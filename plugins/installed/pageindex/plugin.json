@@ -1,0 +1,28 @@
+{
+  "id": "pageindex",
+  "name": "LVIS PageIndex",
+  "version": "1.0.0",
+  "entry": "../../../node_modules/@lvis/plugin-pageindex/dist/hostPlugin.js",
+  "methods": [
+    "index.scan",
+    "index.documents",
+    "chat.preview"
+  ],
+  "config": {
+    "scanFolders": [
+      "fixtures"
+    ],
+    "workspace": ".pageindex-workspace"
+  },
+  "ui": [
+    {
+      "id": "pageindex-control",
+      "slot": "sidebar",
+      "kind": "embedded-page",
+      "displayName": "인덱서",
+      "title": "PageIndex Indexer",
+      "description": "문서 스캔/목록 확인과 채팅창 질문 전송을 제공합니다.",
+      "page": "../../../node_modules/@lvis/plugin-pageindex/dist/ui/indexer-control.html"
+    }
+  ]
+}

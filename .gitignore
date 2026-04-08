@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.pageindex-workspace/
+.pageindex-workspace-test/

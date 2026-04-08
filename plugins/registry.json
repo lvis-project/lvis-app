@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "pageindex",
+      "manifestPath": "installed/pageindex/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "meeting",
+      "manifestPath": "installed/meeting/plugin.json",
+      "enabled": true
+    }
+  ]
+}
