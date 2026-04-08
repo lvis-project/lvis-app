@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Search, MoreHorizontal, Command as CommandIcon, Settings2, PanelsTopLeft } from "lucide-react";
 import { Button } from "./components/ui/button.js";
@@ -34,6 +34,7 @@ import { ScrollArea } from "./components/ui/scroll-area.js";
 import { Separator } from "./components/ui/separator.js";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover.js";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "./components/ui/sheet.js";
+import { PluginUiHostView, type PluginUiExtensionView } from "./plugin-ui-host.js";
 
 type PreviewResult = {
   question: string;
@@ -51,19 +52,7 @@ type MarketplaceItem = {
   enabled: boolean;
 };
 
-type PluginUiExtension = {
-  pluginId: string;
-  extension: {
-    id: string;
-    slot: "sidebar";
-    kind: "embedded-page" | "info-card";
-    displayName?: string;
-    title: string;
-    description?: string;
-    page?: string;
-  };
-  pageUrl?: string;
-};
+type PluginUiExtension = PluginUiExtensionView;
 
 type Message = { role: "user" | "assistant"; text: string };
 
@@ -73,6 +62,7 @@ declare global {
       chatPreview: (question: string) => Promise<PreviewResult>;
       listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
       installMarketplacePlugin: (pluginId: string) => Promise<{ pluginId: string; installed: true }>;
+      uninstallMarketplacePlugin: (pluginId: string) => Promise<{ pluginId: string; uninstalled: true }>;
       listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
       callPluginMethod: (method: string, payload?: unknown) => Promise<unknown>;
       onViewActivate: (handler: (viewKey: string) => void) => () => void;
@@ -94,7 +84,7 @@ function getPluginViewLabel(item: PluginUiExtension): string {
 }
 
 function App() {
-  const api = getApi();
+  const api = useMemo(() => getApi(), []);
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", text: "LVIS 로컬 지식 채팅 UI가 준비되었습니다. 질문을 입력해 주세요." },
   ]);
@@ -104,6 +94,7 @@ function App() {
   const [activeView, setActiveView] = useState("home");
   const [marketStatus, setMarketStatus] = useState("목록 로딩 중...");
   const [installTarget, setInstallTarget] = useState<MarketplaceItem | null>(null);
+  const [uninstallTarget, setUninstallTarget] = useState<MarketplaceItem | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [working, setWorking] = useState(false);
@@ -139,7 +130,16 @@ function App() {
         await installPlugin(item.id);
       },
     }));
-    return [...base, ...views, ...installs];
+    const uninstalls = marketplace
+      .filter((item) => item.installed)
+      .map((item) => ({
+        id: `uninstall:${item.id}`,
+        label: `${item.name} 제거`,
+        run: async () => {
+          await uninstallPlugin(item.id);
+        },
+      }));
+    return [...base, ...views, ...installs, ...uninstalls];
   }, [pluginViews, marketplace, messages]);
 
   const filteredActions = useMemo(() => {
@@ -152,6 +152,7 @@ function App() {
     const views = (await api.listPluginUiExtensions()).filter((item) => item.extension.slot === "sidebar");
     setPluginViews(views);
     setActiveView((prev) => (prev === "home" || views.some((item) => toViewKey(item) === prev) ? prev : "home"));
+    return views;
   };
 
   const refreshMarketplace = async () => {
@@ -165,7 +166,7 @@ function App() {
     }
   };
 
-  const handleAsk = async (q: string) => {
+  const handleAsk = useCallback(async (q: string) => {
     const trimmed = q.trim();
     if (!trimmed) return;
     setQuestion("");
@@ -179,7 +180,19 @@ function App() {
     } catch (error) {
       setMessages((prev) => [...prev, { role: "assistant", text: `오류: ${(error as Error).message}` }]);
     }
-  };
+  }, [api]);
+
+  const callPluginMethod = useCallback(
+    (method: string, payload?: unknown) => api.callPluginMethod(method, payload),
+    [api],
+  );
+
+  const handlePluginAskInHome = useCallback(async (question: string) => {
+    const trimmed = question.trim();
+    if (!trimmed) return;
+    setActiveView("home");
+    await handleAsk(trimmed);
+  }, [handleAsk]);
 
   const installPlugin = async (pluginId: string) => {
     const target = marketplace.find((item) => item.id === pluginId);
@@ -188,12 +201,29 @@ function App() {
       setMarketStatus(`${target?.name ?? pluginId} 설치 중...`);
       await api.installMarketplacePlugin(pluginId);
       await refreshMarketplace();
-      await refreshViews();
-      const view = pluginViews.find((item) => item.pluginId === pluginId);
+      const views = await refreshViews();
+      const view = views.find((item) => item.pluginId === pluginId);
       if (view) setActiveView(toViewKey(view));
       setMarketStatus(`${target?.name ?? pluginId} 설치 완료`);
     } catch (error) {
       setMarketStatus(`${target?.name ?? pluginId} 설치 실패: ${(error as Error).message}`);
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const uninstallPlugin = async (pluginId: string) => {
+    const target = marketplace.find((item) => item.id === pluginId);
+    if (!target?.installed) return;
+    setWorking(true);
+    try {
+      setMarketStatus(`${target.name} 제거 중...`);
+      await api.uninstallMarketplacePlugin(pluginId);
+      await refreshMarketplace();
+      await refreshViews();
+      setMarketStatus(`${target.name} 제거 완료`);
+    } catch (error) {
+      setMarketStatus(`${target.name} 제거 실패: ${(error as Error).message}`);
     } finally {
       setWorking(false);
     }
@@ -216,52 +246,6 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const handler = (event: MessageEvent) => {
-      const data = event.data as
-        | { type?: string; requestId?: string; method?: string; payload?: unknown; eventName?: string }
-        | undefined;
-      if (!data) return;
-      if (data.type === "lvis:plugin-ui:event" && data.eventName === "chat.ask") {
-        const payload = data.payload as { question?: unknown } | undefined;
-        const q = String(payload?.question ?? "").trim();
-        if (!q) return;
-        setActiveView("home");
-        void handleAsk(q);
-        return;
-      }
-      if (data.type !== "lvis:plugin-ui:call") return;
-      const source = event.source;
-      if (!source || typeof data.requestId !== "string" || typeof data.method !== "string") return;
-      const reply = (message: { type: string; requestId: string; ok: boolean; result?: unknown; error?: string }) => {
-        if (source instanceof Window) {
-          source.postMessage(message, "*");
-        } else {
-          source.postMessage(message);
-        }
-      };
-      void api
-        .callPluginMethod(data.method, data.payload)
-        .then((result) =>
-          reply({
-            type: "lvis:plugin-ui:result",
-            requestId: data.requestId!,
-            ok: true,
-            result,
-          }),
-        )
-        .catch((error) =>
-          reply({
-            type: "lvis:plugin-ui:result",
-            requestId: data.requestId!,
-            ok: false,
-            error: (error as Error).message,
-          }),
-        );
-    };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
-  }, [api, pluginViews, messages, question]);
 
   return (
     <TooltipProvider>
@@ -296,6 +280,17 @@ function App() {
                           >
                             {plugin.installed ? "재설치" : "설치"}
                           </Button>
+                          {plugin.installed ? (
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => setUninstallTarget(plugin)}
+                              disabled={working}
+                              className="h-8"
+                            >
+                              제거
+                            </Button>
+                          ) : null}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button size="icon" variant="outline" className="h-8 w-8">
@@ -313,6 +308,12 @@ function App() {
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => setInstallTarget(plugin)}>
                                 {plugin.installed ? "재설치" : "설치"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setUninstallTarget(plugin)}
+                                disabled={!plugin.installed || working}
+                              >
+                                제거
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -458,22 +459,11 @@ function App() {
               </div>
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 p-4">
-              <Card className="flex min-h-0 w-full flex-col">
-                <CardHeader>
-                  <CardTitle>{activePluginView ? getPluginViewLabel(activePluginView) : "플러그인 UI"}</CardTitle>
-                  <CardDescription>{activePluginView?.extension.description ?? "플러그인 화면을 로딩합니다."}</CardDescription>
-                </CardHeader>
-                <CardContent className="min-h-0 flex-1">
-                  <iframe
-                    title={activePluginView?.extension.title ?? "plugin-ui"}
-                    src={activePluginView?.pageUrl ?? "about:blank"}
-                    className="h-full min-h-[360px] w-full rounded-md border bg-card"
-                    sandbox="allow-scripts allow-same-origin"
-                  />
-                </CardContent>
-              </Card>
-            </div>
+            <PluginUiHostView
+              view={activePluginView ?? null}
+              callPluginMethod={callPluginMethod}
+              onAskInHomeChat={handlePluginAskInHome}
+            />
           )}
         </main>
       </div>
@@ -511,7 +501,7 @@ function App() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Command</DialogTitle>
-            <DialogDescription>뷰 전환과 설치 작업을 빠르게 실행합니다.</DialogDescription>
+            <DialogDescription>뷰 전환과 설치/제거 작업을 빠르게 실행합니다.</DialogDescription>
           </DialogHeader>
           <Command>
             <CommandInput
@@ -538,6 +528,36 @@ function App() {
               </CommandGroup>
             </CommandList>
           </Command>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!uninstallTarget} onOpenChange={(open) => !open && setUninstallTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>플러그인 제거</DialogTitle>
+            <DialogDescription>
+              {uninstallTarget
+                ? `'${uninstallTarget.name}' 플러그인을 제거하시겠습니까?`
+                : "플러그인 제거를 진행하시겠습니까?"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setUninstallTarget(null)}>
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!uninstallTarget) return;
+                const id = uninstallTarget.id;
+                setUninstallTarget(null);
+                await uninstallPlugin(id);
+              }}
+              disabled={working}
+            >
+              제거
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </TooltipProvider>

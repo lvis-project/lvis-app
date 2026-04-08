@@ -11,11 +11,13 @@ export interface PluginManifest {
 export interface PluginUiExtension {
   id: string;
   slot: "sidebar";
-  kind: "embedded-page" | "info-card";
+  kind: "embedded-module" | "embedded-page" | "info-card";
   displayName?: string;
   title: string;
   description?: string;
   defaults?: Record<string, unknown>;
+  entry?: string;
+  exportName?: string;
   page?: string;
 }
 

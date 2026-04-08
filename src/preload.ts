@@ -54,6 +54,8 @@ const api = {
     >,
   installMarketplacePlugin: async (pluginId: string) =>
     ipcRenderer.invoke("lvis:plugins:install", pluginId) as Promise<{ pluginId: string; installed: true }>,
+  uninstallMarketplacePlugin: async (pluginId: string) =>
+    ipcRenderer.invoke("lvis:plugins:uninstall", pluginId) as Promise<{ pluginId: string; uninstalled: true }>,
   listPluginUiExtensions: async () =>
     ipcRenderer.invoke("lvis:plugins:ui:list") as Promise<
       Array<{
@@ -61,14 +63,16 @@ const api = {
         extension: {
           id: string;
           slot: "sidebar";
-          kind: "embedded-page" | "info-card";
+          kind: "embedded-module" | "embedded-page" | "info-card";
           displayName?: string;
           title: string;
           description?: string;
           defaults?: Record<string, unknown>;
+          entry?: string;
+          exportName?: string;
           page?: string;
         };
-        pageUrl?: string;
+        entryUrl?: string;
       }>
     >,
   callPluginMethod: async (method: string, payload?: unknown) =>

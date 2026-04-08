@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { readPluginRegistry, writePluginRegistry } from "./registry.js";
 import type { PluginMarketplaceItem, PluginUiExtension } from "./types.js";
@@ -60,6 +60,35 @@ export class PluginMarketplaceService {
     return { pluginId: plugin.id, installed: true };
   }
 
+  async uninstall(pluginId: string): Promise<{ pluginId: string; uninstalled: true }> {
+    const registry = await readPluginRegistry(this.registryPath);
+    const target = registry.plugins.find((x) => x.id === pluginId);
+    if (!target) {
+      throw new Error(`Plugin not installed: ${pluginId}`);
+    }
+
+    const remainingEntries = registry.plugins.filter((x) => x.id !== pluginId);
+    const manifestPath = isAbsolute(target.manifestPath)
+      ? target.manifestPath
+      : resolve(dirname(this.registryPath), target.manifestPath);
+    const packageName = await this.resolvePackageName(pluginId, manifestPath);
+    const shouldUninstallPackage =
+      packageName && !(await this.isPackageUsedByRemainingPlugins(packageName, remainingEntries.map((entry) => entry.id)));
+
+    if (shouldUninstallPackage && packageName) {
+      await this.runNpmUninstall(packageName);
+    }
+
+    const installedManifestDir = dirname(manifestPath);
+    if (this.isWithin(this.installedDir, installedManifestDir)) {
+      await rm(installedManifestDir, { recursive: true, force: true });
+    }
+
+    registry.plugins = remainingEntries;
+    await writePluginRegistry(this.registryPath, registry);
+    return { pluginId, uninstalled: true };
+  }
+
   private async readCatalog(): Promise<MarketplaceCatalog> {
     const raw = await readFile(this.marketplacePath, "utf-8");
     const parsed = JSON.parse(raw) as MarketplaceCatalog;
@@ -95,15 +124,51 @@ export class PluginMarketplaceService {
     pluginDir: string,
     extension: PluginUiExtension,
   ): PluginUiExtension {
-    if (!extension.page) return extension;
-    const pageAbsPath = resolve(this.appRoot, "node_modules", plugin.packageName, extension.page);
-    const pageRelPath = relative(pluginDir, pageAbsPath).split("\\").join("/");
+    const entrySource = extension.entry ?? extension.page;
+    if (!entrySource) return extension;
+    const entryAbsPath = resolve(this.appRoot, "node_modules", plugin.packageName, entrySource);
+    const entryRelPath = relative(pluginDir, entryAbsPath).split("\\").join("/");
     return {
       ...extension,
-      page: pageRelPath,
+      entry: entryRelPath,
+      page: extension.page ? entryRelPath : undefined,
     };
   }
 
+
+  private async resolvePackageName(pluginId: string, manifestPath: string): Promise<string | undefined> {
+    const catalog = await this.readCatalog().catch(() => ({ version: 1, plugins: [] as PluginMarketplaceItem[] }));
+    const targetFromCatalog = catalog.plugins.find((x) => x.id === pluginId);
+    if (targetFromCatalog?.packageName) {
+      return targetFromCatalog.packageName;
+    }
+
+    try {
+      const rawManifest = await readFile(manifestPath, "utf-8");
+      const parsed = JSON.parse(rawManifest) as { entry?: string };
+      return this.extractPackageNameFromEntry(parsed.entry);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private extractPackageNameFromEntry(entry?: string): string | undefined {
+    if (!entry) return undefined;
+    const normalized = entry.split("\\").join("/");
+    const matched = normalized.match(/node_modules\/((?:@[^/]+\/[^/]+)|(?:[^/]+))/);
+    return matched?.[1];
+  }
+
+  private async isPackageUsedByRemainingPlugins(packageName: string, remainingPluginIds: string[]): Promise<boolean> {
+    const catalog = await this.readCatalog().catch(() => ({ version: 1, plugins: [] as PluginMarketplaceItem[] }));
+    const remaining = new Set(remainingPluginIds);
+    return catalog.plugins.some((plugin) => plugin.packageName === packageName && remaining.has(plugin.id));
+  }
+
+  private isWithin(basePath: string, targetPath: string): boolean {
+    const rel = relative(basePath, targetPath);
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  }
   private async runNpmInstall(packageSpec: string): Promise<void> {
     await new Promise<void>((resolvePromise, rejectPromise) => {
       const child = spawn("npm", ["install", "--prefix", this.appRoot, packageSpec], {
@@ -130,6 +195,36 @@ export class PluginMarketplaceService {
           return;
         }
         rejectPromise(new Error(stderr || `npm install failed (${code})`));
+      });
+    });
+  }
+
+  private async runNpmUninstall(packageName: string): Promise<void> {
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      const child = spawn("npm", ["uninstall", "--prefix", this.appRoot, packageName], {
+        stdio: "pipe",
+        shell: false,
+        cwd: this.appRoot,
+      });
+      let stderr = "";
+      child.stdout.on("data", (chunk) => {
+        process.stdout.write(chunk);
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString("utf-8");
+        process.stderr.write(chunk);
+      });
+      const timeout = setTimeout(() => {
+        child.kill("SIGTERM");
+        rejectPromise(new Error(`npm uninstall timeout for ${packageName}`));
+      }, 60_000);
+      child.on("exit", (code) => {
+        clearTimeout(timeout);
+        if (code === 0) {
+          resolvePromise();
+          return;
+        }
+        rejectPromise(new Error(stderr || `npm uninstall failed (${code})`));
       });
     });
   }

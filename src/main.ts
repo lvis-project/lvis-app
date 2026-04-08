@@ -152,6 +152,12 @@ async function bootstrap() {
     refreshApplicationMenu();
     return result;
   });
+  ipcMain.handle("lvis:plugins:uninstall", async (_event, pluginId: string) => {
+    const result = await pluginMarketplace.uninstall(pluginId);
+    await pluginRuntime.restartAll();
+    refreshApplicationMenu();
+    return result;
+  });
   ipcMain.handle("lvis:plugins:ui:list", async () => {
     return pluginRuntime.listUiExtensions();
   });

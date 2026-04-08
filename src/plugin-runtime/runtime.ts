@@ -127,15 +127,16 @@ export class PluginRuntime {
     return [...this.methodMap.keys()].sort();
   }
 
-  listUiExtensions(): Array<{ pluginId: string; extension: PluginUiExtension; pageUrl?: string }> {
-    const result: Array<{ pluginId: string; extension: PluginUiExtension; pageUrl?: string }> = [];
+  listUiExtensions(): Array<{ pluginId: string; extension: PluginUiExtension; entryUrl?: string }> {
+    const result: Array<{ pluginId: string; extension: PluginUiExtension; entryUrl?: string }> = [];
     for (const [pluginId, plugin] of this.plugins) {
       for (const extension of plugin.manifest.ui ?? []) {
-        const pagePath = extension.page ? this.resolveEntryPath(plugin.pluginRoot, extension.page) : undefined;
+        const entrySource = extension.entry ?? extension.page;
+        const entryPath = entrySource ? this.resolveEntryPath(plugin.pluginRoot, entrySource) : undefined;
         result.push({
           pluginId,
           extension,
-          pageUrl: pagePath ? pathToFileURL(pagePath).href : undefined,
+          entryUrl: entryPath ? pathToFileURL(entryPath).href : undefined,
         });
       }
     }
@@ -165,9 +166,6 @@ export class PluginRuntime {
     }
     const registry = await readPluginRegistry(this.registryPath);
     const resolved = resolveManifestPathsFromRegistry(this.registryPath, registry.plugins);
-    if (resolved.length === 0) {
-      throw new Error(`No enabled plugins found in registry: ${this.registryPath}`);
-    }
     return resolved;
   }
 

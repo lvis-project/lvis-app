@@ -41,10 +41,8 @@ npm run plugins:add -- search search/plugin.json
 Electron 앱 좌측 사이드바의 **플러그인 마켓플레이스** 영역에서 설치 버튼을 눌러도 동일하게 로컬 설치/등록이 수행됩니다.  
 설치된 플러그인이 `plugin.json`의 `ui` 확장을 제공하면, 메인 패널 상단 탭(및 앱 메뉴바)에서 선택해 해당 플러그인 UI를 열 수 있습니다.
 탭/메뉴 라벨은 `ui.displayName`을 우선 사용하고, 없으면 `title`을 사용합니다.
-`kind: "embedded-page"` 확장은 플러그인 패키지 내부 페이지(예: `dist/ui/meeting-control.html`)를 `iframe`으로 직접 로드합니다.
-현재 단계에서는 UI 스키마를 과도하게 일반화하지 않고, 동적 로드 가능한 TS 구조를 활용해 플러그인별 확장을 직접 구현하는 방식을 우선 적용합니다.
-향후 플러그인 종류가 증가해 중복 UI 패턴이 늘어나면, 그 시점에 선언형 UI 스키마 일반화를 재검토합니다.
-UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인은 `plugin.json`의 `ui` 메타데이터와 실제 UI 페이지 자산, 그리고 기능 메서드를 제공합니다.
+`kind: "embedded-module"` 확장은 플러그인 패키지 내부 UI 모듈(예: `dist/ui/meeting-control.js`)을 호스트가 동적 import하여 인라인으로 마운트합니다.
+UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인은 `plugin.json`의 `ui` 메타데이터와 실제 UI 모듈 자산, 그리고 기능 메서드를 제공합니다.
 
 ## 독립 플러그인 아키텍처
 - 메인 앱은 플러그인 구현을 직접 import하지 않고 `PluginRuntime`이 매니페스트를 읽어 런타임 동적 로드합니다.
