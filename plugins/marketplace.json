@@ -55,6 +55,33 @@
         }
       ]
     }
+    ,
+    {
+      "id": "email",
+      "name": "LVIS Email",
+      "description": "Outlook 메일을 읽고 LVIS가 답장·할 일·일정을 제안하는 이메일 플러그인",
+      "packageSpec": "file:../lvis-plugin-email",
+      "packageName": "@lvis/plugin-email",
+      "methods": [
+        "email.status",
+        "email.auth",
+        "email.list",
+        "email.read",
+        "email.analyze"
+      ],
+      "defaultConfig": {},
+      "ui": [
+        {
+          "id": "email-control",
+          "slot": "sidebar",
+          "kind": "embedded-module",
+          "displayName": "이메일",
+          "title": "Outlook Email",
+          "description": "Outlook 메일을 읽고 LVIS가 할 일·답장·일정 등을 제안합니다.",
+          "entry": "dist/ui/email-control.js"
+        }
+      ]
+    }
   ]
 }
 

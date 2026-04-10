@@ -10,6 +10,11 @@
       "id": "meeting",
       "manifestPath": "installed/meeting/plugin.json",
       "enabled": true
+    },
+    {
+      "id": "email",
+      "manifestPath": "installed/email/plugin.json",
+      "enabled": true
     }
   ]
 }

@@ -1,0 +1,25 @@
+{
+  "id": "email",
+  "name": "LVIS Email",
+  "version": "0.1.0",
+  "entry": "../../../node_modules/@lvis/plugin-email/dist/hostPlugin.js",
+  "methods": [
+    "email.status",
+    "email.auth",
+    "email.list",
+    "email.read",
+    "email.analyze"
+  ],
+  "config": {},
+  "ui": [
+    {
+      "id": "email-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "이메일",
+      "title": "Outlook Email",
+      "description": "Outlook 메일을 읽고 LVIS가 할 일·답장·일정 등을 제안합니다.",
+      "entry": "../../../node_modules/@lvis/plugin-email/dist/ui/email-control.js"
+    }
+  ]
+}
