@@ -13,6 +13,12 @@ const api = {
   uninstallMarketplacePlugin: async (pluginId) => ipcRenderer.invoke("lvis:plugins:uninstall", pluginId),
   listPluginUiExtensions: async () => ipcRenderer.invoke("lvis:plugins:ui:list"),
   callPluginMethod: async (method, payload) => ipcRenderer.invoke("lvis:plugins:call", method, payload),
+  addTask: async (task) => ipcRenderer.invoke("lvis:tasks:add", task),
+  queryTasks: async (filter) => ipcRenderer.invoke("lvis:tasks:query", filter),
+  updateTask: async (id, patch) => ipcRenderer.invoke("lvis:tasks:update", id, patch),
+  deleteTask: async (id) => ipcRenderer.invoke("lvis:tasks:delete", id),
+  getTodayTasks: async () => ipcRenderer.invoke("lvis:tasks:today"),
+  getOverdueTasks: async () => ipcRenderer.invoke("lvis:tasks:overdue"),
   onViewActivate: (handler) => {
     const listener = (_event, payload) => handler(payload?.viewKey ?? "home");
     ipcRenderer.on("lvis:view:activate", listener);

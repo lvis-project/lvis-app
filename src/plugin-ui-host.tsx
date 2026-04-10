@@ -21,6 +21,7 @@ export type PluginUiExtensionView = {
 export type PluginUiBridge = {
   callPluginMethod: (method: string, payload?: unknown) => Promise<unknown>;
   askInHomeChat: (question: string) => Promise<void>;
+  addTask: (task: { title: string; source: string; sourceRef?: string; priority?: string; description?: string; dueAt?: string }) => Promise<unknown>;
 };
 
 export type PluginUiMountContext = {
@@ -67,10 +68,12 @@ export function PluginUiHostView({
   view,
   callPluginMethod,
   onAskInHomeChat,
+  onAddTask,
 }: {
   view: PluginUiExtensionView | null;
   callPluginMethod: (method: string, payload?: unknown) => Promise<unknown>;
   onAskInHomeChat: (question: string) => Promise<void>;
+  onAddTask: PluginUiBridge["addTask"];
 }) {
   const mountRootRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,8 +83,9 @@ export function PluginUiHostView({
     () => ({
       callPluginMethod,
       askInHomeChat: onAskInHomeChat,
+      addTask: onAddTask,
     }),
-    [callPluginMethod, onAskInHomeChat],
+    [callPluginMethod, onAskInHomeChat, onAddTask],
   );
 
   useEffect(() => {

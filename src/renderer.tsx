@@ -56,18 +56,167 @@ type PluginUiExtension = PluginUiExtensionView;
 
 type Message = { role: "user" | "assistant"; text: string };
 
+type Task = {
+  id: string;
+  title: string;
+  description?: string;
+  source: "email" | "meeting" | "calendar" | "teams" | "manual";
+  sourceRef?: string;
+  priority: "high" | "medium" | "low";
+  status: "pending" | "done" | "snoozed";
+  dueAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type LvisApi = {
+  chatPreview: (question: string) => Promise<PreviewResult>;
+  listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
+  installMarketplacePlugin: (pluginId: string) => Promise<{ pluginId: string; installed: true }>;
+  uninstallMarketplacePlugin: (pluginId: string) => Promise<{ pluginId: string; uninstalled: true }>;
+  listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
+  callPluginMethod: (method: string, payload?: unknown) => Promise<unknown>;
+  addTask: (task: unknown) => Promise<Task>;
+  queryTasks: (filter?: unknown) => Promise<Task[]>;
+  updateTask: (id: string, patch: unknown) => Promise<Task>;
+  deleteTask: (id: string) => Promise<void>;
+  getTodayTasks: () => Promise<Task[]>;
+  getOverdueTasks: () => Promise<Task[]>;
+  onViewActivate: (handler: (viewKey: string) => void) => () => void;
+};
+
 declare global {
   interface Window {
-    lvisApi: {
-      chatPreview: (question: string) => Promise<PreviewResult>;
-      listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
-      installMarketplacePlugin: (pluginId: string) => Promise<{ pluginId: string; installed: true }>;
-      uninstallMarketplacePlugin: (pluginId: string) => Promise<{ pluginId: string; uninstalled: true }>;
-      listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
-      callPluginMethod: (method: string, payload?: unknown) => Promise<unknown>;
-      onViewActivate: (handler: (viewKey: string) => void) => () => void;
-    };
+    lvisApi: LvisApi;
   }
+}
+
+const PRIORITY_CLASS: Record<Task["priority"], string> = {
+  high: "text-red-400",
+  medium: "text-amber-400",
+  low: "text-slate-400",
+};
+
+const SOURCE_LABEL: Record<Task["source"], string> = {
+  email: "메일",
+  meeting: "미팅",
+  calendar: "일정",
+  teams: "Teams",
+  manual: "직접",
+};
+
+function TaskView({ api }: { api: LvisApi }) {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [filter, setFilter] = useState<"pending" | "today" | "overdue" | "done">("pending");
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      let result: Task[];
+      if (filter === "today") result = await api.getTodayTasks();
+      else if (filter === "overdue") result = await api.getOverdueTasks();
+      else if (filter === "done") result = await api.queryTasks({ status: "done" });
+      else result = await api.queryTasks({ status: "pending" });
+      setTasks(result);
+    } catch {
+      setTasks([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filter, api]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const markDone = (id: string) => {
+    void api.updateTask(id, { status: "done" }).then(() => load());
+  };
+
+  const markPending = (id: string) => {
+    void api.updateTask(id, { status: "pending" }).then(() => load());
+  };
+
+  const remove = (id: string) => {
+    void api.deleteTask(id).then(() => load());
+  };
+
+  const isDone = filter === "done";
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col p-4">
+      <Card className="flex h-full min-h-0 flex-col">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>태스크</CardTitle>
+            <Button size="sm" variant="outline" onClick={() => void load()}>새로고침</Button>
+          </div>
+          <CardDescription>이메일·미팅에서 수집된 할 일 목록</CardDescription>
+        </CardHeader>
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+          <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
+            <TabsList className="w-full">
+              <TabsTrigger value="pending" className="flex-1">진행중</TabsTrigger>
+              <TabsTrigger value="today" className="flex-1">오늘 마감</TabsTrigger>
+              <TabsTrigger value="overdue" className="flex-1">기한 초과</TabsTrigger>
+              <TabsTrigger value="done" className="flex-1">완료됨</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <ScrollArea className="flex-1">
+            {loading ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">로딩 중...</div>
+            ) : tasks.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">태스크가 없습니다.</div>
+            ) : (
+              <div className="space-y-2 pr-2">
+                {tasks.map((task) => (
+                  <div key={task.id} className={`flex items-start gap-2 rounded-md border p-3 ${isDone ? "opacity-60" : ""}`}>
+                    <button
+                      className={`mt-0.5 h-4 w-4 flex-shrink-0 rounded border ${isDone ? "border-primary bg-primary" : "border-muted-foreground hover:border-primary"}`}
+                      title={isDone ? "진행중으로 되돌리기" : "완료로 표시"}
+                      onClick={() => isDone ? markPending(task.id) : markDone(task.id)}
+                    >
+                      {isDone ? <span className="flex h-full w-full items-center justify-center text-[8px] text-primary-foreground">✓</span> : null}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={`text-sm font-medium ${isDone ? "line-through" : ""}`}>{task.title}</span>
+                        <Badge variant="outline" className="text-[10px]">{SOURCE_LABEL[task.source]}</Badge>
+                        <span className={`text-[10px] font-semibold ${PRIORITY_CLASS[task.priority]}`}>
+                          {task.priority}
+                        </span>
+                      </div>
+                      {task.description ? (
+                        <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{task.description}</p>
+                      ) : null}
+                      <div className="mt-1 flex items-center gap-1">
+                        <span className="text-[10px] text-muted-foreground">마감:</span>
+                        <input
+                          type="date"
+                          className="rounded border border-transparent bg-transparent px-1 text-[10px] text-muted-foreground hover:border-muted focus:border-primary focus:outline-none"
+                          value={task.dueAt ? task.dueAt.slice(0, 10) : ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            void api.updateTask(task.id, { dueAt: val ? new Date(val).toISOString() : undefined }).then(() => load());
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <button
+                      className="flex-shrink-0 text-[10px] text-muted-foreground hover:text-destructive"
+                      title="삭제"
+                      onClick={() => remove(task.id)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function getApi() {
@@ -84,7 +233,7 @@ function getPluginViewLabel(item: PluginUiExtension): string {
 }
 
 function App() {
-  const api = useMemo(() => getApi(), []);
+  const api = useMemo<LvisApi>(() => getApi(), []);
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", text: "LVIS 로컬 지식 채팅 UI가 준비되었습니다. 질문을 입력해 주세요." },
   ]);
@@ -106,9 +255,12 @@ function App() {
     [pluginViews, activeView],
   );
 
+  const handleAddTask = useCallback((task: unknown) => api.addTask(task), [api]);
+
   const commandActions = useMemo(() => {
     const base = [
       { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
+      { id: "tasks", label: "태스크 보기", run: () => setActiveView("tasks") },
       {
         id: "ask",
         label: "최근 질문 다시 실행",
@@ -151,7 +303,7 @@ function App() {
   const refreshViews = async () => {
     const views = (await api.listPluginUiExtensions()).filter((item) => item.extension.slot === "sidebar");
     setPluginViews(views);
-    setActiveView((prev) => (prev === "home" || views.some((item) => toViewKey(item) === prev) ? prev : "home"));
+    setActiveView((prev) => (prev === "home" || prev === "tasks" || views.some((item) => toViewKey(item) === prev) ? prev : "home"));
     return views;
   };
 
@@ -332,6 +484,7 @@ function App() {
               <Tabs value={activeView} onValueChange={setActiveView}>
                 <TabsList>
                   <TabsTrigger value="home">홈</TabsTrigger>
+                  <TabsTrigger value="tasks">태스크</TabsTrigger>
                   {pluginViews.map((item) => (
                     <TabsTrigger key={toViewKey(item)} value={toViewKey(item)}>
                       {getPluginViewLabel(item)}
@@ -386,12 +539,16 @@ function App() {
                       <Button
                         variant={activeView === "home" ? "default" : "secondary"}
                         className="w-full justify-start"
-                        onClick={() => {
-                          setActiveView("home");
-                          setSheetOpen(false);
-                        }}
+                        onClick={() => { setActiveView("home"); setSheetOpen(false); }}
                       >
                         홈
+                      </Button>
+                      <Button
+                        variant={activeView === "tasks" ? "default" : "secondary"}
+                        className="w-full justify-start"
+                        onClick={() => { setActiveView("tasks"); setSheetOpen(false); }}
+                      >
+                        태스크
                       </Button>
                       {pluginViews.map((item) => {
                         const key = toViewKey(item);
@@ -425,7 +582,9 @@ function App() {
             </div>
           </div>
 
-          {activeView === "home" ? (
+          {activeView === "tasks" ? (
+            <TaskView api={api} />
+          ) : activeView === "home" ? (
             <div className="grid min-h-0 flex-1 grid-rows-[1fr_auto]">
               <ScrollArea className="h-full p-4">
                 <div className="space-y-3">
@@ -463,6 +622,7 @@ function App() {
               view={activePluginView ?? null}
               callPluginMethod={callPluginMethod}
               onAskInHomeChat={handlePluginAskInHome}
+              onAddTask={handleAddTask}
             />
           )}
         </main>

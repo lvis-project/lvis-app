@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PluginRuntime } from "./plugin-runtime/runtime.js";
 import { PluginMarketplaceService } from "./plugin-runtime/marketplace.js";
+import { TaskService } from "./taskService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,6 +27,9 @@ const pluginRuntime = new PluginRuntime({
   registryPath: resolve(projectRoot, "plugins/registry.json"),
 });
 const pluginMarketplace = new PluginMarketplaceService(projectRoot);
+const taskService = new TaskService({
+  dbPath: resolve(app.getPath("userData"), "lvis-tasks.db"),
+});
 
 function activateView(viewKey: string) {
   mainWindow?.webContents.send("lvis:view:activate", { viewKey });
@@ -165,6 +169,16 @@ async function bootstrap() {
     return pluginRuntime.call(method, payload);
   });
 
+  // TaskService IPC
+  ipcMain.handle("lvis:tasks:add", (_event, task) => taskService.add(task));
+  ipcMain.handle("lvis:tasks:update", (_event, id: string, patch) => taskService.update(id, patch));
+  ipcMain.handle("lvis:tasks:get", (_event, id: string) => taskService.get(id));
+  ipcMain.handle("lvis:tasks:delete", (_event, id: string) => taskService.delete(id));
+  ipcMain.handle("lvis:tasks:query", (_event, filter) => taskService.query(filter));
+  ipcMain.handle("lvis:tasks:pending", () => taskService.getPendingByPriority());
+  ipcMain.handle("lvis:tasks:overdue", () => taskService.getOverdue());
+  ipcMain.handle("lvis:tasks:today", () => taskService.getDueToday());
+
   createWindow();
   refreshApplicationMenu();
 }
@@ -175,6 +189,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", async () => {
   await pluginRuntime.stopAll();
+  taskService.close();
 });
 
 app.whenReady().then(() => {
