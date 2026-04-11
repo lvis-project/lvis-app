@@ -240,6 +240,7 @@ export class ConversationLoop {
         this.history.append({
           role: "tool_result",
           toolUseId: tr.tool_use_id,
+          toolName: toolUses.find((tu) => tu.id === tr.tool_use_id)?.name,
           content: tr.content,
           ...(tr.is_error && { isError: true }),
         });

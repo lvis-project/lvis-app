@@ -29,13 +29,23 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
-    const messages = toOpenAIMessages(params.systemPrompt, params.messages);
+    const modelLower = params.model.toLowerCase();
+    // o1, o3 및 'reasoning'이 포함된 모델은 추론 모델로 분류
+    const isReasoningModel = modelLower.includes("o1") || modelLower.includes("o3") || modelLower.includes("reasoning");
+    // gpt-4o 계열, gpt-4.5, gpt-5 및 추론 모델은 max_completion_tokens 사용 권장/필수
+    const useMaxCompletionTokens = isReasoningModel || modelLower.includes("gpt-4o") || modelLower.includes("gpt-4.5") || modelLower.includes("gpt-5");
+
+    console.log(`[OpenAIProvider] model="${params.model}", isReasoning=${isReasoningModel}, useMaxCompletionTokens=${useMaxCompletionTokens}`);
+
+    const messages = toOpenAIMessages(params.systemPrompt, params.messages, isReasoningModel);
     const tools = params.tools?.map(toOpenAITool);
 
     try {
       const stream = await this.client.chat.completions.create({
         model: params.model,
-        max_tokens: params.maxTokens ?? 4096,
+        ...(useMaxCompletionTokens
+          ? { max_completion_tokens: params.maxTokens ?? 4096 }
+          : { max_tokens: params.maxTokens ?? 4096 }),
         messages,
         ...(tools && tools.length > 0 && { tools }),
         stream: true,
@@ -98,9 +108,10 @@ export class OpenAIProvider implements LLMProvider {
 function toOpenAIMessages(
   systemPrompt: string,
   messages: GenericMessage[],
+  isReasoningModel: boolean = false,
 ): OpenAI.ChatCompletionMessageParam[] {
   const result: OpenAI.ChatCompletionMessageParam[] = [
-    { role: "system", content: systemPrompt },
+    { role: isReasoningModel ? ("developer" as any) : "system", content: systemPrompt },
   ];
 
   for (const msg of messages) {

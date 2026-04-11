@@ -30,7 +30,7 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
 export type GenericMessage =
   | { role: "user"; content: string }
   | { role: "assistant"; content: string; toolCalls?: ToolCallBlock[] }
-  | { role: "tool_result"; toolUseId: string; content: string; isError?: boolean };
+  | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean };
 
 export interface ToolCallBlock {
   id: string;
