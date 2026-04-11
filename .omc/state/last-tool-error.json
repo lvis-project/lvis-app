@@ -1,7 +1,0 @@
-{
-  "tool_name": "WebFetch",
-  "tool_input_preview": "{\"url\":\"https://platform.openai.com/docs/api-reference/chat/create\",\"prompt\":\"What is the exact regex pattern, allowed characters, or naming rules for the function/tool \\\"name\\\" field? Look for any me...",
-  "error": "Request failed with status code 403",
-  "timestamp": "2026-04-11T14:51:12.079Z",
-  "retry_count": 2
-}

@@ -2,3 +2,5 @@ node_modules/
 dist/
 .pageindex-workspace/
 .pageindex-workspace-test/
+.DS_Store
+.omc/
