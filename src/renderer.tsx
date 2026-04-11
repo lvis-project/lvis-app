@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./com
 import { Badge } from "./components/ui/badge.js";
 import { Input } from "./components/ui/input.js";
 import { Textarea } from "./components/ui/textarea.js";
-import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs.js";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs.js";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./components/ui/dialog.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip.js";
@@ -15,13 +15,15 @@ import { ScrollArea } from "./components/ui/scroll-area.js";
 import { Separator } from "./components/ui/separator.js";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "./components/ui/sheet.js";
 import { PluginUiHostView, type PluginUiExtensionView } from "./plugin-ui-host.js";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // ─── Types ──────────────────────────────────────────
 
 type MarketplaceItem = { id: string; name: string; description: string; packageSpec: string; installed: boolean; enabled: boolean };
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
-type AppSettings = { llm: { provider: string; model: string }; chat: { systemPrompt: string } };
+type AppSettings = { llm: { provider: string; model: string }; chat: { systemPrompt: string }; webSearch: { provider: string } };
 type StreamEvent = { type: string; text?: string; name?: string; error?: string; result?: string; isError?: boolean };
 
 type ChatEntry =
@@ -35,6 +37,9 @@ type LvisApi = {
   setApiKey: (vendor: string, k: string) => Promise<{ ok: true }>;
   hasApiKey: (vendor?: string) => Promise<boolean>;
   deleteApiKey: (vendor: string) => Promise<{ ok: true }>;
+  setWebApiKey: (provider: string, k: string) => Promise<{ ok: true }>;
+  hasWebApiKey: (provider: string) => Promise<boolean>;
+  deleteWebApiKey: (provider: string) => Promise<{ ok: true }>;
   chatHasProvider: () => Promise<boolean>;
   chatSend: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
@@ -136,14 +141,28 @@ const VENDORS = [
   { id: "copilot", label: "GitHub Copilot", placeholder: "ghp_...", defaultModel: "gpt-4o" },
 ] as const;
 
+const WEB_PROVIDERS = [
+  { id: "duckduckgo", label: "DuckDuckGo", placeholder: "키 불필요", needsKey: false },
+  { id: "tavily", label: "Tavily AI", placeholder: "tvly-...", needsKey: true },
+  { id: "serper", label: "Serper.dev", placeholder: "키 입력...", needsKey: true },
+  { id: "google", label: "Google Search", placeholder: "API Key...", needsKey: true },
+] as const;
+
 function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; api: LvisApi; onSaved: () => void }) {
+  const [tab, setTab] = useState("llm");
   const [vendor, setVendor] = useState("claude");
   const [keyInput, setKeyInput] = useState("");
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
+  
+  const [webProvider, setWebProvider] = useState("duckduckgo");
+  const [webKeyInput, setWebKeyInput] = useState("");
+  const [hasWebKey, setHasWebKey] = useState(false);
+  
   const [saving, setSaving] = useState(false);
 
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
+  const webInfo = WEB_PROVIDERS.find((p) => p.id === webProvider) ?? WEB_PROVIDERS[0];
 
   useEffect(() => {
     if (!open) return;
@@ -152,6 +171,9 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       setVendor(s.llm.provider);
       setModel(s.llm.model);
       setHasKey(await api.hasApiKey(s.llm.provider));
+      
+      setWebProvider(s.webSearch.provider);
+      setHasWebKey(await api.hasWebApiKey(s.webSearch.provider));
     })();
   }, [open, api]);
 
@@ -161,22 +183,29 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
     const v = VENDORS.find((x) => x.id === vendor);
     if (v) {
       void api.hasApiKey(vendor).then(setHasKey);
-      // 현재 저장된 설정의 벤더와 일치하면 저장된 모델명 유지, 아니면 기본값 추천
       void api.getSettings().then(s => {
-        if (s.llm.provider !== vendor) {
-          setModel(v.defaultModel);
-        } else {
-          setModel(s.llm.model);
-        }
+        if (s.llm.provider !== vendor) setModel(v.defaultModel);
+        else setModel(s.llm.model);
       });
     }
   }, [vendor, open, api]);
 
+  // 웹 프로바이더 변경 시 키 상태 확인
+  useEffect(() => {
+    if (!open) return;
+    void api.hasWebApiKey(webProvider).then(setHasWebKey);
+  }, [webProvider, open, api]);
+
   const save = async () => {
     setSaving(true);
     try {
-      if (keyInput.trim()) { await api.setApiKey(vendor, keyInput.trim()); setKeyInput(""); setHasKey(true); }
-      await api.updateSettings({ llm: { provider: vendor as AppSettings["llm"]["provider"], model: model.trim() || vendorInfo.defaultModel } });
+      if (tab === "llm") {
+        if (keyInput.trim()) { await api.setApiKey(vendor, keyInput.trim()); setKeyInput(""); setHasKey(true); }
+        await api.updateSettings({ llm: { provider: vendor as any, model: model.trim() || vendorInfo.defaultModel } } as any);
+      } else {
+        if (webKeyInput.trim()) { await api.setWebApiKey(webProvider, webKeyInput.trim()); setWebKeyInput(""); setHasWebKey(true); }
+        await api.updateSettings({ webSearch: { provider: webProvider as any } } as any);
+      }
       onSaved(); onOpenChange(false);
     } finally { setSaving(false); }
   };
@@ -184,27 +213,59 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>LLM 설정</DialogTitle><DialogDescription>벤더를 선택하고 API 키를 설정합니다.</DialogDescription></DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">벤더</label>
-            <div className="grid grid-cols-2 gap-2">
-              {VENDORS.map((v) => (
-                <Button key={v.id} size="sm" variant={vendor === v.id ? "default" : "outline"} className="justify-start text-xs" onClick={() => setVendor(v.id)}>
-                  {v.label}
-                </Button>
-              ))}
+        <DialogHeader><DialogTitle>설정</DialogTitle><DialogDescription>앱 환경 및 검색 엔진을 설정합니다.</DialogDescription></DialogHeader>
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList className="w-full">
+            <TabsTrigger value="llm" className="flex-1">지능 (LLM)</TabsTrigger>
+            <TabsTrigger value="web" className="flex-1">검색 (Web)</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="llm" className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">벤더</label>
+              <div className="grid grid-cols-2 gap-2">
+                {VENDORS.map((v) => (
+                  <Button key={v.id} size="sm" variant={vendor === v.id ? "default" : "outline"} className="justify-start text-xs" onClick={() => setVendor(v.id)}>
+                    {v.label}
+                  </Button>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium">{vendorInfo.label} API 키</label>
-            {hasKey
-              ? <div className="flex items-center gap-2"><Badge variant="default" className="text-xs">설정됨</Badge><Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button></div>
-              : <Badge variant="secondary" className="text-xs">미설정</Badge>}
-            <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
-          </div>
-          <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
-        </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">{vendorInfo.label} API 키</label>
+              <div className="flex items-center gap-2">
+                {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
+                {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
+              </div>
+              <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
+            </div>
+            <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
+          </TabsContent>
+
+          <TabsContent value="web" className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">검색 엔진</label>
+              <div className="grid grid-cols-2 gap-2">
+                {WEB_PROVIDERS.map((p) => (
+                  <Button key={p.id} size="sm" variant={webProvider === p.id ? "default" : "outline"} className="justify-start text-xs" onClick={() => setWebProvider(p.id)}>
+                    {p.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            {webInfo.needsKey && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{webInfo.label} API 키</label>
+                <div className="flex items-center gap-2">
+                  {hasWebKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
+                  {hasWebKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteWebApiKey(webProvider).then(() => { setHasWebKey(false); onSaved(); })}>삭제</Button>}
+                </div>
+                <Input type="password" placeholder={hasWebKey ? "새 키로 교체" : webInfo.placeholder} value={webKeyInput} onChange={(e) => setWebKeyInput(e.target.value)} />
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground">Tavily와 Serper는 AI 에이전트용 고성능 검색 기능을 제공합니다.</p>
+          </TabsContent>
+        </Tabs>
         <DialogFooter><Button variant="secondary" onClick={() => onOpenChange(false)}>취소</Button><Button onClick={() => void save()} disabled={saving}>{saving ? "저장 중..." : "저장"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
@@ -427,7 +488,11 @@ function App() {
                   return (
                     <div key={idx} className="max-w-[85%] rounded-md border bg-card px-3 py-2 text-sm">
                       <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">LVIS{entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}</div>
-                      <div className="whitespace-pre-wrap">{entry.text || (entry.streaming ? "생각 중..." : "")}</div>
+                      <div className="prose prose-sm prose-invert max-w-none break-words">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {entry.text || (entry.streaming ? "생각 중..." : "")}
+                        </ReactMarkdown>
+                      </div>
                     </div>
                   );
                 })}

@@ -83,8 +83,10 @@ export class ToolExecutor {
     let isError = false;
 
     try {
+      console.log(`[ToolExecutor] executing ${toolUse.name} with`, finalInput);
       const result = await tool.execute(finalInput);
       content = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+      console.log(`[ToolExecutor] ${toolUse.name} result:`, content.slice(0, 500) + (content.length > 500 ? "..." : ""));
     } catch (err) {
       content = err instanceof Error ? err.message : "알 수 없는 도구 실행 오류";
       isError = true;

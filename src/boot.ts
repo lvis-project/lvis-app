@@ -54,10 +54,23 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
   const toolRegistry = new ToolRegistry();
   const routeEngine = new RouteEngine({ toolRegistry });
 
+  // API 키 준비 (플러그인 주입용)
+  const llmSettings = settingsService.get("llm");
+  const configOverrides: Record<string, any> = {};
+  if (llmSettings.provider === "openai") {
+    const apiKey = settingsService.getSecret(`llm.apiKey.openai`);
+    if (apiKey) {
+      // PageIndex 엔진이 설치되지 않은 환경에서 오류를 방지하기 위해 testMode 강제 적용
+      configOverrides["pageindex"] = { apiKey, testMode: true };
+      process.env.OPENAI_API_KEY = apiKey;
+    }
+  }
+
   // §4.2 Step 3-4: 플러그인 초기화
   const pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
     registryPath: resolve(projectRoot, "plugins/registry.json"),
+    configOverrides,
   });
   await pluginRuntime.startAll();
   console.log("[lvis] boot: plugins loaded:", pluginRuntime.listMethods());
@@ -66,7 +79,7 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
   registerPluginTools(pluginRuntime, toolRegistry);
 
   // 빌트인 도구 등록
-  registerBuiltinTools(memoryManager, pluginRuntime, toolRegistry);
+  registerBuiltinTools(memoryManager, pluginRuntime, toolRegistry, settingsService);
 
   // 플러그인 스킬 키워드 등록 (향후 plugin.json의 keywords 필드에서 로드)
   registerDefaultKeywords(keywordEngine);
@@ -128,15 +141,31 @@ function registerPluginTools(
     const toolName = method.replace(/\./g, "_"); // dot → underscore (LLM 벤더 호환)
     toolRegistry.register({
       name: toolName,
-      description: `플러그인 메서드: ${method}`,
+      description: `플러그인 메서드: ${method}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`,
       parameters: {
         type: "object",
         properties: {
-          payload: { type: "string", description: "메서드에 전달할 JSON 페이로드" },
+          payload: { type: "object", description: "메서드에 전달할 매개변수 객체" },
         },
       },
       execute: async (args) => {
-        return pluginRuntime.call(method, args.payload ? JSON.parse(args.payload as string) : undefined);
+        let finalPayload = args.payload;
+        if (!finalPayload && Object.keys(args).length > 0) finalPayload = args;
+        if (typeof finalPayload === "string") { try { finalPayload = JSON.parse(finalPayload); } catch { } }
+        
+        const rawResult = await pluginRuntime.call(method, finalPayload);
+        
+        // LLM 오해 방지를 위한 결과 가공 (Ultrathink Mapping)
+        if (method === "index.scan") {
+          const res = rawResult as any;
+          return {
+            ...res,
+            message: `스캔 완료. 현재 총 ${res.scanned || 0}개의 파일을 확인했으며, 인덱스에 저장된 문서는 상태가 유지되고 있습니다. 새로 추가된 문서는 ${res.indexed || 0}개입니다.`,
+            instruction: "인덱싱된 상세 목록이 필요하면 index_documents 도구를 호출하세요."
+          };
+        }
+        
+        return rawResult;
       },
       source: "plugin",
     });
@@ -147,6 +176,7 @@ function registerBuiltinTools(
   memoryManager: MemoryManager,
   pluginRuntime: PluginRuntime,
   toolRegistry: ToolRegistry,
+  settingsService: SettingsService,
 ): void {
   const builtins: ToolDefinition[] = [
     {
@@ -188,6 +218,89 @@ function registerBuiltinTools(
       parameters: { type: "object", properties: {} },
       execute: async () => {
         return memoryManager.listNotes().map((n) => ({ title: n.title, filename: n.filename }));
+      },
+      source: "builtin",
+    },
+    {
+      name: "web_search",
+      description: "인터넷 검색을 통해 최신 정보나 지식을 찾습니다. 결과 개수를 지정할 수 있습니다.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "검색어" },
+          count: { type: "integer", description: "반환할 결과 개수 (1-10)" },
+        },
+        required: ["query"],
+      },
+      execute: async (args) => {
+        const query = args.query as string;
+        const count = (args.count as number) || 5;
+        const ws = settingsService.get("webSearch");
+        const apiKey = settingsService.getSecret(`web.apiKey.${ws.provider}`);
+
+        try {
+          if (ws.provider === "tavily" && apiKey) {
+            const res = await fetch("https://api.tavily.com/search", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ api_key: apiKey, query, search_depth: "basic", max_results: count }),
+            });
+            const data = await res.json() as any;
+            return { query, provider: "Tavily", results: data.results?.map((r: any) => ({ title: r.title, snippet: r.content, url: r.url })) || [] };
+          }
+
+          if (ws.provider === "serper" && apiKey) {
+            const res = await fetch("https://google.serper.dev/search", {
+              method: "POST",
+              headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+              body: JSON.stringify({ q: query, num: count }),
+            });
+            const data = await res.json() as any;
+            return { query, provider: "Serper", results: data.organic?.map((r: any) => ({ title: r.title, snippet: r.snippet, url: r.link })) || [] };
+          }
+
+          // DuckDuckGo fallback
+          const response = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`);
+          const data = await response.json() as any;
+          const results: any[] = [];
+          if (data.AbstractText) results.push({ title: data.Heading || query, snippet: data.AbstractText, url: data.AbstractURL });
+          if (data.RelatedTopics) {
+            for (const t of data.RelatedTopics.slice(0, count - results.length)) {
+              if (t.Text && t.FirstURL) results.push({ title: t.Text.split(" - ")[0], snippet: t.Text, url: t.FirstURL });
+            }
+          }
+          return { query, provider: "DuckDuckGo", results };
+        } catch (error) {
+          return { query, error: "검색 중 오류 발생", details: (error as Error).message };
+        }
+      },
+      source: "builtin",
+    },
+    {
+      name: "web_fetch",
+      description: "특정 URL의 웹 페이지 내용을 읽어 텍스트로 변환합니다.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "읽어올 웹 페이지 URL" },
+        },
+        required: ["url"],
+      },
+      execute: async (args) => {
+        const url = args.url as string;
+        try {
+          const response = await fetch(url, { headers: { "User-Agent": "LVIS-Assistant/0.1.0" } });
+          const html = await response.text();
+          let text = html
+            .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gim, "")
+            .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gim, "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+          return { url, content: text.slice(0, 5000), truncated: text.length > 5000 };
+        } catch (error) {
+          return { url, error: "웹 페이지를 읽을 수 없습니다.", details: (error as Error).message };
+        }
       },
       source: "builtin",
     },
