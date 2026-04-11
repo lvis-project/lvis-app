@@ -153,19 +153,7 @@ function registerPluginTools(
         if (!finalPayload && Object.keys(args).length > 0) finalPayload = args;
         if (typeof finalPayload === "string") { try { finalPayload = JSON.parse(finalPayload); } catch { } }
         
-        const rawResult = await pluginRuntime.call(method, finalPayload);
-        
-        // LLM 오해 방지를 위한 결과 가공 (Ultrathink Mapping)
-        if (method === "index.scan") {
-          const res = rawResult as any;
-          return {
-            ...res,
-            message: `스캔 완료. 현재 총 ${res.scanned || 0}개의 파일을 확인했으며, 인덱스에 저장된 문서는 상태가 유지되고 있습니다. 새로 추가된 문서는 ${res.indexed || 0}개입니다.`,
-            instruction: "인덱싱된 상세 목록이 필요하면 index_documents 도구를 호출하세요."
-          };
-        }
-        
-        return rawResult;
+        return pluginRuntime.call(method, finalPayload);
       },
       source: "plugin",
     });
