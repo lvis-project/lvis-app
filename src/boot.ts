@@ -125,8 +125,9 @@ function registerPluginTools(
   toolRegistry: ToolRegistry,
 ): void {
   for (const method of pluginRuntime.listMethods()) {
+    const toolName = method.replace(/\./g, "_"); // dot → underscore (LLM 벤더 호환)
     toolRegistry.register({
-      name: method,
+      name: toolName,
       description: `플러그인 메서드: ${method}`,
       parameters: {
         type: "object",
@@ -149,7 +150,7 @@ function registerBuiltinTools(
 ): void {
   const builtins: ToolDefinition[] = [
     {
-      name: "memory.save",
+      name: "memory_save",
       description: "사용자가 기억해달라고 한 내용을 notes/에 저장합니다.",
       parameters: {
         type: "object",
@@ -166,7 +167,7 @@ function registerBuiltinTools(
       source: "builtin",
     },
     {
-      name: "memory.search",
+      name: "memory_search",
       description: "사용자의 notes/ 메모를 키워드로 검색합니다.",
       parameters: {
         type: "object",
@@ -182,7 +183,7 @@ function registerBuiltinTools(
       source: "builtin",
     },
     {
-      name: "memory.list",
+      name: "memory_list",
       description: "저장된 모든 메모 목록을 반환합니다.",
       parameters: { type: "object", properties: {} },
       execute: async () => {
@@ -198,11 +199,11 @@ function registerBuiltinTools(
 function registerDefaultKeywords(keywordEngine: KeywordEngine): void {
   // 향후 plugin.json의 keywords 필드에서 동적 로드
   keywordEngine.registerKeywords([
-    { keyword: "회의록", skillId: "meeting.start" },
-    { keyword: "녹음", skillId: "meeting.start" },
-    { keyword: "이메일", skillId: "email.list" },
-    { keyword: "메일", skillId: "email.list" },
-    { keyword: "인덱스", skillId: "index.scan" },
-    { keyword: "문서 검색", skillId: "index.scan" },
+    { keyword: "회의록", skillId: "meeting_start" },
+    { keyword: "녹음", skillId: "meeting_start" },
+    { keyword: "이메일", skillId: "email_list" },
+    { keyword: "메일", skillId: "email_list" },
+    { keyword: "인덱스", skillId: "index_scan" },
+    { keyword: "문서 검색", skillId: "index_scan" },
   ]);
 }
