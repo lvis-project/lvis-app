@@ -24,7 +24,7 @@ if (process.platform === "linux" && process.env.WSL_DISTRO_NAME) {
     app.commandLine.appendSwitch("ozone-platform-hint", "x11");
   }
 }
-app.disableHardwareAcceleration();
+// app.disableHardwareAcceleration();
 
 let mainWindow: BrowserWindow | null = null;
 let services: AppServices | null = null;
@@ -71,7 +71,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
-    show: false,
+    show: true, // 즉시 표시
     autoHideMenuBar: false,
     webPreferences: {
       contextIsolation: true,
@@ -81,12 +81,18 @@ function createWindow() {
   });
 
   const win = mainWindow;
-  const fallback = setTimeout(() => {
-    if (!win.isDestroyed() && !win.isVisible()) { win.show(); win.focus(); }
-  }, 3000);
+  
+  // 디버깅을 위해 DevTools를 자동으로 엽니다.
+  win.webContents.openDevTools();
 
-  win.once("ready-to-show", () => { clearTimeout(fallback); win.show(); win.focus(); });
-  win.on("closed", () => { clearTimeout(fallback); if (mainWindow === win) mainWindow = null; });
+  win.once("ready-to-show", () => {
+    console.log("[lvis] window ready-to-show");
+    win.show();
+    win.focus();
+  });
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+  });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("[lvis] window failed to load", { code, desc, url });
   });

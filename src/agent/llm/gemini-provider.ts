@@ -32,20 +32,20 @@ export class GeminiProvider implements LLMProvider {
         }),
       });
 
-      const { history, lastUserContent } = toGeminiHistory(params.messages);
-      const chat = model.startChat({ history });
-
-      const result = await chat.sendMessageStream(lastUserContent);
+      // 전체 히스토리를 Content 배열로 변환 (Stateless 방식)
+      const contents = toGeminiContents(params.messages);
+      const result = await model.generateContentStream({ contents });
 
       let hasToolCalls = false;
 
       for await (const chunk of result.stream) {
-        const text = chunk.text();
-        if (text) {
-          yield { type: "text_delta", text };
-        }
+        try {
+          const text = chunk.text();
+          if (text) {
+            yield { type: "text_delta", text };
+          }
+        } catch { /* text가 없는 chunk인 경우 무시 */ }
 
-        // functionCall 파트 감지
         for (const candidate of chunk.candidates ?? []) {
           for (const part of candidate.content?.parts ?? []) {
             if (part.functionCall) {
@@ -82,46 +82,35 @@ export class GeminiProvider implements LLMProvider {
 
 // ─── Format Conversion ──────────────────────────────
 
-function toGeminiHistory(messages: GenericMessage[]): {
-  history: Content[];
-  lastUserContent: string | Part[];
-} {
-  const history: Content[] = [];
-  let lastUserContent: string | Part[] = "";
-
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
-    const isLast = i === messages.length - 1;
+function toGeminiContents(messages: GenericMessage[]): Content[] {
+  return messages.map((msg) => {
+    let role: string = "user";
+    let parts: Part[] = [];
 
     if (msg.role === "user") {
-      if (isLast) {
-        lastUserContent = msg.content;
-      } else {
-        history.push({ role: "user", parts: [{ text: msg.content }] });
-      }
+      role = "user";
+      parts = [{ text: msg.content }];
     } else if (msg.role === "assistant") {
-      const parts: Part[] = [];
+      role = "model";
       if (msg.content) parts.push({ text: msg.content });
       if (msg.toolCalls) {
         for (const tc of msg.toolCalls) {
           parts.push({ functionCall: { name: tc.name, args: tc.input } });
         }
       }
-      history.push({ role: "model", parts });
     } else if (msg.role === "tool_result") {
-      // Gemini: functionResponse는 user role 아래 part로
-      if (isLast) {
-        lastUserContent = [{ functionResponse: { name: "tool", response: { result: msg.content } } }];
-      } else {
-        history.push({
-          role: "user",
-          parts: [{ functionResponse: { name: "tool", response: { result: msg.content } } }],
-        });
-      }
+      // Gemini: functionResponse는 user role로 전달
+      role = "user";
+      parts = [{
+        functionResponse: {
+          name: msg.toolName || "tool",
+          response: { result: msg.content },
+        },
+      }];
     }
-  }
 
-  return { history, lastUserContent };
+    return { role, parts };
+  });
 }
 
 function toGeminiFunctionDeclaration(schema: ToolSchema): FunctionDeclaration {

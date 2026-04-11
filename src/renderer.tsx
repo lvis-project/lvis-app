@@ -155,11 +155,21 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
     })();
   }, [open, api]);
 
-  // 벤더 변경 시 해당 벤더의 키 상태 확인
+  // 벤더 변경 시 해당 벤더의 키 상태 확인 및 모델 추천
   useEffect(() => {
     if (!open) return;
     const v = VENDORS.find((x) => x.id === vendor);
-    if (v) { setModel(v.defaultModel); void api.hasApiKey(vendor).then(setHasKey); }
+    if (v) {
+      void api.hasApiKey(vendor).then(setHasKey);
+      // 현재 저장된 설정의 벤더와 일치하면 저장된 모델명 유지, 아니면 기본값 추천
+      void api.getSettings().then(s => {
+        if (s.llm.provider !== vendor) {
+          setModel(v.defaultModel);
+        } else {
+          setModel(s.llm.model);
+        }
+      });
+    }
   }, [vendor, open, api]);
 
   const save = async () => {
@@ -274,16 +284,53 @@ function App() {
     void refreshMarketplace(); void refreshViews(); void checkApiKey();
     const dv = api.onViewActivate((k) => setActiveView(k));
     const ds = api.onChatStream((ev) => {
+      console.log("[lvis:chat:stream]", ev);
       if (ev.type === "text_delta" && ev.text) {
         streamRef.current += ev.text;
         const cur = streamRef.current;
-        setEntries((p) => { const c = [...p]; const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && "streaming" in e && e.streaming); if (i >= 0) c[i] = { kind: "assistant", text: cur, streaming: true }; return c; });
+        setEntries((p) => {
+          const c = [...p];
+          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && "streaming" in e && e.streaming);
+          if (i >= 0) {
+            c[i] = { kind: "assistant", text: cur, streaming: true };
+          } else {
+            // 스트리밍 엔트리를 찾지 못한 경우 (레이스 컨디션 등) 강제로 추가
+            console.warn("[lvis:renderer] missing assistant entry for delta, adding new one");
+            c.push({ kind: "assistant", text: cur, streaming: true });
+          }
+          return c;
+        });
       } else if (ev.type === "tool_start" && ev.name) {
         setEntries((p) => [...p, { kind: "tool", name: ev.name!, status: "running" as const }]);
       } else if (ev.type === "tool_end" && ev.name) {
-        setEntries((p) => { const c = [...p]; const i = findLastIdx(c, (e: ChatEntry) => e.kind === "tool" && e.name === ev.name && e.status === "running"); if (i >= 0) c[i] = { kind: "tool", name: ev.name!, status: ev.isError ? "error" : "done", result: ev.result }; return c; });
+        setEntries((p) => {
+          const c = [...p];
+          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "tool" && e.name === ev.name && e.status === "running");
+          if (i >= 0) c[i] = { kind: "tool", name: ev.name!, status: ev.isError ? "error" : "done", result: ev.result };
+          return c;
+        });
+      } else if (ev.type === "error") {
+        setEntries((p) => {
+          const c = [...p];
+          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && "streaming" in e && e.streaming);
+          if (i >= 0) {
+            c[i] = { kind: "assistant", text: `오류: ${ev.error || "알 수 없는 오류"}`, streaming: false };
+          } else {
+            c.push({ kind: "assistant", text: `오류: ${ev.error || "알 수 없는 오류"}`, streaming: false });
+          }
+          return c;
+        });
       } else if (ev.type === "done") {
-        setEntries((p) => { const c = [...p]; const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && "streaming" in e && e.streaming); if (i >= 0) c[i] = { ...c[i], streaming: false } as ChatEntry; return c; });
+        setEntries((p) => {
+          const c = [...p];
+          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && "streaming" in e && e.streaming);
+          if (i >= 0) {
+            // 만약 텍스트가 전혀 없었다면 "응답이 없습니다" 등의 표시를 할 수도 있음
+            const text = c[i].kind === "assistant" && "text" in c[i] ? c[i].text : "";
+            c[i] = { ...c[i], text: text || (streamRef.current || "(응답 없음)"), streaming: false } as ChatEntry;
+          }
+          return c;
+        });
       }
     });
     const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); } };
@@ -388,7 +435,13 @@ function App() {
               </div></ScrollArea>
               <div className="grid grid-cols-[1fr_auto] gap-2 border-t bg-card p-3">
                 <Textarea value={question} onChange={(e) => setQuestion(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleAsk(question); } }}
+                  onKeyDown={(e) => {
+                    if (e.nativeEvent.isComposing) return;
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void handleAsk(question);
+                    }
+                  }}
                   placeholder={hasApiKey === false ? "API 키를 먼저 설정해 주세요..." : "질문 입력 (Enter 전송 / Shift+Enter 줄바꿈) · /command 사용 가능"}
                   className="min-h-[76px]" disabled={streaming} />
                 <Button onClick={() => void handleAsk(question)} disabled={streaming || !question.trim()}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
