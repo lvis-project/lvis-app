@@ -28,7 +28,7 @@ type StreamEvent = { type: string; text?: string; name?: string; error?: string;
 
 type ChatEntry =
   | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string; streaming: boolean }
+  | { kind: "assistant"; text: string; thought?: string; streaming?: boolean }
   | { kind: "tool"; name: string; status: "running" | "done" | "error"; result?: string };
 
 type LvisApi = {
@@ -289,6 +289,7 @@ function App() {
   const [question, setQuestion] = useState("");
   const [streaming, setStreaming] = useState(false);
   const streamRef = useRef("");
+  const thoughtRef = useRef("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // App state
@@ -317,7 +318,8 @@ function App() {
     setEntries((p) => [...p, { kind: "user", text: t }]);
     // Streaming assistant entry
     streamRef.current = "";
-    setEntries((p) => [...p, { kind: "assistant", text: "", streaming: true }]);
+    thoughtRef.current = "";
+    setEntries((p) => [...p, { kind: "assistant", text: "", thought: "", streaming: true }]);
     setStreaming(true);
     try {
       await api.chatSend(t);
@@ -326,7 +328,7 @@ function App() {
       setEntries((p) => {
         const copy = [...p];
         const last = findLastIdx(copy, (e: ChatEntry) => e.kind === "assistant");
-        if (last >= 0) copy[last] = { kind: "assistant", text: `오류: ${(err as Error).message}`, streaming: false };
+        if (last >= 0) copy[last] = { kind: "assistant", text: `오류: ${(err as Error).message}`, thought: "", streaming: false };
         return copy;
       });
     } finally { setStreaming(false); }
@@ -347,17 +349,18 @@ function App() {
     const ds = api.onChatStream((ev) => {
       console.log("[lvis:chat:stream]", ev);
       if (ev.type === "text_delta" && ev.text) {
-        streamRef.current += ev.text;
-        const cur = streamRef.current;
+        if ((ev as any).isReasoning) {
+          thoughtRef.current += ev.text;
+        } else {
+          streamRef.current += ev.text;
+        }
+        const curText = streamRef.current;
+        const curThought = thoughtRef.current;
         setEntries((p) => {
           const c = [...p];
-          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && "streaming" in e && e.streaming);
+          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && !!e.streaming);
           if (i >= 0) {
-            c[i] = { kind: "assistant", text: cur, streaming: true };
-          } else {
-            // 스트리밍 엔트리를 찾지 못한 경우 (레이스 컨디션 등) 강제로 추가
-            console.warn("[lvis:renderer] missing assistant entry for delta, adding new one");
-            c.push({ kind: "assistant", text: cur, streaming: true });
+            c[i] = { kind: "assistant", text: curText, thought: curThought, streaming: true };
           }
           return c;
         });
@@ -373,7 +376,7 @@ function App() {
       } else if (ev.type === "error") {
         setEntries((p) => {
           const c = [...p];
-          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && "streaming" in e && e.streaming);
+          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && !!(e as any).streaming);
           if (i >= 0) {
             c[i] = { kind: "assistant", text: `오류: ${ev.error || "알 수 없는 오류"}`, streaming: false };
           } else {
@@ -384,11 +387,15 @@ function App() {
       } else if (ev.type === "done") {
         setEntries((p) => {
           const c = [...p];
-          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && "streaming" in e && e.streaming);
+          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && !!e.streaming);
           if (i >= 0) {
-            // 만약 텍스트가 전혀 없었다면 "응답이 없습니다" 등의 표시를 할 수도 있음
-            const text = c[i].kind === "assistant" && "text" in c[i] ? c[i].text : "";
-            c[i] = { ...c[i], text: text || (streamRef.current || "(응답 없음)"), streaming: false } as ChatEntry;
+            const entry = c[i] as any;
+            c[i] = { 
+              ...entry, 
+              text: entry.text || (streamRef.current || "(응답 없음)"), 
+              thought: entry.thought || thoughtRef.current,
+              streaming: false 
+            } as ChatEntry;
           }
           return c;
         });
@@ -488,6 +495,14 @@ function App() {
                   return (
                     <div key={idx} className="max-w-[85%] rounded-md border bg-card px-3 py-2 text-sm">
                       <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">LVIS{entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}</div>
+                      
+                      {entry.thought && (
+                        <div className="mb-2 border-l-2 border-muted pl-2 text-[12px] text-muted-foreground italic">
+                          <div className="mb-1 font-semibold not-italic opacity-70">생각 과정:</div>
+                          <div className="whitespace-pre-wrap">{entry.thought}</div>
+                        </div>
+                      )}
+
                       <div className="prose prose-sm prose-invert max-w-none break-words">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {entry.text || (entry.streaming ? "생각 중..." : "")}
