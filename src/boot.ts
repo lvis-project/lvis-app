@@ -248,14 +248,32 @@ function registerBuiltinTools(
             return { query, provider: "Serper", results: data.organic?.map((r: any) => ({ title: r.title, snippet: r.snippet, url: r.link })) || [] };
           }
 
-          // DuckDuckGo fallback
-          const response = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`);
-          const data = await response.json() as any;
+          // DuckDuckGo HTML 검색 (Instant Answer API 대신 실제 검색 결과 파싱)
+          const ddgRes = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+            method: "POST",
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: `q=${encodeURIComponent(query)}`,
+          });
+          const ddgHtml = await ddgRes.text();
           const results: any[] = [];
-          if (data.AbstractText) results.push({ title: data.Heading || query, snippet: data.AbstractText, url: data.AbstractURL });
-          if (data.RelatedTopics) {
-            for (const t of data.RelatedTopics.slice(0, count - results.length)) {
-              if (t.Text && t.FirstURL) results.push({ title: t.Text.split(" - ")[0], snippet: t.Text, url: t.FirstURL });
+          // 검색 결과 파싱: <a class="result__a"> (제목+URL) + <a class="result__snippet"> (요약)
+          const resultBlocks = ddgHtml.split(/class="result\s/g).slice(1, count + 1);
+          for (const block of resultBlocks) {
+            const urlMatch = block.match(/class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)/);
+            const snippetMatch = block.match(/class="result__snippet"[^>]*>([^<]+)/);
+            if (urlMatch) {
+              let url = urlMatch[1];
+              // DuckDuckGo redirect URL 디코딩
+              const uddg = url.match(/uddg=([^&]+)/);
+              if (uddg) url = decodeURIComponent(uddg[1]);
+              results.push({
+                title: urlMatch[2].trim(),
+                snippet: snippetMatch?.[1]?.trim() || "",
+                url,
+              });
             }
           }
           return { query, provider: "DuckDuckGo", results };
