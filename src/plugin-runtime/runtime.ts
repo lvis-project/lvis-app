@@ -5,6 +5,7 @@ import type {
   PluginManifest,
   PluginMethodHandler,
   PluginUiExtension,
+  PluginHostApi,
   RuntimePlugin,
   RuntimePluginFactory,
 } from "./types.js";
@@ -22,6 +23,8 @@ export interface PluginRuntimeOptions {
   manifestPaths?: string[];
   registryPath?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
+  /** 플러그인별 HostApi를 생성하는 팩토리 — boot.ts에서 주입 */
+  createHostApi?: (pluginId: string) => PluginHostApi;
 }
 
 export class PluginRuntime {
@@ -29,6 +32,7 @@ export class PluginRuntime {
   private readonly manifestPaths: string[];
   private readonly registryPath?: string;
   private readonly configOverrides: Record<string, Record<string, unknown>>;
+  private readonly createHostApi?: (pluginId: string) => PluginHostApi;
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginMethodHandler }>();
   private loaded = false;
@@ -38,6 +42,7 @@ export class PluginRuntime {
     this.manifestPaths = (options.manifestPaths ?? []).map((path) => resolve(path));
     this.registryPath = options.registryPath ? resolve(options.registryPath) : undefined;
     this.configOverrides = options.configOverrides ?? {};
+    this.createHostApi = options.createHostApi;
   }
 
   async load(): Promise<void> {
@@ -56,6 +61,9 @@ export class PluginRuntime {
         throw new Error(`Plugin entry does not export default/createPlugin: ${manifest.id}`);
       }
 
+      // 플러그인별 스코프된 HostApi 생성
+      const hostApi = this.createHostApi?.(manifest.id) ?? createNoopHostApi();
+
       const instance = await createPlugin({
         pluginId: manifest.id,
         pluginRoot,
@@ -71,6 +79,7 @@ export class PluginRuntime {
           }
           console.log(`[plugin:${manifest.id}] ${message}`);
         },
+        hostApi,
       });
 
       const methods = new Map<string, PluginMethodHandler>();
@@ -84,6 +93,11 @@ export class PluginRuntime {
           throw new Error(`Duplicate plugin method registered: ${methodName}`);
         }
         this.methodMap.set(methodName, { pluginId: manifest.id, handler });
+      }
+
+      // 매니페스트에 선언된 키워드 자동 등록
+      if (manifest.keywords && manifest.keywords.length > 0) {
+        hostApi.registerKeywords(manifest.keywords);
       }
 
       this.plugins.set(manifest.id, {
@@ -125,6 +139,10 @@ export class PluginRuntime {
 
   listMethods(): string[] {
     return [...this.methodMap.keys()].sort();
+  }
+
+  listPluginIds(): string[] {
+    return [...this.plugins.keys()];
   }
 
   listUiExtensions(): Array<{ pluginId: string; extension: PluginUiExtension; entryUrl?: string }> {
@@ -173,6 +191,19 @@ export class PluginRuntime {
     this.plugins.clear();
     this.methodMap.clear();
     this.loaded = false;
+    // Note: 호스트의 keywordEngine/toolRegistry는 boot.ts의 createHostApi에서
+    // pluginId 기반으로 정리됨 (restartAll → 새로 load 시 재등록)
   }
 }
 
+/** 폴백: HostApi 없이 동작하는 noop 구현 */
+function createNoopHostApi(): PluginHostApi {
+  return {
+    registerKeywords: () => {},
+    emitEvent: () => {},
+    onEvent: () => {},
+    addTask: () => {},
+    saveNote: () => {},
+    getSecret: () => null,
+  };
+}
