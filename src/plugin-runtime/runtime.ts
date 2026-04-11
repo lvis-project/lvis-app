@@ -113,8 +113,18 @@ export class PluginRuntime {
 
   async startAll(): Promise<void> {
     await this.load();
+    // 개별 플러그인 시작 실패가 전체 앱을 죽이지 않도록 격리
     for (const plugin of this.plugins.values()) {
-      await plugin.instance.start?.();
+      try {
+        await plugin.instance.start?.();
+      } catch (err) {
+        console.error(`[plugin:${plugin.manifest.id}] start failed (non-fatal):`, (err as Error).message);
+        // 실패한 플러그인의 메서드를 제거하여 호출 시 에러 방지
+        for (const method of plugin.methods.keys()) {
+          this.methodMap.delete(method);
+        }
+        this.plugins.delete(plugin.manifest.id);
+      }
     }
   }
 
