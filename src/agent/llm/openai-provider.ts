@@ -59,6 +59,10 @@ export class OpenAIProvider implements LLMProvider {
         const delta = chunk.choices[0]?.delta;
         finishReason = chunk.choices[0]?.finish_reason ?? finishReason;
 
+        if ((delta as any)?.reasoning_content) {
+          yield { type: "text_delta", text: (delta as any).reasoning_content, isReasoning: true } as any;
+        }
+
         if (delta?.content) {
           yield { type: "text_delta", text: delta.content };
         }
