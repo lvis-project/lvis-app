@@ -7,6 +7,9 @@ const api = {
   setApiKey: async (vendor, apiKey) => ipcRenderer.invoke("lvis:settings:set-api-key", vendor, apiKey),
   hasApiKey: async (vendor) => ipcRenderer.invoke("lvis:settings:has-api-key", vendor),
   deleteApiKey: async (vendor) => ipcRenderer.invoke("lvis:settings:delete-api-key", vendor),
+  setWebApiKey: async (provider, apiKey) => ipcRenderer.invoke("lvis:settings:set-web-api-key", provider, apiKey),
+  hasWebApiKey: async (provider) => ipcRenderer.invoke("lvis:settings:has-web-api-key", provider),
+  deleteWebApiKey: async (provider) => ipcRenderer.invoke("lvis:settings:delete-web-api-key", provider),
 
   // Chat (ConversationLoop)
   chatHasProvider: async () => ipcRenderer.invoke("lvis:chat:has-provider"),

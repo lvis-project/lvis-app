@@ -16,6 +16,11 @@ export interface ChatSettings {
 export interface AppSettings {
   llm: LLMSettings;
   chat: ChatSettings;
+  webSearch: WebSearchSettings;
+}
+
+export interface WebSearchSettings {
+  provider: "duckduckgo" | "tavily" | "serper" | "google";
 }
 
 export interface SettingsServiceOptions {
@@ -30,6 +35,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   chat: {
     systemPrompt:
       "당신은 LVIS 로컬 지식 어시스턴트입니다. 사용자의 문서와 컨텍스트를 기반으로 정확하고 유용한 답변을 제공합니다. 한국어로 답변합니다.",
+  },
+  webSearch: {
+    provider: "duckduckgo",
   },
 };
 
@@ -62,6 +70,7 @@ export class SettingsService {
   patch(partial: Partial<AppSettings>): AppSettings {
     if (partial.llm) this.settings.llm = { ...this.settings.llm, ...partial.llm };
     if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
+    if (partial.webSearch) this.settings.webSearch = { ...this.settings.webSearch, ...partial.webSearch };
     this.saveSettings();
     return this.getAll();
   }
@@ -115,10 +124,11 @@ export class SettingsService {
     if (!existsSync(this.settingsPath)) return structuredClone(DEFAULT_SETTINGS);
     try {
       const raw = readFileSync(this.settingsPath, "utf-8");
-      const parsed = JSON.parse(raw) as Partial<AppSettings>;
+      const parsed = JSON.parse(raw) as any;
       return {
         llm: { ...DEFAULT_SETTINGS.llm, ...parsed.llm },
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
+        webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);

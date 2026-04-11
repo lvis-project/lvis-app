@@ -42,6 +42,19 @@ export function registerIpcHandlers(
     return { ok: true };
   });
 
+  // ─── Web Search Keys ───────────────────────────
+  ipcMain.handle("lvis:settings:set-web-api-key", (_e, provider: string, apiKey: string) => {
+    settingsService.setSecret(`web.apiKey.${provider}`, apiKey);
+    return { ok: true };
+  });
+  ipcMain.handle("lvis:settings:has-web-api-key", (_e, provider: string) => {
+    return settingsService.getSecret(`web.apiKey.${provider}`) !== null;
+  });
+  ipcMain.handle("lvis:settings:delete-web-api-key", (_e, provider: string) => {
+    settingsService.deleteSecret(`web.apiKey.${provider}`);
+    return { ok: true };
+  });
+
   // ─── Chat (ConversationLoop) ────────────────────
   ipcMain.handle("lvis:chat:has-provider", () => conversationLoop.hasProvider());
 

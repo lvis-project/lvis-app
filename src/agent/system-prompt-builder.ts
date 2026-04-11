@@ -65,6 +65,11 @@ export class SystemPromptBuilder {
     return this.sources.map((s) => ({ id: s.id, name: s.name, refresh: s.refresh }));
   }
 
+  /** 인덱싱된 문서 정보를 시스템 프롬프트에 동적으로 업데이트 */
+  setIndexedDocsContext(context: string): void {
+    (this as any)._indexedDocsContext = context;
+  }
+
   // ─── Private ──────────────────────────────────────
 
   private initSources(deps: SystemPromptBuilderDeps): void {
@@ -120,10 +125,10 @@ export class SystemPromptBuilder {
       build: () => getPluginSchemas?.() ?? "",
     });
 
-    // ⑦ Memory / notes/ (파일 변경 시)
+    // ⑦ Memory / notes / Indexed Docs (파일 변경 시)
     this.sources.push({
       id: 7,
-      name: "Memory / notes",
+      name: "Memory & Knowledge",
       refresh: "on-change",
       build: () => {
         const prefs = memoryManager.getUserPreferences();
@@ -131,6 +136,13 @@ export class SystemPromptBuilder {
         const parts: string[] = [];
         if (prefs) parts.push(`<user-preferences>\n${prefs}\n</user-preferences>`);
         if (notes) parts.push(`<user-notes>\n${notes}\n</user-notes>`);
+        
+        // 인덱싱된 문서 요약 정보 추가 (ConversationLoop에서 주입)
+        const docsContext = (this as any)._indexedDocsContext;
+        if (docsContext) {
+          parts.push(`<indexed-knowledge>\n${docsContext}\n</indexed-knowledge>`);
+        }
+        
         return parts.join("\n\n");
       },
     });
@@ -166,21 +178,22 @@ export class SystemPromptBuilder {
 
 // ─── Constants ──────────────────────────────────────
 
-const ROLE_DEFINITION = `당신은 LVIS(LG Virtual Intelligence Secretary) — 사원 개인을 위한 AI 비서 에이전트입니다.
+const ROLE_DEFINITION = `당신은 LVIS(LG Virtual Intelligence Secretary) — 사원 개인을 위한 초지능형 AI 비서 에이전트입니다.
+
+## 사고 과정 (Ultrathink)
+- 사용자의 질문을 받으면 즉시 답변하지 않고, 먼저 '무엇을 모르는가?'를 자문하세요.
+- 지식 확인 루틴:
+  1. 먼저 로컬 지식 베이스(index_documents)에 관련 문서가 있는지 확인하세요.
+  2. 문서가 있다면 chat_preview로 내용을 심층 분석하세요.
+  3. 최신 정보나 사외 지식이 필요하면 web_search 및 web_fetch를 병행하세요.
+- 모든 정보를 종합하여 논리적 근거를 바탕으로 답변하세요.
 
 ## 핵심 원칙
-- 사용자의 업무 맥락을 기억하고, 반복 업무를 줄이며, 오늘 해야 할 일을 먼저 제안합니다.
-- 회사가 허용한 경로(도구, API) 안에서만 동작합니다.
-- 정확하지 않은 정보는 추측하지 않고, 확인이 필요하면 솔직히 밝힙니다.
-- 한국어로 답변하되, 기술 용어는 원어를 병기합니다.
+- **정확성 최우선:** 인덱싱된 문서가 있는데도 없다고 하는 것은 치명적인 오류입니다. 반드시 도구로 재확인하세요.
+- **실시간 대응:** "방금 파일을 넣었어"라고 하면 index_scan을 실행하여 즉시 지식을 동기화하세요.
+- **기술 용어:** 한국어로 답변하되, 중요한 기술 용어는 원어를 병기합니다.
 
-## 도구 사용
-- 사용 가능한 도구가 제공되면 적극 활용하세요.
-- 도구 호출 시 tool_use 블록을 사용합니다.
-- 복수 도구가 필요하면 병렬 호출이 가능합니다.
-
-## 기억
-- <lvis-context> 태그에 조직/프로젝트 컨텍스트가 있습니다.
-- <user-preferences> 태그에 사용자 선호가 있습니다.
-- <user-notes> 태그에 사용자가 기억해달라고 한 메모가 있습니다.
-- 사용자가 "이거 기억해"라고 하면 memory_save 도구로 notes/에 저장하세요.`;
+## 기억 및 지식
+- <lvis-context>에 조직 맥락이 있습니다.
+- 로컬 지식 베이스는 별도의 도구(index_*)를 통해 접근 가능합니다.
+- 사용자가 명시적으로 지시한 메모는 <user-notes>에 있습니다.`;
