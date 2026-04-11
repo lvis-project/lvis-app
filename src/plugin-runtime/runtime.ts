@@ -70,7 +70,8 @@ export class PluginRuntime {
         hostRoot: this.hostRoot,
         config: {
           ...(manifest.config ?? {}),
-          ...(this.configOverrides[manifest.id] ?? {}),
+          ...(this.configOverrides["*"] ?? {}),       // 와일드카드: 모든 플러그인에 적용
+          ...(this.configOverrides[manifest.id] ?? {}), // 플러그인별 오버라이드
         },
         log: (message, meta) => {
           if (meta !== undefined) {

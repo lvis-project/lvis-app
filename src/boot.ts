@@ -172,16 +172,26 @@ function buildPluginConfigOverrides(settings: SettingsService): Record<string, R
   const overrides: Record<string, Record<string, unknown>> = {};
   const llm = settings.get("llm");
 
-  // 현재 LLM 벤더의 API 키를 환경에 맞게 전달
-  const apiKey = settings.getSecret(`llm.apiKey.${llm.provider}`);
-  if (apiKey) {
-    // OpenAI 키는 여러 플러그인이 활용 가능 (STT, Summary 등)
-    if (llm.provider === "openai" || llm.provider === "copilot") {
-      process.env.OPENAI_API_KEY = apiKey;
-    }
-    // 모든 플러그인에 범용적으로 API 키 전달
-    // 각 플러그인은 hostApi.getSecret()으로도 접근 가능
-    overrides["*"] = { llmApiKey: apiKey, llmProvider: llm.provider };
+  // OpenAI 키는 STT/Summary 플러그인이 공통으로 사용
+  const openaiKey = settings.getSecret("llm.apiKey.openai");
+  const currentKey = settings.getSecret(`llm.apiKey.${llm.provider}`);
+
+  // OpenAI 키가 있으면 환경변수에도 설정 (pageindex 등 fallback 지원)
+  if (openaiKey) {
+    process.env.OPENAI_API_KEY = openaiKey;
+  } else if (currentKey && (llm.provider === "openai" || llm.provider === "copilot")) {
+    process.env.OPENAI_API_KEY = currentKey;
+  }
+
+  // 모든 플러그인에 범용적으로 전달 — 각 플러그인이 필요한 키를 선택
+  const resolvedApiKey = openaiKey ?? currentKey;
+  if (resolvedApiKey) {
+    overrides["*"] = {
+      llmApiKey: resolvedApiKey,
+      llmProvider: llm.provider,
+      apiKey: resolvedApiKey,         // pageindex가 사용하는 키 이름
+      openaiApiKey: resolvedApiKey,   // meeting이 사용하는 키 이름
+    };
   }
 
   return overrides;
