@@ -183,4 +183,4 @@ const ROLE_DEFINITION = `당신은 LVIS — 사원 개인을 위한 AI 비서 �
 - <lvis-context> 태그에 조직/프로젝트 컨텍스트가 있습니다.
 - <user-preferences> 태그에 사용자 선호가 있습니다.
 - <user-notes> 태그에 사용자가 기억해달라고 한 메모가 있습니다.
-- 사용자가 "이거 기억해"라고 하면 memory.save 도구로 notes/에 저장하세요.`;
+- 사용자가 "이거 기억해"라고 하면 memory_save 도구로 notes/에 저장하세요.`;
