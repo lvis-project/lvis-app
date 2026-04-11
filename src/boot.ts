@@ -116,6 +116,9 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
     memoryManager,
   });
 
+  // §7/P2-6: 미팅 이벤트 통합 — 액션아이템→태스크, 요약→메모리
+  setupMeetingIntegration(pluginRuntime, taskService, memoryManager);
+
   console.log("[lvis] boot: ready (%d tools registered)", toolRegistry.size);
 
   return {
@@ -317,7 +320,6 @@ function registerBuiltinTools(
 }
 
 function registerDefaultKeywords(keywordEngine: KeywordEngine): void {
-  // 향후 plugin.json의 keywords 필드에서 동적 로드
   keywordEngine.registerKeywords([
     { keyword: "회의록", skillId: "meeting_start" },
     { keyword: "녹음", skillId: "meeting_start" },
@@ -326,4 +328,80 @@ function registerDefaultKeywords(keywordEngine: KeywordEngine): void {
     { keyword: "인덱스", skillId: "index_scan" },
     { keyword: "문서 검색", skillId: "index_scan" },
   ]);
+}
+
+/**
+ * §7/P2-6: 미팅 플러그인 이벤트 → LVIS Task/Memory 통합
+ *
+ * 미팅 종료 후 meeting.events를 폴링하여:
+ * - actionItems → TaskService에 자동 태스크 생성
+ * - 요약 → MemoryManager notes/에 자동 저장
+ */
+function setupMeetingIntegration(
+  pluginRuntime: PluginRuntime,
+  taskService: TaskService,
+  memoryManager: MemoryManager,
+): void {
+  // 미팅 종료 이벤트를 감지하는 폴링 (향후 이벤트 버스로 전환)
+  let lastEventCount = 0;
+
+  setInterval(async () => {
+    try {
+      if (!pluginRuntime.listMethods().includes("meeting.events")) return;
+
+      const events = (await pluginRuntime.call("meeting.events")) as
+        Array<{ type: string; sessionId: string; data?: { title?: string; summary?: string }; timestamp: string }>;
+
+      if (!events || events.length <= lastEventCount) return;
+
+      const newEvents = events.slice(lastEventCount);
+      lastEventCount = events.length;
+
+      for (const event of newEvents) {
+        if (event.type === "meeting.summary.created" && event.data) {
+          // 요약을 notes/에 자동 저장
+          const title = `미팅-${event.sessionId.slice(0, 8)}-${event.data.title || "회의"}`;
+          const content = [
+            `# ${event.data.title || "회의 요약"}`,
+            `> 세션: ${event.sessionId}`,
+            `> 시간: ${event.timestamp}`,
+            "",
+            event.data.summary || "",
+          ].join("\n");
+
+          memoryManager.saveNote(title, content);
+          console.log(`[lvis] meeting→memory: saved note "${title}"`);
+
+          // 미팅 결과에서 액션 아이템 추출하여 태스크 생성
+          try {
+            const meetingResult = await pluginRuntime.call("meeting.stop", { sessionId: event.sessionId }).catch(() => null) as
+              { actionItems?: string[] } | null;
+
+            // 이미 stop된 세션이면 세션 스토어에서 가져오기
+            const sessions = (await pluginRuntime.call("meeting.sessions").catch(() => [])) as
+              Array<{ sessionId: string }>;
+
+            // actionItems가 있으면 태스크 생성
+            if (meetingResult?.actionItems) {
+              for (const item of meetingResult.actionItems) {
+                taskService.add({
+                  title: item.slice(0, 100),
+                  description: `미팅(${event.data.title})에서 생성된 액션 아이템`,
+                  source: "meeting" as const,
+                  sourceRef: event.sessionId,
+                  priority: "medium" as const,
+                  status: "pending" as const,
+                });
+                console.log(`[lvis] meeting→task: created "${item.slice(0, 50)}"`);
+              }
+            }
+          } catch {
+            // 태스크 생성 실패는 비차단
+          }
+        }
+      }
+    } catch {
+      // 폴링 실패 무시
+    }
+  }, 5000); // 5초 간격 폴링
 }
