@@ -62,6 +62,7 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
     if (apiKey) {
       // PageIndex 엔진이 설치되지 않은 환경에서 오류를 방지하기 위해 testMode 강제 적용
       configOverrides["pageindex"] = { apiKey, testMode: true };
+      configOverrides["meeting"] = { openaiApiKey: apiKey };
       process.env.OPENAI_API_KEY = apiKey;
     }
   }
