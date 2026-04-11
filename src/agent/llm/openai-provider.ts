@@ -29,7 +29,8 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
-    const messages = toOpenAIMessages(params.systemPrompt, params.messages);
+    const originalToolNames = params.tools?.map((t) => t.name) ?? [];
+    const messages = toOpenAIMessages(params.systemPrompt, params.messages, originalToolNames);
     const tools = params.tools?.map(toOpenAITool);
 
     try {
@@ -67,11 +68,11 @@ export class OpenAIProvider implements LLMProvider {
         }
       }
 
-      // tool_call 이벤트 발행
+      // tool_call 이벤트 발행 (이름 역변환: underscore → dot)
       for (const [, tc] of pendingToolCalls) {
         let input: Record<string, unknown> = {};
         try { input = JSON.parse(tc.args); } catch { /* 파싱 실패 시 빈 객체 */ }
-        yield { type: "tool_call", id: tc.id, name: tc.name, input };
+        yield { type: "tool_call", id: tc.id, name: restoreToolName(tc.name, originalToolNames), input };
       }
 
       yield {
@@ -93,11 +94,28 @@ export class OpenAIProvider implements LLMProvider {
   }
 }
 
+// ─── Tool Name Sanitization (OpenAI: ^[a-zA-Z0-9_-]+$) ─
+
+/** dot → underscore (memory.save → memory_save) */
+function sanitizeToolName(name: string): string {
+  return name.replace(/\./g, "_");
+}
+
+/** underscore → dot 역변환 (memory_save → memory.save) */
+function restoreToolName(sanitized: string, originals: string[]): string {
+  // 원본 이름 목록에서 매칭 시도
+  for (const orig of originals) {
+    if (sanitizeToolName(orig) === sanitized) return orig;
+  }
+  return sanitized;
+}
+
 // ─── Format Conversion ──────────────────────────────
 
 function toOpenAIMessages(
   systemPrompt: string,
   messages: GenericMessage[],
+  _originalToolNames: string[],
 ): OpenAI.ChatCompletionMessageParam[] {
   const result: OpenAI.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
@@ -114,7 +132,7 @@ function toOpenAIMessages(
           tool_calls: msg.toolCalls.map((tc) => ({
             id: tc.id,
             type: "function" as const,
-            function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+            function: { name: sanitizeToolName(tc.name), arguments: JSON.stringify(tc.input) },
           })),
         }),
       });
@@ -134,7 +152,7 @@ function toOpenAITool(schema: ToolSchema): OpenAI.ChatCompletionTool {
   return {
     type: "function",
     function: {
-      name: schema.name,
+      name: sanitizeToolName(schema.name),
       description: schema.description,
       parameters: schema.inputSchema,
     },
