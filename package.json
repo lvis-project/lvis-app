@@ -6,7 +6,7 @@
   "description": "Test Electron host app for LVIS plugins.",
   "main": "dist/src/main.js",
   "scripts": {
-    "prepare:plugins": "npm run --prefix ../lvis-plugin-pageindex build && npm run --prefix ../lvis-plugin-meeting build",
+    "prepare:plugins": "npm run --prefix ../lvis-plugin-pageindex build && npm run --prefix ../lvis-plugin-meeting build && npm run --prefix ../lvis-plugin-email build",
     "build:main": "tsc -p tsconfig.json",
     "build:renderer": "esbuild src/renderer.tsx --bundle --platform=browser --format=esm --outfile=dist/src/renderer.js",
     "build:styles": "tailwindcss -i src/styles.css -o dist/src/styles.css --minify",
@@ -25,6 +25,8 @@
     "test:main-flow": "npm run prepare:plugins && tsx scripts/test-main-flow.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.88.0",
+    "@google/generative-ai": "^0.24.1",
     "@lvis/plugin-email": "file:../lvis-plugin-email",
     "@lvis/plugin-meeting": "file:../lvis-plugin-meeting",
     "@lvis/plugin-pageindex": "file:../lvis-plugin-pageindex",
@@ -41,6 +43,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "lucide-react": "^1.7.0",
+    "openai": "^6.34.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "tailwind-merge": "^3.5.0"
@@ -52,6 +55,7 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.27",
     "electron": "^41.2.0",
+    "electron-rebuild": "^3.2.9",
     "esbuild": "^0.28.0",
     "postcss": "^8.5.9",
     "tailwindcss": "^3.4.13",
