@@ -12,7 +12,8 @@
     "scanFolders": [
       "fixtures"
     ],
-    "workspace": ".pageindex-workspace"
+    "workspace": ".pageindex-workspace",
+    "testMode": true
   },
   "ui": [
     {
