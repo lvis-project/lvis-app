@@ -7,7 +7,8 @@
     "meeting.start",
     "meeting.pushChunk",
     "meeting.stop",
-    "meeting.transcript"
+    "meeting.transcript",
+    "meeting.sessions"
   ],
   "config": {
     "intermediateEveryFinalSegments": 1
