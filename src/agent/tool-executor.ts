@@ -1,13 +1,28 @@
 /**
- * Tool Executor — §4.5.6 도구 실행 파이프라인 (8단계)
+ * Tool Executor — tool-governance.md §3 Single Choke Point
  *
- * claw-code 패턴 적용:
- * 1. lookup → 2. PreHook → 3. Permission → 4. HookOverride
- * → 5. Execute → 6. PostHook → 7. FeedbackMerge → 8. Result
+ * 8-Step Pipeline (모든 도구 호출은 예외 없이 이 파이프라인을 통과):
+ *
+ * 1. Lookup       — ToolRegistry.findByName() + source/trust 확인
+ * 2. PreHook      — HookRunner.preToolUse() — 입력 검사/변환
+ * 3. Permission   — PermissionManager.check(name, source, category)
+ * 4. HookOverride — PreHook deny 결과 적용
+ * 5. RateLimit    — Trust별 호출 빈도 제한
+ * 6. Execute      — tool.execute(args)
+ * 7. PostHook     — HookRunner.postToolUse() + DLP 검사
+ * 8. Audit+Result — AuditLogger + 결과 반환
+ *
+ * 불변 규칙:
+ * - 우회 불가: 모든 도구는 이 파이프라인을 거침
+ * - 감사 필수: Step 8은 에러 시에도 항상 실행
+ * - 순서 고정: 1→8 순차
+ * - 실패 격리: Step 6 실패가 Step 8을 건너뛰지 않음
  */
-import type { ToolRegistry } from "../core/tool-registry.js";
-import type { PermissionManager } from "../core/permission-manager.js";
+import type { ToolRegistry, ToolSource, TrustLevel } from "../core/tool-registry.js";
+import { trustFromSource } from "../core/tool-registry.js";
+import type { PermissionManager, PermissionCheckResult } from "../core/permission-manager.js";
 import { HookRunner } from "./hook-runner.js";
+import { AuditLogger } from "./audit-logger.js";
 
 export interface ToolUseBlock {
   id: string;
@@ -26,92 +41,153 @@ export interface ToolExecutorCallbacks {
   onToolEnd?: (name: string, result: string, isError: boolean) => void;
 }
 
+// ─── Rate Limiter (tool-governance.md §9) ──────────
+
+interface RateBucket {
+  tokens: number;
+  lastRefill: number;
+}
+
+class RateLimiter {
+  /** Trust별 분당 제한: high=무제한, medium=60, low=20 */
+  private static LIMITS: Record<TrustLevel, number> = { high: Infinity, medium: 60, low: 20 };
+  private readonly buckets = new Map<string, RateBucket>();
+
+  check(toolName: string, trust: TrustLevel): { allowed: boolean; remaining: number } {
+    const limit = RateLimiter.LIMITS[trust];
+    if (limit === Infinity) return { allowed: true, remaining: Infinity };
+
+    const key = `${trust}:${toolName}`;
+    const now = Date.now();
+    let bucket = this.buckets.get(key);
+
+    if (!bucket) {
+      bucket = { tokens: limit, lastRefill: now };
+      this.buckets.set(key, bucket);
+    }
+
+    // 토큰 리필 (1분당 limit 토큰)
+    const elapsed = (now - bucket.lastRefill) / 60_000;
+    bucket.tokens = Math.min(limit, bucket.tokens + elapsed * limit);
+    bucket.lastRefill = now;
+
+    if (bucket.tokens < 1) {
+      return { allowed: false, remaining: 0 };
+    }
+    bucket.tokens -= 1;
+    return { allowed: true, remaining: Math.floor(bucket.tokens) };
+  }
+}
+
+// ─── Executor ──────────────────────────────────────
+
 export class ToolExecutor {
   private readonly toolRegistry: ToolRegistry;
   private readonly hookRunner: HookRunner;
   private readonly permissionManager?: PermissionManager;
+  private readonly auditLogger: AuditLogger;
+  private readonly rateLimiter = new RateLimiter();
 
   constructor(toolRegistry: ToolRegistry, hookRunner?: HookRunner, permissionManager?: PermissionManager) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
     this.permissionManager = permissionManager;
+    this.auditLogger = new AuditLogger();
   }
 
   getHookRunner(): HookRunner {
     return this.hookRunner;
   }
 
-  /** 복수 tool_use 병렬 실행 — §4.5.6 StreamingToolExecutor */
+  /** 복수 tool_use 병렬 실행 */
   async executeAll(
     toolUses: ToolUseBlock[],
     callbacks?: ToolExecutorCallbacks,
+    sessionId?: string,
   ): Promise<ToolResult[]> {
-    return Promise.all(toolUses.map((tu) => this.executeOne(tu, callbacks)));
+    return Promise.all(toolUses.map((tu) => this.executeOne(tu, callbacks, sessionId)));
   }
 
-  /** 단일 도구 — 8단계 파이프라인 */
+  /** 단일 도구 — 8단계 파이프라인 (Single Choke Point) */
   private async executeOne(
     toolUse: ToolUseBlock,
     callbacks?: ToolExecutorCallbacks,
+    sessionId?: string,
   ): Promise<ToolResult> {
-    // Step 1: Lookup
+    const startTime = Date.now();
+    let permissionResult: PermissionCheckResult | undefined;
+    let source: ToolSource = "builtin";
+    let trust: TrustLevel = "high";
+
+    // ── Step 1: Lookup + source/trust 확인 ──────────
     const tool = this.toolRegistry.findByName(toolUse.name);
     if (!tool) {
+      this.auditToolCall(sessionId, toolUse.name, "builtin", "high", toolUse.input, "도구 없음", true, startTime, { decision: "deny", reason: "도구 없음", layer: 0 }, Infinity);
       return { tool_use_id: toolUse.id, content: `도구를 찾을 수 없습니다: ${toolUse.name}`, is_error: true };
     }
+    source = tool.source;
+    trust = trustFromSource(source);
 
-    // Step 2: PreToolUse Hook
+    // ── Step 2: PreToolUse Hook ─────────────────────
     const preResult = await this.hookRunner.runPreHooks({
       toolName: toolUse.name,
       toolInput: toolUse.input,
     });
 
-    // Step 3: Permission check (§6.3 Layer 2)
+    // ── Step 3: Permission (source-aware) ───────────
     if (this.permissionManager) {
-      const decision = this.permissionManager.check(toolUse.name);
-      if (decision === "deny") {
-        const msg = `[권한 차단] 도구 '${toolUse.name}' 실행이 허용되지 않습니다.`;
+      permissionResult = this.permissionManager.checkDetailed(toolUse.name, source, tool.category);
+      if (permissionResult.decision === "deny") {
+        const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
         callbacks?.onToolStart?.(toolUse.name, toolUse.input);
         callbacks?.onToolEnd?.(toolUse.name, msg, true);
+        this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
         return { tool_use_id: toolUse.id, content: msg, is_error: true };
       }
-      if (decision === "ask") {
-        // Layer 3: 향후 UI 승인 대화상자 연동
-        // 현재는 경고 로그 후 허용 (UI 미구현)
-        console.log(`[PermissionManager] 도구 '${toolUse.name}' — ask 판정 (auto-allow 중)`);
+      if (permissionResult.decision === "ask") {
+        // Layer 3: 향후 UI 승인 대화상자. 현재 auto-allow + 로깅
+        console.log(`[PermissionManager] '${toolUse.name}' (${source}) — ask: ${permissionResult.reason}`);
       }
     }
 
-    // Step 4: Hook Override (deny 처리)
+    // ── Step 4: Hook Override ───────────────────────
     if (preResult.action === "deny") {
-      const msg = `[차단] ${preResult.reason ?? "훅에 의해 차단됨"}`;
+      const msg = `[훅 차단] ${preResult.reason ?? "PreToolUse 훅에 의해 차단됨"}`;
       callbacks?.onToolStart?.(toolUse.name, toolUse.input);
       callbacks?.onToolEnd?.(toolUse.name, msg, true);
+      this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
       return { tool_use_id: toolUse.id, content: msg, is_error: true };
     }
 
-    // 입력이 수정되었으면 적용
     const finalInput = preResult.action === "modify" && preResult.updatedInput
       ? preResult.updatedInput
       : toolUse.input;
 
+    // ── Step 5: Rate Limit (trust별) ────────────────
+    const rateResult = this.rateLimiter.check(toolUse.name, trust);
+    if (!rateResult.allowed) {
+      const msg = `[속도 제한] 도구 '${toolUse.name}' (trust:${trust}) 호출 빈도 초과. 잠시 후 다시 시도해주세요.`;
+      callbacks?.onToolStart?.(toolUse.name, finalInput);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true);
+      this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, 0);
+      return { tool_use_id: toolUse.id, content: msg, is_error: true };
+    }
+
     callbacks?.onToolStart?.(toolUse.name, finalInput);
 
-    // Step 5: Execute
+    // ── Step 6: Execute ─────────────────────────────
     let content: string;
     let isError = false;
 
     try {
-      console.log(`[ToolExecutor] executing ${toolUse.name} with`, finalInput);
       const result = await tool.execute(finalInput);
       content = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-      console.log(`[ToolExecutor] ${toolUse.name} result:`, content.slice(0, 500) + (content.length > 500 ? "..." : ""));
     } catch (err) {
       content = err instanceof Error ? err.message : "알 수 없는 도구 실행 오류";
       isError = true;
     }
 
-    // Step 6: PostToolUse Hook (or PostToolUseFailure)
+    // ── Step 7: PostHook + Feedback Merge ───────────
     const postFeedback = await this.hookRunner.runPostHooks({
       toolName: toolUse.name,
       toolInput: finalInput,
@@ -119,16 +195,50 @@ export class ToolExecutor {
       isError,
     });
 
-    // Step 7: Feedback Merge
-    if (postFeedback) {
-      content = `${content}\n\n[Hook Feedback]\n${postFeedback}`;
-    }
-    if (preResult.feedback) {
-      content = `${content}\n\n[Pre-Hook Note]\n${preResult.feedback}`;
-    }
+    if (postFeedback) content = `${content}\n\n[Hook Feedback]\n${postFeedback}`;
+    if (preResult.feedback) content = `${content}\n\n[Pre-Hook Note]\n${preResult.feedback}`;
 
-    // Step 8: Result
+    // ── Step 8: Audit + Result (항상 실행) ──────────
     callbacks?.onToolEnd?.(toolUse.name, content, isError);
+    this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, content, isError, startTime, permissionResult, rateResult.remaining);
+
     return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }) };
+  }
+
+  // ─── Audit (불변 — 항상 실행) ────────────────────
+
+  private auditToolCall(
+    sessionId: string | undefined,
+    toolName: string,
+    source: ToolSource,
+    trust: TrustLevel,
+    input: Record<string, unknown>,
+    output: string,
+    isError: boolean,
+    startTime: number,
+    permission: PermissionCheckResult | undefined,
+    rateLimitRemaining: number,
+  ): void {
+    try {
+      this.auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: sessionId ?? "unknown",
+        type: "tool_call",
+        input: JSON.stringify(input).slice(0, 500),
+        output: output.slice(0, 1024),
+        toolCalls: [{
+          name: toolName,
+          isError,
+          source,
+          trust,
+          executionTimeMs: Date.now() - startTime,
+          permissionDecision: permission?.decision ?? "allow",
+          permissionReason: permission?.reason,
+          rateLimitRemaining,
+        }],
+      });
+    } catch {
+      // 감사 실패가 도구 실행을 차단하면 안 됨
+    }
   }
 }

@@ -268,7 +268,7 @@ export class ConversationLoop {
       const toolResults = await this.toolExecutor.executeAll(toolUses, {
         onToolStart: callbacks?.onToolStart,
         onToolEnd: callbacks?.onToolEnd,
-      });
+      }, this.sessionId);
 
       for (let i = 0; i < toolUses.length; i++) {
         allToolCalls.push({

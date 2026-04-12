@@ -12,10 +12,20 @@ import { homedir } from "node:os";
 export interface AuditEntry {
   timestamp: string;
   sessionId: string;
-  type: "turn" | "tool_call" | "approval" | "error";
+  type: "turn" | "tool_call" | "approval" | "error" | "mcp_connect" | "kill_switch";
   input?: string;
   output?: string;
-  toolCalls?: Array<{ name: string; isError: boolean }>;
+  toolCalls?: Array<{
+    name: string;
+    isError: boolean;
+    /** tool-governance.md §8 통합 감사 스키마 확장 필드 */
+    source?: string;
+    trust?: string;
+    executionTimeMs?: number;
+    permissionDecision?: string;
+    permissionReason?: string;
+    rateLimitRemaining?: number;
+  }>;
   tokenUsage?: { inputTokens: number; outputTokens: number };
   route?: string;
 }
