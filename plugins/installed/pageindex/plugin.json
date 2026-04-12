@@ -6,6 +6,9 @@
   "methods": [
     "index.scan",
     "index.documents",
+    "index.folders",
+    "index.addFolder",
+    "index.removeFolder",
     "chat.preview"
   ],
   "config": {
