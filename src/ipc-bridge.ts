@@ -152,6 +152,22 @@ export function registerIpcHandlers(
     pluginRuntime.call(method, payload),
   );
 
+  // ─── MCP ──────────────────────────────────────
+  ipcMain.handle("lvis:mcp:servers", () => services.mcpManager.listServers());
+  ipcMain.handle("lvis:mcp:kill", (_e, serverId: string) => services.mcpManager.killSwitch(serverId));
+
+  // ─── Permission Prompt (§6.3 Layer 3) ─────────
+  // ToolExecutor sends request → renderer shows dialog → user responds
+  // For now: expose permission mode control via IPC
+  ipcMain.handle("lvis:permission:get-mode", () => {
+    // Access permissionManager from conversationLoop or services
+    return { mode: "default" }; // TODO: expose from ConversationLoop
+  });
+  ipcMain.handle("lvis:permission:set-mode", (_e, mode: string) => {
+    // TODO: expose setMode from ConversationLoop
+    return { ok: true, mode };
+  });
+
   // ─── Tasks ──────────────────────────────────────
   ipcMain.handle("lvis:tasks:add", (_e, task) => taskService.add(task));
   ipcMain.handle("lvis:tasks:update", (_e, id: string, patch) => taskService.update(id, patch));

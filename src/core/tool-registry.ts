@@ -36,7 +36,7 @@ export interface ToolDefinition {
   /** JSON Schema 형태의 파라미터 정의 */
   parameters: {
     type: "object";
-    properties: Record<string, { type: string; description: string }>;
+    properties: Record<string, unknown>;
     required?: string[];
   };
   /** 도구 실행 함수 */
