@@ -107,8 +107,34 @@ export class ConversationLoop {
     return this.history;
   }
 
+  getSessionId(): string {
+    return this.sessionId;
+  }
+
   getCumulativeUsage(): TokenUsage {
     return { ...this.cumulativeUsage };
+  }
+
+  /** 세션 목록 조회 — §4.5.7 */
+  listSessions(): Array<{ id: string; modifiedAt: Date }> {
+    return this.deps.memoryManager.listSessions();
+  }
+
+  /** 기존 세션 복원 — §4.5.7 */
+  loadSession(sessionId: string): boolean {
+    const messages = this.deps.memoryManager.loadSession(sessionId);
+    if (!messages) return false;
+
+    // 현재 세션 저장 후 전환
+    if (this.history.length > 0) {
+      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+    }
+
+    this.sessionId = sessionId;
+    this.history.clear();
+    this.history.restore(messages as import("./llm/types.js").GenericMessage[]);
+    this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
+    return true;
   }
 
   /**
@@ -279,11 +305,36 @@ export class ConversationLoop {
           : notes.map((n) => `- ${n.title} (${n.filename})`).join("\n");
         break;
       }
+      case "sessions": {
+        const sessions = this.listSessions();
+        if (sessions.length === 0) { result = "저장된 세션 없음."; break; }
+        const current = this.sessionId;
+        result = sessions.slice(0, 10).map((s) => {
+          const marker = s.id === current ? " ← 현재" : "";
+          const date = s.modifiedAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+          return `- ${s.id.slice(0, 8)}… (${date})${marker}`;
+        }).join("\n");
+        result = `세션 목록 (최근 10개):\n${result}\n\n세션 전환: /load <세션ID>`;
+        break;
+      }
+      case "load": {
+        if (!args.trim()) { result = "사용법: /load <세션ID>"; break; }
+        const targetId = args.trim();
+        // 부분 ID 매칭
+        const sessions = this.listSessions();
+        const match = sessions.find((s) => s.id.startsWith(targetId));
+        if (!match) { result = `세션을 찾을 수 없습니다: ${targetId}`; break; }
+        const loaded = this.loadSession(match.id);
+        result = loaded
+          ? `세션 복원됨: ${match.id.slice(0, 8)}… (${this.history.length}개 메시지)`
+          : `세션 로드 실패: ${match.id}`;
+        break;
+      }
       case "vendor":
-        result = `현재 벤더: ${this.getVendor()}\n누적 토큰: 입력 ${this.cumulativeUsage.inputTokens}, 출력 ${this.cumulativeUsage.outputTokens}`;
+        result = `현재 벤더: ${this.getVendor()}\n세션: ${this.sessionId.slice(0, 8)}…\n누적 토큰: 입력 ${this.cumulativeUsage.inputTokens}, 출력 ${this.cumulativeUsage.outputTokens}`;
         break;
       default:
-        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /remember, /notes, /vendor`;
+        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /remember, /notes, /vendor`;
     }
 
     callbacks?.onTextDelta?.(result);
