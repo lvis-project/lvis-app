@@ -19,6 +19,7 @@ import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../core/tool-registry.js";
 import type { MemoryManager } from "../core/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
+import { AuditLogger } from "./audit-logger.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -55,6 +56,7 @@ export class ConversationLoop {
   private readonly deps: ConversationLoopDeps;
   private readonly history: ConversationHistory;
   private readonly toolExecutor: ToolExecutor;
+  private readonly auditLogger: AuditLogger;
   private provider: LLMProvider | null = null;
   private sessionId: string = crypto.randomUUID();
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
@@ -63,6 +65,7 @@ export class ConversationLoop {
     this.deps = deps;
     this.history = new ConversationHistory();
     this.toolExecutor = new ToolExecutor(deps.toolRegistry, new HookRunner(), deps.permissionManager);
+    this.auditLogger = new AuditLogger();
     this.refreshProvider();
   }
 
@@ -164,7 +167,7 @@ export class ConversationLoop {
     const systemPrompt = this.deps.systemPromptBuilder.build();
     const result = await this.queryLoop(systemPrompt, callbacks);
 
-    // §4.5.5 Post-Turn Hooks
+    // §4.5.5 Post-Turn Hooks (5개 중 4개 구현)
     // 1. Auto-Compact (§4.5.4)
     if (shouldCompact(this.cumulativeUsage)) {
       const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
@@ -176,6 +179,17 @@ export class ConversationLoop {
     }
     // 2. 세션 영속화 (§4.5.7)
     this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+    // 3. Memory Extraction — 어시스턴트 응답에서 기억할 내용 자동 추출
+    this.extractMemory(result.text, input);
+    // 4. Audit Log — §14.2 Governance 대비 구조화된 로깅
+    this.auditLogger.logTurn({
+      sessionId: this.sessionId,
+      input,
+      output: result.text,
+      toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
+      tokenUsage: result.usage,
+      route: routeResult.route,
+    });
 
     callbacks?.onTurnComplete?.(result.text);
     return { ...result, route: routeResult.route };
@@ -275,6 +289,32 @@ export class ConversationLoop {
     }
 
     return { text: "(도구 실행 라운드 한도 초과)", toolCalls: allToolCalls, usage: turnUsage };
+  }
+
+  // ─── Private: Memory Extraction (§4.5.5 Hook 3) ───
+
+  /** 어시스턴트 응답에서 기억 요청을 감지하여 자동 저장 */
+  private extractMemory(assistantText: string, userInput: string): void {
+    try {
+      // 사용자가 "기억해", "remember" 등을 요청했는지 탐지
+      const memoryPatterns = /기억해|기억하|잊지\s*마|remember|don't forget|메모해/i;
+      if (!memoryPatterns.test(userInput)) return;
+
+      // 어시스턴트가 기억하겠다고 응답한 경우 자동 저장
+      const confirmPatterns = /기억하겠|메모.*저장|기록.*했|noted|remembered|saved/i;
+      if (!confirmPatterns.test(assistantText)) return;
+
+      const title = userInput.slice(0, 40).replace(/\n/g, " ").trim();
+      if (title.length < 3) return;
+
+      this.deps.memoryManager.saveNote(
+        `자동-${title}`,
+        `[사용자 요청]\n${userInput}\n\n[어시스턴트 응답]\n${assistantText.slice(0, 500)}`,
+      );
+      console.log(`[lvis] memory-extraction: auto-saved note "${title}"`);
+    } catch {
+      // Memory extraction 실패가 대화를 차단하면 안 됨
+    }
   }
 
   // ─── Private: Command Handler ─────────────────────
