@@ -20,6 +20,7 @@ import type { ToolRegistry } from "../core/tool-registry.js";
 import type { MemoryManager } from "../core/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { AuditLogger } from "./audit-logger.js";
+import type { ProactiveEngine } from "../core/proactive-engine.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -46,6 +47,7 @@ export interface ConversationLoopDeps {
   toolRegistry: ToolRegistry;
   memoryManager: MemoryManager;
   permissionManager?: import("../core/permission-manager.js").PermissionManager;
+  proactiveEngine?: ProactiveEngine;
 }
 
 const MAX_TOOL_ROUNDS = 10;
@@ -370,11 +372,18 @@ export class ConversationLoop {
           : `세션 로드 실패: ${match.id}`;
         break;
       }
+      case "briefing": {
+        const engine = this.deps.proactiveEngine;
+        if (!engine) { result = "Proactive Engine이 초기화되지 않았습니다."; break; }
+        const briefing = engine.generateTextBriefing();
+        result = `📋 LVIS 데일리 브리핑 (${new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })})\n\n${briefing.summary}`;
+        break;
+      }
       case "vendor":
         result = `현재 벤더: ${this.getVendor()}\n세션: ${this.sessionId.slice(0, 8)}…\n누적 토큰: 입력 ${this.cumulativeUsage.inputTokens}, 출력 ${this.cumulativeUsage.outputTokens}`;
         break;
       default:
-        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /remember, /notes, /vendor`;
+        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /briefing, /remember, /notes, /vendor`;
     }
 
     callbacks?.onTextDelta?.(result);
