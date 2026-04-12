@@ -1,33 +1,48 @@
 /**
- * Permission Manager — §6.3 Layer 2-3 도구 실행 권한 관리
+ * Permission Manager — tool-governance.md §4 Source-Aware Permission Model
  *
- * 3-Layer 보안 모델:
- * - Layer 1: ToolRegistry deny rules (도구 존재 자체를 숨김) → tool-registry.ts
- * - Layer 2: Per-call permission check (이 파일) → allow/deny/ask 판정
- * - Layer 3: User prompt (ask 판정 시 UI 승인 요청) → 향후 구현
+ * 통합 도구 거버넌스:
+ * - 모든 도구(Builtin/Plugin/MCP)에 대해 source + trust 기반 판정
+ * - Deny-by-default: MCP 도구는 strict 모드 강제
+ * - 감사 로그 연동을 위한 판정 사유 추적
  *
- * Execution Modes:
- * - default: 위험 도구만 ask, 나머지 allow
- * - strict: 모든 도구 ask
- * - auto: 모든 도구 allow (에이전트가 자율 판단)
+ * 판정 우선순위 (§4.1):
+ * 1. Governance deny 규칙 (불변)
+ * 2. 관리자 명시 deny 규칙
+ * 3. 관리자 명시 allow 규칙
+ * 4. 사용자 "항상 허용" 규칙
+ * 5. Trust-based 기본 정책
  */
+import type { ToolSource, TrustLevel } from "./tool-registry.js";
+import { trustFromSource } from "./tool-registry.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto";
 
 export interface PermissionRule {
-  /** 도구 이름 패턴 (glob: "memory_*", "web_*", "*") */
+  /** 도구 이름 패턴 (glob: "memory_*", "mcp_*", "*") */
   pattern: string;
   /** 허용/차단 */
   action: "allow" | "deny";
+  /** 적용 소스 제한 (없으면 전체 적용) */
+  source?: ToolSource;
+}
+
+export interface PermissionCheckResult {
+  decision: PermissionDecision;
+  reason: string;
+  layer: number; // 어떤 단계에서 결정되었는지
 }
 
 export class PermissionManager {
   private rules: PermissionRule[] = [];
   private mode: ExecutionMode = "default";
   private readonly alwaysAllowed = new Set<string>();
+  /** Trust 수준 오버라이드 (관리자 설정) */
+  private readonly trustOverrides = new Map<string, TrustLevel>();
 
-  /** 실행 모드 설정 */
+  // ─── 설정 ────────────────────────────────────────
+
   setMode(mode: ExecutionMode): void {
     this.mode = mode;
   }
@@ -36,54 +51,119 @@ export class PermissionManager {
     return this.mode;
   }
 
-  /** allow/deny 규칙 설정 */
   setRules(rules: PermissionRule[]): void {
     this.rules = [...rules];
   }
 
-  /** 사용자가 "항상 허용"을 선택한 도구 등록 (Layer 3 결과) */
   addAlwaysAllowed(toolName: string): void {
     this.alwaysAllowed.add(toolName);
   }
 
+  setTrustOverride(toolName: string, trust: TrustLevel): void {
+    this.trustOverrides.set(toolName, trust);
+  }
+
+  // ─── 판정 (§4.1) ────────────────────────────────
+
   /**
-   * §6.3 Layer 2 — 도구 실행 가능 여부 판정
-   *
-   * 판정 우선순위:
-   * 1. deny 규칙 매칭 → deny
-   * 2. allow 규칙 매칭 → allow
-   * 3. always-allowed → allow
-   * 4. execution mode 기반 판정
+   * Source-aware 도구 실행 권한 판정.
+   * 간단 인터페이스 — 이전 호환.
    */
-  check(toolName: string): PermissionDecision {
-    // 1. Deny rules first (deny는 항상 우선)
+  check(toolName: string, source?: ToolSource, category?: "read" | "write" | "dangerous"): PermissionDecision {
+    return this.checkDetailed(toolName, source, category).decision;
+  }
+
+  /**
+   * 상세 판정 — 감사 로그용 사유 포함.
+   */
+  checkDetailed(
+    toolName: string,
+    source?: ToolSource,
+    category?: "read" | "write" | "dangerous",
+  ): PermissionCheckResult {
+    const trust = this.resolveTrust(toolName, source);
+
+    // 1. Deny rules (최우선, 불변)
     for (const rule of this.rules) {
-      if (rule.action === "deny" && matchGlob(rule.pattern, toolName)) {
-        return "deny";
+      if (rule.action !== "deny") continue;
+      if (rule.source && rule.source !== source) continue;
+      if (matchGlob(rule.pattern, toolName)) {
+        return { decision: "deny", reason: `deny 규칙: ${rule.pattern}`, layer: 1 };
       }
     }
 
     // 2. Allow rules
     for (const rule of this.rules) {
-      if (rule.action === "allow" && matchGlob(rule.pattern, toolName)) {
-        return "allow";
+      if (rule.action !== "allow") continue;
+      if (rule.source && rule.source !== source) continue;
+      if (matchGlob(rule.pattern, toolName)) {
+        return { decision: "allow", reason: `allow 규칙: ${rule.pattern}`, layer: 2 };
       }
     }
 
-    // 3. Always-allowed (사용자가 이전에 승인)
+    // 3. Always-allowed (사용자 이전 승인)
     if (this.alwaysAllowed.has(toolName)) {
-      return "allow";
+      return { decision: "allow", reason: "사용자 영구 승인", layer: 3 };
     }
 
-    // 4. Execution mode 기반 판정
-    switch (this.mode) {
-      case "auto":
-        return "allow";
-      case "strict":
-        return "ask";
-      case "default":
-        return classifyToolRisk(toolName);
+    // 4. Trust-based 기본 정책 (§4.1)
+    return this.trustBasedDecision(toolName, trust, category);
+  }
+
+  // ─── Private ─────────────────────────────────────
+
+  private resolveTrust(toolName: string, source?: ToolSource): TrustLevel {
+    // 관리자 오버라이드
+    const override = this.trustOverrides.get(toolName);
+    if (override) return override;
+    // 소스 기반
+    return trustFromSource(source ?? "builtin");
+  }
+
+  /**
+   * Trust 기반 판정 (tool-governance.md §4.1):
+   *
+   * HIGH  + read  → ALLOW
+   * HIGH  + write → ASK (default mode) / ALLOW (auto mode)
+   * MEDIUM + read → ALLOW
+   * MEDIUM + write → ASK (default mode)
+   * LOW   + any   → ASK (strict 강제)
+   */
+  private trustBasedDecision(
+    toolName: string,
+    trust: TrustLevel,
+    category?: "read" | "write" | "dangerous",
+  ): PermissionCheckResult {
+    // auto 모드: 모든 trust 허용
+    if (this.mode === "auto") {
+      return { decision: "allow", reason: `auto 모드 (trust: ${trust})`, layer: 4 };
     }
+
+    // strict 모드: 모든 것 ask
+    if (this.mode === "strict") {
+      return { decision: "ask", reason: `strict 모드 (trust: ${trust})`, layer: 4 };
+    }
+
+    // default 모드: trust + category 기반
+    const resolvedCategory = category ?? classifyToolCategory(toolName);
+
+    // LOW trust (MCP): 항상 ask
+    if (trust === "low") {
+      return { decision: "ask", reason: `MCP 도구 strict 강제 (trust: low)`, layer: 4 };
+    }
+
+    // dangerous: 항상 ask
+    if (resolvedCategory === "dangerous") {
+      return { decision: "ask", reason: `위험 도구 (category: dangerous)`, layer: 4 };
+    }
+
+    // read: 허용
+    if (resolvedCategory === "read") {
+      return { decision: "allow", reason: `조회 도구 (trust: ${trust}, category: read)`, layer: 4 };
+    }
+
+    // write (MEDIUM/HIGH): ask
+    return { decision: "ask", reason: `상태 변경 도구 (trust: ${trust}, category: write)`, layer: 4 };
   }
 }
 
@@ -96,28 +176,13 @@ function matchGlob(pattern: string, name: string): boolean {
   return regex.test(name);
 }
 
-/**
- * TODO(human): 도구 위험 분류 정책
- *
- * Default 모드에서 "ask" vs "allow" 판정 기준.
- * 현재 보수적 기본값: read-only 도구는 allow, 그 외 ask.
- * 프로젝트 요구에 맞게 분류를 조정하세요.
- */
-function classifyToolRisk(toolName: string): PermissionDecision {
-  // Read-only / 조회성 도구는 자동 허용
-  const safePatterns = [
-    /^memory_(search|list)$/,   // 메모 조회
-    /^index_(scan|documents)$/,  // 문서 목록/스캔
-    /^chat_preview$/,            // 문서 검색 미리보기
-    /^email_(status|list)$/,     // 이메일 상태/목록 조회
-    /^meeting_(transcript|sessions)$/, // 회의 전사/세션 조회
-    /^web_search$/,              // 웹 검색 (read-only)
+/** 도구 이름에서 Read/Write 분류 추론 */
+function classifyToolCategory(toolName: string): "read" | "write" | "dangerous" {
+  const readPatterns = [
+    /_(search|list|get|query|status|transcript|sessions|documents|preview|fetch)$/,
+    /^web_search$/,
+    /^web_fetch$/,
   ];
-
-  if (safePatterns.some((p) => p.test(toolName))) {
-    return "allow";
-  }
-
-  // 상태 변경 도구는 ask (사용자 확인 필요)
-  return "ask";
+  if (readPatterns.some((p) => p.test(toolName))) return "read";
+  return "write";
 }

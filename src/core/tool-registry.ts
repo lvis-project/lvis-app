@@ -16,8 +16,20 @@ export interface ToolParameter {
   required?: boolean;
 }
 
+export type ToolSource = "builtin" | "plugin" | "mcp";
+export type TrustLevel = "high" | "medium" | "low";
+
+/** 소스 → 신뢰 수준 매핑 (tool-governance.md §2.1) */
+export function trustFromSource(source: ToolSource): TrustLevel {
+  switch (source) {
+    case "builtin": return "high";
+    case "plugin": return "medium";
+    case "mcp": return "low";
+  }
+}
+
 export interface ToolDefinition {
-  /** 고유 이름 (예: "index.scan", "meeting.start", "memory.save") */
+  /** 고유 이름 (예: "memory_save", "meeting_start", "mcp_hr_query") */
   name: string;
   /** LLM에 표시되는 설명 */
   description: string;
@@ -29,10 +41,14 @@ export interface ToolDefinition {
   };
   /** 도구 실행 함수 */
   execute: (args: Record<string, unknown>) => Promise<unknown>;
-  /** 도구 출처 */
-  source: "builtin" | "plugin" | "mcp";
+  /** 도구 출처 (tool-governance.md §2) */
+  source: ToolSource;
   /** 출처 플러그인 ID (source가 plugin일 때) */
   pluginId?: string;
+  /** 출처 MCP 서버 ID (source가 mcp일 때) */
+  mcpServerId?: string;
+  /** Read/Write 분류 (tool-governance.md §4.2) */
+  category?: "read" | "write" | "dangerous";
 }
 
 export interface DenyRule {
@@ -65,6 +81,15 @@ export class ToolRegistry {
   unregisterByPlugin(pluginId: string): void {
     for (const [name, tool] of this.tools) {
       if (tool.pluginId === pluginId) {
+        this.tools.delete(name);
+      }
+    }
+  }
+
+  /** MCP 서버의 모든 도구 제거 (Kill Switch — tool-governance.md §10.1) */
+  unregisterByMcp(mcpServerId: string): void {
+    for (const [name, tool] of this.tools) {
+      if (tool.mcpServerId === mcpServerId) {
         this.tools.delete(name);
       }
     }
