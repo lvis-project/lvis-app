@@ -16,6 +16,7 @@ import { RouteEngine } from "./core/route-engine.js";
 import { ToolRegistry } from "./core/tool-registry.js";
 import { SystemPromptBuilder } from "./agent/system-prompt-builder.js";
 import { ConversationLoop } from "./agent/conversation-loop.js";
+import { PermissionManager } from "./core/permission-manager.js";
 import type { PluginHostApi } from "./plugin-runtime/types.js";
 import type { ToolDefinition } from "./core/tool-registry.js";
 
@@ -146,6 +147,16 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
     },
   });
 
+  // §6.3: PermissionManager (Layer 2-3)
+  const permissionManager = new PermissionManager();
+  // 기본 allow 규칙: 조회성 도구 자동 허용
+  permissionManager.setRules([
+    { pattern: "memory_search", action: "allow" },
+    { pattern: "memory_list", action: "allow" },
+    { pattern: "web_search", action: "allow" },
+    { pattern: "web_fetch", action: "allow" },
+  ]);
+
   // §4.5: ConversationLoop
   const conversationLoop = new ConversationLoop({
     settingsService,
@@ -154,6 +165,7 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
     routeEngine,
     toolRegistry,
     memoryManager,
+    permissionManager,
   });
 
   console.log("[lvis] boot: ready (%d tools, %d plugins)", toolRegistry.size, pluginRuntime.listPluginIds().length);

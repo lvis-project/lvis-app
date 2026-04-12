@@ -44,6 +44,7 @@ export interface ConversationLoopDeps {
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   memoryManager: MemoryManager;
+  permissionManager?: import("../core/permission-manager.js").PermissionManager;
 }
 
 const MAX_TOOL_ROUNDS = 10;
@@ -61,7 +62,7 @@ export class ConversationLoop {
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
     this.history = new ConversationHistory();
-    this.toolExecutor = new ToolExecutor(deps.toolRegistry, new HookRunner());
+    this.toolExecutor = new ToolExecutor(deps.toolRegistry, new HookRunner(), deps.permissionManager);
     this.refreshProvider();
   }
 
