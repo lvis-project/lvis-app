@@ -17,6 +17,7 @@ import { ToolRegistry } from "./core/tool-registry.js";
 import { SystemPromptBuilder } from "./agent/system-prompt-builder.js";
 import { ConversationLoop } from "./agent/conversation-loop.js";
 import { PermissionManager } from "./core/permission-manager.js";
+import { ProactiveEngine } from "./core/proactive-engine.js";
 import type { PluginHostApi } from "./plugin-runtime/types.js";
 import type { ToolDefinition } from "./core/tool-registry.js";
 
@@ -31,6 +32,7 @@ export interface AppServices {
   toolRegistry: ToolRegistry;
   systemPromptBuilder: SystemPromptBuilder;
   conversationLoop: ConversationLoop;
+  proactiveEngine: ProactiveEngine;
 }
 
 // ─── 이벤트 버스 (플러그인 간 통신) ────────────────
@@ -157,6 +159,21 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
     { pattern: "web_fetch", action: "allow" },
   ]);
 
+  // §7: Proactive Engine (Daily Briefing)
+  const proactiveEngine = new ProactiveEngine({
+    getTaskSummary: () => taskService.getPendingByPriority().map((t) => ({
+      title: t.title, priority: t.priority, status: t.status,
+      dueAt: t.dueAt ?? undefined, source: t.source,
+    })),
+    getRecentNotes: () => memoryManager.listNotes().slice(0, 5),
+    getRecentSessions: () => memoryManager.listSessions().slice(0, 5),
+  });
+
+  // 이벤트 버스 → Proactive Engine 연동
+  onEvent("meeting.summary.created", (data) => proactiveEngine.collectEvent("meeting.summary.created", data));
+  onEvent("email.action.needed", (data) => proactiveEngine.collectEvent("email.action.needed", data));
+  onEvent("meeting.ended", (data) => proactiveEngine.collectEvent("meeting.ended", data));
+
   // §4.5: ConversationLoop
   const conversationLoop = new ConversationLoop({
     settingsService,
@@ -166,6 +183,7 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
     toolRegistry,
     memoryManager,
     permissionManager,
+    proactiveEngine,
   });
 
   console.log("[lvis] boot: ready (%d tools, %d plugins)", toolRegistry.size, pluginRuntime.listPluginIds().length);
@@ -173,7 +191,7 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
   return {
     pluginRuntime, pluginMarketplace, taskService, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
-    systemPromptBuilder, conversationLoop,
+    systemPromptBuilder, conversationLoop, proactiveEngine,
   };
 }
 
