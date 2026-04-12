@@ -6,6 +6,7 @@
  * → 5. Execute → 6. PostHook → 7. FeedbackMerge → 8. Result
  */
 import type { ToolRegistry } from "../core/tool-registry.js";
+import type { PermissionManager } from "../core/permission-manager.js";
 import { HookRunner } from "./hook-runner.js";
 
 export interface ToolUseBlock {
@@ -28,10 +29,12 @@ export interface ToolExecutorCallbacks {
 export class ToolExecutor {
   private readonly toolRegistry: ToolRegistry;
   private readonly hookRunner: HookRunner;
+  private readonly permissionManager?: PermissionManager;
 
-  constructor(toolRegistry: ToolRegistry, hookRunner?: HookRunner) {
+  constructor(toolRegistry: ToolRegistry, hookRunner?: HookRunner, permissionManager?: PermissionManager) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
+    this.permissionManager = permissionManager;
   }
 
   getHookRunner(): HookRunner {
@@ -63,7 +66,23 @@ export class ToolExecutor {
       toolInput: toolUse.input,
     });
 
-    // Step 3-4: Permission + Hook Override (deny 처리)
+    // Step 3: Permission check (§6.3 Layer 2)
+    if (this.permissionManager) {
+      const decision = this.permissionManager.check(toolUse.name);
+      if (decision === "deny") {
+        const msg = `[권한 차단] 도구 '${toolUse.name}' 실행이 허용되지 않습니다.`;
+        callbacks?.onToolStart?.(toolUse.name, toolUse.input);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true);
+        return { tool_use_id: toolUse.id, content: msg, is_error: true };
+      }
+      if (decision === "ask") {
+        // Layer 3: 향후 UI 승인 대화상자 연동
+        // 현재는 경고 로그 후 허용 (UI 미구현)
+        console.log(`[PermissionManager] 도구 '${toolUse.name}' — ask 판정 (auto-allow 중)`);
+      }
+    }
+
+    // Step 4: Hook Override (deny 처리)
     if (preResult.action === "deny") {
       const msg = `[차단] ${preResult.reason ?? "훅에 의해 차단됨"}`;
       callbacks?.onToolStart?.(toolUse.name, toolUse.input);
