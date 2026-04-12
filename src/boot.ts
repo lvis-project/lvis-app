@@ -18,6 +18,8 @@ import { SystemPromptBuilder } from "./agent/system-prompt-builder.js";
 import { ConversationLoop } from "./agent/conversation-loop.js";
 import { PermissionManager } from "./core/permission-manager.js";
 import { ProactiveEngine } from "./core/proactive-engine.js";
+import { McpGovernance } from "./mcp/mcp-governance.js";
+import { McpManager } from "./mcp/mcp-manager.js";
 import type { PluginHostApi } from "./plugin-runtime/types.js";
 import type { ToolDefinition } from "./core/tool-registry.js";
 
@@ -33,6 +35,7 @@ export interface AppServices {
   systemPromptBuilder: SystemPromptBuilder;
   conversationLoop: ConversationLoop;
   proactiveEngine: ProactiveEngine;
+  mcpManager: McpManager;
 }
 
 // ─── 이벤트 버스 (플러그인 간 통신) ────────────────
@@ -186,12 +189,26 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
     proactiveEngine,
   });
 
-  console.log("[lvis] boot: ready (%d tools, %d plugins)", toolRegistry.size, pluginRuntime.listPluginIds().length);
+  // §9.5: MCP Server 연결 (거버넌스 승인 서버만)
+  const mcpGovernance = new McpGovernance();
+  const mcpManager = new McpManager(mcpGovernance, toolRegistry);
+  try {
+    const configs = await mcpManager.loadFromConfig();
+    if (configs.length > 0) {
+      await mcpManager.connectAll();
+      console.log("[lvis] boot: MCP servers connected");
+    }
+  } catch (err) {
+    console.warn("[lvis] boot: MCP initialization failed (non-fatal):", (err as Error).message);
+  }
+  mcpGovernance.startPolicyRefresh();
+
+  console.log("[lvis] boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
 
   return {
     pluginRuntime, pluginMarketplace, taskService, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
-    systemPromptBuilder, conversationLoop, proactiveEngine,
+    systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
   };
 }
 

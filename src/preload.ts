@@ -46,6 +46,18 @@ const api = {
   getTodayTasks: async () => ipcRenderer.invoke("lvis:tasks:today"),
   getOverdueTasks: async () => ipcRenderer.invoke("lvis:tasks:overdue"),
 
+  // ─── MCP ─────────────────────────────────────────
+  mcp: {
+    servers: async () => ipcRenderer.invoke("lvis:mcp:servers"),
+    kill: async (id: string) => ipcRenderer.invoke("lvis:mcp:kill", id),
+  },
+
+  // ─── Permission ───────────────────────────────────
+  permission: {
+    getMode: async () => ipcRenderer.invoke("lvis:permission:get-mode"),
+    setMode: async (mode: string) => ipcRenderer.invoke("lvis:permission:set-mode", mode),
+  },
+
   // ─── View Events ─────────────────────────────────
   onViewActivate: (handler: (viewKey: string) => void) => {
     const listener = (_event: unknown, payload: { viewKey?: string }) => handler(payload?.viewKey ?? "home");
