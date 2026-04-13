@@ -23,6 +23,7 @@ import { trustFromSource } from "../core/tool-registry.js";
 import type { PermissionManager, PermissionCheckResult } from "../core/permission-manager.js";
 import { HookRunner } from "./hook-runner.js";
 import { AuditLogger } from "./audit-logger.js";
+import { maskSensitiveData } from "./dlp-filter.js";
 
 export interface ToolUseBlock {
   id: string;
@@ -145,7 +146,16 @@ export class ToolExecutor {
         return { tool_use_id: toolUse.id, content: msg, is_error: true };
       }
       if (permissionResult.decision === "ask") {
-        // Layer 3: 향후 UI 승인 대화상자. 현재 auto-allow + 로깅
+        // H2 fix: MCP 도구는 UI 승인 구현 전까지 deny (보안 우선)
+        if (source === "mcp") {
+          const msg = `[MCP 보안] 도구 '${toolUse.name}' — 승인 UI 미구현으로 차단. ${permissionResult.reason}`;
+          console.warn(msg);
+          callbacks?.onToolStart?.(toolUse.name, toolUse.input);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true);
+          this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+          return { tool_use_id: toolUse.id, content: msg, is_error: true };
+        }
+        // Builtin/Plugin: 경고 후 허용 (향후 UI 승인 대화상자 연동)
         console.log(`[PermissionManager] '${toolUse.name}' (${source}) — ask: ${permissionResult.reason}`);
       }
     }
@@ -197,6 +207,31 @@ export class ToolExecutor {
 
     if (postFeedback) content = `${content}\n\n[Hook Feedback]\n${postFeedback}`;
     if (preResult.feedback) content = `${content}\n\n[Pre-Hook Note]\n${preResult.feedback}`;
+
+    // ── Step 7b: DLP 민감 데이터 마스킹 ────────────
+    const dlpResult = maskSensitiveData(content);
+    if (dlpResult.detections.length > 0) {
+      content = dlpResult.masked;
+      console.warn(
+        `[DLP] 민감 데이터 탐지 및 마스킹 — 도구: '${toolUse.name}', 패턴: ${dlpResult.detections.join(", ")}`,
+      );
+      this.auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: sessionId ?? "unknown",
+        type: "tool_call",
+        input: JSON.stringify(finalInput).slice(0, 500),
+        output: `[DLP 마스킹 적용] 패턴: ${dlpResult.detections.join(", ")}`,
+        toolCalls: [{
+          name: toolUse.name,
+          isError: false,
+          source,
+          trust,
+          executionTimeMs: Date.now() - startTime,
+          permissionDecision: "dlp_masked",
+          permissionReason: `탐지된 패턴: ${dlpResult.detections.join(", ")}`,
+        }],
+      });
+    }
 
     // ── Step 8: Audit + Result (항상 실행) ──────────
     callbacks?.onToolEnd?.(toolUse.name, content, isError);
