@@ -151,6 +151,11 @@ export class SettingsService {
 
   private saveSecrets(secrets: Record<string, string>): void {
     mkdirSync(dirname(this.secretsPath), { recursive: true });
-    writeFileSync(this.secretsPath, JSON.stringify(secrets, null, 2), "utf-8");
+    // Security A4 fix: 0o600 mode (owner only) — Linux 공용 PC에서 safeStorage unavailable 시
+    // 'plain:' prefix 평문 API 키가 other/group에 노출되는 것을 차단
+    writeFileSync(this.secretsPath, JSON.stringify(secrets, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
   }
 }
