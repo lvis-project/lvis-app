@@ -100,13 +100,24 @@ export class ToolExecutor {
     return this.hookRunner;
   }
 
-  /** 복수 tool_use 병렬 실행 */
+  /** 복수 tool_use 병렬 실행 — 최대 5개씩 배치 처리 */
   async executeAll(
     toolUses: ToolUseBlock[],
     callbacks?: ToolExecutorCallbacks,
     sessionId?: string,
   ): Promise<ToolResult[]> {
-    return Promise.all(toolUses.map((tu) => this.executeOne(tu, callbacks, sessionId)));
+    const BATCH_SIZE = 5;
+    if (toolUses.length <= BATCH_SIZE) {
+      return Promise.all(toolUses.map((tu) => this.executeOne(tu, callbacks, sessionId)));
+    }
+
+    const results: ToolResult[] = [];
+    for (let i = 0; i < toolUses.length; i += BATCH_SIZE) {
+      const batch = toolUses.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(batch.map((tu) => this.executeOne(tu, callbacks, sessionId)));
+      results.push(...batchResults);
+    }
+    return results;
   }
 
   /** 단일 도구 — 8단계 파이프라인 (Single Choke Point) */

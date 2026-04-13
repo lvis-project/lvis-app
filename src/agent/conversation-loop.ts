@@ -382,8 +382,37 @@ export class ConversationLoop {
       case "vendor":
         result = `현재 벤더: ${this.getVendor()}\n세션: ${this.sessionId.slice(0, 8)}…\n누적 토큰: 입력 ${this.cumulativeUsage.inputTokens}, 출력 ${this.cumulativeUsage.outputTokens}`;
         break;
+      case "compact": {
+        const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
+        if (cr.compacted) {
+          this.history.clear();
+          this.history.restore(compacted);
+          result = `컴팩트 완료: ${cr.removedMessages}개 메시지 제거, ~${cr.freedTokens} 토큰 확보`;
+        } else {
+          result = "컴팩트 불필요: 메시지 수가 충분히 적습니다.";
+        }
+        break;
+      }
+      case "tools": {
+        const tools = this.deps.toolRegistry.getVisibleTools();
+        result = tools.map((t) => `${t.name} [${t.source}]`).join("\n") || "등록된 도구 없음";
+        break;
+      }
+      case "help":
+        result = `LVIS 명령어:
+/new — 새 대화 시작
+/sessions — 저장된 세션 목록
+/load <ID> — 세션 복원
+/compact — 대화 이력 압축
+/briefing — 데일리 브리핑
+/remember <내용> — 메모 저장
+/notes — 메모 목록
+/vendor — 현재 벤더/토큰 정보
+/tools — 등록된 도구 목록
+/help — 이 도움말`;
+        break;
       default:
-        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /briefing, /remember, /notes, /vendor`;
+        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /briefing, /remember, /notes, /vendor, /tools, /help`;
     }
 
     callbacks?.onTextDelta?.(result);
