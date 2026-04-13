@@ -104,6 +104,9 @@ export interface PluginMarketplaceItem {
   methods: string[];
   defaultConfig?: Record<string, unknown>;
   ui?: PluginUiExtension[];
+  /** Phase 1.5 §9.6: catalog item's deployment mode (propagated to installed manifest) */
+  deployment?: DeploymentMode;
+  publisher?: string;
 }
 
 /**

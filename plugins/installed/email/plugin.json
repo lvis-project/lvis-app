@@ -2,6 +2,8 @@
   "id": "email",
   "name": "LVIS Email",
   "version": "0.1.0",
+  "deployment": "managed",
+  "publisher": "the organization's IT",
   "entry": "../../../node_modules/@lvis/plugin-email/dist/hostPlugin.js",
   "methods": [
     "email.status",

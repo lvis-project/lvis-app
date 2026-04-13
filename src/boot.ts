@@ -9,6 +9,7 @@ import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { PluginRuntime } from "./plugin-runtime/runtime.js";
 import { PluginMarketplaceService } from "./plugin-runtime/marketplace.js";
+import { PluginDeploymentGuard } from "./plugin-runtime/deployment-guard.js";
 import { TaskService } from "./taskService.js";
 import { SettingsService } from "./data/settings-store.js";
 import { MemoryManager } from "./core/memory-manager.js";
@@ -124,10 +125,18 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     };
   }
 
+  // §7.2 Plugin Deployment Guard — managed 플러그인 사용자 제거/비활성화 차단.
+  // userInstalledDir 밖에 있는 모든 플러그인(번들/IT-push)은 default-deny.
+  const deploymentGuard = new PluginDeploymentGuard({
+    registryPath: resolve(projectRoot, "plugins/registry.json"),
+    userInstalledDir: resolve(projectRoot, "plugins/installed"),
+  });
+
   const pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
     registryPath: resolve(projectRoot, "plugins/registry.json"),
     configOverrides,
+    deploymentGuard,
     // 플러그인별 스코프된 HostApi 팩토리
     createHostApi: (pluginId: string): PluginHostApi => ({
       registerKeywords: (keywords) => {
@@ -279,7 +288,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     });
   }
 
-  const pluginMarketplace = new PluginMarketplaceService(projectRoot);
+  const pluginMarketplace = new PluginMarketplaceService(projectRoot, deploymentGuard);
 
   // §4.5.9: SystemPromptBuilder
   const systemPromptBuilder = new SystemPromptBuilder({
