@@ -1,3 +1,19 @@
+/**
+ * Plugin Deployment Mode — §9.6
+ *
+ * 상세 설계: lvis-app/docs/architecture/plugin-deployment-model.md
+ *
+ * - **managed**: 회사(LGE IT)가 원격으로 배포/업데이트/삭제 제어.
+ *   사용자는 UI에서 제거·비활성화 불가 (PluginDeploymentGuard가 차단).
+ *   정책 서명 검증 필수 (Phase 3+).
+ *
+ * - **user**: 사용자가 자율적으로 설치. 회사 정책(userInstallPolicy)에 따라
+ *   allow / deny / allowlist / denylist / ask로 제어.
+ *
+ * Backward compatibility: `deployment` 필드가 없는 기존 매니페스트는 "user"로 해석.
+ */
+export type DeploymentMode = "managed" | "user";
+
 export interface PluginManifest {
   id: string;
   name: string;
@@ -8,6 +24,51 @@ export interface PluginManifest {
   ui?: PluginUiExtension[];
   /** 플러그인이 선언하는 키워드 (§9.2) */
   keywords?: Array<{ keyword: string; skillId: string }>;
+
+  // ─── §9.6 Plugin Deployment Model (Phase 1.5 신규) ─────────────────
+
+  /**
+   * 배포 모드 — 기본값 "user" (backward compat).
+   * "managed"는 회사 IT가 배포한 플러그인으로 사용자가 제거·비활성화할 수 없다.
+   */
+  deployment?: DeploymentMode;
+
+  /** managed 배포 시 publisher 식별 (예: "LG Electronics IT") */
+  publisher?: string;
+  publisherId?: string;
+  publishedAt?: string; // ISO 8601
+
+  /**
+   * managed 매니페스트 서명 (Phase 3부터 필수).
+   * ECDSA-P256-SHA256 기준, canonicalize된 manifest body에 대한 base64 signature.
+   * 검증 실패 시 플러그인 로드 거부 + CRITICAL audit.
+   */
+  signature?: string;
+  signatureAlgorithm?: "ECDSA-P256-SHA256";
+
+  /** 앱 버전 호환 범위 (semver) */
+  minAppVersion?: string;
+  maxAppVersion?: string;
+}
+
+/**
+ * 런타임에서 추적하는 플러그인 배포 메타데이터.
+ * 매니페스트 필드 + LVIS가 설치 시점에 기록한 정보를 결합.
+ */
+export interface PluginDeploymentMetadata {
+  mode: DeploymentMode;
+  publisher?: string;
+  publisherId?: string;
+  publishedAt?: string;
+  /** LVIS가 실제 설치한 시점 (보존/롤백 판단용) */
+  installedAt: string;
+  lastUpdatedAt?: string;
+  /** IT가 강제 설치했는지 (정책 forceInstall) */
+  forceInstalled?: boolean;
+  /** 다운로드 URL (managed only, 재설치 시 참조) */
+  managedSource?: string;
+  /** 서명 검증 상태 */
+  signatureStatus: "verified" | "unverified" | "failed" | "skipped";
 }
 
 export interface PluginUiExtension {
