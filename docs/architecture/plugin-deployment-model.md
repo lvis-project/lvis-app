@@ -1,6 +1,6 @@
 # Plugin Deployment Model — Managed vs User-Installed
 
-**Status**: Design (Phase 1.5 implementation target)
+**Status**: Phase 1.5 ✅ COMPLETE (2026-04-14) — see `docs/blueprints/phase1.5-closure-report.md`
 **Owner**: LVIS Platform Team
 **Last Updated**: 2026-04-13
 **Related**: `docs/architecture/architecture.md` §9.6, §14.2 Policy Enforcement, §6.3 Tool Permission Model
@@ -782,16 +782,22 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 
 ## 12. 구현 Roadmap
 
-### Phase 1.5 — 경량 구현 (이번 라운드 뒤 후속)
+### Phase 1.5 — 경량 구현 ✅ **COMPLETE** (2026-04-14)
 
-**Scope**:
-- `DeploymentMode` 타입 + `PluginManifest.deployment` 필드 (types.ts)
-- `PluginDeploymentGuard` 경량 버전 (정책 파일 없이 manifest `deployment` 필드만 확인)
-- `PluginRuntime.uninstall/disable`에 guard 호출
-- UI 잠금 표시 (🔒 + 회색 배경)
-- `plugin.json`에 `"deployment": "managed"` 필드 추가 (기본 플러그인 3종)
+**Closure report**: `docs/blueprints/phase1.5-closure-report.md`
 
-**제외**: 정책 파일, 서명 검증, managed installer, IT admin API 연동
+**Scope** (all delivered):
+- ✅ `DeploymentMode` 타입 + `PluginManifest.deployment` 필드 (types.ts)
+- ✅ `PluginDeploymentGuard` **hybrid** (path check + manifest field) — 경량 구현을 spec보다 강화
+- ✅ `canUninstall` / `canDisable` / `canInstall` (§13 test req)
+- ✅ `PluginMarketplaceService.install/uninstall` + `PluginRuntime.disable` guard 주입
+- ✅ UI 잠금 표시 (🔒 + bg-muted/40 + 버튼 disabled + tooltip)
+- ✅ `plugin.json` + 설치 manifest + marketplace.json catalog 3곳 모두 `deployment: "managed"` 전파
+- ✅ Bonus F-round: registry TOCTOU lock, fd-based chmod, 하드코딩 SHA256, 15 신규 테스트
+
+**제외** (Phase 2 정식 이월): 정책 파일, 서명 검증, managed installer, IT admin API 연동
+
+**검증**: vitest 110/110 PASS, TSC 0 errors, E2E subset 5/5, 3-reviewer APPROVE_WITH_MINOR → F-round all resolved.
 
 **산출물 예상**:
 - `lvis-app/src/plugin-runtime/types.ts` (DeploymentMode 추가)
