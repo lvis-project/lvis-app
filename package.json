@@ -20,6 +20,8 @@
     "plugins:remove": "tsx scripts/plugins-cli.ts remove",
     "plugins:enable": "tsx scripts/plugins-cli.ts enable",
     "plugins:disable": "tsx scripts/plugins-cli.ts disable",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:electron-smoke": "electron --version",
     "test:plugin-flow": "tsx scripts/test-pageindex-flow.ts",
     "test:meeting-flow": "npm run prepare:plugins && tsx scripts/test-meeting-flow.ts",

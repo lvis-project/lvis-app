@@ -163,7 +163,7 @@ export interface PluginManifest {
   maxAppVersion?: string;
 }
 
-export interface DeploymentMetadata {
+export interface PluginDeploymentMetadata {
   mode: DeploymentMode;
   publisher?: string;
   publisherId?: string;
@@ -457,31 +457,51 @@ export class PluginDeploymentGuard {
     },
   ) {}
 
-  /** managed 플러그인은 사용자가 제거할 수 없다 */
+  /**
+   * managed 플러그인은 사용자가 제거할 수 없다.
+   *
+   * ⚠️ Security B-HIGH-2 + Architect CRITICAL-2 정정 (2026-04-13):
+   * 이전 초안은 `registry().plugins.find(...).deployment`에서 deployment를 읽었으나
+   * `PluginRegistryEntry`에는 `deployment` 필드가 없고(있어도 registry JSON을
+   * 사용자가 편집하여 managed→user 재분류 가능), **manifestPath 경로가 managed
+   * 디렉터리 하위인지로 판정**하는 것이 올바르다. registry 파일 위변조에 독립.
+   */
   canUninstall(pluginId: string, actor: "user" | "it-admin"): GuardResult {
     if (actor === "it-admin") return { allowed: true };
-    const plugin = this.registry().plugins.find(p => p.id === pluginId);
-    if (!plugin) return { allowed: false, reason: "plugin-not-found" };
-    const deployment = plugin.deployment ?? "user";
-    if (deployment === "managed") {
+    const entry = this.registry().plugins.find(p => p.id === pluginId);
+    if (!entry) return { allowed: false, reason: "plugin-not-found" };
+
+    const managedDir = path.join(os.homedir(), ".lvis", "plugins", "managed");
+    const manifestPath = path.resolve(entry.manifestPath);
+    const isManagedDir = manifestPath.startsWith(managedDir + path.sep);
+
+    if (isManagedDir) {
       return {
         allowed: false,
         reason: "managed-plugin-user-uninstall-blocked",
         userMessage: "이 플러그인은 회사 정책에 의해 배포되었습니다. IT 부서에 문의하세요.",
       };
     }
+
+    // (double check) manifest.deployment 필드도 교차 검증 가능하지만
+    // 파일 경로가 단일 진실 소스이므로 여기서는 생략.
     return { allowed: true };
   }
 
   canDisable(pluginId: string, actor: "user" | "it-admin"): GuardResult {
     if (actor === "it-admin") return { allowed: true };
-    const plugin = this.registry().plugins.find(p => p.id === pluginId);
-    if (!plugin) return { allowed: false, reason: "plugin-not-found" };
-    const deployment = plugin.deployment ?? "user";
-    if (deployment !== "managed") return { allowed: true };
+    const entry = this.registry().plugins.find(p => p.id === pluginId);
+    if (!entry) return { allowed: false, reason: "plugin-not-found" };
+
+    // manifestPath 기반 판정 (위 canUninstall과 동일 원칙)
+    const managedDir = path.join(os.homedir(), ".lvis", "plugins", "managed");
+    const manifestPath = path.resolve(entry.manifestPath);
+    const isManagedDir = manifestPath.startsWith(managedDir + path.sep);
+    if (!isManagedDir) return { allowed: true };
+
     const policy = this.policy();
-    const entry = policy?.enforcements.managedPlugins.find(p => p.id === pluginId);
-    if (entry?.lockEnabled) {
+    const managedEntry = policy?.enforcements.managedPlugins.find(p => p.id === pluginId);
+    if (managedEntry?.lockEnabled) {
       return {
         allowed: false,
         reason: "managed-plugin-lock-enabled",
@@ -544,12 +564,22 @@ export interface GuardResult {
 }
 ```
 
-### 7.4 `PluginRuntime` 변경
+### 7.4 통합 지점 — `PluginMarketplaceService` + `PluginRuntime`
+
+**⚠️ Architect Phase 4 cycle 2 CRITICAL-1 정정 (2026-04-13)**:
+이전 초안은 `PluginRuntime.uninstall/disable/install`에 guard를 삽입한다고 기술했으나, 실제 `lvis-app/src/plugin-runtime/runtime.ts`에는 이 메서드들이 존재하지 않는다. **실제 uninstall 경로는 `PluginMarketplaceService.uninstall()` (`marketplace.ts:63-90`)** 이며, `disable` 기능은 현재 **런타임 hot-disable이 미구현**이다. Phase 1.5 scope에는 다음이 포함되어야 한다:
+
+1. **`PluginMarketplaceService.uninstall()`에 guard 삽입** (기존 메서드)
+2. **`disable()` 메서드 신규 구현** — `registry.json`의 `enabled` 토글 + 런타임 `PluginRuntime.stopAll()` 재호출
+3. **`install()` 경로 guard** — 현재 `PluginMarketplaceService.install()` 기반
+
+**actor 신뢰 경계 (Security B-HIGH-1 대응)**:
+`actor` 파라미터는 **main process 코드 내부에서만** 결정된다. IPC/HTTP로 외부 입력을 받을 수 없으며, renderer devtools로 IPC 호출 시 actor는 항상 `"user"` 고정. `"it-admin"` 경로는 `ManagedPluginInstaller` 내부에서만 사용되며 IPC에 노출되지 않는다.
 
 ```typescript
-// lvis-app/src/plugin-runtime/runtime.ts (변경안)
+// lvis-app/src/plugin-runtime/marketplace.ts (변경안)
 
-export class PluginRuntime {
+export class PluginMarketplaceService {
   // 기존 필드...
 
   constructor(
@@ -557,24 +587,22 @@ export class PluginRuntime {
     private readonly deploymentGuard?: PluginDeploymentGuard,
   ) {}
 
-  async uninstall(pluginId: string, actor: "user" | "it-admin" = "user"): Promise<void> {
+  /**
+   * @param pluginId 제거할 플러그인 id
+   * @param actor main process 내부에서만 결정 — IPC 노출 금지.
+   *              IPC 핸들러는 항상 actor="user" 고정 전달.
+   */
+  async uninstall(
+    pluginId: string,
+    actor: "user" | "it-admin" = "user",
+  ): Promise<void> {
     if (this.deploymentGuard) {
       const guard = this.deploymentGuard.canUninstall(pluginId, actor);
       if (!guard.allowed) {
         throw new Error(guard.userMessage ?? `Uninstall blocked: ${guard.reason}`);
       }
     }
-    // 기존 uninstall 로직
-  }
-
-  async disable(pluginId: string, actor: "user" | "it-admin" = "user"): Promise<void> {
-    if (this.deploymentGuard) {
-      const guard = this.deploymentGuard.canDisable(pluginId, actor);
-      if (!guard.allowed) {
-        throw new Error(guard.userMessage ?? `Disable blocked: ${guard.reason}`);
-      }
-    }
-    // 기존 disable 로직
+    // 기존 uninstall 로직 (npm uninstall + registry 제거)
   }
 
   async install(
@@ -593,7 +621,53 @@ export class PluginRuntime {
     // 기존 install 로직
   }
 }
+
+// lvis-app/src/plugin-runtime/runtime.ts (disable 신규)
+
+export class PluginRuntime {
+  // 기존 필드...
+
+  /**
+   * 플러그인 hot-disable — Phase 1.5 신규.
+   * registry.json의 enabled 토글 + 런타임에서 plugins Map 제거.
+   * managed 플러그인 + lockEnabled 시 거부.
+   */
+  async disable(
+    pluginId: string,
+    actor: "user" | "it-admin" = "user",
+  ): Promise<void> {
+    if (this.deploymentGuard) {
+      const guard = this.deploymentGuard.canDisable(pluginId, actor);
+      if (!guard.allowed) {
+        throw new Error(guard.userMessage ?? `Disable blocked: ${guard.reason}`);
+      }
+    }
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) return;
+    try {
+      await plugin.instance.stop?.();
+    } finally {
+      this.plugins.delete(pluginId);
+      // registry.json 갱신 (enabled: false)
+    }
+  }
+}
+
+// lvis-app/src/ipc-bridge.ts (IPC 핸들러 — actor 고정)
+
+ipcMain.handle("lvis:plugins:uninstall", async (_e, pluginId: string) => {
+  // ⚠️ actor 파라미터는 IPC에서 받지 않음. 항상 "user" 고정.
+  return pluginMarketplace.uninstall(pluginId, "user");
+});
+ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
+  return pluginRuntime.disable(pluginId, "user");
+});
 ```
+
+**Phase 1.5 구현 주의사항**:
+- `pluginMarketplace.uninstall()`은 npm uninstall + registry 파일 갱신만 담당. HostApi가 등록한 keyword/tool은 `PluginRuntime.stopAll()`/restart 시점에 재정리.
+- `disable()` 신규 구현 시 hot-disable 경로(런타임 즉시 중지)와 cold-disable 경로(registry 토글 후 다음 boot에 반영) 중 **hot-disable 우선** 권장.
+- Guard 단위 테스트 매트릭스: `(user/it-admin) × (managed/user) × (lockEnabled true/false) × (policy null/present)` 16조합.
 
 ---
 
