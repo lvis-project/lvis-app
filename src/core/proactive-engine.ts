@@ -112,10 +112,19 @@ export class ProactiveEngine {
 
     const emailEvents = recentEvents.filter((e) => e.type === "email.action.needed");
     if (emailEvents.length > 0) {
+      // 우선순위별 분류
+      const highEmails = emailEvents.filter((e) => (e.data as { priority?: string })?.priority === "high");
+      const topEmail = emailEvents[emailEvents.length - 1]?.data as {
+        subject?: string; sender?: string; deadline?: string; intent?: string; priority?: string;
+      } | undefined;
+
       items.push({
         category: "email",
-        priority: "high",
+        priority: highEmails.length > 0 ? "high" : "medium",
         title: `액션 필요 이메일 ${emailEvents.length}건`,
+        detail: topEmail?.subject
+          ? `${topEmail.sender ? `${topEmail.sender} — ` : ""}${topEmail.subject}${topEmail.deadline ? ` (마감: ${topEmail.deadline})` : ""}`
+          : undefined,
       });
     }
 
@@ -172,12 +181,29 @@ export class ProactiveEngine {
   /** LLM 브리핑용 프롬프트 데이터 생성 (ConversationLoop에서 호출) */
   getBriefingPromptData(): string {
     const items = this.collectBriefingItems();
-    if (items.length === 0) return "";
 
-    return [
+    // 최근 24시간 미처리 이메일 목록 (상세)
+    const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const emailDetails = this.eventLog
+      .filter((e) => e.type === "email.action.needed" && new Date(e.timestamp).getTime() > recentCutoff)
+      .map((e) => {
+        const d = e.data as { subject?: string; sender?: string; deadline?: string; intent?: string };
+        return `  - "${d.subject ?? "제목 없음"}"${d.sender ? ` (from: ${d.sender})` : ""}${d.deadline ? ` [마감: ${d.deadline}]` : ""}${d.intent ? ` — ${d.intent}` : ""}`;
+      });
+
+    if (items.length === 0 && emailDetails.length === 0) return "";
+
+    const lines = [
       "<daily-briefing-data>",
       ...items.map((i) => `[${i.priority}] ${i.category}: ${i.title}${i.detail ? ` (${i.detail})` : ""}`),
-      "</daily-briefing-data>",
-    ].join("\n");
+    ];
+
+    if (emailDetails.length > 0) {
+      lines.push("미처리 이메일 상세:");
+      lines.push(...emailDetails);
+    }
+
+    lines.push("</daily-briefing-data>");
+    return lines.join("\n");
   }
 }
