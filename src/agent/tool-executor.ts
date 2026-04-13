@@ -24,6 +24,7 @@ import type { PermissionManager, PermissionCheckResult } from "../core/permissio
 import { HookRunner } from "./hook-runner.js";
 import { AuditLogger } from "./audit-logger.js";
 import { maskSensitiveData } from "./dlp-filter.js";
+import { BashAstValidator } from "../main/bash-ast-validator.js";
 
 export interface ToolUseBlock {
   id: string;
@@ -88,12 +89,19 @@ export class ToolExecutor {
   private readonly permissionManager?: PermissionManager;
   private readonly auditLogger: AuditLogger;
   private readonly rateLimiter = new RateLimiter();
+  private readonly bashAstValidator?: BashAstValidator;
 
-  constructor(toolRegistry: ToolRegistry, hookRunner?: HookRunner, permissionManager?: PermissionManager) {
+  constructor(
+    toolRegistry: ToolRegistry,
+    hookRunner?: HookRunner,
+    permissionManager?: PermissionManager,
+    bashAstValidator?: BashAstValidator,
+  ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
     this.permissionManager = permissionManager;
     this.auditLogger = new AuditLogger();
+    this.bashAstValidator = bashAstValidator;
   }
 
   getHookRunner(): HookRunner {
@@ -145,6 +153,21 @@ export class ToolExecutor {
       toolName: toolUse.name,
       toolInput: toolUse.input,
     });
+
+    // ── Step 2.5: Bash AST Pre-Validator ────────────
+    if (this.bashAstValidator) {
+      const bashResult = this.bashAstValidator.validate(toolUse.name, toolUse.input);
+      if (bashResult.decision === "deny") {
+        const msg = `[Bash AST 차단] ${bashResult.reason} (pattern: ${bashResult.patternId})`;
+        callbacks?.onToolStart?.(toolUse.name, toolUse.input);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true);
+        this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity);
+        return { tool_use_id: toolUse.id, content: msg, is_error: true };
+      }
+      if (bashResult.decision === "warn") {
+        console.warn(`[Bash AST 경고] ${bashResult.reason}`);
+      }
+    }
 
     // ── Step 3: Permission (source-aware) ───────────
     if (this.permissionManager) {

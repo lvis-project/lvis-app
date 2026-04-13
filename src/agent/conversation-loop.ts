@@ -21,6 +21,8 @@ import type { MemoryManager } from "../core/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { AuditLogger } from "./audit-logger.js";
 import type { ProactiveEngine } from "../core/proactive-engine.js";
+import type { IdleSchedulerService } from "../main/idle-scheduler.js";
+import { PostTurnHookChain } from "./post-turn-hook-chain.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -48,9 +50,24 @@ export interface ConversationLoopDeps {
   memoryManager: MemoryManager;
   permissionManager?: import("../core/permission-manager.js").PermissionManager;
   proactiveEngine?: ProactiveEngine;
+  /** Agent 5: turn 완료 시 idle scheduler에 대화 신호 전송 (§6.1) */
+  idleScheduler?: IdleSchedulerService;
+  /** Agent 6: post-turn hook chain (compact → saveSession → extractMemory → audit → idle-poke) */
+  postTurnHookChain?: PostTurnHookChain;
+  /** Agent 6: Bash AST pre-validator — ToolExecutor Step 2.5에 주입 */
+  bashAstValidator?: import("../main/bash-ast-validator.js").BashAstValidator;
 }
 
 const MAX_TOOL_ROUNDS = 10;
+
+// §11 리스크: LLM agentic 토큰 폭발 방지 — knowledge 도구 turn당 호출 횟수 hard cap
+const KNOWLEDGE_DEPTH_CAP = 3;
+const KNOWLEDGE_TOOL_NAMES = new Set([
+  "knowledge_search",
+  "document_list",
+  "document_structure",
+  "document_page_content",
+]);
 
 // ─── Loop ───────────────────────────────────────────
 
@@ -66,7 +83,7 @@ export class ConversationLoop {
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
     this.history = new ConversationHistory();
-    this.toolExecutor = new ToolExecutor(deps.toolRegistry, new HookRunner(), deps.permissionManager);
+    this.toolExecutor = new ToolExecutor(deps.toolRegistry, new HookRunner(), deps.permissionManager, deps.bashAstValidator);
     this.auditLogger = new AuditLogger();
     this.refreshProvider();
   }
@@ -169,31 +186,51 @@ export class ConversationLoop {
     const systemPrompt = this.deps.systemPromptBuilder.build();
     const result = await this.queryLoop(systemPrompt, callbacks);
 
-    // §4.5.5 Post-Turn Hooks (5개 중 4개 구현)
-    // 1. Auto-Compact (§4.5.4)
-    if (shouldCompact(this.cumulativeUsage)) {
-      const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
-      if (cr.compacted) {
+    // §4.5.5 Post-Turn Hook Chain (Agent 6: compact → saveSession → extractMemory → audit → idle-poke)
+    if (this.deps.postTurnHookChain) {
+      const compactedMessages = await this.deps.postTurnHookChain.run({
+        sessionId: this.sessionId,
+        messages: this.history.getMessages(),
+        cumulativeUsage: this.cumulativeUsage,
+        input,
+        output: result.text,
+        toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
+        tokenUsage: result.usage,
+        route: routeResult.route,
+      });
+      // compact가 발생했으면 history 교체
+      if (compactedMessages) {
         this.history.clear();
-        this.history.restore(compacted);
-        console.log(`[lvis] auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+        this.history.restore(compactedMessages);
       }
+    } else {
+      // fallback: PostTurnHookChain 미주입 시 기존 inline 로직 유지.
+      // cycle 1 MED: extractMemory 중복 제거 — memory-extract hook이
+      // PostTurnHookChain에서 이미 처리하므로 fallback에서도 호출하지 않는다.
+      // PostTurnHookChain을 주입한 경우와 fallback 모두 memory 추출은
+      // hook chain의 memory-extract 단계에서만 일어난다.
+      if (shouldCompact(this.cumulativeUsage)) {
+        const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
+        if (cr.compacted) {
+          this.history.clear();
+          this.history.restore(compacted);
+          console.log(`[lvis] auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+        }
+      }
+      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+      this.auditLogger.logTurn({
+        sessionId: this.sessionId,
+        input,
+        output: result.text,
+        toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
+        tokenUsage: result.usage,
+        route: routeResult.route,
+      });
+      this.deps.idleScheduler?.signalConversation();
     }
-    // 2. 세션 영속화 (§4.5.7)
-    this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
-    // 3. Memory Extraction — 어시스턴트 응답에서 기억할 내용 자동 추출
-    this.extractMemory(result.text, input);
-    // 4. Audit Log — §14.2 Governance 대비 구조화된 로깅
-    this.auditLogger.logTurn({
-      sessionId: this.sessionId,
-      input,
-      output: result.text,
-      toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
-      tokenUsage: result.usage,
-      route: routeResult.route,
-    });
 
     callbacks?.onTurnComplete?.(result.text);
+
     return { ...result, route: routeResult.route };
   }
 
@@ -211,6 +248,8 @@ export class ConversationLoop {
     }));
     const allToolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }> = [];
     let turnUsage: TokenUsage | undefined;
+    // turn당 knowledge 도구 호출 횟수 카운터 (depth ≤ 3 hard cap)
+    let knowledgeCallCount = 0;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       // §4.5.3: 벤더 추상화 스트리밍
@@ -265,21 +304,54 @@ export class ConversationLoop {
         id: tc.id, name: tc.name, input: tc.input,
       }));
 
-      const toolResults = await this.toolExecutor.executeAll(toolUses, {
+      // §11 depth cap: knowledge 도구 turn당 최대 KNOWLEDGE_DEPTH_CAP 회
+      const cappedToolUses: ToolUseBlock[] = [];
+      const capBlockResults: Array<{ tool_use_id: string; content: string; is_error: boolean }> = [];
+      for (const tu of toolUses) {
+        if (KNOWLEDGE_TOOL_NAMES.has(tu.name)) {
+          if (knowledgeCallCount >= KNOWLEDGE_DEPTH_CAP) {
+            capBlockResults.push({
+              tool_use_id: tu.id,
+              content: `[depth cap] ${tu.name} 도구는 turn당 최대 ${KNOWLEDGE_DEPTH_CAP}회만 호출 가능합니다.`,
+              is_error: true,
+            });
+            continue;
+          }
+          knowledgeCallCount++;
+        }
+        cappedToolUses.push(tu);
+      }
+
+      const toolResults = await this.toolExecutor.executeAll(cappedToolUses, {
         onToolStart: callbacks?.onToolStart,
         onToolEnd: callbacks?.onToolEnd,
       }, this.sessionId);
 
-      for (let i = 0; i < toolUses.length; i++) {
+      // cap 차단된 결과를 toolResults에 병합
+      const allResults = [...toolResults, ...capBlockResults];
+
+      // 1:1 안전 접근 — toolResults가 짧을 수 있으므로 ?.content 가드
+      for (let i = 0; i < cappedToolUses.length; i++) {
         allToolCalls.push({
-          name: toolUses[i].name,
-          input: toolUses[i].input,
-          result: toolResults[i].content,
+          name: cappedToolUses[i].name,
+          input: cappedToolUses[i].input,
+          result: toolResults[i]?.content ?? "(missing)",
         });
+      }
+      // cap 차단 결과도 audit trail에 포함 (depth cap 감사 근거 누락 방지)
+      for (const blocked of capBlockResults) {
+        const origTool = toolUses.find((tu) => tu.id === blocked.tool_use_id);
+        if (origTool) {
+          allToolCalls.push({
+            name: origTool.name,
+            input: origTool.input,
+            result: blocked.content,
+          });
+        }
       }
 
       // tool_result를 히스토리에 추가 → loop back
-      for (const tr of toolResults) {
+      for (const tr of allResults) {
         this.history.append({
           role: "tool_result",
           toolUseId: tr.tool_use_id,
@@ -294,30 +366,9 @@ export class ConversationLoop {
   }
 
   // ─── Private: Memory Extraction (§4.5.5 Hook 3) ───
-
-  /** 어시스턴트 응답에서 기억 요청을 감지하여 자동 저장 */
-  private extractMemory(assistantText: string, userInput: string): void {
-    try {
-      // 사용자가 "기억해", "remember" 등을 요청했는지 탐지
-      const memoryPatterns = /기억해|기억하|잊지\s*마|remember|don't forget|메모해/i;
-      if (!memoryPatterns.test(userInput)) return;
-
-      // 어시스턴트가 기억하겠다고 응답한 경우 자동 저장
-      const confirmPatterns = /기억하겠|메모.*저장|기록.*했|noted|remembered|saved/i;
-      if (!confirmPatterns.test(assistantText)) return;
-
-      const title = userInput.slice(0, 40).replace(/\n/g, " ").trim();
-      if (title.length < 3) return;
-
-      this.deps.memoryManager.saveNote(
-        `자동-${title}`,
-        `[사용자 요청]\n${userInput}\n\n[어시스턴트 응답]\n${assistantText.slice(0, 500)}`,
-      );
-      console.log(`[lvis] memory-extraction: auto-saved note "${title}"`);
-    } catch {
-      // Memory extraction 실패가 대화를 차단하면 안 됨
-    }
-  }
+  // cycle 1 MED: extractMemory inline 로직 제거.
+  // PostTurnHookChain의 memory-extract hook이 단일 진실 소스이며,
+  // fallback 경로에서도 중복 추출을 수행하지 않는다.
 
   // ─── Private: Command Handler ─────────────────────
 

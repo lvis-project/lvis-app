@@ -156,6 +156,16 @@ export class PluginRuntime {
     return [...this.plugins.keys()];
   }
 
+  /**
+   * Retrieve a loaded plugin's instance by id.
+   * Returns undefined when the plugin failed to load or is not registered.
+   * Public accessor so callers (e.g. boot.ts knowledge-tools DI) do not
+   * reach into the private `plugins` Map via `as any` casts.
+   */
+  getPluginInstance<T = unknown>(pluginId: string): T | undefined {
+    return this.plugins.get(pluginId)?.instance as T | undefined;
+  }
+
   listUiExtensions(): Array<{ pluginId: string; extension: PluginUiExtension; entryUrl?: string }> {
     const result: Array<{ pluginId: string; extension: PluginUiExtension; entryUrl?: string }> = [];
     for (const [pluginId, plugin] of this.plugins) {
