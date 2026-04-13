@@ -1,5 +1,5 @@
 import { safeStorage } from "electron";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 export type LLMVendor = "claude" | "openai" | "gemini" | "copilot" | "lgenie";
@@ -51,7 +51,39 @@ export class SettingsService {
     mkdirSync(dir, { recursive: true });
     this.settingsPath = resolve(dir, "lvis-settings.json");
     this.secretsPath = resolve(dir, "lvis-secrets.json");
+    this.migrateSecretsMode();
     this.settings = this.loadSettings();
+  }
+
+  /**
+   * Phase 1.5 §7.x: Retroactive 0o600 enforcement.
+   * Phase 1 C5 fix (A4)는 신규 write에만 mode를 적용했으므로, 기존 설치에
+   * 남아있는 lvis-secrets.json (0o644 추정)을 owner-only로 내려준다.
+   *
+   * F-round §M2: fd-based fstat+fchmod로 TOCTOU 방지. path 기반 chmod는
+   * 공격자가 stat→chmod window 사이에 파일을 symlink로 바꿔치기해 다른 파일의
+   * 퍼미션을 내릴 수 있다 (chmod follows symlinks on Linux). fd를 열면 파일
+   * 핸들이 해당 inode에 고정되므로 이 race를 차단.
+   *
+   * Windows에서는 POSIX mode가 무의미하므로 silent-skip.
+   */
+  private migrateSecretsMode(): void {
+    if (process.platform === "win32") return;
+    if (!existsSync(this.secretsPath)) return;
+    let fd: number | null = null;
+    try {
+      fd = openSync(this.secretsPath, "r");
+      const st = fstatSync(fd);
+      if ((st.mode & 0o777) !== 0o600) {
+        fchmodSync(fd, 0o600);
+      }
+    } catch (err) {
+      console.warn("[settings] secrets mode migration failed:", (err as Error).message);
+    } finally {
+      if (fd !== null) {
+        try { closeSync(fd); } catch { /* ignore */ }
+      }
+    }
   }
 
   getAll(): AppSettings {

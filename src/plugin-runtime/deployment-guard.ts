@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { readPluginRegistry } from "./registry.js";
+import type { DeploymentMode } from "./types.js";
 
 /**
  * Plugin Deployment Guard — §9.6 / plugin-deployment-model.md §7.2-§7.3
@@ -84,11 +85,43 @@ export class PluginDeploymentGuard {
     return this.canUninstall(pluginId, actor);
   }
 
+  /**
+   * Phase 1.5 §13 test requirement: install-side guard.
+   *
+   * Catalog item에 `deployment: "managed"`가 붙어있으면 user actor의 설치 요청을
+   * 거부한다. UI는 이미 disabled 상태지만, 백엔드에서도 enforcement를 걸어
+   * IPC 경유 우회를 차단한다 (defense in depth).
+   *
+   * 호출 시점: `PluginMarketplaceService.install()` 진입 직후, npm install 실행 전.
+   */
+  async canInstall(
+    pluginId: string,
+    actor: Actor,
+    catalogDeployment?: DeploymentMode,
+  ): Promise<GuardResult> {
+    if (actor === "it-admin") {
+      return { allowed: true };
+    }
+    if (catalogDeployment === "managed") {
+      return {
+        allowed: false,
+        reason: `Managed plugin cannot be installed by user: ${pluginId}`,
+      };
+    }
+    return { allowed: true };
+  }
+
   private async readManifestSafe(path: string): Promise<{ deployment?: string } | null> {
     try {
       const raw = await readFile(path, "utf-8");
       return JSON.parse(raw) as { deployment?: string };
-    } catch {
+    } catch (err) {
+      // Corrupted / missing manifest. Path check alone may have already
+      // decided, so we don't throw — but surface for forensics.
+      console.warn(
+        `[deployment-guard] readManifestSafe failed for ${path}:`,
+        (err as Error).message,
+      );
       return null;
     }
   }

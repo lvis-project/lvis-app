@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
-import { readPluginRegistry, writePluginRegistry } from "./registry.js";
+import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 
@@ -30,11 +30,6 @@ export class PluginMarketplaceService {
     this.marketplacePath = resolve(this.appRoot, "plugins/marketplace.json");
     this.installedDir = resolve(this.appRoot, "plugins/installed");
     this.deploymentGuard = deploymentGuard;
-  }
-
-  /** Exposed for boot.ts DI when a deployment guard is constructed separately. */
-  getInstalledDir(): string {
-    return this.installedDir;
   }
 
   async list(): Promise<MarketplaceListItem[]> {
@@ -78,17 +73,28 @@ export class PluginMarketplaceService {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
     }
 
+    // §7.2 canInstall — managed 카탈로그 항목은 user actor 차단 (defense-in-depth).
+    // UI 잠금은 이미 disabled지만 IPC 경유 직접 호출도 봉쇄.
+    if (this.deploymentGuard) {
+      const guardResult = await this.deploymentGuard.canInstall(pluginId, "user", plugin.deployment);
+      if (!guardResult.allowed) {
+        throw new Error(guardResult.reason ?? `Plugin install denied: ${pluginId}`);
+      }
+    }
+
     await this.runNpmInstall(plugin.packageSpec);
     const manifestPath = await this.writeInstalledManifest(plugin);
-    const registry = await readPluginRegistry(this.registryPath);
-    const existing = registry.plugins.find((x) => x.id === plugin.id);
-    if (existing) {
-      existing.manifestPath = manifestPath;
-      existing.enabled = true;
-    } else {
-      registry.plugins.push({ id: plugin.id, manifestPath, enabled: true });
-    }
-    await writePluginRegistry(this.registryPath, registry);
+
+    // §M1 F-round: atomic read-modify-write under registry lock.
+    await updatePluginRegistry(this.registryPath, (registry) => {
+      const existing = registry.plugins.find((x) => x.id === plugin.id);
+      if (existing) {
+        existing.manifestPath = manifestPath;
+        existing.enabled = true;
+      } else {
+        registry.plugins.push({ id: plugin.id, manifestPath, enabled: true });
+      }
+    });
     return { pluginId: plugin.id, installed: true };
   }
 
@@ -101,32 +107,35 @@ export class PluginMarketplaceService {
       }
     }
 
-    const registry = await readPluginRegistry(this.registryPath);
-    const target = registry.plugins.find((x) => x.id === pluginId);
-    if (!target) {
-      throw new Error(`Plugin not installed: ${pluginId}`);
-    }
+    // §M1 F-round: serialize read-remove-write through the registry lock.
+    return withRegistryLock(this.registryPath, async () => {
+      const registry = await readPluginRegistry(this.registryPath);
+      const target = registry.plugins.find((x) => x.id === pluginId);
+      if (!target) {
+        throw new Error(`Plugin not installed: ${pluginId}`);
+      }
 
-    const remainingEntries = registry.plugins.filter((x) => x.id !== pluginId);
-    const manifestPath = isAbsolute(target.manifestPath)
-      ? target.manifestPath
-      : resolve(dirname(this.registryPath), target.manifestPath);
-    const packageName = await this.resolvePackageName(pluginId, manifestPath);
-    const shouldUninstallPackage =
-      packageName && !(await this.isPackageUsedByRemainingPlugins(packageName, remainingEntries.map((entry) => entry.id)));
+      const remainingEntries = registry.plugins.filter((x) => x.id !== pluginId);
+      const manifestPath = isAbsolute(target.manifestPath)
+        ? target.manifestPath
+        : resolve(dirname(this.registryPath), target.manifestPath);
+      const packageName = await this.resolvePackageName(pluginId, manifestPath);
+      const shouldUninstallPackage =
+        packageName && !(await this.isPackageUsedByRemainingPlugins(packageName, remainingEntries.map((entry) => entry.id)));
 
-    if (shouldUninstallPackage && packageName) {
-      await this.runNpmUninstall(packageName);
-    }
+      if (shouldUninstallPackage && packageName) {
+        await this.runNpmUninstall(packageName);
+      }
 
-    const installedManifestDir = dirname(manifestPath);
-    if (this.isWithin(this.installedDir, installedManifestDir)) {
-      await rm(installedManifestDir, { recursive: true, force: true });
-    }
+      const installedManifestDir = dirname(manifestPath);
+      if (this.isWithin(this.installedDir, installedManifestDir)) {
+        await rm(installedManifestDir, { recursive: true, force: true });
+      }
 
-    registry.plugins = remainingEntries;
-    await writePluginRegistry(this.registryPath, registry);
-    return { pluginId, uninstalled: true };
+      registry.plugins = remainingEntries;
+      await writePluginRegistry(this.registryPath, registry);
+      return { pluginId, uninstalled: true as const };
+    });
   }
 
   private async readCatalog(): Promise<MarketplaceCatalog> {

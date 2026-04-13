@@ -9,7 +9,7 @@ import type {
   RuntimePlugin,
   RuntimePluginFactory,
 } from "./types.js";
-import { readPluginRegistry, resolveManifestPathsFromRegistry, writePluginRegistry } from "./registry.js";
+import { readPluginRegistry, resolveManifestPathsFromRegistry, updatePluginRegistry } from "./registry.js";
 import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
 
 type LoadedPlugin = {
@@ -176,12 +176,13 @@ export class PluginRuntime {
     this.plugins.delete(pluginId);
 
     if (this.registryPath) {
-      const registry = await readPluginRegistry(this.registryPath);
-      const entry = registry.plugins.find((p) => p.id === pluginId);
-      if (entry) {
-        entry.enabled = false;
-        await writePluginRegistry(this.registryPath, registry);
-      }
+      // §M1 F-round: atomic update under registry lock.
+      await updatePluginRegistry(this.registryPath, (registry) => {
+        const entry = registry.plugins.find((p) => p.id === pluginId);
+        if (entry) {
+          entry.enabled = false;
+        }
+      });
     }
   }
 
