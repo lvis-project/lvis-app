@@ -246,7 +246,8 @@ export class McpGovernance {
       return { valid: false, reason: "stdio transport에는 command가 필요합니다.", layer: 1 };
     }
     const allowed = approval.allowedCommands ?? [];
-    if (allowed.length > 0 && !allowed.includes(config.command)) {
+    // H3 fix: 빈 allowedCommands는 deny (deny-by-default 원칙)
+    if (allowed.length === 0 || !allowed.includes(config.command)) {
       return {
         valid: false,
         reason: `허용되지 않은 명령어: '${config.command}'. 허용 목록: [${allowed.join(", ")}]`,

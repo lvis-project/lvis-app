@@ -134,8 +134,11 @@ export class PermissionManager {
     trust: TrustLevel,
     category?: "read" | "write" | "dangerous",
   ): PermissionCheckResult {
-    // auto 모드: 모든 trust 허용
+    // auto 모드: HIGH/MEDIUM 허용, LOW(MCP)는 여전히 ask 강제 (H1 fix)
     if (this.mode === "auto") {
+      if (trust === "low") {
+        return { decision: "ask", reason: "MCP 도구는 auto 모드에서도 승인 필요 (trust: low)", layer: 4 };
+      }
       return { decision: "allow", reason: `auto 모드 (trust: ${trust})`, layer: 4 };
     }
 

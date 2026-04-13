@@ -126,7 +126,14 @@ export class McpClient {
       // subprocess 시작
       this.process = spawn(this.config.command, this.config.args ?? [], {
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, ...this.config.env },
+        env: {
+        // C2 fix: 최소 환경변수만 허용 — API 키 유출 방지 (Least Privilege)
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        LANG: process.env.LANG,
+        NODE_ENV: process.env.NODE_ENV,
+        ...this.config.env, // 관리자 승인 환경변수만
+      },
       });
 
       this.setupProcessHandlers();
