@@ -102,14 +102,15 @@ function createWindow() {
 }
 
 async function main() {
-  // §4.2 Boot Sequence
-  services = await bootstrap(projectRoot);
+  // §4.2 Step 8: UI 렌더링 먼저 — bootstrap이 mainWindow를 필요로 함
+  createWindow();
+
+  // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
+  services = await bootstrap(projectRoot, mainWindow!);
 
   // §4.1 IPC Bridge
   registerIpcHandlers(services, () => mainWindow);
 
-  // §4.2 Step 8: UI 렌더링
-  createWindow();
   refreshApplicationMenu();
 }
 

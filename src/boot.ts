@@ -6,6 +6,7 @@
  */
 import { resolve } from "node:path";
 import { app } from "electron";
+import type { BrowserWindow } from "electron";
 import { PluginRuntime } from "./plugin-runtime/runtime.js";
 import { PluginMarketplaceService } from "./plugin-runtime/marketplace.js";
 import { TaskService } from "./taskService.js";
@@ -20,6 +21,15 @@ import { PermissionManager } from "./core/permission-manager.js";
 import { ProactiveEngine } from "./core/proactive-engine.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
+import { PythonRuntimeBootstrapper } from "./main/python-runtime.js";
+import { HybridRetriever } from "./main/hybrid-retriever.js";
+import { MockCloudIndexAdapter } from "./main/cloud-index-adapter.js";
+import { IdleSchedulerService, type WorkerClientLite } from "./main/idle-scheduler.js";
+import { BashAstValidator } from "./main/bash-ast-validator.js";
+import { AuditService } from "./main/audit-service.js";
+import { PostTurnHookChain } from "./agent/post-turn-hook-chain.js";
+import { AuditLogger } from "./agent/audit-logger.js";
+import { createKnowledgeSearchTools } from "./agent/knowledge-search-tool.js";
 import type { PluginHostApi } from "./plugin-runtime/types.js";
 import type { ToolDefinition } from "./core/tool-registry.js";
 
@@ -36,6 +46,12 @@ export interface AppServices {
   conversationLoop: ConversationLoop;
   proactiveEngine: ProactiveEngine;
   mcpManager: McpManager;
+  idleScheduler?: IdleSchedulerService;
+  bashAstValidator: BashAstValidator;
+  auditService: AuditService;
+  postTurnHookChain: PostTurnHookChain;
+  /** Whether knowledge search tools were successfully registered. */
+  knowledgeAvailable: boolean;
 }
 
 // ─── 이벤트 버스 (플러그인 간 통신) ────────────────
@@ -59,8 +75,24 @@ function onEvent(type: string, handler: EventHandler): void {
 
 // ─── Bootstrap ──────────────────────────────────────
 
-export async function bootstrap(projectRoot: string): Promise<AppServices> {
+export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow): Promise<AppServices> {
   console.log("[lvis] boot: starting...");
+
+  // §4.2 Step 0: Python Runtime Bootstrap (Agent 1)
+  const pythonRuntime = new PythonRuntimeBootstrapper();
+  let pythonPath: string | undefined;
+  try {
+    const runtimeResult = await pythonRuntime.ensureReady(mainWindow);
+    pythonPath = runtimeResult.pythonPath;
+    console.log("[lvis] boot: python runtime ready:", pythonPath);
+  } catch (err) {
+    console.warn("[lvis] boot: python runtime setup failed (non-fatal):", (err as Error).message);
+  }
+
+  // §4.2 Step 0.5: Governance Services (Agent 6)
+  const bashAstValidator = new BashAstValidator({ mode: "deny" });
+  const auditService = new AuditService();
+  await auditService.start();
 
   // §4.2 Step 1: Config
   const settingsService = new SettingsService({
@@ -83,6 +115,14 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
   // §4.2 Step 3-4: 플러그인 초기화 (범용 — 플러그인 특정 코드 없음)
   // API 키를 플러그인에 범용적으로 전달
   const configOverrides = buildPluginConfigOverrides(settingsService);
+
+  // pythonExecutable 주입 (Agent 1 산출물)
+  if (pythonPath) {
+    configOverrides["lvis-plugin-pageindex"] = {
+      ...(configOverrides["lvis-plugin-pageindex"] ?? {}),
+      pythonExecutable: pythonPath,
+    };
+  }
 
   const pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
@@ -135,6 +175,110 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
   // 빌트인 도구 등록 (호스트 자체 기능)
   registerBuiltinTools(memoryManager, toolRegistry, settingsService);
 
+  // §4.4 HybridRetriever + Knowledge Tools DI (Agent 3 산출물 연결)
+  // §6.1 IdleSchedulerService 배선 (Agent 5 산출물)
+  let idleScheduler: IdleSchedulerService | undefined;
+  let knowledgeAvailable = false;
+  try {
+    // Public accessor (runtime.getPluginInstance) replaces the previous
+    // `(pluginRuntime as any).plugins?.get(...)` private reach-through.
+    const pageIndexPlugin = pluginRuntime.getPluginInstance<{
+      getWorkerClient?: () => {
+        listDocuments: () => Promise<unknown>;
+        getStructure: (docId: string) => Promise<unknown>;
+        getPageContent: (docId: string, pages: string) => Promise<unknown>;
+        enqueue: (filePath: string, mode?: string, priority?: number) => Promise<unknown>;
+        processOne: (priority?: number) => Promise<unknown>;
+        getIndexerState: () => Promise<unknown>;
+      };
+      setIdleScheduler?: (scheduler: IdleSchedulerService) => void;
+    }>("lvis-plugin-pageindex");
+    const workerClient = pageIndexPlugin?.getWorkerClient?.() as
+      | {
+          listDocuments: () => Promise<unknown>;
+          getStructure: (docId: string) => Promise<unknown>;
+          getPageContent: (docId: string, pages: string) => Promise<unknown>;
+          enqueue: (filePath: string, mode?: string, priority?: number) => Promise<unknown>;
+          processOne: (priority?: number) => Promise<unknown>;
+          getIndexerState: () => Promise<unknown>;
+        }
+      | undefined;
+    if (workerClient) {
+      const cloudAdapter = new MockCloudIndexAdapter();
+      const hybridRetriever = new HybridRetriever({
+        workerClient: workerClient as never,
+        cloudAdapter,
+      });
+      const knowledgeTools = createKnowledgeSearchTools({
+        hybridRetriever,
+        workerClient: {
+          listDocuments: () => workerClient.listDocuments() as never,
+          getStructure: (docId: string) => workerClient.getStructure(docId) as never,
+          getPageContent: (docId: string, pages: string) =>
+            workerClient.getPageContent(docId, pages) as never,
+        },
+      });
+      for (const tool of knowledgeTools) {
+        toolRegistry.register(tool);
+      }
+      knowledgeAvailable = true;
+      console.log("[lvis] boot: knowledge tools registered (%d tools)", knowledgeTools.length);
+
+      // §6.1 IdleScheduler: WorkerClient의 enqueue/processOne/getIndexerState를 WorkerClientLite shape으로 래핑
+      const idleWorkerAdapter: WorkerClientLite = {
+        enqueue: (filePath: string, mode?: string, priority?: number) =>
+          workerClient.enqueue(filePath, mode, priority) as never,
+        processOne: (priority?: number) => workerClient.processOne(priority) as never,
+        getIndexerState: () => workerClient.getIndexerState() as never,
+      };
+      // Electron powerMonitor lazy import — test 환경에서 electron 로드 회피
+      try {
+        const { powerMonitor } = await import("electron");
+        idleScheduler = new IdleSchedulerService({
+          workerClient: idleWorkerAdapter,
+          powerMonitor: powerMonitor as unknown as import("./main/idle-scheduler.js").PowerMonitorLike,
+        });
+        idleScheduler.start();
+        // folderIndexer에 stub 주입 (Agent 4의 setIdleScheduler 경로)
+        if (typeof pageIndexPlugin?.setIdleScheduler === "function") {
+          pageIndexPlugin.setIdleScheduler(idleScheduler);
+          console.log("[lvis] boot: idle-scheduler wired to folderIndexer");
+        } else {
+          console.warn("[lvis] boot: pageindex plugin setIdleScheduler() not available");
+        }
+      } catch (err) {
+        console.warn(
+          "[lvis] boot: idle-scheduler setup failed (non-fatal):",
+          (err as Error).message,
+        );
+      }
+    } else {
+      console.warn(
+        "[lvis] boot: pageindex plugin getWorkerClient() not available — knowledge tools skipped",
+      );
+      auditService.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "boot",
+        type: "error",
+        payload: {
+          reason: "knowledge tools skipped — getWorkerClient missing",
+          pluginId: "lvis-plugin-pageindex",
+        },
+      });
+    }
+  } catch (err) {
+    console.warn("[lvis] boot: knowledge tools DI failed (non-fatal):", (err as Error).message);
+    auditService.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "boot",
+      type: "error",
+      payload: {
+        reason: "knowledge tools DI failed",
+        error: (err as Error).message,
+      },
+    });
+  }
+
   const pluginMarketplace = new PluginMarketplaceService(projectRoot);
 
   // §4.5.9: SystemPromptBuilder
@@ -177,6 +321,14 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
   onEvent("email.action.needed", (data) => proactiveEngine.collectEvent("email.action.needed", data));
   onEvent("meeting.ended", (data) => proactiveEngine.collectEvent("meeting.ended", data));
 
+  // §4.5 + Agent 6: PostTurnHookChain 조립
+  const bootAuditLogger = new AuditLogger();
+  const postTurnHookChain = new PostTurnHookChain({
+    memoryManager,
+    auditLogger: bootAuditLogger,
+    idleScheduler,
+  });
+
   // §4.5: ConversationLoop
   const conversationLoop = new ConversationLoop({
     settingsService,
@@ -187,6 +339,9 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
     memoryManager,
     permissionManager,
     proactiveEngine,
+    idleScheduler,
+    postTurnHookChain,
+    bashAstValidator,
   });
 
   // §9.5: MCP Server 연결 (거버넌스 승인 서버만)
@@ -209,6 +364,8 @@ export async function bootstrap(projectRoot: string): Promise<AppServices> {
     pluginRuntime, pluginMarketplace, taskService, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
+    idleScheduler, bashAstValidator, auditService, postTurnHookChain,
+    knowledgeAvailable,
   };
 }
 
@@ -219,16 +376,11 @@ function buildPluginConfigOverrides(settings: SettingsService): Record<string, R
   const overrides: Record<string, Record<string, unknown>> = {};
   const llm = settings.get("llm");
 
-  // OpenAI 키는 STT/Summary 플러그인이 공통으로 사용
+  // OpenAI 키는 STT/Summary 플러그인이 공통으로 사용.
+  // 글로벌 process.env 오염 금지 — configOverrides를 통한 명시적 주입만 허용.
+  // (cycle 1 LOW: process.env.OPENAI_API_KEY 글로벌 set 제거)
   const openaiKey = settings.getSecret("llm.apiKey.openai");
   const currentKey = settings.getSecret(`llm.apiKey.${llm.provider}`);
-
-  // OpenAI 키가 있으면 환경변수에도 설정 (pageindex 등 fallback 지원)
-  if (openaiKey) {
-    process.env.OPENAI_API_KEY = openaiKey;
-  } else if (currentKey && (llm.provider === "openai" || llm.provider === "copilot")) {
-    process.env.OPENAI_API_KEY = currentKey;
-  }
 
   // 모든 플러그인에 범용적으로 전달 — 각 플러그인이 필요한 키를 선택
   const resolvedApiKey = openaiKey ?? currentKey;
