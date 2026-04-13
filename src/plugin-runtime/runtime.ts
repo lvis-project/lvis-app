@@ -9,7 +9,8 @@ import type {
   RuntimePlugin,
   RuntimePluginFactory,
 } from "./types.js";
-import { readPluginRegistry, resolveManifestPathsFromRegistry } from "./registry.js";
+import { readPluginRegistry, resolveManifestPathsFromRegistry, writePluginRegistry } from "./registry.js";
+import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
 
 type LoadedPlugin = {
   manifest: PluginManifest;
@@ -25,6 +26,8 @@ export interface PluginRuntimeOptions {
   configOverrides?: Record<string, Record<string, unknown>>;
   /** 플러그인별 HostApi를 생성하는 팩토리 — boot.ts에서 주입 */
   createHostApi?: (pluginId: string) => PluginHostApi;
+  /** Phase 1.5 §7.3: disable 시 managed 플러그인 차단 */
+  deploymentGuard?: PluginDeploymentGuard;
 }
 
 export class PluginRuntime {
@@ -33,6 +36,7 @@ export class PluginRuntime {
   private readonly registryPath?: string;
   private readonly configOverrides: Record<string, Record<string, unknown>>;
   private readonly createHostApi?: (pluginId: string) => PluginHostApi;
+  private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginMethodHandler }>();
   private loaded = false;
@@ -43,6 +47,7 @@ export class PluginRuntime {
     this.registryPath = options.registryPath ? resolve(options.registryPath) : undefined;
     this.configOverrides = options.configOverrides ?? {};
     this.createHostApi = options.createHostApi;
+    this.deploymentGuard = options.deploymentGuard;
   }
 
   async load(): Promise<void> {
@@ -138,6 +143,46 @@ export class PluginRuntime {
     await this.stopAll();
     this.resetLoadedState();
     await this.startAll();
+  }
+
+  /**
+   * Disable a loaded plugin at runtime — stops the instance, removes its method
+   * handlers, and marks enabled=false in registry.json.
+   *
+   * §7.2 / §7.3: 기본 actor는 "user". managed 플러그인은 guard가 차단.
+   */
+  async disable(pluginId: string, actor: Actor = "user"): Promise<void> {
+    if (this.deploymentGuard) {
+      const result = await this.deploymentGuard.canDisable(pluginId, actor);
+      if (!result.allowed) {
+        throw new Error(result.reason ?? `Plugin disable denied: ${pluginId}`);
+      }
+    }
+
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) {
+      throw new Error(`Plugin not loaded: ${pluginId}`);
+    }
+
+    try {
+      await plugin.instance.stop?.();
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] stop during disable failed:`, (err as Error).message);
+    }
+
+    for (const method of plugin.methods.keys()) {
+      this.methodMap.delete(method);
+    }
+    this.plugins.delete(pluginId);
+
+    if (this.registryPath) {
+      const registry = await readPluginRegistry(this.registryPath);
+      const entry = registry.plugins.find((p) => p.id === pluginId);
+      if (entry) {
+        entry.enabled = false;
+        await writePluginRegistry(this.registryPath, registry);
+      }
+    }
   }
 
   async call(method: string, payload?: unknown): Promise<unknown> {

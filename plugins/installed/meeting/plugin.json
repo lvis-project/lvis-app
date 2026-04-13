@@ -2,6 +2,8 @@
   "id": "meeting",
   "name": "LVIS Meeting",
   "version": "1.0.0",
+  "deployment": "managed",
+  "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
   "methods": [
     "meeting.start",
