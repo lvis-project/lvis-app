@@ -147,6 +147,49 @@ describe("PluginDeploymentGuard", () => {
     expect(result.allowed).toBe(true);
   });
 
+  it("BACKCOMPAT: absent deployment field in legacy manifest → allowed for user", async () => {
+    const userDir = join(installedDir, "p-legacy");
+    await mkdir(userDir, { recursive: true });
+    const manifestPath = join(userDir, "plugin.json");
+    // legacy manifest without deployment field (predates Phase 1.5)
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ id: "p-legacy", name: "Legacy", version: "0.9.0" }),
+      "utf-8",
+    );
+    await writeRegistry([{ id: "p-legacy", manifestPath }]);
+
+    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const result = await guard.canUninstall("p-legacy", "user");
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("canInstall: rejects user installing a managed catalog item", async () => {
+    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const result = await guard.canInstall("p-managed", "user", "managed");
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/installed by user/);
+  });
+
+  it("canInstall: allows user installing a non-managed catalog item", async () => {
+    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const result = await guard.canInstall("p-user", "user", "user");
+    expect(result.allowed).toBe(true);
+  });
+
+  it("canInstall: allows user installing when deployment field is absent (backward compat)", async () => {
+    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const result = await guard.canInstall("p-legacy", "user", undefined);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("canInstall: always allows it-admin actor (trust boundary bypass)", async () => {
+    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const result = await guard.canInstall("p-managed", "it-admin", "managed");
+    expect(result.allowed).toBe(true);
+  });
+
   it("canDisable mirrors canUninstall semantics", async () => {
     const managedRoot = join(testDir, "bundled");
     await mkdir(join(managedRoot, "p-managed"), { recursive: true });

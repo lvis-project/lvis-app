@@ -29,3 +29,45 @@ export function resolveManifestPathsFromRegistry(
     .map((entry) => (isAbsolute(entry.manifestPath) ? entry.manifestPath : resolve(baseDir, entry.manifestPath)));
 }
 
+// ─── Phase 1.5 F-round §M1: in-process async mutex ──────────────────
+//
+// Serialize read-modify-write cycles on registry.json to prevent TOCTOU
+// races between concurrent install / uninstall / disable paths. Keyed by
+// registryPath so tests with tmp paths do not interfere with production.
+// Scope is intentionally in-process only — cross-process locking is Phase 2+
+// (requires file locks or IPC serialization).
+
+const registryLocks = new Map<string, Promise<void>>();
+
+export async function withRegistryLock<T>(
+  registryPath: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const key = resolve(registryPath);
+  const prev = registryLocks.get(key) ?? Promise.resolve();
+  const next = prev.then(() => fn());
+  // Next acquirer chains off this turn's completion, regardless of success.
+  registryLocks.set(key, next.then(() => undefined, () => undefined));
+  return next;
+}
+
+/**
+ * Atomic read → mutate → write helper. Use this from any code path that
+ * modifies the registry to ensure serialization with concurrent writers.
+ *
+ * Example:
+ *   await updatePluginRegistry(path, (reg) => {
+ *     const entry = reg.plugins.find(...);
+ *     if (entry) entry.enabled = false;
+ *   });
+ */
+export async function updatePluginRegistry(
+  registryPath: string,
+  mutator: (registry: PluginRegistry) => void | Promise<void>,
+): Promise<void> {
+  await withRegistryLock(registryPath, async () => {
+    const registry = await readPluginRegistry(registryPath);
+    await mutator(registry);
+    await writePluginRegistry(registryPath, registry);
+  });
+}

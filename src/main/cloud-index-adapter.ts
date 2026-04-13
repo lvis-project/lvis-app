@@ -55,7 +55,7 @@ export interface CloudIndexAdapter {
  * 모든 검색 요청에 빈 배열을 반환한다. 이로써 HybridRetriever는
  * bm25 + vec 두 개 소스만으로 작동하고, cloud weight=0 정규화가 성립한다.
  *
- * Phase 1.5에서 실클라이언트로 교체되면 HybridRetriever 생성자의
+ * Phase 2에서 실클라이언트로 교체되면 HybridRetriever 생성자의
  * weights 기본값을 {bm25:0.35, vec:0.35, cloud:0.3}로 바꾸면 된다.
  */
 export class MockCloudIndexAdapter implements CloudIndexAdapter {

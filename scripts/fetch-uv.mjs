@@ -11,16 +11,11 @@
  * postinstall 훅으로 자동 실행됨 (package.json scripts.postinstall).
  */
 
-import { createWriteStream, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { mkdir, chmod, rename, unlink } from "node:fs/promises";
-import { pipeline } from "node:stream/promises";
-import { createGunzip } from "node:zlib";
-import { extract as tarExtract } from "node:tar"; // Node.js 22+ 내장 없음 → tar 모듈 필요
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
-import { createWriteStream as _cws } from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,6 +33,40 @@ function parseArgs() {
 }
 
 const UV_VERSION = parseArgs();
+
+// ─── Phase 1.5 Security A2: Hardcoded known-good SHA256 ─────────
+//
+// 다운로드 무결성을 compile-time 상수로 검증한다. 해당 버전의 해시가 존재하면
+// fail-closed로 비교하고, 부재 시(새 버전으로 bump) GitHub .sha256 side-car로
+// 폴백한다. side-car도 부재하면 역시 fail-closed.
+//
+// 업데이트 방법: uv 버전 bump 시, curl -sL <archive>.sha256 으로 각 플랫폼의
+// 아카이브 해시를 받아 아래 맵에 추가한다.
+const KNOWN_GOOD_SHA256 = {
+  "0.7.3": {
+    "uv-aarch64-apple-darwin.tar.gz":
+      "162b328fc63e0075d4267688201de91356e1c1b81db50419fa4466cfe2dfdebc",
+    "uv-x86_64-apple-darwin.tar.gz":
+      "d676940b51bdd5606b218bc2965fed67731f94ad07926045716acbf78626e09b",
+    "uv-x86_64-pc-windows-msvc.zip":
+      "20d3a420abbf2af9699cd9a02225d9325344046af8deb15563cc451e3c4fd059",
+    "uv-x86_64-unknown-linux-gnu.tar.gz":
+      "17fc118ba4d7e9303f84fcabdc0a593fc3480ba76eb6980668fdbbb96fe88562",
+    "uv-aarch64-unknown-linux-gnu.tar.gz":
+      "2c2be8bbb83e9bc722f2013de8bb7506cfe6521d0e30b4ad046849d036b3eea6",
+  },
+};
+
+// F-round §L1: 정의 시점 포맷 검증 — 오타/대문자 혼입을 fail-fast.
+for (const [version, archives] of Object.entries(KNOWN_GOOD_SHA256)) {
+  for (const [archive, digest] of Object.entries(archives)) {
+    if (!/^[0-9a-f]{64}$/.test(digest)) {
+      throw new Error(
+        `KNOWN_GOOD_SHA256 malformed: ${version}/${archive} is not lowercase 64-char hex`,
+      );
+    }
+  }
+}
 
 // ─── 플랫폼 매핑 ─────────────────────────────────────────
 
@@ -213,42 +242,62 @@ function sha256Hex(buffer) {
 }
 
 /**
- * Download `<asset>.sha256` side-car from GitHub and verify.
- * Returns true if verified, false if side-car unavailable (warn only).
- * Throws if side-car exists but digest mismatches — fail-closed.
+ * Verify downloaded archive SHA256.
+ *
+ * Phase 1.5 hardening:
+ *   1. 하드코딩된 KNOWN_GOOD_SHA256 맵 우선 (fail-closed).
+ *   2. 맵에 없으면 GitHub `.sha256` side-car 폴백 (forward compat for version bump).
+ *   3. side-car도 없거나 불일치면 throw (fail-closed — no silent skip).
  */
 async function verifyArchiveSha256(url, archiveBuffer) {
+  const archiveName = path.basename(url);
+  const actual = sha256Hex(archiveBuffer);
+
+  const hardcoded = KNOWN_GOOD_SHA256[UV_VERSION]?.[archiveName];
+  if (hardcoded) {
+    if (actual !== hardcoded.toLowerCase()) {
+      throw new Error(
+        `SHA256 불일치 (hardcoded known-good) — 다운로드 무결성 검증 실패.\n` +
+        `  archive:  ${archiveName}\n` +
+        `  expected: ${hardcoded}\n` +
+        `  actual:   ${actual}\n`,
+      );
+    }
+    log(`  SHA256 verified (hardcoded known-good): ${actual.slice(0, 16)}…`);
+    return true;
+  }
+
+  log(`  INFO: no hardcoded SHA256 for ${archiveName} @ ${UV_VERSION} — falling back to .sha256 side-car`);
   const sha256Url = `${url}.sha256`;
   let expected;
   try {
     const resp = await fetch(sha256Url);
     if (!resp.ok) {
-      log(`  WARN: .sha256 side-car not available (${resp.status}) — skipping verification`);
-      return false;
+      throw new Error(`side-car HTTP ${resp.status}`);
     }
     const text = (await resp.text()).trim();
-    // GitHub format: "<hex>  <filename>" or just "<hex>"
     const match = text.match(/^([0-9a-fA-F]{64})/);
     if (!match) {
-      log(`  WARN: .sha256 side-car format unrecognised — skipping verification`);
-      return false;
+      throw new Error("side-car format unrecognised");
     }
     expected = match[1].toLowerCase();
   } catch (err) {
-    log(`  WARN: .sha256 fetch error (${err instanceof Error ? err.message : String(err)}) — skipping verification`);
-    return false;
-  }
-
-  const actual = sha256Hex(archiveBuffer);
-  if (actual !== expected) {
     throw new Error(
-      `SHA256 불일치 — 다운로드 무결성 검증 실패.\n` +
-      `  expected: ${expected}\n` +
-      `  actual:   ${actual}\n` +
-      `  url:      ${url}`,
+      `SHA256 검증 실패 — hardcoded 맵에도 없고 .sha256 side-car도 얻을 수 없음.\n` +
+      `  archive: ${archiveName}\n` +
+      `  reason:  ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  log(`  SHA256 verified: ${actual.slice(0, 16)}…`);
+
+  if (actual !== expected) {
+    throw new Error(
+      `SHA256 불일치 (side-car) — 다운로드 무결성 검증 실패.\n` +
+      `  archive:  ${archiveName}\n` +
+      `  expected: ${expected}\n` +
+      `  actual:   ${actual}\n`,
+    );
+  }
+  log(`  SHA256 verified (side-car fallback): ${actual.slice(0, 16)}…`);
   return true;
 }
 
