@@ -13,8 +13,11 @@
  * 4. 사용자 "항상 허용" 규칙
  * 5. Trust-based 기본 정책
  */
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import type { ToolSource, TrustLevel } from "./tool-registry.js";
 import { trustFromSource } from "./tool-registry.js";
+import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto";
@@ -40,6 +43,13 @@ export class PermissionManager {
   private readonly alwaysAllowed = new Set<string>();
   /** Trust 수준 오버라이드 (관리자 설정) */
   private readonly trustOverrides = new Map<string, TrustLevel>();
+  /** 영구 규칙 저장 경로 (~/.lvis/permissions.json) */
+  private readonly permissionsFilePath: string;
+
+  constructor(permissionsFilePath?: string) {
+    this.permissionsFilePath =
+      permissionsFilePath ?? resolve(homedir(), ".lvis", "permissions.json");
+  }
 
   // ─── 설정 ────────────────────────────────────────
 
@@ -55,12 +65,115 @@ export class PermissionManager {
     this.rules = [...rules];
   }
 
-  addAlwaysAllowed(toolName: string): void {
-    this.alwaysAllowed.add(toolName);
-  }
-
   setTrustOverride(toolName: string, trust: TrustLevel): void {
     this.trustOverrides.set(toolName, trust);
+  }
+
+  // ─── 영구 규칙 관리 (B1) ─────────────────────────
+
+  /**
+   * 도구 이름(패턴)을 영구 allow 규칙으로 추가.
+   * 인메모리 + permissions.json 동시 업데이트.
+   */
+  async addAlwaysAllowedPersist(pattern: string): Promise<void> {
+    // 인메모리: alwaysAllowed Set (checkDetailed layer 3)
+    this.alwaysAllowed.add(pattern);
+    // 영구: rules 배열에 allow 규칙 추가 (중복 방지)
+    await updatePermissionsFile(this.permissionsFilePath, (file) => {
+      const exists = file.rules.some(
+        (r) => r.action === "allow" && r.pattern === pattern && !r.source,
+      );
+      if (!exists) {
+        file.rules.push({ pattern, action: "allow" });
+      }
+    });
+  }
+
+  /**
+   * 도구 이름(패턴)을 영구 deny 규칙으로 추가.
+   * 인메모리 rules 배열 + permissions.json 동시 업데이트.
+   */
+  async addAlwaysDeniedPersist(pattern: string): Promise<void> {
+    // 인메모리: rules 배열 선두 삽입 (deny 최우선)
+    const exists = this.rules.some(
+      (r) => r.action === "deny" && r.pattern === pattern && !r.source,
+    );
+    if (!exists) {
+      this.rules.unshift({ pattern, action: "deny" });
+    }
+    // 영구
+    await updatePermissionsFile(this.permissionsFilePath, (file) => {
+      const fileExists = file.rules.some(
+        (r) => r.action === "deny" && r.pattern === pattern && !r.source,
+      );
+      if (!fileExists) {
+        file.rules.unshift({ pattern, action: "deny" });
+      }
+    });
+  }
+
+  /**
+   * 패턴 + 액션으로 영구 규칙 삭제.
+   */
+  async removeRule(pattern: string, action: "allow" | "deny"): Promise<void> {
+    // 인메모리
+    this.rules = this.rules.filter(
+      (r) => !(r.pattern === pattern && r.action === action && !r.source),
+    );
+    if (action === "allow") this.alwaysAllowed.delete(pattern);
+    // 영구
+    await updatePermissionsFile(this.permissionsFilePath, (file) => {
+      file.rules = file.rules.filter(
+        (r) => !(r.pattern === pattern && r.action === action && !r.source),
+      );
+    });
+  }
+
+  /**
+   * 앱 부팅 시 호출. permissions.json → 인메모리 병합.
+   * 파일 없음 → no-op (정상).
+   */
+  async loadRulesFromFile(): Promise<void> {
+    const file = await readPermissionsFile(this.permissionsFilePath);
+    if (!file) return;
+
+    // mode 동기화
+    if (file.mode) this.mode = file.mode;
+
+    // rules 병합: 파일 규칙은 기존 인메모리 규칙 뒤에 추가 (중복 제거)
+    for (const rule of file.rules) {
+      const dup = this.rules.some(
+        (r) => r.pattern === rule.pattern && r.action === rule.action && r.source === rule.source,
+      );
+      if (!dup) {
+        if (rule.action === "deny") {
+          this.rules.unshift(rule); // deny는 최우선
+        } else {
+          this.rules.push(rule);
+          // allow 규칙은 alwaysAllowed Set에도 반영
+          if (!rule.source) this.alwaysAllowed.add(rule.pattern);
+        }
+      }
+    }
+  }
+
+  /**
+   * permissions.json에 저장된 규칙 목록 반환 (Settings UI용).
+   * 파일 없음 → 빈 배열.
+   */
+  async listPersistedRules(): Promise<PermissionRule[]> {
+    const file = await readPermissionsFile(this.permissionsFilePath);
+    return file?.rules ?? [];
+  }
+
+  /**
+   * mode를 변경하고 permissions.json에 영구 저장.
+   */
+  async setModePersist(mode: ExecutionMode): Promise<void> {
+    this.mode = mode;
+    await updatePermissionsFile(this.permissionsFilePath, (file) => {
+      file.mode = mode;
+    });
   }
 
   // ─── 판정 (§4.1) ────────────────────────────────

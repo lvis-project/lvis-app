@@ -31,6 +31,8 @@ import { AuditService } from "./main/audit-service.js";
 import { PostTurnHookChain } from "./agent/post-turn-hook-chain.js";
 import { AuditLogger } from "./agent/audit-logger.js";
 import { createKnowledgeSearchTools } from "./agent/knowledge-search-tool.js";
+import { ApprovalGate } from "./core/approval-gate.js";
+import { loadPolicy } from "./core/policy-store.js";
 import type { PluginHostApi } from "./plugin-runtime/types.js";
 import type { ToolDefinition } from "./core/tool-registry.js";
 
@@ -51,6 +53,8 @@ export interface AppServices {
   bashAstValidator: BashAstValidator;
   auditService: AuditService;
   postTurnHookChain: PostTurnHookChain;
+  /** B1: 승인 게이트 — mainWindow 준비 후 생성 */
+  approvalGate?: ApprovalGate;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
 }
@@ -323,6 +327,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     { pattern: "web_search", action: "allow" },
     { pattern: "web_fetch", action: "allow" },
   ]);
+  // B1: 영구 규칙 파일 로드 (~/.lvis/permissions.json → 인메모리 병합)
+  await permissionManager.loadRulesFromFile();
 
   // §7: Proactive Engine (Daily Briefing)
   const proactiveEngine = new ProactiveEngine({
@@ -347,6 +353,11 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     idleScheduler,
   });
 
+  // B1: Policy 로드 후 ApprovalGate 생성 — mainWindow.webContents 준비 후
+  // §F7: bootAuditLogger 주입 → requested/decided/timeout/send-failed 4 phase 감사
+  const bootPolicy = await loadPolicy();
+  const approvalGate = new ApprovalGate(mainWindow.webContents, bootPolicy, 5 * 60 * 1000, bootAuditLogger);
+
   // §4.5: ConversationLoop
   const conversationLoop = new ConversationLoop({
     settingsService,
@@ -360,6 +371,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     idleScheduler,
     postTurnHookChain,
     bashAstValidator,
+    approvalGate,
   });
 
   // §9.5: MCP Server 연결 (거버넌스 승인 서버만)
@@ -383,7 +395,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, postTurnHookChain,
-    knowledgeAvailable,
+    approvalGate, knowledgeAvailable,
   };
 }
 

@@ -6,6 +6,7 @@
  */
 import { Menu, app, BrowserWindow, type MenuItemConstructorOptions } from "electron";
 import { dirname, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers } from "./ipc-bridge.js";
@@ -103,6 +104,11 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
 </style></head><body><div class="wrap"><div class="spin"></div><h1>LVIS 초기 부팅 중</h1><p>Python 런타임과 플러그인을 준비하고 있습니다…</p></div></body></html>`;
 
 function createWindow() {
+  const preloadPath = resolve(__dirname, "preload.js");
+  if (!existsSync(preloadPath)) {
+    throw new Error(`[lvis] preload.js not found at ${preloadPath} — run 'npm run build:preload' first`);
+  }
+
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
@@ -111,7 +117,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: resolve(__dirname, "preload.cjs"),
+      preload: preloadPath,
     },
   });
 

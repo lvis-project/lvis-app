@@ -18,9 +18,11 @@
  * - 순서 고정: 1→8 순차
  * - 실패 격리: Step 6 실패가 Step 8을 건너뛰지 않음
  */
+import { randomUUID } from "node:crypto";
 import type { ToolRegistry, ToolSource, TrustLevel } from "../core/tool-registry.js";
 import { trustFromSource } from "../core/tool-registry.js";
 import type { PermissionManager, PermissionCheckResult } from "../core/permission-manager.js";
+import type { ApprovalGate } from "../core/approval-gate.js";
 import { HookRunner } from "./hook-runner.js";
 import { AuditLogger } from "./audit-logger.js";
 import { maskSensitiveData } from "./dlp-filter.js";
@@ -87,6 +89,7 @@ export class ToolExecutor {
   private readonly toolRegistry: ToolRegistry;
   private readonly hookRunner: HookRunner;
   private readonly permissionManager?: PermissionManager;
+  private readonly approvalGate?: ApprovalGate;
   private readonly auditLogger: AuditLogger;
   private readonly rateLimiter = new RateLimiter();
   private readonly bashAstValidator?: BashAstValidator;
@@ -96,10 +99,12 @@ export class ToolExecutor {
     hookRunner?: HookRunner,
     permissionManager?: PermissionManager,
     bashAstValidator?: BashAstValidator,
+    approvalGate?: ApprovalGate,
   ) {
     this.toolRegistry = toolRegistry;
     this.hookRunner = hookRunner ?? new HookRunner();
     this.permissionManager = permissionManager;
+    this.approvalGate = approvalGate;
     this.auditLogger = new AuditLogger();
     this.bashAstValidator = bashAstValidator;
   }
@@ -180,17 +185,58 @@ export class ToolExecutor {
         return { tool_use_id: toolUse.id, content: msg, is_error: true };
       }
       if (permissionResult.decision === "ask") {
-        // H2 fix: MCP 도구는 UI 승인 구현 전까지 deny (보안 우선)
-        if (source === "mcp") {
-          const msg = `[MCP 보안] 도구 '${toolUse.name}' — 승인 UI 미구현으로 차단. ${permissionResult.reason}`;
-          console.warn(msg);
+        if (this.approvalGate) {
+          // §6.3 Layer 3 + §8: 렌더러 승인 모달로 round-trip
+          const approvalRequest = {
+            id: randomUUID(),
+            category: "tool" as const,
+            toolName: toolUse.name,
+            args: toolUse.input,
+            reason: permissionResult.reason,
+            source: source as "builtin" | "plugin" | "mcp",
+            createdAt: Date.now(),
+          };
+
+          // §F3: requestAndWait 실패 시 감사 로그 보장 후 deny-once 처리
+          let decision;
+          try {
+            decision = await this.approvalGate.requestAndWait(approvalRequest);
+          } catch (approvalErr) {
+            const msg = `[승인 오류] 도구 '${toolUse.name}' — 승인 게이트 내부 오류: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
+            callbacks?.onToolStart?.(toolUse.name, toolUse.input);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true);
+            this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true };
+          }
+
+          if (decision.choice.startsWith("deny")) {
+            // deny-always: 영구 거부 규칙 추가
+            if (decision.choice === "deny-always" && this.permissionManager) {
+              const pattern = decision.rememberPattern ?? toolUse.name;
+              await this.permissionManager.addAlwaysDeniedPersist(pattern);
+            }
+            const msg = `[승인 거부] 도구 '${toolUse.name}' — 사용자가 실행을 거부했습니다.`;
+            callbacks?.onToolStart?.(toolUse.name, toolUse.input);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true);
+            this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+            return { tool_use_id: toolUse.id, content: msg, is_error: true };
+          }
+
+          // allow-always: 영구 허용 규칙 추가
+          if (decision.choice === "allow-always" && this.permissionManager) {
+            const pattern = decision.rememberPattern ?? toolUse.name;
+            await this.permissionManager.addAlwaysAllowedPersist(pattern);
+          }
+          // allow-once / allow-always: 실행 계속
+        } else {
+          // §F4: approvalGate 미연결 시 fail-closed — 모든 ask 결정을 차단
+          const msg = `[승인 게이트 미연결] 도구 '${toolUse.name}' (${source}) — ask 결정이지만 승인 게이트가 없어 차단. ${permissionResult.reason}`;
+          console.error(msg);
           callbacks?.onToolStart?.(toolUse.name, toolUse.input);
           callbacks?.onToolEnd?.(toolUse.name, msg, true);
           this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
           return { tool_use_id: toolUse.id, content: msg, is_error: true };
         }
-        // Builtin/Plugin: 경고 후 허용 (향후 UI 승인 대화상자 연동)
-        console.log(`[PermissionManager] '${toolUse.name}' (${source}) — ask: ${permissionResult.reason}`);
       }
     }
 
