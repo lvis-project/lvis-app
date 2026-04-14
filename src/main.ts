@@ -67,11 +67,27 @@ function refreshApplicationMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+/**
+ * Bootstrap 동안 렌더러에 표시할 임시 splash HTML.
+ * 실 index.html은 IPC 핸들러 등록 후에 로드된다 — 초기 useEffect IPC 호출이
+ * 핸들러보다 앞서는 race 방지 (§M-race fix).
+ */
+const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><title>LVIS</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0b10;color:#e4e4e8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:.8rem}
+  h1{margin:0;font-size:1.1rem;font-weight:600;letter-spacing:.02em}
+  p{margin:0;font-size:.85rem;opacity:.65}
+  .spin{width:24px;height:24px;border:2px solid #2a2a33;border-top-color:#7a7aff;border-radius:50%;animation:s 1s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+</style></head><body><div class="wrap"><div class="spin"></div><h1>LVIS 초기 부팅 중</h1><p>Python 런타임과 플러그인을 준비하고 있습니다…</p></div></body></html>`;
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
-    show: true, // 즉시 표시
+    show: true,
     autoHideMenuBar: false,
     webPreferences: {
       contextIsolation: true,
@@ -81,8 +97,6 @@ function createWindow() {
   });
 
   const win = mainWindow;
-  
-  // 디버깅을 위해 DevTools를 자동으로 엽니다.
   win.webContents.openDevTools();
 
   win.once("ready-to-show", () => {
@@ -96,22 +110,34 @@ function createWindow() {
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("[lvis] window failed to load", { code, desc, url });
   });
-  void win.loadFile(resolve(__dirname, "index.html")).catch((err) => {
-    console.error("[lvis] failed to load index.html", err);
-  });
+
+  // §M-race: bootstrap 동안 splash만 표시. 실 index.html 로드는 main()이
+  // IPC 핸들러 등록 후 수행.
+  void win
+    .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(BOOTSTRAP_SPLASH)}`)
+    .catch((err) => console.error("[lvis] splash load failed", err));
 }
 
 async function main() {
-  // §4.2 Step 8: UI 렌더링 먼저 — bootstrap이 mainWindow를 필요로 함
+  // §4.2 Step 8: window 생성 (splash 표시) — bootstrap이 mainWindow를 필요로 함
   createWindow();
 
   // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
   services = await bootstrap(projectRoot, mainWindow!);
 
-  // §4.1 IPC Bridge
+  // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
   registerIpcHandlers(services, () => mainWindow);
 
   refreshApplicationMenu();
+
+  // 실 UI 로드 — 이 시점부터 렌더러의 IPC 호출이 항상 handler와 매칭됨
+  if (mainWindow) {
+    try {
+      await mainWindow.loadFile(resolve(__dirname, "index.html"));
+    } catch (err) {
+      console.error("[lvis] failed to load index.html", err);
+    }
+  }
 }
 
 app.on("window-all-closed", () => {
