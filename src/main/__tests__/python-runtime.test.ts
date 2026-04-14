@@ -165,11 +165,11 @@ describe("PythonRuntimeBootstrapper", () => {
     const [, secondArgs] = mockedSpawn.mock.calls[1] as [string, string[]];
     expect(secondArgs).toContain("venv");
 
-    // 세 번째 spawn: uv pip sync --frozen
+    // 세 번째 spawn: uv pip sync (lockfile arg) — uv 0.7.x는 --frozen 미지원
     const [, thirdArgs] = mockedSpawn.mock.calls[2] as [string, string[]];
     expect(thirdArgs).toContain("pip");
     expect(thirdArgs).toContain("sync");
-    expect(thirdArgs).toContain("--frozen");
+    expect(thirdArgs).not.toContain("--frozen");
 
     // result 유효
     expect(result.pythonPath).toBeTruthy();

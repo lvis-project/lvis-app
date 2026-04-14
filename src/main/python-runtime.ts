@@ -151,11 +151,14 @@ export class PythonRuntimeBootstrapper {
     });
 
     // Step 4: pip sync (requirements.lock)
+    // uv 0.7.3 이후 `pip sync`는 lock 파일을 받아 그대로 동기화하므로 `--frozen`은
+    // 받지 않음 (uv 0.7.x: error: unexpected argument '--frozen'). lock 파일 자체가
+    // pinning 역할이라 의미적으로도 redundant.
     this.sendStatus({ phase: "installing-deps", msg: "의존성 설치 중 (최초 1회)...", pct: 40 });
-    await this.log("[python-runtime] Step 3: uv pip sync --frozen");
+    await this.log("[python-runtime] Step 3: uv pip sync");
     const lockFile = await this.findLockFile();
     await this.runUv(uvBin, [
-      "pip", "sync", "--frozen", lockFile,
+      "pip", "sync", lockFile,
       "--python", this.getPythonPath(),
     ], {
       UV_PYTHON_INSTALL_DIR: PYTHON_INSTALL_DIR,
@@ -192,16 +195,26 @@ export class PythonRuntimeBootstrapper {
     const platformDir = this.resolvePlatformDir(platform, arch);
     const binName = platform === "win32" ? "uv.exe" : "uv";
 
-    // 프로덕션: process.resourcesPath (Electron 번들)
-    const resourcesPath = process.resourcesPath;
-    if (resourcesPath) {
-      return path.join(resourcesPath, "uv", platformDir, binName);
+    // dev/prod 분기:
+    //   - dev electron: process.defaultApp === true (Electron이 source 모드에서 set)
+    //   - vitest 등 plain Node: process.resourcesPath === undefined
+    //   - packaged electron: defaultApp 없음 + resourcesPath 있음
+    // process.resourcesPath만 가지고 분기하면 dev에서도 Electron Helper.app/Contents/Resources/
+    // 가 truthy이라 prod 경로로 빠지는 버그가 발생한다 (이 fix 이전 동작).
+    const isDev =
+      !!(process as { defaultApp?: boolean }).defaultApp || !process.resourcesPath;
+
+    if (isDev) {
+      // dist/src/main/python-runtime.js 기준 → lvis-app/resources/uv/...
+      // (fetch-uv.mjs가 PROJECT_ROOT="lvis-app" 기준으로 다운로드한 경로와 일치)
+      return path.join(
+        __dirname, "..", "..", "..", "resources", "uv",
+        platformDir, binName,
+      );
     }
 
-    // 개발 환경 fallback: __dirname 기준
-    // dist/src/main/ → 프로젝트 루트/resources/uv/...
-    const devResourcesPath = path.join(__dirname, "..", "..", "..", "resources", "uv");
-    return path.join(devResourcesPath, platformDir, binName);
+    // production: extraResources로 packaged된 Electron Resources
+    return path.join(process.resourcesPath, "uv", platformDir, binName);
   }
 
   private resolvePlatformDir(platform: string, arch: string): string {

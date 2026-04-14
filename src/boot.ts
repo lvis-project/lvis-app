@@ -118,10 +118,19 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   const configOverrides = buildPluginConfigOverrides(settingsService);
 
   // pythonExecutable 주입 (Agent 1 산출물)
+  // pageindex plugin은 두 가지 id로 lookup될 수 있다:
+  //   - "pageindex"             — installed manifest + marketplace catalog 기준 (실제 사용)
+  //   - "lvis-plugin-pageindex" — source repo plugin.json 기준 (legacy / 일관성)
+  // 양쪽 키에 모두 주입하여 어느 경로로 lookup되어도 매칭되도록 한다.
   if (pythonPath) {
+    const pageindexCfg = { pythonExecutable: pythonPath };
+    configOverrides["pageindex"] = {
+      ...(configOverrides["pageindex"] ?? {}),
+      ...pageindexCfg,
+    };
     configOverrides["lvis-plugin-pageindex"] = {
       ...(configOverrides["lvis-plugin-pageindex"] ?? {}),
-      pythonExecutable: pythonPath,
+      ...pageindexCfg,
     };
   }
 
