@@ -56,6 +56,30 @@ const api = {
   permission: {
     getMode: async () => ipcRenderer.invoke("lvis:permission:get-mode"),
     setMode: async (mode: string) => ipcRenderer.invoke("lvis:permission:set-mode", mode),
+    listRules: async () => ipcRenderer.invoke("lvis:permission:list-rules"),
+    addRule: async (pattern: string, action: string) =>
+      ipcRenderer.invoke("lvis:permission:add-rule", pattern, action),
+    removeRule: async (pattern: string, action: string) =>
+      ipcRenderer.invoke("lvis:permission:remove-rule", pattern, action),
+  },
+
+  // ─── Policy (Governance) ─────────────────────────
+  policy: {
+    get: async () => ipcRenderer.invoke("lvis:policy:get"),
+    set: async (patch: unknown) => ipcRenderer.invoke("lvis:policy:set", patch),
+  },
+
+  // ─── Approval Gate (§6.3 Layer 3 + §8) ─────────
+  approval: {
+    /** main→renderer 단방향 이벤트 구독 */
+    onRequest: (cb: (req: unknown) => void) => {
+      const listener = (_event: unknown, req: unknown) => cb(req);
+      ipcRenderer.on("lvis:approval:request", listener);
+      return () => ipcRenderer.removeListener("lvis:approval:request", listener);
+    },
+    /** 사용자 결정을 main으로 전송 */
+    respond: async (decision: unknown) =>
+      ipcRenderer.invoke("lvis:approval:respond", decision),
   },
 
   // ─── View Events ─────────────────────────────────
@@ -67,3 +91,11 @@ const api = {
 };
 
 contextBridge.exposeInMainWorld("lvisApi", api);
+
+// ─── lvis 네임스페이스 (B1: Approval Gate + Permission) ──
+// renderer에서 window.lvis.approval / window.lvis.permission으로 접근
+contextBridge.exposeInMainWorld("lvis", {
+  permission: api.permission,
+  approval: api.approval,
+  policy: api.policy,
+});

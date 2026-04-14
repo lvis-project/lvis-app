@@ -56,6 +56,8 @@ export interface ConversationLoopDeps {
   postTurnHookChain?: PostTurnHookChain;
   /** Agent 6: Bash AST pre-validator — ToolExecutor Step 2.5에 주입 */
   bashAstValidator?: import("../main/bash-ast-validator.js").BashAstValidator;
+  /** B1: 승인 게이트 — "ask" 결정 시 렌더러 모달로 round-trip */
+  approvalGate?: import("../core/approval-gate.js").ApprovalGate;
 }
 
 const MAX_TOOL_ROUNDS = 10;
@@ -83,9 +85,20 @@ export class ConversationLoop {
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
     this.history = new ConversationHistory();
-    this.toolExecutor = new ToolExecutor(deps.toolRegistry, new HookRunner(), deps.permissionManager, deps.bashAstValidator);
+    this.toolExecutor = new ToolExecutor(
+      deps.toolRegistry,
+      new HookRunner(),
+      deps.permissionManager,
+      deps.bashAstValidator,
+      deps.approvalGate,
+    );
     this.auditLogger = new AuditLogger();
     this.refreshProvider();
+  }
+
+  /** B1: PermissionManager 참조 — IPC bridge에서 mode 조회/변경에 사용 */
+  get permissionManager(): import("../core/permission-manager.js").PermissionManager | undefined {
+    return this.deps.permissionManager;
   }
 
   /** 설정 변경 시 Provider 재생성 — 벤더별 API 키 조회 */

@@ -61,7 +61,56 @@ type LvisApi = {
   onViewActivate: (h: (k: string) => void) => () => void;
 };
 
-declare global { interface Window { lvisApi: LvisApi } }
+// ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─
+
+type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny-always";
+type ApprovalRequest = {
+  id: string;
+  category: "tool" | "agent-action";
+  toolName: string;
+  args: unknown;
+  reason: string;
+  source?: "builtin" | "plugin" | "mcp";
+  createdAt: number;
+  /** PolicyFile.requireExplicitApproval — true: dismiss 차단, false: dismiss → deny-once */
+  requireExplicit: boolean;
+};
+type ApprovalDecision = {
+  requestId: string;
+  choice: ApprovalChoice;
+  rememberPattern?: string;
+};
+
+type LvisApprovalApi = {
+  onRequest: (cb: (req: ApprovalRequest) => void) => () => void;
+  respond: (decision: ApprovalDecision) => Promise<unknown>;
+};
+
+type PermissionRule = { pattern: string; action: "allow" | "deny"; source?: string };
+
+type LvisPermissionApi = {
+  getMode: () => Promise<{ mode: string }>;
+  setMode: (mode: string) => Promise<{ ok: boolean; mode: string }>;
+  listRules: () => Promise<PermissionRule[]>;
+  addRule: (pattern: string, action: string) => Promise<{ ok: boolean }>;
+  removeRule: (pattern: string, action: string) => Promise<{ ok: boolean }>;
+};
+
+type LvisPolicyApi = {
+  get: () => Promise<{ version: 1; requireExplicitApproval: boolean; managed: boolean; updatedAt: string }>;
+  set: (patch: unknown) => Promise<{ ok: boolean; policy?: unknown; error?: string; message?: string }>;
+};
+
+declare global {
+  interface Window {
+    lvisApi: LvisApi;
+    lvis: {
+      permission: LvisPermissionApi;
+      approval: LvisApprovalApi;
+      policy: LvisPolicyApi;
+    };
+  }
+}
 
 // ─── Constants ──────────────────────────────────────
 
@@ -148,17 +197,300 @@ const WEB_PROVIDERS = [
   { id: "google", label: "Google Search", placeholder: "API Key...", needsKey: true },
 ] as const;
 
+// ─── PermissionsTab ─────────────────────────────────
+
+type ExecMode = "default" | "strict" | "auto";
+
+const EXEC_MODE_OPTIONS: { value: ExecMode; label: string; description: string }[] = [
+  { value: "default", label: "기본 (Default)", description: "위험한 도구만 승인 요구" },
+  { value: "strict",  label: "엄격 (Strict)",  description: "모든 도구 승인 요구" },
+  { value: "auto",    label: "자동 (Auto)",    description: "신뢰도 기반 자동 허용 (builtin 자동, plugin 승인, mcp 차단)" },
+];
+
+function PermissionsTab() {
+  // ── 로딩 상태 ─────────────────────────────────────
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // ── 인라인 배너 (alert 대체 — §F9) ───────────────
+  const [banner, setBanner] = useState<{ type: "error" | "warn"; msg: string } | null>(null);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showBanner = useCallback((type: "error" | "warn", msg: string) => {
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    setBanner({ type, msg });
+    bannerTimerRef.current = setTimeout(() => setBanner(null), 5000);
+  }, []);
+
+  // ── Section A: Execution Mode ─────────────────────
+  const [mode, setMode] = useState<ExecMode>("default");
+
+  // ── Section B: Explicit Approval Policy ──────────
+  const [requireExplicit, setRequireExplicit] = useState(true);
+  const [policyManaged, setPolicyManaged] = useState(false);
+  const [policyBusy, setPolicyBusy] = useState(false);
+
+  // ── Section C: Rule Editor ────────────────────────
+  const [rules, setRules] = useState<PermissionRule[]>([]);
+  const [newPattern, setNewPattern] = useState("");
+  const [newAction, setNewAction] = useState<"allow" | "deny">("allow");
+  const [rulesBusy, setRulesBusy] = useState(false);
+
+  // ── 초기 fetch (탭 진입 시) ───────────────────────
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [modeRes, policyRes, rulesRes] = await Promise.all([
+        window.lvis.permission.getMode(),
+        window.lvis.policy.get(),
+        window.lvis.permission.listRules(),
+      ]);
+      setMode((modeRes.mode as ExecMode) ?? "default");
+      setRequireExplicit(policyRes.requireExplicitApproval);
+      setPolicyManaged(policyRes.managed);
+      setRules(rulesRes);
+    } catch (e) {
+      setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void fetchAll(); }, [fetchAll]);
+
+  // ── Section A handler ─────────────────────────────
+  const handleModeChange = async (m: ExecMode) => {
+    setMode(m);
+    await window.lvis.permission.setMode(m);
+  };
+
+  // ── Section B handler ─────────────────────────────
+  const handleExplicitToggle = async () => {
+    if (policyManaged) return;
+    setPolicyBusy(true);
+    try {
+      const next = !requireExplicit;
+      const res = await window.lvis.policy.set({ requireExplicitApproval: next });
+      if (res.ok) {
+        setRequireExplicit(next);
+      } else if (res.error === "managed") {
+        showBanner("warn", "이 정책은 IT 관리자가 설정했습니다. 사용자가 변경할 수 없습니다.");
+      } else {
+        showBanner("error", res.message ?? "정책 변경에 실패했습니다.");
+      }
+    } finally {
+      setPolicyBusy(false);
+    }
+  };
+
+  // ── Section C handlers ────────────────────────────
+  const refreshRules = async () => {
+    const r = await window.lvis.permission.listRules();
+    setRules(r);
+  };
+
+  const handleAddRule = async () => {
+    const pattern = newPattern.trim();
+    if (!pattern) return;
+    setRulesBusy(true);
+    try {
+      await window.lvis.permission.addRule(pattern, newAction);
+      setNewPattern("");
+      await refreshRules();
+    } finally {
+      setRulesBusy(false);
+    }
+  };
+
+  const handleRemoveRule = async (pattern: string, action: "allow" | "deny") => {
+    setRulesBusy(true);
+    try {
+      await window.lvis.permission.removeRule(pattern, action);
+      await refreshRules();
+    } finally {
+      setRulesBusy(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="py-8 text-center text-sm text-muted-foreground">로딩 중...</div>;
+  }
+  if (error) {
+    return <div className="py-4 text-sm text-destructive">{error}</div>;
+  }
+
+  return (
+    <ScrollArea className="h-[420px] pr-2">
+      <div className="space-y-6 pt-4">
+
+        {/* ── 인라인 배너 (§F9 — alert 대체) ── */}
+        {banner && (
+          <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${banner.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-yellow-500/30 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400"}`}>
+            <span className="mt-0.5 flex-shrink-0">{banner.type === "error" ? "⚠" : "🔒"}</span>
+            <span>{banner.msg}</span>
+            <button className="ml-auto flex-shrink-0 opacity-60 hover:opacity-100" onClick={() => setBanner(null)}>✕</button>
+          </div>
+        )}
+
+        {/* ── Section A: Execution Mode ── */}
+        <div className="space-y-2">
+          <div>
+            <p className="text-sm font-medium">실행 모드</p>
+            <p className="text-[11px] text-muted-foreground">AI 에이전트가 도구를 실행할 때 어떤 수준의 권한을 적용할지 결정합니다.</p>
+          </div>
+          <div className="space-y-1.5">
+            {EXEC_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                className={`flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left text-sm transition-colors ${mode === opt.value ? "border-primary bg-primary/10" : "border-muted hover:border-muted-foreground/40"}`}
+                onClick={() => void handleModeChange(opt.value)}
+              >
+                <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${mode === opt.value ? "border-primary" : "border-muted-foreground"}`}>
+                  {mode === opt.value && <span className="h-2 w-2 rounded-full bg-primary" />}
+                </span>
+                <span>
+                  <span className="font-medium">{opt.label}</span>
+                  <span className="ml-1.5 text-[11px] text-muted-foreground">{opt.description}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* ── Section B: Explicit Approval Policy ── */}
+        <div className="space-y-2">
+          <div>
+            <p className="text-sm font-medium">명시적 승인 요구</p>
+            <p className="text-[11px] text-muted-foreground">체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 사용자가 반드시 명시적 버튼을 눌러야 합니다.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              role="checkbox"
+              aria-checked={requireExplicit}
+              disabled={policyManaged || policyBusy}
+              className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${requireExplicit ? "border-primary bg-primary" : "border-muted-foreground"} ${policyManaged ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:border-primary/60"}`}
+              onClick={() => void handleExplicitToggle()}
+            >
+              {requireExplicit && (
+                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
+              )}
+            </button>
+            <span className="text-sm">{requireExplicit ? "활성화됨" : "비활성화됨"}</span>
+            {policyManaged && <span className="text-base" title="IT 관리자 설정">🔒</span>}
+          </div>
+          {policyManaged && (
+            <p className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-600 dark:text-yellow-400">
+              이 정책은 IT 관리자가 설정했습니다. 사용자가 변경할 수 없습니다.
+            </p>
+          )}
+        </div>
+
+        <Separator />
+
+        {/* ── Section C: Rule Editor ── */}
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm font-medium">도구 규칙</p>
+            <p className="text-[11px] text-muted-foreground">특정 도구 패턴에 대해 항상 허용 / 항상 거부를 설정합니다 (와일드카드 지원: <code className="text-[10px]">mcp_*</code>).</p>
+          </div>
+
+          {/* 규칙 테이블 */}
+          {rules.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground italic">저장된 규칙이 없습니다.</p>
+          ) : (
+            <div className="rounded-md border">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <th className="px-3 py-2 text-left font-medium">패턴</th>
+                    <th className="px-3 py-2 text-left font-medium">동작</th>
+                    <th className="px-3 py-2 text-left font-medium">소스</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rules.map((r, i) => (
+                    <tr key={`${r.pattern}:${r.action}:${i}`} className="border-b last:border-0 hover:bg-muted/20">
+                      <td className="px-3 py-1.5 font-mono">{r.pattern}</td>
+                      <td className="px-3 py-1.5">
+                        <Badge variant={r.action === "allow" ? "default" : "secondary"} className={`text-[10px] ${r.action === "deny" ? "text-red-400" : ""}`}>
+                          {r.action === "allow" ? "허용" : "거부"}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-1.5 text-muted-foreground">{r.source ?? "전체"}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        <button
+                          className="text-[10px] text-muted-foreground hover:text-destructive disabled:opacity-40"
+                          disabled={rulesBusy}
+                          onClick={() => void handleRemoveRule(r.pattern, r.action)}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* 규칙 추가 */}
+          <div className="flex items-center gap-2">
+            <Input
+              className="h-8 flex-1 text-xs"
+              placeholder="패턴 (예: mcp_*, memory_save)"
+              value={newPattern}
+              onChange={(e) => setNewPattern(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && newPattern.trim()) void handleAddRule(); }}
+            />
+            <select
+              className="h-8 rounded-md border bg-background px-2 text-xs"
+              value={newAction}
+              onChange={(e) => setNewAction(e.target.value as "allow" | "deny")}
+            >
+              <option value="allow">허용</option>
+              <option value="deny">거부</option>
+            </select>
+            <Button size="sm" className="h-8" onClick={() => void handleAddRule()} disabled={rulesBusy || !newPattern.trim()}>
+              추가
+            </Button>
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* ── Section D: Audit Log Placeholder ── */}
+        <div className="space-y-2">
+          <div>
+            <p className="text-sm font-medium">감사 로그</p>
+            <p className="text-[11px] text-muted-foreground">도구 실행 감사 로그 뷰어는 Phase 2 이후 추가됩니다.</p>
+          </div>
+          <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+            곧 추가 예정
+          </div>
+        </div>
+
+      </div>
+    </ScrollArea>
+  );
+}
+
+// ─── SettingsDialog ─────────────────────────────────
+
 function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; api: LvisApi; onSaved: () => void }) {
   const [tab, setTab] = useState("llm");
   const [vendor, setVendor] = useState("claude");
   const [keyInput, setKeyInput] = useState("");
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
-  
+
   const [webProvider, setWebProvider] = useState("duckduckgo");
   const [webKeyInput, setWebKeyInput] = useState("");
   const [hasWebKey, setHasWebKey] = useState(false);
-  
+
   const [saving, setSaving] = useState(false);
 
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
@@ -171,7 +503,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       setVendor(s.llm.provider);
       setModel(s.llm.model);
       setHasKey(await api.hasApiKey(s.llm.provider));
-      
+
       setWebProvider(s.webSearch.provider);
       setHasWebKey(await api.hasWebApiKey(s.webSearch.provider));
     })();
@@ -202,24 +534,27 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       if (tab === "llm") {
         if (keyInput.trim()) { await api.setApiKey(vendor, keyInput.trim()); setKeyInput(""); setHasKey(true); }
         await api.updateSettings({ llm: { provider: vendor as any, model: model.trim() || vendorInfo.defaultModel } } as any);
-      } else {
+      } else if (tab === "web") {
         if (webKeyInput.trim()) { await api.setWebApiKey(webProvider, webKeyInput.trim()); setWebKeyInput(""); setHasWebKey(true); }
         await api.updateSettings({ webSearch: { provider: webProvider as any } } as any);
       }
-      onSaved(); onOpenChange(false);
+      // permissions 탭: 각 항목이 즉시 저장되므로 별도 save 불필요
+      if (tab !== "permissions") { onSaved(); onOpenChange(false); }
+      else { onOpenChange(false); }
     } finally { setSaving(false); }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>설정</DialogTitle><DialogDescription>앱 환경 및 검색 엔진을 설정합니다.</DialogDescription></DialogHeader>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>설정</DialogTitle><DialogDescription>앱 환경, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription></DialogHeader>
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="w-full">
             <TabsTrigger value="llm" className="flex-1">지능 (LLM)</TabsTrigger>
             <TabsTrigger value="web" className="flex-1">검색 (Web)</TabsTrigger>
+            <TabsTrigger value="permissions" className="flex-1">권한</TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="llm" className="space-y-4 pt-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">벤더</label>
@@ -265,8 +600,159 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
             )}
             <p className="text-[11px] text-muted-foreground">Tavily와 Serper는 AI 에이전트용 고성능 검색 기능을 제공합니다.</p>
           </TabsContent>
+
+          <TabsContent value="permissions">
+            <PermissionsTab />
+          </TabsContent>
         </Tabs>
-        <DialogFooter><Button variant="secondary" onClick={() => onOpenChange(false)}>취소</Button><Button onClick={() => void save()} disabled={saving}>{saving ? "저장 중..." : "저장"}</Button></DialogFooter>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
+          {tab !== "permissions" && (
+            <Button onClick={() => void save()} disabled={saving}>{saving ? "저장 중..." : "저장"}</Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── ToolApprovalDialog ─────────────────────────────
+
+const SOURCE_BADGE: Record<string, string> = {
+  builtin: "내장",
+  plugin: "플러그인",
+  mcp: "MCP",
+};
+
+function ToolApprovalDialog({
+  open,
+  request,
+  onDecide,
+}: {
+  open: boolean;
+  request: ApprovalRequest | null;
+  onDecide: (choice: ApprovalChoice, pattern?: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  // 키보드 단축키
+  useEffect(() => {
+    if (!open || !request) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        onDecide("allow-once");
+      } else if (e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        onDecide("deny-once");
+      } else if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        onDecide("allow-once");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, request, onDecide]);
+
+  if (!request) return null;
+
+  const title =
+    request.category === "agent-action" ? "작업 승인 필요" : "도구 승인 필요";
+  const argsStr = JSON.stringify(request.args, null, 2) ?? "";
+  const argsTruncated = argsStr.length > 500 && !expanded;
+  const argsDisplay = argsTruncated ? argsStr.slice(0, 500) + "\n…" : argsStr;
+  const sourceBadge = request.source ? SOURCE_BADGE[request.source] ?? request.source : "알 수 없음";
+
+  return (
+    <Dialog open={open} onOpenChange={() => {}}>
+      <DialogContent
+        className="max-w-lg"
+        onInteractOutside={(e) => {
+          if (request.requireExplicit) {
+            e.preventDefault();
+          } else {
+            void onDecide("deny-once");
+          }
+        }}
+        onEscapeKeyDown={(e) => {
+          if (request.requireExplicit) {
+            e.preventDefault();
+          } else {
+            void onDecide("deny-once");
+          }
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
+            AI 에이전트가 아래 도구를 실행하려 합니다. 허용하시겠습니까?
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-2">
+          {/* 도구 이름 + 소스 배지 */}
+          <div className="flex items-center gap-2">
+            <code className="rounded bg-muted px-2 py-1 text-sm font-mono">
+              {request.toolName}
+            </code>
+            <Badge variant="outline" className="text-[11px]">{sourceBadge}</Badge>
+          </div>
+
+          {/* 사유 */}
+          <div>
+            <p className="mb-1 text-xs font-medium text-muted-foreground">승인 사유</p>
+            <p className="text-sm">{request.reason}</p>
+          </div>
+
+          {/* 인자 미리보기 */}
+          <div>
+            <p className="mb-1 text-xs font-medium text-muted-foreground">인자</p>
+            <pre className="max-h-40 overflow-auto rounded border bg-muted/50 p-2 text-[11px]">
+              {argsDisplay}
+            </pre>
+            {argsStr.length > 500 && (
+              <button
+                className="mt-1 text-[11px] text-primary underline"
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? "접기" : "모두 보기"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="flex-col gap-2 sm:flex-row">
+          <Button
+            size="sm"
+            variant="default"
+            onClick={() => onDecide("allow-once")}
+            title="단축키: A 또는 Enter"
+          >
+            한 번만 허용
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onDecide("allow-always", request.toolName)}
+          >
+            항상 허용
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => onDecide("deny-once")}
+            title="단축키: D"
+          >
+            거부
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => onDecide("deny-always", request.toolName)}
+          >
+            항상 거부
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -305,6 +791,7 @@ function App() {
   const [commandQuery, setCommandQuery] = useState("");
   const [working, setWorking] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
@@ -407,6 +894,28 @@ function App() {
   }, []);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
+
+  // ─── Approval Gate 구독 ───────────────────────
+  useEffect(() => {
+    if (!window.lvis?.approval) return;
+    const unsub = window.lvis.approval.onRequest((req) => {
+      setApprovalRequest(req);
+    });
+    return unsub;
+  }, []);
+
+  const handleApprovalDecide = useCallback(async (choice: ApprovalChoice, pattern?: string) => {
+    if (!approvalRequest) return;
+    const decision: ApprovalDecision = {
+      requestId: approvalRequest.id,
+      choice,
+      rememberPattern: pattern,
+    };
+    setApprovalRequest(null);
+    if (window.lvis?.approval) {
+      await window.lvis.approval.respond(decision);
+    }
+  }, [approvalRequest]);
 
   const commandActions = useMemo(() => [
     { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
@@ -540,6 +1049,11 @@ function App() {
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => void checkApiKey()} />
+      <ToolApprovalDialog
+        open={approvalRequest !== null}
+        request={approvalRequest}
+        onDecide={(choice, pattern) => void handleApprovalDecide(choice, pattern)}
+      />
       <Dialog open={!!installTarget} onOpenChange={(o) => !o && setInstallTarget(null)}><DialogContent><DialogHeader><DialogTitle>플러그인 설치</DialogTitle><DialogDescription>{installTarget ? `'${installTarget.name}' 설치?` : ""}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setInstallTarget(null)}>취소</Button><Button onClick={async () => { if (!installTarget) return; const id = installTarget.id; setInstallTarget(null); await installPlugin(id); }} disabled={working}>설치</Button></DialogFooter></DialogContent></Dialog>
       <Dialog open={commandOpen} onOpenChange={setCommandOpen}><DialogContent><DialogHeader><DialogTitle>Command</DialogTitle><DialogDescription>빠른 실행</DialogDescription></DialogHeader><Command><CommandInput placeholder="검색..." value={commandQuery} onValueChange={setCommandQuery} /><CommandList><CommandEmpty>결과 없음</CommandEmpty><CommandGroup heading="Actions">{commandActions.filter((a) => !commandQuery || a.label.toLowerCase().includes(commandQuery.toLowerCase())).map((a) => <CommandItem key={a.id} onSelect={() => { setCommandOpen(false); setCommandQuery(""); void a.run(); }}><Search className="mr-2 h-4 w-4" />{a.label}</CommandItem>)}</CommandGroup></CommandList></Command></DialogContent></Dialog>
       <Dialog open={!!uninstallTarget} onOpenChange={(o) => !o && setUninstallTarget(null)}><DialogContent><DialogHeader><DialogTitle>플러그인 제거</DialogTitle><DialogDescription>{uninstallTarget ? `'${uninstallTarget.name}' 제거?` : ""}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setUninstallTarget(null)}>취소</Button><Button variant="destructive" onClick={async () => { if (!uninstallTarget) return; const id = uninstallTarget.id; setUninstallTarget(null); await uninstallPlugin(id); }} disabled={working}>제거</Button></DialogFooter></DialogContent></Dialog>
