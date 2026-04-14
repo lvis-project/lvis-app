@@ -737,7 +737,7 @@ RESUME_DELAY ──── 90s elapsed ──→ RUNNING
 ```mermaid
 flowchart TB
     subgraph "① 입력 수신"
-        USER_INPUT["👤 사용자 메시지<br/>(키보드 입력 / 음성 STT)"]
+        USER_INPUT["👤 사용자 메시지<br/>(키보드 입력)"]
         CREATE_MSG["createUserMessage()<br/>Anthropic 메시지 포맷 래핑"]
     end
 
@@ -802,7 +802,7 @@ flowchart TB
 
 | 단계 | 함수 / 컴포넌트 | 설명 | 비고 |
 | --- | --- | --- | --- |
-| **1. 입력 캡처** | `InputCapture` (Electron IPC) | 키보드·음성·파일 드롭 등 다양한 입력 소스를 표준 메시지 객체로 변환 | 음성: STT 파이프라인 → 텍스트 |
+| **1. 입력 캡처** | `InputCapture` (Electron IPC) | 키보드 및 파일 드롭 입력 소스를 표준 메시지 객체로 변환 | 음성 입력은 제품 스코프 밖 (meeting plugin STT 는 회의 전사 전용) |
 | **2. 메시지 생성** | `createUserMessage()` | 입력 텍스트를 `{ role: "user", content: [...] }` 포맷으로 래핑. 파일 첨부 시 multipart content block 생성 | claw-code 패턴 차용 |
 | **3. 히스토리 추가** | `ConversationHistory.append()` | in-memory 메시지 배열 끝에 추가. 토큰 카운트 갱신 | 영속화는 세션 종료 시 |
 | **4. 시스템 프롬프트 조립** | `SystemPromptBuilder.build()` | 10+ 소스 결합: LVIS.md, notes/, 도구 스키마, 사용자 프로필, 조직 컨텍스트, OS 정보, 활성 플러그인 | 매 턴마다 재조립 |
@@ -988,7 +988,7 @@ sequenceDiagram
 
 | ccleaks.com Query Loop 단계 | LVIS 대응 구현 | LVIS 차별점 |
 | --- | --- | --- |
-| `createUserMessage()` | `InputCapture` + `createUserMessage()` | + 음성 STT · 파일 드롭 입력 지원 |
+| `createUserMessage()` | `InputCapture` + `createUserMessage()` | + 파일 드롭 입력 지원 |
 | Append to conversation history | `ConversationHistory.append()` | + 토큰 카운트 실시간 갱신 |
 | Build system prompt | `SystemPromptBuilder.build()` | + LVIS.md · notes/ · 조직 컨텍스트 · Plugin 스키마 |
 | Stream to Claude API | `LgenieSession.stream()` (SSE) | Lgenie 사내 LLM 엔드포인트 |
