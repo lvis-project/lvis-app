@@ -26,6 +26,25 @@ if (process.platform === "linux" && process.env.WSL_DISTRO_NAME) {
 }
 // app.disableHardwareAcceleration();
 
+// ⚠️⚠️⚠️ DEV-ONLY: corporate TLS interception 우회 (Phase 1.5 임시 — TODO §17)
+//
+// LG 사내망은 outbound HTTPS를 self-signed CA로 MITM 인터셉트한다. Node fetch는
+// OS keystore를 읽지 않으므로 `SELF_SIGNED_CERT_IN_CHAIN` 으로 실패 (meeting STT,
+// chat LLM, embedding 모두 동일). dev 단계 한정으로 검증을 끈다.
+//
+// **production build (app.isPackaged === true)에는 자동 미적용** —
+// packaged 앱은 그대로 cert 검증 실패할 것이므로, Phase 2 진입 전에 반드시
+// `mac-ca` / `win-ca` 등으로 OS keystore 런타임 추출 (Option B)로 교체.
+// 자세한 내용: TODO.md §17.
+if (!app.isPackaged) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  app.commandLine.appendSwitch("ignore-certificate-errors");
+  console.warn("[lvis] ⚠️ DEV-ONLY: corporate TLS interception 우회 활성화");
+  console.warn("[lvis]    - NODE_TLS_REJECT_UNAUTHORIZED=0 (Node fetch / main process)");
+  console.warn("[lvis]    - --ignore-certificate-errors (Chromium / renderer)");
+  console.warn("[lvis]    - 정식 대응: TODO.md §17 (OS keystore 통합 — Phase 2)");
+}
+
 let mainWindow: BrowserWindow | null = null;
 let services: AppServices | null = null;
 
