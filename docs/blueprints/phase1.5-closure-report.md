@@ -181,6 +181,36 @@ IPC 핸들러에서 actor 파라미터가 누락되더라도 최소 권한(user)
 
 정식 대응: **Option B (OS keystore 런타임 추출, `mac-ca`/`win-ca`)** 권장. 상세 작업 + 체크리스트 + 보안 게이트는 `TODO.md §17` 참조. main.ts:30-44 에 inline TODO 마커 존재.
 
+### 8.5 Integration Fix Round — Physical Cold Boot (2026-04-14)
+
+F-round(§4) 완료 후 사용자 실 Electron 실행 점검 중 **8개 layer에 걸친 integration 결함**이 누적 발견. root cause는 **Phase 1이 mock 88건 + mocked e2e-phase1.ts로만 검증되고 physical cold boot이 한 번도 완주되지 않았기 때문**. mock은 boundary 양쪽이 동일 가정을 공유한 채 격리 검증되므로 boundary mismatch 감지 불가.
+
+**Layer별 fix 요약** (`TODO.md §18` 참조):
+
+1. **IPC handler race** (main.ts `ab5aa80`) — `createWindow()`→`loadFile`가 `bootstrap()`→`registerIpcHandlers()` 이전. splash data: URL로 해소.
+2. **Corporate TLS interception** (main.ts `5414840`) — `!app.isPackaged` 가드로 dev-only bypass.
+3. **uv binary dev/prod path** (python-runtime.ts `be4041d`) — `process.defaultApp ‖ !process.resourcesPath` 분기.
+4. **uv pip sync `--frozen` 제거** (`be4041d`) — uv 0.7.x 호환.
+5. **Lock 파일 transitive deps + pin 충돌** (`a2c852e`) — `uv pip compile` 재생성 (271 lines, pins 해소).
+6. **pageindex plugin id mismatch** (boot.ts `be4041d`) — `pageindex` / `lvis-plugin-pageindex` 양쪽 키 configOverrides 주입.
+7. **kiwipiepy 0.23 모델 호환** (korean_tokenizer.py `a2c852e`) — `OSError` fallback to default.
+8. **workerClient endpoint drift** (pageIndexPlugin.ts `a2c852e`) — 5 HTTP 메서드를 `workerClient` delegation thin wrapper로 통합. `indexDocument /index` (404) → `reindex`로 위임. **single source of truth 확립**.
+
+**Bonus fix**:
+- **422 validator**: allowedRoots host 주입 + persistedFolders 사전 로드
+- **500 health timeout**: 3-layer lazy fix (eager dimensions 제거 + embed_corpus try/except + SearchService None)
+- **HF SSL fail**: spawn env `PYTHONHTTPSVERIFY=0 + HF_HUB_DISABLE_TELEMETRY=1` dev-only
+
+**Architectural 결정 — RAG 외부 API 의존성 제거** (`a2c852e`):
+사용자 질문 "RAG에 API가 필요한가?" — **정답: 필요 없음**. Phase 2 계획이던 local embedding을 Phase 1.5로 앞당김. `paraphrase-multilingual-MiniLM-L12-v2` (384-dim, 117 MB, 한국어 + 50개) 기본값. `create_embedding_client(provider=...)` factory로 local/openai 분기. Graceful BM25-only degrade로 HF 차단 환경에서도 plugin이 boot 성공.
+
+**Physical 검증 결과**:
+- Before: `boot: ready (15 tools, 2 plugins)` — pageindex load fail
+- After: **`boot: ready (21 tools, 3 plugins)`** — pageindex 정상 등록, fixtures + Downloads PDF 인덱싱 (BM25 + FTS5 + kiwi)
+- vitest 110/110, TSC 0 errors, 회귀 0
+
+**한계 (Phase 2 이월)**: 사내망 HF 다운로드 차단으로 vector layer 비활성 (BM25-only). 사외망 1회 cold boot으로 모델 영구 cache → 이후 사내망에서도 vector 활성. Phase 2에서 HF mirror 또는 pre-baked tarball 방식 IT 협의 필요.
+
 ---
 
 ## 9. References
