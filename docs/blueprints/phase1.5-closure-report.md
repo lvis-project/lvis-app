@@ -176,6 +176,11 @@ IPC 핸들러에서 actor 파라미터가 누락되더라도 최소 권한(user)
 ### 8.3 Physical E2E cold boot 공백
 `.ready` sentinel이 stale (이전 세션 mock 테스트의 잔재) — 실제 venv 바이너리는 부재. S1 cold boot physical run을 한 번 완주하면 S3/S4까지 자동 해결. 우회: `rm -rf ~/.lvis/runtime && npx tsx lvis-app/scripts/e2e-phase1.ts S1`.
 
+### 8.4 Corporate TLS Interception (added 2026-04-14)
+사용자 실행 점검 중 meeting STT가 `SELF_SIGNED_CERT_IN_CHAIN`으로 실패. LG 사내망의 self-signed CA MITM이 원인. **dev bypass(D+E)를 `main.ts` 의 `if (!app.isPackaged)` 가드로 임시 적용** — `NODE_TLS_REJECT_UNAUTHORIZED=0` + Chromium `--ignore-certificate-errors`. **packaged build에는 자동 미적용**이므로 production 진입 전 정식 구현 필수.
+
+정식 대응: **Option B (OS keystore 런타임 추출, `mac-ca`/`win-ca`)** 권장. 상세 작업 + 체크리스트 + 보안 게이트는 `TODO.md §17` 참조. main.ts:30-44 에 inline TODO 마커 존재.
+
 ---
 
 ## 9. References
