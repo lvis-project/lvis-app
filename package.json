@@ -6,11 +6,13 @@
   "description": "Test Electron host app for LVIS plugins.",
   "main": "dist/src/main.js",
   "scripts": {
-    "prepare:plugins": "npm run --prefix ../lvis-plugin-pageindex build && npm run --prefix ../lvis-plugin-meeting build",
+    "postinstall": "node scripts/fetch-uv.mjs",
+    "prepare:plugins": "npm run --prefix ../lvis-plugin-pageindex build && npm run --prefix ../lvis-plugin-meeting build && npm run --prefix ../lvis-plugin-email build",
     "build:main": "tsc -p tsconfig.json",
     "build:renderer": "esbuild src/renderer.tsx --bundle --platform=browser --format=esm --outfile=dist/src/renderer.js",
     "build:styles": "tailwindcss -i src/styles.css -o dist/src/styles.css --minify",
-    "build": "npm run build:main && npm run build:renderer && npm run build:styles && mkdir -p dist/src && cp src/index.html dist/src/index.html && cp src/preload.cjs dist/src/preload.cjs",
+    "build:preload": "esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/src/preload.js",
+    "build": "npm run build:main && npm run build:renderer && npm run build:styles && npm run build:preload && mkdir -p dist/src && cp src/index.html dist/src/index.html && node scripts/check-no-tls-bypass.mjs",
     "typecheck": "tsc --noEmit",
     "start": "npm run prepare:plugins && npm run build && electron dist/src/main.js",
     "plugins:list": "tsx scripts/plugins-cli.ts list",
@@ -19,12 +21,16 @@
     "plugins:remove": "tsx scripts/plugins-cli.ts remove",
     "plugins:enable": "tsx scripts/plugins-cli.ts enable",
     "plugins:disable": "tsx scripts/plugins-cli.ts disable",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:electron-smoke": "electron --version",
     "test:plugin-flow": "tsx scripts/test-pageindex-flow.ts",
     "test:meeting-flow": "npm run prepare:plugins && tsx scripts/test-meeting-flow.ts",
     "test:main-flow": "npm run prepare:plugins && tsx scripts/test-main-flow.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.88.0",
+    "@google/generative-ai": "^0.24.1",
     "@lvis/plugin-email": "file:../lvis-plugin-email",
     "@lvis/plugin-meeting": "file:../lvis-plugin-meeting",
     "@lvis/plugin-pageindex": "file:../lvis-plugin-pageindex",
@@ -36,16 +42,22 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@tailwindcss/typography": "^0.5.19",
     "better-sqlite3": "^12.8.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "lucide-react": "^1.7.0",
+    "openai": "^6.34.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "tailwind-merge": "^3.5.0"
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.5.0",
+    "undici": "^8.1.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.14",
@@ -56,6 +68,23 @@
     "postcss": "^8.5.9",
     "tailwindcss": "^3.4.13",
     "tsx": "^4.19.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.0"
+  },
+  "build": {
+    "extraResources": [
+      {
+        "from": "resources/uv/${os}${arch}",
+        "to": "uv"
+      },
+      {
+        "from": "../lvis-plugin-pageindex/python-requirements.lock",
+        "to": "python-requirements.lock"
+      }
+    ],
+    "mac": {
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    }
   }
 }
