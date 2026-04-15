@@ -9,7 +9,7 @@
  */
 import { hostname, platform, homedir, userInfo } from "node:os";
 import type { MemoryManager } from "../memory/memory-manager.js";
-import type { ToolRegistry } from "../core/tool-registry.js";
+import type { ToolRegistry } from "../tools/registry.js";
 
 // ─── Types ──────────────────────────────────────────
 

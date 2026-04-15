@@ -13,7 +13,7 @@
  * 6. Lgenie Fallback → LLM 직접 대화
  */
 import type { InputClassification } from "./keyword-engine.js";
-import type { ToolRegistry } from "./tool-registry.js";
+import type { ToolRegistry } from "../tools/registry.js";
 
 // ─── Types ──────────────────────────────────────────
 

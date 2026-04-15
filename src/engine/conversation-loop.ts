@@ -16,7 +16,7 @@ import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessag
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
-import type { ToolRegistry } from "../core/tool-registry.js";
+import type { ToolRegistry } from "../tools/registry.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { AuditLogger } from "../audit/audit-logger.js";
@@ -308,7 +308,10 @@ ${briefingData}
     const toolSchemas: ToolSchema[] = this.deps.toolRegistry.getToolSchemas().map((s) => ({
       name: s.name,
       description: s.description,
-      inputSchema: s.input_schema,
+      // Tool.toJsonSchema() returns `unknown` (may be Zod-generated or raw
+      // plugin/MCP schema); LLM providers all expect the flat
+      // `{type: "object", properties, required?}` shape.
+      inputSchema: s.input_schema as ToolSchema["inputSchema"],
     }));
     const allToolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }> = [];
     let turnUsage: TokenUsage | undefined;
