@@ -17,10 +17,26 @@ export interface AppSettings {
   llm: LLMSettings;
   chat: ChatSettings;
   webSearch: WebSearchSettings;
+  marketplace: MarketplaceSettings;
 }
 
 export interface WebSearchSettings {
   provider: "duckduckgo" | "tavily" | "serper" | "google";
+}
+
+/**
+ * §9.5 M4: plugin marketplace backend selection.
+ *
+ * - `"mock"`         — default; reads the bundled `plugins/marketplace.json`.
+ * - `"real-cloud"`   — talks to lvis-marketplace REST server at
+ *                      `realCloudBaseUrl`. Bearer auth via
+ *                      `settings.marketplace.apiKey` secret.
+ */
+export interface MarketplaceSettings {
+  backend: "mock" | "real-cloud";
+  realCloudBaseUrl?: string;
+  /** Local dev/test only: bypass SSRF guard for loopback servers. */
+  realCloudAllowPrivateNetwork?: boolean;
 }
 
 export interface SettingsServiceOptions {
@@ -38,6 +54,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   webSearch: {
     provider: "duckduckgo",
+  },
+  marketplace: {
+    backend: "mock",
   },
 };
 
@@ -103,6 +122,9 @@ export class SettingsService {
     if (partial.llm) this.settings.llm = { ...this.settings.llm, ...partial.llm };
     if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
     if (partial.webSearch) this.settings.webSearch = { ...this.settings.webSearch, ...partial.webSearch };
+    if (partial.marketplace) {
+      this.settings.marketplace = { ...this.settings.marketplace, ...partial.marketplace };
+    }
     this.saveSettings();
     return this.getAll();
   }
@@ -163,6 +185,7 @@ export class SettingsService {
         llm: { ...DEFAULT_SETTINGS.llm, ...parsed.llm },
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
+        marketplace: { ...DEFAULT_SETTINGS.marketplace, ...parsed.marketplace },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);

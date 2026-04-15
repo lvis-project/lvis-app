@@ -1,0 +1,211 @@
+/**
+ * Real cloud marketplace fetcher — §9.5 M4
+ *
+ * Talks to the lvis-marketplace REST server. Read-only client: never
+ * publishes, never mutates server state.
+ *
+ * Endpoints (server repo: lvis-marketplace):
+ *   - GET /api/v1/health
+ *   - GET /api/v1/catalog
+ *   - GET /api/v1/plugins/{slug}
+ *   - GET /api/v1/plugins/{slug}/versions/{version}/download
+ *
+ * All public-network calls go through {@link fetchPublicHttpResponse}
+ * to inherit SSRF defense + timeouts. Private-network mode is available
+ * for local development/testing against a loopback server; it bypasses
+ * the NetworkGuard and must be opted in explicitly via
+ * `allowPrivateNetwork: true`.
+ */
+import { createHash } from "node:crypto";
+import {
+  fetchPublicHttpResponse,
+  NetworkGuardError,
+} from "../core/network-guard.js";
+import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
+import type { PluginMarketplaceItem, PluginUiExtension } from "./types.js";
+
+export interface RealCloudMarketplaceConfig {
+  baseUrl: string;
+  apiKey?: string;
+  timeoutMs?: number;
+  /**
+   * When true, bypasses {@link fetchPublicHttpResponse} (SSRF guard).
+   * Intended for local dev/test only — do not enable in production.
+   */
+  allowPrivateNetwork?: boolean;
+}
+
+/** Loose shape for a catalog row returned by the server. */
+interface ServerCatalogRow {
+  id?: string;
+  slug?: string;
+  name?: string;
+  display_name?: string;
+  displayName?: string;
+  description?: string;
+  package_spec?: string;
+  packageSpec?: string;
+  package_name?: string;
+  packageName?: string;
+  methods?: unknown;
+  default_config?: Record<string, unknown>;
+  defaultConfig?: Record<string, unknown>;
+  ui?: unknown;
+  deployment?: string;
+  publisher?: string;
+  latest_stable_version?: string;
+  latestStableVersion?: string;
+}
+
+export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
+  constructor(private readonly config: RealCloudMarketplaceConfig) {}
+
+  async listPlugins(): Promise<PluginMarketplaceItem[]> {
+    const res = await this.request("GET", "/api/v1/catalog");
+    const data = (await res.json()) as unknown;
+    const rows = this.extractRows(data);
+    return rows.map((row) => this.mapItem(row));
+  }
+
+  async getPluginDetail(slug: string): Promise<PluginMarketplaceItem | null> {
+    try {
+      const res = await this.request(
+        "GET",
+        `/api/v1/plugins/${encodeURIComponent(slug)}`,
+      );
+      const data = (await res.json()) as unknown;
+      return this.mapItem(this.asRow(data));
+    } catch (err) {
+      if (err instanceof Error && /\b404\b/.test(err.message)) return null;
+      throw err;
+    }
+  }
+
+  async downloadVersion(
+    slug: string,
+    version: string,
+  ): Promise<{ zipBuffer: Buffer; sha256: string }> {
+    const res = await this.request(
+      "GET",
+      `/api/v1/plugins/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/download`,
+    );
+    const arrayBuffer = await res.arrayBuffer();
+    const zipBuffer = Buffer.from(arrayBuffer);
+    const sha256 = createHash("sha256").update(zipBuffer).digest("hex");
+    return { zipBuffer, sha256 };
+  }
+
+  // ─── Internals ────────────────────────────────────────────────
+
+  private async request(method: string, path: string): Promise<Response> {
+    const base = this.config.baseUrl.replace(/\/$/, "");
+    const url = `${base}${path}`;
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (this.config.apiKey) {
+      headers["authorization"] = `Bearer ${this.config.apiKey}`;
+    }
+    const timeoutMs = this.config.timeoutMs ?? 15_000;
+
+    if (this.config.allowPrivateNetwork) {
+      // Local dev/test path — do NOT use in production. Loopback servers
+      // are blocked by NetworkGuard, so we bypass it here.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, {
+          method,
+          headers,
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          throw new Error(`marketplace ${res.status}: ${res.statusText}`);
+        }
+        return res;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    try {
+      const res = await fetchPublicHttpResponse(url, {
+        method,
+        headers,
+        timeoutMs,
+      });
+      if (!res.ok) {
+        throw new Error(`marketplace ${res.status}: ${res.statusText}`);
+      }
+      return res;
+    } catch (err) {
+      if (err instanceof NetworkGuardError) {
+        throw new Error(`network guard: ${err.message}`);
+      }
+      throw err;
+    }
+  }
+
+  private extractRows(data: unknown): ServerCatalogRow[] {
+    if (Array.isArray(data)) return data as ServerCatalogRow[];
+    if (data && typeof data === "object") {
+      const obj = data as Record<string, unknown>;
+      if (Array.isArray(obj.plugins)) return obj.plugins as ServerCatalogRow[];
+      if (Array.isArray(obj.items)) return obj.items as ServerCatalogRow[];
+    }
+    return [];
+  }
+
+  private asRow(data: unknown): ServerCatalogRow {
+    if (data && typeof data === "object") return data as ServerCatalogRow;
+    return {};
+  }
+
+  private mapItem(row: ServerCatalogRow): PluginMarketplaceItem {
+    const id = row.id ?? row.slug;
+    const name = row.name ?? row.display_name ?? row.displayName ?? id;
+    if (!id || !name) {
+      throw new Error("marketplace row missing id/name");
+    }
+
+    const packageName = row.package_name ?? row.packageName;
+    if (!packageName) {
+      throw new Error(`marketplace row "${id}" missing packageName`);
+    }
+
+    // packageSpec: prefer explicit; otherwise build from packageName + version
+    const version =
+      row.latest_stable_version ?? row.latestStableVersion ?? undefined;
+    const packageSpec =
+      row.package_spec ??
+      row.packageSpec ??
+      (version ? `${packageName}@${version}` : packageName);
+
+    const methods = Array.isArray(row.methods)
+      ? (row.methods as unknown[]).filter((m): m is string => typeof m === "string")
+      : [];
+
+    const ui = Array.isArray(row.ui)
+      ? (row.ui as PluginUiExtension[])
+      : undefined;
+
+    const item: PluginMarketplaceItem = {
+      id,
+      name,
+      description: row.description ?? "",
+      packageSpec,
+      packageName,
+      methods,
+    };
+
+    const defaultConfig = row.default_config ?? row.defaultConfig;
+    if (defaultConfig && typeof defaultConfig === "object") {
+      item.defaultConfig = defaultConfig;
+    }
+    if (ui) item.ui = ui;
+    if (row.deployment === "managed" || row.deployment === "user") {
+      item.deployment = row.deployment;
+    }
+    if (row.publisher) item.publisher = row.publisher;
+
+    return item;
+  }
+}
