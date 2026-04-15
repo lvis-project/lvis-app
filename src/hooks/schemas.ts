@@ -16,7 +16,7 @@ export const CommandHookDefinitionSchema = z.object({
 export const HttpHookDefinitionSchema = z.object({
   type: z.literal("http"),
   url: z.string().url(),
-  headers: z.record(z.string()).default({}),
+  headers: z.record(z.string(), z.string()).default({}),
   timeoutSeconds: z.number().int().min(1).max(600).default(30),
   matcher: z.string().optional(),
   blockOnFailure: z.boolean().default(false),
