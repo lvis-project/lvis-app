@@ -23,13 +23,22 @@ import { AuditLogger } from "../audit/audit-logger.js";
 import type { ProactiveEngine } from "../core/proactive-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
+import type { ToolCallMeta } from "../tools/executor.js";
 
 // ─── Types ──────────────────────────────────────────
 
 export interface TurnCallbacks {
+  onReasoningDelta?: (text: string) => void;
   onTextDelta?: (text: string) => void;
-  onToolStart?: (name: string, input: Record<string, unknown>) => void;
-  onToolEnd?: (name: string, result: string, isError: boolean) => void;
+  onToolStart?: (name: string, input: Record<string, unknown>, meta: ToolCallMeta) => void;
+  onToolEnd?: (name: string, result: string, isError: boolean, meta: ToolCallMeta) => void;
+  onAssistantRound?: (round: {
+    roundIndex: number;
+    text: string;
+    thought: string;
+    stopReason: "end_turn" | "tool_use";
+    hasToolCalls: boolean;
+  }) => void;
   onTurnComplete?: (fullText: string) => void;
   onError?: (error: string) => void;
 }
@@ -317,10 +326,12 @@ ${briefingData}
     let turnUsage: TokenUsage | undefined;
     // turn당 knowledge 도구 호출 횟수 카운터 (depth ≤ 3 hard cap)
     let knowledgeCallCount = 0;
+    let roundIndex = 0;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       // §4.5.3: 벤더 추상화 스트리밍
       let textContent = "";
+      let thoughtContent = "";
       const pendingToolCalls: ToolCallBlock[] = [];
       let stopReason: "end_turn" | "tool_use" = "end_turn";
 
@@ -332,6 +343,10 @@ ${briefingData}
         maxTokens: 4096,
       })) {
         switch (event.type) {
+          case "reasoning_delta":
+            thoughtContent += event.text;
+            callbacks?.onReasoningDelta?.(event.text);
+            break;
           case "text_delta":
             textContent += event.text;
             callbacks?.onTextDelta?.(event.text);
@@ -358,8 +373,17 @@ ${briefingData}
       this.history.append({
         role: "assistant",
         content: textContent,
+        ...(thoughtContent && { thought: thoughtContent }),
         ...(pendingToolCalls.length > 0 && { toolCalls: pendingToolCalls }),
       });
+      callbacks?.onAssistantRound?.({
+        roundIndex,
+        text: textContent,
+        thought: thoughtContent,
+        stopReason,
+        hasToolCalls: pendingToolCalls.length > 0,
+      });
+      roundIndex += 1;
 
       // tool_use 없으면 루프 종료
       if (pendingToolCalls.length === 0 || stopReason === "end_turn") {
