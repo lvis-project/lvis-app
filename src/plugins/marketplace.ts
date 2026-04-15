@@ -3,7 +3,10 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
+import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PluginMarketplaceItem, PluginUiExtension } from "./types.js";
+
+export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 
 type MarketplaceCatalog = {
   version: number;
@@ -17,25 +20,75 @@ export interface MarketplaceListItem extends PluginMarketplaceItem {
   isManaged: boolean;
 }
 
+/**
+ * Default fetcher that reads the bundled `plugins/marketplace.json`
+ * catalog file. Preserves the pre-M4 behavior — install/uninstall and
+ * existing tests continue to work unchanged.
+ *
+ * Note: download/detail operations are not supported by this fetcher
+ * because the local catalog does not carry version binaries; callers
+ * that need those must use {@link RealCloudMarketplaceFetcher}.
+ */
+export class MockMarketplaceFetcher implements MarketplaceFetcher {
+  constructor(private readonly marketplacePath: string) {}
+
+  async listPlugins(): Promise<PluginMarketplaceItem[]> {
+    const catalog = await this.readCatalog();
+    return catalog.plugins;
+  }
+
+  async getPluginDetail(slug: string): Promise<PluginMarketplaceItem | null> {
+    const catalog = await this.readCatalog();
+    return catalog.plugins.find((p) => p.id === slug) ?? null;
+  }
+
+  async downloadVersion(
+    _slug: string,
+    _version: string,
+  ): Promise<{ zipBuffer: Buffer; sha256: string }> {
+    throw new Error(
+      "MockMarketplaceFetcher does not support downloadVersion(); use RealCloudMarketplaceFetcher",
+    );
+  }
+
+  async readCatalog(): Promise<MarketplaceCatalog> {
+    const raw = await readFile(this.marketplacePath, "utf-8");
+    const parsed = JSON.parse(raw) as MarketplaceCatalog;
+    if (!Array.isArray(parsed.plugins)) {
+      throw new Error(`Invalid marketplace catalog: ${this.marketplacePath}`);
+    }
+    return parsed;
+  }
+}
+
 export class PluginMarketplaceService {
   private readonly appRoot: string;
   private readonly registryPath: string;
   private readonly marketplacePath: string;
   private readonly installedDir: string;
   private readonly deploymentGuard?: PluginDeploymentGuard;
+  private readonly fetcher: MarketplaceFetcher;
 
-  constructor(appRoot: string, deploymentGuard?: PluginDeploymentGuard) {
+  constructor(
+    appRoot: string,
+    deploymentGuard?: PluginDeploymentGuard,
+    fetcher?: MarketplaceFetcher,
+  ) {
     this.appRoot = resolve(appRoot);
     this.registryPath = resolve(this.appRoot, "plugins/registry.json");
     this.marketplacePath = resolve(this.appRoot, "plugins/marketplace.json");
     this.installedDir = resolve(this.appRoot, "plugins/installed");
     this.deploymentGuard = deploymentGuard;
+    this.fetcher = fetcher ?? new MockMarketplaceFetcher(this.marketplacePath);
   }
 
   async list(): Promise<MarketplaceListItem[]> {
-    const [catalog, registry] = await Promise.all([this.readCatalog(), readPluginRegistry(this.registryPath)]);
+    const [plugins, registry] = await Promise.all([
+      this.fetcher.listPlugins(),
+      readPluginRegistry(this.registryPath),
+    ]);
     const items: MarketplaceListItem[] = [];
-    for (const plugin of catalog.plugins) {
+    for (const plugin of plugins) {
       const entry = registry.plugins.find((x) => x.id === plugin.id);
       const isManaged = await this.resolveIsManaged(plugin, entry?.manifestPath);
       items.push({
@@ -67,8 +120,8 @@ export class PluginMarketplaceService {
   }
 
   async install(pluginId: string): Promise<{ pluginId: string; installed: true }> {
-    const catalog = await this.readCatalog();
-    const plugin = catalog.plugins.find((x) => x.id === pluginId);
+    const plugins = await this.fetcher.listPlugins();
+    const plugin = plugins.find((x) => x.id === pluginId);
     if (!plugin) {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
     }
@@ -138,15 +191,6 @@ export class PluginMarketplaceService {
     });
   }
 
-  private async readCatalog(): Promise<MarketplaceCatalog> {
-    const raw = await readFile(this.marketplacePath, "utf-8");
-    const parsed = JSON.parse(raw) as MarketplaceCatalog;
-    if (!Array.isArray(parsed.plugins)) {
-      throw new Error(`Invalid marketplace catalog: ${this.marketplacePath}`);
-    }
-    return parsed;
-  }
-
   private async writeInstalledManifest(plugin: PluginMarketplaceItem): Promise<string> {
     const pluginDir = resolve(this.installedDir, plugin.id);
     await mkdir(pluginDir, { recursive: true });
@@ -188,8 +232,8 @@ export class PluginMarketplaceService {
 
 
   private async resolvePackageName(pluginId: string, manifestPath: string): Promise<string | undefined> {
-    const catalog = await this.readCatalog().catch(() => ({ version: 1, plugins: [] as PluginMarketplaceItem[] }));
-    const targetFromCatalog = catalog.plugins.find((x) => x.id === pluginId);
+    const plugins = await this.fetcher.listPlugins().catch(() => [] as PluginMarketplaceItem[]);
+    const targetFromCatalog = plugins.find((x) => x.id === pluginId);
     if (targetFromCatalog?.packageName) {
       return targetFromCatalog.packageName;
     }
@@ -211,9 +255,9 @@ export class PluginMarketplaceService {
   }
 
   private async isPackageUsedByRemainingPlugins(packageName: string, remainingPluginIds: string[]): Promise<boolean> {
-    const catalog = await this.readCatalog().catch(() => ({ version: 1, plugins: [] as PluginMarketplaceItem[] }));
+    const plugins = await this.fetcher.listPlugins().catch(() => [] as PluginMarketplaceItem[]);
     const remaining = new Set(remainingPluginIds);
-    return catalog.plugins.some((plugin) => plugin.packageName === packageName && remaining.has(plugin.id));
+    return plugins.some((plugin) => plugin.packageName === packageName && remaining.has(plugin.id));
   }
 
   private isWithin(basePath: string, targetPath: string): boolean {
