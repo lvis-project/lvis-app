@@ -224,4 +224,84 @@ describe("ApprovalGate", () => {
     expect(result.requestId).toBe("req-send-throw");
     expect(gate.pendingCount).toBe(0);
   });
+
+  // ── S1: Sensitive path hard-block ─────────────────
+
+  it("sensitive path is hard-blocked even with mode=full_auto — dialog never shown", async () => {
+    const wc = makeMockWebContents();
+    // Even a permissive policy cannot unblock a sensitive path
+    const permissive = makePolicy({ requireExplicitApproval: false });
+    const gate = new ApprovalGate(wc as never, permissive);
+    const req = makeRequest({
+      id: "req-sensitive",
+      toolName: "file_read",
+      target: { filePath: "/Users/ken/.ssh/id_rsa" },
+      mode: "full_auto",
+      // Even if tool lies and claims read-only, sensitive block wins
+      isReadOnly: true,
+    });
+
+    const result = await gate.requestAndWait(req);
+
+    expect(result.choice).toBe("deny-once");
+    expect(result.requestId).toBe("req-sensitive");
+    // Dialog must NOT have been shown to the user
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(gate.pendingCount).toBe(0);
+    // The pattern that triggered the block is surfaced to the caller
+    expect(result.rememberPattern).toContain("Sensitive credential path blocked");
+    expect(result.rememberPattern).toContain("**/.ssh/*");
+  });
+
+  // ── S4: isReadOnly short-circuit ──────────────────
+
+  it("isReadOnly=true + mode=default → auto-approve, dialog skipped", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({
+      id: "req-readonly",
+      toolName: "knowledge_search",
+      isReadOnly: true,
+      mode: "default",
+    });
+
+    const result = await gate.requestAndWait(req);
+
+    expect(result.choice).toBe("allow-once");
+    expect(result.requestId).toBe("req-readonly");
+    expect(result.rememberPattern).toBe("read-only auto-approve");
+    // Dialog must NOT have been shown to the user
+    expect(wc.send).not.toHaveBeenCalled();
+    expect(gate.pendingCount).toBe(0);
+  });
+
+  it("isReadOnly=true + mode=plan → still blocked by plan mode (dialog shown)", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({
+      id: "req-readonly-plan",
+      toolName: "knowledge_search",
+      isReadOnly: true,
+      mode: "plan",
+    });
+
+    const promise = gate.requestAndWait(req);
+
+    // Plan mode must NOT short-circuit — dialog must be sent
+    expect(wc.send).toHaveBeenCalledTimes(1);
+    const [channel, payload] = wc.send.mock.calls[0] as [string, ApprovalRequest];
+    expect(channel).toBe("lvis:approval:request");
+    expect(payload.id).toBe("req-readonly-plan");
+    expect(payload.mode).toBe("plan");
+    expect(payload.isReadOnly).toBe(true);
+    expect(gate.pendingCount).toBe(1);
+
+    // Simulate user denying
+    gate.resolve("req-readonly-plan", {
+      requestId: "req-readonly-plan",
+      choice: "deny-once",
+    });
+    const result = await promise;
+    expect(result.choice).toBe("deny-once");
+  });
 });
