@@ -1,11 +1,18 @@
 /**
- * BaseTool + BaseToolRegistry unit tests — Tier S3
+ * BaseTool unit tests — Tier S3
+ *
+ * Registry semantics now flow through the canonical §6.4
+ * {@link ../../core/tool-registry.js ToolRegistry} via the
+ * {@link ../adapter.js baseToolToLegacyDefinition} adapter; the prior
+ * standalone `BaseToolRegistry` was removed in the Phase 3 follow-up
+ * tool-registry unification (see `docs/blueprints/openharness-selective-borrow-plan.md`).
  */
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
+import { ToolRegistry } from "../../core/tool-registry.js";
+import { baseToolToLegacyDefinition } from "../adapter.js";
 import {
   BaseTool,
-  BaseToolRegistry,
   type ToolExecutionContext,
   type ToolResult,
 } from "../base.js";
@@ -35,10 +42,15 @@ class ReadOnlyEchoTool extends EchoTool {
   }
 }
 
+class PluginEchoTool extends EchoTool {
+  override readonly name = "echo_plugin";
+  override readonly source = "plugin" as const;
+}
+
 // ─── BaseTool ─────────────────────────────────────────
 
 describe("BaseTool", () => {
-  it("toApiSchema returns name, description, and input_schema", () => {
+  it("toApiSchema returns name, description, and a flat JSON Schema", () => {
     const tool = new EchoTool();
     const schema = tool.toApiSchema();
 
@@ -46,33 +58,17 @@ describe("BaseTool", () => {
     expect(schema.description).toBe("Echoes the input text back to the caller.");
     expect(schema.input_schema).toBeTypeOf("object");
 
+    // zod v4 native z.toJSONSchema returns a flat object schema (no $ref
+    // wrapping) when called without a name option.
     const inputSchema = schema.input_schema as {
-      type?: string;
-      properties?: Record<string, unknown>;
-      required?: string[];
-      definitions?: Record<string, unknown>;
-      $ref?: string;
+      type: string;
+      properties: Record<string, unknown>;
+      required: string[];
     };
-
-    // zodToJsonSchema with name option wraps schema in definitions + $ref.
-    // Resolve to the actual object schema.
-    const resolved =
-      inputSchema.definitions && inputSchema.$ref
-        ? (inputSchema.definitions[inputSchema.$ref.replace("#/definitions/", "")] as {
-            type: string;
-            properties: Record<string, unknown>;
-            required: string[];
-          })
-        : (inputSchema as {
-            type: string;
-            properties: Record<string, unknown>;
-            required: string[];
-          });
-
-    expect(resolved.type).toBe("object");
-    expect(resolved.properties).toBeDefined();
-    expect(resolved.properties.text).toBeDefined();
-    expect(resolved.required).toContain("text");
+    expect(inputSchema.type).toBe("object");
+    expect(inputSchema.properties).toBeDefined();
+    expect(inputSchema.properties.text).toBeDefined();
+    expect(inputSchema.required).toContain("text");
   });
 
   it("execute returns a ToolResult", async () => {
@@ -94,40 +90,63 @@ describe("BaseTool", () => {
     const tool = new ReadOnlyEchoTool();
     expect(tool.isReadOnly({ text: "x" })).toBe(true);
   });
+
+  it("source defaults to 'builtin'", () => {
+    expect(new EchoTool().source).toBe("builtin");
+  });
+
+  it("subclass can override source to 'plugin'", () => {
+    expect(new PluginEchoTool().source).toBe("plugin");
+  });
 });
 
-// ─── BaseToolRegistry ─────────────────────────────────────
+// ─── ToolRegistry integration via adapter ─────────────
 
-describe("BaseToolRegistry", () => {
-  it("register + get + has + list", () => {
-    const registry = new BaseToolRegistry();
+describe("BaseTool + ToolRegistry adapter integration", () => {
+  it("adapter result registers cleanly into legacy ToolRegistry", () => {
+    const registry = new ToolRegistry();
     const tool = new EchoTool();
 
-    expect(registry.has("echo")).toBe(false);
-    expect(registry.get("echo")).toBeUndefined();
-    expect(registry.list()).toEqual([]);
+    registry.register(baseToolToLegacyDefinition(tool));
 
-    registry.register(tool);
-
-    expect(registry.has("echo")).toBe(true);
-    expect(registry.get("echo")).toBe(tool);
-    expect(registry.list()).toEqual([tool]);
+    expect(registry.size).toBe(1);
+    const found = registry.findByName("echo");
+    expect(found).toBeDefined();
+    expect(found?.name).toBe("echo");
+    expect(found?.source).toBe("builtin");
   });
 
-  it("registering the same tool twice throws", () => {
-    const registry = new BaseToolRegistry();
-    registry.register(new EchoTool());
-    expect(() => registry.register(new EchoTool())).toThrowError(
-      /Tool already registered: echo/,
+  it("explicit source argument overrides BaseTool.source", () => {
+    const registry = new ToolRegistry();
+    registry.register(baseToolToLegacyDefinition(new EchoTool(), "plugin"));
+    expect(registry.findByName("echo")?.source).toBe("plugin");
+  });
+
+  it("BaseTool.source is propagated when no explicit source given", () => {
+    const registry = new ToolRegistry();
+    registry.register(baseToolToLegacyDefinition(new PluginEchoTool()));
+    expect(registry.findByName("echo_plugin")?.source).toBe("plugin");
+  });
+
+  it("extras propagates pluginId / mcpServerId / category", () => {
+    const registry = new ToolRegistry();
+    registry.register(
+      baseToolToLegacyDefinition(new EchoTool(), "plugin", {
+        pluginId: "lvis-plugin-meeting",
+        category: "read",
+      }),
     );
+    const def = registry.findByName("echo");
+    expect(def?.pluginId).toBe("lvis-plugin-meeting");
+    expect(def?.category).toBe("read");
   });
 
-  it("toApiSchema returns one entry per registered tool", () => {
-    const registry = new BaseToolRegistry();
-    registry.register(new EchoTool());
-    registry.register(new ReadOnlyEchoTool());
+  it("getToolSchemas returns one entry per registered BaseTool", () => {
+    const registry = new ToolRegistry();
+    registry.register(baseToolToLegacyDefinition(new EchoTool()));
+    registry.register(baseToolToLegacyDefinition(new ReadOnlyEchoTool()));
 
-    const schemas = registry.toApiSchema();
+    const schemas = registry.getToolSchemas();
     expect(schemas).toHaveLength(2);
     expect(schemas.map((s) => s.name).sort()).toEqual(["echo", "echo_readonly"]);
     for (const entry of schemas) {
