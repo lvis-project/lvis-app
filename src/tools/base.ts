@@ -4,7 +4,6 @@
  * Copyright (c) 2026 HKU Data Intelligence Lab
  */
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 export interface ToolExecutionContext {
   cwd: string;
@@ -32,13 +31,13 @@ export abstract class BaseTool<TInputSchema extends z.ZodTypeAny = z.ZodTypeAny>
   }
 
   toApiSchema(): { name: string; description: string; input_schema: unknown } {
+    // zod v4 ships with native JSON Schema export via z.toJSONSchema().
+    // Replaces the v3-only `zod-to-json-schema` package which was the
+    // source of the pre-existing TSC errors caught by Phase 3 follow-up.
     return {
       name: this.name,
       description: this.description,
-      input_schema: zodToJsonSchema(this.inputSchema, {
-        name: this.name,
-        $refStrategy: "none",
-      }),
+      input_schema: z.toJSONSchema(this.inputSchema),
     };
   }
 }

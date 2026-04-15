@@ -60,13 +60,13 @@ export function baseToolToLegacyDefinition<T extends z.ZodTypeAny>(
  * Derive the legacy `{ type: "object"; properties; required? }` parameters
  * shape directly from a BaseTool's top-level zod object schema.
  *
- * Rationale: {@link BaseTool.toApiSchema} routes through `zod-to-json-schema`
- * which in this project's current library pin produces empty schema bodies.
- * Inspecting the ZodObject shape directly with `instanceof` + `_def.type`
- * keeps W1 resilient to that library mismatch — for BaseTools whose
- * `inputSchema` is a ZodObject (the only shape used by Tier A1 tools
- * today), we walk `.shape`, tag each property with a primitive JSON Schema
- * `type`, and collect required keys using the public `isOptional()` API.
+ * Rationale: legacy `ToolDefinition.parameters` expects a flat
+ * `{type, properties, required}` shape, while `BaseTool.toApiSchema()`
+ * (which uses `z.toJSONSchema()`) returns a richer JSON Schema 2020-12
+ * structure that may include `$ref`/`$defs`. To avoid coupling the legacy
+ * registry to the full JSON Schema dialect, we walk `ZodObject.shape`
+ * directly: tag each property with a primitive JSON Schema `type`, and
+ * collect required keys using the public `isOptional()` API.
  *
  * For non-ZodObject inputSchemas (rare), we fall back to an empty object
  * schema — the tool still executes, and the LLM simply sees a no-arg tool.
