@@ -58,6 +58,15 @@ export interface ConversationLoopDeps {
   bashAstValidator?: import("../main/bash-ast-validator.js").BashAstValidator;
   /** B1: 승인 게이트 — "ask" 결정 시 렌더러 모달로 round-trip */
   approvalGate?: import("../permissions/approval-gate.js").ApprovalGate;
+  /**
+   * Tier A4 (W3): pre-configured {@link HookRunner} — boot owns the lifecycle
+   * so external command/http hooks loaded from `~/.lvis/hooks.json` +
+   * admin-dir `hooks.json` are attached via
+   * {@link HookRunner.setExternalExecutor} BEFORE the loop is constructed.
+   * Defaults to a fresh runner with no hooks when omitted (preserves old
+   * test harnesses that instantiate ConversationLoop directly).
+   */
+  hookRunner?: HookRunner;
 }
 
 const MAX_TOOL_ROUNDS = 10;
@@ -87,7 +96,7 @@ export class ConversationLoop {
     this.history = new ConversationHistory();
     this.toolExecutor = new ToolExecutor(
       deps.toolRegistry,
-      new HookRunner(),
+      deps.hookRunner ?? new HookRunner(),
       deps.permissionManager,
       deps.bashAstValidator,
       deps.approvalGate,
