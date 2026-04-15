@@ -59,6 +59,7 @@ type LvisApi = {
   deleteTask: (id: string) => Promise<void>;
   getTodayTasks: () => Promise<Task[]>;
   getOverdueTasks: () => Promise<Task[]>;
+  getBriefing: () => Promise<string | null>;
   onViewActivate: (h: (k: string) => void) => () => void;
 };
 
@@ -877,6 +878,11 @@ function App() {
   // ─── Effects ──────────────────────────────────
   useEffect(() => {
     void refreshMarketplace(); void refreshViews(); void checkApiKey();
+
+    // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
+    api.getBriefing().then((text) => {
+      if (text) setEntries([{ kind: "assistant", text }]);
+    }).catch(() => {});
     const dv = api.onViewActivate((k) => setActiveView(k));
     const ds = api.onChatStream((ev) => {
       console.log("[lvis:chat:stream]", ev);
