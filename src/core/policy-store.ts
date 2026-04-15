@@ -1,20 +1,48 @@
 /**
- * Policy Store — ~/.lvis/policy.json 비동기 직렬 읽기/쓰기
+ * Policy Store — ~/.lvis/policy.json + admin-dir merge (§C2)
  *
- * managed 플래그로 IT/회사가 설정을 잠글 수 있다.
- * managed: true → savePolicy()가 오류 throw → 사용자 UI에서 변경 불가.
+ * 병합 순서 (나중 값이 우선):
+ *  1. defaults: { version:1, requireExplicitApproval: true, managed: false }
+ *  2. userPath:  ~/.lvis/policy.json
+ *  3. adminPath: 플랫폼별 OS 관리자 위치 (존재 시에만)
  *
- * TODO Phase 2: IT Admin API에서 policy를 push하고 managed를 lock.
+ * admin-dir 파일이 존재하면:
+ *  - admin 값이 user 값을 override.
+ *  - admin의 managed=true → 최종 managed가 항상 true.
+ *  - savePolicy() 호출 시 admin-dir 파일 존재 여부를 먼저 체크하여 throw.
  *
- * async-mutex 패턴: permissions-store.ts §M1 복사 (경로 기반 lock map).
+ * ACL 강제는 하지 않는다 — OS 수준 쓰기 방지는 IT/MDM 담당.
+ * admin-dir 파일의 부재가 기본 상황 (개발자 머신 / 해외망).
+ *
+ * async-mutex 패턴: permissions-store.ts §M1 복사.
+ *
+ * TODO Phase 3: Windows (certutil), Linux (/etc/lvis) admin-dir 검증 강화.
  */
 import { mkdir, open, readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 // ─── 기본 경로 ────────────────────────────────────────
 
-const DEFAULT_POLICY_PATH = resolve(homedir(), ".lvis", "policy.json");
+const DEFAULT_USER_POLICY_PATH = resolve(homedir(), ".lvis", "policy.json");
+
+/**
+ * 플랫폼별 admin-dir policy 경로.
+ * 일반 사용자가 수정할 수 없는 OS 관리자 위치.
+ */
+export function getAdminPolicyPath(): string {
+  switch (process.platform) {
+    case "darwin":
+      return "/Library/Application Support/LVIS/policy.json";
+    case "win32":
+      return join(process.env.ProgramData ?? "C:\\ProgramData", "LVIS", "policy.json");
+    case "linux":
+      return "/etc/lvis/policy.json";
+    default:
+      // 미지원 플랫폼: 존재하지 않는 경로 → 항상 null 반환 (soft skip)
+      return "/nonexistent/lvis/policy.json";
+  }
+}
 
 // ─── 파일 형태 ────────────────────────────────────────
 
@@ -22,9 +50,21 @@ export interface PolicyFile {
   version: 1;
   /** true = 모달 dismiss 차단, false = outside/Escape → deny-once */
   requireExplicitApproval: boolean;
-  /** true = IT 설정, 사용자 UI에서 변경 불가 (savePolicy 시 throw) */
+  /** true = IT 설정, 사용자 UI에서 변경 불가 */
   managed: boolean;
   updatedAt: string;
+}
+
+/**
+ * loadPolicy() 반환 형태 — source tracking 추가.
+ */
+export interface LoadedPolicy extends PolicyFile {
+  /** 어디서 왔는지 추적 */
+  source: "defaults" | "user" | "admin" | "merged";
+  /** admin이 override한 필드 이름 리스트 (merged일 때만 의미 있음) */
+  adminOverrides?: string[];
+  /** admin-dir 경로 (source가 "admin" 또는 "merged"일 때 설정됨) */
+  adminPath?: string;
 }
 
 // ─── lenient default (파일 없을 때) ─────────────────
@@ -49,52 +89,121 @@ async function withPolicyLock<T>(
   const key = resolve(filePath);
   const prev = policyLocks.get(key) ?? Promise.resolve();
   const next = prev.then(() => fn());
-  // 다음 대기자는 이번 턴 완료 여부에 관계없이 체이닝
   policyLocks.set(key, next.then(() => undefined, () => undefined));
   return next;
 }
 
-// ─── Read ────────────────────────────────────────────
+// ─── Read (single file) ───────────────────────────────
 
 async function readPolicyFile(filePath: string): Promise<PolicyFile | null> {
   try {
     const raw = await readFile(filePath, "utf-8");
     const parsed = JSON.parse(raw) as PolicyFile;
-    if (parsed.version !== 1) return null;
+    if (parsed.version !== 1) {
+      // major version 불일치 → fallback (에러 로그만)
+      console.error(`[policy-store] version mismatch in ${filePath}: expected 1, got ${parsed.version} — ignoring`);
+      return null;
+    }
     return parsed;
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
+    // JSON parse error 등 — 에러 로그 + fallback
+    console.error(`[policy-store] failed to read ${filePath}:`, (err as Error).message);
+    return null;
   }
 }
 
 // ─── Public API ──────────────────────────────────────
 
 /**
- * 파일에서 policy를 로드한다.
- * 파일이 없으면 기본값(requireExplicitApproval: true, managed: false)을 반환.
+ * policy를 로드한다. admin-dir 파일이 있으면 user 파일보다 우선 merge.
+ *
+ * 반환값의 `source` 필드:
+ *  - "defaults": 파일 없음 → 기본값
+ *  - "user":     user 파일만 존재
+ *  - "admin":    admin 파일만 존재 (또는 user 파일 없이 admin만)
+ *  - "merged":   둘 다 존재, admin이 user를 override
+ *
+ * @param userPath  사용자 policy 파일 경로 (기본: ~/.lvis/policy.json)
+ * @param adminPath admin policy 파일 경로 (기본: getAdminPolicyPath())
  */
-export async function loadPolicy(filePath = DEFAULT_POLICY_PATH): Promise<PolicyFile> {
-  const existing = await readPolicyFile(filePath);
-  return existing ?? defaultPolicy();
+export async function loadPolicy(
+  userPath = DEFAULT_USER_POLICY_PATH,
+  adminPath = getAdminPolicyPath(),
+): Promise<LoadedPolicy> {
+  const [userFile, adminFile] = await Promise.all([
+    readPolicyFile(userPath),
+    readPolicyFile(adminPath),
+  ]);
+
+  // case 1: 둘 다 없음 → defaults
+  if (!userFile && !adminFile) {
+    return { ...defaultPolicy(), source: "defaults" };
+  }
+
+  // case 2: user만 존재
+  if (userFile && !adminFile) {
+    return { ...userFile, source: "user" };
+  }
+
+  // case 3: admin만 존재 (user 없음)
+  if (!userFile && adminFile) {
+    return { ...adminFile, source: "admin", adminPath };
+  }
+
+  // case 4: 둘 다 존재 → merge (admin wins)
+  const base = { ...defaultPolicy(), ...userFile! };
+  const overrides: string[] = [];
+  const merged = { ...base };
+
+  const adminFields = adminFile!;
+  // requireExplicitApproval
+  if (adminFields.requireExplicitApproval !== undefined &&
+      adminFields.requireExplicitApproval !== base.requireExplicitApproval) {
+    merged.requireExplicitApproval = adminFields.requireExplicitApproval;
+    overrides.push("requireExplicitApproval");
+  }
+  // managed: admin true → always true
+  if (adminFields.managed === true) {
+    merged.managed = true;
+    if (!base.managed) overrides.push("managed");
+  }
+  // updatedAt: use admin's timestamp when merged
+  merged.updatedAt = adminFields.updatedAt;
+
+  return {
+    ...merged,
+    version: 1,
+    source: "merged",
+    adminPath,
+    adminOverrides: overrides,
+  };
 }
 
 /**
  * policy를 디스크에 저장한다.
  *
- * 현재 파일에 managed: true가 박혀 있으면
- * Error("IT 관리 정책은 사용자가 변경할 수 없습니다.") throw.
+ * 차단 조건 (우선순위):
+ *  1. admin-dir 파일이 존재하면 항상 throw ("Policy is managed by IT (admin-dir file exists)")
+ *  2. user 파일의 managed: true → throw ("IT 관리 정책은 사용자가 변경할 수 없습니다.")
  *
- * managed 플래그 자체는 patch로 변경할 수 없다 — IT Admin API 전용 (Phase 2+).
+ * managed 플래그 자체는 patch로 변경 불가 — IT Admin API 전용.
  */
 export async function savePolicy(
   patch: Partial<Omit<PolicyFile, "version" | "managed" | "updatedAt">>,
-  filePath = DEFAULT_POLICY_PATH,
+  userPath = DEFAULT_USER_POLICY_PATH,
+  adminPath = getAdminPolicyPath(),
 ): Promise<PolicyFile> {
-  return withPolicyLock(filePath, async () => {
-    const existing = await readPolicyFile(filePath);
+  return withPolicyLock(userPath, async () => {
+    // admin-dir 우선 체크
+    const adminFile = await readPolicyFile(adminPath);
+    if (adminFile !== null) {
+      throw new Error("Policy is managed by IT (admin-dir file exists)");
+    }
 
-    // managed: true이면 사용자 변경 차단
+    const existing = await readPolicyFile(userPath);
+
+    // user managed: true 체크 (기존 B1 동작 유지)
     if (existing?.managed === true) {
       throw new Error("IT 관리 정책은 사용자가 변경할 수 없습니다.");
     }
@@ -108,9 +217,9 @@ export async function savePolicy(
       updatedAt: new Date().toISOString(),
     };
 
-    await mkdir(dirname(filePath), { recursive: true });
-    // §S4: 0o600 — owner read/write only (world-readable 방지)
-    const fd = await open(filePath, "w", 0o600);
+    await mkdir(dirname(userPath), { recursive: true });
+    // §S4: 0o600 — owner read/write only
+    const fd = await open(userPath, "w", 0o600);
     try {
       await fd.writeFile(`${JSON.stringify(updated, null, 2)}\n`, "utf-8");
     } finally {

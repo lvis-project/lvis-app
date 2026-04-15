@@ -7,9 +7,13 @@
 import { Menu, app, BrowserWindow, type MenuItemConstructorOptions } from "electron";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
+import * as https from "node:https";
+import * as tls from "node:tls";
+import { Agent, setGlobalDispatcher } from "undici";
 import { fileURLToPath } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers } from "./ipc-bridge.js";
+import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -27,24 +31,28 @@ if (process.platform === "linux" && process.env.WSL_DISTRO_NAME) {
 }
 // app.disableHardwareAcceleration();
 
-// ⚠️⚠️⚠️ DEV-ONLY: corporate TLS interception 우회 (Phase 1.5 임시 — TODO §17)
-//
-// LG 사내망은 outbound HTTPS를 self-signed CA로 MITM 인터셉트한다. Node fetch는
-// OS keystore를 읽지 않으므로 `SELF_SIGNED_CERT_IN_CHAIN` 으로 실패 (meeting STT,
-// chat LLM, embedding 모두 동일). dev 단계 한정으로 검증을 끈다.
-//
-// **production build (app.isPackaged === true)에는 자동 미적용** —
-// packaged 앱은 그대로 cert 검증 실패할 것이므로, Phase 2 진입 전에 반드시
-// `mac-ca` / `win-ca` 등으로 OS keystore 런타임 추출 (Option B)로 교체.
-// 자세한 내용: TODO.md §17.
-if (!app.isPackaged) {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-  app.commandLine.appendSwitch("ignore-certificate-errors");
-  console.warn("[lvis] ⚠️ DEV-ONLY: corporate TLS interception 우회 활성화");
-  console.warn("[lvis]    - NODE_TLS_REJECT_UNAUTHORIZED=0 (Node fetch / main process)");
-  console.warn("[lvis]    - --ignore-certificate-errors (Chromium / renderer)");
-  console.warn("[lvis]    - 정식 대응: TODO.md §17 (OS keystore 통합 — Phase 2)");
+// §17 C1: 사내망 Corporate CA 런타임 주입 — corp-ca-loader 사용 (정식 대응 완료).
+// Phase 1.5의 dev-only TLS bypass 완전 제거. Chromium은 OS keystore 자동 신뢰.
+async function injectCorporateCa() {
+  try {
+    const result = await ensureCorporateCa();
+    if (!result.pem) {
+      console.warn("[lvis] corporate CA not found — 해외망 사용 중이거나 MDM 미배포. TLS 검증 기본값 유지.");
+      return;
+    }
+    const ca = [...tls.rootCertificates, result.pem];
+    // 1) undici (Node fetch / global dispatcher)
+    setGlobalDispatcher(new Agent({ connect: { ca } }));
+    // 2) https.globalAgent (legacy https.get / https.request)
+    (https.globalAgent.options as Record<string, unknown>).ca = ca;
+    // 3) tls.setDefaultCACertificates — Node 24 기준 미존재, 향후 확장 포인트
+    console.log(`[lvis] corporate CA injected: source=${result.source} certs=${result.certCount} path=${result.path}`);
+  } catch (e) {
+    // 주입 실패해도 앱은 계속 실행 (해외망에서는 기본 CA로 충분)
+    console.error("[lvis] corporate CA 주입 실패 (non-fatal):", (e as Error).message);
+  }
 }
+await injectCorporateCa();
 
 let mainWindow: BrowserWindow | null = null;
 let services: AppServices | null = null;

@@ -219,6 +219,7 @@ export function registerIpcHandlers(
 
   // ─── Policy (Governance) ──────────────────────
   ipcMain.handle("lvis:policy:get", async () => {
+    // §C2: LoadedPolicy (source, adminOverrides, adminPath 포함) 전체 반환
     return loadPolicy();
   });
   ipcMain.handle("lvis:policy:set", async (_e, patch: Record<string, unknown>) => {
@@ -230,6 +231,7 @@ export function registerIpcHandlers(
       return { ok: false, error: "invalid-patch", message: "'requireExplicitApproval'은 boolean이어야 합니다." };
     }
     try {
+      // §C2: savePolicy(patch, userPath?, adminPath?) — admin-dir 존재 시 throw
       const updated = await savePolicy(patch as Parameters<typeof savePolicy>[0]);
       // 즉시 반영: ApprovalGate에 새 policy 주입
       if (approvalGate) {
