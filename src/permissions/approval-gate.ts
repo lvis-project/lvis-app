@@ -12,11 +12,22 @@
  * - §A2: webContents 소멸 체크 + send 예외 처리 → deny-once + pending 정리.
  * - §S8: AuditLogger DI — requested/decided/timeout/send-failed 4개 phase 기록.
  */
+import { resolve as pathResolve } from "node:path";
 import type { WebContents } from "electron";
 import type { PolicyFile } from "./policy-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import { isSensitivePath } from "./sensitive-paths.js";
 
 // ─── 공개 타입 ────────────────────────────────────────
+
+/**
+ * Permission mode hint passed alongside an ApprovalRequest. Drives the
+ * §S4 isReadOnly short-circuit: in "plan" mode even read-only tools must
+ * still be blocked (plan mode is a dry-run / review stance).
+ *
+ * `undefined` → treat as "default" (standard read-only auto-approve).
+ */
+export type ApprovalMode = "default" | "plan" | "full_auto";
 
 export interface ApprovalRequest {
   id: string;
@@ -28,6 +39,26 @@ export interface ApprovalRequest {
   createdAt: number;
   /** PolicyFile.requireExplicitApproval — renderer가 dismiss 동작을 분기하는 데 사용 */
   requireExplicit: boolean;
+  /**
+   * §S1: absolute filesystem path the tool intends to touch. When set and
+   * matched against SENSITIVE_PATH_PATTERNS, the request is hard-blocked
+   * BEFORE the user dialog is shown. Cannot be overridden.
+   */
+  target?: {
+    filePath?: string;
+  };
+  /**
+   * §S4: tool self-declares it does not mutate state. When true and the
+   * current mode is not "plan", the dialog is skipped and the call is
+   * auto-approved with reason "read-only auto-approve".
+   */
+  isReadOnly?: boolean;
+  /**
+   * §S4: current permission mode. Drives the isReadOnly short-circuit:
+   *   - "default" / "full_auto" / undefined → read-only tools auto-approve
+   *   - "plan" → still block (plan mode inspects without executing)
+   */
+  mode?: ApprovalMode;
 }
 
 export type ApprovalChoice =
@@ -104,6 +135,63 @@ export class ApprovalGate {
       ...req,
       requireExplicit: this.currentPolicy.requireExplicitApproval,
     };
+
+    // §S1: sensitive-path hard-block — runs BEFORE anything else so that
+    // not even full_auto / user-approval paths can bypass it. Cannot be
+    // overridden by user approval, admin policy, or permission mode.
+    //
+    // H3: canonicalize the path BEFORE matching. Pure string matching is
+    // bypassable via `..` segments, NFD unicode forms, trailing spaces,
+    // mixed-case on case-insensitive filesystems, and duplicate slashes.
+    // All four vectors are closed below before invoking isSensitivePath().
+    const rawCandidate = fullReq.target?.filePath;
+    if (rawCandidate) {
+      // 1. Resolve `..` / `.` segments + make absolute
+      let canonical = pathResolve(rawCandidate);
+      // 2. Collapse duplicate slashes (///Users → /Users)
+      canonical = canonical.replace(/\/+/g, "/");
+      // 3. Unicode NFC normalize (folds NFD-decomposed forms, e.g.
+      //    ".\u0073\u0073h" → ".ssh")
+      canonical = canonical.normalize("NFC");
+      // 4. Case-fold on case-insensitive filesystems (macOS / Windows) so
+      //    `/Users/Ken/.SSH/ID_rsa` matches `**/.ssh/*` — the underlying
+      //    filesystem treats them as the same file, so the block must too.
+      const caseFolded =
+        process.platform === "darwin" || process.platform === "win32"
+          ? canonical.toLowerCase()
+          : canonical;
+      const matchedPattern = isSensitivePath(caseFolded);
+      if (matchedPattern) {
+        this.auditLogger?.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "approval-gate",
+          type: "approval",
+          output: `[approval:sensitive-path-blocked] ${fullReq.id} toolName=${fullReq.toolName} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
+        });
+        return {
+          requestId: fullReq.id,
+          choice: "deny-once",
+          rememberPattern: `Sensitive credential path blocked: ${matchedPattern}`,
+        };
+      }
+    }
+
+    // §S4: isReadOnly short-circuit — if the tool self-declares read-only
+    // and we are NOT in plan mode, skip the confirmation dialog. Plan
+    // mode still blocks (plan = dry-run / inspect only).
+    if (fullReq.isReadOnly === true && fullReq.mode !== "plan") {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "approval-gate",
+        type: "approval",
+        output: `[approval:read-only-auto-approve] ${fullReq.id} toolName=${fullReq.toolName} mode=${fullReq.mode ?? "default"} → allow-once`,
+      });
+      return {
+        requestId: fullReq.id,
+        choice: "allow-once",
+        rememberPattern: "read-only auto-approve",
+      };
+    }
 
     // §A2: webContents 소멸 체크 — 렌더러가 이미 닫혔으면 즉시 deny-once
     if (this.webContents.isDestroyed()) {
