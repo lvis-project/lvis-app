@@ -19,6 +19,7 @@ import { KeywordEngine } from "./core/keyword-engine.js";
 import { RouteEngine } from "./core/route-engine.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { createDynamicTool, type Tool } from "./tools/base.js";
+import { pluginMethodToTool } from "./plugins/plugin-tool-adapter.js";
 import { SystemPromptBuilder } from "./prompts/system-prompt-builder.js";
 import { ConversationLoop } from "./engine/conversation-loop.js";
 import { PermissionManager } from "./permissions/permission-manager.js";
@@ -513,45 +514,7 @@ function buildPluginConfigOverrides(settings: SettingsService): Record<string, R
 
 function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolRegistry): void {
   for (const method of pluginRuntime.listMethods()) {
-    const toolName = method.replace(/\./g, "_");
-    toolRegistry.register(
-      createDynamicTool({
-        name: toolName,
-        description: `플러그인 메서드: ${method}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`,
-        source: "plugin",
-        jsonSchema: {
-          type: "object",
-          properties: {
-            payload: { type: "object", description: "메서드에 전달할 매개변수 객체" },
-          },
-        },
-        execute: async (rawInput) => {
-          const args = (rawInput ?? {}) as Record<string, unknown>;
-          let finalPayload: unknown = args.payload;
-          if (!finalPayload && Object.keys(args).length > 0) finalPayload = args;
-          if (typeof finalPayload === "string") {
-            try {
-              finalPayload = JSON.parse(finalPayload);
-            } catch {
-              /* leave as string */
-            }
-          }
-          try {
-            const result = await pluginRuntime.call(method, finalPayload);
-            const output =
-              typeof result === "string"
-                ? result
-                : JSON.stringify(result, null, 2);
-            return { output, isError: false };
-          } catch (err) {
-            return {
-              output: err instanceof Error ? err.message : String(err),
-              isError: true,
-            };
-          }
-        },
-      }),
-    );
+    toolRegistry.register(pluginMethodToTool(pluginRuntime, method));
   }
 }
 

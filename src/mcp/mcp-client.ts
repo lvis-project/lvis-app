@@ -24,7 +24,7 @@ import type {
 } from "./types.js";
 import type { McpGovernance } from "./mcp-governance.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import { createDynamicTool } from "../tools/base.js";
+import { mcpToolToTool } from "./mcp-tool-adapter.js";
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
 
@@ -437,34 +437,11 @@ export class McpClient {
 
     for (const tool of tools) {
       const namespacedName = this.governance.applyToolNamespace(serverId, tool.name);
-
       this.toolRegistry.register(
-        createDynamicTool({
-          name: namespacedName,
-          description: tool.description,
-          source: "mcp",
-          mcpServerId: serverId,
-          jsonSchema: {
-            type: "object",
-            properties: tool.inputSchema.properties,
-            required: tool.inputSchema.required,
-          },
-          execute: async (rawInput) => {
-            // tools/call에는 원래 도구 이름 사용
-            const args = (rawInput ?? {}) as Record<string, unknown>;
-            try {
-              const text = await this.callTool(tool.name, args);
-              return { output: text, isError: false };
-            } catch (err) {
-              return {
-                output: err instanceof Error ? err.message : String(err),
-                isError: true,
-              };
-            }
-          },
-        }),
+        mcpToolToTool(serverId, namespacedName, tool, (toolName, args) =>
+          this.callTool(toolName, args),
+        ),
       );
-
       this.state.registeredTools.push(namespacedName);
     }
   }
