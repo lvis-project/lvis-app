@@ -8,21 +8,21 @@
  * claw-code harness 패턴 기반.
  */
 import { ConversationHistory } from "./conversation-history.js";
-import { ToolExecutor, type ToolUseBlock } from "./tool-executor.js";
-import { HookRunner } from "./hook-runner.js";
+import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
+import { HookRunner } from "../hooks/hook-runner.js";
 import { shouldCompact, compactMessages } from "./auto-compact.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage } from "./llm/types.js";
-import type { SystemPromptBuilder } from "./system-prompt-builder.js";
+import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../core/tool-registry.js";
-import type { MemoryManager } from "../core/memory-manager.js";
+import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
-import { AuditLogger } from "./audit-logger.js";
+import { AuditLogger } from "../audit/audit-logger.js";
 import type { ProactiveEngine } from "../core/proactive-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
-import { PostTurnHookChain } from "./post-turn-hook-chain.js";
+import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -48,7 +48,7 @@ export interface ConversationLoopDeps {
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   memoryManager: MemoryManager;
-  permissionManager?: import("../core/permission-manager.js").PermissionManager;
+  permissionManager?: import("../permissions/permission-manager.js").PermissionManager;
   proactiveEngine?: ProactiveEngine;
   /** Agent 5: turn 완료 시 idle scheduler에 대화 신호 전송 (§6.1) */
   idleScheduler?: IdleSchedulerService;
@@ -57,7 +57,7 @@ export interface ConversationLoopDeps {
   /** Agent 6: Bash AST pre-validator — ToolExecutor Step 2.5에 주입 */
   bashAstValidator?: import("../main/bash-ast-validator.js").BashAstValidator;
   /** B1: 승인 게이트 — "ask" 결정 시 렌더러 모달로 round-trip */
-  approvalGate?: import("../core/approval-gate.js").ApprovalGate;
+  approvalGate?: import("../permissions/approval-gate.js").ApprovalGate;
 }
 
 const MAX_TOOL_ROUNDS = 10;
@@ -97,7 +97,7 @@ export class ConversationLoop {
   }
 
   /** B1: PermissionManager 참조 — IPC bridge에서 mode 조회/변경에 사용 */
-  get permissionManager(): import("../core/permission-manager.js").PermissionManager | undefined {
+  get permissionManager(): import("../permissions/permission-manager.js").PermissionManager | undefined {
     return this.deps.permissionManager;
   }
 

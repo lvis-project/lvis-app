@@ -12,7 +12,7 @@
  * @internal Phase 2 stub — Phase 3에서 ConversationLoop 연동
  */
 import { randomUUID } from "node:crypto";
-import type { ApprovalGate, ApprovalDecision, ApprovalChoice } from "../core/approval-gate.js";
+import type { ApprovalGate, ApprovalDecision, ApprovalChoice } from "./approval-gate.js";
 
 // ─── AgentAction 유니온 ───────────────────────────────
 

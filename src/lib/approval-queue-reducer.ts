@@ -4,7 +4,7 @@
  * renderer.tsx ApprovalGate 구독을 single-slot → FIFO queue 로 승격.
  * 순수 함수로 분리해 jsdom 없이 unit test 가능.
  */
-import type { ApprovalRequest } from "../core/approval-gate.js";
+import type { ApprovalRequest } from "../permissions/approval-gate.js";
 
 export type ApprovalQueueAction =
   | { type: "push"; req: ApprovalRequest }
