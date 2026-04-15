@@ -2,3 +2,14 @@ node_modules/
 dist/
 .pageindex-workspace/
 .pageindex-workspace-test/
+.DS_Store
+.omc/
+
+# Phase 1 인덱서 격상 작업 중 생기는 test artifacts
+.meeting-sessions/
+
+# LVIS 런타임 디렉터리 (사용자별)
+.lvis/
+
+# Resources 번들 대상(개발 시 fetch-uv.mjs가 다운로드)
+resources/uv/

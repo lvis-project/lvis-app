@@ -1,7 +1,8 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
-import { readPluginRegistry, writePluginRegistry } from "./registry.js";
+import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
+import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 
 type MarketplaceCatalog = {
@@ -12,6 +13,8 @@ type MarketplaceCatalog = {
 export interface MarketplaceListItem extends PluginMarketplaceItem {
   installed: boolean;
   enabled: boolean;
+  /** Phase 1.5 §9.6: true if protected (managed) — used by UI to show lock icon */
+  isManaged: boolean;
 }
 
 export class PluginMarketplaceService {
@@ -19,24 +22,48 @@ export class PluginMarketplaceService {
   private readonly registryPath: string;
   private readonly marketplacePath: string;
   private readonly installedDir: string;
+  private readonly deploymentGuard?: PluginDeploymentGuard;
 
-  constructor(appRoot: string) {
+  constructor(appRoot: string, deploymentGuard?: PluginDeploymentGuard) {
     this.appRoot = resolve(appRoot);
     this.registryPath = resolve(this.appRoot, "plugins/registry.json");
     this.marketplacePath = resolve(this.appRoot, "plugins/marketplace.json");
     this.installedDir = resolve(this.appRoot, "plugins/installed");
+    this.deploymentGuard = deploymentGuard;
   }
 
   async list(): Promise<MarketplaceListItem[]> {
     const [catalog, registry] = await Promise.all([this.readCatalog(), readPluginRegistry(this.registryPath)]);
-    return catalog.plugins.map((plugin) => {
+    const items: MarketplaceListItem[] = [];
+    for (const plugin of catalog.plugins) {
       const entry = registry.plugins.find((x) => x.id === plugin.id);
-      return {
+      const isManaged = await this.resolveIsManaged(plugin, entry?.manifestPath);
+      items.push({
         ...plugin,
         installed: !!entry,
         enabled: entry?.enabled !== false,
-      };
-    });
+        isManaged,
+      });
+    }
+    return items;
+  }
+
+  private async resolveIsManaged(
+    catalogItem: PluginMarketplaceItem,
+    installedManifestPath?: string,
+  ): Promise<boolean> {
+    if (catalogItem.deployment === "managed") return true;
+    if (!installedManifestPath) return false;
+    const abs = isAbsolute(installedManifestPath)
+      ? installedManifestPath
+      : resolve(dirname(this.registryPath), installedManifestPath);
+    try {
+      const raw = await readFile(abs, "utf-8");
+      const parsed = JSON.parse(raw) as { deployment?: string };
+      return parsed.deployment === "managed";
+    } catch {
+      return false;
+    }
   }
 
   async install(pluginId: string): Promise<{ pluginId: string; installed: true }> {
@@ -46,47 +73,69 @@ export class PluginMarketplaceService {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
     }
 
+    // §7.2 canInstall — managed 카탈로그 항목은 user actor 차단 (defense-in-depth).
+    // UI 잠금은 이미 disabled지만 IPC 경유 직접 호출도 봉쇄.
+    if (this.deploymentGuard) {
+      const guardResult = await this.deploymentGuard.canInstall(pluginId, "user", plugin.deployment);
+      if (!guardResult.allowed) {
+        throw new Error(guardResult.reason ?? `Plugin install denied: ${pluginId}`);
+      }
+    }
+
     await this.runNpmInstall(plugin.packageSpec);
     const manifestPath = await this.writeInstalledManifest(plugin);
-    const registry = await readPluginRegistry(this.registryPath);
-    const existing = registry.plugins.find((x) => x.id === plugin.id);
-    if (existing) {
-      existing.manifestPath = manifestPath;
-      existing.enabled = true;
-    } else {
-      registry.plugins.push({ id: plugin.id, manifestPath, enabled: true });
-    }
-    await writePluginRegistry(this.registryPath, registry);
+
+    // §M1 F-round: atomic read-modify-write under registry lock.
+    await updatePluginRegistry(this.registryPath, (registry) => {
+      const existing = registry.plugins.find((x) => x.id === plugin.id);
+      if (existing) {
+        existing.manifestPath = manifestPath;
+        existing.enabled = true;
+      } else {
+        registry.plugins.push({ id: plugin.id, manifestPath, enabled: true });
+      }
+    });
     return { pluginId: plugin.id, installed: true };
   }
 
   async uninstall(pluginId: string): Promise<{ pluginId: string; uninstalled: true }> {
-    const registry = await readPluginRegistry(this.registryPath);
-    const target = registry.plugins.find((x) => x.id === pluginId);
-    if (!target) {
-      throw new Error(`Plugin not installed: ${pluginId}`);
+    // §7.2 PluginDeploymentGuard — managed 플러그인은 user actor에게 차단.
+    if (this.deploymentGuard) {
+      const guardResult = await this.deploymentGuard.canUninstall(pluginId, "user");
+      if (!guardResult.allowed) {
+        throw new Error(guardResult.reason ?? `Plugin uninstall denied: ${pluginId}`);
+      }
     }
 
-    const remainingEntries = registry.plugins.filter((x) => x.id !== pluginId);
-    const manifestPath = isAbsolute(target.manifestPath)
-      ? target.manifestPath
-      : resolve(dirname(this.registryPath), target.manifestPath);
-    const packageName = await this.resolvePackageName(pluginId, manifestPath);
-    const shouldUninstallPackage =
-      packageName && !(await this.isPackageUsedByRemainingPlugins(packageName, remainingEntries.map((entry) => entry.id)));
+    // §M1 F-round: serialize read-remove-write through the registry lock.
+    return withRegistryLock(this.registryPath, async () => {
+      const registry = await readPluginRegistry(this.registryPath);
+      const target = registry.plugins.find((x) => x.id === pluginId);
+      if (!target) {
+        throw new Error(`Plugin not installed: ${pluginId}`);
+      }
 
-    if (shouldUninstallPackage && packageName) {
-      await this.runNpmUninstall(packageName);
-    }
+      const remainingEntries = registry.plugins.filter((x) => x.id !== pluginId);
+      const manifestPath = isAbsolute(target.manifestPath)
+        ? target.manifestPath
+        : resolve(dirname(this.registryPath), target.manifestPath);
+      const packageName = await this.resolvePackageName(pluginId, manifestPath);
+      const shouldUninstallPackage =
+        packageName && !(await this.isPackageUsedByRemainingPlugins(packageName, remainingEntries.map((entry) => entry.id)));
 
-    const installedManifestDir = dirname(manifestPath);
-    if (this.isWithin(this.installedDir, installedManifestDir)) {
-      await rm(installedManifestDir, { recursive: true, force: true });
-    }
+      if (shouldUninstallPackage && packageName) {
+        await this.runNpmUninstall(packageName);
+      }
 
-    registry.plugins = remainingEntries;
-    await writePluginRegistry(this.registryPath, registry);
-    return { pluginId, uninstalled: true };
+      const installedManifestDir = dirname(manifestPath);
+      if (this.isWithin(this.installedDir, installedManifestDir)) {
+        await rm(installedManifestDir, { recursive: true, force: true });
+      }
+
+      registry.plugins = remainingEntries;
+      await writePluginRegistry(this.registryPath, registry);
+      return { pluginId, uninstalled: true as const };
+    });
   }
 
   private async readCatalog(): Promise<MarketplaceCatalog> {
@@ -105,7 +154,7 @@ export class PluginMarketplaceService {
     const entryAbsPath = resolve(this.appRoot, "node_modules", plugin.packageName, "dist/hostPlugin.js");
     const entryRelPath = relative(pluginDir, entryAbsPath).split("\\").join("/");
     const resolvedUi = (plugin.ui ?? []).map((extension) => this.resolveUiExtension(plugin, pluginDir, extension));
-    const manifest = {
+    const manifest: Record<string, unknown> = {
       id: plugin.id,
       name: plugin.name,
       version: "1.0.0",
@@ -114,6 +163,8 @@ export class PluginMarketplaceService {
       config: plugin.defaultConfig ?? {},
       ui: resolvedUi,
     };
+    if (plugin.deployment) manifest.deployment = plugin.deployment;
+    if (plugin.publisher) manifest.publisher = plugin.publisher;
     await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
     const registryRelativePath = relative(dirname(this.registryPath), manifestFile).split("\\").join("/");
     return registryRelativePath;

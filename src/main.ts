@@ -1,15 +1,26 @@
-import { Menu, app, BrowserWindow, ipcMain, type MenuItemConstructorOptions } from "electron";
+/**
+ * LVIS App — Electron Main Process Entry
+ *
+ * 슬림 엔트리. 모든 로직은 boot.ts와 ipc-bridge.ts로 위임.
+ * §4.1 Client Architecture 준수.
+ */
+import { Menu, app, BrowserWindow, type MenuItemConstructorOptions } from "electron";
 import { dirname, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import * as https from "node:https";
+import * as tls from "node:tls";
+import { Agent, setGlobalDispatcher } from "undici";
 import { fileURLToPath } from "node:url";
-import { PluginRuntime } from "./plugin-runtime/runtime.js";
-import { PluginMarketplaceService } from "./plugin-runtime/marketplace.js";
-import { TaskService } from "./taskService.js";
+import { bootstrap, type AppServices } from "./boot.js";
+import { registerIpcHandlers } from "./ipc-bridge.js";
+import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const distRoot = resolve(__dirname, "..");
 const projectRoot = resolve(distRoot, "..");
 
+// WSL 환경 대응
 if (process.platform === "linux" && process.env.WSL_DISTRO_NAME) {
   app.commandLine.appendSwitch("enable-features", "UseOzonePlatform");
   if (process.env.WAYLAND_DISPLAY) {
@@ -18,70 +29,98 @@ if (process.platform === "linux" && process.env.WSL_DISTRO_NAME) {
     app.commandLine.appendSwitch("ozone-platform-hint", "x11");
   }
 }
-app.disableHardwareAcceleration();
+// app.disableHardwareAcceleration();
+
+// §17 C1: 사내망 Corporate CA 런타임 주입 — corp-ca-loader 사용 (정식 대응 완료).
+// Phase 1.5의 dev-only TLS bypass 완전 제거. Chromium은 OS keystore 자동 신뢰.
+async function injectCorporateCa() {
+  try {
+    const result = await ensureCorporateCa();
+    if (!result.pem) {
+      console.warn("[lvis] corporate CA not found — 해외망 사용 중이거나 MDM 미배포. TLS 검증 기본값 유지.");
+      return;
+    }
+    const ca = [...tls.rootCertificates, result.pem];
+    // 1) undici (Node fetch / global dispatcher)
+    setGlobalDispatcher(new Agent({ connect: { ca } }));
+    // 2) https.globalAgent (legacy https.get / https.request)
+    (https.globalAgent.options as Record<string, unknown>).ca = ca;
+    // 3) tls.setDefaultCACertificates — Node 24 기준 미존재, 향후 확장 포인트
+    console.log(`[lvis] corporate CA injected: source=${result.source} certs=${result.certCount} path=${result.path}`);
+  } catch (e) {
+    // 주입 실패해도 앱은 계속 실행 (해외망에서는 기본 CA로 충분)
+    console.error("[lvis] corporate CA 주입 실패 (non-fatal):", (e as Error).message);
+  }
+}
+await injectCorporateCa();
 
 let mainWindow: BrowserWindow | null = null;
-
-const pluginRuntime = new PluginRuntime({
-  hostRoot: projectRoot,
-  registryPath: resolve(projectRoot, "plugins/registry.json"),
-});
-const pluginMarketplace = new PluginMarketplaceService(projectRoot);
-const taskService = new TaskService({
-  dbPath: resolve(app.getPath("userData"), "lvis-tasks.db"),
-});
+let services: AppServices | null = null;
 
 function activateView(viewKey: string) {
   mainWindow?.webContents.send("lvis:view:activate", { viewKey });
 }
 
 function createViewMenu() {
-  const pluginViews = pluginRuntime
+  if (!services) return { label: "플러그인", submenu: [] as MenuItemConstructorOptions[] };
+  const pluginViews = services.pluginRuntime
     .listUiExtensions()
     .filter((item) => item.extension.slot === "sidebar")
     .map((item) => ({
       key: `plugin:${item.pluginId}:${item.extension.id}`,
       label: item.extension.displayName?.trim() || item.extension.title || item.pluginId,
     }));
-  const submenu = [
-    {
-      label: "홈",
-      click: () => activateView("home"),
-    },
-    ...pluginViews.map((item) => ({
-      label: item.label,
-      click: () => activateView(item.key),
-    })),
-  ];
-  return { label: "플러그인", submenu };
+  return {
+    label: "플러그인",
+    submenu: [
+      { label: "홈", click: () => activateView("home") },
+      ...pluginViews.map((item) => ({
+        label: item.label,
+        click: () => activateView(item.key),
+      })),
+    ],
+  };
 }
 
 function refreshApplicationMenu() {
   const template: MenuItemConstructorOptions[] =
     process.platform === "darwin"
       ? [
-          {
-            label: app.name,
-            submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }],
-          },
+          { label: app.name, submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }] },
           createViewMenu(),
-          {
-            label: "편집",
-            submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }],
-          },
+          { label: "편집", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }] },
           { label: "보기", submenu: [{ role: "reload" }, { role: "toggleDevTools" }] },
         ]
       : [createViewMenu()];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+/**
+ * Bootstrap 동안 렌더러에 표시할 임시 splash HTML.
+ * 실 index.html은 IPC 핸들러 등록 후에 로드된다 — 초기 useEffect IPC 호출이
+ * 핸들러보다 앞서는 race 방지 (§M-race fix).
+ */
+const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><title>LVIS</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0b10;color:#e4e4e8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:.8rem}
+  h1{margin:0;font-size:1.1rem;font-weight:600;letter-spacing:.02em}
+  p{margin:0;font-size:.85rem;opacity:.65}
+  .spin{width:24px;height:24px;border:2px solid #2a2a33;border-top-color:#7a7aff;border-radius:50%;animation:s 1s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+</style></head><body><div class="wrap"><div class="spin"></div><h1>LVIS 초기 부팅 중</h1><p>Python 런타임과 플러그인을 준비하고 있습니다…</p></div></body></html>`;
+
 function createWindow() {
-  const preloadPath = resolve(__dirname, "preload.cjs");
-  const indexHtmlPath = resolve(__dirname, "index.html");
+  const preloadPath = resolve(__dirname, "preload.js");
+  if (!existsSync(preloadPath)) {
+    throw new Error(`[lvis] preload.js not found at ${preloadPath} — run 'npm run build:preload' first`);
+  }
+
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
-    show: false,
+    show: true,
     autoHideMenuBar: false,
     webPreferences: {
       contextIsolation: true,
@@ -89,98 +128,49 @@ function createWindow() {
       preload: preloadPath,
     },
   });
-  const windowToShow = mainWindow;
-  const showFallbackTimer = setTimeout(() => {
-    if (!windowToShow.isDestroyed() && !windowToShow.isVisible()) {
-      windowToShow.show();
-      windowToShow.focus();
-    }
-  }, 3000);
-  windowToShow.once("ready-to-show", () => {
-    clearTimeout(showFallbackTimer);
-    windowToShow.show();
-    windowToShow.focus();
+
+  const win = mainWindow;
+  win.webContents.openDevTools();
+
+  win.once("ready-to-show", () => {
+    console.log("[lvis] window ready-to-show");
+    win.show();
+    win.focus();
   });
-  windowToShow.on("closed", () => {
-    clearTimeout(showFallbackTimer);
-    if (mainWindow === windowToShow) {
-      mainWindow = null;
-    }
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
   });
-  windowToShow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl) => {
-    console.error("[lvis-app] main window failed to load", { errorCode, errorDescription, validatedUrl });
+  win.webContents.on("did-fail-load", (_e, code, desc, url) => {
+    console.error("[lvis] window failed to load", { code, desc, url });
   });
-  void windowToShow.loadFile(indexHtmlPath).catch((error) => {
-    console.error("[lvis-app] failed to load index.html", error);
-  });
+
+  // §M-race: bootstrap 동안 splash만 표시. 실 index.html 로드는 main()이
+  // IPC 핸들러 등록 후 수행.
+  void win
+    .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(BOOTSTRAP_SPLASH)}`)
+    .catch((err) => console.error("[lvis] splash load failed", err));
 }
 
-async function bootstrap() {
-  await pluginRuntime.startAll();
-  console.log("[lvis-app] loaded plugin methods:", pluginRuntime.listMethods());
-
-  ipcMain.handle("lvis:index:scan", async () => {
-    return pluginRuntime.call("index.scan");
-  });
-  ipcMain.handle("lvis:index:documents", async () => {
-    return pluginRuntime.call("index.documents");
-  });
-  ipcMain.handle("lvis:chat:preview", async (_event, question: string) => {
-    return pluginRuntime.call("chat.preview", { question });
-  });
-  ipcMain.handle("lvis:meeting:start", async (_event, sessionId: string, context?: { locale?: string; contextHint?: string; participants?: string[] }) => {
-    return pluginRuntime.call("meeting.start", { sessionId, context });
-  });
-  ipcMain.handle(
-    "lvis:meeting:push-chunk",
-    async (
-      _event,
-      sessionId: string,
-      chunk: { pcm16leMono: number[]; sampleRate: number; startSec: number; endSec: number },
-    ) => {
-      return pluginRuntime.call("meeting.pushChunk", { sessionId, chunk });
-    },
-  );
-  ipcMain.handle("lvis:meeting:stop", async (_event, sessionId: string) => {
-    return pluginRuntime.call("meeting.stop", { sessionId });
-  });
-  ipcMain.handle("lvis:meeting:transcript", async (_event, sessionId: string) => {
-    return pluginRuntime.call("meeting.transcript", { sessionId });
-  });
-  ipcMain.handle("lvis:plugins:marketplace:list", async () => {
-    return pluginMarketplace.list();
-  });
-  ipcMain.handle("lvis:plugins:install", async (_event, pluginId: string) => {
-    const result = await pluginMarketplace.install(pluginId);
-    await pluginRuntime.restartAll();
-    refreshApplicationMenu();
-    return result;
-  });
-  ipcMain.handle("lvis:plugins:uninstall", async (_event, pluginId: string) => {
-    const result = await pluginMarketplace.uninstall(pluginId);
-    await pluginRuntime.restartAll();
-    refreshApplicationMenu();
-    return result;
-  });
-  ipcMain.handle("lvis:plugins:ui:list", async () => {
-    return pluginRuntime.listUiExtensions();
-  });
-  ipcMain.handle("lvis:plugins:call", async (_event, method: string, payload?: unknown) => {
-    return pluginRuntime.call(method, payload);
-  });
-
-  // TaskService IPC
-  ipcMain.handle("lvis:tasks:add", (_event, task) => taskService.add(task));
-  ipcMain.handle("lvis:tasks:update", (_event, id: string, patch) => taskService.update(id, patch));
-  ipcMain.handle("lvis:tasks:get", (_event, id: string) => taskService.get(id));
-  ipcMain.handle("lvis:tasks:delete", (_event, id: string) => taskService.delete(id));
-  ipcMain.handle("lvis:tasks:query", (_event, filter) => taskService.query(filter));
-  ipcMain.handle("lvis:tasks:pending", () => taskService.getPendingByPriority());
-  ipcMain.handle("lvis:tasks:overdue", () => taskService.getOverdue());
-  ipcMain.handle("lvis:tasks:today", () => taskService.getDueToday());
-
+async function main() {
+  // §4.2 Step 8: window 생성 (splash 표시) — bootstrap이 mainWindow를 필요로 함
   createWindow();
+
+  // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
+  services = await bootstrap(projectRoot, mainWindow!);
+
+  // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
+  registerIpcHandlers(services, () => mainWindow);
+
   refreshApplicationMenu();
+
+  // 실 UI 로드 — 이 시점부터 렌더러의 IPC 호출이 항상 handler와 매칭됨
+  if (mainWindow) {
+    try {
+      await mainWindow.loadFile(resolve(__dirname, "index.html"));
+    } catch (err) {
+      console.error("[lvis] failed to load index.html", err);
+    }
+  }
 }
 
 app.on("window-all-closed", () => {
@@ -188,13 +178,15 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", async () => {
-  await pluginRuntime.stopAll();
-  taskService.close();
+  if (services) {
+    await services.pluginRuntime.stopAll();
+    services.taskService.close();
+  }
 });
 
 app.whenReady().then(() => {
-  void bootstrap().catch((error) => {
-    console.error("[lvis-app] bootstrap failed", error);
+  void main().catch((error) => {
+    console.error("[lvis] bootstrap failed", error);
     app.quit();
   });
 });
