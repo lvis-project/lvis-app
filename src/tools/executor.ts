@@ -19,14 +19,60 @@
  * - 실패 격리: Step 6 실패가 Step 8을 건너뛰지 않음
  */
 import { randomUUID } from "node:crypto";
+import { resolve as pathResolve } from "node:path";
 import type { ToolRegistry, ToolSource, TrustLevel } from "../core/tool-registry.js";
 import { trustFromSource } from "../core/tool-registry.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
-import type { ApprovalGate } from "../permissions/approval-gate.js";
+import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
+
+// ─── C1: Sensitive-path + read-only hint extraction ────────
+
+/**
+ * Static list of tool names known to perform only read operations.
+ * Used by {@link ToolExecutor} to set `isReadOnly` on ApprovalRequest so
+ * the §S4 approval-gate short-circuit can auto-approve (except in plan mode).
+ * Conservative: tools not listed here are treated as state-mutating.
+ */
+const READ_ONLY_TOOL_NAMES = new Set<string>([
+  "read_file",
+  "glob",
+  "grep",
+  "knowledge_search",
+  "list_directory",
+  "file_read",
+  "web_fetch",
+]);
+
+/**
+ * Extract an absolute filesystem target path from a tool's input, if one
+ * can be inferred from common arg shapes. Used so {@link ApprovalGate}'s
+ * §S1 sensitive-path hard-block can actually run against the path the
+ * tool is about to touch. Returns `undefined` if no recognizable path
+ * field is present (e.g. bash `command`, which is handled separately
+ * by the BashAstValidator).
+ */
+function extractTargetFilePath(
+  _toolName: string,
+  input: unknown,
+): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const obj = input as Record<string, unknown>;
+  const candidate =
+    (typeof obj.path === "string" && obj.path) ||
+    (typeof obj.file_path === "string" && obj.file_path) ||
+    (typeof obj.filePath === "string" && obj.filePath) ||
+    undefined;
+  if (!candidate) return undefined;
+  try {
+    return pathResolve(candidate);
+  } catch {
+    return undefined;
+  }
+}
 
 export interface ToolUseBlock {
   id: string;
@@ -109,6 +155,19 @@ export class ToolExecutor {
     this.bashAstValidator = bashAstValidator;
   }
 
+  /**
+   * C1: convert the PermissionManager execution mode into the ApprovalMode
+   * vocabulary understood by ApprovalGate (§S4 read-only short-circuit).
+   * `strict` → `default` (show dialog); `auto` → `full_auto`; `default` → `default`.
+   */
+  private currentApprovalMode(): ApprovalMode {
+    const pm = this.permissionManager?.getMode?.();
+    if (pm === "auto") return "full_auto";
+    // strict + default both map to "default" — plan mode is not yet wired
+    // through the PermissionManager and must be requested explicitly.
+    return "default";
+  }
+
   getHookRunner(): HookRunner {
     return this.hookRunner;
   }
@@ -187,6 +246,11 @@ export class ToolExecutor {
       if (permissionResult.decision === "ask") {
         if (this.approvalGate) {
           // §6.3 Layer 3 + §8: 렌더러 승인 모달로 round-trip
+          // C1: wire target.filePath + isReadOnly + mode so that §S1
+          // sensitive-path hard-block and §S4 read-only short-circuit
+          // actually fire. Previously these were missing → §S1 check
+          // read `undefined` and was effectively dead code.
+          const targetFilePath = extractTargetFilePath(toolUse.name, toolUse.input);
           const approvalRequest = {
             id: randomUUID(),
             category: "tool" as const,
@@ -195,6 +259,9 @@ export class ToolExecutor {
             reason: permissionResult.reason,
             source: source as "builtin" | "plugin" | "mcp",
             createdAt: Date.now(),
+            ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
+            isReadOnly: READ_ONLY_TOOL_NAMES.has(toolUse.name),
+            mode: this.currentApprovalMode(),
           };
 
           // §F3: requestAndWait 실패 시 감사 로그 보장 후 deny-once 처리
