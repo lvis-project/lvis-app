@@ -194,6 +194,13 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   await pluginRuntime.startAll();
   console.log("[lvis] boot: plugins loaded:", pluginRuntime.listMethods());
 
+  // 이메일 watcher 자동 시작 (UI 열기 전에도 알림 수신)
+  if (pluginRuntime.listMethods().includes("email.startWatcher")) {
+    pluginRuntime.call("email.startWatcher", {}).catch((e: Error) =>
+      console.log("[lvis] boot: email watcher start failed (non-fatal):", e.message)
+    );
+  }
+
   // 플러그인 메서드를 ToolRegistry에 등록 (범용)
   registerPluginTools(pluginRuntime, toolRegistry);
 
@@ -347,6 +354,21 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   onEvent("meeting.summary.created", (data) => proactiveEngine.collectEvent("meeting.summary.created", data));
   onEvent("email.action.needed", (data) => proactiveEngine.collectEvent("email.action.needed", data));
   onEvent("meeting.ended", (data) => proactiveEngine.collectEvent("meeting.ended", data));
+
+  // 새 이메일 → 네이티브 알림
+  onEvent("email.new", (data) => {
+    const d = data as { subject?: string; sender?: string; replyNeeded?: boolean; importance?: string };
+    const { Notification } = require("electron") as typeof import("electron");
+    if (!Notification.isSupported()) return;
+    const urgency = d.importance === "high" || d.replyNeeded;
+    const notif = new Notification({
+      title: urgency ? `📧 회신 필요 — ${d.sender ?? "알 수 없음"}` : `📧 새 메일 — ${d.sender ?? "알 수 없음"}`,
+      body: d.subject ?? "(제목 없음)",
+      silent: false,
+    });
+    notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
+    notif.show();
+  });
 
   // §4.5 + Agent 6: PostTurnHookChain 조립
   const bootAuditLogger = new AuditLogger();
