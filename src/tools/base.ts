@@ -2,8 +2,17 @@
  * Portions adapted from OpenHarness (MIT License)
  * https://github.com/HKUDS/OpenHarness/blob/main/src/openharness/tools/base.py
  * Copyright (c) 2026 HKU Data Intelligence Lab
+ *
+ * Modern tool base class — single-file-per-tool, Zod input validation,
+ * native v4 JSON Schema export. Tools register into the canonical §6.4
+ * {@link ../core/tool-registry.js ToolRegistry} via
+ * {@link ./adapter.js baseToolToLegacyDefinition}; this module no longer
+ * exposes its own registry to avoid dual-registry drift (the legacy one
+ * carries the §6.3 deny rules + §6.4 trust governance and is the single
+ * production source of truth).
  */
 import { z } from "zod";
+import type { ToolSource } from "../core/tool-registry.js";
 
 export interface ToolExecutionContext {
   cwd: string;
@@ -21,6 +30,15 @@ export abstract class BaseTool<TInputSchema extends z.ZodTypeAny = z.ZodTypeAny>
   abstract readonly description: string;
   abstract readonly inputSchema: TInputSchema;
 
+  /**
+   * Source category used by §6.3 trust governance. The adapter propagates
+   * this into {@link ../core/tool-registry.js ToolDefinition.source} which
+   * PermissionManager + RateLimiter consume for trust-tier enforcement.
+   * Subclasses override (`override readonly source = "plugin" as const`)
+   * when shipped from a plugin or MCP server.
+   */
+  readonly source: ToolSource = "builtin";
+
   abstract execute(
     input: z.infer<TInputSchema>,
     ctx: ToolExecutionContext,
@@ -32,46 +50,12 @@ export abstract class BaseTool<TInputSchema extends z.ZodTypeAny = z.ZodTypeAny>
 
   toApiSchema(): { name: string; description: string; input_schema: unknown } {
     // zod v4 ships with native JSON Schema export via z.toJSONSchema().
-    // Replaces the v3-only `zod-to-json-schema` package which was the
-    // source of the pre-existing TSC errors caught by Phase 3 follow-up.
+    // Replaces the v3-only `zod-to-json-schema` package which was removed
+    // by Phase 3 follow-up T7-E.
     return {
       name: this.name,
       description: this.description,
       input_schema: z.toJSONSchema(this.inputSchema),
     };
-  }
-}
-
-/**
- * AF1: renamed from `ToolRegistry` to `BaseToolRegistry` to avoid a
- * symbol collision with {@link ../core/tool-registry.ts::ToolRegistry},
- * which implements the richer §6.4 source/trust aware registry used by
- * the conversation loop. This registry is the minimal OpenHarness-port
- * BaseTool container used by Tier S3 unit tests and tool fixtures.
- */
-export class BaseToolRegistry {
-  private readonly tools = new Map<string, BaseTool>();
-
-  register(tool: BaseTool): void {
-    if (this.tools.has(tool.name)) {
-      throw new Error(`Tool already registered: ${tool.name}`);
-    }
-    this.tools.set(tool.name, tool);
-  }
-
-  get(name: string): BaseTool | undefined {
-    return this.tools.get(name);
-  }
-
-  has(name: string): boolean {
-    return this.tools.has(name);
-  }
-
-  list(): BaseTool[] {
-    return [...this.tools.values()];
-  }
-
-  toApiSchema(): Array<{ name: string; description: string; input_schema: unknown }> {
-    return [...this.tools.values()].map((t) => t.toApiSchema());
   }
 }

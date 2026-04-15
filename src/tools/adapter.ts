@@ -28,22 +28,41 @@ import type { ToolDefinition, ToolSource } from "../core/tool-registry.js";
 import type { BaseTool, ToolResult } from "./base.js";
 
 /**
+ * Optional governance metadata injected into the legacy
+ * {@link ToolDefinition} when adapting from a {@link BaseTool}.
+ * Use this when the tool ships from a plugin (set `pluginId`) or MCP
+ * server (`mcpServerId`), or when its read/write/dangerous category is
+ * known statically.
+ */
+export interface BaseToolAdapterExtras {
+  pluginId?: string;
+  mcpServerId?: string;
+  category?: ToolDefinition["category"];
+}
+
+/**
  * Convert a {@link BaseTool} into a legacy {@link ToolDefinition} that can
- * be registered with the §6.4 {@link ToolRegistry}. `source` defaults to
- * `"builtin"` because Tier A1 BaseTool subclasses (e.g. {@link BashTool})
- * ship as host-native core tools.
+ * be registered with the §6.4 {@link ToolRegistry}. The effective source
+ * is, in order: explicit `source` argument → `tool.source` (BaseTool
+ * default `"builtin"`). Tier A1 BaseTool subclasses (e.g. {@link BashTool})
+ * inherit the default and need no source override.
  */
 export function baseToolToLegacyDefinition<T extends z.ZodTypeAny>(
   tool: BaseTool<T>,
-  source: ToolSource = "builtin",
+  source?: ToolSource,
+  extras: BaseToolAdapterExtras = {},
 ): ToolDefinition {
   const parameters = deriveLegacyParameters(tool);
+  const effectiveSource: ToolSource = source ?? tool.source;
 
   return {
     name: tool.name,
     description: tool.description,
     parameters,
-    source,
+    source: effectiveSource,
+    pluginId: extras.pluginId,
+    mcpServerId: extras.mcpServerId,
+    category: extras.category,
     execute: async (args: Record<string, unknown>): Promise<ToolResult> => {
       // Zod-parse drops unknown keys + fills defaults so the BaseTool
       // execute() receives the exact shape its inputSchema promises.

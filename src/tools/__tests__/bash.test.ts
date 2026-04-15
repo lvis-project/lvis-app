@@ -6,8 +6,10 @@
  */
 import { describe, it, expect } from "vitest";
 
+import { ToolRegistry } from "../../core/tool-registry.js";
 import { BashTool, BashToolInputSchema } from "../bash.js";
-import { BaseToolRegistry, type ToolExecutionContext } from "../base.js";
+import { baseToolToLegacyDefinition } from "../adapter.js";
+import type { ToolExecutionContext } from "../base.js";
 
 const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
   cwd,
@@ -140,12 +142,13 @@ describe("BashTool — BaseTool surface", () => {
     expect(resolved.properties.command).toBeDefined();
   });
 
-  it("registers in a fresh BaseToolRegistry", () => {
-    const registry = new BaseToolRegistry();
-    const tool = new BashTool();
-    registry.register(tool);
-    expect(registry.has("bash")).toBe(true);
-    expect(registry.get("bash")).toBe(tool);
+  it("registers into the canonical ToolRegistry via the BaseTool adapter", () => {
+    const registry = new ToolRegistry();
+    registry.register(baseToolToLegacyDefinition(new BashTool()));
+    const found = registry.findByName("bash");
+    expect(found).toBeDefined();
+    expect(found?.name).toBe("bash");
+    expect(found?.source).toBe("builtin");
   });
 });
 
