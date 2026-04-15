@@ -10,7 +10,12 @@
     "email.auth",
     "email.list",
     "email.read",
-    "email.analyze"
+    "email.analyze",
+    "email.reply",
+    "email.startWatcher",
+    "email.stopWatcher",
+    "email.getNotifications",
+    "email.createEvent"
   ],
   "config": {},
   "ui": [

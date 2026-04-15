@@ -123,6 +123,48 @@ export class ConversationLoop {
     return this.provider !== null;
   }
 
+  /** 앱 시작 시 비서 스타일 데일리 브리핑 생성 — 항목 없으면 null 반환 */
+  async generateBriefing(): Promise<string | null> {
+    const engine = this.deps.proactiveEngine;
+    if (!engine || !this.provider) return null;
+
+    const items = engine.collectBriefingItems();
+    if (items.length === 0) return null;
+
+    const briefingData = engine.getBriefingPromptData();
+    const today = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul", weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+    const prompt = `당신은 LVIS, 사용자의 AI 비서입니다. 아침 브리핑을 보고합니다.
+오늘 날짜: ${today}
+
+${briefingData}
+
+위 데이터를 바탕으로 비서가 상사에게 보고하듯 자연스럽고 간결하게 브리핑해주세요.
+- 2~5문장 내외로 핵심만
+- 긴급/중요 항목은 먼저
+- 친근하지만 프로페셔널한 말투
+- 마크다운 없이 자연스러운 대화체
+- "안녕하세요" 인사로 시작`;
+
+    let text = "";
+    try {
+      for await (const ev of this.provider.streamTurn({
+        systemPrompt: "당신은 LVIS, 사용자의 AI 비서입니다.",
+        messages: [{ role: "user", content: prompt }],
+        tools: [],
+        model: this.deps.settingsService.get("llm").model,
+        maxTokens: 400,
+      })) {
+        if (ev.type === "text_delta" && ev.text) text += ev.text;
+        if (ev.type === "message_complete") break;
+      }
+    } catch {
+      return null;
+    }
+
+    return text.trim() || null;
+  }
+
   /** 현재 벤더 이름 */
   getVendor(): string {
     return this.provider?.vendor ?? "none";

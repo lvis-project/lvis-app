@@ -46,6 +46,9 @@ const api = {
   getTodayTasks: async () => ipcRenderer.invoke("lvis:tasks:today"),
   getOverdueTasks: async () => ipcRenderer.invoke("lvis:tasks:overdue"),
 
+  // ─── Daily Briefing ──────────────────────────────
+  getBriefing: async () => ipcRenderer.invoke("lvis:briefing:get"),
+
   // ─── MCP ─────────────────────────────────────────
   mcp: {
     servers: async () => ipcRenderer.invoke("lvis:mcp:servers"),
