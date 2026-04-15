@@ -75,6 +75,23 @@ type ApprovalRequest = {
   createdAt: number;
   /** PolicyFile.requireExplicitApproval — true: dismiss 차단, false: dismiss → deny-once */
   requireExplicit: boolean;
+  /**
+   * AF2: §S1 hard-block target. Populated by the tool executor so the
+   * approval-gate can run the sensitive-path check. Shown as-is by the
+   * dialog if present (UI enhancement is a separate follow-up).
+   */
+  target?: { filePath?: string };
+  /**
+   * AF2: §S4 read-only hint. When true and mode !== "plan", the gate
+   * short-circuits without showing this dialog — so renderer only sees
+   * a request with `isReadOnly=true` when the gate was bypassed (plan mode).
+   */
+  isReadOnly?: boolean;
+  /**
+   * AF2: permission mode at request time. "plan" still surfaces the dialog
+   * even for read-only tools; "default" / "full_auto" auto-approve.
+   */
+  mode?: "default" | "plan" | "full_auto";
 };
 type ApprovalDecision = {
   requestId: string;

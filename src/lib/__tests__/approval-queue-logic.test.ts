@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { approvalQueueReducer } from "../approval-queue-reducer.js";
-import type { ApprovalRequest } from "../../core/approval-gate.js";
+import type { ApprovalRequest } from "../../permissions/approval-gate.js";
 
 function makeReq(id: string): ApprovalRequest {
   return {

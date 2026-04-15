@@ -1062,6 +1062,102 @@ flowchart LR
 
 ---
 
+### 4.6 Source Tree Layout & Module Boundaries — Phase 3
+
+Phase 3 리팩터 기준 `lvis-app/src/` 모듈 경계. Phase 1~2 의 `src/agent/` (11 파일 / 7 관심사) 와 `src/core/` (permissions 스택 + 엔진 혼재) 의 과부하를 해소하고, OpenHarness 비교 연구(`docs/blueprints/openharness-selective-borrow-plan.md`) 결과로 도출한 **단일 관심사 디렉터리** 원칙을 적용한다.
+
+#### 4.6.1 Canonical Directory Map
+
+```
+lvis-app/src/
+├── main.ts, boot.ts, preload.ts, renderer.tsx, ipc-bridge.ts,
+│   plugin-ui-host.tsx, taskService.ts                        # 엔트리/브릿지
+│
+├── engine/        # 에이전트 루프 + LLM 프로바이더 (구 src/agent/ 일부)
+│   ├── conversation-loop.ts, conversation-history.ts, auto-compact.ts
+│   └── llm/       # claude/openai/gemini provider + factory
+│
+├── tools/         # 1-file-per-tool (Tier S3 BaseTool 패턴)
+│   ├── base.ts            # BaseToolRegistry + BaseTool abstract (Tier S3)
+│   ├── executor.ts        # 기존 tool-executor (migrated)
+│   ├── knowledge-search.ts
+│   ├── bash.ts            # SafeBashExecutor (Tier A1)
+│   └── untrusted-banner.ts # Tier S5 wrap helper
+│
+├── prompts/       # 시스템 프롬프트 조립
+│
+├── hooks/         # PreTool/PostTool 인터셉트
+│   ├── hook-runner.ts            # 기존 function-hook API (유지)
+│   ├── post-turn-hook-chain.ts
+│   ├── types.ts / schemas.ts     # Zod discriminated union (Tier A4)
+│   ├── external-executor.ts      # Command + HTTP hook 실행기 (Tier A4)
+│   └── config-loader.ts          # ~/.lvis/hooks.json + admin-dir merge
+│
+├── permissions/   # 권한 스택 (구 src/core/ 에서 분리)
+│   ├── permission-manager.ts, permissions-store.ts, policy-store.ts,
+│   │   approval-gate.ts, agent-action-requester.ts,
+│   │   sensitive-paths.ts        # Tier S1+S2 SENSITIVE_PATH_PATTERNS
+│
+├── sandbox/       # 파일 경계 강제 (leaf)
+│   └── path-validator.ts         # Tier A3 realpath + boundary check
+│
+├── memory/        # §5 파일 기반 기억
+│
+├── audit/         # 감사 로그 / DLP 필터 (구 src/agent/ 에서 분리)
+│   └── audit-logger.ts, dlp-filter.ts
+│
+├── core/          # 남은 cross-cutting
+│   ├── keyword-engine.ts, route-engine.ts, proactive-engine.ts,
+│   │   tool-registry.ts          # 기존 레거시 (점진적 BaseToolRegistry 마이그레이션)
+│   └── network-guard.ts          # Tier A2 SSRF defense
+│
+├── mcp/           # Model Context Protocol 클라이언트 (기존 유지)
+│
+├── plugins/       # 플러그인 런타임 (구 plugin-runtime/)
+│   └── runtime.ts, registry.ts, marketplace.ts, deployment-guard.ts, types.ts
+│
+├── data/, main/, lib/, components/ui/, ui/, __tests__/
+```
+
+#### 4.6.2 Module Boundary Rules
+
+| 디렉터리 | 허용되는 의존 | 금지 |
+|---|---|---|
+| `engine/` | `permissions/`, `hooks/`, `prompts/`, `tools/`, `audit/`, `memory/`, `mcp/`, `core/`, `plugins/`, `engine/llm/` | DOM, `renderer.tsx`, `components/` |
+| `tools/` | `permissions/`, `sandbox/`, `core/network-guard.ts`, `hooks/` | `engine/`, `renderer.tsx` |
+| `prompts/` | `memory/`, `data/` | `engine/`, `renderer.tsx` |
+| `hooks/` | `permissions/`, `audit/`, `core/network-guard.ts` | `engine/` (hooks are called BY engine) |
+| `permissions/` | `data/settings-store.ts`, `audit/` | `engine/`, `tools/`, `renderer.tsx` |
+| `sandbox/` | Node stdlib only (leaf) | 모든 상위 |
+| `memory/` | `data/` | `engine/`, `tools/` |
+| `audit/` | `data/` | `engine/`, `tools/` |
+| `core/` | `permissions/`, `memory/`, `tools/`, `plugins/` | `engine/`, `renderer.tsx` |
+| `plugins/` | `permissions/`, `hooks/`, `data/`, `mcp/` | `engine/` 직접 (HostApi 경유) |
+| `main/` | Node stdlib + Electron main API | renderer 프로세스 코드 |
+| `mcp/` | `permissions/`, `core/network-guard.ts` | `renderer.tsx` |
+
+**원칙**:
+1. **하향 의존만** — 각 모듈은 "더 작은 책임" 방향으로만 의존
+2. **`engine/` 는 조립자** — tools/prompts/hooks/permissions 호출, 그 반대 금지
+3. **`sandbox/`, `permissions/`, `memory/`, `audit/` 는 leaf 성격** — business 모듈 import 금지
+4. **`renderer.tsx` 는 IPC 만** — 메인 프로세스 모듈 직접 import 금지
+
+#### 4.6.3 관련 blueprint
+
+- `docs/blueprints/openharness-selective-borrow-plan.md` — Tier S/A 차용 근거
+- `docs/blueprints/phase3-folder-refactor-plan.md` — file-by-file migration map
+
+#### 4.6.4 불변 사항 (리팩터가 바꾸지 않는 것)
+
+- 모든 public API / 함수 시그니처
+- Tool 이름 (underscore 규약)
+- IPC 채널
+- 플러그인 manifest 형식 (`plugin.json`)
+- 파일 기반 상태 (`~/.lvis/*`)
+- 기존 테스트 통과 수
+
+---
+
 ## 5. Memory — 경량 기억 구조
 
 Claude Code / Copilot이 채택한 **파일 기반 경량 메모리** 모델을 따른다. 복잡한 다계층 기억 관리가 아니라, 사용자가 직접 읽고 편집할 수 있는 투명한 구조로 유지한다.

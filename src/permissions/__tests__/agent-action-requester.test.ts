@@ -9,7 +9,7 @@ import {
   type AgentTaskDelegateAction,
   type AgentExternalApiCallAction,
 } from "../agent-action-requester.js";
-import type { ApprovalGate, ApprovalDecision } from "../../core/approval-gate.js";
+import type { ApprovalGate, ApprovalDecision } from "../approval-gate.js";
 
 // ─── Mock ApprovalGate ───────────────────────────────
 

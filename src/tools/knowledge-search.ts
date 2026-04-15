@@ -5,7 +5,7 @@
  *   PageIndex 0.2.8은 데이터 소스일 뿐 `search()`가 없음.
  *   → LVIS가 OpenAI function calling 4개 도구를 노출하여 LLM이 직접 트리를 탐색.
  *
- * 청사진 §6.1: `lvis-app/src/agent/knowledge-search-tool.ts`
+ * 청사진 §6.1: `lvis-app/src/tools/knowledge-search.ts`
  * 청사진 §10 S5: LLM Agentic 검색 시나리오
  * 청사진 §11 리스크: LLM agentic 토큰 폭발 → top-5 + depth ≤3 하드 캡
  *
@@ -25,7 +25,7 @@
  * INTEGRATION NOTE for Agent 4 (Plugin Integrator):
  * boot.ts registerBuiltinTools() 근처 (line 272-407)에서:
  *
- *   import { createKnowledgeSearchTools } from "./agent/knowledge-search-tool.js";
+ *   import { createKnowledgeSearchTools } from "./tools/knowledge-search.js";
  *   import { HybridRetriever } from "./main/hybrid-retriever.js";
  *   import { MockCloudIndexAdapter } from "./main/cloud-index-adapter.js";
  *
