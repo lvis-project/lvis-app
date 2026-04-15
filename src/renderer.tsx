@@ -17,6 +17,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTr
 import { PluginUiHostView, type PluginUiExtensionView } from "./plugin-ui-host.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { approvalQueueReducer } from "./lib/approval-queue-reducer.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -97,7 +98,16 @@ type LvisPermissionApi = {
 };
 
 type LvisPolicyApi = {
-  get: () => Promise<{ version: 1; requireExplicitApproval: boolean; managed: boolean; updatedAt: string }>;
+  get: () => Promise<{
+    version: 1;
+    requireExplicitApproval: boolean;
+    managed: boolean;
+    updatedAt: string;
+    /** §C2 admin-dir source tracking */
+    source: "defaults" | "user" | "admin" | "merged";
+    adminOverrides?: string[];
+    adminPath?: string;
+  }>;
   set: (patch: unknown) => Promise<{ ok: boolean; policy?: unknown; error?: string; message?: string }>;
 };
 
@@ -229,6 +239,9 @@ function PermissionsTab() {
   const [requireExplicit, setRequireExplicit] = useState(true);
   const [policyManaged, setPolicyManaged] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
+  /** §C2: admin-dir source tracking */
+  const [policySource, setPolicySource] = useState<"defaults"|"user"|"admin"|"merged">("defaults");
+  const [policyAdminPath, setPolicyAdminPath] = useState<string | undefined>(undefined);
 
   // ── Section C: Rule Editor ────────────────────────
   const [rules, setRules] = useState<PermissionRule[]>([]);
@@ -249,6 +262,8 @@ function PermissionsTab() {
       setMode((modeRes.mode as ExecMode) ?? "default");
       setRequireExplicit(policyRes.requireExplicitApproval);
       setPolicyManaged(policyRes.managed);
+      setPolicySource((policyRes.source as "defaults"|"user"|"admin"|"merged") ?? "defaults");
+      setPolicyAdminPath(policyRes.adminPath as string | undefined);
       setRules(rulesRes);
     } catch (e) {
       setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
@@ -383,7 +398,9 @@ function PermissionsTab() {
           </div>
           {policyManaged && (
             <p className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-600 dark:text-yellow-400">
-              이 정책은 IT 관리자가 설정했습니다. 사용자가 변경할 수 없습니다.
+              {(policySource === "admin" || policySource === "merged") && policyAdminPath
+                ? `이 정책은 회사 IT 관리자가 배포했습니다 (경로: ${policyAdminPath}). 사용자가 변경할 수 없습니다.`
+                : "이 정책은 IT 관리자가 설정했습니다. 사용자가 변경할 수 없습니다."}
             </p>
           )}
         </div>
@@ -627,10 +644,12 @@ const SOURCE_BADGE: Record<string, string> = {
 function ToolApprovalDialog({
   open,
   request,
+  pendingCount = 1,
   onDecide,
 }: {
   open: boolean;
   request: ApprovalRequest | null;
+  pendingCount?: number;
   onDecide: (choice: ApprovalChoice, pattern?: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -683,7 +702,14 @@ function ToolApprovalDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            {title}
+            {pendingCount > 1 && (
+              <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                대기 중 {pendingCount - 1}개
+              </span>
+            )}
+          </DialogTitle>
           <DialogDescription>
             AI 에이전트가 아래 도구를 실행하려 합니다. 허용하시겠습니까?
           </DialogDescription>
@@ -791,7 +817,9 @@ function App() {
   const [commandQuery, setCommandQuery] = useState("");
   const [working, setWorking] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
+  const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([]);
+  const approvalQueueRef = useRef<ApprovalRequest[]>([]);
+  useEffect(() => { approvalQueueRef.current = approvalQueue; }, [approvalQueue]);
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
@@ -895,27 +923,24 @@ function App() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
 
-  // ─── Approval Gate 구독 ───────────────────────
+  // ─── Approval Gate 구독 (C4: single-slot → FIFO queue) ──
   useEffect(() => {
     if (!window.lvis?.approval) return;
     const unsub = window.lvis.approval.onRequest((req) => {
-      setApprovalRequest(req);
+      setApprovalQueue((q) => approvalQueueReducer(q, { type: "push", req }));
     });
     return unsub;
   }, []);
 
   const handleApprovalDecide = useCallback(async (choice: ApprovalChoice, pattern?: string) => {
-    if (!approvalRequest) return;
-    const decision: ApprovalDecision = {
-      requestId: approvalRequest.id,
-      choice,
-      rememberPattern: pattern,
-    };
-    setApprovalRequest(null);
+    const current = approvalQueueRef.current[0];
+    if (!current) return;
+    // shift 먼저 — respond 완료 전에 다음 항목 표시
+    setApprovalQueue((q) => approvalQueueReducer(q, { type: "shift" }));
     if (window.lvis?.approval) {
-      await window.lvis.approval.respond(decision);
+      await window.lvis.approval.respond({ requestId: current.id, choice, rememberPattern: pattern });
     }
-  }, [approvalRequest]);
+  }, []);
 
   const commandActions = useMemo(() => [
     { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
@@ -1050,8 +1075,9 @@ function App() {
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => void checkApiKey()} />
       <ToolApprovalDialog
-        open={approvalRequest !== null}
-        request={approvalRequest}
+        open={approvalQueue.length > 0}
+        request={approvalQueue[0] ?? null}
+        pendingCount={approvalQueue.length}
         onDecide={(choice, pattern) => void handleApprovalDecide(choice, pattern)}
       />
       <Dialog open={!!installTarget} onOpenChange={(o) => !o && setInstallTarget(null)}><DialogContent><DialogHeader><DialogTitle>플러그인 설치</DialogTitle><DialogDescription>{installTarget ? `'${installTarget.name}' 설치?` : ""}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setInstallTarget(null)}>취소</Button><Button onClick={async () => { if (!installTarget) return; const id = installTarget.id; setInstallTarget(null); await installPlugin(id); }} disabled={working}>설치</Button></DialogFooter></DialogContent></Dialog>

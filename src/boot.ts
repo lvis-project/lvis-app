@@ -33,6 +33,7 @@ import { AuditLogger } from "./agent/audit-logger.js";
 import { createKnowledgeSearchTools } from "./agent/knowledge-search-tool.js";
 import { ApprovalGate } from "./core/approval-gate.js";
 import { loadPolicy } from "./core/policy-store.js";
+import { DefaultAgentActionRequester } from "./agent/agent-action-requester.js";
 import type { PluginHostApi } from "./plugin-runtime/types.js";
 import type { ToolDefinition } from "./core/tool-registry.js";
 
@@ -55,6 +56,8 @@ export interface AppServices {
   postTurnHookChain: PostTurnHookChain;
   /** B1: 승인 게이트 — mainWindow 준비 후 생성 */
   approvalGate?: ApprovalGate;
+  /** @internal Phase 2 stub — §8 Agent Hub approval caller (Phase 3 ConversationLoop 연동 예정) */
+  agentActionRequester?: DefaultAgentActionRequester;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
 }
@@ -357,6 +360,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // §F7: bootAuditLogger 주입 → requested/decided/timeout/send-failed 4 phase 감사
   const bootPolicy = await loadPolicy();
   const approvalGate = new ApprovalGate(mainWindow.webContents, bootPolicy, 5 * 60 * 1000, bootAuditLogger);
+  // @internal Phase 2 stub — §8 Agent Hub approval caller (Phase 3 ConversationLoop 연동 예정)
+  const agentActionRequester = new DefaultAgentActionRequester(approvalGate);
 
   // §4.5: ConversationLoop
   const conversationLoop = new ConversationLoop({
@@ -395,7 +400,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, postTurnHookChain,
-    approvalGate, knowledgeAvailable,
+    approvalGate, agentActionRequester, knowledgeAvailable,
   };
 }
 
