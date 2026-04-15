@@ -2,17 +2,23 @@
   "id": "pageindex",
   "name": "LVIS PageIndex",
   "version": "1.0.0",
+  "deployment": "managed",
+  "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-pageindex/dist/hostPlugin.js",
   "methods": [
     "index.scan",
     "index.documents",
+    "index.folders",
+    "index.addFolder",
+    "index.removeFolder",
     "chat.preview"
   ],
   "config": {
     "scanFolders": [
       "fixtures"
     ],
-    "workspace": ".pageindex-workspace"
+    "workspace": ".pageindex-workspace",
+    "testMode": true
   },
   "ui": [
     {

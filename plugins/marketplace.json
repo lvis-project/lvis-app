@@ -7,6 +7,8 @@
       "description": "로컬 문서를 인덱싱하고 질의 미리보기를 제공하는 검색 플러그인",
       "packageSpec": "file:../lvis-plugin-pageindex",
       "packageName": "@lvis/plugin-pageindex",
+      "deployment": "managed",
+      "publisher": "LG Electronics IT",
       "methods": [
         "index.scan",
         "index.documents",
@@ -34,6 +36,8 @@
       "description": "회의 STT/요약 파이프라인을 제공하는 미팅 플러그인",
       "packageSpec": "file:../lvis-plugin-meeting",
       "packageName": "@lvis/plugin-meeting",
+      "deployment": "managed",
+      "publisher": "LG Electronics IT",
       "methods": [
         "meeting.start",
         "meeting.pushChunk",
@@ -62,6 +66,8 @@
       "description": "Outlook 메일을 읽고 LVIS가 답장·할 일·일정을 제안하는 이메일 플러그인",
       "packageSpec": "file:../lvis-plugin-email",
       "packageName": "@lvis/plugin-email",
+      "deployment": "managed",
+      "publisher": "LG Electronics IT",
       "methods": [
         "email.status",
         "email.auth",
