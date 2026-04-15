@@ -8,7 +8,7 @@
  * Phase 4+ 추가: ③④⑧⑩⑪⑫ (서버 인프라 의존)
  */
 import { hostname, platform, homedir, userInfo } from "node:os";
-import type { MemoryManager } from "../core/memory-manager.js";
+import type { MemoryManager } from "../memory/memory-manager.js";
 import type { ToolRegistry } from "../core/tool-registry.js";
 
 // ─── Types ──────────────────────────────────────────
