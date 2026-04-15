@@ -8,7 +8,9 @@ import { resolve } from "node:path";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { PluginRuntime } from "./plugins/runtime.js";
-import { PluginMarketplaceService } from "./plugins/marketplace.js";
+import { MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
+import type { MarketplaceFetcher } from "./plugins/marketplace.js";
+import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
 import { PluginDeploymentGuard } from "./plugins/deployment-guard.js";
 import { TaskService } from "./taskService.js";
 import { SettingsService } from "./data/settings-store.js";
@@ -320,7 +322,29 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     });
   }
 
-  const pluginMarketplace = new PluginMarketplaceService(projectRoot, deploymentGuard);
+  // §9.5 M4: select marketplace backend from settings (default = mock local JSON).
+  const marketplaceSettings = settingsService.get("marketplace");
+  let marketplaceFetcher: MarketplaceFetcher;
+  if (
+    marketplaceSettings.backend === "real-cloud" &&
+    marketplaceSettings.realCloudBaseUrl
+  ) {
+    marketplaceFetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: marketplaceSettings.realCloudBaseUrl,
+      apiKey: settingsService.getSecret("marketplace.apiKey") ?? undefined,
+      allowPrivateNetwork: marketplaceSettings.realCloudAllowPrivateNetwork,
+    });
+    console.log("[lvis] boot: marketplace backend = real-cloud (%s)", marketplaceSettings.realCloudBaseUrl);
+  } else {
+    marketplaceFetcher = new MockMarketplaceFetcher(
+      resolve(projectRoot, "plugins/marketplace.json"),
+    );
+  }
+  const pluginMarketplace = new PluginMarketplaceService(
+    projectRoot,
+    deploymentGuard,
+    marketplaceFetcher,
+  );
 
   // §4.5.9: SystemPromptBuilder
   const systemPromptBuilder = new SystemPromptBuilder({
