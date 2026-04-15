@@ -22,7 +22,8 @@
 import { describe, it, expect, vi } from "vitest";
 
 import { ToolExecutor } from "../executor.js";
-import { ToolRegistry, type ToolDefinition } from "../../core/tool-registry.js";
+import { ToolRegistry } from "../registry.js";
+import { createDynamicTool, type Tool } from "../base.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
 
@@ -35,19 +36,25 @@ function makeMockWebContents() {
   };
 }
 
-function makeReadFileTool(executeSpy: ReturnType<typeof vi.fn>): ToolDefinition {
-  return {
+function makeReadFileTool(
+  executeSpy: ReturnType<typeof vi.fn>,
+): Tool {
+  return createDynamicTool({
     name: "read_file",
     description: "Reads a file.",
-    parameters: {
+    source: "builtin",
+    category: "read",
+    isReadOnly: () => true,
+    jsonSchema: {
       type: "object",
       properties: { path: { type: "string" } },
       required: ["path"],
     },
-    execute: executeSpy,
-    source: "builtin",
-    category: "read",
-  };
+    execute: async (rawInput) => {
+      const value = await executeSpy(rawInput);
+      return { output: String(value), isError: false };
+    },
+  });
 }
 
 // ─── Tests ───────────────────────────────────────────

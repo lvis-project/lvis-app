@@ -15,8 +15,8 @@
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { ToolSource, TrustLevel } from "../core/tool-registry.js";
-import { trustFromSource } from "../core/tool-registry.js";
+import type { ToolSource, TrustLevel } from "../tools/types.js";
+import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";

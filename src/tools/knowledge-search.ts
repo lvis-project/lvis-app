@@ -22,30 +22,12 @@
  * Depth 카운팅은 ConversationLoop의 tool_call 카운터에 위임 (이 파일 외부 책임).
  * 본 모듈은 도구 정의만 제공한다.
  *
- * INTEGRATION NOTE for Agent 4 (Plugin Integrator):
- * boot.ts registerBuiltinTools() 근처 (line 272-407)에서:
- *
- *   import { createKnowledgeSearchTools } from "./tools/knowledge-search.js";
- *   import { HybridRetriever } from "./main/hybrid-retriever.js";
- *   import { MockCloudIndexAdapter } from "./main/cloud-index-adapter.js";
- *
- *   // (pageIndexPlugin이 workerClient를 expose하도록 Agent 4가 개조)
- *   const workerClient = pageIndexPlugin.getWorkerClient();
- *   const cloudAdapter = new MockCloudIndexAdapter();
- *   const hybridRetriever = new HybridRetriever({ workerClient, cloudAdapter });
- *
- *   const knowledgeTools = createKnowledgeSearchTools({
- *     hybridRetriever,
- *     workerClient: {
- *       listDocuments:  () => workerClient.listDocuments(),
- *       getStructure:   (docId) => workerClient.getStructure(docId),
- *       getPageContent: (docId, pages) => workerClient.getPageContent(docId, pages),
- *     },
- *   });
- *   for (const tool of knowledgeTools) toolRegistry.register(tool);
+ * 각 도구는 {@link createDynamicTool}로 생성되어 {@link Tool} 계약을
+ * 만족한다. 도구별 execute()는 `ToolResult { output, isError, metadata? }`
+ * 형태를 반환하며, 결과는 JSON 문자열로 직렬화되어 LLM에 전달된다.
  */
 
-import type { ToolDefinition } from "../core/tool-registry.js";
+import { createDynamicTool, type Tool } from "./base.js";
 import type { HybridRetriever, HybridResult } from "../main/hybrid-retriever.js";
 
 // ─── 외부 의존 인터페이스 (Agent 4가 구현) ─────────
@@ -118,16 +100,19 @@ export interface KnowledgeSearchResultItem {
  */
 export function createKnowledgeSearchTools(
   deps: KnowledgeSearchToolDeps,
-): ToolDefinition[] {
+): Tool[] {
   const defaultTopK = deps.defaultTopK ?? 5;
   const maxTopK = deps.maxTopK ?? 10;
   const snippetMaxChars = deps.snippetMaxChars ?? 200;
 
-  const knowledgeSearchTool: ToolDefinition = {
+  const knowledgeSearchTool = createDynamicTool({
     name: "knowledge_search",
     description:
       "사용자 질문과 관련된 사내 문서 chunk를 검색합니다. BM25 + 벡터 hybrid retrieval (RRF k=60) 기반으로 최대 10개 결과를 반환합니다. 결과의 chunk_id, doc_id, page, snippet을 활용하여 추가 상세가 필요하면 document_structure와 document_page_content를 호출하세요. 가장 먼저 호출해야 하는 1차 검색 도구입니다.",
-    parameters: {
+    source: "builtin",
+    category: "read",
+    isReadOnly: () => true,
+    jsonSchema: {
       type: "object",
       properties: {
         query: {
@@ -141,55 +126,83 @@ export function createKnowledgeSearchTools(
       },
       required: ["query"],
     },
-    execute: async (args): Promise<KnowledgeSearchResultItem[]> => {
+    execute: async (rawInput) => {
+      const args = (rawInput ?? {}) as Record<string, unknown>;
       const query = String(args.query ?? "").trim();
-      if (!query) return [];
+      if (!query) {
+        return { output: JSON.stringify([]), isError: false };
+      }
 
       const requestedTopK = Number(args.topK ?? defaultTopK);
       const topK = Math.min(
         maxTopK,
-        Math.max(1, Number.isFinite(requestedTopK) ? requestedTopK : defaultTopK),
+        Math.max(
+          1,
+          Number.isFinite(requestedTopK) ? requestedTopK : defaultTopK,
+        ),
       );
 
-      const results = await deps.hybridRetriever.retrieve(query, topK);
-      return results.map((r: HybridResult) => ({
-        chunkId: r.chunkId,
-        docId: r.docId,
-        docName: r.docName,
-        page: r.page,
-        snippet: truncate(r.rawText, snippetMaxChars),
-        score: r.rrfScore,
-        sources: r.sources.map((s) => s.source),
-      }));
+      try {
+        const results = await deps.hybridRetriever.retrieve(query, topK);
+        const mapped: KnowledgeSearchResultItem[] = results.map(
+          (r: HybridResult) => ({
+            chunkId: r.chunkId,
+            docId: r.docId,
+            docName: r.docName,
+            page: r.page,
+            snippet: truncate(r.rawText, snippetMaxChars),
+            score: r.rrfScore,
+            sources: r.sources.map((s) => s.source),
+          }),
+        );
+        return { output: JSON.stringify(mapped), isError: false };
+      } catch (err) {
+        return {
+          output: JSON.stringify({
+            error: "knowledge_search failed",
+            details: (err as Error).message,
+          }),
+          isError: true,
+        };
+      }
     },
-    source: "builtin",
-    category: "read",
-  };
+  });
 
-  const documentListTool: ToolDefinition = {
+  const documentListTool = createDynamicTool({
     name: "document_list",
     description:
       "인덱싱된 모든 문서의 목록(docId, docName, type)을 반환합니다. 특정 문서를 지칭해서 탐색하고 싶을 때 사용하세요.",
-    parameters: {
+    source: "builtin",
+    category: "read",
+    isReadOnly: () => true,
+    jsonSchema: {
       type: "object",
       properties: {},
     },
     execute: async () => {
       try {
-        return await deps.workerClient.listDocuments();
+        const docs = await deps.workerClient.listDocuments();
+        return { output: JSON.stringify(docs), isError: false };
       } catch (err) {
-        return { error: "document_list failed", details: (err as Error).message };
+        return {
+          output: JSON.stringify({
+            error: "document_list failed",
+            details: (err as Error).message,
+          }),
+          isError: true,
+        };
       }
     },
-    source: "builtin",
-    category: "read",
-  };
+  });
 
-  const documentStructureTool: ToolDefinition = {
+  const documentStructureTool = createDynamicTool({
     name: "document_structure",
     description:
       "특정 문서의 PageIndex 트리 구조를 반환합니다. 트리의 노드 제목을 보고 관련 페이지 범위를 추론한 다음, document_page_content로 그 범위를 읽으세요. 이는 agentic 루프의 2-hop 탐색에 사용됩니다.",
-    parameters: {
+    source: "builtin",
+    category: "read",
+    isReadOnly: () => true,
+    jsonSchema: {
       type: "object",
       properties: {
         docId: {
@@ -199,24 +212,38 @@ export function createKnowledgeSearchTools(
       },
       required: ["docId"],
     },
-    execute: async (args) => {
+    execute: async (rawInput) => {
+      const args = (rawInput ?? {}) as Record<string, unknown>;
       const docId = String(args.docId ?? "").trim();
-      if (!docId) return { error: "docId is required" };
+      if (!docId) {
+        return {
+          output: JSON.stringify({ error: "docId is required" }),
+          isError: true,
+        };
+      }
       try {
-        return await deps.workerClient.getStructure(docId);
+        const structure = await deps.workerClient.getStructure(docId);
+        return { output: JSON.stringify(structure), isError: false };
       } catch (err) {
-        return { error: "document_structure failed", details: (err as Error).message };
+        return {
+          output: JSON.stringify({
+            error: "document_structure failed",
+            details: (err as Error).message,
+          }),
+          isError: true,
+        };
       }
     },
-    source: "builtin",
-    category: "read",
-  };
+  });
 
-  const documentPageContentTool: ToolDefinition = {
+  const documentPageContentTool = createDynamicTool({
     name: "document_page_content",
     description:
       "특정 문서의 페이지 범위 내용을 반환합니다. pages 파라미터는 PageIndex 표현식으로, '5' (단일 페이지), '5-7' (범위), '1,3,5-7' (복합)의 세 형식을 지원합니다. knowledge_search의 결과 또는 document_structure의 노드를 본 뒤 정확한 페이지 본문을 얻기 위해 호출하세요.",
-    parameters: {
+    source: "builtin",
+    category: "read",
+    isReadOnly: () => true,
+    jsonSchema: {
       type: "object",
       properties: {
         docId: {
@@ -230,20 +257,36 @@ export function createKnowledgeSearchTools(
       },
       required: ["docId", "pages"],
     },
-    execute: async (args) => {
+    execute: async (rawInput) => {
+      const args = (rawInput ?? {}) as Record<string, unknown>;
       const docId = String(args.docId ?? "").trim();
       const pages = String(args.pages ?? "").trim();
-      if (!docId) return { error: "docId is required" };
-      if (!pages) return { error: "pages is required" };
+      if (!docId) {
+        return {
+          output: JSON.stringify({ error: "docId is required" }),
+          isError: true,
+        };
+      }
+      if (!pages) {
+        return {
+          output: JSON.stringify({ error: "pages is required" }),
+          isError: true,
+        };
+      }
       try {
-        return await deps.workerClient.getPageContent(docId, pages);
+        const content = await deps.workerClient.getPageContent(docId, pages);
+        return { output: JSON.stringify(content), isError: false };
       } catch (err) {
-        return { error: "document_page_content failed", details: (err as Error).message };
+        return {
+          output: JSON.stringify({
+            error: "document_page_content failed",
+            details: (err as Error).message,
+          }),
+          isError: true,
+        };
       }
     },
-    source: "builtin",
-    category: "read",
-  };
+  });
 
   return [
     knowledgeSearchTool,

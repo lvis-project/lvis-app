@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import type { McpServerConfig, McpServerState } from "./types.js";
 import { McpGovernance } from "./mcp-governance.js";
 import { McpClient } from "./mcp-client.js";
-import type { ToolRegistry } from "../core/tool-registry.js";
+import type { ToolRegistry } from "../tools/registry.js";
 
 const DEFAULT_CONFIG_PATH = join(homedir(), ".lvis", "mcp-servers.json");
 

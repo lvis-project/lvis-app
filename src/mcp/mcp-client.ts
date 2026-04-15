@@ -23,7 +23,8 @@ import type {
   McpToolSchema,
 } from "./types.js";
 import type { McpGovernance } from "./mcp-governance.js";
-import type { ToolRegistry } from "../core/tool-registry.js";
+import type { ToolRegistry } from "../tools/registry.js";
+import { createDynamicTool } from "../tools/base.js";
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
 
@@ -437,21 +438,32 @@ export class McpClient {
     for (const tool of tools) {
       const namespacedName = this.governance.applyToolNamespace(serverId, tool.name);
 
-      this.toolRegistry.register({
-        name: namespacedName,
-        description: tool.description,
-        parameters: {
-          type: "object" as const,
-          properties: tool.inputSchema.properties as Record<string, { type: string; description: string }>,
-          required: tool.inputSchema.required,
-        },
-        execute: async (args: Record<string, unknown>) => {
-          // tools/call에는 원래 도구 이름 사용
-          return this.callTool(tool.name, args);
-        },
-        source: "mcp",
-        mcpServerId: serverId,
-      });
+      this.toolRegistry.register(
+        createDynamicTool({
+          name: namespacedName,
+          description: tool.description,
+          source: "mcp",
+          mcpServerId: serverId,
+          jsonSchema: {
+            type: "object",
+            properties: tool.inputSchema.properties,
+            required: tool.inputSchema.required,
+          },
+          execute: async (rawInput) => {
+            // tools/call에는 원래 도구 이름 사용
+            const args = (rawInput ?? {}) as Record<string, unknown>;
+            try {
+              const text = await this.callTool(tool.name, args);
+              return { output: text, isError: false };
+            } catch (err) {
+              return {
+                output: err instanceof Error ? err.message : String(err),
+                isError: true,
+              };
+            }
+          },
+        }),
+      );
 
       this.state.registeredTools.push(namespacedName);
     }

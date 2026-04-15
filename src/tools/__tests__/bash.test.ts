@@ -3,12 +3,15 @@
  *
  * Uses harmless commands (echo, false, sleep, yes|head) so the test
  * suite remains fast and side-effect free on macOS/Linux CI.
+ *
+ * BashTool extends the canonical {@link ../base.js ZodTool}, so tests
+ * exercise it through the same {@link execute} entry point the §6.4
+ * {@link ../registry.js ToolRegistry} uses in production — no adapter.
  */
 import { describe, it, expect } from "vitest";
 
-import { ToolRegistry } from "../../core/tool-registry.js";
+import { ToolRegistry } from "../registry.js";
 import { BashTool, BashToolInputSchema } from "../bash.js";
-import { baseToolToLegacyDefinition } from "../adapter.js";
 import type { ToolExecutionContext } from "../base.js";
 
 const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
@@ -102,20 +105,15 @@ describe("BashTool — preflight interactive command block", () => {
   });
 });
 
-describe("BashTool — BaseTool surface", () => {
+describe("BashTool — ZodTool surface", () => {
   it("isReadOnly returns false", () => {
     const tool = new BashTool();
     expect(tool.isReadOnly({ command: "echo", timeoutSeconds: 5 })).toBe(false);
   });
 
-  it("toApiSchema returns name, description, input_schema with command property", () => {
+  it("toJsonSchema returns an object schema with a command property", () => {
     const tool = new BashTool();
-    const schema = tool.toApiSchema();
-    expect(schema.name).toBe("bash");
-    expect(schema.description).toBe("Run a shell command in the local repository.");
-    expect(schema.input_schema).toBeTypeOf("object");
-
-    const inputSchema = schema.input_schema as {
+    const schema = tool.toJsonSchema() as {
       type?: string;
       properties?: Record<string, unknown>;
       required?: string[];
@@ -123,15 +121,15 @@ describe("BashTool — BaseTool surface", () => {
       $ref?: string;
     };
 
-    // zodToJsonSchema with name option wraps schema in definitions + $ref.
+    // zodToJsonSchema may wrap in definitions + $ref depending on options.
     const resolved =
-      inputSchema.definitions && inputSchema.$ref
-        ? (inputSchema.definitions[inputSchema.$ref.replace("#/definitions/", "")] as {
+      schema.definitions && schema.$ref
+        ? (schema.definitions[schema.$ref.replace("#/definitions/", "")] as {
             type: string;
             properties: Record<string, unknown>;
             required?: string[];
           })
-        : (inputSchema as {
+        : (schema as {
             type: string;
             properties: Record<string, unknown>;
             required?: string[];
@@ -142,13 +140,18 @@ describe("BashTool — BaseTool surface", () => {
     expect(resolved.properties.command).toBeDefined();
   });
 
-  it("registers into the canonical ToolRegistry via the BaseTool adapter", () => {
+  it("category is 'dangerous'", () => {
+    expect(new BashTool().category).toBe("dangerous");
+  });
+
+  it("registers directly into the canonical ToolRegistry", () => {
     const registry = new ToolRegistry();
-    registry.register(baseToolToLegacyDefinition(new BashTool()));
+    registry.register(new BashTool());
     const found = registry.findByName("bash");
     expect(found).toBeDefined();
     expect(found?.name).toBe("bash");
     expect(found?.source).toBe("builtin");
+    expect(found?.category).toBe("dangerous");
   });
 });
 

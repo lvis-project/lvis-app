@@ -3,59 +3,155 @@
  * https://github.com/HKUDS/OpenHarness/blob/main/src/openharness/tools/base.py
  * Copyright (c) 2026 HKU Data Intelligence Lab
  *
- * Modern tool base class — single-file-per-tool, Zod input validation,
- * native v4 JSON Schema export. Tools register into the canonical §6.4
- * {@link ../core/tool-registry.js ToolRegistry} via
- * {@link ./adapter.js baseToolToLegacyDefinition}; this module no longer
- * exposes its own registry to avoid dual-registry drift (the legacy one
- * carries the §6.3 deny rules + §6.4 trust governance and is the single
- * production source of truth).
+ * Tool interface + ergonomic bases.
+ *
+ * Every tool registered with the §6.4 {@link ./registry.js ToolRegistry}
+ * implements {@link Tool}, regardless of whether it was hand-written as
+ * a {@link ZodTool} subclass or generated dynamically via
+ * {@link createDynamicTool} (plugin manifest, MCP discovery,
+ * knowledge-search factory).
+ *
+ * This is the single source of truth for the tool contract — the
+ * permission manager, the 8-step executor pipeline, the system prompt
+ * builder, and the plugin/MCP lifecycle all consume this shape.
  */
 import { z } from "zod";
-import type { ToolSource } from "../core/tool-registry.js";
+import type {
+  ToolSource,
+  ToolCategory,
+  ToolExecutionContext,
+  ToolResult,
+} from "./types.js";
 
-export interface ToolExecutionContext {
-  cwd: string;
-  metadata: Record<string, unknown>;
-}
+// Re-export governance types so downstream modules can grab the full
+// tool surface from a single import path (tools/base.js).
+export type {
+  ToolSource,
+  ToolCategory,
+  ToolExecutionContext,
+  ToolResult,
+} from "./types.js";
 
-export interface ToolResult {
-  output: string;
-  isError: boolean;
-  metadata?: Record<string, unknown>;
-}
+/**
+ * Canonical tool contract used by the §6.4 {@link ToolRegistry}, the
+ * §6.3 permission stack, the executor pipeline, and
+ * {@link ../prompts/system-prompt-builder.js SystemPromptBuilder}.
+ *
+ * Implementations must be self-describing: {@link toJsonSchema} produces
+ * the schema sent to LLM providers, {@link isReadOnly} drives the
+ * approval-gate §S4 read-only short-circuit, and {@link execute}
+ * validates + runs the tool against the shared execution context.
+ */
+export interface Tool {
+  readonly name: string;
+  readonly description: string;
+  readonly source: ToolSource;
+  readonly category?: ToolCategory;
+  readonly pluginId?: string;
+  readonly mcpServerId?: string;
 
-export abstract class BaseTool<TInputSchema extends z.ZodTypeAny = z.ZodTypeAny> {
-  abstract readonly name: string;
-  abstract readonly description: string;
-  abstract readonly inputSchema: TInputSchema;
+  /** JSON Schema describing the input shape — sent to LLM providers. */
+  toJsonSchema(): unknown;
+
+  /** Per-invocation read-only check — false = mutating. */
+  isReadOnly(input: unknown): boolean;
 
   /**
-   * Source category used by §6.3 trust governance. The adapter propagates
-   * this into {@link ../core/tool-registry.js ToolDefinition.source} which
-   * PermissionManager + RateLimiter consume for trust-tier enforcement.
-   * Subclasses override (`override readonly source = "plugin" as const`)
-   * when shipped from a plugin or MCP server.
+   * Validate + execute. Implementations parse `rawInput` to whatever
+   * typed shape they need. Returns a {@link ToolResult} (with isError
+   * for downstream pipeline steps) instead of throwing for normal
+   * failures.
    */
+  execute(rawInput: unknown, ctx: ToolExecutionContext): Promise<ToolResult>;
+}
+
+/**
+ * Ergonomic abstract base for hand-written tools backed by a Zod schema.
+ * Subclasses implement {@link executeTyped}; {@link execute} parses
+ * `rawInput` via the schema first then dispatches typed.
+ *
+ * Override `source` / `category` with `override readonly` for plugin or
+ * dangerous tools — see {@link BashTool} for a complete example.
+ */
+export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
+  implements Tool
+{
+  abstract readonly name: string;
+  abstract readonly description: string;
+  abstract readonly inputSchema: TSchema;
+
   readonly source: ToolSource = "builtin";
+  readonly category?: ToolCategory;
+  readonly pluginId?: string;
+  readonly mcpServerId?: string;
 
-  abstract execute(
-    input: z.infer<TInputSchema>,
-    ctx: ToolExecutionContext,
-  ): Promise<ToolResult>;
+  toJsonSchema(): unknown {
+    // zod v4 ships with native JSON Schema export.
+    return z.toJSONSchema(this.inputSchema);
+  }
 
-  isReadOnly(_input: z.infer<TInputSchema>): boolean {
+  isReadOnly(_input: unknown): boolean {
     return false;
   }
 
-  toApiSchema(): { name: string; description: string; input_schema: unknown } {
-    // zod v4 ships with native JSON Schema export via z.toJSONSchema().
-    // Replaces the v3-only `zod-to-json-schema` package which was removed
-    // by Phase 3 follow-up T7-E.
-    return {
-      name: this.name,
-      description: this.description,
-      input_schema: z.toJSONSchema(this.inputSchema),
-    };
+  async execute(
+    rawInput: unknown,
+    ctx: ToolExecutionContext,
+  ): Promise<ToolResult> {
+    const parsed = this.inputSchema.parse(rawInput) as z.infer<TSchema>;
+    return this.executeTyped(parsed, ctx);
   }
+
+  /**
+   * Typed execution after Zod parsing. Subclasses implement this — the
+   * public {@link execute} entry point threads raw LLM-supplied input
+   * through the zod schema before dispatching.
+   */
+  protected abstract executeTyped(
+    input: z.infer<TSchema>,
+    ctx: ToolExecutionContext,
+  ): Promise<ToolResult>;
+}
+
+/**
+ * Specification consumed by {@link createDynamicTool}. Runtime-built
+ * tools (plugin manifest registration, MCP discovery, knowledge-search
+ * factory) supply a raw JSON Schema and an execute callback rather
+ * than a Zod schema + subclass.
+ */
+export interface DynamicToolSpec {
+  name: string;
+  description: string;
+  source: ToolSource;
+  category?: ToolCategory;
+  pluginId?: string;
+  mcpServerId?: string;
+  /** Raw JSON Schema — used when no Zod schema is available (plugin/MCP). */
+  jsonSchema: object;
+  execute: (
+    rawInput: unknown,
+    ctx: ToolExecutionContext,
+  ) => Promise<ToolResult>;
+  isReadOnly?: (input: unknown) => boolean;
+}
+
+/**
+ * Factory for runtime-built tools. Plugin manifest registration, MCP
+ * discovery, and the knowledge-search factory call this to skip the
+ * abstract subclass ceremony and pass a spec object — the returned
+ * value is a fully-fledged {@link Tool} ready for
+ * {@link ToolRegistry.register}.
+ */
+export function createDynamicTool(spec: DynamicToolSpec): Tool {
+  return {
+    name: spec.name,
+    description: spec.description,
+    source: spec.source,
+    category: spec.category,
+    pluginId: spec.pluginId,
+    mcpServerId: spec.mcpServerId,
+    toJsonSchema: () => spec.jsonSchema,
+    isReadOnly: spec.isReadOnly ?? ((): boolean => false),
+    execute: spec.execute,
+  };
 }

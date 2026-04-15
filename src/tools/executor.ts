@@ -20,8 +20,13 @@
  */
 import { randomUUID } from "node:crypto";
 import { resolve as pathResolve } from "node:path";
-import type { ToolRegistry, ToolSource, TrustLevel } from "../core/tool-registry.js";
-import { trustFromSource } from "../core/tool-registry.js";
+import type { ToolRegistry } from "./registry.js";
+import type {
+  ToolSource,
+  TrustLevel,
+  ToolExecutionContext,
+} from "./types.js";
+import { trustFromSource } from "./types.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
 import { HookRunner } from "../hooks/hook-runner.js";
@@ -336,9 +341,15 @@ export class ToolExecutor {
     let content: string;
     let isError = false;
 
+    const executionContext: ToolExecutionContext = {
+      cwd: process.cwd(),
+      metadata: { sessionId: sessionId ?? "unknown" },
+    };
+
     try {
-      const result = await tool.execute(finalInput);
-      content = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+      const result = await tool.execute(finalInput, executionContext);
+      content = result.output;
+      isError = result.isError;
     } catch (err) {
       content = err instanceof Error ? err.message : "알 수 없는 도구 실행 오류";
       isError = true;
