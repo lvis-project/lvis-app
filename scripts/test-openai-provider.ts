@@ -1,8 +1,8 @@
 /**
  * OpenAI Provider 직접 테스트 — Electron 없이 CLI에서 실행
  */
-import { OpenAIProvider } from "../src/agent/llm/openai-provider.js";
-import type { StreamEvent } from "../src/agent/llm/types.js";
+import { OpenAIProvider } from "../src/engine/llm/openai-provider.js";
+import type { StreamEvent } from "../src/engine/llm/types.js";
 
 const API_KEY = process.argv[2];
 if (!API_KEY) {

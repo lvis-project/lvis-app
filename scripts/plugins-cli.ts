@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import {
   readPluginRegistry,
   writePluginRegistry,
-} from "../src/plugin-runtime/registry.js";
-import { PluginMarketplaceService } from "../src/plugin-runtime/marketplace.js";
-import type { PluginRegistry } from "../src/plugin-runtime/types.js";
+} from "../src/plugins/registry.js";
+import { PluginMarketplaceService } from "../src/plugins/marketplace.js";
+import type { PluginRegistry } from "../src/plugins/types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

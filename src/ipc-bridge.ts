@@ -6,8 +6,8 @@
  */
 import { ipcMain, type BrowserWindow } from "electron";
 import type { AppServices } from "./boot.js";
-import type { ApprovalDecision } from "./core/approval-gate.js";
-import { loadPolicy, savePolicy } from "./core/policy-store.js";
+import type { ApprovalDecision } from "./permissions/approval-gate.js";
+import { loadPolicy, savePolicy } from "./permissions/policy-store.js";
 
 export function registerIpcHandlers(
   services: AppServices,
@@ -172,7 +172,7 @@ export function registerIpcHandlers(
     }
     const pm = conversationLoop.permissionManager;
     if (pm) {
-      await pm.setModePersist(mode as import("./core/permission-manager.js").ExecutionMode);
+      await pm.setModePersist(mode as import("./permissions/permission-manager.js").ExecutionMode);
     }
     return { ok: true, mode };
   });
