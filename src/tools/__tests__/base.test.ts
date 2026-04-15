@@ -1,11 +1,11 @@
 /**
- * BaseTool + ToolRegistry unit tests — Tier S3
+ * BaseTool + BaseToolRegistry unit tests — Tier S3
  */
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import {
   BaseTool,
-  ToolRegistry,
+  BaseToolRegistry,
   type ToolExecutionContext,
   type ToolResult,
 } from "../base.js";
@@ -96,11 +96,11 @@ describe("BaseTool", () => {
   });
 });
 
-// ─── ToolRegistry ─────────────────────────────────────
+// ─── BaseToolRegistry ─────────────────────────────────────
 
-describe("ToolRegistry", () => {
+describe("BaseToolRegistry", () => {
   it("register + get + has + list", () => {
-    const registry = new ToolRegistry();
+    const registry = new BaseToolRegistry();
     const tool = new EchoTool();
 
     expect(registry.has("echo")).toBe(false);
@@ -115,7 +115,7 @@ describe("ToolRegistry", () => {
   });
 
   it("registering the same tool twice throws", () => {
-    const registry = new ToolRegistry();
+    const registry = new BaseToolRegistry();
     registry.register(new EchoTool());
     expect(() => registry.register(new EchoTool())).toThrowError(
       /Tool already registered: echo/,
@@ -123,7 +123,7 @@ describe("ToolRegistry", () => {
   });
 
   it("toApiSchema returns one entry per registered tool", () => {
-    const registry = new ToolRegistry();
+    const registry = new BaseToolRegistry();
     registry.register(new EchoTool());
     registry.register(new ReadOnlyEchoTool());
 

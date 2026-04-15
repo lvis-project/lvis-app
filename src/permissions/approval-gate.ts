@@ -12,6 +12,7 @@
  * - §A2: webContents 소멸 체크 + send 예외 처리 → deny-once + pending 정리.
  * - §S8: AuditLogger DI — requested/decided/timeout/send-failed 4개 phase 기록.
  */
+import { resolve as pathResolve } from "node:path";
 import type { WebContents } from "electron";
 import type { PolicyFile } from "./policy-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
@@ -138,15 +139,34 @@ export class ApprovalGate {
     // §S1: sensitive-path hard-block — runs BEFORE anything else so that
     // not even full_auto / user-approval paths can bypass it. Cannot be
     // overridden by user approval, admin policy, or permission mode.
-    const candidatePath = fullReq.target?.filePath;
-    if (candidatePath) {
-      const matchedPattern = isSensitivePath(candidatePath);
+    //
+    // H3: canonicalize the path BEFORE matching. Pure string matching is
+    // bypassable via `..` segments, NFD unicode forms, trailing spaces,
+    // mixed-case on case-insensitive filesystems, and duplicate slashes.
+    // All four vectors are closed below before invoking isSensitivePath().
+    const rawCandidate = fullReq.target?.filePath;
+    if (rawCandidate) {
+      // 1. Resolve `..` / `.` segments + make absolute
+      let canonical = pathResolve(rawCandidate);
+      // 2. Collapse duplicate slashes (///Users → /Users)
+      canonical = canonical.replace(/\/+/g, "/");
+      // 3. Unicode NFC normalize (folds NFD-decomposed forms, e.g.
+      //    ".\u0073\u0073h" → ".ssh")
+      canonical = canonical.normalize("NFC");
+      // 4. Case-fold on case-insensitive filesystems (macOS / Windows) so
+      //    `/Users/Ken/.SSH/ID_rsa` matches `**/.ssh/*` — the underlying
+      //    filesystem treats them as the same file, so the block must too.
+      const caseFolded =
+        process.platform === "darwin" || process.platform === "win32"
+          ? canonical.toLowerCase()
+          : canonical;
+      const matchedPattern = isSensitivePath(caseFolded);
       if (matchedPattern) {
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
           sessionId: "approval-gate",
           type: "approval",
-          output: `[approval:sensitive-path-blocked] ${fullReq.id} toolName=${fullReq.toolName} path=${candidatePath} pattern=${matchedPattern} → deny-once (hard-block)`,
+          output: `[approval:sensitive-path-blocked] ${fullReq.id} toolName=${fullReq.toolName} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
         });
         return {
           requestId: fullReq.id,

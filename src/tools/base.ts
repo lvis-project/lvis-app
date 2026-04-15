@@ -43,7 +43,14 @@ export abstract class BaseTool<TInputSchema extends z.ZodTypeAny = z.ZodTypeAny>
   }
 }
 
-export class ToolRegistry {
+/**
+ * AF1: renamed from `ToolRegistry` to `BaseToolRegistry` to avoid a
+ * symbol collision with {@link ../core/tool-registry.ts::ToolRegistry},
+ * which implements the richer §6.4 source/trust aware registry used by
+ * the conversation loop. This registry is the minimal OpenHarness-port
+ * BaseTool container used by Tier S3 unit tests and tool fixtures.
+ */
+export class BaseToolRegistry {
   private readonly tools = new Map<string, BaseTool>();
 
   register(tool: BaseTool): void {

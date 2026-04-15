@@ -7,7 +7,7 @@
 import { describe, it, expect } from "vitest";
 
 import { BashTool, BashToolInputSchema } from "../bash.js";
-import { ToolRegistry, type ToolExecutionContext } from "../base.js";
+import { BaseToolRegistry, type ToolExecutionContext } from "../base.js";
 
 const ctx = (cwd: string = process.cwd()): ToolExecutionContext => ({
   cwd,
@@ -140,8 +140,8 @@ describe("BashTool — BaseTool surface", () => {
     expect(resolved.properties.command).toBeDefined();
   });
 
-  it("registers in a fresh ToolRegistry", () => {
-    const registry = new ToolRegistry();
+  it("registers in a fresh BaseToolRegistry", () => {
+    const registry = new BaseToolRegistry();
     const tool = new BashTool();
     registry.register(tool);
     expect(registry.has("bash")).toBe(true);
@@ -165,5 +165,60 @@ describe("BashTool — schema default", () => {
   it("input schema defaults timeoutSeconds to 600 when omitted", () => {
     const parsed = BashToolInputSchema.parse({ command: "echo hi" });
     expect(parsed.timeoutSeconds).toBe(600);
+  });
+});
+
+// ── H2: env whitelist — secrets must NOT leak to child process ────
+
+describe("BashTool — H2 env whitelist", () => {
+  it("does not leak LVIS_TEST_SECRET to the spawned child", async () => {
+    // Arrange: set a secret in the parent env
+    const SECRET_KEY = "LVIS_TEST_SECRET";
+    const SECRET_VAL = "secret-xyz-12345";
+    const prev = process.env[SECRET_KEY];
+    process.env[SECRET_KEY] = SECRET_VAL;
+    try {
+      const tool = new BashTool();
+      // `env` prints all env vars; if the filter works, LVIS_TEST_SECRET
+      // is absent and grep exits 1 (isError=true with "(no output)").
+      const result = await tool.execute(
+        { command: "env | grep LVIS_TEST_SECRET || true", timeoutSeconds: 5 },
+        ctx(),
+      );
+      // The child exited cleanly (|| true) but no match should be found
+      expect(result.output).not.toContain(SECRET_VAL);
+      expect(result.output).not.toContain("LVIS_TEST_SECRET=");
+    } finally {
+      if (prev === undefined) delete process.env[SECRET_KEY];
+      else process.env[SECRET_KEY] = prev;
+    }
+  });
+
+  it("does not leak ANTHROPIC_API_KEY to the spawned child", async () => {
+    const prev = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test-should-not-leak";
+    try {
+      const tool = new BashTool();
+      const result = await tool.execute(
+        { command: "env | grep ANTHROPIC_API_KEY || true", timeoutSeconds: 5 },
+        ctx(),
+      );
+      expect(result.output).not.toContain("sk-ant-test-should-not-leak");
+    } finally {
+      if (prev === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = prev;
+    }
+  });
+
+  it("still forwards PATH so basic commands resolve", async () => {
+    const tool = new BashTool();
+    // `echo` is a shell builtin but `which echo` exercises PATH lookup.
+    const result = await tool.execute(
+      { command: "which echo || true", timeoutSeconds: 5 },
+      ctx(),
+    );
+    // We expect either "/bin/echo", "/usr/bin/echo", or similar — just
+    // verify PATH was not stripped (output contains "echo")
+    expect(result.output).toContain("echo");
   });
 });

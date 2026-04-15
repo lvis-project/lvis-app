@@ -6,6 +6,13 @@
  * SafeBashExecutor (Tier A1) — non-interactive shell execution with
  * preflight detection for interactive scaffolds, timeout handling with
  * partial-output drain, graceful terminate→kill ladder, and output cap.
+ *
+ * AF3: the `cwd` sandbox check in `execute()` is a **heuristic hint**,
+ * not a sandbox boundary. A user-supplied `input.cwd` that points outside
+ * the session cwd is rejected before spawn, but the real enforcement of
+ * which commands may run lives in {@link ../main/bash-ast-validator.ts}.
+ * Do not rely on this function to stop shell escapes — only BashAstValidator
+ * (Step 2.5 of the tool executor pipeline) prevents dangerous syntax.
  */
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
@@ -16,6 +23,7 @@ type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 
 import { BaseTool, type ToolExecutionContext, type ToolResult } from "./base.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
+import { buildSafeChildEnv } from "./safe-env.js";
 
 export const BashToolInputSchema = z.object({
   command: z.string().min(1).describe("Shell command to execute"),
@@ -117,6 +125,9 @@ async function spawnWithTimeout(
     const child: PipedChild = spawn("sh", ["-c", command], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
+      // H2: strip secrets (LVIS_*, *_API_KEY, GITHUB_TOKEN, AWS_*, etc.)
+      // from the child's environment. Only generic shell/locale vars.
+      env: buildSafeChildEnv(),
     });
 
     const chunks: Buffer[] = [];

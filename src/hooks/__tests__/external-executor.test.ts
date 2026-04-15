@@ -37,10 +37,34 @@ function makeFakeChild(): FakeChild {
   return child;
 }
 
+// ─── NetworkGuard mock (after vi.mock) ──────────────
+// H1: HTTP hooks route through fetchPublicHttpResponse which performs
+// DNS resolution + public-address enforcement. For hostnames that the
+// test fixture uses (hook.local) we stub the guard so tests can drive
+// behaviour deterministically without a network.
+vi.mock("../../core/network-guard.js", async () => {
+  const actual = await vi.importActual<typeof import("../../core/network-guard.js")>(
+    "../../core/network-guard.js",
+  );
+  return {
+    ...actual,
+    fetchPublicHttpResponse: vi.fn(async (url: string, init?: RequestInit) => {
+      // Delegate to the global `fetch` mock set up by tests. Default
+      // behaviour preserves the existing contract: tests install
+      // fetchMock via vi.stubGlobal("fetch", ...) and we just forward.
+      return await (globalThis.fetch as typeof fetch)(url, init ?? {});
+    }),
+  };
+});
+
 // ─── Imports under test (after vi.mock) ──────────────
 
 import { ExternalHookExecutor } from "../external-executor.js";
 import type { HooksConfig } from "../schemas.js";
+import {
+  fetchPublicHttpResponse,
+  NetworkGuardError,
+} from "../../core/network-guard.js";
 
 // ─── Helpers ─────────────────────────────────────────
 
@@ -328,5 +352,76 @@ describe("ExternalHookExecutor — http hooks", () => {
     expect(agg.results[0].success).toBe(false);
     expect(agg.blocked).toBe(true);
     expect(agg.reason).toContain("ECONNREFUSED");
+  });
+});
+
+describe("ExternalHookExecutor — H1 NetworkGuard SSRF defense", () => {
+  beforeEach(() => {
+    vi.mocked(fetchPublicHttpResponse).mockReset();
+    vi.mocked(fetchPublicHttpResponse).mockImplementation(async (url: string) => {
+      // Simulate NetworkGuard rejecting AWS metadata endpoint
+      if (url.includes("169.254.169.254") || url.includes("metadata")) {
+        throw new NetworkGuardError(
+          "target resolves to non-public address(es): 169.254.169.254",
+        );
+      }
+      // Anything else: 200 OK
+      return new Response("ok", { status: 200 });
+    });
+  });
+
+  afterEach(() => {
+    vi.mocked(fetchPublicHttpResponse).mockReset();
+  });
+
+  it("HTTP hook targeting AWS metadata (169.254.169.254) is rejected by NetworkGuard", async () => {
+    const exec = new ExternalHookExecutor(
+      {
+        preToolUse: [
+          {
+            type: "http",
+            url: "http://169.254.169.254/latest/meta-data/",
+            headers: {},
+            timeoutSeconds: 5,
+            blockOnFailure: true,
+          },
+        ],
+        postToolUse: [],
+      },
+      "/tmp",
+    );
+
+    const agg = await exec.run("preToolUse", "read_file", {});
+
+    expect(agg.results).toHaveLength(1);
+    expect(agg.results[0].success).toBe(false);
+    expect(agg.blocked).toBe(true);
+    // Reason surfaces NetworkGuard specifically so admins can identify
+    // the SSRF defense as the source of the block.
+    expect(agg.reason).toContain("network guard");
+    expect(agg.reason).toContain("169.254.169.254");
+  });
+
+  it("HTTP hook targeting an allowed host passes through NetworkGuard", async () => {
+    const exec = new ExternalHookExecutor(
+      {
+        preToolUse: [
+          {
+            type: "http",
+            url: "http://example.com/hook",
+            headers: {},
+            timeoutSeconds: 5,
+            blockOnFailure: true,
+          },
+        ],
+        postToolUse: [],
+      },
+      "/tmp",
+    );
+
+    const agg = await exec.run("preToolUse", "read_file", {});
+
+    expect(agg.results[0].success).toBe(true);
+    expect(agg.blocked).toBe(false);
   });
 });

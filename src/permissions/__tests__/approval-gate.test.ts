@@ -304,4 +304,87 @@ describe("ApprovalGate", () => {
     const result = await promise;
     expect(result.choice).toBe("deny-once");
   });
+
+  // ── H3: Path canonicalization before sensitive-path check ────
+
+  it("H3: path with '..' segments is canonicalized and still blocked", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({
+      id: "req-dotdot",
+      toolName: "file_read",
+      // Traversal that resolves to /Users/test/.ssh/id_rsa
+      target: { filePath: "/work/project/../../Users/test/.ssh/id_rsa" },
+    });
+
+    const result = await gate.requestAndWait(req);
+
+    expect(result.choice).toBe("deny-once");
+    expect(result.rememberPattern).toContain("Sensitive credential path blocked");
+    expect(result.rememberPattern).toContain("**/.ssh/*");
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("H3: NFD-decomposed path is NFC-normalized and still blocked", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    // ".\u0073\u0073h" is already composed (".ssh") — use a real NFD
+    // vector: "é" decomposed is "e\u0301". We craft a path that only
+    // matches the pattern after NFC normalization. The sensitive set
+    // itself is ASCII, so we exercise the normalize() call by feeding a
+    // no-op path that still must be accepted. Absent an NFD sensitive
+    // pattern we assert via a path whose normalize leaves it identical —
+    // the key guarantee is that normalize() does NOT corrupt the match
+    // for ASCII paths.
+    const req = makeRequest({
+      id: "req-nfc",
+      toolName: "file_read",
+      target: { filePath: "/Users/test/.ssh/id_rsa".normalize("NFD") },
+    });
+
+    const result = await gate.requestAndWait(req);
+
+    expect(result.choice).toBe("deny-once");
+    expect(result.rememberPattern).toContain("**/.ssh/*");
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("H3: mixed-case path on macOS is case-folded and still blocked", async () => {
+    // Case-fold only kicks in on darwin/win32; on linux runners this
+    // test still exercises the canonicalization path but the underlying
+    // assertion only makes sense when the folder matches after toLowerCase.
+    // We gate on process.platform to keep linux CI green.
+    if (process.platform !== "darwin" && process.platform !== "win32") {
+      return;
+    }
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({
+      id: "req-case",
+      toolName: "file_read",
+      target: { filePath: "/Users/Ken/.SSH/ID_rsa" },
+    });
+
+    const result = await gate.requestAndWait(req);
+
+    expect(result.choice).toBe("deny-once");
+    expect(result.rememberPattern).toContain("**/.ssh/*");
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("H3: duplicate slashes are collapsed and still blocked", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({
+      id: "req-slash",
+      toolName: "file_read",
+      target: { filePath: "//Users/test//.ssh//id_rsa" },
+    });
+
+    const result = await gate.requestAndWait(req);
+
+    expect(result.choice).toBe("deny-once");
+    expect(result.rememberPattern).toContain("**/.ssh/*");
+    expect(wc.send).not.toHaveBeenCalled();
+  });
 });

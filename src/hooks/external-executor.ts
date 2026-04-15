@@ -12,6 +12,11 @@ import type {
   HookDefinition,
   HttpHookDefinition,
 } from "./schemas.js";
+import {
+  fetchPublicHttpResponse,
+  NetworkGuardError,
+} from "../core/network-guard.js";
+import { buildSafeChildEnv } from "../tools/safe-env.js";
 
 export class ExternalHookExecutor {
   constructor(
@@ -48,12 +53,14 @@ export class ExternalHookExecutor {
     return new Promise((resolve) => {
       const child = spawn("sh", ["-c", commandWithArgs], {
         cwd: this.cwd,
-        env: {
-          ...process.env,
+        // H2: whitelist env — do not leak LVIS_*, ANTHROPIC_API_KEY,
+        // OPENAI_API_KEY, GOOGLE_*, AWS_*, GITHUB_TOKEN to hook scripts.
+        // Only the hook-specific LVIS_HOOK_* variables are set.
+        env: buildSafeChildEnv({
           LVIS_HOOK_EVENT: event,
           LVIS_HOOK_PAYLOAD: payloadJson,
           LVIS_HOOK_TOOL_NAME: toolName,
-        },
+        }),
       });
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
@@ -95,16 +102,17 @@ export class ExternalHookExecutor {
     toolName: string,
     payload: Record<string, unknown>,
   ): Promise<ExternalHookResult> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), hook.timeoutSeconds * 1000);
     try {
-      const response = await fetch(hook.url, {
+      // H1: route through NetworkGuard so that admin-configured hooks.json
+      // cannot pivot to cloud metadata endpoints (169.254.169.254), RFC1918
+      // ranges, loopback, link-local IPv6, etc. Each redirect hop is also
+      // re-validated by fetchPublicHttpResponse.
+      const response = await fetchPublicHttpResponse(hook.url, {
         method: "POST",
         headers: { "content-type": "application/json", ...hook.headers },
         body: JSON.stringify({ event, toolName, payload }),
-        signal: controller.signal,
+        timeoutMs: hook.timeoutSeconds * 1000,
       });
-      clearTimeout(timer);
       const output = await response.text().catch(() => "");
       const success = response.ok;
       return {
@@ -116,7 +124,14 @@ export class ExternalHookExecutor {
         metadata: { statusCode: response.status },
       };
     } catch (err) {
-      clearTimeout(timer);
+      if (err instanceof NetworkGuardError) {
+        return {
+          hookType: "http",
+          success: false,
+          blocked: hook.blockOnFailure,
+          reason: `network guard: ${err.message}`,
+        };
+      }
       return {
         hookType: "http",
         success: false,
