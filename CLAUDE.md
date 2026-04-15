@@ -7,6 +7,8 @@ Always check `../TODO.md` for current status across all components.
 
 ## Project Structure
 
+See `docs/architecture/architecture.md` §4.6 and `docs/blueprints/phase3-folder-refactor-plan.md` for the canonical layout and module boundary rules.
+
 ```
 src/
   main.ts                     — Electron entry point
@@ -16,12 +18,9 @@ src/
   renderer.tsx                — React UI (chat, vendor selector, tool display)
   plugin-ui-host.tsx          — Dynamic plugin UI mounting
 
-  agent/
+  engine/                     — Agent loop + LLM providers (was src/agent/)
     conversation-loop.ts      — §4.5 Core agentic cycle (stream + tool loop)
-    system-prompt-builder.ts  — §4.5.9 12-source prompt assembly
     conversation-history.ts   — In-memory message management
-    tool-executor.ts          — §4.5.6 8-step pipeline with hooks
-    hook-runner.ts            — Pre/Post tool execution hooks
     auto-compact.ts           — Token-aware history compression
     llm/
       types.ts                — Vendor-agnostic LLM interfaces
@@ -30,20 +29,55 @@ src/
       gemini-provider.ts      — Google Generative AI
       provider-factory.ts     — Vendor selection factory
 
-  core/
+  tools/                      — 1-file-per-tool (Tier S3 BaseTool pattern)
+    executor.ts               — §4.5.6 8-step pipeline with hooks (was tool-executor.ts)
+    knowledge-search.ts       — LLM agentic knowledge search (was knowledge-search-tool.ts)
+
+  prompts/                    — System prompt assembly
+    system-prompt-builder.ts  — §4.5.9 12-source prompt assembly
+
+  hooks/                      — PreTool / PostTool interception
+    hook-runner.ts            — Pre/Post tool execution hooks
+    post-turn-hook-chain.ts   — compact → save → extract → audit → idle-poke
+
+  permissions/                — Full permission stack (was partly in core/, partly in agent/)
+    permission-manager.ts     — §6.3 Source-aware permission model
+    permissions-store.ts      — ~/.lvis/permissions.json persistence
+    policy-store.ts           — Admin policy + governance rules
+    approval-gate.ts          — §8 Layer 3 ask-user modal gate
+    agent-action-requester.ts — §8 Agent Hub approval caller skeleton
+
+  sandbox/                    — Path boundary enforcement (Tier A3 — placeholder)
+
+  memory/                     — §5 File-based memory (~/.lvis/)
+    memory-manager.ts
+
+  audit/                      — Audit logger + DLP filter (was in agent/)
+    audit-logger.ts
+    dlp-filter.ts
+
+  core/                       — Remaining cross-cutting engines
     keyword-engine.ts         — §6.1 Input classification
     route-engine.ts           — §6.2 Routing resolution
-    tool-registry.ts          — §6.4 Unified tool registry
-    memory-manager.ts         — §5 File-based memory (~/.lvis/)
+    tool-registry.ts          — §6.4 Unified tool registry (deprecated by tools/base.ts eventually)
+    proactive-engine.ts       — §7 Proactive briefing
 
-  data/
-    settings-store.ts         — Multi-vendor settings + encrypted API keys
+  mcp/                        — Model Context Protocol client (unchanged)
 
-  plugin-runtime/
+  plugins/                    — Plugin runtime (was plugin-runtime/)
     types.ts                  — PluginManifest, HostApi, RuntimePlugin
     runtime.ts                — Plugin loading, HostApi injection
     marketplace.ts            — Install/remove plugins
     registry.ts               — Plugin registry file management
+    deployment-guard.ts       — Deployment mode enforcement
+
+  data/
+    settings-store.ts         — Multi-vendor settings + encrypted API keys
+
+  main/                       — Electron main-process helpers (corp-ca, python-runtime, ...)
+  lib/                        — Pure TS utilities (approval-queue-reducer, utils)
+  components/ui/              — shadcn
+  ui/                         — LVIS-custom UI components/views
 ```
 
 ## Key Principles

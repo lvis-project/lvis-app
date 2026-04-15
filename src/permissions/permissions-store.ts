@@ -1,7 +1,7 @@
 /**
  * Permissions Store — ~/.lvis/permissions.json 비동기 직렬 읽기/쓰기
  *
- * in-process async mutex 패턴: plugin-runtime/registry.ts §M1 복사.
+ * in-process async mutex 패턴: plugins/registry.ts §M1 복사.
  * 키: 파일 절대경로 → 직렬화된 Promise 체인.
  * 범위: in-process 전용 (크로스 프로세스 잠금은 Phase 3+).
  */

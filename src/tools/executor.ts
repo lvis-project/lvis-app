@@ -21,11 +21,11 @@
 import { randomUUID } from "node:crypto";
 import type { ToolRegistry, ToolSource, TrustLevel } from "../core/tool-registry.js";
 import { trustFromSource } from "../core/tool-registry.js";
-import type { PermissionManager, PermissionCheckResult } from "../core/permission-manager.js";
-import type { ApprovalGate } from "../core/approval-gate.js";
-import { HookRunner } from "./hook-runner.js";
-import { AuditLogger } from "./audit-logger.js";
-import { maskSensitiveData } from "./dlp-filter.js";
+import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
+import type { ApprovalGate } from "../permissions/approval-gate.js";
+import { HookRunner } from "../hooks/hook-runner.js";
+import { AuditLogger } from "../audit/audit-logger.js";
+import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 
 export interface ToolUseBlock {

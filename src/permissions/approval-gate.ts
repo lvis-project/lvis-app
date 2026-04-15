@@ -14,7 +14,7 @@
  */
 import type { WebContents } from "electron";
 import type { PolicyFile } from "./policy-store.js";
-import type { AuditLogger } from "../agent/audit-logger.js";
+import type { AuditLogger } from "../audit/audit-logger.js";
 
 // ─── 공개 타입 ────────────────────────────────────────
 

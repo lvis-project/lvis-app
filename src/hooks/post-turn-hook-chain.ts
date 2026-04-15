@@ -12,10 +12,10 @@
  *   5. idleScheduler.signalConversation (Agent 5 §6.1)
  */
 
-import { shouldCompact, compactMessages } from "./auto-compact.js";
-import type { GenericMessage, TokenUsage } from "./llm/types.js";
-import type { MemoryManager } from "../core/memory-manager.js";
-import type { AuditLogger } from "./audit-logger.js";
+import { shouldCompact, compactMessages } from "../engine/auto-compact.js";
+import type { GenericMessage, TokenUsage } from "../engine/llm/types.js";
+import type { MemoryManager } from "../memory/memory-manager.js";
+import type { AuditLogger } from "../audit/audit-logger.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 
 export interface PostTurnHookContext {

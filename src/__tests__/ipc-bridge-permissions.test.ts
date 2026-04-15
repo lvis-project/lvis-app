@@ -23,7 +23,7 @@ vi.mock("electron", () => ({
 const mockLoadPolicy = vi.fn();
 const mockSavePolicy = vi.fn();
 
-vi.mock("../core/policy-store.js", () => ({
+vi.mock("../permissions/policy-store.js", () => ({
   loadPolicy: mockLoadPolicy,
   savePolicy: mockSavePolicy,
 }));
