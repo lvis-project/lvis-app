@@ -68,6 +68,11 @@ export class HookRunner {
   async runPreHooks(ctx: HookContext): Promise<HookResult> {
     let currentInput = { ...ctx.toolInput };
     const feedbacks: string[] = [];
+    // Copilot review fix: 기존엔 `Object.keys().length` 비교로 modify 여부를 판정해서
+    // 같은 키 수의 값 변경 (e.g. {path:"/old"}→{path:"/new"}) 이 "allow" 로 분류돼
+    // tool-executor.ts Step 4 에서 updatedInput 이 무시되는 silent bug 가 있었다.
+    // 훅이 실제로 modify 결과를 반환했는지 explicit flag 로 추적한다.
+    let modified = false;
 
     for (const hook of this.preHooks) {
       try {
@@ -79,6 +84,7 @@ export class HookRunner {
 
         if (result.action === "modify" && result.updatedInput) {
           currentInput = result.updatedInput;
+          modified = true;
         }
 
         if (result.feedback) {
@@ -91,7 +97,7 @@ export class HookRunner {
     }
 
     return {
-      action: Object.keys(currentInput).length !== Object.keys(ctx.toolInput).length ? "modify" : "allow",
+      action: modified ? "modify" : "allow",
       updatedInput: currentInput,
       feedback: feedbacks.length > 0 ? feedbacks.join("\n") : undefined,
     };
