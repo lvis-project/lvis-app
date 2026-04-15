@@ -29,8 +29,13 @@ import { IdleSchedulerService, type WorkerClientLite } from "./main/idle-schedul
 import { BashAstValidator } from "./main/bash-ast-validator.js";
 import { AuditService } from "./main/audit-service.js";
 import { PostTurnHookChain } from "./hooks/post-turn-hook-chain.js";
+import { HookRunner } from "./hooks/hook-runner.js";
+import { loadHooksConfig } from "./hooks/config-loader.js";
+import { ExternalHookExecutor } from "./hooks/external-executor.js";
 import { AuditLogger } from "./audit/audit-logger.js";
 import { createKnowledgeSearchTools } from "./tools/knowledge-search.js";
+import { BashTool } from "./tools/bash.js";
+import { baseToolToLegacyDefinition } from "./tools/adapter.js";
 import { ApprovalGate } from "./permissions/approval-gate.js";
 import { loadPolicy } from "./permissions/policy-store.js";
 import { DefaultAgentActionRequester } from "./permissions/agent-action-requester.js";
@@ -114,6 +119,10 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   const keywordEngine = new KeywordEngine();
   const toolRegistry = new ToolRegistry();
+  // Tier A1 (W1): register the OpenHarness-port BashTool through the legacy
+  // adapter. Uses the builtin source (trust=high) so the conversation loop +
+  // system prompt builder see it like any other §6.4 core tool.
+  toolRegistry.register(baseToolToLegacyDefinition(new BashTool(), "builtin"));
   const routeEngine = new RouteEngine({ toolRegistry });
 
   const taskService = new TaskService({
@@ -385,6 +394,29 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // @internal Phase 2 stub — §8 Agent Hub approval caller (Phase 3 ConversationLoop 연동 예정)
   const agentActionRequester = new DefaultAgentActionRequester(approvalGate);
 
+  // Tier A4 (W3): load hooks config from admin-dir + ~/.lvis/hooks.json and
+  // attach an ExternalHookExecutor to the HookRunner so every preToolUse /
+  // postToolUse event routes through it. Host owns the runner lifecycle so
+  // external hooks fire inside the ToolExecutor's 8-step pipeline.
+  const hookRunner = new HookRunner();
+  try {
+    const hooksConfig = loadHooksConfig();
+    const externalHookExecutor = new ExternalHookExecutor(hooksConfig, process.cwd());
+    hookRunner.setExternalExecutor(externalHookExecutor);
+    const preCount = hooksConfig.preToolUse.length;
+    const postCount = hooksConfig.postToolUse.length;
+    console.log(
+      "[lvis] boot: external hook executor attached (pre=%d, post=%d)",
+      preCount,
+      postCount,
+    );
+  } catch (err) {
+    console.warn(
+      "[lvis] boot: external hook executor setup failed (non-fatal):",
+      (err as Error).message,
+    );
+  }
+
   // §4.5: ConversationLoop
   const conversationLoop = new ConversationLoop({
     settingsService,
@@ -399,6 +431,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     postTurnHookChain,
     bashAstValidator,
     approvalGate,
+    hookRunner,
   });
 
   // §9.5: MCP Server 연결 (거버넌스 승인 서버만)
