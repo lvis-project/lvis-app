@@ -12,6 +12,8 @@
     "email.read",
     "email.analyze",
     "email.reply",
+    "email.getSentReplies",
+    "email.getSentReply",
     "email.startWatcher",
     "email.stopWatcher",
     "email.getNotifications",
