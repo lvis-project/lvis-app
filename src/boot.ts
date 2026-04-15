@@ -17,7 +17,8 @@ import { SettingsService } from "./data/settings-store.js";
 import { MemoryManager } from "./memory/memory-manager.js";
 import { KeywordEngine } from "./core/keyword-engine.js";
 import { RouteEngine } from "./core/route-engine.js";
-import { ToolRegistry } from "./core/tool-registry.js";
+import { ToolRegistry } from "./tools/registry.js";
+import { createDynamicTool, type Tool } from "./tools/base.js";
 import { SystemPromptBuilder } from "./prompts/system-prompt-builder.js";
 import { ConversationLoop } from "./engine/conversation-loop.js";
 import { PermissionManager } from "./permissions/permission-manager.js";
@@ -37,12 +38,10 @@ import { ExternalHookExecutor } from "./hooks/external-executor.js";
 import { AuditLogger } from "./audit/audit-logger.js";
 import { createKnowledgeSearchTools } from "./tools/knowledge-search.js";
 import { BashTool } from "./tools/bash.js";
-import { baseToolToLegacyDefinition } from "./tools/adapter.js";
 import { ApprovalGate } from "./permissions/approval-gate.js";
 import { loadPolicy } from "./permissions/policy-store.js";
 import { DefaultAgentActionRequester } from "./permissions/agent-action-requester.js";
 import type { PluginHostApi } from "./plugins/types.js";
-import type { ToolDefinition } from "./core/tool-registry.js";
 
 export interface AppServices {
   pluginRuntime: PluginRuntime;
@@ -121,10 +120,10 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   const keywordEngine = new KeywordEngine();
   const toolRegistry = new ToolRegistry();
-  // Tier A1 (W1): register the OpenHarness-port BashTool through the legacy
-  // adapter. Uses the builtin source (trust=high) so the conversation loop +
-  // system prompt builder see it like any other §6.4 core tool.
-  toolRegistry.register(baseToolToLegacyDefinition(new BashTool(), "builtin"));
+  // Tier A1: BashTool registers directly — it implements the canonical
+  // Tool contract via ZodTool and is tagged source="builtin" + category
+  // "dangerous" so the §6.3 permission stack handles approval correctly.
+  toolRegistry.register(new BashTool());
   const routeEngine = new RouteEngine({ toolRegistry });
 
   const taskService = new TaskService({
@@ -515,23 +514,44 @@ function buildPluginConfigOverrides(settings: SettingsService): Record<string, R
 function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolRegistry): void {
   for (const method of pluginRuntime.listMethods()) {
     const toolName = method.replace(/\./g, "_");
-    toolRegistry.register({
-      name: toolName,
-      description: `플러그인 메서드: ${method}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`,
-      parameters: {
-        type: "object",
-        properties: {
-          payload: { type: "object", description: "메서드에 전달할 매개변수 객체" },
+    toolRegistry.register(
+      createDynamicTool({
+        name: toolName,
+        description: `플러그인 메서드: ${method}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`,
+        source: "plugin",
+        jsonSchema: {
+          type: "object",
+          properties: {
+            payload: { type: "object", description: "메서드에 전달할 매개변수 객체" },
+          },
         },
-      },
-      execute: async (args) => {
-        let finalPayload = args.payload;
-        if (!finalPayload && Object.keys(args).length > 0) finalPayload = args;
-        if (typeof finalPayload === "string") { try { finalPayload = JSON.parse(finalPayload); } catch { /* */ } }
-        return pluginRuntime.call(method, finalPayload);
-      },
-      source: "plugin",
-    });
+        execute: async (rawInput) => {
+          const args = (rawInput ?? {}) as Record<string, unknown>;
+          let finalPayload: unknown = args.payload;
+          if (!finalPayload && Object.keys(args).length > 0) finalPayload = args;
+          if (typeof finalPayload === "string") {
+            try {
+              finalPayload = JSON.parse(finalPayload);
+            } catch {
+              /* leave as string */
+            }
+          }
+          try {
+            const result = await pluginRuntime.call(method, finalPayload);
+            const output =
+              typeof result === "string"
+                ? result
+                : JSON.stringify(result, null, 2);
+            return { output, isError: false };
+          } catch (err) {
+            return {
+              output: err instanceof Error ? err.message : String(err),
+              isError: true,
+            };
+          }
+        },
+      }),
+    );
   }
 }
 
@@ -540,11 +560,13 @@ function registerBuiltinTools(
   toolRegistry: ToolRegistry,
   settingsService: SettingsService,
 ): void {
-  const builtins: ToolDefinition[] = [
-    {
+  const builtins: Tool[] = [
+    createDynamicTool({
       name: "memory_save",
       description: "사용자가 기억해달라고 한 내용을 notes/에 저장합니다.",
-      parameters: {
+      source: "builtin",
+      category: "write",
+      jsonSchema: {
         type: "object",
         properties: {
           title: { type: "string", description: "메모 제목 (40자 이내)" },
@@ -552,38 +574,58 @@ function registerBuiltinTools(
         },
         required: ["title", "content"],
       },
-      execute: async (args) => {
-        const note = memoryManager.saveNote(args.title as string, args.content as string);
-        return { saved: true, filename: note.filename };
+      execute: async (rawInput) => {
+        const args = (rawInput ?? {}) as Record<string, unknown>;
+        const note = memoryManager.saveNote(
+          args.title as string,
+          args.content as string,
+        );
+        return {
+          output: JSON.stringify({ saved: true, filename: note.filename }),
+          isError: false,
+        };
       },
-      source: "builtin",
-    },
-    {
+    }),
+    createDynamicTool({
       name: "memory_search",
       description: "사용자의 notes/ 메모를 키워드로 검색합니다.",
-      parameters: {
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: {
         type: "object",
         properties: { query: { type: "string", description: "검색 키워드" } },
         required: ["query"],
       },
-      execute: async (args) => {
-        return memoryManager.searchNotes(args.query as string).map((n) => ({ title: n.title, filename: n.filename }));
+      execute: async (rawInput) => {
+        const args = (rawInput ?? {}) as Record<string, unknown>;
+        const results = memoryManager
+          .searchNotes(args.query as string)
+          .map((n) => ({ title: n.title, filename: n.filename }));
+        return { output: JSON.stringify(results), isError: false };
       },
-      source: "builtin",
-    },
-    {
+    }),
+    createDynamicTool({
       name: "memory_list",
       description: "저장된 모든 메모 목록을 반환합니다.",
-      parameters: { type: "object", properties: {} },
-      execute: async () => {
-        return memoryManager.listNotes().map((n) => ({ title: n.title, filename: n.filename }));
-      },
       source: "builtin",
-    },
-    {
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => {
+        const notes = memoryManager
+          .listNotes()
+          .map((n) => ({ title: n.title, filename: n.filename }));
+        return { output: JSON.stringify(notes), isError: false };
+      },
+    }),
+    createDynamicTool({
       name: "web_search",
       description: "인터넷 검색을 통해 최신 정보나 지식을 찾습니다.",
-      parameters: {
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: {
         type: "object",
         properties: {
           query: { type: "string", description: "검색어" },
@@ -591,7 +633,8 @@ function registerBuiltinTools(
         },
         required: ["query"],
       },
-      execute: async (args) => {
+      execute: async (rawInput) => {
+        const args = (rawInput ?? {}) as Record<string, unknown>;
         const query = args.query as string;
         const count = (args.count as number) || 5;
         const ws = settingsService.get("webSearch");
@@ -604,7 +647,14 @@ function registerBuiltinTools(
               body: JSON.stringify({ api_key: apiKey, query, search_depth: "basic", max_results: count }),
             });
             const data = await res.json() as any;
-            return { query, provider: "Tavily", results: data.results?.map((r: any) => ({ title: r.title, snippet: r.content, url: r.url })) || [] };
+            return {
+              output: JSON.stringify({
+                query,
+                provider: "Tavily",
+                results: data.results?.map((r: any) => ({ title: r.title, snippet: r.content, url: r.url })) || [],
+              }),
+              isError: false,
+            };
           }
           if (ws.provider === "serper" && apiKey) {
             const res = await fetch("https://google.serper.dev/search", {
@@ -613,7 +663,14 @@ function registerBuiltinTools(
               body: JSON.stringify({ q: query, num: count }),
             });
             const data = await res.json() as any;
-            return { query, provider: "Serper", results: data.organic?.map((r: any) => ({ title: r.title, snippet: r.snippet, url: r.link })) || [] };
+            return {
+              output: JSON.stringify({
+                query,
+                provider: "Serper",
+                results: data.organic?.map((r: any) => ({ title: r.title, snippet: r.snippet, url: r.link })) || [],
+              }),
+              isError: false,
+            };
           }
           // DuckDuckGo HTML 검색
           const ddgRes = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
@@ -634,39 +691,65 @@ function registerBuiltinTools(
               results.push({ title: urlMatch[2].trim(), snippet: snippetMatch?.[1]?.trim() || "", url });
             }
           }
-          return { query, provider: "DuckDuckGo", results };
+          return {
+            output: JSON.stringify({ query, provider: "DuckDuckGo", results }),
+            isError: false,
+          };
         } catch (error) {
-          return { query, error: "검색 중 오류 발생", details: (error as Error).message };
+          return {
+            output: JSON.stringify({
+              query,
+              error: "검색 중 오류 발생",
+              details: (error as Error).message,
+            }),
+            isError: true,
+          };
         }
       },
-      source: "builtin",
-    },
-    {
+    }),
+    createDynamicTool({
       name: "web_fetch",
       description: "특정 URL의 웹 페이지 내용을 읽어 텍스트로 변환합니다.",
-      parameters: {
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: {
         type: "object",
         properties: { url: { type: "string", description: "읽어올 웹 페이지 URL" } },
         required: ["url"],
       },
-      execute: async (args) => {
+      execute: async (rawInput) => {
+        const args = (rawInput ?? {}) as Record<string, unknown>;
         const url = args.url as string;
         try {
           const response = await fetch(url, { headers: { "User-Agent": "LVIS-Assistant/0.1.0" } });
           const html = await response.text();
-          let text = html
+          const text = html
             .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gim, "")
             .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gim, "")
             .replace(/<[^>]+>/g, " ")
             .replace(/\s+/g, " ")
             .trim();
-          return { url, content: text.slice(0, 5000), truncated: text.length > 5000 };
+          return {
+            output: JSON.stringify({
+              url,
+              content: text.slice(0, 5000),
+              truncated: text.length > 5000,
+            }),
+            isError: false,
+          };
         } catch (error) {
-          return { url, error: "웹 페이지를 읽을 수 없습니다.", details: (error as Error).message };
+          return {
+            output: JSON.stringify({
+              url,
+              error: "웹 페이지를 읽을 수 없습니다.",
+              details: (error as Error).message,
+            }),
+            isError: true,
+          };
         }
       },
-      source: "builtin",
-    },
+    }),
   ];
 
   toolRegistry.registerBatch(builtins);

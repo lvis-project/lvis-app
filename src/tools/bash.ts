@@ -21,7 +21,12 @@ import { z } from "zod";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 
-import { BaseTool, type ToolExecutionContext, type ToolResult } from "./base.js";
+import {
+  ZodTool,
+  type ToolCategory,
+  type ToolExecutionContext,
+  type ToolResult,
+} from "./base.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import { buildSafeChildEnv } from "./safe-env.js";
 
@@ -57,16 +62,17 @@ const NON_INTERACTIVE_MARKERS = [
   "--ci",
 ];
 
-export class BashTool extends BaseTool<typeof BashToolInputSchema> {
+export class BashTool extends ZodTool<typeof BashToolInputSchema> {
   readonly name = "bash";
   readonly description = "Run a shell command in the local repository.";
   readonly inputSchema = BashToolInputSchema;
+  override readonly category: ToolCategory = "dangerous";
 
-  override isReadOnly(_input: z.infer<typeof BashToolInputSchema>): boolean {
+  override isReadOnly(_input: unknown): boolean {
     return false;
   }
 
-  async execute(
+  protected async executeTyped(
     input: z.infer<typeof BashToolInputSchema>,
     ctx: ToolExecutionContext,
   ): Promise<ToolResult> {
