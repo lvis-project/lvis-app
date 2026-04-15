@@ -146,9 +146,11 @@ export class SettingsService {
     this.saveSecrets(secrets);
   }
 
-  hasApiKey(): boolean {
-    return this.getSecret("llm.apiKey") !== null;
-  }
+  // Copilot review fix: 기존 hasApiKey() 는 `llm.apiKey` 단일 키만 검사했으나
+  // 실제 IPC handler (`lvis:settings:has-api-key`) 는 vendor 별 `llm.apiKey.<v>`
+  // 형식으로 직접 getSecret 을 호출한다. 이 메서드는 어디서도 호출되지 않아
+  // dead code 였고, 미래 caller 가 잘못 사용하면 항상 false 를 반환했을 것이다.
+  // 통일된 API key 검사는 `getSecret(\`llm.apiKey.\${vendor}\`)` 로 직접 수행하라.
 
   // --- private helpers ---
 
