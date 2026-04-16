@@ -1,4 +1,4 @@
-import electron from "electron/renderer";
+import electron from "electron";
 
 const { contextBridge, ipcRenderer } = electron;
 

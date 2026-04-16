@@ -5,9 +5,10 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { execFileSync } from "node:child_process";
-import { resolveShell, ShellMismatchError } from "../shell-resolver.js";
+import { resolveShell, ShellMismatchError, __resetShellResolverCache } from "../shell-resolver.js";
 
 afterEach(() => {
+  __resetShellResolverCache();
   vi.restoreAllMocks();
 });
 

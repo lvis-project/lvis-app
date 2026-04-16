@@ -249,15 +249,15 @@ export class ToolExecutor {
     }
 
     // ── Step 3: Permission (source-aware) ───────────
-      if (this.permissionManager) {
-        permissionResult = this.permissionManager.checkDetailed(toolUse.name, source, tool.category);
-        if (permissionResult.decision === "deny") {
-          const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
-          callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
-          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
-          this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
-          return { tool_use_id: toolUse.id, content: msg, is_error: true };
-        }
+    if (this.permissionManager) {
+      permissionResult = this.permissionManager.checkDetailed(toolUse.name, source, tool.category);
+      if (permissionResult.decision === "deny") {
+        const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
+        callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
+        this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
+        return { tool_use_id: toolUse.id, content: msg, is_error: true };
+      }
       if (permissionResult.decision === "ask") {
         if (this.approvalGate) {
           // §6.3 Layer 3 + §8: 렌더러 승인 모달로 round-trip
