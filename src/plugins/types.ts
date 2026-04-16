@@ -15,14 +15,33 @@
 export type DeploymentMode = "managed" | "user";
 
 export interface PluginManifest {
+  /**
+   * 플러그인 고유 식별자.
+   *
+   * 도트(`.`) 형식을 권장합니다. 예: `com.lge.meeting-recorder`, `com.lge.email`
+   *
+   * 이 값은 **플러그인 식별/패키지 네임스페이스**에 사용되며
+   * LLM tool name과는 별개입니다 — 도트를 포함해도 됩니다.
+   */
   id: string;
   name: string;
   version: string;
   entry: string;
+  /**
+   * LLM에 노출되는 도구 이름(tool name) 배열.
+   *
+   * **반드시 `^[a-zA-Z0-9_-]+$` 패턴을 만족해야 합니다 — 도트(`.`) 금지.**
+   * OpenAI, Anthropic, Google 등 모든 LLM 제공자가 이 패턴을 강제합니다.
+   *
+   * 예: `["meeting_start", "meeting_stop", "meeting_transcript"]`
+   *
+   * 플러그인 id의 네임스페이스(도트 허용)와 혼동하지 마세요.
+   * 런타임이 이 값을 그대로 tool name으로 사용하며 변환하지 않습니다.
+   */
   methods: string[];
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
-  /** 플러그인이 선언하는 키워드 (§9.2) */
+  /** 플러그인이 선언하는 키워드 (§9.2). `skillId`는 `methods` 배열의 tool name과 일치해야 함 */
   keywords?: Array<{ keyword: string; skillId: string }>;
 
   // ─── §9.6 Plugin Deployment Model (Phase 1.5 신규) ─────────────────

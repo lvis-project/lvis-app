@@ -144,4 +144,59 @@ describe("PluginRuntime.disable", () => {
     // Existing plugin still loaded
     expect(runtime.listPluginIds()).toContain("p-existing");
   });
+
+  it("plugin with dotted reverse-domain id (com.lge.xxx) and underscore methods loads correctly", async () => {
+    // Plugin ID may use reverse-domain dots (package identity namespace)
+    // Tool names (methods[]) must still be underscore-only (LLM tool name namespace)
+    const pluginId = "com.lge.test";
+    const pluginDir = join(installedDir, "com-lge-test");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return {
+    handlers: { "com_lge_test_hello": async () => "hi" },
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+`,
+      "utf-8",
+    );
+
+    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", methods: ["com_lge_test_hello"] };
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    await writeRegistry([{ id: pluginId, manifestPath, enabled: true }]);
+
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    expect(runtime.listPluginIds()).toContain(pluginId);
+    expect(runtime.listMethods()).toContain("com_lge_test_hello");
+  });
+
+  it("plugin with dot-notation method name fails to load with a clear error", async () => {
+    // Methods are LLM tool names and must not contain dots
+    const pluginDir = join(installedDir, "bad-plugin");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return { handlers: { "bad.method": async () => "fail" } };
+}
+`,
+      "utf-8",
+    );
+
+    const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", methods: ["bad.method"] };
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    await writeRegistry([{ id: "bad-plugin", manifestPath, enabled: true }]);
+
+    const runtime = makeRuntime();
+    await expect(runtime.load()).rejects.toThrow(/Invalid tool name 'bad\.method'/);
+  });
 });
