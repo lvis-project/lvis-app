@@ -1,0 +1,32 @@
+{
+  "id": "calendar",
+  "name": "LVIS Calendar",
+  "version": "0.1.0",
+  "deployment": "managed",
+  "publisher": "LG Electronics IT",
+  "entry": "../../../node_modules/@lvis/plugin-calendar/dist/hostPlugin.js",
+  "methods": [
+    "calendar.status",
+    "calendar.auth",
+    "calendar.list",
+    "calendar.today",
+    "calendar.get",
+    "calendar.create",
+    "calendar.update",
+    "calendar.delete",
+    "calendar.startWatcher",
+    "calendar.stopWatcher"
+  ],
+  "config": {},
+  "ui": [
+    {
+      "id": "calendar-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "캘린더",
+      "title": "Outlook Calendar",
+      "description": "Outlook 일정을 읽고 쓰며 미팅 시작 전 알림을 제공합니다.",
+      "entry": "../../../node_modules/@lvis/plugin-calendar/dist/ui/calendar-control.js"
+    }
+  ]
+}
