@@ -97,6 +97,11 @@ type ApprovalRequest = {
    * even for read-only tools; "default" / "full_auto" auto-approve.
    */
   mode?: "default" | "plan" | "full_auto";
+  /**
+   * §S1 renderer hint mirrored from main. Matched SENSITIVE_PATH_PATTERNS
+   * pattern when target.filePath is a sensitive path, otherwise null/absent.
+   */
+  sensitivePathPattern?: string | null;
 };
 type ApprovalDecision = {
   requestId: string;
@@ -738,13 +743,45 @@ function ToolApprovalDialog({
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          {/* 도구 이름 + 소스 배지 */}
-          <div className="flex items-center gap-2">
+          {/* 도구 이름 + 소스/모드/읽기전용 배지 */}
+          <div className="flex flex-wrap items-center gap-2">
             <code className="rounded bg-muted px-2 py-1 text-sm font-mono">
               {request.toolName}
             </code>
             <Badge variant="outline" className="text-[11px]">{sourceBadge}</Badge>
+            {request.isReadOnly && (
+              <Badge variant="secondary" className="text-[11px]">읽기 전용</Badge>
+            )}
+            {request.mode === "plan" && (
+              <Badge variant="outline" className="border-amber-500 text-[11px] text-amber-700">
+                계획 모드
+              </Badge>
+            )}
           </div>
+
+          {/* 민감 경로 경고 — sensitivePathPattern 이 있으면 최상단 경고 배너 */}
+          {request.sensitivePathPattern && (
+            <div className="rounded border border-destructive/60 bg-destructive/10 p-2 text-xs text-destructive">
+              <p className="font-semibold">민감 경로 접근</p>
+              <p className="mt-0.5">
+                이 도구가 접근하려는 경로는 민감한 경로로 분류되었습니다. 허용 시
+                자격 증명 또는 비밀이 노출될 수 있습니다.
+              </p>
+              <p className="mt-0.5 font-mono text-[10px] opacity-80">
+                매칭 패턴: {request.sensitivePathPattern}
+              </p>
+            </div>
+          )}
+
+          {/* 대상 파일 경로 (있을 때만) */}
+          {request.target?.filePath && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">대상 파일</p>
+              <code className="block break-all rounded bg-muted/50 p-2 text-[11px] font-mono">
+                {request.target.filePath}
+              </code>
+            </div>
+          )}
 
           {/* 사유 */}
           <div>

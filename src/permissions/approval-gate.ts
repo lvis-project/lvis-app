@@ -59,6 +59,17 @@ export interface ApprovalRequest {
    *   - "plan" → still block (plan mode inspects without executing)
    */
   mode?: ApprovalMode;
+  /**
+   * §S1 renderer hint. When the executor detected that `target.filePath`
+   * matches a SENSITIVE_PATH_PATTERNS entry, this field carries the
+   * matched pattern string so the dialog can surface a prominent warning.
+   * Remains `null`/omitted when the path is not sensitive.
+   *
+   * Note: this is a user-facing hint only. The authoritative hard-block
+   * is enforced inside {@link ApprovalGate.requestAndWait} before the
+   * dialog is shown, using the same {@link isSensitivePath} function.
+   */
+  sensitivePathPattern?: string | null;
 }
 
 export type ApprovalChoice =
