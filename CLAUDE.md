@@ -83,7 +83,7 @@ src/
 ## Key Principles
 
 1. **NO plugin-specific code in host** — All plugin integration via HostApi self-registration
-2. **Tool names use underscore** — `meeting_start` not `meeting.start` (vendor compatibility)
+2. **Two naming namespaces** — Plugin IDs use dot format (`com.lge.meeting-recorder`); LLM tool names use underscore-only (`meeting_start`). No runtime conversion — methods must be declared in underscore form in the manifest.
 3. **Multi-vendor LLM** — GenericMessage abstraction, never vendor-specific in core logic
 4. **Config wildcard** — `configOverrides["*"]` passes API keys to all plugins
 
