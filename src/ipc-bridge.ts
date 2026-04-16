@@ -133,22 +133,22 @@ export function registerIpcHandlers(
   );
 
   // ─── Plugin Methods (proxy) ─────────────────────
-  ipcMain.handle("lvis:index:scan", () => pluginRuntime.call("index.scan"));
-  ipcMain.handle("lvis:index:documents", () => pluginRuntime.call("index.documents"));
+  ipcMain.handle("lvis:index:scan", () => pluginRuntime.call("index_scan"));
+  ipcMain.handle("lvis:index:documents", () => pluginRuntime.call("index_documents"));
   ipcMain.handle("lvis:chat:preview", (_e, question: string) =>
-    pluginRuntime.call("chat.preview", { question }),
+    pluginRuntime.call("chat_preview", { question }),
   );
   ipcMain.handle("lvis:meeting:start", (_e, sessionId: string, context?: unknown) =>
-    pluginRuntime.call("meeting.start", { sessionId, context }),
+    pluginRuntime.call("meeting_start", { sessionId, context }),
   );
   ipcMain.handle("lvis:meeting:push-chunk", (_e, sessionId: string, chunk: unknown) =>
-    pluginRuntime.call("meeting.pushChunk", { sessionId, chunk }),
+    pluginRuntime.call("meeting_pushChunk", { sessionId, chunk }),
   );
   ipcMain.handle("lvis:meeting:stop", (_e, sessionId: string) =>
-    pluginRuntime.call("meeting.stop", { sessionId }),
+    pluginRuntime.call("meeting_stop", { sessionId }),
   );
   ipcMain.handle("lvis:meeting:transcript", (_e, sessionId: string) =>
-    pluginRuntime.call("meeting.transcript", { sessionId }),
+    pluginRuntime.call("meeting_transcript", { sessionId }),
   );
 
   // ─── Marketplace ────────────────────────────────
