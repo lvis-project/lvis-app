@@ -3,9 +3,11 @@
  *
  * 이메일·캘린더 등 MS Graph를 쓰는 모든 플러그인이 하나의 토큰을 공유.
  * MSAL PublicClientApplication을 싱글톤으로 유지하고
- * ~/.lvis/ms-graph-token.json 에 토큰을 영속화.
+ * <userData>/ms-graph-token.json 에 토큰을 영속화(Electron safeStorage 암호화).
+ * userData 경로는 생성자에서 주입 (boot.ts: app.getPath("userData")).
  */
 
+import { safeStorage } from "electron";
 import { PublicClientApplication } from "@azure/msal-node";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
@@ -53,12 +55,22 @@ export class MsGraphService {
       const raw = await readFile(this.tokenPath, "utf-8");
       const saved = JSON.parse(raw) as SavedToken;
       const expiry = new Date(saved.expiry);
-      if (saved.accessToken && expiry > new Date()) {
-        this.accessToken = saved.accessToken;
-        this.tokenExpiry = expiry;
-        this.accountName = saved.account;
-        console.log(`[ms-graph] 저장된 토큰 로드 — ${this.accountName}`);
+      if (!saved.accessToken || expiry <= new Date()) return;
+
+      let accessToken: string;
+      if (saved.accessToken.startsWith("plain:")) {
+        accessToken = saved.accessToken.slice(6);
+      } else if (safeStorage.isEncryptionAvailable()) {
+        accessToken = safeStorage.decryptString(Buffer.from(saved.accessToken, "base64"));
+      } else {
+        // Encrypted but safeStorage unavailable (e.g. different keychain) — skip
+        return;
       }
+
+      this.accessToken = accessToken;
+      this.tokenExpiry = expiry;
+      this.accountName = saved.account;
+      console.log(`[ms-graph] 저장된 토큰 로드 — ${this.accountName}`);
     } catch {
       // 없으면 무시
     }
@@ -98,11 +110,13 @@ export class MsGraphService {
           </body></html>`,
       })
       .then(async (result: { accessToken: string; expiresOn: Date | null; account?: { username?: string; name?: string } | null } | null) => {
-        if (result) {
-          const account = result.account?.username ?? result.account?.name ?? "Unknown";
-          await this.persistToken(result.accessToken, result.expiresOn ?? new Date(), account);
-          this.notifyChange();
+        if (!result) return;
+        if (!result.expiresOn) {
+          throw new Error("Interactive authentication did not return a token expiry.");
         }
+        const account = result.account?.username ?? result.account?.name ?? "Unknown";
+        await this.persistToken(result.accessToken, result.expiresOn, account);
+        this.notifyChange();
       })
       .finally(() => {
         this.authInProgress = null;
@@ -121,10 +135,20 @@ export class MsGraphService {
     this.accessToken = token;
     this.tokenExpiry = expiry;
     this.accountName = account;
+
+    let tokenToStore: string;
+    if (safeStorage.isEncryptionAvailable()) {
+      tokenToStore = safeStorage.encryptString(token).toString("base64");
+    } else {
+      // 암호화 불가 환경 — 평문 저장 (개발 환경 등)
+      tokenToStore = `plain:${token}`;
+    }
+
     await mkdir(dirname(this.tokenPath), { recursive: true });
     await writeFile(
       this.tokenPath,
-      JSON.stringify({ accessToken: token, expiry: expiry.toISOString(), account }, null, 2),
+      JSON.stringify({ accessToken: tokenToStore, expiry: expiry.toISOString(), account }, null, 2),
+      { encoding: "utf-8", mode: 0o600 },
     );
     console.log(`[ms-graph] 토큰 저장 완료 — ${account}`);
   }
