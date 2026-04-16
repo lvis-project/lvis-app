@@ -26,9 +26,11 @@ export type ToolEntryItem = {
 
 export type ChatEntry =
   | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string; thought?: string; streaming?: boolean }
+  | { kind: "reasoning"; text: string; streaming?: boolean }
+  | { kind: "assistant"; text: string; streaming?: boolean }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] };
 
+type ReasoningEntry = Extract<ChatEntry, { kind: "reasoning" }>;
 type AssistantEntry = Extract<ChatEntry, { kind: "assistant" }>;
 type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 
@@ -36,11 +38,48 @@ export function appendUserEntry(entries: ChatEntry[], text: string): ChatEntry[]
   return [...entries, { kind: "user", text }];
 }
 
+export function upsertStreamingReasoning(
+  entries: ChatEntry[],
+  text: string,
+): ChatEntry[] {
+  if (!text) {
+    return entries;
+  }
+
+  const next = [...entries];
+  const reasoningIdx = findLastIdx(
+    next,
+    (entry): entry is Extract<ChatEntry, { kind: "reasoning" }> =>
+      entry.kind === "reasoning" && !!entry.streaming,
+  );
+
+  const reasoning = { kind: "reasoning" as const, text, streaming: true };
+  if (reasoningIdx >= 0) {
+    next[reasoningIdx] = reasoning;
+    return next;
+  }
+
+  const assistantIdx = findLastIdx(
+    next,
+    (entry): entry is Extract<ChatEntry, { kind: "assistant" }> =>
+      entry.kind === "assistant" && !!entry.streaming,
+  );
+  if (assistantIdx >= 0) {
+    next.splice(assistantIdx, 0, reasoning);
+  } else {
+    next.push(reasoning);
+  }
+  return next;
+}
+
 export function upsertStreamingAssistant(
   entries: ChatEntry[],
   text: string,
-  thought: string,
 ): ChatEntry[] {
+  if (!text) {
+    return entries;
+  }
+
   const next = [...entries];
   const assistantIdx = findLastIdx(
     next,
@@ -48,7 +87,7 @@ export function upsertStreamingAssistant(
       entry.kind === "assistant" && !!entry.streaming,
   );
 
-  const assistant = { kind: "assistant" as const, text, thought, streaming: true };
+  const assistant = { kind: "assistant" as const, text, streaming: true };
   if (assistantIdx >= 0) {
     next[assistantIdx] = assistant;
   } else {
@@ -57,10 +96,57 @@ export function upsertStreamingAssistant(
   return next;
 }
 
+export function finalizeStreamingReasoning(
+  entries: ChatEntry[],
+  fallbackText: string,
+): ChatEntry[] {
+  const next = [...entries];
+  const reasoningIdx = findLastIdx(
+    next,
+    (entry): entry is Extract<ChatEntry, { kind: "reasoning" }> =>
+      entry.kind === "reasoning" && !!entry.streaming,
+  );
+
+  if (reasoningIdx >= 0) {
+    const reasoning = next[reasoningIdx] as ReasoningEntry;
+    const text = reasoning.text || fallbackText;
+    if (!text) {
+      next.splice(reasoningIdx, 1);
+      return next;
+    }
+    next[reasoningIdx] = {
+      ...reasoning,
+      text,
+      streaming: false,
+    };
+    return next;
+  }
+
+  if (!fallbackText) {
+    return next;
+  }
+
+  const reasoning = {
+    kind: "reasoning" as const,
+    text: fallbackText,
+    streaming: false,
+  };
+  const assistantIdx = findLastIdx(
+    next,
+    (entry): entry is Extract<ChatEntry, { kind: "assistant" }> =>
+      entry.kind === "assistant" && !!entry.streaming,
+  );
+  if (assistantIdx >= 0) {
+    next.splice(assistantIdx, 0, reasoning);
+  } else {
+    next.push(reasoning);
+  }
+  return next;
+}
+
 export function finalizeStreamingAssistant(
   entries: ChatEntry[],
   fallbackText: string,
-  fallbackThought: string,
 ): ChatEntry[] {
   const next = [...entries];
   const assistantIdx = findLastIdx(
@@ -71,30 +157,33 @@ export function finalizeStreamingAssistant(
 
   if (assistantIdx >= 0) {
     const assistant = next[assistantIdx] as AssistantEntry;
+    const text = assistant.text || fallbackText;
+    if (!text) {
+      next.splice(assistantIdx, 1);
+      return next;
+    }
     next[assistantIdx] = {
       ...assistant,
-      text: assistant.text || fallbackText,
-      thought: assistant.thought || fallbackThought,
+      text,
       streaming: false,
     };
     return next;
   }
 
-  if (!fallbackText && !fallbackThought) {
+  if (!fallbackText) {
     return next;
   }
 
   next.push({
     kind: "assistant",
     text: fallbackText,
-    thought: fallbackThought,
     streaming: false,
   });
   return next;
 }
 
-export function setAssistantError(entries: ChatEntry[], message: string): ChatEntry[] {
-  const next = [...entries];
+export function setAssistantError(entries: ChatEntry[], message: string, fallbackThought: string = ""): ChatEntry[] {
+  const next = finalizeStreamingReasoning(entries, fallbackThought);
   const assistantIdx = findLastIdx(
     next,
     (entry): entry is Extract<ChatEntry, { kind: "assistant" }> =>
@@ -102,9 +191,9 @@ export function setAssistantError(entries: ChatEntry[], message: string): ChatEn
   );
 
   if (assistantIdx >= 0) {
-    next[assistantIdx] = { kind: "assistant", text: message, thought: "", streaming: false };
+    next[assistantIdx] = { kind: "assistant", text: message, streaming: false };
   } else {
-    next.push({ kind: "assistant", text: message, thought: "", streaming: false });
+    next.push({ kind: "assistant", text: message, streaming: false });
   }
   return next;
 }
@@ -120,17 +209,12 @@ export function applyToolStart(
   },
 ): ChatEntry[] {
   const next = [...entries];
-  const assistantIdx = findLastIdx(
-    next,
-    (entry): entry is Extract<ChatEntry, { kind: "assistant" }> =>
-      entry.kind === "assistant" && !!entry.streaming,
-  );
   let groupIdx = findLastIdx(
     next,
     (entry): entry is Extract<ChatEntry, { kind: "tool_group" }> =>
       entry.kind === "tool_group" && entry.groupIds.includes(payload.groupId),
   );
-  const adjacentGroupIdx = getAdjacentToolGroupIndex(next, assistantIdx);
+  const adjacentGroupIdx = getAdjacentToolGroupIndex(next);
 
   const tool: ToolEntryItem = {
     toolUseId: payload.toolUseId,
@@ -147,12 +231,6 @@ export function applyToolStart(
       toolIdx >= 0
         ? group.tools.map((entry: ToolEntryItem, index: number) => (index === toolIdx ? tool : entry))
         : [...group.tools, tool];
-
-    if (assistantIdx >= 0 && groupIdx > assistantIdx) {
-      next.splice(groupIdx, 1);
-      next.splice(assistantIdx, 0, { ...group, status: "running", tools });
-      return next;
-    }
 
     next[groupIdx] = { ...group, status: "running", tools };
     return next;
@@ -180,11 +258,7 @@ export function applyToolStart(
     tools: [tool],
   };
 
-  if (assistantIdx >= 0) {
-    next.splice(assistantIdx, 0, newGroup);
-  } else {
-    next.push(newGroup);
-  }
+  next.push(newGroup);
   return next;
 }
 
@@ -231,11 +305,8 @@ function findLastIdx<T>(items: T[], predicate: (value: T) => boolean): number {
   return -1;
 }
 
-function getAdjacentToolGroupIndex(entries: ChatEntry[], assistantIdx: number): number {
-  if (assistantIdx > 0 && entries[assistantIdx - 1]?.kind === "tool_group") {
-    return assistantIdx - 1;
-  }
-  if (assistantIdx < 0 && entries[entries.length - 1]?.kind === "tool_group") {
+function getAdjacentToolGroupIndex(entries: ChatEntry[]): number {
+  if (entries[entries.length - 1]?.kind === "tool_group") {
     return entries.length - 1;
   }
   return -1;
