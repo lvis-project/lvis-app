@@ -11,10 +11,19 @@
  */
 
 export interface BriefingItem {
-  category: "task" | "note" | "session" | "meeting" | "email" | "system";
+  category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
   priority: "high" | "medium" | "low";
   title: string;
   detail?: string;
+}
+
+export interface CachedCalendarEvent {
+  subject: string;
+  start: string;
+  end: string;
+  isAllDay?: boolean;
+  location?: string;
+  isOnlineMeeting?: boolean;
 }
 
 export interface Briefing {
@@ -32,9 +41,15 @@ export interface ProactiveEngineDeps {
 export class ProactiveEngine {
   private readonly deps: ProactiveEngineDeps;
   private readonly eventLog: Array<{ type: string; data: unknown; timestamp: string }> = [];
+  private calendarEventsCache: CachedCalendarEvent[] = [];
 
   constructor(deps: ProactiveEngineDeps) {
     this.deps = deps;
+  }
+
+  /** 캘린더 이벤트 캐시 업데이트 (boot.ts에서 호출) */
+  updateCalendarEvents(events: CachedCalendarEvent[]): void {
+    this.calendarEventsCache = events;
   }
 
   /** 플러그인 이벤트 수집 (이벤트 버스에서 호출) */
@@ -108,6 +123,52 @@ export class ProactiveEngine {
         priority: "medium",
         title: `회의 요약 ${meetingEvents.length}건`,
       });
+    }
+
+    // 5. 오늘 캘린더 일정
+    if (this.calendarEventsCache.length > 0) {
+      const now = new Date();
+      const upcomingEvents = this.calendarEventsCache
+        .filter((e) => !e.isAllDay && new Date(e.start) > now)
+        .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+      const allDayEvents = this.calendarEventsCache.filter((e) => e.isAllDay);
+      const ongoingEvents = this.calendarEventsCache.filter(
+        (e) => !e.isAllDay && new Date(e.start) <= now && new Date(e.end) > now,
+      );
+
+      // 진행 중 일정 — 높은 우선순위
+      for (const ev of ongoingEvents) {
+        const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+        items.push({
+          category: "calendar",
+          priority: "high",
+          title: `[진행 중] ${ev.subject}`,
+          detail: `${endTime}까지${ev.location ? ` — ${ev.location}` : ""}${ev.isOnlineMeeting ? " (온라인)" : ""}`,
+        });
+      }
+
+      // 예정 일정 (최대 3개)
+      for (const ev of upcomingEvents.slice(0, 3)) {
+        const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+        const minutesUntil = Math.round((new Date(ev.start).getTime() - now.getTime()) / 60000);
+        const soon = minutesUntil <= 30;
+        items.push({
+          category: "calendar",
+          priority: soon ? "high" : "medium",
+          title: ev.subject,
+          detail: `${startTime}${minutesUntil < 60 ? ` (${minutesUntil}분 후)` : ""}${ev.location ? ` — ${ev.location}` : ""}${ev.isOnlineMeeting ? " (온라인)" : ""}`,
+        });
+      }
+
+      // 종일 일정
+      if (allDayEvents.length > 0) {
+        items.push({
+          category: "calendar",
+          priority: "low",
+          title: `종일 일정 ${allDayEvents.length}건`,
+          detail: allDayEvents.map((e) => e.subject).join(", "),
+        });
+      }
     }
 
     const emailEvents = recentEvents.filter((e) => e.type === "email.action.needed");
@@ -201,6 +262,23 @@ export class ProactiveEngine {
     if (emailDetails.length > 0) {
       lines.push("미처리 이메일 상세:");
       lines.push(...emailDetails);
+    }
+
+    // 오늘 캘린더 일정 상세
+    if (this.calendarEventsCache.length > 0) {
+      const now = new Date();
+      const todayEvents = this.calendarEventsCache
+        .filter((e) => !e.isAllDay)
+        .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+      if (todayEvents.length > 0) {
+        lines.push("오늘 일정:");
+        for (const ev of todayEvents) {
+          const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+          const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+          const isOngoing = new Date(ev.start) <= now && new Date(ev.end) > now;
+          lines.push(`  - ${isOngoing ? "[진행중] " : ""}${startTime}~${endTime} ${ev.subject}${ev.location ? ` @ ${ev.location}` : ""}${ev.isOnlineMeeting ? " (온라인 미팅)" : ""}`);
+        }
+      }
     }
 
     lines.push("</daily-briefing-data>");
