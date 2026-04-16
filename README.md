@@ -3,7 +3,7 @@
 
 ## 포함 내용
 - Plugin Runtime + Manifest 기반 동적 로딩
-- `plugins/*/plugin.json` 매니페스트 스캔
+- `plugins/registry.json` 기반 manifestPath 동적 로딩
 - `@lvis/plugin-pageindex`, `@lvis/plugin-meeting`, `@lvis/plugin-email`, `@lvis/plugin-calendar` 동적 통합
 - 앱 시작 시 PageIndex 워커 + 자동 인덱서 구동
 - 실제 채팅 UI(렌더러) + preload IPC 브리지
@@ -18,14 +18,11 @@
 - E2E 플로우 스모크 테스트 스크립트
 
 ## 동적 플러그인 매니페스트
-모든 플러그인은 `plugins/installed/*/plugin.json` 경로에 설치되며, `plugins/registry.json`이 활성 목록을 관리합니다.
 - `plugins/installed/pageindex/plugin.json`
 - `plugins/installed/meeting/plugin.json`
 - `plugins/installed/email/plugin.json`
 - `plugins/installed/calendar/plugin.json`
 - `plugins/registry.json` (활성 플러그인 목록)
-
-> `plugins/pageindex/` 및 `plugins/meeting/` 디렉토리는 이전 버전의 번들 경로이며, 런타임은 이를 사용하지 않습니다.
 
 ## Plugins Registry CLI
 ```bash

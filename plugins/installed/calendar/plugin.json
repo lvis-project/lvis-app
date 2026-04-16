@@ -18,6 +18,16 @@
     "calendar_stop_watcher",
     "calendar_open_url"
   ],
+  "capabilities": [
+    "calendar-source",
+    "background-watcher"
+  ],
+  "startupMethods": [
+    "calendar_start_watcher"
+  ],
+  "eventSubscriptions": [
+    "meeting.ended"
+  ],
   "config": {},
   "ui": [
     {

@@ -14,6 +14,15 @@
  */
 export type DeploymentMode = "managed" | "user";
 
+export interface PluginIpcBinding {
+  /** IPC channel name exposed by host (legacy compatibility path). */
+  channel: string;
+  /** Plugin method name to call. Must be present in `methods`. */
+  method: string;
+  /** Optional payload field names for positional IPC args. */
+  args?: string[];
+}
+
 export interface PluginManifest {
   /**
    * 플러그인 고유 식별자.
@@ -30,20 +39,27 @@ export interface PluginManifest {
   /**
    * LLM에 노출되는 도구 이름(tool name) 배열.
    *
-   * **반드시 `^[a-z][a-z0-9_]*$` 패턴을 만족해야 합니다 — 소문자/숫자/언더스코어만 허용, 첫 글자는 소문자.**
-   * OpenAI, Anthropic, Google Gemini 등 모든 주요 LLM 제공자의 교집합 제약입니다
-   * (Gemini: 소문자 전용; OpenAI/Anthropic: 언더스코어·소문자 권장, 하이픈 금지).
+  * **반드시 `^[a-zA-Z_][a-zA-Z0-9_]*$` 패턴을 만족해야 합니다 — 도트(`.`), 하이픈(`-`) 금지.**
+   * OpenAI, Anthropic, Google 등 모든 LLM 제공자가 이 패턴을 강제합니다.
    *
    * 예: `["meeting_start", "meeting_stop", "meeting_transcript"]`
    *
-   * 플러그인 id의 네임스페이스(도트·대문자·하이픈 허용)와 혼동하지 마세요.
-   * 런타임이 이 값을 그대로 tool name으로 사용하며 어떠한 변환도 수행하지 않습니다.
+   * 플러그인 id의 네임스페이스(도트 허용)와 혼동하지 마세요.
+   * 런타임이 이 값을 그대로 tool name으로 사용하며 변환하지 않습니다.
    */
   methods: string[];
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   /** 플러그인이 선언하는 키워드 (§9.2). `skillId`는 `methods` 배열의 tool name과 일치해야 함 */
   keywords?: Array<{ keyword: string; skillId: string }>;
+  /** 호스트가 capability 기반으로 기능을 찾을 때 사용하는 선언형 태그 */
+  capabilities?: string[];
+  /** 부팅 직후 자동 실행할 메서드 목록 (선언형 autostart) */
+  startupMethods?: string[];
+  /** 호스트가 수집해야 할 이벤트 타입 목록 (예: proactive 연동) */
+  eventSubscriptions?: string[];
+  /** 하드코딩 IPC 제거를 위한 채널↔메서드 바인딩 선언 */
+  ipcBindings?: PluginIpcBinding[];
 
   // ─── §9.6 Plugin Deployment Model (Phase 1.5 신규) ─────────────────
 
