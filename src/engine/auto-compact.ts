@@ -9,13 +9,162 @@
  * - 최근 N개 메시지는 보존 (기본 4)
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
-import type { GenericMessage, TokenUsage } from "./llm/types.js";
+import type { GenericMessage, TokenUsage, LLMVendor } from "./llm/types.js";
+
+// ─── Context Window Registry ─────────────────────────
+
+/**
+ * 알려진 모델별 최대 컨텍스트 윈도우 토큰 수.
+ * 최신 정보 기준 (2026-04-17): 각 공급사 공식 문서 · API 스펙 참조.
+ * 미등록 모델은 getModelContextWindow()에서 DEFAULT_CONTEXT_WINDOW(128K)로 폴백.
+ */
+const MODEL_CONTEXT_WINDOWS: Partial<Record<LLMVendor, Record<string, number>>> = {
+  // ── Anthropic Claude ───────────────────────────────────────────────────────
+  // 출처: https://platform.claude.com/docs/en/about-claude/models/overview
+  claude: {
+    // Claude 4 세대 (2025~2026) — 최신
+    "claude-opus-4-6":           1_000_000, // 1M context (2026-02)
+    "claude-sonnet-4-6":         1_000_000, // 1M context (2026-02)
+    "claude-opus-4-5":             200_000, // 200K (2025-11)
+    "claude-sonnet-4-5":           200_000, // 200K (2025-09)
+    "claude-haiku-4-5":            200_000, // 200K (2025-10)
+    "claude-haiku-4-5-20251001":   200_000,
+    "claude-opus-4-20250514":      200_000, // Claude 4 최초 릴리즈 스냅샷
+    "claude-sonnet-4-20250514":    200_000, // Claude 4 최초 릴리즈 스냅샷
+    // Claude 3.x 세대 (구형 — 하위 호환)
+    "claude-3-5-sonnet-20241022":  200_000,
+    "claude-3-5-haiku-20241022":   200_000,
+    "claude-3-opus-20240229":      200_000,
+    "claude-3-sonnet-20240229":    200_000,
+    "claude-3-haiku-20240307":     200_000,
+  },
+
+  // ── OpenAI ─────────────────────────────────────────────────────────────────
+  // 출처: https://platform.openai.com/docs/models
+  openai: {
+    // GPT-5.4 시리즈 (2026-03) — 최신, 1.05M context
+    "gpt-5.4":                   1_050_000,
+    "gpt-5.4-pro":               1_050_000,
+    "gpt-5.4-mini":              1_050_000,
+    "gpt-5.4-nano":              1_050_000,
+    // GPT-5.3 (2026) — 400K context
+    "gpt-5.3":                     400_000,
+    // GPT-5.2 시리즈 (2025-12) — 400K context
+    "gpt-5.2":                     400_000,
+    "gpt-5.2-codex":               400_000,
+    "gpt-5.3-codex":               400_000,
+    // GPT-5.1 시리즈 (2025) — 400K context
+    "gpt-5.1":                     400_000,
+    "gpt-5.1-reasoning":           400_000,
+    "gpt-5.1-pro":                 400_000,
+    "gpt-5.1-codex":               400_000,
+    "gpt-5.1-codex-mini":          400_000,
+    "gpt-5.1-codex-max":           400_000,
+    // GPT-5 베이스 시리즈 (2025) — 400K context
+    "gpt-5":                       400_000,
+    "gpt-5-mini":                  400_000,
+    "gpt-5-nano":                  400_000,
+    // GPT-4.1 시리즈 (2025-04) — 1M context
+    "gpt-4.1":                   1_000_000,
+    "gpt-4.1-mini":              1_000_000,
+    "gpt-4.1-nano":              1_000_000,
+    "gpt-4.1-2025-04-14":        1_000_000,
+    // o-series 추론 모델 (2025)
+    "o3":                          200_000,
+    "o3-2025-04-16":               200_000,
+    "o4-mini":                     200_000,
+    "o4-mini-2025-04-24":          200_000,
+    "o1":                          200_000,
+    "o1-mini":                     128_000,
+    // GPT-4o 시리즈 (128K)
+    "gpt-4o":                      128_000,
+    "gpt-4o-mini":                 128_000,
+    // GPT-4 레거시
+    "gpt-4-turbo":                 128_000,
+    "gpt-4-32k":                    32_768,
+    "gpt-4":                         8_192,
+    "gpt-3.5-turbo":                16_385,
+  },
+
+  // ── Google Gemini ──────────────────────────────────────────────────────────
+  // 출처: https://ai.google.dev/gemini-api/docs/models
+  gemini: {
+    // Gemini 2.5 시리즈 (2025) — 최신
+    "gemini-2.5-pro":            1_000_000,
+    "gemini-2.5-flash":          1_000_000,
+    "gemini-2.5-flash-lite":       128_000,
+    // Gemini 2.0 시리즈 (구형)
+    "gemini-2.0-flash":          1_048_576,
+    "gemini-2.0-flash-lite":       128_000,
+    // Gemini 1.5 시리즈 (레거시)
+    "gemini-1.5-pro":            2_097_152,
+    "gemini-1.5-flash":          1_048_576,
+    "gemini-1.5-flash-8b":       1_048_576,
+  },
+
+  // ── GitHub Copilot (github.ai/inference) ───────────────────────────────────
+  // 출처: https://docs.github.com/en/copilot/reference/ai-models/supported-models
+  copilot: {
+    // GPT-5.4 (최신 — 2026-04 기준)
+    "gpt-5.4":                   1_050_000,
+    "gpt-5.4-mini":              1_050_000,
+    // GPT-5.x 시리즈
+    "gpt-5.3":                     400_000,
+    "gpt-5.2":                     400_000,
+    "gpt-5.1":                     400_000,
+    "gpt-5.1-codex":               400_000,
+    "gpt-5.1-codex-mini":          400_000,
+    "gpt-5.1-codex-max":           400_000,
+    "gpt-5":                       400_000,
+    "gpt-5-mini":                  400_000,
+    // GPT-4.1 (2025-05부터 Copilot 기본 모델)
+    "gpt-4.1":                   1_000_000,
+    "gpt-4.1-mini":              1_000_000,
+    // GPT-4o
+    "gpt-4o":                      128_000,
+    "gpt-4o-mini":                 128_000,
+    // Claude (GitHub Models를 통해 접근)
+    "claude-opus-4-6":           1_000_000,
+    "claude-sonnet-4-6":         1_000_000,
+    "claude-opus-4-5":             200_000,
+    "claude-sonnet-4-5":           200_000,
+    "claude-haiku-4-5":            200_000,
+  },
+};
+
+/** 벤더/모델 정보가 없을 때 사용하는 기본 컨텍스트 윈도우 크기 */
+const DEFAULT_CONTEXT_WINDOW = 128_000;
+
+/**
+ * 벤더·모델 식별자로부터 최대 컨텍스트 윈도우 토큰 수를 반환.
+ * 알 수 없는 모델은 DEFAULT_CONTEXT_WINDOW(128K)를 반환.
+ *
+ * 매칭 순서:
+ * 1. 정확히 일치하는 키 (우선)
+ * 2. model.startsWith(k) 방향의 프리픽스 중 가장 긴 것 (날짜 suffix 등 변형 대응)
+ */
+export function getModelContextWindow(vendor: LLMVendor, model: string): number {
+  const vendorMap = MODEL_CONTEXT_WINDOWS[vendor];
+  if (vendorMap) {
+    if (vendorMap[model] !== undefined) return vendorMap[model];
+    // 프리픽스 매칭: model이 등록된 키로 시작하는 경우만 허용 (역방향 제외)
+    // 여러 키가 매칭되면 가장 구체적인(긴) 키를 선택
+    let bestKey: string | undefined;
+    for (const k of Object.keys(vendorMap)) {
+      if (model.startsWith(k) && (bestKey === undefined || k.length > bestKey.length)) {
+        bestKey = k;
+      }
+    }
+    if (bestKey !== undefined) return vendorMap[bestKey];
+  }
+  return DEFAULT_CONTEXT_WINDOW;
+}
 
 // ─── Types ──────────────────────────────────────────
 
 export interface CompactConfig {
-  /** 자동 컴팩션 트리거 토큰 수 (기본 80K) */
-  thresholdTokens: number;
+  /** 자동 컴팩션 트리거 사용률 임계치 (기본 80%) — 모델 컨텍스트 윈도우 대비 */
+  thresholdPct: number;
   /** 보존할 최근 메시지 수 (기본 4) */
   preserveRecentMessages: number;
   /** 요약 최대 토큰 예산 (기본 2K) */
@@ -34,7 +183,7 @@ export interface CompactResult {
 }
 
 const DEFAULT_CONFIG: CompactConfig = {
-  thresholdTokens: 80_000,
+  thresholdPct: 0.8,
   preserveRecentMessages: 4,
   summaryBudgetTokens: 2_000,
 };
@@ -69,12 +218,27 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
 
 /**
  * 컴팩션 필요 여부 확인
+ *
+ * 임계치 = floor(contextWindowTokens × config.thresholdPct).
+ * 기본 설정(128K 윈도우, 80%)에서는 102,400 토큰 도달 시 true 반환.
+ *
+ * @param cumulativeUsage - 누적 토큰 사용량
+ * @param contextWindowTokens - 모델의 최대 컨텍스트 윈도우 크기 (미제공 시 128K 기본값)
+ * @param config - 컴팩션 설정 (미제공 시 기본값: thresholdPct=0.8)
+ *
+ * @example
+ * // gpt-5.4 (1,050,000 토큰 윈도우), 80% 임계치 → 840,000 토큰 도달 시 압축
+ * shouldCompact({ inputTokens: 850_000, outputTokens: 0 }, 1_050_000); // true
+ * // gpt-4o (128,000 토큰 윈도우), 80% 임계치 → 102,400 토큰 도달 시 압축
+ * shouldCompact({ inputTokens: 80_000, outputTokens: 0 }, 128_000);    // false
  */
 export function shouldCompact(
   cumulativeUsage: TokenUsage,
+  contextWindowTokens: number = DEFAULT_CONTEXT_WINDOW,
   config: CompactConfig = DEFAULT_CONFIG,
 ): boolean {
-  return cumulativeUsage.inputTokens >= config.thresholdTokens;
+  const threshold = Math.floor(contextWindowTokens * config.thresholdPct);
+  return cumulativeUsage.inputTokens >= threshold;
 }
 
 /**
