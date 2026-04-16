@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft } from "lucide-react";
+import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "./components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
 import { Badge } from "./components/ui/badge.js";
@@ -18,6 +18,16 @@ import { PluginUiHostView, type PluginUiExtensionView } from "./plugin-ui-host.j
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { approvalQueueReducer } from "./lib/approval-queue-reducer.js";
+import {
+  appendUserEntry,
+  applyToolEnd,
+  applyToolStart,
+  finalizeStreamingAssistant,
+  setAssistantError,
+  type ChatEntry,
+  type StreamEvent,
+  upsertStreamingAssistant,
+} from "./lib/chat-stream-state.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -25,12 +35,6 @@ type MarketplaceItem = { id: string; name: string; description: string; packageS
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
 type AppSettings = { llm: { provider: string; model: string }; chat: { systemPrompt: string }; webSearch: { provider: string } };
-type StreamEvent = { type: string; text?: string; name?: string; error?: string; result?: string; isError?: boolean };
-
-type ChatEntry =
-  | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string; thought?: string; streaming?: boolean }
-  | { kind: "tool"; name: string; status: "running" | "done" | "error"; result?: string };
 
 type LvisApi = {
   getSettings: () => Promise<AppSettings>;
@@ -93,6 +97,16 @@ type ApprovalRequest = {
    * even for read-only tools; "default" / "full_auto" auto-approve.
    */
   mode?: "default" | "plan" | "full_auto";
+  /**
+   * §S1 metadata hint mirrored from main. Carries the matched
+   * SENSITIVE_PATH_PATTERNS entry when the executor detected a sensitive
+   * path, for diagnostics and logging. Remains null/absent otherwise.
+   *
+   * Note: sensitive paths are hard-blocked inside ApprovalGate before any
+   * approval request is sent over IPC, so this field will not be set on
+   * requests that actually reach this dialog.
+   */
+  sensitivePathPattern?: string | null;
 };
 type ApprovalDecision = {
   requestId: string;
@@ -734,13 +748,31 @@ function ToolApprovalDialog({
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          {/* 도구 이름 + 소스 배지 */}
-          <div className="flex items-center gap-2">
+          {/* 도구 이름 + 소스/모드/읽기전용 배지 */}
+          <div className="flex flex-wrap items-center gap-2">
             <code className="rounded bg-muted px-2 py-1 text-sm font-mono">
               {request.toolName}
             </code>
             <Badge variant="outline" className="text-[11px]">{sourceBadge}</Badge>
+            {request.isReadOnly && (
+              <Badge variant="secondary" className="text-[11px]">읽기 전용</Badge>
+            )}
+            {request.mode === "plan" && (
+              <Badge variant="outline" className="border-amber-500 text-[11px] text-amber-700">
+                계획 모드
+              </Badge>
+            )}
           </div>
+
+          {/* 대상 파일 경로 (있을 때만) */}
+          {request.target?.filePath && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">대상 파일</p>
+              <code className="block break-all rounded bg-muted/50 p-2 text-[11px] font-mono">
+                {request.target.filePath}
+              </code>
+            </div>
+          )}
 
           {/* 사유 */}
           <div>
@@ -805,9 +837,101 @@ function ToolApprovalDialog({
 // ─── Helpers ────────────────────────────────────────
 
 function getApi(): LvisApi { if (!window.lvisApi) throw new Error("lvisApi not initialized"); return window.lvisApi; }
-function findLastIdx<T>(arr: T[], pred: (v: T) => boolean): number { for (let i = arr.length - 1; i >= 0; i--) { if (pred(arr[i])) return i; } return -1; }
 function toViewKey(item: PluginUiExtension) { return `plugin:${item.pluginId}:${item.extension.id}`; }
 function getPluginViewLabel(item: PluginUiExtension) { return item.extension.displayName?.trim() || item.extension.title || item.pluginId; }
+
+function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_group" }> }) {
+  const [open, setOpen] = useState(false);
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const doneCount = group.tools.filter((t) => t.status !== "running").length;
+  const hasError = group.tools.some((t) => t.status === "error");
+  const groupStatus = group.status === "running"
+    ? "running"
+    : hasError ? "error" : "done";
+
+  function toggleTool(id: string) {
+    setExpandedTools((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
+
+  return (
+    <div className="mx-4 rounded border border-dashed text-xs text-muted-foreground">
+      <button
+        className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
+        <Wrench className="h-3 w-3 flex-shrink-0" />
+        <span className="font-medium">도구 사용</span>
+        <Badge variant="outline" className="px-1 py-0 text-[10px]">
+          {groupStatus === "running" ? `${doneCount}/${group.tools.length}` : `${group.tools.length}개`}
+        </Badge>
+        {groupStatus === "running" ? (
+          <Loader2 className="ml-auto h-3 w-3 animate-spin" />
+        ) : (
+          <Badge
+            variant={groupStatus === "error" ? "secondary" : "default"}
+            className={`ml-auto px-1 py-0 text-[10px] ${groupStatus === "error" ? "text-red-400" : ""}`}
+          >
+            {groupStatus === "error" ? "오류 있음" : "완료"}
+          </Badge>
+        )}
+      </button>
+      {open && (
+        <div className="space-y-1 border-t px-3 py-1.5">
+          {tools.map((tool) => {
+            const isExpanded = expandedTools.has(tool.toolUseId);
+            return (
+              <div key={tool.toolUseId} className="rounded border border-dashed/50">
+                <button
+                  className="flex w-full items-center gap-2 px-2 py-1 hover:bg-muted/20"
+                  onClick={() => toggleTool(tool.toolUseId)}
+                >
+                  {isExpanded ? <ChevronDown className="h-2.5 w-2.5 flex-shrink-0" /> : <ChevronRight className="h-2.5 w-2.5 flex-shrink-0" />}
+                  <span className="font-mono">{tool.name}</span>
+                  {tool.status === "running" ? (
+                    <Loader2 className="ml-auto h-2.5 w-2.5 animate-spin" />
+                  ) : (
+                    <Badge
+                      variant={tool.status === "error" ? "secondary" : "default"}
+                      className={`ml-auto px-1 py-0 text-[10px] ${tool.status === "error" ? "text-red-400" : ""}`}
+                    >
+                      {tool.status === "error" ? "실패" : "완료"}
+                    </Badge>
+                  )}
+                </button>
+                {isExpanded && (
+                  <div className="space-y-1 border-t px-2 py-1 font-mono text-[10px]">
+                    {tool.input && (
+                      <div>
+                        <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
+                        <pre className="whitespace-pre-wrap break-all opacity-80">{JSON.stringify(tool.input, null, 2)}</pre>
+                      </div>
+                    )}
+                    {tool.result !== undefined && (
+                      <div>
+                        <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${tool.status === "error" ? "text-red-400" : ""}`}>
+                          {tool.status === "error" ? "오류" : "결과"}
+                        </div>
+                        <pre className={`whitespace-pre-wrap break-all opacity-80 ${tool.status === "error" ? "text-red-400" : ""}`}>{tool.result}</pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── App ────────────────────────────────────────────
 
@@ -848,22 +972,15 @@ function App() {
     if (!(await checkApiKey())) { setSettingsOpen(true); return; }
     setQuestion("");
     // User entry
-    setEntries((p) => [...p, { kind: "user", text: t }]);
-    // Streaming assistant entry
+    setEntries((p) => appendUserEntry(p, t));
     streamRef.current = "";
     thoughtRef.current = "";
-    setEntries((p) => [...p, { kind: "assistant", text: "", thought: "", streaming: true }]);
     setStreaming(true);
     try {
       await api.chatSend(t);
       // Final state set by stream events + done
     } catch (err) {
-      setEntries((p) => {
-        const copy = [...p];
-        const last = findLastIdx(copy, (e: ChatEntry) => e.kind === "assistant");
-        if (last >= 0) copy[last] = { kind: "assistant", text: `오류: ${(err as Error).message}`, thought: "", streaming: false };
-        return copy;
-      });
+      setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`));
     } finally { setStreaming(false); }
   }, [api, streaming, checkApiKey]);
 
@@ -887,56 +1004,35 @@ function App() {
     const ds = api.onChatStream((ev) => {
       console.log("[lvis:chat:stream]", ev);
       if (ev.type === "text_delta" && ev.text) {
-        if ((ev as any).isReasoning) {
-          thoughtRef.current += ev.text;
-        } else {
-          streamRef.current += ev.text;
-        }
+        streamRef.current += ev.text;
         const curText = streamRef.current;
         const curThought = thoughtRef.current;
-        setEntries((p) => {
-          const c = [...p];
-          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && !!e.streaming);
-          if (i >= 0) {
-            c[i] = { kind: "assistant", text: curText, thought: curThought, streaming: true };
-          }
-          return c;
-        });
-      } else if (ev.type === "tool_start" && ev.name) {
-        setEntries((p) => [...p, { kind: "tool", name: ev.name!, status: "running" as const }]);
-      } else if (ev.type === "tool_end" && ev.name) {
-        setEntries((p) => {
-          const c = [...p];
-          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "tool" && e.name === ev.name && e.status === "running");
-          if (i >= 0) c[i] = { kind: "tool", name: ev.name!, status: ev.isError ? "error" : "done", result: ev.result };
-          return c;
-        });
+        setEntries((p) => upsertStreamingAssistant(p, curText, curThought));
+      } else if (ev.type === "reasoning_delta" && ev.text) {
+        thoughtRef.current += ev.text;
+        const curText = streamRef.current;
+        const curThought = thoughtRef.current;
+        setEntries((p) => upsertStreamingAssistant(p, curText, curThought));
+      } else if (ev.type === "assistant_round") {
+        setEntries((p) => finalizeStreamingAssistant(p, ev.text ?? streamRef.current, ev.thought ?? thoughtRef.current));
+        streamRef.current = "";
+        thoughtRef.current = "";
+      } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
+        const { groupId, toolUseId, displayOrder = 0, name, input } = ev;
+        setEntries((p) => applyToolStart(p, { groupId, toolUseId, displayOrder, name, input }));
+      } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
+        const { groupId, toolUseId, result, isError } = ev;
+        setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError }));
       } else if (ev.type === "error") {
-        setEntries((p) => {
-          const c = [...p];
-          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && !!(e as any).streaming);
-          if (i >= 0) {
-            c[i] = { kind: "assistant", text: `오류: ${ev.error || "알 수 없는 오류"}`, streaming: false };
-          } else {
-            c.push({ kind: "assistant", text: `오류: ${ev.error || "알 수 없는 오류"}`, streaming: false });
-          }
-          return c;
-        });
+        setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`));
+        streamRef.current = "";
+        thoughtRef.current = "";
       } else if (ev.type === "done") {
-        setEntries((p) => {
-          const c = [...p];
-          const i = findLastIdx(c, (e: ChatEntry) => e.kind === "assistant" && !!e.streaming);
-          if (i >= 0) {
-            const entry = c[i] as any;
-            c[i] = { 
-              ...entry, 
-              text: entry.text || (streamRef.current || "(응답 없음)"), 
-              thought: entry.thought || thoughtRef.current,
-              streaming: false 
-            } as ChatEntry;
-          }
-          return c;
-        });
+        if (streamRef.current || thoughtRef.current) {
+          setEntries((p) => finalizeStreamingAssistant(p, streamRef.current, thoughtRef.current));
+          streamRef.current = "";
+          thoughtRef.current = "";
+        }
       }
     });
     const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); } };
@@ -1047,13 +1143,7 @@ function App() {
                 {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
                 {entries.map((entry, idx) => {
                   if (entry.kind === "user") return <div key={idx} className="ml-auto max-w-[85%] rounded-md border bg-primary px-3 py-2 text-sm text-primary-foreground"><div className="mb-1 text-[11px] text-muted-foreground">나</div><div className="whitespace-pre-wrap">{entry.text}</div></div>;
-                  if (entry.kind === "tool") return (
-                    <div key={idx} className="mx-4 flex items-center gap-2 rounded border border-dashed px-3 py-1.5 text-xs text-muted-foreground">
-                      <Wrench className="h-3 w-3" />
-                      <span className="font-mono">{entry.name}</span>
-                      {entry.status === "running" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Badge variant={entry.status === "error" ? "secondary" : "default"} className={`text-[10px] ${entry.status === "error" ? "text-red-400" : ""}`}>{entry.status === "error" ? "실패" : "완료"}</Badge>}
-                    </div>
-                  );
+                  if (entry.kind === "tool_group") return <ToolGroupCard key={entry.groupId} group={entry} />;
                   // assistant
                   return (
                     <div key={idx} className="max-w-[85%] rounded-md border bg-card px-3 py-2 text-sm">

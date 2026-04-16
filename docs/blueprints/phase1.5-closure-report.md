@@ -2,7 +2,7 @@
 
 **Status**: ✅ COMPLETE
 **Window**: 2026-04-13 → 2026-04-14 (single session continuation)
-**Scope doc**: `lvis-app/docs/architecture/plugin-deployment-model.md` §12
+**Scope doc**: `docs/architecture/plugin-deployment-model.md` §12
 **Working TODO (root, untracked)**: `TODO.md` §16.3–§16.5
 
 ---
@@ -215,9 +215,9 @@ F-round(§4) 완료 후 사용자 실 Electron 실행 점검 중 **8개 layer에
 
 ## 9. References
 
-- `lvis-app/docs/architecture/plugin-deployment-model.md` — 설계 명세 (§12 Phase 1.5 roadmap)
-- `lvis-app/docs/architecture/architecture.md` §9.6 — 상위 아키텍처 요약
-- `lvis-app/docs/blueprints/autopilot-phase1-indexer.md` — Phase 1 closure report
+- `docs/architecture/plugin-deployment-model.md` — 설계 명세 (§12 Phase 1.5 roadmap)
+- `docs/architecture/architecture.md` §9.6 — 상위 아키텍처 요약
+- `docs/blueprints/autopilot-phase1-indexer.md` — Phase 1 closure report
 - `TODO.md` (root, 추적 안 됨) §16 — working state
 - 커밋: `aa5b3ca`, `986e16e`, `db83425`, `19182d9`, `30b95c4`
 

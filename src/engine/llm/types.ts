@@ -29,7 +29,7 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
 
 export type GenericMessage =
   | { role: "user"; content: string }
-  | { role: "assistant"; content: string; toolCalls?: ToolCallBlock[] }
+  | { role: "assistant"; content: string; thought?: string; toolCalls?: ToolCallBlock[] }
   | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean };
 
 export interface ToolCallBlock {
@@ -54,6 +54,7 @@ export interface ToolSchema {
 
 export type StreamEvent =
   | { type: "text_delta"; text: string }
+  | { type: "reasoning_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
   | { type: "message_complete"; stopReason: "end_turn" | "tool_use"; usage?: TokenUsage }
   | { type: "error"; error: string };

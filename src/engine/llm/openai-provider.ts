@@ -59,8 +59,9 @@ export class OpenAIProvider implements LLMProvider {
         const delta = chunk.choices[0]?.delta;
         finishReason = chunk.choices[0]?.finish_reason ?? finishReason;
 
-        if ((delta as any)?.reasoning_content) {
-          yield { type: "text_delta", text: (delta as any).reasoning_content, isReasoning: true } as any;
+        const reasoningContent = (delta as { reasoning_content?: string | null } | undefined)?.reasoning_content;
+        if (reasoningContent) {
+          yield { type: "reasoning_delta", text: reasoningContent };
         }
 
         if (delta?.content) {
@@ -122,7 +123,7 @@ function toOpenAIMessages(
     if (msg.role === "user") {
       result.push({ role: "user", content: msg.content });
     } else if (msg.role === "assistant") {
-      result.push({
+      const assistantMessage: OpenAI.ChatCompletionAssistantMessageParam & { reasoning_content?: string } = {
         role: "assistant",
         content: msg.content || null,
         ...(msg.toolCalls && {
@@ -132,7 +133,11 @@ function toOpenAIMessages(
             function: { name: tc.name, arguments: JSON.stringify(tc.input) },
           })),
         }),
-      });
+      };
+      if (isReasoningModel && (msg.thought !== undefined || msg.toolCalls)) {
+        assistantMessage.reasoning_content = msg.thought ?? "";
+      }
+      result.push(assistantMessage);
     } else if (msg.role === "tool_result") {
       result.push({
         role: "tool",

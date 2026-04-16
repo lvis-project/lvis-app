@@ -22,6 +22,7 @@ const spawnMock = vi.fn<(cmd: string, args: readonly string[], opts: unknown) =>
 
 vi.mock("node:child_process", () => ({
   spawn: (cmd: string, args: readonly string[], opts: unknown) => spawnMock(cmd, args, opts),
+  execFileSync: vi.fn(() => "C:\\Program Files\\Git\\bin\\bash.exe"),
 }));
 
 function makeFakeChild(): FakeChild {

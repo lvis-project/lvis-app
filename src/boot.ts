@@ -43,6 +43,7 @@ import { ApprovalGate } from "./permissions/approval-gate.js";
 import { loadPolicy } from "./permissions/policy-store.js";
 import { DefaultAgentActionRequester } from "./permissions/agent-action-requester.js";
 import type { PluginHostApi } from "./plugins/types.js";
+import { MsGraphService } from "./main/ms-graph-service.js";
 
 export interface AppServices {
   pluginRuntime: PluginRuntime;
@@ -106,6 +107,13 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // §4.2 Step 0.5: Governance Services (Agent 6)
   const bashAstValidator = new BashAstValidator({ mode: "deny" });
+
+  // Microsoft Graph 공유 인증 서비스 (이메일·캘린더 플러그인 공용)
+  const msGraphService = new MsGraphService(app.getPath("userData"));
+  await msGraphService.loadSavedToken();
+  if (msGraphService.isAuthenticated()) {
+    console.log("[lvis] boot: ms-graph token loaded —", msGraphService.getAccountName());
+  }
   const auditService = new AuditService();
   await auditService.start();
 
@@ -167,13 +175,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     // 플러그인별 스코프된 HostApi 팩토리
     createHostApi: (pluginId: string): PluginHostApi => ({
       registerKeywords: (keywords) => {
-        // 도구 이름을 underscore 표준으로 변환
-        const converted = keywords.map((k) => ({
-          keyword: k.keyword,
-          skillId: k.skillId.replace(/\./g, "_"),
-        }));
-        keywordEngine.registerKeywords(converted);
-        console.log(`[lvis] plugin:${pluginId} registered ${converted.length} keywords`);
+        keywordEngine.registerKeywords(keywords);
+        console.log(`[lvis] plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
         emitEvent(type, { pluginId, ...((data as Record<string, unknown>) ?? {}) });
@@ -199,6 +202,14 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       getSecret: (key) => {
         return settingsService.getSecret(key);
       },
+      // ─── Microsoft Graph 공유 인증 ────────────────────────────────
+      getMsGraphToken: () => msGraphService.getAccessToken(),
+      startMsGraphAuth: async (openBrowser) => {
+        await msGraphService.startInteractiveAuth(openBrowser);
+      },
+      isMsGraphAuthenticated: () => msGraphService.isAuthenticated(),
+      getMsGraphAccount: () => msGraphService.getAccountName(),
+      onMsGraphAuthChange: (handler) => msGraphService.onAuthChange(handler),
     }),
   });
 
@@ -209,6 +220,13 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   if (pluginRuntime.listMethods().includes("email.startWatcher")) {
     pluginRuntime.call("email.startWatcher", {}).catch((e: Error) =>
       console.log("[lvis] boot: email watcher start failed (non-fatal):", e.message)
+    );
+  }
+
+  // 캘린더 watcher 자동 시작 (인증된 경우에만 — 미인증이면 non-fatal)
+  if (pluginRuntime.listMethods().includes("calendar.startWatcher")) {
+    pluginRuntime.call("calendar.startWatcher", {}).catch((e: Error) =>
+      console.log("[lvis] boot: calendar watcher start failed (non-fatal):", e.message)
     );
   }
 
@@ -387,6 +405,18 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   onEvent("meeting.summary.created", (data) => proactiveEngine.collectEvent("meeting.summary.created", data));
   onEvent("email.action.needed", (data) => proactiveEngine.collectEvent("email.action.needed", data));
   onEvent("meeting.ended", (data) => proactiveEngine.collectEvent("meeting.ended", data));
+
+  // 오늘 일정 초기 로드 (플러그인 인증 여부와 관계없이 시도, 미인증이면 빈 배열)
+  if (pluginRuntime.listMethods().includes("calendar.today")) {
+    pluginRuntime.call("calendar.today", {})
+      .then((events: unknown) => {
+        if (Array.isArray(events)) {
+          proactiveEngine.updateCalendarEvents(events as import("./core/proactive-engine.js").CachedCalendarEvent[]);
+          console.log(`[lvis] boot: calendar today loaded (${events.length}건)`);
+        }
+      })
+      .catch((e: Error) => console.log("[lvis] boot: calendar.today failed (non-fatal):", e.message));
+  }
 
   // 새 이메일 → 네이티브 알림
   onEvent("email.new", (data) => {

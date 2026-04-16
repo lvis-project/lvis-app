@@ -46,7 +46,7 @@ UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인
 
 ## 독립 플러그인 아키텍처
 - 메인 앱은 플러그인 구현을 직접 import하지 않고 `PluginRuntime`이 매니페스트를 읽어 런타임 동적 로드합니다.
-- 각 플러그인은 자체 host entry(`host-plugin`)를 제공하고, 메서드 단위(`index.scan`, `meeting.start` 등)로 기능을 노출합니다.
+- 각 플러그인은 자체 host entry(`host-plugin`)를 제공하고, 메서드 단위(`index_scan`, `meeting_start` 등)로 기능을 노출합니다.
 - 메인 프로세스는 IPC를 플러그인 메서드 호출로 브리지하며, 플러그인 추가/교체 시 매니페스트 변경만으로 확장 가능합니다.
 - 라이프사이클(`start`/`stop`)은 runtime이 일괄 관리합니다.
 
