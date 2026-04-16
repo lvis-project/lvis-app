@@ -29,6 +29,7 @@ import type {
 import { trustFromSource } from "./types.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
+import { isSensitivePath, canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
@@ -266,6 +267,9 @@ export class ToolExecutor {
           // actually fire. Previously these were missing → §S1 check
           // read `undefined` and was effectively dead code.
           const targetFilePath = extractTargetFilePath(toolUse.name, toolUse.input);
+          const sensitivePathPattern = targetFilePath
+            ? isSensitivePath(canonicalizePathForMatch(targetFilePath))
+            : null;
           const approvalRequest = {
             id: randomUUID(),
             category: "tool" as const,
@@ -277,6 +281,7 @@ export class ToolExecutor {
             ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
             isReadOnly: READ_ONLY_TOOL_NAMES.has(toolUse.name),
             mode: this.currentApprovalMode(),
+            sensitivePathPattern,
           };
 
           // §F3: requestAndWait 실패 시 감사 로그 보장 후 deny-once 처리

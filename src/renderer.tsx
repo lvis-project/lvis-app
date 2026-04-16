@@ -97,6 +97,16 @@ type ApprovalRequest = {
    * even for read-only tools; "default" / "full_auto" auto-approve.
    */
   mode?: "default" | "plan" | "full_auto";
+  /**
+   * §S1 metadata hint mirrored from main. Carries the matched
+   * SENSITIVE_PATH_PATTERNS entry when the executor detected a sensitive
+   * path, for diagnostics and logging. Remains null/absent otherwise.
+   *
+   * Note: sensitive paths are hard-blocked inside ApprovalGate before any
+   * approval request is sent over IPC, so this field will not be set on
+   * requests that actually reach this dialog.
+   */
+  sensitivePathPattern?: string | null;
 };
 type ApprovalDecision = {
   requestId: string;
@@ -738,13 +748,31 @@ function ToolApprovalDialog({
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          {/* 도구 이름 + 소스 배지 */}
-          <div className="flex items-center gap-2">
+          {/* 도구 이름 + 소스/모드/읽기전용 배지 */}
+          <div className="flex flex-wrap items-center gap-2">
             <code className="rounded bg-muted px-2 py-1 text-sm font-mono">
               {request.toolName}
             </code>
             <Badge variant="outline" className="text-[11px]">{sourceBadge}</Badge>
+            {request.isReadOnly && (
+              <Badge variant="secondary" className="text-[11px]">읽기 전용</Badge>
+            )}
+            {request.mode === "plan" && (
+              <Badge variant="outline" className="border-amber-500 text-[11px] text-amber-700">
+                계획 모드
+              </Badge>
+            )}
           </div>
+
+          {/* 대상 파일 경로 (있을 때만) */}
+          {request.target?.filePath && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">대상 파일</p>
+              <code className="block break-all rounded bg-muted/50 p-2 text-[11px] font-mono">
+                {request.target.filePath}
+              </code>
+            </div>
+          )}
 
           {/* 사유 */}
           <div>

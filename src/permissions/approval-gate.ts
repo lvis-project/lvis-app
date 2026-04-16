@@ -12,11 +12,10 @@
  * - §A2: webContents 소멸 체크 + send 예외 처리 → deny-once + pending 정리.
  * - §S8: AuditLogger DI — requested/decided/timeout/send-failed 4개 phase 기록.
  */
-import { resolve as pathResolve } from "node:path";
 import type { WebContents } from "electron";
 import type { PolicyFile } from "./policy-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
-import { isSensitivePath } from "./sensitive-paths.js";
+import { isSensitivePath, canonicalizePathForMatch } from "./sensitive-paths.js";
 
 // ─── 공개 타입 ────────────────────────────────────────
 
@@ -59,6 +58,20 @@ export interface ApprovalRequest {
    *   - "plan" → still block (plan mode inspects without executing)
    */
   mode?: ApprovalMode;
+  /**
+   * §S1 metadata hint. When the executor detected that `target.filePath`
+   * matches a SENSITIVE_PATH_PATTERNS entry, this field carries the
+   * matched pattern string for diagnostics, logging, and any non-blocking
+   * consumers of the request payload. Remains `null`/omitted when the
+   * path is not sensitive.
+   *
+   * Note: the authoritative hard-block is enforced inside
+   * {@link ApprovalGate.requestAndWait} before any approval dialog is
+   * shown, using the same {@link isSensitivePath} function. As a result,
+   * the renderer should not rely on this field to display blocked-state UI
+   * for the sensitive-path denial path.
+   */
+  sensitivePathPattern?: string | null;
 }
 
 export type ApprovalChoice =
@@ -140,26 +153,13 @@ export class ApprovalGate {
     // not even full_auto / user-approval paths can bypass it. Cannot be
     // overridden by user approval, admin policy, or permission mode.
     //
-    // H3: canonicalize the path BEFORE matching. Pure string matching is
-    // bypassable via `..` segments, NFD unicode forms, trailing spaces,
-    // mixed-case on case-insensitive filesystems, and duplicate slashes.
-    // All four vectors are closed below before invoking isSensitivePath().
+    // H3: canonicalize the path BEFORE matching via the shared
+    // canonicalizePathForMatch() helper. This closes four bypass vectors:
+    // `..` segments, NFD unicode forms, trailing spaces, mixed-case on
+    // case-insensitive filesystems, and duplicate slashes.
     const rawCandidate = fullReq.target?.filePath;
     if (rawCandidate) {
-      // 1. Resolve `..` / `.` segments + make absolute
-      let canonical = pathResolve(rawCandidate);
-      // 2. Collapse duplicate slashes (///Users → /Users)
-      canonical = canonical.replace(/\/+/g, "/");
-      // 3. Unicode NFC normalize (folds NFD-decomposed forms, e.g.
-      //    ".\u0073\u0073h" → ".ssh")
-      canonical = canonical.normalize("NFC");
-      // 4. Case-fold on case-insensitive filesystems (macOS / Windows) so
-      //    `/Users/Ken/.SSH/ID_rsa` matches `**/.ssh/*` — the underlying
-      //    filesystem treats them as the same file, so the block must too.
-      const caseFolded =
-        process.platform === "darwin" || process.platform === "win32"
-          ? canonical.toLowerCase()
-          : canonical;
+      const caseFolded = canonicalizePathForMatch(rawCandidate);
       const matchedPattern = isSensitivePath(caseFolded);
       if (matchedPattern) {
         this.auditLogger?.log({
