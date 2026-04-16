@@ -267,16 +267,22 @@ export class ProactiveEngine {
     // 오늘 캘린더 일정 상세
     if (this.calendarEventsCache.length > 0) {
       const now = new Date();
+      const maxDetailedTodayEvents = 8;
       const todayEvents = this.calendarEventsCache
         .filter((e) => !e.isAllDay)
         .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
       if (todayEvents.length > 0) {
         lines.push("오늘 일정:");
-        for (const ev of todayEvents) {
+        const detailedTodayEvents = todayEvents.slice(0, maxDetailedTodayEvents);
+        for (const ev of detailedTodayEvents) {
           const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
           const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
           const isOngoing = new Date(ev.start) <= now && new Date(ev.end) > now;
           lines.push(`  - ${isOngoing ? "[진행중] " : ""}${startTime}~${endTime} ${ev.subject}${ev.location ? ` @ ${ev.location}` : ""}${ev.isOnlineMeeting ? " (온라인 미팅)" : ""}`);
+        }
+        const remainingTodayEvents = todayEvents.length - detailedTodayEvents.length;
+        if (remainingTodayEvents > 0) {
+          lines.push(`  - 외 ${remainingTodayEvents}건`);
         }
       }
     }
