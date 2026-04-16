@@ -4,7 +4,7 @@
  * 슬림 엔트리. 모든 로직은 boot.ts와 ipc-bridge.ts로 위임.
  * §4.1 Client Architecture 준수.
  */
-import { Menu, app, BrowserWindow, type MenuItemConstructorOptions } from "electron";
+import { Menu, app, BrowserWindow, shell, type MenuItemConstructorOptions } from "electron";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import * as https from "node:https";
@@ -142,6 +142,36 @@ function createWindow() {
   });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("[lvis] window failed to load", { code, desc, url });
+  });
+
+  // 외부 URL → 시스템 브라우저로 리다이렉트 (앱 내 탐색 방지)
+  // window.open() 차단
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsedUrl = new URL(url);
+      const allowedProtocols = new Set(["http:", "https:"]);
+
+      if (allowedProtocols.has(parsedUrl.protocol)) {
+        void shell.openExternal(parsedUrl.toString()).catch((err) => {
+          console.error("[lvis] failed to open external URL", { url: parsedUrl.toString(), err });
+        });
+      } else {
+        console.warn("[lvis] blocked external URL with disallowed protocol", {
+          url,
+          protocol: parsedUrl.protocol,
+        });
+      }
+    } catch (err) {
+      console.warn("[lvis] blocked invalid external URL", { url, err });
+    }
+    return { action: "deny" };
+  });
+  // <a href> 클릭 또는 location.href 변경으로 인한 탐색 차단
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("file://") && !url.startsWith("data:")) {
+      event.preventDefault();
+      void shell.openExternal(url);
+    }
   });
 
   // §M-race: bootstrap 동안 splash만 표시. 실 index.html 로드는 main()이

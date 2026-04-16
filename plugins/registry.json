@@ -15,6 +15,11 @@
       "id": "email",
       "manifestPath": "installed/email/plugin.json",
       "enabled": true
+    },
+    {
+      "id": "calendar",
+      "manifestPath": "installed/calendar/plugin.json",
+      "enabled": true
     }
   ]
 }

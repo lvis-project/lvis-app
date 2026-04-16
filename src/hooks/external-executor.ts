@@ -17,6 +17,7 @@ import {
   NetworkGuardError,
 } from "../core/network-guard.js";
 import { buildSafeChildEnv } from "../tools/safe-env.js";
+import { resolveShell, ShellMismatchError } from "../lib/shell-resolver.js";
 
 export class ExternalHookExecutor {
   constructor(
@@ -50,8 +51,22 @@ export class ExternalHookExecutor {
   ): Promise<ExternalHookResult> {
     const payloadJson = JSON.stringify(payload);
     const commandWithArgs = hook.command.replace("$ARGUMENTS", shellEscape(payloadJson));
+    let shell;
+    try {
+      shell = resolveShell();
+    } catch (err) {
+      if (err instanceof ShellMismatchError) {
+        return {
+          hookType: "command",
+          success: false,
+          blocked: hook.blockOnFailure,
+          reason: err.message,
+        };
+      }
+      throw err;
+    }
     return new Promise((resolve) => {
-      const child = spawn("sh", ["-c", commandWithArgs], {
+      const child = spawn(shell.cmd, shell.shellArgs(commandWithArgs), {
         cwd: this.cwd,
         // H2: whitelist env — do not leak LVIS_*, ANTHROPIC_API_KEY,
         // OPENAI_API_KEY, GOOGLE_*, AWS_*, GITHUB_TOKEN to hook scripts.
