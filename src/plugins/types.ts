@@ -30,13 +30,14 @@ export interface PluginManifest {
   /**
    * LLM에 노출되는 도구 이름(tool name) 배열.
    *
-   * **반드시 `^[a-zA-Z0-9_-]+$` 패턴을 만족해야 합니다 — 도트(`.`) 금지.**
-   * OpenAI, Anthropic, Google 등 모든 LLM 제공자가 이 패턴을 강제합니다.
+   * **반드시 `^[a-z][a-z0-9_]*$` 패턴을 만족해야 합니다 — 소문자/숫자/언더스코어만 허용, 첫 글자는 소문자.**
+   * OpenAI, Anthropic, Google Gemini 등 모든 주요 LLM 제공자의 교집합 제약입니다
+   * (Gemini: 소문자 전용; OpenAI/Anthropic: 언더스코어·소문자 권장, 하이픈 금지).
    *
    * 예: `["meeting_start", "meeting_stop", "meeting_transcript"]`
    *
-   * 플러그인 id의 네임스페이스(도트 허용)와 혼동하지 마세요.
-   * 런타임이 이 값을 그대로 tool name으로 사용하며 변환하지 않습니다.
+   * 플러그인 id의 네임스페이스(도트·대문자·하이픈 허용)와 혼동하지 마세요.
+   * 런타임이 이 값을 그대로 tool name으로 사용하며 어떠한 변환도 수행하지 않습니다.
    */
   methods: string[];
   config?: Record<string, unknown>;

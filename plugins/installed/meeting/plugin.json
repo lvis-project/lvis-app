@@ -6,11 +6,11 @@
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
   "methods": [
-    "meeting.start",
-    "meeting.pushChunk",
-    "meeting.stop",
-    "meeting.transcript",
-    "meeting.sessions"
+    "meeting_start",
+    "meeting_push_chunk",
+    "meeting_stop",
+    "meeting_transcript",
+    "meeting_sessions"
   ],
   "config": {
     "intermediateEveryFinalSegments": 1
