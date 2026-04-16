@@ -1,8 +1,8 @@
-# LVIS Architecture Document v4 (Final)
+# LVIS Architecture Document v0.4.1 (Current)
 
-> **Version**: 0.4.0
-> **Date**: 2026-04-11
-> **Status**: Architecture Final Draft (v1~v3 통합 · LLD 보강 · 승인 체계 확정)
+> **Version**: 0.4.1
+> **Date**: 2026-04-16
+> **Status**: Architecture Currentized Draft (대화 루프/도구 표시/자동 컴팩트 구현 기준 반영)
 > **Authors**: LVIS Architecture Team
 > **Base Reference**: [구현 철학](../vision/philosophy.md) · [claw-code harness](https://github.com/ultraworkers/claw-code)
 
@@ -15,7 +15,7 @@
    - 2.1 System Overview · 2.2 Five Pillars
 3. [System Layer Map — 5-Layer Architecture](#3-system-layer-map--5-layer-architecture)
 4. [Low-Level Design (LLD)](#4-low-level-design-lld)
-   - 4.1 Client Architecture · 4.2 Boot Sequence · 4.3 Agent Loop · **4.4 Local Index Engine** · **4.5 Conversation Query Loop**
+   - 4.1 Client Architecture · 4.2 Boot Sequence · 4.3 Input Classification & Routing · **4.4 Local Index Engine** · **4.5 Conversation Query Loop** · **4.5.10 Tool Call Presentation** · **4.6 Source Tree Layout**
 5. [Memory — 경량 기억 구조](#5-memory--경량-기억-구조)
    - 5.1 설계 원칙 · 5.2 Memory 파일 구조
 6. [Client Core Engines](#6-client-core-engines)
@@ -23,11 +23,12 @@
 7. [Proactive Engine — Daily Briefing (Core)](#7-proactive-engine--daily-briefing-core)
 8. [Agent Approval System — 에이전트 요청 승인](#8-agent-approval-system--에이전트-요청-승인)
 9. [Plugin System & UI Extension](#9-plugin-system--ui-extension)
-   - 9.1 Plugin Architecture · 9.2 Manifest · 9.3 UI Slot · 9.4 Scenario · **9.5 MCP Protocol Architecture**
+   - 9.1 Plugin Architecture · 9.2 Manifest · 9.3 UI Slot · 9.4 Scenario · **9.5 MCP Protocol Architecture** · **9.6 Deployment Model**
 10. [Agent Hub — 사원 레플리카 메시지 보드](#10-agent-hub--사원-레플리카-메시지-보드)
 11. [Marketplace Hub — 사업부 플러그인 생태계](#11-marketplace-hub--사업부-플러그인-생태계)
 12. [Use Case → Architecture Mapping](#12-use-case--architecture-mapping)
 13. [Data Flow](#13-data-flow)
+    - 13.1 End-to-End · 13.2 Local + Server Indexing · **13.3 Audit Data Flow**
 14. [Deployment & Governance](#14-deployment--governance)
     - 14.1 Deployment Topology · 14.2 Governance Layer · 14.3 Technology Stack · **14.4 Feature Flag & Gradual Rollout**
 15. [Appendix](#appendix)
@@ -47,30 +48,30 @@ mindmap
     설치형·로컬 기반 (온라인 전제)
       내 PC에 상주하는 퍼스널 AI
       로컬 문서·파일 인덱싱 (Lgenie 연동)
-      **→ Local Index Engine (PageIndex)**
-      **→ Client Core Engines**
+      Local Index Engine (PageIndex)
+      Client Core Engines
     기억 중심 개인화
       LVIS.md — 조직·프로젝트 컨텍스트
       notes/ — 사용자 축적 메모
       사용할수록 나를 더 잘 아는 비서
-      **→ Memory Files**
-      **→ Proactive Engine**
+      Memory Files
+      Proactive Engine
     에이전트 네트워크
       전 사원 디지털 레플리카
       에이전트 간 비동기 협업 A2A
       메시지 보드 기반 소통
       업무 일지 범위 지정 게시 · 상호작용 승인
-      Hub 수시 열람 → 집단 지성 (권한 범위 내)
-      **→ Agent Hub**
-      **→ Agent Route Engine**
-      **→ Agent Approval System**
+      Hub 수시 열람 - 집단 지성 (권한 범위 내)
+      Agent Hub
+      Agent Route Engine
+      Agent Approval System
     기업 프로세스 통합
       LGenie 사내 LLM 시스템
       사업부 API 플러그인 연동
       거버넌스·감사·보안
-      **→ Lgenie Session**
-      **→ Marketplace Hub**
-      **→ Governance Layer**
+      Lgenie Session
+      Marketplace Hub
+      Governance Layer
 ```
 
 | 철학 원칙              | 아키텍처 구현체                                    | 철학이 구조가 되는 이유                                                      |
@@ -366,13 +367,13 @@ graph TB
 
 ### 4.2 Boot Sequence — 부팅 시 동적 업데이트
 
-> **Phase 1 갱신 (2026-04-13)**: Step 0 (Python Runtime Bootstrap) 추가. SettingsService 초기화 이전 맨 첫 단계로 실행된다.
+> **Phase 1 갱신 (2026-04-13)**: Step 0 (Python Runtime Bootstrap) 추가. `SettingsService` 초기화 이전 맨 첫 단계로 실행된다.
 
 **부팅 소요 시간 (Phase 1 실측 추정):**
 
 | 시나리오 | 소요 시간 | 비고 |
-|---------|----------|------|
-| 첫 부팅 (cold) | ~40-50초 | uv Python 3.12 설치 + venv 생성 + deps 설치 |
+| --- | --- | --- |
+| 첫 부팅 (cold) | ~40-50초 | `uv` Python 3.12 설치 + venv 생성 + deps 설치 |
 | 두 번째 이후 부팅 (warm) | <1.5초 | `.ready` sentinel 통과 → 즉시 skip |
 
 ```mermaid
@@ -395,7 +396,7 @@ sequenceDiagram
         PythonRT->>PythonRT: uv venv ~/.lvis/runtime/venv
         PythonRT->>PythonRT: uv pip sync --frozen python-requirements.lock
         PythonRT->>PythonRT: touch .ready
-    else 두 번째+ 부팅 (warm — <10ms)
+    else 두 번째 이후 부팅 (warm — <1.5초)
         PythonRT-->>App: .ready 확인 → 즉시 resolve
     end
     PythonRT-->>App: { pythonPath, venvPath }
@@ -403,8 +404,8 @@ sequenceDiagram
     App->>Config: 1. Load local config and cached state
     Config->>Auth: 2. SSO/LDAP 인증
     Auth-->>Config: Token + 사원 프로필
-    Config->>Policy: 3. Fetch 정책 (권한·허용 경로)
-    Policy-->>Config: 정책 매니페스트
+    Config->>Policy: 3. Fetch 정책 + 로컬 캐시 갱신
+    Policy-->>Config: 정책 매니페스트 + 브로드캐스트 채널 정보
 
     par 동적 업데이트 (부팅마다 실행)
         Config->>Market: 4a. Plugin manifest diff
@@ -428,69 +429,45 @@ sequenceDiagram
     App->>App: 8. Ready — UI 렌더링 완료
 ```
 
-### 4.3 Agent Loop — claw-code Harness 기반
+### 4.3 Input Classification & Routing — 대화 루프 진입 전 단계
 
-사용자 입력이 처리되는 핵심 루프. claw-code의 `ConversationRuntime.run_turn()` 패턴을 차용하되, LVIS의 키워드 감지·에이전트 라우팅·기억 조회를 앞단에 배치한다.
+이 섹션은 **사용자 입력을 어떤 실행 경로로 보낼지**를 다룬다. Keyword Detecting은 대화가 루프 본문에 들어가기 전에 수행되는 가장 빠른 사전 판단 단계이며, 빌트인 규칙과 플러그인 키워드 그룹을 함께 본다. 실제 턴 내부의 reasoning → tool → assistant 핑퐁은 **§4.5 Conversation Query Loop**를 단일 canonical 경로로 삼는다.
 
 ```mermaid
 flowchart TB
     INPUT["👤 사용자 입력"]
+    MEMORY["Memory / Context Load<br/>(LVIS.md + notes/ + 로컬 컨텍스트)"]
+    DETECT["Keyword Detecting Engine<br/>(builtin + plugin keyword groups)"]
+    DISAMBIG{"명확한 매칭인가?"}
+    RECOMMEND["Lgenie Keyword Recommender<br/>(최적 후보 추천 / 애매하면 사용자 문의)"]
+    ROUTE{"Route Resolver"}
 
-    MEM_RECALL["Memory Load<br/>(LVIS.md + notes/ 참조)"]
-    CTX_ENRICH["Context Enrichment<br/>(LVIS.md + 로컬 인덱스 + 프로필)"]
+    COMMAND["/command 직접 실행"]
+    SKILL["Skill / Task 경로"]
+    AGENT["Agent Hub Message / A2A<br/>(메시지 보드 · 게시 · 직접 메시지)"]
+    CHAT["ConversationLoop.runTurn()<br/>일반 대화 / 도구 루프"]
 
-    KW{"Keyword<br/>Detecting<br/>Engine"}
-
-    CLASSIFY{"입력 분류"}
-
-    CMD_EXEC["Command 실행<br/>(/command 직접 실행)"]
-    SKILL_INVOKE["Skill 활성화<br/>(회의록, 번역, 출장 등)"]
-    AGENT_ROUTE["Agent Route<br/>(에이전트 선택·위임)"]
-    DIRECT_LLM["Lgenie 직접 세션<br/>(일반 대화)"]
-
-    TOOL_LOOP["Tool Execution Loop<br/>(claw harness)"]
-
-    PRE_HOOK["PreToolUse Hook"]
-    POLICY_CHK{"Governance<br/>Policy Check"}
-    PERM{"Permission<br/>Check"}
-    EXEC["Tool Execute"]
-    POST_HOOK["PostToolUse Hook"]
-
-    LLM_CALL["Lgenie 추론<br/>(사내 LLM)"]
-
-    MEM_SAVE["Note Save<br/>(필요 시 notes/ 저장)"]
-    AUDIT_LOG["Audit Log<br/>(감사 기록)"]
-    RENDER["UI 렌더링<br/>(Chat / Plugin UI)"]
-
-    INPUT --> MEM_RECALL
-    MEM_RECALL --> CTX_ENRICH
-    CTX_ENRICH --> KW
-    KW --> CLASSIFY
-
-    CLASSIFY -->|"명령어 /command"| CMD_EXEC
-    CLASSIFY -->|"스킬 키워드"| SKILL_INVOKE
-    CLASSIFY -->|"@멘션 / 위임"| AGENT_ROUTE
-    CLASSIFY -->|"일반 대화"| DIRECT_LLM
-
-    CMD_EXEC --> RENDER
-    SKILL_INVOKE --> TOOL_LOOP
-    AGENT_ROUTE --> TOOL_LOOP
-    DIRECT_LLM --> LLM_CALL
-
-    TOOL_LOOP --> PRE_HOOK
-    PRE_HOOK --> POLICY_CHK
-    POLICY_CHK -->|"허용"| PERM
-    POLICY_CHK -->|"차단"| AUDIT_LOG
-    PERM -->|"승인"| EXEC
-    PERM -->|"거부"| AUDIT_LOG
-    EXEC --> POST_HOOK
-    POST_HOOK --> LLM_CALL
-
-    LLM_CALL -->|"추가 Tool 필요"| TOOL_LOOP
-    LLM_CALL -->|"완료"| MEM_SAVE
-    MEM_SAVE --> AUDIT_LOG
-    AUDIT_LOG --> RENDER
+    INPUT --> MEMORY --> DETECT --> DISAMBIG
+    DISAMBIG -->|"Yes"| ROUTE
+    DISAMBIG -->|"Ambiguous"| RECOMMEND --> ROUTE
+    ROUTE -->|"명시적 명령"| COMMAND
+    ROUTE -->|"스킬 매칭"| SKILL
+    ROUTE -->|"@멘션 / 게시 / A2A"| AGENT
+    ROUTE -->|"일반 대화"| CHAT
 ```
+
+| 분류 결과 | 진입 지점 | 설명 |
+| --- | --- | --- |
+| **명령 실행** | Command executor | `/new`, `/compact`, `/load` 같은 즉시 명령 |
+| **스킬/태스크** | Skill / orchestrator | 플러그인 키워드 그룹과 워크플로우를 기준으로 실행 경로 선택 |
+| **에이전트 상호작용** | Agent Hub message board / A2A | 다른 에이전트에게 메시지·게시물·요청을 전달하는 경로. 백그라운드 자율 수행 서버를 뜻하지 않음 |
+| **일반 대화** | `ConversationLoop.runTurn()` | 본 문서의 상세 턴 사이클은 §4.5에 정의 |
+
+**설계 메모**
+
+- 플러그인은 설치/활성화 시 **키워드 그룹**을 동적으로 등록한다.
+- 동일 입력이 여러 그룹에 걸리면 Lgenie가 가장 적합한 후보를 추천하고, 확신이 낮으면 사용자에게 확인을 요청한다.
+- Agent Hub는 paperclip의 board와 유사한 **비동기 메시지 보드**이며, 에이전트가 백그라운드에서 자율 실행되는 서버를 의미하지 않는다.
 
 ### 4.4 Local Index Engine — 로컬 검색 엔진 LLD
 
@@ -559,61 +536,55 @@ Layer B — 지능형 인덱싱 (PageIndex)
 
 | 구성 요소 | 기술 (Phase 1) | 설명 |
 |-----------|------|------|
-| **File Watcher** | chokidar (FSEvents/inotify/ReadDirectoryChanges) | 파일 변경 실시간 감지 → FolderAutoIndexer → IdleScheduler P0 enqueue |
-| **Document Parser** | PDF: `pymupdf4llm` · DOCX/PPTX/XLSX/HTML: Microsoft `markitdown` · TXT/MD: 직접 읽기 | 포맷별 텍스트 추출 + 마크다운 변환. kiwipiepy 한국어 사전 토큰화 |
-| **PageIndex 트리 인덱서** | [pageindex==0.2.8](https://github.com/ken-jo/PageIndex.git) (데이터 소스) | TOC 트리 구조화. **search() 메서드 부재** — LLM agentic 루프가 `document_structure` / `document_page_content` function calling으로 직접 트리 탐색 |
-| **SQLite + FTS5** | SQLite FTS5 `unicode61` + kiwipiepy 사전 토큰화 (`content_ko` 컬럼) | 한국어 BM25 (패턴 B): morpheme 추출 → 공백 결합 → FTS5 MATCH. R4 8쿼리 8/8 hit |
-| **Vector Store** | OpenAI `text-embedding-3-small` (1536 dim) + lancedb 로컬 ANN | 100 chunks/batch, 400 RPM throttle, tenacity 지수 백오프 |
-| **Hybrid Ranker** | `HybridRetriever` (TypeScript) — RRF k=60, {bm25:0.5, vec:0.5, cloud:0.0} | Reciprocal Rank Fusion. Phase 2에서 cloud 실연결 시 weights 재정규화 |
-| **Cloud Adapter** | `MockCloudIndexAdapter` (Phase 1 빈 결과) | Phase 2: 사내 Elasticsearch + Milvus/Qdrant 실연결 |
+| **File Watcher** | chokidar (FSEvents / inotify / ReadDirectoryChanges) | 파일 변경 실시간 감지 → FolderAutoIndexer → IdleScheduler P0 enqueue |
+| **Document Parser** | PDF: `pymupdf4llm` · DOCX/PPTX/XLSX/HTML: Microsoft `markitdown` · TXT/MD: 직접 읽기 | 포맷별 텍스트 추출 + 마크다운 변환. `kiwipiepy` 기반 한국어 형태소 토큰화 보강 |
+| **PageIndex 트리 인덱서** | `pageindex==0.2.8` | TOC 트리 구조화. `search()` 메서드가 없으므로 LVIS가 `document_structure` / `document_page_content` 도구로 agentic 트리 탐색 수행 |
+| **SQLite + FTS5** | SQLite FTS5 `unicode61` + `kiwipiepy` 사전 토큰화 (`content_ko`) | 한국어 BM25 (패턴 B): 형태소 추출 → 공백 결합 → FTS5 MATCH |
+| **Vector Store** | OpenAI `text-embedding-3-small` (1536 dim) + `lancedb` 로컬 ANN | 100 chunks / batch, 400 RPM throttle, 지수 백오프 |
+| **Hybrid Ranker** | `HybridRetriever` (TypeScript) — RRF `k=60`, `{bm25:0.5, vec:0.5, cloud:0.0}` | BM25 + vector + cloud adapter 결과를 가중 융합 |
+| **Cloud Adapter** | `MockCloudIndexAdapter` | Phase 1은 빈 결과 반환, Phase 2에서 사내 Elasticsearch + Milvus/Qdrant 실연결 |
 | **Query Cache** | LRU Cache (in-memory, structure/content) | 재인덱싱 시 자동 무효화 |
 
 **PageIndex 활용 시 고려사항 (Phase 1):**
 
 | 항목 | Phase 1 현황 | 대응 방안 |
 |------|------|-----------|
-| 지원 포맷 | PDF · DOCX · PPTX · XLSX · HTML · MD · TXT | pymupdf4llm(PDF) + markitdown(Office/HTML) + 직접 읽기(텍스트). PPTX/XLSX 이미지 OCR은 Phase 2 Vision |
-| LLM 의존성 | 임베딩: OpenAI `text-embedding-3-small` | Phase 1: OpenAI API key 필요. Phase 2: BAAI/bge-m3 로컬 임베딩 또는 Lgenie 후속 |
-| 온라인 전제 | OpenAI 임베딩 API 필요 (인덱싱 시) | Phase 1: OpenAI key로 동작. Phase 2: Lgenie 로컬 임베딩으로 오프라인화 예정 |
-| Python 런타임 | uv + venv 자동 셋업 (Step 0) | 첫 부팅 ~40-50초. 이후 <1.5초. 사용자 PC에 Python 수동 설치 불필요 |
+| 지원 포맷 | PDF · DOCX · PPTX · XLSX · HTML · MD · TXT | `pymupdf4llm`(PDF) + `markitdown`(Office / HTML) + 직접 읽기(텍스트). PPTX / XLSX 이미지 OCR은 Phase 2 Vision |
+| LLM 의존성 | 임베딩은 OpenAI `text-embedding-3-small` 사용 | Phase 1은 OpenAI API key 필요. Phase 2는 BAAI / bge-m3 또는 LGenie 후속 경로 검토 |
+| 온라인 전제 | 인덱싱 시 임베딩 API 호출 필요 | Phase 1은 외부 임베딩 경로, Phase 2는 로컬 / 사내 임베딩으로 오프라인화 목표 |
+| Python 런타임 | `uv` + venv 자동 셋업 (Step 0) | 첫 부팅 ~40-50초, 이후 <1.5초. 사용자 PC에 Python 수동 설치 불필요 |
 
 #### 4.4.1 Phase 1 Production Upgrade — 완료 (2026-04-13)
 
-> **단일 진실 소스**: [`.omc/plans/autopilot-phase1-indexer.md`](../../.omc/plans/autopilot-phase1-indexer.md)
-> **상태**: Phase 1 구현 완료 (7-Agent AUTOPILOT)
-> **모드**: AUTOPILOT 7-Agent 병렬 + Reviewer
-
-**Phase 1 완료 메트릭:**
-
-| 지표 | 결과 |
-|------|------|
-| 신규 파일 | 25개 (TS 14 + Python 7 + 기타 4) |
-| 변경 파일 | 11개 |
-| TypeScript TSC | 0 errors (lvis-app + lvis-plugin-pageindex) |
-| 회귀 테스트 | 86/86 PASS (bash-ast 36 + idle 20 + hybrid 10 + cloud 4 + pageindex 28) |
-| 한국어 BM25 recall | 8/8 hit (목표 4/8 초과) |
-
-본 §4.4의 Layer A·B 명세를 production 수준으로 격상하는 작업이 진행 중이다. 핵심 보강:
+Phase 1에서 §4.4 Layer A·B 명세를 production 수준으로 끌어올리는 구현이 완료되었다. 핵심 보강은 아래와 같다.
 
 | 항목 | Phase 1 변경 |
-|---|---|
-| **Python 런타임 자동 셋업** | uv 0.11.6 standalone binary 번들 (~20MB × 5 platform), 첫 부팅 시 `uv python install 3.12` + `uv venv` + `uv pip sync --frozen`로 사용자 PC에 lazy 설치 (~30-70초). 두 번째 부팅 <1.5초 |
-| **Layer A 파서** | PDF는 `pymupdf4llm`(PyPDF2 한국어 폰트 깨짐 우회), DOCX/PPTX/XLSX/HTML은 Microsoft `markitdown` 단일 API |
-| **PageIndex 통합** | `pageindex==0.2.8` 오픈소스. **검색 메서드 부재** 확정 — LVIS가 OpenAI function calling으로 `document_structure`+`document_page_content`를 도구 노출하여 LLM agentic 트리 탐색 직접 구현 |
-| **한국어 BM25** | kiwipiepy 0.23.1 형태소 추출 → 공백 결합 `content_ko` 컬럼 → SQLite FTS5 unicode61 (패턴 B). FTS5 unicode61 단독은 한국어 recall 붕괴 (실측 "규정"이 "규정집"을 못 찾음). 이 우회 패턴으로 R4 8쿼리 4/4 정답 hit |
-| **벡터 검색** | OpenAI `text-embedding-3-small` 1536 dim → `lancedb` 로컬 ANN. 100 chunks/request, 400 RPM throttle, tenacity 지수 백오프 |
-| **Hybrid Ranker** | TypeScript `HybridRetriever`가 worker `/search/bm25` + `/search/vector` + `MockCloudIndexAdapter` 결과를 RRF(k=60, weights {bm25:0.5, vec:0.5, cloud:0.0}) 결합. Phase 2에서 Lgenie/사내 ES Cloud 실연결 시 weights 재정규화 |
-| **Idle-aware 인덱싱** | `IdleScheduler` 5-state 머신 (RUNNING/IDLE_SCAN/THROTTLED/PAUSED/RESUME_DELAY) — Electron `powerMonitor` + CPU EMA + battery + thermal-state. 사용자 입력 500ms 이내 즉시 throttle, P0~P4 우선순위 큐 |
-| **Cloud 어댑터** | Phase 1은 `MockCloudIndexAdapter` 인터페이스만 (§13.2 사내 ES+Milvus는 후속 라운드에서 실연결) |
-| **검색 도구** | builtin tool 4종 — `knowledge_search`(HybridRetriever wrapper), `document_list`, `document_structure`, `document_page_content`. LLM은 depth ≤3 hard cap으로 agentic 루프 |
-| **거버넌스 보강** | `tool-executor.ts` Step 2.5에 Bash AST pre-validator 삽입, `audit-service.ts`로 감사 데이터 플레인 분리, `post-turn-hook-chain.ts`로 compact→memory-extract→idle-poke 후크 |
-| **Out-of-Scope** (의도적 후속) | LightRAG knowledge graph (Phase 1.5 feature flag, 동시성 race condition 해결 후), BAAI/bge-m3 로컬 임베딩 (Phase 2), Lgenie LLM (Phase 2), 사내 ES/Milvus 실연결 (후속 라운드), PPTX/XLSX OCR (Phase 2 Vision) |
+| --- | --- |
+| **Python 런타임 자동 셋업** | `uv` standalone binary 번들 후 첫 부팅에 `uv python install 3.12` + `uv venv` + `uv pip sync --frozen` 수행. 이후 warm boot는 `.ready` sentinel로 즉시 skip |
+| **Layer A 파서** | PDF는 `pymupdf4llm`, DOCX / PPTX / XLSX / HTML은 Microsoft `markitdown` 단일 API 사용 |
+| **PageIndex 통합** | `pageindex==0.2.8`은 검색 메서드가 없으므로 LVIS가 function calling으로 `document_structure` + `document_page_content`를 도구 노출해 agentic 탐색을 직접 구현 |
+| **한국어 BM25** | `kiwipiepy 0.23.1` 형태소 추출 → `content_ko` 컬럼 → SQLite FTS5 `unicode61` 패턴으로 한국어 recall 보강 |
+| **벡터 검색** | OpenAI `text-embedding-3-small` → `lancedb` 로컬 ANN. 100 chunks / request, 400 RPM throttle, 지수 백오프 |
+| **Hybrid Ranker** | `lvis-app/src/main/hybrid-retriever.ts`가 worker BM25 / vector / cloud adapter 결과를 RRF(k=60)로 결합 |
+| **Idle-aware 인덱싱** | `lvis-app/src/main/idle-scheduler.ts` 5-state 머신으로 유휴 시점에 우선순위 큐 처리 |
+| **Cloud 어댑터** | `lvis-app/src/main/cloud-index-adapter.ts`는 Phase 1에서 mock 인터페이스만 제공 |
+| **검색 도구** | builtin tool 4종 — `knowledge_search`, `document_list`, `document_structure`, `document_page_content` |
+| **거버넌스 보강** | `lvis-app/src/tools/executor.ts` Step 2.5 Bash AST pre-validator, `lvis-app/src/main/audit-service.ts`, `lvis-app/src/hooks/post-turn-hook-chain.ts` 연계 |
+| **Out-of-Scope** | LightRAG knowledge graph, 로컬 임베딩, LGenie 기반 인덱싱, 사내 cloud index 실연결, PPTX / XLSX OCR은 후속 단계 |
 
-레퍼런스: claw-code(github.com/ultraworkers/claw-code) 모듈 경계 거버넌스 + ccleaks.com/architecture의 IdleScheduler/post-turn hooks/Coordinator 패턴을 차용.
+**Phase 1 완료 메트릭 (lvis-app 기준):**
 
-#### 4.4.2 Korean BM25 — 패턴 B (kiwipiepy + FTS5 unicode61)
+| 지표 | 결과 |
+| --- | --- |
+| 신규 파일 | 25개 (TS 14 + Python 7 + 기타 4) |
+| 변경 파일 | 11개 |
+| TypeScript TSC | 0 errors |
+| 회귀 테스트 | 86 / 86 PASS |
+| 한국어 BM25 recall | 8 / 8 hit |
 
-한국어 형태소 분석을 FTS5에 연결하는 우회 패턴. FTS5 unicode61 단독은 한국어 recall 붕괴 ("규정"이 "규정집"을 못 찾는 문제)를 패턴 B로 해결한다.
+#### 4.4.2 Korean BM25 — 패턴 B (`kiwipiepy` + FTS5 `unicode61`)
+
+한국어 형태소 분석을 FTS5에 연결하는 우회 패턴이다. FTS5 `unicode61` 단독은 한국어 recall이 급격히 낮아질 수 있으므로, 색인과 검색 양쪽에 동일한 형태소 파이프라인을 적용한다.
 
 ```
 인덱싱:
@@ -629,10 +600,10 @@ Layer B — 지능형 인덱싱 (PageIndex)
     → BM25(FTS5) score 반환
 ```
 
-**검증 결과 (R4, lvis-plugin-pageindex/test/pageindex_search.test.py):**
+**검증 결과 (R4):**
 
 | 쿼리 | 기대 | 결과 |
-|------|------|------|
+| --- | --- | --- |
 | `regulation` | hit | PASS |
 | `규정` | hit | PASS |
 | `규정집` | hit | PASS |
@@ -642,35 +613,35 @@ Layer B — 지능형 인덱싱 (PageIndex)
 | `지원` | hit | PASS |
 | `품의` | hit | PASS |
 
-구현: `lvis-plugin-pageindex/worker/korean_tokenizer.py`
+구현 위치: `lvis-plugin-pageindex/worker/korean_tokenizer.py`
 
-#### 4.4.3 HybridRetriever — RRF k=60
+#### 4.4.3 HybridRetriever — RRF `k=60`
 
-TypeScript (`lvis-app/src/main/hybrid-retriever.ts`) 구현. Python worker의 `/search/bm25`, `/search/vector` + `MockCloudIndexAdapter` 결과를 Reciprocal Rank Fusion으로 통합한다.
+TypeScript 구현은 `lvis-app/src/main/hybrid-retriever.ts`에 있다. Python worker의 `/search/bm25`, `/search/vector`와 `MockCloudIndexAdapter` 결과를 Reciprocal Rank Fusion으로 통합한다.
 
 **RRF 공식:**
 
 ```
-score(d) = Σ_r  weight_r × (1 / (k + rank_r + 1))
+score(d) = Σ_r weight_r × (1 / (k + rank_r + 1))
 ```
 
-- `k = 60` (순위 격차 완화 상수)
-- `rank_r`: 0-based rank (최상위 = 0)
-- `+1`: 0-based rank 보정
+- `k = 60` — 순위 격차 완화 상수
+- `rank_r` — 0-based rank (최상위 = 0)
+- `+1` — 0-based rank 보정
 
 **Phase 1 가중치:**
 
 | Retriever | Weight | 비고 |
-|-----------|--------|------|
+| --- | --- | --- |
 | BM25 (FTS5) | 0.5 | Python worker `/search/bm25` |
-| Vector (lancedb) | 0.5 | Python worker `/search/vector` |
-| Cloud (Mock) | 0.0 | Phase 2에서 실연결 시 {bm25:0.35, vec:0.35, cloud:0.3} 재정규화 |
+| Vector (`lancedb`) | 0.5 | Python worker `/search/vector` |
+| Cloud (Mock) | 0.0 | Phase 2에서 실연결 시 `{bm25:0.35, vec:0.35, cloud:0.3}` 재정규화 |
 
-Phase 1.5 (LightRAG 도입 시): `{bm25:0.35, vec:0.35, lightrag:0.3}`
+Phase 1.5에서 LightRAG를 도입하면 `{bm25:0.35, vec:0.35, lightrag:0.3}` 재조정 가능하다.
 
 #### 4.4.4 IdleScheduler — 5-state 머신
 
-`lvis-app/src/main/idle-scheduler.ts` 구현. 사용자 PC의 유휴 상태를 감지하여 백그라운드 인덱싱을 스케줄링한다. Electron `powerMonitor` 추상화로 Electron 외부(테스트)에서도 동작.
+`lvis-app/src/main/idle-scheduler.ts`는 사용자 PC 유휴 상태를 감지해 백그라운드 인덱싱을 스케줄링한다. Electron `powerMonitor` 추상화를 사용해 테스트 환경에서도 동일하게 검증 가능하다.
 
 ```
 RUNNING ──── idle≥60s + CPU<40% + battery>50% OR AC ──→ IDLE_SCAN
@@ -684,7 +655,7 @@ RESUME_DELAY ──── 90s elapsed ──→ RUNNING
 **IDLE_SCAN 진입 조건 (모두 충족):**
 
 | 조건 | 값 |
-|------|-----|
+| --- | --- |
 | 시스템 유휴 시간 | ≥ 60초 |
 | CPU 5분 EMA | < 40% |
 | 마지막 대화 경과 | ≥ 30초 |
@@ -693,311 +664,303 @@ RESUME_DELAY ──── 90s elapsed ──→ RUNNING
 **우선순위 큐:**
 
 | Priority | 용도 | 처리 모드 |
-|----------|------|----------|
+| --- | --- | --- |
 | P0 | 방금 열린 파일 | real-time |
 | P1 | 최근 7일 접근 | real-time |
-| P2 | 중요 태그/변경 감지 | 기본 |
+| P2 | 중요 태그 / 변경 감지 | 기본 |
 | P3 | 배경 변경 감지 | 배경 |
 | P4 | orphan cleanup | batch |
 
 #### 4.4.5 LLM Agentic 검색 — function calling (depth ≤ 3)
 
-`pageindex==0.2.8`에 search() 메서드가 없으므로 LVIS가 OpenAI function calling 4개 도구를 노출하여 LLM이 트리를 직접 탐색한다. 구현: `lvis-app/src/agent/knowledge-search-tool.ts`
-
-**4개 builtin tools:**
+`pageindex==0.2.8`에 `search()` 메서드가 없으므로 LVIS는 4개 builtin 도구를 노출해 LLM이 트리를 직접 탐색하도록 한다. 현재 구현 도구 정의는 `lvis-app/src/tools/knowledge-search.ts`, depth cap enforcement는 `lvis-app/src/engine/conversation-loop.ts`에 있다.
 
 | Tool | 동작 |
-|------|------|
-| `knowledge_search(query, topK?)` | HybridRetriever 호출 → RRF top 결과 반환 |
-| `document_list()` | 인덱싱된 문서 목록 (docId, docName, type, pageCount) |
+| --- | --- |
+| `knowledge_search(query, topK?)` | `HybridRetriever` 호출 → RRF top 결과 반환 |
+| `document_list()` | 인덱싱된 문서 목록 (`docId`, `docName`, `type`, `pageCount`) |
 | `document_structure(docId)` | PageIndex TOC 트리 (agentic 탐색용) |
-| `document_page_content(docId, pages)` | 특정 페이지 범위 본문 ("5", "5-7", "1,3,5-7") |
+| `document_page_content(docId, pages)` | 특정 페이지 범위 본문 (`5`, `5-7`, `1,3,5-7`) |
 
-**KNOWLEDGE_DEPTH_CAP = 3**: `conversation-loop.ts`에서 turn당 `knowledge_search` 도구 호출 횟수를 카운트. 3회 초과 시 `[depth cap]` 에러 메시지 반환. LLM agentic 토큰 폭발 방지.
+`KNOWLEDGE_DEPTH_CAP = 3` 규칙으로 한 턴 내 `knowledge_search` 도구 호출 횟수를 제한해 agentic 루프의 토큰 폭주를 방지한다.
 
 #### 4.4.6 CloudIndexAdapter — Mock 인터페이스 (Phase 1)
 
-`lvis-app/src/main/cloud-index-adapter.ts`. Phase 1에서는 항상 빈 결과를 반환하는 Mock 구현만 제공. HybridRetriever의 cloud weight = 0.0이므로 RRF 결과에 영향 없음.
+`lvis-app/src/main/cloud-index-adapter.ts`는 Phase 1에서 항상 빈 결과를 반환하는 mock 구현만 제공한다. 따라서 HybridRetriever의 cloud weight는 `0.0`이며 현재 결과 순위에는 영향을 주지 않는다.
 
 **Phase 2 마이그레이션 경로:**
-- `CloudIndexAdapter` 인터페이스를 구현하는 실제 클라이언트 작성
-- 사내 Elasticsearch (BM25) + Milvus/Qdrant (벡터) 연결
-- weights를 `{bm25:0.35, vec:0.35, cloud:0.3}`으로 재정규화
-- `settings.indexing.cloudEnabled: true` feature flag로 제어
+
+1. `CloudIndexAdapter` 인터페이스를 구현하는 실제 클라이언트 작성
+2. 사내 Elasticsearch (BM25) + Milvus / Qdrant (벡터) 연결
+3. weights를 `{bm25:0.35, vec:0.35, cloud:0.3}`으로 재정규화
+4. `settings.indexing.cloudEnabled` feature flag로 제어
 
 ---
 
 ### 4.5 Conversation Query Loop — 대화 처리 핵심 사이클
 
 > **Reference**: [Claude Code Query Loop](https://ccleaks.com/architecture) §03 "The Core Cycle" 패턴을 LVIS 환경에 맞게 재설계.
-> §4.3 Agent Loop이 **입력 분류·라우팅** 구조라면, 이 섹션은 **한 턴(turn)이 내부에서 어떻게 실행되는지** — 메시지 생성부터 스트리밍 렌더링, 도구 실행, 컨텍스트 관리까지 — 상세 사이클을 기술한다.
+> §4.3 Input Classification & Routing이 **입력 분류·라우팅** 구조라면, 이 섹션은 **한 턴(turn)이 내부에서 어떻게 실행되는지** — 메시지 생성부터 스트리밍 렌더링, 도구 실행, 컨텍스트 관리까지 — 상세 사이클을 기술한다.
 
 #### 4.5.1 Core Cycle 개요
 
 ```mermaid
 flowchart TB
-    subgraph "① 입력 수신"
-        USER_INPUT["👤 사용자 메시지<br/>(키보드 입력)"]
-        CREATE_MSG["createUserMessage()<br/>Anthropic 메시지 포맷 래핑"]
-    end
+    USER["Renderer user input"]
+    IPC["ipcMain.handle('lvis:chat:send')"]
+    KEYWORD["KeywordEngine.classify()<br/>(builtin + plugin groups preflight)"]
+    ROUTE["RouteEngine.route()"]
+    LOOP["ConversationLoop.runTurn()"]
+    HISTORY["ConversationHistory.append(user)"]
+    PROMPT["System prompt assembly<br/>(memory + settings + tool schema)"]
+    PROVIDER["provider.streamTurn(...)"]
+    REASON["reasoning_delta / text_delta"]
+    TOOL_CHECK{"tool_call 존재?"}
+    POLICY_CHK{"Governance Policy Check"}
+    PERM["Permission / Approval"]
+    TOOL_EXEC["ToolExecutor.executeAll()<br/>(groupId 단위 실행)"]
+    TOOL_RESULT["tool_result 메시지 append"]
+    ROUND["assistant_round finalize<br/>(thought + text 저장)"]
+    POST["PostTurnHookChain.run()"]
+    SAVE["saveSession / audit / idle"]
+    PROACTIVE["Proactive Trigger<br/>(heartbeat / 조건 평가)"]
 
-    subgraph "② 컨텍스트 조립"
-        APPEND_HIST["Conversation History<br/>in-memory 메시지 배열에 추가"]
-        BUILD_SYS["System Prompt 조립<br/>(LVIS.md + notes/ + 도구 스키마<br/>+ 프로필 + 조직 컨텍스트)"]
-    end
-
-    subgraph "③ Lgenie 추론"
-        STREAM_API["Lgenie API 스트리밍 호출<br/>(SSE — Server-Sent Events)"]
-        PARSE_TOKEN["토큰 파싱 &<br/>증분 렌더링"]
-    end
-
-    subgraph "④ 도구 실행 루프"
-        TOOL_CHECK{"tool_use 블록<br/>존재?"}
-        FIND_TOOL["findToolByName()<br/>Tool Registry 조회"]
-        CAN_USE["canUseTool()<br/>Permission + Governance"]
-        APPROVAL{"승인<br/>필요?"}
-        APPROVAL_QUEUE["Approval Queue<br/>사용자 승인 대기"]
-        EXECUTOR["StreamingToolExecutor<br/>병렬 실행 가능"]
-        COLLECT["tool_result 메시지 조립"]
-    end
-
-    subgraph "⑤ 응답 완료"
-        RENDER_FINAL["최종 응답 렌더링<br/>(Markdown → Chat UI)"]
-        POST_HOOKS["Post-Turn Hooks"]
-        COMPACT_CHK["Auto-Compact 임계치 확인"]
-        MEM_EXTRACT["Memory Extraction<br/>(notes/ 자동 저장)"]
-        AUDIT["Audit Log 기록"]
-        IDLE["⏳ 다음 입력 대기<br/>(Proactive 타이머 활성)"]
-    end
-
-    USER_INPUT --> CREATE_MSG
-    CREATE_MSG --> APPEND_HIST
-    APPEND_HIST --> BUILD_SYS
-    BUILD_SYS --> STREAM_API
-    STREAM_API --> PARSE_TOKEN
-    PARSE_TOKEN --> TOOL_CHECK
-
-    TOOL_CHECK -->|"Yes"| FIND_TOOL
-    TOOL_CHECK -->|"No"| RENDER_FINAL
-
-    FIND_TOOL --> CAN_USE
-    CAN_USE --> APPROVAL
-    APPROVAL -->|"자동 허용"| EXECUTOR
-    APPROVAL -->|"사용자 승인 필요"| APPROVAL_QUEUE
-    APPROVAL_QUEUE -->|"승인"| EXECUTOR
-    APPROVAL_QUEUE -->|"거부"| RENDER_FINAL
-    EXECUTOR --> COLLECT
-    COLLECT -->|"Loop back"| STREAM_API
-
-    RENDER_FINAL --> POST_HOOKS
-    POST_HOOKS --> COMPACT_CHK
-    POST_HOOKS --> MEM_EXTRACT
-    POST_HOOKS --> AUDIT
-    COMPACT_CHK --> IDLE
-    MEM_EXTRACT --> IDLE
-    AUDIT --> IDLE
+    USER --> IPC --> KEYWORD --> ROUTE --> LOOP --> HISTORY --> PROMPT --> PROVIDER --> REASON --> TOOL_CHECK
+    TOOL_CHECK -->|"Yes"| POLICY_CHK -->|"허용"| PERM --> TOOL_EXEC --> TOOL_RESULT --> PROVIDER
+    TOOL_CHECK -->|"No"| ROUND --> POST --> SAVE
+    POST --> PROACTIVE
+    POLICY_CHK -->|"차단"| TOOL_RESULT
 ```
+
+> **문서 원칙**: 이 섹션은 `ConversationLoop`의 현재 구현을 기준으로 설명하되, 아직 미구현인 목표 설계(Keyword disambiguation, Governance sync, Proactive heartbeat, richer session history)도 함께 유지한다.
+> `GovernancePolicy`는 도구 호출이 생길 때마다 **루프 내부에서 반드시 통과하는 필수 게이트**이며, 바깥에서 한 번만 거르는 보조 체크가 아니다.
 
 #### 4.5.2 메시지 라이프사이클 — 한 턴의 상세 단계
 
 | 단계 | 함수 / 컴포넌트 | 설명 | 비고 |
 | --- | --- | --- | --- |
-| **1. 입력 캡처** | `InputCapture` (Electron IPC) | 키보드 및 파일 드롭 입력 소스를 표준 메시지 객체로 변환 | 음성 입력은 제품 스코프 밖 (meeting plugin STT 는 회의 전사 전용) |
-| **2. 메시지 생성** | `createUserMessage()` | 입력 텍스트를 `{ role: "user", content: [...] }` 포맷으로 래핑. 파일 첨부 시 multipart content block 생성 | claw-code 패턴 차용 |
-| **3. 히스토리 추가** | `ConversationHistory.append()` | in-memory 메시지 배열 끝에 추가. 토큰 카운트 갱신 | 영속화는 세션 종료 시 |
-| **4. 시스템 프롬프트 조립** | `SystemPromptBuilder.build()` | 10+ 소스 결합: LVIS.md, notes/, 도구 스키마, 사용자 프로필, 조직 컨텍스트, OS 정보, 활성 플러그인 | 매 턴마다 재조립 |
-| **5. Lgenie 스트리밍 호출** | `LgenieSession.stream()` | SSE 기반 스트리밍 요청. 토큰이 도착할 때마다 UI에 증분 렌더링 | 온라인 전제 |
-| **6. 응답 파싱** | `ResponseParser.parse()` | 스트리밍 토큰을 text / tool_use 블록으로 분류. tool_use 감지 시 도구 실행 루프 진입 | JSON 파싱 + 타입 판별 |
-| **7. 도구 조회** | `ToolRegistry.findByName()` | 빌트인 + 플러그인 + MCP 통합 레지스트리에서 도구 검색 | §9 Plugin 동적 등록 연동 |
-| **8. 권한 확인** | `PermissionManager.canUse()` | allow/deny 규칙 + Governance Policy + RBAC 확인. 매칭 규칙 없으면 사용자 프롬프트 | §8 Approval System 연동 |
-| **9. 도구 실행** | `StreamingToolExecutor.run()` | 병렬 실행 가능. 각 도구 결과를 `tool_result` 메시지로 조립 후 Lgenie에 재전송 | Agentic Loop |
-| **10. 응답 렌더링** | `ChatRenderer.render()` | Markdown → Electron Chat UI. 코드 블록 하이라이팅, 테이블, Mermaid 인라인 렌더링 지원 | 증분 렌더링 |
-| **11. Post-Turn Hooks** | `PostTurnHookChain.run()` | 5 hooks 순차 실행: ① Auto-Compact → ② saveSession → ③ Memory Extraction → ④ Audit Log → ⑤ IdleScheduler 신호. 각 hook 독립 try/catch — 한 hook 실패가 다음을 차단하지 않음. 구현: `post-turn-hook-chain.ts` | KNOWLEDGE_DEPTH_CAP=3: turn당 `knowledge_search` 호출 3회 초과 시 `[depth cap]` 에러 반환 |
+| **1. 요청 진입** | `window.lvis.chat.send()` → `ipcMain.handle("lvis:chat:send")` | renderer 입력을 main process로 전달 | 채팅 UI의 단일 진입점 |
+| **2. 조기 키워드 감지** | `KeywordEngine.classify()` | 대화 루프 본문에 들어가기 전에 명령/스킬/@멘션/일반 대화를 판단 | 플러그인 keyword group 동적 등록 지원. 다중 후보일 때 LGenie 추천/사용자 확인은 목표 설계 |
+| **3. 실행 경로 결정** | `RouteEngine.route()` | `command` / `skill` / `agent-hub` / `llm` 중 하나로 경로 확정 | Agent Hub 경로는 메시지 보드/A2A 상호작용 경로 |
+| **4. 턴 오케스트레이션** | `ConversationLoop.runTurn()` | 한 턴 전체를 관리하고 provider/tool/post-turn 훅을 묶는다 | 턴 경계의 canonical 구현 |
+| **5. 히스토리 적재** | `ConversationHistory.append()` | user 메시지를 인메모리 히스토리에 추가 | assistant/tool_result도 동일 히스토리에 누적 |
+| **6. 프롬프트 조립** | system prompt assembly | LVIS.md, notes/, 설정, 도구 스키마, 환경 정보를 합쳐 provider 입력 생성 | 매 턴 재조립 |
+| **7. LLM 스트리밍** | `provider.streamTurn(...)` | provider가 `text_delta`, `reasoning_delta`, `tool_call`, `done` 이벤트를 순차 발생 | Claude / Gemini / OpenAI 공통 인터페이스 |
+| **8. reasoning 누적** | `reasoning_delta` | 중간 생각은 별도 스트림 이벤트로 누적되고, assistant round와 분리해 UI에 표시 | OpenAI reasoning 모델도 replay 지원 |
+| **9. 거버넌스/도구 실행** | `GovernancePolicy` → `PermissionManager` → `ToolExecutor.executeAll()` | 도구 호출 전 정책 차단, 승인 판단, 실행을 순서대로 수행 | GovernancePolicy는 로컬 정책 캐시를 보고, 상위 동기화 서버 broadcast로 갱신되는 설계를 유지 |
+| **10. 라운드 확정** | `onAssistantRound` callback | tool 호출 전후의 assistant 텍스트/생각을 라운드 단위로 확정 | `thought` 필드로 세션에 저장 |
+| **11. 렌더링 반영** | `ipc-bridge.ts` → `renderer.tsx` | reasoning, tool_start/tool_end, assistant_round를 UI 타임라인으로 변환 | 도구 묶음은 시각적으로만 병합 가능 |
+| **12. 턴 후처리** | `PostTurnHookChain.run()` | auto-compact, saveSession, memory extraction, audit, proactive trigger, idle를 조율 | 현재 구현은 일부만 완료, 목표 설계를 문서에 유지 |
 
 #### 4.5.3 스트리밍 아키텍처
 
-Lgenie 응답은 SSE(Server-Sent Events)로 전달되며, 사용자는 전체 응답 완료를 기다리지 않고 토큰 단위로 즉시 확인한다.
+사용자는 전체 응답 완료를 기다리지 않고 **keyword preflight → reasoning → tool group → reasoning → assistant** 순서를 스트림으로 확인한다. provider별 내부 transport는 다를 수 있지만, renderer가 받는 표준 이벤트는 `reasoning_delta`, `text_delta`, `tool_start`, `tool_end`, `assistant_round`, `done`이다.
 
 ```mermaid
 sequenceDiagram
-    participant UI as Chat UI<br/>(Electron Renderer)
-    participant MAIN as Main Process<br/>(IPC Bridge)
-    participant SESSION as LgenieSession<br/>(Rust NAPI)
-    participant LLM as Lgenie API<br/>(사내 LLM)
+    participant UI as Renderer
+    participant IPC as IPC Bridge
+    participant KW as Keyword Engine
+    participant ROUTE as Route Engine
+    participant LOOP as ConversationLoop
+    participant GOV as GovernancePolicy
+    participant LLM as Provider
+    participant TOOLS as ToolExecutor
 
-    UI->>MAIN: sendMessage(userInput)
-    MAIN->>SESSION: stream(systemPrompt, history)
-    SESSION->>LLM: POST /v1/chat/completions<br/>(stream: true)
+    UI->>IPC: send(input)
+    IPC->>KW: classify(input)
+    KW-->>ROUTE: classification
+    ROUTE-->>LOOP: route
+    LOOP->>LLM: streamTurn(messages, systemPrompt)
 
-    loop SSE 토큰 스트림
-        LLM-->>SESSION: data: {"delta": {"content": "..."}}
-        SESSION-->>MAIN: IPC: token_chunk
-        MAIN-->>UI: 증분 렌더링
+    loop provider stream
+        LLM-->>LOOP: reasoning_delta / text_delta
+        LOOP-->>IPC: stream event
+        IPC-->>UI: timeline update
     end
 
-    alt tool_use 블록 감지
-        SESSION->>SESSION: ResponseParser → tool_use 추출
-        SESSION->>MAIN: IPC: tool_request(toolName, args)
-        MAIN->>MAIN: PermissionManager.canUse()
-        alt 승인 필요
-            MAIN-->>UI: 승인 다이얼로그 표시
-            UI-->>MAIN: 사용자 승인/거부
+    alt tool_call detected
+        LLM-->>LOOP: tool_call[]
+        LOOP->>GOV: policyCheck(toolName, args)
+        alt policy allow
+            GOV-->>LOOP: allow / policy snapshot
+            LOOP->>TOOLS: executeAll(toolUses)
+            TOOLS-->>IPC: tool_start / tool_end
+            IPC-->>UI: grouped tool card update
+            TOOLS-->>LOOP: tool_result[]
+            LOOP->>LLM: streamTurn(...tool results...)
+        else policy deny
+            GOV-->>LOOP: deny + reason
+            LOOP->>LLM: blocked tool_result / error
         end
-        MAIN->>SESSION: executeTools(approved_tools)
-        SESSION->>SESSION: StreamingToolExecutor.run()
-        SESSION->>LLM: tool_result 포함 재요청
-        Note over LLM,SESSION: Agentic Loop 반복
+    else assistant round completed
+        LOOP-->>IPC: assistant_round
+        IPC-->>UI: finalize reasoning/tool/assistant entries
     end
 
-    LLM-->>SESSION: data: [DONE]
-    SESSION->>MAIN: IPC: turn_complete
-    MAIN->>MAIN: HookRunner.postTurn()
-    MAIN-->>UI: 최종 응답 확정
+    LOOP->>LOOP: PostTurnHookChain.run()
+    IPC-->>UI: done
 ```
 
 **핵심 구현 포인트**
 
 | 항목 | 설명 |
 | --- | --- |
-| **증분 렌더링** | 토큰이 도착할 때마다 UI 갱신. 전체 응답 완료를 기다리지 않아 체감 응답 속도 극대화 |
-| **병렬 도구 실행** | Lgenie가 복수 tool_use를 동시 요청하면 `StreamingToolExecutor`가 병렬 실행 후 결과를 한 번에 반환 |
-| **Agentic Loop** | tool_use → tool_result → 재추론 사이클이 자동 반복. Lgenie가 tool_use 없는 응답을 생성하면 루프 종료 |
-| **인터럽트 처리** | 사용자가 도구 실행 중 취소(Ctrl+C / UI 버튼) 시 `StreamingToolExecutor.abort()` 호출. 대화 히스토리는 보존되어 이어서 대화 가능 |
-| **오류 격리** | 개별 도구 실행 실패 시 해당 tool_result에 에러 메시지를 담아 Lgenie에 전달. Lgenie가 재시도 또는 대안 제시 |
+| **초기 사전판단** | Keyword Detecting은 `runTurn()` 초입에서 수행되며, plugin keyword group도 함께 반영된다. |
+| **First-class reasoning** | reasoning은 `text_delta`의 부가 플래그가 아니라 별도 이벤트다. 그래서 도구 묶음 사이에 중간 생각을 독립 카드로 배치할 수 있다. |
+| **Round boundary 보존** | `assistant_round` 이벤트로 tool 호출 전/후의 assistant 응답을 안정적으로 끊는다. |
+| **시각적 도구 병합** | renderer는 assistant 텍스트가 끼지 않은 인접 tool round만 한 묶음으로 합친다. query loop ID를 억지로 재사용하지 않는다. |
+| **오류 국소화** | 실패는 개별 tool item에만 귀속되고, 같은 group의 다른 도구와 다음 assistant round는 계속 진행될 수 있다. |
+| **지속성** | assistant `thought`는 히스토리에 저장되어 tool round-trip 후에도 reasoning 모델의 문맥이 유지된다. |
+| **거버넌스 동기화** | 대화 루프는 로컬 GovernancePolicy를 조회하고, 상위 정책 동기화 서버의 broadcast로 갱신되는 설계를 전제로 한다. |
 
 #### 4.5.4 컨텍스트 관리 — Auto-Compact
 
-대화가 길어지면 히스토리 토큰이 Lgenie 컨텍스트 윈도우를 초과한다. Auto-Compact가 이를 자동 관리한다.
+문서의 **목표 설계**는 컨텍스트 **사용률 기준 Auto-Compact**다. 기본 임계치는 **40%**이며, 사용자가 **20% 단위(20 / 40 / 60 / 80%)** 로 조정할 수 있다. 현재 구현 단계는 `inputTokens >= 80_000`과 on/off 토글로 단순화되어 있으므로, 문서에는 **현재 구현**과 **목표 설계**를 함께 남긴다.
 
 ```mermaid
 flowchart LR
-    subgraph "컨텍스트 윈도우"
-        SYS["System Prompt<br/>(5~15K tokens)"]
-        MEM["LVIS.md + notes/<br/>(2~10K tokens)"]
-        HIST["대화 히스토리<br/>(증가)"]
-        TOOL_RES["도구 결과<br/>(증가)"]
-        AVAIL["가용 공간"]
-    end
+    USAGE["Context usage monitor<br/>(system + memory + history + tool result)"]
+    SETTING["사용자 설정<br/>(20 / 40 / 60 / 80%)"]
+    THRESHOLD{"사용률 ≥ 설정 임계치?"}
+    MODE{"autoCompact enabled?"}
+    BOUNDARY["findSafeBoundary()<br/>tool_call / tool_result 쌍 보호"]
+    SUMMARY["Compact Summary<br/>(extractive now / richer summary later)"]
+    REWRITE["[이전 대화 요약] + 최근 4개 메시지 유지"]
 
-    MONITOR["Token Counter<br/>매 턴 갱신"]
-    THRESHOLD{"사용률<br/>≥ 80%?"}
-    COMPACT["Auto-Compact 실행"]
-    SUMMARY["Lgenie 자체 요약<br/>(이전 대화 압축)"]
-    MARKER["CompactBoundaryMessage<br/>삽입"]
-    FREED["~40~60% 공간 확보"]
-
-    MONITOR --> THRESHOLD
-    THRESHOLD -->|"Yes"| COMPACT
-    THRESHOLD -->|"No"| MONITOR
-    COMPACT --> SUMMARY
-    SUMMARY --> MARKER
-    MARKER --> FREED
-    FREED --> MONITOR
+    USAGE --> THRESHOLD
+    SETTING --> THRESHOLD
+    THRESHOLD -->|"No"| USAGE
+    THRESHOLD -->|"Yes"| MODE
+    MODE -->|"Off"| USAGE
+    MODE -->|"On"| BOUNDARY --> SUMMARY --> REWRITE
 ```
 
-| 항목 | 값 |
-| --- | --- |
-| 임계치 | 컨텍스트 사용률 80% (기본값, 설정 변경 가능) |
-| 압축 방식 | Lgenie가 compact boundary 이전 메시지를 자체 요약 |
-| 공간 회수 | 약 40~60% |
-| 수동 트리거 | `/compact` 명령어로 수동 실행 가능 |
-| 요약 커스텀 | 설정에서 compact 지시사항 커스터마이징 가능 |
+| 항목 | 목표 설계 | 현재 구현 단계 |
+| --- | --- | --- |
+| 임계치 | 컨텍스트 사용률 **40% 기본값** | `inputTokens >= 80_000` |
+| 사용자 설정 | **20% 단위**로 20/40/60/80% 선택 가능 | `chat.autoCompact` on/off 토글 |
+| 압축 방식 | compact boundary 보존 + 더 풍부한 요약 전략 | 로컬 추출 기반 요약 (`generateSummary`) |
+| 공간 회수 | 약 40~60% 확보 목표 | 요약 내용과 메시지 길이에 따라 가변 |
+| 보존 규칙 | 최근 대화와 tool round 경계를 함께 보존 | 최근 4개 메시지 유지 + tool_call/tool_result 안전 경계 보존 |
+| 수동 트리거 | `/compact` 명령어로 수동 실행 가능 | 동일 |
+| 적용 위치 | post-turn + 세션 재개 전후 컨텍스트 관리까지 확장 | `PostTurnHookChain`와 `ConversationLoop` fallback 경로 사용 |
 
 #### 4.5.5 Post-Turn Hooks
 
-매 어시스턴트 턴 완료 후 비동기로 실행되는 후처리 파이프라인.
+매 assistant 턴 완료 후 실행되는 후처리 파이프라인이다. 현재 구현은 **순차 chain** 이고, 목표 설계는 여기에 **Proactive Trigger** 와 **Plugin PostTurn** 을 포함한 coordinator를 유지한다.
 
 ```mermaid
 flowchart LR
     TURN_DONE["턴 완료"]
 
-    TURN_DONE --> COMPACT_CHK["Auto-Compact<br/>임계치 확인"]
-    TURN_DONE --> MEM_EXT["Memory Extraction<br/>대화에서 기억할 내용 추출<br/>→ notes/ 자동 저장"]
-    TURN_DONE --> AUDIT_LOG["Audit Log<br/>대화·도구 사용 기록<br/>→ Governance Layer"]
-    TURN_DONE --> PROACTIVE_EVAL["Proactive Trigger 평가<br/>브리핑·알림 조건 충족 확인"]
-    TURN_DONE --> PLUGIN_HOOK["Plugin PostTurn Hook<br/>활성 플러그인 후처리"]
+    TURN_DONE --> COMPACT_CHK["1. Auto-Compact"]
+    COMPACT_CHK --> SAVE["2. saveSession(JSONL)"]
+    SAVE --> MEM_EXT["3. Memory Extraction<br/>(기억해 패턴)"]
+    MEM_EXT --> AUDIT_LOG["4. Audit Log"]
+    AUDIT_LOG --> PROACTIVE_EVAL["5. Proactive Trigger 평가"]
+    PROACTIVE_EVAL --> HEARTBEAT_CFG["설정 값 기반 heartbeat"]
+    PROACTIVE_EVAL --> HEARTBEAT_COND["조건 기반 heartbeat"]
+    HEARTBEAT_CFG --> PROACTIVE_EVT["briefing / notification event"]
+    HEARTBEAT_COND --> PROACTIVE_EVT
+    PROACTIVE_EVT --> PLUGIN_HOOK["6. Plugin PostTurn Hook"]
+    PLUGIN_HOOK --> IDLE["7. Idle signal"]
 ```
 
-| Hook | 실행 조건 | 동작 |
+| Hook | 목표 설계 | 현재 구현 단계 |
 | --- | --- | --- |
-| **Auto-Compact** | 토큰 사용률 ≥ 80% | 이전 대화 Lgenie 자체 요약 → 공간 확보 |
-| **Memory Extraction** | 매 턴 (변경 감지 시) | 대화 중 기억할 내용(이름, 선호, 프로젝트 정보 등)을 notes/에 자동 저장 |
-| **Audit Log** | 매 턴 (필수) | 대화 내용·도구 호출·승인 결과를 Governance Layer에 기록 |
-| **Proactive Trigger** | 매 턴 (조건부) | 브리핑 시간 도래, 승인 대기 건 존재, 일정 임박 등 → Proactive Engine에 이벤트 전달 |
-| **Plugin PostTurn** | 활성 플러그인 존재 시 | 플러그인별 후처리 (예: 회의록 자동 저장, 외부 시스템 동기화) |
+| **Auto-Compact** | 사용률 40% 기본값 + 20% 단위 설정 기반 자동 압축 | `chat.autoCompact` + 80k token threshold |
+| **saveSession** | 매 턴 세션 히스토리 저장 및 복구 포인트 생성 | `~/.lvis/sessions/<id>.jsonl`에 저장 |
+| **Memory Extraction** | 대화/도구 결과에서 기억할 내용을 구조화 저장 | `"기억해"`류 요청을 notes/로 자동 저장 |
+| **Audit Log** | 대화·도구·정책 차단·승인 이력을 기록 | 구현됨 |
+| **Proactive Trigger** | **설정 값 기반 heartbeat** + **조건 기반 heartbeat** 로 브리핑/알림 발생 | briefing generation과 idle signal은 존재, full trigger coordinator는 확장 예정 |
+| **Plugin PostTurn** | 활성 플러그인의 후처리 훅 실행 | 문서상 목표 설계 유지 |
+| **Idle signal** | 다음 입력 대기 전 상태 갱신과 조용한 heartbeat 보조 신호 | idle scheduler 신호 전달 구현 |
 
 #### 4.5.6 도구 실행 파이프라인 상세
 
-§4.3의 Tool Execution Loop를 확장한 상세 파이프라인. 도구 하나가 실행되는 전체 과정을 기술한다.
+`ToolExecutor`는 모든 도구 호출의 single choke point다. 상세 보안 모델은 `tool-governance.md`를 따르며, 여기서는 **현재 구현 순서**와 **유지되어야 할 Governance 정책 경계**를 함께 요약한다.
 
 ```mermaid
 sequenceDiagram
-    participant LLM as Lgenie
-    participant PARSE as ResponseParser
+    participant LOOP as ConversationLoop
     participant REG as ToolRegistry
-    participant PERM as PermissionManager
-    participant GOV as GovernancePolicy
     participant HOOK as HookRunner
-    participant EXEC as StreamingToolExecutor
-    participant AUDIT as AuditLog
+    participant AST as BashAstValidator
+    participant GOV as GovernancePolicy
+    participant PERM as PermissionManager
+    participant APPROVAL as ApprovalGate
+    participant LIMIT as RateLimiter
+    participant EXEC as ToolExecutor
+    participant AUDIT as AuditLogger
 
-    LLM->>PARSE: tool_use 블록 수신
-    PARSE->>REG: findByName(toolName)
-    REG-->>PARSE: Tool 인스턴스
+    LOOP->>REG: findByName(toolName)
+    REG-->>LOOP: tool
+    LOOP->>HOOK: runPreHooks(input)
+    LOOP->>AST: validate(bash input)
+    LOOP->>GOV: policyCheck(name, source, args)
 
-    PARSE->>PERM: canUse(tool, args, context)
-    PERM->>GOV: policyCheck(tool, args)
+    alt policy deny
+        GOV-->>LOOP: deny + reason
+        LOOP->>AUDIT: log(BLOCKED, reason)
+    else policy allow
+        GOV-->>PERM: allow / policy snapshot
+        LOOP->>PERM: checkDetailed(name, source, category)
 
-    alt 정책 차단
-        GOV-->>PERM: DENY (사유)
-        PERM-->>PARSE: 차단
-        PARSE->>AUDIT: log(BLOCKED, tool, reason)
-        PARSE->>LLM: tool_result: { error: "정책에 의해 차단됨" }
-    else 승인 필요
-        PERM-->>PARSE: NEED_APPROVAL
-        PARSE->>PARSE: Approval Queue에 추가 → UI 알림
-        Note over PARSE: 사용자 응답 대기
-        PARSE-->>PERM: 사용자 승인/거부
-    else 허용
-        PERM-->>PARSE: ALLOW
+        alt ask decision
+            PERM-->>APPROVAL: requestAndWait(...)
+            APPROVAL-->>LOOP: allow / deny
+        end
+
+        LOOP->>LIMIT: check(name, trust)
+        LOOP->>EXEC: tool.execute(finalInput)
+        EXEC-->>LOOP: result / error
+        LOOP->>HOOK: runPostHooks(result)
+        LOOP->>AUDIT: logToolCall(...)
     end
-
-    PARSE->>HOOK: preToolUse(tool, args)
-    HOOK-->>PARSE: (인자 변환 가능)
-
-    PARSE->>EXEC: execute(tool, args)
-    EXEC-->>PARSE: result
-
-    PARSE->>HOOK: postToolUse(tool, result)
-
-    PARSE->>AUDIT: log(EXECUTED, tool, result_summary)
-    PARSE->>LLM: tool_result 메시지
 ```
+
+| 순서 | 단계 | 설명 |
+| --- | --- | --- |
+| **1** | Lookup | `ToolRegistry.findByName()` + source/trust 계산 |
+| **2** | PreToolUse Hook | 외부 훅이 입력을 차단/수정할 수 있음 |
+| **2.5** | Bash AST Validator | bash 입력은 별도 AST 검증을 거침 |
+| **3** | Governance Policy Check | 로컬 정책 캐시 기준으로 도구 차단/허용을 먼저 판단 |
+| **4** | Permission / Approval | `deny` / `ask` / `allow` 결정 후 필요 시 UI 승인 |
+| **5** | Hook override 반영 | 수정된 입력을 최종 실행 인자로 확정 |
+| **6** | Rate limit | trust 수준별 호출 빈도 제한 |
+| **7** | Execute | 실제 도구 실행 |
+| **8** | PostToolUse Hook | 결과 후처리 및 차단 |
+| **9** | Audit + tool_result | 감사 로그 기록 후 LLM loop에 결과 반환 |
+
+> **Governance 설계 메모**: `GovernancePolicy`는 로컬 정책 캐시에서 평가되고, 상위 **거버넌스 정책 동기화 서버**가 브로드캐스팅하는 delta를 받아 갱신되는 구조를 목표로 한다. 따라서 대화 루프는 매 호출마다 네트워크 왕복이 아니라 **최신 로컬 정책 스냅샷**을 조회한다.
 
 #### 4.5.7 대화 세션 관리
 
-| 항목 | 설계 | 비고 |
+| 항목 | 목표 설계 | 현재 구현 단계 |
 | --- | --- | --- |
-| **세션 생성** | 앱 실행 시 또는 `/new` 명령 시 새 세션 생성 | 세션 ID = UUID v4 |
-| **히스토리 영속화** | 세션 종료 시 SQLite에 저장. 재개 시 복원 | 대화 히스토리 + 도구 실행 로그 |
-| **멀티 세션** | 동시 복수 세션 지원. 탭 기반 UI | 각 세션 독립 컨텍스트 |
-| **세션 이어가기** | 이전 세션 선택 → 히스토리 로드 → 컨텍스트 재조립 | Auto-Compact 적용 가능 |
-| **세션 메타데이터** | 제목(자동 생성), 생성일시, 마지막 활동, 토큰 사용량 | Lgenie로 제목 자동 생성 |
+| **세션 생성** | 앱 실행 시 또는 `/new` 명령 시 새 세션 생성 | 구현됨 (세션 ID = UUID v4) |
+| **세션 히스토리 보관** | 타 채팅 앱처럼 최근 대화 목록·복구 가능해야 함 | `MemoryManager.saveSession()`이 JSONL 파일로 저장 |
+| **세션 조회** | 최근 세션 목록 + 제목/미리보기/검색까지 확장 | `listSessions()`와 IPC `lvis:chat:sessions`가 최근 목록 제공 |
+| **세션 이어가기** | UI에서 이전 세션 선택 → 히스토리 복원 → 컨텍스트 재조립 | `loadSession(sessionId)`, `/load`, `lvis:chat:load-session` 지원 |
+| **멀티 세션 UX** | 채팅 히스토리 패널/최근 세션 전환 UX | 현재는 단일 active session + persisted history |
+| **세션 삭제/정리** | 보존 정책과 사용자 삭제 UI 확장 | 현재는 JSONL 파일 삭제 수준 |
+| **메시지 스키마** | `user` / `assistant` / `tool_result` + assistant `thought` 유지, 추후 preview 메타데이터 확장 | reasoning을 별도 persistent message type으로 늘리지는 않음 |
 
 #### 4.5.8 claw-code 패턴 매핑
 
 | ccleaks.com Query Loop 단계 | LVIS 대응 구현 | LVIS 차별점 |
 | --- | --- | --- |
-| `createUserMessage()` | `InputCapture` + `createUserMessage()` | + 파일 드롭 입력 지원 |
-| Append to conversation history | `ConversationHistory.append()` | + 토큰 카운트 실시간 갱신 |
-| Build system prompt | `SystemPromptBuilder.build()` | + LVIS.md · notes/ · 조직 컨텍스트 · Plugin 스키마 |
-| Stream to Claude API | `LgenieSession.stream()` (SSE) | Lgenie 사내 LLM 엔드포인트 |
+| `createUserMessage()` | renderer input → `ipcMain.handle("lvis:chat:send")` | Electron IPC + 조기 keyword preflight |
+| Append to conversation history | `ConversationHistory.append()` | + assistant `thought` 보존 |
+| Build system prompt | system prompt assembly | + LVIS.md · notes/ · 조직 컨텍스트 · tool schema · proactive context |
+| Stream to Claude API | `provider.streamTurn(...)` | provider 공통 인터페이스로 Claude/Gemini/OpenAI 수용 |
 | `findToolByName()` | `ToolRegistry.findByName()` | + Plugin · MCP 동적 등록 통합 레지스트리 |
-| `canUseTool()` | `PermissionManager.canUse()` | + Governance Policy + RBAC + **Approval Queue** |
-| `StreamingToolExecutor` | `StreamingToolExecutor.run()` | + 승인 대기 · 정책 차단 분기 추가 |
-| Post-sampling hooks | `HookRunner.postTurn()` | + Proactive Trigger · Plugin PostTurn · Memory Extraction |
-| Auto-compact | `AutoCompact.check()` | 동일 패턴 — Lgenie 자체 요약 방식 |
-| Wait for next input | Idle + Proactive Timer | + Proactive Engine 타이머 기반 능동 알림 |
+| `canUseTool()` | `GovernancePolicy` + `PermissionManager.checkDetailed()` | + source/trust aware approval gate + 정책 동기화 전제 |
+| `StreamingToolExecutor` | `ToolExecutor.executeAll()` | + groupId, displayOrder, bash validator, rate limit |
+| Post-sampling hooks | `PostTurnHookChain.run()` | 현재: JSONL saveSession + memory extraction + audit + idle, 목표: proactive trigger + plugin post-turn 확장 |
+| Auto-compact | `AutoCompact` | 목표: 40% 기본값/20% 단위 설정, 현재: 80k token threshold + on/off |
+| Wait for next input | renderer idle state | + reasoning/tool/assistant 타임라인 유지 + proactive heartbeat 예정 |
 
 #### 4.5.9 System Prompt 조립 상세 — 12개 소스
 
@@ -1062,58 +1025,105 @@ flowchart LR
 
 ---
 
+#### 4.5.10 Tool Call Presentation — grouped card + drill-down
+
+도구 호출은 **한 번의 tool round = 하나의 group card**로 먼저 보여주고, 사용자가 펼칠 때만 하위 도구와 입력/결과를 드러낸다. renderer는 assistant 텍스트가 끼지 않은 인접 group만 시각적으로 병합해, 사용자가 자연스러운 `생각 → 도구 → 생각 → 도구 → 응답` 흐름을 볼 수 있게 한다.
+
+```mermaid
+flowchart TB
+    REASON["Reasoning card"]
+    GROUP["Grouped tool card"]
+    ITEMS["Ordered tool items"]
+    INPUT["Per-tool input"]
+    OUTPUT["Per-tool result / error"]
+    ANSWER["Assistant response"]
+
+    REASON --> GROUP --> ITEMS
+    ITEMS --> INPUT
+    ITEMS --> OUTPUT
+    GROUP --> ANSWER
+```
+
+**표현 규칙**
+
+| 레벨 | 표시 방식 | 클릭 시 |
+| --- | --- | --- |
+| **Reasoning** | 진행 중 생각/정리 카드를 별도 entry로 표시 | 도구 묶음 사이에도 독립적으로 남음 |
+| **Tool group** | 사용된 도구 개수와 상태를 요약한 접힘 카드 | 하위 tool item 목록을 펼침 |
+| **Tool item** | 도구명 + 실행 순서 + 성공/실패 | 입력/결과 상세를 각각 펼침 |
+| **Input panel** | tool input JSON/raw input | 필요할 때만 노출 |
+| **Result panel** | 도구 결과 또는 오류 메시지 | 실패는 해당 item에만 국한 |
+
+**현재 구현 상태 규칙**
+
+- `tool_start`가 오면 group card가 먼저 생성되고, assistant 본문보다 앞에 보일 수 있다.
+- 각 도구는 `toolUseId`, `displayOrder`를 가지므로 하위 목록 순서가 안정적이다.
+- 인접한 tool round라도 그 사이에 `assistant_round`가 있으면 별도 묶음으로 유지한다.
+- 완료된 도구 묶음은 접힘 상태로 유지되고, 필요 시에만 펼친다.
+- `spawn sh ENOENT` 같은 실행 실패는 그룹 전체가 아니라 해당 tool item 실패로만 표시한다.
+
+**레퍼런스 처리 방식**
+
+| 시스템 | 관찰된 처리 방식 | LVIS 반영 |
+| --- | --- | --- |
+| **claw-code** | tool_use / tool_result를 순서 있는 스트림 이벤트로 유지 | group card는 UI 표현 계층에서만 형성 |
+| **OpenHarness** | 실행 run 단위를 구조화해 추적 | LVIS도 tool round를 `groupId` 단위로 추적 |
+| **Paperclip / PaperclipAI** | thinking, tool call, tool result, assistant를 분리 기록 | reasoning card와 assistant round를 분리 유지 |
+
+---
+
 ### 4.6 Source Tree Layout & Module Boundaries — Phase 3
 
-Phase 3 리팩터 기준 `lvis-app/src/` 모듈 경계. Phase 1~2 의 `src/agent/` (11 파일 / 7 관심사) 와 `src/core/` (permissions 스택 + 엔진 혼재) 의 과부하를 해소하고, OpenHarness 비교 연구(`docs/blueprints/openharness-selective-borrow-plan.md`) 결과로 도출한 **단일 관심사 디렉터리** 원칙을 적용한다.
+Phase 3 리팩터 기준 `lvis-app/src/` 모듈 경계다. Phase 1~2의 `src/agent/` / `src/core/` 과부하를 해소하고, OpenHarness 비교 연구 결과를 반영한 **단일 관심사 디렉터리** 원칙을 적용한다.
 
 #### 4.6.1 Canonical Directory Map
 
 ```
 lvis-app/src/
 ├── main.ts, boot.ts, preload.ts, renderer.tsx, ipc-bridge.ts,
-│   plugin-ui-host.tsx, taskService.ts                        # 엔트리/브릿지
+│   plugin-ui-host.tsx, taskService.ts                        # 엔트리 / 브릿지
 │
-├── engine/        # 에이전트 루프 + LLM 프로바이더 (구 src/agent/ 일부)
+├── engine/        # 에이전트 루프 + LLM 프로바이더
 │   ├── conversation-loop.ts, conversation-history.ts, auto-compact.ts
-│   └── llm/       # claude/openai/gemini provider + factory
+│   └── llm/       # claude / openai / gemini provider + factory
 │
-├── tools/         # 1-file-per-tool (Tier S3 BaseTool 패턴)
-│   ├── base.ts            # BaseToolRegistry + BaseTool abstract (Tier S3)
-│   ├── executor.ts        # 기존 tool-executor (migrated)
+├── tools/         # 1-file-per-tool
+│   ├── base.ts
+│   ├── executor.ts
 │   ├── knowledge-search.ts
-│   ├── bash.ts            # SafeBashExecutor (Tier A1)
-│   └── untrusted-banner.ts # Tier S5 wrap helper
+│   ├── bash.ts
+│   └── untrusted-banner.ts
 │
 ├── prompts/       # 시스템 프롬프트 조립
 │
-├── hooks/         # PreTool/PostTool 인터셉트
-│   ├── hook-runner.ts            # 기존 function-hook API (유지)
+├── hooks/         # PreTool / PostTool 인터셉트
+│   ├── hook-runner.ts
 │   ├── post-turn-hook-chain.ts
-│   ├── types.ts / schemas.ts     # Zod discriminated union (Tier A4)
-│   ├── external-executor.ts      # Command + HTTP hook 실행기 (Tier A4)
-│   └── config-loader.ts          # ~/.lvis/hooks.json + admin-dir merge
+│   ├── types.ts / schemas.ts
+│   ├── external-executor.ts
+│   └── config-loader.ts
 │
-├── permissions/   # 권한 스택 (구 src/core/ 에서 분리)
+├── permissions/   # 권한 스택
 │   ├── permission-manager.ts, permissions-store.ts, policy-store.ts,
 │   │   approval-gate.ts, agent-action-requester.ts,
-│   │   sensitive-paths.ts        # Tier S1+S2 SENSITIVE_PATH_PATTERNS
+│   │   sensitive-paths.ts
 │
-├── sandbox/       # 파일 경계 강제 (leaf)
-│   └── path-validator.ts         # Tier A3 realpath + boundary check
+├── sandbox/       # 파일 경계 강제
+│   └── path-validator.ts
 │
 ├── memory/        # §5 파일 기반 기억
 │
-├── audit/         # 감사 로그 / DLP 필터 (구 src/agent/ 에서 분리)
+├── audit/         # 감사 로그 / DLP 필터
 │   └── audit-logger.ts, dlp-filter.ts
 │
 ├── core/          # 남은 cross-cutting
 │   ├── keyword-engine.ts, route-engine.ts, proactive-engine.ts,
-│   │   tool-registry.ts          # 기존 레거시 (점진적 BaseToolRegistry 마이그레이션)
-│   └── network-guard.ts          # Tier A2 SSRF defense
+│   │   tool-registry.ts
+│   └── network-guard.ts
 │
-├── mcp/           # Model Context Protocol 클라이언트 (기존 유지)
+├── mcp/           # Model Context Protocol 클라이언트
 │
-├── plugins/       # 플러그인 런타임 (구 plugin-runtime/)
+├── plugins/       # 플러그인 런타임
 │   └── runtime.ts, registry.ts, marketplace.ts, deployment-guard.ts, types.ts
 │
 ├── data/, main/, lib/, components/ui/, ui/, __tests__/
@@ -1122,29 +1132,30 @@ lvis-app/src/
 #### 4.6.2 Module Boundary Rules
 
 | 디렉터리 | 허용되는 의존 | 금지 |
-|---|---|---|
+| --- | --- | --- |
 | `engine/` | `permissions/`, `hooks/`, `prompts/`, `tools/`, `audit/`, `memory/`, `mcp/`, `core/`, `plugins/`, `engine/llm/` | DOM, `renderer.tsx`, `components/` |
 | `tools/` | `permissions/`, `sandbox/`, `core/network-guard.ts`, `hooks/` | `engine/`, `renderer.tsx` |
 | `prompts/` | `memory/`, `data/` | `engine/`, `renderer.tsx` |
-| `hooks/` | `permissions/`, `audit/`, `core/network-guard.ts` | `engine/` (hooks are called BY engine) |
+| `hooks/` | `permissions/`, `audit/`, `core/network-guard.ts` | `engine/` (hooks are called by engine) |
 | `permissions/` | `data/settings-store.ts`, `audit/` | `engine/`, `tools/`, `renderer.tsx` |
 | `sandbox/` | Node stdlib only (leaf) | 모든 상위 |
 | `memory/` | `data/` | `engine/`, `tools/` |
 | `audit/` | `data/` | `engine/`, `tools/` |
 | `core/` | `permissions/`, `memory/`, `tools/`, `plugins/` | `engine/`, `renderer.tsx` |
-| `plugins/` | `permissions/`, `hooks/`, `data/`, `mcp/` | `engine/` 직접 (HostApi 경유) |
+| `plugins/` | `permissions/`, `hooks/`, `data/`, `mcp/` | `engine/` 직접 호출 (HostApi 경유) |
 | `main/` | Node stdlib + Electron main API | renderer 프로세스 코드 |
 | `mcp/` | `permissions/`, `core/network-guard.ts` | `renderer.tsx` |
 
-**원칙**:
-1. **하향 의존만** — 각 모듈은 "더 작은 책임" 방향으로만 의존
-2. **`engine/` 는 조립자** — tools/prompts/hooks/permissions 호출, 그 반대 금지
-3. **`sandbox/`, `permissions/`, `memory/`, `audit/` 는 leaf 성격** — business 모듈 import 금지
-4. **`renderer.tsx` 는 IPC 만** — 메인 프로세스 모듈 직접 import 금지
+**원칙**
 
-#### 4.6.3 관련 blueprint
+1. **하향 의존만** — 각 모듈은 더 작은 책임 방향으로만 의존한다.
+2. **`engine/` 는 조립자** — tools / prompts / hooks / permissions를 호출하되, 그 반대는 금지한다.
+3. **`sandbox/`, `permissions/`, `memory/`, `audit/` 는 leaf 성격** — business 모듈 import를 받지 않는다.
+4. **`renderer.tsx` 는 IPC만 사용** — main-process 모듈 직접 import 금지.
 
-- `docs/blueprints/openharness-selective-borrow-plan.md` — Tier S/A 차용 근거
+#### 4.6.3 관련 청사진
+
+- `docs/blueprints/openharness-selective-borrow-plan.md` — Tier S / A 차용 근거
 - `docs/blueprints/phase3-folder-refactor-plan.md` — file-by-file migration map
 
 #### 4.6.4 불변 사항 (리팩터가 바꾸지 않는 것)
@@ -1224,23 +1235,26 @@ graph LR
 
 ### 6.1 Keyword Detecting Engine
 
-사용자 입력에서 의도·키워드·엔티티를 감지하는 첫 번째 관문.
+사용자 입력에서 의도·키워드·엔티티를 감지하는 첫 번째 관문. **Conversation Loop 본문보다 먼저** 실행되며, 빌트인 규칙과 플러그인이 등록한 keyword group을 함께 본다.
 
 ```mermaid
 flowchart LR
     INPUT["Raw Input"] --> TOKENIZER["Tokenizer<br/>(형태소 분석)"]
 
     TOKENIZER --> CMD_DETECT{"명령어 감지<br/>/command"}
-    TOKENIZER --> SKILL_DETECT{"스킬 키워드<br/>(플러그인 등록 키워드)"}
+    TOKENIZER --> SKILL_DETECT{"스킬 키워드 그룹<br/>(builtin + plugin registry)"}
     TOKENIZER --> MENTION_DETECT{"멘션 감지<br/>@사람, @팀"}
     TOKENIZER --> INTENT_DETECT{"의도 분류<br/>(질문/요청/지시)"}
     TOKENIZER --> ENTITY_EXTRACT["엔티티 추출<br/>(파일명, 날짜, 금액)"]
+    SKILL_DETECT --> AMBIG{"후보가 하나인가?"}
+    AMBIG -->|"No"| LLM_RECO["Lgenie Recommender<br/>(최적 후보 추천 / 애매하면 사용자 문의)"]
+    AMBIG -->|"Yes"| SKILL_RESOLVE["Skill Resolver<br/>(어떤 플러그인?)"]
 
     CMD_DETECT -->|"매칭"| CMD_EXEC["Command Executor"]
-    SKILL_DETECT -->|"매칭"| SKILL_RESOLVE["Skill Resolver<br/>(어떤 플러그인?)"]
     MENTION_DETECT -->|"매칭"| AGENT_RESOLVE["Agent Resolver<br/>(Agent Hub 라우팅)"]
     INTENT_DETECT --> ROUTE_HINT["Route Hint"]
     ENTITY_EXTRACT --> CTX["Context Package"]
+    LLM_RECO --> SKILL_RESOLVE
 
     ROUTE_HINT --> ROUTE_ENGINE["Agent Route Engine"]
     CTX --> ROUTE_ENGINE
@@ -1258,6 +1272,12 @@ flowchart LR
 | 4    | 의도 + 엔티티 | "출장 품의 작성해줘"    | Route Engine → Lgenie + 관련 도구 |
 | 5    | 일반 대화     | "안녕하세요"            | Lgenie 직접 세션                  |
 
+**확장 설계 메모**
+
+- 플러그인은 manifest/skill 등록 시 **keyword group** 을 동적으로 추가한다.
+- 동일 입력이 여러 스킬 그룹에 걸리면 Lgenie가 가장 적합한 후보를 추천한다.
+- 추천 confidence가 낮으면 사용자가 명시적으로 선택하도록 묻는다.
+
 ### 6.2 Agent Route Engine
 
 감지된 의도를 올바른 실행 경로로 전달하는 라우터.
@@ -1269,7 +1289,7 @@ flowchart TB
     ROUTE_IN --> RESOLVER{"Route Resolver"}
 
     RESOLVER -->|"로컬 스킬"| LOCAL["Local Skill Executor<br/>(플러그인 내장 기능)"]
-    RESOLVER -->|"에이전트 위임"| A2A["Agent Hub A2A<br/>(메시지 보드 전달)"]
+    RESOLVER -->|"에이전트 메시지/A2A"| A2A["Agent Hub Message Board<br/>(메시지 보드 전달)"]
     RESOLVER -->|"LLM 대화"| LGENIE["Lgenie Session<br/>(추론·요약·생성)"]
     RESOLVER -->|"복합 작업"| ORCHESTRATOR["Task Orchestrator<br/>(다중 스킬 조합)"]
     RESOLVER -->|"사업부 API"| MARKET["Marketplace API<br/>(사업부 시스템 호출)"]
@@ -1291,7 +1311,7 @@ flowchart TB
 1. Governance Policy Check   → 거버넌스 정책 위반 시 즉시 차단
 2. Permission Check          → 사원 권한 확인
 3. Local Skill Match         → 설치된 플러그인 스킬 매칭
-4. Agent Hub Routing         → @멘션 또는 A2A 위임
+4. Agent Hub Routing         → @멘션 또는 메시지 보드/A2A 상호작용
 5. Marketplace API           → 사업부 API 호출 필요 시
 6. Lgenie Fallback           → 위 모두 해당 없으면 LLM 직접 대화
 ```
@@ -1470,30 +1490,37 @@ flowchart LR
     end
 ```
 
-**Phase 1 구현: `BashAstValidator` (lvis-app/src/main/bash-ast-validator.ts)**
+| 위험 등급 | 패턴 예시 | 조치 |
+| --- | --- | --- |
+| **Critical** | `rm -rf /`, Fork bomb, `> /dev/sda`, `mkfs` | 즉시 차단 — 사용자 승인 불가 |
+| **High** | `sudo *`, `curl\|bash`, `chmod 777`, `chown root` | 차단 + 사유 표시. 사용자가 명시적으로 해제 가능 |
+| **Medium** | `rm -rf (상대경로)`, `kill -9`, pipe to `sh` | 사용자 승인 필요 (L3 Prompt) |
+| **Low** | `git push --force`, `npm install -g` | 기본 허용, 설정에서 승인 요구 가능 |
 
-7개 차단 패턴 + warn/deny 모드 분리:
+**Phase 1 구현: `BashAstValidator` (`lvis-app/src/main/bash-ast-validator.ts`)**
+
+7개 차단 패턴과 `warn` / `deny` 모드를 분리해 `lvis-app/src/tools/executor.ts` Step 2.5에서 실행한다.
 
 | Pattern ID | 정규식 패턴 | 차단 사유 |
-|------------|------------|---------|
-| `rm-rf-root` | `\brm\s+(-[rfRF]+\s+)+(\/\|~\|\$HOME\|\*)` | rm -rf 위험 경로 (/, ~, $HOME, *) |
+| --- | --- | --- |
+| `rm-rf-root` | `\brm\s+(-[rfRF]+\s+)+(\/\|~\|\$HOME\|\*)` | `rm -rf` 위험 경로 (`/`, `~`, `$HOME`, `*`) |
 | `curl-pipe-sh` | `\b(curl\|wget\|fetch)\b[^|]*\|\s*(sh\|bash\|zsh\|fish)` | 원격 스크립트 직접 실행 |
 | `sudo-escalation` | `\b(sudo\|su\|doas)\b` | 권한 상승 시도 |
 | `fork-bomb` | `:\(\)\s*\{\s*:\|:\s*&\s*\}\s*;\s*:` | fork bomb |
-| `eval-untrusted` | `\beval\s+\$?\{?[^}]*\}?` | eval 위험 사용 |
+| `eval-untrusted` | `\beval\s+\$?\{?[^}]*\}?` | `eval` 기반 위험 실행 |
 | `tty-injection` | `echo\s+-[ne]+\s+["'].*\\033` | TTY escape sequence injection |
 | `subst-pipe-shell` | `\$\([^)]+\)\s*\|\s*(sh\|bash)` | command substitution → shell pipe |
 
-**warn/deny 모드:**
+**warn / deny 모드**
 
 | 모드 | 동작 | 설정 |
-|------|------|------|
+| --- | --- | --- |
 | `deny` (기본) | 패턴 매칭 시 실행 차단, `ValidationResult.decision = "deny"` | `settings.governance.bashValidationMode: "deny"` |
-| `warn` | 패턴 매칭 시 경고만, 실행은 허용 | `settings.governance.bashValidationMode: "warn"` |
+| `warn` | 패턴 매칭 시 경고만 남기고 실행은 허용 | `settings.governance.bashValidationMode: "warn"` |
 
-`tool-executor.ts` **Step 2.5**에서 호출 (ToolRegistry 조회 후, Permission check 전). Bash 계열 도구가 아닌 경우 즉시 `allow` 반환.
+**AST 분석이 L2 Permission Check보다 먼저 실행되는 이유**: Permission 규칙에 `allow: ["Bash(*)"]`로 전체 허용이 설정되어 있더라도, Critical/High 패턴은 AST 분석에서 차단한다. 이 계층은 Governance Policy와 동급의 불변 안전 경계이다.
 
-**AST 분석이 L2 Permission Check보다 먼저 실행되는 이유**: Permission 규칙에 `allow: ["Bash(*)"]`로 전체 허용이 설정되어 있더라도, 7개 패턴은 AST 분석에서 차단한다. 이 계층은 Governance Policy와 동급의 불변 안전 경계이다.
+**Windows shell 주의사항**: `Bash` 도구는 내부적으로 POSIX shell을 기대하므로, Windows에서 `sh` shim이 없으면 `spawn sh ENOENT`가 발생할 수 있다. 이 경우 전체 대화를 실패로 만들지 말고, 해당 tool item만 실패 처리하고 플랫폼 불일치 힌트를 함께 노출한다.
 
 ---
 
@@ -1501,7 +1528,7 @@ flowchart LR
 
 philosophy.md: _"플러그인이 아니라 코어에 가까운 기능으로 두는 것이 맞을 수 있습니다."_
 
-Proactive Engine은 플러그인이 아닌 **클라이언트 코어**에 위치한다. 매일 아침 출근 시 자동으로 오늘의 브리핑을 생성한다.
+Proactive Engine은 플러그인이 아닌 **클라이언트 코어**에 위치한다. 목표 설계는 단순 아침 브리핑을 넘어, **설정 값 기반 heartbeat** 와 **조건 기반 heartbeat** 로 브리핑/알림을 발생시키는 것이다. 현재 구현 단계는 `generateBriefing()` 중심의 브리핑 생성과 관련 데이터 수집 경로를 갖고 있다.
 
 ```mermaid
 flowchart TB
@@ -1540,6 +1567,29 @@ flowchart TB
     ACTION_SUGGEST --> NOTIFICATION
     ACTION_SUGGEST --> TASK_CREATE
 ```
+
+**트리거 모델**
+
+```mermaid
+flowchart LR
+    SETTINGS["사용자 설정<br/>(출근 시각 · heartbeat 간격 · quiet hours)"]
+    EVENTS["이메일 · 캘린더 · 태스크 · Agent Hub · Approval Queue"]
+    SCHEDULED["설정 값 기반 heartbeat"]
+    CONDITIONAL["조건 기반 heartbeat"]
+    TRIGGER["Proactive Trigger"]
+    OUTPUT["Briefing / Notification / Reminder"]
+
+    SETTINGS --> SCHEDULED
+    EVENTS --> CONDITIONAL
+    SCHEDULED --> TRIGGER
+    CONDITIONAL --> TRIGGER
+    TRIGGER --> OUTPUT
+```
+
+| 트리거 유형 | 예시 | 의도 |
+| --- | --- | --- |
+| **설정 값 기반 heartbeat** | 출근 직후, 30분 간격, 점심 이후 재알림 | 사용자가 기대하는 리듬으로 브리핑/리마인드 제공 |
+| **조건 기반 heartbeat** | 승인 대기 증가, 마감 임박, 긴급 메일, Agent Hub 중요 게시물 | 이벤트가 생겼을 때만 필요한 알림 발생 |
 
 **브리핑 예시:**
 
@@ -1751,26 +1801,6 @@ graph TB
 
 ### 9.2 Plugin Manifest Spec
 
-**`python.runtime` 필드 (Phase 1 신규):**
-
-Python 런타임이 필요한 플러그인은 manifest에 `python` 섹션을 선언한다. 호스트 앱이 uv venv를 자동 셋업하므로 사용자가 직접 Python을 설치할 필요가 없다.
-
-```json
-{
-  "python": {
-    "managedBy": "lvis-app",
-    "requirementsLock": "python-requirements.lock"
-  }
-}
-```
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `managedBy` | `"lvis-app"` | 런타임 관리 주체. `"lvis-app"` 고정 값 — uv venv 자동 셋업 |
-| `requirementsLock` | string | `python-requirements.lock` 파일 경로 (플러그인 루트 기준). uv pip sync --frozen 에 사용 |
-
-구현 참조: `lvis-plugin-pageindex/plugin.json`, `lvis-app/src/main/python-runtime.ts`
-
 ```json
 {
     "id": "com.lge.meeting-recorder",
@@ -1816,6 +1846,24 @@ Python 런타임이 필요한 플러그인은 manifest에 `python` 섹션을 선
     }
 }
 ```
+
+**`python` 섹션 — 런타임 의존 플러그인 명세**
+
+Python 런타임이 필요한 플러그인은 manifest에 `python` 섹션을 선언할 수 있다. 호스트 앱은 `lvis-app/src/main/python-runtime.ts`의 bootstrap 경로를 통해 `uv` 기반 venv를 준비하므로, 목표 설계는 사용자에게 Python 수동 설치를 요구하지 않는 것이다.
+
+```json
+{
+  "python": {
+    "managedBy": "lvis-app",
+    "requirementsLock": "python-requirements.lock"
+  }
+}
+```
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `managedBy` | `"lvis-app"` | 런타임 관리 주체. 호스트가 venv provisioning을 맡는다는 선언 |
+| `requirementsLock` | string | `python-requirements.lock` 경로 (플러그인 루트 기준). `uv pip sync --frozen` 입력 |
 
 ### 9.3 UI Slot System
 
@@ -2013,13 +2061,9 @@ sequenceDiagram
     CLIENT->>SERVER: shutdown (세션 종료)
 ```
 
----
-
 ### 9.6 Plugin Deployment Model — Managed vs User-Installed
 
-> **Reference**: 상세 설계는 [lvis-app/docs/architecture/plugin-deployment-model.md](../../lvis-app/docs/architecture/plugin-deployment-model.md) 참조.
-
-LVIS 플러그인은 두 가지 deployment 모드를 구분한다. 동일 Plugin System(§9.1-9.5) 위에서 작동하지만 **lifecycle, 권한, UI, 감사**가 모두 다르다.
+상세 설계는 `docs/architecture/plugin-deployment-model.md`를 따른다. 동일한 Plugin System 위에서 동작하지만 **lifecycle, 권한, UI, 감사**가 모두 다른 두 deployment 모드를 구분한다.
 
 ```mermaid
 graph TB
@@ -2040,7 +2084,7 @@ graph TB
     end
 
     subgraph "PluginRuntime"
-        GUARD["PluginDeploymentGuard<br/>(uninstall/disable 정책 체크)"]
+        GUARD["PluginDeploymentGuard<br/>(uninstall / disable 정책 체크)"]
     end
 
     M4 --> GUARD
@@ -2048,23 +2092,23 @@ graph TB
     GUARD --> RUN["공통 runtime<br/>(HostApi 동일)"]
 ```
 
-**핵심 구분**:
+**핵심 구분**
 
 | 항목 | managed | user |
-|---|---|---|
+| --- | --- | --- |
 | **소스** | 사내 marketplace API (mTLS + SSO) | 사용자 직접 (URL, local file, 사내 store의 자율 항목) |
 | **설치 시점** | LVIS boot 시 Managed Policy Sync에서 자동 | 사용자 명시 액션 |
-| **삭제 권한** | **회사만** (`PluginDeploymentGuard.canUninstall()` = false) | 사용자 자유 |
+| **삭제 권한** | 회사만 (`PluginDeploymentGuard.canUninstall()` = false) | 사용자 자유 |
 | **업데이트** | 정책 push 시 강제 | 사용자 opt-in |
-| **서명 검증** | LG Internal Root CA **필수** (실패 시 load 거부) | 정책에 따라 (warn / require / off) |
+| **서명 검증** | LG Internal Root CA 필수 (실패 시 load 거부) | 정책에 따라 `warn` / `require` / `off` |
 | **Directory** | `~/.lvis/plugins/managed/<id>/<version>/` | `~/.lvis/plugins/user/<id>/` |
 | **Manifest 필드** | `deployment: "managed"`, `publisher`, `signature`, `publishedAt` | `deployment: "user"` |
-| **Settings UI** | 🔒 lock icon + "회사 배포" 표시 + 제거/비활성화 버튼 회색 처리 | 정상 토글 |
-| **차단 시나리오** | 정책 deny_list 발행 → 다음 boot 시 자동 제거 | 정책 매치 시 즉시 비활성화 |
-| **감사 로깅** | Managed sync 이벤트가 사내 감사 endpoint로도 push 대상 | 로컬 audit-service만 |
-| **오프라인** | 최근 정책 cache (TTL 7일), 30일 초과 시 보수 모드 (user 설치 deny) | 항상 사용 가능 |
+| **Settings UI** | lock icon + "회사 배포" 표시, 제거 / 비활성화 버튼 잠금 | 정상 토글 |
+| **차단 시나리오** | 정책 `deny_list` 발행 → 다음 boot 시 자동 제거 | 정책 매치 시 즉시 비활성화 |
+| **감사 로깅** | managed sync 이벤트는 사내 감사 endpoint push 대상 | 로컬 audit log 중심 |
+| **오프라인** | 최근 정책 cache (TTL 7일), 30일 초과 시 보수 모드 | 항상 사용 가능 |
 
-**Manifest 확장** (§9.2 보강):
+**Manifest 확장 (§9.2 보강)**
 
 ```json
 {
@@ -2084,36 +2128,37 @@ graph TB
 }
 ```
 
-`user` deployment 매니페스트는 `signature`가 **optional**이며, 정책에서 `require_user_signature: true`이면 필수.
+`user` deployment manifest는 `signature`가 optional이며, 정책에서 `requireUserSignature: true`일 때 필수로 승격된다.
 
-**Boot Sequence 확장** (§4.2 보강):
+**Boot Sequence 확장 (§4.2 보강)**
 
 ```
 Step 0:    Python Runtime Bootstrap                       [Phase 1 완료]
-Step 0.5:  Managed Policy Sync                            [신규 Phase 1.5]
+Step 0.5:  Managed Policy Sync                            [Phase 1.5 설계]
            ├─ ssoToken 확보 (§14.2 Auth)
            ├─ fetchPolicy(sso) from IT Admin API
            ├─ verifyPolicySignature() — LG CA 공개키
            ├─ policy cache 갱신 (7일 TTL)
            └─ offline fallback: last-valid cache
-Step 0.6:  Managed Plugin Installer                       [신규 Phase 1.5]
+Step 0.6:  Managed Plugin Installer                       [Phase 1.5 설계]
            ├─ diff: installed/managed vs policy.enforcements
            ├─ install / update / remove
            ├─ hash + signature 검증 → 파일 무결성
            └─ 실패 시 기존 버전 유지 + 사용자 알림
-Step 1-8:  (기존 boot sequence)
+Step 1-8:  기존 boot sequence
 ```
 
-**Runtime 제약**: `PluginRuntime.uninstall(id)` 및 `.disable(id)` 호출은 `PluginDeploymentGuard` 통과 후만 실행된다. managed 플러그인은 기본적으로 모든 uninstall/disable 요청을 거부한다 (IT admin API에서만 가능).
+**Runtime 제약**: `PluginRuntime.uninstall(id)` 및 `disable(id)`는 `PluginDeploymentGuard` 통과 후만 실행된다. managed 플러그인은 기본적으로 uninstall / disable 요청을 거부한다.
 
-**User Install Policy**: 정책은 다섯 가지 중 하나를 선언한다:
-- `allow`: 모든 user 설치 허용
-- `deny`: 모든 user 설치 차단 (kiosk 모드)
-- `allowlist`: 지정 id만 허용
-- `denylist`: 지정 id 제외 모두 허용
-- `ask`: 사용자 승인 + IT 알림 (고위험 환경)
+**User Install Policy**는 다섯 가지 중 하나를 선언한다.
 
-**정책 파일 구조** (`~/.lvis/governance/managed-policy.json`):
+- `allow` — 모든 user 설치 허용
+- `deny` — 모든 user 설치 차단 (kiosk 모드)
+- `allowlist` — 지정 id만 허용
+- `denylist` — 지정 id 제외 모두 허용
+- `ask` — 사용자 승인 + IT 알림
+
+**정책 파일 구조** (`~/.lvis/governance/managed-policy.json`)
 
 ```json
 {
@@ -2142,13 +2187,11 @@ Step 1-8:  (기존 boot sequence)
 }
 ```
 
-**Phase 분리**:
-- **Phase 1.5**: DeploymentMode 타입 + 매니페스트 확장 + PluginDeploymentGuard 경량 구현 + UI 잠금 표시. 서명 검증 없이 `deployment` 필드만으로 구분 (신뢰된 로컬 환경 가정)
+**Phase 분리**
+
+- **Phase 1.5**: deployment mode 타입 + manifest 확장 + `PluginDeploymentGuard` 경량 구현 + UI 잠금 표시
 - **Phase 2**: Managed Policy Sync + Installer + IT Admin API 실연결 + SSO 토큰 경로
 - **Phase 3**: ECDSA 서명 검증 + LG CA 체인 + 오프라인 cache TTL + 사내 감사 endpoint 연동
-- **Phase 4**: User allowlist/denylist UI + remote emergency deny + kiosk 모드 + 멀티 CA 지원
-
-자세한 파일 경로·코드 시그니처·edge case 분석은 [lvis-app/docs/architecture/plugin-deployment-model.md](../../lvis-app/docs/architecture/plugin-deployment-model.md) 참조.
 
 ---
 
@@ -2498,22 +2541,22 @@ flowchart LR
 
 ### 13.3 Audit Data Flow — Phase 1
 
-Phase 1에서 감사 로깅은 두 컴포넌트가 **병렬로** 운용된다.
+Phase 1 감사 로깅은 두 컴포넌트가 병렬로 운용된다.
 
 | 컴포넌트 | 파일 | 방식 | 용도 |
-|---------|------|------|------|
-| `AuditLogger` (sync) | `lvis-app/src/agent/audit-logger.ts` | 동기 write — tool_executor 내 즉시 기록 | 도구 실행 즉시 감사 (latency 우선) |
-| `AuditService` (async) | `lvis-app/src/main/audit-service.ts` | 비동기 큐 → 1초 주기 flush | 대용량 이벤트 수집 (I/O 부담 격리) |
+| --- | --- | --- | --- |
+| `AuditLogger` (sync) | `lvis-app/src/audit/audit-logger.ts` | 동기 write — tool execution 경로에서 즉시 기록 | 도구 실행 / 정책 차단 즉시 감사 |
+| `AuditService` (async) | `lvis-app/src/main/audit-service.ts` | 비동기 큐 → 주기 flush | 대용량 이벤트 수집, I/O 부담 분리 |
 
-**AuditService 상세:**
+**AuditService 상세**
 
 - append-only NDJSON (`~/.lvis/audit/audit.ndjson`)
-- 1초 주기 flush (`setInterval(1000)`)
+- 1초 주기 flush
 - 50MB rotation (파일 크기 초과 시 `.YYYYMMDD-HHMMSS.ndjson`으로 rename)
-- 큐 최대 10,000 이벤트 — 초과 시 oldest drop (디스크 I/O 장애 시 도구 실행 차단 방지)
+- 큐 최대 10,000 이벤트 — 초과 시 oldest drop
 - 이벤트 타입: `tool_call` | `permission_decision` | `bash_validation` | `compact` | `error`
 
-**AuditLogger는 AuditService로 대체되지 않음** — 두 컴포넌트가 상호 보완적으로 운용된다. AuditLogger는 `tool-executor.ts`의 동기 경로에서 즉시 기록하고, AuditService는 PostTurnHookChain hook ④에서 비동기로 추가 기록한다.
+`AuditLogger`와 `AuditService`는 대체 관계가 아니다. 전자는 동기 경로에서 즉시 기록하고, 후자는 post-turn / background 감사 이벤트를 비동기로 수집한다.
 
 ---
 
@@ -2710,12 +2753,12 @@ flowchart TB
 | `PluginHooks` (Pre/PostToolUse)  | Hook Runner           | 동일 패턴 채용                   |
 | `GlobalToolRegistry`             | Tool Registry         | + Plugin 동적 등록·해제          |
 | `PermissionPolicy`               | Permission Manager    | + RBAC + Governance Policy 통합  |
-| `Session` persistence            | Session Manager       | + Memory System 연동             |
+| `Session` persistence            | Session Manager       | + 세션 히스토리 저장·복구 + Memory System 연동 |
 | `HookRunner`                     | Hook Runner           | + Event Emitter (Proactive) 추가 |
 | Query Loop (Core Cycle)          | Conversation Query Loop (§4.5) | + 승인 큐 분기 + Proactive Trigger + Memory Extraction |
 | `StreamingToolExecutor`          | StreamingToolExecutor | + Governance Policy 차단 + Approval Queue 연동 |
-| Auto-compact                     | AutoCompact           | 동일 패턴 — Lgenie 자체 요약 |
-| Post-sampling hooks              | Post-Turn Hooks       | + Proactive Trigger + Plugin PostTurn 추가 |
+| Auto-compact                     | AutoCompact           | 목표: 40% 기본값/20% 단위 설정, 현재: 80k token threshold + on/off |
+| Post-sampling hooks              | Post-Turn Hooks       | 현재 chain 유지 + Proactive Trigger + Plugin PostTurn 목표 설계 병행 |
 | 3-layer permission model         | Tool Permission Model (§6.3) | + L1 Registry Filter (LLM에서 도구 은닉) + Governance 통합 |
 | Tool categorization (43 tools)   | Tool Registry & Taxonomy (§6.4) | LVIS 도메인 도구 + 플러그인·MCP 동적 등록 |
 | Bash AST safety analysis         | Command Safety (§6.5) | + 위험 등급 4단계 + Governance 불변 경계 |

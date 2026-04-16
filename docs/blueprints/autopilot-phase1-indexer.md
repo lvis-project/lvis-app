@@ -263,7 +263,7 @@ t=1.30s  [boot 완료]
 | `lvis-plugin-pageindex/src/types.ts` | IndexMode 확장, ChunkMeta/SearchHit/HybridResult 신규 |
 | `lvis-app/package.json` | postinstall, extraResources, mac.entitlements |
 | `lvis-plugin-pageindex/plugin.json` | python.runtime 필드 |
-| `lvis-app/docs/architecture/architecture.md` | §4.2 Step 0, §4.4 갱신, §9 manifest 필드 |
+| `docs/architecture/architecture.md` | §4.2 Step 0, §4.4 갱신, §9 manifest 필드 |
 | `TODO.md` | Section 15 갱신 (Agent 7) |
 
 ### 7.1 Python worker HTTP API (16 엔드포인트)
