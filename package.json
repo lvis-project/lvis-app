@@ -30,7 +30,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
+    "@azure/msal-node": "^5.1.2",
     "@google/generative-ai": "^0.24.1",
+    "@lvis/plugin-calendar": "file:../lvis-plugin-calendar",
     "@lvis/plugin-email": "file:../lvis-plugin-email",
     "@lvis/plugin-meeting": "file:../lvis-plugin-meeting",
     "@lvis/plugin-pageindex": "file:../lvis-plugin-pageindex",
