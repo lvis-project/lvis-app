@@ -17,6 +17,7 @@ import type { GenericMessage, TokenUsage } from "../engine/llm/types.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
+import type { SettingsService } from "../data/settings-store.js";
 
 export interface PostTurnHookContext {
   sessionId: string;
@@ -35,6 +36,7 @@ export interface PostTurnHookChainDeps {
   memoryManager?: MemoryManager;
   auditLogger?: AuditLogger;
   idleScheduler?: IdleSchedulerService;
+  settingsService?: SettingsService;
 }
 
 export class PostTurnHookChain {
@@ -52,7 +54,8 @@ export class PostTurnHookChain {
     // 1. Auto-Compact (§4.5.4)
     // shouldCompact()는 cumulativeUsage.inputTokens ≥ thresholdTokens 판단
     try {
-      if (shouldCompact(ctx.cumulativeUsage)) {
+      const autoCompactEnabled = this.deps.settingsService?.get("chat").autoCompact ?? true;
+      if (autoCompactEnabled && shouldCompact(ctx.cumulativeUsage)) {
         const { messages: compacted, result: cr } = compactMessages(ctx.messages);
         if (cr.compacted) {
           compactedMessages = compacted;

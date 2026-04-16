@@ -210,6 +210,10 @@ ${briefingData}
     return { ...this.cumulativeUsage };
   }
 
+  private isAutoCompactEnabled(): boolean {
+    return this.deps.settingsService.get("chat").autoCompact ?? true;
+  }
+
   /** 세션 목록 조회 — §4.5.7 */
   listSessions(): Array<{ id: string; modifiedAt: Date }> {
     return this.deps.memoryManager.listSessions();
@@ -282,7 +286,7 @@ ${briefingData}
       // PostTurnHookChain에서 이미 처리하므로 fallback에서도 호출하지 않는다.
       // PostTurnHookChain을 주입한 경우와 fallback 모두 memory 추출은
       // hook chain의 memory-extract 단계에서만 일어난다.
-      if (shouldCompact(this.cumulativeUsage)) {
+      if (this.isAutoCompactEnabled() && shouldCompact(this.cumulativeUsage)) {
         const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
         if (cr.compacted) {
           this.history.clear();
