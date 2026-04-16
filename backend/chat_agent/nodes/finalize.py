@@ -17,5 +17,6 @@ def finalize_turn(state: dict[str, Any]) -> dict[str, Any]:
             "toolCalls": result.tool_calls,
             "stopReason": result.stop_reason,
             "usage": result.usage,
+            "category": resolved.selected_domain,
         }
     }

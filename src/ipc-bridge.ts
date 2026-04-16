@@ -99,17 +99,68 @@ export function registerIpcHandlers(
     return { ok: true };
   });
 
+  ipcMain.handle("lvis:chat:clear-sessions", () => {
+    conversationLoop.clearAllSessions();
+    return { ok: true };
+  });
+
   ipcMain.handle("lvis:chat:sessions", () => ({
     current: conversationLoop.getSessionId(),
     sessions: conversationLoop.listSessions().slice(0, 20).map((s) => ({
       id: s.id,
       modifiedAt: s.modifiedAt.toISOString(),
+      category: s.category,
+      title: s.title,
+      preview: s.preview,
+      messageCount: s.messageCount,
     })),
   }));
 
   ipcMain.handle("lvis:chat:load-session", (_e, sessionId: string) => {
     const loaded = conversationLoop.loadSession(sessionId);
-    return { ok: loaded, sessionId: loaded ? sessionId : null };
+    return {
+      ok: loaded,
+      sessionId: loaded ? sessionId : null,
+      messages: loaded ? conversationLoop.getHistory().getMessages() : [],
+    };
+  });
+
+  ipcMain.handle("lvis:chat:load-category", (_e, category: string) => {
+    const sessions = conversationLoop.listSessions();
+    const filtered = category === "all"
+      ? sessions
+      : sessions.filter((session) => session.category === category);
+
+    if (filtered.length === 0) {
+      return {
+        ok: false,
+        category,
+        sessionId: null,
+        messages: [],
+      };
+    }
+
+    const latest = filtered[0] ?? null;
+    if (latest) {
+      conversationLoop.loadSession(latest.id);
+    }
+
+    const mergedMessages = filtered
+      .slice()
+      .sort((left, right) => left.modifiedAt.getTime() - right.modifiedAt.getTime())
+      .flatMap((session) => {
+        const messages = memoryManager.loadSession(session.id);
+        return Array.isArray(messages)
+          ? messages
+          : [];
+      });
+
+    return {
+      ok: true,
+      category,
+      sessionId: latest?.id ?? null,
+      messages: mergedMessages,
+    };
   });
 
   // ─── Memory ─────────────────────────────────────

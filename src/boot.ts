@@ -368,11 +368,21 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     memoryManager,
     toolRegistry,
     getPluginSchemas: () => {
+      const plugins = pluginRuntime.listPluginSummaries();
       const methods = pluginRuntime.listMethods();
-      if (methods.length === 0) return "";
+      if (plugins.length === 0) return "";
       return [
         "<active-plugins>",
         `활성 플러그인 메서드: ${methods.join(", ")}`,
+        "If the user asks what LVIS can do, answer with a numbered list by plugin.",
+        "For each plugin, describe its purpose and what is currently supported. Do not claim unsupported actions.",
+        "",
+        ...plugins.flatMap((plugin, index) => [
+          `${index + 1}. ${plugin.name} (${plugin.id})`,
+          `   - Purpose: ${plugin.description}`,
+          `   - Currently supported: ${formatPluginMethodCapabilities(plugin.methods)}`,
+          ...(plugin.publisher ? [`   - Publisher: ${plugin.publisher}`] : []),
+        ]),
         "</active-plugins>",
       ].join("\n");
     },
@@ -536,6 +546,50 @@ function buildPluginConfigOverrides(settings: SettingsService): Record<string, R
 }
 
 // ─── Tool Registration (범용) ───────────────────────
+
+function formatPluginMethodCapabilities(methods: string[]): string {
+  const labels = methods.map((method) => describePluginMethod(method));
+  return [...new Set(labels)].join(", ");
+}
+
+function describePluginMethod(method: string): string {
+  const labels: Record<string, string> = {
+    "meeting.start": "start a meeting capture session",
+    "meeting.pushChunk": "ingest meeting audio chunks",
+    "meeting.stop": "stop a meeting capture session",
+    "meeting.transcript": "read meeting transcripts",
+    "meeting.sessions": "list meeting sessions",
+    "email.status": "check email connection status",
+    "email.auth": "authenticate email access",
+    "email.list": "list inbox messages",
+    "email.read": "read email content",
+    "email.analyze": "analyze emails",
+    "email.reply": "draft or send email replies",
+    "email.getSentReplies": "list sent replies",
+    "email.getSentReply": "read a sent reply",
+    "email.startWatcher": "watch for new emails",
+    "email.stopWatcher": "stop email watching",
+    "email.getNotifications": "read email notifications",
+    "email.createEvent": "create calendar events from email context",
+    "calendar.status": "check calendar connection status",
+    "calendar.auth": "authenticate calendar access",
+    "calendar.list": "list calendar events",
+    "calendar.today": "show today's schedule",
+    "calendar.get": "read event details",
+    "calendar.create": "create calendar events or reservations",
+    "calendar.update": "update calendar events",
+    "calendar.delete": "delete calendar events",
+    "calendar.startWatcher": "watch schedule changes",
+    "calendar.stopWatcher": "stop schedule watching",
+    "index.scan": "scan and index documents",
+    "index.documents": "list indexed documents",
+    "index.folders": "list indexed folders",
+    "index.addFolder": "add folders to indexing",
+    "index.removeFolder": "remove folders from indexing",
+    "chat.preview": "preview answers using indexed knowledge",
+  };
+  return labels[method] ?? method.replace(/\./g, " ");
+}
 
 function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolRegistry): void {
   for (const method of pluginRuntime.listMethods()) {

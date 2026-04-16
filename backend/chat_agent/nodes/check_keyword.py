@@ -1,37 +1,24 @@
 from __future__ import annotations
 
 from typing import Any
-
-from .shared import ensure_state, has_domain_tool_result, infer_category_from_query, parse_classification
-
-CLASSIFICATION_SYSTEM_PROMPT = """
-You classify the latest user request for an assistant workflow.
-
-Return JSON only:
-{"category":"meeting|email|general","reason":"short reason","confidence":0.0}
-
-Rules:
-- meeting: the user asks about meetings, meeting notes, transcripts, minutes, summaries, or action items.
-- email: the user asks about email, inbox, Outlook, mail reading, mail reply, or mail analysis.
-- general: everything else.
-- Choose exactly one category.
-""".strip()
+from .shared import (
+    build_classification_prompt,
+    ensure_state,
+    has_domain_tool_result,
+    parse_classification,
+)
 
 
 async def check_keyword(state: dict[str, Any]) -> dict[str, Any]:
     resolved = ensure_state(state)
+    categories = resolved.plugin_categories
 
-    if has_domain_tool_result(resolved.messages, "meeting"):
-        return {
-            "selected_domain": "meeting",
-            "classification_reason": "meeting tool result already present",
-        }
-
-    if has_domain_tool_result(resolved.messages, "email"):
-        return {
-            "selected_domain": "email",
-            "classification_reason": "email tool result already present",
-        }
+    for category in categories:
+        if has_domain_tool_result(resolved.messages, category.id, categories):
+            return {
+                "selected_domain": category.id,
+                "classification_reason": f"{category.id} tool result already present",
+            }
 
     if not resolved.latest_user_query:
         return {
@@ -42,14 +29,14 @@ async def check_keyword(state: dict[str, Any]) -> dict[str, Any]:
     try:
         result = await resolved.provider.invoke_turn(
             model=resolved.model,
-            system_prompt=CLASSIFICATION_SYSTEM_PROMPT,
+            system_prompt=build_classification_prompt(categories),
             messages=[{"role": "user", "content": resolved.latest_user_query}],
             tools=[],
             max_tokens=120,
         )
-        classification = parse_classification(result.text, resolved.latest_user_query)
+        classification = parse_classification(result.text, resolved.latest_user_query, categories)
     except Exception:
-        classification = infer_category_from_query(resolved.latest_user_query)
+        classification = parse_classification("", resolved.latest_user_query, categories)
 
     return {
         "selected_domain": classification.category,

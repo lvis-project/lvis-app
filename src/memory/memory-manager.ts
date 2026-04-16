@@ -14,6 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
+import type { GenericMessage } from "../engine/llm/types.js";
 
 export interface MemoryManagerOptions {
   /** ~/.lvis 기본, 테스트 시 override */
@@ -25,6 +26,50 @@ export interface NoteEntry {
   title: string;
   content: string;
 }
+
+export type SessionCategory = string;
+
+export interface SessionSummary {
+  id: string;
+  modifiedAt: Date;
+  category: SessionCategory;
+  title: string;
+  preview: string;
+  messageCount: number;
+}
+
+interface SessionMetaFile {
+  category?: SessionCategory;
+  title?: string;
+  preview?: string;
+  messageCount?: number;
+}
+
+interface SaveSessionOptions {
+  category?: SessionCategory;
+}
+
+const TOOL_CATEGORY_BY_PREFIX: Record<string, SessionCategory> = {
+  meeting: "meeting",
+  email: "email",
+  calendar: "calendar",
+  index: "pageindex",
+};
+
+const TOOL_CATEGORY_BY_NAME: Record<string, SessionCategory> = {
+  chat_preview: "pageindex",
+  knowledge_search: "pageindex",
+  document_list: "pageindex",
+  document_structure: "pageindex",
+  document_page_content: "pageindex",
+};
+
+const _TEXT_CATEGORY_HINTS_UNUSED: Array<{ category: SessionCategory; tokens: string[] }> = [
+  { category: "meeting", tokens: ["회의", "회의록", "미팅", "녹취", "meeting"] },
+  { category: "email", tokens: ["메일", "이메일", "email", "outlook", "inbox"] },
+  { category: "calendar", tokens: ["일정", "캘린더", "calendar", "event", "schedule"] },
+  { category: "pageindex", tokens: ["문서", "자료", "검색", "index", "pageindex", "knowledge"] },
+];
 
 const DEFAULT_LVIS_MD = `# LVIS 컨텍스트
 
@@ -159,10 +204,12 @@ export class MemoryManager {
   // ─── Session Persistence (§5.2 ~/.lvis/sessions/) ─
 
   /** 세션 저장 — JSONL 형식 (§4.5.7) */
-  saveSession(sessionId: string, messages: unknown[]): void {
+  saveSession(sessionId: string, messages: unknown[], options?: SaveSessionOptions): void {
     const path = join(this.sessionsDir, `${sessionId}.jsonl`);
     const lines = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
     writeFileSync(path, lines, "utf-8");
+    const summary = this.buildSessionSummary(sessionId, messages as GenericMessage[], options);
+    writeFileSync(this.getSessionMetaPath(sessionId), JSON.stringify(summary, null, 2), "utf-8");
   }
 
   /** 세션 복원 */
@@ -174,13 +221,25 @@ export class MemoryManager {
   }
 
   /** 세션 목록 */
-  listSessions(): Array<{ id: string; modifiedAt: Date }> {
+  listSessions(): SessionSummary[] {
     if (!existsSync(this.sessionsDir)) return [];
     return readdirSync(this.sessionsDir)
       .filter((f) => f.endsWith(".jsonl"))
       .map((f) => {
         const stat = statSync(join(this.sessionsDir, f));
-        return { id: f.replace(".jsonl", ""), modifiedAt: stat.mtime };
+        const id = f.replace(".jsonl", "");
+        const messages = this.loadSession(id) as GenericMessage[] | null;
+        const summary = messages
+          ? this.readSessionSummary(id, messages, stat.mtime)
+          : {
+              id,
+              modifiedAt: stat.mtime,
+              category: "general" as const,
+              title: id,
+              preview: "",
+              messageCount: 0,
+            };
+        return summary;
       })
       .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
   }
@@ -189,6 +248,17 @@ export class MemoryManager {
   deleteSession(sessionId: string): void {
     const path = join(this.sessionsDir, `${sessionId}.jsonl`);
     if (existsSync(path)) unlinkSync(path);
+    const metaPath = this.getSessionMetaPath(sessionId);
+    if (existsSync(metaPath)) unlinkSync(metaPath);
+  }
+
+  clearSessions(): void {
+    if (!existsSync(this.sessionsDir)) return;
+    for (const filename of readdirSync(this.sessionsDir)) {
+      if (filename.endsWith(".jsonl") || filename.endsWith(".meta.json")) {
+        unlinkSync(join(this.sessionsDir, filename));
+      }
+    }
   }
 
   private ensureStructure(): void {
@@ -219,5 +289,101 @@ export class MemoryManager {
       .replace(/\s+/g, "-")
       .replace(/-+/g, "-")
       .slice(0, 60) || "untitled";
+  }
+
+  private getSessionMetaPath(sessionId: string): string {
+    return join(this.sessionsDir, `${sessionId}.meta.json`);
+  }
+
+  private readSessionSummary(sessionId: string, messages: GenericMessage[], modifiedAt: Date): SessionSummary {
+    const metaPath = this.getSessionMetaPath(sessionId);
+    let meta: SessionMetaFile | null = null;
+    if (existsSync(metaPath)) {
+      try {
+        meta = JSON.parse(readFileSync(metaPath, "utf-8")) as SessionMetaFile;
+      } catch {
+        meta = null;
+      }
+    }
+
+    const inferred = this.inferSessionMeta(messages);
+    return {
+      id: sessionId,
+      modifiedAt,
+      category: meta?.category ?? inferred.category,
+      title: meta?.title ?? inferred.title,
+      preview: meta?.preview ?? inferred.preview,
+      messageCount: meta?.messageCount ?? messages.length,
+    };
+  }
+
+  private buildSessionSummary(
+    sessionId: string,
+    messages: GenericMessage[],
+    options?: SaveSessionOptions,
+  ): SessionMetaFile {
+    const inferred = this.inferSessionMeta(messages);
+    return {
+      category: options?.category ?? inferred.category,
+      title: inferred.title,
+      preview: inferred.preview,
+      messageCount: messages.length,
+    };
+  }
+
+  private inferSessionMeta(messages: GenericMessage[]): Omit<SessionSummary, "id" | "modifiedAt" | "messageCount"> & { category: SessionCategory } {
+    const firstUser = messages.find((message): message is Extract<GenericMessage, { role: "user" }> => message.role === "user");
+    const firstAssistant = messages.find((message): message is Extract<GenericMessage, { role: "assistant" }> => message.role === "assistant" && !!message.content?.trim());
+
+    const titleSource = firstUser?.content?.trim() || firstAssistant?.content?.trim() || "새 대화";
+    const previewSource = firstAssistant?.content?.trim() || firstUser?.content?.trim() || "";
+
+    return {
+      category: this.inferCategoryFromMessages(messages),
+      title: this.compactText(titleSource, 36),
+      preview: this.compactText(previewSource, 80),
+    };
+  }
+
+  private inferCategoryFromMessages(messages: GenericMessage[]): SessionCategory {
+    for (const message of messages) {
+      if (message.role === "assistant" && message.toolCalls?.length) {
+        for (const toolCall of message.toolCalls) {
+          const category = this.inferCategoryFromToolName(toolCall.name);
+          if (category) return category;
+        }
+      }
+      if (message.role === "tool_result") {
+        const category = this.inferCategoryFromToolName(message.toolName);
+        if (category) return category;
+      }
+    }
+
+    return "general";
+
+    const text = messages
+      .filter((message): message is Extract<GenericMessage, { role: "user" | "assistant" }> => message.role !== "tool_result")
+      .map((message) => message.content.toLowerCase())
+      .join(" ");
+
+    if (["회의", "회의록", "미팅", "녹취", "meeting"].some((token) => text.includes(token))) return "meeting";
+    if (["메일", "이메일", "email", "outlook"].some((token) => text.includes(token))) return "email";
+    return "general";
+  }
+
+  private inferCategoryFromToolName(toolName?: string): SessionCategory | null {
+    if (!toolName) return null;
+    if (TOOL_CATEGORY_BY_NAME[toolName]) {
+      return TOOL_CATEGORY_BY_NAME[toolName];
+    }
+
+    const prefix = toolName.split("_")[0] ?? "";
+    return TOOL_CATEGORY_BY_PREFIX[prefix] ?? null;
+  }
+
+  private compactText(value: string, maxLength: number): string {
+    const compacted = value.replace(/\s+/g, " ").trim();
+    if (compacted.length <= maxLength) return compacted;
+    return `${compacted.slice(0, maxLength - 1)}…`;
   }
 }

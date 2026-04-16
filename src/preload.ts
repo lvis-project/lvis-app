@@ -17,6 +17,45 @@ const api = {
   chatHasProvider: async () => ipcRenderer.invoke("lvis:chat:has-provider") as Promise<boolean>,
   chatSend: async (input: string) => ipcRenderer.invoke("lvis:chat:send", input),
   chatNew: async () => ipcRenderer.invoke("lvis:chat:new"),
+  chatClearSessions: async () => ipcRenderer.invoke("lvis:chat:clear-sessions") as Promise<{ ok: true }>,
+  chatSessions: async () => ipcRenderer.invoke("lvis:chat:sessions") as Promise<{
+    current: string;
+    sessions: Array<{
+      id: string;
+      modifiedAt: string;
+      category: string;
+      title: string;
+      preview: string;
+      messageCount: number;
+    }>;
+  }>,
+  chatLoadSession: async (sessionId: string) => ipcRenderer.invoke("lvis:chat:load-session", sessionId) as Promise<{
+    ok: boolean;
+    sessionId: string | null;
+    messages: Array<{
+      role: "user" | "assistant" | "tool_result";
+      content?: string;
+      thought?: string;
+      toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
+      toolUseId?: string;
+      toolName?: string;
+      isError?: boolean;
+    }>;
+  }>,
+  chatLoadCategory: async (category: string) => ipcRenderer.invoke("lvis:chat:load-category", category) as Promise<{
+    ok: boolean;
+    category: string;
+    sessionId: string | null;
+    messages: Array<{
+      role: "user" | "assistant" | "tool_result";
+      content?: string;
+      thought?: string;
+      toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
+      toolUseId?: string;
+      toolName?: string;
+      isError?: boolean;
+    }>;
+  }>,
   onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:chat:stream", listener);

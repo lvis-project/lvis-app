@@ -1,0 +1,10 @@
+id: domains/plugin_domain
+version: 1
+description: Guidance for turns routed to a plugin-backed domain.
+variables:
+  - category_name
+  - selected_domain
+  - category_description
+  - tool_names
+  - tool_results_exist
+enabled: true

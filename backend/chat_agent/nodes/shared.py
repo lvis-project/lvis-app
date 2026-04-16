@@ -1,41 +1,36 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Iterable
 
-from schemas import ChatGraphState, ClassificationResult, DomainCategory
-
-MEETING_TOOL_NAMES = {
-    "meeting_sessions",
-    "meeting_transcript",
-}
-
-EMAIL_TOOL_NAMES = {
-    "email_status",
-    "email_auth",
-    "email_list",
-    "email_read",
-    "email_analyze",
-    "email_getSentReplies",
-    "email_getSentReply",
-    "email_getNotifications",
-}
-
-MEETING_QUERY_TOKENS = (
-    "\ud68c\uc758",
-    "\ud68c\uc758\ub85d",
-    "\ubbf8\ud305",
-    "\ub179\ucde8",
-    "\ud68c\uc758 \ub0b4\uc6a9",
-    "meeting",
+from prompt_loader import load_prompt
+from schemas import (
+    ChatGraphState,
+    ClassificationResult,
+    DomainCategory,
+    PluginCategorySpec,
 )
 
-EMAIL_QUERY_TOKENS = (
-    "\uba54\uc77c",
-    "\uc774\uba54\uc77c",
-    "outlook",
-    "email",
-)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PLUGINS_DIR = PROJECT_ROOT / "plugins"
+PLUGIN_REGISTRY_PATH = PLUGINS_DIR / "registry.json"
+
+PLUGIN_TOOL_ALIASES: dict[str, tuple[str, ...]] = {
+    "pageindex": (
+        "knowledge_search",
+        "document_list",
+        "document_structure",
+        "document_page_content",
+    ),
+}
+
+PLUGIN_CLASSIFICATION_NOTES: dict[str, str] = {
+    "meeting": "Use for meeting notes, transcripts, minutes, summaries, or action items after or during a meeting.",
+    "email": "Use for inbox, email reading, replying, sent mail, Outlook mail, or mail analysis.",
+    "calendar": "Use for schedules, events, meeting-room reservation, room availability, booking a room, or creating/updating calendar events.",
+    "pageindex": "Use for searching documents, looking up indexed files, knowledge search, or reading document content.",
+}
 
 
 def ensure_state(state: ChatGraphState | dict[str, Any]) -> ChatGraphState:
@@ -51,20 +46,94 @@ def latest_user_query(messages: list[dict[str, Any]]) -> str:
     return ""
 
 
-def filter_tools(tools: list[dict[str, Any]], allowed_names: Iterable[str]) -> list[dict[str, Any]]:
+def filter_tools(
+    tools: list[dict[str, Any]], allowed_names: Iterable[str]
+) -> list[dict[str, Any]]:
     allowed = set(allowed_names)
-    return [tool for tool in tools if tool.get("name") in allowed]
+    return [tool for tool in tools if str(tool.get("name", "")) in allowed]
 
 
-def has_domain_tool_result(messages: list[dict[str, Any]], domain: DomainCategory) -> bool:
-    prefix = f"{domain}_"
+def load_plugin_categories() -> list[PluginCategorySpec]:
+    if not PLUGIN_REGISTRY_PATH.exists():
+        return []
+
+    try:
+        registry = json.loads(PLUGIN_REGISTRY_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    categories: list[PluginCategorySpec] = []
+    for entry in registry.get("plugins", []):
+        if not entry.get("enabled", True):
+            continue
+
+        manifest_path = PLUGINS_DIR / str(entry.get("manifestPath", ""))
+        if not manifest_path.exists():
+            continue
+
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        category_id = str(manifest.get("id") or entry.get("id") or "").strip().lower()
+        if not category_id:
+            continue
+
+        name = str(manifest.get("name") or category_id).strip() or category_id
+        description = first_non_empty_text(
+            manifest.get("description"),
+            *(
+                ui.get("description")
+                for ui in manifest.get("ui", [])
+                if isinstance(ui, dict)
+            ),
+            *(ui.get("title") for ui in manifest.get("ui", []) if isinstance(ui, dict)),
+            *(
+                ui.get("displayName")
+                for ui in manifest.get("ui", [])
+                if isinstance(ui, dict)
+            ),
+        )
+
+        method_names = [
+            str(method).replace(".", "_")
+            for method in manifest.get("methods", [])
+            if isinstance(method, str) and method.strip()
+        ]
+        tool_names = dedupe_preserve_order(
+            [*method_names, *PLUGIN_TOOL_ALIASES.get(category_id, ())]
+        )
+
+        categories.append(
+            PluginCategorySpec(
+                id=category_id,
+                name=name,
+                description=description,
+                tool_names=tool_names,
+                keywords=[],
+            )
+        )
+
+    return categories
+
+
+def has_domain_tool_result(
+    messages: list[dict[str, Any]],
+    domain: DomainCategory,
+    plugin_categories: list[PluginCategorySpec],
+) -> bool:
+    tool_names = set(get_plugin_tool_names(plugin_categories, domain))
+    if not tool_names:
+        return False
+
     for message in reversed(messages):
         if message.get("role") == "user":
             return False
         if message.get("role") != "tool_result":
             continue
-        tool_name = message.get("toolName") or ""
-        if isinstance(tool_name, str) and tool_name.startswith(prefix):
+        tool_name = str(message.get("toolName") or "").strip()
+        if tool_name in tool_names:
             return True
     return False
 
@@ -92,39 +161,34 @@ async def invoke_provider(
     }
 
 
-def normalize_category(value: str | None) -> DomainCategory | None:
+def normalize_category(
+    value: str | None, plugin_categories: list[PluginCategorySpec]
+) -> DomainCategory | None:
     if not value:
         return None
 
     normalized = value.strip().lower()
-    if normalized in {"meeting", "meetings", "minutes", "transcript", "conference"}:
-        return "meeting"
-    if normalized in {"email", "mail", "outlook", "inbox"}:
-        return "email"
-    if normalized in {"general", "other", "misc", "etc"}:
+    if normalized == "general":
         return "general"
-    if "meeting" in normalized or "minutes" in normalized or "transcript" in normalized:
-        return "meeting"
-    if "email" in normalized or "mail" in normalized or "outlook" in normalized:
-        return "email"
+
+    for category in plugin_categories:
+        if normalized == category.id:
+            return category.id
+        if normalized == category.name.strip().lower():
+            return category.id
     return None
 
 
-def infer_category_from_query(query: str) -> ClassificationResult:
-    lowered = query.lower()
-    if any(token in query for token in MEETING_QUERY_TOKENS):
-        return ClassificationResult(category="meeting", reason="query keyword fallback")
-    if any(token in query for token in EMAIL_QUERY_TOKENS):
-        return ClassificationResult(category="email", reason="query keyword fallback")
-    if any(token in lowered for token in ("mail", "inbox", "message")):
-        return ClassificationResult(category="email", reason="query keyword fallback")
-    return ClassificationResult(category="general", reason="query keyword fallback")
-
-
-def parse_classification(raw_text: str, query: str) -> ClassificationResult:
+def parse_classification(
+    raw_text: str,
+    _query: str,
+    plugin_categories: list[PluginCategorySpec],
+) -> ClassificationResult:
     stripped = raw_text.strip()
     if not stripped:
-        return infer_category_from_query(query)
+        return ClassificationResult(
+            category="general", reason="classification unavailable"
+        )
 
     try:
         payload = json.loads(stripped)
@@ -132,22 +196,95 @@ def parse_classification(raw_text: str, query: str) -> ClassificationResult:
         payload = None
 
     if isinstance(payload, dict):
-        category = normalize_category(str(payload.get("category") or ""))
+        category = normalize_category(
+            str(payload.get("category") or ""), plugin_categories
+        )
         if category:
             confidence = payload.get("confidence")
             return ClassificationResult(
                 category=category,
                 reason=str(payload.get("reason") or "").strip() or None,
-                confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
+                confidence=(
+                    float(confidence) if isinstance(confidence, (int, float)) else None
+                ),
             )
 
-    category = normalize_category(stripped)
+    category = normalize_category(stripped, plugin_categories)
     if category:
-        return ClassificationResult(category=category, reason="plain-text classification")
+        return ClassificationResult(
+            category=category, reason="plain-text classification"
+        )
 
-    return infer_category_from_query(query)
+    return ClassificationResult(
+        category="general", reason="unrecognized classification output"
+    )
 
 
-def route_domain(state: ChatGraphState | dict[str, Any]) -> DomainCategory:
+def route_branch(state: ChatGraphState | dict[str, Any]) -> str:
     resolved = ensure_state(state)
-    return resolved.selected_domain
+    return "general" if resolved.selected_domain == "general" else "plugin"
+
+
+def get_plugin_tool_names(
+    plugin_categories: list[PluginCategorySpec], category_id: str
+) -> list[str]:
+    for category in plugin_categories:
+        if category.id == category_id:
+            return category.tool_names
+    return []
+
+
+def get_plugin_spec(
+    plugin_categories: list[PluginCategorySpec], category_id: str
+) -> PluginCategorySpec | None:
+    for category in plugin_categories:
+        if category.id == category_id:
+            return category
+    return None
+
+
+def build_classification_prompt(plugin_categories: list[PluginCategorySpec]) -> str:
+    category_lines = []
+    for category in plugin_categories:
+        tool_names = ", ".join(category.tool_names[:8]) or "none"
+        description = category.description or category.name
+        note = PLUGIN_CLASSIFICATION_NOTES.get(category.id, "")
+        category_lines.append(
+            f'- "{category.id}": {description}. {note} Tools: {tool_names}.'
+        )
+
+    categories_block = (
+        "\n".join(category_lines)
+        if category_lines
+        else '- "general": default category.'
+    )
+    valid_categories = ", ".join(
+        [*(category.id for category in plugin_categories), "general"]
+    )
+    return load_prompt(
+        "routing/classify_category",
+        {
+            "valid_categories": valid_categories,
+            "categories_block": categories_block,
+        },
+    )
+
+
+def first_non_empty_text(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return None
+
+
+def dedupe_preserve_order(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result

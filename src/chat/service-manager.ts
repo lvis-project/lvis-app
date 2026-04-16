@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { ToolCallBlock, TokenUsage, GenericMessage, ToolSchema } from "../engine/llm/types.js";
 
@@ -19,6 +19,7 @@ export interface ChatTurnResponse {
   toolCalls: ToolCallBlock[];
   stopReason: "end_turn" | "tool_use";
   usage?: TokenUsage;
+  category?: string;
 }
 
 export interface ChatServiceManagerOptions {
@@ -35,6 +36,7 @@ export class ChatServiceManager {
   private readonly port: number;
   private process: ChildProcess | null = null;
   private starting: Promise<void> | null = null;
+  private backendRevision: string | null = null;
 
   constructor(options: ChatServiceManagerOptions) {
     this.pythonPath = options.pythonPath;
@@ -77,9 +79,16 @@ export class ChatServiceManager {
     this.process.kill("SIGTERM");
     this.process = null;
     this.starting = null;
+    this.backendRevision = null;
   }
 
   private async ensureStarted(): Promise<void> {
+    if (this.isDevMode()) {
+      const revision = await this.computeBackendRevision();
+      if (this.process && this.backendRevision && revision !== this.backendRevision) {
+        await this.stop();
+      }
+    }
     if (await this.isHealthy()) return;
     if (this.starting) return this.starting;
     this.starting = this.start();
@@ -93,6 +102,7 @@ export class ChatServiceManager {
   private async start(): Promise<void> {
     const chatScript = this.resolveChatScriptPath();
     await access(chatScript);
+    this.backendRevision = await this.computeBackendRevision();
 
     const proc = spawn(
       this.pythonPath,
@@ -142,13 +152,47 @@ export class ChatServiceManager {
   }
 
   private resolveChatScriptPath(): string {
-    const isDev =
-      !!(process as { defaultApp?: boolean }).defaultApp || !process.resourcesPath;
-
-    if (isDev) {
+    if (this.isDevMode()) {
       return join(this.projectRoot, "backend", "chat_agent", "chat.py");
     }
 
     return join(process.resourcesPath, "backend", "chat_agent", "chat.py");
+  }
+
+  private isDevMode(): boolean {
+    return !!(process as { defaultApp?: boolean }).defaultApp || !process.resourcesPath;
+  }
+
+  private async computeBackendRevision(): Promise<string | null> {
+    if (!this.isDevMode()) {
+      return null;
+    }
+
+    const root = join(this.projectRoot, "backend", "chat_agent");
+    const mtimes: number[] = [];
+    const stack = [root];
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current) continue;
+      const entries = await readdir(current, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = join(current, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === "__pycache__") {
+            continue;
+          }
+          stack.push(fullPath);
+          continue;
+        }
+        if (!entry.name.endsWith(".py")) {
+          continue;
+        }
+        const info = await stat(fullPath);
+        mtimes.push(info.mtimeMs);
+      }
+    }
+
+    return mtimes.length > 0 ? String(Math.max(...mtimes)) : null;
   }
 }

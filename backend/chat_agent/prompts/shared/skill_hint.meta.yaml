@@ -1,0 +1,6 @@
+id: shared/skill_hint
+version: 1
+description: Optional skill-routing hint text for prompt composition.
+variables:
+  - skill_id
+enabled: true

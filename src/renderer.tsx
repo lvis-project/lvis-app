@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "./components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
 import { Badge } from "./components/ui/badge.js";
@@ -28,6 +28,8 @@ import {
   type StreamEvent,
   upsertStreamingAssistant,
 } from "./lib/chat-stream-state.js";
+import { restoreChatEntries } from "./lib/chat-history-state.js";
+import type { GenericMessage } from "./engine/llm/types.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -35,6 +37,30 @@ type MarketplaceItem = { id: string; name: string; description: string; packageS
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
 type AppSettings = { llm: { provider: string; model: string }; chat: { systemPrompt: string }; webSearch: { provider: string } };
+type ChatSessionCategory = string;
+type ChatSessionFilter = "all" | ChatSessionCategory;
+type ChatSessionSummary = {
+  id: string;
+  modifiedAt: string;
+  category: ChatSessionCategory;
+  title: string;
+  preview: string;
+  messageCount: number;
+};
+type ChatCategorySummary = {
+  id: ChatSessionFilter;
+  label: string;
+  preview: string;
+  modifiedAt: string | null;
+  sessionCount: number;
+  messageCount: number;
+};
+type ChatTurnResult = {
+  sessionId?: string;
+  sessionChanged?: boolean;
+  category?: ChatSessionCategory;
+  messages?: GenericMessage[];
+};
 
 type LvisApi = {
   getSettings: () => Promise<AppSettings>;
@@ -46,8 +72,12 @@ type LvisApi = {
   hasWebApiKey: (provider: string) => Promise<boolean>;
   deleteWebApiKey: (provider: string) => Promise<{ ok: true }>;
   chatHasProvider: () => Promise<boolean>;
-  chatSend: (input: string) => Promise<unknown>;
+  chatSend: (input: string) => Promise<ChatTurnResult>;
   chatNew: () => Promise<{ ok: true }>;
+  chatClearSessions: () => Promise<{ ok: true }>;
+  chatSessions: () => Promise<{ current: string; sessions: ChatSessionSummary[] }>;
+  chatLoadSession: (sessionId: string) => Promise<{ ok: boolean; sessionId: string | null; messages: GenericMessage[] }>;
+  chatLoadCategory: (category: string) => Promise<{ ok: boolean; category: string; sessionId: string | null; messages: GenericMessage[] }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   memoryListNotes: () => Promise<Array<{ filename: string; title: string; content: string }>>;
   memorySaveNote: (t: string, c: string) => Promise<unknown>;
@@ -160,6 +190,38 @@ const PRIORITY_CLASS: Record<Task["priority"], string> = { high: "text-red-400",
 const SOURCE_LABEL: Record<Task["source"], string> = { email: "메일", meeting: "미팅", calendar: "일정", teams: "Teams", manual: "직접" };
 
 // ─── TaskView ───────────────────────────────────────
+
+const CATEGORY_LABEL_OVERRIDES: Record<string, string> = {
+  meeting: "회의",
+  email: "메일",
+  calendar: "캘린더",
+  pageindex: "문서",
+  general: "기타",
+};
+
+function getChatCategoryLabel(category: string): string {
+  const labelOverrides: Record<string, string> = {
+    meeting: "회의",
+    email: "메일",
+    calendar: "회의실/일정",
+    pageindex: "문서",
+    general: "일반",
+  };
+  const normalized = category.trim().toLowerCase();
+  if (!normalized) return labelOverrides.general;
+  const label = labelOverrides[normalized];
+  if (label) return label;
+  if (!normalized) return "기타";
+  if (CATEGORY_LABEL_OVERRIDES[normalized]) {
+    return CATEGORY_LABEL_OVERRIDES[normalized];
+  }
+
+  return normalized
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 function TaskView({ api }: { api: LvisApi }) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -839,6 +901,150 @@ function ToolApprovalDialog({
 function getApi(): LvisApi { if (!window.lvisApi) throw new Error("lvisApi not initialized"); return window.lvisApi; }
 function toViewKey(item: PluginUiExtension) { return `plugin:${item.pluginId}:${item.extension.id}`; }
 function getPluginViewLabel(item: PluginUiExtension) { return item.extension.displayName?.trim() || item.extension.title || item.pluginId; }
+function buildCategorySummaries(sessions: ChatSessionSummary[]): ChatCategorySummary[] {
+  const buckets = new Map<string, ChatCategorySummary>();
+
+  for (const session of sessions) {
+    const existing = buckets.get(session.category);
+    if (!existing) {
+      buckets.set(session.category, {
+        id: session.category,
+        label: getChatCategoryLabel(session.category),
+        preview: session.preview,
+        modifiedAt: session.modifiedAt,
+        sessionCount: 1,
+        messageCount: session.messageCount,
+      });
+      continue;
+    }
+
+    existing.sessionCount += 1;
+    existing.messageCount += session.messageCount;
+    if (!existing.preview && session.preview) {
+      existing.preview = session.preview;
+    }
+    if (!existing.modifiedAt || new Date(session.modifiedAt).getTime() > new Date(existing.modifiedAt).getTime()) {
+      existing.modifiedAt = session.modifiedAt;
+      existing.preview = session.preview || existing.preview;
+    }
+  }
+
+  return [...buckets.values()].sort((left, right) => {
+    if (left.id === "general") return 1;
+    if (right.id === "general") return -1;
+    const leftTime = left.modifiedAt ? new Date(left.modifiedAt).getTime() : 0;
+    const rightTime = right.modifiedAt ? new Date(right.modifiedAt).getTime() : 0;
+    return rightTime - leftTime;
+  });
+}
+
+function ChatHistoryPanel({
+  sessions,
+  activeCategory,
+  currentSessionId,
+  loading,
+  onSelectCategory,
+  onSelectSession,
+  onClearAll,
+}: {
+  sessions: ChatSessionSummary[];
+  activeCategory: ChatSessionFilter;
+  currentSessionId: string | null;
+  loading: boolean;
+  onSelectCategory: (category: ChatSessionFilter) => void;
+  onSelectSession: (sessionId: string) => void;
+  onClearAll: () => void;
+}) {
+  const countsUnused = sessions.reduce<Record<ChatSessionCategory, number>>((acc, session) => {
+    acc[session.category] = (acc[session.category] ?? 0) + 1;
+    return acc;
+  }, {});
+  const categoriesUnused: Array<{ id: ChatSessionFilter; label: string; count: number }> = [
+    { id: "all", label: "?꾩껜", count: sessions.length },
+    ...Object.entries(countsUnused)
+      .sort(([left], [right]) => {
+        if (left === "general") return 1;
+        if (right === "general") return -1;
+        return left.localeCompare(right);
+      })
+      .map(([category, count]) => ({ id: category, label: getChatCategoryLabel(category), count })),
+  ];
+
+  const filteredSessionsUnused = sessions;
+  void countsUnused;
+  void categoriesUnused;
+  void filteredSessionsUnused;
+  const counts = countsUnused;
+
+  const categories: Array<{ id: ChatSessionFilter; label: string; count: number }> = [
+    { id: "all", label: "전체", count: sessions.length },
+    ...Object.entries(counts)
+      .sort(([left], [right]) => {
+        if (left === "general") return 1;
+        if (right === "general") return -1;
+        return left.localeCompare(right);
+      })
+      .map(([category, count]) => ({ id: category, label: getChatCategoryLabel(category), count })),
+  ];
+
+  const filteredSessions = sessions;
+  void categories;
+
+  return (
+    <aside className="border-r bg-card/40 p-3">
+      <Card className="flex h-full min-h-0 flex-col">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>채팅 카테고리</CardTitle>
+            {sessions.length > 0 ? (
+              <Button size="sm" variant="ghost" className="h-8 px-2 text-destructive hover:text-destructive" onClick={onClearAll}>
+                <Trash2 className="mr-1 h-4 w-4" />
+                전체 삭제
+              </Button>
+            ) : null}
+          </div>
+          <CardDescription>저장된 대화를 분류별로 살펴봅니다.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+          <ScrollArea className="flex-1 pr-2">
+            {loading ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">불러오는 중...</div>
+            ) : filteredSessions.length === 0 ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">표시할 대화가 없습니다.</div>
+            ) : (
+              <div className="space-y-2">
+                {filteredSessions.map((session) => (
+                  <button
+                    key={session.id}
+                    type="button"
+                    onClick={() => onSelectSession(session.id)}
+                    className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                      currentSessionId === session.id
+                        ? "border-primary bg-primary/10"
+                        : "border-muted hover:border-muted-foreground/30 hover:bg-muted/40"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium">{session.title}</span>
+                      <Badge variant="outline" className="text-[10px]">{session.messageCount}개 메시지</Badge>
+                    </div>
+                    {session.preview ? (
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{session.preview}</p>
+                    ) : null}
+                    <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>{new Date(session.modifiedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</span>
+                      <span>{session.messageCount}개 메시지</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </CardContent>
+      </Card>
+    </aside>
+  );
+}
 
 function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_group" }> }) {
   const [open, setOpen] = useState(false);
@@ -945,6 +1151,11 @@ function App() {
   const streamRef = useRef("");
   const thoughtRef = useRef("");
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
+  const [chatSessionsLoading, setChatSessionsLoading] = useState(true);
+  const [activeChatCategory, setActiveChatCategory] = useState<ChatSessionFilter>("all");
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [clearHistoryOpen, setClearHistoryOpen] = useState(false);
 
   // App state
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
@@ -964,12 +1175,51 @@ function App() {
   useEffect(() => { approvalQueueRef.current = approvalQueue; }, [approvalQueue]);
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
+  const chatCategoryCards = useMemo<ChatSessionSummary[]>(
+    () => buildCategorySummaries(chatSessions).map((category) => ({
+      id: category.id,
+      modifiedAt: category.modifiedAt ?? new Date(0).toISOString(),
+      category: category.id === "all" ? "general" : category.id,
+      title: category.label,
+      preview: category.preview,
+      messageCount: category.messageCount,
+    })),
+    [chatSessions],
+  );
+  const selectedCategoryCard = useMemo(
+    () => chatCategoryCards.find((card) => card.id === activeChatCategory) ?? null,
+    [chatCategoryCards, activeChatCategory],
+  );
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
+  const refreshChatSessions = useCallback(async () => {
+    setChatSessionsLoading(true);
+    try {
+      const payload = await api.chatSessions();
+      setCurrentSessionId(payload.current);
+      setChatSessions(payload.sessions);
+    } finally {
+      setChatSessionsLoading(false);
+    }
+  }, [api]);
+
+  const loadCategoryView = useCallback(async (category: ChatSessionFilter) => {
+    setActiveChatCategory(category);
+    const result = await api.chatLoadCategory(category);
+    if (!result.ok) {
+      setEntries([]);
+      setCurrentSessionId(null);
+      return;
+    }
+    setEntries(restoreChatEntries(result.messages));
+    setCurrentSessionId(result.sessionId);
+    setActiveView("home");
+  }, [api]);
 
   // ─── Chat ─────────────────────────────────────
   const handleAsk = useCallback(async (q: string) => {
     const t = q.trim(); if (!t || streaming) return;
     if (!(await checkApiKey())) { setSettingsOpen(true); return; }
+    let nextCategory: ChatSessionFilter = activeChatCategory;
     setQuestion("");
     // User entry
     setEntries((p) => appendUserEntry(p, t));
@@ -977,14 +1227,45 @@ function App() {
     thoughtRef.current = "";
     setStreaming(true);
     try {
-      await api.chatSend(t);
+      const result = await api.chatSend(t);
+      if (result.category) {
+        nextCategory = result.category;
+        setActiveChatCategory(nextCategory);
+      }
+      if (result.sessionId) {
+        setCurrentSessionId(result.sessionId);
+      }
+      if (result.sessionChanged && result.messages) {
+        setEntries(restoreChatEntries(result.messages));
+      }
       // Final state set by stream events + done
     } catch (err) {
       setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`));
-    } finally { setStreaming(false); }
-  }, [api, streaming, checkApiKey]);
+    } finally {
+      setStreaming(false);
+      await refreshChatSessions();
+      if (nextCategory !== "all") {
+        await loadCategoryView(nextCategory);
+      }
+    }
+  }, [api, streaming, checkApiKey, refreshChatSessions, activeChatCategory, loadCategoryView]);
 
-  const handleNewChat = useCallback(async () => { await api.chatNew(); setEntries([]); }, [api]);
+  const handleNewChat = useCallback(async () => {
+    await api.chatNew();
+    setEntries([]);
+    setCurrentSessionId(null);
+    setActiveChatCategory("all");
+    await refreshChatSessions();
+  }, [api, refreshChatSessions]);
+
+  const handleClearAllSessions = useCallback(async () => {
+    await api.chatClearSessions();
+    setEntries([]);
+    setCurrentSessionId(null);
+    setActiveChatCategory("all");
+    setClearHistoryOpen(false);
+    await refreshChatSessions();
+  }, [api, refreshChatSessions]);
 
   // ─── Plugin actions ───────────────────────────
   const refreshViews = async () => { const v = (await api.listPluginUiExtensions()).filter((i) => i.extension.slot === "sidebar"); setPluginViews(v); return v; };
@@ -994,7 +1275,7 @@ function App() {
 
   // ─── Effects ──────────────────────────────────
   useEffect(() => {
-    void refreshMarketplace(); void refreshViews(); void checkApiKey();
+    void refreshMarketplace(); void refreshViews(); void checkApiKey(); void refreshChatSessions();
 
     // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
     api.getBriefing().then((text) => {
@@ -1038,7 +1319,7 @@ function App() {
     const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); } };
     window.addEventListener("keydown", onKey);
     return () => { dv(); ds(); window.removeEventListener("keydown", onKey); };
-  }, []);
+  }, [api, checkApiKey, refreshChatSessions]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
 
@@ -1131,7 +1412,17 @@ function App() {
 
           {/* Content */}
           {activeView === "tasks" ? <TaskView api={api} /> : activeView === "home" ? (
-            <div className="grid min-h-0 flex-1 grid-rows-[1fr_auto]">
+            <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)]">
+              <ChatHistoryPanel
+                sessions={chatCategoryCards}
+                activeCategory={activeChatCategory}
+                currentSessionId={activeChatCategory}
+                loading={chatSessionsLoading}
+                onSelectCategory={(category) => void loadCategoryView(category)}
+                onSelectSession={(sessionId) => void loadCategoryView(sessionId)}
+                onClearAll={() => setClearHistoryOpen(true)}
+              />
+              <div className="relative grid min-h-0 grid-rows-[1fr_auto]">
               {hasApiKey === false && (
                 <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
                   <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>API 키 설정 필요</CardTitle><CardDescription>채팅을 시작하려면 Claude API 키를 설정해 주세요.</CardDescription></CardHeader>
@@ -1139,6 +1430,19 @@ function App() {
                   </Card>
                 </div>
               )}
+              {selectedCategoryCard ? (
+                <div className="border-b bg-card/60 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-semibold">{selectedCategoryCard.title}</h2>
+                    <Badge variant="secondary" className="rounded-full px-2 py-0 text-[11px]">
+                      {selectedCategoryCard.id}
+                    </Badge>
+                  </div>
+                  {selectedCategoryCard.preview ? (
+                    <p className="mt-1 text-xs text-muted-foreground">{selectedCategoryCard.preview}</p>
+                  ) : null}
+                </div>
+              ) : null}
               <ScrollArea className="h-full p-4"><div className="space-y-3">
                 {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
                 {entries.map((entry, idx) => {
@@ -1179,6 +1483,7 @@ function App() {
                   className="min-h-[76px]" disabled={streaming} />
                 <Button onClick={() => void handleAsk(question)} disabled={streaming || !question.trim()}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
               </div>
+              </div>
             </div>
           ) : (
             <PluginUiHostView view={activePluginView ?? null} callPluginMethod={(m, p) => api.callPluginMethod(m, p)} onAskInHomeChat={async (q) => { setActiveView("home"); await handleAsk(q); }} onAddTask={(t) => api.addTask(t)} />
@@ -1196,6 +1501,7 @@ function App() {
       <Dialog open={!!installTarget} onOpenChange={(o) => !o && setInstallTarget(null)}><DialogContent><DialogHeader><DialogTitle>플러그인 설치</DialogTitle><DialogDescription>{installTarget ? `'${installTarget.name}' 설치?` : ""}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setInstallTarget(null)}>취소</Button><Button onClick={async () => { if (!installTarget) return; const id = installTarget.id; setInstallTarget(null); await installPlugin(id); }} disabled={working}>설치</Button></DialogFooter></DialogContent></Dialog>
       <Dialog open={commandOpen} onOpenChange={setCommandOpen}><DialogContent><DialogHeader><DialogTitle>Command</DialogTitle><DialogDescription>빠른 실행</DialogDescription></DialogHeader><Command><CommandInput placeholder="검색..." value={commandQuery} onValueChange={setCommandQuery} /><CommandList><CommandEmpty>결과 없음</CommandEmpty><CommandGroup heading="Actions">{commandActions.filter((a) => !commandQuery || a.label.toLowerCase().includes(commandQuery.toLowerCase())).map((a) => <CommandItem key={a.id} onSelect={() => { setCommandOpen(false); setCommandQuery(""); void a.run(); }}><Search className="mr-2 h-4 w-4" />{a.label}</CommandItem>)}</CommandGroup></CommandList></Command></DialogContent></Dialog>
       <Dialog open={!!uninstallTarget} onOpenChange={(o) => !o && setUninstallTarget(null)}><DialogContent><DialogHeader><DialogTitle>플러그인 제거</DialogTitle><DialogDescription>{uninstallTarget ? `'${uninstallTarget.name}' 제거?` : ""}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setUninstallTarget(null)}>취소</Button><Button variant="destructive" onClick={async () => { if (!uninstallTarget) return; const id = uninstallTarget.id; setUninstallTarget(null); await uninstallPlugin(id); }} disabled={working}>제거</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={clearHistoryOpen} onOpenChange={setClearHistoryOpen}><DialogContent><DialogHeader><DialogTitle>채팅 내역 전체 삭제</DialogTitle><DialogDescription>저장된 모든 채팅 세션과 현재 대화가 함께 삭제됩니다.</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setClearHistoryOpen(false)}>취소</Button><Button variant="destructive" onClick={() => void handleClearAllSessions()}>전체 삭제</Button></DialogFooter></DialogContent></Dialog>
     </TooltipProvider>
   );
 }

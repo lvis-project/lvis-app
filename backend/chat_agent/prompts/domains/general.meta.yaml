@@ -1,0 +1,5 @@
+id: domains/general
+version: 1
+description: Guidance for non-plugin general chat turns.
+variables:
+enabled: true

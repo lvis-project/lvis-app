@@ -19,14 +19,13 @@ from langgraph_compat import END, START, StateGraph  # noqa: E402
 from nodes import (  # noqa: E402
     check_keyword,
     finalize_turn,
-    handle_email,
     handle_general,
-    handle_meeting,
+    handle_plugin_domain,
     prepare_turn,
-    route_domain,
+    route_branch,
 )
 from providers import ProviderHttpError, build_provider  # noqa: E402
-from schemas import ChatGraphState  # noqa: E402
+from schemas import ChatGraphState, DomainCategory  # noqa: E402
 
 
 class ToolSchemaModel(BaseModel):
@@ -61,29 +60,27 @@ class ChatTurnResponse(BaseModel):
     toolCalls: list[dict[str, Any]] = Field(default_factory=list)
     stopReason: str
     usage: dict[str, int] | None = None
+    category: DomainCategory = "general"
 
 
 def build_graph():
     graph = StateGraph(ChatGraphState)
     graph.add_node("prepare", prepare_turn)
     graph.add_node("check_keyword", check_keyword)
-    graph.add_node("meeting", handle_meeting)
-    graph.add_node("email", handle_email)
+    graph.add_node("plugin", handle_plugin_domain)
     graph.add_node("general", handle_general)
     graph.add_node("finalize", finalize_turn)
     graph.add_edge(START, "prepare")
     graph.add_edge("prepare", "check_keyword")
     graph.add_conditional_edges(
         "check_keyword",
-        route_domain,
+        route_branch,
         {
-            "meeting": "meeting",
-            "email": "email",
+            "plugin": "plugin",
             "general": "general",
         },
     )
-    graph.add_edge("meeting", "finalize")
-    graph.add_edge("email", "finalize")
+    graph.add_edge("plugin", "finalize")
     graph.add_edge("general", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile()

@@ -202,6 +202,26 @@ export class PluginRuntime {
     return [...this.plugins.keys()];
   }
 
+  listPluginSummaries(): Array<{
+    id: string;
+    name: string;
+    description: string;
+    methods: string[];
+    deployment?: PluginManifest["deployment"];
+    publisher?: string;
+  }> {
+    return [...this.plugins.values()]
+      .map(({ manifest, methods }) => ({
+        id: manifest.id,
+        name: manifest.name,
+        description: this.describeManifest(manifest),
+        methods: [...methods.keys()].sort(),
+        deployment: manifest.deployment,
+        publisher: manifest.publisher,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
   /**
    * Retrieve a loaded plugin's instance by id.
    * Returns undefined when the plugin failed to load or is not registered.
@@ -260,6 +280,14 @@ export class PluginRuntime {
     this.loaded = false;
     // Note: 호스트의 keywordEngine/toolRegistry는 boot.ts의 createHostApi에서
     // pluginId 기반으로 정리됨 (restartAll → 새로 load 시 재등록)
+  }
+
+  private describeManifest(manifest: PluginManifest): string {
+    const uiDescription = manifest.ui?.find((entry) => entry.description?.trim())?.description?.trim();
+    if (uiDescription) return uiDescription;
+    const uiTitle = manifest.ui?.find((entry) => entry.title?.trim())?.title?.trim();
+    if (uiTitle) return uiTitle;
+    return manifest.name;
   }
 }
 

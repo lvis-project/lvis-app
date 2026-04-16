@@ -3,10 +3,10 @@ import { ToolExecutor, type ToolUseBlock, type ToolCallMeta } from "../tools/exe
 import { HookRunner } from "../hooks/hook-runner.js";
 import { shouldCompact, compactMessages } from "../engine/auto-compact.js";
 import { secretKeyFor } from "../engine/llm/provider-factory.js";
-import { LLM_DEFAULT_MODELS, type ToolSchema, type TokenUsage, type LLMVendor } from "../engine/llm/types.js";
+import { LLM_DEFAULT_MODELS, type ToolSchema, type TokenUsage, type LLMVendor, type GenericMessage } from "../engine/llm/types.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
-import type { RouteEngine } from "../core/route-engine.js";
+import type { RouteEngine, RouteResult } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService, LLMSettings } from "../data/settings-store.js";
@@ -15,6 +15,7 @@ import type { ProactiveEngine } from "../core/proactive-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import { ChatServiceManager, type ChatTurnRequest, type ChatTurnResponse } from "./service-manager.js";
+import type { SessionCategory, SessionSummary } from "../memory/memory-manager.js";
 
 export interface TurnCallbacks {
   onReasoningDelta?: (text: string) => void;
@@ -37,6 +38,10 @@ export interface TurnResult {
   toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
   route: string;
   usage?: TokenUsage;
+  category?: SessionCategory;
+  sessionId?: string;
+  sessionChanged?: boolean;
+  messages?: GenericMessage[];
 }
 
 export interface ChatRuntimeDeps {
@@ -65,6 +70,19 @@ const KNOWLEDGE_TOOL_NAMES = new Set([
   "document_structure",
   "document_page_content",
 ]);
+const TOOL_CATEGORY_BY_PREFIX: Record<string, SessionCategory> = {
+  meeting: "meeting",
+  email: "email",
+  calendar: "calendar",
+  index: "pageindex",
+};
+const TOOL_CATEGORY_BY_NAME: Record<string, SessionCategory> = {
+  chat_preview: "pageindex",
+  knowledge_search: "pageindex",
+  document_list: "pageindex",
+  document_structure: "pageindex",
+  document_page_content: "pageindex",
+};
 
 export class ChatRuntime {
   private readonly deps: ChatRuntimeDeps;
@@ -72,6 +90,7 @@ export class ChatRuntime {
   private readonly toolExecutor: ToolExecutor;
   private readonly auditLogger: AuditLogger;
   private sessionId: string = crypto.randomUUID();
+  private sessionCategory: SessionCategory = "general";
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
   constructor(deps: ChatRuntimeDeps) {
@@ -150,9 +169,18 @@ ${briefingData}
 
   newConversation(): void {
     if (this.history.length > 0) {
-      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+      this.persistCurrentSession();
     }
     this.sessionId = crypto.randomUUID();
+    this.sessionCategory = "general";
+    this.history.clear();
+    this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
+  }
+
+  clearAllSessions(): void {
+    this.deps.memoryManager.clearSessions();
+    this.sessionId = crypto.randomUUID();
+    this.sessionCategory = "general";
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
   }
@@ -169,7 +197,7 @@ ${briefingData}
     return { ...this.cumulativeUsage };
   }
 
-  listSessions(): Array<{ id: string; modifiedAt: Date }> {
+  listSessions(): SessionSummary[] {
     return this.deps.memoryManager.listSessions();
   }
 
@@ -177,9 +205,10 @@ ${briefingData}
     const messages = this.deps.memoryManager.loadSession(sessionId);
     if (!messages) return false;
     if (this.history.length > 0) {
-      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+      this.persistCurrentSession();
     }
     this.sessionId = sessionId;
+    this.sessionCategory = this.listSessions().find((session) => session.id === sessionId)?.category ?? "general";
     this.history.clear();
     this.history.restore(messages as import("../engine/llm/types.js").GenericMessage[]);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
@@ -200,13 +229,20 @@ ${briefingData}
       return this.handleCommand(routeResult.command, routeResult.args, callbacks);
     }
 
+    const routeCategory = this.inferCategoryFromRoute(routeResult);
     const userContent = routeResult.route === "skill"
       ? `[스킬: ${routeResult.skillId}] ${input}`
       : input;
-    this.history.append({ role: "user", content: userContent });
+    const historyBeforeTurn = this.history.getMessages();
+    this.history.append({ role: "user", content: input });
 
-    const systemPrompt = this.deps.systemPromptBuilder.build();
+    const systemPrompt = this.buildTurnSystemPrompt(this.deps.systemPromptBuilder.build(), routeResult);
     const result = await this.queryLoop(systemPrompt, callbacks);
+    const resolvedCategory = routeCategory ?? result.category;
+    const sessionChanged = this.rotateSessionForCategoryChange(historyBeforeTurn, resolvedCategory, result.usage);
+    if (!sessionChanged) {
+      this.updateSessionCategory(resolvedCategory);
+    }
 
     if (this.deps.postTurnHookChain) {
       const compactedMessages = await this.deps.postTurnHookChain.run({
@@ -231,26 +267,39 @@ ${briefingData}
           this.history.restore(compacted);
         }
       }
-      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
-      this.auditLogger.logTurn({
-        sessionId: this.sessionId,
-        input,
-        output: result.text,
-        toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
-        tokenUsage: result.usage,
-        route: routeResult.route,
-      });
-      this.deps.idleScheduler?.signalConversation();
     }
 
+    this.persistCurrentSession();
+    this.auditLogger.logTurn({
+      sessionId: this.sessionId,
+      input,
+      output: result.text,
+      toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
+      tokenUsage: result.usage,
+      route: routeResult.route,
+    });
+    this.deps.idleScheduler?.signalConversation();
+
     callbacks?.onTurnComplete?.(result.text);
-    return { ...result, route: routeResult.route };
+    return {
+      ...result,
+      category: resolvedCategory,
+      route: routeResult.route,
+      sessionId: this.sessionId,
+      sessionChanged,
+      ...(sessionChanged ? { messages: this.history.getMessages() } : {}),
+    };
   }
 
   private async queryLoop(
     systemPrompt: string,
     callbacks?: TurnCallbacks,
-  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage }> {
+  ): Promise<{
+    text: string;
+    toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
+    usage?: TokenUsage;
+    category?: SessionCategory;
+  }> {
     if (!this.deps.chatService) {
       throw new Error("chat service unavailable");
     }
@@ -263,6 +312,7 @@ ${briefingData}
 
     const allToolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }> = [];
     let turnUsage: TokenUsage | undefined;
+    let turnCategory: SessionCategory | undefined;
     let knowledgeCallCount = 0;
     let roundIndex = 0;
 
@@ -279,11 +329,12 @@ ${briefingData}
         const message = error instanceof Error ? error.message : String(error);
         callbacks?.onError?.(message);
         this.history.append({ role: "assistant", content: `오류: ${message}` });
-        return { text: `오류: ${message}`, toolCalls: allToolCalls, usage: turnUsage };
+        return { text: `오류: ${message}`, toolCalls: allToolCalls, usage: turnUsage, category: turnCategory };
       }
 
       if (response.thought) callbacks?.onReasoningDelta?.(response.thought);
       if (response.text) callbacks?.onTextDelta?.(response.text);
+      if (response.category) turnCategory = response.category;
 
       if (response.usage) {
         turnUsage = response.usage;
@@ -307,7 +358,7 @@ ${briefingData}
       roundIndex += 1;
 
       if (response.toolCalls.length === 0 || response.stopReason === "end_turn") {
-        return { text: response.text, toolCalls: allToolCalls, usage: turnUsage };
+        return { text: response.text, toolCalls: allToolCalls, usage: turnUsage, category: turnCategory };
       }
 
       const toolUses: ToolUseBlock[] = response.toolCalls.map((toolCall) => ({
@@ -368,7 +419,7 @@ ${briefingData}
       }
     }
 
-    return { text: "(tool round limit exceeded)", toolCalls: allToolCalls, usage: turnUsage };
+    return { text: "(tool round limit exceeded)", toolCalls: allToolCalls, usage: turnUsage, category: turnCategory };
   }
 
   private async handleCommand(command: string, args: string, callbacks?: TurnCallbacks): Promise<TurnResult> {
@@ -533,5 +584,76 @@ ${briefingData}
     }
 
     throw firstError ?? new Error("all chat providers failed");
+  }
+
+  private persistCurrentSession(): void {
+    this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages(), {
+      category: this.sessionCategory,
+    });
+  }
+
+  private rotateSessionForCategoryChange(
+    previousMessages: GenericMessage[],
+    nextCategory?: SessionCategory,
+    usage?: TokenUsage,
+  ): boolean {
+    if (!nextCategory || previousMessages.length === 0 || nextCategory === this.sessionCategory) {
+      return false;
+    }
+
+    const turnMessages = this.history.getMessages().slice(previousMessages.length);
+    if (turnMessages.length === 0) {
+      return false;
+    }
+
+    this.deps.memoryManager.saveSession(this.sessionId, previousMessages, {
+      category: this.sessionCategory,
+    });
+
+    this.sessionId = crypto.randomUUID();
+    this.sessionCategory = nextCategory;
+    this.history.clear();
+    this.history.restore(turnMessages);
+    this.cumulativeUsage = usage
+      ? { ...usage }
+      : { inputTokens: 0, outputTokens: 0 };
+    return true;
+  }
+
+  private updateSessionCategory(category?: SessionCategory): void {
+    if (!category) return;
+    if (category !== "general" || this.sessionCategory === "general") {
+      this.sessionCategory = category;
+    }
+  }
+
+  private buildTurnSystemPrompt(basePrompt: string, routeResult: RouteResult): string {
+    if (routeResult.route !== "skill") {
+      return basePrompt;
+    }
+    const routeCategory = this.inferCategoryFromSkillId(routeResult.skillId);
+    const skillHint = routeCategory
+      ? `Matched local skill hint: ${routeResult.skillId} (category: ${routeCategory}). Prefer that plugin domain for this turn when appropriate.`
+      : `Matched local skill hint: ${routeResult.skillId}. Prefer tools relevant to this skill for this turn when appropriate.`;
+    return `${basePrompt}\n\n${skillHint}`;
+  }
+
+  private inferCategoryFromRoute(routeResult: RouteResult): SessionCategory | undefined {
+    if (routeResult.route !== "skill") {
+      return undefined;
+    }
+    return this.inferCategoryFromSkillId(routeResult.skillId);
+  }
+
+  private inferCategoryFromSkillId(skillId: string): SessionCategory | undefined {
+    const normalized = skillId.trim().toLowerCase();
+    if (!normalized) {
+      return undefined;
+    }
+    if (TOOL_CATEGORY_BY_NAME[normalized]) {
+      return TOOL_CATEGORY_BY_NAME[normalized];
+    }
+    const prefix = normalized.split("_")[0] ?? "";
+    return TOOL_CATEGORY_BY_PREFIX[prefix];
   }
 }

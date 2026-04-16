@@ -1,0 +1,7 @@
+id: routing/classify_category
+version: 1
+description: Classify the latest user request into a plugin-backed domain or general chat.
+variables:
+  - valid_categories
+  - categories_block
+enabled: true
