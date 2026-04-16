@@ -40,7 +40,7 @@ describe("PluginRuntime.disable", () => {
       `export default async function createPlugin(ctx) {
   return {
     handlers: {
-      "${id}.hello": async () => "hi-${id}",
+      "${id}_hello": async () => "hi-${id}",
     },
     start: async () => {},
     stop: async () => {},
@@ -55,7 +55,7 @@ describe("PluginRuntime.disable", () => {
       name: id,
       version: "1.0.0",
       entry: "entry.mjs",
-      methods: [`${id}.hello`],
+      methods: [`${id}_hello`],
     };
     if (deployment) manifest.deployment = deployment;
     const manifestPath = join(pluginDir, "plugin.json");
@@ -90,12 +90,12 @@ describe("PluginRuntime.disable", () => {
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-user");
-    expect(runtime.listMethods()).toContain("p-user.hello");
+    expect(runtime.listMethods()).toContain("p-user_hello");
 
     await runtime.disable("p-user");
 
     expect(runtime.listPluginIds()).not.toContain("p-user");
-    expect(runtime.listMethods()).not.toContain("p-user.hello");
+    expect(runtime.listMethods()).not.toContain("p-user_hello");
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     const entry = registry.plugins.find((p: { id: string }) => p.id === "p-user");
@@ -111,7 +111,7 @@ describe("PluginRuntime.disable", () => {
     await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Managed plugin/);
 
     expect(runtime.listPluginIds()).toContain("p-managed");
-    expect(runtime.listMethods()).toContain("p-managed.hello");
+    expect(runtime.listMethods()).toContain("p-managed_hello");
 
     // registry should NOT have enabled=false
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));

@@ -175,13 +175,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     // 플러그인별 스코프된 HostApi 팩토리
     createHostApi: (pluginId: string): PluginHostApi => ({
       registerKeywords: (keywords) => {
-        // 도구 이름을 underscore 표준으로 변환
-        const converted = keywords.map((k) => ({
-          keyword: k.keyword,
-          skillId: k.skillId.replace(/\./g, "_"),
-        }));
-        keywordEngine.registerKeywords(converted);
-        console.log(`[lvis] plugin:${pluginId} registered ${converted.length} keywords`);
+        keywordEngine.registerKeywords(keywords);
+        console.log(`[lvis] plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
         emitEvent(type, { pluginId, ...((data as Record<string, unknown>) ?? {}) });

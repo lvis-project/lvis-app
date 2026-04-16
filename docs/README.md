@@ -13,7 +13,7 @@ AI 프론티어 생산성 향상 엔터프라이즈 매니지먼트 시스템
 |------|------|
 | [구현 철학](./vision/philosophy.md) | 프로젝트의 배경, 문제 인식, 철학 |
 | [비전 & 골](./vision/README.md) | 프로젝트 비전, 목표, 로드맵 |
-| [아키텍처](./architecture/README.md) | **LVIS Architecture v4 Final** — 5-Layer, 42+ Mermaid 다이어그램 |
+| [아키텍처](./architecture/README.md) | **LVIS Architecture v0.4.1 Draft** — 5-Layer, 42+ Mermaid 다이어그램 |
 | [아키텍처 본문](./architecture/architecture.md) | 전체 아키텍처 상세 (16개 섹션, 38+ 서브섹션) |
 | [도구 거버넌스 보충](./architecture/tool-governance.md) | Builtin / Plugin / MCP 통합 보안 모델 |
 | [플러그인 배포 모델](./architecture/plugin-deployment-model.md) | managed vs user-installed 배포 정책 상세 |
@@ -33,7 +33,7 @@ docs/
 │   └── philosophy.md                      # 구현 철학 — 배경·문제 인식·핵심 방향
 ├── architecture/
 │   ├── README.md                          # 아키텍처 개요·요약·목차
-│   ├── architecture.md                    # ★ 최종 아키텍처 (v4 Final)
+│   ├── architecture.md                    # ★ 현재 아키텍처 (v0.4.1 Draft)
 │   ├── tool-governance.md                 # 통합 도구 거버넌스 보충
 │   ├── plugin-deployment-model.md         # managed/user 배포 모델 상세
 │   └── architecture.reference.md          # v1 초안 (참고용)

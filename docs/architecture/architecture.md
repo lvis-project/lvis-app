@@ -1,4 +1,4 @@
-# LVIS Architecture Document v4 (Final)
+# LVIS Architecture Document v0.4.1 (Current)
 
 > **Version**: 0.4.1
 > **Date**: 2026-04-16
@@ -1155,8 +1155,8 @@ lvis-app/src/
 
 #### 4.6.3 관련 청사진
 
-- `lvis-app/docs/blueprints/openharness-selective-borrow-plan.md` — Tier S / A 차용 근거
-- `lvis-app/docs/blueprints/phase3-folder-refactor-plan.md` — file-by-file migration map
+- `docs/blueprints/openharness-selective-borrow-plan.md` — Tier S / A 차용 근거
+- `docs/blueprints/phase3-folder-refactor-plan.md` — file-by-file migration map
 
 #### 4.6.4 불변 사항 (리팩터가 바꾸지 않는 것)
 

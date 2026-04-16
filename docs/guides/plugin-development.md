@@ -2,7 +2,7 @@
 
 > **상태**: 최종 버전 (2026-04-12)
 > **대상**: LVIS 플러그인 개발자
-> **선행 읽음**: [아키텍처 문서 §9](../architecture/architecture.md#9-plugin-system--ui-extension) · [CLAUDE.md — Plugin Self-Registration Pattern](../../CLAUDE.md#plugin-self-registration-pattern)
+> **선행 읽음**: [아키텍처 문서 §9](../architecture/architecture.md#9-plugin-system--ui-extension) · [CLAUDE.md](../../CLAUDE.md)
 
 ---
 
@@ -118,7 +118,7 @@ interface PluginManifest {
 
 #### methods
 - 플러그인이 제공하는 도구 이름 배열
-- **언더스코어 형식 사용** (도트 금지)
+- **언더스코어 형식 사용** (도트 금지) — LLM 제공자의 도구 이름 제약(`^[a-zA-Z0-9_-]+$`) 충족
 - 예: `meeting_start`, `email_list`, `index_scan`
 
 #### config (선택)
@@ -129,7 +129,8 @@ interface PluginManifest {
 #### keywords (선택)
 - 키워드 엔진이 인식할 스킬 키워드
 - 사용자 입력 분류 시 사용
-- 예: `{ keyword: "회의록", skillId: "meeting.start" }`
+- `skillId`는 매니페스트 `methods` 배열에 있는 도구 이름과 동일한 언더스코어 형식 사용
+- 예: `{ keyword: "회의록", skillId: "meeting_start" }`
 
 #### ui (선택)
 - 호스트 UI의 특정 슬롯에 확장 UI를 마운트
@@ -171,8 +172,8 @@ export default async function createPlugin(context: HostPluginContext) {
 
   // 2. 키워드 등록 (hostApi)
   hostApi.registerKeywords([
-    { keyword: "회의록", skillId: "meeting.start" },
-    { keyword: "녹음", skillId: "meeting.start" },
+    { keyword: "회의록", skillId: "meeting_start" },
+    { keyword: "녹음", skillId: "meeting_start" },
   ]);
 
   // 3. 이벤트 핸들러 등록
@@ -246,13 +247,13 @@ for (const session of sessionStore.listUnfinished()) {
 
 ```typescript
 hostApi.registerKeywords([
-  { keyword: "회의록", skillId: "meeting.start" },
-  { keyword: "녹음", skillId: "meeting.start" },
-  { keyword: "미팅", skillId: "meeting.start" },
+  { keyword: "회의록", skillId: "meeting_start" },
+  { keyword: "녹음", skillId: "meeting_start" },
+  { keyword: "미팅", skillId: "meeting_start" },
 ]);
 ```
 
-**주의**: `skillId`는 매니페스트의 `methods` 배열에 있는 도구 이름과 일치해야 합니다.
+**주의**: `skillId`는 매니페스트의 `methods` 배열에 있는 도구 이름(언더스코어 형식)과 일치해야 합니다.
 
 #### 단계 4: 이벤트 핸들러 등록
 
@@ -344,13 +345,13 @@ return {
 
 ```typescript
 hostApi.registerKeywords([
-  { keyword: "회의록", skillId: "meeting.start" },
-  { keyword: "녹음", skillId: "meeting.start" },
+  { keyword: "회의록", skillId: "meeting_start" },
+  { keyword: "녹음", skillId: "meeting_start" },
 ]);
 ```
 
 **주의사항**:
-- `skillId`는 매니페스트 `methods` 배열에 있어야 함
+- `skillId`는 매니페스트 `methods` 배열에 있는 언더스코어 형식 도구 이름이어야 함
 - 플러그인 제거 시 자동으로 해제됨
 - 키워드는 한국어, 영문, 혼합 모두 지원
 
@@ -460,16 +461,16 @@ if (!openaiKey) {
 
 ## 도구 명명 규칙
 
-**LVIS 도구는 언더스코어(`_`) 형식을 사용합니다. 도트(`.`)는 금지입니다.**
+**LVIS 도구는 언더스코어(`_`) 형식을 사용합니다. 매니페스트 선언부터 핸들러 키까지 도트(`.`)는 금지입니다.**
 
 ### 이유
 
 OpenAI, Anthropic, Google 등 주요 LLM 제공자는 도구 이름을 정규식 `^[a-zA-Z0-9_-]+$`로 검증합니다. 도트를 포함하면 모델이 도구를 호출할 수 없습니다.
 
-### 올바른 명명
+### 명명 규칙
 
 ```typescript
-// ✅ 올바름
+// ✅ 올바름 — 매니페스트 methods 배열과 handlers 키 모두 언더스코어 사용
 methods: [
   "meeting_start",
   "meeting_pushChunk",
@@ -480,32 +481,15 @@ methods: [
   "index_search",
   "index_scan",
 ]
-```
 
-### 잘못된 명명
-
-```typescript
-// ❌ 잘못됨 (도트 사용)
+// ❌ 잘못됨 (도트 사용 금지)
 methods: [
   "meeting.start",
   "email.list",
-  "index.search",
 ]
 ```
 
-### 변환 규칙
-
-플러그인이 도트 형식의 이벤트(`meeting.summary.created`)를 사용해도 괜찮습니다. **도구 이름만 언더스코어 형식이어야 합니다.**
-
-호스트 `boot.ts`의 `registerPluginTools()`는 자동으로 도트를 언더스코어로 변환합니다:
-
-```typescript
-// 플러그인에서 선언
-methods: ["meeting.start", "meeting.stop"]
-
-// 자동 변환
-// → "meeting_start", "meeting_stop"
-```
+**주의**: 이벤트 이름(`meeting.summary.created`)과 달리 **도구 이름은 도트를 사용할 수 없습니다.** 매니페스트 `methods`, `handlers` 키, `keywords[].skillId` 모두 언더스코어 형식이어야 합니다.
 
 ---
 
@@ -1199,6 +1183,6 @@ export default async function createPlugin(context: HostPluginContext) {
 ## 참고 자료
 
 - [아키텍처 문서 §9 — Plugin System & UI Extension](../architecture/architecture.md#9-plugin-system--ui-extension)
-- [CLAUDE.md — Plugin Self-Registration Pattern](../../CLAUDE.md#plugin-self-registration-pattern)
-- [Meeting 플러그인 (실제 예제)](../../lvis-plugin-meeting/src/)
-- [Email 플러그인 (실제 예제)](../../lvis-plugin-email/src/)
+- [CLAUDE.md](../../CLAUDE.md)
+- Meeting 플러그인 (실제 예제) — 별도 플러그인 저장소(`lvis-project/lvis-plugin-meeting`) 또는 외부 문서를 참조하세요.
+- Email 플러그인 (실제 예제) — 별도 플러그인 저장소(`lvis-project/lvis-plugin-email`) 또는 외부 문서를 참조하세요.
