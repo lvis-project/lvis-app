@@ -3,18 +3,18 @@ import { ToolExecutor, type ToolUseBlock, type ToolCallMeta } from "../tools/exe
 import { HookRunner } from "../hooks/hook-runner.js";
 import { shouldCompact, compactMessages } from "../engine/auto-compact.js";
 import { secretKeyFor } from "../engine/llm/provider-factory.js";
-import type { ToolSchema, TokenUsage } from "../engine/llm/types.js";
+import { LLM_DEFAULT_MODELS, type ToolSchema, type TokenUsage, type LLMVendor } from "../engine/llm/types.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
-import type { SettingsService } from "../data/settings-store.js";
+import type { SettingsService, LLMSettings } from "../data/settings-store.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { ProactiveEngine } from "../core/proactive-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
-import { ChatServiceManager, type ChatTurnResponse } from "./service-manager.js";
+import { ChatServiceManager, type ChatTurnRequest, type ChatTurnResponse } from "./service-manager.js";
 
 export interface TurnCallbacks {
   onReasoningDelta?: (text: string) => void;
@@ -58,6 +58,7 @@ export interface ChatRuntimeDeps {
 
 const MAX_TOOL_ROUNDS = 10;
 const KNOWLEDGE_DEPTH_CAP = 3;
+const FALLBACK_VENDORS: LLMVendor[] = ["claude", "openai", "gemini", "copilot"];
 const KNOWLEDGE_TOOL_NAMES = new Set([
   "knowledge_search",
   "document_list",
@@ -93,10 +94,8 @@ export class ChatRuntime {
   refreshProvider(): void {}
 
   hasProvider(): boolean {
-    const llmSettings = this.deps.settingsService.get("llm");
-    if (llmSettings.provider === "lgenie") return false;
     if (!this.deps.chatService) return false;
-    return this.deps.settingsService.getSecret(secretKeyFor(llmSettings.provider)) !== null;
+    return this.getProviderCandidates().length > 0;
   }
 
   async close(): Promise<void> {
@@ -109,10 +108,6 @@ export class ChatRuntime {
 
     const items = engine.collectBriefingItems();
     if (items.length === 0) return null;
-
-    const llmSettings = this.deps.settingsService.get("llm");
-    const apiKey = this.deps.settingsService.getSecret(secretKeyFor(llmSettings.provider));
-    if (!apiKey) return null;
 
     const briefingData = engine.getBriefingPromptData();
     const today = new Date().toLocaleString("ko-KR", {
@@ -137,10 +132,7 @@ ${briefingData}
 - 마크다운 없이 자연어 문장`;
 
     try {
-      const response = await this.deps.chatService.turn({
-        vendor: llmSettings.provider,
-        apiKey,
-        model: llmSettings.model,
+      const response = await this.invokeWithFallback({
         systemPrompt: "당신은 LVIS, 사용자의 AI 비서입니다.",
         messages: [{ role: "user", content: prompt }],
         tools: [],
@@ -263,12 +255,6 @@ ${briefingData}
       throw new Error("chat service unavailable");
     }
 
-    const llmSettings = this.deps.settingsService.get("llm");
-    const apiKey = this.deps.settingsService.getSecret(secretKeyFor(llmSettings.provider));
-    if (!apiKey) {
-      throw new Error(`missing API key for ${llmSettings.provider}`);
-    }
-
     const toolSchemas: ToolSchema[] = this.deps.toolRegistry.getToolSchemas().map((schema) => ({
       name: schema.name,
       description: schema.description,
@@ -283,10 +269,7 @@ ${briefingData}
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       let response: ChatTurnResponse;
       try {
-        response = await this.deps.chatService.turn({
-          vendor: llmSettings.provider,
-          apiKey,
-          model: llmSettings.model,
+        response = await this.invokeWithFallback({
           systemPrompt,
           messages: this.history.getMessages(),
           tools: toolSchemas.length > 0 ? toolSchemas : undefined,
@@ -494,5 +477,61 @@ ${briefingData}
     callbacks?.onTextDelta?.(result);
     callbacks?.onTurnComplete?.(result);
     return { text: result, toolCalls: [], route: "command" };
+  }
+
+  private getProviderCandidates(): Array<{ vendor: LLMVendor; apiKey: string; model: string }> {
+    const llmSettings = this.deps.settingsService.get("llm");
+    const ordered = [
+      llmSettings.provider,
+      ...FALLBACK_VENDORS.filter((vendor) => vendor !== llmSettings.provider),
+    ];
+
+    const candidates: Array<{ vendor: LLMVendor; apiKey: string; model: string }> = [];
+    for (const vendor of ordered) {
+      if (vendor === "lgenie") continue;
+      const apiKey = this.deps.settingsService.getSecret(secretKeyFor(vendor));
+      if (!apiKey) continue;
+      const model = vendor === llmSettings.provider
+        ? llmSettings.model
+        : LLM_DEFAULT_MODELS[vendor];
+      candidates.push({ vendor, apiKey, model });
+    }
+    return candidates;
+  }
+
+  private async invokeWithFallback(
+    request: Omit<ChatTurnRequest, "vendor" | "apiKey" | "model">,
+  ): Promise<ChatTurnResponse> {
+    if (!this.deps.chatService) {
+      throw new Error("chat service unavailable");
+    }
+
+    const candidates = this.getProviderCandidates();
+    if (candidates.length === 0) {
+      const llm = this.deps.settingsService.get("llm");
+      throw new Error(`missing API key for ${llm.provider} and no fallback provider is configured`);
+    }
+
+    let firstError: Error | null = null;
+    for (let index = 0; index < candidates.length; index++) {
+      const candidate = candidates[index];
+      try {
+        if (index > 0) {
+          console.warn(`[lvis] chat fallback -> ${candidate.vendor} (${candidate.model})`);
+        }
+        return await this.deps.chatService.turn({
+          ...request,
+          vendor: candidate.vendor,
+          apiKey: candidate.apiKey,
+          model: candidate.model,
+        });
+      } catch (error) {
+        const resolved = error instanceof Error ? error : new Error(String(error));
+        if (!firstError) firstError = resolved;
+        console.warn(`[lvis] chat provider failed: ${candidate.vendor}: ${resolved.message}`);
+      }
+    }
+
+    throw firstError ?? new Error("all chat providers failed");
   }
 }
