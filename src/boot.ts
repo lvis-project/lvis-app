@@ -228,6 +228,13 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     );
   }
 
+  // 캘린더 watcher 자동 시작 (인증된 경우에만 — 미인증이면 non-fatal)
+  if (pluginRuntime.listMethods().includes("calendar.startWatcher")) {
+    pluginRuntime.call("calendar.startWatcher", {}).catch((e: Error) =>
+      console.log("[lvis] boot: calendar watcher start failed (non-fatal):", e.message)
+    );
+  }
+
   // 플러그인 메서드를 ToolRegistry에 등록 (범용)
   registerPluginTools(pluginRuntime, toolRegistry);
 
