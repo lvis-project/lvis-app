@@ -134,6 +134,18 @@ export interface PluginHostApi {
   saveNote(title: string, content: string): void;
   /** 설정에서 시크릿 조회 (API 키 등) */
   getSecret(key: string): string | null;
+
+  // ─── Microsoft Graph 공유 인증 ───────────────────────────────────────
+  /** 현재 유효한 MS Graph 액세스 토큰 반환. 미인증 시 null */
+  getMsGraphToken(): Promise<string | null>;
+  /** 브라우저 인터랙티브 인증 시작 (이미 인증된 경우 즉시 반환) */
+  startMsGraphAuth(openBrowser: (url: string) => Promise<void>): Promise<void>;
+  /** 현재 MS Graph 인증 여부 */
+  isMsGraphAuthenticated(): boolean;
+  /** 인증된 계정 이름 (이메일 주소) */
+  getMsGraphAccount(): string | null;
+  /** 인증 상태 변경 시 콜백 등록 */
+  onMsGraphAuthChange(handler: () => void): void;
 }
 
 export interface PluginRuntimeContext {
