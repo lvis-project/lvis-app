@@ -206,7 +206,7 @@ export class ProactiveEngine {
       const hasHighPriorityEmail = hinted.category === "email" &&
         events.some((e) => (e.data as { priority?: string } | undefined)?.priority === "high");
 
-      const priority = hinted.priority ?? (hasHighPriorityEmail ? "high" : "medium");
+      const priority = hasHighPriorityEmail ? "high" : (hinted.priority ?? "medium");
       const title = hinted.title ?? `${eventType} ${events.length}건`;
 
       items.push({

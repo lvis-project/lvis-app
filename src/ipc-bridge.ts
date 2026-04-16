@@ -9,6 +9,59 @@ import type { AppServices } from "./boot.js";
 import type { ApprovalDecision } from "./permissions/approval-gate.js";
 import { loadPolicy, savePolicy } from "./permissions/policy-store.js";
 
+/**
+ * All IPC channels reserved by the host. Plugin manifests must not declare
+ * ipcBindings that collide with these, as doing so would shadow privileged
+ * host handlers and create unpredictable (or malicious) behaviour.
+ */
+const RESERVED_HOST_CHANNELS = new Set([
+  "lvis:settings:get",
+  "lvis:settings:update",
+  "lvis:settings:set-api-key",
+  "lvis:settings:has-api-key",
+  "lvis:settings:delete-api-key",
+  "lvis:settings:set-web-api-key",
+  "lvis:settings:has-web-api-key",
+  "lvis:settings:delete-web-api-key",
+  "lvis:chat:has-provider",
+  "lvis:chat:send",
+  "lvis:chat:new",
+  "lvis:chat:sessions",
+  "lvis:chat:load-session",
+  "lvis:memory:notes:list",
+  "lvis:memory:notes:save",
+  "lvis:memory:notes:delete",
+  "lvis:memory:notes:search",
+  "lvis:memory:lvis-md:get",
+  "lvis:memory:lvis-md:update",
+  "lvis:memory:user-prefs:get",
+  "lvis:memory:user-prefs:update",
+  "lvis:plugins:marketplace:list",
+  "lvis:plugins:install",
+  "lvis:plugins:uninstall",
+  "lvis:plugins:ui:list",
+  "lvis:plugins:call",
+  "lvis:mcp:servers",
+  "lvis:mcp:kill",
+  "lvis:permission:get-mode",
+  "lvis:permission:set-mode",
+  "lvis:permission:list-rules",
+  "lvis:permission:add-rule",
+  "lvis:permission:remove-rule",
+  "lvis:approval:respond",
+  "lvis:policy:get",
+  "lvis:policy:set",
+  "lvis:tasks:add",
+  "lvis:tasks:update",
+  "lvis:tasks:get",
+  "lvis:tasks:delete",
+  "lvis:tasks:query",
+  "lvis:tasks:pending",
+  "lvis:tasks:overdue",
+  "lvis:tasks:today",
+  "lvis:briefing:get",
+]);
+
 export function registerIpcHandlers(
   services: AppServices,
   getMainWindow: () => BrowserWindow | null,
@@ -135,6 +188,13 @@ export function registerIpcHandlers(
   // ─── Plugin Methods (proxy) ─────────────────────
   // Legacy IPC channel compatibility is now manifest-driven.
   for (const binding of pluginRuntime.listIpcBindings()) {
+    if (RESERVED_HOST_CHANNELS.has(binding.channel)) {
+      console.warn(
+        `[ipc-bridge] Plugin '${binding.pluginId}' declares ipcBinding channel '${binding.channel}' ` +
+        `which is reserved by the host — binding skipped.`,
+      );
+      continue;
+    }
     ipcMain.handle(binding.channel, (_e, ...args: unknown[]) =>
       pluginRuntime.call(binding.method, toPluginPayload(args, binding.args)),
     );
@@ -271,7 +331,8 @@ function toPluginPayload(args: unknown[], argNames?: string[]): unknown {
     return args;
   }
   const payload: Record<string, unknown> = {};
-  for (let i = 0; i < argNames.length; i += 1) {
+  const count = Math.min(argNames.length, args.length);
+  for (let i = 0; i < count; i += 1) {
     payload[argNames[i]] = args[i];
   }
   return payload;

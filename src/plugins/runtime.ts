@@ -216,12 +216,14 @@ export class PluginRuntime {
   }
 
   findPluginIdByCapability(capability: string): string | undefined {
-    for (const [pluginId, plugin] of this.plugins) {
-      if (plugin.manifest.capabilities?.includes(capability)) {
-        return pluginId;
-      }
+    const matches = this.listPluginIdsByCapability(capability);
+    if (matches.length > 1) {
+      console.warn(
+        `[plugin-runtime] Multiple plugins declare capability '${capability}': ${matches.join(", ")}. ` +
+        `Using '${matches[0]}'. Ensure only one plugin provides this capability.`,
+      );
     }
-    return undefined;
+    return matches[0];
   }
 
   listPluginIdsByCapability(capability: string): string[] {
@@ -290,6 +292,11 @@ export class PluginRuntime {
       }
     }
 
+    if (parsed.startupMethods !== undefined && !Array.isArray(parsed.startupMethods)) {
+      throw new Error(
+        `Invalid manifest for plugin '${parsed.id}': 'startupMethods' must be an array of strings`,
+      );
+    }
     for (const startupMethod of parsed.startupMethods ?? []) {
       if (!parsed.methods.includes(startupMethod)) {
         throw new Error(
@@ -299,12 +306,23 @@ export class PluginRuntime {
       }
     }
 
+    if (parsed.ipcBindings !== undefined && !Array.isArray(parsed.ipcBindings)) {
+      throw new Error(
+        `Invalid manifest for plugin '${parsed.id}': 'ipcBindings' must be an array of objects`,
+      );
+    }
     for (const binding of parsed.ipcBindings ?? []) {
       if (!binding.channel || typeof binding.channel !== "string") {
         throw new Error(`Invalid ipcBindings entry in plugin '${parsed.id}': missing channel`);
       }
       if (!binding.method || typeof binding.method !== "string") {
         throw new Error(`Invalid ipcBindings entry in plugin '${parsed.id}': missing method`);
+      }
+      if (binding.args !== undefined && !Array.isArray(binding.args)) {
+        throw new Error(
+          `Invalid ipcBindings entry for channel '${binding.channel}' in plugin '${parsed.id}': ` +
+          `'args' must be an array of strings`,
+        );
       }
       if (!parsed.methods.includes(binding.method)) {
         throw new Error(
