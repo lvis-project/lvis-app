@@ -83,6 +83,10 @@
       {
         "from": "../lvis-plugin-pageindex/python-requirements.lock",
         "to": "python-requirements.lock"
+      },
+      {
+        "from": "backend/chat_agent",
+        "to": "backend/chat_agent"
       }
     ],
     "mac": {

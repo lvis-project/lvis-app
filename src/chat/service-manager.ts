@@ -91,7 +91,7 @@ export class ChatServiceManager {
   }
 
   private async start(): Promise<void> {
-    const chatScript = join(this.projectRoot, "src", "chat", "chat.py");
+    const chatScript = this.resolveChatScriptPath();
     await access(chatScript);
 
     const proc = spawn(
@@ -139,5 +139,16 @@ export class ChatServiceManager {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     throw new Error(`chat service did not become healthy within ${timeoutMs}ms`);
+  }
+
+  private resolveChatScriptPath(): string {
+    const isDev =
+      !!(process as { defaultApp?: boolean }).defaultApp || !process.resourcesPath;
+
+    if (isDev) {
+      return join(this.projectRoot, "backend", "chat_agent", "chat.py");
+    }
+
+    return join(process.resourcesPath, "backend", "chat_agent", "chat.py");
   }
 }

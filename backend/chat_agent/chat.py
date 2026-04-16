@@ -16,8 +16,17 @@ if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
 from langgraph_compat import END, START, StateGraph  # noqa: E402
-from nodes import finalize_turn, invoke_model, prepare_turn  # noqa: E402
+from nodes import (  # noqa: E402
+    check_keyword,
+    finalize_turn,
+    handle_email,
+    handle_general,
+    handle_meeting,
+    prepare_turn,
+    route_domain,
+)
 from providers import ProviderHttpError, build_provider  # noqa: E402
+from schemas import ChatGraphState  # noqa: E402
 
 
 class ToolSchemaModel(BaseModel):
@@ -55,13 +64,27 @@ class ChatTurnResponse(BaseModel):
 
 
 def build_graph():
-    graph = StateGraph(dict)
+    graph = StateGraph(ChatGraphState)
     graph.add_node("prepare", prepare_turn)
-    graph.add_node("model", invoke_model)
+    graph.add_node("check_keyword", check_keyword)
+    graph.add_node("meeting", handle_meeting)
+    graph.add_node("email", handle_email)
+    graph.add_node("general", handle_general)
     graph.add_node("finalize", finalize_turn)
     graph.add_edge(START, "prepare")
-    graph.add_edge("prepare", "model")
-    graph.add_edge("model", "finalize")
+    graph.add_edge("prepare", "check_keyword")
+    graph.add_conditional_edges(
+        "check_keyword",
+        route_domain,
+        {
+            "meeting": "meeting",
+            "email": "email",
+            "general": "general",
+        },
+    )
+    graph.add_edge("meeting", "finalize")
+    graph.add_edge("email", "finalize")
+    graph.add_edge("general", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile()
 
@@ -82,14 +105,14 @@ async def chat_turn(request: ChatTurnRequest) -> ChatTurnResponse:
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    state = {
-        "provider": provider,
-        "model": request.model,
-        "system_prompt": request.systemPrompt,
-        "messages": [message.model_dump(exclude_none=True) for message in request.messages],
-        "tools": [tool.model_dump() for tool in request.tools],
-        "max_tokens": request.maxTokens,
-    }
+    state = ChatGraphState(
+        provider=provider,
+        model=request.model,
+        system_prompt=request.systemPrompt,
+        messages=[message.model_dump(exclude_none=True) for message in request.messages],
+        tools=[tool.model_dump() for tool in request.tools],
+        max_tokens=request.maxTokens,
+    )
 
     try:
         result = await GRAPH.ainvoke(state)
@@ -98,7 +121,8 @@ async def chat_turn(request: ChatTurnRequest) -> ChatTurnResponse:
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
-    return ChatTurnResponse(**result["response"])
+    payload = result.response if isinstance(result, ChatGraphState) else result["response"]
+    return ChatTurnResponse(**payload)
 
 
 @app.post("/shutdown")
