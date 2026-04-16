@@ -1,0 +1,1204 @@
+# LVIS 플러그인 개발 가이드
+
+> **상태**: 최종 버전 (2026-04-12)
+> **대상**: LVIS 플러그인 개발자
+> **선행 읽음**: [아키텍처 문서 §9](../architecture/architecture.md#9-plugin-system--ui-extension) · [CLAUDE.md — Plugin Self-Registration Pattern](../../CLAUDE.md#plugin-self-registration-pattern)
+
+---
+
+## 목차
+
+1. [플러그인이란](#플러그인이란)
+2. [플러그인 매니페스트 (plugin.json)](#플러그인-매니페스트-pluginjson)
+3. [호스트 플러그인 엔트리 (hostPlugin.ts)](#호스트-플러그인-엔트리-hostplugints)
+4. [HostApi 계약](#hostapi-계약)
+5. [도구 명명 규칙](#도구-명명-규칙)
+6. [UI 확장](#ui-확장)
+7. [빌드 설정](#빌드-설정)
+8. [테스팅](#테스팅)
+9. [설치 및 배포](#설치-및-배포)
+10. [완전한 예제](#완전한-예제)
+
+---
+
+## 플러그인이란
+
+LVIS 플러그인은 **자기 등록 방식의 모듈식 확장**입니다. 호스트 앱이 플러그인 특정 코드를 갖지 않고, 플러그인이 시작 시 `context.hostApi`를 통해 자신을 등록합니다.
+
+### 핵심 원칙
+
+1. **호스트는 플러그인을 몰라야 함** — 모든 플러그인 통합은 HostApi를 통해 이루어짐
+2. **독립적 생명주기** — 플러그인 추가/제거 시 호스트를 수정하지 않음
+3. **명확한 계약** — PluginManifest + HostApi 인터페이스로 정의됨
+
+### 플러그인의 역할
+
+| 역할 | 설명 | 예시 |
+|------|------|------|
+| **스킬 제공** | 키워드 등록 및 도구 핸들러 | "회의록", "이메일", "문서 검색" |
+| **이벤트 생산** | 호스트/플러그인이 구독할 이벤트 발행 | `meeting.summary.created` |
+| **데이터 통합** | 외부 시스템의 데이터를 LVIS에 끌어옴 | 이메일, 회의 기록, 문서 인덱싱 |
+| **UI 제공** | 사이드바 슬롯에 React/vanilla JS 컴포넌트 | 회의 제어, 이메일 인증, 검색 UI |
+
+---
+
+## 플러그인 매니페스트 (plugin.json)
+
+플러그인 매니페스트는 호스트가 플러그인을 발견하고 로드하기 위한 메타데이터입니다.
+
+### 전체 스키마
+
+```typescript
+interface PluginManifest {
+  // 필수 필드
+  id: string;              // 고유 ID (예: "meeting")
+  name: string;            // 사람이 읽을 수 있는 이름
+  version: string;         // Semantic versioning (예: "1.0.0")
+  entry: string;           // hostPlugin.ts 진입점 경로
+  methods: string[];       // 제공하는 도구 이름 배열
+
+  // 선택 필드
+  config?: Record<string, unknown>;    // 기본 설정값
+  keywords?: Array<{ keyword: string; skillId: string }>;  // 키워드 선언
+  ui?: PluginUiExtension[];            // UI 슬롯 확장
+}
+```
+
+### 예제: 미팅 플러그인
+
+```json
+{
+  "id": "meeting",
+  "name": "LVIS Meeting",
+  "version": "1.0.0",
+  "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
+  "methods": [
+    "meeting_start",
+    "meeting_pushChunk",
+    "meeting_stop",
+    "meeting_transcript",
+    "meeting_sessions"
+  ],
+  "config": {
+    "intermediateEveryFinalSegments": 1
+  },
+  "ui": [
+    {
+      "id": "meeting-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "미팅",
+      "title": "Meeting Recorder",
+      "description": "회의 세션 시작/청크 주입/종료/전사 조회를 테스트합니다.",
+      "entry": "../../../node_modules/@lvis/plugin-meeting/dist/ui/meeting-control.js"
+    }
+  ]
+}
+```
+
+### 필드 설명
+
+#### id
+- 플러그인 고유 식별자
+- 영문자, 숫자, 하이픈만 사용 (예: `meeting`, `page-index`, `email`)
+- UI 슬롯 ID, 이벤트 네임스페이스의 프리픽스로 사용
+
+#### name
+- 사람이 읽을 수 있는 플러그인 이름
+- 설정 UI, 마켓플레이스에서 표시
+
+#### version
+- Semantic versioning: `MAJOR.MINOR.PATCH`
+- 플러그인 업데이트 추적에 사용
+
+#### entry
+- 호스트 플러그인 JavaScript 파일의 경로
+- 상대 경로 (플러그인 설치 위치 기준)
+- 예: `../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js`
+
+#### methods
+- 플러그인이 제공하는 도구 이름 배열
+- **언더스코어 형식 사용** (도트 금지)
+- 예: `meeting_start`, `email_list`, `index_scan`
+
+#### config (선택)
+- 기본 설정값
+- 사용자가 호스트 설정 UI에서 수정 가능
+- 플러그인은 `context.config`로 접근
+
+#### keywords (선택)
+- 키워드 엔진이 인식할 스킬 키워드
+- 사용자 입력 분류 시 사용
+- 예: `{ keyword: "회의록", skillId: "meeting.start" }`
+
+#### ui (선택)
+- 호스트 UI의 특정 슬롯에 확장 UI를 마운트
+- 자세히는 [UI 확장](#ui-확장) 섹션 참고
+
+---
+
+## 호스트 플러그인 엔트리 (hostPlugin.ts)
+
+호스트 플러그인은 플러그인의 JavaScript 진입점입니다. **모든 플러그인 초기화와 자기 등록이 여기서 이루어집니다.**
+
+### 기본 구조
+
+```typescript
+import { type PluginRuntimeContext, type RuntimePlugin } from "../plugin-runtime/types";
+
+type HostPluginContext = {
+  pluginId: string;          // 플러그인 ID (예: "meeting")
+  pluginRoot: string;        // 플러그인 루트 디렉토리 경로
+  hostRoot: string;          // 호스트 앱 루트 디렉토리 경로
+  config?: Record<string, unknown>;  // 매니페스트에서 지정된 config
+  log: (message: string, meta?: unknown) => void;  // 로깅 함수
+  hostApi: {
+    registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
+    emitEvent(eventType: string, data?: unknown): void;
+    onEvent(eventType: string, handler: (data: unknown) => void): void;
+    addTask(task: { ... }): void;
+    saveNote(title: string, content: string): void;
+    getSecret(key: string): string | null;
+  };
+};
+
+// 플러그인 팩토리 함수
+export default async function createPlugin(context: HostPluginContext) {
+  const { hostApi } = context;
+
+  // 1. 초기화 로직 (상태 복원, 서비스 시작 등)
+  // ...
+
+  // 2. 키워드 등록 (hostApi)
+  hostApi.registerKeywords([
+    { keyword: "회의록", skillId: "meeting.start" },
+    { keyword: "녹음", skillId: "meeting.start" },
+  ]);
+
+  // 3. 이벤트 핸들러 등록
+  recorder.on("final-summary", ({ sessionId, title, summary }) => {
+    hostApi.saveNote(`미팅-${sessionId}`, `# ${title}\n${summary}`);
+    hostApi.emitEvent("meeting.summary.created", { sessionId, title });
+  });
+
+  // 4. 도구 핸들러 반환
+  return {
+    handlers: {
+      "meeting_start": async (payload?: unknown) => {
+        // ...
+      },
+      "meeting_stop": async (payload?: unknown) => {
+        // ...
+      },
+    },
+  };
+}
+```
+
+### 단계별 구현 패턴
+
+#### 단계 1: 의존성 주입 처리
+
+```typescript
+export default async function createPlugin(context: HostPluginContext) {
+  const { hostApi, config, log } = context;
+
+  // API 키 조회 (config 또는 hostApi.getSecret 우선순위)
+  const apiKey = (config.openaiApiKey as string)
+    ?? (config as any).llmApiKey as string
+    ?? hostApi.getSecret("llm.apiKey.openai")
+    ?? undefined;
+
+  // 저장 경로 설정
+  const storageDir = (config.storageDir as string) 
+    ?? join(context.hostRoot, ".plugin-data");
+
+  log("plugin initialized", { apiKey: !!apiKey, storageDir });
+  // ...
+}
+```
+
+#### 단계 2: 서비스/상태 초기화
+
+```typescript
+// 세션 지속성
+const sessionStore = new SessionStore(storageDir);
+
+// 메인 파이프라인/엔진 생성
+const pipeline = new MeetingPipeline({
+  sttProvider: apiKey ? new OpenAIWhisperSttProvider({ apiKey }) : new MockSttProvider(),
+  summaryProvider: apiKey ? new OpenAISummaryProvider({ apiKey }) : new MockSummaryProvider(),
+  log: context.log,
+  onSessionUpdate: (session) => {
+    // 상태 변경 시 저장
+    sessionStore.save({...});
+  },
+});
+
+// 크래시 복구
+for (const session of sessionStore.listUnfinished()) {
+  pipeline.restoreSession(session);
+  context.log(`recovered session: ${session.sessionId}`);
+}
+```
+
+#### 단계 3: 키워드 등록
+
+```typescript
+hostApi.registerKeywords([
+  { keyword: "회의록", skillId: "meeting.start" },
+  { keyword: "녹음", skillId: "meeting.start" },
+  { keyword: "미팅", skillId: "meeting.start" },
+]);
+```
+
+**주의**: `skillId`는 매니페스트의 `methods` 배열에 있는 도구 이름과 일치해야 합니다.
+
+#### 단계 4: 이벤트 핸들러 등록
+
+```typescript
+recorder.on("final-summary", ({ sessionId, title, summary }) => {
+  // 메모 자동 저장
+  hostApi.saveNote(
+    `미팅-${sessionId.slice(0, 8)}`,
+    `# ${title}\n\n${summary}`
+  );
+
+  // 이벤트 발행 (다른 플러그인/호스트 구독 가능)
+  hostApi.emitEvent("meeting.summary.created", {
+    sessionId,
+    title,
+    summary,
+  });
+});
+
+recorder.on("error", ({ sessionId, error }) => {
+  context.log(`meeting error: ${sessionId}`, error);
+  hostApi.emitEvent("meeting.error", {
+    sessionId,
+    error: (error as Error).message,
+  });
+});
+```
+
+#### 단계 5: 도구 핸들러 정의 및 반환
+
+```typescript
+return {
+  start?: async () => {
+    // 플러그인 시작 시 호출 (선택)
+    context.log("plugin started");
+  },
+
+  stop?: async () => {
+    // 플러그인 정지 시 호출 (선택)
+    context.log("plugin stopped");
+  },
+
+  handlers: {
+    "meeting_start": async (payload?: unknown) => {
+      const body = (payload ?? {}) as { sessionId?: string };
+      if (!body.sessionId) throw new Error("sessionId is required");
+
+      recorder.start(body.sessionId);
+      hostApi.emitEvent("meeting.started", { sessionId: body.sessionId });
+      return { sessionId: body.sessionId, started: true };
+    },
+
+    "meeting_stop": async (payload?: unknown) => {
+      const body = (payload ?? {}) as { sessionId?: string };
+      if (!body.sessionId) throw new Error("sessionId is required");
+
+      await recorder.stop(body.sessionId);
+      hostApi.emitEvent("meeting.ended", { sessionId: body.sessionId });
+
+      // 최종 요약에서 태스크 생성
+      const final = finalBySession.get(body.sessionId);
+      if (final?.actionItems.length) {
+        for (const item of final.actionItems) {
+          hostApi.addTask({
+            title: item.slice(0, 100),
+            description: `미팅(${final.title})에서 생성된 액션 아이템`,
+            source: "meeting",
+            sourceRef: body.sessionId,
+            priority: "medium",
+          });
+        }
+      }
+
+      return final;
+    },
+  },
+};
+```
+
+---
+
+## HostApi 계약
+
+플러그인이 호스트와 통신하는 유일한 통로가 **HostApi**입니다. 다섯 가지 핵심 메서드를 제공합니다.
+
+### 1. registerKeywords()
+
+키워드 엔진에 스킬 키워드를 등록합니다. 사용자 입력이 분류될 때 매칭됩니다.
+
+```typescript
+hostApi.registerKeywords([
+  { keyword: "회의록", skillId: "meeting.start" },
+  { keyword: "녹음", skillId: "meeting.start" },
+]);
+```
+
+**주의사항**:
+- `skillId`는 매니페스트 `methods` 배열에 있어야 함
+- 플러그인 제거 시 자동으로 해제됨
+- 키워드는 한국어, 영문, 혼합 모두 지원
+
+### 2. emitEvent()
+
+플러그인이 이벤트를 발행합니다. 호스트나 다른 플러그인이 구독할 수 있습니다.
+
+```typescript
+hostApi.emitEvent("meeting.summary.created", {
+  sessionId: "sess-123",
+  title: "팀 회의",
+  summary: "...",
+});
+```
+
+**이벤트 네이밍**:
+- 형식: `{pluginId}.{eventName}`
+- 예: `meeting.summary.created`, `email.action.needed`, `index.scan.complete`
+
+**흔한 이벤트**:
+| 플러그인 | 이벤트 | 의미 |
+|---------|--------|------|
+| meeting | `meeting.started` | 녹음 시작 |
+| meeting | `meeting.ended` | 녹음 종료 |
+| meeting | `meeting.summary.created` | 최종 요약 완료 |
+| meeting | `meeting.error` | 오류 발생 |
+| email | `email.action.needed` | 액션 필요 이메일 발견 |
+| email | `email.analyzed` | 이메일 분석 완료 |
+| index | `index.scan.complete` | 문서 인덱싱 완료 |
+
+### 3. onEvent()
+
+이벤트를 구독합니다. 플러그인이 다른 플러그인의 이벤트에 반응할 수 있습니다.
+
+```typescript
+hostApi.onEvent("email.analyzed", (data: unknown) => {
+  const { emailId, taskCount } = data as {
+    emailId: string;
+    taskCount: number;
+  };
+  context.log(`email analyzed: ${emailId} (${taskCount} tasks)`);
+});
+```
+
+### 4. addTask()
+
+LVIS 태스크를 자동 생성합니다. 이메일에서 추출한 할 일, 미팅의 액션 아이템 등이 대상입니다.
+
+```typescript
+hostApi.addTask({
+  title: "계약 검토",
+  description: "이메일(고객 계약서)에서 추출된 할 일",
+  source: "email",           // 플러그인 ID
+  sourceRef: "email-456",    // 소스 문서 ID (검색 시 역추적 가능)
+  priority: "high",          // "high" | "medium" | "low"
+});
+```
+
+**필드 설명**:
+- `title`: 태스크 제목 (최대 100자 권장)
+- `description`: 상세 설명
+- `source`: 플러그인 ID (예: "meeting", "email", "index")
+- `sourceRef`: 소스 문서/세션 ID (검색할 때 역추적 가능)
+- `priority`: "high" | "medium" | "low"
+
+### 5. saveNote()
+
+사용자의 `notes/` 디렉토리에 메모를 저장합니다. 플러그인이 생성한 데이터(요약, 분석 결과)를 영구 보관합니다.
+
+```typescript
+hostApi.saveNote(
+  `미팅-${sessionId.slice(0, 8)}-${title}`,
+  `# ${title}\n> 세션: ${sessionId}\n> 시간: ${createdAt}\n\n${summary}`
+);
+```
+
+**주의사항**:
+- 첫 번째 인자는 파일명 (`.md` 자동 추가됨)
+- 두 번째 인자는 마크다운 콘텐츠
+- 파일은 `~/.lvis/notes/` 저장됨
+- 중복 호출 시 기존 파일 덮어씀
+
+### 6. getSecret()
+
+설정에 저장된 암호화된 API 키를 조회합니다. 사용자가 설정 UI에서 등록한 API 키를 안전하게 접근합니다.
+
+```typescript
+const openaiKey = hostApi.getSecret("llm.apiKey.openai");
+const graphToken = hostApi.getSecret("email.graph.token");
+
+if (!openaiKey) {
+  context.log("API 키가 설정되지 않았습니다");
+  // Fallback: mock provider 사용
+}
+```
+
+**흔한 시크릿 키**:
+| 키 | 설명 |
+|----|------|
+| `llm.apiKey.openai` | OpenAI API 키 |
+| `llm.apiKey.anthropic` | Anthropic API 키 |
+| `llm.apiKey.google` | Google API 키 |
+| `email.graph.token` | Microsoft Graph 토큰 |
+| `email.graph.refreshToken` | Microsoft Graph 리프레시 토큰 |
+
+---
+
+## 도구 명명 규칙
+
+**LVIS 도구는 언더스코어(`_`) 형식을 사용합니다. 도트(`.`)는 금지입니다.**
+
+### 이유
+
+OpenAI, Anthropic, Google 등 주요 LLM 제공자는 도구 이름을 정규식 `^[a-zA-Z0-9_-]+$`로 검증합니다. 도트를 포함하면 모델이 도구를 호출할 수 없습니다.
+
+### 올바른 명명
+
+```typescript
+// ✅ 올바름
+methods: [
+  "meeting_start",
+  "meeting_pushChunk",
+  "meeting_stop",
+  "meeting_transcript",
+  "email_list",
+  "email_analyze",
+  "index_search",
+  "index_scan",
+]
+```
+
+### 잘못된 명명
+
+```typescript
+// ❌ 잘못됨 (도트 사용)
+methods: [
+  "meeting.start",
+  "email.list",
+  "index.search",
+]
+```
+
+### 변환 규칙
+
+플러그인이 도트 형식의 이벤트(`meeting.summary.created`)를 사용해도 괜찮습니다. **도구 이름만 언더스코어 형식이어야 합니다.**
+
+호스트 `boot.ts`의 `registerPluginTools()`는 자동으로 도트를 언더스코어로 변환합니다:
+
+```typescript
+// 플러그인에서 선언
+methods: ["meeting.start", "meeting.stop"]
+
+// 자동 변환
+// → "meeting_start", "meeting_stop"
+```
+
+---
+
+## UI 확장
+
+플러그인은 사이드바 슬롯에 React/vanilla JS 컴포넌트를 마운트할 수 있습니다.
+
+### UI 확장 타입
+
+```typescript
+interface PluginUiExtension {
+  id: string;                    // 고유 ID (예: "meeting-control")
+  slot: "sidebar";               // 마운트 슬롯 (현재는 sidebar만 지원)
+  kind: "embedded-module" | "embedded-page" | "info-card";
+  displayName?: string;          // 사이드바에 표시할 이름
+  title: string;                 // UI 제목
+  description?: string;          // UI 설명
+  defaults?: Record<string, unknown>;  // 초기값
+  entry?: string;                // JS 파일 경로
+  exportName?: string;           // 내보낸 함수/클래스 이름
+  page?: string;                 // 페이지 식별자
+}
+```
+
+### 예제: 미팅 컨트롤 UI
+
+```json
+{
+  "ui": [
+    {
+      "id": "meeting-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "미팅",
+      "title": "Meeting Recorder",
+      "description": "회의 세션을 관리합니다.",
+      "entry": "../../../node_modules/@lvis/plugin-meeting/dist/ui/meeting-control.js"
+    }
+  ]
+}
+```
+
+### UI 모듈 작성 (Vanilla JS)
+
+```javascript
+// ui/meeting-control.js
+
+/**
+ * UI 모듈 (sidebar에 마운트될 컴포넌트)
+ *
+ * @param {Object} props
+ * @param {HTMLElement} props.container - 마운트 대상 DOM 노드
+ * @param {Object} props.hostApi - 호스트 도구 API
+ *   - hostApi.callTool(toolName, payload): Promise
+ *   - hostApi.onToolResult(listener): 도구 실행 결과 구독
+ * @param {Object} props.config - 매니페스트 config
+ * @returns {Object} UI 객체 (선택: { cleanup?: () => void })
+ */
+export default async function MeetingControlUI({ container, hostApi, config }) {
+  // UI 초기화
+  const html = `
+    <div class="meeting-control">
+      <button id="start-btn">회의 시작</button>
+      <button id="stop-btn" disabled>회의 종료</button>
+      <div id="status"></div>
+    </div>
+  `;
+  container.innerHTML = html;
+
+  const startBtn = container.querySelector("#start-btn");
+  const stopBtn = container.querySelector("#stop-btn");
+  const statusDiv = container.querySelector("#status");
+
+  let sessionId = null;
+
+  // 회의 시작
+  startBtn.addEventListener("click", async () => {
+    sessionId = `sess-${Date.now()}`;
+    try {
+      const result = await hostApi.callTool("meeting_start", {
+        sessionId,
+      });
+      statusDiv.textContent = `회의 시작: ${result.sessionId}`;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    } catch (err) {
+      statusDiv.textContent = `오류: ${err.message}`;
+    }
+  });
+
+  // 회의 종료
+  stopBtn.addEventListener("click", async () => {
+    try {
+      const result = await hostApi.callTool("meeting_stop", { sessionId });
+      statusDiv.textContent = `요약: ${result.summary.slice(0, 50)}...`;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    } catch (err) {
+      statusDiv.textContent = `오류: ${err.message}`;
+    }
+  });
+
+  // 정리 함수 (플러그인 제거 시 호출)
+  return {
+    cleanup: () => {
+      container.innerHTML = "";
+    },
+  };
+}
+```
+
+### UI 모듈 작성 (React)
+
+```typescript
+// ui/meeting-control.tsx
+import React, { useState } from "react";
+
+interface UIProps {
+  container: HTMLElement;
+  hostApi: {
+    callTool(toolName: string, payload: unknown): Promise<unknown>;
+    onToolResult(listener: (result: unknown) => void): void;
+  };
+  config: Record<string, unknown>;
+}
+
+export default async function MeetingControlUI({
+  container,
+  hostApi,
+  config,
+}: UIProps) {
+  const root = ReactDOM.createRoot(container);
+
+  function MeetingControl() {
+    const [sessionId, setSessionId] = useState<string | null>(null);
+    const [status, setStatus] = useState("");
+    const [isRecording, setIsRecording] = useState(false);
+
+    const handleStart = async () => {
+      const newSessionId = `sess-${Date.now()}`;
+      try {
+        const result = (await hostApi.callTool("meeting_start", {
+          sessionId: newSessionId,
+        })) as { sessionId: string };
+        setSessionId(result.sessionId);
+        setStatus("회의 시작됨");
+        setIsRecording(true);
+      } catch (err) {
+        setStatus(`오류: ${(err as Error).message}`);
+      }
+    };
+
+    const handleStop = async () => {
+      if (!sessionId) return;
+      try {
+        const result = (await hostApi.callTool("meeting_stop", {
+          sessionId,
+        })) as { summary: string };
+        setStatus(`요약: ${result.summary.slice(0, 50)}...`);
+        setIsRecording(false);
+      } catch (err) {
+        setStatus(`오류: ${(err as Error).message}`);
+      }
+    };
+
+    return (
+      <div className="meeting-control p-4">
+        <button
+          onClick={handleStart}
+          disabled={isRecording}
+          className="btn btn-primary"
+        >
+          회의 시작
+        </button>
+        <button
+          onClick={handleStop}
+          disabled={!isRecording}
+          className="btn btn-secondary ml-2"
+        >
+          회의 종료
+        </button>
+        <p className="mt-2 text-sm">{status}</p>
+      </div>
+    );
+  }
+
+  root.render(<MeetingControl />);
+
+  return {
+    cleanup: () => root.unmount(),
+  };
+}
+```
+
+---
+
+## 빌드 설정
+
+LVIS 플러그인은 TypeScript로 작성되고 `tsup` + `vitest`로 빌드·테스트됩니다.
+
+### package.json
+
+```json
+{
+  "name": "@lvis/plugin-example",
+  "version": "1.0.0",
+  "description": "LVIS 플러그인 예제",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./host-plugin": {
+      "types": "./dist/hostPlugin.d.ts",
+      "import": "./dist/hostPlugin.js",
+      "require": "./dist/hostPlugin.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup && mkdir -p dist/ui && cp src/ui/*.html dist/ui/ && cp src/ui/*.js dist/ui/",
+    "clean": "rm -rf dist coverage",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev:test": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsup": "^8.2.4",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.4"
+  },
+  "dependencies": {
+    "@lvis/plugin-types": "workspace:*"
+  }
+}
+```
+
+### tsup.config.ts
+
+```typescript
+import { defineConfig } from "tsup";
+
+export default defineConfig({
+  entry: ["src/index.ts", "src/hostPlugin.ts"],
+  format: ["esm", "cjs"],  // CommonJS와 ES Module 모두 생성
+  dts: true,               // TypeScript 타입 파일 생성
+  sourcemap: true,         // 소스맵 생성
+  clean: true,             // 빌드 전 dist/ 정리
+  target: "node18",        // Node 18 이상 대상
+  outDir: "dist",
+  splitting: false,        // 파일 분할 금지 (plgin.json entry가 정확해야 함)
+});
+```
+
+**주의**: `splitting: false`는 필수입니다. 플러그인 매니페스트의 `entry` 경로가 정확해야 합니다.
+
+### tsconfig.json
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020"],
+    "declaration": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "test"]
+}
+```
+
+---
+
+## 테스팅
+
+### vitest.config.ts
+
+```typescript
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    environment: "node",
+    include: ["test/**/*.test.ts"],
+    globals: true,
+  },
+});
+```
+
+### 테스트 작성 예제
+
+```typescript
+// test/hostPlugin.test.ts
+import { describe, it, expect, vi } from "vitest";
+import createPlugin from "../src/hostPlugin.js";
+
+describe("Meeting Plugin", () => {
+  it("should register keywords on startup", async () => {
+    const mockRegisterKeywords = vi.fn();
+    const mockHostApi = {
+      registerKeywords: mockRegisterKeywords,
+      emitEvent: vi.fn(),
+      onEvent: vi.fn(),
+      addTask: vi.fn(),
+      saveNote: vi.fn(),
+      getSecret: vi.fn(() => null),
+    };
+
+    const plugin = await createPlugin({
+      pluginId: "meeting",
+      pluginRoot: "/plugin/root",
+      hostRoot: "/host/root",
+      log: vi.fn(),
+      hostApi: mockHostApi,
+    });
+
+    // 키워드 등록 확인
+    expect(mockRegisterKeywords).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ keyword: "회의록", skillId: "meeting_start" }),
+      ])
+    );
+
+    // 도구 핸들러 존재 확인
+    expect(plugin.handlers["meeting_start"]).toBeDefined();
+  });
+
+  it("should handle meeting_start correctly", async () => {
+    const mockEmitEvent = vi.fn();
+    const mockHostApi = {
+      registerKeywords: vi.fn(),
+      emitEvent: mockEmitEvent,
+      onEvent: vi.fn(),
+      addTask: vi.fn(),
+      saveNote: vi.fn(),
+      getSecret: vi.fn(() => null),
+    };
+
+    const plugin = await createPlugin({
+      pluginId: "meeting",
+      pluginRoot: "/plugin/root",
+      hostRoot: "/host/root",
+      log: vi.fn(),
+      hostApi: mockHostApi,
+    });
+
+    const result = await plugin.handlers["meeting_start"]({
+      sessionId: "test-session",
+    });
+
+    expect(result).toEqual({
+      sessionId: "test-session",
+      started: true,
+    });
+    expect(mockEmitEvent).toHaveBeenCalledWith("meeting.started", {
+      sessionId: "test-session",
+    });
+  });
+});
+```
+
+### 빌드 및 테스트 실행
+
+```bash
+# 플러그인 빌드
+npm run build
+
+# 타입 체크
+npm run typecheck
+
+# 테스트 실행 (한 번)
+npm test
+
+# 개발 모드 테스트 (watch)
+npm run dev:test
+```
+
+---
+
+## 설치 및 배포
+
+### 플러그인 디렉토리 구조
+
+```
+lvis-app/
+  plugins/
+    installed/
+      {plugin-id}/
+        plugin.json          ← 매니페스트
+        ... (플러그인 파일)
+```
+
+### 예제: Meeting 플러그인 설치
+
+```
+lvis-app/plugins/installed/meeting/
+  plugin.json
+  dist/
+    hostPlugin.js
+    hostPlugin.d.ts
+    index.js
+    index.d.ts
+    ui/
+      meeting-control.js
+      meeting-control.html
+```
+
+### registry.json
+
+호스트 앱은 `plugins/registry.json`에서 설치된 플러그인 목록을 관리합니다.
+
+```json
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "meeting",
+      "manifestPath": "plugins/installed/meeting/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "email",
+      "manifestPath": "plugins/installed/email/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "pageindex",
+      "manifestPath": "plugins/installed/pageindex/plugin.json",
+      "enabled": true
+    }
+  ]
+}
+```
+
+### 플러그인 발견 및 로드 (boot.ts)
+
+호스트 `boot.ts`는 시작 시 `registry.json`을 읽고 모든 활성화된 플러그인을 로드합니다.
+
+```typescript
+// boot.ts (§4.2 Boot Sequence)
+async function loadPlugins(app: App) {
+  const registryPath = join(app.getPath("userData"), "plugins", "registry.json");
+  const registry = JSON.parse(await fs.readFile(registryPath, "utf-8"));
+
+  for (const entry of registry.plugins) {
+    if (!entry.enabled) continue;
+
+    const manifest = JSON.parse(
+      await fs.readFile(entry.manifestPath, "utf-8")
+    );
+
+    const pluginRoot = dirname(entry.manifestPath);
+    const entryPath = resolve(pluginRoot, manifest.entry);
+
+    // hostPlugin.js import
+    const createPlugin = (await import(entryPath)).default;
+
+    // 플러그인 실행
+    const plugin = await createPlugin({
+      pluginId: manifest.id,
+      pluginRoot,
+      hostRoot: app.getPath("userData"),
+      config: manifest.config ?? {},
+      log: (msg, meta) => console.log(`[${manifest.id}] ${msg}`, meta),
+      hostApi: createHostApi(manifest.id),
+    });
+
+    // 핸들러 등록
+    for (const [toolName, handler] of Object.entries(plugin.handlers ?? {})) {
+      toolRegistry.register(manifest.id, toolName, handler);
+    }
+  }
+}
+```
+
+### 플러그인 제거
+
+플러그인 제거 시:
+
+1. `registry.json`에서 플러그인 항목 삭제 또는 `enabled: false` 설정
+2. 호스트 재시작
+3. 플러그인의 `stop()` 메서드 호출 (있는 경우)
+4. 플러그인이 등록한 모든 것(키워드, 이벤트 핸들러 등) 자동 정리
+
+---
+
+## 완전한 예제
+
+### 이메일 플러그인 (간단한 예제)
+
+```typescript
+// src/hostPlugin.ts
+import { GraphClient } from "./graphClient.js";
+import { analyzeEmailWithAI } from "./emailAnalyzer.js";
+
+type HostPluginContext = {
+  pluginId: string;
+  pluginRoot: string;
+  hostRoot: string;
+  config?: Record<string, unknown>;
+  log: (message: string, meta?: unknown) => void;
+  hostApi: {
+    registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
+    emitEvent(type: string, data?: unknown): void;
+    onEvent(type: string, handler: (data: unknown) => void): void;
+    addTask(task: {
+      title: string;
+      description?: string;
+      source: string;
+      sourceRef?: string;
+      priority?: string;
+    }): void;
+    saveNote(title: string, content: string): void;
+    getSecret(key: string): string | null;
+  };
+};
+
+export default async function createPlugin(context: HostPluginContext) {
+  const { hostApi } = context;
+
+  // Microsoft Graph 클라이언트 초기화
+  const client = new GraphClient(context.hostRoot);
+  await client.loadSavedToken();
+
+  // API 키 조회
+  const apiKey =
+    (context.config?.openaiApiKey as string) ||
+    hostApi.getSecret("llm.apiKey.openai") ||
+    undefined;
+
+  // ──── 자기 등록: 키워드 ────
+  hostApi.registerKeywords([
+    { keyword: "이메일", skillId: "email_list" },
+    { keyword: "메일", skillId: "email_list" },
+    { keyword: "email", skillId: "email_list" },
+  ]);
+
+  if (client.isAuthenticated()) {
+    context.log(`authenticated as ${client.getAccountName()}`);
+  }
+
+  return {
+    handlers: {
+      "email_status": async () => ({
+        authenticated: client.isAuthenticated(),
+        account: client.getAccountName() ?? undefined,
+      }),
+
+      "email_list": async (payload?: unknown) => {
+        if (!client.isAuthenticated()) {
+          throw new Error("먼저 로그인해주세요");
+        }
+        const p = (payload ?? {}) as { top?: number };
+        return client.listEmails(p.top ?? 20);
+      },
+
+      "email_read": async (payload?: unknown) => {
+        if (!client.isAuthenticated()) {
+          throw new Error("먼저 로그인해주세요");
+        }
+        const p = (payload ?? {}) as { id?: string };
+        if (!p.id) throw new Error("id가 필요합니다");
+        return client.readEmail(p.id);
+      },
+
+      "email_analyze": async (payload?: unknown) => {
+        if (!client.isAuthenticated()) {
+          throw new Error("먼저 로그인해주세요");
+        }
+        const p = (payload ?? {}) as { id?: string };
+        if (!p.id) throw new Error("id가 필요합니다");
+
+        const email = await client.readEmail(p.id);
+        const analysis = apiKey
+          ? await analyzeEmailWithAI(email, apiKey)
+          : { actionRequired: false, tasks: [] };
+
+        // 액션 필요 이벤트 발행
+        if (analysis.actionRequired) {
+          hostApi.emitEvent("email.action_needed", {
+            emailId: p.id,
+            subject: email.subject,
+            taskCount: analysis.tasks?.length ?? 0,
+          });
+        }
+
+        // 태스크 자동 생성
+        for (const task of analysis.tasks ?? []) {
+          hostApi.addTask({
+            title: task.title.slice(0, 100),
+            description: `이메일(${email.subject})에서 추출된 할 일`,
+            source: "email",
+            sourceRef: p.id,
+            priority: task.priority ?? "medium",
+          });
+        }
+
+        return { email, analysis, isAI: !!apiKey };
+      },
+    },
+  };
+}
+```
+
+### plugin.json
+
+```json
+{
+  "id": "email",
+  "name": "LVIS Email",
+  "version": "1.0.0",
+  "entry": "../../../node_modules/@lvis/plugin-email/dist/hostPlugin.js",
+  "methods": ["email_status", "email_list", "email_read", "email_analyze"],
+  "config": {
+    "openaiApiKey": ""
+  },
+  "ui": [
+    {
+      "id": "email-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "이메일",
+      "title": "Email Manager",
+      "description": "이메일 계정을 연결하고 메시지를 조회합니다.",
+      "entry": "../../../node_modules/@lvis/plugin-email/dist/ui/email-control.js"
+    }
+  ]
+}
+```
+
+---
+
+## 체크리스트
+
+새 플러그인 개발 시 이 체크리스트를 따르세요.
+
+- [ ] **프로젝트 설정**
+  - [ ] `package.json` (name, exports, scripts)
+  - [ ] `tsup.config.ts` (entry, format, dts)
+  - [ ] `tsconfig.json` (strict mode)
+  - [ ] `vitest.config.ts`
+
+- [ ] **플러그인 매니페스트**
+  - [ ] `plugin.json` 생성
+  - [ ] `id`, `name`, `version` 설정
+  - [ ] `entry` 경로 (hostPlugin.js)
+  - [ ] `methods` 배열 (언더스코어 형식)
+  - [ ] `config` 기본값 (있는 경우)
+  - [ ] `ui` 확장 (있는 경우)
+
+- [ ] **hostPlugin.ts 구현**
+  - [ ] `createPlugin` 함수 내보내기
+  - [ ] `hostApi.registerKeywords()` 호출
+  - [ ] 이벤트 발행 (`hostApi.emitEvent()`)
+  - [ ] 도구 핸들러 구현 (`handlers` 객체)
+  - [ ] 오류 처리 (throw 명시적)
+  - [ ] 로깅 (`context.log()`)
+
+- [ ] **테스팅**
+  - [ ] 단위 테스트 작성 (`test/*.test.ts`)
+  - [ ] `npm test` 통과
+  - [ ] 타입 체크 (`npm run typecheck`)
+
+- [ ] **UI (선택)**
+  - [ ] UI 모듈 작성 (`src/ui/*.js`)
+  - [ ] `plugin.json`의 `ui` 섹션 설정
+  - [ ] 빌드 스크립트에서 UI 파일 복사
+
+- [ ] **빌드 및 배포**
+  - [ ] `npm run build` 성공
+  - [ ] `dist/hostPlugin.js` 생성 확인
+  - [ ] `plugins/installed/{id}/` 디렉토리 생성
+  - [ ] `plugin.json` 복사
+  - [ ] `registry.json`에 항목 추가
+  - [ ] 호스트 재시작 후 플러그인 로드 확인
+
+---
+
+## 참고 자료
+
+- [아키텍처 문서 §9 — Plugin System & UI Extension](../architecture/architecture.md#9-plugin-system--ui-extension)
+- [CLAUDE.md — Plugin Self-Registration Pattern](../../CLAUDE.md#plugin-self-registration-pattern)
+- [Meeting 플러그인 (실제 예제)](../../lvis-plugin-meeting/src/)
+- [Email 플러그인 (실제 예제)](../../lvis-plugin-email/src/)
