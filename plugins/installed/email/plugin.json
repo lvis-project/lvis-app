@@ -19,6 +19,17 @@
     "email_get_notifications",
     "email_create_event"
   ],
+  "capabilities": [
+    "mail-source",
+    "background-watcher"
+  ],
+  "startupMethods": [
+    "email_start_watcher"
+  ],
+  "eventSubscriptions": [
+    "email.action.needed",
+    "email.new"
+  ],
   "config": {},
   "ui": [
     {

@@ -33,6 +33,8 @@ describe("PluginRuntime.disable", () => {
     const pluginDir = join(installedDir, id);
     await mkdir(pluginDir, { recursive: true });
 
+    const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_hello`;
+
     // Minimal ESM plugin entry — no external deps.
     const entryPath = join(pluginDir, "entry.mjs");
     await writeFile(
@@ -40,7 +42,7 @@ describe("PluginRuntime.disable", () => {
       `export default async function createPlugin(ctx) {
   return {
     handlers: {
-      "${id}_hello": async () => "hi-${id}",
+      "${methodName}": async () => "hi-${id}",
     },
     start: async () => {},
     stop: async () => {},
@@ -55,7 +57,7 @@ describe("PluginRuntime.disable", () => {
       name: id,
       version: "1.0.0",
       entry: "entry.mjs",
-      methods: [`${id}_hello`],
+      methods: [methodName],
     };
     if (deployment) manifest.deployment = deployment;
     const manifestPath = join(pluginDir, "plugin.json");
@@ -90,12 +92,12 @@ describe("PluginRuntime.disable", () => {
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-user");
-    expect(runtime.listMethods()).toContain("p-user_hello");
+    expect(runtime.listMethods()).toContain("p_user_hello");
 
     await runtime.disable("p-user");
 
     expect(runtime.listPluginIds()).not.toContain("p-user");
-    expect(runtime.listMethods()).not.toContain("p-user_hello");
+    expect(runtime.listMethods()).not.toContain("p_user_hello");
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     const entry = registry.plugins.find((p: { id: string }) => p.id === "p-user");
@@ -111,7 +113,7 @@ describe("PluginRuntime.disable", () => {
     await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Managed plugin/);
 
     expect(runtime.listPluginIds()).toContain("p-managed");
-    expect(runtime.listMethods()).toContain("p-managed_hello");
+    expect(runtime.listMethods()).toContain("p_managed_hello");
 
     // registry should NOT have enabled=false
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
@@ -198,5 +200,109 @@ describe("PluginRuntime.disable", () => {
 
     const runtime = makeRuntime();
     await expect(runtime.load()).rejects.toThrow(/Invalid tool name 'bad\.method'/);
+  });
+
+  it("plugin with method name starting with digit fails to load", async () => {
+    const pluginDir = join(installedDir, "bad-leading-digit");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return { handlers: { "1bad_name": async () => "fail" } };
+}
+`,
+      "utf-8",
+    );
+
+    const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", methods: ["1bad_name"] };
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    await writeRegistry([{ id: "bad-leading-digit", manifestPath, enabled: true }]);
+
+    const runtime = makeRuntime();
+    await expect(runtime.load()).rejects.toThrow(/Invalid tool name '1bad_name'/);
+  });
+
+  it("plugin with hyphen in method name fails to load", async () => {
+    const pluginDir = join(installedDir, "bad-hyphen");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return { handlers: { "bad-name": async () => "fail" } };
+}
+`,
+      "utf-8",
+    );
+
+    const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", methods: ["bad-name"] };
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    await writeRegistry([{ id: "bad-hyphen", manifestPath, enabled: true }]);
+
+    const runtime = makeRuntime();
+    await expect(runtime.load()).rejects.toThrow(/Invalid tool name 'bad-name'/);
+  });
+
+  it("exposes capability/manifest/ipc binding metadata from loaded plugins", async () => {
+    const pluginDir = join(installedDir, "meta-plugin");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return {
+    handlers: {
+      "meta_ping": async () => "pong",
+    },
+  };
+}
+`,
+      "utf-8",
+    );
+
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "meta-plugin",
+        name: "meta-plugin",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        methods: ["meta_ping"],
+        capabilities: ["meta-capability"],
+        startupMethods: ["meta_ping"],
+        ipcBindings: [
+          {
+            channel: "lvis:meta:ping",
+            method: "meta_ping",
+            args: ["message"],
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    await writeRegistry([{ id: "meta-plugin", manifestPath, enabled: true }]);
+
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    expect(runtime.findPluginIdByCapability("meta-capability")).toBe("meta-plugin");
+    expect(runtime.listPluginIdsByCapability("meta-capability")).toEqual(["meta-plugin"]);
+
+    const manifest = runtime.getPluginManifest("meta-plugin");
+    expect(manifest?.startupMethods).toEqual(["meta_ping"]);
+
+    expect(runtime.listIpcBindings()).toEqual([
+      {
+        pluginId: "meta-plugin",
+        channel: "lvis:meta:ping",
+        method: "meta_ping",
+        args: ["message"],
+      },
+    ]);
   });
 });

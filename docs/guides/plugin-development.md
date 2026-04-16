@@ -61,6 +61,16 @@ interface PluginManifest {
   config?: Record<string, unknown>;    // 기본 설정값
   keywords?: Array<{ keyword: string; skillId: string }>;  // 키워드 선언
   ui?: PluginUiExtension[];            // UI 슬롯 확장
+
+  // 호스트 역참조 제거용 선언형 메타데이터
+  capabilities?: string[];             // 기능 태그 (예: "worker-client", "calendar-source")
+  startupMethods?: string[];           // 부팅 시 자동 실행할 methods[] 항목
+  eventSubscriptions?: string[];       // 호스트가 수집/구독할 이벤트 타입
+  ipcBindings?: Array<{
+    channel: string;                   // legacy IPC 채널명
+    method: string;                    // 호출할 methods[] 항목
+    args?: string[];                   // positional IPC 인자를 payload object로 매핑할 키 목록
+  }>;
 }
 ```
 
@@ -120,10 +130,10 @@ interface PluginManifest {
 
 #### methods
 - **LLM에 노출되는 도구 이름(tool name) 배열**
-- **반드시 lower snake_case (`^[a-z][a-z0-9_]*$`) — 소문자·숫자·언더스코어만 허용, 대문자·도트(`.`)·하이픈(`-`) 금지**
+- **반드시 `^[a-zA-Z_][a-zA-Z0-9_]*$` 패턴 (첫 글자는 영문자/언더스코어, 이후 영문자/숫자/언더스코어) — 도트(`.`)·하이픈(`-`) 금지**
 - 예: `meeting_start`, `email_list`, `index_scan`
-- 런타임이 이 값을 그대로 LLM tool name으로 사용하며 어떠한 변환도 수행하지 않음
-- 로드 시 패턴 검증(`^[a-z][a-z0-9_]*$`)을 수행하며, 위반 시 플러그인 로드 거부
+- 런타임이 이 값을 그대로 LLM tool name으로 사용하며 dot-to-underscore 변환을 수행하지 않음
+- 로드 시 패턴 검증을 수행하며, 위반 시 플러그인 로드 거부
 
 #### config (선택)
 - 기본 설정값
@@ -139,6 +149,35 @@ interface PluginManifest {
 #### ui (선택)
 - 호스트 UI의 특정 슬롯에 확장 UI를 마운트
 - 자세히는 [UI 확장](#ui-확장) 섹션 참고
+
+#### capabilities (선택)
+- 호스트가 플러그인 구현체를 직접 알지 않도록 하는 **기능 선언 태그**입니다.
+- 예: `worker-client`, `knowledge-index`, `background-watcher`, `calendar-source`
+- 호스트는 특정 plugin id 대신 capability를 조회해 통합 지점을 결정합니다.
+
+#### startupMethods (선택)
+- 앱 부팅 직후 실행해야 하는 메서드 목록입니다.
+- 항목은 반드시 `methods` 배열에 선언되어 있어야 하며, 불일치 시 플러그인 로드가 거부됩니다.
+- 예: `email_start_watcher`, `calendar_start_watcher`
+
+#### eventSubscriptions (선택)
+- 호스트가 이벤트 버스에서 수집해야 할 이벤트 타입 목록입니다.
+- 하드코딩된 `onEvent("...")` 대신 선언 기반으로 wiring됩니다.
+- `mail-source` capability를 선언한 플러그인은 `*.new` 이벤트를 추가하면
+  호스트가 네이티브 알림을 자동 등록합니다. (예: `email.new`)
+
+#### ipcBindings (선택)
+- 기존 renderer/native 호환 IPC 채널을 유지해야 할 때 사용하는 선언형 매핑입니다.
+- `channel` → `method` 연결을 매니페스트에 선언하면 호스트가 동적으로 IPC 핸들러를 등록합니다.
+- `args`를 지정하면 positional 인자를 object payload로 변환해 메서드에 전달합니다.
+
+### 역참조 방지 체크리스트
+
+1. `boot.ts`, `ipc-bridge.ts`에서 플러그인 id 문자열을 직접 비교하지 않습니다.
+2. 플러그인별 분기가 필요하면 `capabilities` 또는 `startupMethods`로 선언합니다.
+3. 레거시 IPC는 코드에 `pluginRuntime.call("meeting_...")`를 추가하지 말고 `ipcBindings`를 사용합니다.
+4. 신규 이벤트 연동은 `eventSubscriptions`를 통해 호스트에 노출합니다.
+5. 플러그인 리네임/교체 시 호스트 코드는 수정 없이 매니페스트만 갱신되어야 합니다.
 
 ---
 

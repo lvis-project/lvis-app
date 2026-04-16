@@ -1847,7 +1847,7 @@ graph TB
 }
 ```
 
-> LLM에 노출되는 skill / tool / method 식별자는 모두 lower snake_case(`^[a-z][a-z0-9_]*$`, 예: `meeting_record`, `stt_transcribe`, `index_scan`)를 사용한다. 이는 Google Gemini(소문자 전용 강제)·OpenAI·Anthropic 모두를 커버하는 교집합 제약이며, 런타임 로드 시 이 패턴으로 검증하고 위반 시 로드를 거부한다. 호스트는 manifest 값을 그대로 등록하며, 어떠한 변환도 수행하지 않는다. 이벤트 채널 이름은 별도 네임스페이스이므로 dotted form을 유지한다.
+> LLM에 노출되는 skill / tool / method 식별자는 모두 lower snake_case(예: `meeting_record`, `stt_transcribe`, `index_scan`)를 사용한다. 호스트는 manifest 값을 그대로 등록하며, 도트를 언더스코어로 바꾸는 런타임 변환은 없다. 이벤트 채널 이름은 별도 네임스페이스이므로 dotted form을 유지한다.
 
 **`python` 섹션 — 런타임 의존 플러그인 명세**
 
@@ -2130,7 +2130,7 @@ graph TB
 }
 ```
 
-> `methods[]` 는 lower snake_case LLM tool name(`^[a-z][a-z0-9_]*$`, 예: `calendar_today`, `email_start_watcher`)이며, boot/runtime/keyword registration 경로에서도 동일한 이름이 그대로 전달된다. 런타임 로드 시 이 패턴으로 검증되며 위반 시 플러그인 로드가 거부된다. dotted form은 이벤트 이름에만 사용한다.
+> `methods[]` 는 lower snake_case LLM tool name이며 (`calendar_today`, `email_start_watcher` 등), boot/runtime/keyword registration 경로에서도 동일한 이름이 그대로 전달된다. dotted form은 이벤트 이름에만 사용한다.
 
 `user` deployment manifest는 `signature`가 optional이며, 정책에서 `requireUserSignature: true`일 때 필수로 승격된다.
 
