@@ -439,6 +439,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     memoryManager,
     auditLogger: bootAuditLogger,
     idleScheduler,
+    settingsService,
   });
 
   // B1: Policy 로드 후 ApprovalGate 생성 — mainWindow.webContents 준비 후
