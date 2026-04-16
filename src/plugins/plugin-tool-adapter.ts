@@ -17,10 +17,10 @@ import type { PluginRuntime } from "./runtime.js";
  * Convert one plugin manifest method into a {@link Tool} ready for
  * {@link ToolRegistry.register}.
  *
- * Plugin manifest method names must use underscore-only format
- * (`^[a-zA-Z0-9_-]+$`) to satisfy vendor LLM API constraints.
- * The method name is used directly as the tool name — no conversion
- * is performed.
+ * Plugin manifest method names should already be in the canonical
+ * lower snake_case form (for example `meeting_start`).
+ * The adapter forwards that manifest name directly as the tool name —
+ * no dot-to-underscore conversion is performed.
  *
  * The exposed tool takes a single `payload` argument because plugin
  * methods accept an arbitrary object — the LLM either nests its

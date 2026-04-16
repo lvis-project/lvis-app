@@ -142,7 +142,7 @@ export function registerIpcHandlers(
     pluginRuntime.call("meeting_start", { sessionId, context }),
   );
   ipcMain.handle("lvis:meeting:push-chunk", (_e, sessionId: string, chunk: unknown) =>
-    pluginRuntime.call("meeting_pushChunk", { sessionId, chunk }),
+    pluginRuntime.call("meeting_push_chunk", { sessionId, chunk }),
   );
   ipcMain.handle("lvis:meeting:stop", (_e, sessionId: string) =>
     pluginRuntime.call("meeting_stop", { sessionId }),

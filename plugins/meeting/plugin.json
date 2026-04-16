@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "entry": "../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
   "methods": [
-    "meeting.start",
-    "meeting.pushChunk",
-    "meeting.stop",
-    "meeting.transcript"
+    "meeting_start",
+    "meeting_push_chunk",
+    "meeting_stop",
+    "meeting_transcript"
   ],
   "config": {
     "intermediateEveryFinalSegments": 1
