@@ -9,13 +9,66 @@
  * - 최근 N개 메시지는 보존 (기본 4)
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
-import type { GenericMessage, TokenUsage } from "./llm/types.js";
+import type { GenericMessage, TokenUsage, LLMVendor } from "./llm/types.js";
+
+// ─── Context Window Registry ─────────────────────────
+
+/** 알려진 모델별 최대 컨텍스트 윈도우 토큰 수 */
+const MODEL_CONTEXT_WINDOWS: Partial<Record<LLMVendor, Record<string, number>>> = {
+  claude: {
+    "claude-sonnet-4-20250514": 200_000,
+    "claude-3-5-sonnet-20241022": 200_000,
+    "claude-3-5-haiku-20241022": 200_000,
+    "claude-3-opus-20240229": 200_000,
+    "claude-3-sonnet-20240229": 200_000,
+    "claude-3-haiku-20240307": 200_000,
+  },
+  openai: {
+    "gpt-4o": 128_000,
+    "gpt-4o-mini": 128_000,
+    "gpt-4-turbo": 128_000,
+    "gpt-4": 8_192,
+    "gpt-3.5-turbo": 16_385,
+    "o1": 200_000,
+    "o3": 200_000,
+    "o3-mini": 200_000,
+  },
+  gemini: {
+    "gemini-2.0-flash": 1_048_576,
+    "gemini-1.5-pro": 2_097_152,
+    "gemini-1.5-flash": 1_048_576,
+  },
+  copilot: {
+    "gpt-4o": 128_000,
+    "gpt-4o-mini": 128_000,
+  },
+};
+
+/** 벤더/모델 정보가 없을 때 사용하는 기본 컨텍스트 윈도우 크기 */
+const DEFAULT_CONTEXT_WINDOW = 128_000;
+
+/**
+ * 벤더·모델 식별자로부터 최대 컨텍스트 윈도우 토큰 수를 반환.
+ * 알 수 없는 모델은 DEFAULT_CONTEXT_WINDOW(128K)를 반환.
+ */
+export function getModelContextWindow(vendor: LLMVendor, model: string): number {
+  const vendorMap = MODEL_CONTEXT_WINDOWS[vendor];
+  if (vendorMap) {
+    if (vendorMap[model] !== undefined) return vendorMap[model];
+    // 프리픽스 매칭: 날짜 suffix 등이 다른 경우 대비
+    const prefix = Object.keys(vendorMap).find(
+      (k) => model.startsWith(k) || k.startsWith(model),
+    );
+    if (prefix !== undefined && vendorMap[prefix] !== undefined) return vendorMap[prefix];
+  }
+  return DEFAULT_CONTEXT_WINDOW;
+}
 
 // ─── Types ──────────────────────────────────────────
 
 export interface CompactConfig {
-  /** 자동 컴팩션 트리거 토큰 수 (기본 80K) */
-  thresholdTokens: number;
+  /** 자동 컴팩션 트리거 사용률 임계치 (기본 80%) — 모델 컨텍스트 윈도우 대비 */
+  thresholdPct: number;
   /** 보존할 최근 메시지 수 (기본 4) */
   preserveRecentMessages: number;
   /** 요약 최대 토큰 예산 (기본 2K) */
@@ -34,7 +87,7 @@ export interface CompactResult {
 }
 
 const DEFAULT_CONFIG: CompactConfig = {
-  thresholdTokens: 80_000,
+  thresholdPct: 0.8,
   preserveRecentMessages: 4,
   summaryBudgetTokens: 2_000,
 };
@@ -69,12 +122,18 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
 
 /**
  * 컴팩션 필요 여부 확인
+ *
+ * @param cumulativeUsage - 누적 토큰 사용량
+ * @param contextWindowTokens - 모델의 최대 컨텍스트 윈도우 크기 (미제공 시 128K 기본값)
+ * @param config - 컴팩션 설정 (미제공 시 기본값: thresholdPct=0.8)
  */
 export function shouldCompact(
   cumulativeUsage: TokenUsage,
+  contextWindowTokens: number = DEFAULT_CONTEXT_WINDOW,
   config: CompactConfig = DEFAULT_CONFIG,
 ): boolean {
-  return cumulativeUsage.inputTokens >= config.thresholdTokens;
+  const threshold = Math.floor(contextWindowTokens * config.thresholdPct);
+  return cumulativeUsage.inputTokens >= threshold;
 }
 
 /**

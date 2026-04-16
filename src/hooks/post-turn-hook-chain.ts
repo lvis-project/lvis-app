@@ -12,8 +12,8 @@
  *   5. idleScheduler.signalConversation (Agent 5 §6.1)
  */
 
-import { shouldCompact, compactMessages } from "../engine/auto-compact.js";
-import type { GenericMessage, TokenUsage } from "../engine/llm/types.js";
+import { shouldCompact, compactMessages, getModelContextWindow } from "../engine/auto-compact.js";
+import type { GenericMessage, TokenUsage, LLMVendor } from "../engine/llm/types.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
@@ -52,16 +52,22 @@ export class PostTurnHookChain {
     let compactedMessages: GenericMessage[] | null = null;
 
     // 1. Auto-Compact (§4.5.4)
-    // shouldCompact()는 cumulativeUsage.inputTokens ≥ thresholdTokens 판단
+    // 모델 컨텍스트 윈도우의 80% 이상 사용 시 자동 압축 (아키텍처 §4.5.4)
     try {
       const autoCompactEnabled = this.deps.settingsService?.get("chat").autoCompact ?? true;
-      if (autoCompactEnabled && shouldCompact(ctx.cumulativeUsage)) {
-        const { messages: compacted, result: cr } = compactMessages(ctx.messages);
-        if (cr.compacted) {
-          compactedMessages = compacted;
-          console.log(
-            `[post-turn] auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`,
-          );
+      if (autoCompactEnabled) {
+        const llmSettings = this.deps.settingsService?.get("llm");
+        const contextWindow = llmSettings
+          ? getModelContextWindow(llmSettings.provider as LLMVendor, llmSettings.model as string)
+          : undefined;
+        if (shouldCompact(ctx.cumulativeUsage, contextWindow)) {
+          const { messages: compacted, result: cr } = compactMessages(ctx.messages);
+          if (cr.compacted) {
+            compactedMessages = compacted;
+            console.log(
+              `[post-turn] auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`,
+            );
+          }
         }
       }
     } catch (err) {

@@ -549,10 +549,14 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       setVendor(s.llm.provider);
       setModel(s.llm.model);
       setAutoCompact(s.chat.autoCompact ?? true);
-      setHasKey(await api.hasApiKey(s.llm.provider));
+      const apiKeySet = await api.hasApiKey(s.llm.provider);
+      if (cancelled) return;
+      setHasKey(apiKeySet);
 
       setWebProvider(s.webSearch.provider);
-      setHasWebKey(await api.hasWebApiKey(s.webSearch.provider));
+      const webApiKeySet = await api.hasWebApiKey(s.webSearch.provider);
+      if (cancelled) return;
+      setHasWebKey(webApiKeySet);
       setSettingsLoaded(true);
     })();
     return () => {
@@ -648,6 +652,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
               </div>
               <div className="flex items-center gap-3 rounded-md border px-3 py-3">
                 <button
+                  type="button"
                   role="checkbox"
                   aria-checked={autoCompact}
                   className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${autoCompact ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}

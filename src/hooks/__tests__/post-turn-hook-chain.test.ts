@@ -25,7 +25,10 @@ describe("PostTurnHookChain", () => {
     const saveSession = vi.fn();
     const memoryManager = { saveSession } as unknown as MemoryManager;
     const settingsService = {
-      get: vi.fn(() => ({ systemPrompt: "", autoCompact: false })),
+      get: vi.fn((key: string) => {
+        if (key === "llm") return { provider: "openai", model: "gpt-4o" };
+        return { systemPrompt: "", autoCompact: false };
+      }),
     } as unknown as SettingsService;
     const chain = new PostTurnHookChain({ memoryManager, settingsService });
     const messages = createMessages();
@@ -33,7 +36,7 @@ describe("PostTurnHookChain", () => {
     const result = await chain.run({
       sessionId: "session-disabled",
       messages,
-      cumulativeUsage: { inputTokens: 100_000, outputTokens: 0, totalTokens: 100_000 },
+      cumulativeUsage: { inputTokens: 120_000, outputTokens: 0 },
       input: "긴 대화를 이어가자",
       output: "좋아요",
       toolCalls: [],
@@ -50,7 +53,10 @@ describe("PostTurnHookChain", () => {
     const saveSession = vi.fn();
     const memoryManager = { saveSession } as unknown as MemoryManager;
     const settingsService = {
-      get: vi.fn(() => ({ systemPrompt: "", autoCompact: true })),
+      get: vi.fn((key: string) => {
+        if (key === "llm") return { provider: "openai", model: "gpt-4o" };
+        return { systemPrompt: "", autoCompact: true };
+      }),
     } as unknown as SettingsService;
     const chain = new PostTurnHookChain({ memoryManager, settingsService });
     const messages = createMessages();
@@ -58,7 +64,7 @@ describe("PostTurnHookChain", () => {
     const result = await chain.run({
       sessionId: "session-enabled",
       messages,
-      cumulativeUsage: { inputTokens: 100_000, outputTokens: 0, totalTokens: 100_000 },
+      cumulativeUsage: { inputTokens: 120_000, outputTokens: 0 },
       input: "긴 대화를 이어가자",
       output: "좋아요",
       toolCalls: [],
