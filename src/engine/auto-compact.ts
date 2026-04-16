@@ -51,9 +51,14 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
   let total = 0;
   for (const msg of messages) {
     total += estimateTokens(msg.content);
-    if (msg.role === "assistant" && msg.toolCalls) {
-      for (const tc of msg.toolCalls) {
-        total += estimateTokens(JSON.stringify(tc.input));
+    if (msg.role === "assistant") {
+      if (msg.thought) {
+        total += estimateTokens(msg.thought);
+      }
+      if (msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          total += estimateTokens(JSON.stringify(tc.input));
+        }
       }
     }
   }
