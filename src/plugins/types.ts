@@ -39,7 +39,7 @@ export interface PluginManifest {
   /**
    * LLM에 노출되는 도구 이름(tool name) 배열.
    *
-   * **반드시 `^[a-zA-Z0-9_-]+$` 패턴을 만족해야 합니다 — 도트(`.`) 금지.**
+  * **반드시 `^[a-zA-Z_][a-zA-Z0-9_]*$` 패턴을 만족해야 합니다 — 도트(`.`), 하이픈(`-`) 금지.**
    * OpenAI, Anthropic, Google 등 모든 LLM 제공자가 이 패턴을 강제합니다.
    *
    * 예: `["meeting_start", "meeting_stop", "meeting_transcript"]`

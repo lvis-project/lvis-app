@@ -130,7 +130,7 @@ interface PluginManifest {
 
 #### methods
 - **LLM에 노출되는 도구 이름(tool name) 배열**
-- **반드시 lower snake_case (영문 소문자/숫자/언더스코어) — 도트(`.`)·하이픈(`-`) 금지**
+- **반드시 `^[a-zA-Z_][a-zA-Z0-9_]*$` 패턴 (첫 글자는 영문자/언더스코어, 이후 영문자/숫자/언더스코어) — 도트(`.`)·하이픈(`-`) 금지**
 - 예: `meeting_start`, `email_list`, `index_scan`
 - 런타임이 이 값을 그대로 LLM tool name으로 사용하며 dot-to-underscore 변환을 수행하지 않음
 - 로드 시 패턴 검증을 수행하며, 위반 시 플러그인 로드 거부
