@@ -234,16 +234,19 @@ export class PluginRuntime {
     if (!parsed.id || !parsed.entry || !Array.isArray(parsed.methods)) {
       throw new Error(`Invalid plugin manifest: ${path}`);
     }
-    // Tool names exposed to LLMs must satisfy ^[a-zA-Z0-9_-]+$ (vendor requirement).
+    // Tool names exposed to LLMs must be lower snake_case: ^[a-z][a-z0-9_]*$
+    // This is the strictest common constraint across OpenAI, Anthropic, and Google Gemini.
     // Plugin id is the package identity and may contain dots (e.g. com.lge.meeting-recorder),
-    // but methods are LLM tool names — no dots allowed, no runtime conversion is performed.
-    const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
+    // but methods are LLM tool names — lower-case letters, digits, underscores only.
+    // No dots, no hyphens, no uppercase; no runtime conversion is performed.
+    const TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
     for (const method of parsed.methods) {
       if (!TOOL_NAME_PATTERN.test(method)) {
         throw new Error(
           `Invalid tool name '${method}' in plugin '${parsed.id}': ` +
-          `tool names must match ^[a-zA-Z0-9_-]+$ — use underscores instead of dots ` +
-          `(e.g. 'meeting_start' not 'meeting.start')`,
+          `tool names must be lower snake_case (^[a-z][a-z0-9_]*$) — ` +
+          `lowercase letters, digits, and underscores only, starting with a letter ` +
+          `(e.g. 'meeting_start' not 'Meeting_Start', 'meeting-start', or 'meeting.start')`,
         );
       }
     }

@@ -6,12 +6,12 @@
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-pageindex/dist/hostPlugin.js",
   "methods": [
-    "index.scan",
-    "index.documents",
-    "index.folders",
-    "index.addFolder",
-    "index.removeFolder",
-    "chat.preview"
+    "index_scan",
+    "index_documents",
+    "index_folders",
+    "index_add_folder",
+    "index_remove_folder",
+    "chat_preview"
   ],
   "config": {
     "scanFolders": [

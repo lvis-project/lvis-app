@@ -6,16 +6,17 @@
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-calendar/dist/hostPlugin.js",
   "methods": [
-    "calendar.status",
-    "calendar.auth",
-    "calendar.list",
-    "calendar.today",
-    "calendar.get",
-    "calendar.create",
-    "calendar.update",
-    "calendar.delete",
-    "calendar.startWatcher",
-    "calendar.stopWatcher"
+    "calendar_status",
+    "calendar_auth",
+    "calendar_list",
+    "calendar_today",
+    "calendar_get",
+    "calendar_create",
+    "calendar_update",
+    "calendar_delete",
+    "calendar_start_watcher",
+    "calendar_stop_watcher",
+    "calendar_open_url"
   ],
   "config": {},
   "ui": [
