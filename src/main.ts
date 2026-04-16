@@ -147,7 +147,23 @@ function createWindow() {
   // 외부 URL → 시스템 브라우저로 리다이렉트 (앱 내 탐색 방지)
   // window.open() 차단
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    try {
+      const parsedUrl = new URL(url);
+      const allowedProtocols = new Set(["http:", "https:"]);
+
+      if (allowedProtocols.has(parsedUrl.protocol)) {
+        void shell.openExternal(parsedUrl.toString()).catch((err) => {
+          console.error("[lvis] failed to open external URL", { url: parsedUrl.toString(), err });
+        });
+      } else {
+        console.warn("[lvis] blocked external URL with disallowed protocol", {
+          url,
+          protocol: parsedUrl.protocol,
+        });
+      }
+    } catch (err) {
+      console.warn("[lvis] blocked invalid external URL", { url, err });
+    }
     return { action: "deny" };
   });
   // <a href> 클릭 또는 location.href 변경으로 인한 탐색 차단
