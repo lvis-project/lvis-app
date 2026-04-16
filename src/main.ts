@@ -4,7 +4,7 @@
  * 슬림 엔트리. 모든 로직은 boot.ts와 ipc-bridge.ts로 위임.
  * §4.1 Client Architecture 준수.
  */
-import { Menu, app, BrowserWindow, type MenuItemConstructorOptions } from "electron";
+import { Menu, app, BrowserWindow, shell, type MenuItemConstructorOptions } from "electron";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import * as https from "node:https";
@@ -142,6 +142,14 @@ function createWindow() {
   });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("[lvis] window failed to load", { code, desc, url });
+  });
+
+  // window.open() → shell.openExternal() 리다이렉트
+  // 플러그인 UI에서 window.open(url)을 호출하면 새 BrowserWindow 대신
+  // 시스템 브라우저로 열어 앱 종료를 방지한다.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url);
+    return { action: "deny" };
   });
 
   // §M-race: bootstrap 동안 splash만 표시. 실 index.html 로드는 main()이
