@@ -411,6 +411,18 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   onEvent("email.action.needed", (data) => proactiveEngine.collectEvent("email.action.needed", data));
   onEvent("meeting.ended", (data) => proactiveEngine.collectEvent("meeting.ended", data));
 
+  // 오늘 일정 초기 로드 (플러그인 인증 여부와 관계없이 시도, 미인증이면 빈 배열)
+  if (pluginRuntime.listMethods().includes("calendar.today")) {
+    pluginRuntime.call("calendar.today", {})
+      .then((events: unknown) => {
+        if (Array.isArray(events)) {
+          proactiveEngine.updateCalendarEvents(events as import("./core/proactive-engine.js").CachedCalendarEvent[]);
+          console.log(`[lvis] boot: calendar today loaded (${events.length}건)`);
+        }
+      })
+      .catch((e: Error) => console.log("[lvis] boot: calendar.today failed (non-fatal):", e.message));
+  }
+
   // 새 이메일 → 네이티브 알림
   onEvent("email.new", (data) => {
     const d = data as { subject?: string; sender?: string; replyNeeded?: boolean; importance?: string };
