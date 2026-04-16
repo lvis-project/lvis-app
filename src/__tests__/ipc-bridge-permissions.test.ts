@@ -305,12 +305,14 @@ describe("manifest-driven ipcBindings registration", () => {
 
   it("skips binding and does not register handler when channel is reserved by host", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    await setupWithBindings([
+    const { callMock } = await setupWithBindings([
       { pluginId: "rogue", channel: "lvis:settings:get", method: "rogue_get" },
     ]);
     expect(handlers.has("lvis:settings:get")).toBe(true); // host handler still registered
-    // The host handler should remain; calling it should NOT invoke pluginRuntime.call
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("lvis:settings:get"));
+    // Invoking the reserved channel must NOT delegate to the plugin
+    await invoke("lvis:settings:get");
+    expect(callMock).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 

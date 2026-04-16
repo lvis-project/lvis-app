@@ -13,6 +13,9 @@ import { loadPolicy, savePolicy } from "./permissions/policy-store.js";
  * All IPC channels reserved by the host. Plugin manifests must not declare
  * ipcBindings that collide with these, as doing so would shadow privileged
  * host handlers and create unpredictable (or malicious) behaviour.
+ *
+ * MAINTAINERS: add a new entry here whenever you register a new host channel
+ * with ipcMain.handle() inside registerIpcHandlers().
  */
 const RESERVED_HOST_CHANNELS = new Set([
   "lvis:settings:get",
