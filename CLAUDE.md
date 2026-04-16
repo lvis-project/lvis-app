@@ -92,7 +92,7 @@ src/
 ```bash
 npm run build          # TypeScript + esbuild renderer + Tailwind CSS
 npm run start          # Full build + Electron launch
-npm run prepare:plugins  # Build all 3 plugins in parallel
+npm run prepare:plugins  # Build all 4 bundled plugins
 ```
 
 ## TODO Tracking

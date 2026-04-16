@@ -74,7 +74,7 @@ interface PluginManifest {
   "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
   "methods": [
     "meeting_start",
-    "meeting_pushChunk",
+    "meeting_push_chunk",
     "meeting_stop",
     "meeting_transcript",
     "meeting_sessions"
@@ -120,9 +120,9 @@ interface PluginManifest {
 
 #### methods
 - **LLM에 노출되는 도구 이름(tool name) 배열**
-- **반드시 `^[a-zA-Z0-9_-]+$` 패턴 — 도트(`.`) 절대 금지**
+- **반드시 lower snake_case (영문 소문자/숫자/언더스코어) — 도트(`.`)·하이픈(`-`) 금지**
 - 예: `meeting_start`, `email_list`, `index_scan`
-- 런타임이 이 값을 그대로 LLM tool name으로 사용하며 변환을 수행하지 않음
+- 런타임이 이 값을 그대로 LLM tool name으로 사용하며 dot-to-underscore 변환을 수행하지 않음
 - 로드 시 패턴 검증을 수행하며, 위반 시 플러그인 로드 거부
 
 #### config (선택)
@@ -481,7 +481,7 @@ LVIS 플러그인에는 **두 개의 독립적인 명명 네임스페이스**가
 
 ### 2. LLM tool name (도구 이름 네임스페이스)
 
-`methods[]` 배열과 `handlers` 객체 키는 **LLM이 직접 호출하는 이름**입니다. OpenAI, Anthropic, Google 등 모든 LLM 제공자가 `^[a-zA-Z0-9_-]+$` 정규식을 강제합니다. **도트(`.`)는 절대 금지입니다.**
+`methods[]` 배열과 `handlers` 객체 키는 **LLM이 직접 호출하는 이름**입니다. LVIS의 canonical form은 lower snake_case (`meeting_start`, `index_scan`)이며, 런타임은 manifest 값을 그대로 등록합니다. **도트(`.`)나 하이픈(`-`)을 언더스코어로 바꿔주지 않습니다.**
 
 ```json
 {

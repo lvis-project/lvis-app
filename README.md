@@ -4,7 +4,7 @@
 ## 포함 내용
 - Plugin Runtime + Manifest 기반 동적 로딩
 - `plugins/*/plugin.json` 매니페스트 스캔
-- `@lvis/plugin-pageindex`, `@lvis/plugin-meeting` 동적 통합
+- `@lvis/plugin-pageindex`, `@lvis/plugin-meeting`, `@lvis/plugin-email`, `@lvis/plugin-calendar` 동적 통합
 - 앱 시작 시 PageIndex 워커 + 자동 인덱서 구동
 - 실제 채팅 UI(렌더러) + preload IPC 브리지
 - IPC 핸들러
@@ -20,6 +20,8 @@
 ## 동적 플러그인 매니페스트
 - `plugins/pageindex/plugin.json`
 - `plugins/meeting/plugin.json`
+- `plugins/installed/email/plugin.json`
+- `plugins/installed/calendar/plugin.json`
 - `plugins/registry.json` (활성 플러그인 목록)
 
 ## Plugins Registry CLI

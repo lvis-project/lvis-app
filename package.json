@@ -7,14 +7,17 @@
   "main": "dist/src/main.js",
   "scripts": {
     "postinstall": "electron-rebuild && node scripts/fetch-uv.mjs",
-    "prepare:plugins": "npm run --prefix ../lvis-plugin-pageindex build && npm run --prefix ../lvis-plugin-meeting build && npm run --prefix ../lvis-plugin-email build",
+    "prepare:plugins": "npm run --prefix ../lvis-plugin-pageindex build && npm run --prefix ../lvis-plugin-meeting build && npm run --prefix ../lvis-plugin-email build && npm run --prefix ../lvis-plugin-calendar build",
+    "prepare:plugins:bun": "bun --cwd ../lvis-plugin-pageindex run build && bun --cwd ../lvis-plugin-meeting run build && bun --cwd ../lvis-plugin-email run build && bun --cwd ../lvis-plugin-calendar run build",
     "build:main": "tsc -p tsconfig.json",
     "build:renderer": "esbuild src/renderer.tsx --bundle --platform=browser --format=esm --outfile=dist/src/renderer.js",
     "build:styles": "tailwindcss -i src/styles.css -o dist/src/styles.css --minify",
     "build:preload": "esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/src/preload.js",
     "build": "npm run build:main && npm run build:renderer && npm run build:styles && npm run build:preload && node scripts/copy-build-assets.mjs src/index.html dist/src/index.html && node scripts/check-no-tls-bypass.mjs",
+    "build:bun": "bun run build:main && bun run build:renderer && bun run build:styles && bun run build:preload && node scripts/copy-build-assets.mjs src/index.html dist/src/index.html && node scripts/check-no-tls-bypass.mjs",
     "typecheck": "tsc --noEmit",
     "start": "npm run prepare:plugins && npm run build && node scripts/run-electron.mjs dist/src/main.js",
+    "start:bun": "bun run prepare:plugins:bun && bun run build:bun && node scripts/run-electron.mjs dist/src/main.js",
     "plugins:list": "tsx scripts/plugins-cli.ts list",
     "plugins:install": "tsx scripts/plugins-cli.ts install",
     "plugins:add": "tsx scripts/plugins-cli.ts add",
@@ -26,7 +29,9 @@
     "test:electron-smoke": "node scripts/run-electron.mjs --version",
     "test:plugin-flow": "tsx scripts/test-pageindex-flow.ts",
     "test:meeting-flow": "npm run prepare:plugins && tsx scripts/test-meeting-flow.ts",
-    "test:main-flow": "npm run prepare:plugins && tsx scripts/test-main-flow.ts"
+    "test:meeting-flow:bun": "bun run prepare:plugins:bun && tsx scripts/test-meeting-flow.ts",
+    "test:main-flow": "npm run prepare:plugins && tsx scripts/test-main-flow.ts",
+    "test:main-flow:bun": "bun run prepare:plugins:bun && tsx scripts/test-main-flow.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
@@ -74,6 +79,18 @@
     "typescript": "^5.8.3",
     "vitest": "^2.1.0"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "electron",
+      "esbuild"
+    ]
+  },
+  "trustedDependencies": [
+    "better-sqlite3",
+    "electron",
+    "esbuild"
+  ],
   "build": {
     "extraResources": [
       {

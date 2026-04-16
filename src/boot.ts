@@ -217,15 +217,15 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   console.log("[lvis] boot: plugins loaded:", pluginRuntime.listMethods());
 
   // 이메일 watcher 자동 시작 (UI 열기 전에도 알림 수신)
-  if (pluginRuntime.listMethods().includes("email.startWatcher")) {
-    pluginRuntime.call("email.startWatcher", {}).catch((e: Error) =>
+  if (pluginRuntime.listMethods().includes("email_start_watcher")) {
+    pluginRuntime.call("email_start_watcher", {}).catch((e: Error) =>
       console.log("[lvis] boot: email watcher start failed (non-fatal):", e.message)
     );
   }
 
   // 캘린더 watcher 자동 시작 (인증된 경우에만 — 미인증이면 non-fatal)
-  if (pluginRuntime.listMethods().includes("calendar.startWatcher")) {
-    pluginRuntime.call("calendar.startWatcher", {}).catch((e: Error) =>
+  if (pluginRuntime.listMethods().includes("calendar_start_watcher")) {
+    pluginRuntime.call("calendar_start_watcher", {}).catch((e: Error) =>
       console.log("[lvis] boot: calendar watcher start failed (non-fatal):", e.message)
     );
   }
@@ -407,15 +407,15 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   onEvent("meeting.ended", (data) => proactiveEngine.collectEvent("meeting.ended", data));
 
   // 오늘 일정 초기 로드 (플러그인 인증 여부와 관계없이 시도, 미인증이면 빈 배열)
-  if (pluginRuntime.listMethods().includes("calendar.today")) {
-    pluginRuntime.call("calendar.today", {})
+  if (pluginRuntime.listMethods().includes("calendar_today")) {
+    pluginRuntime.call("calendar_today", {})
       .then((events: unknown) => {
         if (Array.isArray(events)) {
           proactiveEngine.updateCalendarEvents(events as import("./core/proactive-engine.js").CachedCalendarEvent[]);
           console.log(`[lvis] boot: calendar today loaded (${events.length}건)`);
         }
       })
-      .catch((e: Error) => console.log("[lvis] boot: calendar.today failed (non-fatal):", e.message));
+      .catch((e: Error) => console.log("[lvis] boot: calendar_today failed (non-fatal):", e.message));
   }
 
   // 새 이메일 → 네이티브 알림

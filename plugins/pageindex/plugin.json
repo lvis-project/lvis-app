@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "entry": "../../node_modules/@lvis/plugin-pageindex/dist/hostPlugin.js",
   "methods": [
-    "index.scan",
-    "index.documents",
-    "chat.preview"
+    "index_scan",
+    "index_documents",
+    "chat_preview"
   ],
   "config": {
     "scanFolders": ["fixtures"],
