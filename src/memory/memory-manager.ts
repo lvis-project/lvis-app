@@ -359,8 +359,6 @@ export class MemoryManager {
       }
     }
 
-    return "general";
-
     const text = messages
       .filter((message): message is Extract<GenericMessage, { role: "user" | "assistant" }> => message.role !== "tool_result")
       .map((message) => message.content.toLowerCase())
