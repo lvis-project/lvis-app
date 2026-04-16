@@ -21,7 +21,8 @@ import { ToolRegistry } from "./tools/registry.js";
 import { createDynamicTool, type Tool } from "./tools/base.js";
 import { pluginMethodToTool } from "./plugins/plugin-tool-adapter.js";
 import { SystemPromptBuilder } from "./prompts/system-prompt-builder.js";
-import { ConversationLoop } from "./engine/conversation-loop.js";
+import { ChatRuntime } from "./chat/runtime.js";
+import { ChatServiceManager } from "./chat/service-manager.js";
 import { PermissionManager } from "./permissions/permission-manager.js";
 import { ProactiveEngine } from "./core/proactive-engine.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
@@ -55,7 +56,7 @@ export interface AppServices {
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
   systemPromptBuilder: SystemPromptBuilder;
-  conversationLoop: ConversationLoop;
+  conversationLoop: ChatRuntime;
   proactiveEngine: ProactiveEngine;
   mcpManager: McpManager;
   idleScheduler?: IdleSchedulerService;
@@ -457,14 +458,22 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     );
   }
 
-  // §4.5: ConversationLoop
-  const conversationLoop = new ConversationLoop({
+  const chatService = pythonPath
+    ? new ChatServiceManager({
+        pythonPath,
+        projectRoot,
+      })
+    : undefined;
+
+  // Python LangGraph chat runtime
+  const conversationLoop = new ChatRuntime({
     settingsService,
     systemPromptBuilder,
     keywordEngine,
     routeEngine,
     toolRegistry,
     memoryManager,
+    chatService,
     permissionManager,
     proactiveEngine,
     idleScheduler,

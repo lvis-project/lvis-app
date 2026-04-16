@@ -180,6 +180,7 @@ app.on("window-all-closed", () => {
 app.on("before-quit", async () => {
   if (services) {
     await services.pluginRuntime.stopAll();
+    await services.conversationLoop.close();
     services.taskService.close();
   }
 });
