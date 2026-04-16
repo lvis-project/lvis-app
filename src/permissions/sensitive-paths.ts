@@ -21,6 +21,7 @@
  * trailing single-star segments. This mirrors OpenHarness's
  * `_policy_match_paths` subtle-glob-bug prevention.
  */
+import { resolve as pathResolve } from "node:path";
 
 /**
  * Patterns use minimatch-compatible glob syntax:
@@ -50,6 +51,34 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
 ]);
 
 // ─── Public helpers ─────────────────────────────────
+
+/**
+ * Canonical form of a raw filesystem path for sensitive-path matching.
+ *
+ * Applies the same four-step normalization used inside
+ * {@link ApprovalGate.requestAndWait} so that any caller computing a
+ * `sensitivePathPattern` hint sees the same result as the authoritative
+ * hard-block:
+ *
+ *   1. `path.resolve()` — expands `..`/`.` segments and makes the path absolute.
+ *   2. Duplicate-slash collapse (`///Users` → `/Users`).
+ *   3. Unicode NFC normalization — folds NFD-decomposed forms (e.g.
+ *      `.s\u0073h` → `.ssh`).
+ *   4. Case-folding on macOS/Windows — paths like ".SSH/ID_rsa" are
+ *      lowercased so they match case-insensitive filesystem equivalents.
+ *
+ * Use this helper wherever a path is compared against SENSITIVE_PATH_PATTERNS
+ * to ensure consistent results across all call sites.
+ */
+export function canonicalizePathForMatch(rawPath: string): string {
+  let canonical = pathResolve(rawPath);
+  canonical = canonical.replace(/\/+/g, "/");
+  canonical = canonical.normalize("NFC");
+  if (process.platform === "darwin" || process.platform === "win32") {
+    canonical = canonical.toLowerCase();
+  }
+  return canonical;
+}
 
 /**
  * Returns the OpenHarness-style tuple `[path, path + "/"]` used by the

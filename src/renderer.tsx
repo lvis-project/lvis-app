@@ -98,8 +98,13 @@ type ApprovalRequest = {
    */
   mode?: "default" | "plan" | "full_auto";
   /**
-   * §S1 renderer hint mirrored from main. Matched SENSITIVE_PATH_PATTERNS
-   * pattern when target.filePath is a sensitive path, otherwise null/absent.
+   * §S1 metadata hint mirrored from main. Carries the matched
+   * SENSITIVE_PATH_PATTERNS entry when the executor detected a sensitive
+   * path, for diagnostics and logging. Remains null/absent otherwise.
+   *
+   * Note: sensitive paths are hard-blocked inside ApprovalGate before any
+   * approval request is sent over IPC, so this field will not be set on
+   * requests that actually reach this dialog.
    */
   sensitivePathPattern?: string | null;
 };
@@ -758,20 +763,6 @@ function ToolApprovalDialog({
               </Badge>
             )}
           </div>
-
-          {/* 민감 경로 경고 — sensitivePathPattern 이 있으면 최상단 경고 배너 */}
-          {request.sensitivePathPattern && (
-            <div className="rounded border border-destructive/60 bg-destructive/10 p-2 text-xs text-destructive">
-              <p className="font-semibold">민감 경로 접근</p>
-              <p className="mt-0.5">
-                이 도구가 접근하려는 경로는 민감한 경로로 분류되었습니다. 허용 시
-                자격 증명 또는 비밀이 노출될 수 있습니다.
-              </p>
-              <p className="mt-0.5 font-mono text-[10px] opacity-80">
-                매칭 패턴: {request.sensitivePathPattern}
-              </p>
-            </div>
-          )}
 
           {/* 대상 파일 경로 (있을 때만) */}
           {request.target?.filePath && (

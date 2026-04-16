@@ -29,7 +29,7 @@ import type {
 import { trustFromSource } from "./types.js";
 import type { PermissionManager, PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ApprovalGate, ApprovalMode } from "../permissions/approval-gate.js";
-import { isSensitivePath } from "../permissions/sensitive-paths.js";
+import { isSensitivePath, canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
@@ -267,7 +267,9 @@ export class ToolExecutor {
           // actually fire. Previously these were missing → §S1 check
           // read `undefined` and was effectively dead code.
           const targetFilePath = extractTargetFilePath(toolUse.name, toolUse.input);
-          const sensitivePathPattern = targetFilePath ? isSensitivePath(targetFilePath) : null;
+          const sensitivePathPattern = targetFilePath
+            ? isSensitivePath(canonicalizePathForMatch(targetFilePath))
+            : null;
           const approvalRequest = {
             id: randomUUID(),
             category: "tool" as const,
