@@ -133,23 +133,12 @@ export function registerIpcHandlers(
   );
 
   // ─── Plugin Methods (proxy) ─────────────────────
-  ipcMain.handle("lvis:index:scan", () => pluginRuntime.call("index_scan"));
-  ipcMain.handle("lvis:index:documents", () => pluginRuntime.call("index_documents"));
-  ipcMain.handle("lvis:chat:preview", (_e, question: string) =>
-    pluginRuntime.call("chat_preview", { question }),
-  );
-  ipcMain.handle("lvis:meeting:start", (_e, sessionId: string, context?: unknown) =>
-    pluginRuntime.call("meeting_start", { sessionId, context }),
-  );
-  ipcMain.handle("lvis:meeting:push-chunk", (_e, sessionId: string, chunk: unknown) =>
-    pluginRuntime.call("meeting_pushChunk", { sessionId, chunk }),
-  );
-  ipcMain.handle("lvis:meeting:stop", (_e, sessionId: string) =>
-    pluginRuntime.call("meeting_stop", { sessionId }),
-  );
-  ipcMain.handle("lvis:meeting:transcript", (_e, sessionId: string) =>
-    pluginRuntime.call("meeting_transcript", { sessionId }),
-  );
+  // Legacy IPC channel compatibility is now manifest-driven.
+  for (const binding of pluginRuntime.listIpcBindings()) {
+    ipcMain.handle(binding.channel, (_e, ...args: unknown[]) =>
+      pluginRuntime.call(binding.method, toPluginPayload(args, binding.args)),
+    );
+  }
 
   // ─── Marketplace ────────────────────────────────
   ipcMain.handle("lvis:plugins:marketplace:list", () => pluginMarketplace.list());
@@ -269,4 +258,21 @@ export function registerIpcHandlers(
 
   // ─── Daily Briefing ──────────────────────────────
   ipcMain.handle("lvis:briefing:get", () => conversationLoop.generateBriefing());
+}
+
+function toPluginPayload(args: unknown[], argNames?: string[]): unknown {
+  if (args.length === 0) {
+    return undefined;
+  }
+  if (!argNames || argNames.length === 0) {
+    if (args.length === 1) {
+      return args[0];
+    }
+    return args;
+  }
+  const payload: Record<string, unknown> = {};
+  for (let i = 0; i < argNames.length; i += 1) {
+    payload[argNames[i]] = args[i];
+  }
+  return payload;
 }

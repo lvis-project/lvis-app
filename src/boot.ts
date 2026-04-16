@@ -144,19 +144,11 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   const configOverrides = buildPluginConfigOverrides(settingsService);
 
   // pythonExecutable 주입 (Agent 1 산출물)
-  // pageindex plugin은 두 가지 id로 lookup될 수 있다:
-  //   - "pageindex"             — installed manifest + marketplace catalog 기준 (실제 사용)
-  //   - "lvis-plugin-pageindex" — source repo plugin.json 기준 (legacy / 일관성)
-  // 양쪽 키에 모두 주입하여 어느 경로로 lookup되어도 매칭되도록 한다.
+  // 특정 플러그인 id 하드코딩 없이 모든 플러그인에 선언형으로 주입한다.
   if (pythonPath) {
-    const pageindexCfg = { pythonExecutable: pythonPath };
-    configOverrides["pageindex"] = {
-      ...(configOverrides["pageindex"] ?? {}),
-      ...pageindexCfg,
-    };
-    configOverrides["lvis-plugin-pageindex"] = {
-      ...(configOverrides["lvis-plugin-pageindex"] ?? {}),
-      ...pageindexCfg,
+    configOverrides["*"] = {
+      ...(configOverrides["*"] ?? {}),
+      pythonExecutable: pythonPath,
     };
   }
 
@@ -216,19 +208,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   await pluginRuntime.startAll();
   console.log("[lvis] boot: plugins loaded:", pluginRuntime.listMethods());
 
-  // 이메일 watcher 자동 시작 (UI 열기 전에도 알림 수신)
-  if (pluginRuntime.listMethods().includes("email.startWatcher")) {
-    pluginRuntime.call("email.startWatcher", {}).catch((e: Error) =>
-      console.log("[lvis] boot: email watcher start failed (non-fatal):", e.message)
-    );
-  }
-
-  // 캘린더 watcher 자동 시작 (인증된 경우에만 — 미인증이면 non-fatal)
-  if (pluginRuntime.listMethods().includes("calendar.startWatcher")) {
-    pluginRuntime.call("calendar.startWatcher", {}).catch((e: Error) =>
-      console.log("[lvis] boot: calendar watcher start failed (non-fatal):", e.message)
-    );
-  }
+  // 선언형 startupMethods 자동 실행 (플러그인별 watcher/bootstrap 훅)
+  runManifestStartupMethods(pluginRuntime);
 
   // 플러그인 메서드를 ToolRegistry에 등록 (범용)
   registerPluginTools(pluginRuntime, toolRegistry);
@@ -243,7 +224,9 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   try {
     // Public accessor (runtime.getPluginInstance) replaces the previous
     // `(pluginRuntime as any).plugins?.get(...)` private reach-through.
-    const pageIndexPlugin = pluginRuntime.getPluginInstance<{
+    const workerClientPluginId = pluginRuntime.findPluginIdByCapability("worker-client");
+    const pageIndexPlugin = workerClientPluginId
+      ? pluginRuntime.getPluginInstance<{
       getWorkerClient?: () => {
         listDocuments: () => Promise<unknown>;
         getStructure: (docId: string) => Promise<unknown>;
@@ -253,7 +236,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
         getIndexerState: () => Promise<unknown>;
       };
       setIdleScheduler?: (scheduler: IdleSchedulerService) => void;
-    }>("lvis-plugin-pageindex");
+    }>(workerClientPluginId)
+      : undefined;
     const workerClient = pageIndexPlugin?.getWorkerClient?.() as
       | {
           listDocuments: () => Promise<unknown>;
@@ -305,7 +289,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
           pageIndexPlugin.setIdleScheduler(idleScheduler);
           console.log("[lvis] boot: idle-scheduler wired to folderIndexer");
         } else {
-          console.warn("[lvis] boot: pageindex plugin setIdleScheduler() not available");
+          console.warn("[lvis] boot: worker-client plugin setIdleScheduler() not available");
         }
       } catch (err) {
         console.warn(
@@ -315,7 +299,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       }
     } else {
       console.warn(
-        "[lvis] boot: pageindex plugin getWorkerClient() not available — knowledge tools skipped",
+        "[lvis] boot: worker-client capability missing getWorkerClient() — knowledge tools skipped",
       );
       auditService.log({
         timestamp: new Date().toISOString(),
@@ -323,7 +307,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
         type: "error",
         payload: {
           reason: "knowledge tools skipped — getWorkerClient missing",
-          pluginId: "lvis-plugin-pageindex",
+          pluginId: workerClientPluginId ?? "(capability:worker-client not found)",
         },
       });
     }
@@ -400,38 +384,30 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     getRecentNotes: () => memoryManager.listNotes().slice(0, 5),
     getRecentSessions: () => memoryManager.listSessions().slice(0, 5),
   });
+  proactiveEngine.setEventHints(buildManifestEventHints(pluginRuntime));
 
-  // 이벤트 버스 → Proactive Engine 연동
-  onEvent("meeting.summary.created", (data) => proactiveEngine.collectEvent("meeting.summary.created", data));
-  onEvent("email.action.needed", (data) => proactiveEngine.collectEvent("email.action.needed", data));
-  onEvent("meeting.ended", (data) => proactiveEngine.collectEvent("meeting.ended", data));
+  // 이벤트 버스 → Proactive Engine 연동 (manifest.eventSubscriptions 선언 기반)
+  registerManifestEventSubscriptions(pluginRuntime, proactiveEngine);
 
-  // 오늘 일정 초기 로드 (플러그인 인증 여부와 관계없이 시도, 미인증이면 빈 배열)
-  if (pluginRuntime.listMethods().includes("calendar.today")) {
-    pluginRuntime.call("calendar.today", {})
+  // 오늘 일정 초기 로드 (calendar-source capability 플러그인에서 *_today 메서드 자동 탐색)
+  const calendarTodayMethod = findMethodByCapability(
+    pluginRuntime,
+    "calendar-source",
+    (method) => method.endsWith("_today"),
+  );
+  if (calendarTodayMethod) {
+    pluginRuntime.call(calendarTodayMethod, {})
       .then((events: unknown) => {
         if (Array.isArray(events)) {
           proactiveEngine.updateCalendarEvents(events as import("./core/proactive-engine.js").CachedCalendarEvent[]);
           console.log(`[lvis] boot: calendar today loaded (${events.length}건)`);
         }
       })
-      .catch((e: Error) => console.log("[lvis] boot: calendar.today failed (non-fatal):", e.message));
+      .catch((e: Error) => console.log("[lvis] boot: calendar today load failed (non-fatal):", e.message));
   }
 
-  // 새 이메일 → 네이티브 알림
-  onEvent("email.new", (data) => {
-    const d = data as { subject?: string; sender?: string; replyNeeded?: boolean; importance?: string };
-    const { Notification } = require("electron") as typeof import("electron");
-    if (!Notification.isSupported()) return;
-    const urgency = d.importance === "high" || d.replyNeeded;
-    const notif = new Notification({
-      title: urgency ? `📧 회신 필요 — ${d.sender ?? "알 수 없음"}` : `📧 새 메일 — ${d.sender ?? "알 수 없음"}`,
-      body: d.subject ?? "(제목 없음)",
-      silent: false,
-    });
-    notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
-    notif.show();
-  });
+  // 메일 소스 플러그인의 신규 이벤트 알림 (manifest 선언 기반)
+  registerMailSourceNotifications(pluginRuntime, mainWindow);
 
   // §4.5 + Agent 6: PostTurnHookChain 조립
   const bootAuditLogger = new AuditLogger();
@@ -546,6 +522,125 @@ function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolReg
   for (const method of pluginRuntime.listMethods()) {
     toolRegistry.register(pluginMethodToTool(pluginRuntime, method));
   }
+}
+
+function runManifestStartupMethods(pluginRuntime: PluginRuntime): void {
+  const loadedMethods = new Set(pluginRuntime.listMethods());
+  for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
+    for (const method of manifest.startupMethods ?? []) {
+      if (!loadedMethods.has(method)) {
+        console.warn(
+          `[lvis] boot: startup method not loaded (plugin=${pluginId}, method=${method})`,
+        );
+        continue;
+      }
+      pluginRuntime.call(method, {}).catch((e: Error) =>
+        console.log(
+          `[lvis] boot: startup method failed (non-fatal, plugin=${pluginId}, method=${method}):`,
+          e.message,
+        ),
+      );
+    }
+  }
+}
+
+function registerManifestEventSubscriptions(
+  pluginRuntime: PluginRuntime,
+  proactiveEngine: ProactiveEngine,
+): void {
+  const eventTypes = new Set<string>();
+  for (const { manifest } of pluginRuntime.listPluginManifests()) {
+    for (const eventType of manifest.eventSubscriptions ?? []) {
+      eventTypes.add(eventType);
+    }
+  }
+  for (const eventType of eventTypes) {
+    onEvent(eventType, (data) => proactiveEngine.collectEvent(eventType, data));
+  }
+}
+
+function buildManifestEventHints(
+  pluginRuntime: PluginRuntime,
+): Record<string, import("./core/proactive-engine.js").ProactiveEventHint> {
+  const hints: Record<string, import("./core/proactive-engine.js").ProactiveEventHint> = {};
+  for (const { manifest } of pluginRuntime.listPluginManifests()) {
+    for (const eventType of manifest.eventSubscriptions ?? []) {
+      const [prefix] = eventType.split(".");
+      if (prefix === "meeting") {
+        hints[eventType] = {
+          category: "meeting",
+          priority: "medium",
+          title: "회의 이벤트",
+        };
+        continue;
+      }
+      if (prefix === "email") {
+        hints[eventType] = {
+          category: "email",
+          priority: "medium",
+          title: eventType === "email.action.needed" ? "액션 필요 이메일" : "이메일 이벤트",
+        };
+        continue;
+      }
+      if (prefix === "calendar") {
+        hints[eventType] = {
+          category: "calendar",
+          priority: "low",
+          title: "일정 이벤트",
+        };
+        continue;
+      }
+      hints[eventType] = {
+        category: "system",
+        priority: "low",
+        title: eventType,
+      };
+    }
+  }
+  return hints;
+}
+
+function registerMailSourceNotifications(
+  pluginRuntime: PluginRuntime,
+  mainWindow: BrowserWindow,
+): void {
+  const eventTypes = new Set<string>();
+  for (const pluginId of pluginRuntime.listPluginIdsByCapability("mail-source")) {
+    const manifest = pluginRuntime.getPluginManifest(pluginId);
+    for (const eventType of manifest?.eventSubscriptions ?? []) {
+      if (eventType.endsWith(".new")) {
+        eventTypes.add(eventType);
+      }
+    }
+  }
+
+  for (const eventType of eventTypes) {
+    onEvent(eventType, (data) => {
+      const d = data as { subject?: string; sender?: string; replyNeeded?: boolean; importance?: string };
+      const { Notification } = require("electron") as typeof import("electron");
+      if (!Notification.isSupported()) return;
+      const urgency = d.importance === "high" || d.replyNeeded;
+      const notif = new Notification({
+        title: urgency ? `📧 회신 필요 — ${d.sender ?? "알 수 없음"}` : `📧 새 메일 — ${d.sender ?? "알 수 없음"}`,
+        body: d.subject ?? "(제목 없음)",
+        silent: false,
+      });
+      notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
+      notif.show();
+    });
+  }
+}
+
+function findMethodByCapability(
+  pluginRuntime: PluginRuntime,
+  capability: string,
+  matcher: (method: string) => boolean,
+): string | undefined {
+  const pluginId = pluginRuntime.findPluginIdByCapability(capability);
+  if (!pluginId) return undefined;
+  const manifest = pluginRuntime.getPluginManifest(pluginId);
+  if (!manifest) return undefined;
+  return manifest.methods.find(matcher);
 }
 
 function registerBuiltinTools(

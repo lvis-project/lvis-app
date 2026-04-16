@@ -199,4 +199,64 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await expect(runtime.load()).rejects.toThrow(/Invalid tool name 'bad\.method'/);
   });
+
+  it("exposes capability/manifest/ipc binding metadata from loaded plugins", async () => {
+    const pluginDir = join(installedDir, "meta-plugin");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return {
+    handlers: {
+      "meta_ping": async () => "pong",
+    },
+  };
+}
+`,
+      "utf-8",
+    );
+
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "meta-plugin",
+        name: "meta-plugin",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        methods: ["meta_ping"],
+        capabilities: ["meta-capability"],
+        startupMethods: ["meta_ping"],
+        ipcBindings: [
+          {
+            channel: "lvis:meta:ping",
+            method: "meta_ping",
+            args: ["message"],
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    await writeRegistry([{ id: "meta-plugin", manifestPath, enabled: true }]);
+
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    expect(runtime.findPluginIdByCapability("meta-capability")).toBe("meta-plugin");
+    expect(runtime.listPluginIdsByCapability("meta-capability")).toEqual(["meta-plugin"]);
+
+    const manifest = runtime.getPluginManifest("meta-plugin");
+    expect(manifest?.startupMethods).toEqual(["meta_ping"]);
+
+    expect(runtime.listIpcBindings()).toEqual([
+      {
+        pluginId: "meta-plugin",
+        channel: "lvis:meta:ping",
+        method: "meta_ping",
+        args: ["message"],
+      },
+    ]);
+  });
 });

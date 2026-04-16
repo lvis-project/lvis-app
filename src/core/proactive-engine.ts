@@ -38,9 +38,16 @@ export interface ProactiveEngineDeps {
   getRecentSessions: () => Array<{ id: string; modifiedAt: Date }>;
 }
 
+export interface ProactiveEventHint {
+  category: BriefingItem["category"];
+  priority?: BriefingItem["priority"];
+  title?: string;
+}
+
 export class ProactiveEngine {
   private readonly deps: ProactiveEngineDeps;
   private readonly eventLog: Array<{ type: string; data: unknown; timestamp: string }> = [];
+  private readonly eventHints = new Map<string, ProactiveEventHint>();
   private calendarEventsCache: CachedCalendarEvent[] = [];
 
   constructor(deps: ProactiveEngineDeps) {
@@ -62,6 +69,13 @@ export class ProactiveEngine {
     // 최근 100개만 유지
     if (this.eventLog.length > 100) {
       this.eventLog.splice(0, this.eventLog.length - 100);
+    }
+  }
+
+  setEventHints(hints: Record<string, ProactiveEventHint>): void {
+    this.eventHints.clear();
+    for (const [eventType, hint] of Object.entries(hints)) {
+      this.eventHints.set(eventType, hint);
     }
   }
 
@@ -116,14 +130,7 @@ export class ProactiveEngine {
       (e) => new Date(e.timestamp).getTime() > recentCutoff,
     );
 
-    const meetingEvents = recentEvents.filter((e) => e.type === "meeting.summary.created");
-    if (meetingEvents.length > 0) {
-      items.push({
-        category: "meeting",
-        priority: "medium",
-        title: `회의 요약 ${meetingEvents.length}건`,
-      });
-    }
+    this.collectHintedEventItems(recentEvents, items);
 
     // 5. 오늘 캘린더 일정
     if (this.calendarEventsCache.length > 0) {
@@ -171,28 +178,46 @@ export class ProactiveEngine {
       }
     }
 
-    const emailEvents = recentEvents.filter((e) => e.type === "email.action.needed");
-    if (emailEvents.length > 0) {
-      // 우선순위별 분류
-      const highEmails = emailEvents.filter((e) => (e.data as { priority?: string })?.priority === "high");
-      const topEmail = emailEvents[emailEvents.length - 1]?.data as {
-        subject?: string; sender?: string; deadline?: string; intent?: string; priority?: string;
-      } | undefined;
-
-      items.push({
-        category: "email",
-        priority: highEmails.length > 0 ? "high" : "medium",
-        title: `액션 필요 이메일 ${emailEvents.length}건`,
-        detail: topEmail?.subject
-          ? `${topEmail.sender ? `${topEmail.sender} — ` : ""}${topEmail.subject}${topEmail.deadline ? ` (마감: ${topEmail.deadline})` : ""}`
-          : undefined,
-      });
-    }
-
     return items.sort((a, b) => {
       const order = { high: 0, medium: 1, low: 2 };
       return order[a.priority] - order[b.priority];
     });
+  }
+
+  private collectHintedEventItems(
+    recentEvents: Array<{ type: string; data: unknown; timestamp: string }>,
+    items: BriefingItem[],
+  ): void {
+    const grouped = new Map<string, Array<{ type: string; data: unknown; timestamp: string }>>();
+    for (const event of recentEvents) {
+      const bucket = grouped.get(event.type) ?? [];
+      bucket.push(event);
+      grouped.set(event.type, bucket);
+    }
+
+    for (const [eventType, events] of grouped.entries()) {
+      const hinted = this.eventHints.get(eventType) ?? inferHintFromEventType(eventType);
+      if (!hinted) continue;
+      if (hinted.category === "calendar") continue;
+
+      const latestData = events[events.length - 1]?.data as {
+        subject?: string; sender?: string; deadline?: string; priority?: string;
+      } | undefined;
+      const hasHighPriorityEmail = hinted.category === "email" &&
+        events.some((e) => (e.data as { priority?: string } | undefined)?.priority === "high");
+
+      const priority = hinted.priority ?? (hasHighPriorityEmail ? "high" : "medium");
+      const title = hinted.title ?? `${eventType} ${events.length}건`;
+
+      items.push({
+        category: hinted.category,
+        priority,
+        title,
+        detail: hinted.category === "email" && latestData?.subject
+          ? `${latestData.sender ? `${latestData.sender} — ` : ""}${latestData.subject}${latestData.deadline ? ` (마감: ${latestData.deadline})` : ""}`
+          : undefined,
+      });
+    }
   }
 
   /** 텍스트 브리핑 생성 (LLM 없이, 구조화된 텍스트) */
@@ -290,4 +315,18 @@ export class ProactiveEngine {
     lines.push("</daily-briefing-data>");
     return lines.join("\n");
   }
+}
+
+function inferHintFromEventType(eventType: string): ProactiveEventHint | undefined {
+  const [prefix] = eventType.split(".");
+  if (prefix === "meeting") {
+    return { category: "meeting", priority: "medium", title: "회의 이벤트" };
+  }
+  if (prefix === "email") {
+    return { category: "email", priority: "medium", title: "이메일 이벤트" };
+  }
+  if (prefix === "calendar") {
+    return { category: "calendar", priority: "low", title: "일정 이벤트" };
+  }
+  return { category: "system", priority: "low", title: eventType };
 }

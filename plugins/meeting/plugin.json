@@ -4,10 +4,39 @@
   "version": "0.1.0",
   "entry": "../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
   "methods": [
-    "meeting.start",
-    "meeting.pushChunk",
-    "meeting.stop",
-    "meeting.transcript"
+    "meeting_start",
+    "meeting_push_chunk",
+    "meeting_stop",
+    "meeting_transcript"
+  ],
+  "capabilities": [
+    "meeting-recorder"
+  ],
+  "eventSubscriptions": [
+    "meeting.summary.created",
+    "meeting.ended"
+  ],
+  "ipcBindings": [
+    {
+      "channel": "lvis:meeting:start",
+      "method": "meeting_start",
+      "args": ["sessionId", "context"]
+    },
+    {
+      "channel": "lvis:meeting:push-chunk",
+      "method": "meeting_push_chunk",
+      "args": ["sessionId", "chunk"]
+    },
+    {
+      "channel": "lvis:meeting:stop",
+      "method": "meeting_stop",
+      "args": ["sessionId"]
+    },
+    {
+      "channel": "lvis:meeting:transcript",
+      "method": "meeting_transcript",
+      "args": ["sessionId"]
+    }
   ],
   "config": {
     "intermediateEveryFinalSegments": 1

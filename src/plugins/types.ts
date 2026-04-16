@@ -14,6 +14,15 @@
  */
 export type DeploymentMode = "managed" | "user";
 
+export interface PluginIpcBinding {
+  /** IPC channel name exposed by host (legacy compatibility path). */
+  channel: string;
+  /** Plugin method name to call. Must be present in `methods`. */
+  method: string;
+  /** Optional payload field names for positional IPC args. */
+  args?: string[];
+}
+
 export interface PluginManifest {
   /**
    * 플러그인 고유 식별자.
@@ -43,6 +52,14 @@ export interface PluginManifest {
   ui?: PluginUiExtension[];
   /** 플러그인이 선언하는 키워드 (§9.2). `skillId`는 `methods` 배열의 tool name과 일치해야 함 */
   keywords?: Array<{ keyword: string; skillId: string }>;
+  /** 호스트가 capability 기반으로 기능을 찾을 때 사용하는 선언형 태그 */
+  capabilities?: string[];
+  /** 부팅 직후 자동 실행할 메서드 목록 (선언형 autostart) */
+  startupMethods?: string[];
+  /** 호스트가 수집해야 할 이벤트 타입 목록 (예: proactive 연동) */
+  eventSubscriptions?: string[];
+  /** 하드코딩 IPC 제거를 위한 채널↔메서드 바인딩 선언 */
+  ipcBindings?: PluginIpcBinding[];
 
   // ─── §9.6 Plugin Deployment Model (Phase 1.5 신규) ─────────────────
 
