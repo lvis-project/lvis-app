@@ -34,6 +34,12 @@ import { AuditLogger } from "../audit/audit-logger.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 
+export interface ToolCallMeta {
+  groupId: string;
+  toolUseId: string;
+  displayOrder: number;
+}
+
 // ─── C1: Sensitive-path + read-only hint extraction ────────
 
 /**
@@ -92,8 +98,8 @@ export interface ToolResult {
 }
 
 export interface ToolExecutorCallbacks {
-  onToolStart?: (name: string, input: Record<string, unknown>) => void;
-  onToolEnd?: (name: string, result: string, isError: boolean) => void;
+  onToolStart?: (name: string, input: Record<string, unknown>, meta: ToolCallMeta) => void;
+  onToolEnd?: (name: string, result: string, isError: boolean, meta: ToolCallMeta) => void;
 }
 
 // ─── Rate Limiter (tool-governance.md §9) ──────────
@@ -183,15 +189,16 @@ export class ToolExecutor {
     callbacks?: ToolExecutorCallbacks,
     sessionId?: string,
   ): Promise<ToolResult[]> {
+    const groupId = randomUUID();
     const BATCH_SIZE = 5;
     if (toolUses.length <= BATCH_SIZE) {
-      return Promise.all(toolUses.map((tu) => this.executeOne(tu, callbacks, sessionId)));
+      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId)));
     }
 
     const results: ToolResult[] = [];
     for (let i = 0; i < toolUses.length; i += BATCH_SIZE) {
       const batch = toolUses.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(batch.map((tu) => this.executeOne(tu, callbacks, sessionId)));
+      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId)));
       results.push(...batchResults);
     }
     return results;
@@ -200,10 +207,13 @@ export class ToolExecutor {
   /** 단일 도구 — 8단계 파이프라인 (Single Choke Point) */
   private async executeOne(
     toolUse: ToolUseBlock,
+    groupId: string,
+    displayOrder: number,
     callbacks?: ToolExecutorCallbacks,
     sessionId?: string,
   ): Promise<ToolResult> {
     const startTime = Date.now();
+    const meta: ToolCallMeta = { groupId, toolUseId: toolUse.id, displayOrder };
     let permissionResult: PermissionCheckResult | undefined;
     let source: ToolSource = "builtin";
     let trust: TrustLevel = "high";
@@ -228,8 +238,8 @@ export class ToolExecutor {
       const bashResult = this.bashAstValidator.validate(toolUse.name, toolUse.input);
       if (bashResult.decision === "deny") {
         const msg = `[Bash AST 차단] ${bashResult.reason} (pattern: ${bashResult.patternId})`;
-        callbacks?.onToolStart?.(toolUse.name, toolUse.input);
-        callbacks?.onToolEnd?.(toolUse.name, msg, true);
+        callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
         this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity);
         return { tool_use_id: toolUse.id, content: msg, is_error: true };
       }
@@ -243,8 +253,8 @@ export class ToolExecutor {
       permissionResult = this.permissionManager.checkDetailed(toolUse.name, source, tool.category);
       if (permissionResult.decision === "deny") {
         const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
-        callbacks?.onToolStart?.(toolUse.name, toolUse.input);
-        callbacks?.onToolEnd?.(toolUse.name, msg, true);
+        callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
         this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
         return { tool_use_id: toolUse.id, content: msg, is_error: true };
       }
@@ -275,8 +285,8 @@ export class ToolExecutor {
             decision = await this.approvalGate.requestAndWait(approvalRequest);
           } catch (approvalErr) {
             const msg = `[승인 오류] 도구 '${toolUse.name}' — 승인 게이트 내부 오류: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
-            callbacks?.onToolStart?.(toolUse.name, toolUse.input);
-            callbacks?.onToolEnd?.(toolUse.name, msg, true);
+            callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
             this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
             return { tool_use_id: toolUse.id, content: msg, is_error: true };
           }
@@ -288,8 +298,8 @@ export class ToolExecutor {
               await this.permissionManager.addAlwaysDeniedPersist(pattern);
             }
             const msg = `[승인 거부] 도구 '${toolUse.name}' — 사용자가 실행을 거부했습니다.`;
-            callbacks?.onToolStart?.(toolUse.name, toolUse.input);
-            callbacks?.onToolEnd?.(toolUse.name, msg, true);
+            callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
             this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
             return { tool_use_id: toolUse.id, content: msg, is_error: true };
           }
@@ -304,8 +314,8 @@ export class ToolExecutor {
           // §F4: approvalGate 미연결 시 fail-closed — 모든 ask 결정을 차단
           const msg = `[승인 게이트 미연결] 도구 '${toolUse.name}' (${source}) — ask 결정이지만 승인 게이트가 없어 차단. ${permissionResult.reason}`;
           console.error(msg);
-          callbacks?.onToolStart?.(toolUse.name, toolUse.input);
-          callbacks?.onToolEnd?.(toolUse.name, msg, true);
+          callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
           this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
           return { tool_use_id: toolUse.id, content: msg, is_error: true };
         }
@@ -315,8 +325,8 @@ export class ToolExecutor {
     // ── Step 4: Hook Override ───────────────────────
     if (preResult.action === "deny") {
       const msg = `[훅 차단] ${preResult.reason ?? "PreToolUse 훅에 의해 차단됨"}`;
-      callbacks?.onToolStart?.(toolUse.name, toolUse.input);
-      callbacks?.onToolEnd?.(toolUse.name, msg, true);
+      callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
       this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
       return { tool_use_id: toolUse.id, content: msg, is_error: true };
     }
@@ -329,13 +339,13 @@ export class ToolExecutor {
     const rateResult = this.rateLimiter.check(toolUse.name, trust);
     if (!rateResult.allowed) {
       const msg = `[속도 제한] 도구 '${toolUse.name}' (trust:${trust}) 호출 빈도 초과. 잠시 후 다시 시도해주세요.`;
-      callbacks?.onToolStart?.(toolUse.name, finalInput);
-      callbacks?.onToolEnd?.(toolUse.name, msg, true);
+      callbacks?.onToolStart?.(toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
       this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, 0);
       return { tool_use_id: toolUse.id, content: msg, is_error: true };
     }
 
-    callbacks?.onToolStart?.(toolUse.name, finalInput);
+    callbacks?.onToolStart?.(toolUse.name, finalInput, meta);
 
     // ── Step 6: Execute ─────────────────────────────
     let content: string;
@@ -392,7 +402,7 @@ export class ToolExecutor {
     }
 
     // ── Step 8: Audit + Result (항상 실행) ──────────
-    callbacks?.onToolEnd?.(toolUse.name, content, isError);
+    callbacks?.onToolEnd?.(toolUse.name, content, isError, meta);
     this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, content, isError, startTime, permissionResult, rateResult.remaining);
 
     return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }) };

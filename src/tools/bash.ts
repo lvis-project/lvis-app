@@ -15,6 +15,7 @@
  * (Step 2.5 of the tool executor pipeline) prevents dangerous syntax.
  */
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { resolveShell } from "../lib/shell-resolver.js";
 import type { Readable } from "node:stream";
 import { resolve as pathResolve } from "node:path";
 import { z } from "zod";
@@ -95,7 +96,7 @@ export class BashTool extends ZodTool<typeof BashToolInputSchema> {
       }
     }
 
-    return await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds);
+    return await spawnWithTimeout(input.command, resolvedCwd, input.timeoutSeconds); // Uses shared shell resolver
   }
 }
 
@@ -128,7 +129,8 @@ async function spawnWithTimeout(
   timeoutSeconds: number,
 ): Promise<SpawnResult> {
   return new Promise((resolve) => {
-    const child: PipedChild = spawn("sh", ["-c", command], {
+    const shell = resolveShell();
+    const child: PipedChild = spawn(shell.cmd, shell.shellArgs(command), {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       // H2: strip secrets (LVIS_*, *_API_KEY, GITHUB_TOKEN, AWS_*, etc.)
