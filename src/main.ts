@@ -144,12 +144,18 @@ function createWindow() {
     console.error("[lvis] window failed to load", { code, desc, url });
   });
 
-  // window.open() → shell.openExternal() 리다이렉트
-  // 플러그인 UI에서 window.open(url)을 호출하면 새 BrowserWindow 대신
-  // 시스템 브라우저로 열어 앱 종료를 방지한다.
+  // 외부 URL → 시스템 브라우저로 리다이렉트 (앱 내 탐색 방지)
+  // window.open() 차단
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
+  });
+  // <a href> 클릭 또는 location.href 변경으로 인한 탐색 차단
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("file://") && !url.startsWith("data:")) {
+      event.preventDefault();
+      void shell.openExternal(url);
+    }
   });
 
   // §M-race: bootstrap 동안 splash만 표시. 실 index.html 로드는 main()이
