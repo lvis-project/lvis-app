@@ -52,7 +52,8 @@ export class PostTurnHookChain {
     let compactedMessages: GenericMessage[] | null = null;
 
     // 1. Auto-Compact (§4.5.4)
-    // 모델 컨텍스트 윈도우의 80% 이상 사용 시 자동 압축 (아키텍처 §4.5.4)
+    // 모델 컨텍스트 윈도우 대비 사용률이 설정값(기본 80%) 이상이면 자동 압축 (아키텍처 §4.5.4)
+    // thresholdPct는 CompactConfig에서 조정 가능하며 기본값은 0.8
     try {
       const autoCompactEnabled = this.deps.settingsService?.get("chat").autoCompact ?? true;
       if (autoCompactEnabled) {
