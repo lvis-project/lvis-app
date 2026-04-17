@@ -42,14 +42,6 @@ LVIS currently implements only Stage 2. This reference set motivated the Stage 1
 - Different problem framing: persistent cross-session memory vs. in-turn context window management.
 - Takeaway: orthogonal to our compact work; relevant later for LVIS long-term memory (§5 architecture).
 
-## 4. ccleaks.com — Claude Code architecture (satirical framing, factual leak content)
-
-- Site is April Fools satire, but the Architecture section is extracted from a real `cli.js.map` source map leak.
-- Confirms: **80% threshold** for compact trigger, `CompactBoundaryMessage` message type, microcompact-like "tool result collapsing" on every turn.
-- Used as **pattern convergence confirmation**, not copied (per user memory: "자체창작 금지" / don't copy flag names verbatim).
-
----
-
 ## Cross-reference — where LVIS implements each concept
 
 | Concept | LVIS location |
@@ -71,4 +63,4 @@ LVIS currently implements only Stage 2. This reference set motivated the Stage 1
 
 ## Provenance
 
-Captured during Phase 3 follow-up session (2026-04-17) before context compaction. Source conversation: `.claude/projects/-Users-ken-workspace-GIT-github-lvis-project/58e30a0f-d7f2-44b0-9173-45144b6ce684.jsonl`.
+Captured during the Phase 3 follow-up session (2026-04-17) before context compaction. Derived from an internal session record.
