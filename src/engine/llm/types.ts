@@ -27,10 +27,29 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
 
 // ─── 범용 메시지 ────────────────────────────────────
 
+/**
+ * Optional per-message metadata for lifecycle bookkeeping (auto-compact, microcompact,
+ * boundary markers, etc.). All fields optional so existing callers remain unaffected.
+ */
+export interface MessageMeta {
+  /** microcompact가 tool_result content를 stub으로 교체했는지 여부 */
+  stripped?: boolean;
+  /** stripped 되기 전 원본 content의 문자열 길이(JS string.length — UTF-16 code units, bytes 아님) */
+  originalLength?: number;
+  /** compactMessages()가 생성한 요약 경계 marker인지 여부 (idempotency) */
+  compactBoundary?: boolean;
+  /** 경계 marker의 경우, 요약 대상이 된 메시지 수 */
+  removedCount?: number;
+  /** microcompact strip 발생 ISO timestamp */
+  strippedAt?: string;
+  /** compactMessages 실행 ISO timestamp */
+  compactedAt?: string;
+}
+
 export type GenericMessage =
-  | { role: "user"; content: string }
-  | { role: "assistant"; content: string; thought?: string; toolCalls?: ToolCallBlock[] }
-  | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean };
+  | { role: "user"; content: string; meta?: MessageMeta }
+  | { role: "assistant"; content: string; thought?: string; toolCalls?: ToolCallBlock[]; meta?: MessageMeta }
+  | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean; meta?: MessageMeta };
 
 export interface ToolCallBlock {
   id: string;
