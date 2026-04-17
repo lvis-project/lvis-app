@@ -80,6 +80,13 @@ export interface ConversationLoopDeps {
 
 const MAX_TOOL_ROUNDS = 10;
 
+/** Phase 1 Lazy Tool Scoping — 매 턴 LLM에 노출할 도구 집합 정의. */
+interface ToolScope {
+  activePluginIds: Set<string>;
+  includeBuiltins: boolean;
+  includeMcp: boolean;
+}
+
 // §11 리스크: LLM agentic 토큰 폭발 방지 — knowledge 도구 turn당 호출 횟수 hard cap
 const KNOWLEDGE_DEPTH_CAP = 3;
 const KNOWLEDGE_TOOL_NAMES = new Set([
@@ -99,6 +106,12 @@ export class ConversationLoop {
   private provider: LLMProvider | null = null;
   private sessionId: string = crypto.randomUUID();
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  /**
+   * Phase 1 Lazy Tool Scoping — 직전 턴의 active plugin 집합.
+   * Keyword miss (type==="general") 시 fallback으로 재사용한다.
+   * null = 이전 턴 없음 → builtin-only scope.
+   */
+  private lastTurnScope: Set<string> | null = null;
 
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
@@ -260,8 +273,16 @@ ${briefingData}
 
     this.history.append({ role: "user", content: userContent });
 
+    // Phase 1 Lazy Tool Scoping — 이 턴에서 노출할 plugin 집합 결정.
+    // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
+    // build() 호출 전에 setToolScope 수행.
+    const scope = this.resolveToolScope(input);
+    this.lastTurnScope = scope.activePluginIds;
+    // Guard: test mocks may stub SystemPromptBuilder without this method.
+    this.deps.systemPromptBuilder.setToolScope?.(scope);
+
     const systemPrompt = this.deps.systemPromptBuilder.build();
-    const result = await this.queryLoop(systemPrompt, callbacks);
+    const result = await this.queryLoop(systemPrompt, scope, callbacks);
 
     // §4.5.5 Post-Turn Hook Chain (Agent 6: compact → saveSession → extractMemory → audit → idle-poke)
     if (this.deps.postTurnHookChain) {
@@ -316,11 +337,12 @@ ${briefingData}
 
   private async queryLoop(
     systemPrompt: string,
+    scope: ToolScope,
     callbacks?: TurnCallbacks,
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const model = llmSettings.model;
-    const toolSchemas: ToolSchema[] = this.deps.toolRegistry.getToolSchemas().map((s) => ({
+    const toolSchemas: ToolSchema[] = this.deps.toolRegistry.getToolSchemasForScope(scope).map((s) => ({
       name: s.name,
       description: s.description,
       // Tool.toJsonSchema() returns `unknown` (may be Zod-generated or raw
@@ -552,6 +574,27 @@ ${briefingData}
   // cycle 1 MED: extractMemory inline 로직 제거.
   // PostTurnHookChain의 memory-extract hook이 단일 진실 소스이며,
   // fallback 경로에서도 중복 추출을 수행하지 않는다.
+
+  // ─── Private: Tool Scope Resolution (Phase 1 Lazy Tool Scoping) ───
+
+  /**
+   * 입력에서 활성 plugin 집합을 유도하여 ToolScope를 반환한다.
+   *
+   * - KeywordEngine.matchAllPluginIds() → 이번 턴 active plugin Set
+   * - 매치 없음(일반 대화) → lastTurnScope fallback, 그마저 없으면 빈 Set (builtin-only)
+   * - Builtins + MCP는 항상 포함 (host-side tool은 항시 사용 가능)
+   */
+  private resolveToolScope(input: string): ToolScope {
+    const matched = this.deps.keywordEngine.matchAllPluginIds(input);
+    const activePluginIds = matched.size > 0
+      ? matched
+      : (this.lastTurnScope ?? new Set<string>());
+    return {
+      activePluginIds,
+      includeBuiltins: true,
+      includeMcp: true,
+    };
+  }
 
   // ─── Private: Command Handler ─────────────────────
 

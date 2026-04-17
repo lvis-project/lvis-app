@@ -164,7 +164,11 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     // 플러그인별 스코프된 HostApi 팩토리
     createHostApi: (pluginId: string): PluginHostApi => ({
       registerKeywords: (keywords) => {
-        keywordEngine.registerKeywords(keywords);
+        // Phase 1 Lazy Tool Scoping — plugin 호출 경로에서 pluginId 자동 주입.
+        // 플러그인 소스는 수정하지 않고 host가 origin을 tag한다.
+        keywordEngine.registerKeywords(
+          keywords.map((k) => ({ ...k, pluginId })),
+        );
         console.log(`[lvis] plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
