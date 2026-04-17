@@ -72,7 +72,60 @@ describe("PostTurnHookChain", () => {
     });
 
     expect(result).not.toBeNull();
-    expect(result?.[0]?.content).toContain("[이전 대화 요약]");
+    // 요약 marker는 배열 어딘가에 존재
+    const marker = result?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
+    expect(marker).toBeDefined();
+    expect(marker?.content).toContain("[이전 대화 요약]");
     expect(saveSession).toHaveBeenCalledWith("session-enabled", result);
+  });
+
+  it("runs microcompact alone (no full compact) when threshold is not met", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const saveSession = vi.fn();
+    const memoryManager = { saveSession } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return { provider: "openai", model: "gpt-4o" };
+        return { systemPrompt: "", autoCompact: true };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({ memoryManager, settingsService });
+
+    // 10개 tool_result가 있는 히스토리 — 미세압축은 6개 strip, 임계치는 미달
+    const messages: GenericMessage[] = [{ role: "user", content: "시작" }];
+    for (let i = 0; i < 10; i++) {
+      const id = `t${i}`;
+      messages.push({
+        role: "assistant",
+        content: `s${i}`,
+        toolCalls: [{ id, name: "search", input: { q: `q${i}` } }],
+      });
+      messages.push({
+        role: "tool_result",
+        toolUseId: id,
+        toolName: "search",
+        content: "y".repeat(3000),
+      });
+    }
+
+    const result = await chain.run({
+      sessionId: "session-micro",
+      messages,
+      cumulativeUsage: { inputTokens: 1_000, outputTokens: 0 }, // 임계치 훨씬 아래
+      input: "검색",
+      output: "ok",
+      toolCalls: [],
+      route: "chat",
+    });
+
+    expect(result).not.toBeNull();
+    // full-compact 요약 marker는 없어야 함
+    const marker = result?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
+    expect(marker).toBeUndefined();
+    // 하지만 stripped 메시지는 존재
+    const strippedCount = result?.filter((m) => m.role === "tool_result" && m.meta?.stripped === true).length ?? 0;
+    expect(strippedCount).toBeGreaterThan(0);
+    expect(saveSession).toHaveBeenCalledWith("session-micro", result);
   });
 });
