@@ -36,7 +36,7 @@ import {
 type MarketplaceItem = { id: string; name: string; description: string; packageSpec: string; installed: boolean; enabled: boolean; isManaged?: boolean };
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
-type AppSettings = { llm: { provider: string; model: string }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string } };
+type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string } };
 
 type LvisApi = {
   getSettings: () => Promise<AppSettings>;
@@ -218,7 +218,7 @@ function TaskView({ api }: { api: LvisApi }) {
 // ─── SettingsDialog ─────────────────────────────────
 
 const VENDORS = [
-  { id: "claude", label: "Anthropic Claude", placeholder: "sk-ant-...", defaultModel: "claude-sonnet-4-20250514" },
+  { id: "claude", label: "Anthropic Claude", placeholder: "sk-ant-...", defaultModel: "claude-sonnet-4-6" },
   { id: "openai", label: "OpenAI", placeholder: "sk-...", defaultModel: "gpt-4o" },
   { id: "gemini", label: "Google Gemini", placeholder: "AIza...", defaultModel: "gemini-2.0-flash" },
   { id: "copilot", label: "GitHub Copilot", placeholder: "ghp_...", defaultModel: "gpt-4o" },

@@ -7,6 +7,10 @@ export type LLMVendor = "claude" | "openai" | "gemini" | "copilot" | "lgenie";
 export interface LLMSettings {
   provider: LLMVendor;
   model: string;
+  /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */
+  enableThinking?: boolean;
+  /** Token budget for Claude extended thinking (1024–32000). Only used when enableThinking is true. */
+  thinkingBudgetTokens?: number;
 }
 
 export interface ChatSettings {
