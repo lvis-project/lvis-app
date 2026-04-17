@@ -40,6 +40,7 @@ import { mcpToolToTool } from "./mcp-tool-adapter.js";
 import {
   NetworkGuardError,
   ensurePublicHttpUrl,
+  fetchPublicHttpResponse,
   validateHttpUrl,
 } from "../core/network-guard.js";
 
@@ -114,14 +115,26 @@ interface McpTransport {
   isAlive(): boolean;
   onMessage(handler: (msg: JsonRpcResponse) => void): void;
   onClose(handler: (reason: string) => void): void;
+  /**
+   * Fired by streaming transports whenever a chunk of data arrives. Lets the
+   * client reset per-request timeout timers so long-running SSE responses
+   * (e.g., a streaming `tools/call`) don't trip the standard 30s timeout
+   * while data is still flowing. Optional — only HTTP+SSE uses it.
+   */
+  onActivity?(handler: () => void): void;
+}
+
+interface PendingRequest {
+  resolve: (value: unknown) => void;
+  reject: (reason: Error) => void;
+  timer: NodeJS.Timeout;
+  timeoutMs: number;
+  method: string;
 }
 
 export class McpClient {
   private nextRequestId = 1;
-  private readonly pendingRequests = new Map<
-    number,
-    { resolve: (value: unknown) => void; reject: (reason: Error) => void; timer: NodeJS.Timeout }
-  >();
+  private readonly pendingRequests = new Map<number, PendingRequest>();
   private healthTimer: NodeJS.Timeout | null = null;
   private transport: McpTransport | null = null;
 
@@ -166,6 +179,9 @@ export class McpClient {
 
       this.transport.onMessage((msg) => this.handleResponse(msg));
       this.transport.onClose((reason) => this.handleTransportClose(reason));
+      // Streaming transports call this on every incoming chunk — reset
+      // per-request timers so long streaming responses don't hit timeout.
+      this.transport.onActivity?.(() => this.resetPendingTimers());
 
       await this.transport.open();
 
@@ -303,6 +319,8 @@ export class McpClient {
         resolve: resolve as (value: unknown) => void,
         reject,
         timer,
+        timeoutMs: timeout,
+        method,
       });
 
       const request: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
@@ -381,6 +399,27 @@ export class McpClient {
     this.pendingRequests.clear();
   }
 
+  /**
+   * Reset per-request timeout timers. Called by streaming transports on each
+   * incoming chunk so that long-running SSE responses (e.g., a streaming
+   * `tools/call`) aren't killed by the standard timeout while data is still
+   * flowing. Each timer gets a fresh `timeoutMs` window from "now".
+   */
+  private resetPendingTimers(): void {
+    for (const [id, pending] of this.pendingRequests) {
+      clearTimeout(pending.timer);
+      const method = pending.method;
+      const timeoutMs = pending.timeoutMs;
+      const newTimer = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        pending.reject(
+          new Error(`[mcp-client] 요청 타임아웃 (${timeoutMs}ms): ${method}`),
+        );
+      }, timeoutMs);
+      pending.timer = newTimer;
+    }
+  }
+
   // ─── Tool Registration ──────────────────────────────
 
   private registerTools(tools: McpToolSchema[]): void {
@@ -420,6 +459,14 @@ export class McpClient {
       this.handleTransportClose("health check: transport 비활성");
       return;
     }
+
+    // stdio transport: exit 이벤트로 프로세스 사망을 감지하므로 active probe 불필요.
+    // http transport: 매 30초 POST 요청은 트래픽/비용/로그 노이즈를 유발하고,
+    //   서버가 `ping`을 구현하지 않으면 계속 오류가 쌓인다. 연결 상태는
+    //   `send()` 실패 시 SSE stream 종료/네트워크 오류 경로로 감지되므로
+    //   http 쪽에서도 능동 probe 를 생략한다. 필요하면 향후 서버가 선언한
+    //   capability (`capabilities.ping`) 기반으로 enable 한다.
+    if (transport.kind !== "stdio") return;
 
     // ping 요청 (응답 없어도 transport 생존 확인이 목적)
     this.sendRequest("ping", {}, 5000).catch(() => {
@@ -484,23 +531,28 @@ class StdioTransport implements McpTransport {
 
   async close(): Promise<void> {
     this.closedExternally = true;
-    if (!this.process) return;
+    // Capture the process reference BEFORE nulling `this.process` so the
+    // SIGKILL fallback timer can still reach it. Without this, `close()` used
+    // to null the field synchronously and the 3-second timer would dereference
+    // `this.process?.kill("SIGKILL")` as a no-op.
+    const proc = this.process;
+    this.process = null;
+    if (!proc) return;
     try {
-      this.process.stdin?.end();
-      this.process.kill("SIGTERM");
+      proc.stdin?.end();
+      proc.kill("SIGTERM");
       // SIGTERM 후 3초 내 종료 안 되면 SIGKILL
       const forceKillTimer = setTimeout(() => {
         try {
-          this.process?.kill("SIGKILL");
+          proc.kill("SIGKILL");
         } catch {
           // 이미 종료됨
         }
       }, 3000);
-      this.process.once("exit", () => clearTimeout(forceKillTimer));
+      proc.once("exit", () => clearTimeout(forceKillTimer));
     } catch {
       // 이미 종료됨
     }
-    this.process = null;
   }
 
   isAlive(): boolean {
@@ -593,18 +645,26 @@ class StdioTransport implements McpTransport {
  *     events are passed to the message handler (server-initiated notifications).
  *   - Notifications (no id) expect HTTP 202 or 200 with empty body.
  *
- * SSRF control: URL is validated with `ensurePublicHttpUrl` at `open` time
- * unless `allowPrivateNetworks: true`. No additional per-request URL
- * validation is performed; instead every request sets `redirect: "error"` so
- * `fetch` never silently follows a Location header to a private IP. DNS
- * rebinding during the session is therefore still theoretically possible but
- * is out of scope for this transport.
+ * SSRF control: every outbound request is routed through
+ * {@link fetchPublicHttpResponse}, which re-resolves DNS and rejects any
+ * private / link-local / loopback address on every hop. This closes the
+ * DNS-rebinding window between `open()` and `send()`: even if an attacker
+ * flips the host's A record to 169.254.169.254 after the initial
+ * {@link ensurePublicHttpUrl} passed, the per-request re-resolution will
+ * block the pivot. The helper also enforces `redirect: "manual"` plus
+ * per-hop validation, defeating `Location:`-based redirect pivots.
+ *
+ * Escape hatch: when the per-server `allowPrivateNetworks` config is set AND
+ * the global policy allowed it (governance layer gate), requests bypass
+ * NetworkGuard and use raw `fetch` — required for on-prem / loopback
+ * deployments. `redirect: "error"` is still set in that mode.
  */
 class HttpTransport implements McpTransport {
   readonly kind = "http" as const;
   private alive = false;
   private messageHandler: ((msg: JsonRpcResponse) => void) | null = null;
   private closeHandler: ((reason: string) => void) | null = null;
+  private activityHandler: (() => void) | null = null;
   /** Tracks in-flight SSE AbortControllers so `close` can cancel them. */
   private readonly inflight = new Set<AbortController>();
 
@@ -616,6 +676,10 @@ class HttpTransport implements McpTransport {
 
   onClose(handler: (reason: string) => void): void {
     this.closeHandler = handler;
+  }
+
+  onActivity(handler: () => void): void {
+    this.activityHandler = handler;
   }
 
   async open(): Promise<void> {
@@ -648,7 +712,8 @@ class HttpTransport implements McpTransport {
 
     // Timeout covers the initial HTTP round-trip (until response headers
     // arrive). Cleared once the server responds; SSE body reads continue
-    // asynchronously and can be cancelled at any time via close().
+    // asynchronously and are reset per chunk so long-running streaming
+    // tool calls do not trip the request timer while data is flowing.
     // Note: the reason passed to abort() is stored on signal.reason and is
     // useful for debugging, but fetch() always throws a generic AbortError.
     const timeoutId = setTimeout(
@@ -656,32 +721,60 @@ class HttpTransport implements McpTransport {
       DEFAULT_REQUEST_TIMEOUT_MS,
     );
 
+    // Build and validate request headers. `config.headers` comes from admin
+    // governance but we still strip CRLF-injection attempts — no trusted
+    // source should be immune from hardening.
     const headers: Record<string, string> = {
       "content-type": "application/json",
       // Streamable HTTP servers may return either JSON or SSE.
       accept: "application/json, text/event-stream",
       ...this.config.headers,
     };
-    if (this.config.apiKey && !headers["authorization"] && !headers["Authorization"]) {
+    if (this.config.apiKey && !hasAuthorization(headers)) {
       headers.authorization = `Bearer ${this.config.apiKey}`;
     }
 
+    const body = JSON.stringify(message);
+    const init: RequestInit = {
+      method: "POST",
+      headers,
+      body,
+      signal: controller.signal,
+      // Disable automatic redirect-following so a server cannot pivot to a
+      // private IP via a Location header after passing the open()-time SSRF
+      // check. `fetchPublicHttpResponse` re-validates every manual hop; the
+      // raw-fetch escape-hatch path surfaces 3xx as a TypeError.
+      redirect: "error",
+    };
+
     let response: Response;
     try {
-      response = await fetch(this.config.url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(message),
-        signal: controller.signal,
-        // Disable automatic redirect-following so a server cannot pivot to a
-        // private IP via a Location header after passing the open()-time SSRF
-        // check. Any 3xx response surfaces as a TypeError, which is caught
-        // below and re-thrown as a transport error.
-        redirect: "error",
-      });
+      if (this.config.allowPrivateNetworks) {
+        // Governance has already gated `allowPrivateNetworks` behind an
+        // admin-policy flag (see McpGovernance.validateServer). Bypass
+        // NetworkGuard here for on-prem / loopback deployments.
+        response = await fetch(this.config.url, init);
+      } else {
+        // Every request re-validates DNS via fetchPublicHttpResponse, which
+        // re-runs ensurePublicHttpUrl on the initial URL and on each redirect
+        // hop. This closes the DNS-rebinding window between open() and send().
+        response = await fetchPublicHttpResponse(this.config.url, {
+          ...init,
+          // `fetchPublicHttpResponse` owns its own AbortController but honours
+          // an external `signal`. Keep the caller's signal so close() still
+          // cancels in-flight requests.
+          signal: controller.signal,
+          // Its internal timeout covers each hop; we still want the overall
+          // request guarded by the McpClient-level timer above, so match it.
+          timeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
+        });
+      }
     } catch (err) {
       clearTimeout(timeoutId);
       this.inflight.delete(controller);
+      if (err instanceof NetworkGuardError) {
+        throw new NetworkGuardError(`network guard: ${err.message}`);
+      }
       const reason = err instanceof Error ? err.message : String(err);
       throw new Error(`http transport fetch 실패: ${reason}`);
     }
@@ -707,7 +800,10 @@ class HttpTransport implements McpTransport {
     if (!response.ok) {
       this.inflight.delete(controller);
       const body = await response.text().catch(() => "");
-      throw new Error(`http transport HTTP ${response.status}: ${body.slice(0, 200)}`);
+      // Scrub obvious secret material before surfacing server error bodies.
+      throw new Error(
+        `http transport HTTP ${response.status}: ${scrubSecrets(body).slice(0, 200)}`,
+      );
     }
 
     const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
@@ -716,6 +812,14 @@ class HttpTransport implements McpTransport {
       // through the normal `onMessage` path, matching stdio semantics.
       void this.consumeSse(response, controller).catch((err) => {
         console.warn(`[mcp-client] ${this.config.id} SSE 읽기 오류:`, err);
+        // A failed SSE stream means the transport is effectively dead;
+        // pending requests would otherwise only time out individually.
+        // Signal the client so it can reject everything and transition to
+        // the error state immediately.
+        if (this.alive) {
+          this.alive = false;
+          this.closeHandler?.("SSE stream terminated unexpectedly");
+        }
       });
       return;
     }
@@ -766,6 +870,10 @@ class HttpTransport implements McpTransport {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
+        // Fire activity so McpClient can reset per-request timeout timers.
+        // Long-streaming tool calls otherwise hit the 30s timeout even
+        // while data is still flowing.
+        this.activityHandler?.();
         buffer += decoder.decode(value, { stream: true });
         // Spec allows \n\n or \r\n\r\n as event delimiter.
         let delimIdx: number;
@@ -819,6 +927,22 @@ class HttpTransport implements McpTransport {
 }
 
 // ─── Helpers ─────────────────────────────────────────
+
+/** Case-insensitive presence check for an `authorization` header. */
+function hasAuthorization(headers: Record<string, string>): boolean {
+  return Object.keys(headers).some((k) => k.toLowerCase() === "authorization");
+}
+
+/**
+ * Strip obvious secret material (bearer tokens, `authorization: ...` values)
+ * from a string before it's logged or surfaced in an error message. Best-effort
+ * — the goal is to avoid leaking tokens in MCP server HTTP error bodies.
+ */
+function scrubSecrets(text: string): string {
+  return text
+    .replace(/[Bb]earer\s+[A-Za-z0-9._\-~+/=]+/g, "Bearer [redacted]")
+    .replace(/authorization\s*:\s*[^\s\r\n]+/gi, "authorization: [redacted]");
+}
 
 function indexOfAny(haystack: string, needles: string[]): number {
   let earliest = -1;
