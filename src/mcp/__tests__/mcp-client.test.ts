@@ -340,7 +340,7 @@ describe("HttpTransport — NetworkGuard", () => {
     expect(client.getState().status).toBe("error");
   });
 
-  it("allows a private-IP URL when allowPrivateNetworks is true", async () => {
+  it("allows a private-IP URL when allowPrivateNetworks is true and admin policy agrees", async () => {
     const fetchMock = vi.fn(
       async (_url: string, init?: RequestInit): Promise<Response> => {
         const method = readRpcMethod(init);
@@ -363,10 +363,14 @@ describe("HttpTransport — NetworkGuard", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
+    // Per-server approval opts the server into the private-network escape
+    // hatch; the client config then additionally sets `allowPrivateNetworks`.
+    // Both gates must be aligned.
     const gov = governanceWithPolicy(
       buildPolicy([
         httpApproval("local", "http://localhost:4040/mcp", {
           allowedUrls: ["localhost"],
+          allowPrivateNetworks: true,
         }),
       ]),
     );
@@ -384,6 +388,37 @@ describe("HttpTransport — NetworkGuard", () => {
     await client.connect();
     expect(client.getState().status).toBe("connected");
     await client.disconnect();
+  });
+
+  it("rejects allowPrivateNetworks when admin policy has not authorised it", async () => {
+    // Client config sets allowPrivateNetworks=true but governance approval
+    // / globalRules have not opted in — governance must reject with a
+    // message that names the `allowPrivateNetworks` gate so operators can
+    // tell why the connection was refused.
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const gov = governanceWithPolicy(
+      buildPolicy([
+        httpApproval("rogue", "http://localhost:4040/mcp", {
+          allowedUrls: ["localhost"],
+        }),
+      ]),
+    );
+    const client = new McpClient(
+      {
+        id: "rogue",
+        transport: "http",
+        url: "http://localhost:4040/mcp",
+        allowPrivateNetworks: true,
+      },
+      gov,
+      new ToolRegistry(),
+    );
+
+    await expect(client.connect()).rejects.toThrow(/allowPrivateNetworks/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(client.getState().status).toBe("error");
   });
 });
 
@@ -576,5 +611,336 @@ describe("StdioTransport — regression", () => {
 
     await client.disconnect();
     expect(client.getState().status).toBe("disconnected");
+  });
+
+  it("SIGKILL fallback fires when the subprocess ignores SIGTERM", async () => {
+    // Build a FakeChildProcess that REFUSES to exit on SIGTERM so we can
+    // verify the SIGKILL fallback timer (mcp-client.ts close()) actually
+    // reaches `proc.kill("SIGKILL")`. Previous regression: `this.process`
+    // was nulled synchronously before the 3-second timer fired.
+    vi.useFakeTimers();
+    try {
+      const killCalls: string[] = [];
+      class StubbornChild extends EventEmitter {
+        stdout = new PassThrough();
+        stderr = new PassThrough();
+        stdin = {
+          writable: true,
+          write: (_chunk: string) => true,
+          end: () => {
+            this.stdin.writable = false;
+          },
+        };
+        exitCode: number | null = null;
+
+        kill(signal?: string): boolean {
+          killCalls.push(signal ?? "SIGTERM");
+          // Do NOT emit exit — simulate a stuck child.
+          return true;
+        }
+      }
+      const fake = new StubbornChild();
+      // Respond to the initial handshake so connect() can succeed. We stuff
+      // framed JSON-RPC responses into `stdout` manually.
+      spawnMock.mockReturnValueOnce(fake);
+
+      const gov = governanceWithPolicy(
+        buildPolicy([stdioApproval("stubborn", "lvis-mcp-stubborn")]),
+      );
+      const client = new McpClient(
+        {
+          id: "stubborn",
+          transport: "stdio",
+          command: "lvis-mcp-stubborn",
+        },
+        gov,
+        new ToolRegistry(),
+      );
+
+      // connect() pends on `initialize` — resolve it asynchronously.
+      const connectPromise = client.connect();
+      // Wait one microtask for the send() to hit stdin.write, then feed
+      // canned responses back.
+      await Promise.resolve();
+      const reply = (id: number, result: unknown): void => {
+        const payload = JSON.stringify({ jsonrpc: "2.0", id, result });
+        const frame = `Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`;
+        fake.stdout.write(frame);
+      };
+      // initialize → id 1, tools/list → id 2
+      reply(1, {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "stubborn", version: "0.0.1" },
+      });
+      // Allow the pending promise to resolve before we advance to tools/list.
+      await vi.advanceTimersByTimeAsync(0);
+      reply(2, { tools: [] });
+      await vi.advanceTimersByTimeAsync(0);
+      await connectPromise;
+
+      // Now ask it to disconnect — triggers StdioTransport.close().
+      const disconnectPromise = client.disconnect();
+      // SIGTERM should have been sent synchronously.
+      expect(killCalls).toContain("SIGTERM");
+      // Advance time past the 3-second SIGKILL fallback.
+      await vi.advanceTimersByTimeAsync(3_500);
+      expect(killCalls).toContain("SIGKILL");
+
+      // disconnect() resolves regardless — simulate the process finally exiting.
+      fake.exitCode = 0;
+      fake.emit("exit", 0, "SIGKILL");
+      await disconnectPromise;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ─── 6. CRLF header rejection at governance ────────────────
+
+describe("McpGovernance — header validation", () => {
+  it("rejects http config whose headers contain CR/LF", async () => {
+    const gov = governanceWithPolicy(
+      buildPolicy([httpApproval("inj", "https://good.example.com/mcp")]),
+    );
+    const result = gov.validateServer({
+      id: "inj",
+      transport: "http",
+      url: "https://good.example.com/mcp",
+      headers: {
+        "x-legit": "ok",
+        "x-injected": "value\r\nX-Smuggled: attacker",
+      },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.layer).toBe(1);
+      expect(result.reason).toMatch(/CR\/LF/);
+    }
+  });
+
+  it("rejects http config whose header values contain raw control bytes", async () => {
+    const gov = governanceWithPolicy(
+      buildPolicy([httpApproval("ctl", "https://good.example.com/mcp")]),
+    );
+    const result = gov.validateServer({
+      id: "ctl",
+      transport: "http",
+      url: "https://good.example.com/mcp",
+      headers: { "x-ctrl": "bad\x01value" },
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it("accepts http config with plain, well-formed headers", async () => {
+    const gov = governanceWithPolicy(
+      buildPolicy([httpApproval("ok", "https://good.example.com/mcp")]),
+    );
+    const result = gov.validateServer({
+      id: "ok",
+      transport: "http",
+      url: "https://good.example.com/mcp",
+      headers: { "x-tenant": "lge", authorization: "Bearer redacted" },
+    });
+    expect(result.valid).toBe(true);
+  });
+});
+
+// ─── 7. DNS rebinding on send() ─────────────────────────────
+
+describe("HttpTransport — per-request DNS rebinding defense", () => {
+  it("rejects a send() after DNS flips to a private IP mid-session", async () => {
+    // First lookup (during open()) returns a public IP → connect succeeds.
+    // Subsequent lookups (during send()) return a private IP → fetch must
+    // never be issued on the rebinding hop.
+    lookupMock.mockImplementation(async () => {
+      if (lookupMock.mock.calls.length === 1) {
+        return [{ address: "93.184.216.34", family: 4 }];
+      }
+      return [{ address: "169.254.169.254", family: 4 }];
+    });
+
+    let fetchCallCount = 0;
+    const fetchMock = vi.fn(
+      async (_url: string, init?: RequestInit): Promise<Response> => {
+        fetchCallCount += 1;
+        const method = readRpcMethod(init);
+        const id = readRpcId(init) ?? 0;
+        if (method === "initialize") {
+          return jsonRpcResponse(id, {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            serverInfo: { name: "rebind", version: "0.0.1" },
+          });
+        }
+        if (method === "notifications/initialized") {
+          return new Response(null, { status: 202 });
+        }
+        if (method === "tools/list") {
+          return jsonRpcResponse(id, { tools: [] });
+        }
+        return new Response("x", { status: 500 });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const gov = governanceWithPolicy(
+      buildPolicy([httpApproval("rebind", "https://rebind.example.com/mcp")]),
+    );
+    const client = new McpClient(
+      {
+        id: "rebind",
+        transport: "http",
+        url: "https://rebind.example.com/mcp",
+      },
+      gov,
+      new ToolRegistry(),
+    );
+
+    // Connect expects initialize/tools-list to succeed; those also go through
+    // `send()` which re-validates DNS. The second lookup (send path) is the
+    // rebinding attempt and should reject BEFORE fetch is called for that
+    // request. Capture the outcome through the thrown error.
+    await expect(client.connect()).rejects.toThrow(/network guard:/);
+    // The first fetch (initialize) should never have fired because DNS
+    // rebinding is caught on every hop now — fetchPublicHttpResponse calls
+    // ensurePublicHttpUrl before each hop.
+    expect(fetchCallCount).toBe(0);
+  });
+});
+
+// ─── 8. SSE stream-death transitions transport to dead ──────
+
+describe("HttpTransport — SSE stream death", () => {
+  it("marks transport dead and rejects pending requests when SSE body errors out", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+
+    // First call: initialize — normal JSON response so the handshake finishes.
+    // Second call (notifications/initialized): 202, third (tools/list): JSON.
+    // Fourth call (tools/call): SSE stream that errors mid-flight.
+    const fetchMock = vi.fn(
+      async (_url: string, init?: RequestInit): Promise<Response> => {
+        const method = readRpcMethod(init);
+        const id = readRpcId(init) ?? 0;
+        if (method === "initialize") {
+          return jsonRpcResponse(id, {
+            protocolVersion: "2024-11-05",
+            capabilities: { tools: {} },
+            serverInfo: { name: "dying", version: "0.1.0" },
+          });
+        }
+        if (method === "notifications/initialized") {
+          return new Response(null, { status: 202 });
+        }
+        if (method === "tools/list") {
+          return jsonRpcResponse(id, {
+            tools: [
+              {
+                name: "stream",
+                description: "streaming tool",
+                inputSchema: {
+                  type: "object",
+                  properties: {},
+                },
+              },
+            ],
+          });
+        }
+        // tools/call → SSE stream that throws on read.
+        const failingStream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            // Queue an initial partial event, then error the stream.
+            const enc = new TextEncoder();
+            controller.enqueue(enc.encode("event: message\ndata: {\"jsonrpc\""));
+            controller.error(new Error("connection reset by peer"));
+          },
+        });
+        return new Response(failingStream, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const gov = governanceWithPolicy(
+      buildPolicy([httpApproval("dying", "https://dying.example.com/mcp")]),
+    );
+    const client = new McpClient(
+      {
+        id: "dying",
+        transport: "http",
+        url: "https://dying.example.com/mcp",
+      },
+      gov,
+      new ToolRegistry(),
+    );
+
+    await client.connect();
+    expect(client.getState().status).toBe("connected");
+
+    // Fire the streaming tool call. The SSE body errors during read →
+    // transport should transition to dead and the pending tools/call should
+    // reject with the stream-termination reason (not wait for timeout).
+    await expect(client.callTool("stream", {})).rejects.toThrow();
+    // Transport is now reported dead by the client state machine.
+    expect(client.getState().status).toBe("error");
+  });
+});
+
+// ─── 9. Timeout path honours AbortController ──────────────
+
+describe("HttpTransport — timeout path", () => {
+  it("aborts the underlying fetch when the request times out", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+
+    vi.useFakeTimers();
+    try {
+      // Capture the signal passed to fetch so we can assert abort propagated.
+      let capturedSignal: AbortSignal | undefined;
+      const fetchMock = vi.fn(
+        (_url: string, init?: RequestInit): Promise<Response> => {
+          capturedSignal = init?.signal ?? undefined;
+          // Never resolve — only an abort can terminate this request.
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new Error("AbortError"));
+            });
+          });
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const gov = governanceWithPolicy(
+        buildPolicy([httpApproval("slow", "https://slow.example.com/mcp")]),
+      );
+      const client = new McpClient(
+        {
+          id: "slow",
+          transport: "http",
+          url: "https://slow.example.com/mcp",
+        },
+        gov,
+        new ToolRegistry(),
+      );
+
+      // Fire connect() but do NOT await yet — it will hang on initialize.
+      const connectPromise = client.connect().catch((e) => e);
+      // Let open() + initial send() fire.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(capturedSignal).toBeDefined();
+      expect(capturedSignal?.aborted).toBe(false);
+      // Advance past the default 30s request timeout so the abort timer fires.
+      await vi.advanceTimersByTimeAsync(31_000);
+      // The AbortController must have propagated to the fetch signal.
+      expect(capturedSignal?.aborted).toBe(true);
+      // And the connect() promise resolves (to rejection) because the
+      // transport now surfaces a fetch failure.
+      const err = await connectPromise;
+      expect(err).toBeInstanceOf(Error);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
