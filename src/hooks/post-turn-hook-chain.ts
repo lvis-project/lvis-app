@@ -63,7 +63,7 @@ export class PostTurnHookChain {
         if (mr.stripped) {
           compactedMessages = afterMicro;
           console.log(
-            `[post-turn] microcompact: stripped ${mr.strippedCount} tool_results, freed ~${mr.freedBytes} bytes`,
+            `[post-turn] microcompact: stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars`,
           );
         }
 
@@ -73,7 +73,7 @@ export class PostTurnHookChain {
           ? getModelContextWindow(llmSettings.provider as LLMVendor, llmSettings.model as string)
           : undefined;
         if (shouldCompact(ctx.cumulativeUsage, contextWindow)) {
-          const { messages: compacted, result: cr } = compactMessages(working);
+          const { messages: compacted, result: cr } = compactMessages(working, undefined, "auto");
           if (cr.compacted) {
             compactedMessages = compacted;
             console.log(
