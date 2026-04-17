@@ -10,7 +10,7 @@ All references confirm the same canonical pattern LVIS already follows:
 2. **Compaction is client-side** — when usage approaches the context window, the client replaces old messages with a summary.
 3. **2-stage compact is the converging best practice**: cheap per-turn stub replacement + threshold-gated LLM summary.
 
-Before this PR, LVIS implemented only Stage 2. This reference set motivated the Stage 1 (microcompact) + boundary-marker PR.
+LVIS currently implements only Stage 2. This reference set motivated the Stage 1 (microcompact) + boundary-marker PR.
 
 ---
 
@@ -32,7 +32,7 @@ Before this PR, LVIS implemented only Stage 2. This reference set motivated the 
   - **Stage 2 — full compact** (threshold-gated): `auto_compact_if_needed()` triggers when `auto_compact_threshold_tokens` exceeded. LLM summarizes removed range.
 - **Reactive trigger**: catches `prompt_too_long` / context-exceeded errors mid-turn and retries after compaction (`trigger = "auto" | "reactive"`).
 - **Carryover metadata**: `context.tool_metadata` preserves goals/artifacts across compaction boundaries (capped lists).
-- Takeaway: richest reference. LVIS adopted Stage 1 + boundary marker in the original microcompact PR; reactive recovery and carryover metadata were deferred from that PR and later shipped in follow-up PRs #30/#31.
+- Takeaway: richest reference. LVIS adopted Stage 1 + boundary marker + reactive recovery + carryover metadata in PR #30/#31; provider-level error shaping deferred to a follow-up PR.
 
 ## 3. paperclip (`paperclipai/paperclip`) — TypeScript agent
 

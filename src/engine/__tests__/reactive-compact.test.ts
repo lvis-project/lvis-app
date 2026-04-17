@@ -216,6 +216,7 @@ describe("ConversationLoop reactive compact recovery", () => {
     );
     const loop = makeLoop(provider);
 
+    // Populate history with enough messages to compact
     const history = loop.getHistory();
     for (let i = 0; i < 10; i++) {
       history.append({ role: "user", content: `메시지 ${i}` });
@@ -224,7 +225,7 @@ describe("ConversationLoop reactive compact recovery", () => {
 
     const result = await loop.runTurn("새 질문", {});
     expect(result.text).toBe("재시도 성공");
-    expect(provider.getCallCount()).toBe(2);
+    expect(provider.getCallCount()).toBe(2); // error event once, succeeded on retry
   });
 
   it("does not trigger reactive compact on normal turns", async () => {

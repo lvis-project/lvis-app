@@ -257,11 +257,10 @@ export function shouldCompact(
  */
 export function compactMessages(
   messages: GenericMessage[],
-  config?: CompactConfig,
+  config: CompactConfig = DEFAULT_CONFIG,
   trigger?: "auto" | "reactive",
 ): { messages: GenericMessage[]; result: CompactResult } {
-  const cfg = config ?? DEFAULT_CONFIG;
-  if (messages.length <= cfg.preserveRecentMessages) {
+  if (messages.length <= config.preserveRecentMessages) {
     return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
   }
 
@@ -276,7 +275,7 @@ export function compactMessages(
   }
 
   // 보존할 메시지 경계 찾기 (marker 이후 구간에서만 요약)
-  const idealBoundary = messages.length - cfg.preserveRecentMessages;
+  const idealBoundary = messages.length - config.preserveRecentMessages;
   const preserveFrom = findSafeBoundary(messages, idealBoundary);
   // 요약 대상은 marker(+ack) 다음부터 preserveFrom까지.
   // compactMessages는 marker 뒤에 ACK assistant 메시지를 붙이므로 그 경우 한 칸 더 skip.
@@ -295,7 +294,7 @@ export function compactMessages(
   }
 
   // 요약 생성
-  const summary = generateSummary(toCompact, cfg.summaryBudgetTokens);
+  const summary = generateSummary(toCompact, config.summaryBudgetTokens);
   const freedTokens = estimateMessagesTokens(toCompact) - estimateTokens(summary);
 
   // carryover 추출: 요약 대상 메시지에서 목표·산출물·결정사항을 추출
@@ -343,7 +342,7 @@ export interface MicrocompactResult {
   stripped: boolean;
   /** strip된 tool_result 개수 */
   strippedCount: number;
-  /** 확보된 총 문자 길이 (JS string.length 기준, UTF-16 코드 유닛 수) */
+  /** 확보된 총 바이트 수 (문자열 길이 기준) */
   freedChars: number;
 }
 
@@ -434,14 +433,19 @@ export function microcompactMessages(
 /**
  * 벤더별 "context too long" 오류인지 판별.
  *
- * 현재 구현은 벤더별로 알려진 `message` 패턴과 일부 `code` 값을 기반으로 판별한다.
+ * 입력 형태별 처리 (duck-typing):
+ * - `Error` 인스턴스: `.message` 문자열 검사 + `.code === "context_length_exceeded"` 검사
+ * - `string`: 직접 검사 (StreamEvent `{type:"error", error:string}` 경로)
+ * - `{message: string}` 객체: `.message` 필드 검사
+ * - `{error: string}` 객체: `.error` 필드 검사
  *
- * - Anthropic: message에 "prompt is too long" 포함.
- * - OpenAI / Copilot: `error.code === "context_length_exceeded"` 또는
- *                     message에 "maximum context length" 포함.
- * - Gemini: message에 "context window" 포함.
+ * 메시지 패턴:
+ * - Anthropic: "prompt is too long"
+ * - OpenAI / Copilot: `.code === "context_length_exceeded"` 또는 "maximum context length"
+ * - Gemini: "context window"
  *
- * 오류 객체 형태가 벤더마다 다르므로 주로 message/code 기반 duck-typing으로 처리.
+ * 주의: `error.type` 필드나 HTTP 상태 코드는 직접 검사하지 않음.
+ * 벤더가 이를 노출하는 경우에도 message 패턴 매칭으로 충분히 커버됨.
  */
 export function isContextLengthError(err: unknown): boolean {
   let rawMsg: string;
@@ -474,8 +478,11 @@ export function isContextLengthError(err: unknown): boolean {
   // OpenAI fallback message
   if (msg.includes("maximum context length")) return true;
 
-  // Gemini
-  if (msg.includes("context window")) return true;
+  // Gemini: "The input token count (N) exceeds the maximum number of tokens allowed"
+  //         "Input exceeds the context window size"
+  if ((msg.includes("exceeds the maximum") && msg.includes("token")) ||
+      msg.includes("input token count") ||
+      msg.includes("context window")) return true;
 
   return false;
 }
@@ -504,7 +511,7 @@ export function extractCarryover(messages: GenericMessage[]): ConversationCarryo
   const artifactPhraseRe =
     /(?:생성|작성\s*완료|저장|created?|wrote?|saved?)\s+[`'"]?([\w./\\-]+\.\w+)[`'"]?/gi;
   const decisionRe =
-    /(?:결정|선택|채택|→|⇒|decided?|(?:choose|chose|chosen)|select(?:ed)?)\s*[:：]?\s*(.{5,100})/gi;
+    /(?:결정|선택|채택|→|⇒|decided?|chose?|selected?)\s*[:：]?\s*(.{5,100})/gi;
 
   for (const msg of messages) {
     if (msg.role === "user") {
