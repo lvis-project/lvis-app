@@ -1854,6 +1854,66 @@ graph TB
 
 > LLM에 노출되는 skill / tool / method 식별자는 모두 lower snake_case(예: `meeting_record`, `stt_transcribe`, `index_scan`)를 사용한다. 호스트는 manifest 값을 그대로 등록하며, 도트를 언더스코어로 바꾸는 런타임 변환은 없다. 이벤트 채널 이름은 별도 네임스페이스이므로 dotted form을 유지한다.
 
+### 9.2a Plugin Tool Schema (v1.2)
+
+플러그인은 `tools[]` 배열로 per-method 스키마를 선언한다. `methods[]`와 공존하며 하위 호환 유지.
+
+#### executionType 분류
+
+| 타입 | 설명 | 필수 spec 블록 |
+|------|------|--------------|
+| `command` | 동기 직접 실행 | 없음 |
+| `subagent` | 내부 LLM 루프 생성 | `subagent{}` |
+| `background` | 비동기 — jobId 즉시 반환 | `background{}` |
+
+#### 핵심 필드
+
+```typescript
+// src/plugins/types.ts
+interface PluginToolDefinition {
+  name: string;              // 필수: [a-zA-Z_][a-zA-Z0-9_]* max 64
+  description: string;       // 필수: LLM 최적화 (언제/무엇/반환값/금지조건)
+  executionType: ToolExecutionType;  // 필수
+  inputSchema?: object;      // JSON Schema; 없으면 {payload:object} fallback
+  outputSchema?: object;     // MCP 2025-06-18 호환
+  annotations?: PluginToolAnnotations;  // readOnly/destructive/idempotent/openWorld
+  permissions?: CapabilityScope[];  // PermissionManager RPC 강제 (P2)
+  subagent?: PluginSubagentSpec;    // executionType="subagent" 시 필수
+  background?: PluginBackgroundSpec; // executionType="background" 시 필수
+  isolationMode?: "inline" | "worker";  // tool 단위 격리 오버라이드
+}
+```
+
+#### 격리 모드 (isolationMode)
+
+플러그인/tool 단위로 프로세스 격리 수준 선언. Paperclip 패턴 참조.
+
+| 값 | 설명 | 구현 단계 |
+|----|------|---------|
+| `"inline"` | 호스트 프로세스 내 실행 (기본) | ✅ 현재 |
+| `"worker"` | Node.js worker_threads 격리 | P3 |
+| `"process"` | child process + JSON-RPC 2.0 | P4 |
+
+#### Capability 권한 스코프 (P2 구현)
+
+`permissions[]`는 `CapabilityScope` 형식으로 선언. `PermissionManager`가 HostApi 호출 시 강제.
+
+```
+audio.capture / audio.playback
+fs.read:~/.lvis / fs.write:~/.lvis/meetings
+http.outbound:api.openai.com
+llm.invoke / llm.embed
+ipc.emit / ipc.subscribe
+```
+
+범위 초과 호출 → 즉시 `PermissionDenied`. 플러그인이 오버라이드 불가.
+
+#### JSON Schema 검증
+
+`schemas/plugin.schema.json` (draft-07) — 플러그인 로드 시 manifest 검증.
+`subagent` executionType → `subagent{}` 필수 강제 (allOf/if-then).
+`background` executionType → `background{}` 필수 강제.
+
 **`python` 섹션 — 런타임 의존 플러그인 명세**
 
 Python 런타임이 필요한 플러그인은 manifest에 `python` 섹션을 선언할 수 있다. 호스트 앱은 `lvis-app/src/main/python-runtime.ts`의 bootstrap 경로를 통해 `uv` 기반 venv를 준비하므로, 목표 설계는 사용자에게 Python 수동 설치를 요구하지 않는 것이다.

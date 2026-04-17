@@ -23,6 +23,147 @@ export interface PluginIpcBinding {
   args?: string[];
 }
 
+// ─── Plugin Tool Schema (§9 v1.2) ──────────────────────────────────────────
+
+export type ToolExecutionType = "command" | "subagent" | "background";
+
+export type PluginIsolationMode = "inline" | "worker" | "process";
+
+/**
+ * Capability-based permission scope for PluginHostApi RPC enforcement.
+ * Format mirrors Paperclip's manifest capabilities pattern.
+ * PermissionManager enforces these at HostApi call time (P2 implementation).
+ */
+export type CapabilityScope =
+  | `audio.${"capture" | "playback"}`
+  | `fs.${"read" | "write"}:${string}`
+  | `http.outbound:${string}`
+  | "llm.invoke"
+  | "llm.embed"
+  | "ipc.emit"
+  | "ipc.subscribe";
+
+export interface PluginToolAnnotations {
+  /** Read-only tool — AgentApproval can auto-approve (MCP 2025-06-18) */
+  readOnlyHint?: boolean;
+  /** Destructive operation — requires explicit user approval */
+  destructiveHint?: boolean;
+  /** Idempotent — safe to retry */
+  idempotentHint?: boolean;
+  /** May contact external systems outside declared scope (MCP 2025-06-18) */
+  openWorldHint?: boolean;
+}
+
+export interface PluginToolExample {
+  description?: string;
+  input: unknown;
+  output?: unknown;
+}
+
+export interface PluginSubagentSpec {
+  /** System prompt for the spawned sub-agent */
+  systemPrompt: string;
+  /** Tool names the sub-agent may call (scoped view via ToolRegistry.createScopedView) */
+  allowedTools?: string[];
+  /** Max conversation turns (default 8, max 50) */
+  maxTurns?: number;
+  /** Model to use — "inherit" (default) uses parent's provider */
+  model?: string;
+  /** JSON Schema to validate the sub-agent's final output */
+  resultSchema?: object;
+  /**
+   * How much parent conversation history to pass to the sub-agent.
+   * "none" (default): only the userMessage string.
+   * "summary": extractCarryover() summary, capped at summaryCutoff chars.
+   * "full": complete parent history (use with caution — token cost).
+   * Ref: OpenAI Agents SDK input_filter pattern.
+   */
+  historyPolicy?: "none" | "summary" | "full";
+  /** Max chars for historyPolicy="summary" (default 2000) */
+  summaryCutoff?: number;
+}
+
+export interface PluginBackgroundSpec {
+  /** Field name for the immediately-returned job ID (default "jobId") */
+  jobIdField?: string;
+  /** Event name emitted with progress updates */
+  progressEvent?: string;
+  /** Event name emitted on completion */
+  completionEvent?: string;
+  /** Tool name to call for cancellation */
+  cancelMethod?: string;
+  /**
+   * Cron expression for scheduled execution (host manages the scheduler).
+   * Example: "0 *\/6 * * *" (every 6 hours).
+   * Ref: OpenHarness CronCreate pattern.
+   */
+  schedule?: string;
+  /** Max simultaneous background instances (default 1, prevents schedule overlap) */
+  maxConcurrent?: number;
+}
+
+export interface PluginToolDefinition {
+  // ── Required ──────────────────────────────────────────────────────────────
+  /** Stable identifier: [a-zA-Z_][a-zA-Z0-9_]* max 64 chars */
+  name: string;
+  /** LLM-optimized description: when/what/returns/when-NOT-to-use */
+  description: string;
+  /** Execution mode — determines which spec block is required */
+  executionType: ToolExecutionType;
+
+  // ── MCP 2025-06-18 compatible ─────────────────────────────────────────────
+  /** Input JSON Schema (fallback: {payload: object}) */
+  inputSchema?: object;
+  /** Output JSON Schema — applies to all execution types */
+  outputSchema?: object;
+  /** Human-readable return value description (auto-appended to description) */
+  outputDescription?: string;
+  /** MCP 2025-06-18 behavior hints → PermissionManager integration */
+  annotations?: PluginToolAnnotations;
+
+  // ── LLM quality ──────────────────────────────────────────────────────────
+  /** Input/output examples (auto-appended to description) */
+  examples?: PluginToolExample[];
+
+  // ── Permissions & metadata ────────────────────────────────────────────────
+  /** CapabilityScope[] — PermissionManager enforces at HostApi call time (P2) */
+  permissions?: string[];
+  tags?: string[];
+  /** Timeout in ms (default 30000) */
+  timeoutMs?: number;
+  /** Human-readable display name for UI slots */
+  uiTitle?: string;
+
+  // ── Execution-type-specific specs ─────────────────────────────────────────
+  /** Required when executionType="subagent" */
+  subagent?: PluginSubagentSpec;
+  /** Required when executionType="background" */
+  background?: PluginBackgroundSpec;
+
+  // ── Isolation override ────────────────────────────────────────────────────
+  /** Per-tool isolation override (takes precedence over manifest isolationMode) */
+  isolationMode?: Exclude<PluginIsolationMode, "process">;
+}
+
+export interface SpawnSubagentRequest {
+  systemPrompt: string;
+  userMessage: string;
+  allowedTools: string[];
+  maxTurns?: number;
+  model?: string;
+  resultSchema?: object;
+  historyPolicy?: "none" | "summary" | "full";
+  summaryCutoff?: number;
+  parentRequestId?: string;
+}
+
+export interface SpawnSubagentResult {
+  output: string;
+  toolCalls: number;
+  stoppedBy: "complete" | "maxTurns" | "error";
+  isError?: boolean;
+}
+
 export interface PluginManifest {
   /**
    * 플러그인 고유 식별자.
@@ -60,6 +201,31 @@ export interface PluginManifest {
   eventSubscriptions?: string[];
   /** 하드코딩 IPC 제거를 위한 채널↔메서드 바인딩 선언 */
   ipcBindings?: PluginIpcBinding[];
+
+  /**
+   * Per-method tool schema declarations (§9 v1.2).
+   * Superset of `methods[]` — each entry provides LLM-optimized inputSchema,
+   * outputSchema, executionType, and annotations.
+   * Legacy `methods[]` entries without a matching `tools[]` entry fall back
+   * to the generic {payload: object} schema.
+   */
+  tools?: PluginToolDefinition[];
+
+  /**
+   * Plugin process isolation mode (default "inline").
+   * "inline": in-process (current behavior, 1st-party plugins).
+   * "worker": Node.js worker_threads isolation (P3, 3rd-party marketplace plugins).
+   * "process": child process + JSON-RPC 2.0 (P4, max isolation).
+   * Ref: Paperclip plugin isolation pattern.
+   */
+  isolationMode?: PluginIsolationMode;
+
+  /**
+   * Allow plugin reload without app restart (P3 implementation).
+   * Used by marketplace install/upgrade flow.
+   * Ref: Paperclip hot reload pattern.
+   */
+  hotReload?: boolean;
 
   // ─── §9.6 Plugin Deployment Model (Phase 1.5 신규) ─────────────────
 
@@ -182,6 +348,14 @@ export interface PluginHostApi {
   getMsGraphAccount(): string | null;
   /** 인증 상태 변경 시 콜백 등록 */
   onMsGraphAuthChange(handler: () => void): void;
+
+  /**
+   * Spawn a scoped sub-agent ConversationLoop (P2 implementation).
+   * Creates a new loop with ToolRegistry.createScopedView(allowedTools),
+   * max depth 2, shared AbortSignal from parent.
+   * Result is validated against resultSchema via ajv if provided.
+   */
+  spawnSubagent(req: SpawnSubagentRequest): Promise<SpawnSubagentResult>;
 }
 
 export interface PluginRuntimeContext {

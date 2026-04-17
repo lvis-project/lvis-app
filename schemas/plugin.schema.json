@@ -1,0 +1,237 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lvis.lge.com/schemas/plugin.schema.json",
+  "title": "LVIS Plugin Manifest",
+  "description": "Validates plugin.json manifest files for LVIS plugins (§9 v1.2)",
+  "type": "object",
+  "required": ["id", "name", "version", "entry", "methods"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Plugin unique identifier (dot-format recommended)",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9._-]*$",
+      "minLength": 3,
+      "maxLength": 128
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+",
+      "description": "Semver version string"
+    },
+    "entry": { "type": "string", "minLength": 1 },
+    "methods": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+        "maxLength": 64
+      },
+      "description": "Legacy tool name list — must use underscore format"
+    },
+    "tools": {
+      "type": "array",
+      "description": "Per-method tool schema declarations (§9 v1.2). Superset of methods[].",
+      "items": {
+        "type": "object",
+        "required": ["name", "description", "executionType"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 2048
+          },
+          "executionType": {
+            "enum": ["command", "subagent", "background"]
+          },
+          "inputSchema": { "type": "object" },
+          "outputSchema": { "type": "object" },
+          "outputDescription": { "type": "string" },
+          "annotations": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "readOnlyHint": { "type": "boolean" },
+              "destructiveHint": { "type": "boolean" },
+              "idempotentHint": { "type": "boolean" },
+              "openWorldHint": { "type": "boolean" }
+            }
+          },
+          "examples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["input"],
+              "additionalProperties": false,
+              "properties": {
+                "description": { "type": "string" },
+                "input": {},
+                "output": {}
+              }
+            }
+          },
+          "permissions": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 300000
+          },
+          "uiTitle": { "type": "string" },
+          "isolationMode": {
+            "enum": ["inline", "worker"],
+            "description": "Per-tool isolation override"
+          },
+          "subagent": {
+            "type": "object",
+            "required": ["systemPrompt"],
+            "additionalProperties": false,
+            "properties": {
+              "systemPrompt": { "type": "string", "minLength": 1 },
+              "allowedTools": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "maxTurns": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50,
+                "default": 8
+              },
+              "model": { "type": "string" },
+              "resultSchema": { "type": "object" },
+              "historyPolicy": {
+                "enum": ["none", "summary", "full"],
+                "default": "none"
+              },
+              "summaryCutoff": {
+                "type": "integer",
+                "minimum": 100,
+                "default": 2000
+              }
+            }
+          },
+          "background": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "jobIdField": { "type": "string", "default": "jobId" },
+              "progressEvent": { "type": "string" },
+              "completionEvent": { "type": "string" },
+              "cancelMethod": { "type": "string" },
+              "schedule": {
+                "type": "string",
+                "description": "Cron expression (host-managed scheduling)"
+              },
+              "maxConcurrent": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 1
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "executionType": { "const": "subagent" } },
+              "required": ["executionType"]
+            },
+            "then": { "required": ["subagent"] }
+          },
+          {
+            "if": {
+              "properties": { "executionType": { "const": "background" } },
+              "required": ["executionType"]
+            },
+            "then": { "required": ["background"] }
+          }
+        ]
+      }
+    },
+    "config": { "type": "object" },
+    "ui": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "slot", "kind", "title"],
+        "properties": {
+          "id": { "type": "string" },
+          "slot": { "enum": ["sidebar"] },
+          "kind": { "enum": ["embedded-module", "embedded-page", "info-card"] },
+          "displayName": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "defaults": { "type": "object" },
+          "entry": { "type": "string" },
+          "exportName": { "type": "string" },
+          "page": { "type": "string" }
+        }
+      }
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["keyword", "skillId"],
+        "properties": {
+          "keyword": { "type": "string" },
+          "skillId": { "type": "string" }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "startupMethods": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "eventSubscriptions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ipcBindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["channel", "method"],
+        "properties": {
+          "channel": { "type": "string" },
+          "method": { "type": "string" },
+          "args": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "isolationMode": {
+      "enum": ["inline", "worker", "process"],
+      "description": "Plugin-level isolation mode (default: inline)"
+    },
+    "hotReload": {
+      "type": "boolean",
+      "description": "Allow reload without app restart (P3)"
+    },
+    "deployment": { "enum": ["managed", "user"] },
+    "publisher": { "type": "string" },
+    "publisherId": { "type": "string" },
+    "publishedAt": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string" },
+    "signatureAlgorithm": { "enum": ["ECDSA-P256-SHA256"] },
+    "minAppVersion": { "type": "string" },
+    "maxAppVersion": { "type": "string" }
+  }
+}

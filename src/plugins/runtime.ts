@@ -375,5 +375,6 @@ function createNoopHostApi(): PluginHostApi {
     isMsGraphAuthenticated: () => false,
     getMsGraphAccount: () => null,
     onMsGraphAuthChange: () => {},
+    spawnSubagent: async (_req) => { throw new Error("spawnSubagent: P2 not implemented"); },
   };
 }

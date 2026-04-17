@@ -19,7 +19,7 @@ import { KeywordEngine } from "./core/keyword-engine.js";
 import { RouteEngine } from "./core/route-engine.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { createDynamicTool, type Tool } from "./tools/base.js";
-import { pluginMethodToTool } from "./plugins/plugin-tool-adapter.js";
+import { pluginToolsForRegistration } from "./plugins/plugin-tool-adapter.js";
 import { SystemPromptBuilder } from "./prompts/system-prompt-builder.js";
 import { ConversationLoop } from "./engine/conversation-loop.js";
 import { PermissionManager } from "./permissions/permission-manager.js";
@@ -202,6 +202,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       isMsGraphAuthenticated: () => msGraphService.isAuthenticated(),
       getMsGraphAccount: () => msGraphService.getAccountName(),
       onMsGraphAuthChange: (handler) => msGraphService.onAuthChange(handler),
+      spawnSubagent: async (_req) => { throw new Error("spawnSubagent: P2 not implemented"); },
     }),
   });
 
@@ -520,8 +521,10 @@ function buildPluginConfigOverrides(settings: SettingsService): Record<string, R
 // ─── Tool Registration (범용) ───────────────────────
 
 function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolRegistry): void {
-  for (const method of pluginRuntime.listMethods()) {
-    toolRegistry.register(pluginMethodToTool(pluginRuntime, method));
+  for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
+    for (const tool of pluginToolsForRegistration(pluginRuntime, pluginId, manifest)) {
+      toolRegistry.register(tool);
+    }
   }
 }
 

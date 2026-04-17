@@ -1,39 +1,194 @@
 /**
- * Plugin Tool Adapter — bridges the LVIS plugin runtime's manifest
- * method registry (`pluginRuntime.listMethods()`) into the canonical
- * {@link Tool} contract used by the §6.4 ToolRegistry.
+ * Plugin Tool Adapter — bridges plugin manifest `tools[]` declarations into
+ * the canonical {@link Tool} contract used by the §6.4 ToolRegistry.
  *
- * Equivalent in role to {@link ../mcp/mcp-tool-adapter.js mcpToolToTool}
- * but for in-process plugin manifests instead of MCP servers. Keeping
- * the adapter in one named module (rather than inlining
- * {@link createDynamicTool} at every plugin registration call site)
- * matches the OpenHarness `McpToolAdapter` pattern and gives the
- * plugin→Tool bridge a single auditable home.
+ * v1.2: dispatches by `executionType` ("command" | "subagent" | "background").
+ * Legacy `methods[]`-only plugins fall back to the generic payload schema.
+ *
+ * Ref: LVIS Plugin Tool Schema Design §5 (docs/references/plugin-tool-schema-design.md)
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import type { PluginRuntime } from "./runtime.js";
+import type {
+  PluginManifest,
+  PluginToolDefinition,
+  PluginToolAnnotations,
+  PluginToolExample,
+} from "./types.js";
 
-/**
- * Convert one plugin manifest method into a {@link Tool} ready for
- * {@link ToolRegistry.register}.
- *
- * Plugin manifest method names should already be in the canonical
- * lower snake_case form (for example `meeting_start`).
- * The adapter forwards that manifest name directly as the tool name —
- * no dot-to-underscore conversion is performed.
- *
- * The exposed tool takes a single `payload` argument because plugin
- * methods accept an arbitrary object — the LLM either nests its
- * arguments under `payload` or passes a flat object that we treat
- * as the payload.
- */
+// ─── Description synthesis ──────────────────────────────────────────────────
+
+function synthesizeDescription(def: PluginToolDefinition): string {
+  const parts: string[] = [def.description];
+
+  if (def.outputDescription) {
+    parts.push(`\nOutput: ${def.outputDescription}`);
+  }
+
+  if (def.examples && def.examples.length > 0) {
+    const exLines = def.examples
+      .map((ex: PluginToolExample) => {
+        const inp = JSON.stringify(ex.input);
+        const base = ex.description ? `${ex.description}: input=${inp}` : `input=${inp}`;
+        return ex.output !== undefined
+          ? `  - ${base}, output=${JSON.stringify(ex.output)}`
+          : `  - ${base}`;
+      })
+      .join("\n");
+    parts.push(`\nExamples:\n${exLines}`);
+  }
+
+  if (def.executionType === "background") {
+    const bg = def.background;
+    const progress = bg?.progressEvent ? `${bg.progressEvent} 이벤트로 진행 상황 수신` : "진행 이벤트로 수신";
+    const done = bg?.completionEvent ? `${bg.completionEvent} 이벤트로 완료 확인` : "완료 이벤트로 확인";
+    parts.push(`\n[비동기 실행 — ${progress}, ${done}. 결과를 직접 기다리지 마세요.]`);
+    if (bg?.schedule) {
+      parts.push(`[스케줄: ${bg.schedule}]`);
+    }
+  }
+
+  if (def.executionType === "subagent") {
+    parts.push(`\n[내부 LLM 서브에이전트를 사용합니다. 완료까지 여러 턴이 소요될 수 있습니다.]`);
+  }
+
+  return parts.join("");
+}
+
+// ─── isReadOnly helper ───────────────────────────────────────────────────────
+
+function resolveReadOnly(annotations?: PluginToolAnnotations): boolean {
+  return annotations?.readOnlyHint === true;
+}
+
+// ─── inputSchema with fallback ───────────────────────────────────────────────
+
+function resolveInputSchema(def: PluginToolDefinition): object {
+  if (def.inputSchema) return def.inputSchema;
+  return {
+    type: "object",
+    properties: {
+      payload: {
+        type: "object",
+        description: "메서드에 전달할 매개변수 객체",
+      },
+    },
+  };
+}
+
+// ─── Tool builders ───────────────────────────────────────────────────────────
+
+function buildCommandTool(
+  pluginRuntime: PluginRuntime,
+  def: PluginToolDefinition,
+  pluginId: string,
+): Tool {
+  const readOnly = resolveReadOnly(def.annotations);
+  return createDynamicTool({
+    name: def.name,
+    description: synthesizeDescription(def),
+    source: "plugin",
+    pluginId,
+    jsonSchema: resolveInputSchema(def),
+    isReadOnly: () => readOnly,
+    execute: async (rawInput) => {
+      const args = (rawInput ?? {}) as Record<string, unknown>;
+      // If LLM passed a flat object matching inputSchema fields, use directly.
+      // If it passed {payload: ...}, extract payload.
+      const payload = def.inputSchema
+        ? args
+        : (args.payload ?? (Object.keys(args).length > 0 ? args : undefined));
+      try {
+        const result = await pluginRuntime.call(def.name, payload);
+        return {
+          output: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+          isError: false,
+        };
+      } catch (err) {
+        return {
+          output: err instanceof Error ? err.message : String(err),
+          isError: true,
+        };
+      }
+    },
+  });
+}
+
+function buildSubagentTool(
+  pluginRuntime: PluginRuntime,
+  def: PluginToolDefinition,
+  pluginId: string,
+): Tool {
+  return createDynamicTool({
+    name: def.name,
+    description: synthesizeDescription(def),
+    source: "plugin",
+    pluginId,
+    jsonSchema: resolveInputSchema(def),
+    isReadOnly: () => resolveReadOnly(def.annotations),
+    execute: async (rawInput) => {
+      const args = (rawInput ?? {}) as Record<string, unknown>;
+      // P2: hostApi.spawnSubagent() will be wired here.
+      // For now, fall through to pluginRuntime.call() which delegates to plugin handler.
+      try {
+        const result = await pluginRuntime.call(def.name, args);
+        return {
+          output: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+          isError: false,
+        };
+      } catch (err) {
+        return {
+          output: err instanceof Error ? err.message : String(err),
+          isError: true,
+        };
+      }
+    },
+  });
+}
+
+function buildBackgroundTool(
+  pluginRuntime: PluginRuntime,
+  def: PluginToolDefinition,
+  pluginId: string,
+): Tool {
+  const jobIdField = def.background?.jobIdField ?? "jobId";
+  return createDynamicTool({
+    name: def.name,
+    description: synthesizeDescription(def),
+    source: "plugin",
+    pluginId,
+    jsonSchema: resolveInputSchema(def),
+    isReadOnly: () => false,
+    execute: async (rawInput) => {
+      const args = (rawInput ?? {}) as Record<string, unknown>;
+      try {
+        const result = await pluginRuntime.call(def.name, args);
+        const output = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+        // Confirm jobId returned for LLM awareness
+        if (result && typeof result === "object" && jobIdField in (result as Record<string, unknown>)) {
+          const jobId = (result as Record<string, unknown>)[jobIdField];
+          return { output: `${output}\n[jobId=${jobId} — 비동기 작업 시작됨]`, isError: false };
+        }
+        return { output, isError: false };
+      } catch (err) {
+        return {
+          output: err instanceof Error ? err.message : String(err),
+          isError: true,
+        };
+      }
+    },
+  });
+}
+
+// ─── Generic fallback (legacy methods[]) ─────────────────────────────────────
+
+/** @deprecated Use pluginToolsForRegistration() with manifest.tools[] instead. */
 export function pluginMethodToTool(
   pluginRuntime: PluginRuntime,
   methodName: string,
 ): Tool {
-  const toolName = methodName;
   return createDynamicTool({
-    name: toolName,
+    name: methodName,
     description: `플러그인 메서드: ${methodName}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`,
     source: "plugin",
     jsonSchema: {
@@ -50,19 +205,14 @@ export function pluginMethodToTool(
       let finalPayload: unknown = args.payload;
       if (!finalPayload && Object.keys(args).length > 0) finalPayload = args;
       if (typeof finalPayload === "string") {
-        try {
-          finalPayload = JSON.parse(finalPayload);
-        } catch {
-          /* leave as string */
-        }
+        try { finalPayload = JSON.parse(finalPayload); } catch { /* leave as string */ }
       }
       try {
         const result = await pluginRuntime.call(methodName, finalPayload);
-        const output =
-          typeof result === "string"
-            ? result
-            : JSON.stringify(result, null, 2);
-        return { output, isError: false };
+        return {
+          output: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+          isError: false,
+        };
       } catch (err) {
         return {
           output: err instanceof Error ? err.message : String(err),
@@ -71,4 +221,58 @@ export function pluginMethodToTool(
       }
     },
   });
+}
+
+// ─── Main entry point ────────────────────────────────────────────────────────
+
+/**
+ * Build all Tool instances for a plugin, dispatching by executionType.
+ *
+ * Resolution order per method name:
+ *  1. tools[] entry with matching name → typed dispatch (command/subagent/background)
+ *  2. methods[] entry without tools[] match → generic {payload: object} fallback
+ *
+ * @param pluginRuntime - The plugin runtime instance
+ * @param pluginId      - Plugin identifier for ToolRegistry tagging
+ * @param manifest      - Plugin manifest (may include tools[] and/or methods[])
+ */
+export function pluginToolsForRegistration(
+  pluginRuntime: PluginRuntime,
+  pluginId: string,
+  manifest: PluginManifest,
+): Tool[] {
+  const tools: Tool[] = [];
+  const declared = new Map<string, PluginToolDefinition>();
+
+  // Index tools[] by name
+  for (const def of manifest.tools ?? []) {
+    declared.set(def.name, def);
+  }
+
+  // Build typed tools from tools[]
+  for (const def of manifest.tools ?? []) {
+    let tool: Tool;
+    switch (def.executionType) {
+      case "subagent":
+        tool = buildSubagentTool(pluginRuntime, def, pluginId);
+        break;
+      case "background":
+        tool = buildBackgroundTool(pluginRuntime, def, pluginId);
+        break;
+      case "command":
+      default:
+        tool = buildCommandTool(pluginRuntime, def, pluginId);
+        break;
+    }
+    tools.push(tool);
+  }
+
+  // Fallback: methods[] entries not covered by tools[]
+  for (const method of manifest.methods ?? []) {
+    if (!declared.has(method)) {
+      tools.push(pluginMethodToTool(pluginRuntime, method));
+    }
+  }
+
+  return tools;
 }
