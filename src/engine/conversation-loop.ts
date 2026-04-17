@@ -343,12 +343,24 @@ ${briefingData}
       let thoughtContent = "";
       const pendingToolCalls: ToolCallBlock[] = [];
       let stopReason: "end_turn" | "tool_use" = "end_turn";
+
       const collectStream = async (messages: ReturnType<typeof this.history.getMessages>) => {
         textContent = "";
         thoughtContent = "";
         pendingToolCalls.length = 0;
         stopReason = "end_turn";
+        // Snapshot cumulativeUsage so a partial stream that errors mid-flight
+        // does not double-count tokens when we retry after reactive compact.
+        const usageSnapshot = {
+          inputTokens: this.cumulativeUsage.inputTokens,
+          outputTokens: this.cumulativeUsage.outputTokens,
+        };
+        const restoreUsage = () => {
+          this.cumulativeUsage.inputTokens = usageSnapshot.inputTokens;
+          this.cumulativeUsage.outputTokens = usageSnapshot.outputTokens;
+        };
 
+        const llmSettings = this.deps.settingsService.get("llm");
         for await (const event of this.provider!.streamTurn({
           model,
           systemPrompt,
@@ -381,18 +393,33 @@ ${briefingData}
             case "error":
               // context-length 오류를 stream event로 수신한 경우 → compact + retry
               if (isContextLengthError(event.error) && !reactiveCompacted) {
+                restoreUsage();
                 return { earlyReturn: false as const, streamContextError: event.error };
               }
               callbacks?.onError?.(event.error);
-              this.history.append({ role: "assistant", content: `오류: ${event.error}` });
-              return { earlyReturn: true as const, text: `오류: ${event.error}` };
+              // Escalate message when second attempt (post-compact) also fails.
+              const userMsg = reactiveCompacted && isContextLengthError(event.error)
+                ? `오류: 대화 기록을 압축한 뒤에도 모델 컨텍스트 한도를 초과했습니다. 새 세션을 시작하거나 이전 첨부를 정리해 주세요 (원인: ${event.error})`
+                : `오류: ${event.error}`;
+              this.history.append({ role: "assistant", content: userMsg });
+              return { earlyReturn: true as const, text: userMsg };
           }
         }
         return { earlyReturn: false as const };
       };
 
+      // Snapshot at outer scope too: catch-path throws bypass collectStream's restoreUsage.
+      const outerUsageSnapshot = {
+        inputTokens: this.cumulativeUsage.inputTokens,
+        outputTokens: this.cumulativeUsage.outputTokens,
+      };
       let streamResult = await collectStream(this.history.getMessages()).catch((err: unknown) => {
-        if (isContextLengthError(err)) return { earlyReturn: false as const, contextError: err };
+        if (isContextLengthError(err)) {
+          // throw-path did not hit the restoreUsage inside collectStream; do it here
+          this.cumulativeUsage.inputTokens = outerUsageSnapshot.inputTokens;
+          this.cumulativeUsage.outputTokens = outerUsageSnapshot.outputTokens;
+          return { earlyReturn: false as const, contextError: err };
+        }
         throw err;
       });
 

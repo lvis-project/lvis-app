@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lvis.lge.com/schemas/plugin.schema.json",
+  "title": "LVIS Plugin Manifest",
+  "description": "Validates plugin.json manifest files for LVIS plugins (§9)",
+  "type": "object",
+  "required": ["id", "name", "version", "entry", "methods"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Plugin unique identifier (dot-format recommended)",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9._-]*$",
+      "minLength": 3,
+      "maxLength": 128
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+",
+      "description": "Semver version string"
+    },
+    "entry": { "type": "string", "minLength": 1 },
+    "methods": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+        "maxLength": 64
+      },
+      "description": "Tool name list — underscore format required"
+    },
+    "config": { "type": "object" },
+    "ui": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "slot", "kind", "title"],
+        "properties": {
+          "id": { "type": "string" },
+          "slot": { "enum": ["sidebar"] },
+          "kind": { "enum": ["embedded-module", "embedded-page", "info-card"] },
+          "displayName": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "defaults": { "type": "object" },
+          "entry": { "type": "string" },
+          "exportName": { "type": "string" },
+          "page": { "type": "string" }
+        }
+      }
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["keyword", "skillId"],
+        "properties": {
+          "keyword": { "type": "string" },
+          "skillId": { "type": "string" }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "startupMethods": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "eventSubscriptions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ipcBindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["channel", "method"],
+        "properties": {
+          "channel": { "type": "string" },
+          "method": { "type": "string" },
+          "args": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "deployment": { "enum": ["managed", "user"] },
+    "publisher": { "type": "string" }
+  }
+}
