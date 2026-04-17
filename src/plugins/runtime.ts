@@ -2,9 +2,8 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
-  PluginIpcBinding,
   PluginManifest,
-  PluginToolHandler,
+  PluginMethodHandler,
   PluginUiExtension,
   PluginHostApi,
   RuntimePlugin,
@@ -17,7 +16,7 @@ type LoadedPlugin = {
   manifest: PluginManifest;
   pluginRoot: string;
   instance: RuntimePlugin;
-  tools: Map<string, PluginToolHandler>;
+  methods: Map<string, PluginMethodHandler>;
 };
 
 export interface PluginRuntimeOptions {
@@ -39,7 +38,7 @@ export class PluginRuntime {
   private readonly createHostApi?: (pluginId: string) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly plugins = new Map<string, LoadedPlugin>();
-  private readonly toolMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
+  private readonly methodMap = new Map<string, { pluginId: string; handler: PluginMethodHandler }>();
   private loaded = false;
 
   constructor(options: PluginRuntimeOptions) {
@@ -89,17 +88,17 @@ export class PluginRuntime {
         hostApi,
       });
 
-      const tools = new Map<string, PluginToolHandler>();
-      for (const toolName of manifest.tools) {
-        const handler = instance.handlers[toolName];
+      const methods = new Map<string, PluginMethodHandler>();
+      for (const methodName of manifest.methods) {
+        const handler = instance.handlers[methodName];
         if (!handler) {
-          throw new Error(`Missing handler '${toolName}' in plugin '${manifest.id}'`);
+          throw new Error(`Missing handler '${methodName}' in plugin '${manifest.id}'`);
         }
-        tools.set(toolName, handler);
-        if (this.toolMap.has(toolName)) {
-          throw new Error(`Duplicate plugin tool registered: ${toolName}`);
+        methods.set(methodName, handler);
+        if (this.methodMap.has(methodName)) {
+          throw new Error(`Duplicate plugin method registered: ${methodName}`);
         }
-        this.toolMap.set(toolName, { pluginId: manifest.id, handler });
+        this.methodMap.set(methodName, { pluginId: manifest.id, handler });
       }
 
       // 매니페스트에 선언된 키워드 자동 등록
@@ -111,7 +110,7 @@ export class PluginRuntime {
         manifest,
         pluginRoot,
         instance,
-        tools,
+        methods,
       });
     }
     this.loaded = true;
@@ -125,9 +124,9 @@ export class PluginRuntime {
         await plugin.instance.start?.();
       } catch (err) {
         console.error(`[plugin:${plugin.manifest.id}] start failed (non-fatal):`, (err as Error).message);
-        // 실패한 플러그인의 도구를 제거하여 호출 시 에러 방지
-        for (const tool of plugin.tools.keys()) {
-          this.toolMap.delete(tool);
+        // 실패한 플러그인의 메서드를 제거하여 호출 시 에러 방지
+        for (const method of plugin.methods.keys()) {
+          this.methodMap.delete(method);
         }
         this.plugins.delete(plugin.manifest.id);
       }
@@ -171,8 +170,8 @@ export class PluginRuntime {
       console.error(`[plugin:${pluginId}] stop during disable failed:`, (err as Error).message);
     }
 
-    for (const tool of plugin.tools.keys()) {
-      this.toolMap.delete(tool);
+    for (const method of plugin.methods.keys()) {
+      this.methodMap.delete(method);
     }
     this.plugins.delete(pluginId);
 
@@ -187,16 +186,16 @@ export class PluginRuntime {
     }
   }
 
-  async call(toolName: string, payload?: unknown): Promise<unknown> {
-    const entry = this.toolMap.get(toolName);
+  async call(method: string, payload?: unknown): Promise<unknown> {
+    const entry = this.methodMap.get(method);
     if (!entry) {
-      throw new Error(`Plugin tool not found: ${toolName}`);
+      throw new Error(`Plugin method not found: ${method}`);
     }
     return entry.handler(payload);
   }
 
   listToolNames(): string[] {
-    return [...this.toolMap.keys()].sort();
+    return [...this.methodMap.keys()].sort();
   }
 
   listPluginIds(): string[] {
@@ -236,16 +235,6 @@ export class PluginRuntime {
     return result;
   }
 
-  listIpcBindings(): Array<PluginIpcBinding & { pluginId: string }> {
-    const result: Array<PluginIpcBinding & { pluginId: string }> = [];
-    for (const [pluginId, plugin] of this.plugins) {
-      for (const binding of plugin.manifest.ipcBindings ?? []) {
-        result.push({ pluginId, ...binding });
-      }
-    }
-    return result;
-  }
-
   /**
    * Retrieve a loaded plugin's instance by id.
    * Returns undefined when the plugin failed to load or is not registered.
@@ -275,17 +264,17 @@ export class PluginRuntime {
   private async readManifest(path: string): Promise<PluginManifest> {
     const raw = await readFile(path, "utf-8");
     const parsed = JSON.parse(raw) as PluginManifest;
-    if (!parsed.id || !parsed.entry || !Array.isArray(parsed.tools)) {
+    if (!parsed.id || !parsed.entry || !Array.isArray(parsed.methods)) {
       throw new Error(`Invalid plugin manifest: ${path}`);
     }
     // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor requirement).
     // Plugin id is the package identity and may contain dots (e.g. com.lge.meeting-recorder),
-    // but tools are LLM tool names — no dots allowed, no runtime conversion is performed.
+    // but methods are LLM tool names — no dots allowed, no runtime conversion is performed.
     const TOOL_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-    for (const tool of parsed.tools) {
-      if (!TOOL_NAME_PATTERN.test(tool)) {
+    for (const method of parsed.methods) {
+      if (!TOOL_NAME_PATTERN.test(method)) {
         throw new Error(
-          `Invalid tool name '${tool}' in plugin '${parsed.id}': ` +
+          `Invalid tool name '${method}' in plugin '${parsed.id}': ` +
           `tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores) ` +
           `(e.g. 'meeting_start' not 'meeting.start')`,
         );
@@ -297,37 +286,11 @@ export class PluginRuntime {
         `Invalid manifest for plugin '${parsed.id}': 'startupTools' must be an array of strings`,
       );
     }
-    for (const startupTool of parsed.startupTools ?? []) {
-      if (!parsed.tools.includes(startupTool)) {
+    for (const startupMethod of parsed.startupTools ?? []) {
+      if (!parsed.methods.includes(startupMethod)) {
         throw new Error(
-          `Invalid startupTools entry '${startupTool}' in plugin '${parsed.id}': ` +
-          `tool is not declared in tools[]`,
-        );
-      }
-    }
-
-    if (parsed.ipcBindings !== undefined && !Array.isArray(parsed.ipcBindings)) {
-      throw new Error(
-        `Invalid manifest for plugin '${parsed.id}': 'ipcBindings' must be an array of objects`,
-      );
-    }
-    for (const binding of parsed.ipcBindings ?? []) {
-      if (!binding.channel || typeof binding.channel !== "string") {
-        throw new Error(`Invalid ipcBindings entry in plugin '${parsed.id}': missing channel`);
-      }
-      if (!binding.method || typeof binding.method !== "string") {
-        throw new Error(`Invalid ipcBindings entry in plugin '${parsed.id}': missing method`);
-      }
-      if (binding.args !== undefined && !Array.isArray(binding.args)) {
-        throw new Error(
-          `Invalid ipcBindings entry for channel '${binding.channel}' in plugin '${parsed.id}': ` +
-          `'args' must be an array of strings`,
-        );
-      }
-      if (!parsed.tools.includes(binding.method)) {
-        throw new Error(
-          `Invalid ipcBindings method '${binding.method}' in plugin '${parsed.id}': ` +
-          `tool is not declared in tools[]`,
+          `Invalid startupTools entry '${startupMethod}' in plugin '${parsed.id}': ` +
+          `method is not declared in methods[]`,
         );
       }
     }
@@ -354,7 +317,7 @@ export class PluginRuntime {
 
   private resetLoadedState(): void {
     this.plugins.clear();
-    this.toolMap.clear();
+    this.methodMap.clear();
     this.loaded = false;
     // Note: 호스트의 keywordEngine/toolRegistry는 boot.ts의 createHostApi에서
     // pluginId 기반으로 정리됨 (restartAll → 새로 load 시 재등록)

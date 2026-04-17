@@ -5,7 +5,7 @@
   "deployment": "managed",
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
-  "tools": [
+  "methods": [
     "meeting_start",
     "meeting_push_chunk",
     "meeting_stop",
@@ -19,137 +19,6 @@
     "meeting.summary.created",
     "meeting.ended"
   ],
-  "ipcBindings": [
-    {
-      "channel": "lvis:meeting:start",
-      "method": "meeting_start",
-      "args": ["sessionId", "context"]
-    },
-    {
-      "channel": "lvis:meeting:push-chunk",
-      "method": "meeting_push_chunk",
-      "args": ["sessionId", "chunk"]
-    },
-    {
-      "channel": "lvis:meeting:stop",
-      "method": "meeting_stop",
-      "args": ["sessionId"]
-    },
-    {
-      "channel": "lvis:meeting:transcript",
-      "method": "meeting_transcript",
-      "args": ["sessionId"]
-    }
-  ],
-  "toolSchemas": {
-    "meeting_start": {
-      "description": "회의 세션을 시작합니다. sessionId로 세션을 식별하고, context로 회의 제목·참석자 등 메타데이터를 전달합니다. 성공 시 { sessionId, started: true }를 반환합니다.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "description": "회의 세션 고유 식별자 (UUID 권장)"
-          },
-          "context": {
-            "type": "object",
-            "description": "회의 메타데이터 (제목, 참석자 등 선택 정보)",
-            "properties": {
-              "title": { "type": "string", "description": "회의 제목" },
-              "participants": {
-                "type": "array",
-                "items": { "type": "string" },
-                "description": "참석자 이름 목록"
-              }
-            },
-            "additionalProperties": true
-          }
-        },
-        "required": ["sessionId"],
-        "additionalProperties": false
-      }
-    },
-    "meeting_push_chunk": {
-      "description": "진행 중인 회의 세션에 PCM16LE 모노 오디오 청크를 전송합니다. chunk.pcm16leMono는 16비트 정수 배열(범위 -32768~32767)입니다. 성공 시 { sessionId, added: 누적 세그먼트 수 }를 반환합니다.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "description": "오디오를 전송할 회의 세션 ID"
-          },
-          "chunk": {
-            "type": "object",
-            "description": "PCM16LE 모노 오디오 청크",
-            "properties": {
-              "pcm16leMono": {
-                "type": "array",
-                "items": { "type": "integer", "minimum": -32768, "maximum": 32767 },
-                "description": "16비트 부호 정수 PCM 샘플 배열"
-              },
-              "sampleRate": {
-                "type": "integer",
-                "description": "샘플링 레이트 (Hz), 예: 16000"
-              },
-              "startSec": {
-                "type": "number",
-                "description": "청크 시작 시각 (세션 시작 기준 초)"
-              },
-              "endSec": {
-                "type": "number",
-                "description": "청크 종료 시각 (세션 시작 기준 초)"
-              }
-            },
-            "required": ["pcm16leMono", "sampleRate", "startSec", "endSec"],
-            "additionalProperties": false
-          }
-        },
-        "required": ["sessionId", "chunk"],
-        "additionalProperties": false
-      }
-    },
-    "meeting_stop": {
-      "description": "회의 세션을 종료하고 최종 요약을 반환합니다. 액션 아이템이 있으면 LVIS Task로 자동 생성됩니다. 성공 시 { title, summary, highlights, actionItems, createdAt }를 반환합니다.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "description": "종료할 회의 세션 ID"
-          }
-        },
-        "required": ["sessionId"],
-        "additionalProperties": false
-      }
-    },
-    "meeting_transcript": {
-      "description": "특정 회의 세션의 전사 세그먼트 목록을 반환합니다. 각 세그먼트는 텍스트, 시간, 화자 정보를 포함합니다.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "description": "전사를 조회할 회의 세션 ID"
-          }
-        },
-        "required": ["sessionId"],
-        "additionalProperties": false
-      }
-    },
-    "meeting_sessions": {
-      "description": "완료된 회의 세션 목록(최근 20개)을 반환합니다. 각 항목에 sessionId, 세그먼트 수, 생성/수정 시각이 포함됩니다. 인자 없음.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {},
-        "additionalProperties": false
-      }
-    }
-  },
   "config": {
     "intermediateEveryFinalSegments": 1
   },
