@@ -9,7 +9,7 @@
  * - 최근 N개 메시지는 보존 (기본 4)
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
-import type { GenericMessage, TokenUsage, LLMVendor } from "./llm/types.js";
+import type { GenericMessage, TokenUsage, LLMVendor, ConversationCarryover } from "./llm/types.js";
 
 /** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
 const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
@@ -183,6 +183,12 @@ export interface CompactResult {
   summary?: string;
   /** 확보된 예상 토큰 수 */
   freedTokens: number;
+  /**
+   * 컴팩션 트리거 종류.
+   * - "auto": 토큰 임계치 기반 사전 컴팩션 (PostTurnHookChain)
+   * - "reactive": 벤더 context-length 오류 수신 후 즉시 컴팩션
+   */
+  trigger?: "auto" | "reactive";
 }
 
 const DEFAULT_CONFIG: CompactConfig = {
@@ -414,6 +420,39 @@ export function microcompactMessages(
       freedBytes,
     },
   };
+}
+
+// ─── Reactive Recovery ──────────────────────────────
+
+/**
+ * 벤더별 "context too long" 오류인지 판별.
+ *
+ * - Anthropic: `error.type === "invalid_request_error"` + message에 "prompt is too long" 포함,
+ *              또는 HTTP 400 with the same message pattern.
+ * - OpenAI / Copilot: `error.code === "context_length_exceeded"` 또는
+ *                     message에 "maximum context length" 포함.
+ * - Gemini: message에 "context window" 포함.
+ *
+ * 오류 객체 형태가 벤더마다 다르므로 duck-typing으로 처리.
+ */
+export function isContextLengthError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+
+  // Anthropic: "prompt is too long" (status 400, type invalid_request_error)
+  if (msg.includes("prompt is too long")) return true;
+
+  // OpenAI / Copilot: error.code field
+  const code = (err as { code?: string }).code;
+  if (code === "context_length_exceeded") return true;
+
+  // OpenAI fallback message
+  if (msg.includes("maximum context length")) return true;
+
+  // Gemini
+  if (msg.includes("context window")) return true;
+
+  return false;
 }
 
 // ─── Private Helpers ────────────────────────────────

@@ -10,7 +10,7 @@
 import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, getModelContextWindow } from "./auto-compact.js";
+import { shouldCompact, compactMessages, isContextLengthError, getModelContextWindow } from "./auto-compact.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage } from "./llm/types.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
@@ -340,38 +340,72 @@ ${briefingData}
       const pendingToolCalls: ToolCallBlock[] = [];
       let stopReason: "end_turn" | "tool_use" = "end_turn";
 
-      for await (const event of this.provider!.streamTurn({
-        model,
-        systemPrompt,
-        messages: this.history.getMessages(),
-        tools: toolSchemas.length > 0 ? toolSchemas : undefined,
-        maxTokens: 4096,
-      })) {
-        switch (event.type) {
-          case "reasoning_delta":
-            thoughtContent += event.text;
-            callbacks?.onReasoningDelta?.(event.text);
-            break;
-          case "text_delta":
-            textContent += event.text;
-            callbacks?.onTextDelta?.(event.text);
-            break;
-          case "tool_call":
-            pendingToolCalls.push({ id: event.id, name: event.name, input: event.input });
-            break;
-          case "message_complete":
-            stopReason = event.stopReason;
-            if (event.usage) {
-              turnUsage = event.usage;
-              this.cumulativeUsage.inputTokens += event.usage.inputTokens;
-              this.cumulativeUsage.outputTokens += event.usage.outputTokens;
-            }
-            break;
-          case "error":
-            callbacks?.onError?.(event.error);
-            this.history.append({ role: "assistant", content: `오류: ${event.error}` });
-            return { text: `오류: ${event.error}`, toolCalls: allToolCalls, usage: turnUsage };
+      // Reactive compact recovery: context-length 오류 발생 시 1회 compact 후 재시도
+      let reactiveRetried = false;
+      const collectStream = async (messages: ReturnType<typeof this.history.getMessages>) => {
+        textContent = "";
+        thoughtContent = "";
+        pendingToolCalls.length = 0;
+        stopReason = "end_turn";
+
+        for await (const event of this.provider!.streamTurn({
+          model,
+          systemPrompt,
+          messages,
+          tools: toolSchemas.length > 0 ? toolSchemas : undefined,
+          maxTokens: 4096,
+        })) {
+          switch (event.type) {
+            case "reasoning_delta":
+              thoughtContent += event.text;
+              callbacks?.onReasoningDelta?.(event.text);
+              break;
+            case "text_delta":
+              textContent += event.text;
+              callbacks?.onTextDelta?.(event.text);
+              break;
+            case "tool_call":
+              pendingToolCalls.push({ id: event.id, name: event.name, input: event.input });
+              break;
+            case "message_complete":
+              stopReason = event.stopReason;
+              if (event.usage) {
+                turnUsage = event.usage;
+                this.cumulativeUsage.inputTokens += event.usage.inputTokens;
+                this.cumulativeUsage.outputTokens += event.usage.outputTokens;
+              }
+              break;
+            case "error":
+              callbacks?.onError?.(event.error);
+              this.history.append({ role: "assistant", content: `오류: ${event.error}` });
+              return { earlyReturn: true as const, text: `오류: ${event.error}` };
+          }
         }
+        return { earlyReturn: false as const };
+      };
+
+      let streamResult = await collectStream(this.history.getMessages()).catch((err: unknown) => {
+        if (isContextLengthError(err)) return { earlyReturn: false as const, contextError: err };
+        throw err;
+      });
+
+      // context-length 오류 → compact 후 1회 재시도
+      if (!streamResult.earlyReturn && (streamResult as { contextError?: unknown }).contextError && !reactiveRetried) {
+        reactiveRetried = true;
+        const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
+        if (cr.compacted) {
+          this.history.clear();
+          this.history.restore(compacted);
+          console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+        }
+        streamResult = await collectStream(this.history.getMessages()).catch((err: unknown) => {
+          // 재시도도 실패하면 그대로 전파
+          throw err;
+        });
+      }
+
+      if (streamResult.earlyReturn) {
+        return { text: streamResult.text, toolCalls: allToolCalls, usage: turnUsage };
       }
 
       // assistant 응답을 히스토리에 추가
