@@ -19,7 +19,7 @@ import { KeywordEngine } from "./core/keyword-engine.js";
 import { RouteEngine } from "./core/route-engine.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { createDynamicTool, type Tool } from "./tools/base.js";
-import { pluginMethodToTool } from "./plugins/plugin-tool-adapter.js";
+import { pluginToolsForRegistration } from "./plugins/plugin-tool-adapter.js";
 import { SystemPromptBuilder } from "./prompts/system-prompt-builder.js";
 import { ConversationLoop } from "./engine/conversation-loop.js";
 import { PermissionManager } from "./permissions/permission-manager.js";
@@ -41,7 +41,6 @@ import { createKnowledgeSearchTools } from "./tools/knowledge-search.js";
 import { BashTool } from "./tools/bash.js";
 import { ApprovalGate } from "./permissions/approval-gate.js";
 import { loadPolicy } from "./permissions/policy-store.js";
-import { DefaultAgentActionRequester } from "./permissions/agent-action-requester.js";
 import type { PluginHostApi } from "./plugins/types.js";
 import { MsGraphService } from "./main/ms-graph-service.js";
 
@@ -64,8 +63,6 @@ export interface AppServices {
   postTurnHookChain: PostTurnHookChain;
   /** B1: 승인 게이트 — mainWindow 준비 후 생성 */
   approvalGate?: ApprovalGate;
-  /** @internal Phase 2 stub — §8 Agent Hub approval caller (Phase 3 ConversationLoop 연동 예정) */
-  agentActionRequester?: DefaultAgentActionRequester;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
 }
@@ -422,8 +419,6 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // §F7: bootAuditLogger 주입 → requested/decided/timeout/send-failed 4 phase 감사
   const bootPolicy = await loadPolicy();
   const approvalGate = new ApprovalGate(mainWindow.webContents, bootPolicy, 5 * 60 * 1000, bootAuditLogger);
-  // @internal Phase 2 stub — §8 Agent Hub approval caller (Phase 3 ConversationLoop 연동 예정)
-  const agentActionRequester = new DefaultAgentActionRequester(approvalGate);
 
   // Tier A4 (W3): load hooks config from admin-dir + ~/.lvis/hooks.json and
   // attach an ExternalHookExecutor to the HookRunner so every preToolUse /
@@ -486,7 +481,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, postTurnHookChain,
-    approvalGate, agentActionRequester, knowledgeAvailable,
+    approvalGate, knowledgeAvailable,
   };
 }
 
@@ -520,8 +515,10 @@ function buildPluginConfigOverrides(settings: SettingsService): Record<string, R
 // ─── Tool Registration (범용) ───────────────────────
 
 function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolRegistry): void {
-  for (const method of pluginRuntime.listMethods()) {
-    toolRegistry.register(pluginMethodToTool(pluginRuntime, method));
+  for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
+    for (const tool of pluginToolsForRegistration(pluginRuntime, pluginId, manifest)) {
+      toolRegistry.register(tool);
+    }
   }
 }
 

@@ -6,7 +6,6 @@
  *
  * - 동시 복수 요청: Map으로 격리 (requestId 키).
  * - 타임아웃: 기본 5분 → deny-once 반환.
- * - category "tool" | "agent-action": 동일 UX, 타이틀만 분기.
  * - requireExplicit: PolicyFile.requireExplicitApproval을 그대로 렌더러로 전달,
  *   dismiss/Escape 동작을 renderer에서 분기.
  * - §A2: webContents 소멸 체크 + send 예외 처리 → deny-once + pending 정리.
@@ -30,7 +29,7 @@ export type ApprovalMode = "default" | "plan" | "full_auto";
 
 export interface ApprovalRequest {
   id: string;
-  category: "tool" | "agent-action";
+  category: "tool";
   toolName: string;
   args: unknown;
   reason: string;
