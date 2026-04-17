@@ -821,7 +821,7 @@ LVIS는 OpenHarness 레퍼런스를 따라 **2-stage compact** 를 채택한다:
 - **Stage 1a — Microcompact (preventive, LLM-free)**: 매 post-turn마다 실행. `microcompactMessages()` 가 오래된 `tool_result` 메시지 body를 stub(`[tool_result stripped: tool=X, origBytes=N]`)으로 교체해 토큰을 낮춘다. `MessageMeta.stripped=true` 로 표시되어 **idempotent** 이며, 최근 N개(기본 4)는 원본 유지, `toolUseId` 참조 무결성은 그대로 보존된다.
 - **Stage 1b — Full compact (threshold-gated, LLM-free 요약)**: `shouldCompact()` 가 사용률 임계치(기본 80%) 초과를 감지하면 `compactMessages()` 가 보존 구간을 제외한 이전 메시지를 요약으로 교체. 생성된 summary user 메시지는 `MessageMeta.compactBoundary=true` 로 마킹되어 **double-compact 를 방지** 한다 (marker 이후만 재요약 대상).
 
-목표 설계는 사용률 기준 자동 트리거(20% 단위 조정 20/40/60/80%)이며, 현재 Stage 1b threshold 는 `inputTokens` 비교로 단순화되어 있다. Stage 1a는 **항상 실행** 되므로 threshold와 독립적으로 토큰 압력을 완화한다.
+목표 설계와 현재 구현 모두 사용률 기준 자동 트리거(20% 단위 조정 20/40/60/80%)를 따른다. 즉, Stage 1b는 고정 `inputTokens` 비교가 아니라 `shouldCompact(cumulativeUsage, contextWindow)` 로 계산되며, 누적 사용량이 `contextWindow × thresholdPct`(기본 80%) 를 넘으면 발동한다. Stage 1a는 **항상 실행** 되므로 threshold와 독립적으로 토큰 압력을 완화한다.
 
 ```mermaid
 flowchart LR

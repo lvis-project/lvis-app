@@ -34,8 +34,8 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
 export interface MessageMeta {
   /** microcompact가 tool_result content를 stub으로 교체했는지 여부 */
   stripped?: boolean;
-  /** stripped 되기 전 원본 content의 바이트(문자열 길이) */
-  originalBytes?: number;
+  /** stripped 되기 전 원본 content의 문자열 길이(JS string.length — UTF-16 code units, bytes 아님) */
+  originalLength?: number;
   /** compactMessages()가 생성한 요약 경계 marker인지 여부 (idempotency) */
   compactBoundary?: boolean;
   /** 경계 marker의 경우, 요약 대상이 된 메시지 수 */
