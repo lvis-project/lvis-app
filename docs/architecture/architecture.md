@@ -1813,8 +1813,22 @@ graph TB
     "version": "1.2.0",
     "description": "STT 기반 회의록 자동 작성 플러그인",
     "author": "DX Platform Team",
-    "methods": ["meeting_start", "meeting_stop", "meeting_summarize"],
+    "permissions": ["microphone", "local-storage", "lgenie-session", "ui-slot:sidebar", "ui-slot:toolbar"],
     "keywords": ["회의록", "녹음", "회의", "미팅", "meeting"],
+    "skills": [
+        {
+            "name": "meeting_record",
+            "trigger": ["회의록 작성", "회의 녹음", "미팅 기록"],
+            "entry": "skills/meeting_record.js"
+        }
+    ],
+    "tools": [
+        {
+            "name": "stt_transcribe",
+            "entry": "tools/stt_transcribe.js",
+            "description": "음성을 텍스트로 변환"
+        }
+    ],
     "ui": {
         "sidebar": "ui/MeetingSidebar.jsx",
         "toolbar": "ui/MeetingToolbar.jsx",
@@ -1858,6 +1872,52 @@ Python 런타임이 필요한 플러그인은 manifest에 `python` 섹션을 선
 | `managedBy` | `"lvis-app"` | 런타임 관리 주체. 호스트가 venv provisioning을 맡는다는 선언 |
 | `requirementsLock` | string | `python-requirements.lock` 경로 (플러그인 루트 기준). `uv pip sync --frozen` 입력 |
 
+**`toolSchemas` 필드 — LLM 파라미터 명세 (Phase 1 신규)**
+
+LLM이 메서드 파라미터를 잘못 추론하는 경우에만 선택적으로 추가한다. 없으면 generic `{ payload: object }` fallback이 유지된다.
+
+```json
+{
+  "methods": ["meeting_start", "meeting_push_chunk"],
+  "toolSchemas": {
+    "meeting_push_chunk": {
+      "description": "PCM16LE 오디오 청크를 세션에 추가",
+      "inputSchema": {
+        "type": "object",
+        "required": ["sessionId", "chunk"],
+        "properties": {
+          "sessionId": { "type": "string" },
+          "chunk": {
+            "type": "object",
+            "required": ["pcm16leMono", "sampleRate"],
+            "properties": {
+              "pcm16leMono": { "type": "array", "items": { "type": "integer" } },
+              "sampleRate": { "type": "integer", "enum": [16000, 44100, 48000] }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+규칙:
+- top-level `"type": "object"` 필수 (OpenAI / Claude / Gemini 공통 요구사항)
+- JSON Schema draft-07
+- 플러그인 저자가 수기 작성 — zod 자동추출 금지
+- 호스트는 이 스키마를 LLM system prompt의 tool schema로 삽입. 런타임 검증은 수행하지 않음.
+- 상세 작성 가이드: `docs/references/plugin-tool-schema-design.md` §3
+
+**`toolSchemas` 도입 경위 — LLM 파라미터 추론 관찰**
+
+번들 플러그인 4개를 운영하면서 두 가지 패턴에서 LLM 파라미터 추론 실패가 반복 관찰되었다:
+
+1. **바이너리/배열 데이터** (`meeting_push_chunk.chunk.pcm16leMono`): LLM이 `number[]` 대신 base64 string을 시도.
+2. **nested required + 배열 항목** (`calendar_create.attendees`): LLM이 `string[]` 대신 단일 문자열 전달.
+
+기존 generic schema(`{ payload: object }`)는 LLM에 파라미터 구조를 전달하지 않아 이 문제를 해결할 수 없었다. `toolSchemas`를 선택적 필드로 도입하면 기존 플러그인에 하위 호환성을 유지하면서 필요한 메서드만 점진적으로 명세를 추가할 수 있다.
+
 ### 9.3 UI Slot System
 
 ```mermaid
@@ -1898,6 +1958,31 @@ graph TB
     MEETING_SIDEBAR -.-> SIDEBAR_SLOT
     MEETING_WIDGET -.-> CHAT_WIDGET_SLOT
 ```
+
+### 9.3a Plugin Runtime — Startup 정책
+
+boot 시 플러그인은 `Promise.allSettled`로 병렬 로딩된다. 한 플러그인의 느린 시작이 전체 boot를 차단하지 않는다.
+
+**기본 동작 (startupTimeoutMs 미선언):**
+
+- 모든 플러그인을 병렬로 `start()` 호출
+- 5초 초과 시 경고 로그: `[plugin-runtime] slow plugin detected: <id> (>5000ms)`
+- 완료를 기다리지 않고 boot 계속 진행
+- 실패한 플러그인은 `allSettled` rejected 결과로 수집 후 로깅. 다른 플러그인에 영향 없음.
+
+**startupTimeoutMs 선언 시 (강제 타임아웃):**
+
+```json
+{
+  "startupTimeoutMs": 10000
+}
+```
+
+- 해당 플러그인의 `start()` Promise에 AbortController로 타임아웃 적용
+- 초과 시 강제 중단 + 오류 로그. 플러그인은 비활성 상태로 처리.
+- 선언하지 않으면 경고만 하고 완료 대기 (무한정은 아님 — 전체 boot timeout은 별도).
+
+**handler 등록은 타임아웃 무관:** `handlers` Map 등록은 `start()` 호출 전에 완료되므로, 느린 `start()`는 메서드 가용성에 영향 없음.
 
 ### 9.4 Plugin Scenario — 회의록 플러그인
 
@@ -1945,6 +2030,28 @@ stateDiagram-v2
 
     BEFORE --> AFTER: 플러그인 설치
 ```
+
+### 9.4a HostApi — 플러그인 ↔ 호스트 계약
+
+`PluginHostApi` 인터페이스 (`src/plugins/types.ts`). 플러그인이 호스트 서비스에 접근하는 유일한 경로이며, 이 인터페이스 자체가 capability gate 역할을 한다.
+
+| 메서드 | 설명 | 소비 플러그인 |
+|--------|------|--------------|
+| `registerKeywords(keywords)` | KeywordEngine에 트리거 키워드 등록 (boot 시 1회) | 전체 |
+| `emitEvent(name, payload)` | 다른 플러그인·ProactiveEngine에 이벤트 발행 | 전체 |
+| `onEvent(name, handler)` | 이벤트 구독 | 전체 |
+| `addTask(task)` | LVIS 태스크 생성 (`~/.lvis/tasks/`) | meeting, email |
+| `saveNote(title, content)` | `~/.lvis/notes/`에 메모 저장 | meeting |
+| `getSecret(key)` | 암호화된 API 키 조회 | meeting, email, calendar |
+| `getMsGraphToken()` | Microsoft Graph Bearer 토큰 획득 | email, calendar |
+| `startMsGraphAuth(openBrowser)` | OAuth 2.0 브라우저 플로우 개시 | email, calendar |
+| `isMsGraphAuthenticated()` | 현재 인증 상태 조회 | email, calendar |
+| `getMsGraphAccount()` | 로그인 계정 이메일 반환 | email, calendar |
+| `onMsGraphAuthChange(handler)` | 인증 상태 변화 구독 | email, calendar |
+| `logEvent(level, message, data?)` | **[Phase 2]** 호스트 감사 로그에 플러그인 이벤트 기록. `level`: `"info"\|"warn"\|"error"` | 전체 |
+| `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
+
+**HostApi 확장 원칙 ("3+ 플러그인 규칙"):** 새 메서드는 3개 이상의 플러그인이 동일 기능을 필요로 하거나, 보안·감사 제어가 필요한 경우에만 추가한다. 상세: `docs/references/plugin-tool-schema-design.md` §6
 
 ### 9.5 MCP Protocol Architecture — 외부 도구 연동 프로토콜
 
@@ -2096,7 +2203,7 @@ graph TB
 | **업데이트** | 정책 push 시 강제 | 사용자 opt-in |
 | **서명 검증** | LG Internal Root CA 필수 (실패 시 load 거부) | 정책에 따라 `warn` / `require` / `off` |
 | **Directory** | `~/.lvis/plugins/managed/<id>/<version>/` | `~/.lvis/plugins/user/<id>/` |
-| **Manifest 필드** | `deployment: "managed"`, `publisher` | `deployment: "user"` |
+| **Manifest 필드** | `deployment: "managed"`, `publisher`, `signature`, `publishedAt` | `deployment: "user"` |
 | **Settings UI** | lock icon + "회사 배포" 표시, 제거 / 비활성화 버튼 잠금 | 정상 토글 |
 | **차단 시나리오** | 정책 `deny_list` 발행 → 다음 boot 시 자동 제거 | 정책 매치 시 즉시 비활성화 |
 | **감사 로깅** | managed sync 이벤트는 사내 감사 endpoint push 대상 | 로컬 audit log 중심 |
@@ -2110,9 +2217,15 @@ graph TB
   "name": "LVIS PageIndex",
   "version": "0.2.0",
   "entry": "dist/index.js",
-  "methods": ["index_scan", "chat_preview"],
+  "methods": ["index_scan", "chat_preview", "..."],
   "deployment": "managed",
-  "publisher": "LG Electronics IT"
+  "publisher": "LG Electronics IT",
+  "publisherId": "lge.it",
+  "publishedAt": "2026-04-13T12:00:00Z",
+  "signature": "base64(ECDSA-P256-SHA256(manifest_body))",
+  "signatureAlgorithm": "ECDSA-P256-SHA256",
+  "minAppVersion": "1.0.0",
+  "maxAppVersion": "1.5.0"
 }
 ```
 
@@ -2176,6 +2289,12 @@ Step 1-8:  기존 boot sequence
   "nextCheckAt": "2026-04-14T21:00:00Z"
 }
 ```
+
+**Phase 분리**
+
+- **Phase 1.5**: deployment mode 타입 + manifest 확장 + `PluginDeploymentGuard` 경량 구현 + UI 잠금 표시
+- **Phase 2**: Managed Policy Sync + Installer + IT Admin API 실연결 + SSO 토큰 경로
+- **Phase 3**: ECDSA 서명 검증 + LG CA 체인 + 오프라인 cache TTL + 사내 감사 endpoint 연동
 
 ---
 

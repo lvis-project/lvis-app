@@ -57,7 +57,7 @@ describe("PluginRuntime.disable", () => {
       name: id,
       version: "1.0.0",
       entry: "entry.mjs",
-      methods: [methodName],
+      tools: [methodName],
     };
     if (deployment) manifest.deployment = deployment;
     const manifestPath = join(pluginDir, "plugin.json");
@@ -92,12 +92,12 @@ describe("PluginRuntime.disable", () => {
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-user");
-    expect(runtime.listMethods()).toContain("p_user_hello");
+    expect(runtime.listToolNames()).toContain("p_user_hello");
 
     await runtime.disable("p-user");
 
     expect(runtime.listPluginIds()).not.toContain("p-user");
-    expect(runtime.listMethods()).not.toContain("p_user_hello");
+    expect(runtime.listToolNames()).not.toContain("p_user_hello");
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     const entry = registry.plugins.find((p: { id: string }) => p.id === "p-user");
@@ -113,7 +113,7 @@ describe("PluginRuntime.disable", () => {
     await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Managed plugin/);
 
     expect(runtime.listPluginIds()).toContain("p-managed");
-    expect(runtime.listMethods()).toContain("p_managed_hello");
+    expect(runtime.listToolNames()).toContain("p_managed_hello");
 
     // registry should NOT have enabled=false
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
@@ -167,7 +167,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", methods: ["com_lge_test_hello"] };
+    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", tools: ["com_lge_test_hello"] };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: pluginId, manifestPath, enabled: true }]);
@@ -176,7 +176,7 @@ describe("PluginRuntime.disable", () => {
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain(pluginId);
-    expect(runtime.listMethods()).toContain("com_lge_test_hello");
+    expect(runtime.listToolNames()).toContain("com_lge_test_hello");
   });
 
   it("plugin with dot-notation method name fails to load with a clear error", async () => {
@@ -193,7 +193,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", methods: ["bad.method"] };
+    const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad.method"] };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-plugin", manifestPath, enabled: true }]);
@@ -215,7 +215,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", methods: ["1bad_name"] };
+    const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["1bad_name"] };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-leading-digit", manifestPath, enabled: true }]);
@@ -237,7 +237,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", methods: ["bad-name"] };
+    const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad-name"] };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-hyphen", manifestPath, enabled: true }]);
@@ -271,9 +271,9 @@ describe("PluginRuntime.disable", () => {
         name: "meta-plugin",
         version: "1.0.0",
         entry: "entry.mjs",
-        methods: ["meta_ping"],
+        tools: ["meta_ping"],
         capabilities: ["meta-capability"],
-        startupMethods: ["meta_ping"],
+        startupTools: ["meta_ping"],
         ipcBindings: [
           {
             channel: "lvis:meta:ping",
@@ -294,7 +294,7 @@ describe("PluginRuntime.disable", () => {
     expect(runtime.listPluginIdsByCapability("meta-capability")).toEqual(["meta-plugin"]);
 
     const manifest = runtime.getPluginManifest("meta-plugin");
-    expect(manifest?.startupMethods).toEqual(["meta_ping"]);
+    expect(manifest?.startupTools).toEqual(["meta_ping"]);
 
     expect(runtime.listIpcBindings()).toEqual([
       {

@@ -1,6 +1,10 @@
 /**
- * Plugin Tool Adapter — bridges plugin `methods[]` declarations into the
+ * Plugin Tool Adapter — bridges plugin `tools[]` declarations into the
  * canonical {@link Tool} contract used by the §6.4 ToolRegistry.
+ *
+ * Uses `manifest.toolSchemas[tool]` when present so the LLM sees typed
+ * parameter fields; otherwise falls back to the generic `{payload: object}`
+ * wrapper shape.
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import type { PluginRuntime } from "./runtime.js";
@@ -11,27 +15,45 @@ const GENERIC_PAYLOAD_SCHEMA = {
   properties: {
     payload: {
       type: "object",
-      description: "메서드에 전달할 매개변수 객체",
+      description: "플러그인 도구에 전달할 매개변수 객체",
     },
   },
 };
 
-function buildMethodTool(pluginRuntime: PluginRuntime, methodName: string, pluginId: string): Tool {
+interface ToolSchemaEntry {
+  description?: string;
+  inputSchema: Record<string, unknown>;
+}
+
+function buildPluginTool(
+  pluginRuntime: PluginRuntime,
+  toolName: string,
+  pluginId: string,
+  schemaEntry: ToolSchemaEntry | undefined,
+): Tool {
+  const typed = schemaEntry?.inputSchema;
   return createDynamicTool({
-    name: methodName,
-    description: `플러그인 메서드: ${methodName}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`,
+    name: toolName,
+    description: schemaEntry?.description ?? `플러그인 도구: ${toolName}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`,
     source: "plugin",
     pluginId,
-    jsonSchema: GENERIC_PAYLOAD_SCHEMA,
+    jsonSchema: typed ?? GENERIC_PAYLOAD_SCHEMA,
     execute: async (rawInput) => {
       const args = (rawInput ?? {}) as Record<string, unknown>;
-      let finalPayload: unknown = args.payload;
-      if (!finalPayload && Object.keys(args).length > 0) finalPayload = args;
-      if (typeof finalPayload === "string") {
-        try { finalPayload = JSON.parse(finalPayload); } catch { /* leave as string */ }
+      // With a typed inputSchema the LLM passes arguments as a flat object —
+      // forward it unwrapped. Without one, unwrap the {payload} envelope.
+      let finalPayload: unknown;
+      if (typed) {
+        finalPayload = Object.keys(args).length > 0 ? args : undefined;
+      } else {
+        finalPayload = args.payload;
+        if (!finalPayload && Object.keys(args).length > 0) finalPayload = args;
+        if (typeof finalPayload === "string") {
+          try { finalPayload = JSON.parse(finalPayload); } catch { /* leave as string */ }
+        }
       }
       try {
-        const result = await pluginRuntime.call(methodName, finalPayload);
+        const result = await pluginRuntime.call(toolName, finalPayload);
         return {
           output: typeof result === "string" ? result : JSON.stringify(result, null, 2),
           isError: false,
@@ -51,5 +73,8 @@ export function pluginToolsForRegistration(
   pluginId: string,
   manifest: PluginManifest,
 ): Tool[] {
-  return (manifest.methods ?? []).map((method) => buildMethodTool(pluginRuntime, method, pluginId));
+  const schemas = manifest.toolSchemas ?? {};
+  return (manifest.tools ?? []).map((tool) =>
+    buildPluginTool(pluginRuntime, tool, pluginId, schemas[tool]),
+  );
 }
