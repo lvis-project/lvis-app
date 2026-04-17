@@ -54,9 +54,19 @@ export interface MessageMeta {
   carryover?: ConversationCarryover;
 }
 
+/**
+ * Claude extended-thinking block preserved verbatim. Both the thinking text and
+ * its signature MUST be echoed back in the next request when tool use is still
+ * in-flight — otherwise Anthropic rejects the message as tampered.
+ */
+export interface ThinkingBlock {
+  thinking: string;
+  signature: string;
+}
+
 export type GenericMessage =
   | { role: "user"; content: string; meta?: MessageMeta }
-  | { role: "assistant"; content: string; thought?: string; toolCalls?: ToolCallBlock[]; meta?: MessageMeta }
+  | { role: "assistant"; content: string; thought?: string; thinkingBlocks?: ThinkingBlock[]; toolCalls?: ToolCallBlock[]; meta?: MessageMeta }
   | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean; meta?: MessageMeta };
 
 export interface ToolCallBlock {
@@ -83,7 +93,7 @@ export type StreamEvent =
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
-  | { type: "message_complete"; stopReason: "end_turn" | "tool_use"; usage?: TokenUsage }
+  | { type: "message_complete"; stopReason: "end_turn" | "tool_use"; usage?: TokenUsage; thinkingBlocks?: ThinkingBlock[] }
   | { type: "error"; error: string };
 
 export interface TokenUsage {
