@@ -1,0 +1,173 @@
+/**
+ * Auto-Compact — 2-stage compaction tests.
+ *
+ * Stage 1 (microcompact): preventive tool_result stub 교체.
+ * Stage 2 (compactMessages): threshold 초과 시 요약 생성 + boundary marker.
+ */
+import { describe, it, expect } from "vitest";
+
+import {
+  microcompactMessages,
+  compactMessages,
+} from "../auto-compact.js";
+import type { GenericMessage } from "../llm/types.js";
+
+function makeToolUseId(i: number): string {
+  return `toolu_${String(i).padStart(3, "0")}`;
+}
+
+/** 10개의 tool_use/tool_result 쌍을 가진 합성 대화 */
+function synth(withLargeResults = true): GenericMessage[] {
+  const msgs: GenericMessage[] = [{ role: "user", content: "시작하자" }];
+  for (let i = 0; i < 10; i++) {
+    const id = makeToolUseId(i);
+    msgs.push({
+      role: "assistant",
+      content: `step ${i}`,
+      toolCalls: [{ id, name: "search", input: { q: `query-${i}` } }],
+    });
+    msgs.push({
+      role: "tool_result",
+      toolUseId: id,
+      toolName: "search",
+      content: withLargeResults ? "x".repeat(5000) + `#${i}` : `small-${i}`,
+    });
+  }
+  msgs.push({ role: "assistant", content: "끝" });
+  return msgs;
+}
+
+describe("microcompactMessages", () => {
+  it("strips older tool_results while preserving the most recent N", () => {
+    const messages = synth();
+    const { messages: out, result } = microcompactMessages(messages, {
+      preserveRecentToolResults: 4,
+    });
+
+    expect(result.stripped).toBe(true);
+    expect(result.strippedCount).toBe(6); // 10 - 4
+    expect(result.freedBytes).toBeGreaterThan(0);
+
+    const toolResults = out.filter((m) => m.role === "tool_result");
+    expect(toolResults).toHaveLength(10);
+
+    // 처음 6개는 stripped, 끝 4개는 raw
+    for (let i = 0; i < 6; i++) {
+      const m = toolResults[i];
+      expect(m.role).toBe("tool_result");
+      if (m.role === "tool_result") {
+        expect(m.meta?.stripped).toBe(true);
+        expect(m.meta?.originalBytes).toBeGreaterThan(1000);
+        expect(m.content).toContain("[tool_result stripped");
+      }
+    }
+    for (let i = 6; i < 10; i++) {
+      const m = toolResults[i];
+      if (m.role === "tool_result") {
+        expect(m.meta?.stripped).toBeUndefined();
+        expect(m.content.length).toBeGreaterThan(1000);
+      }
+    }
+  });
+
+  it("is idempotent — second call produces no changes", () => {
+    const messages = synth();
+    const first = microcompactMessages(messages, { preserveRecentToolResults: 4 });
+    const second = microcompactMessages(first.messages, { preserveRecentToolResults: 4 });
+
+    expect(second.result.stripped).toBe(false);
+    expect(second.result.strippedCount).toBe(0);
+    // 새 객체를 만들지 않고 reference 유지 기대 (stripped 후보 없음 → early return 또는 map pass-through)
+    // 여기선 strippedCount만 확인해도 idempotency 충족
+  });
+
+  it("preserves tool_use_id linkage for stripped messages", () => {
+    const messages = synth();
+    const { messages: out } = microcompactMessages(messages, {
+      preserveRecentToolResults: 4,
+    });
+
+    // 모든 assistant toolCall id가 대응 tool_result에 그대로 보존
+    const callIds: string[] = [];
+    for (const m of out) {
+      if (m.role === "assistant" && m.toolCalls) {
+        for (const tc of m.toolCalls) callIds.push(tc.id);
+      }
+    }
+    const resultIds: string[] = [];
+    for (const m of out) {
+      if (m.role === "tool_result") resultIds.push(m.toolUseId);
+    }
+    expect(resultIds.sort()).toEqual(callIds.sort());
+  });
+
+  it("returns input unchanged when fewer tool_results than preserve count", () => {
+    const messages: GenericMessage[] = [
+      { role: "user", content: "hi" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "t1", name: "f", input: {} }],
+      },
+      { role: "tool_result", toolUseId: "t1", toolName: "f", content: "data" },
+    ];
+    const { messages: out, result } = microcompactMessages(messages, {
+      preserveRecentToolResults: 4,
+    });
+    expect(result.stripped).toBe(false);
+    expect(out).toBe(messages); // reference-equal
+  });
+});
+
+describe("compactMessages — boundary marker", () => {
+  it("tags the generated summary user message with compactBoundary=true", () => {
+    const messages: GenericMessage[] = [];
+    for (let i = 0; i < 20; i++) {
+      messages.push({ role: "user", content: `q${i}` });
+      messages.push({ role: "assistant", content: `a${i}` });
+    }
+    const { messages: out, result } = compactMessages(messages);
+    expect(result.compacted).toBe(true);
+
+    const marker = out.find(
+      (m) => m.role === "user" && m.meta?.compactBoundary === true,
+    );
+    expect(marker).toBeDefined();
+    expect(marker?.content).toContain("[이전 대화 요약]");
+    expect(marker?.meta?.removedCount).toBeGreaterThan(0);
+    expect(marker?.meta?.compactedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("does not re-summarize an existing boundary marker (double-compact prevention)", () => {
+    // 1) 첫 compact
+    const initial: GenericMessage[] = [];
+    for (let i = 0; i < 20; i++) {
+      initial.push({ role: "user", content: `q${i}` });
+      initial.push({ role: "assistant", content: `a${i}` });
+    }
+    const first = compactMessages(initial);
+    expect(first.result.compacted).toBe(true);
+    const originalMarker = first.messages.find(
+      (m) => m.role === "user" && m.meta?.compactBoundary === true,
+    );
+
+    // 2) 대화를 더 이어서 두 번째 compact 트리거
+    const extended: GenericMessage[] = [...first.messages];
+    for (let i = 0; i < 20; i++) {
+      extended.push({ role: "user", content: `q2-${i}` });
+      extended.push({ role: "assistant", content: `a2-${i}` });
+    }
+    const second = compactMessages(extended);
+    expect(second.result.compacted).toBe(true);
+
+    // 원본 marker가 여전히 메시지 배열 안에 reference-equal로 존재
+    const stillThere = second.messages.find((m) => m === originalMarker);
+    expect(stillThere).toBeDefined();
+
+    // 새 marker도 생성됨 (두 개의 boundary 가능)
+    const markerCount = second.messages.filter(
+      (m) => m.role === "user" && m.meta?.compactBoundary === true,
+    ).length;
+    expect(markerCount).toBeGreaterThanOrEqual(2);
+  });
+});
