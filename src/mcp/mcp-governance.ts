@@ -136,10 +136,21 @@ export class McpGovernance {
       if (!cmdResult.valid) return cmdResult;
     }
 
-    // L1-e: SSE/WebSocket — URL 검증
-    if (config.transport === "sse" || config.transport === "websocket") {
+    // L1-e: HTTP / SSE / WebSocket — URL 검증
+    if (
+      config.transport === "http" ||
+      config.transport === "sse" ||
+      config.transport === "websocket"
+    ) {
       const urlResult = this.validateUrl(config, approval);
       if (!urlResult.valid) return urlResult;
+
+      // L1-f: Streamable HTTP 전용 — https 강제 (localhost/loopback 제외).
+      //       사설망 IP 검사는 NetworkGuard(Tier A2)에 위임.
+      if (config.transport === "http") {
+        const httpResult = this.validateHttpScheme(config.url);
+        if (!httpResult.valid) return httpResult;
+      }
     }
 
     // L2: 연결 보안 검증
@@ -305,6 +316,37 @@ export class McpGovernance {
     }
 
     return { valid: true };
+  }
+
+  /**
+   * Streamable HTTP transport에만 적용: https 강제.
+   * localhost / 127.0.0.1 / ::1 은 개발 편의상 http 허용.
+   * 사설망/링크로컬 등 IP 기반 판단은 NetworkGuard가 담당.
+   */
+  private validateHttpScheme(rawUrl: string): ValidationResult {
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return { valid: false, reason: `잘못된 URL 형식: '${rawUrl}'`, layer: 1 };
+    }
+    if (parsed.protocol === "https:") return { valid: true };
+    if (parsed.protocol === "http:") {
+      const host = parsed.hostname.replace(/^\[|\]$/g, "");
+      if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+        return { valid: true };
+      }
+      return {
+        valid: false,
+        reason: `HTTP transport에는 https:// 가 필요합니다 (localhost 제외): '${rawUrl}'`,
+        layer: 1,
+      };
+    }
+    return {
+      valid: false,
+      reason: `HTTP transport는 http:// 또는 https:// 만 허용됩니다: '${rawUrl}'`,
+      layer: 1,
+    };
   }
 
   private validateConnectionSecurity(config: McpServerConfig, approval: McpServerApproval): ValidationResult {

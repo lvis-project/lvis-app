@@ -102,25 +102,80 @@ export interface McpGlobalRules {
 
 // ─── MCP Protocol Types ────────────────────────────
 
-export type McpTransport = "stdio" | "sse" | "websocket";
+/**
+ * MCP transport types.
+ *
+ * - `stdio`    : local subprocess with Content-Length framed JSON-RPC on stdin/stdout.
+ * - `http`     : MCP Streamable HTTP transport (spec revision 2025-03-26+).
+ *                Single POST endpoint that returns either `application/json`
+ *                for single responses or `text/event-stream` for streaming.
+ * - `sse`      : legacy HTTP+SSE dual-endpoint transport. Governance layer only
+ *                (validation path); runtime client is not implemented — prefer `http`.
+ * - `websocket`: not implemented at the client layer — governance validation only.
+ */
+export type McpTransport = "stdio" | "http" | "sse" | "websocket";
 export type McpCapability = "tools" | "resources" | "prompts";
 
-export interface McpServerConfig {
+// ─── Config: discriminated union on `transport` ────
+
+interface McpServerConfigBase {
   id: string;
-  transport: McpTransport;
-  /** stdio: 실행 명령 */
-  command?: string;
-  /** stdio: 인수 */
-  args?: string[];
-  /** SSE/WebSocket: URL */
-  url?: string;
   /** 인증 방식 */
   auth?: "sso" | "api-key" | "none";
-  /** API 키 (api-key auth 시) */
+  /** API 키 (api-key auth 시) — stdio 서버에서도 env로 전달 가능 */
   apiKey?: string;
+}
+
+export interface McpStdioServerConfig extends McpServerConfigBase {
+  transport: "stdio";
+  /** stdio: 실행 명령 */
+  command: string;
+  /** stdio: 인수 */
+  args?: string[];
   /** 환경 변수 */
   env?: Record<string, string>;
+  url?: never;
+  headers?: never;
+  allowPrivateNetworks?: never;
 }
+
+export interface McpHttpServerConfig extends McpServerConfigBase {
+  transport: "http";
+  /** Streamable HTTP endpoint URL (POST target). */
+  url: string;
+  /** Optional additional request headers (e.g. `Authorization`). */
+  headers?: Record<string, string>;
+  /**
+   * Opt-in escape hatch for on-prem / localhost deployments. When true,
+   * NetworkGuard's private-IP check is skipped for this server — the governance
+   * `allowedUrls` allowlist is still the primary gate. Defaults to false.
+   * Mirrors the external-executor SSRF-protection pattern.
+   */
+  allowPrivateNetworks?: boolean;
+  command?: never;
+  args?: never;
+  env?: never;
+}
+
+/**
+ * Legacy / not-yet-implemented transports. Kept on the discriminated union so
+ * governance validation paths that branch on `config.transport === "sse"` or
+ * `"websocket"` continue to type-check unchanged.
+ */
+export interface McpLegacyRemoteServerConfig extends McpServerConfigBase {
+  transport: "sse" | "websocket";
+  url: string;
+  headers?: Record<string, string>;
+  command?: never;
+  args?: never;
+  env?: never;
+  allowPrivateNetworks?: never;
+}
+
+export type McpServerConfig =
+  | McpStdioServerConfig
+  | McpHttpServerConfig
+  | McpLegacyRemoteServerConfig;
 
 export interface McpToolSchema {
   name: string;
