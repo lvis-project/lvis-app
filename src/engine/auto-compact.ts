@@ -10,6 +10,7 @@
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
 import type { GenericMessage, TokenUsage, LLMVendor, ConversationCarryover } from "./llm/types.js";
+import { serializeMessageForEstimation } from "./llm/types.js";
 
 /** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
 const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
@@ -208,17 +209,9 @@ export function estimateTokens(text: string): number {
 export function estimateMessagesTokens(messages: GenericMessage[]): number {
   let total = 0;
   for (const msg of messages) {
-    total += estimateTokens(msg.content);
-    if (msg.role === "assistant") {
-      if (msg.thought) {
-        total += estimateTokens(msg.thought);
-      }
-      if (msg.toolCalls) {
-        for (const tc of msg.toolCalls) {
-          total += estimateTokens(JSON.stringify(tc.input));
-        }
-      }
-    }
+    // Estimate tokens from the complete canonical serialization so that
+    // assistant thinkingBlocks (extended thinking) are counted as well.
+    total += estimateTokens(serializeMessageForEstimation(msg));
   }
   return total;
 }

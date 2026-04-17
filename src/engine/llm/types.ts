@@ -69,6 +69,46 @@ export type GenericMessage =
   | { role: "assistant"; content: string; thought?: string; thinkingBlocks?: ThinkingBlock[]; toolCalls?: ToolCallBlock[]; meta?: MessageMeta }
   | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean; meta?: MessageMeta };
 
+/**
+ * Canonical serialized form for message-size / token-estimation logic.
+ * Includes all prompt-bearing fields, notably assistant thinkingBlocks,
+ * so callers do not undercount context usage when extended thinking is enabled.
+ */
+export function serializeThinkingBlocksForEstimation(thinkingBlocks?: ThinkingBlock[]): string {
+  if (!thinkingBlocks || thinkingBlocks.length === 0) return "";
+  return JSON.stringify(thinkingBlocks);
+}
+
+export function serializeMessageForEstimation(message: GenericMessage): string {
+  switch (message.role) {
+    case "user":
+      return JSON.stringify({
+        role: message.role,
+        content: message.content,
+      });
+    case "assistant":
+      return JSON.stringify({
+        role: message.role,
+        content: message.content,
+        thought: message.thought ?? "",
+        thinkingBlocks: message.thinkingBlocks ?? [],
+        toolCalls: message.toolCalls ?? [],
+      });
+    case "tool_result":
+      return JSON.stringify({
+        role: message.role,
+        toolUseId: message.toolUseId,
+        toolName: message.toolName ?? "",
+        content: message.content,
+        isError: message.isError ?? false,
+      });
+  }
+}
+
+export function estimateMessageCharacters(message: GenericMessage): number {
+  return serializeMessageForEstimation(message).length;
+}
+
 export interface ToolCallBlock {
   id: string;
   name: string;

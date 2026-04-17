@@ -458,13 +458,14 @@ ${briefingData}
         return { text: streamResult.text, toolCalls: allToolCalls, usage: turnUsage };
       }
 
-      // assistant 응답을 히스토리에 추가 — thinkingBlocks는 다음 턴 요청에
-      // signature 그대로 포함해야 Anthropic이 수락한다.
+      // assistant 응답을 히스토리에 추가 — thinkingBlocks는 tool_use 체인이
+      // 이어지는 다음 요청에만 signature 그대로 포함되어야 Anthropic이 수락한다.
+      const preserveThinkingBlocks = stopReason === "tool_use" && pendingToolCalls.length > 0;
       this.history.append({
         role: "assistant",
         content: textContent,
         ...(thoughtContent && { thought: thoughtContent }),
-        ...(roundThinkingBlocks.length > 0 && { thinkingBlocks: roundThinkingBlocks }),
+        ...(preserveThinkingBlocks && roundThinkingBlocks.length > 0 && { thinkingBlocks: roundThinkingBlocks }),
         ...(pendingToolCalls.length > 0 && { toolCalls: pendingToolCalls }),
       });
       callbacks?.onAssistantRound?.({

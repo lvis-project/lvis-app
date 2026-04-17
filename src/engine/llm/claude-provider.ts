@@ -78,9 +78,13 @@ export class ClaudeProvider implements LLMProvider {
       const thinkingBlocks: ThinkingBlock[] = [];
       for (const block of final.content) {
         if (block.type === "thinking") {
+          const signature = (block as unknown as { signature?: string }).signature;
+          if (typeof signature !== "string" || signature.length === 0) {
+            throw new Error("Claude 응답의 thinking 블록에 유효한 signature가 없습니다.");
+          }
           thinkingBlocks.push({
             thinking: block.thinking,
-            signature: (block as unknown as { signature: string }).signature ?? "",
+            signature,
           });
         } else if (block.type === "tool_use") {
           const tc: ToolCallBlock = {
