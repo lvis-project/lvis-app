@@ -254,10 +254,27 @@ export function compactMessages(
     return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
   }
 
-  // 보존할 메시지 경계 찾기
-  const preserveFrom = findSafeBoundary(messages, messages.length - config.preserveRecentMessages);
-  const toCompact = messages.slice(0, preserveFrom);
-  const toPreserve = messages.slice(preserveFrom);
+  // 기존 경계 marker가 있으면 절대 re-summarize 하지 않음 (double-compact 방지)
+  // marker 이전 메시지는 이미 요약 대상이었으므로, 요약은 마지막 marker 이후부터만 수행
+  let lastMarkerIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === "user" && m.meta?.compactBoundary === true) {
+      lastMarkerIdx = i;
+    }
+  }
+
+  // 보존할 메시지 경계 찾기 (marker 이후 구간에서만 요약)
+  const idealBoundary = messages.length - config.preserveRecentMessages;
+  const preserveFrom = findSafeBoundary(messages, idealBoundary);
+  // 요약 대상은 marker 다음(marker + ack 한쌍 이후)부터 preserveFrom까지
+  // compactMessages는 marker 뒤에 "이전 대화 내용을 확인했습니다..." assistant를 붙이므로
+  // 해당 assistant까지 skip
+  const compactStart = lastMarkerIdx >= 0 ? lastMarkerIdx + 1 : 0;
+  const effectivePreserveFrom = Math.max(preserveFrom, compactStart);
+  const preAnchor = messages.slice(0, compactStart); // 이전 marker + 그 앞 (있다면)
+  const toCompact = messages.slice(compactStart, effectivePreserveFrom);
+  const toPreserve = messages.slice(effectivePreserveFrom);
 
   if (toCompact.length === 0) {
     return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
@@ -268,8 +285,18 @@ export function compactMessages(
   const freedTokens = estimateMessagesTokens(toCompact) - estimateTokens(summary);
 
   // 요약 메시지 + 보존 메시지
+  const boundaryMessage: GenericMessage = {
+    role: "user",
+    content: `[이전 대화 요약]\n${summary}`,
+    meta: {
+      compactBoundary: true,
+      removedCount: toCompact.length,
+      compactedAt: new Date().toISOString(),
+    },
+  };
   const compactedMessages: GenericMessage[] = [
-    { role: "user", content: `[이전 대화 요약]\n${summary}` },
+    ...preAnchor,
+    boundaryMessage,
     { role: "assistant", content: "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다." },
     ...toPreserve,
   ];
@@ -281,6 +308,98 @@ export function compactMessages(
       removedMessages: toCompact.length,
       summary,
       freedTokens: Math.max(0, freedTokens),
+    },
+  };
+}
+
+// ─── Microcompact (Stage 1 — preventive, LLM-free) ──
+
+export interface MicrocompactConfig {
+  /** 말단에서부터 이 개수만큼의 tool_result는 raw 유지 (기본 4) */
+  preserveRecentToolResults: number;
+}
+
+export interface MicrocompactResult {
+  /** 실제 strip이 일어났는지 여부 */
+  stripped: boolean;
+  /** strip된 tool_result 개수 */
+  strippedCount: number;
+  /** 확보된 총 바이트 수 (문자열 길이 기준) */
+  freedBytes: number;
+}
+
+const DEFAULT_MICROCOMPACT_CONFIG: MicrocompactConfig = {
+  preserveRecentToolResults: 4,
+};
+
+/**
+ * Stage 1 — Preventive, LLM-free microcompact.
+ *
+ * 오래된 tool_result 메시지 content를 stub string으로 교체해 히스토리 크기를 낮춘다.
+ * - 최근 `preserveRecentToolResults` 개는 원본 유지 (assistant가 참조 가능성 있음)
+ * - 이미 stripped된 메시지는 skip (idempotent)
+ * - `toolUseId`는 절대 변경하지 않음 — 다른 메시지 참조 무결성 보존
+ * - 입력 array는 mutate하지 않고 새 배열 반환. strip된 메시지만 새 객체, 나머지는 reference-equal.
+ */
+export function microcompactMessages(
+  messages: GenericMessage[],
+  config: MicrocompactConfig = DEFAULT_MICROCOMPACT_CONFIG,
+): { messages: GenericMessage[]; result: MicrocompactResult } {
+  const preserveCount = Math.max(0, config.preserveRecentToolResults);
+
+  // tool_result 인덱스를 순서대로 수집
+  const toolResultIndices: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === "tool_result") toolResultIndices.push(i);
+  }
+
+  if (toolResultIndices.length <= preserveCount) {
+    return {
+      messages,
+      result: { stripped: false, strippedCount: 0, freedBytes: 0 },
+    };
+  }
+
+  // 끝에서부터 preserveCount 개를 제외한 인덱스가 strip 후보
+  const stripCandidateIdxSet = new Set(
+    toolResultIndices.slice(0, toolResultIndices.length - preserveCount),
+  );
+
+  let strippedCount = 0;
+  let freedBytes = 0;
+  const nowIso = new Date().toISOString();
+
+  const out = messages.map((msg, i) => {
+    if (!stripCandidateIdxSet.has(i)) return msg;
+    if (msg.role !== "tool_result") return msg;
+    if (msg.meta?.stripped === true) return msg; // idempotent
+
+    const origLen = msg.content.length;
+    const stub = `[tool_result stripped: tool=${msg.toolName ?? "?"}, origBytes=${origLen}]`;
+    freedBytes += Math.max(0, origLen - stub.length);
+    strippedCount += 1;
+
+    return {
+      role: "tool_result",
+      toolUseId: msg.toolUseId,
+      toolName: msg.toolName,
+      isError: msg.isError,
+      content: stub,
+      meta: {
+        ...(msg.meta ?? {}),
+        stripped: true,
+        originalBytes: origLen,
+        strippedAt: nowIso,
+      },
+    } as GenericMessage;
+  });
+
+  return {
+    messages: out,
+    result: {
+      stripped: strippedCount > 0,
+      strippedCount,
+      freedBytes,
     },
   };
 }
