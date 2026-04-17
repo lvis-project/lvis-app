@@ -1813,22 +1813,8 @@ graph TB
     "version": "1.2.0",
     "description": "STT 기반 회의록 자동 작성 플러그인",
     "author": "DX Platform Team",
-    "permissions": ["microphone", "local-storage", "lgenie-session", "ui-slot:sidebar", "ui-slot:toolbar"],
+    "methods": ["meeting_start", "meeting_stop", "meeting_summarize"],
     "keywords": ["회의록", "녹음", "회의", "미팅", "meeting"],
-    "skills": [
-        {
-            "name": "meeting_record",
-            "trigger": ["회의록 작성", "회의 녹음", "미팅 기록"],
-            "entry": "skills/meeting_record.js"
-        }
-    ],
-    "tools": [
-        {
-            "name": "stt_transcribe",
-            "entry": "tools/stt_transcribe.js",
-            "description": "음성을 텍스트로 변환"
-        }
-    ],
     "ui": {
         "sidebar": "ui/MeetingSidebar.jsx",
         "toolbar": "ui/MeetingToolbar.jsx",
@@ -2110,7 +2096,7 @@ graph TB
 | **업데이트** | 정책 push 시 강제 | 사용자 opt-in |
 | **서명 검증** | LG Internal Root CA 필수 (실패 시 load 거부) | 정책에 따라 `warn` / `require` / `off` |
 | **Directory** | `~/.lvis/plugins/managed/<id>/<version>/` | `~/.lvis/plugins/user/<id>/` |
-| **Manifest 필드** | `deployment: "managed"`, `publisher`, `signature`, `publishedAt` | `deployment: "user"` |
+| **Manifest 필드** | `deployment: "managed"`, `publisher` | `deployment: "user"` |
 | **Settings UI** | lock icon + "회사 배포" 표시, 제거 / 비활성화 버튼 잠금 | 정상 토글 |
 | **차단 시나리오** | 정책 `deny_list` 발행 → 다음 boot 시 자동 제거 | 정책 매치 시 즉시 비활성화 |
 | **감사 로깅** | managed sync 이벤트는 사내 감사 endpoint push 대상 | 로컬 audit log 중심 |
@@ -2124,15 +2110,9 @@ graph TB
   "name": "LVIS PageIndex",
   "version": "0.2.0",
   "entry": "dist/index.js",
-  "methods": ["index_scan", "chat_preview", "..."],
+  "methods": ["index_scan", "chat_preview"],
   "deployment": "managed",
-  "publisher": "LG Electronics IT",
-  "publisherId": "lge.it",
-  "publishedAt": "2026-04-13T12:00:00Z",
-  "signature": "base64(ECDSA-P256-SHA256(manifest_body))",
-  "signatureAlgorithm": "ECDSA-P256-SHA256",
-  "minAppVersion": "1.0.0",
-  "maxAppVersion": "1.5.0"
+  "publisher": "LG Electronics IT"
 }
 ```
 
@@ -2196,12 +2176,6 @@ Step 1-8:  기존 boot sequence
   "nextCheckAt": "2026-04-14T21:00:00Z"
 }
 ```
-
-**Phase 분리**
-
-- **Phase 1.5**: deployment mode 타입 + manifest 확장 + `PluginDeploymentGuard` 경량 구현 + UI 잠금 표시
-- **Phase 2**: Managed Policy Sync + Installer + IT Admin API 실연결 + SSO 토큰 경로
-- **Phase 3**: ECDSA 서명 검증 + LG CA 체인 + 오프라인 cache TTL + 사내 감사 endpoint 연동
 
 ---
 
