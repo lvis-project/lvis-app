@@ -57,7 +57,7 @@ describe("microcompactMessages", () => {
       expect(m.role).toBe("tool_result");
       if (m.role === "tool_result") {
         expect(m.meta?.stripped).toBe(true);
-        expect(m.meta?.originalLength).toBeGreaterThan(1000);
+        expect(m.meta?.originalBytes).toBeGreaterThan(1000);
         expect(m.content).toContain("[tool_result stripped");
       }
     }
