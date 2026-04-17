@@ -66,7 +66,7 @@ function makeMockGate() {
 
 function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) {
   return {
-    pluginRuntime: { call: vi.fn(), listMethods: vi.fn(() => []), listPluginIds: vi.fn(() => []), listIpcBindings: vi.fn(() => []), restartAll: vi.fn(), listUiExtensions: vi.fn(() => []) } as any,
+    pluginRuntime: { call: vi.fn(), listMethods: vi.fn(() => []), listPluginIds: vi.fn(() => []), restartAll: vi.fn(), listUiExtensions: vi.fn(() => []) } as any,
     pluginMarketplace: { list: vi.fn(), install: vi.fn(), uninstall: vi.fn() } as any,
     taskService: { add: vi.fn(), update: vi.fn(), get: vi.fn(), delete: vi.fn(), query: vi.fn(), getPendingByPriority: vi.fn(() => []), getOverdue: vi.fn(() => []), getDueToday: vi.fn(() => []) } as any,
     settingsService: { getAll: vi.fn(), patch: vi.fn(), get: vi.fn(() => ({ provider: "openai" })), getSecret: vi.fn(), setSecret: vi.fn(), deleteSecret: vi.fn() } as any,
@@ -279,59 +279,3 @@ describe("lvis:policy:set — F8 validation", () => {
   });
 });
 
-// ─── Manifest-driven IPC binding registration ─────────
-
-describe("manifest-driven ipcBindings registration", () => {
-  async function setupWithBindings(bindings: Array<{ pluginId: string; channel: string; method: string; args?: string[] }>) {
-    handlers.clear();
-    vi.clearAllMocks();
-    const pm = makeMockPM();
-    const callMock = vi.fn(async () => ({ ok: true }));
-    const services = makeServices(pm);
-    (services.pluginRuntime as any).listIpcBindings = vi.fn(() => bindings);
-    (services.pluginRuntime as any).call = callMock;
-    const { registerIpcHandlers } = await import("../ipc-bridge.js");
-    registerIpcHandlers(services, () => null);
-    return { callMock };
-  }
-
-  it("registers handler for plugin binding channel and delegates to pluginRuntime.call()", async () => {
-    const { callMock } = await setupWithBindings([
-      { pluginId: "meeting", channel: "lvis:meeting:start", method: "meeting_start", args: ["sessionId", "context"] },
-    ]);
-    await invoke("lvis:meeting:start", "sess-1", { lang: "ko" });
-    expect(callMock).toHaveBeenCalledWith("meeting_start", { sessionId: "sess-1", context: { lang: "ko" } });
-  });
-
-  it("skips binding and does not register handler when channel is reserved by host", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { callMock } = await setupWithBindings([
-      { pluginId: "rogue", channel: "lvis:settings:get", method: "rogue_get" },
-    ]);
-    expect(handlers.has("lvis:settings:get")).toBe(true); // host handler still registered
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("lvis:settings:get"));
-    // Invoking the reserved channel must NOT delegate to the plugin
-    await invoke("lvis:settings:get");
-    expect(callMock).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  it("maps positional args to named payload using binding.args", async () => {
-    const { callMock } = await setupWithBindings([
-      { pluginId: "meeting", channel: "lvis:meeting:stop", method: "meeting_stop", args: ["sessionId"] },
-    ]);
-    await invoke("lvis:meeting:stop", "sess-42");
-    expect(callMock).toHaveBeenCalledWith("meeting_stop", { sessionId: "sess-42" });
-  });
-
-  it("does not include payload keys when fewer args than argNames are provided", async () => {
-    const { callMock } = await setupWithBindings([
-      { pluginId: "meeting", channel: "lvis:meeting:start", method: "meeting_start", args: ["sessionId", "context"] },
-    ]);
-    await invoke("lvis:meeting:start", "sess-99");
-    // Only sessionId should be present; context should be absent (not undefined)
-    expect(callMock).toHaveBeenCalledWith("meeting_start", { sessionId: "sess-99" });
-    const payload = callMock.mock.calls[0][1] as Record<string, unknown>;
-    expect(Object.keys(payload)).toEqual(["sessionId"]);
-  });
-});

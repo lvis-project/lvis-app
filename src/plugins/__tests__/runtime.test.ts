@@ -274,13 +274,6 @@ describe("PluginRuntime.disable", () => {
         methods: ["meta_ping"],
         capabilities: ["meta-capability"],
         startupMethods: ["meta_ping"],
-        ipcBindings: [
-          {
-            channel: "lvis:meta:ping",
-            method: "meta_ping",
-            args: ["message"],
-          },
-        ],
       }),
       "utf-8",
     );
@@ -295,14 +288,5 @@ describe("PluginRuntime.disable", () => {
 
     const manifest = runtime.getPluginManifest("meta-plugin");
     expect(manifest?.startupMethods).toEqual(["meta_ping"]);
-
-    expect(runtime.listIpcBindings()).toEqual([
-      {
-        pluginId: "meta-plugin",
-        channel: "lvis:meta:ping",
-        method: "meta_ping",
-        args: ["message"],
-      },
-    ]);
   });
 });

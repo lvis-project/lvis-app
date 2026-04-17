@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
-  PluginIpcBinding,
   PluginManifest,
   PluginMethodHandler,
   PluginUiExtension,
@@ -236,16 +235,6 @@ export class PluginRuntime {
     return result;
   }
 
-  listIpcBindings(): Array<PluginIpcBinding & { pluginId: string }> {
-    const result: Array<PluginIpcBinding & { pluginId: string }> = [];
-    for (const [pluginId, plugin] of this.plugins) {
-      for (const binding of plugin.manifest.ipcBindings ?? []) {
-        result.push({ pluginId, ...binding });
-      }
-    }
-    return result;
-  }
-
   /**
    * Retrieve a loaded plugin's instance by id.
    * Returns undefined when the plugin failed to load or is not registered.
@@ -301,32 +290,6 @@ export class PluginRuntime {
       if (!parsed.methods.includes(startupMethod)) {
         throw new Error(
           `Invalid startupMethods entry '${startupMethod}' in plugin '${parsed.id}': ` +
-          `method is not declared in methods[]`,
-        );
-      }
-    }
-
-    if (parsed.ipcBindings !== undefined && !Array.isArray(parsed.ipcBindings)) {
-      throw new Error(
-        `Invalid manifest for plugin '${parsed.id}': 'ipcBindings' must be an array of objects`,
-      );
-    }
-    for (const binding of parsed.ipcBindings ?? []) {
-      if (!binding.channel || typeof binding.channel !== "string") {
-        throw new Error(`Invalid ipcBindings entry in plugin '${parsed.id}': missing channel`);
-      }
-      if (!binding.method || typeof binding.method !== "string") {
-        throw new Error(`Invalid ipcBindings entry in plugin '${parsed.id}': missing method`);
-      }
-      if (binding.args !== undefined && !Array.isArray(binding.args)) {
-        throw new Error(
-          `Invalid ipcBindings entry for channel '${binding.channel}' in plugin '${parsed.id}': ` +
-          `'args' must be an array of strings`,
-        );
-      }
-      if (!parsed.methods.includes(binding.method)) {
-        throw new Error(
-          `Invalid ipcBindings method '${binding.method}' in plugin '${parsed.id}': ` +
           `method is not declared in methods[]`,
         );
       }

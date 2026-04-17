@@ -73,18 +73,6 @@
       "type": "array",
       "items": { "type": "string" }
     },
-    "ipcBindings": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["channel", "method"],
-        "properties": {
-          "channel": { "type": "string" },
-          "method": { "type": "string" },
-          "args": { "type": "array", "items": { "type": "string" } }
-        }
-      }
-    },
     "deployment": { "enum": ["managed", "user"] },
     "publisher": { "type": "string" }
   }

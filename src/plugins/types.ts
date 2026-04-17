@@ -7,12 +7,6 @@
  */
 export type DeploymentMode = "managed" | "user";
 
-export interface PluginIpcBinding {
-  channel: string;
-  method: string;
-  args?: string[];
-}
-
 export interface PluginManifest {
   /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.lge.meeting-recorder`. */
   id: string;
@@ -30,7 +24,6 @@ export interface PluginManifest {
   capabilities?: string[];
   startupMethods?: string[];
   eventSubscriptions?: string[];
-  ipcBindings?: PluginIpcBinding[];
   deployment?: DeploymentMode;
   publisher?: string;
 }
