@@ -594,11 +594,11 @@ class StdioTransport implements McpTransport {
  *   - Notifications (no id) expect HTTP 202 or 200 with empty body.
  *
  * SSRF control: URL is validated with `ensurePublicHttpUrl` at `open` time
- * unless `allowPrivateNetworks: true`. Each request still goes through
- * `validateHttpUrl` syntactic check; DNS rebinding to a private IP during
- * the session is possible but is out of scope for this transport (the
- * redirect-aware hop-by-hop validator is for followRedirect:true flows,
- * which this transport does not use).
+ * unless `allowPrivateNetworks: true`. No additional per-request URL
+ * validation is performed; instead every request sets `redirect: "error"` so
+ * `fetch` never silently follows a Location header to a private IP. DNS
+ * rebinding during the session is therefore still theoretically possible but
+ * is out of scope for this transport.
  */
 class HttpTransport implements McpTransport {
   readonly kind = "http" as const;
@@ -646,6 +646,14 @@ class HttpTransport implements McpTransport {
     const controller = new AbortController();
     this.inflight.add(controller);
 
+    // Timeout covers the initial HTTP round-trip (until response headers
+    // arrive). Cleared once the server responds; SSE body reads continue
+    // asynchronously and can be cancelled at any time via close().
+    const timeoutId = setTimeout(
+      () => controller.abort(new Error(`[mcp-client] request timeout after ${DEFAULT_REQUEST_TIMEOUT_MS}ms`)),
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    );
+
     const headers: Record<string, string> = {
       "content-type": "application/json",
       // Streamable HTTP servers may return either JSON or SSE.
@@ -663,12 +671,21 @@ class HttpTransport implements McpTransport {
         headers,
         body: JSON.stringify(message),
         signal: controller.signal,
+        // Disable automatic redirect-following so a server cannot pivot to a
+        // private IP via a Location header after passing the open()-time SSRF
+        // check. Any 3xx response surfaces as a TypeError, which is caught
+        // below and re-thrown as a transport error.
+        redirect: "error",
       });
     } catch (err) {
+      clearTimeout(timeoutId);
       this.inflight.delete(controller);
       const reason = err instanceof Error ? err.message : String(err);
       throw new Error(`http transport fetch 실패: ${reason}`);
     }
+
+    // Response headers received — cancel the initial-response timeout.
+    clearTimeout(timeoutId);
 
     // Notifications (no id) expect no body — release and return.
     if (!("id" in message)) {
@@ -761,7 +778,10 @@ class HttpTransport implements McpTransport {
           this.dispatchSseEvent(rawEvent);
         }
       }
-      // Flush any trailing event without a closing blank line.
+      // Flush any bytes held in the streaming TextDecoder (e.g., an
+      // incomplete multi-byte UTF-8 sequence split across the last chunk).
+      buffer += decoder.decode();
+      // Dispatch any trailing event that arrived without a closing blank line.
       if (buffer.trim().length > 0) {
         this.dispatchSseEvent(buffer);
       }
