@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
+  PluginIpcBinding,
   PluginManifest,
   PluginMethodHandler,
   PluginUiExtension,
@@ -202,6 +203,49 @@ export class PluginRuntime {
     return [...this.plugins.keys()];
   }
 
+  getPluginManifest(pluginId: string): PluginManifest | undefined {
+    return this.plugins.get(pluginId)?.manifest;
+  }
+
+  listPluginManifests(): Array<{ pluginId: string; manifest: PluginManifest }> {
+    const result: Array<{ pluginId: string; manifest: PluginManifest }> = [];
+    for (const [pluginId, plugin] of this.plugins) {
+      result.push({ pluginId, manifest: plugin.manifest });
+    }
+    return result;
+  }
+
+  findPluginIdByCapability(capability: string): string | undefined {
+    const matches = this.listPluginIdsByCapability(capability);
+    if (matches.length > 1) {
+      console.warn(
+        `[plugin-runtime] Multiple plugins declare capability '${capability}': ${matches.join(", ")}. ` +
+        `Using '${matches[0]}'. Ensure only one plugin provides this capability.`,
+      );
+    }
+    return matches[0];
+  }
+
+  listPluginIdsByCapability(capability: string): string[] {
+    const result: string[] = [];
+    for (const [pluginId, plugin] of this.plugins) {
+      if (plugin.manifest.capabilities?.includes(capability)) {
+        result.push(pluginId);
+      }
+    }
+    return result;
+  }
+
+  listIpcBindings(): Array<PluginIpcBinding & { pluginId: string }> {
+    const result: Array<PluginIpcBinding & { pluginId: string }> = [];
+    for (const [pluginId, plugin] of this.plugins) {
+      for (const binding of plugin.manifest.ipcBindings ?? []) {
+        result.push({ pluginId, ...binding });
+      }
+    }
+    return result;
+  }
+
   /**
    * Retrieve a loaded plugin's instance by id.
    * Returns undefined when the plugin failed to load or is not registered.
@@ -234,19 +278,60 @@ export class PluginRuntime {
     if (!parsed.id || !parsed.entry || !Array.isArray(parsed.methods)) {
       throw new Error(`Invalid plugin manifest: ${path}`);
     }
-    // Tool names exposed to LLMs must satisfy ^[a-zA-Z0-9_-]+$ (vendor requirement).
+    // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor requirement).
     // Plugin id is the package identity and may contain dots (e.g. com.lge.meeting-recorder),
     // but methods are LLM tool names — no dots allowed, no runtime conversion is performed.
-    const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
+    const TOOL_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
     for (const method of parsed.methods) {
       if (!TOOL_NAME_PATTERN.test(method)) {
         throw new Error(
           `Invalid tool name '${method}' in plugin '${parsed.id}': ` +
-          `tool names must match ^[a-zA-Z0-9_-]+$ — use underscores instead of dots ` +
+          `tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores) ` +
           `(e.g. 'meeting_start' not 'meeting.start')`,
         );
       }
     }
+
+    if (parsed.startupMethods !== undefined && !Array.isArray(parsed.startupMethods)) {
+      throw new Error(
+        `Invalid manifest for plugin '${parsed.id}': 'startupMethods' must be an array of strings`,
+      );
+    }
+    for (const startupMethod of parsed.startupMethods ?? []) {
+      if (!parsed.methods.includes(startupMethod)) {
+        throw new Error(
+          `Invalid startupMethods entry '${startupMethod}' in plugin '${parsed.id}': ` +
+          `method is not declared in methods[]`,
+        );
+      }
+    }
+
+    if (parsed.ipcBindings !== undefined && !Array.isArray(parsed.ipcBindings)) {
+      throw new Error(
+        `Invalid manifest for plugin '${parsed.id}': 'ipcBindings' must be an array of objects`,
+      );
+    }
+    for (const binding of parsed.ipcBindings ?? []) {
+      if (!binding.channel || typeof binding.channel !== "string") {
+        throw new Error(`Invalid ipcBindings entry in plugin '${parsed.id}': missing channel`);
+      }
+      if (!binding.method || typeof binding.method !== "string") {
+        throw new Error(`Invalid ipcBindings entry in plugin '${parsed.id}': missing method`);
+      }
+      if (binding.args !== undefined && !Array.isArray(binding.args)) {
+        throw new Error(
+          `Invalid ipcBindings entry for channel '${binding.channel}' in plugin '${parsed.id}': ` +
+          `'args' must be an array of strings`,
+        );
+      }
+      if (!parsed.methods.includes(binding.method)) {
+        throw new Error(
+          `Invalid ipcBindings method '${binding.method}' in plugin '${parsed.id}': ` +
+          `method is not declared in methods[]`,
+        );
+      }
+    }
+
     return parsed;
   }
 

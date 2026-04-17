@@ -11,6 +11,7 @@ export interface LLMSettings {
 
 export interface ChatSettings {
   systemPrompt: string;
+  autoCompact: boolean;
 }
 
 export interface AppSettings {
@@ -51,6 +52,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   chat: {
     systemPrompt:
       "당신은 LVIS 로컬 지식 어시스턴트입니다. 사용자의 문서와 컨텍스트를 기반으로 정확하고 유용한 답변을 제공합니다. 한국어로 답변합니다.",
+    autoCompact: true,
   },
   webSearch: {
     provider: "duckduckgo",

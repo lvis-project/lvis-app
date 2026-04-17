@@ -10,6 +10,7 @@ dist/
 
 # LVIS 런타임 디렉터리 (사용자별)
 .lvis/
+.email-token.json
 
 # Resources 번들 대상(개발 시 fetch-uv.mjs가 다운로드)
 resources/uv/

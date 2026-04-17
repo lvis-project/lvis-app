@@ -814,9 +814,14 @@ sequenceDiagram
 | **지속성** | assistant `thought`는 히스토리에 저장되어 tool round-trip 후에도 reasoning 모델의 문맥이 유지된다. |
 | **거버넌스 동기화** | 대화 루프는 로컬 GovernancePolicy를 조회하고, 상위 정책 동기화 서버의 broadcast로 갱신되는 설계를 전제로 한다. |
 
-#### 4.5.4 컨텍스트 관리 — Auto-Compact
+#### 4.5.4 컨텍스트 관리 — Auto-Compact (2-stage)
 
-문서의 **목표 설계**는 컨텍스트 **사용률 기준 Auto-Compact**다. 기본 임계치는 **40%**이며, 사용자가 **20% 단위(20 / 40 / 60 / 80%)** 로 조정할 수 있다. 현재 구현 단계는 `inputTokens >= 80_000`과 on/off 토글로 단순화되어 있으므로, 문서에는 **현재 구현**과 **목표 설계**를 함께 남긴다.
+LVIS는 OpenHarness 레퍼런스를 따라 **2-stage compact** 를 채택한다:
+
+- **Stage 1a — Microcompact (preventive, LLM-free)**: 매 post-turn마다 실행. `microcompactMessages()` 가 오래된 `tool_result` 메시지 body를 stub(`[tool_result stripped: tool=X, origLen=N]`)으로 교체해 토큰을 낮춘다. `MessageMeta.stripped=true` 로 표시되어 **idempotent** 이며, 최근 N개(기본 4)는 원본 유지, `toolUseId` 참조 무결성은 그대로 보존된다.
+- **Stage 1b — Full compact (threshold-gated, LLM-free 요약)**: `shouldCompact()` 가 사용률 임계치(기본 80%) 초과를 감지하면 `compactMessages()` 가 보존 구간을 제외한 이전 메시지를 요약으로 교체. 생성된 summary user 메시지는 `MessageMeta.compactBoundary=true` 로 마킹되어 **double-compact 를 방지** 한다 (marker 이후만 재요약 대상).
+
+목표 설계와 현재 구현 모두 사용률 기준 자동 트리거(20% 단위 조정 20/40/60/80%)를 따른다. 즉, Stage 1b는 고정 `inputTokens` 비교가 아니라 `shouldCompact(cumulativeUsage, contextWindow)` 로 계산되며, 누적 사용량이 `contextWindow × thresholdPct`(기본 80%) 를 넘으면 발동한다. Stage 1a는 **항상 실행** 되므로 threshold와 독립적으로 토큰 압력을 완화한다.
 
 ```mermaid
 flowchart LR
@@ -1812,15 +1817,15 @@ graph TB
     "keywords": ["회의록", "녹음", "회의", "미팅", "meeting"],
     "skills": [
         {
-            "name": "meeting-record",
+            "name": "meeting_record",
             "trigger": ["회의록 작성", "회의 녹음", "미팅 기록"],
-            "entry": "skills/meeting-record.js"
+            "entry": "skills/meeting_record.js"
         }
     ],
     "tools": [
         {
-            "name": "stt-transcribe",
-            "entry": "tools/stt.js",
+            "name": "stt_transcribe",
+            "entry": "tools/stt_transcribe.js",
             "description": "음성을 텍스트로 변환"
         }
     ],
@@ -1846,6 +1851,8 @@ graph TB
     }
 }
 ```
+
+> LLM에 노출되는 skill / tool / method 식별자는 모두 lower snake_case(예: `meeting_record`, `stt_transcribe`, `index_scan`)를 사용한다. 호스트는 manifest 값을 그대로 등록하며, 도트를 언더스코어로 바꾸는 런타임 변환은 없다. 이벤트 채널 이름은 별도 네임스페이스이므로 dotted form을 유지한다.
 
 **`python` 섹션 — 런타임 의존 플러그인 명세**
 
@@ -2008,8 +2015,9 @@ graph TB
 | Transport | 프로토콜 | 적합 시나리오 | 비고 |
 | --- | --- | --- | --- |
 | **stdio** | subprocess stdin/stdout | 로컬 도구 (파일 시스템, git 등) | 가장 단순·안정적 |
-| **SSE** | HTTP Server-Sent Events | 원격 API 서버 (사업부 시스템) | 방화벽 친화적 |
-| **WebSocket** | 양방향 소켓 | 실시간 양방향 통신 (DB 모니터링 등) | 가장 유연 |
+| **http (Streamable HTTP 2025-03-26)** | 단일 POST → `application/json` 또는 `text/event-stream` | 원격 MCP 서버 (사내 API, SaaS) | 현행 권장 원격 transport. NetworkGuard(Tier A2) + `fetchPublicHttpResponse` 경유 — DNS rebinding/SSRF 방어, 매 요청·매 redirect hop DNS 재검증. `redirect: "manual"`, `allowPrivateNetworks` 옵트인은 거버넌스 admin 플래그(`globalRules.allowPrivateNetworks` 또는 승인 레벨) 동의 필수. |
+| **sse** | HTTP Server-Sent Events (legacy dual-endpoint) | — | **governance-only, legacy** — 런타임 client 미구현. 신규 서버는 `http` 로 이전. |
+| **websocket** | 양방향 소켓 | — | **governance-only, legacy** — 런타임 client 미구현. 실시간 요구 사항은 `http` SSE response 로 우선 검토. |
 
 **MCP 서버 설정 예시:**
 
@@ -2116,7 +2124,7 @@ graph TB
   "name": "LVIS PageIndex",
   "version": "0.2.0",
   "entry": "dist/index.js",
-  "methods": ["index.scan", "chat.preview", "..."],
+  "methods": ["index_scan", "chat_preview", "..."],
   "deployment": "managed",
   "publisher": "LG Electronics IT",
   "publisherId": "lge.it",
@@ -2127,6 +2135,8 @@ graph TB
   "maxAppVersion": "1.5.0"
 }
 ```
+
+> `methods[]` 는 lower snake_case LLM tool name이며 (`calendar_today`, `email_start_watcher` 등), boot/runtime/keyword registration 경로에서도 동일한 이름이 그대로 전달된다. dotted form은 이벤트 이름에만 사용한다.
 
 `user` deployment manifest는 `signature`가 optional이며, 정책에서 `requireUserSignature: true`일 때 필수로 승격된다.
 

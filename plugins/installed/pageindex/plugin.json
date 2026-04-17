@@ -6,12 +6,31 @@
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-pageindex/dist/hostPlugin.js",
   "methods": [
-    "index.scan",
-    "index.documents",
-    "index.folders",
-    "index.addFolder",
-    "index.removeFolder",
-    "chat.preview"
+    "index_scan",
+    "index_documents",
+    "index_folders",
+    "index_add_folder",
+    "index_remove_folder",
+    "chat_preview"
+  ],
+  "capabilities": [
+    "worker-client",
+    "knowledge-index"
+  ],
+  "ipcBindings": [
+    {
+      "channel": "lvis:index:scan",
+      "method": "index_scan"
+    },
+    {
+      "channel": "lvis:index:documents",
+      "method": "index_documents"
+    },
+    {
+      "channel": "lvis:chat:preview",
+      "method": "chat_preview",
+      "args": ["question"]
+    }
   ],
   "config": {
     "scanFolders": [
