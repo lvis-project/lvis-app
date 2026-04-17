@@ -10,9 +10,9 @@
       "deployment": "managed",
       "publisher": "LG Electronics IT",
       "methods": [
-        "index.scan",
-        "index.documents",
-        "chat.preview"
+        "index_scan",
+        "index_documents",
+        "chat_preview"
       ],
       "defaultConfig": {
         "scanFolders": ["fixtures"],
@@ -39,10 +39,10 @@
       "deployment": "managed",
       "publisher": "LG Electronics IT",
       "methods": [
-        "meeting.start",
-        "meeting.pushChunk",
-        "meeting.stop",
-        "meeting.transcript"
+        "meeting_start",
+        "meeting_push_chunk",
+        "meeting_stop",
+        "meeting_transcript"
       ],
       "defaultConfig": {
         "intermediateEveryFinalSegments": 1
@@ -69,11 +69,11 @@
       "deployment": "managed",
       "publisher": "LG Electronics IT",
       "methods": [
-        "email.status",
-        "email.auth",
-        "email.list",
-        "email.read",
-        "email.analyze"
+        "email_status",
+        "email_auth",
+        "email_list",
+        "email_read",
+        "email_analyze"
       ],
       "defaultConfig": {},
       "ui": [
@@ -85,6 +85,40 @@
           "title": "Outlook Email",
           "description": "Outlook 메일을 읽고 LVIS가 할 일·답장·일정 등을 제안합니다.",
           "entry": "dist/ui/email-control.js"
+        }
+      ]
+    },
+    {
+      "id": "calendar",
+      "name": "LVIS Calendar",
+      "description": "Outlook 일정을 읽고 쓰며 미팅 시작 전 알림을 제공하는 캘린더 플러그인",
+      "packageSpec": "file:../lvis-plugin-calendar",
+      "packageName": "@lvis/plugin-calendar",
+      "deployment": "managed",
+      "publisher": "LG Electronics IT",
+      "methods": [
+        "calendar_status",
+        "calendar_auth",
+        "calendar_list",
+        "calendar_today",
+        "calendar_get",
+        "calendar_create",
+        "calendar_update",
+        "calendar_delete",
+        "calendar_start_watcher",
+        "calendar_stop_watcher",
+        "calendar_open_url"
+      ],
+      "defaultConfig": {},
+      "ui": [
+        {
+          "id": "calendar-control",
+          "slot": "sidebar",
+          "kind": "embedded-module",
+          "displayName": "캘린더",
+          "title": "Outlook Calendar",
+          "description": "Outlook 일정을 읽고 쓰며 미팅 시작 전 알림을 제공합니다.",
+          "entry": "dist/ui/calendar-control.js"
         }
       ]
     }
