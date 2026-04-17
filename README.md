@@ -26,18 +26,18 @@
 
 ## Plugins Registry CLI
 ```bash
-npm run plugins:list
-npm run plugins:install -- <plugin-id>
-npm run plugins:add -- <plugin-id> <manifest-path>
-npm run plugins:remove -- <plugin-id>
-npm run plugins:enable -- <plugin-id>
-npm run plugins:disable -- <plugin-id>
+bun run plugins:list
+bun run plugins:install -- <plugin-id>
+bun run plugins:add -- <plugin-id> <manifest-path>
+bun run plugins:remove -- <plugin-id>
+bun run plugins:enable -- <plugin-id>
+bun run plugins:disable -- <plugin-id>
 ```
 
 예시:
 ```bash
-npm run plugins:install -- meeting
-npm run plugins:add -- search search/plugin.json
+bun run plugins:install -- meeting
+bun run plugins:add -- search search/plugin.json
 ```
 
 Electron 앱 좌측 사이드바의 **플러그인 마켓플레이스** 영역에서 설치 버튼을 눌러도 동일하게 로컬 설치/등록이 수행됩니다.  
@@ -54,22 +54,35 @@ UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인
 
 ## 설치
 ```bash
-npm install
+bun install
 ```
+
+이 저장소는 **bun**을 기본 패키지 매니저 + 스크립트 러너로 사용합니다.
+Electron 런타임 자체는 여전히 Node로 구동됩니다 (`scripts/run-electron.mjs`
+가 `electron` 바이너리를 실행하며, bun으로 Electron 프로세스를 띄우지는
+않습니다). 문제가 발생하면 `*:npm` 폴백 스크립트(`start:npm`, `build:npm`,
+`prepare:plugins:npm` 등)를 사용할 수 있습니다.
+
+> **⚠️ Node.js 필수:** bun이 기본 러너이지만, `postinstall` 스크립트
+> (`node scripts/fetch-uv.mjs`)와 Electron 실행 스크립트
+> (`scripts/run-electron.mjs`)는 시스템 `node` CLI를 직접 호출합니다.
+> Electron 내장 Node는 PATH의 `node` 바이너리를 대체하지 않으므로,
+> **개발자 머신에 Node.js v18 이상**이 별도로 설치되어 있어야 합니다.
 
 ## 테스트
 ```bash
-npm run test:electron-smoke
-npm run test:plugin-flow
-npm run test:meeting-flow
-npm run test:main-flow
+bun run test:electron-smoke
+bun run test:plugin-flow
+bun run test:meeting-flow
+bun run test:main-flow
+bunx vitest run
 ```
 
 ## 실행
 ```bash
 # 실제 PageIndex 모드 (설치/키 필요)
-# PAGEINDEX_ROOT=/absolute/path/to/PageIndex OPENAI_API_KEY=... npm run start
+# PAGEINDEX_ROOT=/absolute/path/to/PageIndex OPENAI_API_KEY=... bun run start
 
 # 테스트 모드(기본): 외부 LLM 없이 로컬 Markdown 기준 검증
-LVIS_PAGEINDEX_TEST_MODE=1 npm run start
+LVIS_PAGEINDEX_TEST_MODE=1 bun run start
 ```
