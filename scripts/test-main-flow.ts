@@ -31,15 +31,15 @@ async function main() {
 
   try {
     await runtime.startAll();
-    const scan = (await runtime.call("index.scan")) as { scanned: number; indexed: number };
-    const docs = (await runtime.call("index.documents")) as Array<{ id: string }>;
-    const preview = (await runtime.call("chat.preview", { question: "문서 요약" })) as { preview: string };
+    const scan = (await runtime.call("index_scan")) as { scanned: number; indexed: number };
+    const docs = (await runtime.call("index_documents")) as Array<{ id: string }>;
+    const preview = (await runtime.call("chat_preview", { question: "문서 요약" })) as { preview: string };
 
-    await runtime.call("meeting.start", {
+    await runtime.call("meeting_start", {
       sessionId,
       context: { locale: "ko", contextHint: "main process integration flow" },
     });
-    await runtime.call("meeting.pushChunk", {
+    await runtime.call("meeting_push_chunk", {
       sessionId,
       chunk: {
         pcm16leMono: [0x00, 0x01],
@@ -48,8 +48,8 @@ async function main() {
         endSec: 1.1,
       },
     });
-    const finalSummary = (await runtime.call("meeting.stop", { sessionId })) as { title: string; summary: string };
-    const transcript = (await runtime.call("meeting.transcript", { sessionId })) as Array<{ id: string }>;
+    const finalSummary = (await runtime.call("meeting_stop", { sessionId })) as { title: string; summary: string };
+    const transcript = (await runtime.call("meeting_transcript", { sessionId })) as Array<{ id: string }>;
 
     if (scan.scanned < 1) throw new Error("index scan이 수행되지 않았습니다.");
     if (docs.length < 1) throw new Error("index documents가 비어 있습니다.");

@@ -117,13 +117,25 @@ export async function fetchPublicHttpResponse(
   rawUrl: string,
   init: RequestInit & { maxRedirects?: number; timeoutMs?: number } = {},
 ): Promise<Response> {
-  const { maxRedirects = 5, timeoutMs = 15000, ...restInit } = init;
+  const { maxRedirects = 5, timeoutMs = 15000, signal: externalSignal, ...restInit } = init;
   let currentUrl = rawUrl;
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
     await ensurePublicHttpUrl(currentUrl);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    // Forward aborts from the caller-supplied signal so callers can cancel
+    // long-running requests (e.g., transport.close()). The per-hop timer
+    // still fires independently.
+    let externalAbortListener: (() => void) | null = null;
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else {
+        externalAbortListener = () => controller.abort();
+        externalSignal.addEventListener("abort", externalAbortListener, { once: true });
+      }
+    }
     try {
       const response = await fetch(currentUrl, {
         ...restInit,
@@ -144,6 +156,9 @@ export async function fetchPublicHttpResponse(
       currentUrl = new URL(location, currentUrl).toString();
     } finally {
       clearTimeout(timer);
+      if (externalAbortListener && externalSignal) {
+        externalSignal.removeEventListener("abort", externalAbortListener);
+      }
     }
   }
   throw new NetworkGuardError("request failed before receiving a response");

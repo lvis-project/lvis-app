@@ -22,10 +22,12 @@ import {
   appendUserEntry,
   applyToolEnd,
   applyToolStart,
+  finalizeStreamingReasoning,
   finalizeStreamingAssistant,
   setAssistantError,
   type ChatEntry,
   type StreamEvent,
+  upsertStreamingReasoning,
   upsertStreamingAssistant,
 } from "./lib/chat-stream-state.js";
 
@@ -34,7 +36,7 @@ import {
 type MarketplaceItem = { id: string; name: string; description: string; packageSpec: string; installed: boolean; enabled: boolean; isManaged?: boolean };
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
-type AppSettings = { llm: { provider: string; model: string }; chat: { systemPrompt: string }; webSearch: { provider: string } };
+type AppSettings = { llm: { provider: string; model: string }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string } };
 
 type LvisApi = {
   getSettings: () => Promise<AppSettings>;
@@ -97,16 +99,6 @@ type ApprovalRequest = {
    * even for read-only tools; "default" / "full_auto" auto-approve.
    */
   mode?: "default" | "plan" | "full_auto";
-  /**
-   * §S1 metadata hint mirrored from main. Carries the matched
-   * SENSITIVE_PATH_PATTERNS entry when the executor detected a sensitive
-   * path, for diagnostics and logging. Remains null/absent otherwise.
-   *
-   * Note: sensitive paths are hard-blocked inside ApprovalGate before any
-   * approval request is sent over IPC, so this field will not be set on
-   * requests that actually reach this dialog.
-   */
-  sensitivePathPattern?: string | null;
 };
 type ApprovalDecision = {
   requestId: string;
@@ -535,6 +527,8 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
   const [keyInput, setKeyInput] = useState("");
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
+  const [autoCompact, setAutoCompact] = useState(true);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   const [webProvider, setWebProvider] = useState("duckduckgo");
   const [webKeyInput, setWebKeyInput] = useState("");
@@ -547,15 +541,27 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
+    setSettingsLoaded(false);
     void (async () => {
       const s = await api.getSettings();
+      if (cancelled) return;
       setVendor(s.llm.provider);
       setModel(s.llm.model);
-      setHasKey(await api.hasApiKey(s.llm.provider));
+      setAutoCompact(s.chat.autoCompact ?? true);
+      const apiKeySet = await api.hasApiKey(s.llm.provider);
+      if (cancelled) return;
+      setHasKey(apiKeySet);
 
       setWebProvider(s.webSearch.provider);
-      setHasWebKey(await api.hasWebApiKey(s.webSearch.provider));
+      const webApiKeySet = await api.hasWebApiKey(s.webSearch.provider);
+      if (cancelled) return;
+      setHasWebKey(webApiKeySet);
+      setSettingsLoaded(true);
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [open, api]);
 
   // 벤더 변경 시 해당 벤더의 키 상태 확인 및 모델 추천
@@ -578,14 +584,25 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
   }, [webProvider, open, api]);
 
   const save = async () => {
+    if (!settingsLoaded) return;
     setSaving(true);
     try {
-      if (tab === "llm") {
-        if (keyInput.trim()) { await api.setApiKey(vendor, keyInput.trim()); setKeyInput(""); setHasKey(true); }
-        await api.updateSettings({ llm: { provider: vendor as any, model: model.trim() || vendorInfo.defaultModel } } as any);
-      } else if (tab === "web") {
-        if (webKeyInput.trim()) { await api.setWebApiKey(webProvider, webKeyInput.trim()); setWebKeyInput(""); setHasWebKey(true); }
-        await api.updateSettings({ webSearch: { provider: webProvider as any } } as any);
+      if (tab !== "permissions") {
+        if (keyInput.trim()) {
+          await api.setApiKey(vendor, keyInput.trim());
+          setKeyInput("");
+          setHasKey(true);
+        }
+        if (webKeyInput.trim()) {
+          await api.setWebApiKey(webProvider, webKeyInput.trim());
+          setWebKeyInput("");
+          setHasWebKey(true);
+        }
+        await api.updateSettings({
+          llm: { provider: vendor as any, model: model.trim() || vendorInfo.defaultModel },
+          webSearch: { provider: webProvider as any },
+          chat: { autoCompact },
+        } as any);
       }
       // permissions 탭: 각 항목이 즉시 저장되므로 별도 save 불필요
       if (tab !== "permissions") { onSaved(); onOpenChange(false); }
@@ -596,10 +613,11 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>설정</DialogTitle><DialogDescription>앱 환경, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>설정</DialogTitle><DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription></DialogHeader>
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="w-full">
             <TabsTrigger value="llm" className="flex-1">지능 (LLM)</TabsTrigger>
+            <TabsTrigger value="chat" className="flex-1">채팅</TabsTrigger>
             <TabsTrigger value="web" className="flex-1">검색 (Web)</TabsTrigger>
             <TabsTrigger value="permissions" className="flex-1">권한</TabsTrigger>
           </TabsList>
@@ -624,6 +642,32 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
               <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
             </div>
             <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
+          </TabsContent>
+
+          <TabsContent value="chat" className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-medium">대화 최적화</p>
+                <p className="text-[11px] text-muted-foreground">긴 대화에서 이전 히스토리를 자동으로 요약해 컨텍스트를 절약합니다.</p>
+              </div>
+              <div className="flex items-center gap-3 rounded-md border px-3 py-3">
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={autoCompact}
+                  className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${autoCompact ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}
+                  onClick={() => setAutoCompact((prev) => !prev)}
+                >
+                  {autoCompact && (
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
+                  )}
+                </button>
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium">자동 컴팩트 활성화</p>
+                  <p className="text-[11px] text-muted-foreground">끄면 자동 요약은 중단되고, 수동 `/compact`만 사용할 수 있습니다.</p>
+                </div>
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="web" className="space-y-4 pt-4">
@@ -657,7 +701,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
         <DialogFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
           {tab !== "permissions" && (
-            <Button onClick={() => void save()} disabled={saving}>{saving ? "저장 중..." : "저장"}</Button>
+            <Button onClick={() => void save()} disabled={saving || !settingsLoaded}>{saving ? "저장 중..." : "저장"}</Button>
           )}
         </DialogFooter>
       </DialogContent>
@@ -748,31 +792,13 @@ function ToolApprovalDialog({
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          {/* 도구 이름 + 소스/모드/읽기전용 배지 */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* 도구 이름 + 소스 배지 */}
+          <div className="flex items-center gap-2">
             <code className="rounded bg-muted px-2 py-1 text-sm font-mono">
               {request.toolName}
             </code>
             <Badge variant="outline" className="text-[11px]">{sourceBadge}</Badge>
-            {request.isReadOnly && (
-              <Badge variant="secondary" className="text-[11px]">읽기 전용</Badge>
-            )}
-            {request.mode === "plan" && (
-              <Badge variant="outline" className="border-amber-500 text-[11px] text-amber-700">
-                계획 모드
-              </Badge>
-            )}
           </div>
-
-          {/* 대상 파일 경로 (있을 때만) */}
-          {request.target?.filePath && (
-            <div>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">대상 파일</p>
-              <code className="block break-all rounded bg-muted/50 p-2 text-[11px] font-mono">
-                {request.target.filePath}
-              </code>
-            </div>
-          )}
 
           {/* 사유 */}
           <div>
@@ -848,6 +874,7 @@ function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_grou
   const groupStatus = group.status === "running"
     ? "running"
     : hasError ? "error" : "done";
+  const groupTitle = groupStatus === "running" ? "도구 사용 중" : "도구 사용 결과";
 
   function toggleTool(id: string) {
     setExpandedTools((prev) => {
@@ -868,7 +895,7 @@ function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_grou
       >
         {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
         <Wrench className="h-3 w-3 flex-shrink-0" />
-        <span className="font-medium">도구 사용</span>
+        <span className="font-medium">{groupTitle}</span>
         <Badge variant="outline" className="px-1 py-0 text-[10px]">
           {groupStatus === "running" ? `${doneCount}/${group.tools.length}` : `${group.tools.length}개`}
         </Badge>
@@ -933,6 +960,41 @@ function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_grou
   );
 }
 
+function ReasoningCard({ entry }: { entry: Extract<ChatEntry, { kind: "reasoning" }> }) {
+  const title = entry.streaming ? "생각 정리 중" : "생각 정리";
+
+  return (
+    <div className="max-w-[85%] rounded-md border border-dashed bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+      <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+        {title}
+        {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+      </div>
+      <div className="whitespace-pre-wrap text-[12px] italic leading-5">
+        {entry.text || (entry.streaming ? "생각을 정리하는 중..." : "")}
+      </div>
+    </div>
+  );
+}
+
+function AssistantCard({ entry }: { entry: Extract<ChatEntry, { kind: "assistant" }> }) {
+  const title = entry.streaming ? "LVIS 응답 작성 중" : "LVIS 응답";
+
+  return (
+    <div className="max-w-[85%] rounded-md border bg-card px-3 py-2 text-sm">
+      <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+        {title}
+        {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+      </div>
+
+      <div className="prose prose-sm prose-invert max-w-none break-words">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {entry.text || (entry.streaming ? "응답을 작성하는 중..." : "")}
+        </ReactMarkdown>
+      </div>
+    </div>
+  );
+}
+
 // ─── App ────────────────────────────────────────────
 
 function App() {
@@ -980,7 +1042,9 @@ function App() {
       await api.chatSend(t);
       // Final state set by stream events + done
     } catch (err) {
-      setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`));
+      setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current));
+      streamRef.current = "";
+      thoughtRef.current = "";
     } finally { setStreaming(false); }
   }, [api, streaming, checkApiKey]);
 
@@ -1005,16 +1069,16 @@ function App() {
       console.log("[lvis:chat:stream]", ev);
       if (ev.type === "text_delta" && ev.text) {
         streamRef.current += ev.text;
-        const curText = streamRef.current;
-        const curThought = thoughtRef.current;
-        setEntries((p) => upsertStreamingAssistant(p, curText, curThought));
+        setEntries((p) => upsertStreamingAssistant(p, streamRef.current));
       } else if (ev.type === "reasoning_delta" && ev.text) {
         thoughtRef.current += ev.text;
-        const curText = streamRef.current;
-        const curThought = thoughtRef.current;
-        setEntries((p) => upsertStreamingAssistant(p, curText, curThought));
+        setEntries((p) => upsertStreamingReasoning(p, thoughtRef.current));
       } else if (ev.type === "assistant_round") {
-        setEntries((p) => finalizeStreamingAssistant(p, ev.text ?? streamRef.current, ev.thought ?? thoughtRef.current));
+        setEntries((p) => {
+          let next = finalizeStreamingReasoning(p, ev.thought ?? thoughtRef.current);
+          next = finalizeStreamingAssistant(next, ev.text ?? streamRef.current);
+          return next;
+        });
         streamRef.current = "";
         thoughtRef.current = "";
       } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
@@ -1024,12 +1088,16 @@ function App() {
         const { groupId, toolUseId, result, isError } = ev;
         setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError }));
       } else if (ev.type === "error") {
-        setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`));
+        setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current));
         streamRef.current = "";
         thoughtRef.current = "";
       } else if (ev.type === "done") {
         if (streamRef.current || thoughtRef.current) {
-          setEntries((p) => finalizeStreamingAssistant(p, streamRef.current, thoughtRef.current));
+          setEntries((p) => {
+            let next = finalizeStreamingReasoning(p, thoughtRef.current);
+            next = finalizeStreamingAssistant(next, streamRef.current);
+            return next;
+          });
           streamRef.current = "";
           thoughtRef.current = "";
         }
@@ -1143,26 +1211,9 @@ function App() {
                 {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
                 {entries.map((entry, idx) => {
                   if (entry.kind === "user") return <div key={idx} className="ml-auto max-w-[85%] rounded-md border bg-primary px-3 py-2 text-sm text-primary-foreground"><div className="mb-1 text-[11px] text-muted-foreground">나</div><div className="whitespace-pre-wrap">{entry.text}</div></div>;
+                  if (entry.kind === "reasoning") return <ReasoningCard key={idx} entry={entry} />;
                   if (entry.kind === "tool_group") return <ToolGroupCard key={entry.groupId} group={entry} />;
-                  // assistant
-                  return (
-                    <div key={idx} className="max-w-[85%] rounded-md border bg-card px-3 py-2 text-sm">
-                      <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">LVIS{entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}</div>
-                      
-                      {entry.thought && (
-                        <div className="mb-2 border-l-2 border-muted pl-2 text-[12px] text-muted-foreground italic">
-                          <div className="mb-1 font-semibold not-italic opacity-70">생각 과정:</div>
-                          <div className="whitespace-pre-wrap">{entry.thought}</div>
-                        </div>
-                      )}
-
-                      <div className="prose prose-sm prose-invert max-w-none break-words">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {entry.text || (entry.streaming ? "생각 중..." : "")}
-                        </ReactMarkdown>
-                      </div>
-                    </div>
-                  );
+                  return <AssistantCard key={idx} entry={entry} />;
                 })}
                 <div ref={chatEndRef} />
               </div></ScrollArea>

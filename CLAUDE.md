@@ -89,11 +89,28 @@ src/
 
 ## Build
 
+This repo uses **bun** as the default package manager + script runner.
+The Electron runtime itself still launches via Node (`scripts/run-electron.mjs`
+invokes the `electron` binary which uses its bundled Node). Bun is NOT used to
+execute the Electron process.
+
+> **Node CLI required:** Even though bun is the default runner, the `postinstall`
+> script (`node scripts/fetch-uv.mjs`) and the Electron launcher
+> (`scripts/run-electron.mjs`) invoke the system `node` binary directly.
+> Electron's bundled Node is **not** a `node` executable on PATH, so a
+> standalone **Node.js ≥ 18** installation is required on the developer machine.
+
 ```bash
-npm run build          # TypeScript + esbuild renderer + Tailwind CSS
-npm run start          # Full build + Electron launch
-npm run prepare:plugins  # Build all 3 plugins in parallel
+bun install            # Install deps (runs electron-rebuild + fetch-uv postinstall)
+bun run build          # TypeScript + esbuild renderer + Tailwind CSS
+bun run start          # prepare:plugins + build + Electron launch (Electron runs on Node)
+bun run prepare:plugins  # Build all 4 bundled plugins (pageindex/meeting/email/calendar)
+bunx vitest run        # Run tests
 ```
+
+Legacy npm scripts are retained as fallbacks: `start:npm`, `build:npm`,
+`prepare:plugins:npm`, `test:meeting-flow:npm`, `test:main-flow:npm`. Use them
+only if a bun-specific issue surfaces.
 
 ## TODO Tracking
 
