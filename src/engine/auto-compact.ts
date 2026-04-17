@@ -257,10 +257,11 @@ export function shouldCompact(
  */
 export function compactMessages(
   messages: GenericMessage[],
-  config: CompactConfig = DEFAULT_CONFIG,
+  config?: CompactConfig,
   trigger?: "auto" | "reactive",
 ): { messages: GenericMessage[]; result: CompactResult } {
-  if (messages.length <= config.preserveRecentMessages) {
+  const cfg = config ?? DEFAULT_CONFIG;
+  if (messages.length <= cfg.preserveRecentMessages) {
     return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
   }
 
@@ -275,7 +276,7 @@ export function compactMessages(
   }
 
   // 보존할 메시지 경계 찾기 (marker 이후 구간에서만 요약)
-  const idealBoundary = messages.length - config.preserveRecentMessages;
+  const idealBoundary = messages.length - cfg.preserveRecentMessages;
   const preserveFrom = findSafeBoundary(messages, idealBoundary);
   // 요약 대상은 marker(+ack) 다음부터 preserveFrom까지.
   // compactMessages는 marker 뒤에 ACK assistant 메시지를 붙이므로 그 경우 한 칸 더 skip.
@@ -294,7 +295,7 @@ export function compactMessages(
   }
 
   // 요약 생성
-  const summary = generateSummary(toCompact, config.summaryBudgetTokens);
+  const summary = generateSummary(toCompact, cfg.summaryBudgetTokens);
   const freedTokens = estimateMessagesTokens(toCompact) - estimateTokens(summary);
 
   // carryover 추출: 요약 대상 메시지에서 목표·산출물·결정사항을 추출
