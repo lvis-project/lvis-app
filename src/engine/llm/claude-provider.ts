@@ -25,20 +25,26 @@ export class ClaudeProvider implements LLMProvider {
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
     const messages = toAnthropicMessages(params.messages);
     const tools = params.tools?.map(toAnthropicTool);
+    const useThinking = params.enableThinking === true;
+    const thinkingBudget = params.thinkingBudgetTokens ?? 10_000;
 
     try {
-      const thinkingEnabled = params.thinking?.enabled === true;
+      // When extended thinking is enabled, max_tokens must exceed the thinking
+      // budget.  We reserve thinkingBudget tokens for reasoning and add 4 096
+      // (the default non-thinking ceiling) as a minimum headroom for visible
+      // output, matching Anthropic's documentation recommendation.
+      const maxTokens = useThinking
+        ? Math.max(params.maxTokens ?? 4096, thinkingBudget + 4096)
+        : (params.maxTokens ?? 4096);
+
       const stream = this.client.messages.stream({
         model: params.model,
-        max_tokens: params.maxTokens ?? 4096,
+        max_tokens: maxTokens,
         system: params.systemPrompt,
         messages,
         ...(tools && tools.length > 0 && { tools }),
-        ...(thinkingEnabled && {
-          thinking: {
-            type: "enabled" as const,
-            budget_tokens: params.thinking?.budgetTokens ?? 10_000,
-          },
+        ...(useThinking && {
+          thinking: { type: "enabled", budget_tokens: thinkingBudget },
         }),
       });
 
@@ -54,7 +60,7 @@ export class ClaudeProvider implements LLMProvider {
           if (event.delta.type === "text_delta") {
             yield { type: "text_delta", text: event.delta.text };
           } else if (event.delta.type === "thinking_delta") {
-            yield { type: "reasoning_delta", text: (event.delta as unknown as { thinking: string }).thinking };
+            yield { type: "reasoning_delta", text: event.delta.thinking };
           }
         }
       }

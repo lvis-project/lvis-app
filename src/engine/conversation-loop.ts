@@ -318,7 +318,8 @@ ${briefingData}
     systemPrompt: string,
     callbacks?: TurnCallbacks,
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage }> {
-    const model = this.deps.settingsService.get("llm").model;
+    const llmSettings = this.deps.settingsService.get("llm");
+    const model = llmSettings.model;
     const toolSchemas: ToolSchema[] = this.deps.toolRegistry.getToolSchemas().map((s) => ({
       name: s.name,
       description: s.description,
@@ -366,12 +367,8 @@ ${briefingData}
           messages,
           tools: toolSchemas.length > 0 ? toolSchemas : undefined,
           maxTokens: 4096,
-          ...(llmSettings.enableThinking && {
-            thinking: {
-              enabled: true,
-              budgetTokens: llmSettings.thinkingBudgetTokens ?? 10_000,
-            },
-          }),
+          enableThinking: llmSettings.enableThinking,
+          thinkingBudgetTokens: llmSettings.thinkingBudgetTokens,
         })) {
           switch (event.type) {
             case "reasoning_delta":
