@@ -47,7 +47,7 @@ describe("microcompactMessages", () => {
 
     expect(result.stripped).toBe(true);
     expect(result.strippedCount).toBe(6); // 10 - 4
-    expect(result.freedBytes).toBeGreaterThan(0);
+    expect(result.freedChars).toBeGreaterThan(0);
 
     const toolResults = out.filter((m) => m.role === "tool_result");
     expect(toolResults).toHaveLength(10);

@@ -332,6 +332,9 @@ ${briefingData}
     // turn당 knowledge 도구 호출 횟수 카운터 (depth ≤ 3 hard cap)
     let knowledgeCallCount = 0;
     let roundIndex = 0;
+    // Reactive compact recovery: context-length 오류 발생 시 1회 compact 후 재시도
+    // turn당 1회만 허용 — for 루프 밖에 선언
+    let reactiveCompacted = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       // §4.5.3: 벤더 추상화 스트리밍
@@ -340,8 +343,6 @@ ${briefingData}
       const pendingToolCalls: ToolCallBlock[] = [];
       let stopReason: "end_turn" | "tool_use" = "end_turn";
 
-      // Reactive compact recovery: context-length 오류 발생 시 1회 compact 후 재시도
-      let reactiveRetried = false;
       const collectStream = async (messages: ReturnType<typeof this.history.getMessages>) => {
         textContent = "";
         thoughtContent = "";
@@ -376,6 +377,10 @@ ${briefingData}
               }
               break;
             case "error":
+              // context-length 오류를 stream event로 수신한 경우 → compact + retry
+              if (isContextLengthError(event.error) && !reactiveCompacted) {
+                return { earlyReturn: false as const, streamContextError: event.error };
+              }
               callbacks?.onError?.(event.error);
               this.history.append({ role: "assistant", content: `오류: ${event.error}` });
               return { earlyReturn: true as const, text: `오류: ${event.error}` };
@@ -389,19 +394,30 @@ ${briefingData}
         throw err;
       });
 
-      // context-length 오류 → compact 후 1회 재시도
-      if (!streamResult.earlyReturn && (streamResult as { contextError?: unknown }).contextError && !reactiveRetried) {
-        reactiveRetried = true;
-        const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
-        if (cr.compacted) {
-          this.history.clear();
-          this.history.restore(compacted);
-          console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+      // context-length 오류 → compact 후 1회 재시도 (throw 경로 또는 stream event 경로)
+      const throwCtxError = !streamResult.earlyReturn && (streamResult as { contextError?: unknown }).contextError;
+      const streamCtxError = !streamResult.earlyReturn && (streamResult as { streamContextError?: string }).streamContextError;
+      if ((throwCtxError || streamCtxError) && !reactiveCompacted) {
+        reactiveCompacted = true;
+        let compacted = false;
+        try {
+          const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages(), undefined, "reactive");
+          if (cr.compacted) {
+            compacted = true;
+            this.history.clear();
+            this.history.restore(compactedMsgs);
+            console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+          }
+        } catch (compactErr) {
+          console.warn("[lvis] reactive-compact: compactMessages threw, skipping retry:", compactErr);
         }
-        streamResult = await collectStream(this.history.getMessages()).catch((err: unknown) => {
-          // 재시도도 실패하면 그대로 전파
-          throw err;
-        });
+        if (compacted) {
+          streamResult = await collectStream(this.history.getMessages());
+        } else {
+          // compact가 아무것도 하지 않았으면 재시도해도 의미 없음 — 원래 오류 재전파
+          if (throwCtxError) throw (streamResult as { contextError?: unknown }).contextError;
+          throw new Error((streamResult as { streamContextError?: string }).streamContextError);
+        }
       }
 
       if (streamResult.earlyReturn) {

@@ -4,7 +4,7 @@
  * Verifies that the conversation loop catches context-length errors from providers,
  * compacts history, retries once, and does NOT retry on other error types.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { isContextLengthError } from "../auto-compact.js";
 import { ConversationLoop } from "../conversation-loop.js";
@@ -68,6 +68,29 @@ class AlwaysThrowProvider implements LLMProvider {
   async *streamTurn(): AsyncIterable<StreamEvent> {
     this.callCount++;
     throw this.throwError;
+  }
+
+  getCallCount(): number { return this.callCount; }
+}
+
+/** Provider that emits error stream event on first call, succeeds on second */
+class ErrorEventThenSucceedProvider implements LLMProvider {
+  readonly vendor = "openai" as const;
+  private callCount = 0;
+
+  constructor(
+    private readonly errorMsg: string,
+    private readonly successEvents: StreamEvent[],
+  ) {}
+
+  async *streamTurn(): AsyncIterable<StreamEvent> {
+    if (this.callCount === 0) {
+      this.callCount++;
+      yield { type: "error", error: this.errorMsg };
+      return;
+    }
+    this.callCount++;
+    yield* this.successEvents;
   }
 
   getCallCount(): number { return this.callCount; }
@@ -170,10 +193,6 @@ describe("ConversationLoop reactive compact recovery", () => {
   });
 
   it("propagates error if retry also fails (no infinite loop)", async () => {
-    const contextError = Object.assign(
-      new Error("prompt is too long after compaction too"),
-      {},
-    );
     // Make the message match isContextLengthError
     const ctxErr = new Error("prompt is too long even after compact");
     const provider = new AlwaysThrowProvider(ctxErr);
@@ -187,6 +206,24 @@ describe("ConversationLoop reactive compact recovery", () => {
 
     await expect(loop.runTurn("질문", {})).rejects.toThrow("prompt is too long");
     // First call throws → compact → second call throws → propagate (total 2 calls)
+    expect(provider.getCallCount()).toBe(2);
+  });
+
+  it("retries once after context-length stream error event and succeeds", async () => {
+    const provider = new ErrorEventThenSucceedProvider(
+      "This model's maximum context length is 128000 tokens",
+      successEvents,
+    );
+    const loop = makeLoop(provider);
+
+    const history = loop.getHistory();
+    for (let i = 0; i < 10; i++) {
+      history.append({ role: "user", content: `메시지 ${i}` });
+      history.append({ role: "assistant", content: `응답 ${i}` });
+    }
+
+    const result = await loop.runTurn("새 질문", {});
+    expect(result.text).toBe("재시도 성공");
     expect(provider.getCallCount()).toBe(2);
   });
 

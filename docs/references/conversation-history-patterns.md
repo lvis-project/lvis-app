@@ -47,7 +47,7 @@ LVIS currently implements only Stage 2. This reference set motivated the Stage 1
 | Concept | LVIS location |
 |---|---|
 | In-memory message array | `src/engine/conversation-history.ts:13` — `private messages: GenericMessage[]` |
-| Full re-transmit per turn | `ConversationHistory.getAll()` called by `conversation-loop.ts` |
+| Full re-transmit per turn | `ConversationHistory.getMessages()` called by `conversation-loop.ts` |
 | Threshold check | `src/engine/auto-compact.ts` — `shouldCompact()` (80% default) |
 | Full compact (Stage 2) | `src/engine/auto-compact.ts` — `compactMessages()` |
 | Microcompact (Stage 1) | `src/engine/auto-compact.ts` — `microcompactMessages()` (added in this PR) |
@@ -55,10 +55,14 @@ LVIS currently implements only Stage 2. This reference set motivated the Stage 1
 | Post-turn orchestration | `src/hooks/post-turn-hook-chain.ts` Step 1a/1b |
 | Per-vendor context window | `src/engine/auto-compact.ts` — `MODEL_CONTEXT_WINDOWS` registry |
 
+## Shipped
+
+- **Reactive recovery**: `conversation-loop.ts` catches both thrown errors and `{type:"error"}` stream events from providers, runs `compactMessages(..., "reactive")`, and retries once per turn. Implemented in PR #30.
+- **Carryover metadata**: `extractCarryover()` in `auto-compact.ts` captures goals/artifacts/decisions into `MessageMeta.carryover` on each compact boundary. `ConversationCarryover` exported from `src/engine/llm/types.ts`. Implemented in PR #31.
+
 ## Deferred (future PRs)
 
-- **Reactive recovery**: catch vendor-specific `prompt_too_long` errors, compact + retry. Needs provider-level hook in `llm/*-provider.ts`.
-- **Carryover metadata**: preserve goals/artifacts (capped lists) across boundaries. Needs new `ConversationContext` abstraction.
+- **Provider-level error shaping**: vendors currently emit context-length errors as both throws and stream `{type:"error"}` events inconsistently. Normalizing this at the provider layer (`llm/*-provider.ts`) would simplify the recovery path.
 - **External memory provider** (paperclip-style): separate §5 memory work, not compact-related.
 
 ## Provenance

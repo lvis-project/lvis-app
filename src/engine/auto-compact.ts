@@ -258,6 +258,7 @@ export function shouldCompact(
 export function compactMessages(
   messages: GenericMessage[],
   config: CompactConfig = DEFAULT_CONFIG,
+  trigger?: "auto" | "reactive",
 ): { messages: GenericMessage[]; result: CompactResult } {
   if (messages.length <= config.preserveRecentMessages) {
     return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
@@ -324,6 +325,7 @@ export function compactMessages(
       removedMessages: toCompact.length,
       summary,
       freedTokens: Math.max(0, freedTokens),
+      ...(trigger !== undefined && { trigger }),
     },
   };
 }
@@ -341,7 +343,7 @@ export interface MicrocompactResult {
   /** strip된 tool_result 개수 */
   strippedCount: number;
   /** 확보된 총 바이트 수 (문자열 길이 기준) */
-  freedBytes: number;
+  freedChars: number;
 }
 
 const DEFAULT_MICROCOMPACT_CONFIG: MicrocompactConfig = {
@@ -372,7 +374,7 @@ export function microcompactMessages(
   if (toolResultIndices.length <= preserveCount) {
     return {
       messages,
-      result: { stripped: false, strippedCount: 0, freedBytes: 0 },
+      result: { stripped: false, strippedCount: 0, freedChars: 0 },
     };
   }
 
@@ -382,13 +384,13 @@ export function microcompactMessages(
   if (stripCandidates.every((i) => (messages[i] as { meta?: { stripped?: boolean } }).meta?.stripped === true)) {
     return {
       messages,
-      result: { stripped: false, strippedCount: 0, freedBytes: 0 },
+      result: { stripped: false, strippedCount: 0, freedChars: 0 },
     };
   }
   const stripCandidateIdxSet = new Set(stripCandidates);
 
   let strippedCount = 0;
-  let freedBytes = 0;
+  let freedChars = 0;
   const nowIso = new Date().toISOString();
 
   const out = messages.map((msg, i) => {
@@ -398,7 +400,7 @@ export function microcompactMessages(
 
     const origLen = msg.content.length;
     const stub = `[tool_result stripped: tool=${msg.toolName ?? "?"}, origLen=${origLen}]`;
-    freedBytes += Math.max(0, origLen - stub.length);
+    freedChars += Math.max(0, origLen - stub.length);
     strippedCount += 1;
 
     return {
@@ -421,7 +423,7 @@ export function microcompactMessages(
     result: {
       stripped: strippedCount > 0,
       strippedCount,
-      freedBytes,
+      freedChars,
     },
   };
 }
@@ -440,15 +442,32 @@ export function microcompactMessages(
  * 오류 객체 형태가 벤더마다 다르므로 duck-typing으로 처리.
  */
 export function isContextLengthError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message.toLowerCase();
+  let rawMsg: string;
+  if (err instanceof Error) {
+    rawMsg = err.message;
+  } else if (typeof err === "string") {
+    rawMsg = err;
+  } else if (err !== null && typeof err === "object") {
+    // {message: string} or {error: string} (StreamEvent-style)
+    const asObj = err as Record<string, unknown>;
+    rawMsg = typeof asObj["message"] === "string"
+      ? asObj["message"]
+      : typeof asObj["error"] === "string"
+        ? asObj["error"]
+        : "";
+  } else {
+    return false;
+  }
+
+  const msg = rawMsg.toLowerCase();
+  // code field (Error instances only)
+  if (err instanceof Error) {
+    const code = (err as { code?: string }).code;
+    if (code === "context_length_exceeded") return true;
+  }
 
   // Anthropic: "prompt is too long" (status 400, type invalid_request_error)
   if (msg.includes("prompt is too long")) return true;
-
-  // OpenAI / Copilot: error.code field
-  const code = (err as { code?: string }).code;
-  if (code === "context_length_exceeded") return true;
 
   // OpenAI fallback message
   if (msg.includes("maximum context length")) return true;
