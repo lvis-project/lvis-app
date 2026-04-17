@@ -183,6 +183,30 @@ ${briefingData}
     return text.trim() || null;
   }
 
+  /**
+   * 플러그인 callLlm용 범용 텍스트 생성.
+   * 독립적인 단발 LLM 호출 — 대화 히스토리와 무관.
+   */
+  async generateText(
+    prompt: string,
+    maxTokens = 400,
+    systemPrompt = "당신은 LVIS, 사용자의 AI 비서입니다.",
+  ): Promise<string> {
+    if (!this.provider) throw new Error("LLM provider not configured");
+    let text = "";
+    for await (const ev of this.provider.streamTurn({
+      systemPrompt,
+      messages: [{ role: "user", content: prompt }],
+      tools: [],
+      model: this.deps.settingsService.get("llm").model,
+      maxTokens,
+    })) {
+      if (ev.type === "text_delta" && ev.text) text += ev.text;
+      if (ev.type === "message_complete") break;
+    }
+    return text.trim();
+  }
+
   /** 현재 벤더 이름 */
   getVendor(): string {
     return this.provider?.vendor ?? "none";

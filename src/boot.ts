@@ -159,6 +159,12 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     userInstalledDir: resolve(projectRoot, "plugins/installed"),
   });
 
+  // LLM 호출 레퍼런스 — ConversationLoop 생성 후 주입됨
+  // 플러그인 callLlm()이 이 ref를 통해 LLM에 접근
+  const llmCallerRef: {
+    fn: ((prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string>) | null;
+  } = { fn: null };
+
   const pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
     registryPath: resolve(projectRoot, "plugins/registry.json"),
@@ -202,6 +208,10 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       isMsGraphAuthenticated: () => msGraphService.isAuthenticated(),
       getMsGraphAccount: () => msGraphService.getAccountName(),
       onMsGraphAuthChange: (handler) => msGraphService.onAuthChange(handler),
+      callLlm: async (prompt, opts) => {
+        if (!llmCallerRef.fn) throw new Error("LLM provider not ready");
+        return llmCallerRef.fn(prompt, opts);
+      },
     }),
   });
 
@@ -465,6 +475,30 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     hookRunner,
   });
 
+  // LLM ref 주입 — 이 시점부터 플러그인 callLlm() 사용 가능
+  llmCallerRef.fn = (prompt, opts) =>
+    conversationLoop.generateText(prompt, opts?.maxTokens, opts?.systemPrompt);
+  console.log("[lvis] boot: plugin callLlm ready");
+
+  // Feature 1: 미팅 브리핑 네이티브 알림
+  registerCalendarBriefingNotifications(pluginRuntime, mainWindow);
+
+  // Feature 4: 월요일 주간 일정 캐시 로드 (브리핑에 주간 컨텍스트 포함)
+  const isMonday = new Date().getDay() === 1;
+  const calendarListMethod = findMethodByCapability(
+    pluginRuntime, "calendar-source", (m) => m.endsWith("_list"),
+  );
+  if (isMonday && calendarListMethod) {
+    pluginRuntime.call(calendarListMethod, { days: 7 })
+      .then((events: unknown) => {
+        if (Array.isArray(events)) {
+          proactiveEngine.updateCalendarEvents(events as import("./core/proactive-engine.js").CachedCalendarEvent[]);
+          console.log(`[lvis] boot: weekly calendar loaded (${events.length}건, 월요일 모드)`);
+        }
+      })
+      .catch((e: Error) => console.log("[lvis] boot: weekly calendar load failed (non-fatal):", e.message));
+  }
+
   // §9.5: MCP Server 연결 (거버넌스 승인 서버만)
   const mcpGovernance = new McpGovernance();
   const mcpManager = new McpManager(mcpGovernance, toolRegistry);
@@ -630,6 +664,41 @@ function registerMailSourceNotifications(
       notif.show();
     });
   }
+}
+
+function registerCalendarBriefingNotifications(
+  pluginRuntime: PluginRuntime,
+  mainWindow: BrowserWindow,
+): void {
+  // calendar-source 플러그인의 prebriefing 이벤트만 알림
+  const calendarPluginId = pluginRuntime.findPluginIdByCapability("calendar-source");
+  if (!calendarPluginId) return;
+
+  onEvent("calendar.prebriefing.ready", (data) => {
+    const d = data as { event?: { subject?: string }; briefing?: string; minutesUntilStart?: number };
+    const { Notification } = require("electron") as typeof import("electron");
+    if (!Notification.isSupported()) return;
+    const notif = new Notification({
+      title: `📅 ${d.event?.subject ?? "미팅"} — ${d.minutesUntilStart ?? 15}분 후`,
+      body: d.briefing ?? "(브리핑 없음)",
+      silent: false,
+    });
+    notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
+    notif.show();
+  });
+
+  onEvent("calendar.from_email.suggested", (data) => {
+    const d = data as { emailSubject?: string; sender?: string; rawText?: string };
+    const { Notification } = require("electron") as typeof import("electron");
+    if (!Notification.isSupported()) return;
+    const notif = new Notification({
+      title: "📅 이메일에서 미팅 요청 감지",
+      body: `${d.sender ? `${d.sender} — ` : ""}${d.emailSubject ?? ""}${d.rawText ? `\n${d.rawText.slice(0, 80)}` : ""}`,
+      silent: false,
+    });
+    notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
+    notif.show();
+  });
 }
 
 function findMethodByCapability(

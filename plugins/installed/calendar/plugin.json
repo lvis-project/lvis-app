@@ -16,7 +16,8 @@
     "calendar_delete",
     "calendar_start_watcher",
     "calendar_stop_watcher",
-    "calendar_open_url"
+    "calendar_open_url",
+    "calendar_detect_patterns"
   ],
   "capabilities": [
     "calendar-source",
@@ -26,7 +27,11 @@
     "calendar_start_watcher"
   ],
   "eventSubscriptions": [
-    "meeting.ended"
+    "meeting.ended",
+    "calendar.event.upcoming",
+    "calendar.prebriefing.ready",
+    "calendar.from_email.suggested",
+    "calendar.pattern.detected"
   ],
   "config": {},
   "ui": [
