@@ -25,7 +25,7 @@ export interface PluginIpcBinding {
 
 // ─── Plugin Tool Schema (§9 v1.2) ──────────────────────────────────────────
 
-export type ToolExecutionType = "command" | "subagent" | "background";
+export type ToolExecutionType = "command" | "subagent";
 
 export type PluginIsolationMode = "inline" | "worker" | "process";
 
@@ -81,24 +81,27 @@ export interface PluginSubagentSpec {
   historyPolicy?: "none" | "summary" | "full";
   /** Max chars for historyPolicy="summary" (default 2000) */
   summaryCutoff?: number;
+  /**
+   * When true, the LLM may pass `runInBackground: true` in the tool input
+   * to spawn without awaiting completion (returns taskId immediately).
+   * Mirrors Claude Code Agent tool's run_in_background parameter pattern.
+   * P2 implementation: SubagentRunner honors this flag.
+   */
+  allowBackground?: boolean;
 }
 
-export interface PluginBackgroundSpec {
-  /** Field name for the immediately-returned job ID (default "jobId") */
-  jobIdField?: string;
-  /** Event name emitted with progress updates */
-  progressEvent?: string;
-  /** Event name emitted on completion */
-  completionEvent?: string;
-  /** Tool name to call for cancellation */
-  cancelMethod?: string;
-  /**
-   * Cron expression for scheduled execution (host manages the scheduler).
-   * Example: "0 *\/6 * * *" (every 6 hours).
-   * Ref: OpenHarness CronCreate pattern.
-   */
-  schedule?: string;
-  /** Max simultaneous background instances (default 1, prevents schedule overlap) */
+/**
+ * Cron-based scheduled method invocation declared at manifest level.
+ * Scheduling is a host-managed concern, separate from tool execution type.
+ * Ref: OpenHarness CronCreate pattern.
+ */
+export interface PluginScheduleSpec {
+  /** Plugin method name to invoke on schedule */
+  method: string;
+  /** Cron expression (e.g. "0 *\/6 * * *" = every 6 hours) */
+  cron: string;
+  description?: string;
+  /** Max simultaneous instances (default 1, prevents overlap) */
   maxConcurrent?: number;
 }
 
@@ -137,8 +140,6 @@ export interface PluginToolDefinition {
   // ── Execution-type-specific specs ─────────────────────────────────────────
   /** Required when executionType="subagent" */
   subagent?: PluginSubagentSpec;
-  /** Required when executionType="background" */
-  background?: PluginBackgroundSpec;
 
   // ── Isolation override ────────────────────────────────────────────────────
   /** Per-tool isolation override (takes precedence over manifest isolationMode) */
@@ -155,6 +156,11 @@ export interface SpawnSubagentRequest {
   historyPolicy?: "none" | "summary" | "full";
   summaryCutoff?: number;
   parentRequestId?: string;
+  /**
+   * When true, SubagentRunner spawns without awaiting completion and returns
+   * a taskId immediately. Mirrors Claude Code Agent.run_in_background pattern.
+   */
+  runInBackground?: boolean;
 }
 
 export interface SpawnSubagentResult {
@@ -210,6 +216,12 @@ export interface PluginManifest {
    * to the generic {payload: object} schema.
    */
   tools?: PluginToolDefinition[];
+
+  /**
+   * Host-managed cron schedules (separate from tool executionType).
+   * The ProactiveEngine reads this and invokes the named method on schedule.
+   */
+  schedule?: PluginScheduleSpec[];
 
   /**
    * Plugin process isolation mode (default "inline").
@@ -390,6 +402,11 @@ export interface SpawnSubagentRequest {
   historyPolicy?: "none" | "summary" | "full";
   summaryCutoff?: number;
   parentRequestId?: string;
+  /**
+   * When true, SubagentRunner spawns without awaiting completion and returns
+   * a taskId immediately. Mirrors Claude Code Agent.run_in_background pattern.
+   */
+  runInBackground?: boolean;
 }
 
 export interface SpawnSubagentResult {

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://lvis.lge.com/schemas/plugin.schema.json",
   "title": "LVIS Plugin Manifest",
-  "description": "Validates plugin.json manifest files for LVIS plugins (§9 v1.2)",
+  "description": "Validates plugin.json manifest files for LVIS plugins (§9 v1.3)",
   "type": "object",
   "required": ["id", "name", "version", "entry", "methods"],
   "additionalProperties": false,
@@ -49,7 +49,8 @@
             "maxLength": 2048
           },
           "executionType": {
-            "enum": ["command", "subagent", "background"]
+            "enum": ["command", "subagent"],
+            "description": "command: sync IPC call. subagent: host-spawned LLM agent. Background/fire-and-forget is a per-call LLM option (runInBackground in subagent input), not a type."
           },
           "inputSchema": { "type": "object" },
           "outputSchema": { "type": "object" },
@@ -121,25 +122,10 @@
                 "type": "integer",
                 "minimum": 100,
                 "default": 2000
-              }
-            }
-          },
-          "background": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "jobIdField": { "type": "string", "default": "jobId" },
-              "progressEvent": { "type": "string" },
-              "completionEvent": { "type": "string" },
-              "cancelMethod": { "type": "string" },
-              "schedule": {
-                "type": "string",
-                "description": "Cron expression (host-managed scheduling)"
               },
-              "maxConcurrent": {
-                "type": "integer",
-                "minimum": 1,
-                "default": 1
+              "allowBackground": {
+                "type": "boolean",
+                "description": "When true, LLM may pass runInBackground:true in tool input to spawn without awaiting. Mirrors Claude Code Agent.run_in_background pattern."
               }
             }
           }
@@ -151,13 +137,6 @@
               "required": ["executionType"]
             },
             "then": { "required": ["subagent"] }
-          },
-          {
-            "if": {
-              "properties": { "executionType": { "const": "background" } },
-              "required": ["executionType"]
-            },
-            "then": { "required": ["background"] }
           }
         ]
       }
@@ -214,6 +193,21 @@
           "channel": { "type": "string" },
           "method": { "type": "string" },
           "args": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "schedule": {
+      "type": "array",
+      "description": "Host-managed cron schedules (separate from tool executionType). ProactiveEngine invokes methods on schedule.",
+      "items": {
+        "type": "object",
+        "required": ["method", "cron"],
+        "additionalProperties": false,
+        "properties": {
+          "method": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
+          "cron": { "type": "string", "description": "Cron expression (e.g. '0 */6 * * *')" },
+          "description": { "type": "string" },
+          "maxConcurrent": { "type": "integer", "minimum": 1, "default": 1 }
         }
       }
     },

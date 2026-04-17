@@ -2,7 +2,10 @@
  * Plugin Tool Adapter — bridges plugin manifest `tools[]` declarations into
  * the canonical {@link Tool} contract used by the §6.4 ToolRegistry.
  *
- * v1.2: dispatches by `executionType` ("command" | "subagent" | "background").
+ * v1.3: dispatches by `executionType` ("command" | "subagent").
+ * "background" was removed — fire-and-forget is an LLM-chosen per-call option
+ * (runInBackground in subagent input schema), not a static manifest type.
+ * Scheduled execution uses PluginManifest.schedule[] (separate concern).
  * Legacy `methods[]`-only plugins fall back to the generic payload schema.
  *
  * Ref: LVIS Plugin Tool Schema Design §5 (docs/references/plugin-tool-schema-design.md)
@@ -38,18 +41,11 @@ function synthesizeDescription(def: PluginToolDefinition): string {
     parts.push(`\nExamples:\n${exLines}`);
   }
 
-  if (def.executionType === "background") {
-    const bg = def.background;
-    const progress = bg?.progressEvent ? `${bg.progressEvent} 이벤트로 진행 상황 수신` : "진행 이벤트로 수신";
-    const done = bg?.completionEvent ? `${bg.completionEvent} 이벤트로 완료 확인` : "완료 이벤트로 확인";
-    parts.push(`\n[비동기 실행 — ${progress}, ${done}. 결과를 직접 기다리지 마세요.]`);
-    if (bg?.schedule) {
-      parts.push(`[스케줄: ${bg.schedule}]`);
-    }
-  }
-
   if (def.executionType === "subagent") {
-    parts.push(`\n[내부 LLM 서브에이전트를 사용합니다. 완료까지 여러 턴이 소요될 수 있습니다.]`);
+    const bg = def.subagent?.allowBackground
+      ? " runInBackground:true를 전달하면 즉시 taskId를 반환하고 백그라운드에서 실행합니다."
+      : "";
+    parts.push(`\n[내부 LLM 서브에이전트를 사용합니다. 완료까지 여러 턴이 소요될 수 있습니다.${bg}]`);
   }
 
   return parts.join("");
@@ -114,6 +110,20 @@ function buildCommandTool(
   });
 }
 
+function buildSubagentInputSchema(def: PluginToolDefinition): object {
+  const base = resolveInputSchema(def);
+  if (!def.subagent?.allowBackground) return base;
+  // Inject runInBackground into properties so the LLM can choose per call.
+  // Mirrors Claude Code Agent tool's run_in_background parameter pattern.
+  const baseObj = base as Record<string, unknown>;
+  const props = { ...((baseObj.properties as Record<string, unknown>) ?? {}) };
+  props.runInBackground = {
+    type: "boolean",
+    description: "true로 설정하면 서브에이전트를 백그라운드에서 실행하고 taskId를 즉시 반환합니다.",
+  };
+  return { ...baseObj, properties: props };
+}
+
 function buildSubagentTool(
   pluginRuntime: PluginRuntime,
   def: PluginToolDefinition,
@@ -124,11 +134,11 @@ function buildSubagentTool(
     description: synthesizeDescription(def),
     source: "plugin",
     pluginId,
-    jsonSchema: resolveInputSchema(def),
+    jsonSchema: buildSubagentInputSchema(def),
     isReadOnly: () => resolveReadOnly(def.annotations),
     execute: async (rawInput) => {
       const args = (rawInput ?? {}) as Record<string, unknown>;
-      // P2: hostApi.spawnSubagent() will be wired here.
+      // P2: SubagentRunner wired here. runInBackground flag forwarded to SpawnSubagentRequest.
       // For now, fall through to pluginRuntime.call() which delegates to plugin handler.
       try {
         const result = await pluginRuntime.call(def.name, args);
@@ -136,40 +146,6 @@ function buildSubagentTool(
           output: typeof result === "string" ? result : JSON.stringify(result, null, 2),
           isError: false,
         };
-      } catch (err) {
-        return {
-          output: err instanceof Error ? err.message : String(err),
-          isError: true,
-        };
-      }
-    },
-  });
-}
-
-function buildBackgroundTool(
-  pluginRuntime: PluginRuntime,
-  def: PluginToolDefinition,
-  pluginId: string,
-): Tool {
-  const jobIdField = def.background?.jobIdField ?? "jobId";
-  return createDynamicTool({
-    name: def.name,
-    description: synthesizeDescription(def),
-    source: "plugin",
-    pluginId,
-    jsonSchema: resolveInputSchema(def),
-    isReadOnly: () => false,
-    execute: async (rawInput) => {
-      const args = (rawInput ?? {}) as Record<string, unknown>;
-      try {
-        const result = await pluginRuntime.call(def.name, args);
-        const output = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-        // Confirm jobId returned for LLM awareness
-        if (result && typeof result === "object" && jobIdField in (result as Record<string, unknown>)) {
-          const jobId = (result as Record<string, unknown>)[jobIdField];
-          return { output: `${output}\n[jobId=${jobId} — 비동기 작업 시작됨]`, isError: false };
-        }
-        return { output, isError: false };
       } catch (err) {
         return {
           output: err instanceof Error ? err.message : String(err),
@@ -255,9 +231,6 @@ export function pluginToolsForRegistration(
     switch (def.executionType) {
       case "subagent":
         tool = buildSubagentTool(pluginRuntime, def, pluginId);
-        break;
-      case "background":
-        tool = buildBackgroundTool(pluginRuntime, def, pluginId);
         break;
       case "command":
       default:
