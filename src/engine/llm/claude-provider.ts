@@ -1,8 +1,12 @@
 /**
  * Claude Provider — Anthropic Claude API
  *
- * GenericMessage → Anthropic MessageParam 변환
- * tool_use content blocks → ToolCallBlock 변환
+ * Handles extended thinking with tool use correctly:
+ *   1. `interleaved-thinking-2025-05-14` beta header so the model can reason
+ *      between tool rounds within a single turn (not just at the first round).
+ *   2. Captures `thinking` blocks with their signatures from the stream so the
+ *      next request can echo them verbatim — Anthropic rejects thinking blocks
+ *      whose signature is missing or altered while a tool_use chain is open.
  */
 import Anthropic from "@anthropic-ai/sdk";
 import type {
@@ -10,9 +14,12 @@ import type {
   LLMProvider,
   StreamEvent,
   StreamTurnParams,
+  ThinkingBlock,
   ToolCallBlock,
   ToolSchema,
 } from "./types.js";
+
+const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 
 export class ClaudeProvider implements LLMProvider {
   readonly vendor = "claude" as const;
@@ -37,21 +44,21 @@ export class ClaudeProvider implements LLMProvider {
         ? Math.max(params.maxTokens ?? 4096, thinkingBudget + 4096)
         : (params.maxTokens ?? 4096);
 
-      const stream = this.client.messages.stream({
-        model: params.model,
-        max_tokens: maxTokens,
-        system: params.systemPrompt,
-        messages,
-        ...(tools && tools.length > 0 && { tools }),
-        ...(useThinking && {
-          thinking: { type: "enabled", budget_tokens: thinkingBudget },
-        }),
-      });
-
-      // 토큰 단위 증분 스트리밍
-      stream.on("text", (text) => {
-        // handled via event iteration below
-      });
+      const stream = this.client.messages.stream(
+        {
+          model: params.model,
+          max_tokens: maxTokens,
+          system: params.systemPrompt,
+          messages,
+          ...(tools && tools.length > 0 && { tools }),
+          ...(useThinking && {
+            thinking: { type: "enabled", budget_tokens: thinkingBudget },
+          }),
+        },
+        useThinking && tools && tools.length > 0
+          ? { headers: { "anthropic-beta": INTERLEAVED_THINKING_BETA } }
+          : undefined,
+      );
 
       const toolCalls: ToolCallBlock[] = [];
 
@@ -65,11 +72,21 @@ export class ClaudeProvider implements LLMProvider {
         }
       }
 
-      // 스트리밍 완료 — 전체 응답에서 tool_use 추출
+      // 스트리밍 완료 — 전체 응답에서 thinking + tool_use 추출
       const final = await stream.finalMessage();
 
+      const thinkingBlocks: ThinkingBlock[] = [];
       for (const block of final.content) {
-        if (block.type === "tool_use") {
+        if (block.type === "thinking") {
+          const signature = (block as unknown as { signature?: string }).signature;
+          if (typeof signature !== "string" || signature.length === 0) {
+            throw new Error("Claude 응답의 thinking 블록에 유효한 signature가 없습니다.");
+          }
+          thinkingBlocks.push({
+            thinking: block.thinking,
+            signature,
+          });
+        } else if (block.type === "tool_use") {
           const tc: ToolCallBlock = {
             id: block.id,
             name: block.name,
@@ -83,6 +100,7 @@ export class ClaudeProvider implements LLMProvider {
       yield {
         type: "message_complete",
         stopReason: final.stop_reason === "tool_use" ? "tool_use" : "end_turn",
+        ...(thinkingBlocks.length > 0 && { thinkingBlocks }),
         usage: {
           inputTokens: final.usage.input_tokens,
           outputTokens: final.usage.output_tokens,
@@ -111,6 +129,18 @@ function toAnthropicMessages(messages: GenericMessage[]): Anthropic.MessageParam
       result.push({ role: "user", content: msg.content });
     } else if (msg.role === "assistant") {
       const content: Anthropic.ContentBlockParam[] = [];
+      // Thinking blocks must come first and carry their original signatures —
+      // Anthropic rejects any mismatched or missing signature on a subsequent
+      // turn while a tool_use chain is still open.
+      if (msg.thinkingBlocks) {
+        for (const tb of msg.thinkingBlocks) {
+          content.push({
+            type: "thinking",
+            thinking: tb.thinking,
+            signature: tb.signature,
+          } as Anthropic.ContentBlockParam);
+        }
+      }
       if (msg.content) content.push({ type: "text", text: msg.content });
       if (msg.toolCalls) {
         for (const tc of msg.toolCalls) {
