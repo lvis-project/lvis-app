@@ -1864,7 +1864,7 @@ graph TB
 |------|------|--------------|
 | `command` | 동기 직접 실행 | 없음 |
 | `subagent` | 내부 LLM 루프 생성 | `subagent{}` |
-| `background` | 비동기 — jobId 즉시 반환 | `background{}` |
+| `subagent` (allowBackground) | 서브에이전트 비동기 — LLM이 `runInBackground:true` 전달 시 taskId 즉시 반환 | `subagent{ allowBackground:true }` |
 
 #### 핵심 필드
 
@@ -1878,8 +1878,7 @@ interface PluginToolDefinition {
   outputSchema?: object;     // MCP 2025-06-18 호환
   annotations?: PluginToolAnnotations;  // readOnly/destructive/idempotent/openWorld
   permissions?: CapabilityScope[];  // PermissionManager RPC 강제 (P2)
-  subagent?: PluginSubagentSpec;    // executionType="subagent" 시 필수
-  background?: PluginBackgroundSpec; // executionType="background" 시 필수
+  subagent?: PluginSubagentSpec;    // executionType="subagent" 시 필수 (allowBackground 포함)
   isolationMode?: "inline" | "worker";  // tool 단위 격리 오버라이드
 }
 ```
@@ -1912,7 +1911,8 @@ ipc.emit / ipc.subscribe
 
 `schemas/plugin.schema.json` (draft-07) — 플러그인 로드 시 manifest 검증.
 `subagent` executionType → `subagent{}` 필수 강제 (allOf/if-then).
-`background` executionType → `background{}` 필수 강제.
+`subagent.allowBackground` → LLM이 `runInBackground` 파라미터로 비동기 실행 여부 결정.
+cron 스케줄 → `manifest.schedule[]` 블록으로 선언 (executionType과 무관).
 
 **`python` 섹션 — 런타임 의존 플러그인 명세**
 

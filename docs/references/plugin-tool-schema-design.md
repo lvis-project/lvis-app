@@ -1,15 +1,15 @@
 # Plugin Tool Schema Design — LVIS
 
-**Status:** Draft v1.2  
+**Status:** Draft v1.3  
 **Prepared:** 2026-04-17  
-**Updated:** 2026-04-18 — MCP 버전 정정, openWorldHint 추가, command/background outputSchema 추가, subagent.historyPolicy 추가; 2026-04-18 — ULTRATHINK 레퍼런스 분석 기반 구조 조정 (격리모드, Capability권한, 스케줄실행, 개발방향)  
+**Updated:** 2026-04-18 — MCP 버전 정정, openWorldHint 추가, command/background outputSchema 추가, subagent.historyPolicy 추가; 2026-04-18 — ULTRATHINK 레퍼런스 분석 기반 구조 조정 (격리모드, Capability권한, 스케줄실행, 개발방향); 2026-04-18 — background executionType 제거: fire-and-forget은 subagent.allowBackground + runInBackground 파라미터로, cron은 manifest.schedule[]로 분리  
 **Scope:** Plugin-side tool schema declaration, dynamic loading, execution type routing, sub-agent support
 
 ---
 
 ## TL;DR
 
-현재 `plugin.json`의 `methods: string[]` + 단일 `payload: object` 스키마는 LLM이 파라미터를 추론할 수 없다. 플러그인이 `tools[]` 배열로 per-method 스키마를 직접 선언하도록 개선한다. `executionType` 필드로 동기 명령(`command`), 서브에이전트(`subagent`), 비동기 백그라운드(`background`)를 구분한다. 기존 `methods[]` 기반 플러그인은 그대로 동작(fallback).
+현재 `plugin.json`의 `methods: string[]` + 단일 `payload: object` 스키마는 LLM이 파라미터를 추론할 수 없다. 플러그인이 `tools[]` 배열로 per-method 스키마를 직접 선언하도록 개선한다. `executionType` 필드로 동기 명령(`command`)과 서브에이전트(`subagent`)를 구분한다. fire-and-forget 비동기 실행은 `subagent.allowBackground: true` + LLM이 툴 호출 시 `runInBackground: true` 파라미터를 전달하는 방식으로 처리하며, cron 스케줄 실행은 `PluginManifest.schedule[]` 블록으로 선언한다(툴 executionType과 무관). 기존 `methods[]` 기반 플러그인은 그대로 동작(fallback).
 
 ---
 
@@ -43,7 +43,7 @@
 | `annotations.destructiveHint/readOnlyHint/openWorldHint` | MCP 2025-06-18 | AgentApproval 시스템(§8)과 연동 |
 | `activationEvents` 지연 로드 | VSCode | `keywords[]`/KeywordEngine 트리거 매핑 |
 | `description_for_model` vs `_for_human` | ChatGPT Plugins | `description` vs `uiTitle` 분리 |
-| `return_direct=True` | LangChain | `background.completionEvent` 패턴 |
+| `return_direct=True` | LangChain | `subagent.allowBackground` + `runInBackground` 파라미터 패턴 |
 | 서브에이전트 Handoff + `input_filter` | OpenAI Agents SDK | `executionType: "subagent"` + `historyPolicy` |
 
 ### 1.4 상용 Chat CLI 비교 (2026-04-18 조사)
@@ -54,7 +54,7 @@
 |------|---------------|-------------|-------------------|--------|-------------|--------------------------|---------|
 | **Tool 선언** | `name/title/description/inputSchema/outputSchema/annotations` | 이름 매칭; `mcp__<server>__<tool>` 패턴 | `@function_tool` 데코레이터 자동 추출 or `FunctionTool` 명시 | MCP passthrough (`.cursor/mcp.json`) | `mcpServers` in config.yaml | `plugin.json` (`agents/skills/mcpServers`) | `plugin.json` `tools[]` — MCP 호환 + `executionType` 확장 |
 | **서브에이전트** | ❌ (transport 전용) | `.claude/agents/*.md` + `Agent` tool | `Agent.as_tool()` + `handoff(input_filter)` | ❌ | ❌ | `.github/agents/*.agent.md` | ✅ `executionType:"subagent"` — **유일하게 tool 선언 레벨에서 명시** |
-| **백그라운드/비동기** | ❌ 동기 전용 | `async:true` + `asyncRewake` (hook 레이어) | Python async 네이티브 (schema 없음) | ❌ | ❌ | ❌ | ✅ `executionType:"background"` + jobId/진행/완료/취소 **스키마 내 선언** |
+| **백그라운드/비동기** | ❌ 동기 전용 | `async:true` + `asyncRewake` (hook 레이어) | Python async 네이티브 (schema 없음) | ❌ | ❌ | ❌ | ✅ `subagent.allowBackground:true` + LLM `runInBackground` 파라미터; cron은 `manifest.schedule[]` 블록 |
 | **슬래시 커맨드** | ❌ 스펙 외 | `/hooks` 브라우저 (읽기 전용) | ❌ | ❌ | `prompts[]` (deprecated) | 마켓플레이스 번들 | plugin.json 별도 처리 |
 | **권한/승인** | SHOULD 권고 (primitives 없음) | 풍부: `PreToolUse` allow/deny/ask/defer, rule scoping, mode switching | `needs_approval` + `result.interruptions` | ❌ | 최소 제한 원칙 | hook lifecycle | `annotations` → `PermissionManager` → `AgentApproval` gate |
 | **Output Schema** | ✅ tool 선언 레벨 | N/A | `output_schema` (agent-tool 레벨) | MCP passthrough | MCP passthrough | MCP passthrough | ✅ tool 레벨 `outputSchema` + `subagent.resultSchema` |
@@ -62,8 +62,8 @@
 #### LVIS가 모든 시스템 대비 우위인 부분
 
 1. **`executionType` 선언**: 실행 모드를 tool 메타데이터로 선언. 다른 시스템은 코드/런타임에서 암묵적으로 결정.
-2. **백그라운드 job lifecycle 스키마**: jobId + progressEvent + completionEvent + cancelMethod를 tool 선언 안에 포함. MCP는 동기만, Claude Code asyncRewake는 hook 레이어.
-3. **서브에이전트 선언형 설정**: systemPrompt + allowedTools + resultSchema + historyPolicy를 tool 정의에서 자체 선언. OpenAI SDK는 orchestration 코드에서 처리.
+2. **비동기 실행 선언**: `subagent.allowBackground:true` + LLM이 `runInBackground` 파라미터로 결정. cron 스케줄은 `manifest.schedule[]` 블록으로 분리 선언. MCP는 동기만, Claude Code asyncRewake는 hook 레이어.
+3. **서브에이전트 선언형 설정**: systemPrompt + allowedTools + resultSchema + historyPolicy + allowBackground를 tool 정의에서 자체 선언. OpenAI SDK는 orchestration 코드에서 처리.
 
 #### 다른 시스템 대비 LVIS 갭 (개선 여지)
 
@@ -71,7 +71,7 @@
 |----|-----------|------|
 | `subagent.historyPolicy` 미구현 | OpenAI `input_filter` | v1.1에서 스펙 추가 완료, 구현 필요 |
 | 병렬 서브에이전트 | LangGraph parallel edges | 현재 depth 2 순차만 |
-| 스트리밍 중간 결과 | OpenAI streaming tool output | background progressEvent로 부분 대체 |
+| 스트리밍 중간 결과 | OpenAI streaming tool output | subagent 이벤트 스트림으로 부분 대체 가능 |
 | Permission primitives in schema | Claude Code PreToolUse | annotations → PermissionManager 연동으로 간접 처리 |
 
 ### 1.5 레퍼런스 구현 분석 (claw-code / OpenHarness / Paperclip)
@@ -88,7 +88,7 @@
 | Plugin 로딩 | 플러그인당 tools, skills(markdown), channels, model providers, voice, transcription 등록 — 조합 자유 |
 | SubAgent | `sessions_*`, `subagents`, `agents_list` 툴로 멀티세션 에이전트 위임 |
 | 슬래시 커맨드 | `session_status` 툴 경유 `/status`-style 커맨드; 세션별 모델 오버라이드 |
-| Background | `cron` 툴(스케줄 작업) + `process` 툴(백그라운드 프로세스 라이프사이클) |
+| Background | `cron` 툴(스케줄 작업) + `process` 툴(백그라운드 프로세스 라이프사이클) — LVIS는 `manifest.schedule[]` 블록으로 cron 수용 |
 | Permission | allow/deny 목록; tool profile(`full`, `code-only` 등) |
 
 **LVIS 대비 차별점**: Rust 타입 시스템으로 스키마 검증 — ajv 대신 컴파일 타임 보장. `process` 툴이 백그라운드 프로세스 레벨 제어(LVIS는 이벤트 기반).
@@ -108,7 +108,7 @@
 | Background | `TaskCreate/Get/List/Update/Stop/Output` 라이프사이클; `CronCreate/List/Delete`; RemoteTrigger |
 | Permission | PreToolUse allow/deny/ask/defer; `PermissionRequest`/`PermissionDenied`; mode switching |
 
-**LVIS 대비 차별점**: 슬래시 커맨드 자동완성 TUI가 가장 완성됨. `CronCreate` 스케줄 실행이 LVIS background보다 정교.
+**LVIS 대비 차별점**: 슬래시 커맨드 자동완성 TUI가 가장 완성됨. `CronCreate` 스케줄 실행이 LVIS `manifest.schedule[]`보다 정교 (취소/조회 API 포함).
 
 ---
 
@@ -141,7 +141,7 @@
 | 플러그인 프로세스 격리 | Paperclip | P4 — 장기 안정성 향상, 구현 비용 큼 |
 | Hot reload (재시작 없는 교체) | Paperclip | P3 — marketplace install 시 유용 |
 | `process` 툴 (OS 프로세스 제어) | claw-code | P3 — meeting-recorder 등 native 프로세스 필요 플러그인에 유용 |
-| Cron 스케줄 실행 | OpenHarness | P2 — `background` executionType 확장으로 수용 가능 |
+| Cron 스케줄 실행 | OpenHarness | P2 — `manifest.schedule[]` 블록으로 수용 (executionType과 분리) |
 | Capability-based RPC 강제 | Paperclip | P2 — `permissions[]` → PermissionManager 연동 강화 |
 
 ---
@@ -174,9 +174,9 @@ Scope 형식: `audio.capture`, `fs.read:~/.lvis`, `fs.write:~/.lvis/meetings`, `
 
 #### 결정 3: Background 스케줄 실행 (OpenHarness CronCreate 패턴 참조)
 현재: 플러그인이 자체 setInterval로 폴링 (pageindex 30s 폴링 known issue).
-결정: `BackgroundSpec`에 `schedule?: string` (cron 표현식) 추가. 호스트가 스케줄 실행을 담당.
+결정: `PluginManifest`에 `schedule?: PluginScheduleSpec[]` 블록 추가. 호스트가 스케줄 실행을 담당. `executionType`과 완전히 분리 — `"command"` 또는 `"subagent"` 타입 툴 모두 스케줄 등록 가능.
 플러그인이 폴링 로직을 직접 구현할 필요 없음 → TODO.md의 "30s polling" 이슈 해소 경로.
-**근거**: OpenHarness의 CronCreate/List/Delete 패턴을 plugin.json 선언으로 내면화.
+**근거**: OpenHarness의 CronCreate/List/Delete 패턴을 plugin.json 선언으로 내면화. `executionType:"background"` 종속성을 제거해 스케줄과 실행 모드를 독립적으로 선언 가능.
 
 ---
 
@@ -284,27 +284,38 @@ Scope 형식: `audio.capture`, `fs.read:~/.lvis`, `fs.write:~/.lvis/meetings`, `
       "permissions": ["llm.invoke"]
     },
 
-    // === 백그라운드 타입 ===
+    // === 비동기 서브에이전트 타입 (fire-and-forget) ===
     {
       "name": "meeting_export_video",
-      "description": "회의 녹화를 MP4로 내보내기 시작합니다. jobId를 즉시 반환하며, 진행 상황은 이벤트로 수신됩니다. 완료까지 수분이 소요됩니다. 결과를 기다리지 마세요.",
-      "executionType": "background",
+      "description": "회의 녹화를 MP4로 내보내기 시작합니다. 완료까지 수분이 소요됩니다. LLM이 runInBackground:true로 호출하면 taskId를 즉시 반환합니다. 결과를 기다리지 마세요.",
+      "executionType": "subagent",
       "inputSchema": {
         "type": "object",
         "properties": {
           "sessionId": { "type": "string" },
-          "quality": { "type": "string", "enum": ["720p", "1080p"], "default": "1080p" }
+          "quality": { "type": "string", "enum": ["720p", "1080p"], "default": "1080p" },
+          "runInBackground": { "type": "boolean", "description": "true이면 즉시 taskId 반환 (Claude Code Agent.run_in_background 패턴)", "default": true }
         },
         "required": ["sessionId"]
       },
-      "background": {
-        "jobIdField": "jobId",
-        "progressEvent": "meeting.export.progress",
-        "completionEvent": "meeting.export.done",
-        "cancelMethod": "meeting_export_cancel"
+      "subagent": {
+        "systemPrompt": "회의 녹화를 MP4로 변환하고 완료 이벤트를 발행하세요.",
+        "allowedTools": ["meeting_get_chunk"],
+        "allowBackground": true,
+        "maxTurns": 20
       },
       "annotations": { "readOnlyHint": false, "destructiveHint": false },
       "permissions": ["fs.write:~/.lvis/exports"]
+    }
+  ],
+
+  // === 스케줄 선언 (executionType과 무관한 manifest 블록) ===
+  "schedule": [
+    {
+      "cron": "0 */6 * * *",
+      "method": "meeting_cleanup_old",
+      "description": "6시간마다 오래된 임시 내보내기 파일 정리",
+      "maxConcurrent": 1
     }
   ]
 }
@@ -318,9 +329,9 @@ Scope 형식: `audio.capture`, `fs.read:~/.lvis`, `fs.write:~/.lvis/meetings`, `
 |------|------|------|------|
 | `name` | string | ✅ | 안정적 식별자 `[a-zA-Z_][a-zA-Z0-9_]*` max 64 |
 | `description` | string | ✅ | LLM용. 언제/무엇을/무엇을 반환/언제 쓰지 말아야 하는지 포함 |
-| `executionType` | enum | ✅ | `"command"` \| `"subagent"` \| `"background"` |
+| `executionType` | enum | ✅ | `"command"` \| `"subagent"` |
 | `inputSchema` | JSONSchema | ❌ | 없으면 `{payload: object}` fallback |
-| `outputSchema` | JSONSchema | ❌ | MCP 2025-06-18 호환. `command`/`background`/`subagent` 모두 적용. `subagent`는 `subagent.resultSchema`로도 검증 가능 (중복 시 `resultSchema` 우선) |
+| `outputSchema` | JSONSchema | ❌ | MCP 2025-06-18 호환. `command`/`subagent` 모두 적용. `subagent`는 `subagent.resultSchema`로도 검증 가능 (중복 시 `resultSchema` 우선) |
 | `outputDescription` | string | ❌ | 반환값 설명 (description에 자동 포함) |
 | `annotations` | object | ❌ | MCP 2025-06-18: readOnlyHint, destructiveHint, idempotentHint |
 | `examples` | array | ❌ | input/output 예시 (description에 자동 포함) |
@@ -328,9 +339,8 @@ Scope 형식: `audio.capture`, `fs.read:~/.lvis`, `fs.write:~/.lvis/meetings`, `
 | `tags` | string[] | ❌ | 검색/분류용 |
 | `timeoutMs` | integer | ❌ | 기본 30000 |
 | `uiTitle` | string | ❌ | 사람용 표시명 (UI 슬롯용) |
-| `subagent` | SubagentSpec | `executionType="subagent"` 시 필수 | 서브에이전트 설정 |
-| `background` | BackgroundSpec | `executionType="background"` 시 필수 | 백그라운드 작업 설정 |
-| `isolationMode` | enum | 이 tool의 격리 오버라이드: `"inline"` \| `"worker"` (manifest의 isolationMode보다 세밀한 제어) |
+| `subagent` | SubagentSpec | `executionType="subagent"` 시 필수 | 서브에이전트 설정 (`allowBackground` 포함) |
+| `isolationMode` | enum | ❌ | 이 tool의 격리 오버라이드: `"inline"` \| `"worker"` (manifest의 isolationMode보다 세밀한 제어) |
 
 #### SubagentSpec
 
@@ -342,16 +352,17 @@ Scope 형식: `audio.capture`, `fs.read:~/.lvis`, `fs.write:~/.lvis/meetings`, `
 | `model` | string | `"inherit"` (기본) 또는 모델 ID |
 | `resultSchema` | JSONSchema | 최종 출력 검증용 스키마 |
 | `historyPolicy` | enum | 부모 대화 히스토리 전달 방식: `"none"` (기본, userMessage만) \| `"summary"` \| `"full"` (OpenAI input_filter 패턴) |
+| `allowBackground` | boolean | `true`이면 LLM이 `runInBackground:true` 파라미터로 호출 시 taskId를 즉시 반환 (Claude Code Agent.run_in_background 패턴). 기본 `false` |
 
-#### BackgroundSpec
+#### PluginScheduleSpec (PluginManifest.schedule[] 항목)
+
+cron 스케줄 실행은 `executionType`과 무관하게 `manifest.schedule[]`로 선언한다.
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `jobIdField` | string | 즉시 반환되는 jobId 필드명 (기본 `"jobId"`) |
-| `progressEvent` | string | 진행 상황 이벤트명 |
-| `completionEvent` | string | 완료 이벤트명 |
-| `cancelMethod` | string | 취소에 사용할 다른 tool name |
-| `schedule` | string | cron 표현식 (`"0 */6 * * *"` 등). 호스트가 스케줄 관리. `progressEvent`/`completionEvent`와 함께 사용 |
+| `cron` | string | cron 표현식 (`"0 */6 * * *"` 등). 호스트가 스케줄 관리 |
+| `method` | string | 실행할 tool name (`methods[]`에 선언된 이름) |
+| `description` | string | 스케줄 설명 (선택) |
 | `maxConcurrent` | integer | 동시 실행 최대 인스턴스 수 (기본 1). 스케줄 실행 시 중복 방지 |
 
 ---
@@ -361,7 +372,7 @@ Scope 형식: `audio.capture`, `fs.read:~/.lvis`, `fs.write:~/.lvis/meetings`, `
 `src/plugins/types.ts`에 추가:
 
 ```typescript
-export type ToolExecutionType = "command" | "subagent" | "background";
+export type ToolExecutionType = "command" | "subagent";
 
 export interface PluginToolAnnotations {
   readOnlyHint?: boolean;      // 읽기 전용 (AgentApproval auto-approve 가능)
@@ -383,16 +394,15 @@ export interface PluginSubagentSpec {
   model?: string;           // default "inherit"
   resultSchema?: object;
   historyPolicy?: "none" | "summary" | "full";  // default "none"; ref: OpenAI input_filter
-  summaryCutoff?: number;     // max chars when historyPolicy="summary"; default 2000
+  summaryCutoff?: number;   // max chars when historyPolicy="summary"; default 2000
+  allowBackground?: boolean; // default false; LLM이 runInBackground:true 전달 시 taskId 즉시 반환 (Claude Code Agent.run_in_background 패턴)
 }
 
-export interface PluginBackgroundSpec {
-  jobIdField?: string;          // default "jobId"
-  progressEvent?: string;
-  completionEvent?: string;
-  cancelMethod?: string;
-  schedule?: string;          // cron expression; host manages scheduling
-  maxConcurrent?: number;     // default 1
+export interface PluginScheduleSpec {
+  cron: string;             // cron expression (e.g. "0 */6 * * *"); host manages scheduling
+  method: string;           // tool name to invoke (must be in methods[])
+  description?: string;
+  maxConcurrent?: number;   // default 1; prevents duplicate concurrent runs
 }
 
 export interface PluginToolDefinition {
@@ -409,11 +419,11 @@ export interface PluginToolDefinition {
   timeoutMs?: number;
   uiTitle?: string;
   subagent?: PluginSubagentSpec;   // executionType="subagent" 시 필수
-  background?: PluginBackgroundSpec; // executionType="background" 시 필수
 }
 
 // 기존 PluginManifest에 추가
 // tools?: PluginToolDefinition[];
+// schedule?: PluginScheduleSpec[];  // cron 스케줄 선언 (executionType과 무관)
 
 export type PluginIsolationMode = "inline" | "worker" | "process";
 
@@ -464,8 +474,8 @@ tools[] 파싱 (없으면 methods[]에서 legacy seed 생성)
   ↓
 per-tool: executionType으로 분기
   ├─ "command"    → buildCommandTool(runtime, def)
-  ├─ "subagent"   → buildSubagentTool(hostApi, def)
-  └─ "background" → buildBackgroundTool(runtime, def)
+  └─ "subagent"   → buildSubagentTool(hostApi, def)
+                     (allowBackground:true이면 runInBackground 파라미터 지원)
   ↓
 description 합성 (description + outputDescription + examples)
   ↓
@@ -484,7 +494,7 @@ LLM에 전달되는 최종 description:
 Output: <def.outputDescription>
 Examples:
   - <example.description>: input=<JSON>, output=<JSON>
-[executionType=background: 비동기 실행 — <progressEvent>로 진행 상황 수신, <completionEvent>로 완료 확인]
+[subagent.allowBackground=true: 비동기 실행 가능 — LLM이 runInBackground:true 전달 시 taskId 즉시 반환]
 ```
 
 ### 5.3 하위 호환 Fallback
@@ -606,7 +616,7 @@ ToolResult { output: finalText, isError: false }
     "properties": {
       "name": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$", "maxLength": 64 },
       "description": { "type": "string", "minLength": 10, "maxLength": 2048 },
-      "executionType": { "enum": ["command", "subagent", "background"] },
+      "executionType": { "enum": ["command", "subagent"] },
       "inputSchema": { "type": "object" },
       "outputSchema": { "type": "object" },
       "outputDescription": { "type": "string" },
@@ -643,16 +653,8 @@ ToolResult { output: finalText, isError: false }
           "allowedTools": { "type": "array", "items": { "type": "string" } },
           "maxTurns": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 },
           "model": { "type": "string" },
-          "resultSchema": { "type": "object" }
-        }
-      },
-      "background": {
-        "type": "object",
-        "properties": {
-          "jobIdField": { "type": "string", "default": "jobId" },
-          "progressEvent": { "type": "string" },
-          "completionEvent": { "type": "string" },
-          "cancelMethod": { "type": "string" }
+          "resultSchema": { "type": "object" },
+          "allowBackground": { "type": "boolean", "default": false }
         }
       }
     },
@@ -660,12 +662,21 @@ ToolResult { output: finalText, isError: false }
       {
         "if": { "properties": { "executionType": { "const": "subagent" } }, "required": ["executionType"] },
         "then": { "required": ["subagent"] }
-      },
-      {
-        "if": { "properties": { "executionType": { "const": "background" } }, "required": ["executionType"] },
-        "then": { "required": ["background"] }
       }
     ]
+  }
+},
+"schedule": {
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["cron", "method"],
+    "properties": {
+      "cron": { "type": "string" },
+      "method": { "type": "string" },
+      "description": { "type": "string" },
+      "maxConcurrent": { "type": "integer", "minimum": 1, "default": 1 }
+    }
   }
 }
 ```
@@ -681,8 +692,8 @@ ToolResult { output: finalText, isError: false }
 | **P2** | `ToolRegistry.createScopedView()` | S | 서브에이전트 사전 조건 | — |
 | **P2** | `hostApi.spawnSubagent()` + scoped ConversationLoop + `historyPolicy` | M-L | 서브에이전트 실행 | OpenAI input_filter |
 | **P2** | Capability 기반 권한 강제 (`permissions[]` → PermissionManager RPC) | M | 보안 강화 | Paperclip |
-| **P2** | `BackgroundSpec.schedule` + 호스트 cron 스케줄러 | M | pageindex 30s polling 해소 | OpenHarness CronCreate |
-| **P3** | `background` executionType + 비동기 jobId 처리 | S | 장기 실행 작업 | — |
+| **P2** | `manifest.schedule[]` + 호스트 cron 스케줄러 | M | pageindex 30s polling 해소 | OpenHarness CronCreate |
+| **P3** | `subagent.allowBackground` + `runInBackground` 파라미터 처리 | S | 장기 실행 fire-and-forget 작업 | Claude Code Agent.run_in_background |
 | **P3** | `annotations` → PermissionManager 연동 | S | 승인 시스템 강화 | MCP 2025-06-18 |
 | **P3** | `isolationMode: "worker"` — worker_threads 플러그인 격리 | L | 3rd-party 플러그인 안전 실행 | Paperclip |
 | **P3** | Hot reload (`PluginRuntime.reload(id)`) | M | 마켓플레이스 UX | Paperclip |
@@ -701,7 +712,7 @@ ToolResult { output: finalText, isError: false }
 | legacy `methods[]`만 존재 | 기존 동작 유지, generic payload schema |
 | `subagent.allowedTools`가 존재하지 않는 tool | 로드 시 경고, 런타임에 해당 tool 노출 안 함 |
 | 서브에이전트 depth 초과 | `depth exceeded` 오류를 tool_result로 반환 |
-| `background.cancelMethod`가 존재하지 않는 tool | 경고 + description에서 cancel 안내 제거 |
+| `subagent.allowBackground:true`인데 LLM이 `runInBackground:false` 전달 | 동기 실행으로 처리 (allowBackground는 허용 여부, 강제 아님) |
 
 ---
 
@@ -717,7 +728,7 @@ ToolResult { output: finalText, isError: false }
 |------|---------|-------------------|
 | 권한 강제 | 선언만 있음 (no enforcement) | Capability-based RPC 강제 (Paperclip) |
 | 플러그인 격리 | in-process | worker_threads → 마켓 플러그인 격리 |
-| 스케줄 실행 | 플러그인 자체 폴링 | 호스트 cron 스케줄러 (OpenHarness) |
+| 스케줄 실행 | 플러그인 자체 폴링 | 호스트 cron 스케줄러 — `manifest.schedule[]` 블록 (OpenHarness) |
 | 서브에이전트 컨텍스트 | userMessage 문자열만 | historyPolicy + summaryCutoff |
 
 ### 마일스톤
@@ -727,7 +738,7 @@ M1 (P1): 스키마 선언 → LLM 호출 정확도 향상
   └─ tools[] dispatcher + plugin.schema.json 검증
 
 M2 (P2): 런타임 신뢰성
-  └─ 서브에이전트 실행 + Capability 권한 강제 + 스케줄 실행
+  └─ 서브에이전트 실행 + Capability 권한 강제 + manifest.schedule[] 스케줄 실행
 
 M3 (P3): 마켓플레이스 준비
   └─ worker_threads 격리 + Hot reload + annotations 연동

@@ -205,7 +205,7 @@ export function pluginMethodToTool(
  * Build all Tool instances for a plugin, dispatching by executionType.
  *
  * Resolution order per method name:
- *  1. tools[] entry with matching name → typed dispatch (command/subagent/background)
+ *  1. tools[] entry with matching name → typed dispatch (command/subagent)
  *  2. methods[] entry without tools[] match → generic {payload: object} fallback
  *
  * @param pluginRuntime - The plugin runtime instance
