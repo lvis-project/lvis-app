@@ -63,6 +63,12 @@ Electron 런타임 자체는 여전히 Node로 구동됩니다 (`scripts/run-ele
 않습니다). 문제가 발생하면 `*:npm` 폴백 스크립트(`start:npm`, `build:npm`,
 `prepare:plugins:npm` 등)를 사용할 수 있습니다.
 
+> **⚠️ Node.js 필수:** bun이 기본 러너이지만, `postinstall` 스크립트
+> (`node scripts/fetch-uv.mjs`)와 Electron 실행 스크립트
+> (`scripts/run-electron.mjs`)는 시스템 `node` CLI를 직접 호출합니다.
+> Electron 내장 Node는 PATH의 `node` 바이너리를 대체하지 않으므로,
+> **개발자 머신에 Node.js v18 이상**이 별도로 설치되어 있어야 합니다.
+
 ## 테스트
 ```bash
 bun run test:electron-smoke
