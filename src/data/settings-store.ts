@@ -7,9 +7,9 @@ export type LLMVendor = "claude" | "openai" | "gemini" | "copilot" | "lgenie";
 export interface LLMSettings {
   provider: LLMVendor;
   model: string;
-  /** Enable Claude extended thinking (claude-3-7+ only). Default false. */
+  /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */
   enableThinking?: boolean;
-  /** Token budget for extended thinking (default 10000, max 32000). */
+  /** Token budget for Claude extended thinking (1024–32000). Only used when enableThinking is true. */
   thinkingBudgetTokens?: number;
 }
 
@@ -51,7 +51,9 @@ export interface SettingsServiceOptions {
 const DEFAULT_SETTINGS: AppSettings = {
   llm: {
     provider: "claude",
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
+    enableThinking: true,
+    thinkingBudgetTokens: 10_000,
   },
   chat: {
     systemPrompt:
@@ -187,8 +189,13 @@ export class SettingsService {
     try {
       const raw = readFileSync(this.settingsPath, "utf-8");
       const parsed = JSON.parse(raw) as any;
+      const llm = { ...DEFAULT_SETTINGS.llm, ...parsed.llm };
+      // Migrate pre-thinking Claude models so enableThinking doesn't fail on load.
+      if (llm.provider === "claude" && /^claude-sonnet-4-2025/i.test(llm.model)) {
+        llm.model = DEFAULT_SETTINGS.llm.model;
+      }
       return {
-        llm: { ...DEFAULT_SETTINGS.llm, ...parsed.llm },
+        llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
         marketplace: { ...DEFAULT_SETTINGS.marketplace, ...parsed.marketplace },

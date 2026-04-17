@@ -36,7 +36,7 @@ import {
 type MarketplaceItem = { id: string; name: string; description: string; packageSpec: string; installed: boolean; enabled: boolean; isManaged?: boolean };
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
-type AppSettings = { llm: { provider: string; model: string }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string } };
+type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string } };
 
 type LvisApi = {
   getSettings: () => Promise<AppSettings>;
@@ -218,7 +218,7 @@ function TaskView({ api }: { api: LvisApi }) {
 // ─── SettingsDialog ─────────────────────────────────
 
 const VENDORS = [
-  { id: "claude", label: "Anthropic Claude", placeholder: "sk-ant-...", defaultModel: "claude-sonnet-4-20250514" },
+  { id: "claude", label: "Anthropic Claude", placeholder: "sk-ant-...", defaultModel: "claude-sonnet-4-6" },
   { id: "openai", label: "OpenAI", placeholder: "sk-...", defaultModel: "gpt-4o" },
   { id: "gemini", label: "Google Gemini", placeholder: "AIza...", defaultModel: "gemini-2.0-flash" },
   { id: "copilot", label: "GitHub Copilot", placeholder: "ghp_...", defaultModel: "gpt-4o" },
@@ -528,6 +528,8 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
   const [model, setModel] = useState("");
   const [hasKey, setHasKey] = useState(false);
   const [autoCompact, setAutoCompact] = useState(true);
+  const [enableThinking, setEnableThinking] = useState(true);
+  const [thinkingBudget, setThinkingBudget] = useState(10_000);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   const [webProvider, setWebProvider] = useState("duckduckgo");
@@ -548,6 +550,8 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       if (cancelled) return;
       setVendor(s.llm.provider);
       setModel(s.llm.model);
+      setEnableThinking(s.llm.enableThinking ?? true);
+      setThinkingBudget(s.llm.thinkingBudgetTokens ?? 10_000);
       setAutoCompact(s.chat.autoCompact ?? true);
       const apiKeySet = await api.hasApiKey(s.llm.provider);
       if (cancelled) return;
@@ -599,7 +603,12 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
           setHasWebKey(true);
         }
         await api.updateSettings({
-          llm: { provider: vendor as any, model: model.trim() || vendorInfo.defaultModel },
+          llm: {
+            provider: vendor as any,
+            model: model.trim() || vendorInfo.defaultModel,
+            enableThinking,
+            thinkingBudgetTokens: thinkingBudget,
+          },
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
         } as any);
@@ -642,6 +651,26 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
               <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
             </div>
             <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
+            <div className="space-y-2 rounded-md border p-3">
+              <label className="flex items-center justify-between text-sm font-medium">
+                <span>Extended Thinking / Reasoning</span>
+                <input type="checkbox" className="h-4 w-4" checked={enableThinking} onChange={(e) => setEnableThinking(e.target.checked)} />
+              </label>
+              <p className="text-[11px] text-muted-foreground">모델 내부 추론 과정을 스트리밍으로 표시합니다. Claude는 명시 활성화(Sonnet 4.5+/Opus 4+), OpenAI o-계열(o1/o3/reasoning)은 자동, Gemini 2.0+는 모델 지원 시 자동.</p>
+              {enableThinking && vendor === "claude" && (
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Thinking Budget (tokens) — Claude 전용</label>
+                  <Input
+                    type="number"
+                    min={1024}
+                    max={32000}
+                    step={1000}
+                    value={thinkingBudget}
+                    onChange={(e) => setThinkingBudget(Math.max(1024, Math.min(32000, Number(e.target.value) || 10_000)))}
+                  />
+                </div>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="chat" className="space-y-4 pt-4">
