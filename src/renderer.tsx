@@ -651,28 +651,26 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
               <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
             </div>
             <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
-            {vendor === "claude" && (
-              <div className="space-y-2 rounded-md border p-3">
-                <label className="flex items-center justify-between text-sm font-medium">
-                  <span>Extended Thinking</span>
-                  <input type="checkbox" className="h-4 w-4" checked={enableThinking} onChange={(e) => setEnableThinking(e.target.checked)} />
-                </label>
-                <p className="text-[11px] text-muted-foreground">Claude의 내부 추론 과정을 스트리밍으로 표시합니다. Claude Sonnet 4.5+ / Opus 4+ 모델에서 동작.</p>
-                {enableThinking && (
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground">Thinking Budget (tokens)</label>
-                    <Input
-                      type="number"
-                      min={1024}
-                      max={32000}
-                      step={1000}
-                      value={thinkingBudget}
-                      onChange={(e) => setThinkingBudget(Math.max(1024, Math.min(32000, Number(e.target.value) || 10_000)))}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+            <div className="space-y-2 rounded-md border p-3">
+              <label className="flex items-center justify-between text-sm font-medium">
+                <span>Extended Thinking / Reasoning</span>
+                <input type="checkbox" className="h-4 w-4" checked={enableThinking} onChange={(e) => setEnableThinking(e.target.checked)} />
+              </label>
+              <p className="text-[11px] text-muted-foreground">모델 내부 추론 과정을 스트리밍으로 표시합니다. Claude는 명시 활성화(Sonnet 4.5+/Opus 4+), OpenAI o-계열(o1/o3/reasoning)은 자동, Gemini 2.0+는 모델 지원 시 자동.</p>
+              {enableThinking && vendor === "claude" && (
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Thinking Budget (tokens) — Claude 전용</label>
+                  <Input
+                    type="number"
+                    min={1024}
+                    max={32000}
+                    step={1000}
+                    value={thinkingBudget}
+                    onChange={(e) => setThinkingBudget(Math.max(1024, Math.min(32000, Number(e.target.value) || 10_000)))}
+                  />
+                </div>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="chat" className="space-y-4 pt-4">
