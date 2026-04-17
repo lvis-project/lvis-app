@@ -343,7 +343,7 @@ export interface MicrocompactResult {
   stripped: boolean;
   /** strip된 tool_result 개수 */
   strippedCount: number;
-  /** 확보된 총 바이트 수 (문자열 길이 기준) */
+  /** 확보된 총 문자 길이 (JS string.length 기준, UTF-16 코드 유닛 수) */
   freedChars: number;
 }
 
@@ -434,13 +434,14 @@ export function microcompactMessages(
 /**
  * 벤더별 "context too long" 오류인지 판별.
  *
- * - Anthropic: `error.type === "invalid_request_error"` + message에 "prompt is too long" 포함,
- *              또는 HTTP 400 with the same message pattern.
+ * 현재 구현은 벤더별로 알려진 `message` 패턴과 일부 `code` 값을 기반으로 판별한다.
+ *
+ * - Anthropic: message에 "prompt is too long" 포함.
  * - OpenAI / Copilot: `error.code === "context_length_exceeded"` 또는
  *                     message에 "maximum context length" 포함.
  * - Gemini: message에 "context window" 포함.
  *
- * 오류 객체 형태가 벤더마다 다르므로 duck-typing으로 처리.
+ * 오류 객체 형태가 벤더마다 다르므로 주로 message/code 기반 duck-typing으로 처리.
  */
 export function isContextLengthError(err: unknown): boolean {
   let rawMsg: string;
@@ -503,7 +504,7 @@ export function extractCarryover(messages: GenericMessage[]): ConversationCarryo
   const artifactPhraseRe =
     /(?:생성|작성\s*완료|저장|created?|wrote?|saved?)\s+[`'"]?([\w./\\-]+\.\w+)[`'"]?/gi;
   const decisionRe =
-    /(?:결정|선택|채택|→|⇒|decided?|chose?|selected?)\s*[:：]?\s*(.{5,100})/gi;
+    /(?:결정|선택|채택|→|⇒|decided?|(?:choose|chose|chosen)|select(?:ed)?)\s*[:：]?\s*(.{5,100})/gi;
 
   for (const msg of messages) {
     if (msg.role === "user") {

@@ -343,7 +343,7 @@ ${briefingData}
       const pendingToolCalls: ToolCallBlock[] = [];
       let stopReason: "end_turn" | "tool_use" = "end_turn";
 
-      const collectStream = async (messages: ReturnType<typeof this.history.getMessages>) => {
+      const collectStream = async (messages: GenericMessage[]) => {
         textContent = "";
         thoughtContent = "";
         pendingToolCalls.length = 0;
