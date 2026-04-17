@@ -10,7 +10,7 @@
 import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, getModelContextWindow } from "./auto-compact.js";
+import { shouldCompact, compactMessages, isContextLengthError, getModelContextWindow } from "./auto-compact.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage } from "./llm/types.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
@@ -332,6 +332,9 @@ ${briefingData}
     // turn당 knowledge 도구 호출 횟수 카운터 (depth ≤ 3 hard cap)
     let knowledgeCallCount = 0;
     let roundIndex = 0;
+    // Reactive compact recovery: context-length 오류 발생 시 1회 compact 후 재시도
+    // turn당 1회만 허용 — for 루프 밖에 선언
+    let reactiveCompacted = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       // §4.5.3: 벤더 추상화 스트리밍
@@ -340,38 +343,85 @@ ${briefingData}
       const pendingToolCalls: ToolCallBlock[] = [];
       let stopReason: "end_turn" | "tool_use" = "end_turn";
 
-      for await (const event of this.provider!.streamTurn({
-        model,
-        systemPrompt,
-        messages: this.history.getMessages(),
-        tools: toolSchemas.length > 0 ? toolSchemas : undefined,
-        maxTokens: 4096,
-      })) {
-        switch (event.type) {
-          case "reasoning_delta":
-            thoughtContent += event.text;
-            callbacks?.onReasoningDelta?.(event.text);
-            break;
-          case "text_delta":
-            textContent += event.text;
-            callbacks?.onTextDelta?.(event.text);
-            break;
-          case "tool_call":
-            pendingToolCalls.push({ id: event.id, name: event.name, input: event.input });
-            break;
-          case "message_complete":
-            stopReason = event.stopReason;
-            if (event.usage) {
-              turnUsage = event.usage;
-              this.cumulativeUsage.inputTokens += event.usage.inputTokens;
-              this.cumulativeUsage.outputTokens += event.usage.outputTokens;
-            }
-            break;
-          case "error":
-            callbacks?.onError?.(event.error);
-            this.history.append({ role: "assistant", content: `오류: ${event.error}` });
-            return { text: `오류: ${event.error}`, toolCalls: allToolCalls, usage: turnUsage };
+      const collectStream = async (messages: GenericMessage[]) => {
+        textContent = "";
+        thoughtContent = "";
+        pendingToolCalls.length = 0;
+        stopReason = "end_turn";
+
+        for await (const event of this.provider!.streamTurn({
+          model,
+          systemPrompt,
+          messages,
+          tools: toolSchemas.length > 0 ? toolSchemas : undefined,
+          maxTokens: 4096,
+        })) {
+          switch (event.type) {
+            case "reasoning_delta":
+              thoughtContent += event.text;
+              callbacks?.onReasoningDelta?.(event.text);
+              break;
+            case "text_delta":
+              textContent += event.text;
+              callbacks?.onTextDelta?.(event.text);
+              break;
+            case "tool_call":
+              pendingToolCalls.push({ id: event.id, name: event.name, input: event.input });
+              break;
+            case "message_complete":
+              stopReason = event.stopReason;
+              if (event.usage) {
+                turnUsage = event.usage;
+                this.cumulativeUsage.inputTokens += event.usage.inputTokens;
+                this.cumulativeUsage.outputTokens += event.usage.outputTokens;
+              }
+              break;
+            case "error":
+              // context-length 오류를 stream event로 수신한 경우 → compact + retry
+              if (isContextLengthError(event.error) && !reactiveCompacted) {
+                return { earlyReturn: false as const, streamContextError: event.error };
+              }
+              callbacks?.onError?.(event.error);
+              this.history.append({ role: "assistant", content: `오류: ${event.error}` });
+              return { earlyReturn: true as const, text: `오류: ${event.error}` };
+          }
         }
+        return { earlyReturn: false as const };
+      };
+
+      let streamResult = await collectStream(this.history.getMessages()).catch((err: unknown) => {
+        if (isContextLengthError(err)) return { earlyReturn: false as const, contextError: err };
+        throw err;
+      });
+
+      // context-length 오류 → compact 후 1회 재시도 (throw 경로 또는 stream event 경로)
+      const throwCtxError = !streamResult.earlyReturn && (streamResult as { contextError?: unknown }).contextError;
+      const streamCtxError = !streamResult.earlyReturn && (streamResult as { streamContextError?: string }).streamContextError;
+      if ((throwCtxError || streamCtxError) && !reactiveCompacted) {
+        reactiveCompacted = true;
+        let compacted = false;
+        try {
+          const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages(), undefined, "reactive");
+          if (cr.compacted) {
+            compacted = true;
+            this.history.clear();
+            this.history.restore(compactedMsgs);
+            console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+          }
+        } catch (compactErr) {
+          console.warn("[lvis] reactive-compact: compactMessages threw, skipping retry:", compactErr);
+        }
+        if (compacted) {
+          streamResult = await collectStream(this.history.getMessages());
+        } else {
+          // compact가 아무것도 하지 않았으면 재시도해도 의미 없음 — 원래 오류 재전파
+          if (throwCtxError) throw (streamResult as { contextError?: unknown }).contextError;
+          throw new Error((streamResult as { streamContextError?: string }).streamContextError);
+        }
+      }
+
+      if (streamResult.earlyReturn) {
+        return { text: streamResult.text, toolCalls: allToolCalls, usage: turnUsage };
       }
 
       // assistant 응답을 히스토리에 추가

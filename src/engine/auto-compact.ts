@@ -9,7 +9,7 @@
  * - 최근 N개 메시지는 보존 (기본 4)
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
-import type { GenericMessage, TokenUsage, LLMVendor } from "./llm/types.js";
+import type { GenericMessage, TokenUsage, LLMVendor, ConversationCarryover } from "./llm/types.js";
 
 /** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
 const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
@@ -183,6 +183,12 @@ export interface CompactResult {
   summary?: string;
   /** 확보된 예상 토큰 수 */
   freedTokens: number;
+  /**
+   * 컴팩션 트리거 종류.
+   * - "auto": 토큰 임계치 기반 사전 컴팩션 (PostTurnHookChain)
+   * - "reactive": 벤더 context-length 오류 수신 후 즉시 컴팩션
+   */
+  trigger?: "auto" | "reactive";
 }
 
 const DEFAULT_CONFIG: CompactConfig = {
@@ -251,9 +257,11 @@ export function shouldCompact(
  */
 export function compactMessages(
   messages: GenericMessage[],
-  config: CompactConfig = DEFAULT_CONFIG,
+  config?: CompactConfig,
+  trigger?: "auto" | "reactive",
 ): { messages: GenericMessage[]; result: CompactResult } {
-  if (messages.length <= config.preserveRecentMessages) {
+  const cfg = config ?? DEFAULT_CONFIG;
+  if (messages.length <= cfg.preserveRecentMessages) {
     return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
   }
 
@@ -268,7 +276,7 @@ export function compactMessages(
   }
 
   // 보존할 메시지 경계 찾기 (marker 이후 구간에서만 요약)
-  const idealBoundary = messages.length - config.preserveRecentMessages;
+  const idealBoundary = messages.length - cfg.preserveRecentMessages;
   const preserveFrom = findSafeBoundary(messages, idealBoundary);
   // 요약 대상은 marker(+ack) 다음부터 preserveFrom까지.
   // compactMessages는 marker 뒤에 ACK assistant 메시지를 붙이므로 그 경우 한 칸 더 skip.
@@ -287,8 +295,11 @@ export function compactMessages(
   }
 
   // 요약 생성
-  const summary = generateSummary(toCompact, config.summaryBudgetTokens);
+  const summary = generateSummary(toCompact, cfg.summaryBudgetTokens);
   const freedTokens = estimateMessagesTokens(toCompact) - estimateTokens(summary);
+
+  // carryover 추출: 요약 대상 메시지에서 목표·산출물·결정사항을 추출
+  const carryover = extractCarryover(toCompact);
 
   // 요약 메시지 + 보존 메시지
   const boundaryMessage: GenericMessage = {
@@ -298,6 +309,7 @@ export function compactMessages(
       compactBoundary: true,
       removedCount: toCompact.length,
       compactedAt: new Date().toISOString(),
+      carryover,
     },
   };
   const compactedMessages: GenericMessage[] = [
@@ -314,6 +326,7 @@ export function compactMessages(
       removedMessages: toCompact.length,
       summary,
       freedTokens: Math.max(0, freedTokens),
+      ...(trigger !== undefined && { trigger }),
     },
   };
 }
@@ -330,8 +343,8 @@ export interface MicrocompactResult {
   stripped: boolean;
   /** strip된 tool_result 개수 */
   strippedCount: number;
-  /** 확보된 총 바이트 수 (문자열 길이 기준) */
-  freedBytes: number;
+  /** 확보된 총 문자 길이 (JS string.length 기준, UTF-16 코드 유닛 수) */
+  freedChars: number;
 }
 
 const DEFAULT_MICROCOMPACT_CONFIG: MicrocompactConfig = {
@@ -362,7 +375,7 @@ export function microcompactMessages(
   if (toolResultIndices.length <= preserveCount) {
     return {
       messages,
-      result: { stripped: false, strippedCount: 0, freedBytes: 0 },
+      result: { stripped: false, strippedCount: 0, freedChars: 0 },
     };
   }
 
@@ -372,13 +385,13 @@ export function microcompactMessages(
   if (stripCandidates.every((i) => (messages[i] as { meta?: { stripped?: boolean } }).meta?.stripped === true)) {
     return {
       messages,
-      result: { stripped: false, strippedCount: 0, freedBytes: 0 },
+      result: { stripped: false, strippedCount: 0, freedChars: 0 },
     };
   }
   const stripCandidateIdxSet = new Set(stripCandidates);
 
   let strippedCount = 0;
-  let freedBytes = 0;
+  let freedChars = 0;
   const nowIso = new Date().toISOString();
 
   const out = messages.map((msg, i) => {
@@ -388,7 +401,7 @@ export function microcompactMessages(
 
     const origLen = msg.content.length;
     const stub = `[tool_result stripped: tool=${msg.toolName ?? "?"}, origLen=${origLen}]`;
-    freedBytes += Math.max(0, origLen - stub.length);
+    freedChars += Math.max(0, origLen - stub.length);
     strippedCount += 1;
 
     return {
@@ -411,9 +424,132 @@ export function microcompactMessages(
     result: {
       stripped: strippedCount > 0,
       strippedCount,
-      freedBytes,
+      freedChars,
     },
   };
+}
+
+// ─── Reactive Recovery ──────────────────────────────
+
+/**
+ * 벤더별 "context too long" 오류인지 판별.
+ *
+ * 현재 구현은 벤더별로 알려진 `message` 패턴과 일부 `code` 값을 기반으로 판별한다.
+ *
+ * - Anthropic: message에 "prompt is too long" 포함.
+ * - OpenAI / Copilot: `error.code === "context_length_exceeded"` 또는
+ *                     message에 "maximum context length" 포함.
+ * - Gemini: message에 "context window" 포함.
+ *
+ * 오류 객체 형태가 벤더마다 다르므로 주로 message/code 기반 duck-typing으로 처리.
+ */
+export function isContextLengthError(err: unknown): boolean {
+  let rawMsg: string;
+  if (err instanceof Error) {
+    rawMsg = err.message;
+  } else if (typeof err === "string") {
+    rawMsg = err;
+  } else if (err !== null && typeof err === "object") {
+    // {message: string} or {error: string} (StreamEvent-style)
+    const asObj = err as Record<string, unknown>;
+    rawMsg = typeof asObj["message"] === "string"
+      ? asObj["message"]
+      : typeof asObj["error"] === "string"
+        ? asObj["error"]
+        : "";
+  } else {
+    return false;
+  }
+
+  const msg = rawMsg.toLowerCase();
+  // code field (Error instances only)
+  if (err instanceof Error) {
+    const code = (err as { code?: string }).code;
+    if (code === "context_length_exceeded") return true;
+  }
+
+  // Anthropic: "prompt is too long" (status 400, type invalid_request_error)
+  if (msg.includes("prompt is too long")) return true;
+
+  // OpenAI fallback message
+  if (msg.includes("maximum context length")) return true;
+
+  // Gemini
+  if (msg.includes("context window")) return true;
+
+  return false;
+}
+
+// ─── Carryover Extraction ────────────────────────────
+
+/**
+ * 메시지 배열에서 `ConversationCarryover`를 추출.
+ *
+ * - goals: user 메시지 중 행위 키워드(해줘/구현/작성/create/implement 등)를 포함한
+ *   문장의 첫 100자. 최대 5개 — 넘치면 오래된 것부터 제거.
+ * - artifacts: assistant 메시지에서 파일 경로 패턴(*.ts/js/py/…) 또는
+ *   "생성/저장/created/wrote" 직후 파일명. 최대 10개.
+ * - decisions: assistant 메시지에서 "결정/선택/채택/decided/chose" 이후 문장.
+ *   최대 5개.
+ */
+export function extractCarryover(messages: GenericMessage[]): ConversationCarryover {
+  const goals: string[] = [];
+  const artifacts: string[] = [];
+  const decisions: string[] = [];
+
+  const goalKeywords =
+    /해줘|만들어|작성|구현|수정|추가|삭제|분석|검토|배포|테스트|fix|create|implement|update|refactor|add|remove|analyze|deploy/i;
+  const artifactPathRe =
+    /(?:^|\s)((?:[\w.-]+\/)*[\w.-]+\.(?:ts|tsx|js|jsx|py|json|md|yaml|yml|sh|css|html))\b/gm;
+  const artifactPhraseRe =
+    /(?:생성|작성\s*완료|저장|created?|wrote?|saved?)\s+[`'"]?([\w./\\-]+\.\w+)[`'"]?/gi;
+  const decisionRe =
+    /(?:결정|선택|채택|→|⇒|decided?|(?:choose|chose|chosen)|select(?:ed)?)\s*[:：]?\s*(.{5,100})/gi;
+
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      if (!msg.content.startsWith("[이전 대화 요약]") && goalKeywords.test(msg.content)) {
+        const snippet = msg.content.slice(0, 100).replace(/\n/g, " ").trim();
+        if (snippet && !goals.includes(snippet)) {
+          goals.push(snippet);
+          if (goals.length > 5) goals.shift();
+        }
+      }
+    } else if (msg.role === "assistant") {
+      const content = msg.content;
+
+      let m: RegExpExecArray | null;
+
+      artifactPathRe.lastIndex = 0;
+      while ((m = artifactPathRe.exec(content)) !== null) {
+        const p = m[1].trim();
+        if (p && !artifacts.includes(p)) {
+          artifacts.push(p);
+          if (artifacts.length > 10) artifacts.shift();
+        }
+      }
+
+      artifactPhraseRe.lastIndex = 0;
+      while ((m = artifactPhraseRe.exec(content)) !== null) {
+        const p = m[1].trim();
+        if (p && !artifacts.includes(p)) {
+          artifacts.push(p);
+          if (artifacts.length > 10) artifacts.shift();
+        }
+      }
+
+      decisionRe.lastIndex = 0;
+      while ((m = decisionRe.exec(content)) !== null) {
+        const dec = m[1].trim().slice(0, 100);
+        if (dec && !decisions.includes(dec)) {
+          decisions.push(dec);
+          if (decisions.length > 5) decisions.shift();
+        }
+      }
+    }
+  }
+
+  return { goals, artifacts, decisions };
 }
 
 // ─── Private Helpers ────────────────────────────────
