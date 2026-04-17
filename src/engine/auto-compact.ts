@@ -11,9 +11,6 @@
  */
 import type { GenericMessage, TokenUsage, LLMVendor } from "./llm/types.js";
 
-/** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
-const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
-
 // ─── Context Window Registry ─────────────────────────
 
 /**
@@ -270,13 +267,10 @@ export function compactMessages(
   // 보존할 메시지 경계 찾기 (marker 이후 구간에서만 요약)
   const idealBoundary = messages.length - config.preserveRecentMessages;
   const preserveFrom = findSafeBoundary(messages, idealBoundary);
-  // 요약 대상은 marker(+ack) 다음부터 preserveFrom까지.
-  // compactMessages는 marker 뒤에 ACK assistant 메시지를 붙이므로 그 경우 한 칸 더 skip.
-  const ackAfterMarker =
-    lastMarkerIdx >= 0 &&
-    messages[lastMarkerIdx + 1]?.role === "assistant" &&
-    messages[lastMarkerIdx + 1]?.content === POST_COMPACT_ACK;
-  const compactStart = lastMarkerIdx >= 0 ? (ackAfterMarker ? lastMarkerIdx + 2 : lastMarkerIdx + 1) : 0;
+  // 요약 대상은 marker 다음(marker + ack 한쌍 이후)부터 preserveFrom까지
+  // compactMessages는 marker 뒤에 "이전 대화 내용을 확인했습니다..." assistant를 붙이므로
+  // 해당 assistant까지 skip
+  const compactStart = lastMarkerIdx >= 0 ? lastMarkerIdx + 1 : 0;
   const effectivePreserveFrom = Math.max(preserveFrom, compactStart);
   const preAnchor = messages.slice(0, compactStart); // 이전 marker + 그 앞 (있다면)
   const toCompact = messages.slice(compactStart, effectivePreserveFrom);
@@ -303,7 +297,7 @@ export function compactMessages(
   const compactedMessages: GenericMessage[] = [
     ...preAnchor,
     boundaryMessage,
-    { role: "assistant", content: POST_COMPACT_ACK },
+    { role: "assistant", content: "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다." },
     ...toPreserve,
   ];
 
@@ -367,15 +361,9 @@ export function microcompactMessages(
   }
 
   // 끝에서부터 preserveCount 개를 제외한 인덱스가 strip 후보
-  const stripCandidates = toolResultIndices.slice(0, toolResultIndices.length - preserveCount);
-  // 후보 전원이 이미 stripped면 새 배열 생성 없이 early return (per-turn allocation 회피)
-  if (stripCandidates.every((i) => (messages[i] as { meta?: { stripped?: boolean } }).meta?.stripped === true)) {
-    return {
-      messages,
-      result: { stripped: false, strippedCount: 0, freedBytes: 0 },
-    };
-  }
-  const stripCandidateIdxSet = new Set(stripCandidates);
+  const stripCandidateIdxSet = new Set(
+    toolResultIndices.slice(0, toolResultIndices.length - preserveCount),
+  );
 
   let strippedCount = 0;
   let freedBytes = 0;
@@ -387,7 +375,7 @@ export function microcompactMessages(
     if (msg.meta?.stripped === true) return msg; // idempotent
 
     const origLen = msg.content.length;
-    const stub = `[tool_result stripped: tool=${msg.toolName ?? "?"}, origLen=${origLen}]`;
+    const stub = `[tool_result stripped: tool=${msg.toolName ?? "?"}, origBytes=${origLen}]`;
     freedBytes += Math.max(0, origLen - stub.length);
     strippedCount += 1;
 
@@ -400,7 +388,7 @@ export function microcompactMessages(
       meta: {
         ...(msg.meta ?? {}),
         stripped: true,
-        originalLength: origLen,
+        originalBytes: origLen,
         strippedAt: nowIso,
       },
     } as GenericMessage;
