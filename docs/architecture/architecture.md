@@ -2010,8 +2010,9 @@ graph TB
 | Transport | 프로토콜 | 적합 시나리오 | 비고 |
 | --- | --- | --- | --- |
 | **stdio** | subprocess stdin/stdout | 로컬 도구 (파일 시스템, git 등) | 가장 단순·안정적 |
-| **SSE** | HTTP Server-Sent Events | 원격 API 서버 (사업부 시스템) | 방화벽 친화적 |
-| **WebSocket** | 양방향 소켓 | 실시간 양방향 통신 (DB 모니터링 등) | 가장 유연 |
+| **http (Streamable HTTP 2025-03-26)** | 단일 POST → `application/json` 또는 `text/event-stream` | 원격 MCP 서버 (사내 API, SaaS) | 현행 권장 원격 transport. NetworkGuard(Tier A2) + `fetchPublicHttpResponse` 경유 — DNS rebinding/SSRF 방어, 매 요청·매 redirect hop DNS 재검증. `redirect: "manual"`, `allowPrivateNetworks` 옵트인은 거버넌스 admin 플래그(`globalRules.allowPrivateNetworks` 또는 승인 레벨) 동의 필수. |
+| **sse** | HTTP Server-Sent Events (legacy dual-endpoint) | — | **governance-only, legacy** — 런타임 client 미구현. 신규 서버는 `http` 로 이전. |
+| **websocket** | 양방향 소켓 | — | **governance-only, legacy** — 런타임 client 미구현. 실시간 요구 사항은 `http` SSE response 로 우선 검토. |
 
 **MCP 서버 설정 예시:**
 
