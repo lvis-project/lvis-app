@@ -157,15 +157,7 @@
 
 ### 아키텍처 결정 (v1.1 — 레퍼런스 분석 기반)
 
-#### 결정 1: 플러그인 격리 모드 (Paperclip 패턴 참조)
-현재: 모든 플러그인이 호스트 프로세스 내부에서 in-process로 실행.
-결정: `PluginManifest`에 `isolationMode` 필드 추가. 단계적 도입.
-- `"inline"` (기본): 현행 유지. 1st-party 신뢰 플러그인용.
-- `"worker"`: Node.js `worker_threads` 격리. 마켓플레이스 3rd-party 플러그인용 (P3).
-- `"process"`: 별도 child process + JSON-RPC 2.0 (Paperclip 방식). 최고 격리, 최대 오버헤드 (P4).
-**근거**: Electron 아키텍처상 child_process보다 worker_threads가 오버헤드 적음. 현재 플러그인이 모두 1st-party이므로 inline 유지, 마켓플레이스 확장 시 worker 전환.
-
-#### 결정 2: Capability 기반 권한 강제 (Paperclip RPC 레이어 참조)
+#### 결정 1: Capability 기반 권한 강제 (Paperclip RPC 레이어 참조)
 현재: `permissions[]`는 string 배열이나 런타임 강제 없음.
 결정: `PermissionManager`가 `permissions[]`를 파싱하여 HostApi 호출 시 RPC 레이어에서 강제.
 Scope 형식: `audio.capture`, `fs.read:~/.lvis`, `fs.write:~/.lvis/meetings`, `http.outbound:api.openai.com`, `llm.invoke`, `ipc.emit`, `ipc.subscribe`.
@@ -340,7 +332,6 @@ Scope 형식: `audio.capture`, `fs.read:~/.lvis`, `fs.write:~/.lvis/meetings`, `
 | `timeoutMs` | integer | ❌ | 기본 30000 |
 | `uiTitle` | string | ❌ | 사람용 표시명 (UI 슬롯용) |
 | `subagent` | SubagentSpec | `executionType="subagent"` 시 필수 | 서브에이전트 설정 (`allowBackground` 포함) |
-| `isolationMode` | enum | ❌ | 이 tool의 격리 오버라이드: `"inline"` \| `"worker"` (manifest의 isolationMode보다 세밀한 제어) |
 
 #### SubagentSpec
 
@@ -424,12 +415,6 @@ export interface PluginToolDefinition {
 // 기존 PluginManifest에 추가
 // tools?: PluginToolDefinition[];
 // schedule?: PluginScheduleSpec[];  // cron 스케줄 선언 (executionType과 무관)
-
-export type PluginIsolationMode = "inline" | "worker" | "process";
-
-// Add to PluginManifest (existing type in src/plugins/types.ts):
-// isolationMode?: PluginIsolationMode;   // default "inline"
-// hotReload?: boolean;                   // default false; P3 implementation
 
 export type CapabilityScope =
   | `audio.${"capture" | "playback"}`
@@ -695,10 +680,8 @@ ToolResult { output: finalText, isError: false }
 | **P2** | `manifest.schedule[]` + 호스트 cron 스케줄러 | M | pageindex 30s polling 해소 | OpenHarness CronCreate |
 | **P3** | `subagent.allowBackground` + `runInBackground` 파라미터 처리 | S | 장기 실행 fire-and-forget 작업 | Claude Code Agent.run_in_background |
 | **P3** | `annotations` → PermissionManager 연동 | S | 승인 시스템 강화 | MCP 2025-06-18 |
-| **P3** | `isolationMode: "worker"` — worker_threads 플러그인 격리 | L | 3rd-party 플러그인 안전 실행 | Paperclip |
-| **P3** | Hot reload (`PluginRuntime.reload(id)`) | M | 마켓플레이스 UX | Paperclip |
+| **P3** | Hot reload (`PluginRuntime.reload(id)`) | M | 마켓플레이스 UX | — |
 | **P4** | 병렬 서브에이전트 (fork/join ConversationLoop) | XL | 복합 분석 작업 | LangGraph |
-| **P4** | `isolationMode: "process"` — child process + JSON-RPC 2.0 | XL | 최고 격리 수준 | Paperclip |
 
 ---
 
@@ -727,7 +710,7 @@ ToolResult { output: finalText, isError: false }
 | 영역 | 현재 LVIS | 목표 (레퍼런스 기반) |
 |------|---------|-------------------|
 | 권한 강제 | 선언만 있음 (no enforcement) | Capability-based RPC 강제 (Paperclip) |
-| 플러그인 격리 | in-process | worker_threads → 마켓 플러그인 격리 |
+| 플러그인 격리 | in-process | hot-reload 지원 → 마켓플레이스 UX |
 | 스케줄 실행 | 플러그인 자체 폴링 | 호스트 cron 스케줄러 — `manifest.schedule[]` 블록 (OpenHarness) |
 | 서브에이전트 컨텍스트 | userMessage 문자열만 | historyPolicy + summaryCutoff |
 
@@ -741,10 +724,10 @@ M2 (P2): 런타임 신뢰성
   └─ 서브에이전트 실행 + Capability 권한 강제 + manifest.schedule[] 스케줄 실행
 
 M3 (P3): 마켓플레이스 준비
-  └─ worker_threads 격리 + Hot reload + annotations 연동
+  └─ allowBackground 처리 + Hot reload + annotations 연동
 
 M4 (P4): 고급 에이전트
-  └─ 병렬 서브에이전트 + process 격리
+  └─ 병렬 서브에이전트 (fork/join)
 ```
 
 ### 결정하지 않은 것

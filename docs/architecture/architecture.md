@@ -1863,8 +1863,7 @@ graph TB
 | 타입 | 설명 | 필수 spec 블록 |
 |------|------|--------------|
 | `command` | 동기 직접 실행 | 없음 |
-| `subagent` | 내부 LLM 루프 생성 | `subagent{}` |
-| `subagent` (allowBackground) | 서브에이전트 비동기 — LLM이 `runInBackground:true` 전달 시 taskId 즉시 반환 | `subagent{ allowBackground:true }` |
+| `subagent` | 내부 LLM 루프 생성. `allowBackground:true` 선언 시 LLM이 `runInBackground:true` 파라미터로 비동기 실행 여부를 per-call로 결정 — 즉시 taskId 반환 | `subagent{}` |
 
 #### 핵심 필드
 
@@ -1879,19 +1878,8 @@ interface PluginToolDefinition {
   annotations?: PluginToolAnnotations;  // readOnly/destructive/idempotent/openWorld
   permissions?: CapabilityScope[];  // PermissionManager RPC 강제 (P2)
   subagent?: PluginSubagentSpec;    // executionType="subagent" 시 필수 (allowBackground 포함)
-  isolationMode?: "inline" | "worker";  // tool 단위 격리 오버라이드
 }
 ```
-
-#### 격리 모드 (isolationMode)
-
-플러그인/tool 단위로 프로세스 격리 수준 선언. Paperclip 패턴 참조.
-
-| 값 | 설명 | 구현 단계 |
-|----|------|---------|
-| `"inline"` | 호스트 프로세스 내 실행 (기본) | ✅ 현재 |
-| `"worker"` | Node.js worker_threads 격리 | P3 |
-| `"process"` | child process + JSON-RPC 2.0 | P4 |
 
 #### Capability 권한 스코프 (P2 구현)
 
