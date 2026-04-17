@@ -12,7 +12,7 @@ import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { shouldCompact, compactMessages, isContextLengthError, getModelContextWindow } from "./auto-compact.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
-import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage } from "./llm/types.js";
+import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage, ThinkingBlock } from "./llm/types.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
@@ -341,12 +341,14 @@ ${briefingData}
       // §4.5.3: 벤더 추상화 스트리밍
       let textContent = "";
       let thoughtContent = "";
+      let roundThinkingBlocks: ThinkingBlock[] = [];
       const pendingToolCalls: ToolCallBlock[] = [];
       let stopReason: "end_turn" | "tool_use" = "end_turn";
 
       const collectStream = async (messages: ReturnType<typeof this.history.getMessages>) => {
         textContent = "";
         thoughtContent = "";
+        roundThinkingBlocks = [];
         pendingToolCalls.length = 0;
         stopReason = "end_turn";
         // Snapshot cumulativeUsage so a partial stream that errors mid-flight
@@ -384,6 +386,9 @@ ${briefingData}
               break;
             case "message_complete":
               stopReason = event.stopReason;
+              if (event.thinkingBlocks && event.thinkingBlocks.length > 0) {
+                roundThinkingBlocks = event.thinkingBlocks;
+              }
               if (event.usage) {
                 turnUsage = event.usage;
                 this.cumulativeUsage.inputTokens += event.usage.inputTokens;
@@ -453,11 +458,14 @@ ${briefingData}
         return { text: streamResult.text, toolCalls: allToolCalls, usage: turnUsage };
       }
 
-      // assistant 응답을 히스토리에 추가
+      // assistant 응답을 히스토리에 추가 — thinkingBlocks는 tool_use 체인이
+      // 이어지는 다음 요청에만 signature 그대로 포함되어야 Anthropic이 수락한다.
+      const preserveThinkingBlocks = stopReason === "tool_use" && pendingToolCalls.length > 0;
       this.history.append({
         role: "assistant",
         content: textContent,
         ...(thoughtContent && { thought: thoughtContent }),
+        ...(preserveThinkingBlocks && roundThinkingBlocks.length > 0 && { thinkingBlocks: roundThinkingBlocks }),
         ...(pendingToolCalls.length > 0 && { toolCalls: pendingToolCalls }),
       });
       callbacks?.onAssistantRound?.({

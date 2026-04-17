@@ -54,10 +54,60 @@ export interface MessageMeta {
   carryover?: ConversationCarryover;
 }
 
+/**
+ * Claude extended-thinking block preserved verbatim. Both the thinking text and
+ * its signature MUST be echoed back in the next request when tool use is still
+ * in-flight — otherwise Anthropic rejects the message as tampered.
+ */
+export interface ThinkingBlock {
+  thinking: string;
+  signature: string;
+}
+
 export type GenericMessage =
   | { role: "user"; content: string; meta?: MessageMeta }
-  | { role: "assistant"; content: string; thought?: string; toolCalls?: ToolCallBlock[]; meta?: MessageMeta }
+  | { role: "assistant"; content: string; thought?: string; thinkingBlocks?: ThinkingBlock[]; toolCalls?: ToolCallBlock[]; meta?: MessageMeta }
   | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean; meta?: MessageMeta };
+
+/**
+ * Canonical serialized form for message-size / token-estimation logic.
+ * Includes all prompt-bearing fields, notably assistant thinkingBlocks,
+ * so callers do not undercount context usage when extended thinking is enabled.
+ */
+export function serializeThinkingBlocksForEstimation(thinkingBlocks?: ThinkingBlock[]): string {
+  if (!thinkingBlocks || thinkingBlocks.length === 0) return "";
+  return JSON.stringify(thinkingBlocks);
+}
+
+export function serializeMessageForEstimation(message: GenericMessage): string {
+  switch (message.role) {
+    case "user":
+      return JSON.stringify({
+        role: message.role,
+        content: message.content,
+      });
+    case "assistant":
+      return JSON.stringify({
+        role: message.role,
+        content: message.content,
+        thought: message.thought ?? "",
+        thinkingBlocks: message.thinkingBlocks ?? [],
+        toolCalls: message.toolCalls ?? [],
+      });
+    case "tool_result":
+      return JSON.stringify({
+        role: message.role,
+        toolUseId: message.toolUseId,
+        toolName: message.toolName ?? "",
+        content: message.content,
+        isError: message.isError ?? false,
+      });
+  }
+}
+
+export function estimateMessageCharacters(message: GenericMessage): number {
+  return serializeMessageForEstimation(message).length;
+}
 
 export interface ToolCallBlock {
   id: string;
@@ -83,7 +133,7 @@ export type StreamEvent =
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
-  | { type: "message_complete"; stopReason: "end_turn" | "tool_use"; usage?: TokenUsage }
+  | { type: "message_complete"; stopReason: "end_turn" | "tool_use"; usage?: TokenUsage; thinkingBlocks?: ThinkingBlock[] }
   | { type: "error"; error: string };
 
 export interface TokenUsage {
