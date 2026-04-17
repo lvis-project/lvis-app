@@ -31,6 +31,12 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
  * Optional per-message metadata for lifecycle bookkeeping (auto-compact, microcompact,
  * boundary markers, etc.). All fields optional so existing callers remain unaffected.
  */
+export interface ConversationCarryover {
+  goals: string[];
+  artifacts: string[];
+  decisions: string[];
+}
+
 export interface MessageMeta {
   /** microcompact가 tool_result content를 stub으로 교체했는지 여부 */
   stripped?: boolean;
@@ -44,6 +50,8 @@ export interface MessageMeta {
   strippedAt?: string;
   /** compactMessages 실행 ISO timestamp */
   compactedAt?: string;
+  /** compact boundary 생성 시 추출된 carryover (목표·산출물·결정사항) */
+  carryover?: ConversationCarryover;
 }
 
 export type GenericMessage =
