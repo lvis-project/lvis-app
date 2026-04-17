@@ -7,6 +7,10 @@ export type LLMVendor = "claude" | "openai" | "gemini" | "copilot" | "lgenie";
 export interface LLMSettings {
   provider: LLMVendor;
   model: string;
+  /** Enable Claude extended thinking (claude-3-7+ only). Default false. */
+  enableThinking?: boolean;
+  /** Token budget for extended thinking (default 10000, max 32000). */
+  thinkingBudgetTokens?: number;
 }
 
 export interface ChatSettings {

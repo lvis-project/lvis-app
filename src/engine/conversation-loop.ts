@@ -342,18 +342,26 @@ ${briefingData}
       let thoughtContent = "";
       const pendingToolCalls: ToolCallBlock[] = [];
       let stopReason: "end_turn" | "tool_use" = "end_turn";
+
       const collectStream = async (messages: ReturnType<typeof this.history.getMessages>) => {
         textContent = "";
         thoughtContent = "";
         pendingToolCalls.length = 0;
         stopReason = "end_turn";
 
+        const llmSettings = this.deps.settingsService.get("llm");
         for await (const event of this.provider!.streamTurn({
           model,
           systemPrompt,
           messages,
           tools: toolSchemas.length > 0 ? toolSchemas : undefined,
           maxTokens: 4096,
+          ...(llmSettings.enableThinking && {
+            thinking: {
+              enabled: true,
+              budgetTokens: llmSettings.thinkingBudgetTokens ?? 10_000,
+            },
+          }),
         })) {
           switch (event.type) {
             case "reasoning_delta":

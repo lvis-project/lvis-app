@@ -377,3 +377,24 @@ export interface RuntimePlugin {
 }
 
 export type RuntimePluginFactory = (context: PluginRuntimeContext) => Promise<RuntimePlugin> | RuntimePlugin;
+
+// ─── Sub-agent API ──────────────────────────────────────────────────────────
+
+export interface SpawnSubagentRequest {
+  systemPrompt: string;
+  userMessage: string;
+  allowedTools: string[];
+  maxTurns?: number;
+  model?: string;
+  resultSchema?: object;
+  historyPolicy?: "none" | "summary" | "full";
+  summaryCutoff?: number;
+  parentRequestId?: string;
+}
+
+export interface SpawnSubagentResult {
+  output: string;
+  toolCalls: number;
+  stoppedBy: "complete" | "maxTurns" | "error";
+  isError?: boolean;
+}
