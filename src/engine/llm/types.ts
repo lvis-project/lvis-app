@@ -101,8 +101,10 @@ export interface StreamTurnParams {
   messages: GenericMessage[];
   tools?: ToolSchema[];
   maxTokens?: number;
-  /** Extended thinking — Claude only. budgetTokens default 10000. */
-  thinking?: { enabled: boolean; budgetTokens?: number };
+  /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */
+  enableThinking?: boolean;
+  /** Token budget for Claude extended thinking (1024–32000). Defaults to 10 000 when enableThinking is true. */
+  thinkingBudgetTokens?: number;
 }
 
 export interface LLMProvider {
