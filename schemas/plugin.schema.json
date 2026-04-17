@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://lvis.lge.com/schemas/plugin.schema.json",
   "title": "LVIS Plugin Manifest",
-  "description": "Validates plugin.json manifest files for LVIS plugins (§9 v1.3)",
+  "description": "Validates plugin.json manifest files for LVIS plugins (§9)",
   "type": "object",
   "required": ["id", "name", "version", "entry", "methods"],
   "additionalProperties": false,
@@ -28,114 +28,7 @@
         "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
         "maxLength": 64
       },
-      "description": "Legacy tool name list — must use underscore format"
-    },
-    "tools": {
-      "type": "array",
-      "description": "Per-method tool schema declarations (§9 v1.2). Superset of methods[].",
-      "items": {
-        "type": "object",
-        "required": ["name", "description", "executionType"],
-        "additionalProperties": false,
-        "properties": {
-          "name": {
-            "type": "string",
-            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
-            "maxLength": 64
-          },
-          "description": {
-            "type": "string",
-            "minLength": 10,
-            "maxLength": 2048
-          },
-          "executionType": {
-            "enum": ["command", "subagent"],
-            "description": "command: sync IPC call. subagent: host-spawned LLM agent. Background/fire-and-forget is a per-call LLM option (runInBackground in subagent input), not a type."
-          },
-          "inputSchema": { "type": "object" },
-          "outputSchema": { "type": "object" },
-          "outputDescription": { "type": "string" },
-          "annotations": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "readOnlyHint": { "type": "boolean" },
-              "destructiveHint": { "type": "boolean" },
-              "idempotentHint": { "type": "boolean" },
-              "openWorldHint": { "type": "boolean" }
-            }
-          },
-          "examples": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["input"],
-              "additionalProperties": false,
-              "properties": {
-                "description": { "type": "string" },
-                "input": {},
-                "output": {}
-              }
-            }
-          },
-          "permissions": {
-            "type": "array",
-            "items": { "type": "string" }
-          },
-          "tags": {
-            "type": "array",
-            "items": { "type": "string" }
-          },
-          "timeoutMs": {
-            "type": "integer",
-            "minimum": 100,
-            "maximum": 300000
-          },
-          "uiTitle": { "type": "string" },
-          "subagent": {
-            "type": "object",
-            "required": ["systemPrompt"],
-            "additionalProperties": false,
-            "properties": {
-              "systemPrompt": { "type": "string", "minLength": 1 },
-              "allowedTools": {
-                "type": "array",
-                "items": { "type": "string" }
-              },
-              "maxTurns": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 50,
-                "default": 8
-              },
-              "model": { "type": "string" },
-              "resultSchema": { "type": "object" },
-              "historyPolicy": {
-                "enum": ["none", "summary", "full"],
-                "default": "none"
-              },
-              "summaryCutoff": {
-                "type": "integer",
-                "minimum": 100,
-                "default": 2000
-              },
-              "allowBackground": {
-                "type": "boolean",
-                "description": "When true, LLM may pass runInBackground:true in tool input to spawn without awaiting. Mirrors Claude Code Agent.run_in_background pattern."
-              }
-            }
-          }
-        },
-        "allOf": [
-          {
-            "if": {
-              "properties": { "executionType": { "const": "subagent" } },
-              "required": ["executionType"]
-            },
-            "then": { "required": ["subagent"] }
-          }
-        ]
-      }
+      "description": "Tool name list — underscore format required"
     },
     "config": { "type": "object" },
     "ui": {
@@ -192,36 +85,7 @@
         }
       }
     },
-    "schedule": {
-      "type": "array",
-      "description": "Host-managed cron schedules (separate from tool executionType). ProactiveEngine invokes methods on schedule.",
-      "items": {
-        "type": "object",
-        "required": ["method", "cron"],
-        "additionalProperties": false,
-        "properties": {
-          "method": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" },
-          "cron": { "type": "string", "description": "Cron expression (e.g. '0 */6 * * *')" },
-          "description": { "type": "string" },
-          "maxConcurrent": { "type": "integer", "minimum": 1, "default": 1 }
-        }
-      }
-    },
-    "isolationMode": {
-      "enum": ["inline", "worker", "process"],
-      "description": "Plugin-level isolation mode (default: inline)"
-    },
-    "hotReload": {
-      "type": "boolean",
-      "description": "Allow reload without app restart (P3)"
-    },
     "deployment": { "enum": ["managed", "user"] },
-    "publisher": { "type": "string" },
-    "publisherId": { "type": "string" },
-    "publishedAt": { "type": "string", "format": "date-time" },
-    "signature": { "type": "string" },
-    "signatureAlgorithm": { "enum": ["ECDSA-P256-SHA256"] },
-    "minAppVersion": { "type": "string" },
-    "maxAppVersion": { "type": "string" }
+    "publisher": { "type": "string" }
   }
 }

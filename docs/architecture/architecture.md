@@ -1813,22 +1813,8 @@ graph TB
     "version": "1.2.0",
     "description": "STT 기반 회의록 자동 작성 플러그인",
     "author": "DX Platform Team",
-    "permissions": ["microphone", "local-storage", "lgenie-session", "ui-slot:sidebar", "ui-slot:toolbar"],
+    "methods": ["meeting_start", "meeting_stop", "meeting_summarize"],
     "keywords": ["회의록", "녹음", "회의", "미팅", "meeting"],
-    "skills": [
-        {
-            "name": "meeting_record",
-            "trigger": ["회의록 작성", "회의 녹음", "미팅 기록"],
-            "entry": "skills/meeting_record.js"
-        }
-    ],
-    "tools": [
-        {
-            "name": "stt_transcribe",
-            "entry": "tools/stt_transcribe.js",
-            "description": "음성을 텍스트로 변환"
-        }
-    ],
     "ui": {
         "sidebar": "ui/MeetingSidebar.jsx",
         "toolbar": "ui/MeetingToolbar.jsx",
@@ -1853,54 +1839,6 @@ graph TB
 ```
 
 > LLM에 노출되는 skill / tool / method 식별자는 모두 lower snake_case(예: `meeting_record`, `stt_transcribe`, `index_scan`)를 사용한다. 호스트는 manifest 값을 그대로 등록하며, 도트를 언더스코어로 바꾸는 런타임 변환은 없다. 이벤트 채널 이름은 별도 네임스페이스이므로 dotted form을 유지한다.
-
-### 9.2a Plugin Tool Schema (v1.2)
-
-플러그인은 `tools[]` 배열로 per-method 스키마를 선언한다. `methods[]`와 공존하며 하위 호환 유지.
-
-#### executionType 분류
-
-| 타입 | 설명 | 필수 spec 블록 |
-|------|------|--------------|
-| `command` | 동기 직접 실행 | 없음 |
-| `subagent` | 내부 LLM 루프 생성. `allowBackground:true` 선언 시 LLM이 `runInBackground:true` 파라미터로 비동기 실행 여부를 per-call로 결정 — 즉시 taskId 반환 | `subagent{}` |
-
-#### 핵심 필드
-
-```typescript
-// src/plugins/types.ts
-interface PluginToolDefinition {
-  name: string;              // 필수: [a-zA-Z_][a-zA-Z0-9_]* max 64
-  description: string;       // 필수: LLM 최적화 (언제/무엇/반환값/금지조건)
-  executionType: ToolExecutionType;  // 필수
-  inputSchema?: object;      // JSON Schema; 없으면 {payload:object} fallback
-  outputSchema?: object;     // MCP 2025-06-18 호환
-  annotations?: PluginToolAnnotations;  // readOnly/destructive/idempotent/openWorld
-  permissions?: CapabilityScope[];  // PermissionManager RPC 강제 (P2)
-  subagent?: PluginSubagentSpec;    // executionType="subagent" 시 필수 (allowBackground 포함)
-}
-```
-
-#### Capability 권한 스코프 (P2 구현)
-
-`permissions[]`는 `CapabilityScope` 형식으로 선언. `PermissionManager`가 HostApi 호출 시 강제.
-
-```
-audio.capture / audio.playback
-fs.read:~/.lvis / fs.write:~/.lvis/meetings
-http.outbound:api.openai.com
-llm.invoke / llm.embed
-ipc.emit / ipc.subscribe
-```
-
-범위 초과 호출 → 즉시 `PermissionDenied`. 플러그인이 오버라이드 불가.
-
-#### JSON Schema 검증
-
-`schemas/plugin.schema.json` (draft-07) — 플러그인 로드 시 manifest 검증.
-`subagent` executionType → `subagent{}` 필수 강제 (allOf/if-then).
-`subagent.allowBackground` → LLM이 `runInBackground` 파라미터로 비동기 실행 여부 결정.
-cron 스케줄 → `manifest.schedule[]` 블록으로 선언 (executionType과 무관).
 
 **`python` 섹션 — 런타임 의존 플러그인 명세**
 
@@ -2158,7 +2096,7 @@ graph TB
 | **업데이트** | 정책 push 시 강제 | 사용자 opt-in |
 | **서명 검증** | LG Internal Root CA 필수 (실패 시 load 거부) | 정책에 따라 `warn` / `require` / `off` |
 | **Directory** | `~/.lvis/plugins/managed/<id>/<version>/` | `~/.lvis/plugins/user/<id>/` |
-| **Manifest 필드** | `deployment: "managed"`, `publisher`, `signature`, `publishedAt` | `deployment: "user"` |
+| **Manifest 필드** | `deployment: "managed"`, `publisher` | `deployment: "user"` |
 | **Settings UI** | lock icon + "회사 배포" 표시, 제거 / 비활성화 버튼 잠금 | 정상 토글 |
 | **차단 시나리오** | 정책 `deny_list` 발행 → 다음 boot 시 자동 제거 | 정책 매치 시 즉시 비활성화 |
 | **감사 로깅** | managed sync 이벤트는 사내 감사 endpoint push 대상 | 로컬 audit log 중심 |
@@ -2172,15 +2110,9 @@ graph TB
   "name": "LVIS PageIndex",
   "version": "0.2.0",
   "entry": "dist/index.js",
-  "methods": ["index_scan", "chat_preview", "..."],
+  "methods": ["index_scan", "chat_preview"],
   "deployment": "managed",
-  "publisher": "LG Electronics IT",
-  "publisherId": "lge.it",
-  "publishedAt": "2026-04-13T12:00:00Z",
-  "signature": "base64(ECDSA-P256-SHA256(manifest_body))",
-  "signatureAlgorithm": "ECDSA-P256-SHA256",
-  "minAppVersion": "1.0.0",
-  "maxAppVersion": "1.5.0"
+  "publisher": "LG Electronics IT"
 }
 ```
 
@@ -2244,12 +2176,6 @@ Step 1-8:  기존 boot sequence
   "nextCheckAt": "2026-04-14T21:00:00Z"
 }
 ```
-
-**Phase 분리**
-
-- **Phase 1.5**: deployment mode 타입 + manifest 확장 + `PluginDeploymentGuard` 경량 구현 + UI 잠금 표시
-- **Phase 2**: Managed Policy Sync + Installer + IT Admin API 실연결 + SSO 토큰 경로
-- **Phase 3**: ECDSA 서명 검증 + LG CA 체인 + 오프라인 cache TTL + 사내 감사 endpoint 연동
 
 ---
 
