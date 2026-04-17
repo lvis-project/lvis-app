@@ -649,6 +649,8 @@ class HttpTransport implements McpTransport {
     // Timeout covers the initial HTTP round-trip (until response headers
     // arrive). Cleared once the server responds; SSE body reads continue
     // asynchronously and can be cancelled at any time via close().
+    // Note: the reason passed to abort() is stored on signal.reason and is
+    // useful for debugging, but fetch() always throws a generic AbortError.
     const timeoutId = setTimeout(
       () => controller.abort(new Error(`[mcp-client] request timeout after ${DEFAULT_REQUEST_TIMEOUT_MS}ms`)),
       DEFAULT_REQUEST_TIMEOUT_MS,
@@ -780,6 +782,8 @@ class HttpTransport implements McpTransport {
       }
       // Flush any bytes held in the streaming TextDecoder (e.g., an
       // incomplete multi-byte UTF-8 sequence split across the last chunk).
+      // Calling decode() with no arguments uses stream:false (the default),
+      // which flushes the internal buffer accumulated by the stream:true calls.
       buffer += decoder.decode();
       // Dispatch any trailing event that arrived without a closing blank line.
       if (buffer.trim().length > 0) {
