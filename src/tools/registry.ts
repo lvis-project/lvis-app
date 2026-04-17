@@ -86,6 +86,42 @@ export class ToolRegistry {
     }));
   }
 
+  /**
+   * Phase 1 Lazy Tool Scoping — return schemas restricted to the given scope.
+   *
+   * - Builtins (tool.source === "builtin") are included when includeBuiltins.
+   * - Plugin tools are included only when their pluginId is in activePluginIds.
+   * - MCP tools (tool.source === "mcp") are included when includeMcp.
+   * - Deny rules still apply (§6.3 Layer 1).
+   *
+   * Matches {@link getToolSchemas} shape for drop-in replacement in the
+   * ConversationLoop streaming path.
+   */
+  getToolSchemasForScope(scope: {
+    activePluginIds: Set<string> | string[];
+    includeBuiltins: boolean;
+    includeMcp: boolean;
+  }): Array<{ name: string; description: string; input_schema: unknown }> {
+    const active = scope.activePluginIds instanceof Set
+      ? scope.activePluginIds
+      : new Set(scope.activePluginIds);
+
+    return this.getVisibleTools()
+      .filter((tool) => {
+        if (tool.source === "builtin") return scope.includeBuiltins;
+        if (tool.source === "mcp") return scope.includeMcp;
+        // plugin / other sources gated by pluginId
+        if (tool.pluginId) return active.has(tool.pluginId);
+        // Unknown source without pluginId — be conservative, treat as builtin
+        return scope.includeBuiltins;
+      })
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.toJsonSchema(),
+      }));
+  }
+
   /** Replace the deny-rule list (admin policy load). */
   setDenyRules(rules: DenyRule[]): void {
     this.denyRules = rules;

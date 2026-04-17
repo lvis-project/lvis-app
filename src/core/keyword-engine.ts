@@ -16,7 +16,7 @@
 
 export type InputClassification =
   | { type: "command"; command: string; args: string }
-  | { type: "skill"; keyword: string; skillId: string; input: string }
+  | { type: "skill"; keyword: string; skillId: string; pluginId?: string; input: string }
   | { type: "mention"; target: string; message: string }
   | { type: "general"; input: string };
 
@@ -25,6 +25,13 @@ export interface SkillKeyword {
   keyword: string;
   /** 매핑될 스킬/플러그인 ID */
   skillId: string;
+  /**
+   * Plugin 식별자. null/undefined = builtin 스킬.
+   * Lazy tool scoping (Phase 1) — classify 결과에서 active plugin 집합을
+   * 도출할 때 사용된다. boot.ts createHostApi.registerKeywords가
+   * 플러그인 호출 시 자동 주입한다.
+   */
+  pluginId?: string;
 }
 
 // ─── Engine ─────────────────────────────────────────
@@ -42,6 +49,22 @@ export class KeywordEngine {
     this.skillKeywords = [];
   }
 
+  /**
+   * Phase 1 Lazy Tool Scoping — 입력에 포함된 모든 키워드의 pluginId 집합을 반환.
+   * classify()는 첫 매치만 반환하지만, scope 결정은 "이 턴에서 필요한 모든
+   * 플러그인"을 수집해야 한다. builtin 스킬(pluginId undefined)은 제외된다.
+   */
+  matchAllPluginIds(input: string): Set<string> {
+    const lowerInput = input.trim().toLowerCase();
+    const result = new Set<string>();
+    for (const sk of this.skillKeywords) {
+      if (sk.pluginId && lowerInput.includes(sk.keyword.toLowerCase())) {
+        result.add(sk.pluginId);
+      }
+    }
+    return result;
+  }
+
   /** 사용자 입력 분류 — §6.1 우선순위 기반 */
   classify(input: string): InputClassification {
     const trimmed = input.trim();
@@ -56,7 +79,7 @@ export class KeywordEngine {
       };
     }
 
-    // 2. 스킬 키워드 매칭
+    // 2. 스킬 키워드 매칭 (첫 매치 반환 — routing 용)
     const lowerInput = trimmed.toLowerCase();
     for (const sk of this.skillKeywords) {
       if (lowerInput.includes(sk.keyword.toLowerCase())) {
@@ -64,6 +87,7 @@ export class KeywordEngine {
           type: "skill",
           keyword: sk.keyword,
           skillId: sk.skillId,
+          pluginId: sk.pluginId,
           input: trimmed,
         };
       }

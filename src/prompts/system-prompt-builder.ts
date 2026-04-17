@@ -70,6 +70,18 @@ export class SystemPromptBuilder {
     (this as any)._indexedDocsContext = context;
   }
 
+  /**
+   * Phase 1 Lazy Tool Scoping — 매 턴 직전 호출되어 Tool Schemas 섹션(⑤)이
+   * 노출할 tool 집합을 제한한다. null → 모든 도구 노출 (legacy 동작).
+   */
+  setToolScope(scope: {
+    activePluginIds: Set<string>;
+    includeBuiltins: boolean;
+    includeMcp: boolean;
+  } | null): void {
+    (this as any)._toolScope = scope;
+  }
+
   // ─── Private ──────────────────────────────────────
 
   private initSources(deps: SystemPromptBuilderDeps): void {
@@ -103,7 +115,14 @@ export class SystemPromptBuilder {
       name: "Tool Schemas",
       refresh: "per-turn",
       build: () => {
-        const schemas = toolRegistry.getToolSchemas();
+        const scope = (this as any)._toolScope as {
+          activePluginIds: Set<string>;
+          includeBuiltins: boolean;
+          includeMcp: boolean;
+        } | null | undefined;
+        const schemas = scope
+          ? toolRegistry.getToolSchemasForScope(scope)
+          : toolRegistry.getToolSchemas();
         if (schemas.length === 0) return "";
         return [
           "<available-tools>",
