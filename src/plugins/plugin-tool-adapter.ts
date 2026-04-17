@@ -110,12 +110,22 @@ function buildCommandTool(
   });
 }
 
+/**
+ * Build subagent input schema with optional runInBackground injection.
+ * Only injects when base schema is an object-typed schema — avoids polluting
+ * non-object schemas (string/array/oneOf). Returns unmodified schema when the
+ * plugin has not opted in via `subagent.allowBackground`.
+ */
 function buildSubagentInputSchema(def: PluginToolDefinition): object {
   const base = resolveInputSchema(def);
   if (!def.subagent?.allowBackground) return base;
-  // Inject runInBackground into properties so the LLM can choose per call.
-  // Mirrors Claude Code Agent tool's run_in_background parameter pattern.
   const baseObj = base as Record<string, unknown>;
+  if (baseObj.type !== "object") {
+    console.warn(
+      `[plugin-tool-adapter] ${def.name}: allowBackground requested but inputSchema is not type:"object"; runInBackground not injected.`,
+    );
+    return base;
+  }
   const props = { ...((baseObj.properties as Record<string, unknown>) ?? {}) };
   props.runInBackground = {
     type: "boolean",
@@ -138,10 +148,21 @@ function buildSubagentTool(
     isReadOnly: () => resolveReadOnly(def.annotations),
     execute: async (rawInput) => {
       const args = (rawInput ?? {}) as Record<string, unknown>;
-      // P2: SubagentRunner wired here. runInBackground flag forwarded to SpawnSubagentRequest.
-      // For now, fall through to pluginRuntime.call() which delegates to plugin handler.
+      // Extract and strip runInBackground from payload — plugin handlers must not
+      // receive this meta-field. It is a subagent-runtime directive consumed by
+      // hostApi.spawnSubagent (P2). Until P2 lands, a truthy value returns a clear
+      // "not implemented" error so the LLM does not silently degrade to sync.
+      const { runInBackground, ...payload } = args;
+      if (runInBackground === true) {
+        return {
+          output: "서브에이전트 백그라운드 실행은 아직 구현되지 않았습니다 (P2 대기). runInBackground 없이 재시도하세요.",
+          isError: true,
+        };
+      }
+      // Sync subagent path: P2 SubagentRunner will route through hostApi.spawnSubagent.
+      // Phase 1 fallback: delegate to plugin handler (logged so mis-wiring is visible).
       try {
-        const result = await pluginRuntime.call(def.name, args);
+        const result = await pluginRuntime.call(def.name, payload);
         return {
           output: typeof result === "string" ? result : JSON.stringify(result, null, 2),
           isError: false,
@@ -228,6 +249,18 @@ export function pluginToolsForRegistration(
   // Build typed tools from tools[]
   for (const def of manifest.tools ?? []) {
     let tool: Tool;
+    // Legacy v1.2 support: `executionType: "background"` was removed in v1.3.
+    // Manifest schema now rejects the enum value, but defensively detect it here
+    // for any bypass paths (unvalidated manifests) and emit an upgrade hint.
+    const execType = def.executionType as string;
+    if (execType === "background") {
+      console.warn(
+        `[plugin-tool-adapter] ${pluginId}/${def.name}: executionType:"background" is removed in v1.3. Migrate to executionType:"subagent" + subagent.allowBackground:true, or declare a host-managed manifest.schedule[] entry. Falling back to "command" for now.`,
+      );
+      tool = buildCommandTool(pluginRuntime, def, pluginId);
+      tools.push(tool);
+      continue;
+    }
     switch (def.executionType) {
       case "subagent":
         tool = buildSubagentTool(pluginRuntime, def, pluginId);

@@ -140,10 +140,6 @@ export interface PluginToolDefinition {
   // ── Execution-type-specific specs ─────────────────────────────────────────
   /** Required when executionType="subagent" */
   subagent?: PluginSubagentSpec;
-
-  // ── Isolation override ────────────────────────────────────────────────────
-  /** Per-tool isolation override (takes precedence over manifest isolationMode) */
-  isolationMode?: Exclude<PluginIsolationMode, "process">;
 }
 
 export interface SpawnSubagentRequest {
@@ -389,29 +385,3 @@ export interface RuntimePlugin {
 }
 
 export type RuntimePluginFactory = (context: PluginRuntimeContext) => Promise<RuntimePlugin> | RuntimePlugin;
-
-// ─── Sub-agent API ──────────────────────────────────────────────────────────
-
-export interface SpawnSubagentRequest {
-  systemPrompt: string;
-  userMessage: string;
-  allowedTools: string[];
-  maxTurns?: number;
-  model?: string;
-  resultSchema?: object;
-  historyPolicy?: "none" | "summary" | "full";
-  summaryCutoff?: number;
-  parentRequestId?: string;
-  /**
-   * When true, SubagentRunner spawns without awaiting completion and returns
-   * a taskId immediately. Mirrors Claude Code Agent.run_in_background pattern.
-   */
-  runInBackground?: boolean;
-}
-
-export interface SpawnSubagentResult {
-  output: string;
-  toolCalls: number;
-  stoppedBy: "complete" | "maxTurns" | "error";
-  isError?: boolean;
-}

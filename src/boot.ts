@@ -545,6 +545,13 @@ function runManifestStartupMethods(pluginRuntime: PluginRuntime): void {
         ),
       );
     }
+    // Warn when manifest declares schedule[] but no host scheduler has consumed it
+    // (ProactiveEngine integration is a P2 item — field is declarative-only today).
+    if (manifest.schedule && manifest.schedule.length > 0) {
+      console.warn(
+        `[lvis] boot: plugin=${pluginId} declares manifest.schedule[] (${manifest.schedule.length} entr${manifest.schedule.length === 1 ? "y" : "ies"}) but no host cron scheduler is wired yet — methods will not fire on schedule until P2.`,
+      );
+    }
   }
 }
 

@@ -92,10 +92,6 @@
             "maximum": 300000
           },
           "uiTitle": { "type": "string" },
-          "isolationMode": {
-            "enum": ["inline", "worker"],
-            "description": "Per-tool isolation override"
-          },
           "subagent": {
             "type": "object",
             "required": ["systemPrompt"],
