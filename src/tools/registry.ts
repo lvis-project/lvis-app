@@ -96,6 +96,20 @@ export class ToolRegistry {
     return this.tools.size;
   }
 
+  /**
+   * Create a scoped view restricted to the given tool names.
+   * Used by subagent-runner to enforce allowedTools isolation.
+   * Deny rules are not inherited — the caller controls what the sub-agent sees.
+   */
+  createScopedView(allowedNames: Set<string> | string[]): ToolRegistry {
+    const allowed = new Set(allowedNames);
+    const scoped = new ToolRegistry();
+    for (const [name, tool] of this.tools) {
+      if (allowed.has(name)) scoped.register(tool);
+    }
+    return scoped;
+  }
+
   // ─── Private ──────────────────────────────────────
 
   private isDenied(name: string): boolean {

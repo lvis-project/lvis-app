@@ -101,6 +101,8 @@ export interface StreamTurnParams {
   messages: GenericMessage[];
   tools?: ToolSchema[];
   maxTokens?: number;
+  /** Extended thinking — Claude only. budgetTokens default 10000. */
+  thinking?: { enabled: boolean; budgetTokens?: number };
 }
 
 export interface LLMProvider {

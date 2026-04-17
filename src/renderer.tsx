@@ -74,7 +74,7 @@ type LvisApi = {
 type ApprovalChoice = "allow-once" | "allow-always" | "deny-once" | "deny-always";
 type ApprovalRequest = {
   id: string;
-  category: "tool" | "agent-action";
+  category: "tool";
   toolName: string;
   args: unknown;
   reason: string;
@@ -751,8 +751,7 @@ function ToolApprovalDialog({
 
   if (!request) return null;
 
-  const title =
-    request.category === "agent-action" ? "작업 승인 필요" : "도구 승인 필요";
+  const title = "도구 승인 필요";
   const argsStr = JSON.stringify(request.args, null, 2) ?? "";
   const argsTruncated = argsStr.length > 500 && !expanded;
   const argsDisplay = argsTruncated ? argsStr.slice(0, 500) + "\n…" : argsStr;

@@ -27,12 +27,19 @@ export class ClaudeProvider implements LLMProvider {
     const tools = params.tools?.map(toAnthropicTool);
 
     try {
+      const thinkingEnabled = params.thinking?.enabled === true;
       const stream = this.client.messages.stream({
         model: params.model,
         max_tokens: params.maxTokens ?? 4096,
         system: params.systemPrompt,
         messages,
         ...(tools && tools.length > 0 && { tools }),
+        ...(thinkingEnabled && {
+          thinking: {
+            type: "enabled" as const,
+            budget_tokens: params.thinking?.budgetTokens ?? 10_000,
+          },
+        }),
       });
 
       // 토큰 단위 증분 스트리밍
@@ -43,8 +50,12 @@ export class ClaudeProvider implements LLMProvider {
       const toolCalls: ToolCallBlock[] = [];
 
       for await (const event of stream) {
-        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-          yield { type: "text_delta", text: event.delta.text };
+        if (event.type === "content_block_delta") {
+          if (event.delta.type === "text_delta") {
+            yield { type: "text_delta", text: event.delta.text };
+          } else if (event.delta.type === "thinking_delta") {
+            yield { type: "reasoning_delta", text: (event.delta as unknown as { thinking: string }).thinking };
+          }
         }
       }
 
