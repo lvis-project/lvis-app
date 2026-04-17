@@ -83,6 +83,16 @@ export interface McpServerApproval {
   // ─── Layer 1: 무결성 ──────────────────────────
   /** 바이너리 SHA-256 체크섬 (플랫폼별) */
   checksums?: Record<string, string>;
+
+  /**
+   * Admin gate for `allowPrivateNetworks` on the matching per-server config.
+   * When the client config sets `allowPrivateNetworks: true` (escape hatch
+   * for on-prem / loopback servers), governance requires EITHER this flag
+   * OR `globalRules.allowPrivateNetworks` to be `true` as well. Defaults to
+   * false — preventing a self-elevating config file from bypassing
+   * NetworkGuard.
+   */
+  allowPrivateNetworks?: boolean;
 }
 
 export interface McpGlobalRules {
@@ -98,6 +108,13 @@ export interface McpGlobalRules {
   killSwitchEnabled: boolean;
   /** 정책 갱신 주기 (밀리초) */
   policyRefreshIntervalMs: number;
+  /**
+   * Admin gate for per-server `allowPrivateNetworks`. If not `true`, any
+   * `http` server config that opts into private-network access is rejected
+   * at governance — preventing a self-elevating config file from bypassing
+   * NetworkGuard. Defaults to false.
+   */
+  allowPrivateNetworks?: boolean;
 }
 
 // ─── MCP Protocol Types ────────────────────────────

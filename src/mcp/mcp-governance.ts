@@ -150,6 +150,21 @@ export class McpGovernance {
       if (config.transport === "http") {
         const httpResult = this.validateHttpScheme(config.url);
         if (!httpResult.valid) return httpResult;
+
+        // L1-g: Streamable HTTP headers must not smuggle CRLF. Even though
+        //       admin governance is trusted, request-splitting via header
+        //       values with \r or \n is cheap to block here.
+        const headersResult = this.validateHeaders(config.headers);
+        if (!headersResult.valid) return headersResult;
+
+        // L1-h: `allowPrivateNetworks` is a per-server escape hatch — it
+        //       must be authorised by admin policy, either globally or on
+        //       the matching approval. Otherwise any config file could
+        //       self-elevate out of NetworkGuard.
+        if (config.allowPrivateNetworks) {
+          const gateResult = this.validateAllowPrivateNetworks(approval);
+          if (!gateResult.valid) return gateResult;
+        }
       }
     }
 
@@ -345,6 +360,53 @@ export class McpGovernance {
     return {
       valid: false,
       reason: `HTTP transport는 http:// 또는 https:// 만 허용됩니다: '${rawUrl}'`,
+      layer: 1,
+    };
+  }
+
+  /**
+   * Reject header names/values containing CR (\r) or LF (\n). Prevents
+   * header-injection / request-splitting attacks even though admin governance
+   * is the primary trust boundary. Also rejects control characters that have
+   * no business in HTTP headers.
+   */
+  private validateHeaders(headers: Record<string, string> | undefined): ValidationResult {
+    if (!headers) return { valid: true };
+    for (const [name, value] of Object.entries(headers)) {
+      if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) {
+        return {
+          valid: false,
+          reason: `헤더에 CR/LF 포함 금지: '${name}'`,
+          layer: 1,
+        };
+      }
+      // Defense-in-depth: reject any other control character (U+0000..U+001F
+      // except horizontal tab U+0009) in header values.
+      if (/[\u0000-\u0008\u000B-\u001F]/.test(value)) {
+        return {
+          valid: false,
+          reason: `헤더 값에 제어 문자 포함: '${name}'`,
+          layer: 1,
+        };
+      }
+    }
+    return { valid: true };
+  }
+
+  /**
+   * Enforce admin-policy gating for per-server `allowPrivateNetworks`. Either
+   * the global rule or the per-server approval must explicitly opt in — a
+   * self-elevating per-server config alone is insufficient.
+   */
+  private validateAllowPrivateNetworks(approval: McpServerApproval): ValidationResult {
+    const globalOk = this.policy.globalRules.allowPrivateNetworks === true;
+    const serverOk = approval.allowPrivateNetworks === true;
+    if (globalOk || serverOk) return { valid: true };
+    return {
+      valid: false,
+      reason:
+        `allowPrivateNetworks 거부 (서버: ${approval.id}). ` +
+        `globalRules.allowPrivateNetworks 또는 서버 승인에 명시적 허용이 필요합니다.`,
       layer: 1,
     };
   }
