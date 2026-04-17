@@ -144,4 +144,23 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
     });
     expect(schemas.map((s) => s.name)).not.toContain("bash");
   });
+
+  it("plugin tool missing pluginId is excluded even when includeBuiltins=true", () => {
+    const r = seed();
+    // Register a plugin-source tool with no pluginId (misconfigured tool)
+    r.register(createDynamicTool({
+      name: "orphan_plugin_tool",
+      description: "plugin tool with no pluginId",
+      source: "plugin",
+      // pluginId intentionally omitted
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: "", isError: false }),
+    }));
+    const schemas = r.getToolSchemasForScope({
+      activePluginIds: new Set<string>(),
+      includeBuiltins: true,
+      includeMcp: false,
+    });
+    expect(schemas.map((s) => s.name)).not.toContain("orphan_plugin_tool");
+  });
 });
