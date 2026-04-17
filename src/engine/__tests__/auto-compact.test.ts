@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   microcompactMessages,
   compactMessages,
+  extractCarryover,
 } from "../auto-compact.js";
 import type { GenericMessage } from "../llm/types.js";
 
@@ -169,5 +170,101 @@ describe("compactMessages — boundary marker", () => {
       (m) => m.role === "user" && m.meta?.compactBoundary === true,
     ).length;
     expect(markerCount).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("extractCarryover", () => {
+  it("extracts goals from user messages containing action keywords", () => {
+    const messages: GenericMessage[] = [
+      { role: "user", content: "auth 모듈 구현해줘" },
+      { role: "assistant", content: "네, 구현하겠습니다." },
+      { role: "user", content: "테스트도 작성해줘" },
+    ];
+    const { goals } = extractCarryover(messages);
+    expect(goals.length).toBeGreaterThanOrEqual(1);
+    expect(goals.some((g) => g.includes("구현"))).toBe(true);
+  });
+
+  it("caps goals at 5, keeping the most recent", () => {
+    const messages: GenericMessage[] = Array.from({ length: 8 }, (_, i) => ({
+      role: "user" as const,
+      content: `task-${i} 구현해줘`,
+    }));
+    const { goals } = extractCarryover(messages);
+    expect(goals.length).toBeLessThanOrEqual(5);
+    // 가장 최신 항목이 포함되어야 함
+    expect(goals.some((g) => g.includes("task-7"))).toBe(true);
+  });
+
+  it("extracts file artifacts from assistant messages", () => {
+    const messages: GenericMessage[] = [
+      { role: "user", content: "파일 만들어줘" },
+      {
+        role: "assistant",
+        content:
+          "src/engine/auto-compact.ts 파일을 생성했습니다.\n" +
+          "또한 src/engine/__tests__/auto-compact.test.ts도 업데이트했습니다.",
+      },
+    ];
+    const { artifacts } = extractCarryover(messages);
+    expect(artifacts.length).toBeGreaterThan(0);
+    expect(artifacts.some((a) => a.includes(".ts"))).toBe(true);
+  });
+
+  it("extracts decisions from assistant messages", () => {
+    const messages: GenericMessage[] = [
+      { role: "user", content: "어떤 방식 쓸지 알려줘" },
+      {
+        role: "assistant",
+        content: "결정: extractCarryover를 LLM-free 추출 방식으로 구현합니다.",
+      },
+    ];
+    const { decisions } = extractCarryover(messages);
+    expect(decisions.length).toBeGreaterThan(0);
+    expect(decisions[0]).toContain("extractCarryover");
+  });
+
+  it("returns empty arrays when no relevant content found", () => {
+    const messages: GenericMessage[] = [
+      { role: "user", content: "안녕하세요" },
+      { role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?" },
+    ];
+    const { goals, artifacts, decisions } = extractCarryover(messages);
+    expect(goals).toEqual([]);
+    expect(artifacts).toEqual([]);
+    expect(decisions).toEqual([]);
+  });
+
+  it("ignores [이전 대화 요약] user messages for goal extraction", () => {
+    const messages: GenericMessage[] = [
+      {
+        role: "user",
+        content: "[이전 대화 요약]\n## 사용자 요청\n- auth 구현해줘",
+        meta: { compactBoundary: true },
+      },
+    ];
+    const { goals } = extractCarryover(messages);
+    expect(goals).toEqual([]);
+  });
+
+  it("compactMessages boundary marker includes carryover in meta", () => {
+    const messages: GenericMessage[] = [];
+    for (let i = 0; i < 20; i++) {
+      messages.push({ role: "user", content: `기능 ${i} 구현해줘` });
+      messages.push({
+        role: "assistant",
+        content: `src/feature-${i}.ts 작성 완료했습니다. 결정: 방식 ${i} 채택합니다.`,
+      });
+    }
+    const { messages: out } = compactMessages(messages);
+    const marker = out.find(
+      (m) => m.role === "user" && m.meta?.compactBoundary === true,
+    );
+    expect(marker).toBeDefined();
+    expect(marker?.meta?.carryover).toBeDefined();
+    const carryover = marker?.meta?.carryover;
+    expect(Array.isArray(carryover?.goals)).toBe(true);
+    expect(Array.isArray(carryover?.artifacts)).toBe(true);
+    expect(Array.isArray(carryover?.decisions)).toBe(true);
   });
 });
