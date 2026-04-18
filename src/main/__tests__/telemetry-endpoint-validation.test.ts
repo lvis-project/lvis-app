@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import {
   DEFAULT_TELEMETRY_ALLOWLIST,
   TelemetryService,
+  sanitizeUrlForAudit,
   validateTelemetryEndpoint,
 } from "../telemetry.js";
 import type { TelemetrySettings } from "../../data/settings-store.js";
@@ -99,6 +100,66 @@ describe("validateTelemetryEndpoint — localhost + isPackaged", () => {
     const r = validateTelemetryEndpoint("https://localhost:4000/x", { isPackaged: true });
     expect(r.valid).toBe(false);
     expect(r.reason).toMatch(/packaged/);
+  });
+});
+
+describe("sanitizeUrlForAudit", () => {
+  it("strips userinfo (user:pass@)", () => {
+    expect(sanitizeUrlForAudit("https://user:pw@example.com/path")).toBe(
+      "https://example.com/path",
+    );
+  });
+
+  it("strips query string", () => {
+    expect(sanitizeUrlForAudit("https://host.example/x?token=secret")).toBe(
+      "https://host.example/x",
+    );
+  });
+
+  it("strips fragment", () => {
+    expect(sanitizeUrlForAudit("https://host.example/x#bearer=abc")).toBe(
+      "https://host.example/x",
+    );
+  });
+
+  it("preserves port in host", () => {
+    expect(sanitizeUrlForAudit("https://host.example:8443/x")).toBe(
+      "https://host.example:8443/x",
+    );
+  });
+
+  it("returns an unparseable marker for garbage input", () => {
+    const out = sanitizeUrlForAudit("not a url");
+    expect(out).toMatch(/unparseable/);
+  });
+
+  it("truncates unparseable input to 80 chars of content", () => {
+    const long = "x".repeat(500);
+    const out = sanitizeUrlForAudit(long) ?? "";
+    // "[unparseable] " prefix + 80 chars of content
+    expect(out.length).toBeLessThanOrEqual("[unparseable] ".length + 80);
+  });
+
+  it("returns undefined for non-string / empty", () => {
+    expect(sanitizeUrlForAudit(undefined)).toBeUndefined();
+    expect(sanitizeUrlForAudit("")).toBeUndefined();
+    expect(sanitizeUrlForAudit(42)).toBeUndefined();
+  });
+});
+
+describe("TelemetryService — audit log uses warn + sanitized url", () => {
+  it("logs type=warn (not error) and strips query string when endpoint rejected", () => {
+    const entries: Array<Record<string, unknown>> = [];
+    const svc = new TelemetryService({
+      settings: () => ({ enabled: true, endpoint: "http://bad.example/x?secret=abc" } as TelemetrySettings),
+      isPackaged: true,
+      auditLogger: { log: (e) => entries.push(e) },
+    });
+    expect(svc.isActive()).toBe(false);
+    expect(entries.length).toBe(1);
+    expect(entries[0].type).toBe("warn");
+    expect(String(entries[0].output)).toBe("http://bad.example/x");
+    expect(String(entries[0].output)).not.toContain("secret");
   });
 });
 
