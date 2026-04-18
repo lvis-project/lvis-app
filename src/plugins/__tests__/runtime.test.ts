@@ -92,12 +92,12 @@ describe("PluginRuntime.disable", () => {
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain("p-user");
-    expect(runtime.listMethods()).toContain("p_user_hello");
+    expect(runtime.listToolNames()).toContain("p_user_hello");
 
     await runtime.disable("p-user");
 
     expect(runtime.listPluginIds()).not.toContain("p-user");
-    expect(runtime.listMethods()).not.toContain("p_user_hello");
+    expect(runtime.listToolNames()).not.toContain("p_user_hello");
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     const entry = registry.plugins.find((p: { id: string }) => p.id === "p-user");
@@ -113,7 +113,7 @@ describe("PluginRuntime.disable", () => {
     await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Managed plugin/);
 
     expect(runtime.listPluginIds()).toContain("p-managed");
-    expect(runtime.listMethods()).toContain("p_managed_hello");
+    expect(runtime.listToolNames()).toContain("p_managed_hello");
 
     // registry should NOT have enabled=false
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
@@ -176,7 +176,7 @@ describe("PluginRuntime.disable", () => {
     await runtime.load();
 
     expect(runtime.listPluginIds()).toContain(pluginId);
-    expect(runtime.listMethods()).toContain("com_lge_test_hello");
+    expect(runtime.listToolNames()).toContain("com_lge_test_hello");
   });
 
   it("plugin with dot-notation method name fails to load with a clear error", async () => {
@@ -273,14 +273,7 @@ describe("PluginRuntime.disable", () => {
         entry: "entry.mjs",
         methods: ["meta_ping"],
         capabilities: ["meta-capability"],
-        startupMethods: ["meta_ping"],
-        ipcBindings: [
-          {
-            channel: "lvis:meta:ping",
-            method: "meta_ping",
-            args: ["message"],
-          },
-        ],
+        startupTools: ["meta_ping"],
       }),
       "utf-8",
     );
@@ -294,15 +287,6 @@ describe("PluginRuntime.disable", () => {
     expect(runtime.listPluginIdsByCapability("meta-capability")).toEqual(["meta-plugin"]);
 
     const manifest = runtime.getPluginManifest("meta-plugin");
-    expect(manifest?.startupMethods).toEqual(["meta_ping"]);
-
-    expect(runtime.listIpcBindings()).toEqual([
-      {
-        pluginId: "meta-plugin",
-        channel: "lvis:meta:ping",
-        method: "meta_ping",
-        args: ["message"],
-      },
-    ]);
+    expect(manifest?.startupTools).toEqual(["meta_ping"]);
   });
 });

@@ -203,7 +203,7 @@ export class PluginMarketplaceService {
       name: plugin.name,
       version: "1.0.0",
       entry: entryRelPath,
-      methods: plugin.methods,
+      tools: plugin.tools,
       config: plugin.defaultConfig ?? {},
       ui: resolvedUi,
     };
