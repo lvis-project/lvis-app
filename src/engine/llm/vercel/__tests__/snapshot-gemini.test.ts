@@ -197,7 +197,10 @@ describe("message-mapper (gemini-safe)", () => {
     });
   });
 
-  it("ignores thinkingBlocks (Gemini-safe)", () => {
+  it("emits thinkingBlocks as reasoning parts (P3 — Claude round-trip path)", () => {
+    // P3 change: thinkingBlocks now map to `reasoning` parts carrying
+    // providerOptions.anthropic.signature. Non-Anthropic providers ignore
+    // reasoning parts they don't recognize, so this is safe cross-vendor.
     const result = genericToModelMessages([
       {
         role: "assistant",
@@ -205,10 +208,13 @@ describe("message-mapper (gemini-safe)", () => {
         thinkingBlocks: [{ thinking: "secret", signature: "sig" }],
       },
     ]);
-    const serialized = JSON.stringify(result);
-    expect(serialized).not.toContain("secret");
-    expect(serialized).not.toContain("sig");
-    expect(serialized).toContain("visible");
+    const asst = result[0] as { content: Array<Record<string, unknown>> };
+    expect(asst.content.map((p) => p.type)).toEqual(["reasoning", "text"]);
+    expect(asst.content[0]).toEqual({
+      type: "reasoning",
+      text: "secret",
+      providerOptions: { anthropic: { signature: "sig" } },
+    });
   });
 });
 
