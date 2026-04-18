@@ -147,30 +147,40 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // instantiated later (near PostTurnHookChain); we now share this instance.
   const bootAuditLogger = new AuditLogger();
 
-  // Sprint 1-A A3 — plugin shutdown handler registry. Electron `before-quit`
-  // fires each handler in parallel with a 5s per-handler timeout; slow or
-  // failing handlers are logged but do not block quit.
+  // Sprint 1-A A3 — plugin shutdown handler registry. Runs all handlers in
+  // parallel with a 5s per-handler timeout. Uses `prependOnceListener` so
+  // plugin onShutdown fires BEFORE main.ts's pluginRuntime.stopAll(), and the
+  // handler awaits completion via `event.preventDefault()` + `app.quit()` so
+  // plugins actually finish their cleanup instead of racing shutdown.
+  // Copilot review: previous fire-and-forget `void` path allowed quit to
+  // proceed before handlers finished and ordered them after stop().
   const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }> = [];
-  app.once("before-quit", () => {
-    if (pluginShutdownHandlers.length === 0) return;
+  let pluginShutdownRan = false;
+  app.prependOnceListener("before-quit", (event) => {
+    if (pluginShutdownHandlers.length === 0 || pluginShutdownRan) return;
+    pluginShutdownRan = true;
     const SHUTDOWN_TIMEOUT_MS = 5000;
-    for (const { pluginId, handler } of pluginShutdownHandlers) {
-      void (async () => {
-        let timer: NodeJS.Timeout | undefined;
-        try {
-          await Promise.race([
-            Promise.resolve().then(() => handler()),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error("shutdown handler timeout")), SHUTDOWN_TIMEOUT_MS);
-            }),
-          ]);
-        } catch (err) {
-          console.warn(`[plugin:${pluginId}] shutdown handler error:`, (err as Error).message);
-        } finally {
-          if (timer) clearTimeout(timer);
-        }
-      })();
-    }
+    event.preventDefault();
+    void (async () => {
+      await Promise.allSettled(
+        pluginShutdownHandlers.map(async ({ pluginId, handler }) => {
+          let timer: NodeJS.Timeout | undefined;
+          try {
+            await Promise.race([
+              Promise.resolve().then(() => handler()),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error("shutdown handler timeout")), SHUTDOWN_TIMEOUT_MS);
+              }),
+            ]);
+          } catch (err) {
+            console.warn(`[plugin:${pluginId}] shutdown handler error:`, (err as Error).message);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        }),
+      );
+      app.quit();
+    })();
   });
 
   // §4.2 Step 3-4: 플러그인 초기화 (범용 — 플러그인 특정 코드 없음)

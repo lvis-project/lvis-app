@@ -647,8 +647,12 @@ ${briefingData}
       // request_plugin만 있고 실제 실행할 tool이 없으면 다음 round로 진입
       // (LLM이 새로 활성화된 plugin의 tool을 호출할 수 있도록).
       // C9: request_plugin 전용 round는 MAX_TOOL_ROUNDS 카운트에서 제외.
+      // Copilot: 활성화에 실제로 성공한 경우에만 round를 되돌린다. 실패한
+      // request_plugin(unknown id, over-limit)만 반복되면 round 예산이 정상
+      // 소모되어야 무한 루프가 발생하지 않는다.
       if (remainingToolUses.length === 0) {
-        round--;
+        const successfulActivation = requestPluginResults.some((r) => !r.is_error);
+        if (successfulActivation) round--;
         continue;
       }
 
