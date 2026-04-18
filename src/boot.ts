@@ -162,7 +162,13 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // Dev escape hatch LVIS_DEV_SKIP_SIG=1 disables the verifier entirely (so
   // managed plugins still load without a .sig during local development).
   // TODO(production): ship production publisher public key + enforce in CI.
-  const skipSig = process.env.LVIS_DEV_SKIP_SIG === "1";
+  // H1: packaged builds MUST ignore LVIS_DEV_SKIP_SIG. The escape hatch is
+  // only honored when app.isPackaged === false (dev / test). If the env var
+  // is present in a packaged build, log an error so operators see the attempt.
+  if (app.isPackaged && process.env.LVIS_DEV_SKIP_SIG) {
+    console.error("[lvis] LVIS_DEV_SKIP_SIG ignored in packaged build");
+  }
+  const skipSig = !app.isPackaged && process.env.LVIS_DEV_SKIP_SIG === "1";
   const signatureVerifier = skipSig
     ? undefined
     : new PluginSignatureVerifier({
