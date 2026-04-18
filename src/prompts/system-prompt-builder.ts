@@ -148,7 +148,7 @@ export class SystemPromptBuilder {
     });
 
     // ⑧ Conversation Summary — ConversationLoop에서 Auto-Compact 시 동적 추가
-    // ⑨ OS / Environment (부팅 시)
+    // ⑨ OS / Environment (매 턴)
     this.sources.push({
       id: 9,
       name: "OS / Environment",
@@ -156,7 +156,7 @@ export class SystemPromptBuilder {
       build: () => {
         const now = new Date();
         const KST = "Asia/Seoul";
-        const kstTime = now.toLocaleString("sv-SE", { timeZone: KST, hour12: false }).replace("T", " ");
+        const kstTime = now.toLocaleString("sv-SE", { timeZone: KST, hour12: false });
         return [
           "<environment>",
           `OS: ${platform()}`,

@@ -65,6 +65,8 @@ export interface AppServices {
   approvalGate?: ApprovalGate;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
+  /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
+  refreshPluginNotifications: () => void;
 }
 
 // ─── 이벤트 버스 (플러그인 간 통신) ────────────────
@@ -84,6 +86,10 @@ function emitEvent(type: string, data?: unknown): void {
 function onEvent(type: string, handler: EventHandler): void {
   if (!eventHandlers.has(type)) eventHandlers.set(type, new Set());
   eventHandlers.get(type)!.add(handler);
+}
+
+function offEvent(type: string, handler: EventHandler): void {
+  eventHandlers.get(type)?.delete(handler);
 }
 
 // ─── Bootstrap ──────────────────────────────────────
@@ -414,7 +420,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   }
 
   // manifest.notificationEvents 선언 기반 OS 알림 등록 (플러그인 무관)
-  registerPluginNotifications(pluginRuntime, mainWindow);
+  let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
 
   // §4.5 + Agent 6: PostTurnHookChain 조립
   const bootAuditLogger = new AuditLogger();
@@ -475,8 +481,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     conversationLoop.generateText(prompt, opts?.maxTokens, opts?.systemPrompt);
   console.log("[lvis] boot: plugin callLlm ready");
 
-  // Feature 4: 월요일 주간 일정 캐시 로드
-  const isMonday = new Date().getDay() === 1;
+  // Feature 4: 월요일 주간 일정 캐시 로드 (KST 기준)
+  const isMonday = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Seoul", weekday: "short" }).format(new Date()) === "Mon";
   const calendarListMethod = findMethodByCapability(
     pluginRuntime, "calendar-source", (m) => m.endsWith("_list"),
   );
@@ -513,6 +519,10 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, postTurnHookChain,
     approvalGate, knowledgeAvailable,
+    refreshPluginNotifications: () => {
+      disposePluginNotifications();
+      disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
+    },
   };
 }
 
@@ -633,21 +643,29 @@ function buildManifestEventHints(
 function registerPluginNotifications(
   pluginRuntime: PluginRuntime,
   mainWindow: BrowserWindow,
-): void {
-  if (!Notification.isSupported()) return;
+): () => void {
+  if (!Notification.isSupported()) return () => {};
+
+  const registered: Array<{ type: string; handler: EventHandler }> = [];
 
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
     for (const spec of manifest.notificationEvents ?? []) {
-      onEvent(spec.event, (data) => {
+      const handler: EventHandler = (data) => {
         const title = spec.titleField ? getFieldByPath(data, spec.titleField) : spec.event;
         const body = spec.bodyField ? getFieldByPath(data, spec.bodyField) : "";
         if (!title) return;
         const notif = new Notification({ title, body, silent: false });
         notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
         notif.show();
-      });
+      };
+      onEvent(spec.event, handler);
+      registered.push({ type: spec.event, handler });
     }
   }
+
+  return () => {
+    for (const { type, handler } of registered) offEvent(type, handler);
+  };
 }
 
 function getFieldByPath(data: unknown, path: string): string {

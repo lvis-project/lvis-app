@@ -64,8 +64,8 @@ UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인
 - **예정 미팅** (medium priority): 향후 2시간 이내 일정
 - **종일 일정** (low priority): 당일 종일 이벤트
 
-캘린더 데이터는 앱 부팅 시 `calendar_list`를 통해 로드되어 캐시에 저장됩니다 (`calendarEventsCache`).  
-`getBriefingPromptData()`는 오늘 일정 요약 텍스트(최대 8건)를 LLM 프롬프트에 자동으로 포함합니다.
+캘린더 데이터는 앱 부팅 시 기본적으로 `calendar_today`를 통해 당일 일정만 로드되어 캐시에 저장됩니다 (`calendarEventsCache`). 월요일에는 추가로 `calendar_list({ days: 7 })`를 호출해 주간 일정 캐시를 갱신합니다.  
+`getBriefingPromptData()`는 이 캐시를 바탕으로 오늘 일정 요약 텍스트(최대 8건)를 LLM 프롬프트에 자동으로 포함합니다.
 
 ### 캘린더 플러그인 선제성 기능
 
