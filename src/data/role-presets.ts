@@ -78,6 +78,22 @@ export const DEFAULT_ROLE_PRESETS: RolePreset[] = [
 
 const STORAGE_KEY = "lvis:role-presets:v1";
 
+/**
+ * Window event name dispatched whenever the role-preset list changes via
+ * `saveRolePresets` / `resetRolePresets`. Listen for this at the App level
+ * to keep the preset dropdown in sync without requiring a restart.
+ */
+export const ROLE_PRESETS_CHANGED_EVENT = "lvis:role-presets-changed";
+
+function emitChanged(): void {
+  try {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent(ROLE_PRESETS_CHANGED_EVENT));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function loadRolePresets(): RolePreset[] {
   try {
     const raw = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
@@ -97,6 +113,7 @@ export function saveRolePresets(list: RolePreset[]): void {
   } catch {
     /* ignore quota / serialization errors */
   }
+  emitChanged();
 }
 
 export function resetRolePresets(): RolePreset[] {
@@ -105,6 +122,7 @@ export function resetRolePresets(): RolePreset[] {
   } catch {
     /* ignore */
   }
+  emitChanged();
   return DEFAULT_ROLE_PRESETS;
 }
 
