@@ -36,7 +36,13 @@ import {
 type MarketplaceItem = { id: string; name: string; description: string; packageSpec: string; installed: boolean; enabled: boolean; isManaged?: boolean };
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
-type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string } };
+type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string } };
+
+export type BriefingPayload = {
+  generatedAt: string;
+  items: Array<{ category: string; priority: string; title: string; detail?: string }>;
+  summary?: string;
+};
 
 type LvisApi = {
   getSettings: () => Promise<AppSettings>;
@@ -66,6 +72,9 @@ type LvisApi = {
   getTodayTasks: () => Promise<Task[]>;
   getOverdueTasks: () => Promise<Task[]>;
   getBriefing: () => Promise<string | null>;
+  onProactiveBriefing: (h: (b: BriefingPayload) => void) => () => void;
+  dismissBriefing: () => Promise<{ ok: boolean; debounced?: boolean }>;
+  snoozeBriefing: () => Promise<{ ok: boolean; lastDismissedAt?: string }>;
   onViewActivate: (h: (k: string) => void) => () => void;
 };
 
@@ -150,6 +159,74 @@ declare global {
 
 const PRIORITY_CLASS: Record<Task["priority"], string> = { high: "text-red-400", medium: "text-amber-400", low: "text-slate-400" };
 const SOURCE_LABEL: Record<Task["source"], string> = { email: "메일", meeting: "미팅", calendar: "일정", teams: "Teams", manual: "직접" };
+
+// ─── BriefingCard (Sprint 3-A) ──────────────────────
+
+const PRIORITY_EMOJI: Record<string, string> = { high: "🔴", medium: "🟡", low: "🔵" };
+
+/**
+ * Sprint 3-A: renders a dismissable daily briefing card.
+ * Three prop variants exercised in tests:
+ *   - items present (typical)
+ *   - empty-state (items: [], summary provided by generateTextBriefing)
+ *   - LLM-failed fallback (summary is the plain-text briefing)
+ */
+export function BriefingCard({
+  briefing,
+  onDismiss,
+  onSnooze,
+}: {
+  briefing: BriefingPayload;
+  onDismiss: () => void;
+  onSnooze: () => void;
+}) {
+  const generatedLabel = useMemo(() => {
+    try {
+      return new Date(briefing.generatedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+    } catch {
+      return briefing.generatedAt;
+    }
+  }, [briefing.generatedAt]);
+
+  return (
+    <Card data-testid="briefing-card" className="border-primary/40 bg-primary/5">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-sm">🗒️ 오늘의 브리핑</CardTitle>
+            <CardDescription className="text-[11px]">{generatedLabel}</CardDescription>
+          </div>
+          <div className="flex gap-1">
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onSnooze}>1시간 뒤 다시</Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onDismiss}>닫기</Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2 pt-0">
+        {briefing.summary && (
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{briefing.summary}</p>
+        )}
+        {briefing.items.length === 0 ? (
+          <p className="text-xs text-muted-foreground">표시할 항목이 없습니다.</p>
+        ) : (
+          <ul className="space-y-1 text-xs">
+            {briefing.items.slice(0, 8).map((it, idx) => (
+              // PR#44 HIGH: composite key (category:title) beats raw idx —
+              // stable across reorder; idx fallback handles duplicate titles.
+              <li key={`${it.category}:${it.title}:${idx}`} className="flex gap-1.5">
+                <span>{PRIORITY_EMOJI[it.priority] ?? "•"}</span>
+                <span className="flex-1">
+                  <span className="font-medium">{it.title}</span>
+                  {it.detail ? <span className="text-muted-foreground"> — {it.detail}</span> : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 // ─── TaskView ───────────────────────────────────────
 
@@ -536,6 +613,9 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
   const [webKeyInput, setWebKeyInput] = useState("");
   const [hasWebKey, setHasWebKey] = useState(false);
 
+  // Sprint 3-A: proactive Daily Briefing toggle (§7, §14.4 feature flag).
+  const [enableDailyBriefing, setEnableDailyBriefing] = useState(false);
+
   const [saving, setSaving] = useState(false);
 
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
@@ -561,6 +641,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       const webApiKeySet = await api.hasWebApiKey(s.webSearch.provider);
       if (cancelled) return;
       setHasWebKey(webApiKeySet);
+      setEnableDailyBriefing(s.proactive?.enableDailyBriefing ?? false);
       setSettingsLoaded(true);
     })();
     return () => {
@@ -611,6 +692,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
           },
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
+          proactive: { enableDailyBriefing } as any,
         } as any);
       }
       // permissions 탭: 각 항목이 즉시 저장되므로 별도 save 불필요
@@ -628,6 +710,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
             <TabsTrigger value="llm" className="flex-1">지능 (LLM)</TabsTrigger>
             <TabsTrigger value="chat" className="flex-1">채팅</TabsTrigger>
             <TabsTrigger value="web" className="flex-1">검색 (Web)</TabsTrigger>
+            <TabsTrigger value="proactive" className="flex-1">브리핑</TabsTrigger>
             <TabsTrigger value="permissions" className="flex-1">권한</TabsTrigger>
           </TabsList>
 
@@ -721,6 +804,33 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
               </div>
             )}
             <p className="text-[11px] text-muted-foreground">Tavily와 Serper는 AI 에이전트용 고성능 검색 기능을 제공합니다.</p>
+          </TabsContent>
+
+          <TabsContent value="proactive" className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-medium">데일리 브리핑</p>
+                <p className="text-[11px] text-muted-foreground">장기간 idle 상태일 때 태스크·일정·메모를 종합한 일일 브리핑을 LLM으로 요약해 알려줍니다. 하루 1회, 사용자가 닫으면 24시간 재표시 안 함.</p>
+              </div>
+              <div className="flex items-center gap-3 rounded-md border px-3 py-3">
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={enableDailyBriefing}
+                  aria-labelledby="daily-briefing-toggle-label"
+                  className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${enableDailyBriefing ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}
+                  onClick={() => setEnableDailyBriefing((prev) => !prev)}
+                >
+                  {enableDailyBriefing && (
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
+                  )}
+                </button>
+                <div className="space-y-0.5">
+                  <p id="daily-briefing-toggle-label" className="text-sm font-medium">데일리 브리핑 활성화</p>
+                  <p className="text-[11px] text-muted-foreground">기본값은 꺼짐입니다. 켜면 idle scan 중 요약이 생성됩니다.</p>
+                </div>
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="permissions">
@@ -1049,6 +1159,7 @@ function App() {
   const [commandQuery, setCommandQuery] = useState("");
   const [working, setWorking] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [briefing, setBriefing] = useState<BriefingPayload | null>(null);
   const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([]);
   const approvalQueueRef = useRef<ApprovalRequest[]>([]);
   useEffect(() => { approvalQueueRef.current = approvalQueue; }, [approvalQueue]);
@@ -1081,18 +1192,24 @@ function App() {
   // ─── Plugin actions ───────────────────────────
   const refreshViews = async () => { const v = (await api.listPluginUiExtensions()).filter((i) => i.extension.slot === "sidebar"); setPluginViews(v); return v; };
   const refreshMarketplace = async () => { try { setMarketStatus("로딩 중..."); const l = await api.listMarketplacePlugins(); setMarketplace(l); setMarketStatus(`플러그인 ${l.length}개`); } catch (e) { setMarketStatus(`실패: ${(e as Error).message}`); } };
-  const installPlugin = async (id: string) => { setWorking(true); try { await api.installMarketplacePlugin(id); await refreshMarketplace(); await refreshViews(); } finally { setWorking(false); } };
-  const uninstallPlugin = async (id: string) => { setWorking(true); try { await api.uninstallMarketplacePlugin(id); await refreshMarketplace(); await refreshViews(); } finally { setWorking(false); } };
+  const installPlugin = async (id: string) => { setWorking(true); try { await api.installMarketplacePlugin(id); await refreshMarketplace(); await refreshViews(); setMarketStatus(`설치 완료: ${id}`); } catch (e) { setMarketStatus(`설치 실패: ${(e as Error).message}`); } finally { setWorking(false); } };
+  const uninstallPlugin = async (id: string) => { setWorking(true); try { await api.uninstallMarketplacePlugin(id); await refreshMarketplace(); await refreshViews(); setMarketStatus(`제거 완료: ${id}`); } catch (e) { setMarketStatus(`제거 실패: ${(e as Error).message}`); } finally { setWorking(false); } };
 
   // ─── Effects ──────────────────────────────────
+  // PR#44 HIGH: guard setBriefing against late/async callbacks firing after
+  // this component unmounts. The IPC unsubscribe (db()) runs in cleanup, but
+  // the bridge may still invoke our handler once between the unmount and the
+  // renderer hearing the IPC off. Keep a mounted flag we can check.
+  const isMountedRef = useRef(true);
   useEffect(() => {
     void refreshMarketplace(); void refreshViews(); void checkApiKey();
 
     // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
     api.getBriefing().then((text) => {
-      if (text) setEntries([{ kind: "assistant", text }]);
+      if (text && isMountedRef.current) setEntries([{ kind: "assistant", text }]);
     }).catch(() => {});
-    const dv = api.onViewActivate((k) => setActiveView(k));
+    const dv = api.onViewActivate((k) => { if (isMountedRef.current) setActiveView(k); });
+    const db = api.onProactiveBriefing((b) => { if (isMountedRef.current) setBriefing(b); });
     const ds = api.onChatStream((ev) => {
       if (process.env.NODE_ENV !== "production") console.log("[lvis:chat:stream]", ev);
       if (ev.type === "text_delta" && ev.text) {
@@ -1136,7 +1253,11 @@ function App() {
     });
     const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); } };
     window.addEventListener("keydown", onKey);
-    return () => { dv(); ds(); window.removeEventListener("keydown", onKey); };
+    return () => {
+      isMountedRef.current = false;
+      dv(); db(); ds();
+      window.removeEventListener("keydown", onKey);
+    };
   }, []);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
@@ -1239,6 +1360,29 @@ function App() {
                 </div>
               )}
               <ScrollArea className="h-full p-4"><div className="space-y-3">
+                {briefing && (
+                  <BriefingCard
+                    briefing={briefing}
+                    onDismiss={() => {
+                      // PR#44 Copilot: await IPC result; hide only on ok:true.
+                      // debounced/error keeps card visible so user can retry.
+                      void api.dismissBriefing().then((r) => {
+                        if (r?.ok) setBriefing(null);
+                        else console.warn("[lvis] dismissBriefing skipped:", r);
+                      }).catch((e: Error) => {
+                        console.warn("[lvis] dismissBriefing failed:", e.message);
+                      });
+                    }}
+                    onSnooze={() => {
+                      void api.snoozeBriefing().then((r) => {
+                        if (r?.ok) setBriefing(null);
+                        else console.warn("[lvis] snoozeBriefing skipped:", r);
+                      }).catch((e: Error) => {
+                        console.warn("[lvis] snoozeBriefing failed:", e.message);
+                      });
+                    }}
+                  />
+                )}
                 {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
                 {entries.map((entry, idx) => {
                   if (entry.kind === "user") return <div key={idx} className="ml-auto max-w-[85%] rounded-md border bg-primary px-3 py-2 text-sm text-primary-foreground"><div className="mb-1 text-[11px] text-muted-foreground">나</div><div className="whitespace-pre-wrap">{entry.text}</div></div>;

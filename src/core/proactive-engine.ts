@@ -39,6 +39,12 @@ export interface ProactiveEngineDeps {
   getRecentNotes: () => Array<{ title: string; filename: string }>;
   getRecentSessions: () => Array<{ id: string; modifiedAt: Date }>;
   /**
+   * Sprint 3-A: optional, returns short note excerpts used to infer the
+   * user's voice/tone for the briefing. Kept deterministic — only titles are
+   * surfaced so repeated calls produce identical prompt text for tests.
+   */
+  getRecentMemoryExcerpts?: () => string[];
+  /**
    * §14.4 feature-flag pattern. Called at briefing time so a settings change
    * takes effect without service restart. Default OFF when undefined.
    */
@@ -62,10 +68,21 @@ export type DailyBriefingResult =
   | { status: "skipped"; reason: "disabled" | "no_llm" | "not_idle" | "already_today" | "recently_dismissed" | "no_signals" | "in_flight" };
 
 export interface DailyBriefingOptions {
-  /** IdleScheduler state at call time. Only "long_idle" proceeds. */
+  /**
+   * IdleScheduler state at call time. Accepts:
+   *   - "long_idle": classic idle-scan path
+   *   - "triggered": bypass idle gate (Sprint 3-A-2 coordinator non-idle signals)
+   * Any other value → skipped:not_idle.
+   */
   idleState?: IdleState | string;
   /** Override "now" for tests. */
   now?: Date;
+  /**
+   * Sprint 3-A-2: free-form human-readable reason from the
+   * ProactiveTriggerCoordinator (e.g. "schedule:08:30", "meeting-in-10m",
+   * "task-deadline-2h"). Logged alongside result for observability.
+   */
+  triggerReason?: string;
 }
 
 export interface ProactiveEventHint {
@@ -357,9 +374,9 @@ export class ProactiveEngine {
     // 2) callLlm
     if (!this.deps.callLlm) return { status: "skipped", reason: "no_llm" };
 
-    // 3) idle state — undefined을 허용하지 않음 (호출자 책임). boot 배선 단계에서는
-    //    IdleScheduler.getState() 결과를 전달해야 한다.
-    if (options.idleState !== "long_idle") {
+    // 3) idle state — accepted values: "long_idle" (classic idle path) or
+    //    "triggered" (Sprint 3-A-2 ProactiveTriggerCoordinator non-idle signal).
+    if (options.idleState !== "long_idle" && options.idleState !== "triggered") {
       return { status: "skipped", reason: "not_idle" };
     }
 
@@ -446,6 +463,23 @@ export class ProactiveEngine {
     if (emailDetails.length > 0) {
       lines.push("미처리 이메일 상세:");
       lines.push(...emailDetails);
+    }
+
+    // Sprint 3-A: user-voice hint (one short sentence) derived from recent
+    // memory note titles. Deterministic — uses at most 3 titles in stored
+    // order, so existing tests that assert exact prompt output stay stable.
+    const excerpts = this.deps.getRecentMemoryExcerpts?.() ?? [];
+    if (excerpts.length > 0) {
+      // PR#44 Copilot: memory note titles are user-controlled and flow INSIDE
+      // the <daily-briefing-data> tag. Strip newlines and escape angle
+      // brackets so a crafted title cannot close the tag or inject prompt
+      // directives.
+      const sanitize = (s: string): string =>
+        s.replace(/[\r\n]+/g, " ").replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+      const trimmed = excerpts.slice(0, 3).map(sanitize).filter((s) => s.length > 0);
+      if (trimmed.length > 0) {
+        lines.push(`사용자 목소리 힌트: 최근 메모 — ${trimmed.join(" / ")}. 이 어휘·톤을 자연스럽게 반영해 주세요.`);
+      }
     }
 
     // 오늘 캘린더 일정 상세 (KST 기준 당일과 overlap — 멀티데이/자정 걸친 일정 포함)

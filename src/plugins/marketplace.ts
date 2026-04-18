@@ -1,4 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
@@ -61,6 +62,17 @@ export class MockMarketplaceFetcher implements MarketplaceFetcher {
   }
 }
 
+function buildPinnedSpec(packageName: string, version: string): string {
+  // Scoped packages: @scope/name@version. Unscoped: name@version.
+  return `${packageName}@${version}`;
+}
+
+/** Sprint 3-B §9.6 / PR#44 HIGH — per-plugin install/rollback history. */
+interface PluginHistoryEntry {
+  version: string;
+  installedAt: string; // ISO timestamp
+}
+
 export class PluginMarketplaceService {
   private readonly appRoot: string;
   private readonly registryPath: string;
@@ -68,11 +80,20 @@ export class PluginMarketplaceService {
   private readonly installedDir: string;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly fetcher: MarketplaceFetcher;
+  /** Sprint 3-B §9.6: per-plugin version cache for rollback. */
+  private readonly cacheRoot: string;
+  /**
+   * PR#44 HIGH: per-plugin in-process mutex. Concurrent install/rollback
+   * calls for the same pluginId are serialized to protect the cache
+   * breadcrumb + history.json from corruption.
+   */
+  private readonly locks = new Map<string, Promise<void>>();
 
   constructor(
     appRoot: string,
     deploymentGuard?: PluginDeploymentGuard,
     fetcher?: MarketplaceFetcher,
+    cacheRoot?: string,
   ) {
     this.appRoot = resolve(appRoot);
     this.registryPath = resolve(this.appRoot, "plugins/registry.json");
@@ -80,6 +101,7 @@ export class PluginMarketplaceService {
     this.installedDir = resolve(this.appRoot, "plugins/installed");
     this.deploymentGuard = deploymentGuard;
     this.fetcher = fetcher ?? new MockMarketplaceFetcher(this.marketplacePath);
+    this.cacheRoot = cacheRoot ?? resolve(homedir(), ".lvis/plugins/.cache");
   }
 
   async list(): Promise<MarketplaceListItem[]> {
@@ -135,8 +157,15 @@ export class PluginMarketplaceService {
       }
     }
 
+    // §3-B rollback support — snapshot the currently-installed manifest
+    // before it gets overwritten so rollbackPlugin() can restore it.
+    await this.cacheCurrentVersion(pluginId);
+
     await this.runNpmInstall(plugin.packageSpec);
     const manifestPath = await this.writeInstalledManifest(plugin);
+    // Cache the freshly-installed version too so rollback targets don't
+    // include the version we just promoted to "current".
+    await this.cacheVersionFromManifest(pluginId, resolve(dirname(this.registryPath), manifestPath));
 
     // §M1 F-round: atomic read-modify-write under registry lock.
     await updatePluginRegistry(this.registryPath, (registry) => {
@@ -191,7 +220,225 @@ export class PluginMarketplaceService {
     });
   }
 
-  private async writeInstalledManifest(plugin: PluginMarketplaceItem): Promise<string> {
+  /**
+   * Sprint 3-B §9.6 — versioned install path. Thin wrapper around `install()`
+   * that pins `packageSpec` to a specific version (npm semver) and leaves a
+   * rollback breadcrumb. Callers can pass any marketplace pluginId; version
+   * is used as the npm install target (e.g. `@lvis/foo@1.2.3`).
+   */
+  async installPlugin(
+    pluginId: string,
+    version: string,
+  ): Promise<{ pluginId: string; installed: true; version: string }> {
+    return this.withPluginLock(pluginId, async () => {
+      const plugins = await this.fetcher.listPlugins();
+      const plugin = plugins.find((x) => x.id === pluginId);
+      if (!plugin) {
+        throw new Error(`Plugin not found in marketplace: ${pluginId}`);
+      }
+      if (this.deploymentGuard) {
+        const guardResult = await this.deploymentGuard.canInstall(pluginId, "user", plugin.deployment);
+        if (!guardResult.allowed) {
+          throw new Error(guardResult.reason ?? `Plugin install denied: ${pluginId}`);
+        }
+      }
+
+      await this.cacheCurrentVersion(pluginId);
+
+      // Override packageSpec to pin the requested version. Preserve registry semantics.
+      const pinnedSpec = buildPinnedSpec(plugin.packageName, version);
+      await this.runNpmInstall(pinnedSpec);
+      const manifestPath = await this.writeInstalledManifest(plugin, version);
+      await this.cacheVersionFromManifest(pluginId, resolve(dirname(this.registryPath), manifestPath));
+      // PR#44 HIGH: record install in per-plugin history.json (replaces the
+      // mtime-based rollback target selection, which is unreliable across
+      // filesystems that round mtimes and cache writes).
+      await this.appendHistoryEntry(pluginId, { version, installedAt: new Date().toISOString() });
+
+      await updatePluginRegistry(this.registryPath, (registry) => {
+        const existing = registry.plugins.find((x) => x.id === plugin.id);
+        if (existing) {
+          existing.manifestPath = manifestPath;
+          existing.enabled = true;
+        } else {
+          registry.plugins.push({ id: plugin.id, manifestPath, enabled: true });
+        }
+      });
+      return { pluginId: plugin.id, installed: true, version };
+    });
+  }
+
+  /**
+   * Sprint 3-B §9.6 — rollback to the prior cached version for `pluginId`.
+   * Throws when no prior version is available.
+   * PR#44 HIGH: guarded by per-plugin mutex to avoid racing with installPlugin.
+   */
+  async rollbackPlugin(pluginId: string): Promise<{ pluginId: string; rolledBackTo: string }> {
+    return this.withPluginLock(pluginId, async () => {
+      const priorVersion = await this.findRollbackTargetVersion(pluginId);
+      if (!priorVersion) {
+        throw new Error(`No prior version cached for plugin: ${pluginId}`);
+      }
+
+      const cachedManifestPath = resolve(this.cacheRoot, pluginId, priorVersion, "plugin.json");
+      const raw = await readFile(cachedManifestPath, "utf-8");
+      const cachedManifest = JSON.parse(raw) as { packageName?: string };
+      if (cachedManifest.packageName) {
+        // Reinstall the cached npm package at the prior version. npm resolves
+        // `name@version` from the registry the host is configured against.
+        await this.runNpmInstall(buildPinnedSpec(cachedManifest.packageName, priorVersion));
+      }
+
+      // Restore the cached plugin.json into the live installed dir.
+      const liveDir = resolve(this.installedDir, pluginId);
+      await mkdir(liveDir, { recursive: true });
+      const liveManifest = resolve(liveDir, "plugin.json");
+      await writeFile(liveManifest, raw, "utf-8");
+
+      // Record the rollback as a new history entry so subsequent rollbacks
+      // pick the correct prior version.
+      await this.appendHistoryEntry(pluginId, { version: priorVersion, installedAt: new Date().toISOString() });
+
+      const registryRelativePath = relative(dirname(this.registryPath), liveManifest).split("\\").join("/");
+      await updatePluginRegistry(this.registryPath, (registry) => {
+        const existing = registry.plugins.find((x) => x.id === pluginId);
+        if (existing) {
+          existing.manifestPath = registryRelativePath;
+          existing.enabled = true;
+        } else {
+          registry.plugins.push({ id: pluginId, manifestPath: registryRelativePath, enabled: true });
+        }
+      });
+      return { pluginId, rolledBackTo: priorVersion };
+    });
+  }
+
+  /**
+   * PR#44 HIGH: per-plugin serialization. Concurrent callers for the same
+   * pluginId queue behind each other; callers for different plugins run
+   * concurrently. We keep the map entry only while the promise is pending.
+   */
+  private async withPluginLock<T>(pluginId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.locks.get(pluginId) ?? Promise.resolve();
+    let release: () => void = () => {};
+    const next = new Promise<void>((resolvePromise) => {
+      release = resolvePromise;
+    });
+    this.locks.set(pluginId, prev.then(() => next));
+    try {
+      await prev;
+      return await fn();
+    } finally {
+      release();
+      // Clean up the map entry if this is still the tail of the queue.
+      if (this.locks.get(pluginId) === prev.then(() => next)) {
+        this.locks.delete(pluginId);
+      }
+    }
+  }
+
+  private historyPath(pluginId: string): string {
+    return resolve(this.cacheRoot, pluginId, "history.json");
+  }
+
+  private async readHistory(pluginId: string): Promise<PluginHistoryEntry[]> {
+    try {
+      const raw = await readFile(this.historyPath(pluginId), "utf-8");
+      const parsed = JSON.parse(raw) as { entries?: PluginHistoryEntry[] };
+      return Array.isArray(parsed.entries) ? parsed.entries : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async appendHistoryEntry(pluginId: string, entry: PluginHistoryEntry): Promise<void> {
+    try {
+      const dir = resolve(this.cacheRoot, pluginId);
+      await mkdir(dir, { recursive: true });
+      const entries = await this.readHistory(pluginId);
+      entries.push(entry);
+      await writeFile(this.historyPath(pluginId), `${JSON.stringify({ entries }, null, 2)}\n`, "utf-8");
+    } catch (err) {
+      console.warn(`[marketplace] appendHistoryEntry failed for ${pluginId}:`, (err as Error).message);
+    }
+  }
+
+  /**
+   * Reads the currently-installed manifest for `pluginId` (if any) and
+   * snapshots it under `{cacheRoot}/{pluginId}/{version}/plugin.json`.
+   * No-op when the plugin is not yet installed.
+   */
+  private async cacheCurrentVersion(pluginId: string): Promise<void> {
+    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
+    const entry = registry?.plugins.find((p) => p.id === pluginId);
+    if (!entry) return;
+    const manifestAbs = isAbsolute(entry.manifestPath)
+      ? entry.manifestPath
+      : resolve(dirname(this.registryPath), entry.manifestPath);
+    await this.cacheVersionFromManifest(pluginId, manifestAbs);
+  }
+
+  private async cacheVersionFromManifest(pluginId: string, manifestPath: string): Promise<void> {
+    try {
+      const raw = await readFile(manifestPath, "utf-8");
+      const parsed = JSON.parse(raw) as { version?: string };
+      const version = parsed.version ?? "unknown";
+      const dir = resolve(this.cacheRoot, pluginId, version);
+      await mkdir(dir, { recursive: true });
+      await writeFile(resolve(dir, "plugin.json"), raw, "utf-8");
+    } catch (err) {
+      console.warn(`[marketplace] cacheVersion failed for ${pluginId}:`, (err as Error).message);
+    }
+  }
+
+  /**
+   * PR#44 HIGH: use persisted history.json (install order-of-record) rather
+   * than filesystem mtimes. Picks the most recent history entry whose version
+   * differs from the currently-installed one. Falls back to `null` when no
+   * suitable prior version exists.
+   */
+  private async findRollbackTargetVersion(pluginId: string): Promise<string | null> {
+    const entries = await this.readHistory(pluginId);
+    if (entries.length === 0) return null;
+    // Determine the current version so we don't select it as the rollback target.
+    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
+    const current = registry?.plugins.find((p) => p.id === pluginId);
+    let currentVersion: string | undefined;
+    if (current) {
+      const manifestAbs = isAbsolute(current.manifestPath)
+        ? current.manifestPath
+        : resolve(dirname(this.registryPath), current.manifestPath);
+      try {
+        const raw = await readFile(manifestAbs, "utf-8");
+        currentVersion = (JSON.parse(raw) as { version?: string }).version;
+      } catch {
+        /* ignore */
+      }
+    }
+    // Walk history from newest → oldest, return first non-current version
+    // whose cached manifest still exists on disk.
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const candidate = entries[i].version;
+      // PR#44 Copilot: guard against empty/whitespace/invalid version dirs —
+      // they must be non-empty strings and the cached manifest must exist and
+      // parse as JSON with a matching `version` field. Invalid entries are
+      // skipped rather than treated as missing.
+      if (!candidate || typeof candidate !== "string" || candidate.trim().length === 0) continue;
+      if (candidate === currentVersion) continue;
+      const cachedManifest = resolve(this.cacheRoot, pluginId, candidate, "plugin.json");
+      try {
+        const raw = await readFile(cachedManifest, "utf-8");
+        const parsed = JSON.parse(raw) as { version?: string };
+        if (!parsed.version) continue;
+        return candidate;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  private async writeInstalledManifest(plugin: PluginMarketplaceItem, version?: string): Promise<string> {
     const pluginDir = resolve(this.installedDir, plugin.id);
     await mkdir(pluginDir, { recursive: true });
     const manifestFile = resolve(pluginDir, "plugin.json");
@@ -201,11 +448,15 @@ export class PluginMarketplaceService {
     const manifest: Record<string, unknown> = {
       id: plugin.id,
       name: plugin.name,
-      version: "1.0.0",
+      version: version ?? "1.0.0",
       entry: entryRelPath,
       tools: plugin.tools,
       config: plugin.defaultConfig ?? {},
       ui: resolvedUi,
+      // §3-B rollback: persist the npm package name into the installed manifest
+      // so rollbackPlugin() can reinstall cached versions without consulting
+      // the live marketplace catalog.
+      packageName: plugin.packageName,
     };
     if (plugin.deployment) manifest.deployment = plugin.deployment;
     if (plugin.publisher) manifest.publisher = plugin.publisher;

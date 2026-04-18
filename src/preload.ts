@@ -51,6 +51,15 @@ const api = {
   // ─── Daily Briefing ──────────────────────────────
   getBriefing: async () => ipcRenderer.invoke("lvis:briefing:get"),
 
+  // ─── Proactive (Sprint 3-A: briefing card + snooze/dismiss) ───
+  onProactiveBriefing: (handler: (briefing: { generatedAt: string; items: Array<{ category: string; priority: string; title: string; detail?: string }>; summary?: string }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:proactive:briefing", listener);
+    return () => ipcRenderer.removeListener("lvis:proactive:briefing", listener);
+  },
+  dismissBriefing: async () => ipcRenderer.invoke("lvis:proactive:dismiss-briefing") as Promise<{ ok: boolean; debounced?: boolean }>,
+  snoozeBriefing: async () => ipcRenderer.invoke("lvis:proactive:snooze-briefing") as Promise<{ ok: boolean; lastDismissedAt?: string }>,
+
   // ─── MCP ─────────────────────────────────────────
   mcp: {
     servers: async () => ipcRenderer.invoke("lvis:mcp:servers"),

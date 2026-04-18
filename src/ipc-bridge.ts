@@ -64,6 +64,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:tasks:today",
   "lvis:briefing:get",
   "lvis:proactive:dismiss-briefing",
+  "lvis:proactive:snooze-briefing",
 ]);
 
 export function registerIpcHandlers(
@@ -319,11 +320,51 @@ export function registerIpcHandlers(
 
   // Sprint 2-D: user dismissal — sets lastDismissedAt, which suppresses the
   // gated ProactiveEngine.generateDailyBriefing for the following 24h.
+  // Sprint 3-A (M1): debounce accepted dismisses to min 1s apart to prevent
+  // accidental double-click / rapid-fire IPC abuse.
+  let lastDismissAcceptedAt = 0;
+  const DISMISS_DEBOUNCE_MS = 1000;
   ipcMain.handle("lvis:proactive:dismiss-briefing", () => {
+    const now = Date.now();
+    if (now - lastDismissAcceptedAt < DISMISS_DEBOUNCE_MS) {
+      return { ok: false, debounced: true };
+    }
+    lastDismissAcceptedAt = now;
     const cur = settingsService.get("proactive") ?? { enableDailyBriefing: false };
     settingsService.patch({
-      proactive: { ...cur, lastDismissedAt: new Date().toISOString() },
+      proactive: { ...cur, lastDismissedAt: new Date(now).toISOString() },
     });
     return { ok: true };
+  });
+
+  // Sprint 3-A: snooze 1h — shifts lastDismissedAt forward by 1h from its
+  // current value (or from now when unset). Reuses the same 24h suppression
+  // gate; snoozing effectively re-arms the window further into the future.
+  // PR#44 HIGH: apply same 1s debounce as dismiss (prevents renderer loop
+  // abuse) and clamp the shifted value to `now + 7 days` so repeated snoozes
+  // cannot push lastDismissedAt arbitrarily far into the future.
+  let lastSnoozeAcceptedAt = 0;
+  const SNOOZE_DEBOUNCE_MS = 1000;
+  const SNOOZE_MAX_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
+  ipcMain.handle("lvis:proactive:snooze-briefing", () => {
+    const now = Date.now();
+    if (now - lastSnoozeAcceptedAt < SNOOZE_DEBOUNCE_MS) {
+      return { ok: false, debounced: true };
+    }
+    const cur = settingsService.get("proactive") ?? { enableDailyBriefing: false };
+    const baseMs = cur.lastDismissedAt
+      ? new Date(cur.lastDismissedAt).getTime()
+      : now;
+    const effectiveBase = Number.isFinite(baseMs) ? baseMs : now;
+    const shiftedMs = effectiveBase + 60 * 60 * 1000;
+    if (shiftedMs > now + SNOOZE_MAX_AHEAD_MS) {
+      return { ok: false, error: "snooze horizon exceeded (7d)" };
+    }
+    lastSnoozeAcceptedAt = now;
+    const shifted = new Date(shiftedMs).toISOString();
+    settingsService.patch({
+      proactive: { ...cur, lastDismissedAt: shifted },
+    });
+    return { ok: true, lastDismissedAt: shifted };
   });
 }
