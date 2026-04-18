@@ -49,6 +49,10 @@ const DEFAULT_PRICING: Record<LLMVendor, Record<string, ModelPricing>> = {
   copilot: {
     "gpt-4.1":  { inputPer1M: 0, outputPer1M: 0, contextWindow: 1_000_000 },
   },
+  // Azure AI Foundry / Vertex AI expose vendor-specific models under their own
+  // billing. Default tables are empty; overrides via LVIS_PRICING_OVERRIDE.
+  "azure-foundry": {},
+  "vertex-ai": {},
 };
 
 const FALLBACK: ModelPricing = { inputPer1M: 0, outputPer1M: 0, contextWindow: 128_000 };

@@ -145,12 +145,34 @@ export interface TokenUsage {
 
 // ─── Provider 인터페이스 ────────────────────────────
 
+/** Sprint A: response format selector for structured-output requests. */
+export type ResponseFormat =
+  | "text"
+  | "json"
+  | { type: "json-schema"; schema: object };
+
+/** Sprint A: stream-delta smoothing mode (Vercel AI SDK path only). */
+export type StreamSmoothing = "none" | "word" | "char";
+
 export interface StreamTurnParams {
   model: string;
   systemPrompt: string;
   messages: GenericMessage[];
   tools?: ToolSchema[];
+  /** Legacy: max output tokens. Kept for backward compatibility with all providers. */
   maxTokens?: number;
+  /** Sprint A: vendor-agnostic max output tokens. When set, overrides `maxTokens` in the Vercel adapter. */
+  maxOutputTokens?: number;
+  /** Sprint A: sampling temperature (0.0 – 1.5 typical). Forwarded per vendor when supported. */
+  temperature?: number;
+  /** Sprint A: deterministic sampling seed. Forwarded per vendor when supported. */
+  seed?: number;
+  /** Sprint A: structured-output format. Vendor-specific JSON mode flags mapped in each provider. */
+  responseFormat?: ResponseFormat;
+  /** Sprint A: model-side stop sequences. */
+  stopSequences?: string[];
+  /** Sprint A: client-side stream smoothing (Vercel SDK path only — no-op for legacy providers). */
+  streamSmoothing?: StreamSmoothing;
   /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */
   enableThinking?: boolean;
   /** Token budget for Claude extended thinking (1024–32000). Defaults to 10 000 when enableThinking is true. */

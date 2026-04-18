@@ -24,11 +24,28 @@ export class GeminiProvider implements LLMProvider {
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
     try {
       const tools = params.tools?.map(toGeminiFunctionDeclaration);
+      // Sprint A: map LVIS advanced settings → Gemini generationConfig.
+      const jsonMode =
+        params.responseFormat === "json" ||
+        (typeof params.responseFormat === "object" && params.responseFormat.type === "json-schema");
+      const generationConfig: Record<string, unknown> = {};
+      const maxOut = params.maxOutputTokens ?? params.maxTokens;
+      if (maxOut !== undefined) generationConfig.maxOutputTokens = maxOut;
+      if (params.temperature !== undefined) generationConfig.temperature = params.temperature;
+      if (params.seed !== undefined) generationConfig.seed = params.seed;
+      if (params.stopSequences && params.stopSequences.length > 0) {
+        generationConfig.stopSequences = params.stopSequences;
+      }
+      if (jsonMode) generationConfig.responseMimeType = "application/json";
+
       const model = this.genAI.getGenerativeModel({
         model: params.model,
         systemInstruction: params.systemPrompt,
         ...(tools && tools.length > 0 && {
           tools: [{ functionDeclarations: tools }],
+        }),
+        ...(Object.keys(generationConfig).length > 0 && {
+          generationConfig: generationConfig as never,
         }),
       });
 

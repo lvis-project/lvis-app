@@ -18,7 +18,7 @@
  *     • interleaved-thinking-2025-05-14 beta header only when thinking+tools
  *     • signatures consumed per-step from fullStream (#12433 safe)
  */
-import { streamText, jsonSchema, tool, type ModelMessage } from "ai";
+import { streamText, jsonSchema, smoothStream, tool, type ModelMessage } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createVertex } from "@ai-sdk/google-vertex";
@@ -223,6 +223,44 @@ export class VercelUnifiedProvider implements LLMProvider {
         }
       }
 
+      // Sprint A: vendor-agnostic generation controls. `maxOutputTokens` takes
+      // precedence over legacy `maxTokens` when provided.
+      const effectiveMaxOutputTokens = params.maxOutputTokens ?? params.maxTokens;
+
+      // Sprint A: map responseFormat → providerOptions per vendor (JSON mode).
+      if (params.responseFormat) {
+        const rf = params.responseFormat;
+        const isJson =
+          rf === "json" ||
+          (typeof rf === "object" && rf.type === "json-schema");
+        if (isJson) {
+          providerOptions = providerOptions ?? {};
+          if (slot === "openai" || slot === "copilot" || slot === "openai-compatible" || slot === "azure-foundry") {
+            providerOptions.openai = {
+              ...(providerOptions.openai ?? {}),
+              responseFormat: { type: "json_object" },
+            };
+          } else if (slot === "gemini" || slot === "vertex-ai") {
+            providerOptions.google = {
+              ...(providerOptions.google ?? {}),
+              responseMimeType: "application/json",
+            };
+          }
+          // Claude: JSON mode is prompt-driven; no provider flag.
+        }
+      }
+
+      // Sprint A: smoothStream transform (Vercel path only).
+      // `"word"` uses Vercel's built-in word chunker; `"char"` uses a regex
+      // that matches one code point per chunk.
+      const smoothing = params.streamSmoothing;
+      const transform =
+        smoothing === "word"
+          ? smoothStream({ chunking: "word" })
+          : smoothing === "char"
+            ? smoothStream({ chunking: /./u })
+            : undefined;
+
       // Wrap streamText() in try/catch to also capture synchronous construction
       // errors (e.g. APICallError thrown pre-stream), not just mid-stream errors.
       let fullStream: AsyncIterable<Record<string, unknown> & { type: string }>;
@@ -232,7 +270,13 @@ export class VercelUnifiedProvider implements LLMProvider {
           system: params.systemPrompt,
           messages,
           ...(tools ? { tools } : {}),
-          ...(params.maxTokens ? { maxOutputTokens: params.maxTokens } : {}),
+          ...(effectiveMaxOutputTokens ? { maxOutputTokens: effectiveMaxOutputTokens } : {}),
+          ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
+          ...(params.seed !== undefined ? { seed: params.seed } : {}),
+          ...(params.stopSequences && params.stopSequences.length > 0
+            ? { stopSequences: params.stopSequences }
+            : {}),
+          ...(transform ? { experimental_transform: transform } : {}),
           ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
           ...(providerOptions
             ? {
