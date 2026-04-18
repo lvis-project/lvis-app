@@ -1,27 +1,27 @@
 /**
- * VercelUnifiedProvider — P0 stub.
+ * VercelUnifiedProvider.
  *
  * Per docs/references/vercel-ai-sdk-migration.md §5.2, this is the single
  * adapter that will replace claude-provider/openai-provider/gemini-provider
  * once phases P1-P3 land.
  *
- * Current status (P0): inert scaffold. Feature flag defaults to "none";
- * instantiation is gated behind `settings.llm.useVercelSdk`. `streamTurn`
- * throws on call so any accidental wiring is caught loudly.
+ * P1 status: Gemini path implemented. OpenAI/Claude paths still throw.
  *
- * TODO(P1): Implement Anthropic path (claude vendor)
- *   - message-mapper: GenericMessage → ModelMessage (incl. thinkingBlocks + signature)
- *   - stream-mapper: streamText.fullStream → StreamEvent (reasoning-delta, text-delta, tool-call, finish)
- *   - cache-control providerMetadata (see probe-anthropic-cache.test.ts baseline)
- * TODO(P2): Implement OpenAI path (gpt-5.x via /v1/responses auto-routing)
- * TODO(P3): Implement Gemini path + error-mapper wiring + full L1-L4 snapshot parity
+ * TODO(P2): Implement OpenAI path (gpt-5.x via /v1/responses auto-routing).
+ * TODO(P3): Implement Claude path (thinkingBlocks + signature + cacheControl).
  */
+import { streamText, jsonSchema, tool, type ModelMessage } from "ai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type {
   LLMProvider,
   LLMVendor,
   StreamEvent,
   StreamTurnParams,
+  ToolSchema,
 } from "../types.js";
+import { genericToModelMessages } from "./message-mapper.js";
+import { fullStreamToStreamEvent } from "./stream-mapper.js";
+import { mapAiSdkErrorToLvis } from "./error-mapper.js";
 
 export class VercelUnifiedProvider implements LLMProvider {
   readonly vendor: LLMVendor;
@@ -41,11 +41,52 @@ export class VercelUnifiedProvider implements LLMProvider {
     this.customFetch = customFetch;
   }
 
-  // eslint-disable-next-line require-yield
-  async *streamTurn(_params: StreamTurnParams): AsyncIterable<StreamEvent> {
-    throw new Error(
-      "VercelUnifiedProvider: not yet implemented (P0 stub). " +
-        "Set settings.llm.useVercelSdk='none' or leave unset.",
-    );
+  async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    if (this.vendor !== "gemini") {
+      throw new Error(
+        `VercelUnifiedProvider: vendor "${this.vendor}" not yet implemented (P1 = gemini only). ` +
+          "Set settings.llm.useVercelSdk='none' or 'gemini'.",
+      );
+    }
+
+    try {
+      const google = createGoogleGenerativeAI({
+        apiKey: this.apiKey,
+        ...(this.baseUrl ? { baseURL: this.baseUrl } : {}),
+        ...(this.customFetch ? { fetch: this.customFetch } : {}),
+      });
+
+      const messages: ModelMessage[] = genericToModelMessages(params.messages);
+      const tools = buildTools(params.tools);
+
+      const result = streamText({
+        model: google(params.model),
+        system: params.systemPrompt,
+        messages,
+        ...(tools ? { tools } : {}),
+        ...(params.maxTokens ? { maxOutputTokens: params.maxTokens } : {}),
+      });
+
+      yield* fullStreamToStreamEvent(
+        result.fullStream as AsyncIterable<Record<string, unknown> & { type: string }>,
+      );
+    } catch (err) {
+      const mapped = mapAiSdkErrorToLvis(err);
+      yield { type: "error", error: mapped.userMessage };
+    }
   }
+}
+
+function buildTools(
+  schemas: ToolSchema[] | undefined,
+): Record<string, ReturnType<typeof tool>> | undefined {
+  if (!schemas || schemas.length === 0) return undefined;
+  const out: Record<string, ReturnType<typeof tool>> = {};
+  for (const s of schemas) {
+    out[s.name] = tool({
+      description: s.description,
+      inputSchema: jsonSchema(s.inputSchema as never),
+    });
+  }
+  return out;
 }
