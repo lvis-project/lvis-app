@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "deployment": "managed",
   "publisher": "LG Electronics IT",
+  "startupTimeoutMs": 15000,
   "entry": "../../../node_modules/@lvis/plugin-pageindex/dist/hostPlugin.js",
   "description": "로컬 문서 인덱싱 및 BM25 자연어 검색",
   "tools": [
@@ -106,11 +107,8 @@
     }
   },
   "config": {
-    "scanFolders": [
-      "fixtures"
-    ],
-    "workspace": ".pageindex-workspace",
-    "testMode": true
+    "scanFolders": [],
+    "workspace": ".pageindex-workspace"
   },
   "ui": [
     {

@@ -592,6 +592,21 @@ export class PluginRuntime {
       }
     }
 
+    // Sprint 4-A — surface any remaining testMode flag in a managed plugin
+    // manifest. testMode may legitimately appear in dev/fixture builds but
+    // should NEVER ship inside a managed-deployment install.
+    if (
+      parsed.deployment === "managed" &&
+      parsed.config &&
+      typeof parsed.config === "object" &&
+      (parsed.config as Record<string, unknown>).testMode === true
+    ) {
+      console.warn(
+        `[plugin-runtime] managed plugin '${pid}' has config.testMode=true (${path}). ` +
+        `testMode is a development flag and must not ship in production installs — please remove it from the installed manifest.`,
+      );
+    }
+
     if (parsed.startupTimeoutMs !== undefined) {
       // Schema declares integer; runtime enforces matching constraint.
       if (typeof parsed.startupTimeoutMs !== "number" || !Number.isInteger(parsed.startupTimeoutMs) || parsed.startupTimeoutMs <= 0) {
