@@ -107,7 +107,8 @@
         "calendar_delete",
         "calendar_start_watcher",
         "calendar_stop_watcher",
-        "calendar_open_url"
+        "calendar_open_url",
+        "calendar_detect_patterns"
       ],
       "defaultConfig": {},
       "ui": [

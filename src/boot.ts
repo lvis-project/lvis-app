@@ -5,7 +5,7 @@
  * 플러그인 특정 코드 없음 — 모든 플러그인은 HostApi를 통해 자기 등록.
  */
 import { resolve } from "node:path";
-import { app } from "electron";
+import { app, Notification } from "electron";
 import type { BrowserWindow } from "electron";
 import { PluginRuntime } from "./plugins/runtime.js";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
@@ -65,6 +65,8 @@ export interface AppServices {
   approvalGate?: ApprovalGate;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
+  /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
+  refreshPluginNotifications?: () => void;
 }
 
 // ─── 이벤트 버스 (플러그인 간 통신) ────────────────
@@ -84,6 +86,10 @@ function emitEvent(type: string, data?: unknown): void {
 function onEvent(type: string, handler: EventHandler): void {
   if (!eventHandlers.has(type)) eventHandlers.set(type, new Set());
   eventHandlers.get(type)!.add(handler);
+}
+
+function offEvent(type: string, handler: EventHandler): void {
+  eventHandlers.get(type)?.delete(handler);
 }
 
 // ─── Bootstrap ──────────────────────────────────────
@@ -156,7 +162,13 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     userInstalledDir: resolve(projectRoot, "plugins/installed"),
   });
 
-  // HIGH-1: late-binding ref — conversationLoop은 pluginRuntime 이후에 생성됨.
+  // Late-binding refs — conversationLoop은 pluginRuntime 이후에 생성되므로
+  // pluginRuntime 구성 시점에는 null로 시작하고, conversationLoop 생성 직후 주입한다.
+  //   - llmCallerRef: 플러그인 callLlm()의 LLM 진입점
+  //   - conversationLoopRef: onDisable 콜백이 conversationLoop에 접근하기 위한 핸들
+  const llmCallerRef: {
+    fn: ((prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string>) | null;
+  } = { fn: null };
   let conversationLoopRef: import("./engine/conversation-loop.js").ConversationLoop | null = null;
 
   const pluginRuntime = new PluginRuntime({
@@ -211,6 +223,10 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       isMsGraphAuthenticated: () => msGraphService.isAuthenticated(),
       getMsGraphAccount: () => msGraphService.getAccountName(),
       onMsGraphAuthChange: (handler) => msGraphService.onAuthChange(handler),
+      callLlm: async (prompt, opts) => {
+        if (!llmCallerRef.fn) throw new Error("LLM provider not ready");
+        return llmCallerRef.fn(prompt, opts);
+      },
     }),
   });
 
@@ -445,8 +461,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       .catch((e: Error) => console.log("[lvis] boot: calendar today load failed (non-fatal):", e.message));
   }
 
-  // 메일 소스 플러그인의 신규 이벤트 알림 (manifest 선언 기반)
-  registerMailSourceNotifications(pluginRuntime, mainWindow);
+  // manifest.notificationEvents 선언 기반 OS 알림 등록 (플러그인 무관)
+  let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
 
   // §4.5 + Agent 6: PostTurnHookChain 조립
   const bootAuditLogger = new AuditLogger();
@@ -504,8 +520,37 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     pluginRuntime,
   });
 
-  // HIGH-1: late-binding 완료 — disable 콜백이 conversationLoop에 접근 가능
+  // Late-binding 주입 — 두 ref 모두 여기서 채워진다.
   conversationLoopRef = conversationLoop;
+  // callLlm의 maxTokens는 플러그인이 실수로 큰 값을 넘겨 지연·비용 폭발이 나지 않도록
+  // 호스트에서 sanitize: 유효한 양의 정수만 수용하고 상한(CALL_LLM_MAX_TOKENS_CEILING)
+  // 으로 clamp. 유효하지 않으면 undefined로 넘겨 generateText의 기본값(400)을 사용.
+  const CALL_LLM_MAX_TOKENS_CEILING = 4096;
+  llmCallerRef.fn = (prompt, opts) => {
+    let maxTokens: number | undefined;
+    const raw = opts?.maxTokens;
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      maxTokens = Math.min(Math.floor(raw), CALL_LLM_MAX_TOKENS_CEILING);
+    }
+    return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt);
+  };
+  console.log("[lvis] boot: plugin callLlm ready");
+
+  // Feature 4: 월요일 주간 일정 캐시 로드 (KST 기준)
+  const isMonday = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Seoul", weekday: "short" }).format(new Date()) === "Mon";
+  const calendarListMethod = findMethodByCapability(
+    pluginRuntime, "calendar-source", (m) => m.endsWith("_list"),
+  );
+  if (isMonday && calendarListMethod) {
+    pluginRuntime.call(calendarListMethod, { days: 7 })
+      .then((events: unknown) => {
+        if (Array.isArray(events)) {
+          proactiveEngine.updateCalendarEvents(events as import("./core/proactive-engine.js").CachedCalendarEvent[]);
+          console.log(`[lvis] boot: weekly calendar loaded (${events.length}건, 월요일 모드)`);
+        }
+      })
+      .catch((e: Error) => console.log("[lvis] boot: weekly calendar load failed (non-fatal):", e.message));
+  }
 
   // §9.5: MCP Server 연결 (거버넌스 승인 서버만)
   const mcpGovernance = new McpGovernance();
@@ -529,6 +574,10 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, postTurnHookChain,
     approvalGate, knowledgeAvailable,
+    refreshPluginNotifications: () => {
+      disposePluginNotifications();
+      disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
+    },
   };
 }
 
@@ -645,35 +694,74 @@ function buildManifestEventHints(
   return hints;
 }
 
-function registerMailSourceNotifications(
+/** manifest.notificationEvents 선언 기반으로 OS 알림을 등록한다. 플러그인 특정 코드 없음. */
+function registerPluginNotifications(
   pluginRuntime: PluginRuntime,
   mainWindow: BrowserWindow,
-): void {
-  const eventTypes = new Set<string>();
-  for (const pluginId of pluginRuntime.listPluginIdsByCapability("mail-source")) {
-    const manifest = pluginRuntime.getPluginManifest(pluginId);
-    for (const eventType of manifest?.eventSubscriptions ?? []) {
-      if (eventType.endsWith(".new")) {
-        eventTypes.add(eventType);
+): () => void {
+  if (!Notification.isSupported()) return () => {};
+
+  const registered: Array<{ type: string; handler: EventHandler }> = [];
+  // manifest는 JSON에서 읽으므로 런타임 검증 필요. 또한 여러 플러그인이 같은 이벤트를
+  // 알림으로 선언하면 한 번의 emit에 알림이 중복으로 뜨므로 event별로 1개만 등록.
+  const registeredEvents = new Set<string>();
+
+  for (const { manifest } of pluginRuntime.listPluginManifests()) {
+    const notificationEvents = Array.isArray(manifest.notificationEvents)
+      ? manifest.notificationEvents
+      : [];
+    for (const spec of notificationEvents) {
+      if (!spec || typeof spec !== "object") {
+        console.warn("[lvis] boot: invalid notificationEvents spec (expected object), skipped:", spec);
+        continue;
       }
+      const event = typeof spec.event === "string" ? spec.event.trim() : "";
+      if (!event) {
+        console.warn("[lvis] boot: notificationEvents spec with missing/empty 'event' skipped:", spec);
+        continue;
+      }
+      if (spec.titleField !== undefined && typeof spec.titleField !== "string") {
+        console.warn(`[lvis] boot: notificationEvents[${event}].titleField must be string, skipped`);
+        continue;
+      }
+      if (spec.bodyField !== undefined && typeof spec.bodyField !== "string") {
+        console.warn(`[lvis] boot: notificationEvents[${event}].bodyField must be string, skipped`);
+        continue;
+      }
+      if (registeredEvents.has(event)) {
+        console.warn(`[lvis] boot: duplicate notificationEvents entry for "${event}" — keeping first, skipping rest`);
+        continue;
+      }
+      registeredEvents.add(event);
+      const { titleField, bodyField } = spec;
+      const handler: EventHandler = (data) => {
+        const resolvedTitle = titleField ? getFieldByPath(data, titleField) : "";
+        const title = resolvedTitle || event;
+        const body = bodyField ? getFieldByPath(data, bodyField) : "";
+        const notif = new Notification({ title, body, silent: false });
+        notif.on("click", () => {
+          // macOS에서 창 닫힌 뒤에도 알림이 살아 있을 수 있음 — destroyed 창 접근 시 throw 방지
+          if (mainWindow.isDestroyed()) return;
+          mainWindow.show();
+          mainWindow.focus();
+        });
+        notif.show();
+      };
+      onEvent(event, handler);
+      registered.push({ type: event, handler });
     }
   }
 
-  for (const eventType of eventTypes) {
-    onEvent(eventType, (data) => {
-      const d = data as { subject?: string; sender?: string; replyNeeded?: boolean; importance?: string };
-      const { Notification } = require("electron") as typeof import("electron");
-      if (!Notification.isSupported()) return;
-      const urgency = d.importance === "high" || d.replyNeeded;
-      const notif = new Notification({
-        title: urgency ? `📧 회신 필요 — ${d.sender ?? "알 수 없음"}` : `📧 새 메일 — ${d.sender ?? "알 수 없음"}`,
-        body: d.subject ?? "(제목 없음)",
-        silent: false,
-      });
-      notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
-      notif.show();
-    });
-  }
+  return () => {
+    for (const { type, handler } of registered) offEvent(type, handler);
+  };
+}
+
+function getFieldByPath(data: unknown, path: string): string {
+  const parts = path.split(".");
+  let val: unknown = data;
+  for (const p of parts) val = (val as Record<string, unknown>)?.[p];
+  return typeof val === "string" ? val : "";
 }
 
 function findMethodByCapability(

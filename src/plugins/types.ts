@@ -24,6 +24,15 @@ export interface PluginManifest {
   capabilities?: string[];
   startupTools?: string[];
   eventSubscriptions?: string[];
+  /**
+   * OS 네이티브 알림으로 표시할 이벤트 선언.
+   * titleField / bodyField 는 이벤트 데이터의 점(.) 경로.
+   */
+  notificationEvents?: Array<{
+    event: string;
+    titleField?: string;
+    bodyField?: string;
+  }>;
   deployment?: DeploymentMode;
   publisher?: string;
   /**
@@ -106,6 +115,14 @@ export interface PluginHostApi {
   isMsGraphAuthenticated(): boolean;
   getMsGraphAccount(): string | null;
   onMsGraphAuthChange(handler: () => void): void;
+
+  // ─── LLM 접근 (선제성 기능용) ────────────────────────────────────────
+  /**
+   * 호스트 LLM 프로바이더를 통한 텍스트 생성.
+   * 플러그인이 직접 LLM 키를 관리하지 않고도 인텔리전트 기능 구현 가능.
+   * LLM이 준비되지 않은 경우 에러를 던진다.
+   */
+  callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string>;
 }
 
 export interface PluginRuntimeContext {

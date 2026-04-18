@@ -59,6 +59,24 @@ export class ProactiveEngine {
     this.calendarEventsCache = events;
   }
 
+  /**
+   * KST 기준 당일 범위 [00:00, 24:00)을 UTC ms 경계로 반환.
+   * 캐시에 주간 일정이 섞여 있을 수 있으므로 "오늘" 필터링에 사용한다.
+   */
+  private kstTodayBoundsMs(now: Date): { start: number; end: number } {
+    const todayKstDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(now);
+    const start = new Date(`${todayKstDate}T00:00:00+09:00`).getTime();
+    return { start, end: start + 24 * 60 * 60 * 1000 };
+  }
+
+  /** 이벤트가 KST 당일 범위와 겹치면 true — 멀티데이/자정 걸친 일정도 포함. */
+  private overlapsKstToday(ev: CachedCalendarEvent, bounds: { start: number; end: number }): boolean {
+    const startMs = new Date(ev.start).getTime();
+    const endMs = new Date(ev.end).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
+    return startMs < bounds.end && endMs > bounds.start;
+  }
+
   /** 플러그인 이벤트 수집 (이벤트 버스에서 호출) */
   collectEvent(type: string, data?: unknown): void {
     this.eventLog.push({
@@ -132,20 +150,22 @@ export class ProactiveEngine {
 
     this.collectHintedEventItems(recentEvents, items);
 
-    // 5. 오늘 캘린더 일정
+    // 5. 오늘 캘린더 일정 — KST 기준 당일로 범위 제한 (주간 캐시가 로드돼도 오늘 것만)
     if (this.calendarEventsCache.length > 0) {
       const now = new Date();
-      const upcomingEvents = this.calendarEventsCache
+      const bounds = this.kstTodayBoundsMs(now);
+      const todayCache = this.calendarEventsCache.filter((e) => this.overlapsKstToday(e, bounds));
+      const upcomingEvents = todayCache
         .filter((e) => !e.isAllDay && new Date(e.start) > now)
         .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-      const allDayEvents = this.calendarEventsCache.filter((e) => e.isAllDay);
-      const ongoingEvents = this.calendarEventsCache.filter(
+      const allDayEvents = todayCache.filter((e) => e.isAllDay);
+      const ongoingEvents = todayCache.filter(
         (e) => !e.isAllDay && new Date(e.start) <= now && new Date(e.end) > now,
       );
 
       // 진행 중 일정 — 높은 우선순위
       for (const ev of ongoingEvents) {
-        const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+        const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" });
         items.push({
           category: "calendar",
           priority: "high",
@@ -156,7 +176,7 @@ export class ProactiveEngine {
 
       // 예정 일정 (최대 3개)
       for (const ev of upcomingEvents.slice(0, 3)) {
-        const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+        const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" });
         const minutesUntil = Math.round((new Date(ev.start).getTime() - now.getTime()) / 60000);
         const soon = minutesUntil <= 30;
         items.push({
@@ -289,19 +309,21 @@ export class ProactiveEngine {
       lines.push(...emailDetails);
     }
 
-    // 오늘 캘린더 일정 상세
+    // 오늘 캘린더 일정 상세 (KST 기준 당일과 overlap — 멀티데이/자정 걸친 일정 포함)
     if (this.calendarEventsCache.length > 0) {
       const now = new Date();
+      const bounds = this.kstTodayBoundsMs(now);
       const maxDetailedTodayEvents = 8;
       const todayEvents = this.calendarEventsCache
         .filter((e) => !e.isAllDay)
+        .filter((e) => this.overlapsKstToday(e, bounds))
         .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
       if (todayEvents.length > 0) {
         lines.push("오늘 일정:");
         const detailedTodayEvents = todayEvents.slice(0, maxDetailedTodayEvents);
         for (const ev of detailedTodayEvents) {
-          const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
-          const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+          const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" });
+          const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" });
           const isOngoing = new Date(ev.start) <= now && new Date(ev.end) > now;
           lines.push(`  - ${isOngoing ? "[진행중] " : ""}${startTime}~${endTime} ${ev.subject}${ev.location ? ` @ ${ev.location}` : ""}${ev.isOnlineMeeting ? " (온라인 미팅)" : ""}`);
         }
