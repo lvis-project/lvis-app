@@ -64,11 +64,12 @@ export function mapReasoningEffort(
 ): "none" | "low" | "medium" | "high" {
   if (budget <= 500) return "none";
   if (budget <= 3000) return "low";
-  if (budget >= 8000) return "high";
+  if (budget > 8000) return "high";
   return "medium";
 }
 
 export class VercelUnifiedProvider implements LLMProvider {
+  private static warnedCompatThinking = false;
   readonly vendor: LLMVendor;
   private readonly vendorSlot: VercelVendor;
   private readonly apiKey: string;
@@ -123,17 +124,35 @@ export class VercelUnifiedProvider implements LLMProvider {
         (slot === "openai" || slot === "copilot") &&
         isOpenAIReasoningModel(params.model);
 
-      // Copilot-only guard: Chat Completions returns 400 when reasoning_effort
-      // is set alongside tools for gpt-5.x. Drop the flag on tool turns.
-      // (OpenAI Responses API does NOT have this restriction.)
+      // Guard: Chat Completions returns 400 when reasoning_effort is set
+      // alongside tools for gpt-5.x. Drop the flag on tool turns for:
+      //   - copilot (always Chat Completions)
+      //   - openai with a custom baseUrl (may point at a Chat-Completions proxy
+      //     that cannot be assumed to support Responses API).
+      // Native OpenAI (no baseUrl override) uses Responses API and has no such
+      // restriction.
       const isGpt5 = params.model.toLowerCase().includes("gpt-5");
-      const dropReasoningForCopilotTools =
-        slot === "copilot" && isGpt5 && hasTools;
+      const suppressReasoningForToolTurn =
+        (slot === "copilot" && isGpt5 && hasTools) ||
+        (slot === "openai" && Boolean(this.baseUrl) && isGpt5 && hasTools);
+
+      // One-shot warn: openai-compatible silently ignores enableThinking.
+      if (
+        slot === "openai-compatible" &&
+        params.enableThinking === true &&
+        !VercelUnifiedProvider.warnedCompatThinking
+      ) {
+        VercelUnifiedProvider.warnedCompatThinking = true;
+        console.warn(
+          "[VercelUnifiedProvider] enableThinking=true is silently ignored " +
+            "for vendor=openai-compatible (endpoint does not expose reasoning_effort).",
+        );
+      }
 
       const useReasoning =
         params.enableThinking === true &&
         isOpenAIReasoning &&
-        !dropReasoningForCopilotTools;
+        !suppressReasoningForToolTurn;
 
       const providerOptions = useReasoning
         ? { openai: { reasoningEffort } }
