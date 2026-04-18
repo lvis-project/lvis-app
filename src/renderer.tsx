@@ -73,6 +73,7 @@ import { PermissionsTab } from "./ui/renderer/tabs/PermissionsTab.js";
 import { useSettings } from "./ui/renderer/hooks/use-settings.js";
 import { useChatState } from "./ui/renderer/hooks/use-chat-state.js";
 import { useBriefing } from "./ui/renderer/hooks/use-briefing.js";
+import { useSearch } from "./ui/renderer/hooks/use-search.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./ui/renderer/components/BriefingCard.js";
@@ -707,10 +708,21 @@ export function App() {
   const [maxOutputTokens] = useState<number>(4096);
 
   // Sprint 4.C — conversation UX state (editingEntryIdx / editBusy now in useChatState)
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchCase, setSearchCase] = useState(false);
-  const [searchIdx, setSearchIdx] = useState(0);
+  const {
+    open: searchOpen,
+    query: searchQuery,
+    caseSensitive: searchCase,
+    matches: searchMatches,
+    matchSet: searchMatchSet,
+    matchIdx: searchIdx,
+    highlight: searchHighlight,
+    changeQuery: searchChangeQuery,
+    toggleCase: searchToggleCase,
+    toggleOverlay: searchToggleOverlay,
+    closeOverlay: searchCloseOverlay,
+    nextMatch: searchNext,
+    prevMatch: searchPrev,
+  } = useSearch(entries);
   const [starred, setStarred] = useState<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [sessions, setSessions] = useState<Array<{ id: string; modifiedAt: string }>>([]);
@@ -765,24 +777,7 @@ export function App() {
     return match?.id ?? null;
   }, [starred, currentSessionId, entryIndexToHistoryIndex]);
 
-  // ─── Search (Ctrl/Cmd+F) ──────────────────────
-  const searchMatches = useMemo(() => {
-    if (!searchQuery) return [] as number[];
-    const q = searchCase ? searchQuery : searchQuery.toLowerCase();
-    const hits: number[] = [];
-    entries.forEach((e, i) => {
-      if (e.kind !== "user" && e.kind !== "assistant") return;
-      const t = searchCase ? e.text : e.text.toLowerCase();
-      if (t.includes(q)) hits.push(i);
-    });
-    return hits;
-  }, [entries, searchQuery, searchCase]);
-  // O(1) membership check for per-entry highlight in the big render loop.
-  const searchMatchSet = useMemo(() => new Set(searchMatches), [searchMatches]);
-  useEffect(() => {
-    if (searchIdx >= searchMatches.length) setSearchIdx(0);
-  }, [searchMatches, searchIdx]);
-  const searchHighlight = searchOpen ? searchQuery : "";
+  // ─── Search (Ctrl/Cmd+F) — provided by useSearch hook ─────
 
   // ─── Edit & resend (delegates to useChatState) ─────────────
   const handleEditSave = useCallback(
@@ -1059,8 +1054,7 @@ export function App() {
     });
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); }
-      // Sprint 4.C: Ctrl/Cmd+F opens in-conversation search
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") { e.preventDefault(); setSearchOpen(true); }
+      // Sprint 4.C: Ctrl/Cmd+F handled by useSearch hook
     };
     window.addEventListener("keydown", onKey);
     return () => {
@@ -1189,7 +1183,7 @@ export function App() {
                     <DropdownMenuItem onClick={() => void handleExport("json")}>JSON (.json)</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button variant="outline" size="sm" onClick={() => setSearchOpen((v) => !v)} title="대화 검색 (Ctrl/Cmd+F)"><Search className="mr-1 h-4 w-4" />찾기</Button>
+                <Button variant="outline" size="sm" onClick={searchToggleOverlay} title="대화 검색 (Ctrl/Cmd+F)"><Search className="mr-1 h-4 w-4" />찾기</Button>
                 <Sheet open={sheetOpen} onOpenChange={setSheetOpen}><SheetTrigger asChild><Button variant="outline" size="sm"><PanelsTopLeft className="mr-1 h-4 w-4" />뷰</Button></SheetTrigger>
                   <SheetContent side="right"><SheetHeader><SheetTitle>뷰 관리</SheetTitle><SheetDescription>빠른 이동</SheetDescription></SheetHeader><Separator className="my-4" />
                     <div className="space-y-2">
@@ -1257,11 +1251,11 @@ export function App() {
                 caseSensitive={searchCase}
                 matchCount={searchMatches.length}
                 currentIdx={searchIdx}
-                onChangeQuery={(v) => { setSearchQuery(v); setSearchIdx(0); }}
-                onToggleCase={() => setSearchCase((v) => !v)}
-                onNext={() => setSearchIdx((i) => (searchMatches.length === 0 ? 0 : (i + 1) % searchMatches.length))}
-                onPrev={() => setSearchIdx((i) => (searchMatches.length === 0 ? 0 : (i - 1 + searchMatches.length) % searchMatches.length))}
-                onClose={() => { setSearchOpen(false); setSearchQuery(""); }}
+                onChangeQuery={searchChangeQuery}
+                onToggleCase={searchToggleCase}
+                onNext={searchNext}
+                onPrev={searchPrev}
+                onClose={searchCloseOverlay}
               />
               {hasApiKey === false && (
                 <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
