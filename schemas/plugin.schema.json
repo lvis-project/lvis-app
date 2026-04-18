@@ -73,6 +73,11 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "startupTimeoutMs": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Hard startup() timeout (ms). Exceeding plugins are fail-soft dropped. Default slow warning threshold is 5000ms."
+    },
     "deployment": { "enum": ["managed", "user"] },
     "publisher": { "type": "string" },
     "toolSchemas": {

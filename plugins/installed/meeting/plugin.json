@@ -5,6 +5,7 @@
   "deployment": "managed",
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
+  "description": "회의 녹음·전사·요약 및 액션 아이템 추출",
   "tools": [
     "meeting_start",
     "meeting_push_chunk",

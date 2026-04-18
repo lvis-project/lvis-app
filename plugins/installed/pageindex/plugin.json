@@ -5,6 +5,7 @@
   "deployment": "managed",
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-pageindex/dist/hostPlugin.js",
+  "description": "로컬 문서 인덱싱 및 BM25 자연어 검색",
   "tools": [
     "index_scan",
     "index_documents",

@@ -142,6 +142,37 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     dbPath: resolve(app.getPath("userData"), "lvis-tasks.db"),
   });
 
+  // Sprint 1-A A3 — AuditLogger is created before PluginRuntime so the
+  // per-plugin HostApi.logEvent can route through it. Previously it was
+  // instantiated later (near PostTurnHookChain); we now share this instance.
+  const bootAuditLogger = new AuditLogger();
+
+  // Sprint 1-A A3 — plugin shutdown handler registry. Electron `before-quit`
+  // fires each handler in parallel with a 5s per-handler timeout; slow or
+  // failing handlers are logged but do not block quit.
+  const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }> = [];
+  app.once("before-quit", () => {
+    if (pluginShutdownHandlers.length === 0) return;
+    const SHUTDOWN_TIMEOUT_MS = 5000;
+    for (const { pluginId, handler } of pluginShutdownHandlers) {
+      void (async () => {
+        let timer: NodeJS.Timeout | undefined;
+        try {
+          await Promise.race([
+            Promise.resolve().then(() => handler()),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error("shutdown handler timeout")), SHUTDOWN_TIMEOUT_MS);
+            }),
+          ]);
+        } catch (err) {
+          console.warn(`[plugin:${pluginId}] shutdown handler error:`, (err as Error).message);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      })();
+    }
+  });
+
   // §4.2 Step 3-4: 플러그인 초기화 (범용 — 플러그인 특정 코드 없음)
   // API 키를 플러그인에 범용적으로 전달
   const configOverrides = buildPluginConfigOverrides(settingsService);
@@ -226,6 +257,24 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       callLlm: async (prompt, opts) => {
         if (!llmCallerRef.fn) throw new Error("LLM provider not ready");
         return llmCallerRef.fn(prompt, opts);
+      },
+      // Sprint 1-A A3 — structured log event → AuditLogger (plugin context).
+      logEvent: (level, message, data) => {
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: level === "error" ? "error" : "tool_call",
+            input: `[plugin:${pluginId}] [${level.toUpperCase()}] ${message}`,
+            output: data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
+          });
+        } catch (err) {
+          console.warn(`[plugin:${pluginId}] logEvent failed:`, (err as Error).message);
+        }
+      },
+      // Sprint 1-A A3 — shutdown handler registration (fires on before-quit).
+      onShutdown: (handler) => {
+        pluginShutdownHandlers.push({ pluginId, handler });
       },
     }),
   });
@@ -464,8 +513,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // manifest.notificationEvents 선언 기반 OS 알림 등록 (플러그인 무관)
   let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
 
-  // §4.5 + Agent 6: PostTurnHookChain 조립
-  const bootAuditLogger = new AuditLogger();
+  // §4.5 + Agent 6: PostTurnHookChain 조립 (shares bootAuditLogger from A3 wiring)
   const postTurnHookChain = new PostTurnHookChain({
     memoryManager,
     auditLogger: bootAuditLogger,

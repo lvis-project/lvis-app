@@ -74,7 +74,16 @@ export class PluginRuntime {
     if (this.loaded) return;
     const manifestPaths = await this.resolveManifestPaths();
     for (const manifestPath of manifestPaths) {
-      const manifest = await this.readManifest(manifestPath);
+      let manifest: PluginManifest;
+      try {
+        manifest = await this.readManifest(manifestPath);
+      } catch (err) {
+        // Sprint 1-A A4: fail-soft drop on manifest validation — other
+        // plugins keep loading. Error message already contains pluginId,
+        // field path, reason, and an example.
+        console.error(`[plugin-runtime] ${(err as Error).message}`);
+        continue;
+      }
       const pluginRoot = dirname(manifestPath);
       const entryPath = this.resolveEntryPath(pluginRoot, manifest.entry);
       const module = (await import(pathToFileURL(entryPath).href)) as {
@@ -142,18 +151,73 @@ export class PluginRuntime {
 
   async startAll(): Promise<void> {
     await this.load();
-    // 개별 플러그인 시작 실패가 전체 앱을 죽이지 않도록 격리
-    for (const plugin of this.plugins.values()) {
-      try {
-        await plugin.instance.start?.();
-      } catch (err) {
-        console.error(`[plugin:${plugin.manifest.id}] start failed (non-fatal):`, (err as Error).message);
-        // 실패한 플러그인의 메서드를 제거하여 호출 시 에러 방지
-        for (const method of plugin.methods.keys()) {
-          this.methodMap.delete(method);
+    // Sprint 1-A A1 — parallel start with slow-plugin warning and optional
+    // hard timeout. handler Map is already registered in load() so method
+    // availability is not gated by slow starts.
+    const SLOW_THRESHOLD_MS = 5000;
+    const failed: Array<{ id: string; reason: string }> = [];
+
+    const tasks = [...this.plugins.values()].map((plugin) => {
+      const { id } = plugin.manifest;
+      const startedAt = Date.now();
+      const slowTimer = setTimeout(() => {
+        console.warn(`[plugin-runtime] slow plugin: ${id} (>${SLOW_THRESHOLD_MS}ms)`);
+      }, SLOW_THRESHOLD_MS);
+
+      const startPromise = (async () => {
+        try {
+          if (!plugin.instance.start) return;
+          const hardTimeoutMs = plugin.manifest.startupTimeoutMs;
+          if (hardTimeoutMs && hardTimeoutMs > 0) {
+            const controller = new AbortController();
+            let timer: NodeJS.Timeout | undefined;
+            const timeout = new Promise<never>((_, reject) => {
+              timer = setTimeout(() => {
+                controller.abort();
+                reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`));
+              }, hardTimeoutMs);
+            });
+            try {
+              await Promise.race([
+                Promise.resolve(plugin.instance.start()),
+                timeout,
+              ]);
+            } finally {
+              if (timer) clearTimeout(timer);
+            }
+          } else {
+            await plugin.instance.start();
+          }
+        } finally {
+          clearTimeout(slowTimer);
         }
-        this.plugins.delete(plugin.manifest.id);
+        const elapsed = Date.now() - startedAt;
+        if (elapsed > SLOW_THRESHOLD_MS) {
+          console.warn(`[plugin-runtime] slow plugin: ${id} finished in ${elapsed}ms`);
+        }
+      })();
+
+      return startPromise.then(
+        () => ({ id, ok: true as const }),
+        (err: Error) => ({ id, ok: false as const, reason: err.message }),
+      );
+    });
+
+    const results = await Promise.allSettled(tasks);
+    for (const result of results) {
+      if (result.status !== "fulfilled") continue;
+      const item = result.value;
+      if (!item.ok) failed.push({ id: item.id, reason: item.reason });
+    }
+
+    for (const { id, reason } of failed) {
+      console.error(`[plugin:${id}] start failed (non-fatal): ${reason}`);
+      const plugin = this.plugins.get(id);
+      if (!plugin) continue;
+      for (const method of plugin.methods.keys()) {
+        this.methodMap.delete(method);
       }
+      this.plugins.delete(id);
     }
   }
 
@@ -252,18 +316,22 @@ export class PluginRuntime {
         ? allTools.filter((t) => visibleNames.has(t))
         : allTools;
       const sampleTools = filteredTools.slice(0, 3);
-      // Prefer first 3-5 toolSchemas descriptions joined; else fallback.
+      // C11: manifest.description 우선, 없으면 toolSchemas 요약, 최후 fallback.
       let description: string;
-      const schemas = manifest.toolSchemas;
-      if (schemas) {
-        const parts: string[] = [];
-        for (const toolName of sampleTools) {
-          const desc = schemas[toolName]?.description;
-          if (desc) parts.push(desc);
-        }
-        description = parts.length > 0 ? parts.join(" / ") : `Plugin: ${manifest.name}`;
+      if (manifest.description) {
+        description = manifest.description;
       } else {
-        description = `Plugin: ${manifest.name}`;
+        const schemas = manifest.toolSchemas;
+        if (schemas) {
+          const parts: string[] = [];
+          for (const toolName of sampleTools) {
+            const desc = schemas[toolName]?.description;
+            if (desc) parts.push(desc);
+          }
+          description = parts.length > 0 ? parts.join(" / ") : `Plugin: ${manifest.name}`;
+        } else {
+          description = `Plugin: ${manifest.name}`;
+        }
       }
       cards.push({
         id: pluginId,
@@ -331,35 +399,82 @@ export class PluginRuntime {
   }
 
   private async readManifest(path: string): Promise<PluginManifest> {
+    // Sprint 1-A A4 — detailed, per-field error messages shaped as
+    //   "Invalid plugin manifest '<pluginId>' at '<fieldPath>': <reason>. Example: <correction>"
+    // so operators can fix manifests without re-reading the loader.
     const raw = await readFile(path, "utf-8");
-    const parsed = JSON.parse(raw) as PluginManifest;
-    if (!parsed.id || !parsed.entry || !Array.isArray(parsed.tools)) {
-      throw new Error(`Invalid plugin manifest: ${path}`);
+    let parsed: PluginManifest;
+    try {
+      parsed = JSON.parse(raw) as PluginManifest;
+    } catch (err) {
+      throw new Error(
+        `Invalid plugin manifest '<unknown>' at '${path}': JSON parse error (${(err as Error).message}). ` +
+        `Example: {"id":"com.lge.sample","name":"Sample","version":"1.0.0","entry":"dist/index.js","tools":["sample_ping"]}`,
+      );
     }
+    const pid = typeof parsed?.id === "string" && parsed.id.length > 0 ? parsed.id : "<unknown>";
+    const fail = (fieldPath: string, reason: string, example: string): never => {
+      throw new Error(
+        `Invalid plugin manifest '${pid}' at '${fieldPath}' (${path}): ${reason}. Example: ${example}`,
+      );
+    };
+
+    if (typeof parsed.id !== "string" || parsed.id.length === 0) {
+      fail("id", "must be a non-empty string", `"id": "com.lge.meeting-recorder"`);
+    }
+    if (typeof parsed.version !== "string" || !/^\d+\.\d+\.\d+/.test(parsed.version)) {
+      fail("version", "must be a semver string like 'MAJOR.MINOR.PATCH'", `"version": "1.0.0"`);
+    }
+    if (typeof parsed.entry !== "string" || parsed.entry.length === 0) {
+      fail("entry", "must be a non-empty relative path to the plugin ESM entry", `"entry": "dist/index.js"`);
+    }
+    if (!Array.isArray(parsed.tools)) {
+      fail("tools", "must be an array of tool name strings", `"tools": ["sample_ping"]`);
+    }
+
     // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor requirement).
     // Plugin id is the package identity and may contain dots (e.g. com.lge.meeting-recorder),
-    // but methods are LLM tool names — no dots allowed, no runtime conversion is performed.
+    // but tools are LLM tool names — no dots allowed, no runtime conversion is performed.
     const TOOL_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-    for (const method of parsed.tools) {
+    for (let i = 0; i < parsed.tools.length; i += 1) {
+      const method = parsed.tools[i];
+      if (typeof method !== "string") {
+        fail(`tools[${i}]`, "must be a string", `"tools": ["meeting_start"]`);
+      }
       if (!TOOL_NAME_PATTERN.test(method)) {
+        // Backwards-compat: older tests match /Invalid tool name '...'/ — keep that
+        // substring so the fresh error message still triggers the same assertion.
         throw new Error(
-          `Invalid tool name '${method}' in plugin '${parsed.id}': ` +
-          `tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores) ` +
-          `(e.g. 'meeting_start' not 'meeting.start')`,
+          `Invalid tool name '${method}' in plugin '${pid}' at 'tools[${i}]' (${path}): ` +
+          `tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). ` +
+          `Example: "tools": ["meeting_start"] (not "meeting.start")`,
         );
       }
     }
 
     if (parsed.startupTools !== undefined && !Array.isArray(parsed.startupTools)) {
-      throw new Error(
-        `Invalid manifest for plugin '${parsed.id}': 'startupTools' must be an array of strings`,
+      fail(
+        "startupTools",
+        "must be an array of strings (each value must appear in tools[])",
+        `"startupTools": ["meeting_watch"]`,
       );
     }
     for (const startupMethod of parsed.startupTools ?? []) {
       if (!parsed.tools.includes(startupMethod)) {
-        throw new Error(
-          `Invalid startupTools entry '${startupMethod}' in plugin '${parsed.id}': ` +
-          `method is not declared in tools[]`,
+        fail(
+          "startupTools",
+          `entry '${startupMethod}' is not declared in tools[]`,
+          `add "${startupMethod}" to tools[] or remove it from startupTools[]`,
+        );
+      }
+    }
+
+    if (parsed.startupTimeoutMs !== undefined) {
+      if (typeof parsed.startupTimeoutMs !== "number" || !Number.isFinite(parsed.startupTimeoutMs) || parsed.startupTimeoutMs <= 0) {
+        fail(
+          "startupTimeoutMs",
+          "must be a positive finite number (ms)",
+          `"startupTimeoutMs": 8000`,
         );
       }
     }
@@ -408,5 +523,7 @@ function createNoopHostApi(): PluginHostApi {
     getMsGraphAccount: () => null,
     onMsGraphAuthChange: () => {},
     callLlm: async () => { throw new Error("LLM not available in noop context"); },
+    logEvent: () => {},
+    onShutdown: () => {},
   };
 }

@@ -18,6 +18,8 @@ export interface PluginManifest {
    * 런타임이 이 값을 그대로 tool name으로 사용한다.
    */
   tools: string[];
+  /** 플러그인 한 줄 설명 — LLM 카탈로그 및 UI에 표시 */
+  description?: string;
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   keywords?: Array<{ keyword: string; skillId: string }>;
@@ -39,6 +41,14 @@ export interface PluginManifest {
    * LLM이 도구를 호출할 때 사용하는 JSON Schema (draft-07).
    * 키: tool 이름 (tools 배열 내 값과 동일), 값: { description, inputSchema }
    */
+  /**
+   * Sprint 1-A A1 — optional hard startup timeout (ms).
+   * When declared, PluginRuntime enforces an AbortController-based timeout on
+   * the plugin's `start()` call; plugins exceeding this limit are fail-soft
+   * dropped while leaving other plugins untouched. When absent, the runtime
+   * still emits a slow-plugin warning after a default threshold (5000ms).
+   */
+  startupTimeoutMs?: number;
   toolSchemas?: Record<
     string,
     {
@@ -123,7 +133,27 @@ export interface PluginHostApi {
    * LLM이 준비되지 않은 경우 에러를 던진다.
    */
   callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string>;
+
+  /**
+   * Sprint 1-A A3 — structured log event routed through AuditLogger.
+   * Automatically tagged with `plugin:${pluginId}` context (sessionId = "plugin").
+   */
+  logEvent(level: "info" | "warn" | "error", message: string, data?: unknown): void;
+
+  /**
+   * Sprint 1-A A3 — register a handler fired before app shutdown (Electron
+   * `before-quit`). Host enforces a 5s timeout on each handler; slow handlers
+   * are logged but do not block quit.
+   */
+  onShutdown(handler: () => void | Promise<void>): void;
 }
+
+/**
+ * Sprint 1-A A2 — canonical alias for the tool-handler function type exposed
+ * through `@lvis/plugin-sdk`. Kept identical to `PluginToolHandler` so the SDK
+ * surface can evolve without breaking the existing runtime name.
+ */
+export type PluginMethodHandler = PluginToolHandler;
 
 export interface PluginRuntimeContext {
   pluginId: string;
