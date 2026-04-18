@@ -67,6 +67,8 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:briefing:get",
   "lvis:proactive:dismiss-briefing",
   "lvis:proactive:snooze-briefing",
+  // Sprint 4.B — usage observability
+  "lvis:usage:summary",
   // Sprint 4.C — conversation UX
   "lvis:chat:get-history",
   "lvis:chat:edit-resend",
@@ -329,6 +331,12 @@ export function registerIpcHandlers(
 
   // ─── Daily Briefing ──────────────────────────────
   ipcMain.handle("lvis:briefing:get", () => conversationLoop.generateBriefing());
+
+  // ─── Usage Observability (Sprint 4.B) ───────────
+  ipcMain.handle("lvis:usage:summary", async (_e, days?: number) => {
+    const { getUsageSummary } = await import("./engine/usage-stats.js");
+    return getUsageSummary(typeof days === "number" ? days : 60);
+  });
 
   // Sprint 2-D: user dismissal — sets lastDismissedAt, which suppresses the
   // gated ProactiveEngine.generateDailyBriefing for the following 24h.

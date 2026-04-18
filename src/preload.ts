@@ -64,6 +64,9 @@ const api = {
   // ─── Daily Briefing ──────────────────────────────
   getBriefing: async () => ipcRenderer.invoke("lvis:briefing:get"),
 
+  // ─── Usage Observability (Sprint 4.B) ────────────
+  getUsageSummary: async (days?: number) => ipcRenderer.invoke("lvis:usage:summary", days),
+
   // ─── Proactive (Sprint 3-A: briefing card + snooze/dismiss) ───
   onProactiveBriefing: (handler: (briefing: { generatedAt: string; items: Array<{ category: string; priority: string; title: string; detail?: string }>; summary?: string }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);

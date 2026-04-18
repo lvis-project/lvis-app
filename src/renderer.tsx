@@ -38,6 +38,17 @@ type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
 type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string } };
 
+// ─── Usage types (Sprint 4.B) ───────────────────────
+type UsageTotals = { inputTokens: number; outputTokens: number; totalTokens: number; cost: number };
+type UsagePerX = UsageTotals & { vendor: string; model: string };
+type UsageTrendPt = UsageTotals & { date: string };
+type UsageConv = UsageTotals & { sessionId: string; turns: number; firstInput?: string };
+type UsageSummaryShape = {
+  today: UsageTotals; thisWeek: UsageTotals; thisMonth: UsageTotals;
+  perVendor: UsagePerX[]; perModel: UsagePerX[];
+  trend: UsageTrendPt[]; topConversations: UsageConv[]; generatedAt: string;
+};
+
 export type BriefingPayload = {
   generatedAt: string;
   items: Array<{ category: string; priority: string; title: string; detail?: string }>;
@@ -84,6 +95,7 @@ type LvisApi = {
   dismissBriefing: () => Promise<{ ok: boolean; debounced?: boolean }>;
   snoozeBriefing: () => Promise<{ ok: boolean; lastDismissedAt?: string }>;
   onViewActivate: (h: (k: string) => void) => () => void;
+  getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
 };
 
 // ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─
@@ -720,6 +732,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
             <TabsTrigger value="web" className="flex-1">검색 (Web)</TabsTrigger>
             <TabsTrigger value="proactive" className="flex-1">브리핑</TabsTrigger>
             <TabsTrigger value="permissions" className="flex-1">권한</TabsTrigger>
+            <TabsTrigger value="usage" className="flex-1">사용량</TabsTrigger>
           </TabsList>
 
           <TabsContent value="llm" className="space-y-4 pt-4">
@@ -844,10 +857,14 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
           <TabsContent value="permissions">
             <PermissionsTab />
           </TabsContent>
+
+          <TabsContent value="usage">
+            <UsageDashboard api={api} />
+          </TabsContent>
         </Tabs>
         <DialogFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
-          {tab !== "permissions" && (
+          {tab !== "permissions" && tab !== "usage" && (
             <Button onClick={() => void save()} disabled={saving || !settingsLoaded}>{saving ? "저장 중..." : "저장"}</Button>
           )}
         </DialogFooter>
@@ -1135,14 +1152,29 @@ function AssistantCard({
 }) {
   const title = entry.streaming ? "LVIS 응답 작성 중" : "LVIS 응답";
   const highlighted = highlightText(entry.text, highlightQuery);
+  // Sprint 4.B: rough token estimate for tooltip (~4 chars/token)
+  const outputTokens = Math.ceil(entry.text.length / 4);
   return (
     <div className="group relative max-w-[85%] rounded-md border bg-card px-3 py-2 text-sm">
       <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
         {title}
         {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
         {isStarred ? <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> : null}
+        {!entry.streaming && outputTokens > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="ml-auto cursor-default rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
+                ~{outputTokens >= 1000 ? `${(outputTokens / 1000).toFixed(1)}k` : outputTokens} tok
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              <div>출력 토큰(추정): {outputTokens.toLocaleString()}</div>
+              <div className="text-muted-foreground">실제값은 감사 로그에서 확인 가능</div>
+            </TooltipContent>
+          </Tooltip>
+        )}
         {actions && !entry.streaming ? (
-          <div className="ml-auto hidden gap-1 group-hover:flex">
+          <div className="hidden gap-1 group-hover:flex">
             {actions.onRetry && (
               <Tooltip><TooltipTrigger asChild>
                 <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onRetry} title="다시 시도 (깊이: high)">
@@ -1277,6 +1309,119 @@ function ChatSearchOverlay({
       <button className="rounded p-0.5 hover:bg-muted" onClick={onPrev} title="이전"><ChevronRight className="h-3 w-3 rotate-180" /></button>
       <button className="rounded p-0.5 hover:bg-muted" onClick={onNext} title="다음"><ChevronRight className="h-3 w-3" /></button>
       <button className="rounded p-0.5 hover:bg-muted" onClick={onClose} title="닫기"><XIcon className="h-3 w-3" /></button>
+    </div>
+  );
+}
+
+// ─── Usage Dashboard (Sprint 4.B) ──────────────────
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return `${n}`;
+}
+function formatCost(n: number): string {
+  if (n === 0) return "$0";
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  return `$${n.toFixed(2)}`;
+}
+
+function Sparkline({ points, width = 260, height = 48 }: { points: number[]; width?: number; height?: number }) {
+  if (points.length === 0) return <div className="text-xs text-muted-foreground">데이터 없음</div>;
+  const max = Math.max(...points, 1);
+  const step = points.length > 1 ? width / (points.length - 1) : 0;
+  const path = points
+    .map((v, i) => `${i === 0 ? "M" : "L"} ${(i * step).toFixed(1)} ${(height - (v / max) * (height - 4) - 2).toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg width={width} height={height} className="block">
+      <path d={path} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-primary" />
+    </svg>
+  );
+}
+
+function UsageDashboard({ api }: { api: LvisApi }) {
+  const [summary, setSummary] = useState<UsageSummaryShape | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState<7 | 30>(7);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    api.getUsageSummary(60).then((s) => { if (active) { setSummary(s); setLoading(false); } }).catch(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [api]);
+
+  if (loading) return <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>;
+  if (!summary) return <div className="py-6 text-center text-sm text-muted-foreground">사용량 데이터를 불러올 수 없습니다.</div>;
+
+  const trendSlice = summary.trend.slice(-range);
+  const sparkPoints = trendSlice.map((p) => p.totalTokens);
+
+  return (
+    <div className="space-y-4 pt-4">
+      <div className="grid grid-cols-3 gap-2">
+        {([
+          { label: "오늘", v: summary.today },
+          { label: "이번 주", v: summary.thisWeek },
+          { label: "이번 달", v: summary.thisMonth },
+        ] as const).map(({ label, v }) => (
+          <Card key={label}>
+            <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">{label}</CardTitle></CardHeader>
+            <CardContent className="space-y-0.5 px-3 pb-3">
+              <div className="text-lg font-semibold">{formatTokens(v.totalTokens)}</div>
+              <div className="text-xs text-muted-foreground">in {formatTokens(v.inputTokens)} / out {formatTokens(v.outputTokens)}</div>
+              <div className="text-xs font-medium">{formatCost(v.cost)}</div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader className="pb-1 pt-3 px-3 flex-row items-center justify-between">
+          <CardTitle className="text-xs text-muted-foreground">토큰 추이</CardTitle>
+          <div className="flex gap-1">
+            <Button size="sm" variant={range === 7 ? "default" : "outline"} onClick={() => setRange(7)} className="h-6 px-2 text-[11px]">7d</Button>
+            <Button size="sm" variant={range === 30 ? "default" : "outline"} onClick={() => setRange(30)} className="h-6 px-2 text-[11px]">30d</Button>
+          </div>
+        </CardHeader>
+        <CardContent className="px-3 pb-3"><Sparkline points={sparkPoints} /></CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">벤더별 사용량</CardTitle></CardHeader>
+        <CardContent className="px-3 pb-3">
+          {summary.perVendor.length === 0 ? <div className="text-xs text-muted-foreground">데이터 없음</div> : (
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1">벤더</th><th>토큰</th><th>비용</th></tr></thead>
+              <tbody>
+                {summary.perVendor.map((v) => (
+                  <tr key={v.vendor} className="border-t"><td className="py-1 font-mono">{v.vendor}</td><td>{formatTokens(v.totalTokens)}</td><td>{formatCost(v.cost)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">비용 상위 대화 5</CardTitle></CardHeader>
+        <CardContent className="px-3 pb-3">
+          {summary.topConversations.length === 0 ? <div className="text-xs text-muted-foreground">데이터 없음</div> : (
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1">세션</th><th>턴</th><th>토큰</th><th>비용</th></tr></thead>
+              <tbody>
+                {summary.topConversations.map((c) => (
+                  <tr key={c.sessionId} className="border-t">
+                    <td className="py-1 max-w-[120px] truncate font-mono" title={c.firstInput ?? c.sessionId}>{c.sessionId.slice(0, 12)}</td>
+                    <td>{c.turns}</td><td>{formatTokens(c.totalTokens)}</td><td>{formatCost(c.cost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -1443,6 +1588,26 @@ function App() {
     try { await api.chatExport(format); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
   }, [api]);
 
+  // Sprint 4.B — context overflow tracking
+  const [currentLlmSettings, setCurrentLlmSettings] = useState<{ provider: string; model: string } | null>(null);
+
+  const contextOverflowPct = useMemo(() => {
+    const CONTEXT_WINDOWS: Record<string, number> = {
+      "claude-sonnet-4-6": 1_000_000, "claude-opus-4-6": 1_000_000,
+      "claude-sonnet-4-5": 200_000, "claude-opus-4-5": 200_000,
+      "gpt-5.4": 1_050_000, "gpt-5.4-mini": 1_050_000,
+      "gpt-5": 400_000, "gpt-4.1": 1_000_000, "gpt-4.1-mini": 1_000_000,
+      "gemini-2.5-flash": 1_000_000, "gemini-2.5-pro": 2_000_000,
+    };
+    const model = currentLlmSettings?.model ?? "";
+    const contextWindow = CONTEXT_WINDOWS[model] ?? 128_000;
+    const estimatedTokens = entries.reduce((sum, e) => {
+      if (e.kind === "user" || e.kind === "assistant") return sum + Math.ceil(e.text.length / 4);
+      return sum;
+    }, 0);
+    return estimatedTokens / contextWindow;
+  }, [entries, currentLlmSettings]);
+
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
 
@@ -1483,6 +1648,11 @@ function App() {
   useEffect(() => {
     void refreshMarketplace(); void refreshViews(); void checkApiKey();
     void refreshStarred(); void refreshSessionId();
+
+    // Sprint 4.B: load LLM settings for context overflow calculation
+    api.getSettings().then((s) => {
+      if (isMountedRef.current) setCurrentLlmSettings({ provider: s.llm.provider, model: s.llm.model });
+    }).catch(() => {});
 
     // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
     api.getBriefing().then((text) => {
@@ -1792,6 +1962,18 @@ function App() {
                 })}
                 <div ref={chatEndRef} />
               </div></ScrollArea>
+              {contextOverflowPct >= 0.95 && (
+                <div className="border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive flex items-center gap-2">
+                  <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
+                  <span>— 자동 압축이 필요합니다. 전송이 일시 차단됩니다.</span>
+                </div>
+              )}
+              {contextOverflowPct >= 0.80 && contextOverflowPct < 0.95 && (
+                <div className="border-t bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                  <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
+                  <span>— 곧 자동 압축됩니다.</span>
+                </div>
+              )}
               <div className="grid grid-cols-[1fr_auto] gap-2 border-t bg-card p-3">
                 <Textarea value={question} onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => {
@@ -1803,7 +1985,7 @@ function App() {
                   }}
                   placeholder={hasApiKey === false ? "API 키를 먼저 설정해 주세요..." : "질문 입력 (Enter 전송 / Shift+Enter 줄바꿈) · /command 사용 가능"}
                   className="min-h-[76px]" disabled={streaming} />
-                <Button onClick={() => void handleAsk(question)} disabled={streaming || !question.trim()}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
+                <Button onClick={() => void handleAsk(question)} disabled={streaming || !question.trim() || contextOverflowPct >= 0.95}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
               </div>
             </div>
           ) : (
