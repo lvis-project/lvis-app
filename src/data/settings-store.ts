@@ -194,6 +194,13 @@ export class SettingsService {
       if (llm.provider === "claude" && /^claude-sonnet-4-2025/i.test(llm.model)) {
         llm.model = DEFAULT_SETTINGS.llm.model;
       }
+      // Migrate removed/unsupported vendors (e.g. pre-strip "lgenie") onto the
+      // current default so provider-factory doesn't throw at turn time.
+      const SUPPORTED_VENDORS = ["claude", "openai", "gemini", "copilot"] as const;
+      if (!(SUPPORTED_VENDORS as readonly string[]).includes(llm.provider)) {
+        llm.provider = DEFAULT_SETTINGS.llm.provider;
+        llm.model = DEFAULT_SETTINGS.llm.model;
+      }
       return {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },

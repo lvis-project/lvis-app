@@ -458,6 +458,10 @@ ${briefingData}
               const userMsg = reactiveCompacted && isContextLengthError(event.error)
                 ? `오류: 대화 기록을 압축한 뒤에도 모델 컨텍스트 한도를 초과했습니다. 새 세션을 시작하거나 이전 첨부를 정리해 주세요 (원인: ${event.error})`
                 : `오류: ${classified.userMessage}`;
+              // onError(callback above) was already invoked with the raw
+              // provider error; swap it for the classified user message so
+              // renderer toasts and the persisted history stay aligned.
+              callbacks?.onError?.(userMsg);
               this.history.append({ role: "assistant", content: userMsg });
               return { earlyReturn: true as const, text: userMsg };
           }
@@ -493,6 +497,7 @@ ${briefingData}
             this.history.clear();
             this.history.restore(compactedMsgs);
             if (process.env.NODE_ENV !== "production") console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+            callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
           }
         } catch (compactErr) {
           console.warn("[lvis] reactive-compact: compactMessages threw, skipping retry:", compactErr);
@@ -571,13 +576,14 @@ ${briefingData}
             is_error: true,
           });
         } else {
+          const prevToolCount = toolSchemas.length;
           mutableScope.activePluginIds.add(pluginId);
           pluginExpansions += 1;
           toolSchemas = rebuildToolSchemas();
-          const newPluginToolCount = toolSchemas.length;
+          const addedToolCount = Math.max(0, toolSchemas.length - prevToolCount);
           requestPluginResults.push({
             tool_use_id: tu.id,
-            content: `Plugin '${pluginId}' activated. ${newPluginToolCount} tools now available.`,
+            content: `Plugin '${pluginId}' activated. ${addedToolCount} new tool(s) now available (${toolSchemas.length} total in scope).`,
             is_error: false,
           });
           allToolCalls.push({
