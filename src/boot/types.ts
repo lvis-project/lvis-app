@@ -23,6 +23,7 @@ import type { AuditService } from "../main/audit-service.js";
 import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import type { StarredStore } from "../data/starred-store.js";
+import type { TelemetryService } from "../main/telemetry.js";
 
 export type EventHandler = (data: unknown) => void;
 
@@ -79,4 +80,15 @@ export interface AppServices {
   starredStore?: StarredStore;
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
   refreshPluginNotifications?: () => void;
+  /**
+   * Release-prep — anonymous telemetry service. Retained here so
+   * `before-quit` can run a final flush + stop() before the process exits
+   * (otherwise queued events are lost on shutdown).
+   */
+  telemetry?: TelemetryService;
+  /**
+   * Release-prep — auto-updater stop handle. Retained so shutdown can
+   * clear the 4h interval deterministically instead of relying on unref().
+   */
+  autoUpdaterStop?: () => void;
 }
