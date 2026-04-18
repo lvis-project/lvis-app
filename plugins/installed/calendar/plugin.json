@@ -31,9 +31,17 @@
     "meeting.ended",
     "email.action.needed"
   ],
+  "uiCallable": [
+    "calendar_status",
+    "calendar_auth",
+    "calendar_list",
+    "calendar_delete",
+    "calendar_open_url",
+    "calendar_detect_patterns"
+  ],
   "toolSchemas": {
     "calendar_status": {
-      "description": "Microsoft Graph 인증 상태와 watcher 실행 여부를 반환합니다. 인자 없음. 성공 시 { authenticated, account?, watcherRunning }를 반환합니다.",
+      "description": "Microsoft Graph 인증 상태와 watcher 실행 여부를 반환합니다. 사용 시기: 캘린더 기능이 사용 가능한 상태인지 다른 calendar_* 도구 호출 전에 먼저 확인하고 싶을 때. 인자 없음. 반환: { authenticated, account?, watcherRunning }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -42,7 +50,7 @@
       }
     },
     "calendar_auth": {
-      "description": "Microsoft 계정으로 로그인합니다. 이미 인증된 경우 즉시 반환합니다. 인자 없음. 성공 시 { authenticated, account? }를 반환합니다.",
+      "description": "Microsoft 계정으로 로그인합니다. 사용 시기: calendar_status 가 authenticated=false 를 반환한 직후. 이미 인증된 경우 즉시 반환합니다(중복 호출 안전). 인자 없음. 반환: { authenticated, account? }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -51,7 +59,7 @@
       }
     },
     "calendar_list": {
-      "description": "향후 N일간의 Outlook 일정 목록을 반환합니다. 로그인 필요. 성공 시 일정 배열을 반환합니다.",
+      "description": "향후 N일간의 Outlook 일정 목록을 반환합니다. 로그인 필요. 사용 시기: '이번 주 일정', '앞으로 며칠 간 미팅' 같이 기간 기반 조회. 사용 안 함: 오늘만 필요하면 calendar_today, 특정 일정 1건 상세는 calendar_get. 반환: 일정 배열.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -73,7 +81,7 @@
       }
     },
     "calendar_today": {
-      "description": "오늘의 Outlook 일정 목록을 반환합니다. 로그인 필요. 인자 없음.",
+      "description": "오늘의 Outlook 일정 목록을 반환합니다. 로그인 필요. 사용 시기: '오늘 뭐해', '오늘 미팅' 같은 당일 한정 조회. 사용 안 함: 기간 조회는 calendar_list. 인자 없음.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -82,7 +90,7 @@
       }
     },
     "calendar_get": {
-      "description": "특정 일정 단건을 조회합니다. 로그인 필요. 성공 시 일정 상세 객체를 반환합니다.",
+      "description": "특정 일정 단건의 상세(본문·참석자 등) 를 조회합니다. 로그인 필요. 사용 시기: calendar_list 또는 calendar_today 결과에서 얻은 id 로 상세를 확인해야 할 때. ID를 모르면 calendar_list/today 를 먼저 호출하세요.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -97,7 +105,7 @@
       }
     },
     "calendar_create": {
-      "description": "Outlook 캘린더에 새 일정을 생성합니다. 로그인 필요. 성공 시 생성된 이벤트 객체를 반환합니다.",
+      "description": "Outlook 캘린더에 새 일정을 생성합니다. 로그인 필요. 사용 시기: 사용자가 새 회의/약속 생성을 명시적으로 요청할 때. 사용 안 함: 기존 일정 변경은 calendar_update, 삭제는 calendar_delete. 입력 팁: start/end 는 KST ISO 8601(+09:00) 로 전달, timeZone 은 기본 Asia/Seoul.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -139,7 +147,7 @@
       }
     },
     "calendar_update": {
-      "description": "기존 Outlook 일정을 수정합니다. 로그인 필요. 수정할 필드만 전달하면 됩니다. 성공 시 수정된 이벤트 객체를 반환합니다.",
+      "description": "기존 Outlook 일정을 수정합니다. 로그인 필요. 사용 시기: '회의 30분 미뤄줘', '장소 바꿔줘' 같이 기존 일정의 일부 필드만 바꿀 때. 수정할 필드만 전달하면 됩니다(id 는 필수). 사용 안 함: 새 일정은 calendar_create, 취소는 calendar_delete.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -180,7 +188,7 @@
       }
     },
     "calendar_delete": {
-      "description": "Outlook 일정을 삭제합니다. 로그인 필요. 성공 시 { deleted: true }를 반환합니다.",
+      "description": "Outlook 일정을 영구 삭제합니다. 로그인 필요. 사용 시기: 사용자가 '일정 취소/삭제해줘'라고 명시적으로 요청할 때만. 되돌릴 수 없으므로 id 확인에 주의하고, 모호하면 calendar_get 으로 먼저 일정 내용을 사용자에게 확인 받으세요.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -195,7 +203,7 @@
       }
     },
     "calendar_start_watcher": {
-      "description": "Outlook 일정 변경을 주기적으로 폴링하는 감시자를 시작합니다. 15분/1분 전 알림 이벤트를 발행합니다. 로그인 필요. 성공 시 { started: true, running: true }를 반환합니다.",
+      "description": "Outlook 일정 변경을 주기적으로 폴링하는 감시자를 시작합니다(15분/1분 전 알림 이벤트 발행). 로그인 필요. 사용 시기: 사용자가 능동적 미팅 알림을 원할 때. 이미 실행 중이면 중복 호출 불필요 — calendar_status.watcherRunning 을 먼저 확인하세요.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -210,7 +218,7 @@
       }
     },
     "calendar_stop_watcher": {
-      "description": "일정 감시자를 중지합니다. 인자 없음. 성공 시 { stopped: true }를 반환합니다.",
+      "description": "일정 감시자를 중지합니다. 사용 시기: 사용자가 '일정 알림 꺼줘' 라고 명시할 때. 인자 없음. 반환: { stopped: true }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -219,7 +227,7 @@
       }
     },
     "calendar_open_url": {
-      "description": "외부 일정 링크(https만 허용)를 기본 브라우저로 엽니다. 성공 시 { opened: true }를 반환합니다.",
+      "description": "외부 일정 링크(https만 허용)를 기본 브라우저로 엽니다. 사용 시기: calendar_get 의 본문/메모에서 Teams/Zoom 등 미팅 참여 URL 을 발견하고 사용자가 '참여/열어줘'라고 요청했을 때. 다른 브라우저 탐색에는 사용하지 마세요.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -235,7 +243,7 @@
       }
     },
     "calendar_detect_patterns": {
-      "description": "향후 N일간(기본 28일, 최대 100건)의 일정에서 반복 패턴을 감지합니다. 로그인 필요. 패턴 발견 시 각 항목마다 calendar.pattern.detected 이벤트를 발행하고 { patterns: [...] }를 반환합니다.",
+      "description": "향후 일정에서 반복 패턴(예: 매주 금요일 팀 회의)을 감지합니다. 로그인 필요. 사용 시기: 사용자가 '반복 미팅 찾아봐', '내 일정 습관' 같이 패턴 분석을 명시적으로 요청할 때. 사용 안 함: 일반 일정 조회는 calendar_list 를 먼저. 기본 28일, 최대 100건. 반환: { patterns: [...] }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",

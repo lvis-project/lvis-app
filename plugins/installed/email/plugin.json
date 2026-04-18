@@ -31,9 +31,19 @@
   "notificationEvents": [
     { "event": "email.new", "titleField": "sender", "bodyField": "subject" }
   ],
+  "uiCallable": [
+    "email_status",
+    "email_auth",
+    "email_list",
+    "email_analyze",
+    "email_reply",
+    "email_get_sent_replies",
+    "email_get_notifications",
+    "email_create_event"
+  ],
   "toolSchemas": {
     "email_status": {
-      "description": "Microsoft Graph 인증 상태와 LLM 분석 활성화 여부를 반환합니다. 인자 없음. 성공 시 { authenticated, account?, llmEnabled }를 반환합니다.",
+      "description": "Microsoft Graph 인증 상태와 LLM 분석 활성화 여부를 반환합니다. 사용 시기: 다른 email_* 도구 호출 전 인증/분석 가능 상태를 먼저 확인하고 싶을 때. 인자 없음. 반환: { authenticated, account?, llmEnabled }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -42,7 +52,7 @@
       }
     },
     "email_auth": {
-      "description": "Microsoft 계정으로 로그인합니다. 이미 인증된 경우 즉시 반환합니다. 인자 없음. 성공 시 { authenticated, account? }를 반환합니다.",
+      "description": "Microsoft 계정으로 로그인합니다. 사용 시기: email_status 가 authenticated=false 를 반환한 직후. 이미 인증된 경우 즉시 반환합니다(중복 호출 안전). 인자 없음. 반환: { authenticated, account? }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -51,7 +61,7 @@
       }
     },
     "email_list": {
-      "description": "받은 편지함의 최근 이메일 목록을 가져옵니다. 로그인 필요. 성공 시 이메일 배열을 반환합니다.",
+      "description": "받은 편지함의 최근 이메일 목록(제목·발신자·요약)을 가져옵니다. 로그인 필요. 사용 시기: '메일 뭐 와있어', '최근 메일 정리' 같은 개괄 조회. 사용 안 함: 특정 메일 본문이 필요하면 email_read, 분석은 email_analyze. 반환: 이메일 배열.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -67,7 +77,7 @@
       }
     },
     "email_read": {
-      "description": "특정 이메일 메시지 전체 내용을 조회합니다. 로그인 필요. 성공 시 이메일 상세 객체를 반환합니다.",
+      "description": "특정 이메일 메시지의 전체 본문(HTML → 텍스트 변환) 과 헤더를 조회합니다. 로그인 필요. 사용 시기: email_list 결과에서 얻은 id 로 본문 전체가 필요할 때. 사용 안 함: 액션 여부·마감일 추출이 목적이면 email_analyze 를 바로.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -82,7 +92,7 @@
       }
     },
     "email_analyze": {
-      "description": "이메일을 분석하여 액션 필요 여부, 마감일, 의도, 우선순위 등을 추출합니다. LLM 키가 있으면 AI 분석, 없으면 키워드 분석. 로그인 필요. 성공 시 { email, analysis }를 반환합니다.",
+      "description": "이메일을 분석해 액션 필요 여부·마감일·의도·우선순위를 추출합니다. LLM 키가 있으면 AI 분석, 없으면 키워드 분석. 로그인 필요. 사용 시기: '이 메일 중요해?', '답장 필요한 거 골라줘' 같은 판단이 필요할 때. 사용 안 함: 본문 확인만 필요하면 email_read. 반환: { email, analysis }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -97,7 +107,7 @@
       }
     },
     "email_reply": {
-      "description": "특정 이메일에 답장을 보냅니다. 로그인 필요. 성공 시 { sent: true }를 반환하고 답장 기록을 저장합니다.",
+      "description": "특정 이메일에 답장을 전송합니다(실제 발송). 로그인 필요. 사용 시기: 사용자가 답장 내용을 확인/승인한 직후에만. 되돌릴 수 없으므로 본문(body)은 반드시 사용자에게 미리 보여주고 확인을 받으세요. 발송 후 기록은 email_get_sent_reply 로 조회 가능. 반환: { sent: true }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -124,7 +134,7 @@
       }
     },
     "email_get_sent_replies": {
-      "description": "이번 세션에서 보낸 모든 답장 기록 목록을 반환합니다. 인자 없음. 각 항목에 emailId, subject, to, body, sentAt이 포함됩니다.",
+      "description": "이번 세션에서 email_reply 로 보낸 모든 답장의 기록 목록을 반환합니다. 사용 시기: '방금 보낸 답장 뭐였지?', '오늘 몇 통 답장했어?' 같이 세션 내 전송 이력이 필요할 때. 인자 없음. 각 항목: emailId, subject, to, body, sentAt.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -133,7 +143,7 @@
       }
     },
     "email_get_sent_reply": {
-      "description": "특정 이메일에 대해 보낸 답장 기록을 조회합니다. 없으면 null 반환.",
+      "description": "특정 원본 이메일 id 에 대해 이번 세션에서 보낸 답장 기록을 조회합니다. 사용 시기: '이 메일에 답장 보냈었나?' 같이 특정 메일에 대한 답장 여부가 궁금할 때. 없으면 null 반환. 여러 통을 한 번에 조회하려면 email_get_sent_replies 를 쓰세요.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -148,7 +158,7 @@
       }
     },
     "email_start_watcher": {
-      "description": "새 이메일 도착을 주기적으로 폴링하는 감시자를 시작합니다. 로그인 필요. 성공 시 { started: true, running: true }를 반환합니다.",
+      "description": "새 이메일 도착을 주기적으로 폴링하는 감시자를 시작합니다. 로그인 필요. 사용 시기: 사용자가 능동적 새 메일 알림을 원할 때. 이미 실행 중이면 중복 호출 불필요 — email_status 로 먼저 확인하세요.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -163,7 +173,7 @@
       }
     },
     "email_stop_watcher": {
-      "description": "이메일 감시자를 중지합니다. 인자 없음. 성공 시 { stopped: true }를 반환합니다.",
+      "description": "이메일 감시자를 중지합니다. 사용 시기: 사용자가 '메일 알림 꺼줘' 라고 명시할 때. 인자 없음. 반환: { stopped: true }.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -172,7 +182,7 @@
       }
     },
     "email_get_notifications": {
-      "description": "감시자가 감지한 미처리 이메일 알림 목록을 반환합니다. 인자 없음.",
+      "description": "감시자가 감지한 미처리(아직 사용자에게 안내되지 않은) 새 이메일 알림 목록을 반환합니다. 사용 시기: '새 메일 왔어?', '알림 확인' 같이 감시자가 잡은 건이 있는지 조회할 때. 인자 없음.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -181,7 +191,7 @@
       }
     },
     "email_create_event": {
-      "description": "Outlook 캘린더에 새 일정을 생성합니다. 로그인 필요. 성공 시 생성된 이벤트 객체를 반환합니다.",
+      "description": "이메일 분석 결과에서 파생된 새 Outlook 일정을 생성합니다(email 플러그인 편의 래퍼). 로그인 필요. 사용 시기: email_analyze 결과에 'schedule meeting' 의도가 있을 때 바로 일정 등록. 사용 안 함: 메일과 무관한 일반 일정은 calendar_create 를 사용. 입력 팁: start/end 는 KST ISO 8601.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
