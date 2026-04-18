@@ -80,9 +80,15 @@ export interface AppSettings {
 
 /**
  * Production release prep — Electron auto-update (electron-updater).
- * Default ON so users receive critical fixes; can be disabled via UI.
+ *
+ * `autoCheckEnabled` defaults to TRUE: only the background update *check*
+ * (metadata fetch) runs by default. Actual download + install are always
+ * gated behind explicit user action in the update toast — there is no
+ * silent auto-install. Users who want zero network traffic for updates
+ * can flip this to false via the settings UI.
  */
 export interface UpdateSettings {
+  /** Background update-check enabled. Download/install still requires user action. */
   autoCheckEnabled: boolean;
 }
 

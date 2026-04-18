@@ -25,6 +25,9 @@ const pkgPath = resolve(root, "package.json");
 function run(cmd, args, opts = {}) {
   console.log(`[release] $ ${cmd} ${args.join(" ")}`);
   const r = spawnSync(cmd, args, { stdio: "inherit", cwd: root, ...opts });
+  if (r.error) {
+    throw new Error(`${cmd} ${args.join(" ")} failed to spawn: ${r.error.message}`);
+  }
   if (r.status !== 0) {
     throw new Error(`${cmd} ${args.join(" ")} exited with code ${r.status}`);
   }

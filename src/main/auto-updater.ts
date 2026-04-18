@@ -90,6 +90,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
 
   return {
     start() {
+      if (timer) return;
       void triggerCheck();
       timer = setInterval(() => void triggerCheck(), CHECK_INTERVAL_MS);
       if (timer.unref) timer.unref();

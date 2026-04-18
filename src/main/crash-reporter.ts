@@ -14,10 +14,14 @@
  */
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { homedir } from "node:os";
 import type { TelemetrySettings } from "../data/settings-store.js";
 
 export interface CrashReporterDeps {
+  /**
+   * Base path for crash dumps. We pass this through `app.setPath("crashDumps", …)`
+   * before `crashReporter.start()` so Electron writes minidumps into a LVIS-owned
+   * directory (consistent across OSes + easy to locate during triage).
+   */
   userDataPath: string;
   telemetry: TelemetrySettings;
   crashReporter?: {
@@ -28,6 +32,8 @@ export interface CrashReporterDeps {
       ignoreSystemCrashHandler?: boolean;
     }) => void;
   };
+  /** Optional hook to override Electron's crashDumps path (test seam). */
+  setCrashDumpsPath?: (path: string) => void;
   sentryLoader?: () => SentryLike | null;
 }
 
@@ -42,11 +48,22 @@ export interface CrashReporterHandle {
 }
 
 export function startCrashReporter(deps: CrashReporterDeps): CrashReporterHandle {
-  const dumpDir = resolve(homedir(), ".lvis", "crash-dumps");
+  const dumpDir = resolve(deps.userDataPath, "crash-dumps");
   try {
     mkdirSync(dumpDir, { recursive: true });
   } catch (err) {
     console.warn("[crash-reporter] mkdir dumpDir failed:", (err as Error).message);
+  }
+
+  // Override Electron's crashDumps location BEFORE crashReporter.start() so
+  // native minidumps land next to our userData (not the OS default).
+  const setPath = deps.setCrashDumpsPath ?? loadElectronSetCrashDumpsPath();
+  if (setPath) {
+    try {
+      setPath(dumpDir);
+    } catch (err) {
+      console.warn("[crash-reporter] setPath(crashDumps) failed:", (err as Error).message);
+    }
   }
 
   const uploadEnabled =
@@ -84,7 +101,6 @@ export function startCrashReporter(deps: CrashReporterDeps): CrashReporterHandle
     }
   }
 
-  void deps.userDataPath;
   return { dumpDir, started, sentryActive };
 }
 
@@ -92,6 +108,17 @@ function loadElectronCrashReporter(): CrashReporterDeps["crashReporter"] | undef
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     return require("electron").crashReporter;
+  } catch {
+    return undefined;
+  }
+}
+
+function loadElectronSetCrashDumpsPath(): ((path: string) => void) | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { app } = require("electron") as { app?: { setPath?: (name: string, p: string) => void } };
+    if (app?.setPath) return (p: string) => app.setPath!("crashDumps", p);
+    return undefined;
   } catch {
     return undefined;
   }

@@ -514,14 +514,16 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // Production release prep — auto-updater, crash reporter, telemetry.
   // All default-off or read user settings; no-op in dev without publish config.
+  let telemetry: TelemetryService | undefined;
+  let autoUpdaterStop: (() => void) | undefined;
   try {
-    const telemetrySettings = settingsService.get("telemetry");
     startCrashReporter({
       userDataPath: app.getPath("userData"),
-      telemetry: telemetrySettings,
+      telemetry: settingsService.get("telemetry"),
     });
-    const telemetry = new TelemetryService({
-      settings: telemetrySettings,
+    telemetry = new TelemetryService({
+      // Accessor form — re-reads settings each flush so user toggles apply live.
+      settings: () => settingsService.get("telemetry"),
       appVersion: app.getVersion(),
     });
     telemetry.start();
@@ -531,6 +533,19 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       isEnabled: () => settingsService.get("updates")?.autoCheckEnabled ?? true,
     });
     updater.start();
+    autoUpdaterStop = updater.stop;
+    // Retain telemetry + updater-stop on AppServices so main.ts's before-quit
+    // path (which already has `services`) can flush + clear the interval.
+    const retainedTelemetry = telemetry;
+    app.prependOnceListener("before-quit", () => {
+      try { autoUpdaterStop?.(); } catch { /* noop */ }
+      try {
+        retainedTelemetry.stop();
+        void retainedTelemetry.flush();
+      } catch (err) {
+        console.warn("[lvis] shutdown: telemetry final flush failed:", (err as Error).message);
+      }
+    });
     console.log("[lvis] boot: release prep wired (updater/crash/telemetry)");
   } catch (err) {
     console.warn("[lvis] boot: release prep init failed (non-fatal):", (err as Error).message);
@@ -542,6 +557,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore,
+    telemetry, autoUpdaterStop,
     refreshPluginNotifications: () => {
       disposePluginNotifications();
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);

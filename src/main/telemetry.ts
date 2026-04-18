@@ -28,7 +28,12 @@ export interface TelemetryEvent {
 }
 
 export interface TelemetryDeps {
-  settings: TelemetrySettings;
+  /**
+   * Settings accessor — invoked on every track()/flush() so a user toggle
+   * takes effect immediately. A snapshot object would go stale and keep
+   * accepting events after the user opted out.
+   */
+  settings: () => TelemetrySettings;
   appVersion?: string;
   fetchImpl?: typeof fetch;
   flushIntervalMs?: number;
@@ -49,11 +54,16 @@ export class TelemetryService {
     this.flushIntervalMs = deps.flushIntervalMs ?? DEFAULT_FLUSH_MS;
   }
 
+  private currentSettings(): TelemetrySettings {
+    return this.deps.settings();
+  }
+
   isActive(): boolean {
+    const s = this.currentSettings();
     return (
-      this.deps.settings.enabled === true &&
-      typeof this.deps.settings.endpoint === "string" &&
-      this.deps.settings.endpoint.length > 0
+      s.enabled === true &&
+      typeof s.endpoint === "string" &&
+      s.endpoint.length > 0
     );
   }
 
@@ -83,15 +93,25 @@ export class TelemetryService {
 
   async flush(): Promise<void> {
     if (!this.isActive() || this.queue.length === 0) return;
-    const batch = this.queue.splice(0, this.queue.length);
+    // Snapshot the batch but DO NOT dequeue until after a confirmed 2xx. On
+    // error or non-ok HTTP we leave events in the queue so they retry on the
+    // next flush instead of being silently lost.
+    const batch = this.queue.slice(0);
+    const batchLen = batch.length;
+    const endpoint = this.currentSettings().endpoint!;
     try {
-      await this.fetchImpl(this.deps.settings.endpoint!, {
+      const res = await this.fetchImpl(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ events: batch }),
       });
+      if (!res.ok) {
+        console.warn(`[telemetry] flush non-ok HTTP ${res.status}; re-queued ${batchLen} event(s)`);
+        return;
+      }
+      this.queue.splice(0, batchLen);
     } catch (err) {
-      console.warn("[telemetry] flush failed:", (err as Error).message);
+      console.warn("[telemetry] flush failed (re-queued):", (err as Error).message);
     }
   }
 }

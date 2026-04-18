@@ -89,6 +89,23 @@ describe("auto-updater", () => {
     warn.mockRestore();
   });
 
+  it("start() is idempotent and does not stack timers", () => {
+    const fw = fakeWindow();
+    const u = fakeUpdater();
+    const svc = createAutoUpdater({
+      mainWindow: fw.win,
+      isEnabled: () => false, // disabled so initial triggerCheck is a no-op
+      updaterFactory: () => u,
+    });
+    svc.start();
+    svc.start();
+    svc.start();
+    svc.stop();
+    // If start() stacked timers, stop() would leave dangling intervals — but we
+    // primarily assert no throw and no extra checks are made when disabled.
+    expect(u.checks).toBe(0);
+  });
+
   it("emits action toast on update-downloaded with restart payload", async () => {
     const fw = fakeWindow();
     const u = fakeUpdater();
@@ -108,15 +125,21 @@ describe("crash-reporter", () => {
   it("creates local dump dir and does not upload by default", () => {
     const userData = mkdtempSync(join(tmpdir(), "lvis-crash-"));
     const started: Array<{ uploadToServer?: boolean }> = [];
+    const pathsSet: string[] = [];
     const handle = startCrashReporter({
       userDataPath: userData,
       telemetry: { enabled: false, crashReportingEnabled: false },
       crashReporter: { start: (opts) => started.push(opts) },
+      setCrashDumpsPath: (p) => pathsSet.push(p),
       sentryLoader: () => null,
     });
     expect(handle.started).toBe(true);
     expect(started[0]?.uploadToServer).toBe(false);
     expect(handle.dumpDir).toMatch(/crash-dumps$/);
+    // dumpDir derives from userDataPath (not homedir) for predictable sandboxing.
+    expect(handle.dumpDir.startsWith(userData)).toBe(true);
+    // And Electron's crashDumps path is overridden BEFORE reporter.start().
+    expect(pathsSet).toEqual([handle.dumpDir]);
     expect(handle.sentryActive).toBe(false);
   });
 
@@ -153,7 +176,7 @@ describe("crash-reporter", () => {
 
 describe("telemetry", () => {
   it("is inactive by default and track() is a no-op", async () => {
-    const svc = new TelemetryService({ settings: { enabled: false } });
+    const svc = new TelemetryService({ settings: () => ({ enabled: false }) });
     expect(svc.isActive()).toBe(false);
     svc.track("app_start");
     await svc.flush();
@@ -167,7 +190,7 @@ describe("telemetry", () => {
     }) as unknown as typeof fetch;
 
     const svc = new TelemetryService({
-      settings: { enabled: true, endpoint: "https://t.example/ingest" },
+      settings: () => ({ enabled: true, endpoint: "https://t.example/ingest" }),
       appVersion: "9.9.9",
       fetchImpl,
     });
@@ -194,11 +217,38 @@ describe("telemetry", () => {
       return { ok: true } as Response;
     }) as unknown as typeof fetch;
     const svc = new TelemetryService({
-      settings: { enabled: true, endpoint: "" },
+      settings: () => ({ enabled: true, endpoint: "" }),
       fetchImpl,
     });
     svc.track("app_start");
     await svc.flush();
     expect(calls).toEqual([]);
+  });
+
+  it("re-queues batch on non-ok HTTP instead of losing events", async () => {
+    let attempts = 0;
+    const fetchImpl = (async () => {
+      attempts += 1;
+      return { ok: false, status: 500 } as Response;
+    }) as unknown as typeof fetch;
+    const svc = new TelemetryService({
+      settings: () => ({ enabled: true, endpoint: "https://t.example/ingest" }),
+      fetchImpl,
+    });
+    svc.track("app_start");
+    await svc.flush();
+    // Queue preserved — next flush retries the same event.
+    await svc.flush();
+    expect(attempts).toBe(2);
+  });
+
+  it("honors live settings accessor (opt-out mid-session)", () => {
+    let enabled = true;
+    const svc = new TelemetryService({
+      settings: () => ({ enabled, endpoint: "https://t.example/ingest" }),
+    });
+    expect(svc.isActive()).toBe(true);
+    enabled = false;
+    expect(svc.isActive()).toBe(false);
   });
 });
