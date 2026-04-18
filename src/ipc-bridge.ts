@@ -194,13 +194,13 @@ export function registerIpcHandlers(
   ipcMain.handle("lvis:plugins:install", async (_e, pluginId: string) => {
     const result = await pluginMarketplace.install(pluginId);
     await pluginRuntime.restartAll();
-    refreshPluginNotifications();
+    refreshPluginNotifications?.();
     return result;
   });
   ipcMain.handle("lvis:plugins:uninstall", async (_e, pluginId: string) => {
     const result = await pluginMarketplace.uninstall(pluginId);
     await pluginRuntime.restartAll();
-    refreshPluginNotifications();
+    refreshPluginNotifications?.();
     return result;
   });
   ipcMain.handle("lvis:plugins:ui:list", () => pluginRuntime.listUiExtensions());

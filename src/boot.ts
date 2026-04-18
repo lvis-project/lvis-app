@@ -66,7 +66,7 @@ export interface AppServices {
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
-  refreshPluginNotifications: () => void;
+  refreshPluginNotifications?: () => void;
 }
 
 // ─── 이벤트 버스 (플러그인 간 통신) ────────────────
@@ -649,11 +649,14 @@ function registerPluginNotifications(
   const registered: Array<{ type: string; handler: EventHandler }> = [];
 
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
-    for (const spec of manifest.notificationEvents ?? []) {
+    const notificationEvents = Array.isArray(manifest.notificationEvents)
+      ? manifest.notificationEvents
+      : [];
+    for (const spec of notificationEvents) {
       const handler: EventHandler = (data) => {
-        const title = spec.titleField ? getFieldByPath(data, spec.titleField) : spec.event;
+        const resolvedTitle = spec.titleField ? getFieldByPath(data, spec.titleField) : "";
+        const title = resolvedTitle || spec.event;
         const body = spec.bodyField ? getFieldByPath(data, spec.bodyField) : "";
-        if (!title) return;
         const notif = new Notification({ title, body, silent: false });
         notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
         notif.show();
