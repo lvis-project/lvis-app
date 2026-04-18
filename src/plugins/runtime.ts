@@ -11,6 +11,7 @@ import type {
 } from "./types.js";
 import { readPluginRegistry, resolveManifestPathsFromRegistry, updatePluginRegistry } from "./registry.js";
 import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
+import type { PluginSignatureVerifier } from "./signature-verifier.js";
 
 type LoadedPlugin = {
   manifest: PluginManifest;
@@ -41,6 +42,16 @@ export interface PluginRuntimeOptions {
   /** Phase 1.5 §7.3: disable 시 managed 플러그인 차단 */
   deploymentGuard?: PluginDeploymentGuard;
   /**
+   * Sprint 3-B §9.6: ed25519 manifest signature check. When provided:
+   *   - managed plugins whose signature is missing/invalid are dropped.
+   *   - user plugins whose signature is missing produce a warning but load.
+   *   - user plugins with invalid signatures are dropped.
+   * When absent, signatures are not checked (backward compat).
+   */
+  signatureVerifier?: PluginSignatureVerifier;
+  /** Optional sink for signature-related audit events. */
+  auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
+  /**
    * HIGH-1: plugin disable 시 호출되는 콜백.
    * keywordEngine.unregisterByPlugin / toolRegistry.unregisterByPlugin /
    * conversationLoop.onPluginDisabled 을 boot.ts에서 주입한다.
@@ -55,6 +66,8 @@ export class PluginRuntime {
   private readonly configOverrides: Record<string, Record<string, unknown>>;
   private readonly createHostApi?: (pluginId: string) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
+  private readonly signatureVerifier?: PluginSignatureVerifier;
+  private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   private readonly onDisable?: (pluginId: string) => void;
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
@@ -72,6 +85,8 @@ export class PluginRuntime {
     this.configOverrides = options.configOverrides ?? {};
     this.createHostApi = options.createHostApi;
     this.deploymentGuard = options.deploymentGuard;
+    this.signatureVerifier = options.signatureVerifier;
+    this.auditLog = options.auditLog;
     this.onDisable = options.onDisable;
   }
 
@@ -90,6 +105,52 @@ export class PluginRuntime {
         continue;
       }
       const pluginRoot = dirname(manifestPath);
+
+      // Sprint 3-B §9.6 — manifest signature gate.
+      // Managed plugins require a valid signature; unsigned user plugins are
+      // allowed but audit-logged. Invalid signatures always drop the plugin.
+      if (this.signatureVerifier) {
+        const sigResult = await this.signatureVerifier.verifyManifestFile(manifestPath);
+        const isManaged = manifest.deployment === "managed";
+        if (!sigResult.valid) {
+          if (isManaged) {
+            console.error(
+              `[plugin-runtime] managed plugin '${manifest.id}' rejected — ${sigResult.reason ?? "signature invalid"}`,
+            );
+            this.auditLog?.("error", `plugin_signature_rejected`, {
+              pluginId: manifest.id,
+              reason: sigResult.reason,
+              sha256: sigResult.sha256,
+            });
+            continue;
+          }
+          if (sigResult.reason === "signature file missing") {
+            this.auditLog?.("warn", `plugin_signature_missing`, {
+              pluginId: manifest.id,
+              sha256: sigResult.sha256,
+            });
+            console.warn(
+              `[plugin-runtime] user plugin '${manifest.id}' has no signature — loading unsigned`,
+            );
+          } else {
+            console.error(
+              `[plugin-runtime] user plugin '${manifest.id}' rejected — ${sigResult.reason}`,
+            );
+            this.auditLog?.("error", `plugin_signature_rejected`, {
+              pluginId: manifest.id,
+              reason: sigResult.reason,
+              sha256: sigResult.sha256,
+            });
+            continue;
+          }
+        } else {
+          this.auditLog?.("info", `plugin_signature_verified`, {
+            pluginId: manifest.id,
+            sha256: sigResult.sha256,
+          });
+        }
+      }
+
       const entryPath = this.resolveEntryPath(pluginRoot, manifest.entry);
       const module = (await import(pathToFileURL(entryPath).href)) as {
         default?: RuntimePluginFactory;

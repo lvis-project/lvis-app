@@ -67,6 +67,20 @@ describe("ProactiveEngine.generateDailyBriefing — idle gate", () => {
     if (r.status === "skipped") expect(r.reason).toBe("not_idle");
     expect(callLlm).not.toHaveBeenCalled();
   });
+
+  it("accepts idleState=\"triggered\" (Sprint 3-A-2 coordinator path)", async () => {
+    const callLlm = vi.fn().mockResolvedValue("stub briefing");
+    const engine = new ProactiveEngine(baseDeps({
+      isDailyBriefingEnabled: () => true,
+      callLlm,
+    }));
+    const r = await engine.generateDailyBriefing({
+      idleState: "triggered",
+      triggerReason: "scheduleSignal:08:30",
+    });
+    expect(r.status).toBe("generated");
+    expect(callLlm).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("ProactiveEngine.generateDailyBriefing — once-per-day dedupe", () => {
