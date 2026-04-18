@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-
   "description": "Test Electron host app for LVIS plugins.",
   "main": "dist/src/main.js",
   "scripts": {
@@ -35,6 +34,10 @@
     "test:main-flow:npm": "npm run prepare:plugins:npm && tsx scripts/test-main-flow.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "~3.0.71",
+    "@ai-sdk/google": "^3.0.64",
+    "@ai-sdk/openai": "^3.0.53",
+    "@ai-sdk/openai-compatible": "~2.0.41",
     "@anthropic-ai/sdk": "^0.88.0",
     "@azure/msal-node": "^5.1.2",
     "@google/generative-ai": "^0.24.1",
@@ -51,6 +54,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tailwindcss/typography": "^0.5.19",
+    "ai": "~6.0.168",
     "better-sqlite3": "^12.8.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -66,6 +70,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@ai-sdk/devtools": "^0.0.15",
     "@electron/rebuild": "^4.0.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.0.0",
