@@ -49,6 +49,7 @@ import { useChatState } from "./hooks/use-chat-state.js";
 import { useBriefing } from "./hooks/use-briefing.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
+import { useContextBudget } from "./hooks/use-context-budget.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./components/BriefingCard.js";
@@ -232,72 +233,23 @@ export function App() {
     llmVendor,
     llmModel,
     enableThinkingChat,
-    currentLlmSettings,
     refresh: refreshLlmSettings,
     toggleThinking,
   } = useSettings(api);
 
-  const contextOverflowPct = useMemo(() => {
-    const CONTEXT_WINDOWS: Record<string, number> = {
-      "claude-sonnet-4-6": 1_000_000, "claude-opus-4-6": 1_000_000,
-      "claude-sonnet-4-5": 200_000, "claude-opus-4-5": 200_000,
-      "gpt-5.4": 1_050_000, "gpt-5.4-mini": 1_050_000,
-      "gpt-5": 400_000, "gpt-4.1": 1_000_000, "gpt-4.1-mini": 1_000_000,
-      "gemini-2.5-flash": 1_000_000, "gemini-2.5-pro": 2_000_000,
-    };
-    const model = currentLlmSettings?.model ?? "";
-    const contextWindow = CONTEXT_WINDOWS[model] ?? 128_000;
-    const estimatedTokens = entries.reduce((sum, e) => {
-      if (e.kind === "user" || e.kind === "assistant") return sum + Math.ceil(e.text.length / 4);
-      return sum;
-    }, 0);
-    return estimatedTokens / contextWindow;
-  }, [entries, currentLlmSettings]);
+  // Context window, overflow %, usedTokens, and badge color — Phase 5 hook.
+  // Single source of truth for context-window values is `src/shared/pricing-data.ts`.
+  const {
+    usedTokens,
+    contextBudget,
+    contextPercent,
+    contextColor,
+    contextOverflowPct,
+  } = useContextBudget({ entries, llmVendor, llmModel });
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
 
-  // Rough per-model context budget (input+output tokens) used to show % filled.
-  // NOTE: we currently assume the default 200k for all Claude models. The
-  // Anthropic 1M-context beta for Sonnet 4.6 requires an opt-in beta header
-  // that the renderer doesn't know about; treat this as 200k until/unless
-  // we wire model-ID detection. (The separate `contextOverflowPct` memo
-  // uses exact per-model values for overflow warnings.)
-  const contextBudget = useMemo(() => {
-    const m = (llmModel || "").toLowerCase();
-    if (m.includes("claude")) return 200_000;
-    if (m.includes("gpt-5") || m.includes("gpt-4.1")) return 1_000_000;
-    if (m.includes("gpt-4o") || m.includes("gpt-4")) return 128_000;
-    if (m.includes("gemini")) return 1_000_000;
-    if (m.includes("o1") || m.includes("o3") || m.includes("o4")) return 200_000;
-    return 128_000;
-  }, [llmModel]);
-
-  // Estimated tokens — mirrors engine-side serializeMessageForEstimation heuristic
-  // (see src/engine/llm/types.ts:85): per-message `Math.ceil(serializedLength / 4) + 1`.
-  const usedTokens = useMemo(() => {
-    let total = 0;
-    for (const e of entries) {
-      let serialized = "";
-      if (e.kind === "user" || e.kind === "assistant" || e.kind === "reasoning" || e.kind === "system") {
-        serialized = JSON.stringify({ kind: e.kind, text: e.text ?? "" });
-      } else if (e.kind === "tool_group") {
-        serialized = JSON.stringify({
-          kind: "tool_group",
-          tools: (e.tools ?? []).map((t: any) => ({
-            input: t.input ?? {},
-            result: t.result ?? "",
-          })),
-        });
-      }
-      if (serialized) total += Math.ceil(serialized.length / 4) + 1;
-    }
-    return total;
-  }, [entries]);
-  const contextPercent = Math.min(100, Math.round((usedTokens / contextBudget) * 100));
-  const contextColor =
-    contextPercent < 50 ? "text-emerald-500" :
-    contextPercent < 80 ? "text-amber-500" : "text-red-500";
   const vendorSupportsThinking = useMemo(
     () => vendorSupportsThinkingShared(llmVendor, llmModel),
     [llmVendor, llmModel],
