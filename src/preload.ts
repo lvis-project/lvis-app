@@ -17,6 +17,19 @@ const api = {
   chatHasProvider: async () => ipcRenderer.invoke("lvis:chat:has-provider") as Promise<boolean>,
   chatSend: async (input: string) => ipcRenderer.invoke("lvis:chat:send", input),
   chatNew: async () => ipcRenderer.invoke("lvis:chat:new"),
+  // Sprint 4.C — conversation UX
+  chatGetHistory: async () => ipcRenderer.invoke("lvis:chat:get-history"),
+  chatEditResend: async (messageIndex: number, newText: string) =>
+    ipcRenderer.invoke("lvis:chat:edit-resend", messageIndex, newText),
+  chatFork: async (messageIndex: number) => ipcRenderer.invoke("lvis:chat:fork", messageIndex),
+  chatRetryEffort: async (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) =>
+    ipcRenderer.invoke("lvis:chat:retry-effort", opts),
+  chatExport: async (format: "markdown" | "json") => ipcRenderer.invoke("lvis:chat:export", format),
+  starredList: async () => ipcRenderer.invoke("lvis:starred:list"),
+  starredAdd: async (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) =>
+    ipcRenderer.invoke("lvis:starred:add", entry),
+  starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
+    ipcRenderer.invoke("lvis:starred:remove", opts),
   onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:chat:stream", listener);
