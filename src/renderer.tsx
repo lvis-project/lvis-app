@@ -43,7 +43,6 @@ import {
 import type {
   ApprovalChoice,
   ApprovalRequest,
-  BriefingPayload,
   LvisApi,
   MarketplaceItem,
   PluginCardSummary,
@@ -73,6 +72,7 @@ import { RolesTab } from "./ui/renderer/tabs/RolesTab.js";
 import { PermissionsTab } from "./ui/renderer/tabs/PermissionsTab.js";
 import { useSettings } from "./ui/renderer/hooks/use-settings.js";
 import { useChatState } from "./ui/renderer/hooks/use-chat-state.js";
+import { useBriefing } from "./ui/renderer/hooks/use-briefing.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./ui/renderer/components/BriefingCard.js";
@@ -678,7 +678,7 @@ export function App() {
   const [commandQuery, setCommandQuery] = useState("");
   const [working, setWorking] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [briefing, setBriefing] = useState<BriefingPayload | null>(null);
+  const { briefing, dismiss: dismissBriefing, snooze: snoozeBriefing } = useBriefing(api);
   const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([]);
   const approvalQueueRef = useRef<ApprovalRequest[]>([]);
   useEffect(() => { approvalQueueRef.current = approvalQueue; }, [approvalQueue]);
@@ -1013,7 +1013,6 @@ export function App() {
       if (text && isMountedRef.current) setEntries([{ kind: "assistant", text }]);
     }).catch(() => {});
     const dv = api.onViewActivate((k) => { if (isMountedRef.current) setActiveView(k); });
-    const db = api.onProactiveBriefing((b) => { if (isMountedRef.current) setBriefing(b); });
     const ds = api.onChatStream((ev) => {
       if (process.env.NODE_ENV !== "production") console.log("[lvis:chat:stream]", ev);
       if (ev.type === "text_delta" && ev.text) {
@@ -1066,7 +1065,7 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => {
       isMountedRef.current = false;
-      dv(); db(); ds();
+      dv(); ds();
       window.removeEventListener("keydown", onKey);
     };
   }, []);
@@ -1275,24 +1274,8 @@ export function App() {
                 {briefing && (
                   <BriefingCard
                     briefing={briefing}
-                    onDismiss={(feedback) => {
-                      // PR#44 Copilot: await IPC result; hide only on ok:true.
-                      // debounced/error keeps card visible so user can retry.
-                      void api.dismissBriefing(feedback).then((r) => {
-                        if (r?.ok) setBriefing(null);
-                        else console.warn("[lvis] dismissBriefing skipped:", r);
-                      }).catch((e: Error) => {
-                        console.warn("[lvis] dismissBriefing failed:", e.message);
-                      });
-                    }}
-                    onSnooze={() => {
-                      void api.snoozeBriefing().then((r) => {
-                        if (r?.ok) setBriefing(null);
-                        else console.warn("[lvis] snoozeBriefing skipped:", r);
-                      }).catch((e: Error) => {
-                        console.warn("[lvis] snoozeBriefing failed:", e.message);
-                      });
-                    }}
+                    onDismiss={dismissBriefing}
+                    onSnooze={snoozeBriefing}
                   />
                 )}
                 {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
