@@ -11,13 +11,19 @@
  *    2026-04-18 showed `email_reply` and `calendar_delete` still present.
  *  - This test exists so that regression never happens silently again.
  *
- * Future-managed-signed exception: if a manifest has deployment="managed" AND
- * carries a valid detached signature (.sig), we could allow reviewed
- * destructive entries. For now we enforce the blocklist with no exceptions.
+ * Pre-GA hardening (M1): the runtime gate flipped from blocklist to
+ * allowlist. Read-like verbs (_get/_list/_search/_read/_show/_query/_preview/
+ * _count/_status/_find/_describe/_inspect) may be uiCallable on user
+ * plugins; everything else requires deployment=managed + signatureVerifier
+ * present. We now assert both directions: (a) newly-blocked verbs fail on
+ * user plugins, (b) they pass on managed+signed plugins.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { PluginRuntime } from "../runtime.js";
+import type { PluginSignatureVerifier } from "../signature-verifier.js";
 
 const DESTRUCTIVE_SUFFIX = /_(delete|remove|send|destroy|erase|purge|reply|create|update)$/i;
 
@@ -56,6 +62,107 @@ describe("destructive uiCallable guard (installed manifests)", () => {
         offenders,
         `manifest ${path} exposes destructive tool(s) via uiCallable: ${offenders.join(", ")}`,
       ).toEqual([]);
+    });
+  }
+});
+
+/**
+ * M1 inverted allowlist — the runtime now rejects any uiCallable entry that
+ * does not end in a read-like verb unless the plugin is managed + signed.
+ * These unit tests exercise the new verbs (drop/wipe/reset/revoke/clear/
+ * archive/truncate/disable/uninstall/publish/write/update/set/overwrite)
+ * in both directions.
+ */
+const NEWLY_BLOCKED_VERBS = [
+  "thing_drop",
+  "thing_wipe",
+  "thing_reset",
+  "thing_revoke",
+  "thing_clear",
+  "thing_archive",
+  "thing_truncate",
+  "thing_disable",
+  "thing_uninstall",
+  "thing_publish",
+  "thing_write",
+  "thing_update",
+  "thing_set",
+  "thing_overwrite",
+];
+
+async function writeTempPlugin(opts: {
+  deployment: "managed" | "user";
+  tools: string[];
+  uiCallable: string[];
+}): Promise<string> {
+  const root = mkdtempSync(join(tmpdir(), "lvis-m1-"));
+  const manifest = {
+    id: `com.lge.test-${Math.random().toString(36).slice(2, 8)}`,
+    name: "M1 Test",
+    version: "1.0.0",
+    entry: "dist/index.js",
+    tools: opts.tools,
+    uiCallable: opts.uiCallable,
+    deployment: opts.deployment,
+  };
+  writeFileSync(join(root, "plugin.json"), JSON.stringify(manifest, null, 2));
+  return join(root, "plugin.json");
+}
+
+// Mock signature verifier that treats every manifest as valid — we only want
+// to prove the "managed + verifier present" branch takes effect; the actual
+// crypto check is exercised elsewhere.
+const mockVerifier = {
+  verifyManifestFile: async () => ({ valid: true, sha256: "x" }),
+} as unknown as PluginSignatureVerifier;
+
+describe("M1 uiCallable allowlist (runtime enforcement)", () => {
+  it("read-like verbs are allowed on user plugins", async () => {
+    const manifestPath = await writeTempPlugin({
+      deployment: "user",
+      tools: ["foo_get", "foo_list", "foo_search", "foo_read", "foo_show", "foo_query",
+              "foo_preview", "foo_count", "foo_status", "foo_find", "foo_describe", "foo_inspect"],
+      uiCallable: ["foo_get", "foo_list", "foo_search", "foo_read", "foo_show", "foo_query",
+                   "foo_preview", "foo_count", "foo_status", "foo_find", "foo_describe", "foo_inspect"],
+    });
+    const rt = new PluginRuntime({
+      hostRoot: resolve(__dirname, "..", "..", ".."),
+      manifestPaths: [manifestPath],
+    });
+    // readManifest is private; exercise it via the public resolveManifestPaths
+    // path by invoking the internal method reflectively.
+    const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
+    await expect(parse(manifestPath)).resolves.toBeDefined();
+  });
+
+  for (const verb of NEWLY_BLOCKED_VERBS) {
+    it(`[user] rejects uiCallable '${verb}' without managed+signed`, async () => {
+      const manifestPath = await writeTempPlugin({
+        deployment: "user",
+        tools: [verb],
+        uiCallable: [verb],
+      });
+      const rt = new PluginRuntime({
+        hostRoot: resolve(__dirname, "..", "..", ".."),
+        manifestPaths: [manifestPath],
+      });
+      const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
+      await expect(parse(manifestPath)).rejects.toThrow(/uiCallable/);
+    });
+
+    it(`[managed+signed] accepts uiCallable '${verb}'`, async () => {
+      const manifestPath = await writeTempPlugin({
+        deployment: "managed",
+        tools: [verb],
+        uiCallable: [verb],
+      });
+      const rt = new PluginRuntime({
+        hostRoot: resolve(__dirname, "..", "..", ".."),
+        manifestPaths: [manifestPath],
+        signatureVerifier: mockVerifier,
+      });
+      const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
+      await expect(parse(manifestPath)).resolves.toBeDefined();
     });
   }
 });
