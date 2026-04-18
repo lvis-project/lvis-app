@@ -8,7 +8,7 @@
  *   4) ui[] kind-specific required fields (soft drop per entry)
  *   5) startupTools fail-soft (one throws, others run, plugin stays loaded)
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -100,7 +100,7 @@ describe("Phase 5 — runtime validation hardening", () => {
     }
     expect(runtime.listPluginIds()).toHaveLength(0);
     expect(
-      cap.errors.some((e) => /keywords\[0\]\.skillId "p_kw_missing" not in tools\[\]/.test(e)),
+      cap.errors.some((e) => /keywords\[0\]\.skillId.*p_kw_missing.*not in tools\[\]/.test(e)),
     ).toBe(true);
   });
 
@@ -122,7 +122,7 @@ describe("Phase 5 — runtime validation hardening", () => {
     }
     expect(runtime.listPluginIds()).toHaveLength(0);
     expect(
-      cap.errors.some((e) => /toolSchemas key "p_ts_ghost" not in tools\[\]/.test(e)),
+      cap.errors.some((e) => /toolSchemas\[.*p_ts_ghost.*\].*not in tools\[\]/.test(e)),
     ).toBe(true);
   });
 
@@ -141,7 +141,7 @@ describe("Phase 5 — runtime validation hardening", () => {
     expect(runtime.listPluginIds()).toContain("p_notif");
     expect(
       cap.warns.some((w) =>
-        /notificationEvents\[0\]\.event "meeting\.ghost" not declared in eventSubscriptions/.test(w),
+        /notificationEvents\[0\]\.event 'meeting\.ghost' not declared in eventSubscriptions/.test(w),
       ),
     ).toBe(true);
   });
@@ -174,6 +174,31 @@ describe("Phase 5 — runtime validation hardening", () => {
     ).toBe(true);
   });
 
+  it("4b) ui[] non-plain-object entries (array, number, null) are dropped, plugin loads", async () => {
+    await writePlugin("p_ui_bad", {
+      ui: [
+        [], // array — must be dropped
+        123, // number — must be dropped
+        null, // null — must be dropped
+        // good entry should survive
+        { id: "z", slot: "sidebar", kind: "info-card", title: "Z" },
+      ],
+    });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const cap = captureErrors();
+    try {
+      await runtime.load();
+    } finally {
+      cap.restore();
+    }
+    expect(runtime.listPluginIds()).toContain("p_ui_bad");
+    const manifest = runtime.getPluginManifest("p_ui_bad");
+    expect(manifest?.ui?.map((u) => u.id)).toEqual(["z"]);
+    // Each bad entry should have emitted a warn.
+    const droppedWarns = cap.warns.filter((w) => /ui\[\d+\] is not an object — dropped/.test(w));
+    expect(droppedWarns).toHaveLength(3);
+  });
+
   it("5) startupTools fail-soft: one throws, others run, plugin stays loaded", async () => {
     await writePlugin("p_su", {
       startupTools: ["p_su_bad", "p_su_good"],
@@ -183,22 +208,28 @@ describe("Phase 5 — runtime validation hardening", () => {
     await runtime.startAll();
     expect(runtime.listPluginIds()).toContain("p_su");
 
-    const cap = captureErrors();
-    try {
-      runManifestStartupTools(runtime);
-      // Allow catch() handlers to resolve.
-      await new Promise((r) => setTimeout(r, 20));
-    } finally {
-      cap.restore();
-    }
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    runManifestStartupTools(runtime);
+
+    // Drain the microtask queue: runtime.call() is async so its .catch()
+    // handler fires after at least one await turn per promise in the chain.
+    // Four rounds covers: call → reject → boot .catch → warn side-effect.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
 
     // Plugin still loaded after a startupTool threw.
     expect(runtime.listPluginIds()).toContain("p_su");
-    // Good tool still executes (callable post-failure).
-    await expect(runtime.call("p_su_good", {})).resolves.toBe("ok");
-    // Warning observed.
+    // Warning observed — checked before restoring spy.
     expect(
-      cap.warns.some((w) => /startup-tool-failed.*plugin=p_su.*tool=p_su_bad/.test(w)),
+      warnSpy.mock.calls.some(([msg]) =>
+        /startup-tool-failed.*plugin=p_su.*tool=p_su_bad/.test(String(msg)),
+      ),
     ).toBe(true);
+    vi.restoreAllMocks();
+    // Good tool still callable post-failure.
+    await expect(runtime.call("p_su_good", {})).resolves.toBe("ok");
   });
 });

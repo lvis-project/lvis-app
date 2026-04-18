@@ -564,8 +564,8 @@ export class PluginRuntime {
     if (Array.isArray(parsed.ui)) {
       const keep: typeof parsed.ui = [];
       for (let i = 0; i < parsed.ui.length; i += 1) {
-        const ext = parsed.ui[i] as Record<string, unknown> | undefined;
-        if (!ext || typeof ext !== "object") {
+        const ext = parsed.ui[i] as unknown as Record<string, unknown> | undefined;
+        if (!ext || typeof ext !== "object" || Array.isArray(ext)) {
           console.warn(`[manifest:${pid}] ui[${i}] is not an object — dropped`);
           continue;
         }
@@ -739,8 +739,10 @@ export class PluginRuntime {
     for (let i = 0; i < kw.length; i += 1) {
       const sk = kw[i]?.skillId;
       if (typeof sk !== "string" || !parsed.tools.includes(sk)) {
-        throw new Error(
-          `[manifest:${pid}] keywords[${i}].skillId "${String(sk)}" not in tools[]`,
+        fail(
+          `keywords[${i}].skillId`,
+          `"${String(sk)}" not in tools[]`,
+          `add '${String(sk)}' to tools[] or fix the skillId`,
         );
       }
     }
@@ -751,8 +753,10 @@ export class PluginRuntime {
     const schemaKeys = parsed.toolSchemas ? Object.keys(parsed.toolSchemas) : [];
     for (const k of schemaKeys) {
       if (!parsed.tools.includes(k)) {
-        throw new Error(
-          `[manifest:${pid}] toolSchemas key "${k}" not in tools[]`,
+        fail(
+          `toolSchemas['${k}']`,
+          `key not in tools[]`,
+          `remove the key or add '${k}' to tools[]`,
         );
       }
     }
@@ -766,7 +770,7 @@ export class PluginRuntime {
       const e = notifEvents[i]?.event;
       if (typeof e === "string" && !subs.includes(e)) {
         console.warn(
-          `[manifest:${pid}] notificationEvents[${i}].event "${e}" not declared in eventSubscriptions — will never fire`,
+          `[manifest:${pid}] notificationEvents[${i}].event '${e}' not declared in eventSubscriptions — OS notification will still fire, but plugin won't receive the event via hostApi.onEvent`,
         );
       }
     }

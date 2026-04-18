@@ -67,12 +67,13 @@ export function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
       }
       // fail-soft: catch + warn, never unload the plugin, never abort sibling
       // startupTools. The loaded plugin list is unaffected.
-      pluginRuntime.call(tool, {}).catch((e: Error) =>
+      pluginRuntime.call(tool, {}).catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
         console.warn(
           `[lvis] boot: startup-tool-failed (non-fatal, plugin=${pluginId}, tool=${tool}):`,
-          e.message,
-        ),
-      );
+          msg,
+        );
+      });
     }
   }
 }
