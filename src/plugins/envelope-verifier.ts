@@ -62,6 +62,13 @@ export function verifyEnvelope(
   envelope: SignatureEnvelope,
   publicKeys: Record<string, PublicKeyInput>,
 ): VerifyResult {
+  // 0. Forward-compat: explicitly require envelope version 1. Fail closed on
+  //    unknown versions so future envelope formats (with possibly different
+  //    signing semantics) cannot be accepted accidentally by old clients.
+  if (envelope?.version !== 1) {
+    return { ok: false, reason: "unsupported envelope version" };
+  }
+
   // 1. Integrity cross-check (envelope hash must match tarball hash).
   const computedSha256 = createHash("sha256").update(tarball).digest("hex");
   if (!envelope?.artifact_sha256 || envelope.artifact_sha256.toLowerCase() !== computedSha256) {
@@ -101,7 +108,10 @@ export function verifyEnvelope(
     if (sigBytes.length !== 64) continue;
     try {
       if (verify(null, tarball, keyObj, sigBytes)) {
-        matchedKeyId = sig.key_id;
+        // Preserve the FIRST matching key_id (doc contract).
+        if (matchedKeyId === undefined) {
+          matchedKeyId = sig.key_id;
+        }
       }
     } catch (err) {
       console.warn(
