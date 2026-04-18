@@ -29,6 +29,16 @@ export interface SystemPromptBuilderDeps {
   toolRegistry: ToolRegistry;
   /** 플러그인 스킬 스키마 (PluginRuntime에서 주입) */
   getPluginSchemas?: () => string;
+  /**
+   * Phase 1.5 Option C — 비활성 plugin 카탈로그 공급자.
+   * 빈 배열이거나 undefined면 섹션이 생략된다.
+   */
+  getPluginCards?: () => Array<{
+    id: string;
+    name: string;
+    description: string;
+    sampleTools: string[];
+  }>;
 }
 
 // ─── Builder ────────────────────────────────────────
@@ -142,6 +152,34 @@ export class SystemPromptBuilder {
       name: "Plugin Schemas",
       refresh: "on-change",
       build: () => getPluginSchemas?.() ?? "",
+    });
+
+    // ⑥-b Phase 1.5 Option C — 비활성 plugin 카탈로그.
+    // LLM이 "이 턴에 필요한 플러그인"을 판단해 request_plugin 호출 가능하도록
+    // system prompt에 힌트를 노출. 활성 plugin은 제외.
+    const { getPluginCards } = deps;
+    this.sources.push({
+      id: 65,
+      name: "Inactive Plugin Catalog",
+      refresh: "per-turn",
+      build: () => {
+        const cards = getPluginCards?.() ?? [];
+        if (cards.length === 0) return "";
+        const scope = (this as any)._toolScope as {
+          activePluginIds: Set<string>;
+        } | null | undefined;
+        const active = scope?.activePluginIds ?? new Set<string>();
+        const inactive = cards.filter((c) => !active.has(c.id));
+        if (inactive.length === 0) return "";
+        const lines: string[] = [
+          "## 사용 가능한 플러그인 (현재 비활성 — request_plugin 으로 활성화)",
+        ];
+        for (const c of inactive) {
+          const sample = c.sampleTools.length > 0 ? `: ${c.sampleTools.join(", ")}` : "";
+          lines.push(`- **${c.id}** (${c.description})${sample}`);
+        }
+        return lines.join("\n");
+      },
     });
 
     // ⑦ Memory / notes / Indexed Docs (파일 변경 시)

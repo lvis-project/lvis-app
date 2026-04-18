@@ -2,7 +2,7 @@ import { safeStorage } from "electron";
 import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-export type LLMVendor = "claude" | "openai" | "gemini" | "copilot" | "lgenie";
+export type LLMVendor = "claude" | "openai" | "gemini" | "copilot";
 
 export interface LLMSettings {
   provider: LLMVendor;

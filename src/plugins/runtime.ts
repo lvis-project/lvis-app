@@ -19,6 +19,18 @@ type LoadedPlugin = {
   methods: Map<string, PluginToolHandler>;
 };
 
+/**
+ * Phase 1.5 Option C — 비활성 plugin 카탈로그 카드.
+ * SystemPromptBuilder가 "사용 가능한 플러그인 (비활성)" 섹션 렌더링,
+ * request_plugin 메타 툴이 허용 가능한 pluginId 목록 산출에 사용.
+ */
+export interface PluginCard {
+  id: string;
+  name: string;
+  description: string;
+  sampleTools: string[];
+}
+
 export interface PluginRuntimeOptions {
   hostRoot: string;
   manifestPaths?: string[];
@@ -92,7 +104,11 @@ export class PluginRuntime {
       for (const toolName of manifest.tools) {
         const handler = instance.handlers[toolName];
         if (!handler) {
-          throw new Error(`Missing handler '${toolName}' in plugin '${manifest.id}'`);
+          // Fail-soft: skip this tool but keep the plugin loaded so its other
+          // tools stay usable. Silent full-plugin drop misleads users into
+          // thinking the whole plugin is broken.
+          console.warn(`[plugin:${manifest.id}] missing handler '${toolName}' — tool disabled`);
+          continue;
         }
         methods.set(toolName, handler);
         if (this.methodMap.has(toolName)) {
@@ -204,6 +220,41 @@ export class PluginRuntime {
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {
     return this.plugins.get(pluginId)?.manifest;
+  }
+
+  /**
+   * Phase 1.5 Option C — listPluginCards()
+   *
+   * LLM 판단 기반 lazy-load 요청을 위한 카탈로그. 각 loaded plugin의
+   * pluginId, name, 1-line description, 샘플 tool names (최대 3개)를 반환한다.
+   * SystemPromptBuilder가 비활성 plugin 목록을 렌더할 때 사용.
+   */
+  listPluginCards(): PluginCard[] {
+    const cards: PluginCard[] = [];
+    for (const [pluginId, plugin] of this.plugins) {
+      const manifest = plugin.manifest;
+      const sampleTools = (manifest.tools ?? []).slice(0, 3);
+      // Prefer first 3-5 toolSchemas descriptions joined; else fallback.
+      let description: string;
+      const schemas = manifest.toolSchemas;
+      if (schemas) {
+        const parts: string[] = [];
+        for (const toolName of sampleTools) {
+          const desc = schemas[toolName]?.description;
+          if (desc) parts.push(desc);
+        }
+        description = parts.length > 0 ? parts.join(" / ") : `Plugin: ${manifest.name}`;
+      } else {
+        description = `Plugin: ${manifest.name}`;
+      }
+      cards.push({
+        id: pluginId,
+        name: manifest.name,
+        description,
+        sampleTools,
+      });
+    }
+    return cards;
   }
 
   listPluginManifests(): Array<{ pluginId: string; manifest: PluginManifest }> {
