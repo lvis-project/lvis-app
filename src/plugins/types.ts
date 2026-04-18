@@ -136,6 +136,29 @@ export interface VerifyResult {
   reason?: string;
 }
 
+/**
+ * S14 — dependency specification extracted from plugin manifest's `requires` block.
+ * Capabilities are kebab-case tags matching `^[a-z][a-z0-9-]*$`.
+ */
+export interface RequiresSpec {
+  capabilities: string[];
+}
+
+/**
+ * S14 — thrown by marketplace install preflight when required capabilities
+ * are not satisfied by currently-installed plugins.
+ */
+export class MissingDependenciesError extends Error {
+  readonly missing: string[];
+  constructor(missing: string[]) {
+    super(
+      `Plugin requires capabilities not provided by installed plugins: ${missing.join(", ")}`,
+    );
+    this.missing = missing;
+    this.name = "MissingDependenciesError";
+  }
+}
+
 export interface PluginMarketplaceItem {
   id: string;
   name: string;
@@ -147,6 +170,8 @@ export interface PluginMarketplaceItem {
   ui?: PluginUiExtension[];
   deployment?: DeploymentMode;
   publisher?: string;
+  /** S14: dependency capabilities this plugin requires. */
+  requires?: RequiresSpec;
 }
 
 /**
