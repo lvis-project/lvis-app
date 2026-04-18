@@ -2,7 +2,7 @@
  * VercelUnifiedProvider.
  *
  * Per docs/references/vercel-ai-sdk-migration.md §5.2, this is the single
- * adapter that will replace claude-provider/openai-provider/gemini-provider
+ * adapter that replaces the legacy per-vendor providers
  * once phases P1-P3 land.
  *
  * P1 status: Gemini path implemented.
