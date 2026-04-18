@@ -36,7 +36,7 @@ interface PluginManifest {
    * ^[a-zA-Z_][a-zA-Z0-9_]*$ — 도트·하이픈 금지.
    * runtime.ts가 이 배열 그대로 Tool Registry에 등록.
    */
-  methods: string[];
+  tools: string[];
   /**
    * [Phase 1 신규] 메서드별 JSON Schema (선택적).
    * 없으면 기존 generic { payload: object } fallback 유지.
@@ -51,16 +51,10 @@ interface PluginManifest {
   ui?: PluginUiExtension[];
   keywords?: Array<{ keyword: string; skillId: string }>;
   capabilities?: string[];
-  startupMethods?: string[];
+  startupTools?: string[];
   eventSubscriptions?: string[];
-  ipcBindings?: PluginIpcBinding[];
   deployment?: "managed" | "user";
   publisher?: string;
-  /**
-   * [Phase 2 신규] 시작 제한 시간 (ms). 선언 시 boot에서 해당 시간 초과 시 강제 중단.
-   * 미선언 시 기본 동작: Promise.allSettled 병렬 + 5s warn 로깅.
-   */
-  startupTimeoutMs?: number;
   /** Python 런타임이 필요한 플러그인 전용. */
   python?: {
     managedBy: "lvis-app";
@@ -69,19 +63,20 @@ interface PluginManifest {
 }
 ```
 
+**Phase 2 계획 (미구현 필드):** `startupTimeoutMs` — boot 병렬 로딩 시 AbortController. 현 `PluginManifest`에 존재하지 않으며 runtime이 읽지 않는다.
+
 **각 필드의 런타임 소비처:**
 
 | 필드 | 소비처 | 타이밍 |
 |------|--------|--------|
 | `id` | PluginRegistry, HostApi cleanup | boot + 런타임 전반 |
 | `entry` | runtime.ts `require()` | boot |
-| `methods[]` | Tool Registry 등록 | boot |
+| `tools[]` | Tool Registry 등록 | boot |
 | `toolSchemas` | LLM system prompt에 tool schema로 삽입 | system prompt 빌드 시 |
 | `keywords[]` | KeywordEngine 등록 | boot |
 | `ui[]` | plugin-ui-host.tsx 마운트 | boot + UI 렌더 |
-| `startupMethods[]` | boot 시 자동 호출 (init 류) | boot |
+| `startupTools[]` | boot 시 자동 호출 (init 류) | boot |
 | `eventSubscriptions[]` | ProactiveEngine 연동 참고 | boot |
-| `startupTimeoutMs` | runtime.ts 병렬 로딩 시 AbortController | boot |
 | `deployment` | DeploymentGuard | install + uninstall |
 
 **plugin.json 전체 예시 (meeting 플러그인):**
@@ -92,7 +87,7 @@ interface PluginManifest {
   "name": "회의록 녹음",
   "version": "1.3.0",
   "entry": "dist/index.js",
-  "methods": [
+  "tools": [
     "meeting_start",
     "meeting_push_chunk",
     "meeting_stop",
@@ -274,6 +269,41 @@ hostApi.onShutdown(async () => {
 
 ---
 
+## 4.5 IPC/RPC 범위 (Scope)
+
+LVIS는 IPC/RPC를 **시스템 레벨 전용**으로 확정합니다. 플러그인은 IPC/RPC 개념을 알 필요가 없습니다.
+
+### 시스템 레벨 IPC (호스트가 사용)
+
+| 영역 | 채널/프로토콜 | 용도 |
+|------|---------------|------|
+| Host ↔ Renderer | Electron `ipcMain.handle()` (`lvis:settings:*`, `lvis:chat:*`, `lvis:memory:*`, `lvis:permissions:*`) | UI ↔ 메인 프로세스 상태 동기화 |
+| Marketplace | HTTPS REST (`/plugins/list`, `/plugins/download`) | 플러그인 카탈로그 + 다운로드 |
+| Governance Server | HTTPS REST | 정책·감사 업로드 |
+| MCP | stdio/HTTP (MCP 프로토콜) | 외부 MCP 서버와 통신 |
+| Audit/Log egress | HTTPS | 감사 로그 중앙 수집 (향후) |
+
+호스트는 이 계층에서만 IPC 채널 이름과 RPC 스키마를 정의합니다. `RESERVED_HOST_CHANNELS` Set이 플러그인의 채널 이름 충돌을 차단합니다.
+
+### 플러그인의 통신 경계
+
+플러그인은 **tool 레벨만** 사용:
+
+- **LLM → plugin tool**: `ToolRegistry` 경유. 매니페스트 `tools[]`에 선언된 이름이 LLM에게 노출되고, 호출 시 플러그인의 `handlers[toolName]`로 라우팅됨. IPC 채널 없음.
+- **Renderer UI → plugin tool**: 호스트가 제공하는 generic 핸들러 `lvis:plugins:call(toolName, payload)` 단 하나 경유. 플러그인이 채널을 직접 선언하지 않음.
+- **Plugin → host service**: `PluginHostApi` 메서드 직접 호출 (in-process). IPC 미사용.
+- **Plugin → plugin**: 이벤트 버스(`hostApi.emitEvent` / `onEvent`)만. 직접 호출 불가.
+
+매니페스트에 IPC 바인딩 필드는 존재하지 않으며, 플러그인 번들에서도 Electron `ipcRenderer`/`ipcMain`을 직접 사용하면 안 됩니다.
+
+### 설계 결과
+
+1. 플러그인 저자의 표면적 축소: 매니페스트에서 `tools[]` + `toolSchemas` + `handlers` 세트만 고려.
+2. 호스트 IPC 표면 안정화: 플러그인이 채널 이름 공간을 넓히지 않음.
+3. 보안/승인 게이트 일원화: 모든 플러그인 tool 호출은 ToolRegistry → PermissionManager → ApprovalGate의 단일 경로로 흐름.
+
+---
+
 ## 5. 번들 플러그인 케이스스터디
 
 ### 5.1 Meeting Recorder (`com.lge.meeting-recorder`)
@@ -421,7 +451,7 @@ email_start_watcher: async (payload?: unknown) => {
 **교훈:**
 - MS Graph OAuth 상태 확인이 모든 인증 필요 handler 진입부에 중복 — `if (!hostApi.isMsGraphAuthenticated()) throw` 패턴.
 - `email_analyze`는 내부적으로 LLM API 호출 (plugin이 직접 OpenAI 호출) — HostApi LLM 추상화 없음이 의도된 설계.
-- `email_start_watcher` / `email_stop_watcher` 쌍은 LLM이 직접 호출하기보다 `startupMethods`나 UI에서 호출하는 것이 자연스럽다.
+- `email_start_watcher` / `email_stop_watcher` 쌍은 LLM이 직접 호출하기보다 `startupTools`나 UI에서 호출하는 것이 자연스럽다.
 
 ---
 
@@ -604,7 +634,7 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
   "name": "내 플러그인",
   "version": "1.0.0",
   "entry": "dist/index.js",
-  "methods": ["my_action"],
+  "tools": ["my_action"],
   "deployment": "user"
 }
 ```

@@ -55,7 +55,7 @@ interface PluginManifest {
   name: string;            // 사람이 읽을 수 있는 이름
   version: string;         // Semantic versioning (예: "1.0.0")
   entry: string;           // hostPlugin.ts 진입점 경로
-  methods: string[];       // LLM tool name 배열 (언더스코어 전용, 도트 금지)
+  tools: string[];       // LLM tool name 배열 (언더스코어 전용, 도트 금지)
 
   // 선택 필드
   config?: Record<string, unknown>;    // 기본 설정값
@@ -64,11 +64,11 @@ interface PluginManifest {
 
   // 호스트 역참조 제거용 선언형 메타데이터
   capabilities?: string[];             // 기능 태그 (예: "worker-client", "calendar-source")
-  startupMethods?: string[];           // 부팅 시 자동 실행할 methods[] 항목
+  startupTools?: string[];           // 부팅 시 자동 실행할 tools[] 항목
   eventSubscriptions?: string[];       // 호스트가 수집/구독할 이벤트 타입
   ipcBindings?: Array<{
     channel: string;                   // legacy IPC 채널명
-    method: string;                    // 호출할 methods[] 항목
+    method: string;                    // 호출할 tools[] 항목
     args?: string[];                   // positional IPC 인자를 payload object로 매핑할 키 목록
   }>;
 }
@@ -82,7 +82,7 @@ interface PluginManifest {
   "name": "LVIS Meeting",
   "version": "1.0.0",
   "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
-  "methods": [
+  "tools": [
     "meeting_start",
     "meeting_push_chunk",
     "meeting_stop",
@@ -155,7 +155,7 @@ interface PluginManifest {
 - 예: `worker-client`, `knowledge-index`, `background-watcher`, `calendar-source`
 - 호스트는 특정 plugin id 대신 capability를 조회해 통합 지점을 결정합니다.
 
-#### startupMethods (선택)
+#### startupTools (선택)
 - 앱 부팅 직후 실행해야 하는 메서드 목록입니다.
 - 항목은 반드시 `methods` 배열에 선언되어 있어야 하며, 불일치 시 플러그인 로드가 거부됩니다.
 - 예: `email_start_watcher`, `calendar_start_watcher`
@@ -174,7 +174,7 @@ interface PluginManifest {
 ### 역참조 방지 체크리스트
 
 1. `boot.ts`, `ipc-bridge.ts`에서 플러그인 id 문자열을 직접 비교하지 않습니다.
-2. 플러그인별 분기가 필요하면 `capabilities` 또는 `startupMethods`로 선언합니다.
+2. 플러그인별 분기가 필요하면 `capabilities` 또는 `startupTools`로 선언합니다.
 3. 레거시 IPC는 코드에 `pluginRuntime.call("meeting_...")`를 추가하지 말고 `ipcBindings`를 사용합니다.
 4. 신규 이벤트 연동은 `eventSubscriptions`를 통해 호스트에 노출합니다.
 5. 플러그인 리네임/교체 시 호스트 코드는 수정 없이 매니페스트만 갱신되어야 합니다.
@@ -520,11 +520,11 @@ LVIS 플러그인에는 **두 개의 독립적인 명명 네임스페이스**가
 
 ### 2. LLM tool name (도구 이름 네임스페이스)
 
-`methods[]` 배열과 `handlers` 객체 키는 **LLM이 직접 호출하는 이름**입니다. LVIS의 canonical form은 lower snake_case (`meeting_start`, `index_scan`)이며, 런타임은 manifest 값을 그대로 등록합니다. **도트(`.`)나 하이픈(`-`)을 언더스코어로 바꿔주지 않습니다.**
+`tools[]` 배열과 `handlers` 객체 키는 **LLM이 직접 호출하는 이름**입니다. LVIS의 canonical form은 lower snake_case (`meeting_start`, `index_scan`)이며, 런타임은 manifest 값을 그대로 등록합니다. **도트(`.`)나 하이픈(`-`)을 언더스코어로 바꿔주지 않습니다.**
 
 ```json
 {
-  "methods": ["meeting_start", "meeting_stop", "meeting_transcript"]
+  "tools": ["meeting_start", "meeting_stop", "meeting_transcript"]
 }
 ```
 
@@ -543,13 +543,13 @@ return {
 | 구분 | 대상 | 도트 허용? | 예시 |
 |------|------|-----------|------|
 | 플러그인 ID | `id` 필드 | ✅ 허용 (도트 형식 권장) | `com.lge.meeting-recorder` |
-| LLM tool name | `methods[]`, `handlers` 키 | ❌ 금지 | `meeting_start` |
+| LLM tool name | `tools[]`, `handlers` 키 | ❌ 금지 | `meeting_start` |
 | 이벤트 이름 | `emitEvent()` / `onEvent()` | ✅ 허용 | `meeting.summary.created` |
 | keywords skillId | `keywords[].skillId` | ❌ 금지 (tool name과 일치) | `meeting_start` |
 
 ### 런타임 동작
 
-**런타임 변환은 없습니다.** 매니페스트의 `methods[]` 값이 그대로 LLM tool name으로 등록됩니다. 도트가 포함된 method 이름은 **로드 시 즉시 거부**됩니다.
+**런타임 변환은 없습니다.** 매니페스트의 `tools[]` 값이 그대로 LLM tool name으로 등록됩니다. 도트가 포함된 method 이름은 **로드 시 즉시 거부**됩니다.
 
 ```
 // ✅ 올바른 구성
@@ -1183,7 +1183,7 @@ export default async function createPlugin(context: HostPluginContext) {
   "name": "LVIS Email",
   "version": "1.0.0",
   "entry": "../../../node_modules/@lvis/plugin-email/dist/hostPlugin.js",
-  "methods": ["email_status", "email_list", "email_read", "email_analyze"],
+  "tools": ["email_status", "email_list", "email_read", "email_analyze"],
   "config": {
     "openaiApiKey": ""
   },

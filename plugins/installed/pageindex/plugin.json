@@ -5,7 +5,7 @@
   "deployment": "managed",
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-pageindex/dist/hostPlugin.js",
-  "methods": [
+  "tools": [
     "index_scan",
     "index_documents",
     "index_folders",
@@ -17,6 +17,86 @@
     "worker-client",
     "knowledge-index"
   ],
+  "toolSchemas": {
+    "index_scan": {
+      "description": "등록된 폴더를 즉시 스캔하여 새 파일을 인덱싱합니다. 인자 없음. 성공 시 { indexed, totalIndexed, message }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_documents": {
+      "description": "인덱싱된 모든 문서 메타데이터 목록을 반환합니다. 인자 없음. 각 항목에 doc_name, type, path 등이 포함됩니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_folders": {
+      "description": "현재 인덱싱 대상으로 등록된 폴더 경로 목록을 반환합니다. 인자 없음. 성공 시 { folders: string[] }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_add_folder": {
+      "description": "인덱싱 대상 폴더를 추가합니다. 시스템 디렉토리나 민감 경로(~/.ssh 등)는 차단됩니다. 성공 시 { folders, added: boolean, message }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "추가할 폴더의 절대 경로 또는 상대 경로 (예: /Users/ken/Documents)"
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "index_remove_folder": {
+      "description": "인덱싱 대상에서 폴더를 제거합니다. 성공 시 { folders, removed: boolean, message }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "제거할 폴더의 절대 경로 또는 상대 경로"
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "chat_preview": {
+      "description": "자연어 질문을 입력하면 인덱싱된 문서에서 BM25 검색으로 관련 내용을 찾아 미리보기 텍스트를 반환합니다. 성공 시 { question, documentCount, results, preview }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "검색할 자연어 질문 (예: '보안 정책 문서에서 비밀번호 규정은?')"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
   "config": {
     "scanFolders": [
       "fixtures"

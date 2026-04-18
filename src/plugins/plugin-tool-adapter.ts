@@ -25,23 +25,51 @@ interface ToolSchemaEntry {
   inputSchema: Record<string, unknown>;
 }
 
+/**
+ * Returns true only when the supplied schema is a well-formed object schema
+ * the LLM can consume directly. Anything else (string type, missing
+ * properties, non-object root) is rejected so the caller can fall back to the
+ * generic {payload} shape rather than silently shipping a broken schema.
+ */
+function isValidTypedSchema(schema: Record<string, unknown> | undefined): boolean {
+  if (!schema || typeof schema !== "object") return false;
+  if (schema.type !== "object") return false;
+  const props = schema.properties;
+  return typeof props === "object" && props !== null;
+}
+
+function typedDescription(toolName: string): string {
+  return `플러그인 도구: ${toolName}. inputSchema에 선언된 필드를 평면 객체로 전달하세요.`;
+}
+
+function untypedDescription(toolName: string): string {
+  return `플러그인 도구: ${toolName}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`;
+}
+
 function buildPluginTool(
   pluginRuntime: PluginRuntime,
   toolName: string,
   pluginId: string,
   schemaEntry: ToolSchemaEntry | undefined,
 ): Tool {
-  const typed = schemaEntry?.inputSchema;
+  const typed = isValidTypedSchema(schemaEntry?.inputSchema) ? schemaEntry!.inputSchema : undefined;
+  const description = schemaEntry?.description ?? (typed ? typedDescription(toolName) : untypedDescription(toolName));
   return createDynamicTool({
     name: toolName,
-    description: schemaEntry?.description ?? `플러그인 도구: ${toolName}. payload에 필요한 매개변수를 JSON 객체로 전달하세요.`,
+    description,
     source: "plugin",
     pluginId,
     jsonSchema: typed ?? GENERIC_PAYLOAD_SCHEMA,
     execute: async (rawInput) => {
-      const args = (rawInput ?? {}) as Record<string, unknown>;
-      // With a typed inputSchema the LLM passes arguments as a flat object —
-      // forward it unwrapped. Without one, unwrap the {payload} envelope.
+      // Both typed and untyped paths accept a JSON-string input (some provider
+      // paths deliver tool arguments pre-serialized). Parse once at the entry
+      // point so the downstream flat/wrapped split sees a real object.
+      let parsed: unknown = rawInput ?? {};
+      if (typeof parsed === "string") {
+        try { parsed = JSON.parse(parsed); } catch { /* leave as string */ }
+      }
+      const args = (typeof parsed === "object" && parsed !== null ? parsed : {}) as Record<string, unknown>;
+
       let finalPayload: unknown;
       if (typed) {
         finalPayload = Object.keys(args).length > 0 ? args : undefined;
