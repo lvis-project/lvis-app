@@ -10,6 +10,8 @@
  * 향후 추가 소스: Calendar, Agent Hub, Marketplace
  */
 
+import type { IdleState } from "../main/idle-scheduler.js";
+
 export interface BriefingItem {
   category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
   priority: "high" | "medium" | "low";
@@ -57,11 +59,11 @@ export interface ProactiveEngineDeps {
 /** Result of a daily briefing attempt. */
 export type DailyBriefingResult =
   | { status: "generated"; briefing: Briefing }
-  | { status: "skipped"; reason: "disabled" | "no_llm" | "not_idle" | "already_today" | "recently_dismissed" | "no_signals" };
+  | { status: "skipped"; reason: "disabled" | "no_llm" | "not_idle" | "already_today" | "recently_dismissed" | "no_signals" | "in_flight" };
 
 export interface DailyBriefingOptions {
   /** IdleScheduler state at call time. Only "long_idle" proceeds. */
-  idleState?: string;
+  idleState?: IdleState | string;
   /** Override "now" for tests. */
   now?: Date;
 }
@@ -77,6 +79,8 @@ export class ProactiveEngine {
   private readonly eventLog: Array<{ type: string; data: unknown; timestamp: string }> = [];
   private readonly eventHints = new Map<string, ProactiveEventHint>();
   private calendarEventsCache: CachedCalendarEvent[] = [];
+  /** Race-guard: true while an async generateDailyBriefing() call is in progress. */
+  private briefingInFlight = false;
 
   constructor(deps: ProactiveEngineDeps) {
     this.deps = deps;
@@ -132,7 +136,7 @@ export class ProactiveEngine {
     // 1. 태스크 (미완료, 기한 임박)
     const tasks = this.deps.getTaskSummary();
     const pendingTasks = tasks.filter((t) => t.status === "pending");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = this.kstDateKey(new Date());
 
     for (const task of pendingTasks.slice(0, 10)) {
       const isUrgent = task.priority === "high" || (task.dueAt && task.dueAt <= today);
@@ -331,6 +335,20 @@ export class ProactiveEngine {
    * §14.4: flag가 기본 off이므로 production default는 no-op.
    */
   async generateDailyBriefing(options: DailyBriefingOptions = {}): Promise<DailyBriefingResult> {
+    // 0) concurrent-invocation race guard — set synchronously before first await
+    if (this.briefingInFlight) {
+      return { status: "skipped", reason: "in_flight" };
+    }
+    this.briefingInFlight = true;
+
+    try {
+    return await this._generateDailyBriefingInner(options);
+    } finally {
+      this.briefingInFlight = false;
+    }
+  }
+
+  private async _generateDailyBriefingInner(options: DailyBriefingOptions): Promise<DailyBriefingResult> {
     const now = options.now ?? new Date();
 
     // 1) feature flag
@@ -383,6 +401,9 @@ export class ProactiveEngine {
       summary = await this.deps.callLlm(userPrompt, { maxTokens: 600, systemPrompt });
     } catch (err) {
       console.warn("[proactive] LLM briefing failed, falling back to text:", (err as Error).message);
+      // Intentional: we still persist lastBriefingDate even on LLM failure.
+      // The text-fallback briefing is a valid once-per-day briefing — without
+      // persisting, a transient LLM outage would cause infinite retry loops.
       summary = this.generateTextBriefing().summary ?? "";
     }
 

@@ -140,3 +140,60 @@ describe("ProactiveEngine.generateDailyBriefing — no_signals", () => {
     expect(callLlm).not.toHaveBeenCalled();
   });
 });
+
+describe("ProactiveEngine.generateDailyBriefing — concurrent invocation race guard", () => {
+  it("second parallel call returns in_flight while first is running", async () => {
+    let resolveLlm!: (v: string) => void;
+    const llmPromise = new Promise<string>((res) => { resolveLlm = res; });
+    const callLlm = vi.fn().mockReturnValue(llmPromise);
+    const setLastBriefingDate = vi.fn();
+    const engine = new ProactiveEngine(baseDeps({
+      isDailyBriefingEnabled: () => true,
+      callLlm,
+      getLastBriefingDate: () => undefined,
+      setLastBriefingDate,
+    }));
+
+    // Start first call — it will block on callLlm
+    const first = engine.generateDailyBriefing({ idleState: "long_idle" });
+    // Second call fires before first resolves — must be rejected with in_flight
+    const second = engine.generateDailyBriefing({ idleState: "long_idle" });
+
+    // Unblock the first LLM call
+    resolveLlm("첫 번째 브리핑");
+
+    const [r1, r2] = await Promise.all([first, second]);
+    expect(r1.status).toBe("generated");
+    expect(r2.status).toBe("skipped");
+    if (r2.status === "skipped") expect(r2.reason).toBe("in_flight");
+    // LLM was only called once
+    expect(callLlm).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ProactiveEngine.collectBriefingItems — UTC/KST date boundary", () => {
+  it("task due 'tomorrow UTC' appears as 'today' in briefing when clock is 23:30 UTC (08:30 KST next day)", () => {
+    // 23:30 UTC on 2026-04-17 = 08:30 KST on 2026-04-18
+    // KST date key is "2026-04-18"
+    // A task due "2026-04-18" should be treated as due today (urgent)
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-17T23:30:00Z"));
+
+    const engine = new ProactiveEngine({
+      getTaskSummary: () => [
+        // dueAt is "tomorrow" in UTC terms but "today" in KST
+        { title: "KST-today task", priority: "medium", status: "pending", dueAt: "2026-04-18", source: "test" },
+      ],
+      getRecentNotes: () => [],
+      getRecentSessions: () => [],
+    });
+
+    const items = engine.collectBriefingItems();
+    const taskItem = items.find((i) => i.title === "KST-today task");
+    expect(taskItem).toBeDefined();
+    // dueAt "2026-04-18" <= kstDateKey "2026-04-18" → urgent → priority high
+    expect(taskItem?.priority).toBe("high");
+
+    vi.useRealTimers();
+  });
+});
