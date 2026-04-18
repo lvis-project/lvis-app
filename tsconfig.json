@@ -14,7 +14,12 @@
       "node"
     ],
     "outDir": "dist",
-    "rootDir": "."
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@lvis/plugin-sdk": ["./packages/plugin-sdk/src/index.ts"],
+      "@lvis/plugin-sdk/keys": ["./packages/plugin-sdk/src/keys.ts"]
+    }
   },
   "include": [
     "src",
