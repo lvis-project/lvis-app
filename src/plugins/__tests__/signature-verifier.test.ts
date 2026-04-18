@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +39,7 @@ describe("PluginSignatureVerifier", () => {
   it("accepts a manifest signed by a trusted publisher key", async () => {
     const manifestBytes = await readFileBuf(manifestPath);
     const signature = sign(null, manifestBytes, privateKey);
-    await writeFile(`${manifestPath}.sig`, signature);
+    await writeFile(`${manifestPath}.sig`, signature.toString("base64"));
 
     const verifier = new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] });
     const result = await verifier.verifyManifestFile(manifestPath);
@@ -53,7 +53,7 @@ describe("PluginSignatureVerifier", () => {
     const other = generateKeyPairSync("ed25519");
     const manifestBytes = await readFileBuf(manifestPath);
     const signature = sign(null, manifestBytes, other.privateKey);
-    await writeFile(`${manifestPath}.sig`, signature);
+    await writeFile(`${manifestPath}.sig`, signature.toString("base64"));
 
     const verifier = new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] });
     const result = await verifier.verifyManifestFile(manifestPath);
@@ -84,7 +84,7 @@ describe("PluginSignatureVerifier", () => {
   it("detects tampering — any byte change invalidates the signature", async () => {
     const manifestBytes = await readFileBuf(manifestPath);
     const signature = sign(null, manifestBytes, privateKey);
-    await writeFile(`${manifestPath}.sig`, signature);
+    await writeFile(`${manifestPath}.sig`, signature.toString("base64"));
 
     // Tamper with the manifest after signing.
     await writeFile(
@@ -97,6 +97,46 @@ describe("PluginSignatureVerifier", () => {
     const result = await verifier.verifyManifestFile(manifestPath);
 
     expect(result.valid).toBe(false);
+  });
+
+  // PR#44 HIGH: reject raw 64-byte binary signature files — only base64 is
+  // accepted. A random 64-byte file must not be treated as a candidate sig.
+  it("rejects a raw 64-byte binary signature file (base64-only policy)", async () => {
+    const bogus = Buffer.alloc(64, 0xab);
+    await writeFile(`${manifestPath}.sig`, bogus);
+
+    const verifier = new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] });
+    const result = await verifier.verifyManifestFile(manifestPath);
+
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/malformed/);
+  });
+
+  // PR#44 HIGH: when a key throws during verify(), we log a warning and treat
+  // the key as a non-match (do not silently swallow).
+  it("logs a warning when a publisher key throws during verify() and still rejects", async () => {
+    const manifestBytes = await readFileBuf(manifestPath);
+    // Sign with a different key so the legitimate key won't accept it either.
+    const other = generateKeyPairSync("ed25519");
+    const signature = sign(null, manifestBytes, other.privateKey);
+    await writeFile(`${manifestPath}.sig`, signature.toString("base64"));
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const verifier = new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] });
+      // Monkey-patch one of the internal keys so verify() throws on it.
+      // @ts-expect-error accessing private for test
+      const keys = verifier.keys as unknown[];
+      keys[0] = { type: "public" }; // KeyObject-shaped but invalid → crypto.verify throws
+
+      const result = await verifier.verifyManifestFile(manifestPath);
+      expect(result.valid).toBe(false);
+      expect(warnSpy).toHaveBeenCalled();
+      const firstCallArgs = warnSpy.mock.calls[0]?.join(" ") ?? "";
+      expect(firstCallArgs).toMatch(/signature-verifier/);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 

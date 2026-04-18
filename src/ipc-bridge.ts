@@ -340,13 +340,28 @@ export function registerIpcHandlers(
   // Sprint 3-A: snooze 1h — shifts lastDismissedAt forward by 1h from its
   // current value (or from now when unset). Reuses the same 24h suppression
   // gate; snoozing effectively re-arms the window further into the future.
+  // PR#44 HIGH: apply same 1s debounce as dismiss (prevents renderer loop
+  // abuse) and clamp the shifted value to `now + 7 days` so repeated snoozes
+  // cannot push lastDismissedAt arbitrarily far into the future.
+  let lastSnoozeAcceptedAt = 0;
+  const SNOOZE_DEBOUNCE_MS = 1000;
+  const SNOOZE_MAX_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
   ipcMain.handle("lvis:proactive:snooze-briefing", () => {
+    const now = Date.now();
+    if (now - lastSnoozeAcceptedAt < SNOOZE_DEBOUNCE_MS) {
+      return { ok: false, debounced: true };
+    }
     const cur = settingsService.get("proactive") ?? { enableDailyBriefing: false };
     const baseMs = cur.lastDismissedAt
       ? new Date(cur.lastDismissedAt).getTime()
-      : Date.now();
-    const effectiveBase = Number.isFinite(baseMs) ? baseMs : Date.now();
-    const shifted = new Date(effectiveBase + 60 * 60 * 1000).toISOString();
+      : now;
+    const effectiveBase = Number.isFinite(baseMs) ? baseMs : now;
+    const shiftedMs = effectiveBase + 60 * 60 * 1000;
+    if (shiftedMs > now + SNOOZE_MAX_AHEAD_MS) {
+      return { ok: false, error: "snooze horizon exceeded (7d)" };
+    }
+    lastSnoozeAcceptedAt = now;
+    const shifted = new Date(shiftedMs).toISOString();
     settingsService.patch({
       proactive: { ...cur, lastDismissedAt: shifted },
     });

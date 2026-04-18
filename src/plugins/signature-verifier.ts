@@ -63,34 +63,47 @@ export class PluginSignatureVerifier {
       return { valid: false, sha256, reason: "signature file malformed" };
     }
 
-    for (const key of this.keys) {
+    // PR#44 HIGH: iterate ALL keys before returning to avoid leaking which
+    // key matched via timing side-channel. Accumulate a boolean; do not
+    // early-return on first match. Also log malformed-key errors (instead of
+    // silently swallowing) so operators can spot misconfigured keys.
+    let matched = false;
+    for (let i = 0; i < this.keys.length; i++) {
+      const key = this.keys[i];
       try {
         // ed25519 uses `null` for the digest argument — crypto signs raw bytes.
         if (verify(null, manifestBytes, key, signature)) {
-          return { valid: true, sha256 };
+          matched = true;
         }
-      } catch {
-        // Try next key.
+      } catch (err) {
+        console.warn(
+          `[signature-verifier] key #${i} verify() threw — treating as non-match:`,
+          (err as Error).message,
+        );
       }
+    }
+    if (matched) {
+      return { valid: true, sha256 };
     }
     return { valid: false, sha256, reason: "signature did not match any publisher key" };
   }
 }
 
 /**
- * Accepts either raw 64-byte ed25519 signatures or base64-encoded equivalents.
- * Returns null if the bytes cannot be coerced into a plausible signature.
+ * Accepts base64-encoded ed25519 signatures only. The raw-64-byte-detection
+ * branch was removed (PR#44 HIGH) — any 64-byte file was being treated as a
+ * candidate signature, which is too permissive. Operators must base64-encode
+ * the detached signature; we reject anything whose decoded length is not
+ * exactly 64 bytes.
  */
 function normalizeSignature(raw: Buffer): Buffer | null {
-  if (raw.length === 64) return raw;
   const text = raw.toString("utf-8").trim();
-  if (/^[A-Za-z0-9+/=\s]+$/.test(text)) {
-    try {
-      const decoded = Buffer.from(text.replace(/\s+/g, ""), "base64");
-      if (decoded.length === 64) return decoded;
-    } catch {
-      return null;
-    }
+  if (!/^[A-Za-z0-9+/=\s]+$/.test(text)) return null;
+  try {
+    const decoded = Buffer.from(text.replace(/\s+/g, ""), "base64");
+    if (decoded.length === 64) return decoded;
+  } catch {
+    return null;
   }
   return null;
 }

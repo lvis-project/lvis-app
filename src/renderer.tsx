@@ -211,7 +211,9 @@ export function BriefingCard({
         ) : (
           <ul className="space-y-1 text-xs">
             {briefing.items.slice(0, 8).map((it, idx) => (
-              <li key={idx} className="flex gap-1.5">
+              // PR#44 HIGH: composite key (category:title) beats raw idx —
+              // stable across reorder; idx fallback handles duplicate titles.
+              <li key={`${it.category}:${it.title}:${idx}`} className="flex gap-1.5">
                 <span>{PRIORITY_EMOJI[it.priority] ?? "•"}</span>
                 <span className="flex-1">
                   <span className="font-medium">{it.title}</span>
@@ -1193,15 +1195,20 @@ function App() {
   const uninstallPlugin = async (id: string) => { setWorking(true); try { await api.uninstallMarketplacePlugin(id); await refreshMarketplace(); await refreshViews(); setMarketStatus(`제거 완료: ${id}`); } catch (e) { setMarketStatus(`제거 실패: ${(e as Error).message}`); } finally { setWorking(false); } };
 
   // ─── Effects ──────────────────────────────────
+  // PR#44 HIGH: guard setBriefing against late/async callbacks firing after
+  // this component unmounts. The IPC unsubscribe (db()) runs in cleanup, but
+  // the bridge may still invoke our handler once between the unmount and the
+  // renderer hearing the IPC off. Keep a mounted flag we can check.
+  const isMountedRef = useRef(true);
   useEffect(() => {
     void refreshMarketplace(); void refreshViews(); void checkApiKey();
 
     // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
     api.getBriefing().then((text) => {
-      if (text) setEntries([{ kind: "assistant", text }]);
+      if (text && isMountedRef.current) setEntries([{ kind: "assistant", text }]);
     }).catch(() => {});
-    const dv = api.onViewActivate((k) => setActiveView(k));
-    const db = api.onProactiveBriefing((b) => setBriefing(b));
+    const dv = api.onViewActivate((k) => { if (isMountedRef.current) setActiveView(k); });
+    const db = api.onProactiveBriefing((b) => { if (isMountedRef.current) setBriefing(b); });
     const ds = api.onChatStream((ev) => {
       if (process.env.NODE_ENV !== "production") console.log("[lvis:chat:stream]", ev);
       if (ev.type === "text_delta" && ev.text) {
@@ -1245,7 +1252,11 @@ function App() {
     });
     const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); } };
     window.addEventListener("keydown", onKey);
-    return () => { dv(); db(); ds(); window.removeEventListener("keydown", onKey); };
+    return () => {
+      isMountedRef.current = false;
+      dv(); db(); ds();
+      window.removeEventListener("keydown", onKey);
+    };
   }, []);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
