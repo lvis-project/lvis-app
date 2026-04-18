@@ -256,6 +256,9 @@ describe("VercelUnifiedProvider gemini — adapter smoke (mocked ai.streamText)"
     vi.doUnmock("@ai-sdk/google");
   });
 
+  // (P2: openai is now implemented — see snapshot-openai.test.ts.
+  //  Claude stub assertion also lives there.)
+
   it("forwards abortSignal to streamText()", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
