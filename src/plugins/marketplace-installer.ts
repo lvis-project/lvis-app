@@ -4,17 +4,18 @@
  * Downloads a plugin tarball directly from the marketplace server's
  * `/api/v1/plugins/{slug}/download?version=X` endpoint, verifies the
  * `X-Plugin-SHA256` header + the `/download.sig` envelope signed with a
- * trusted ed25519 key (see §0.1 of `autopilot-impl.md`), extracts the
- * tarball under `~/.lvis/plugins/.downloads/` and returns the verified
+ * trusted ed25519 key (see §0.1 of `autopilot-impl.md`), persists the
+ * verified tarball under `~/.lvis/plugins/.downloads/` and returns the
  * artifact path for the caller to stage into the installed layout.
+ * (Extraction itself is the caller's responsibility.)
  *
  * This module is intentionally decoupled from the npm fallback path in
  * `marketplace.ts` — it exposes a pure function + a small HTTP interface
  * so the feature-flag dispatcher can compose both paths without leaking
  * marketplace URLs into the npm install branch.
  */
-import { createHash } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { verifyEnvelope, type PublicKeyInput } from "./envelope-verifier.js";
@@ -59,7 +60,12 @@ export interface MarketplaceInstallerOptions {
    * Clock injected for tests; defaults to `() => Date.now() / 1000`.
    */
   nowSec?: () => number;
-  /** How many times to retry a 429. Default 3. */
+  /**
+   * Maximum number of download attempts (including the initial one) before
+   * giving up on 429/5xx/network errors. Default 3. Note: despite the legacy
+   * name, this is the TOTAL attempt count, not the retry count — `maxRetries=1`
+   * means a single attempt with no retry.
+   */
   maxRetries?: number;
 }
 
@@ -121,11 +127,19 @@ export async function installFromMarketplace(
     );
   }
 
-  // 4. Clock-skew guard — reject envelopes whose `iat` is implausibly far in
-  //    the future (common symptom of a compromised server clock or replayed
-  //    envelope with tampered timestamp).
+  // 4. Clock-skew guard — reject envelopes whose `iat` is missing / non-finite
+  //    OR implausibly far in the future (common symptom of a compromised
+  //    server clock or replayed envelope with tampered timestamp). Fail closed
+  //    on malformed iat so a malicious envelope can't skip the guard by
+  //    emitting a non-numeric / NaN value.
   const now = nowSec();
-  if (typeof envelope.iat === "number" && envelope.iat - now > maxSkewSec) {
+  if (typeof envelope.iat !== "number" || !Number.isFinite(envelope.iat)) {
+    throw new MarketplaceInstallerError(
+      "CLOCK_SKEW",
+      `envelope iat is missing or not a finite number (got ${String(envelope.iat)})`,
+    );
+  }
+  if (envelope.iat - now > maxSkewSec) {
     throw new MarketplaceInstallerError(
       "CLOCK_SKEW",
       `envelope iat=${envelope.iat} is more than ${maxSkewSec}s in the future (now=${now})`,
@@ -141,15 +155,21 @@ export async function installFromMarketplace(
     );
   }
 
-  // 6. Persist tarball.
+  // 6. Persist tarball atomically: write to a temp file in the same directory
+  //    then rename() into place so a crash/kill mid-write cannot leave a
+  //    partial/corrupt `${version}.tar.gz` that looks "installed".
   const pluginDir = resolve(downloadRoot, slug);
   await mkdir(pluginDir, { recursive: true });
   const tarballPath = resolve(pluginDir, `${version}.tar.gz`);
+  const tmpPath = resolve(
+    pluginDir,
+    `.${version}.tar.gz.${randomBytes(6).toString("hex")}.tmp`,
+  );
   try {
-    await writeFile(tarballPath, body);
+    await writeFile(tmpPath, body);
+    await rename(tmpPath, tarballPath);
   } catch (err) {
-    // Ensure we don't leave a half-written file on disk.
-    await rm(tarballPath, { force: true }).catch(() => undefined);
+    await rm(tmpPath, { force: true }).catch(() => undefined);
     throw new MarketplaceInstallerError(
       "WRITE_FAILED",
       `failed to persist tarball to ${tarballPath}: ${(err as Error).message}`,
@@ -188,6 +208,12 @@ async function downloadWithRetry(
     }
     if (res.status === 429) {
       const waitSec = res.retryAfterSeconds ?? Math.pow(2, attempt) * 0.5;
+      // Track a diagnosable last error so exhausting retries on 429s does not
+      // surface as "unknown error" in the RETRY_EXHAUSTED message.
+      lastErr = new MarketplaceInstallerError(
+        "RATE_LIMITED",
+        `marketplace returned 429 for ${slug}@${version} (retry-after=${waitSec}s)`,
+      );
       await sleep(Math.max(0, waitSec * 1000));
       continue;
     }

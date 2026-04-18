@@ -47,10 +47,15 @@ function rawEd25519ToPem(rawBase64: string): string {
  */
 export function getBundledPublicKeys(): Record<string, Buffer> {
   return Object.fromEntries(
-    (Object.entries(MARKETPLACE_PUBLIC_KEYS) as [string, string][]).map(([id, b64]) => [
-      id,
-      Buffer.from(b64, "base64"),
-    ]),
+    (Object.entries(MARKETPLACE_PUBLIC_KEYS) as [string, string][]).map(([id, b64]) => {
+      const buf = Buffer.from(b64, "base64");
+      if (buf.length !== 32) {
+        throw new Error(
+          `Invalid bundled ed25519 public key for key_id="${id}": expected 32 raw bytes, got ${buf.length}`,
+        );
+      }
+      return [id, buf];
+    }),
   );
 }
 
