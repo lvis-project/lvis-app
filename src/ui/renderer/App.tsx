@@ -3,28 +3,16 @@ import { Search } from "lucide-react";
 import {
   DEFAULT_ROLE_PRESETS,
   ROLE_PRESETS_CHANGED_EVENT,
-  buildPresetPrefix,
   loadRolePresets,
   type RolePreset,
 } from "../../data/role-presets.js";
-import { costTier, estimateTurnCost } from "../../lib/cost-estimator.js";
-import { lookupPricing } from "../../shared/pricing-data.js";
+import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
-import { Button } from "../../components/ui/button.js";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../../components/ui/command.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
-import {
-  appendUserEntry,
-  applyToolEnd,
-  applyToolStart,
-  finalizeStreamingReasoning,
-  finalizeStreamingAssistant,
-  setAssistantError,
-  upsertStreamingReasoning,
-  upsertStreamingAssistant,
-} from "../../lib/chat-stream-state.js";
+import { appendUserEntry } from "../../lib/chat-stream-state.js";
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import type {
@@ -32,7 +20,6 @@ import type {
   PluginUiExtension,
 } from "./types.js";
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
-import { historyToEntries } from "./utils/history.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { PluginInstallDialog } from "./dialogs/PluginInstallDialog.js";
 import { PluginUninstallDialog } from "./dialogs/PluginUninstallDialog.js";
@@ -49,6 +36,10 @@ import { useChatState } from "./hooks/use-chat-state.js";
 import { useBriefing } from "./hooks/use-briefing.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
+import { useContextBudget } from "./hooks/use-context-budget.js";
+import { useCostEstimate } from "./hooks/use-cost-estimate.js";
+import { useStarred } from "./hooks/use-starred.js";
+import { useSessions } from "./hooks/use-sessions.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./components/BriefingCard.js";
@@ -64,14 +55,14 @@ export function App() {
     setEntries,
     streaming,
     setStreaming,
-    streamRef,
-    thoughtRef,
     editingEntryIdx,
     setEditingEntryIdx,
     editBusy,
-    handleEditSave: chatHandleEditSave,
+    entryIndexToHistoryIndex,
+    handleEditSave,
     handleRetryEffort,
-    finalizeLeftoverStream,
+    resetStreamAccumulators,
+    setErrorWithThought,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -131,96 +122,45 @@ export function App() {
     nextMatch: searchNext,
     prevMatch: searchPrev,
   } = useSearch(entries);
-  const [starred, setStarred] = useState<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string>("");
-  const [sessions, setSessions] = useState<Array<{ id: string; modifiedAt: string }>>([]);
+  const { starred, refreshStarred, isEntryStarred: starredIsEntry, handleToggleStar: starredToggle } = useStarred(api);
+  const {
+    currentSessionId,
+    sessions,
+    refreshSessionId,
+    refreshSessions,
+    handleLoadSession: sessionLoad,
+    handleFork: sessionFork,
+  } = useSessions(api);
 
-  const refreshStarred = useCallback(async () => {
-    try { const list = await api.starredList(); setStarred(list); } catch { /* ignore */ }
-  }, [api]);
-  const refreshSessionId = useCallback(async () => {
-    try { const h = await api.chatGetHistory(); setCurrentSessionId(h.sessionId); } catch { /* ignore */ }
-  }, [api]);
-  const refreshSessions = useCallback(async () => {
-    try {
-      const r = await api.chatSessions();
-      setSessions(r.sessions);
-      setCurrentSessionId(r.current);
-    } catch { /* ignore */ }
-  }, [api]);
-  const handleLoadSession = useCallback(async (sessionId: string) => {
-    // Don't swap sessions mid-stream — ConversationLoop.runTurn() has no
-    // concurrency guard, so replacing history while a turn is writing to it
-    // would race. The "기록" button is also disabled during streaming, but
-    // keep this guard here too for programmatic callers (e.g. starred jump).
-    if (streaming) return;
-    try {
-      const res = await api.chatLoadSession(sessionId);
-      if (!res?.ok) return;
-      const h = await api.chatGetHistory();
-      setEntries(historyToEntries(h.messages));
-      setCurrentSessionId(h.sessionId);
-    } catch { /* ignore */ }
-  }, [api, streaming]);
+  const handleLoadSession = useCallback(
+    (sessionId: string) => sessionLoad(sessionId, streaming, setEntries),
+    [sessionLoad, streaming, setEntries],
+  );
 
-  // Map renderer `entries` (which include reasoning/tool_group/system) to
-  // backend history indices which only track user + assistant messages.
-  // This lets edit/fork/star carry the correct `messageIndex`.
-  const entryIndexToHistoryIndex = useMemo(() => {
-    const map = new Map<number, number>();
-    let backend = 0;
-    entries.forEach((e, i) => {
-      if (e.kind === "user" || e.kind === "assistant") {
-        map.set(i, backend);
-        backend += 1;
-      }
-    });
-    return map;
-  }, [entries]);
-
-  const isEntryStarred = useCallback((entryIdx: number): string | null => {
-    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-    if (histIdx === undefined) return null;
-    const match = starred.find((s) => s.sessionId === currentSessionId && s.messageIndex === histIdx);
-    return match?.id ?? null;
-  }, [starred, currentSessionId, entryIndexToHistoryIndex]);
+  const isEntryStarred = useCallback(
+    (entryIdx: number): string | null => starredIsEntry(entryIdx, currentSessionId, entryIndexToHistoryIndex),
+    [starredIsEntry, currentSessionId, entryIndexToHistoryIndex],
+  );
 
   // ─── Search (Ctrl/Cmd+F) — provided by useSearch hook ─────
 
-  // ─── Edit & resend (delegates to useChatState) ─────────────
-  const handleEditSave = useCallback(
-    (entryIdx: number, newText: string) =>
-      chatHandleEditSave(entryIdx, newText, entryIndexToHistoryIndex),
-    [chatHandleEditSave, entryIndexToHistoryIndex],
+  // ─── Fork (Phase 5 hook) ──────────────────────────────────────
+  const handleFork = useCallback(
+    async (entryIdx: number) => {
+      const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+      if (histIdx === undefined) return;
+      await sessionFork(histIdx, entryIdx, setEntries);
+    },
+    [entryIndexToHistoryIndex, sessionFork, setEntries],
   );
-
-  // ─── Fork ──────────────────────────────────────
-  const handleFork = useCallback(async (entryIdx: number) => {
-    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-    if (histIdx === undefined) return;
-    const res = await api.chatFork(histIdx);
-    if (res.ok) {
-      setEntries((p) => p.slice(0, entryIdx + 1));
-      await refreshSessionId();
-    }
-  }, [api, entryIndexToHistoryIndex, refreshSessionId]);
 
   // ─── Retry with deeper thinking — provided by useChatState ─────
 
-  // ─── Star toggle ───────────────────────────────
-  const handleToggleStar = useCallback(async (entryIdx: number) => {
-    const entry = entries[entryIdx];
-    if (!entry || (entry.kind !== "user" && entry.kind !== "assistant")) return;
-    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-    if (histIdx === undefined) return;
-    const existingId = isEntryStarred(entryIdx);
-    if (existingId) {
-      await api.starredRemove({ id: existingId });
-    } else {
-      await api.starredAdd({ sessionId: currentSessionId, messageIndex: histIdx, role: entry.kind, text: entry.text });
-    }
-    await refreshStarred();
-  }, [entries, entryIndexToHistoryIndex, isEntryStarred, api, currentSessionId, refreshStarred]);
+  // ─── Star toggle (Phase 5 hook) ───────────────────────────────
+  const handleToggleStar = useCallback(
+    (entryIdx: number) => starredToggle(entryIdx, entries, currentSessionId, entryIndexToHistoryIndex),
+    [starredToggle, entries, currentSessionId, entryIndexToHistoryIndex],
+  );
 
   // ─── Export ────────────────────────────────────
   const handleExport = useCallback(async (format: "markdown" | "json") => {
@@ -232,90 +172,32 @@ export function App() {
     llmVendor,
     llmModel,
     enableThinkingChat,
-    currentLlmSettings,
     refresh: refreshLlmSettings,
     toggleThinking,
   } = useSettings(api);
 
-  const contextOverflowPct = useMemo(() => {
-    const CONTEXT_WINDOWS: Record<string, number> = {
-      "claude-sonnet-4-6": 1_000_000, "claude-opus-4-6": 1_000_000,
-      "claude-sonnet-4-5": 200_000, "claude-opus-4-5": 200_000,
-      "gpt-5.4": 1_050_000, "gpt-5.4-mini": 1_050_000,
-      "gpt-5": 400_000, "gpt-4.1": 1_000_000, "gpt-4.1-mini": 1_000_000,
-      "gemini-2.5-flash": 1_000_000, "gemini-2.5-pro": 2_000_000,
-    };
-    const model = currentLlmSettings?.model ?? "";
-    const contextWindow = CONTEXT_WINDOWS[model] ?? 128_000;
-    const estimatedTokens = entries.reduce((sum, e) => {
-      if (e.kind === "user" || e.kind === "assistant") return sum + Math.ceil(e.text.length / 4);
-      return sum;
-    }, 0);
-    return estimatedTokens / contextWindow;
-  }, [entries, currentLlmSettings]);
+  // Context window, overflow %, usedTokens, and badge color — Phase 5 hook.
+  // Single source of truth for context-window values is `src/shared/pricing-data.ts`.
+  const {
+    usedTokens,
+    contextBudget,
+    contextPercent,
+    contextColor,
+    contextOverflowPct,
+  } = useContextBudget({ entries, llmVendor, llmModel });
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
 
-  // Rough per-model context budget (input+output tokens) used to show % filled.
-  // NOTE: we currently assume the default 200k for all Claude models. The
-  // Anthropic 1M-context beta for Sonnet 4.6 requires an opt-in beta header
-  // that the renderer doesn't know about; treat this as 200k until/unless
-  // we wire model-ID detection. (The separate `contextOverflowPct` memo
-  // uses exact per-model values for overflow warnings.)
-  const contextBudget = useMemo(() => {
-    const m = (llmModel || "").toLowerCase();
-    if (m.includes("claude")) return 200_000;
-    if (m.includes("gpt-5") || m.includes("gpt-4.1")) return 1_000_000;
-    if (m.includes("gpt-4o") || m.includes("gpt-4")) return 128_000;
-    if (m.includes("gemini")) return 1_000_000;
-    if (m.includes("o1") || m.includes("o3") || m.includes("o4")) return 200_000;
-    return 128_000;
-  }, [llmModel]);
-
-  // Estimated tokens — mirrors engine-side serializeMessageForEstimation heuristic
-  // (see src/engine/llm/types.ts:85): per-message `Math.ceil(serializedLength / 4) + 1`.
-  const usedTokens = useMemo(() => {
-    let total = 0;
-    for (const e of entries) {
-      let serialized = "";
-      if (e.kind === "user" || e.kind === "assistant" || e.kind === "reasoning" || e.kind === "system") {
-        serialized = JSON.stringify({ kind: e.kind, text: e.text ?? "" });
-      } else if (e.kind === "tool_group") {
-        serialized = JSON.stringify({
-          kind: "tool_group",
-          tools: (e.tools ?? []).map((t: any) => ({
-            input: t.input ?? {},
-            result: t.result ?? "",
-          })),
-        });
-      }
-      if (serialized) total += Math.ceil(serialized.length / 4) + 1;
-    }
-    return total;
-  }, [entries]);
-  const contextPercent = Math.min(100, Math.round((usedTokens / contextBudget) * 100));
-  const contextColor =
-    contextPercent < 50 ? "text-emerald-500" :
-    contextPercent < 80 ? "text-amber-500" : "text-red-500";
   const vendorSupportsThinking = useMemo(
     () => vendorSupportsThinkingShared(llmVendor, llmModel),
     [llmVendor, llmModel],
   );
   // ─── Sprint B: compose outgoing message with preset + language + attached docs ──
-  const composeOutgoing = useCallback((raw: string): string => {
-    const parts: string[] = [];
-    const presetPrefix = buildPresetPrefix(activePreset);
-    if (presetPrefix) parts.push(presetPrefix.trimEnd());
-    if (attachedDocs.length > 0) {
-      const lines = attachedDocs.map((d) => `- ${d.name} (id: ${d.id})`).join("\n");
-      parts.push(`[Attached documents — use knowledge_search / document_structure to read them]\n${lines}`);
-    }
-    if (langLock === "ko") parts.push("Respond in Korean only.");
-    else if (langLock === "en") parts.push("Respond in English only.");
-    parts.push(raw);
-    return parts.join("\n\n");
-  }, [activePreset, attachedDocs, langLock]);
+  const composeOutgoing = useCallback(
+    (raw: string): string => composeOutgoingUtil({ raw, activePreset, attachedDocs, langLock }),
+    [activePreset, attachedDocs, langLock],
+  );
 
   // ─── Chat ─────────────────────────────────────
   const handleAsk = useCallback(async (q: string) => {
@@ -324,18 +206,15 @@ export function App() {
     setQuestion("");
     const outgoing = composeOutgoing(t);
     setEntries((p) => appendUserEntry(p, t));
-    streamRef.current = "";
-    thoughtRef.current = "";
+    resetStreamAccumulators();
     setStreaming(true);
     try {
       await api.chatSend(outgoing);
       // Final state set by stream events + done
     } catch (err) {
-      setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current));
-      streamRef.current = "";
-      thoughtRef.current = "";
+      setErrorWithThought(`오류: ${(err as Error).message}`);
     } finally { setStreaming(false); }
-  }, [api, streaming, checkApiKey, composeOutgoing]);
+  }, [api, streaming, checkApiKey, composeOutgoing, setEntries, resetStreamAccumulators, setStreaming, setErrorWithThought]);
 
   // ─── Sprint B: PageIndex document list loader ───────────────
   const refreshIndexedDocs = useCallback(async () => {
@@ -360,38 +239,15 @@ export function App() {
     }
   }, [api]);
 
-  // ─── Sprint B: pre-send cost estimate ─────────────
-  // Keystrokes in the input box re-run the cost memo via `question`, but the
-  // expensive JSON.stringify over every prior entry only depends on `entries`.
-  // Memoize it separately, keyed on length + last-entry identity, so typing a
-  // draft in long sessions doesn't re-serialize the whole conversation.
-  const historySerialized = useMemo(() => {
-    return entries.map((e) => {
-      if (e.kind === "user" || e.kind === "assistant" || e.kind === "reasoning" || e.kind === "system") {
-        return JSON.stringify({ kind: e.kind, text: (e as any).text ?? "" });
-      }
-      if (e.kind === "tool_group") {
-        return JSON.stringify({
-          kind: "tool_group",
-          tools: (e.tools ?? []).map((t: any) => ({ input: t.input ?? {}, result: t.result ?? "" })),
-        });
-      }
-      return "";
-    }).filter(Boolean);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries.length, entries[entries.length - 1]]);
-  const costEstimate = useMemo(() => {
-    const pricing = lookupPricing(llmVendor, llmModel);
-    const draft = question ? composeOutgoing(question) : "";
-    return estimateTurnCost({ historySerialized, draft, maxOutputTokens, pricing });
-  }, [historySerialized, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing]);
-  const costBadgeClass = (() => {
-    const t = costTier(costEstimate.total);
-    if (t === "trivial") return "text-muted-foreground";
-    if (t === "low") return "text-emerald-500";
-    if (t === "medium") return "text-amber-500";
-    return "text-red-500";
-  })();
+  // ─── Sprint B: pre-send cost estimate (Phase 5 hook) ─────────────
+  const { costEstimate, costBadgeClass } = useCostEstimate({
+    entries,
+    question,
+    llmVendor,
+    llmModel,
+    maxOutputTokens,
+    composeOutgoing,
+  });
 
   const handleNewChat = useCallback(async () => { await api.chatNew(); setEntries([]); void refreshSessionId(); }, [api, refreshSessionId]);
 
@@ -409,57 +265,12 @@ export function App() {
   const isMountedRef = useRef(true);
   useEffect(() => {
     void refreshMarketplace(); void refreshViews(); void checkApiKey();
-    void refreshStarred(); void refreshSessionId();
 
     // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
     api.getBriefing().then((text) => {
       if (text && isMountedRef.current) setEntries([{ kind: "assistant", text }]);
     }).catch(() => {});
     const dv = api.onViewActivate((k) => { if (isMountedRef.current) setActiveView(k); });
-    const ds = api.onChatStream((ev) => {
-      if (process.env.NODE_ENV !== "production") console.log("[lvis:chat:stream]", ev);
-      if (ev.type === "text_delta" && ev.text) {
-        streamRef.current += ev.text;
-        setEntries((p) => upsertStreamingAssistant(p, streamRef.current));
-      } else if (ev.type === "reasoning_delta" && ev.text) {
-        thoughtRef.current += ev.text;
-        setEntries((p) => upsertStreamingReasoning(p, thoughtRef.current));
-      } else if (ev.type === "assistant_round") {
-        setEntries((p) => {
-          let next = finalizeStreamingReasoning(p, ev.thought ?? thoughtRef.current);
-          next = finalizeStreamingAssistant(next, ev.text ?? streamRef.current);
-          return next;
-        });
-        streamRef.current = "";
-        thoughtRef.current = "";
-      } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, displayOrder = 0, name, input } = ev;
-        setEntries((p) => applyToolStart(p, { groupId, toolUseId, displayOrder, name, input }));
-      } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, result, isError } = ev;
-        setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError }));
-      } else if (ev.type === "error") {
-        setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current));
-        streamRef.current = "";
-        thoughtRef.current = "";
-      } else if (ev.type === "redact_notice") {
-        // Sprint E §3 — user draft 에서 PII 가 리댁트되었음을 알리는 시스템 배지.
-        const count = (ev as unknown as { count?: number }).count ?? 0;
-        const byKind = (ev as unknown as { byKind?: Record<string, number> }).byKind ?? {};
-        const kindLabel = Object.entries(byKind)
-          .map(([k, v]) => `${k}:${v}`)
-          .join(", ");
-        setEntries((p) => [
-          ...p,
-          { kind: "system", text: `🔒 전송 전 PII ${count}건 리댁트됨${kindLabel ? ` (${kindLabel})` : ""}` },
-        ]);
-      } else if (ev.type === "compact_notice") {
-        const n = ev.removedMessages ?? 0;
-        setEntries((p) => [...p, { kind: "system", text: `💾 이전 ${n}개 대화를 요약했습니다 (목표·결정사항 보존)` }]);
-      } else if (ev.type === "done") {
-        finalizeLeftoverStream();
-      }
-    });
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); }
       // Sprint 4.C: Ctrl/Cmd+F handled by useSearch hook
@@ -467,7 +278,7 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => {
       isMountedRef.current = false;
-      dv(); ds();
+      dv();
       window.removeEventListener("keydown", onKey);
     };
   }, []);
