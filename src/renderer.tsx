@@ -1439,6 +1439,56 @@ function getApi(): LvisApi { if (!window.lvisApi) throw new Error("lvisApi not i
 function toViewKey(item: PluginUiExtension) { return `plugin:${item.pluginId}:${item.extension.id}`; }
 function getPluginViewLabel(item: PluginUiExtension) { return item.extension.displayName?.trim() || item.extension.title || item.pluginId; }
 
+type RenderHtmlPayload = {
+  kind: "lvis.render_html";
+  title?: string;
+  height: number;
+  html: string;
+  warnings?: string[];
+};
+
+function parseRenderHtmlResult(raw: string | undefined): RenderHtmlPayload | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      (parsed as { kind?: unknown }).kind === "lvis.render_html" &&
+      typeof (parsed as { html?: unknown }).html === "string" &&
+      typeof (parsed as { height?: unknown }).height === "number"
+    ) {
+      return parsed as RenderHtmlPayload;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function HtmlPreview({ payload }: { payload: RenderHtmlPayload }) {
+  return (
+    <div className="mt-2 overflow-hidden rounded border bg-background">
+      <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
+        <span className="truncate">{payload.title ?? "HTML 미리보기"}</span>
+        <span className="text-[10px] opacity-60">스크립트 허용 · 네트워크 차단 · opaque origin</span>
+      </div>
+      <iframe
+        title={payload.title ?? "render_html"}
+        sandbox="allow-scripts"
+        srcDoc={payload.html}
+        referrerPolicy="no-referrer"
+        style={{ width: "100%", height: `${payload.height}px`, border: 0, display: "block", background: "transparent" }}
+      />
+      {payload.warnings && payload.warnings.length > 0 && (
+        <div className="border-t px-2 py-1 text-[10px] text-amber-500">
+          정제됨: {payload.warnings.join(", ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_group" }> }) {
   const [open, setOpen] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
@@ -1459,6 +1509,10 @@ function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_grou
   }
 
   const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
+  const htmlPreviews = tools
+    .filter((t) => t.name === "render_html" && t.status === "done")
+    .map((t) => ({ toolUseId: t.toolUseId, payload: parseRenderHtmlResult(t.result) }))
+    .filter((p): p is { toolUseId: string; payload: RenderHtmlPayload } => p.payload !== null);
 
   return (
     <div className="mx-4 rounded border border-dashed text-xs text-muted-foreground">
@@ -1527,6 +1581,13 @@ function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_grou
               </div>
             );
           })}
+        </div>
+      )}
+      {htmlPreviews.length > 0 && (
+        <div className="border-t px-3 py-2">
+          {htmlPreviews.map((p) => (
+            <HtmlPreview key={p.toolUseId} payload={p.payload} />
+          ))}
         </div>
       )}
     </div>
