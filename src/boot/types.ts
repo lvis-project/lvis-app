@@ -36,9 +36,17 @@ export function emitEvent(type: string, data?: unknown): void {
   }
 }
 
-export function onEvent(type: string, handler: EventHandler): void {
+/**
+ * Subscribe to a host event. Returns an unsubscribe disposer so callers
+ * (PluginRuntime.onDisable, test cleanup) can remove handlers
+ * deterministically without having to hold onto the original reference.
+ */
+export function onEvent(type: string, handler: EventHandler): () => void {
   if (!eventHandlers.has(type)) eventHandlers.set(type, new Set());
   eventHandlers.get(type)!.add(handler);
+  return () => {
+    eventHandlers.get(type)?.delete(handler);
+  };
 }
 
 export function offEvent(type: string, handler: EventHandler): void {

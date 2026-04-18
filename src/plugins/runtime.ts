@@ -58,6 +58,11 @@ export class PluginRuntime {
   private readonly onDisable?: (pluginId: string) => void;
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
+  /**
+   * Per-plugin disposers (e.g. event subscriptions). Invoked in order on
+   * disable() so host-side state scrubbing is deterministic.
+   */
+  private readonly disposers = new Map<string, Array<() => void>>();
   private loaded = false;
 
   constructor(options: PluginRuntimeOptions) {
@@ -265,6 +270,17 @@ export class PluginRuntime {
     }
     this.plugins.delete(pluginId);
 
+    // Flush per-plugin disposers (event handlers etc.) before notifying host.
+    const pluginDisposers = this.disposers.get(pluginId);
+    if (pluginDisposers) {
+      for (const d of pluginDisposers) {
+        try { d(); } catch (err) {
+          console.error(`[plugin:${pluginId}] disposer failed:`, (err as Error).message);
+        }
+      }
+      this.disposers.delete(pluginId);
+    }
+
     if (this.registryPath) {
       // §M1 F-round: atomic update under registry lock.
       await updatePluginRegistry(this.registryPath, (registry) => {
@@ -285,6 +301,41 @@ export class PluginRuntime {
       throw new Error(`Plugin method not found: ${method}`);
     }
     return entry.handler(payload);
+  }
+
+  /**
+   * H2: Renderer-originated plugin invocation. Restricted to the method list
+   * each plugin declares in manifest.uiCallable. Everything else must go
+   * through ConversationLoop so MAX_PLUGIN_EXPANSION / PermissionManager /
+   * ApprovalGate / scope filters are enforced.
+   */
+  async callFromUi(method: string, payload?: unknown): Promise<unknown> {
+    const entry = this.methodMap.get(method);
+    if (!entry) {
+      throw new Error(`Plugin method not found: ${method}`);
+    }
+    const plugin = this.plugins.get(entry.pluginId);
+    const uiCallable = plugin?.manifest.uiCallable ?? [];
+    if (!uiCallable.includes(method)) {
+      throw new Error(
+        `Method '${method}' is not UI-callable for plugin '${entry.pluginId}'. ` +
+        `Declare it in manifest.uiCallable[] to allow renderer invocation.`,
+      );
+    }
+    return entry.handler(payload);
+  }
+
+  /**
+   * Register a disposer to run when `pluginId` is disabled. Used by boot's
+   * HostApi.onEvent wrapper to clean up host-side event handlers.
+   */
+  registerDisposer(pluginId: string, dispose: () => void): void {
+    let list = this.disposers.get(pluginId);
+    if (!list) {
+      list = [];
+      this.disposers.set(pluginId, list);
+    }
+    list.push(dispose);
   }
 
   listToolNames(): string[] {
@@ -512,6 +563,15 @@ export class PluginRuntime {
   }
 
   private resetLoadedState(): void {
+    // Flush every plugin's disposers before clearing maps.
+    for (const [pluginId, list] of this.disposers) {
+      for (const d of list) {
+        try { d(); } catch (err) {
+          console.error(`[plugin:${pluginId}] disposer failed:`, (err as Error).message);
+        }
+      }
+    }
+    this.disposers.clear();
     this.plugins.clear();
     this.methodMap.clear();
     this.loaded = false;
@@ -525,7 +585,7 @@ function createNoopHostApi(): PluginHostApi {
   return {
     registerKeywords: () => {},
     emitEvent: () => {},
-    onEvent: () => {},
+    onEvent: () => () => {},
     addTask: () => {},
     saveNote: () => {},
     getSecret: () => null,

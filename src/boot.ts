@@ -161,7 +161,11 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
         emitEvent(type, { pluginId, ...((data as Record<string, unknown>) ?? {}) });
       },
       onEvent: (type, handler) => {
-        onEvent(type, handler);
+        const unsubscribe = onEvent(type, handler);
+        // Track per-plugin so PluginRuntime.disable() can scrub handlers
+        // alongside keyword / tool / scope cleanup.
+        pluginRuntime.registerDisposer(pluginId, unsubscribe);
+        return unsubscribe;
       },
       addTask: (task) => {
         taskService.add({

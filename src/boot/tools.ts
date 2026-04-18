@@ -16,6 +16,7 @@ import { createKnowledgeSearchTools } from "../tools/knowledge-search.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, type WorkerClientLite } from "../main/idle-scheduler.js";
+import { fetchPublicHttpResponse } from "../core/network-guard.js";
 
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
   // Phase 1.5 Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
@@ -246,7 +247,15 @@ export function registerBuiltinTools(
       execute: async (rawInput) => {
         const args = (rawInput ?? {}) as Record<string, unknown>;
         const query = args.query as string;
-        const count = (args.count as number) || 5;
+        // Clamp count to integer in [1,10]. Non-numeric / out-of-range falls
+        // back to default 5. Prevents arbitrary large values reaching search
+        // providers or the DuckDuckGo HTML parser.
+        const rawCount = args.count;
+        let count = 5;
+        if (typeof rawCount === "number" && Number.isFinite(rawCount)) {
+          const clamped = Math.min(10, Math.max(1, Math.floor(rawCount)));
+          count = clamped;
+        }
         const ws = settingsService.get("webSearch");
         const apiKey = settingsService.getSecret(`web.apiKey.${ws.provider}`);
         try {
@@ -332,7 +341,12 @@ export function registerBuiltinTools(
         const args = (rawInput ?? {}) as Record<string, unknown>;
         const url = args.url as string;
         try {
-          const response = await fetch(url, { headers: { "User-Agent": "LVIS-Assistant/0.1.0" } });
+          // SSRF guard: route through NetworkGuard so private / loopback /
+          // link-local / metadata endpoints are rejected per hop (incl. redirect
+          // chain) and bad schemes / embedded credentials are refused up front.
+          const response = await fetchPublicHttpResponse(url, {
+            headers: { "User-Agent": "LVIS-Assistant/0.1.0" },
+          });
           const html = await response.text();
           const text = html
             .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gim, "")
