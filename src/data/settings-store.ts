@@ -190,6 +190,11 @@ export class SettingsService {
       const raw = readFileSync(this.settingsPath, "utf-8");
       const parsed = JSON.parse(raw) as any;
       const llm = { ...DEFAULT_SETTINGS.llm, ...parsed.llm };
+      // MEDIUM-2: enableThinking은 Claude 전용 기능.
+      // 파일에 명시되지 않은 경우, Claude면 true(기본값 유지), 그 외엔 false로 강제.
+      if (parsed.llm?.enableThinking === undefined && llm.provider !== "claude") {
+        llm.enableThinking = false;
+      }
       // Migrate pre-thinking Claude models so enableThinking doesn't fail on load.
       if (llm.provider === "claude" && /^claude-sonnet-4-2025/i.test(llm.model)) {
         llm.model = DEFAULT_SETTINGS.llm.model;

@@ -40,6 +40,12 @@ export interface PluginRuntimeOptions {
   createHostApi?: (pluginId: string) => PluginHostApi;
   /** Phase 1.5 §7.3: disable 시 managed 플러그인 차단 */
   deploymentGuard?: PluginDeploymentGuard;
+  /**
+   * HIGH-1: plugin disable 시 호출되는 콜백.
+   * keywordEngine.unregisterByPlugin / toolRegistry.unregisterByPlugin /
+   * conversationLoop.onPluginDisabled 을 boot.ts에서 주입한다.
+   */
+  onDisable?: (pluginId: string) => void;
 }
 
 export class PluginRuntime {
@@ -49,6 +55,7 @@ export class PluginRuntime {
   private readonly configOverrides: Record<string, Record<string, unknown>>;
   private readonly createHostApi?: (pluginId: string) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
+  private readonly onDisable?: (pluginId: string) => void;
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
   private loaded = false;
@@ -60,6 +67,7 @@ export class PluginRuntime {
     this.configOverrides = options.configOverrides ?? {};
     this.createHostApi = options.createHostApi;
     this.deploymentGuard = options.deploymentGuard;
+    this.onDisable = options.onDisable;
   }
 
   async load(): Promise<void> {
@@ -200,6 +208,9 @@ export class PluginRuntime {
         }
       });
     }
+
+    // HIGH-1: keyword / tool / scope state 정리
+    this.onDisable?.(pluginId);
   }
 
   async call(method: string, payload?: unknown): Promise<unknown> {
@@ -229,11 +240,18 @@ export class PluginRuntime {
    * pluginId, name, 1-line description, 샘플 tool names (최대 3개)를 반환한다.
    * SystemPromptBuilder가 비활성 plugin 목록을 렌더할 때 사용.
    */
-  listPluginCards(): PluginCard[] {
+  listPluginCards(toolRegistry?: { getVisibleTools(): Array<{ name: string }> }): PluginCard[] {
+    const visibleNames = toolRegistry
+      ? new Set(toolRegistry.getVisibleTools().map((t) => t.name))
+      : null;
     const cards: PluginCard[] = [];
     for (const [pluginId, plugin] of this.plugins) {
       const manifest = plugin.manifest;
-      const sampleTools = (manifest.tools ?? []).slice(0, 3);
+      const allTools = manifest.tools ?? [];
+      const filteredTools = visibleNames
+        ? allTools.filter((t) => visibleNames.has(t))
+        : allTools;
+      const sampleTools = filteredTools.slice(0, 3);
       // Prefer first 3-5 toolSchemas descriptions joined; else fallback.
       let description: string;
       const schemas = manifest.toolSchemas;

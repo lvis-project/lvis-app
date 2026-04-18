@@ -86,4 +86,23 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     expect(cards[0].description).toBe("Plugin: Plain");
     expect(cards[0].sampleTools).toEqual(["plain_do"]);
   });
+
+  it("MEDIUM-1: sampleTools excludes deny-rule-blocked tools when toolRegistry provided", async () => {
+    const manifestA = writePlugin(tmp, "com.lge.filtered", {
+      name: "Filtered",
+      tools: ["filtered_a", "filtered_b", "filtered_c"],
+    });
+
+    const runtime = new PluginRuntime({ hostRoot: tmp, manifestPaths: [manifestA] });
+    await runtime.load();
+
+    // Fake toolRegistry that only exposes filtered_a and filtered_c (filtered_b is denied)
+    const fakeRegistry = {
+      getVisibleTools: () => [{ name: "filtered_a" }, { name: "filtered_c" }],
+    };
+
+    const cards = runtime.listPluginCards(fakeRegistry);
+    expect(cards[0].sampleTools).toEqual(["filtered_a", "filtered_c"]);
+    expect(cards[0].sampleTools).not.toContain("filtered_b");
+  });
 });

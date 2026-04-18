@@ -45,4 +45,21 @@ describe("KeywordEngine — pluginId propagation (Phase 1 scoping)", () => {
     ]);
     expect(eng.matchAllPluginIds("날씨 어때")).toEqual(new Set());
   });
+
+  it("unregisterByPlugin() removes only that plugin's keywords", () => {
+    const eng = new KeywordEngine();
+    eng.registerKeywords([
+      { keyword: "회의록", skillId: "m.s", pluginId: "com.lge.meeting" },
+      { keyword: "이메일", skillId: "e.l", pluginId: "com.lge.email" },
+      { keyword: "번역", skillId: "b.t" }, // builtin — no pluginId
+    ]);
+    eng.unregisterByPlugin("com.lge.meeting");
+    // meeting keyword gone
+    expect(eng.matchAllPluginIds("회의록")).toEqual(new Set());
+    // email keyword still present
+    expect(eng.matchAllPluginIds("이메일")).toEqual(new Set(["com.lge.email"]));
+    // builtin keyword still classifies
+    const r = eng.classify("이 문장 번역해줘");
+    expect(r.type).toBe("skill");
+  });
 });

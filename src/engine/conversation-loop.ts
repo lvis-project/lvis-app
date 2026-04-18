@@ -149,6 +149,14 @@ export class ConversationLoop {
     return this.deps.permissionManager;
   }
 
+  /**
+   * HIGH-1: plugin disable 시 lastTurnScope에서 해당 pluginId 제거.
+   * boot.ts의 onDisable 콜백에서 호출된다.
+   */
+  onPluginDisabled(pluginId: string): void {
+    this.lastTurnScope?.delete(pluginId);
+  }
+
   /** 설정 변경 시 Provider 재생성 — 벤더별 API 키 조회 */
   refreshProvider(): void {
     const llmSettings = this.deps.settingsService.get("llm");
@@ -451,16 +459,12 @@ ${briefingData}
                 restoreUsage();
                 return { earlyReturn: false as const, streamContextError: event.error };
               }
-              callbacks?.onError?.(event.error);
-              // Escalate message when second attempt (post-compact) also fails;
-              // otherwise classify the provider error into a user-friendly one.
+              // Classify before notifying so renderer toast + history both
+              // see the same user-friendly Korean message.
               const classified = classifyProviderError(event.error);
               const userMsg = reactiveCompacted && isContextLengthError(event.error)
                 ? `오류: 대화 기록을 압축한 뒤에도 모델 컨텍스트 한도를 초과했습니다. 새 세션을 시작하거나 이전 첨부를 정리해 주세요 (원인: ${event.error})`
                 : `오류: ${classified.userMessage}`;
-              // onError(callback above) was already invoked with the raw
-              // provider error; swap it for the classified user message so
-              // renderer toasts and the persisted history stay aligned.
               callbacks?.onError?.(userMsg);
               this.history.append({ role: "assistant", content: userMsg });
               return { earlyReturn: true as const, text: userMsg };

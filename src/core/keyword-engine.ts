@@ -49,6 +49,11 @@ export class KeywordEngine {
     this.skillKeywords = [];
   }
 
+  /** 특정 플러그인이 등록한 키워드 제거 (disable 시 호출) */
+  unregisterByPlugin(pluginId: string): void {
+    this.skillKeywords = this.skillKeywords.filter((sk) => sk.pluginId !== pluginId);
+  }
+
   /**
    * Phase 1 Lazy Tool Scoping — 입력에 포함된 모든 키워드의 pluginId 집합을 반환.
    * classify()는 첫 매치만 반환하지만, scope 결정은 "이 턴에서 필요한 모든

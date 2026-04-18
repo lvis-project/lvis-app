@@ -156,11 +156,19 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     userInstalledDir: resolve(projectRoot, "plugins/installed"),
   });
 
+  // HIGH-1: late-binding ref — conversationLoop은 pluginRuntime 이후에 생성됨.
+  let conversationLoopRef: import("./engine/conversation-loop.js").ConversationLoop | null = null;
+
   const pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
     registryPath: resolve(projectRoot, "plugins/registry.json"),
     configOverrides,
     deploymentGuard,
+    onDisable: (pluginId) => {
+      keywordEngine.unregisterByPlugin(pluginId);
+      toolRegistry.unregisterByPlugin(pluginId);
+      conversationLoopRef?.onPluginDisabled(pluginId);
+    },
     // 플러그인별 스코프된 HostApi 팩토리
     createHostApi: (pluginId: string): PluginHostApi => ({
       registerKeywords: (keywords) => {
@@ -391,7 +399,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       ].join("\n");
     },
     // Phase 1.5 Option C — 비활성 plugin 카탈로그 공급.
-    getPluginCards: () => pluginRuntime.listPluginCards(),
+    getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
   });
 
   // §6.3: PermissionManager (Layer 2-3)
@@ -495,6 +503,9 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     // Phase 1.5 Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime,
   });
+
+  // HIGH-1: late-binding 완료 — disable 콜백이 conversationLoop에 접근 가능
+  conversationLoopRef = conversationLoop;
 
   // §9.5: MCP Server 연결 (거버넌스 승인 서버만)
   const mcpGovernance = new McpGovernance();
