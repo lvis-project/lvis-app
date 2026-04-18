@@ -171,7 +171,8 @@
       "displayName": "미팅",
       "title": "Meeting Recorder",
       "description": "회의 세션 시작/청크 주입/종료/전사 조회를 테스트합니다.",
-      "entry": "../../../node_modules/@lvis/plugin-meeting/dist/ui/meeting-control.js"
+      "entry": "../../../node_modules/@lvis/plugin-meeting/dist/ui/meeting-control.js",
+      "exportName": "mount"
     }
   ]
 }
