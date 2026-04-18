@@ -264,14 +264,14 @@ export class PluginRuntime {
   private async readManifest(path: string): Promise<PluginManifest> {
     const raw = await readFile(path, "utf-8");
     const parsed = JSON.parse(raw) as PluginManifest;
-    if (!parsed.id || !parsed.entry || !Array.isArray(parsed.methods)) {
+    if (!parsed.id || !parsed.entry || !Array.isArray(parsed.tools)) {
       throw new Error(`Invalid plugin manifest: ${path}`);
     }
     // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor requirement).
     // Plugin id is the package identity and may contain dots (e.g. com.lge.meeting-recorder),
     // but methods are LLM tool names — no dots allowed, no runtime conversion is performed.
     const TOOL_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-    for (const method of parsed.methods) {
+    for (const method of parsed.tools) {
       if (!TOOL_NAME_PATTERN.test(method)) {
         throw new Error(
           `Invalid tool name '${method}' in plugin '${parsed.id}': ` +
@@ -287,10 +287,10 @@ export class PluginRuntime {
       );
     }
     for (const startupMethod of parsed.startupTools ?? []) {
-      if (!parsed.methods.includes(startupMethod)) {
+      if (!parsed.tools.includes(startupMethod)) {
         throw new Error(
           `Invalid startupTools entry '${startupMethod}' in plugin '${parsed.id}': ` +
-          `method is not declared in methods[]`,
+          `method is not declared in tools[]`,
         );
       }
     }
