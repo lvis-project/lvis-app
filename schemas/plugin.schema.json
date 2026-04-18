@@ -52,22 +52,9 @@
           "entry": { "type": "string" },
           "exportName": { "type": "string" },
           "page": { "type": "string" }
-        },
-        "allOf": [
-          {
-            "if": { "properties": { "kind": { "const": "embedded-module" } } },
-            "then": { "required": ["id", "slot", "kind", "title", "entry", "exportName"] }
-          },
-          {
-            "if": { "properties": { "kind": { "const": "embedded-page" } } },
-            "then": { "required": ["id", "slot", "kind", "title", "page"] }
-          },
-          {
-            "if": { "properties": { "kind": { "const": "info-card" } } },
-            "then": { "required": ["id", "slot", "kind", "title"] }
-          }
-        ]
-      }
+        }
+      },
+      "description": "UI extensions. Kind-specific required fields (embedded-module: entry+exportName; embedded-page: page) are enforced at runtime with soft-fallback — invalid entries are dropped with a console warning, the plugin continues to load."
     },
     "keywords": {
       "type": "array",

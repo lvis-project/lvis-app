@@ -556,6 +556,40 @@ export class PluginRuntime {
       );
     };
 
+    // Phase 5 §4 — ui[] kind-specific required-field soft fallback.
+    // Runs BEFORE AJV so a single bad ui entry does not drop the whole
+    // plugin. Each invalid entry is stripped out + console.warn'd; other ui
+    // entries survive. AJV still enforces the generic `required` block
+    // (id/slot/kind/title) and the `kind` enum.
+    if (Array.isArray(parsed.ui)) {
+      const keep: typeof parsed.ui = [];
+      for (let i = 0; i < parsed.ui.length; i += 1) {
+        const ext = parsed.ui[i] as Record<string, unknown> | undefined;
+        if (!ext || typeof ext !== "object") {
+          console.warn(`[manifest:${pid}] ui[${i}] is not an object — dropped`);
+          continue;
+        }
+        const kind = ext.kind;
+        const missing: string[] = [];
+        if (kind === "embedded-module") {
+          if (typeof ext.entry !== "string" || ext.entry.length === 0) missing.push("entry");
+          if (typeof ext.exportName !== "string" || ext.exportName.length === 0) missing.push("exportName");
+        } else if (kind === "embedded-page") {
+          if (typeof ext.page !== "string" || ext.page.length === 0) missing.push("page");
+        }
+        if (missing.length > 0) {
+          for (const f of missing) {
+            console.warn(
+              `[manifest:${pid}] ui[${i}] kind="${String(kind)}" missing required field "${f}" — dropped`,
+            );
+          }
+          continue;
+        }
+        keep.push(parsed.ui[i]);
+      }
+      parsed.ui = keep;
+    }
+
     // Sprint 4-B §B-1 — AJV validation against schemas/plugin.schema.json.
     // Surfaces every violation prefixed with `[manifest:<pluginId>]` so the
     // operator sees all errors at once. Hand-rolled cross-field checks below
@@ -695,6 +729,45 @@ export class PluginRuntime {
             `route '${method}' through ConversationLoop (permission+approval) instead`,
           );
         }
+      }
+    }
+
+    // Phase 5 §1 — keywords[].skillId must be in tools[]. Fail-load when the
+    // declared skill refers to a non-existent tool so routing errors surface
+    // at boot, not during user interaction.
+    const kw = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+    for (let i = 0; i < kw.length; i += 1) {
+      const sk = kw[i]?.skillId;
+      if (typeof sk !== "string" || !parsed.tools.includes(sk)) {
+        throw new Error(
+          `[manifest:${pid}] keywords[${i}].skillId "${String(sk)}" not in tools[]`,
+        );
+      }
+    }
+
+    // Phase 5 §2 — toolSchemas keys must be a subset of tools[]. Schema
+    // descriptions for non-existent tools would never be surfaced to the LLM
+    // and usually indicate a rename drift.
+    const schemaKeys = parsed.toolSchemas ? Object.keys(parsed.toolSchemas) : [];
+    for (const k of schemaKeys) {
+      if (!parsed.tools.includes(k)) {
+        throw new Error(
+          `[manifest:${pid}] toolSchemas key "${k}" not in tools[]`,
+        );
+      }
+    }
+
+    // Phase 5 §3 — notificationEvents[i].event should be in
+    // eventSubscriptions (otherwise the notification never fires). Soft
+    // warn — do not fail the load.
+    const subs = Array.isArray(parsed.eventSubscriptions) ? parsed.eventSubscriptions : [];
+    const notifEvents = Array.isArray(parsed.notificationEvents) ? parsed.notificationEvents : [];
+    for (let i = 0; i < notifEvents.length; i += 1) {
+      const e = notifEvents[i]?.event;
+      if (typeof e === "string" && !subs.includes(e)) {
+        console.warn(
+          `[manifest:${pid}] notificationEvents[${i}].event "${e}" not declared in eventSubscriptions — will never fire`,
+        );
       }
     }
 
