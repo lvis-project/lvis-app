@@ -48,7 +48,8 @@ import {
 
 type MarketplaceItem = { id: string; name: string; description: string; packageSpec: string; installed: boolean; enabled: boolean; isManaged?: boolean };
 type PluginUiExtension = PluginUiExtensionView;
-type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
+type Task = { id: string; title: string; description?: string; source: string; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
+type PluginCardSummary = { id: string; name: string; description: string; sampleTools: string[]; capabilities: string[]; tools: string[] };
 type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number; baseUrls?: Record<string, string>; vertexProject?: string; vertexLocation?: string; temperature?: number; maxOutputTokens?: number; seed?: number; responseFormat?: "text" | "json"; stopSequences?: string[]; streamSmoothing?: "none" | "word" | "char" }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string }; privacy?: { piiRedactEnabled: boolean } };
 
 // ─── Usage types (Sprint 4.B) ───────────────────────
@@ -99,6 +100,7 @@ type LvisApi = {
   uninstallMarketplacePlugin: (id: string) => Promise<unknown>;
   listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
   callPluginMethod: (m: string, p?: unknown) => Promise<unknown>;
+  listPluginCards: () => Promise<PluginCardSummary[]>;
   addTask: (t: unknown) => Promise<Task>;
   queryTasks: (f?: unknown) => Promise<Task[]>;
   updateTask: (id: string, p: unknown) => Promise<Task>;
@@ -193,7 +195,8 @@ declare global {
 // ─── Constants ──────────────────────────────────────
 
 const PRIORITY_CLASS: Record<Task["priority"], string> = { high: "text-red-400", medium: "text-amber-400", low: "text-slate-400" };
-const SOURCE_LABEL: Record<Task["source"], string> = { email: "메일", meeting: "미팅", calendar: "일정", teams: "Teams", manual: "직접" };
+const SOURCE_LABEL: Record<string, string> = { email: "메일", meeting: "미팅", calendar: "일정", teams: "Teams", manual: "직접" };
+const formatTaskSource = (source: string): string => SOURCE_LABEL[source] ?? source;
 
 // ─── BriefingCard (Sprint 3-A) ──────────────────────
 
@@ -340,7 +343,7 @@ function TaskView({ api }: { api: LvisApi }) {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className={`text-sm font-medium ${isDone ? "line-through" : ""}`}>{t.title}</span>
-                        <Badge variant="outline" className="text-[10px]">{SOURCE_LABEL[t.source]}</Badge>
+                        <Badge variant="outline" className="text-[10px]">{formatTaskSource(t.source)}</Badge>
                         <span className={`text-[10px] font-semibold ${PRIORITY_CLASS[t.priority]}`}>{t.priority}</span>
                       </div>
                       {t.description ? <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{t.description}</p> : null}
@@ -2313,10 +2316,12 @@ function App() {
   const refreshIndexedDocs = useCallback(async () => {
     setDocsLoading(true);
     try {
-      const tries = ["page_index_list_documents", "pageindex_list_documents", "com.lge.pageindex.listDocuments"];
+      const cards = await api.listPluginCards();
+      const indexPlugin = cards.find((c) => c.capabilities.includes("knowledge-index"));
+      const listTool = indexPlugin?.tools.find((t) => /list.*document/i.test(t));
       let result: unknown = null;
-      for (const m of tries) {
-        try { result = await api.callPluginMethod(m, {}); if (result) break; } catch { /* try next */ }
+      if (listTool) {
+        try { result = await api.callPluginMethod(listTool, {}); } catch { /* no-op */ }
       }
       const list = Array.isArray(result) ? result : (result as any)?.documents ?? (result as any)?.items ?? [];
       const normalized: Array<{ id: string; name: string }> = (list as any[])

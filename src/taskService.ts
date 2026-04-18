@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-export type TaskSource = "email" | "meeting" | "calendar" | "teams" | "manual";
+export type TaskSource = string;
 export type TaskPriority = "high" | "medium" | "low";
 export type TaskStatus = "pending" | "done" | "snoozed";
 
