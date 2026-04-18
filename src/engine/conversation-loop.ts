@@ -94,6 +94,13 @@ const MAX_TOOL_ROUNDS = 10;
 /** Phase 1.5 Option C — LLM 요청 기반 plugin 활성화 턴당 최대 횟수. */
 const MAX_PLUGIN_EXPANSION = 2;
 
+/**
+ * M2: Session-wide hard cap on total `request_plugin` expansions across
+ * every turn. Prevents a long-running conversation from eventually scoping
+ * every plugin through repeated single-shot activations.
+ */
+const MAX_SESSION_PLUGIN_EXPANSION = 6;
+
 /** Phase 1.5 Option C — 메타 툴 이름. scope filter와 무관히 항상 노출. */
 const REQUEST_PLUGIN_TOOL = "request_plugin";
 
@@ -129,6 +136,8 @@ export class ConversationLoop {
    * null = 이전 턴 없음 → builtin-only scope.
    */
   private lastTurnScope: Set<string> | null = null;
+  /** M2: Session-wide total of request_plugin activations (cap MAX_SESSION_PLUGIN_EXPANSION). */
+  private sessionPluginExpansions = 0;
 
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
@@ -260,6 +269,7 @@ ${briefingData}
     this.sessionId = crypto.randomUUID();
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
+    this.sessionPluginExpansions = 0;
   }
 
   getHistory(): ConversationHistory {
@@ -297,6 +307,7 @@ ${briefingData}
     this.history.clear();
     this.history.restore(messages as import("./llm/types.js").GenericMessage[]);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
+    this.sessionPluginExpansions = 0;
     return true;
   }
 
@@ -615,10 +626,22 @@ ${briefingData}
             content: `request_plugin 한도 초과 (턴당 최대 ${MAX_PLUGIN_EXPANSION}회). '${pluginId}' 활성화 거부.`,
             is_error: true,
           });
+        } else if (this.sessionPluginExpansions >= MAX_SESSION_PLUGIN_EXPANSION) {
+          // M2: session-wide cap — independent of per-turn cap above.
+          console.warn(
+            `[lvis] request_plugin session cap reached (${MAX_SESSION_PLUGIN_EXPANSION}). ` +
+            `Rejecting '${pluginId}'.`,
+          );
+          requestPluginResults.push({
+            tool_use_id: tu.id,
+            content: `request_plugin 세션 한도 초과 (세션당 최대 ${MAX_SESSION_PLUGIN_EXPANSION}회). '${pluginId}' 활성화 거부.`,
+            is_error: true,
+          });
         } else {
           const prevToolCount = toolSchemas.length;
           mutableScope.activePluginIds.add(pluginId);
           pluginExpansions += 1;
+          this.sessionPluginExpansions += 1;
           toolSchemas = rebuildToolSchemas();
           const addedToolCount = Math.max(0, toolSchemas.length - prevToolCount);
           requestPluginResults.push({

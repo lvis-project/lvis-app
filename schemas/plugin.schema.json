@@ -82,6 +82,28 @@
       "minimum": 1,
       "description": "Hard startup() timeout (ms). Exceeding plugins are fail-soft dropped. Default slow warning threshold is 5000ms."
     },
+    "uiCallable": {
+      "type": "array",
+      "description": "Method allowlist invokable directly from renderer UI via lvis:plugins:call IPC. Methods not listed must go through ConversationLoop (permission / scope / expansion caps).",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+        "maxLength": 64
+      }
+    },
+    "notificationEvents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["event"],
+        "additionalProperties": false,
+        "properties": {
+          "event": { "type": "string", "minLength": 1 },
+          "titleField": { "type": "string" },
+          "bodyField": { "type": "string" }
+        }
+      }
+    },
     "deployment": { "enum": ["managed", "user"] },
     "publisher": { "type": "string" },
     "toolSchemas": {

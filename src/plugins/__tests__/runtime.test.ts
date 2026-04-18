@@ -259,6 +259,67 @@ describe("PluginRuntime.disable", () => {
     errSpy.mockRestore();
   });
 
+  it("callFromUi rejects methods not declared in manifest.uiCallable[]", async () => {
+    // H2: renderer-originated plugin calls must only reach methods the plugin
+    // explicitly exposes via manifest.uiCallable. Everything else has to go
+    // through ConversationLoop (scope + permission + expansion caps).
+    const pluginDir = join(installedDir, "ui-callable");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return {
+    handlers: {
+      "uic_public": async () => "public-ok",
+      "uic_private": async () => "private-ok",
+    },
+  };
+}
+`,
+      "utf-8",
+    );
+
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "ui-callable",
+        name: "ui-callable",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: ["uic_public", "uic_private"],
+        uiCallable: ["uic_public"],
+      }),
+      "utf-8",
+    );
+
+    await writeRegistry([{ id: "ui-callable", manifestPath, enabled: true }]);
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    await expect(runtime.callFromUi("uic_public")).resolves.toBe("public-ok");
+    await expect(runtime.callFromUi("uic_private")).rejects.toThrow(
+      /not UI-callable/,
+    );
+    // Normal call() path (ConversationLoop) still works for both.
+    await expect(runtime.call("uic_private")).resolves.toBe("private-ok");
+  });
+
+  it("registerDisposer callbacks fire on disable() and not thereafter", async () => {
+    const manifestPath = await writeFakePlugin("p-disposer");
+    await writeRegistry([{ id: "p-disposer", manifestPath, enabled: true }]);
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    let calls = 0;
+    const dispose = () => { calls += 1; };
+    runtime.registerDisposer("p-disposer", dispose);
+
+    await runtime.disable("p-disposer");
+    expect(calls).toBe(1);
+  });
+
   it("exposes capability/manifest/ipc binding metadata from loaded plugins", async () => {
     const pluginDir = join(installedDir, "meta-plugin");
     await mkdir(pluginDir, { recursive: true });

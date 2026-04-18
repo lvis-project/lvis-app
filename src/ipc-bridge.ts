@@ -208,8 +208,11 @@ export function registerIpcHandlers(
     return result;
   });
   ipcMain.handle("lvis:plugins:ui:list", () => pluginRuntime.listUiExtensions());
+  // H2: renderer-originated plugin calls go through callFromUi() which enforces
+  // the per-plugin uiCallable[] allowlist. Methods not declared there must go
+  // through ConversationLoop so permission / scope / expansion caps apply.
   ipcMain.handle("lvis:plugins:call", (_e, method: string, payload?: unknown) =>
-    pluginRuntime.call(method, payload),
+    pluginRuntime.callFromUi(method, payload),
   );
 
   // ─── MCP ──────────────────────────────────────

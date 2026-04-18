@@ -27,6 +27,12 @@ export interface PluginManifest {
   startupTools?: string[];
   eventSubscriptions?: string[];
   /**
+   * H2: UI가 ipcRenderer 를 통해 직접 호출할 수 있는 plugin method 의 allowlist.
+   * 이 배열에 없는 method 는 `lvis:plugins:call` IPC 를 통해 호출할 수 없다.
+   * (ConversationLoop 의 permission/scope/expansion cap 을 우회하는 경로 차단.)
+   */
+  uiCallable?: string[];
+  /**
    * OS 네이티브 알림으로 표시할 이벤트 선언.
    * titleField / bodyField 는 이벤트 데이터의 점(.) 경로.
    */
@@ -110,7 +116,11 @@ export interface PluginMarketplaceItem {
 export interface PluginHostApi {
   registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
   emitEvent(eventType: string, data?: unknown): void;
-  onEvent(eventType: string, handler: (data: unknown) => void): void;
+  /**
+   * Subscribes to a host event. Returns an `unsubscribe()` disposer so callers
+   * (and PluginRuntime.onDisable) can clean up handlers deterministically.
+   */
+  onEvent(eventType: string, handler: (data: unknown) => void): () => void;
   addTask(task: {
     title: string;
     description?: string;
