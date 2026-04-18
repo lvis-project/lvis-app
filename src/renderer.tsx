@@ -26,7 +26,6 @@ import { ScrollArea } from "./components/ui/scroll-area.js";
 import { Separator } from "./components/ui/separator.js";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "./components/ui/sheet.js";
 import { PluginUiHostView } from "./plugin-ui-host.js";
-import { approvalQueueReducer } from "./lib/approval-queue-reducer.js";
 import {
   appendUserEntry,
   applyToolEnd,
@@ -41,8 +40,6 @@ import {
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import type {
-  ApprovalChoice,
-  ApprovalRequest,
   LvisApi,
   MarketplaceItem,
   PluginCardSummary,
@@ -73,6 +70,7 @@ import { PermissionsTab } from "./ui/renderer/tabs/PermissionsTab.js";
 import { useSettings } from "./ui/renderer/hooks/use-settings.js";
 import { useChatState } from "./ui/renderer/hooks/use-chat-state.js";
 import { useBriefing } from "./ui/renderer/hooks/use-briefing.js";
+import { useApproval } from "./ui/renderer/hooks/use-approval.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./ui/renderer/components/BriefingCard.js";
@@ -679,9 +677,7 @@ export function App() {
   const [working, setWorking] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const { briefing, dismiss: dismissBriefing, snooze: snoozeBriefing } = useBriefing(api);
-  const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([]);
-  const approvalQueueRef = useRef<ApprovalRequest[]>([]);
-  useEffect(() => { approvalQueueRef.current = approvalQueue; }, [approvalQueue]);
+  const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
 
   // Sprint B — role preset, cost preview, attached docs, language lock
   const [rolePresets, setRolePresets] = useState<RolePreset[]>(() => DEFAULT_ROLE_PRESETS);
@@ -1071,25 +1067,6 @@ export function App() {
   }, []);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
-
-  // ─── Approval Gate 구독 (C4: single-slot → FIFO queue) ──
-  useEffect(() => {
-    if (!window.lvis?.approval) return;
-    const unsub = window.lvis.approval.onRequest((req) => {
-      setApprovalQueue((q) => approvalQueueReducer(q, { type: "push", req }));
-    });
-    return unsub;
-  }, []);
-
-  const handleApprovalDecide = useCallback(async (choice: ApprovalChoice, pattern?: string) => {
-    const current = approvalQueueRef.current[0];
-    if (!current) return;
-    // shift 먼저 — respond 완료 전에 다음 항목 표시
-    setApprovalQueue((q) => approvalQueueReducer(q, { type: "shift" }));
-    if (window.lvis?.approval) {
-      await window.lvis.approval.respond({ requestId: current.id, choice, rememberPattern: pattern });
-    }
-  }, []);
 
   const commandActions = useMemo(() => [
     { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
