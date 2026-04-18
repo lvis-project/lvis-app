@@ -71,15 +71,28 @@ export class OpenAIProvider implements LLMProvider {
     console.log(`[OpenAIProvider] model="${params.model}", isReasoning=${isReasoningModel}, useMaxCompletionTokens=${useMaxCompletionTokens}, reasoning=${useThinking ? reasoningEffort : "off"}, tools=${hasTools}`);
 
     try {
+      const maxOut = params.maxOutputTokens ?? params.maxTokens ?? 4096;
+      // JSON mode: OpenAI response_format. Only applied on non-reasoning Chat Completions.
+      const jsonMode =
+        params.responseFormat === "json" ||
+        (typeof params.responseFormat === "object" && params.responseFormat.type === "json-schema");
       const stream = await this.client.chat.completions.create(
         {
           model: params.model,
           ...(useMaxCompletionTokens
-            ? { max_completion_tokens: params.maxTokens ?? 4096 }
-            : { max_tokens: params.maxTokens ?? 4096 }),
+            ? { max_completion_tokens: maxOut }
+            : { max_tokens: maxOut }),
           messages,
           ...(hasTools && { tools }),
           ...(useThinking && { reasoning_effort: reasoningEffort }),
+          ...(params.temperature !== undefined && !isReasoningModel && { temperature: params.temperature }),
+          ...(params.seed !== undefined && { seed: params.seed }),
+          ...(params.stopSequences && params.stopSequences.length > 0 && {
+            stop: params.stopSequences,
+          }),
+          ...(jsonMode && !isReasoningModel && {
+            response_format: { type: "json_object" as const },
+          }),
           stream: true,
         },
         params.abortSignal ? { signal: params.abortSignal } : undefined,
