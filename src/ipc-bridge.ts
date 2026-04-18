@@ -11,7 +11,7 @@ import { loadPolicy, savePolicy } from "./permissions/policy-store.js";
 
 /**
  * All IPC channels reserved by the host. Plugin manifests must not declare
- * ipcBindings that collide with these, as doing so would shadow privileged
+ * channels that collide with these, as doing so would shadow privileged
  * host handlers and create unpredictable (or malicious) behaviour.
  *
  * MAINTAINERS: add a new entry here whenever you register a new host channel
@@ -188,21 +188,6 @@ export function registerIpcHandlers(
     memoryManager.updateUserPreferences(content),
   );
 
-  // ─── Plugin Methods (proxy) ─────────────────────
-  // Legacy IPC channel compatibility is now manifest-driven.
-  for (const binding of pluginRuntime.listIpcBindings()) {
-    if (RESERVED_HOST_CHANNELS.has(binding.channel)) {
-      console.warn(
-        `[ipc-bridge] Plugin '${binding.pluginId}' declares ipcBinding channel '${binding.channel}' ` +
-        `which is reserved by the host — binding skipped.`,
-      );
-      continue;
-    }
-    ipcMain.handle(binding.channel, (_e, ...args: unknown[]) =>
-      pluginRuntime.call(binding.method, toPluginPayload(args, binding.args)),
-    );
-  }
-
   // ─── Marketplace ────────────────────────────────
   ipcMain.handle("lvis:plugins:marketplace:list", () => pluginMarketplace.list());
   ipcMain.handle("lvis:plugins:install", async (_e, pluginId: string) => {
@@ -321,22 +306,4 @@ export function registerIpcHandlers(
 
   // ─── Daily Briefing ──────────────────────────────
   ipcMain.handle("lvis:briefing:get", () => conversationLoop.generateBriefing());
-}
-
-function toPluginPayload(args: unknown[], argNames?: string[]): unknown {
-  if (args.length === 0) {
-    return undefined;
-  }
-  if (!argNames || argNames.length === 0) {
-    if (args.length === 1) {
-      return args[0];
-    }
-    return args;
-  }
-  const payload: Record<string, unknown> = {};
-  const count = Math.min(argNames.length, args.length);
-  for (let i = 0; i < count; i += 1) {
-    payload[argNames[i]] = args[i];
-  }
-  return payload;
 }
