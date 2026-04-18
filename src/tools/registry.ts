@@ -122,11 +122,22 @@ export class ToolRegistry {
         // Fallback for any new source kind added later — exclude from scope.
         return false;
       })
-      .map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        input_schema: tool.toJsonSchema(),
-      }));
+      .map((tool) => {
+        // Copilot review: a broken toJsonSchema() must not kill the whole
+        // scope computation. Drop the offending tool with a warn instead so
+        // the rest of the turn keeps working.
+        try {
+          return {
+            name: tool.name,
+            description: tool.description,
+            input_schema: tool.toJsonSchema(),
+          };
+        } catch (err) {
+          console.warn(`[tool-registry] toJsonSchema failed for '${tool.name}':`, (err as Error).message);
+          return null;
+        }
+      })
+      .filter((entry): entry is { name: string; description: string; input_schema: unknown } => entry !== null);
   }
 
   /** Replace the deny-rule list (admin policy load). */

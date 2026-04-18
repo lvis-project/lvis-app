@@ -45,6 +45,12 @@ export interface SystemPromptBuilderDeps {
 
 export class SystemPromptBuilder {
   private readonly sources: PromptSource[] = [];
+  private toolScope: {
+    activePluginIds: Set<string>;
+    includeBuiltins: boolean;
+    includeMcp: boolean;
+  } | null = null;
+  private indexedDocsContext: string = "";
 
   constructor(deps: SystemPromptBuilderDeps) {
     this.initSources(deps);
@@ -77,7 +83,7 @@ export class SystemPromptBuilder {
 
   /** 인덱싱된 문서 정보를 시스템 프롬프트에 동적으로 업데이트 */
   setIndexedDocsContext(context: string): void {
-    (this as any)._indexedDocsContext = context;
+    this.indexedDocsContext = context;
   }
 
   /**
@@ -89,7 +95,7 @@ export class SystemPromptBuilder {
     includeBuiltins: boolean;
     includeMcp: boolean;
   } | null): void {
-    (this as any)._toolScope = scope;
+    this.toolScope = scope;
   }
 
   // ─── Private ──────────────────────────────────────
@@ -125,11 +131,7 @@ export class SystemPromptBuilder {
       name: "Tool Schemas",
       refresh: "per-turn",
       build: () => {
-        const scope = (this as any)._toolScope as {
-          activePluginIds: Set<string>;
-          includeBuiltins: boolean;
-          includeMcp: boolean;
-        } | null | undefined;
+        const scope = this.toolScope;
         const schemas = scope
           ? toolRegistry.getToolSchemasForScope(scope)
           : toolRegistry.getToolSchemas();
@@ -165,10 +167,7 @@ export class SystemPromptBuilder {
       build: () => {
         const cards = getPluginCards?.() ?? [];
         if (cards.length === 0) return "";
-        const scope = (this as any)._toolScope as {
-          activePluginIds: Set<string>;
-        } | null | undefined;
-        const active = scope?.activePluginIds ?? new Set<string>();
+        const active = this.toolScope?.activePluginIds ?? new Set<string>();
         const inactive = cards.filter((c) => !active.has(c.id));
         if (inactive.length === 0) return "";
         const lines: string[] = [
@@ -195,8 +194,8 @@ export class SystemPromptBuilder {
         if (notes) parts.push(`<user-notes>\n${notes}\n</user-notes>`);
         
         // 인덱싱된 문서 요약 정보 추가 (ConversationLoop에서 주입)
-        const docsContext = (this as any)._indexedDocsContext;
-        if (docsContext) {
+        if (this.indexedDocsContext) {
+          const docsContext = this.indexedDocsContext;
           parts.push(`<indexed-knowledge>\n${docsContext}\n</indexed-knowledge>`);
         }
         

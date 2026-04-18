@@ -119,6 +119,17 @@ export interface IdleSchedulerOptions {
   logger?: (message: string) => void;
 }
 
+/**
+ * Sprint 2-D: state transition listener signature. Fires after every state
+ * change with (newState, oldState, reason). boot.ts wires this to trigger
+ * ProactiveEngine.generateDailyBriefing() when entering IDLE_SCAN.
+ */
+export type IdleStateChangeListener = (
+  newState: IdleState,
+  oldState: IdleState,
+  reason: string,
+) => void;
+
 // ─── IdleSchedulerService ────────────────────────────
 
 export class IdleSchedulerService {
@@ -133,6 +144,7 @@ export class IdleSchedulerService {
   private processing = false;
   private powerSubscribed = false;
   private readonly listeners: Array<{ event: string; handler: (...args: any[]) => void }> = [];
+  private stateChangeListener: IdleStateChangeListener | null = null;
 
   // 파라미터 (기본값 확정)
   private readonly idleThresholdSec: number;
@@ -252,6 +264,15 @@ export class IdleSchedulerService {
 
   getState(): IdleState {
     return this.state;
+  }
+
+  /**
+   * Sprint 2-D: register a late-bound state transition listener. Only one
+   * listener is supported (boot.ts owns it); repeated calls overwrite.
+   * Pass `null` to detach.
+   */
+  setStateChangeListener(listener: IdleStateChangeListener | null): void {
+    this.stateChangeListener = listener;
   }
 
   getQueueLength(): number {
@@ -388,6 +409,16 @@ export class IdleSchedulerService {
     const old = this.state;
     this.state = newState;
     this.logger(`[idle-scheduler] ${old} → ${newState} (${reason})`);
+
+    // Sprint 2-D: notify listener (boot.ts wires ProactiveEngine briefing
+    // trigger here). Swallow listener errors — scheduler must never throw.
+    if (this.stateChangeListener) {
+      try {
+        this.stateChangeListener(newState, old, reason);
+      } catch (err) {
+        this.logger(`[idle-scheduler] stateChangeListener threw: ${(err as Error).message}`);
+      }
+    }
 
     if (newState === "RESUME_DELAY") {
       if (this.resumeTimer) clearTimeout(this.resumeTimer);

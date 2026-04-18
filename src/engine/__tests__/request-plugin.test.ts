@@ -130,7 +130,7 @@ describe("ConversationLoop — request_plugin meta tool (Option C)", () => {
     const messages = loop.getHistory().getMessages();
     const toolResult = messages.find((m) => m.role === "tool_result") as { content: string; isError?: boolean } | undefined;
     expect(toolResult?.isError).toBe(true);
-    expect(toolResult?.content).toContain("Unknown pluginId");
+    expect(toolResult?.content).toContain("알 수 없는 플러그인 ID");
   });
 
   it("enforces MAX_PLUGIN_EXPANSION (=2) per turn", async () => {

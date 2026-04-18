@@ -142,6 +142,47 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     dbPath: resolve(app.getPath("userData"), "lvis-tasks.db"),
   });
 
+  // Sprint 1-A A3 — AuditLogger is created before PluginRuntime so the
+  // per-plugin HostApi.logEvent can route through it. Previously it was
+  // instantiated later (near PostTurnHookChain); we now share this instance.
+  const bootAuditLogger = new AuditLogger();
+
+  // Sprint 1-A A3 — plugin shutdown handler registry. Runs all handlers in
+  // parallel with a 5s per-handler timeout. Uses `prependOnceListener` so
+  // plugin onShutdown fires BEFORE main.ts's pluginRuntime.stopAll(), and the
+  // handler awaits completion via `event.preventDefault()` + `app.quit()` so
+  // plugins actually finish their cleanup instead of racing shutdown.
+  // Copilot review: previous fire-and-forget `void` path allowed quit to
+  // proceed before handlers finished and ordered them after stop().
+  const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }> = [];
+  let pluginShutdownRan = false;
+  app.prependOnceListener("before-quit", (event) => {
+    if (pluginShutdownHandlers.length === 0 || pluginShutdownRan) return;
+    pluginShutdownRan = true;
+    const SHUTDOWN_TIMEOUT_MS = 5000;
+    event.preventDefault();
+    void (async () => {
+      await Promise.allSettled(
+        pluginShutdownHandlers.map(async ({ pluginId, handler }) => {
+          let timer: NodeJS.Timeout | undefined;
+          try {
+            await Promise.race([
+              Promise.resolve().then(() => handler()),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error("shutdown handler timeout")), SHUTDOWN_TIMEOUT_MS);
+              }),
+            ]);
+          } catch (err) {
+            console.warn(`[plugin:${pluginId}] shutdown handler error:`, (err as Error).message);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        }),
+      );
+      app.quit();
+    })();
+  });
+
   // §4.2 Step 3-4: 플러그인 초기화 (범용 — 플러그인 특정 코드 없음)
   // API 키를 플러그인에 범용적으로 전달
   const configOverrides = buildPluginConfigOverrides(settingsService);
@@ -226,6 +267,27 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       callLlm: async (prompt, opts) => {
         if (!llmCallerRef.fn) throw new Error("LLM provider not ready");
         return llmCallerRef.fn(prompt, opts);
+      },
+      // Sprint 1-A A3 — structured log event → AuditLogger (plugin context).
+      logEvent: (level, message, data) => {
+        // AuditLogEntry.type is a fixed enum — "error" for error level,
+        // "tool_call" otherwise. Level is encoded as a [LEVEL] tag in
+        // `input` so downstream viewers can still distinguish info/warn.
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: level === "error" ? "error" : "tool_call",
+            input: `[plugin:${pluginId}] [${level.toUpperCase()}] ${message}`,
+            output: data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
+          });
+        } catch (err) {
+          console.warn(`[plugin:${pluginId}] logEvent failed:`, (err as Error).message);
+        }
+      },
+      // Sprint 1-A A3 — shutdown handler registration (fires on before-quit).
+      onShutdown: (handler) => {
+        pluginShutdownHandlers.push({ pluginId, handler });
       },
     }),
   });
@@ -431,6 +493,10 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   await permissionManager.loadRulesFromFile();
 
   // §7: Proactive Engine (Daily Briefing)
+  // Sprint 2-D: wire 5 gating deps — feature flag, LLM caller, date persistence,
+  // dismissal state. `callLlm` uses late-bound llmCallerRef (same entrypoint as
+  // plugin HostApi.callLlm), so briefing generation reuses the ConversationLoop
+  // LLM path once conversationLoop has been constructed below.
   const proactiveEngine = new ProactiveEngine({
     getTaskSummary: () => taskService.getPendingByPriority().map((t) => ({
       title: t.title, priority: t.priority, status: t.status,
@@ -438,11 +504,53 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     })),
     getRecentNotes: () => memoryManager.listNotes().slice(0, 5),
     getRecentSessions: () => memoryManager.listSessions().slice(0, 5),
+    isDailyBriefingEnabled: () =>
+      settingsService.get("proactive")?.enableDailyBriefing ?? false,
+    callLlm: async (prompt, opts) => {
+      if (!llmCallerRef.fn) throw new Error("LLM provider not ready");
+      return llmCallerRef.fn(prompt, opts);
+    },
+    getLastBriefingDate: () => settingsService.get("proactive")?.lastBriefingAt,
+    setLastBriefingDate: (dateKst) => {
+      const cur = settingsService.get("proactive") ?? { enableDailyBriefing: false };
+      settingsService.patch({ proactive: { ...cur, lastBriefingAt: dateKst } });
+    },
+    getLastDismissedAt: () => settingsService.get("proactive")?.lastDismissedAt,
   });
   proactiveEngine.setEventHints(buildManifestEventHints(pluginRuntime));
 
   // 이벤트 버스 → Proactive Engine 연동 (manifest.eventSubscriptions 선언 기반)
   registerManifestEventSubscriptions(pluginRuntime, proactiveEngine);
+
+  // Sprint 2-D: IdleScheduler IDLE_SCAN 진입 시 Daily Briefing 트리거.
+  // IdleSchedulerService의 "IDLE_SCAN" 상태를 ProactiveEngine이 기대하는
+  // "long_idle"로 매핑. 플래그 off이거나 이미 오늘 생성됐으면 엔진 측 게이팅이
+  // skipped를 반환하므로 여기서는 invariants 없이 호출만 한다.
+  if (idleScheduler) {
+    idleScheduler.setStateChangeListener((newState) => {
+      if (newState !== "IDLE_SCAN") return;
+      proactiveEngine
+        .generateDailyBriefing({ idleState: "long_idle" })
+        .then((r) => {
+          if (r.status === "generated") {
+            console.log("[lvis] boot: daily briefing generated on idle");
+            const win = mainWindow;
+            if (!win.isDestroyed()) {
+              try {
+                win.webContents.send("lvis:proactive:briefing", r.briefing);
+              } catch (e) {
+                console.warn("[lvis] boot: briefing webContents.send failed:", (e as Error).message);
+              }
+            }
+          } else {
+            console.log(`[lvis] boot: daily briefing skipped (${r.reason})`);
+          }
+        })
+        .catch((e: Error) =>
+          console.warn("[lvis] boot: daily briefing trigger failed (non-fatal):", e.message),
+        );
+    });
+  }
 
   // 오늘 일정 초기 로드 (calendar-source capability 플러그인에서 *_today 메서드 자동 탐색)
   const calendarTodayMethod = findMethodByCapability(
@@ -464,8 +572,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // manifest.notificationEvents 선언 기반 OS 알림 등록 (플러그인 무관)
   let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
 
-  // §4.5 + Agent 6: PostTurnHookChain 조립
-  const bootAuditLogger = new AuditLogger();
+  // §4.5 + Agent 6: PostTurnHookChain 조립 (shares bootAuditLogger from A3 wiring)
   const postTurnHookChain = new PostTurnHookChain({
     memoryManager,
     auditLogger: bootAuditLogger,

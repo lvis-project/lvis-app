@@ -63,6 +63,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:tasks:overdue",
   "lvis:tasks:today",
   "lvis:briefing:get",
+  "lvis:proactive:dismiss-briefing",
 ]);
 
 export function registerIpcHandlers(
@@ -312,4 +313,14 @@ export function registerIpcHandlers(
 
   // ─── Daily Briefing ──────────────────────────────
   ipcMain.handle("lvis:briefing:get", () => conversationLoop.generateBriefing());
+
+  // Sprint 2-D: user dismissal — sets lastDismissedAt, which suppresses the
+  // gated ProactiveEngine.generateDailyBriefing for the following 24h.
+  ipcMain.handle("lvis:proactive:dismiss-briefing", () => {
+    const cur = settingsService.get("proactive") ?? { enableDailyBriefing: false };
+    settingsService.patch({
+      proactive: { ...cur, lastDismissedAt: new Date().toISOString() },
+    });
+    return { ok: true };
+  });
 }
