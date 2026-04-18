@@ -53,21 +53,41 @@ export async function* fullStreamToStreamEvent(
           totalUsage?: {
             inputTokens?: number;
             outputTokens?: number;
+            promptTokens?: number;
+            completionTokens?: number;
+          };
+          usage?: {
+            inputTokens?: number;
+            outputTokens?: number;
+            promptTokens?: number;
+            completionTokens?: number;
           };
         };
-        const stopReason: "tool_use" | "end_turn" =
-          p.finishReason === "tool-calls" || hasToolCalls
-            ? "tool_use"
-            : "end_turn";
+        // Honor finishReason explicitly when present; fallback to sticky
+        // hasToolCalls only when finishReason is missing.
+        let stopReason: "tool_use" | "end_turn";
+        if (p.finishReason === "tool-calls") {
+          stopReason = "tool_use";
+        } else if (p.finishReason) {
+          stopReason = "end_turn";
+        } else {
+          stopReason = hasToolCalls ? "tool_use" : "end_turn";
+        }
+        // v5 exposes totalUsage; v4 exposed usage. Accept either and tolerate
+        // both inputTokens/outputTokens (v5) and promptTokens/completionTokens (v4).
+        const usageRaw = p.totalUsage ?? p.usage;
+        const usage = usageRaw
+          ? {
+              inputTokens:
+                usageRaw.inputTokens ?? usageRaw.promptTokens ?? 0,
+              outputTokens:
+                usageRaw.outputTokens ?? usageRaw.completionTokens ?? 0,
+            }
+          : undefined;
         yield {
           type: "message_complete",
           stopReason,
-          usage: p.totalUsage
-            ? {
-                inputTokens: p.totalUsage.inputTokens ?? 0,
-                outputTokens: p.totalUsage.outputTokens ?? 0,
-              }
-            : undefined,
+          usage,
         };
         break;
       }

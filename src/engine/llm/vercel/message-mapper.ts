@@ -56,8 +56,10 @@ export function genericToModelMessages(
         }
       }
 
+      // Omit the message entirely when there is neither visible text nor any
+      // tool calls — SDK providers reject empty assistant turns with 400.
       if (parts.length === 0) {
-        parts.push({ type: "text", text: "" });
+        continue;
       }
 
       out.push({
@@ -75,7 +77,10 @@ export function genericToModelMessages(
             type: "tool-result",
             toolCallId: msg.toolUseId,
             toolName: msg.toolName ?? "tool",
-            output: { type: "text", value: msg.content },
+            output:
+              msg.isError === true
+                ? { type: "error-text", value: msg.content }
+                : { type: "text", value: msg.content },
           },
         ],
       } as ModelMessage);

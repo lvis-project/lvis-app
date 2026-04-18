@@ -256,6 +256,90 @@ describe("VercelUnifiedProvider gemini — adapter smoke (mocked ai.streamText)"
     vi.doUnmock("@ai-sdk/google");
   });
 
+  it("forwards abortSignal to streamText()", async () => {
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      fullStream: (async function* () {
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/google", () => ({
+      createGoogleGenerativeAI: () => (_model: string) => ({ __mock: true }),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider("gemini", "test-key");
+    const ac = new AbortController();
+
+    const events: StreamEvent[] = [];
+    for await (const ev of provider.streamTurn({
+      model: "gemini-2.5-flash",
+      systemPrompt: "sys",
+      messages: [{ role: "user", content: "hi" }],
+      abortSignal: ac.signal,
+    })) {
+      events.push(ev);
+    }
+
+    expect(streamTextSpy).toHaveBeenCalledTimes(1);
+    const callArgs = streamTextSpy.mock.calls[0]![0] as {
+      abortSignal?: AbortSignal;
+    };
+    expect(callArgs.abortSignal).toBe(ac.signal);
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/google");
+  });
+
+  it("yields error event with classification when streamText() throws synchronously (pre-stream)", async () => {
+    vi.resetModules();
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return {
+        ...actual,
+        streamText: vi.fn(() => {
+          // Simulate APICallError-style pre-stream failure (e.g. 429 rate limit).
+          const err = new Error("429 rate limited");
+          throw err;
+        }),
+      };
+    });
+    vi.doMock("@ai-sdk/google", () => ({
+      createGoogleGenerativeAI: () => (_model: string) => ({ __mock: true }),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider("gemini", "test-key");
+
+    const events: StreamEvent[] = [];
+    for await (const ev of provider.streamTurn({
+      model: "gemini-2.5-flash",
+      systemPrompt: "sys",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      events.push(ev);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("error");
+    if (events[0]!.type === "error") {
+      expect(typeof events[0]!.error).toBe("string");
+      expect(events[0]!.classification).toBeDefined();
+      expect(typeof events[0]!.classification).toBe("string");
+    }
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/google");
+  });
+
   it("vendor=openai throws (P2 scope)", async () => {
     const { VercelUnifiedProvider } = await import("../adapter.js");
     const provider = new VercelUnifiedProvider("openai", "k");
@@ -268,5 +352,105 @@ describe("VercelUnifiedProvider gemini — adapter smoke (mocked ai.streamText)"
         void _;
       }
     }).rejects.toThrow(/not yet implemented/);
+  });
+});
+
+describe("stream-mapper — usage v4/v5 fallback", () => {
+  it("reads v4-shape usage { promptTokens, completionTokens }", async () => {
+    const canned = [
+      { type: "text-delta", id: "t1", text: "ok" },
+      {
+        type: "finish",
+        finishReason: "stop",
+        usage: { promptTokens: 10, completionTokens: 5 },
+      },
+    ];
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const finish = events.find((e) => e.type === "message_complete");
+    expect(finish).toBeDefined();
+    if (finish?.type === "message_complete") {
+      expect(finish.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
+    }
+  });
+
+  it("honors finishReason='tool-calls' even without tool-call parts", async () => {
+    const canned = [
+      {
+        type: "finish",
+        finishReason: "tool-calls",
+        totalUsage: { inputTokens: 1, outputTokens: 2 },
+      },
+    ];
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const finish = events.find((e) => e.type === "message_complete");
+    expect(finish).toBeDefined();
+    if (finish?.type === "message_complete") {
+      expect(finish.stopReason).toBe("tool_use");
+    }
+  });
+
+  it("honors finishReason='stop' even when hasToolCalls (sticky) would say tool_use", async () => {
+    const canned = [
+      {
+        type: "tool-call",
+        toolCallId: "c1",
+        toolName: "x",
+        input: {},
+      },
+      {
+        type: "finish",
+        finishReason: "stop",
+        totalUsage: { inputTokens: 1, outputTokens: 2 },
+      },
+    ];
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const finish = events.find((e) => e.type === "message_complete");
+    expect(finish).toBeDefined();
+    if (finish?.type === "message_complete") {
+      expect(finish.stopReason).toBe("end_turn");
+    }
+  });
+});
+
+describe("message-mapper — additional MEDIUM fixes", () => {
+  it("maps tool_result with isError=true to error-text output", () => {
+    const result = genericToModelMessages([
+      {
+        role: "tool_result",
+        toolUseId: "c1",
+        toolName: "index_scan",
+        content: "boom",
+        isError: true,
+      },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "index_scan",
+          output: { type: "error-text", value: "boom" },
+        },
+      ],
+    });
+  });
+
+  it("omits empty assistant message (no text, no toolCalls)", () => {
+    const result = genericToModelMessages([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "" },
+      { role: "user", content: "again" },
+    ]);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "hi" }],
+    });
+    expect(result[1]).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "again" }],
+    });
   });
 });
