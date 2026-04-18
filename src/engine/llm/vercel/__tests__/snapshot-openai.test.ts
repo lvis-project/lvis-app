@@ -511,4 +511,92 @@ describe("VercelUnifiedProvider openai — custom baseUrl proxy guard", () => {
   });
 });
 
+describe("VercelUnifiedProvider — sampling params (temperature / seed) gating", () => {
+  const runAndCaptureStreamTextArgs = async (
+    vendor: "openai" | "copilot",
+    model: string,
+    params: { temperature?: number; seed?: number } = {},
+  ): Promise<Record<string, unknown>> => {
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      fullStream: (async function* () {
+        yield { type: "text-delta", id: "t1", text: "ok" };
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/openai", () => ({
+      createOpenAI: () => ({
+        responses: vi.fn(() => ({ __mock: "responses" })),
+        chat: vi.fn(() => ({ __mock: "chat" })),
+      }),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(vendor, "test-key");
+
+    await collect(
+      provider.streamTurn({
+        model,
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+        temperature: params.temperature,
+        seed: params.seed,
+      }),
+    );
+
+    const callArg = streamTextSpy.mock.calls[0]![0] as Record<string, unknown>;
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai");
+    return callArg;
+  };
+
+  it("OpenAI + reasoning model (gpt-5.4-mini): drops temperature and seed", async () => {
+    const args = await runAndCaptureStreamTextArgs("openai", "gpt-5.4-mini", {
+      temperature: 0.7,
+      seed: 42,
+    });
+    expect(args.temperature).toBeUndefined();
+    expect(args.seed).toBeUndefined();
+  });
+
+  it("OpenAI + reasoning model (o3-mini): drops temperature and seed", async () => {
+    const args = await runAndCaptureStreamTextArgs("openai", "o3-mini", {
+      temperature: 0.9,
+      seed: 7,
+    });
+    expect(args.temperature).toBeUndefined();
+    expect(args.seed).toBeUndefined();
+  });
+
+  it("OpenAI + non-reasoning model (gpt-4.1): forwards temperature and seed", async () => {
+    const args = await runAndCaptureStreamTextArgs("openai", "gpt-4.1", {
+      temperature: 0.7,
+      seed: 42,
+    });
+    expect(args.temperature).toBe(0.7);
+    expect(args.seed).toBe(42);
+  });
+
+  it("Copilot + gpt-5 (Chat Completions): forwards temperature and seed — must NOT drop", async () => {
+    // Copilot always routes through Chat Completions (resolveModel:342-350),
+    // which accepts sampling controls. Regression guard for PR #105 Copilot
+    // review: earlier draft used isOpenAIReasoning which included copilot,
+    // leaking the Responses-API-only restriction to Chat Completions.
+    const args = await runAndCaptureStreamTextArgs("copilot", "gpt-5-mini", {
+      temperature: 0.5,
+      seed: 123,
+    });
+    expect(args.temperature).toBe(0.5);
+    expect(args.seed).toBe(123);
+  });
+});
+
 // Claude path now implemented — see snapshot-claude.test.ts for full coverage.
