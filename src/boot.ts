@@ -1,146 +1,71 @@
 /**
  * Boot Sequence — §4.2
  *
- * 앱 시작 시 실행되는 초기화 파이프라인.
+ * 앱 시작 시 실행되는 초기화 파이프라인. Thin orchestrator —
+ * 세부 로직은 src/boot/*.ts 모듈에 분리되어 있다.
  * 플러그인 특정 코드 없음 — 모든 플러그인은 HostApi를 통해 자기 등록.
  */
 import { resolve } from "node:path";
-import { app, Notification } from "electron";
+import { app } from "electron";
 import type { BrowserWindow } from "electron";
+import { AuditLogger } from "./audit/audit-logger.js";
 import { PluginRuntime } from "./plugins/runtime.js";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
 import { PluginDeploymentGuard } from "./plugins/deployment-guard.js";
-import { TaskService } from "./taskService.js";
-import { SettingsService } from "./data/settings-store.js";
-import { MemoryManager } from "./memory/memory-manager.js";
-import { KeywordEngine } from "./core/keyword-engine.js";
-import { RouteEngine } from "./core/route-engine.js";
-import { ToolRegistry } from "./tools/registry.js";
-import { createDynamicTool, type Tool } from "./tools/base.js";
-import { pluginToolsForRegistration } from "./plugins/plugin-tool-adapter.js";
-import { SystemPromptBuilder } from "./prompts/system-prompt-builder.js";
-import { ConversationLoop } from "./engine/conversation-loop.js";
-import { PermissionManager } from "./permissions/permission-manager.js";
-import { ProactiveEngine } from "./core/proactive-engine.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
-import { PythonRuntimeBootstrapper } from "./main/python-runtime.js";
-import { HybridRetriever } from "./main/hybrid-retriever.js";
-import { MockCloudIndexAdapter } from "./main/cloud-index-adapter.js";
-import { IdleSchedulerService, type WorkerClientLite } from "./main/idle-scheduler.js";
-import { BashAstValidator } from "./main/bash-ast-validator.js";
-import { AuditService } from "./main/audit-service.js";
-import { PostTurnHookChain } from "./hooks/post-turn-hook-chain.js";
-import { HookRunner } from "./hooks/hook-runner.js";
-import { loadHooksConfig } from "./hooks/config-loader.js";
-import { ExternalHookExecutor } from "./hooks/external-executor.js";
-import { AuditLogger } from "./audit/audit-logger.js";
-import { createKnowledgeSearchTools } from "./tools/knowledge-search.js";
-import { BashTool } from "./tools/bash.js";
-import { ApprovalGate } from "./permissions/approval-gate.js";
-import { loadPolicy } from "./permissions/policy-store.js";
 import type { PluginHostApi } from "./plugins/types.js";
-import { MsGraphService } from "./main/ms-graph-service.js";
 
-export interface AppServices {
-  pluginRuntime: PluginRuntime;
-  pluginMarketplace: PluginMarketplaceService;
-  taskService: TaskService;
-  settingsService: SettingsService;
-  memoryManager: MemoryManager;
-  keywordEngine: KeywordEngine;
-  routeEngine: RouteEngine;
-  toolRegistry: ToolRegistry;
-  systemPromptBuilder: SystemPromptBuilder;
-  conversationLoop: ConversationLoop;
-  proactiveEngine: ProactiveEngine;
-  mcpManager: McpManager;
-  idleScheduler?: IdleSchedulerService;
-  bashAstValidator: BashAstValidator;
-  auditService: AuditService;
-  postTurnHookChain: PostTurnHookChain;
-  /** B1: 승인 게이트 — mainWindow 준비 후 생성 */
-  approvalGate?: ApprovalGate;
-  /** Whether knowledge search tools were successfully registered. */
-  knowledgeAvailable: boolean;
-  /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
-  refreshPluginNotifications?: () => void;
-}
+import { emitEvent, onEvent, type AppServices } from "./boot/types.js";
+import { bootstrapCoreServices } from "./boot/services.js";
+import {
+  buildPluginConfigOverrides,
+  registerPluginTools,
+  runManifestStartupTools,
+  registerPluginNotifications,
+} from "./boot/plugins.js";
+import {
+  registerBuiltinTools,
+  registerRequestPluginMetaTool,
+  wireKnowledgeAndIdleScheduler,
+} from "./boot/tools.js";
+import {
+  createProactiveEngine,
+  loadCalendarToday,
+  loadWeeklyCalendarIfMonday,
+} from "./boot/proactive.js";
+import {
+  createSystemPromptBuilder,
+  createPermissionManager,
+  createPostTurnHookChain,
+  createApprovalGate,
+  createHookRunner,
+  createConversationLoop,
+  createCallLlm,
+} from "./boot/conversation.js";
 
-// ─── 이벤트 버스 (플러그인 간 통신) ────────────────
-
-type EventHandler = (data: unknown) => void;
-const eventHandlers = new Map<string, Set<EventHandler>>();
-
-function emitEvent(type: string, data?: unknown): void {
-  const handlers = eventHandlers.get(type);
-  if (handlers) {
-    for (const handler of handlers) {
-      try { handler(data); } catch (err) { console.error(`[lvis] event handler error (${type}):`, err); }
-    }
-  }
-}
-
-function onEvent(type: string, handler: EventHandler): void {
-  if (!eventHandlers.has(type)) eventHandlers.set(type, new Set());
-  eventHandlers.get(type)!.add(handler);
-}
-
-function offEvent(type: string, handler: EventHandler): void {
-  eventHandlers.get(type)?.delete(handler);
-}
-
-// ─── Bootstrap ──────────────────────────────────────
+export type { AppServices } from "./boot/types.js";
 
 export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow): Promise<AppServices> {
   console.log("[lvis] boot: starting...");
 
-  // §4.2 Step 0: Python Runtime Bootstrap (Agent 1)
-  const pythonRuntime = new PythonRuntimeBootstrapper();
-  let pythonPath: string | undefined;
-  try {
-    const runtimeResult = await pythonRuntime.ensureReady(mainWindow);
-    pythonPath = runtimeResult.pythonPath;
-    console.log("[lvis] boot: python runtime ready:", pythonPath);
-  } catch (err) {
-    console.warn("[lvis] boot: python runtime setup failed (non-fatal):", (err as Error).message);
-  }
-
-  // §4.2 Step 0.5: Governance Services (Agent 6)
-  const bashAstValidator = new BashAstValidator({ mode: "deny" });
-
-  // Microsoft Graph 공유 인증 서비스 (이메일·캘린더 플러그인 공용)
-  const msGraphService = new MsGraphService(app.getPath("userData"));
-  await msGraphService.loadSavedToken();
-  if (msGraphService.isAuthenticated()) {
-    console.log("[lvis] boot: ms-graph token loaded —", msGraphService.getAccountName());
-  }
-  const auditService = new AuditService();
-  await auditService.start();
-
-  // §4.2 Step 1: Config
-  const settingsService = new SettingsService({
-    userDataPath: app.getPath("userData"),
-  });
-
-  // §4.2 Step 5: Core Engines
-  const memoryManager = new MemoryManager();
-  memoryManager.load();
-  console.log("[lvis] boot: memory loaded from", memoryManager.getDir());
-
-  const keywordEngine = new KeywordEngine();
-  const toolRegistry = new ToolRegistry();
-  // Tier A1: BashTool registers directly — it implements the canonical
-  // Tool contract via ZodTool and is tagged source="builtin" + category
-  // "dangerous" so the §6.3 permission stack handles approval correctly.
-  toolRegistry.register(new BashTool());
-  const routeEngine = new RouteEngine({ toolRegistry });
-
-  const taskService = new TaskService({
-    dbPath: resolve(app.getPath("userData"), "lvis-tasks.db"),
-  });
+  // §4.2 Step 0–1+5: Core services (python, ms-graph, audit, settings, memory,
+  // keyword/route/tool registry + BashTool, task service).
+  const core = await bootstrapCoreServices(mainWindow);
+  const {
+    pythonPath,
+    bashAstValidator,
+    msGraphService,
+    auditService,
+    settingsService,
+    memoryManager,
+    keywordEngine,
+    toolRegistry,
+    routeEngine,
+    taskService,
+  } = core;
 
   // Sprint 1-A A3 — AuditLogger is created before PluginRuntime so the
   // per-plugin HostApi.logEvent can route through it. Previously it was
@@ -305,139 +230,15 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   registerBuiltinTools(memoryManager, toolRegistry, settingsService);
 
   // Phase 1.5 Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
-  // execute는 no-op — 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
-  toolRegistry.register(createDynamicTool({
-    name: "request_plugin",
-    description:
-      "현재 비활성화된 플러그인 중 이번 턴 작업에 필요한 것을 활성화 요청합니다. " +
-      "비활성 플러그인 목록은 system prompt '사용 가능한 플러그인' 섹션 참조. " +
-      "활성화 후 같은 턴 내에서 해당 플러그인의 tool을 호출할 수 있습니다.",
-    source: "builtin",
-    category: "read",
-    isReadOnly: () => true,
-    jsonSchema: {
-      type: "object",
-      required: ["pluginId"],
-      properties: {
-        pluginId: {
-          type: "string",
-          description: "활성화할 플러그인 ID (카탈로그의 bold 부분)",
-        },
-      },
-    },
-    // Handled inline by ConversationLoop; fallback if executor reaches it.
-    execute: async () => ({
-      output: "request_plugin은 대화 루프에서 직접 처리됩니다.",
-      isError: false,
-    }),
-  }));
+  registerRequestPluginMetaTool(toolRegistry);
 
   // §4.4 HybridRetriever + Knowledge Tools DI (Agent 3 산출물 연결)
   // §6.1 IdleSchedulerService 배선 (Agent 5 산출물)
-  let idleScheduler: IdleSchedulerService | undefined;
-  let knowledgeAvailable = false;
-  try {
-    // Public accessor (runtime.getPluginInstance) replaces the previous
-    // `(pluginRuntime as any).plugins?.get(...)` private reach-through.
-    const workerClientPluginId = pluginRuntime.findPluginIdByCapability("worker-client");
-    const pageIndexPlugin = workerClientPluginId
-      ? pluginRuntime.getPluginInstance<{
-      getWorkerClient?: () => {
-        listDocuments: () => Promise<unknown>;
-        getStructure: (docId: string) => Promise<unknown>;
-        getPageContent: (docId: string, pages: string) => Promise<unknown>;
-        enqueue: (filePath: string, mode?: string, priority?: number) => Promise<unknown>;
-        processOne: (priority?: number) => Promise<unknown>;
-        getIndexerState: () => Promise<unknown>;
-      };
-      setIdleScheduler?: (scheduler: IdleSchedulerService) => void;
-    }>(workerClientPluginId)
-      : undefined;
-    const workerClient = pageIndexPlugin?.getWorkerClient?.() as
-      | {
-          listDocuments: () => Promise<unknown>;
-          getStructure: (docId: string) => Promise<unknown>;
-          getPageContent: (docId: string, pages: string) => Promise<unknown>;
-          enqueue: (filePath: string, mode?: string, priority?: number) => Promise<unknown>;
-          processOne: (priority?: number) => Promise<unknown>;
-          getIndexerState: () => Promise<unknown>;
-        }
-      | undefined;
-    if (workerClient) {
-      const cloudAdapter = new MockCloudIndexAdapter();
-      const hybridRetriever = new HybridRetriever({
-        workerClient: workerClient as never,
-        cloudAdapter,
-      });
-      const knowledgeTools = createKnowledgeSearchTools({
-        hybridRetriever,
-        workerClient: {
-          listDocuments: () => workerClient.listDocuments() as never,
-          getStructure: (docId: string) => workerClient.getStructure(docId) as never,
-          getPageContent: (docId: string, pages: string) =>
-            workerClient.getPageContent(docId, pages) as never,
-        },
-      });
-      for (const tool of knowledgeTools) {
-        toolRegistry.register(tool);
-      }
-      knowledgeAvailable = true;
-      console.log("[lvis] boot: knowledge tools registered (%d tools)", knowledgeTools.length);
-
-      // §6.1 IdleScheduler: WorkerClient의 enqueue/processOne/getIndexerState를 WorkerClientLite shape으로 래핑
-      const idleWorkerAdapter: WorkerClientLite = {
-        enqueue: (filePath: string, mode?: string, priority?: number) =>
-          workerClient.enqueue(filePath, mode, priority) as never,
-        processOne: (priority?: number) => workerClient.processOne(priority) as never,
-        getIndexerState: () => workerClient.getIndexerState() as never,
-      };
-      // Electron powerMonitor lazy import — test 환경에서 electron 로드 회피
-      try {
-        const { powerMonitor } = await import("electron");
-        idleScheduler = new IdleSchedulerService({
-          workerClient: idleWorkerAdapter,
-          powerMonitor: powerMonitor as unknown as import("./main/idle-scheduler.js").PowerMonitorLike,
-        });
-        idleScheduler.start();
-        // folderIndexer에 stub 주입 (Agent 4의 setIdleScheduler 경로)
-        if (typeof pageIndexPlugin?.setIdleScheduler === "function") {
-          pageIndexPlugin.setIdleScheduler(idleScheduler);
-          console.log("[lvis] boot: idle-scheduler wired to folderIndexer");
-        } else {
-          console.warn("[lvis] boot: worker-client plugin setIdleScheduler() not available");
-        }
-      } catch (err) {
-        console.warn(
-          "[lvis] boot: idle-scheduler setup failed (non-fatal):",
-          (err as Error).message,
-        );
-      }
-    } else {
-      console.warn(
-        "[lvis] boot: worker-client capability missing getWorkerClient() — knowledge tools skipped",
-      );
-      auditService.log({
-        timestamp: new Date().toISOString(),
-        sessionId: "boot",
-        type: "error",
-        payload: {
-          reason: "knowledge tools skipped — getWorkerClient missing",
-          pluginId: workerClientPluginId ?? "(capability:worker-client not found)",
-        },
-      });
-    }
-  } catch (err) {
-    console.warn("[lvis] boot: knowledge tools DI failed (non-fatal):", (err as Error).message);
-    auditService.log({
-      timestamp: new Date().toISOString(),
-      sessionId: "boot",
-      type: "error",
-      payload: {
-        reason: "knowledge tools DI failed",
-        error: (err as Error).message,
-      },
-    });
-  }
+  const { idleScheduler, knowledgeAvailable } = await wireKnowledgeAndIdleScheduler({
+    pluginRuntime,
+    toolRegistry,
+    auditService,
+  });
 
   // §9.5 M4: select marketplace backend from settings (default = mock local JSON).
   const marketplaceSettings = settingsService.get("marketplace");
@@ -464,46 +265,22 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   );
 
   // §4.5.9: SystemPromptBuilder
-  const systemPromptBuilder = new SystemPromptBuilder({
-    memoryManager,
-    toolRegistry,
-    getPluginSchemas: () => {
-      const tools = pluginRuntime.listToolNames();
-      if (tools.length === 0) return "";
-      return [
-        "<active-plugins>",
-        `활성 플러그인 도구: ${tools.join(", ")}`,
-        "</active-plugins>",
-      ].join("\n");
-    },
-    // Phase 1.5 Option C — 비활성 plugin 카탈로그 공급.
-    getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
+  const systemPromptBuilder = createSystemPromptBuilder({
+    memoryManager, toolRegistry, pluginRuntime,
   });
 
   // §6.3: PermissionManager (Layer 2-3)
-  const permissionManager = new PermissionManager();
-  // 기본 allow 규칙: 조회성 도구 자동 허용
-  permissionManager.setRules([
-    { pattern: "memory_search", action: "allow" },
-    { pattern: "memory_list", action: "allow" },
-    { pattern: "web_search", action: "allow" },
-    { pattern: "web_fetch", action: "allow" },
-  ]);
-  // B1: 영구 규칙 파일 로드 (~/.lvis/permissions.json → 인메모리 병합)
-  await permissionManager.loadRulesFromFile();
+  const permissionManager = await createPermissionManager();
 
-  // §7: Proactive Engine (Daily Briefing)
+  // §7: Proactive Engine (Daily Briefing) — event subscriptions + hints.
   // Sprint 2-D: wire 5 gating deps — feature flag, LLM caller, date persistence,
   // dismissal state. `callLlm` uses late-bound llmCallerRef (same entrypoint as
   // plugin HostApi.callLlm), so briefing generation reuses the ConversationLoop
   // LLM path once conversationLoop has been constructed below.
-  const proactiveEngine = new ProactiveEngine({
-    getTaskSummary: () => taskService.getPendingByPriority().map((t) => ({
-      title: t.title, priority: t.priority, status: t.status,
-      dueAt: t.dueAt ?? undefined, source: t.source,
-    })),
-    getRecentNotes: () => memoryManager.listNotes().slice(0, 5),
-    getRecentSessions: () => memoryManager.listSessions().slice(0, 5),
+  const proactiveEngine = createProactiveEngine({
+    taskService,
+    memoryManager,
+    pluginRuntime,
     isDailyBriefingEnabled: () =>
       settingsService.get("proactive")?.enableDailyBriefing ?? false,
     callLlm: async (prompt, opts) => {
@@ -517,10 +294,6 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     },
     getLastDismissedAt: () => settingsService.get("proactive")?.lastDismissedAt,
   });
-  proactiveEngine.setEventHints(buildManifestEventHints(pluginRuntime));
-
-  // 이벤트 버스 → Proactive Engine 연동 (manifest.eventSubscriptions 선언 기반)
-  registerManifestEventSubscriptions(pluginRuntime, proactiveEngine);
 
   // Sprint 2-D: IdleScheduler IDLE_SCAN 진입 시 Daily Briefing 트리거.
   // IdleSchedulerService의 "IDLE_SCAN" 상태를 ProactiveEngine이 기대하는
@@ -553,63 +326,28 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   }
 
   // 오늘 일정 초기 로드 (calendar-source capability 플러그인에서 *_today 메서드 자동 탐색)
-  const calendarTodayMethod = findMethodByCapability(
-    pluginRuntime,
-    "calendar-source",
-    (method) => method.endsWith("_today"),
-  );
-  if (calendarTodayMethod) {
-    pluginRuntime.call(calendarTodayMethod, {})
-      .then((events: unknown) => {
-        if (Array.isArray(events)) {
-          proactiveEngine.updateCalendarEvents(events as import("./core/proactive-engine.js").CachedCalendarEvent[]);
-          console.log(`[lvis] boot: calendar today loaded (${events.length}건)`);
-        }
-      })
-      .catch((e: Error) => console.log("[lvis] boot: calendar today load failed (non-fatal):", e.message));
-  }
+  loadCalendarToday(pluginRuntime, proactiveEngine);
 
   // manifest.notificationEvents 선언 기반 OS 알림 등록 (플러그인 무관)
   let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
 
   // §4.5 + Agent 6: PostTurnHookChain 조립 (shares bootAuditLogger from A3 wiring)
-  const postTurnHookChain = new PostTurnHookChain({
+  const { postTurnHookChain } = createPostTurnHookChain({
     memoryManager,
-    auditLogger: bootAuditLogger,
     idleScheduler,
     settingsService,
+    auditLogger: bootAuditLogger,
   });
 
   // B1: Policy 로드 후 ApprovalGate 생성 — mainWindow.webContents 준비 후
   // §F7: bootAuditLogger 주입 → requested/decided/timeout/send-failed 4 phase 감사
-  const bootPolicy = await loadPolicy();
-  const approvalGate = new ApprovalGate(mainWindow.webContents, bootPolicy, 5 * 60 * 1000, bootAuditLogger);
+  const approvalGate = await createApprovalGate(mainWindow, bootAuditLogger);
 
-  // Tier A4 (W3): load hooks config from admin-dir + ~/.lvis/hooks.json and
-  // attach an ExternalHookExecutor to the HookRunner so every preToolUse /
-  // postToolUse event routes through it. Host owns the runner lifecycle so
-  // external hooks fire inside the ToolExecutor's 8-step pipeline.
-  const hookRunner = new HookRunner();
-  try {
-    const hooksConfig = loadHooksConfig();
-    const externalHookExecutor = new ExternalHookExecutor(hooksConfig, process.cwd());
-    hookRunner.setExternalExecutor(externalHookExecutor);
-    const preCount = hooksConfig.preToolUse.length;
-    const postCount = hooksConfig.postToolUse.length;
-    console.log(
-      "[lvis] boot: external hook executor attached (pre=%d, post=%d)",
-      preCount,
-      postCount,
-    );
-  } catch (err) {
-    console.warn(
-      "[lvis] boot: external hook executor setup failed (non-fatal):",
-      (err as Error).message,
-    );
-  }
+  // Tier A4 (W3): external hook executor 부착된 HookRunner
+  const hookRunner = createHookRunner();
 
   // §4.5: ConversationLoop
-  const conversationLoop = new ConversationLoop({
+  const conversationLoop = createConversationLoop({
     settingsService,
     systemPromptBuilder,
     keywordEngine,
@@ -623,41 +361,16 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     bashAstValidator,
     approvalGate,
     hookRunner,
-    // Phase 1.5 Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime,
   });
 
   // Late-binding 주입 — 두 ref 모두 여기서 채워진다.
   conversationLoopRef = conversationLoop;
-  // callLlm의 maxTokens는 플러그인이 실수로 큰 값을 넘겨 지연·비용 폭발이 나지 않도록
-  // 호스트에서 sanitize: 유효한 양의 정수만 수용하고 상한(CALL_LLM_MAX_TOKENS_CEILING)
-  // 으로 clamp. 유효하지 않으면 undefined로 넘겨 generateText의 기본값(400)을 사용.
-  const CALL_LLM_MAX_TOKENS_CEILING = 4096;
-  llmCallerRef.fn = (prompt, opts) => {
-    let maxTokens: number | undefined;
-    const raw = opts?.maxTokens;
-    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
-      maxTokens = Math.min(Math.floor(raw), CALL_LLM_MAX_TOKENS_CEILING);
-    }
-    return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt);
-  };
+  llmCallerRef.fn = createCallLlm(conversationLoop);
   console.log("[lvis] boot: plugin callLlm ready");
 
   // Feature 4: 월요일 주간 일정 캐시 로드 (KST 기준)
-  const isMonday = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Seoul", weekday: "short" }).format(new Date()) === "Mon";
-  const calendarListMethod = findMethodByCapability(
-    pluginRuntime, "calendar-source", (m) => m.endsWith("_list"),
-  );
-  if (isMonday && calendarListMethod) {
-    pluginRuntime.call(calendarListMethod, { days: 7 })
-      .then((events: unknown) => {
-        if (Array.isArray(events)) {
-          proactiveEngine.updateCalendarEvents(events as import("./core/proactive-engine.js").CachedCalendarEvent[]);
-          console.log(`[lvis] boot: weekly calendar loaded (${events.length}건, 월요일 모드)`);
-        }
-      })
-      .catch((e: Error) => console.log("[lvis] boot: weekly calendar load failed (non-fatal):", e.message));
-  }
+  loadWeeklyCalendarIfMonday(pluginRuntime, proactiveEngine);
 
   // §9.5: MCP Server 연결 (거버넌스 승인 서버만)
   const mcpGovernance = new McpGovernance();
@@ -686,399 +399,4 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
     },
   };
-}
-
-// ─── Plugin Config (범용) ───────────────────────────
-
-/** 현재 LLM 벤더의 API 키를 모든 플러그인에 범용으로 전달 */
-function buildPluginConfigOverrides(settings: SettingsService): Record<string, Record<string, unknown>> {
-  const overrides: Record<string, Record<string, unknown>> = {};
-  const llm = settings.get("llm");
-
-  // OpenAI 키는 STT/Summary 플러그인이 공통으로 사용.
-  // 글로벌 process.env 오염 금지 — configOverrides를 통한 명시적 주입만 허용.
-  // (cycle 1 LOW: process.env.OPENAI_API_KEY 글로벌 set 제거)
-  const openaiKey = settings.getSecret("llm.apiKey.openai");
-  const currentKey = settings.getSecret(`llm.apiKey.${llm.provider}`);
-
-  // 모든 플러그인에 범용적으로 전달 — 각 플러그인이 필요한 키를 선택
-  const resolvedApiKey = openaiKey ?? currentKey;
-  if (resolvedApiKey) {
-    overrides["*"] = {
-      llmApiKey: resolvedApiKey,
-      llmProvider: llm.provider,
-      apiKey: resolvedApiKey,         // pageindex가 사용하는 키 이름
-      openaiApiKey: resolvedApiKey,   // meeting이 사용하는 키 이름
-    };
-  }
-
-  return overrides;
-}
-
-// ─── Tool Registration (범용) ───────────────────────
-
-function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolRegistry): void {
-  for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
-    for (const tool of pluginToolsForRegistration(pluginRuntime, pluginId, manifest)) {
-      toolRegistry.register(tool);
-    }
-  }
-}
-
-function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
-  const loadedTools = new Set(pluginRuntime.listToolNames());
-  for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
-    for (const tool of manifest.startupTools ?? []) {
-      if (!loadedTools.has(tool)) {
-        console.warn(
-          `[lvis] boot: startup tool not loaded (plugin=${pluginId}, tool=${tool})`,
-        );
-        continue;
-      }
-      pluginRuntime.call(tool, {}).catch((e: Error) =>
-        console.log(
-          `[lvis] boot: startup tool failed (non-fatal, plugin=${pluginId}, tool=${tool}):`,
-          e.message,
-        ),
-      );
-    }
-  }
-}
-
-function registerManifestEventSubscriptions(
-  pluginRuntime: PluginRuntime,
-  proactiveEngine: ProactiveEngine,
-): void {
-  const eventTypes = new Set<string>();
-  for (const { manifest } of pluginRuntime.listPluginManifests()) {
-    for (const eventType of manifest.eventSubscriptions ?? []) {
-      eventTypes.add(eventType);
-    }
-  }
-  for (const eventType of eventTypes) {
-    onEvent(eventType, (data) => proactiveEngine.collectEvent(eventType, data));
-  }
-}
-
-function buildManifestEventHints(
-  pluginRuntime: PluginRuntime,
-): Record<string, import("./core/proactive-engine.js").ProactiveEventHint> {
-  const hints: Record<string, import("./core/proactive-engine.js").ProactiveEventHint> = {};
-  for (const { manifest } of pluginRuntime.listPluginManifests()) {
-    for (const eventType of manifest.eventSubscriptions ?? []) {
-      const [prefix] = eventType.split(".");
-      if (prefix === "meeting") {
-        hints[eventType] = {
-          category: "meeting",
-          priority: "medium",
-          title: "회의 이벤트",
-        };
-        continue;
-      }
-      if (prefix === "email") {
-        hints[eventType] = {
-          category: "email",
-          priority: "medium",
-          title: eventType === "email.action.needed" ? "액션 필요 이메일" : "이메일 이벤트",
-        };
-        continue;
-      }
-      if (prefix === "calendar") {
-        hints[eventType] = {
-          category: "calendar",
-          priority: "low",
-          title: "일정 이벤트",
-        };
-        continue;
-      }
-      hints[eventType] = {
-        category: "system",
-        priority: "low",
-        title: eventType,
-      };
-    }
-  }
-  return hints;
-}
-
-/** manifest.notificationEvents 선언 기반으로 OS 알림을 등록한다. 플러그인 특정 코드 없음. */
-function registerPluginNotifications(
-  pluginRuntime: PluginRuntime,
-  mainWindow: BrowserWindow,
-): () => void {
-  if (!Notification.isSupported()) return () => {};
-
-  const registered: Array<{ type: string; handler: EventHandler }> = [];
-  // manifest는 JSON에서 읽으므로 런타임 검증 필요. 또한 여러 플러그인이 같은 이벤트를
-  // 알림으로 선언하면 한 번의 emit에 알림이 중복으로 뜨므로 event별로 1개만 등록.
-  const registeredEvents = new Set<string>();
-
-  for (const { manifest } of pluginRuntime.listPluginManifests()) {
-    const notificationEvents = Array.isArray(manifest.notificationEvents)
-      ? manifest.notificationEvents
-      : [];
-    for (const spec of notificationEvents) {
-      if (!spec || typeof spec !== "object") {
-        console.warn("[lvis] boot: invalid notificationEvents spec (expected object), skipped:", spec);
-        continue;
-      }
-      const event = typeof spec.event === "string" ? spec.event.trim() : "";
-      if (!event) {
-        console.warn("[lvis] boot: notificationEvents spec with missing/empty 'event' skipped:", spec);
-        continue;
-      }
-      if (spec.titleField !== undefined && typeof spec.titleField !== "string") {
-        console.warn(`[lvis] boot: notificationEvents[${event}].titleField must be string, skipped`);
-        continue;
-      }
-      if (spec.bodyField !== undefined && typeof spec.bodyField !== "string") {
-        console.warn(`[lvis] boot: notificationEvents[${event}].bodyField must be string, skipped`);
-        continue;
-      }
-      if (registeredEvents.has(event)) {
-        console.warn(`[lvis] boot: duplicate notificationEvents entry for "${event}" — keeping first, skipping rest`);
-        continue;
-      }
-      registeredEvents.add(event);
-      const { titleField, bodyField } = spec;
-      const handler: EventHandler = (data) => {
-        const resolvedTitle = titleField ? getFieldByPath(data, titleField) : "";
-        const title = resolvedTitle || event;
-        const body = bodyField ? getFieldByPath(data, bodyField) : "";
-        const notif = new Notification({ title, body, silent: false });
-        notif.on("click", () => {
-          // macOS에서 창 닫힌 뒤에도 알림이 살아 있을 수 있음 — destroyed 창 접근 시 throw 방지
-          if (mainWindow.isDestroyed()) return;
-          mainWindow.show();
-          mainWindow.focus();
-        });
-        notif.show();
-      };
-      onEvent(event, handler);
-      registered.push({ type: event, handler });
-    }
-  }
-
-  return () => {
-    for (const { type, handler } of registered) offEvent(type, handler);
-  };
-}
-
-function getFieldByPath(data: unknown, path: string): string {
-  const parts = path.split(".");
-  let val: unknown = data;
-  for (const p of parts) val = (val as Record<string, unknown>)?.[p];
-  return typeof val === "string" ? val : "";
-}
-
-function findMethodByCapability(
-  pluginRuntime: PluginRuntime,
-  capability: string,
-  matcher: (tool: string) => boolean,
-): string | undefined {
-  const pluginId = pluginRuntime.findPluginIdByCapability(capability);
-  if (!pluginId) return undefined;
-  const manifest = pluginRuntime.getPluginManifest(pluginId);
-  if (!manifest) return undefined;
-  return manifest.tools.find(matcher);
-}
-
-function registerBuiltinTools(
-  memoryManager: MemoryManager,
-  toolRegistry: ToolRegistry,
-  settingsService: SettingsService,
-): void {
-  const builtins: Tool[] = [
-    createDynamicTool({
-      name: "memory_save",
-      description: "사용자가 기억해달라고 한 내용을 notes/에 저장합니다.",
-      source: "builtin",
-      category: "write",
-      jsonSchema: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "메모 제목 (40자 이내)" },
-          content: { type: "string", description: "메모 내용" },
-        },
-        required: ["title", "content"],
-      },
-      execute: async (rawInput) => {
-        const args = (rawInput ?? {}) as Record<string, unknown>;
-        const note = memoryManager.saveNote(
-          args.title as string,
-          args.content as string,
-        );
-        return {
-          output: JSON.stringify({ saved: true, filename: note.filename }),
-          isError: false,
-        };
-      },
-    }),
-    createDynamicTool({
-      name: "memory_search",
-      description: "사용자의 notes/ 메모를 키워드로 검색합니다.",
-      source: "builtin",
-      category: "read",
-      isReadOnly: () => true,
-      jsonSchema: {
-        type: "object",
-        properties: { query: { type: "string", description: "검색 키워드" } },
-        required: ["query"],
-      },
-      execute: async (rawInput) => {
-        const args = (rawInput ?? {}) as Record<string, unknown>;
-        const results = memoryManager
-          .searchNotes(args.query as string)
-          .map((n) => ({ title: n.title, filename: n.filename }));
-        return { output: JSON.stringify(results), isError: false };
-      },
-    }),
-    createDynamicTool({
-      name: "memory_list",
-      description: "저장된 모든 메모 목록을 반환합니다.",
-      source: "builtin",
-      category: "read",
-      isReadOnly: () => true,
-      jsonSchema: { type: "object", properties: {} },
-      execute: async () => {
-        const notes = memoryManager
-          .listNotes()
-          .map((n) => ({ title: n.title, filename: n.filename }));
-        return { output: JSON.stringify(notes), isError: false };
-      },
-    }),
-    createDynamicTool({
-      name: "web_search",
-      description: "인터넷 검색을 통해 최신 정보나 지식을 찾습니다.",
-      source: "builtin",
-      category: "read",
-      isReadOnly: () => true,
-      jsonSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "검색어" },
-          count: { type: "integer", description: "반환할 결과 개수 (1-10)" },
-        },
-        required: ["query"],
-      },
-      execute: async (rawInput) => {
-        const args = (rawInput ?? {}) as Record<string, unknown>;
-        const query = args.query as string;
-        const count = (args.count as number) || 5;
-        const ws = settingsService.get("webSearch");
-        const apiKey = settingsService.getSecret(`web.apiKey.${ws.provider}`);
-        try {
-          if (ws.provider === "tavily" && apiKey) {
-            const res = await fetch("https://api.tavily.com/search", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ api_key: apiKey, query, search_depth: "basic", max_results: count }),
-            });
-            const data = await res.json() as any;
-            return {
-              output: JSON.stringify({
-                query,
-                provider: "Tavily",
-                results: data.results?.map((r: any) => ({ title: r.title, snippet: r.content, url: r.url })) || [],
-              }),
-              isError: false,
-            };
-          }
-          if (ws.provider === "serper" && apiKey) {
-            const res = await fetch("https://google.serper.dev/search", {
-              method: "POST",
-              headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
-              body: JSON.stringify({ q: query, num: count }),
-            });
-            const data = await res.json() as any;
-            return {
-              output: JSON.stringify({
-                query,
-                provider: "Serper",
-                results: data.organic?.map((r: any) => ({ title: r.title, snippet: r.snippet, url: r.link })) || [],
-              }),
-              isError: false,
-            };
-          }
-          // DuckDuckGo HTML 검색
-          const ddgRes = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-            method: "POST",
-            headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", "Content-Type": "application/x-www-form-urlencoded" },
-            body: `q=${encodeURIComponent(query)}`,
-          });
-          const ddgHtml = await ddgRes.text();
-          const results: any[] = [];
-          const resultBlocks = ddgHtml.split(/class="result\s/g).slice(1, count + 1);
-          for (const block of resultBlocks) {
-            const urlMatch = block.match(/class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)/);
-            const snippetMatch = block.match(/class="result__snippet"[^>]*>([^<]+)/);
-            if (urlMatch) {
-              let url = urlMatch[1];
-              const uddg = url.match(/uddg=([^&]+)/);
-              if (uddg) url = decodeURIComponent(uddg[1]);
-              results.push({ title: urlMatch[2].trim(), snippet: snippetMatch?.[1]?.trim() || "", url });
-            }
-          }
-          return {
-            output: JSON.stringify({ query, provider: "DuckDuckGo", results }),
-            isError: false,
-          };
-        } catch (error) {
-          return {
-            output: JSON.stringify({
-              query,
-              error: "검색 중 오류 발생",
-              details: (error as Error).message,
-            }),
-            isError: true,
-          };
-        }
-      },
-    }),
-    createDynamicTool({
-      name: "web_fetch",
-      description: "특정 URL의 웹 페이지 내용을 읽어 텍스트로 변환합니다.",
-      source: "builtin",
-      category: "read",
-      isReadOnly: () => true,
-      jsonSchema: {
-        type: "object",
-        properties: { url: { type: "string", description: "읽어올 웹 페이지 URL" } },
-        required: ["url"],
-      },
-      execute: async (rawInput) => {
-        const args = (rawInput ?? {}) as Record<string, unknown>;
-        const url = args.url as string;
-        try {
-          const response = await fetch(url, { headers: { "User-Agent": "LVIS-Assistant/0.1.0" } });
-          const html = await response.text();
-          const text = html
-            .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gim, "")
-            .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gim, "")
-            .replace(/<[^>]+>/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-          return {
-            output: JSON.stringify({
-              url,
-              content: text.slice(0, 5000),
-              truncated: text.length > 5000,
-            }),
-            isError: false,
-          };
-        } catch (error) {
-          return {
-            output: JSON.stringify({
-              url,
-              error: "웹 페이지를 읽을 수 없습니다.",
-              details: (error as Error).message,
-            }),
-            isError: true,
-          };
-        }
-      },
-    }),
-  ];
-
-  toolRegistry.registerBatch(builtins);
 }
