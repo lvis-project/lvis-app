@@ -260,6 +260,9 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       },
       // Sprint 1-A A3 — structured log event → AuditLogger (plugin context).
       logEvent: (level, message, data) => {
+        // AuditLogEntry.type is a fixed enum — "error" for error level,
+        // "tool_call" otherwise. Level is encoded as a [LEVEL] tag in
+        // `input` so downstream viewers can still distinguish info/warn.
         try {
           bootAuditLogger.log({
             timestamp: new Date().toISOString(),

@@ -169,11 +169,12 @@ export class PluginRuntime {
           if (!plugin.instance.start) return;
           const hardTimeoutMs = plugin.manifest.startupTimeoutMs;
           if (hardTimeoutMs && hardTimeoutMs > 0) {
-            const controller = new AbortController();
+            // Promise.race enforces the timeout. A future PluginRuntimeContext
+            // may pass an AbortSignal; for now we don't expose one, so skip
+            // the decorative controller to avoid implying cancellation support.
             let timer: NodeJS.Timeout | undefined;
             const timeout = new Promise<never>((_, reject) => {
               timer = setTimeout(() => {
-                controller.abort();
                 reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`));
               }, hardTimeoutMs);
             });
