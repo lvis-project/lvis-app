@@ -21,6 +21,7 @@
 import { streamText, jsonSchema, tool, type ModelMessage } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createVertex } from "@ai-sdk/google-vertex";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type {
@@ -112,6 +113,13 @@ export const isClaude4Family = supportsAdaptiveThinking;
 
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 
+export interface VercelProviderExtras {
+  /** Vertex AI — GCP project ID (required when vendor="vertex-ai"). */
+  vertexProject?: string;
+  /** Vertex AI — GCP region (default "us-central1"). */
+  vertexLocation?: string;
+}
+
 export class VercelUnifiedProvider implements LLMProvider {
   private static warnedCompatThinking = false;
   readonly vendor: LLMVendor;
@@ -119,20 +127,24 @@ export class VercelUnifiedProvider implements LLMProvider {
   private readonly apiKey: string;
   private readonly baseUrl?: string;
   private readonly customFetch?: typeof fetch;
+  private readonly extras: VercelProviderExtras;
 
   constructor(
     vendor: VercelVendor,
     apiKey: string,
     baseUrl?: string,
     customFetch?: typeof fetch,
+    extras: VercelProviderExtras = {},
   ) {
     // Expose a core-compatible vendor on the interface; "openai-compatible"
     // is reported as "openai" so downstream vendor-gated logic keeps working.
+    // "azure-foundry" and "vertex-ai" are first-class LLMVendor values.
     this.vendor = (vendor === "openai-compatible" ? "openai" : vendor) as LLMVendor;
     this.vendorSlot = vendor;
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.customFetch = customFetch;
+    this.extras = extras;
   }
 
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
@@ -316,6 +328,48 @@ export class VercelUnifiedProvider implements LLMProvider {
         ...(this.customFetch ? { fetch: this.customFetch } : {}),
       });
       return compat(modelId);
+    }
+
+    if (slot === "azure-foundry") {
+      // Azure AI Foundry exposes an OpenAI-compatible surface on a per-deployment
+      // endpoint like https://{resource}.openai.azure.com/openai/deployments/{deployment}/.
+      // Route through createOpenAICompatible so we don't add Azure SDK to legacy paths.
+      if (!this.baseUrl) {
+        throw new Error(
+          "VercelUnifiedProvider(azure-foundry): baseUrl is required " +
+            "(e.g. https://{resource}.openai.azure.com/openai/deployments/{deployment}/)",
+        );
+      }
+      const azure = createOpenAICompatible({
+        name: "azure-foundry",
+        baseURL: this.baseUrl,
+        apiKey: this.apiKey,
+        ...(this.customFetch ? { fetch: this.customFetch } : {}),
+      });
+      return azure(modelId);
+    }
+
+    if (slot === "vertex-ai") {
+      // Google Vertex AI — requires GCP project + location. Auth flows via
+      // service account: either GOOGLE_APPLICATION_CREDENTIALS env, or
+      // Application Default Credentials (gcloud auth application-default login).
+      const project =
+        this.extras.vertexProject ||
+        process.env.GOOGLE_CLOUD_PROJECT ||
+        process.env.GCLOUD_PROJECT;
+      if (!project) {
+        throw new Error(
+          "VercelUnifiedProvider(vertex-ai): project is required " +
+            "(set settings.llm.vertexProject or GOOGLE_CLOUD_PROJECT env)",
+        );
+      }
+      const location = this.extras.vertexLocation || "us-central1";
+      const vertex = createVertex({
+        project,
+        location,
+        ...(this.customFetch ? { fetch: this.customFetch } : {}),
+      });
+      return vertex(modelId);
     }
 
     throw new Error(`VercelUnifiedProvider: unknown vendor slot "${slot}"`);

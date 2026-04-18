@@ -2,11 +2,34 @@ import { safeStorage } from "electron";
 import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-export type LLMVendor = "claude" | "openai" | "gemini" | "copilot";
+export type LLMVendor =
+  | "claude"
+  | "openai"
+  | "gemini"
+  | "copilot"
+  | "azure-foundry"
+  | "vertex-ai";
 
 export interface LLMSettings {
   provider: LLMVendor;
   model: string;
+  /**
+   * Per-vendor baseUrl overrides (keyed by vendor). Required for:
+   *   - azure-foundry: `https://{resource}.openai.azure.com/openai/deployments/{deployment}/`
+   * Optional for:
+   *   - openai / copilot: proxy endpoints
+   * Not used by:
+   *   - vertex-ai: uses project + location instead (see vertexProject / vertexLocation)
+   */
+  baseUrls?: Partial<Record<LLMVendor, string>>;
+  /**
+   * Vertex AI — GCP project ID (required for vendor="vertex-ai").
+   * Auth flows via service account: either GOOGLE_APPLICATION_CREDENTIALS env
+   * pointing at a credentials JSON, or Application Default Credentials (ADC).
+   */
+  vertexProject?: string;
+  /** Vertex AI — GCP region (e.g. "us-central1"). Defaults to "us-central1". */
+  vertexLocation?: string;
   /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */
   enableThinking?: boolean;
   /** Token budget for Claude extended thinking (1024–32000). Only used when enableThinking is true. */
@@ -239,7 +262,14 @@ export class SettingsService {
       }
       // Migrate removed/unsupported vendors (e.g. pre-strip "lgenie") onto the
       // current default so provider-factory doesn't throw at turn time.
-      const SUPPORTED_VENDORS = ["claude", "openai", "gemini", "copilot"] as const;
+      const SUPPORTED_VENDORS = [
+        "claude",
+        "openai",
+        "gemini",
+        "copilot",
+        "azure-foundry",
+        "vertex-ai",
+      ] as const;
       if (!(SUPPORTED_VENDORS as readonly string[]).includes(llm.provider)) {
         llm.provider = DEFAULT_SETTINGS.llm.provider;
         llm.model = DEFAULT_SETTINGS.llm.model;
