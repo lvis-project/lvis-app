@@ -21,17 +21,25 @@ import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
 import type { PluginSignatureVerifier } from "./signature-verifier.js";
 
 /**
- * Sprint 4-B §B-3 — destructive tool patterns that must never be exposed
- * through the renderer IPC path (uiCallable allowlist) unless the plugin is
- * signed AND deployed as "managed". Matches suffix-style tool names like
- * `email_send`, `file_delete`, `calendar_remove`, etc.
+ * M1 — uiCallable safety: inverted model.
+ *
+ * Rather than maintain a blocklist of destructive verbs (which grows stale
+ * whenever a plugin invents a new mutating verb like `_revoke`, `_truncate`,
+ * `_wipe`), the renderer→plugin IPC path is gated by an ALLOWLIST of
+ * read-like verbs. Anything that is not clearly a read (_get, _list,
+ * _search, _read, _show, _query, _preview, _count, _status, _find,
+ * _describe, _inspect) is treated as mutating and can only be exposed via
+ * uiCallable when the plugin is managed AND signed.
+ *
+ * Legacy blocklist export retained for backwards-compat (tests may import).
  */
+export const UI_CALLABLE_SAFE_VERBS = /_(get|list|search|read|show|query|preview|count|status|find|describe|inspect)$/i;
 export const DESTRUCTIVE_TOOL_PATTERNS: RegExp[] = [
   /_(delete|remove|send|destroy|erase|purge)$/i,
 ];
 
-function isDestructiveToolName(name: string): boolean {
-  return DESTRUCTIVE_TOOL_PATTERNS.some((re) => re.test(name));
+function isUiSafeVerb(name: string): boolean {
+  return UI_CALLABLE_SAFE_VERBS.test(name);
 }
 
 type LoadedPlugin = {
@@ -711,10 +719,11 @@ export class PluginRuntime {
           `add "${method}" to tools[] or remove it from uiCallable[]`,
         );
       }
-      if (isDestructiveToolName(method)) {
-        // Managed + signed plugins may expose destructive verbs (e.g. admin
-        // tooling); everything else is rejected at manifest load time and
-        // audit-logged so operators see the attempt.
+      if (!isUiSafeVerb(method)) {
+        // M1 inverted gate — only read-like verbs may be uiCallable on user
+        // plugins. Managed + signed plugins may expose mutating verbs (e.g.
+        // admin tooling); everything else is rejected at manifest load time
+        // and audit-logged so operators see the attempt.
         const managedAndSigned =
           parsed.deployment === "managed" && this.signatureVerifier !== undefined;
         if (!managedAndSigned) {
@@ -725,7 +734,7 @@ export class PluginRuntime {
           });
           fail(
             `uiCallable[${i}]`,
-            `destructive tool '${method}' cannot be exposed via uiCallable (managed+signed plugins only)`,
+            `non-read-verb tool '${method}' cannot be exposed via uiCallable (managed+signed plugins only; allowed suffixes: _get|_list|_search|_read|_show|_query|_preview|_count|_status|_find|_describe|_inspect)`,
             `route '${method}' through ConversationLoop (permission+approval) instead`,
           );
         }

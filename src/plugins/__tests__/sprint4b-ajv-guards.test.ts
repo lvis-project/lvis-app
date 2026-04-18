@@ -114,11 +114,11 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
       console.error = origErr;
     }
     expect(runtime.listPluginIds()).toHaveLength(0);
-    expect(errors.some((e) => /destructive/.test(e))).toBe(true);
+    expect(errors.some((e) => /non-read-verb|destructive|uiCallable/.test(e))).toBe(true);
   });
 
   it("B-3: non-destructive uiCallable tool is permitted", async () => {
-    await writePlugin("p_ok", { uiCallable: ["p_ok_hello"], deployment: "user" });
+    await writePlugin("p_ok", { tools: ["p_ok_get", "p_ok_delete"], uiCallable: ["p_ok_get"], deployment: "user" });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("p_ok");
