@@ -270,7 +270,8 @@
       "displayName": "캘린더",
       "title": "Outlook Calendar",
       "description": "Outlook 일정을 읽고 쓰며 미팅 시작 전 알림을 제공합니다.",
-      "entry": "../../../node_modules/@lvis/plugin-calendar/dist/ui/calendar-control.js"
+      "entry": "../../../node_modules/@lvis/plugin-calendar/dist/ui/calendar-control.js",
+      "exportName": "mount"
     }
   ]
 }
