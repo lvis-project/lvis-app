@@ -4,6 +4,7 @@ import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover.js";
 import {
   DEFAULT_ROLE_PRESETS,
+  ROLE_PRESETS_CHANGED_EVENT,
   buildPresetPrefix,
   loadRolePresets,
   saveRolePresets,
@@ -11,35 +12,8 @@ import {
   type RolePreset,
 } from "./data/role-presets.js";
 import { costTier, estimateTurnCost, formatCostBadge } from "./lib/cost-estimator.js";
-
-// Minimal renderer-side pricing lookup (mirrors engine/llm/pricing.ts). Renderer is
-// browser-bundled and must not import the engine module (it references process.env).
-const RENDERER_PRICING: Record<string, Record<string, { inputPer1M: number; outputPer1M: number }>> = {
-  claude: {
-    "claude-sonnet-4-6": { inputPer1M: 3, outputPer1M: 15 },
-    "claude-sonnet-4-5": { inputPer1M: 3, outputPer1M: 15 },
-    "claude-opus-4-6":   { inputPer1M: 15, outputPer1M: 75 },
-    "claude-opus-4-5":   { inputPer1M: 15, outputPer1M: 75 },
-    "claude-haiku-4-5":  { inputPer1M: 1, outputPer1M: 5 },
-  },
-  openai: {
-    "gpt-5.4":      { inputPer1M: 1.25, outputPer1M: 10 },
-    "gpt-5.4-mini": { inputPer1M: 1.25, outputPer1M: 10 },
-    "gpt-5.4-nano": { inputPer1M: 0.5,  outputPer1M: 4 },
-    "gpt-5.4-pro":  { inputPer1M: 5,    outputPer1M: 40 },
-    "gpt-5":        { inputPer1M: 1.25, outputPer1M: 10 },
-    "gpt-4.1":      { inputPer1M: 2,    outputPer1M: 8 },
-    "gpt-4.1-mini": { inputPer1M: 0.4,  outputPer1M: 1.6 },
-  },
-  gemini:  { "gemini-2.5-flash": { inputPer1M: 0, outputPer1M: 0 }, "gemini-2.5-pro": { inputPer1M: 0, outputPer1M: 0 } },
-  copilot: { "gpt-4.1": { inputPer1M: 0, outputPer1M: 0 } },
-};
-function rendererPricing(vendor: string, model: string): { inputPer1M: number; outputPer1M: number } {
-  const table = RENDERER_PRICING[vendor] ?? {};
-  if (table[model]) return table[model];
-  for (const k of Object.keys(table)) if (model.startsWith(k)) return table[k];
-  return { inputPer1M: 0, outputPer1M: 0 };
-}
+import { lookupPricing } from "./shared/pricing-data.js";
+import { vendorSupportsThinking as vendorSupportsThinkingShared } from "./shared/vendor-capabilities.js";
 import { Button } from "./components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
 import { Badge } from "./components/ui/badge.js";
@@ -2021,7 +1995,15 @@ function App() {
 
   // Sprint B — role preset, cost preview, attached docs, language lock
   const [rolePresets, setRolePresets] = useState<RolePreset[]>(() => DEFAULT_ROLE_PRESETS);
-  useEffect(() => { setRolePresets(loadRolePresets()); }, []);
+  useEffect(() => {
+    setRolePresets(loadRolePresets());
+    // Keep the App-level preset list in sync with edits made in the Settings
+    // "역할" tab — saveRolePresets / resetRolePresets dispatch this event so
+    // the chat preset dropdown reflects edits without requiring a restart.
+    const onChanged = () => setRolePresets(loadRolePresets());
+    window.addEventListener(ROLE_PRESETS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(ROLE_PRESETS_CHANGED_EVENT, onChanged);
+  }, []);
   const [activePresetId, setActivePresetId] = useState<string>("default");
   const activePreset = useMemo(
     () => rolePresets.find((p) => p.id === activePresetId) ?? rolePresets[0] ?? null,
@@ -2243,9 +2225,11 @@ function App() {
   useEffect(() => { void refreshLlmSettings(); }, [refreshLlmSettings]);
 
   // Rough per-model context budget (input+output tokens) used to show % filled.
-  // NOTE: 1M context for Claude Sonnet 4.6 is a beta feature gated on a specific
-  // API beta header — currently we assume the default 200k for all Claude models;
-  // 1M beta detection is tracked as a followup.
+  // NOTE: we currently assume the default 200k for all Claude models. The
+  // Anthropic 1M-context beta for Sonnet 4.6 requires an opt-in beta header
+  // that the renderer doesn't know about; treat this as 200k until/unless
+  // we wire model-ID detection. (The separate `contextOverflowPct` memo
+  // uses exact per-model values for overflow warnings.)
   const contextBudget = useMemo(() => {
     const m = (llmModel || "").toLowerCase();
     if (m.includes("claude")) return 200_000;
@@ -2281,16 +2265,10 @@ function App() {
   const contextColor =
     contextPercent < 50 ? "text-emerald-500" :
     contextPercent < 80 ? "text-amber-500" : "text-red-500";
-  const vendorSupportsThinking = useMemo(() => {
-    if (llmVendor === "claude") return true;
-    if (llmVendor === "gemini") return true;
-    if (llmVendor === "vertex-ai") return true;
-    if (llmVendor === "openai" || llmVendor === "copilot" || llmVendor === "azure-foundry") {
-      const m = (llmModel || "").toLowerCase();
-      return m.includes("gpt-5") || m.includes("o1") || m.includes("o3") || m.includes("o4");
-    }
-    return false;
-  }, [llmVendor, llmModel]);
+  const vendorSupportsThinking = useMemo(
+    () => vendorSupportsThinkingShared(llmVendor, llmModel),
+    [llmVendor, llmModel],
+  );
   const toggleThinking = useCallback(async (next: boolean) => {
     setEnableThinkingChat(next);
     try { await api.updateSettings({ llm: { enableThinking: next } } as any); } catch { /* ignore */ }
@@ -2353,9 +2331,12 @@ function App() {
   }, [api]);
 
   // ─── Sprint B: pre-send cost estimate ─────────────
-  const costEstimate = useMemo(() => {
-    const pricing = rendererPricing(llmVendor, llmModel);
-    const historySerialized = entries.map((e) => {
+  // Keystrokes in the input box re-run the cost memo via `question`, but the
+  // expensive JSON.stringify over every prior entry only depends on `entries`.
+  // Memoize it separately, keyed on length + last-entry identity, so typing a
+  // draft in long sessions doesn't re-serialize the whole conversation.
+  const historySerialized = useMemo(() => {
+    return entries.map((e) => {
       if (e.kind === "user" || e.kind === "assistant" || e.kind === "reasoning" || e.kind === "system") {
         return JSON.stringify({ kind: e.kind, text: (e as any).text ?? "" });
       }
@@ -2367,9 +2348,13 @@ function App() {
       }
       return "";
     }).filter(Boolean);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries.length, entries[entries.length - 1]]);
+  const costEstimate = useMemo(() => {
+    const pricing = lookupPricing(llmVendor, llmModel);
     const draft = question ? composeOutgoing(question) : "";
     return estimateTurnCost({ historySerialized, draft, maxOutputTokens, pricing });
-  }, [entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing]);
+  }, [historySerialized, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing]);
   const costBadgeClass = (() => {
     const t = costTier(costEstimate.total);
     if (t === "trivial") return "text-muted-foreground";
