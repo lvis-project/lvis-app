@@ -39,6 +39,12 @@ export interface ProactiveEngineDeps {
   getRecentNotes: () => Array<{ title: string; filename: string }>;
   getRecentSessions: () => Array<{ id: string; modifiedAt: Date }>;
   /**
+   * Sprint 3-A: optional, returns short note excerpts used to infer the
+   * user's voice/tone for the briefing. Kept deterministic — only titles are
+   * surfaced so repeated calls produce identical prompt text for tests.
+   */
+  getRecentMemoryExcerpts?: () => string[];
+  /**
    * §14.4 feature-flag pattern. Called at briefing time so a settings change
    * takes effect without service restart. Default OFF when undefined.
    */
@@ -446,6 +452,17 @@ export class ProactiveEngine {
     if (emailDetails.length > 0) {
       lines.push("미처리 이메일 상세:");
       lines.push(...emailDetails);
+    }
+
+    // Sprint 3-A: user-voice hint (one short sentence) derived from recent
+    // memory note titles. Deterministic — uses at most 3 titles in stored
+    // order, so existing tests that assert exact prompt output stay stable.
+    const excerpts = this.deps.getRecentMemoryExcerpts?.() ?? [];
+    if (excerpts.length > 0) {
+      const trimmed = excerpts.slice(0, 3).map((s) => s.trim()).filter((s) => s.length > 0);
+      if (trimmed.length > 0) {
+        lines.push(`사용자 목소리 힌트: 최근 메모 — ${trimmed.join(" / ")}. 이 어휘·톤을 자연스럽게 반영해 주세요.`);
+      }
     }
 
     // 오늘 캘린더 일정 상세 (KST 기준 당일과 overlap — 멀티데이/자정 걸친 일정 포함)
