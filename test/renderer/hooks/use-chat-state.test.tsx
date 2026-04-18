@@ -1,0 +1,193 @@
+/**
+ * Phase 5 hook tests — use-chat-state + sibling hooks.
+ *
+ * Fix 2 (PR #98): Unit tests for the domain hooks extracted from App.tsx.
+ * Focuses on the pieces most at risk of regressing:
+ *   - use-chat-state subscribes on mount, unsubs on unmount, no double-subscribe
+ *   - use-context-budget arithmetic is deterministic
+ *   - use-cost-estimate memo invariants
+ *   - use-sessions streaming guard on load
+ *   - use-starred toggle semantics
+ */
+import "../setup.js";
+import { describe, it, expect, vi } from "vitest";
+import { renderHook, act, waitFor } from "@testing-library/react";
+import { makeMockLvisApi } from "../mock-lvis-api.js";
+import { useChatState } from "../../../src/ui/renderer/hooks/use-chat-state.js";
+import { useContextBudget } from "../../../src/ui/renderer/hooks/use-context-budget.js";
+import { useCostEstimate } from "../../../src/ui/renderer/hooks/use-cost-estimate.js";
+import { useSessions } from "../../../src/ui/renderer/hooks/use-sessions.js";
+import { useStarred } from "../../../src/ui/renderer/hooks/use-starred.js";
+import type { LvisApi } from "../../../src/ui/renderer/types.js";
+import type { ChatEntry } from "../../../src/lib/chat-stream-state.js";
+
+describe("useChatState", () => {
+  it("subscribes to onChatStream on mount", () => {
+    const { api } = makeMockLvisApi();
+    renderHook(() => useChatState(api as unknown as LvisApi));
+    expect(api.onChatStream).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates entries when a text_delta event is emitted", async () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+
+    act(() => {
+      emitChatStream({ type: "text_delta", text: "hello world" });
+    });
+
+    await waitFor(() => {
+      const hasAssistant = result.current.entries.some(
+        (e) => e.kind === "assistant" && (e as { text: string }).text.includes("hello world"),
+      );
+      expect(hasAssistant).toBe(true);
+    });
+  });
+
+  it("does not log to console when VITE_DEBUG_STREAM is unset (Fix 3)", () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    renderHook(() => useChatState(api as unknown as LvisApi));
+    act(() => {
+      emitChatStream({ type: "text_delta", text: "x" });
+    });
+    const streamLogs = spy.mock.calls.filter((c) => c[0] === "[lvis:chat:stream]");
+    expect(streamLogs.length).toBe(0);
+    spy.mockRestore();
+  });
+
+  it("does not warn about setState after unmount (aliveRef)", async () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { unmount } = renderHook(() => useChatState(api as unknown as LvisApi));
+
+    unmount();
+    // Emit after unmount — aliveRef should swallow it with no setState.
+    act(() => {
+      emitChatStream({ type: "text_delta", text: "late" });
+      emitChatStream({ type: "reasoning_delta", text: "late" });
+      emitChatStream({ type: "done" });
+    });
+
+    const unmountWarnings = errSpy.mock.calls.filter((c) =>
+      String(c[0] ?? "").includes("unmounted"),
+    );
+    expect(unmountWarnings.length).toBe(0);
+    errSpy.mockRestore();
+  });
+
+  it("double-mount does not result in a double subscription on the same instance", () => {
+    const { api } = makeMockLvisApi();
+    const { rerender } = renderHook(() => useChatState(api as unknown as LvisApi));
+    rerender();
+    rerender();
+    // Same api reference → effect deps unchanged → subscription stays the same one.
+    expect(api.onChatStream).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useContextBudget (deterministic math)", () => {
+  it("returns zero usedTokens for empty entries", () => {
+    const { result } = renderHook(() =>
+      useContextBudget({ entries: [], llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+    );
+    expect(result.current.usedTokens).toBe(0);
+    expect(result.current.contextPercent).toBe(0);
+    expect(result.current.isOverflow).toBe(false);
+  });
+
+  it("usedTokens grows monotonically with entries", () => {
+    const small: ChatEntry[] = [{ kind: "user", text: "hi" }];
+    const big: ChatEntry[] = [
+      { kind: "user", text: "hi" },
+      { kind: "assistant", text: "a".repeat(1000) },
+    ];
+    const a = renderHook(() =>
+      useContextBudget({ entries: small, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+    ).result.current.usedTokens;
+    const b = renderHook(() =>
+      useContextBudget({ entries: big, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+    ).result.current.usedTokens;
+    expect(b).toBeGreaterThan(a);
+  });
+});
+
+describe("useCostEstimate (memo invariants)", () => {
+  it("returns a cost object with a badge class", () => {
+    const { result } = renderHook(() =>
+      useCostEstimate({
+        entries: [],
+        question: "hello",
+        llmVendor: "openai",
+        llmModel: "gpt-4o-mini",
+        maxOutputTokens: 1024,
+        composeOutgoing: (raw: string) => raw,
+      }),
+    );
+    expect(result.current.costEstimate).toBeDefined();
+    expect(typeof result.current.costBadgeClass).toBe("string");
+    expect(result.current.costEstimate.total).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("useSessions (streaming guard)", () => {
+  it("handleLoadSession is a no-op while streaming=true", async () => {
+    const { api } = makeMockLvisApi();
+    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const setEntries = vi.fn();
+    await act(async () => {
+      await result.current.handleLoadSession("other-sess", true, setEntries);
+    });
+    expect(api.chatLoadSession).not.toHaveBeenCalled();
+    expect(setEntries).not.toHaveBeenCalled();
+  });
+
+  it("handleLoadSession loads when not streaming", async () => {
+    const { api } = makeMockLvisApi();
+    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const setEntries = vi.fn();
+    await act(async () => {
+      await result.current.handleLoadSession("other-sess", false, setEntries);
+    });
+    expect(api.chatLoadSession).toHaveBeenCalledWith("other-sess");
+    expect(setEntries).toHaveBeenCalled();
+  });
+});
+
+describe("useStarred (toggle semantics)", () => {
+  it("toggles: addStarred when not starred, removeStarred when already starred", async () => {
+    const { api } = makeMockLvisApi({
+      starred: [
+        {
+          id: "star-1",
+          sessionId: "sess-a",
+          messageIndex: 0,
+          role: "user",
+          text: "hi",
+          starredAt: new Date().toISOString(),
+        },
+      ],
+    });
+    const { result } = renderHook(() => useStarred(api as unknown as LvisApi));
+    await waitFor(() => expect(api.starredList).toHaveBeenCalled());
+    await waitFor(() => expect(result.current.starred.length).toBe(1));
+
+    const entries: ChatEntry[] = [
+      { kind: "user", text: "hi" },
+      { kind: "user", text: "next" },
+    ];
+    const idxMap = new Map<number, number>([[0, 0], [1, 1]]);
+
+    // entry 0 is already starred → remove path.
+    await act(async () => {
+      await result.current.handleToggleStar(0, entries, "sess-a", idxMap);
+    });
+    expect(api.starredRemove).toHaveBeenCalledWith({ id: "star-1" });
+
+    // entry 1 is not starred → add path.
+    await act(async () => {
+      await result.current.handleToggleStar(1, entries, "sess-a", idxMap);
+    });
+    expect(api.starredAdd).toHaveBeenCalled();
+  });
+});
