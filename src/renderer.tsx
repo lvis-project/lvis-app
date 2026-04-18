@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft, ChevronDown, ChevronRight, Star, Download, Pencil, GitBranch, RefreshCw, X as XIcon, Paperclip, Globe, User } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover.js";
@@ -1447,6 +1447,23 @@ type RenderHtmlPayload = {
   warnings?: string[];
 };
 
+// Keep in sync with src/tools/render-html.ts — the server already clamps,
+// but reloaded history could deliver forged/NaN values and we must not
+// trust them at render time.
+const RENDER_HTML_MIN_HEIGHT = 80;
+const RENDER_HTML_MAX_HEIGHT = 1200;
+const RENDER_HTML_DEFAULT_HEIGHT = 400;
+
+function clampPreviewHeight(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return RENDER_HTML_DEFAULT_HEIGHT;
+  }
+  return Math.min(
+    RENDER_HTML_MAX_HEIGHT,
+    Math.max(RENDER_HTML_MIN_HEIGHT, Math.floor(value)),
+  );
+}
+
 function parseRenderHtmlResult(raw: string | undefined): RenderHtmlPayload | null {
   if (!raw) return null;
   try {
@@ -1455,10 +1472,10 @@ function parseRenderHtmlResult(raw: string | undefined): RenderHtmlPayload | nul
       parsed &&
       typeof parsed === "object" &&
       (parsed as { kind?: unknown }).kind === "lvis.render_html" &&
-      typeof (parsed as { html?: unknown }).html === "string" &&
-      typeof (parsed as { height?: unknown }).height === "number"
+      typeof (parsed as { html?: unknown }).html === "string"
     ) {
-      return parsed as RenderHtmlPayload;
+      const p = parsed as RenderHtmlPayload;
+      return { ...p, height: clampPreviewHeight(p.height) };
     }
   } catch {
     return null;
@@ -1467,19 +1484,45 @@ function parseRenderHtmlResult(raw: string | undefined): RenderHtmlPayload | nul
 }
 
 function HtmlPreview({ payload }: { payload: RenderHtmlPayload }) {
+  const webviewRef = useRef<HTMLElement | null>(null);
+  const dataUrl = useMemo(
+    () => `data:text/html;charset=utf-8,${encodeURIComponent(payload.html)}`,
+    [payload.html],
+  );
+
+  // <webview> isn't part of React's intrinsic element table; attach
+  // Electron-specific attributes imperatively so we don't need a global JSX
+  // declaration. The element itself is a plain lowercase tag that React
+  // happily renders into the DOM — Electron picks it up at attach time.
+  useEffect(() => {
+    const el = webviewRef.current;
+    if (!el) return;
+    el.setAttribute("partition", "lvis-render-html");
+    el.setAttribute("allowpopups", "false");
+    el.setAttribute(
+      "webpreferences",
+      "contextIsolation=yes, sandbox=yes, nodeIntegration=no, javascript=yes",
+    );
+    el.setAttribute("disablewebsecurity", "false");
+  }, []);
+
   return (
     <div className="mt-2 overflow-hidden rounded border bg-background">
       <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
         <span className="truncate">{payload.title ?? "HTML 미리보기"}</span>
-        <span className="text-[10px] opacity-60">스크립트 허용 · 네트워크 차단 · opaque origin</span>
+        <span className="text-[10px] opacity-60">격리된 프로세스 · 네트워크 차단</span>
       </div>
-      <iframe
-        title={payload.title ?? "render_html"}
-        sandbox="allow-scripts"
-        srcDoc={payload.html}
-        referrerPolicy="no-referrer"
-        style={{ width: "100%", height: `${payload.height}px`, border: 0, display: "block", background: "transparent" }}
-      />
+      {createElement("webview", {
+        ref: webviewRef,
+        src: dataUrl,
+        style: {
+          width: "100%",
+          height: `${payload.height}px`,
+          border: 0,
+          display: "flex",
+          background: "transparent",
+        },
+      })}
       {payload.warnings && payload.warnings.length > 0 && (
         <div className="border-t px-2 py-1 text-[10px] text-amber-500">
           정제됨: {payload.warnings.join(", ")}
