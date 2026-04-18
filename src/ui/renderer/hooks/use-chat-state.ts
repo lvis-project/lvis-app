@@ -30,6 +30,15 @@ export function useChatState(api: LvisApi) {
   const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
   const [editBusy, setEditBusy] = useState(false);
 
+  // Guard against setState after unmount — Fix 1 (PR #98).
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
   // Map renderer `entries` (which include reasoning/tool_group/system) to
   // backend history indices which only track user + assistant messages.
   const entryIndexToHistoryIndex = useMemo(() => {
@@ -47,7 +56,8 @@ export function useChatState(api: LvisApi) {
   // Stream subscription — Phase 5: absorbed from App.tsx.
   useEffect(() => {
     const unsub = api.onChatStream((ev) => {
-      if (process.env.NODE_ENV !== "production") console.log("[lvis:chat:stream]", ev);
+      if (!aliveRef.current) return;
+      if (process.env.VITE_DEBUG_STREAM === "1") console.log("[lvis:chat:stream]", ev);
       if (ev.type === "text_delta" && ev.text) {
         streamRef.current += ev.text;
         setEntries((p) => upsertStreamingAssistant(p, streamRef.current));
