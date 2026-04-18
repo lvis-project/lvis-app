@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft, ChevronDown, ChevronRight, Star, Download, Pencil, GitBranch, RefreshCw, X as XIcon, Paperclip, Globe, User } from "lucide-react";
+import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft, ChevronDown, ChevronRight, Star, Download, Pencil, GitBranch, RefreshCw, X as XIcon, Paperclip, Globe, User, History } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover.js";
 import {
   DEFAULT_ROLE_PRESETS,
@@ -106,6 +106,8 @@ type LvisApi = {
   chatHasProvider: () => Promise<boolean>;
   chatSend: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
+  chatSessions: () => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string }> }>;
+  chatLoadSession: (sessionId: string) => Promise<{ ok: boolean; sessionId: string | null }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   chatGetHistory: () => Promise<{ sessionId: string; messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }> }>;
   chatEditResend: (messageIndex: number, newText: string) => Promise<{ ok: boolean; error?: string }>;
@@ -1439,6 +1441,52 @@ function getApi(): LvisApi { if (!window.lvisApi) throw new Error("lvisApi not i
 function toViewKey(item: PluginUiExtension) { return `plugin:${item.pluginId}:${item.extension.id}`; }
 function getPluginViewLabel(item: PluginUiExtension) { return item.extension.displayName?.trim() || item.extension.title || item.pluginId; }
 
+// Rebuild chat entries from persisted session history. The backend only
+// serializes role/content (+ toolName/isError for tool_result), so tool
+// inputs and thinking blocks are not recoverable — we render a compact
+// tool_group with name + result only. Consecutive tool_results collapse
+// into one group, matching the live-stream rendering.
+function historyToEntries(
+  messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }>,
+): ChatEntry[] {
+  const out: ChatEntry[] = [];
+  let pendingGroup: Extract<ChatEntry, { kind: "tool_group" }> | null = null;
+  let toolOrder = 0;
+  for (const m of messages) {
+    if (m.role === "tool_result") {
+      if (!pendingGroup) {
+        const gid = `hist-${m.index}`;
+        pendingGroup = {
+          kind: "tool_group",
+          groupId: gid,
+          groupIds: [gid],
+          status: "done",
+          tools: [],
+        };
+        out.push(pendingGroup);
+      }
+      pendingGroup.tools.push({
+        toolUseId: `hist-${m.index}`,
+        name: m.toolName ?? "tool",
+        displayOrder: toolOrder++,
+        status: m.isError ? "error" : "done",
+        result: m.content,
+      });
+      if (m.isError) pendingGroup.status = "error";
+      continue;
+    }
+    pendingGroup = null;
+    if (m.role === "user") {
+      out.push({ kind: "user", text: m.content });
+    } else if (m.role === "assistant") {
+      if (m.content.trim().length > 0) {
+        out.push({ kind: "assistant", text: m.content, streaming: false });
+      }
+    }
+  }
+  return out;
+}
+
 function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_group" }> }) {
   const [open, setOpen] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
@@ -1891,12 +1939,29 @@ function App() {
   const [searchIdx, setSearchIdx] = useState(0);
   const [starred, setStarred] = useState<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
+  const [sessions, setSessions] = useState<Array<{ id: string; modifiedAt: string }>>([]);
 
   const refreshStarred = useCallback(async () => {
     try { const list = await api.starredList(); setStarred(list); } catch { /* ignore */ }
   }, [api]);
   const refreshSessionId = useCallback(async () => {
     try { const h = await api.chatGetHistory(); setCurrentSessionId(h.sessionId); } catch { /* ignore */ }
+  }, [api]);
+  const refreshSessions = useCallback(async () => {
+    try {
+      const r = await api.chatSessions();
+      setSessions(r.sessions);
+      setCurrentSessionId(r.current);
+    } catch { /* ignore */ }
+  }, [api]);
+  const handleLoadSession = useCallback(async (sessionId: string) => {
+    try {
+      const res = await api.chatLoadSession(sessionId);
+      if (!res?.ok) return;
+      const h = await api.chatGetHistory();
+      setEntries(historyToEntries(h.messages));
+      setCurrentSessionId(h.sessionId);
+    } catch { /* ignore */ }
   }, [api]);
 
   // Map renderer `entries` (which include reasoning/tool_group/system) to
@@ -2373,6 +2438,32 @@ function App() {
               </TabsList></Tabs>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => void handleNewChat()}><Plus className="mr-1 h-4 w-4" />새 대화</Button>
+                <DropdownMenu onOpenChange={(open) => { if (open) void refreshSessions(); }}>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" title="대화 기록 불러오기"><History className="mr-1 h-4 w-4" />기록</Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="max-h-[480px] w-[300px] overflow-y-auto">
+                    {sessions.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-muted-foreground">저장된 대화가 없습니다.</div>
+                    ) : (
+                      sessions.map((s) => {
+                        const isCurrent = s.id === currentSessionId;
+                        return (
+                          <DropdownMenuItem
+                            key={s.id}
+                            onClick={() => void handleLoadSession(s.id)}
+                            className={isCurrent ? "bg-muted/50" : ""}
+                          >
+                            <div className="flex w-full flex-col">
+                              <span className="text-xs tabular-nums">{new Date(s.modifiedAt).toLocaleString("ko-KR")}</span>
+                              <span className="font-mono text-[10px] opacity-60">#{s.id.slice(0, 8)}{isCurrent ? " · 현재" : ""}</span>
+                            </div>
+                          </DropdownMenuItem>
+                        );
+                      })
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm" title="내보내기"><Download className="mr-1 h-4 w-4" />내보내기</Button>
@@ -2428,11 +2519,8 @@ function App() {
                             <button
                               className="w-full whitespace-pre-wrap break-words text-left text-sm hover:opacity-80"
                               onClick={async () => {
-                                // Jump to that message in context — load the session,
-                                // then switch to home so it's visible.
                                 if (s.sessionId !== currentSessionId) {
-                                  // no public IPC for load-session yet beyond the existing
-                                  // lvis:chat:load-session — leave as future enhancement.
+                                  await handleLoadSession(s.sessionId);
                                 }
                                 setActiveView("home");
                               }}
