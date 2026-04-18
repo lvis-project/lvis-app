@@ -19,7 +19,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { StreamEvent } from "../../types.js";
 import {
   mapBudgetToEffort,
-  isClaude4Family,
+  supportsAdaptiveThinking,
 } from "../adapter.js";
 import { extractSignatureSafely } from "../signature-shim.js";
 import { genericToModelMessages } from "../message-mapper.js";
@@ -53,13 +53,16 @@ describe("Claude helpers — budget → thinking effort mapping", () => {
     expect(mapBudgetToEffort(32_000)).toBe("max");
   });
 
-  it("detects Claude 4 family for adaptive thinking", () => {
-    expect(isClaude4Family("claude-sonnet-4-5")).toBe(true);
-    expect(isClaude4Family("claude-sonnet-4-6")).toBe(true);
-    expect(isClaude4Family("claude-opus-4")).toBe(true);
-    expect(isClaude4Family("claude-haiku-4")).toBe(true);
-    expect(isClaude4Family("claude-3-5-sonnet-latest")).toBe(false);
-    expect(isClaude4Family("claude-3-opus-20240229")).toBe(false);
+  it("detects adaptive-thinking-capable Claude families (≥ v4, version-parsed)", () => {
+    expect(supportsAdaptiveThinking("claude-sonnet-4-5")).toBe(true);
+    expect(supportsAdaptiveThinking("claude-sonnet-4-6")).toBe(true);
+    expect(supportsAdaptiveThinking("claude-opus-4")).toBe(true);
+    expect(supportsAdaptiveThinking("claude-haiku-4")).toBe(true);
+    // Future-proof: claude-5.x and later are picked up without code changes.
+    expect(supportsAdaptiveThinking("claude-sonnet-5-20270101")).toBe(true);
+    expect(supportsAdaptiveThinking("claude-5-opus")).toBe(true);
+    expect(supportsAdaptiveThinking("claude-3-5-sonnet-latest")).toBe(false);
+    expect(supportsAdaptiveThinking("claude-3-opus-20240229")).toBe(false);
   });
 });
 

@@ -39,6 +39,12 @@ export async function* fullStreamToStreamEvent(
 
   for await (const part of stream) {
     switch (part.type) {
+      case "start": {
+        // Generator is single-use per turn; reset sticky state defensively in
+        // case an SDK wrapper restarts the stream within the same instance.
+        hasToolCalls = false;
+        break;
+      }
       case "text-delta": {
         const text = (part as { text?: string }).text ?? "";
         if (text) yield { type: "text_delta", text };
@@ -46,7 +52,12 @@ export async function* fullStreamToStreamEvent(
       }
       case "reasoning-start": {
         const id = (part as { id?: string }).id ?? "";
-        if (id && !reasoningBuffers.has(id)) {
+        if (id && reasoningBuffers.has(id)) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[stream-mapper] duplicate reasoning-start id ${id} — deltas will merge`,
+          );
+        } else if (id) {
           reasoningBuffers.set(id, "");
         }
         break;
@@ -62,6 +73,13 @@ export async function* fullStreamToStreamEvent(
       }
       case "reasoning-end": {
         const id = (part as { id?: string }).id ?? "";
+        if (!reasoningBuffers.has(id)) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[stream-mapper] reasoning-end for unknown id ${id}`,
+          );
+          break;
+        }
         const thinking = reasoningBuffers.get(id) ?? "";
         reasoningBuffers.delete(id);
         const signature = extractSignatureSafely(part);
