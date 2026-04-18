@@ -333,10 +333,11 @@ export function registerIpcHandlers(
   });
   ipcMain.handle("lvis:permission:add-rule", async (_e, pattern: string, action: "allow" | "deny") => {
     // §F8: 입력 검증
-    if (typeof pattern !== "string" || pattern.trim().length === 0) {
+    const normalized = pattern.trim();
+    if (typeof pattern !== "string" || normalized.length === 0) {
       return { ok: false, error: "invalid-pattern", message: "패턴은 빈 문자열일 수 없습니다." };
     }
-    if (pattern.length > 128) {
+    if (normalized.length > 128) {
       return { ok: false, error: "invalid-pattern", message: "패턴은 128자를 초과할 수 없습니다." };
     }
     if (action !== "allow" && action !== "deny") {
@@ -346,11 +347,11 @@ export function registerIpcHandlers(
     if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
     try {
       if (action === "allow") {
-        await pm.addAlwaysAllowedPersist(pattern);
+        await pm.addAlwaysAllowedPersist(normalized);
       } else {
-        await pm.addAlwaysDeniedPersist(pattern);
+        await pm.addAlwaysDeniedPersist(normalized);
       }
-      return { ok: true, rule: { pattern, action } };
+      return { ok: true, rule: { pattern: normalized, action } };
     } catch (e) {
       return { ok: false, error: "add-failed", message: (e as Error).message };
     }
