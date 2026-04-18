@@ -106,6 +106,7 @@ export interface VercelProviderExtras {
 
 export class VercelUnifiedProvider implements LLMProvider {
   private static warnedCompatThinking = false;
+  private static warnedReasoningSamplingDrop = false;
   readonly vendor: LLMVendor;
   private readonly vendorSlot: VercelVendor;
   private readonly apiKey: string;
@@ -220,6 +221,24 @@ export class VercelUnifiedProvider implements LLMProvider {
       // precedence over legacy `maxTokens` when provided.
       const effectiveMaxOutputTokens = params.maxOutputTokens ?? params.maxTokens;
 
+      // OpenAI reasoning models (gpt-5.x, o-series) reject sampling controls
+      // (temperature, seed) on the Responses API — passing them surfaces an
+      // "AI SDK Warning" AND (depending on SDK version) an APICallError that
+      // terminates the stream mid-turn. Gate them off for this family.
+      // stopSequences is kept — Responses API accepts it.
+      const dropSamplingParams = isOpenAIReasoning;
+      if (
+        dropSamplingParams &&
+        (params.temperature !== undefined || params.seed !== undefined) &&
+        !VercelUnifiedProvider.warnedReasoningSamplingDrop
+      ) {
+        VercelUnifiedProvider.warnedReasoningSamplingDrop = true;
+        console.warn(
+          "[VercelUnifiedProvider] OpenAI reasoning models do not support " +
+            "temperature/seed — dropping these params before dispatch.",
+        );
+      }
+
       // Sprint A: map responseFormat → providerOptions per vendor (JSON mode).
       if (params.responseFormat) {
         const rf = params.responseFormat;
@@ -264,8 +283,12 @@ export class VercelUnifiedProvider implements LLMProvider {
           messages,
           ...(tools ? { tools } : {}),
           ...(effectiveMaxOutputTokens ? { maxOutputTokens: effectiveMaxOutputTokens } : {}),
-          ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
-          ...(params.seed !== undefined ? { seed: params.seed } : {}),
+          ...(!dropSamplingParams && params.temperature !== undefined
+            ? { temperature: params.temperature }
+            : {}),
+          ...(!dropSamplingParams && params.seed !== undefined
+            ? { seed: params.seed }
+            : {}),
           ...(params.stopSequences && params.stopSequences.length > 0
             ? { stopSequences: params.stopSequences }
             : {}),
