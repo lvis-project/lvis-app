@@ -34,6 +34,7 @@ import type {
 import { genericToModelMessages } from "./message-mapper.js";
 import { fullStreamToStreamEvent } from "./stream-mapper.js";
 import { mapAiSdkErrorToLvis } from "./error-mapper.js";
+import { budgetToEffort } from "../reasoning-budget.js";
 
 /**
  * Vendor slot recognised by VercelUnifiedProvider. Extends LLMVendor with
@@ -74,20 +75,10 @@ export function mapReasoningEffort(
 
 /**
  * Map LVIS thinking budget (tokens) to Anthropic adaptive-thinking effort.
- *   budget ≤ 3 000 → "low"
- *   budget ≤ 6 000 → "medium"
- *   budget ≤ 16 000 → "high"
- *   budget >  16 000 → "max"
- * Used for claude-4.x adaptive thinking. claude-3.x uses `budgetTokens` directly.
+ * Delegates to shared budgetToEffort (reasoning-budget.ts — single source of
+ * truth). claude-3.x uses budgetTokens directly, not this function.
  */
-export function mapBudgetToEffort(
-  budget: number,
-): "low" | "medium" | "high" | "max" {
-  if (budget <= 3000) return "low";
-  if (budget <= 6000) return "medium";
-  if (budget <= 16_000) return "high";
-  return "max";
-}
+export { budgetToEffort as mapBudgetToEffort } from "../reasoning-budget.js";
 
 /**
  * Detect Claude families that support adaptive thinking (≥ v4).
@@ -215,7 +206,7 @@ export class VercelUnifiedProvider implements LLMProvider {
           if (supportsAdaptiveThinking(params.model)) {
             anthropicOpts.thinking = {
               type: "adaptive",
-              effort: mapBudgetToEffort(budget),
+              effort: budgetToEffort(budget),
             };
           } else {
             anthropicOpts.thinking = {
