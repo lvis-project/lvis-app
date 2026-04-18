@@ -48,7 +48,6 @@ export class OpenAIProvider implements LLMProvider {
     // Map LVIS settings onto OpenAI's reasoning_effort. Budgets above ~8k are
     // "high", below ~3k are "low"; the middle band maps to "medium". This keeps
     // our single Claude-style budget knob working for OpenAI too.
-    const useThinking = params.enableThinking === true && isReasoningModel;
     const budget = params.thinkingBudgetTokens ?? 10_000;
     const reasoningEffort: "low" | "medium" | "high" = budget >= 8000
       ? "high"
@@ -56,10 +55,20 @@ export class OpenAIProvider implements LLMProvider {
         ? "low"
         : "medium";
 
-    console.log(`[OpenAIProvider] model="${params.model}", isReasoning=${isReasoningModel}, useMaxCompletionTokens=${useMaxCompletionTokens}, reasoning=${useThinking ? reasoningEffort : "off"}`);
-
     const messages = toOpenAIMessages(params.systemPrompt, params.messages, isReasoningModel);
     const tools = params.tools?.map(toOpenAITool);
+
+    // OpenAI /v1/chat/completions rejects `reasoning_effort` with 400 when
+    // function tools are present — but only for gpt-5.x models (the restriction
+    // does not apply to o1/o3/o4, which support reasoning + tools on this
+    // endpoint). Drop reasoning_effort only for gpt-5.x tool turns; other
+    // reasoning families keep it. Longer-term: migrate gpt-5.x to /v1/responses.
+    const isGpt5 = modelLower.includes("gpt-5");
+    const hasTools = Boolean(tools && tools.length > 0);
+    const useThinking =
+      params.enableThinking === true && isReasoningModel && !(isGpt5 && hasTools);
+
+    console.log(`[OpenAIProvider] model="${params.model}", isReasoning=${isReasoningModel}, useMaxCompletionTokens=${useMaxCompletionTokens}, reasoning=${useThinking ? reasoningEffort : "off"}, tools=${hasTools}`);
 
     try {
       const stream = await this.client.chat.completions.create({
@@ -68,7 +77,7 @@ export class OpenAIProvider implements LLMProvider {
           ? { max_completion_tokens: params.maxTokens ?? 4096 }
           : { max_tokens: params.maxTokens ?? 4096 }),
         messages,
-        ...(tools && tools.length > 0 && { tools }),
+        ...(hasTools && { tools }),
         ...(useThinking && { reasoning_effort: reasoningEffort }),
         stream: true,
       });
