@@ -692,22 +692,48 @@ function registerPluginNotifications(
   if (!Notification.isSupported()) return () => {};
 
   const registered: Array<{ type: string; handler: EventHandler }> = [];
+  // manifest는 JSON에서 읽으므로 런타임 검증 필요. 또한 여러 플러그인이 같은 이벤트를
+  // 알림으로 선언하면 한 번의 emit에 알림이 중복으로 뜨므로 event별로 1개만 등록.
+  const registeredEvents = new Set<string>();
 
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
     const notificationEvents = Array.isArray(manifest.notificationEvents)
       ? manifest.notificationEvents
       : [];
     for (const spec of notificationEvents) {
+      if (!spec || typeof spec !== "object") {
+        console.warn("[lvis] boot: invalid notificationEvents spec (expected object), skipped:", spec);
+        continue;
+      }
+      const event = typeof spec.event === "string" ? spec.event.trim() : "";
+      if (!event) {
+        console.warn("[lvis] boot: notificationEvents spec with missing/empty 'event' skipped:", spec);
+        continue;
+      }
+      if (spec.titleField !== undefined && typeof spec.titleField !== "string") {
+        console.warn(`[lvis] boot: notificationEvents[${event}].titleField must be string, skipped`);
+        continue;
+      }
+      if (spec.bodyField !== undefined && typeof spec.bodyField !== "string") {
+        console.warn(`[lvis] boot: notificationEvents[${event}].bodyField must be string, skipped`);
+        continue;
+      }
+      if (registeredEvents.has(event)) {
+        console.warn(`[lvis] boot: duplicate notificationEvents entry for "${event}" — keeping first, skipping rest`);
+        continue;
+      }
+      registeredEvents.add(event);
+      const { titleField, bodyField } = spec;
       const handler: EventHandler = (data) => {
-        const resolvedTitle = spec.titleField ? getFieldByPath(data, spec.titleField) : "";
-        const title = resolvedTitle || spec.event;
-        const body = spec.bodyField ? getFieldByPath(data, spec.bodyField) : "";
+        const resolvedTitle = titleField ? getFieldByPath(data, titleField) : "";
+        const title = resolvedTitle || event;
+        const body = bodyField ? getFieldByPath(data, bodyField) : "";
         const notif = new Notification({ title, body, silent: false });
         notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
         notif.show();
       };
-      onEvent(spec.event, handler);
-      registered.push({ type: spec.event, handler });
+      onEvent(event, handler);
+      registered.push({ type: event, handler });
     }
   }
 
