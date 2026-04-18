@@ -10,19 +10,13 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderApp } from "./render-app.js";
+import { submitChatMessage } from "./helpers.js";
 
 describe("Chat edit & resend (Phase 3.2 regression net)", () => {
   it("submitting a user message appends a user entry", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
-    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textarea).toBeTruthy();
-    await act(async () => {
-      fireEvent.change(textarea, { target: { value: "Hello LVIS" } });
-    });
-    await act(async () => {
-      fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
-    });
+    await submitChatMessage(container, "Hello LVIS");
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
     await waitFor(() => {
       expect(container.textContent).toContain("Hello LVIS");
