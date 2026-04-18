@@ -340,18 +340,20 @@ describe("VercelUnifiedProvider gemini — adapter smoke (mocked ai.streamText)"
     vi.doUnmock("@ai-sdk/google");
   });
 
-  it("vendor=openai throws (P2 scope)", async () => {
+  it("vendor=openai yields error event (P2 scope — not yet implemented in P1)", async () => {
     const { VercelUnifiedProvider } = await import("../adapter.js");
     const provider = new VercelUnifiedProvider("openai", "k");
-    await expect(async () => {
-      for await (const _ of provider.streamTurn({
-        model: "gpt-5.4",
-        systemPrompt: "",
-        messages: [],
-      })) {
-        void _;
-      }
-    }).rejects.toThrow(/not yet implemented/);
+    const events: any[] = [];
+    for await (const ev of provider.streamTurn({
+      model: "gpt-5.4",
+      systemPrompt: "",
+      messages: [],
+    })) {
+      events.push(ev);
+    }
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    expect(events[0].type).toBe("error");
+    expect(events[0].error).toMatch(/not implemented yet/);
   });
 });
 
