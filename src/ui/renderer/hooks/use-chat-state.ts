@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
@@ -28,11 +28,25 @@ export function useChatState(api: LvisApi) {
   const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
   const [editBusy, setEditBusy] = useState(false);
 
+  // Map renderer `entries` (which include reasoning/tool_group/system) to
+  // backend history indices which only track user + assistant messages.
+  // This lets edit/fork/star carry the correct `messageIndex`.
+  const entryIndexToHistoryIndex = useMemo(() => {
+    const map = new Map<number, number>();
+    let backend = 0;
+    entries.forEach((e, i) => {
+      if (e.kind === "user" || e.kind === "assistant") {
+        map.set(i, backend);
+        backend += 1;
+      }
+    });
+    return map;
+  }, [entries]);
+
   const handleEditSave = useCallback(
     async (
       entryIdx: number,
       newText: string,
-      entryIndexToHistoryIndex: Map<number, number>,
     ) => {
       const histIdx = entryIndexToHistoryIndex.get(entryIdx);
       if (histIdx === undefined) return;
@@ -66,7 +80,7 @@ export function useChatState(api: LvisApi) {
         if (!failed) setEditingEntryIdx(null);
       }
     },
-    [api, entries],
+    [api, entries, entryIndexToHistoryIndex],
   );
 
   const handleRetryEffort = useCallback(async () => {
@@ -132,6 +146,7 @@ export function useChatState(api: LvisApi) {
     editingEntryIdx,
     setEditingEntryIdx,
     editBusy,
+    entryIndexToHistoryIndex,
     handleEditSave,
     handleRetryEffort,
     finalizeLeftoverStream,

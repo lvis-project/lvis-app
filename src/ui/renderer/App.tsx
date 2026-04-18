@@ -71,7 +71,8 @@ export function App() {
     editingEntryIdx,
     setEditingEntryIdx,
     editBusy,
-    handleEditSave: chatHandleEditSave,
+    entryIndexToHistoryIndex,
+    handleEditSave,
     handleRetryEffort,
     finalizeLeftoverStream,
   } = useChatState(api);
@@ -148,34 +149,12 @@ export function App() {
     [sessionLoad, streaming, setEntries],
   );
 
-  // Map renderer `entries` (which include reasoning/tool_group/system) to
-  // backend history indices which only track user + assistant messages.
-  // This lets edit/fork/star carry the correct `messageIndex`.
-  const entryIndexToHistoryIndex = useMemo(() => {
-    const map = new Map<number, number>();
-    let backend = 0;
-    entries.forEach((e, i) => {
-      if (e.kind === "user" || e.kind === "assistant") {
-        map.set(i, backend);
-        backend += 1;
-      }
-    });
-    return map;
-  }, [entries]);
-
   const isEntryStarred = useCallback(
     (entryIdx: number): string | null => starredIsEntry(entryIdx, currentSessionId, entryIndexToHistoryIndex),
     [starredIsEntry, currentSessionId, entryIndexToHistoryIndex],
   );
 
   // ─── Search (Ctrl/Cmd+F) — provided by useSearch hook ─────
-
-  // ─── Edit & resend (delegates to useChatState) ─────────────
-  const handleEditSave = useCallback(
-    (entryIdx: number, newText: string) =>
-      chatHandleEditSave(entryIdx, newText, entryIndexToHistoryIndex),
-    [chatHandleEditSave, entryIndexToHistoryIndex],
-  );
 
   // ─── Fork (Phase 5 hook) ──────────────────────────────────────
   const handleFork = useCallback(
