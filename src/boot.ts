@@ -24,6 +24,9 @@ import { requiredCapabilityForEmit } from "./plugins/capabilities.js";
 
 import { emitEvent, onEvent, type AppServices } from "./boot/types.js";
 import { bootstrapCoreServices } from "./boot/services.js";
+import { createAutoUpdater } from "./main/auto-updater.js";
+import { startCrashReporter } from "./main/crash-reporter.js";
+import { TelemetryService } from "./main/telemetry.js";
 import {
   buildPluginConfigOverrides,
   registerPluginTools,
@@ -508,6 +511,30 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // Sprint 4.C — starred messages store (persisted in ~/.lvis/starred.json)
   const starredStore = new StarredStore();
+
+  // Production release prep — auto-updater, crash reporter, telemetry.
+  // All default-off or read user settings; no-op in dev without publish config.
+  try {
+    const telemetrySettings = settingsService.get("telemetry");
+    startCrashReporter({
+      userDataPath: app.getPath("userData"),
+      telemetry: telemetrySettings,
+    });
+    const telemetry = new TelemetryService({
+      settings: telemetrySettings,
+      appVersion: app.getVersion(),
+    });
+    telemetry.start();
+    telemetry.track("app_start");
+    const updater = createAutoUpdater({
+      mainWindow,
+      isEnabled: () => settingsService.get("updates")?.autoCheckEnabled ?? true,
+    });
+    updater.start();
+    console.log("[lvis] boot: release prep wired (updater/crash/telemetry)");
+  } catch (err) {
+    console.warn("[lvis] boot: release prep init failed (non-fatal):", (err as Error).message);
+  }
 
   return {
     pluginRuntime, pluginMarketplace, taskService, settingsService,

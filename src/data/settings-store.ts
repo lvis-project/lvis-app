@@ -74,6 +74,28 @@ export interface AppSettings {
   marketplace: MarketplaceSettings;
   proactive: ProactiveSettings;
   privacy: PrivacySettings;
+  updates: UpdateSettings;
+  telemetry: TelemetrySettings;
+}
+
+/**
+ * Production release prep — Electron auto-update (electron-updater).
+ * Default ON so users receive critical fixes; can be disabled via UI.
+ */
+export interface UpdateSettings {
+  autoCheckEnabled: boolean;
+}
+
+/**
+ * Production release prep — anonymous opt-in telemetry.
+ * Default OFF. Requires explicit user action to enable.
+ */
+export interface TelemetrySettings {
+  enabled: boolean;
+  endpoint?: string;
+  sentryDsn?: string;
+  crashReportEndpoint?: string;
+  crashReportingEnabled?: boolean;
 }
 
 /**
@@ -153,6 +175,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   privacy: {
     piiRedactEnabled: false,
   },
+  updates: {
+    autoCheckEnabled: true,
+  },
+  telemetry: {
+    enabled: false,
+    crashReportingEnabled: false,
+  },
 };
 
 export class SettingsService {
@@ -225,6 +254,12 @@ export class SettingsService {
     }
     if (partial.privacy) {
       this.settings.privacy = { ...this.settings.privacy, ...partial.privacy };
+    }
+    if (partial.updates) {
+      this.settings.updates = { ...this.settings.updates, ...partial.updates };
+    }
+    if (partial.telemetry) {
+      this.settings.telemetry = { ...this.settings.telemetry, ...partial.telemetry };
     }
     this.saveSettings();
     return this.getAll();
@@ -313,6 +348,8 @@ export class SettingsService {
         marketplace: { ...DEFAULT_SETTINGS.marketplace, ...parsed.marketplace },
         proactive: { ...DEFAULT_SETTINGS.proactive, ...parsed.proactive },
         privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
+        updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
+        telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);
