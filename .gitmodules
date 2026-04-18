@@ -1,0 +1,3 @@
+[submodule "packages/plugin-sdk"]
+	path = packages/plugin-sdk
+	url = https://github.com/lvis-project/lvis-plugin-sdk.git
