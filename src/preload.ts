@@ -73,7 +73,8 @@ const api = {
     ipcRenderer.on("lvis:proactive:briefing", listener);
     return () => ipcRenderer.removeListener("lvis:proactive:briefing", listener);
   },
-  dismissBriefing: async () => ipcRenderer.invoke("lvis:proactive:dismiss-briefing") as Promise<{ ok: boolean; debounced?: boolean }>,
+  dismissBriefing: async (feedback?: { reason: string; details?: string }) =>
+    ipcRenderer.invoke("lvis:proactive:dismiss-briefing", feedback) as Promise<{ ok: boolean; debounced?: boolean }>,
   snoozeBriefing: async () => ipcRenderer.invoke("lvis:proactive:snooze-briefing") as Promise<{ ok: boolean; lastDismissedAt?: string }>,
 
   // ─── MCP ─────────────────────────────────────────
