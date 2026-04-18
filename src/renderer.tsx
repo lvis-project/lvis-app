@@ -36,7 +36,7 @@ import {
 type MarketplaceItem = { id: string; name: string; description: string; packageSpec: string; installed: boolean; enabled: boolean; isManaged?: boolean };
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
-type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string } };
+type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number; baseUrls?: Record<string, string>; vertexProject?: string; vertexLocation?: string }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string } };
 
 // ─── Usage types (Sprint 4.B) ───────────────────────
 type UsageTotals = { inputTokens: number; outputTokens: number; totalTokens: number; cost: number };
@@ -315,10 +315,12 @@ function TaskView({ api }: { api: LvisApi }) {
 // ─── SettingsDialog ─────────────────────────────────
 
 const VENDORS = [
-  { id: "claude", label: "Anthropic Claude", placeholder: "sk-ant-...", defaultModel: "claude-sonnet-4-6" },
-  { id: "openai", label: "OpenAI", placeholder: "sk-...", defaultModel: "gpt-4o" },
-  { id: "gemini", label: "Google Gemini", placeholder: "AIza...", defaultModel: "gemini-2.0-flash" },
-  { id: "copilot", label: "GitHub Copilot", placeholder: "ghp_...", defaultModel: "gpt-4o" },
+  { id: "claude", label: "Anthropic Claude", placeholder: "sk-ant-...", defaultModel: "claude-sonnet-4-6", needsBaseUrl: false },
+  { id: "openai", label: "OpenAI", placeholder: "sk-...", defaultModel: "gpt-4o", needsBaseUrl: false },
+  { id: "gemini", label: "Google Gemini", placeholder: "AIza...", defaultModel: "gemini-2.0-flash", needsBaseUrl: false },
+  { id: "copilot", label: "GitHub Copilot", placeholder: "ghp_...", defaultModel: "gpt-4o", needsBaseUrl: false },
+  { id: "azure-foundry", label: "Azure AI Foundry", placeholder: "Azure API key...", defaultModel: "gpt-4o", needsBaseUrl: true, baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/deployments/{deployment}/" },
+  { id: "vertex-ai", label: "Google Vertex AI", placeholder: "service account (unused — uses ADC)", defaultModel: "gemini-2.5-flash", needsBaseUrl: false },
 ] as const;
 
 const WEB_PROVIDERS = [
@@ -633,6 +635,13 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
   const [webKeyInput, setWebKeyInput] = useState("");
   const [hasWebKey, setHasWebKey] = useState(false);
 
+  // Per-vendor baseUrl (Azure AI Foundry requires it; OpenAI/Copilot proxy optional).
+  const [baseUrl, setBaseUrl] = useState("");
+
+  // Vertex AI — GCP project + region (vendor uses service account / ADC, not apiKey).
+  const [vertexProject, setVertexProject] = useState("");
+  const [vertexLocation, setVertexLocation] = useState("");
+
   // Sprint 3-A: proactive Daily Briefing toggle (§7, §14.4 feature flag).
   const [enableDailyBriefing, setEnableDailyBriefing] = useState(false);
 
@@ -650,6 +659,9 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       if (cancelled) return;
       setVendor(s.llm.provider);
       setModel(s.llm.model);
+      setBaseUrl((s.llm.baseUrls ?? {})[s.llm.provider] ?? "");
+      setVertexProject(s.llm.vertexProject ?? "");
+      setVertexLocation(s.llm.vertexLocation ?? "");
       setEnableThinking(s.llm.enableThinking ?? true);
       setThinkingBudget(s.llm.thinkingBudgetTokens ?? 10_000);
       setAutoCompact(s.chat.autoCompact ?? true);
@@ -678,6 +690,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       void api.getSettings().then(s => {
         if (s.llm.provider !== vendor) setModel(v.defaultModel);
         else setModel(s.llm.model);
+        setBaseUrl((s.llm.baseUrls ?? {})[vendor as any] ?? "");
       });
     }
   }, [vendor, open, api]);
@@ -703,13 +716,22 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
           setWebKeyInput("");
           setHasWebKey(true);
         }
+        // Merge per-vendor baseUrl so we don't lose other vendors' saved endpoints.
+        const current = await api.getSettings();
+        const mergedBaseUrls = { ...(current.llm.baseUrls ?? {}) } as Record<string, string>;
+        const trimmed = baseUrl.trim();
+        if (trimmed) mergedBaseUrls[vendor] = trimmed;
+        else delete mergedBaseUrls[vendor];
         await api.updateSettings({
           llm: {
             provider: vendor as any,
             model: model.trim() || vendorInfo.defaultModel,
+            baseUrls: mergedBaseUrls as any,
             enableThinking,
             thinkingBudgetTokens: thinkingBudget,
-          },
+            vertexProject: vertexProject.trim() || undefined,
+            vertexLocation: vertexLocation.trim() || undefined,
+          } as any,
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
           proactive: { enableDailyBriefing } as any,
@@ -737,23 +759,77 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
 
           <TabsContent value="llm" className="space-y-4 pt-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">벤더</label>
-              <div className="grid grid-cols-2 gap-2">
+              <label className="text-sm font-medium" htmlFor="vendor-select">벤더</label>
+              <select
+                id="vendor-select"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                value={vendor}
+                onChange={(e) => setVendor(e.target.value)}
+              >
                 {VENDORS.map((v) => (
-                  <Button key={v.id} size="sm" variant={vendor === v.id ? "default" : "outline"} className="justify-start text-xs" onClick={() => setVendor(v.id)}>
-                    {v.label}
-                  </Button>
+                  <option key={v.id} value={v.id}>{v.label}</option>
                 ))}
-              </div>
+              </select>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">{vendorInfo.label} API 키</label>
-              <div className="flex items-center gap-2">
-                {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
-                {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
+            {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : " (선택)"}
+                </label>
+                <Input
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
+                />
+                {vendor === "azure-foundry" && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Azure AI Foundry 엔드포인트 형식:
+                    {" "}<code>https://{"{resource}"}.openai.azure.com/openai/deployments/{"{deployment}"}/</code>
+                    {" "}— 모델 필드에는 deployment 이름을 입력합니다.
+                  </p>
+                )}
+                {(vendor === "openai" || vendor === "copilot") && (
+                  <p className="text-[11px] text-muted-foreground">
+                    이 설정은 Vercel SDK 경로 사용 시 프록시/커스텀 엔드포인트로만 사용됩니다.
+                  </p>
+                )}
               </div>
-              <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
-            </div>
+            )}
+            {vendor === "vertex-ai" && (
+              <div className="space-y-2 rounded-md border p-3">
+                <p className="text-sm font-medium">Google Vertex AI</p>
+                <p className="text-[11px] text-muted-foreground">
+                  서비스 계정 또는 ADC(<code>gcloud auth application-default login</code>)로 인증합니다.
+                  API 키는 사용하지 않으며, <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수로 서비스 계정 JSON 경로를 지정할 수 있습니다.
+                </p>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">GCP Project ID *</label>
+                  <Input
+                    value={vertexProject}
+                    onChange={(e) => setVertexProject(e.target.value)}
+                    placeholder="my-gcp-project"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Location (region) — 선택</label>
+                  <Input
+                    value={vertexLocation}
+                    onChange={(e) => setVertexLocation(e.target.value)}
+                    placeholder="us-central1 (기본값)"
+                  />
+                </div>
+              </div>
+            )}
+            {vendor !== "vertex-ai" && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{vendorInfo.label} API 키</label>
+                <div className="flex items-center gap-2">
+                  {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
+                  {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
+                </div>
+                <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
+              </div>
+            )}
             <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
             <div className="space-y-2 rounded-md border p-3">
               <label className="flex items-center justify-between text-sm font-medium">
@@ -1629,6 +1705,74 @@ function App() {
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
 
+  // Cached LLM settings for chat input bar (vendor + thinking toggle + context budget).
+  const [llmVendor, setLlmVendor] = useState<string>("claude");
+  const [llmModel, setLlmModel] = useState<string>("");
+  const [enableThinkingChat, setEnableThinkingChat] = useState<boolean>(true);
+  const refreshLlmSettings = useCallback(async () => {
+    try {
+      const s = await api.getSettings();
+      setLlmVendor(s.llm.provider);
+      setLlmModel(s.llm.model);
+      setEnableThinkingChat(s.llm.enableThinking ?? false);
+    } catch { /* ignore */ }
+  }, [api]);
+  useEffect(() => { void refreshLlmSettings(); }, [refreshLlmSettings]);
+
+  // Rough per-model context budget (input+output tokens) used to show % filled.
+  // NOTE: 1M context for Claude Sonnet 4.6 is a beta feature gated on a specific
+  // API beta header — currently we assume the default 200k for all Claude models;
+  // 1M beta detection is tracked as a followup.
+  const contextBudget = useMemo(() => {
+    const m = (llmModel || "").toLowerCase();
+    if (m.includes("claude")) return 200_000;
+    if (m.includes("gpt-5") || m.includes("gpt-4.1")) return 1_000_000;
+    if (m.includes("gpt-4o") || m.includes("gpt-4")) return 128_000;
+    if (m.includes("gemini")) return 1_000_000;
+    if (m.includes("o1") || m.includes("o3") || m.includes("o4")) return 200_000;
+    return 128_000;
+  }, [llmModel]);
+
+  // Estimated tokens — mirrors engine-side serializeMessageForEstimation heuristic
+  // (see src/engine/llm/types.ts:85): per-message `Math.ceil(serializedLength / 4) + 1`.
+  const usedTokens = useMemo(() => {
+    let total = 0;
+    for (const e of entries) {
+      let serialized = "";
+      if (e.kind === "user" || e.kind === "assistant" || e.kind === "reasoning" || e.kind === "system") {
+        serialized = JSON.stringify({ kind: e.kind, text: e.text ?? "" });
+      } else if (e.kind === "tool_group") {
+        serialized = JSON.stringify({
+          kind: "tool_group",
+          tools: (e.tools ?? []).map((t: any) => ({
+            input: t.input ?? {},
+            result: t.result ?? "",
+          })),
+        });
+      }
+      if (serialized) total += Math.ceil(serialized.length / 4) + 1;
+    }
+    return total;
+  }, [entries]);
+  const contextPercent = Math.min(100, Math.round((usedTokens / contextBudget) * 100));
+  const contextColor =
+    contextPercent < 50 ? "text-emerald-500" :
+    contextPercent < 80 ? "text-amber-500" : "text-red-500";
+  const vendorSupportsThinking = useMemo(() => {
+    if (llmVendor === "claude") return true;
+    if (llmVendor === "gemini") return true;
+    if (llmVendor === "vertex-ai") return true;
+    if (llmVendor === "openai" || llmVendor === "copilot" || llmVendor === "azure-foundry") {
+      const m = (llmModel || "").toLowerCase();
+      return m.includes("gpt-5") || m.includes("o1") || m.includes("o3") || m.includes("o4");
+    }
+    return false;
+  }, [llmVendor, llmModel]);
+  const toggleThinking = useCallback(async (next: boolean) => {
+    setEnableThinkingChat(next);
+    try { await api.updateSettings({ llm: { enableThinking: next } } as any); } catch { /* ignore */ }
+  }, [api]);
+
   // ─── Chat ─────────────────────────────────────
   const handleAsk = useCallback(async (q: string) => {
     const t = q.trim(); if (!t || streaming) return;
@@ -1992,18 +2136,36 @@ function App() {
                   <span>— 곧 자동 압축됩니다.</span>
                 </div>
               )}
-              <div className="grid grid-cols-[1fr_auto] gap-2 border-t bg-card p-3">
-                <Textarea value={question} onChange={(e) => setQuestion(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.nativeEvent.isComposing) return;
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void handleAsk(question);
-                    }
-                  }}
-                  placeholder={hasApiKey === false ? "API 키를 먼저 설정해 주세요..." : "질문 입력 (Enter 전송 / Shift+Enter 줄바꿈) · /command 사용 가능"}
-                  className="min-h-[76px]" disabled={streaming} />
-                <Button onClick={() => void handleAsk(question)} disabled={streaming || !question.trim() || contextOverflowPct >= 0.95}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
+              <div className="border-t bg-card p-3 space-y-2">
+                <div className="flex items-center justify-between gap-3 text-[11px]">
+                  <div className={`font-mono ${contextColor}`} title="추정 토큰 사용량 (대화 기반)">
+                    {usedTokens.toLocaleString()} / {contextBudget.toLocaleString()} tokens ({contextPercent}%)
+                  </div>
+                  {vendorSupportsThinking && (
+                    <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5"
+                        checked={enableThinkingChat}
+                        onChange={(e) => void toggleThinking(e.target.checked)}
+                      />
+                      <span>Thinking</span>
+                    </label>
+                  )}
+                </div>
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <Textarea value={question} onChange={(e) => setQuestion(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing) return;
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void handleAsk(question);
+                      }
+                    }}
+                    placeholder={hasApiKey === false ? "API 키를 먼저 설정해 주세요..." : "질문 입력 (Enter 전송 / Shift+Enter 줄바꿈) · /command 사용 가능"}
+                    className="min-h-[76px]" disabled={streaming} />
+                  <Button onClick={() => void handleAsk(question)} disabled={streaming || !question.trim() || contextOverflowPct >= 0.95}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
+                </div>
               </div>
             </div>
           ) : (
@@ -2012,7 +2174,7 @@ function App() {
         </main>
       </div>
 
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => void checkApiKey()} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
       <ToolApprovalDialog
         open={approvalQueue.length > 0}
         request={approvalQueue[0] ?? null}
