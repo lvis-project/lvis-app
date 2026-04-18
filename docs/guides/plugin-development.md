@@ -1,6 +1,6 @@
 # LVIS 플러그인 개발 가이드
 
-> **상태**: 최종 버전 (2026-04-12)
+> **상태**: 최종 버전 (2026-04-18)
 > **대상**: LVIS 플러그인 개발자
 > **선행 읽음**: [아키텍처 문서 §9](../architecture/architecture.md#9-plugin-system--ui-extension) · [CLAUDE.md](../../CLAUDE.md)
 
@@ -13,11 +13,14 @@
 3. [호스트 플러그인 엔트리 (hostPlugin.ts)](#호스트-플러그인-엔트리-hostplugints)
 4. [HostApi 계약](#hostapi-계약)
 5. [도구 명명 규칙](#도구-명명-규칙)
-6. [UI 확장](#ui-확장)
-7. [빌드 설정](#빌드-설정)
-8. [테스팅](#테스팅)
-9. [설치 및 배포](#설치-및-배포)
-10. [완전한 예제](#완전한-예제)
+6. [toolSchemas 작성 가이드](#toolschemas-작성-가이드)
+7. [IPC/RPC 경계](#ipcrpc-경계)
+8. [UI 확장](#ui-확장)
+9. [빌드 설정](#빌드-설정)
+10. [테스팅](#테스팅)
+11. [설치 및 배포](#설치-및-배포)
+12. [완전한 예제](#완전한-예제)
+13. [향후 계획 (미구현)](#향후-계획-미구현)
 
 ---
 
@@ -55,22 +58,21 @@ interface PluginManifest {
   name: string;            // 사람이 읽을 수 있는 이름
   version: string;         // Semantic versioning (예: "1.0.0")
   entry: string;           // hostPlugin.ts 진입점 경로
-  methods: string[];       // LLM tool name 배열 (언더스코어 전용, 도트 금지)
+  tools: string[];         // LLM tool name 배열 (언더스코어 전용, 도트 금지)
 
   // 선택 필드
-  config?: Record<string, unknown>;    // 기본 설정값
+  toolSchemas?: Record<string, {
+    description?: string;
+    inputSchema: Record<string, unknown>;
+  }>;                                        // 도구별 입력 스키마 (LLM function calling용)
+  config?: Record<string, unknown>;          // 기본 설정값
   keywords?: Array<{ keyword: string; skillId: string }>;  // 키워드 선언
-  ui?: PluginUiExtension[];            // UI 슬롯 확장
-
-  // 호스트 역참조 제거용 선언형 메타데이터
-  capabilities?: string[];             // 기능 태그 (예: "worker-client", "calendar-source")
-  startupMethods?: string[];           // 부팅 시 자동 실행할 methods[] 항목
-  eventSubscriptions?: string[];       // 호스트가 수집/구독할 이벤트 타입
-  ipcBindings?: Array<{
-    channel: string;                   // legacy IPC 채널명
-    method: string;                    // 호출할 methods[] 항목
-    args?: string[];                   // positional IPC 인자를 payload object로 매핑할 키 목록
-  }>;
+  ui?: PluginUiExtension[];                  // UI 슬롯 확장
+  capabilities?: string[];                   // 기능 태그 (예: "worker-client", "calendar-source")
+  startupTools?: string[];                   // 부팅 시 자동 실행할 tools[] 항목
+  eventSubscriptions?: string[];             // 호스트가 수집/구독할 이벤트 타입
+  deployment?: "managed" | "user";           // 배포 유형
+  publisher?: string;                        // 퍼블리셔 식별자
 }
 ```
 
@@ -82,13 +84,35 @@ interface PluginManifest {
   "name": "LVIS Meeting",
   "version": "1.0.0",
   "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
-  "methods": [
+  "tools": [
     "meeting_start",
     "meeting_push_chunk",
     "meeting_stop",
     "meeting_transcript",
     "meeting_sessions"
   ],
+  "toolSchemas": {
+    "meeting_start": {
+      "description": "회의 세션을 시작합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": { "type": "string", "description": "세션 고유 ID" }
+        },
+        "required": ["sessionId"]
+      }
+    },
+    "meeting_stop": {
+      "description": "진행 중인 회의 세션을 종료하고 요약을 생성합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": { "type": "string", "description": "종료할 세션 ID" }
+        },
+        "required": ["sessionId"]
+      }
+    }
+  },
   "config": {
     "intermediateEveryFinalSegments": 1
   },
@@ -113,7 +137,7 @@ interface PluginManifest {
 - **도트(`.`) 형식 권장**
 - 예: `com.lge.meeting-recorder`, `com.lge.email`, `page-index`
 - UI 슬롯 ID, 이벤트 네임스페이스의 프리픽스로 사용
-- ⚠️ **LLM tool name(methods)과 별개** — id에 도트가 있어도 methods는 반드시 언더스코어여야 함
+- ⚠️ **LLM tool name과 별개** — id에 도트가 있어도 tools[]는 반드시 언더스코어여야 함
 
 #### name
 - 사람이 읽을 수 있는 플러그인 이름
@@ -128,12 +152,18 @@ interface PluginManifest {
 - 상대 경로 (플러그인 설치 위치 기준)
 - 예: `../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js`
 
-#### methods
+#### tools
 - **LLM에 노출되는 도구 이름(tool name) 배열**
 - **반드시 `^[a-zA-Z_][a-zA-Z0-9_]*$` 패턴 (첫 글자는 영문자/언더스코어, 이후 영문자/숫자/언더스코어) — 도트(`.`)·하이픈(`-`) 금지**
 - 예: `meeting_start`, `email_list`, `index_scan`
 - 런타임이 이 값을 그대로 LLM tool name으로 사용하며 dot-to-underscore 변환을 수행하지 않음
 - 로드 시 패턴 검증을 수행하며, 위반 시 플러그인 로드 거부
+
+#### toolSchemas (선택)
+- 각 도구의 설명과 입력 스키마를 선언합니다.
+- LLM function calling에서 도구를 정확히 호출하도록 안내합니다.
+- 키는 `tools[]`에 선언된 이름과 일치해야 합니다.
+- 자세한 작성 방법은 [toolSchemas 작성 가이드](#toolschemas-작성-가이드) 참고
 
 #### config (선택)
 - 기본 설정값
@@ -143,7 +173,7 @@ interface PluginManifest {
 #### keywords (선택)
 - 키워드 엔진이 인식할 스킬 키워드
 - 사용자 입력 분류 시 사용
-- `skillId`는 매니페스트 `methods` 배열에 있는 도구 이름과 동일한 언더스코어 형식 사용
+- `skillId`는 매니페스트 `tools` 배열에 있는 도구 이름과 동일한 언더스코어 형식 사용
 - 예: `{ keyword: "회의록", skillId: "meeting_start" }`
 
 #### ui (선택)
@@ -155,10 +185,10 @@ interface PluginManifest {
 - 예: `worker-client`, `knowledge-index`, `background-watcher`, `calendar-source`
 - 호스트는 특정 plugin id 대신 capability를 조회해 통합 지점을 결정합니다.
 
-#### startupMethods (선택)
-- 앱 부팅 직후 실행해야 하는 메서드 목록입니다.
-- 항목은 반드시 `methods` 배열에 선언되어 있어야 하며, 불일치 시 플러그인 로드가 거부됩니다.
-- 예: `email_start_watcher`, `calendar_start_watcher`
+#### startupTools (선택)
+- 앱 부팅 직후 실행해야 하는 도구 목록입니다.
+- 항목은 반드시 `tools` 배열에 선언되어 있어야 하며, 불일치 시 플러그인 로드가 거부됩니다.
+- 예: `["email_start_watcher", "calendar_start_watcher"]`
 
 #### eventSubscriptions (선택)
 - 호스트가 이벤트 버스에서 수집해야 할 이벤트 타입 목록입니다.
@@ -166,18 +196,12 @@ interface PluginManifest {
 - `mail-source` capability를 선언한 플러그인은 `*.new` 이벤트를 추가하면
   호스트가 네이티브 알림을 자동 등록합니다. (예: `email.new`)
 
-#### ipcBindings (선택)
-- 기존 renderer/native 호환 IPC 채널을 유지해야 할 때 사용하는 선언형 매핑입니다.
-- `channel` → `method` 연결을 매니페스트에 선언하면 호스트가 동적으로 IPC 핸들러를 등록합니다.
-- `args`를 지정하면 positional 인자를 object payload로 변환해 메서드에 전달합니다.
-
 ### 역참조 방지 체크리스트
 
 1. `boot.ts`, `ipc-bridge.ts`에서 플러그인 id 문자열을 직접 비교하지 않습니다.
-2. 플러그인별 분기가 필요하면 `capabilities` 또는 `startupMethods`로 선언합니다.
-3. 레거시 IPC는 코드에 `pluginRuntime.call("meeting_...")`를 추가하지 말고 `ipcBindings`를 사용합니다.
-4. 신규 이벤트 연동은 `eventSubscriptions`를 통해 호스트에 노출합니다.
-5. 플러그인 리네임/교체 시 호스트 코드는 수정 없이 매니페스트만 갱신되어야 합니다.
+2. 플러그인별 분기가 필요하면 `capabilities` 또는 `startupTools`로 선언합니다.
+3. 신규 이벤트 연동은 `eventSubscriptions`를 통해 호스트에 노출합니다.
+4. 플러그인 리네임/교체 시 호스트 코드는 수정 없이 매니페스트만 갱신되어야 합니다.
 
 ---
 
@@ -185,10 +209,24 @@ interface PluginManifest {
 
 호스트 플러그인은 플러그인의 JavaScript 진입점입니다. **모든 플러그인 초기화와 자기 등록이 여기서 이루어집니다.**
 
+### 타입 정의
+
+```typescript
+// PluginToolHandler: 도구 핸들러 함수 타입
+type PluginToolHandler = (payload?: unknown) => Promise<unknown> | unknown;
+
+// RuntimePlugin: createPlugin이 반환하는 객체
+interface RuntimePlugin {
+  start?: () => Promise<void> | void;    // 플러그인 시작 시 호출 (선택)
+  stop?: () => Promise<void> | void;     // 플러그인 정지 시 호출 (선택)
+  handlers: Record<string, PluginToolHandler>;  // key = tools[]의 도구 이름
+}
+```
+
 ### 기본 구조
 
 ```typescript
-import { type PluginRuntimeContext, type RuntimePlugin } from "../plugin-runtime/types";
+import type { PluginToolHandler } from "@lvis/plugin-types";
 
 type HostPluginContext = {
   pluginId: string;          // 플러그인 ID (예: "com.lge.meeting-recorder")
@@ -200,9 +238,14 @@ type HostPluginContext = {
     registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
     emitEvent(eventType: string, data?: unknown): void;
     onEvent(eventType: string, handler: (data: unknown) => void): void;
-    addTask(task: { ... }): void;
+    addTask(task: { title: string; description?: string; source: string; sourceRef?: string; priority?: string }): void;
     saveNote(title: string, content: string): void;
     getSecret(key: string): string | null;
+    getMsGraphToken(): Promise<string | null>;
+    startMsGraphAuth(): Promise<void>;
+    isMsGraphAuthenticated(): boolean;
+    getMsGraphAccount(): { name?: string; email?: string } | null;
+    onMsGraphAuthChange(handler: (authenticated: boolean) => void): void;
   };
 };
 
@@ -248,13 +291,12 @@ export default async function createPlugin(context: HostPluginContext) {
   const { hostApi, config, log } = context;
 
   // API 키 조회 (config 또는 hostApi.getSecret 우선순위)
-  const apiKey = (config.openaiApiKey as string)
-    ?? (config as any).llmApiKey as string
+  const apiKey = (config?.openaiApiKey as string)
     ?? hostApi.getSecret("llm.apiKey.openai")
     ?? undefined;
 
   // 저장 경로 설정
-  const storageDir = (config.storageDir as string) 
+  const storageDir = (config?.storageDir as string) 
     ?? join(context.hostRoot, ".plugin-data");
 
   log("plugin initialized", { apiKey: !!apiKey, storageDir });
@@ -274,7 +316,6 @@ const pipeline = new MeetingPipeline({
   summaryProvider: apiKey ? new OpenAISummaryProvider({ apiKey }) : new MockSummaryProvider(),
   log: context.log,
   onSessionUpdate: (session) => {
-    // 상태 변경 시 저장
     sessionStore.save({...});
   },
 });
@@ -296,7 +337,7 @@ hostApi.registerKeywords([
 ]);
 ```
 
-**주의**: `skillId`는 매니페스트의 `methods` 배열에 있는 도구 이름(언더스코어 형식)과 일치해야 합니다.
+**주의**: `skillId`는 매니페스트의 `tools` 배열에 있는 도구 이름(언더스코어 형식)과 일치해야 합니다.
 
 #### 단계 4: 이벤트 핸들러 등록
 
@@ -329,12 +370,12 @@ recorder.on("error", ({ sessionId, error }) => {
 
 ```typescript
 return {
-  start?: async () => {
+  start: async () => {
     // 플러그인 시작 시 호출 (선택)
     context.log("plugin started");
   },
 
-  stop?: async () => {
+  stop: async () => {
     // 플러그인 정지 시 호출 (선택)
     context.log("plugin stopped");
   },
@@ -356,7 +397,6 @@ return {
       await recorder.stop(body.sessionId);
       hostApi.emitEvent("meeting.ended", { sessionId: body.sessionId });
 
-      // 최종 요약에서 태스크 생성
       const final = finalBySession.get(body.sessionId);
       if (final?.actionItems.length) {
         for (const item of final.actionItems) {
@@ -380,7 +420,7 @@ return {
 
 ## HostApi 계약
 
-플러그인이 호스트와 통신하는 유일한 통로가 **HostApi**입니다. 다섯 가지 핵심 메서드를 제공합니다.
+플러그인이 호스트와 통신하는 유일한 통로가 **HostApi**입니다. 현행 구현된 메서드는 다음과 같습니다.
 
 ### 1. registerKeywords()
 
@@ -394,7 +434,7 @@ hostApi.registerKeywords([
 ```
 
 **주의사항**:
-- `skillId`는 매니페스트 `methods` 배열에 있는 언더스코어 형식 도구 이름이어야 함
+- `skillId`는 매니페스트 `tools` 배열에 있는 언더스코어 형식 도구 이름이어야 함
 - 플러그인 제거 시 자동으로 해제됨
 - 키워드는 한국어, 영문, 혼합 모두 지원
 
@@ -479,11 +519,10 @@ hostApi.saveNote(
 
 ### 6. getSecret()
 
-설정에 저장된 암호화된 API 키를 조회합니다. 사용자가 설정 UI에서 등록한 API 키를 안전하게 접근합니다.
+설정에 저장된 암호화된 API 키를 조회합니다.
 
 ```typescript
 const openaiKey = hostApi.getSecret("llm.apiKey.openai");
-const graphToken = hostApi.getSecret("email.graph.token");
 
 if (!openaiKey) {
   context.log("API 키가 설정되지 않았습니다");
@@ -497,8 +536,54 @@ if (!openaiKey) {
 | `llm.apiKey.openai` | OpenAI API 키 |
 | `llm.apiKey.anthropic` | Anthropic API 키 |
 | `llm.apiKey.google` | Google API 키 |
-| `email.graph.token` | Microsoft Graph 토큰 |
-| `email.graph.refreshToken` | Microsoft Graph 리프레시 토큰 |
+
+### 7. Microsoft Graph 메서드
+
+Microsoft 365 연동이 필요한 플러그인(이메일, 캘린더 등)을 위한 인증 메서드입니다.
+
+```typescript
+// 현재 인증 상태 확인
+const isAuth = hostApi.isMsGraphAuthenticated();
+
+// 로그인한 계정 정보
+const account = hostApi.getMsGraphAccount();
+// → { name?: string; email?: string } | null
+
+// OAuth 인증 플로우 시작 (브라우저 팝업)
+await hostApi.startMsGraphAuth();
+
+// 액세스 토큰 조회 (자동 갱신 포함)
+const token = await hostApi.getMsGraphToken();
+// → string | null
+
+// 인증 상태 변경 구독
+hostApi.onMsGraphAuthChange((authenticated) => {
+  context.log(`MS Graph auth changed: ${authenticated}`);
+});
+```
+
+**사용 패턴**:
+```typescript
+export default async function createPlugin(context: HostPluginContext) {
+  const { hostApi } = context;
+
+  return {
+    handlers: {
+      "email_login": async () => {
+        await hostApi.startMsGraphAuth();
+        return { authenticated: hostApi.isMsGraphAuthenticated() };
+      },
+
+      "email_list": async (payload?: unknown) => {
+        const token = await hostApi.getMsGraphToken();
+        if (!token) throw new Error("먼저 로그인해주세요 (email_login)");
+        // token으로 Graph API 직접 호출
+        // ...
+      },
+    },
+  };
+}
+```
 
 ---
 
@@ -520,11 +605,11 @@ LVIS 플러그인에는 **두 개의 독립적인 명명 네임스페이스**가
 
 ### 2. LLM tool name (도구 이름 네임스페이스)
 
-`methods[]` 배열과 `handlers` 객체 키는 **LLM이 직접 호출하는 이름**입니다. LVIS의 canonical form은 lower snake_case (`meeting_start`, `index_scan`)이며, 런타임은 manifest 값을 그대로 등록합니다. **도트(`.`)나 하이픈(`-`)을 언더스코어로 바꿔주지 않습니다.**
+`tools[]` 배열과 `handlers` 객체 키는 **LLM이 직접 호출하는 이름**입니다. LVIS의 canonical form은 lower snake_case (`meeting_start`, `index_scan`)이며, 런타임은 manifest 값을 그대로 등록합니다. **도트(`.`)나 하이픈(`-`)을 언더스코어로 바꿔주지 않습니다.**
 
 ```json
 {
-  "methods": ["meeting_start", "meeting_stop", "meeting_transcript"]
+  "tools": ["meeting_start", "meeting_stop", "meeting_transcript"]
 }
 ```
 
@@ -543,21 +628,143 @@ return {
 | 구분 | 대상 | 도트 허용? | 예시 |
 |------|------|-----------|------|
 | 플러그인 ID | `id` 필드 | ✅ 허용 (도트 형식 권장) | `com.lge.meeting-recorder` |
-| LLM tool name | `methods[]`, `handlers` 키 | ❌ 금지 | `meeting_start` |
+| LLM tool name | `tools[]`, `handlers` 키 | ❌ 금지 | `meeting_start` |
 | 이벤트 이름 | `emitEvent()` / `onEvent()` | ✅ 허용 | `meeting.summary.created` |
 | keywords skillId | `keywords[].skillId` | ❌ 금지 (tool name과 일치) | `meeting_start` |
 
 ### 런타임 동작
 
-**런타임 변환은 없습니다.** 매니페스트의 `methods[]` 값이 그대로 LLM tool name으로 등록됩니다. 도트가 포함된 method 이름은 **로드 시 즉시 거부**됩니다.
+**런타임 변환은 없습니다.** 매니페스트의 `tools[]` 값이 그대로 LLM tool name으로 등록됩니다. 도트가 포함된 도구 이름은 **로드 시 즉시 거부**됩니다.
 
 ```
 // ✅ 올바른 구성
 id: "com.lge.meeting-recorder"   ← 플러그인 ID, 도트 허용
-methods: ["meeting_start"]        ← LLM tool name, 언더스코어 전용
+tools: ["meeting_start"]          ← LLM tool name, 언더스코어 전용
 
 // ❌ 잘못된 구성 (로드 거부됨)
-methods: ["meeting.start"]        ← tool name에 도트 금지
+tools: ["meeting.start"]          ← tool name에 도트 금지
+```
+
+---
+
+## toolSchemas 작성 가이드
+
+`toolSchemas`는 LLM이 각 도구를 정확하게 호출하도록 안내하는 JSON Schema 선언입니다.
+
+### 왜 필요한가?
+
+`toolSchemas`가 없으면 LLM은 도구의 입력 형식을 추측합니다. 올바른 스키마를 선언하면:
+- LLM이 필수 인자를 누락 없이 전달함
+- 타입 오류로 인한 도구 실패 감소
+- 호스트 ToolRegistry가 입력 검증 가능
+
+### 스키마 작성 규칙
+
+1. `tools[]`에 선언된 모든 도구에 스키마를 작성하는 것을 권장합니다.
+2. `inputSchema`는 JSON Schema Draft 7 형식을 따릅니다.
+3. 필수 인자는 반드시 `required` 배열에 명시합니다.
+4. `description`은 LLM이 도구를 선택하는 기준이 되므로 명확하게 작성합니다.
+
+### 예제: 도구 스키마 작성
+
+```json
+{
+  "toolSchemas": {
+    "meeting_start": {
+      "description": "새 회의 녹음 세션을 시작합니다. 세션 ID를 반드시 전달해야 합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "세션 고유 식별자 (예: 'sess-20260418-001')"
+          }
+        },
+        "required": ["sessionId"],
+        "additionalProperties": false
+      }
+    },
+    "meeting_push_chunk": {
+      "description": "녹음 중인 세션에 오디오 청크 데이터를 주입합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": { "type": "string", "description": "대상 세션 ID" },
+          "chunk": { "type": "string", "description": "base64 인코딩된 오디오 데이터" }
+        },
+        "required": ["sessionId", "chunk"],
+        "additionalProperties": false
+      }
+    },
+    "meeting_sessions": {
+      "description": "저장된 회의 세션 목록을 반환합니다. 인자 없이 호출합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  }
+}
+```
+
+### 핸들러와 스키마 일관성 유지
+
+`toolSchemas`에서 `required`로 선언한 인자는 핸들러 내부에서 반드시 검증하세요:
+
+```typescript
+"meeting_start": async (payload?: unknown) => {
+  const body = (payload ?? {}) as { sessionId?: string };
+  // toolSchemas에서 required: ["sessionId"]이므로 방어 코드 필수
+  if (!body.sessionId) throw new Error("sessionId is required");
+  // ...
+}
+```
+
+---
+
+## IPC/RPC 경계
+
+플러그인 저자가 반드시 숙지해야 할 통신 경계 규칙입니다.
+
+### 원칙: 플러그인은 IPC/RPC를 직접 사용하지 않는다
+
+플러그인 번들에서 Electron의 `ipcRenderer` / `ipcMain`을 **절대로 import하지 마세요**. 모든 통신은 정해진 경계를 통해 이루어집니다.
+
+### 허용된 통신 경계
+
+| 방향 | 방법 | 비고 |
+|------|------|------|
+| LLM → 플러그인 도구 | ToolRegistry 경유 (자동) | 플러그인 코드 불필요 |
+| Renderer UI → 플러그인 도구 | `lvis:plugins:call(toolName, payload)` | 호스트 generic IPC 단 하나 |
+| 플러그인 → 호스트 | `PluginHostApi` 직접 호출 | `context.hostApi.*` |
+| 플러그인 → 플러그인 | `emitEvent` / `onEvent` | 직접 참조 금지 |
+
+### UI 모듈에서의 도구 호출
+
+Renderer에 마운트되는 UI 모듈(사이드바 컴포넌트)은 `hostApi.callTool()`을 통해 도구를 호출합니다. 이 `hostApi`는 플러그인 팩토리의 `context.hostApi`와 다른, UI 전용 인터페이스입니다.
+
+```javascript
+// ✅ 올바름 — UI 모듈에서 도구 호출
+export default async function MyPluginUI({ container, hostApi }) {
+  const result = await hostApi.callTool("meeting_start", { sessionId: "sess-001" });
+}
+
+// ❌ 금지 — 플러그인 번들에서 IPC 직접 사용
+import { ipcRenderer } from "electron"; // 절대 금지
+ipcRenderer.invoke("lvis:some:channel", ...); // 절대 금지
+```
+
+### 플러그인 간 통신
+
+플러그인이 다른 플러그인의 기능을 트리거해야 할 때는 이벤트를 사용합니다:
+
+```typescript
+// ✅ 올바름 — 이벤트로 간접 통신
+hostApi.emitEvent("calendar.event.created", { eventId: "evt-001" });
+
+// ❌ 금지 — 다른 플러그인 핸들러 직접 import/참조
+import { handleCalendarCreate } from "@lvis/plugin-calendar"; // 절대 금지
 ```
 
 ---
@@ -815,7 +1022,7 @@ export default defineConfig({
   clean: true,             // 빌드 전 dist/ 정리
   target: "node18",        // Node 18 이상 대상
   outDir: "dist",
-  splitting: false,        // 파일 분할 금지 (plgin.json entry가 정확해야 함)
+  splitting: false,        // 파일 분할 금지 (plugin.json entry가 정확해야 함)
 });
 ```
 
@@ -877,6 +1084,11 @@ describe("Meeting Plugin", () => {
       addTask: vi.fn(),
       saveNote: vi.fn(),
       getSecret: vi.fn(() => null),
+      getMsGraphToken: vi.fn(async () => null),
+      startMsGraphAuth: vi.fn(async () => {}),
+      isMsGraphAuthenticated: vi.fn(() => false),
+      getMsGraphAccount: vi.fn(() => null),
+      onMsGraphAuthChange: vi.fn(),
     };
 
     const plugin = await createPlugin({
@@ -907,6 +1119,11 @@ describe("Meeting Plugin", () => {
       addTask: vi.fn(),
       saveNote: vi.fn(),
       getSecret: vi.fn(() => null),
+      getMsGraphToken: vi.fn(async () => null),
+      startMsGraphAuth: vi.fn(async () => {}),
+      isMsGraphAuthenticated: vi.fn(() => false),
+      getMsGraphAccount: vi.fn(() => null),
+      onMsGraphAuthChange: vi.fn(),
     };
 
     const plugin = await createPlugin({
@@ -1038,7 +1255,7 @@ async function loadPlugins(app: App) {
       hostApi: createHostApi(manifest.id),
     });
 
-    // 핸들러 등록
+    // 도구 핸들러 등록
     for (const [toolName, handler] of Object.entries(plugin.handlers ?? {})) {
       toolRegistry.register(manifest.id, toolName, handler);
     }
@@ -1052,7 +1269,7 @@ async function loadPlugins(app: App) {
 
 1. `registry.json`에서 플러그인 항목 삭제 또는 `enabled: false` 설정
 2. 호스트 재시작
-3. 플러그인의 `stop()` 메서드 호출 (있는 경우)
+3. 플러그인의 `stop()` 함수 호출 (있는 경우)
 4. 플러그인이 등록한 모든 것(키워드, 이벤트 핸들러 등) 자동 정리
 
 ---
@@ -1063,6 +1280,7 @@ async function loadPlugins(app: App) {
 
 ```typescript
 // src/hostPlugin.ts
+import type { PluginToolHandler } from "@lvis/plugin-types";
 import { GraphClient } from "./graphClient.js";
 import { analyzeEmailWithAI } from "./emailAnalyzer.js";
 
@@ -1085,6 +1303,11 @@ type HostPluginContext = {
     }): void;
     saveNote(title: string, content: string): void;
     getSecret(key: string): string | null;
+    getMsGraphToken(): Promise<string | null>;
+    startMsGraphAuth(): Promise<void>;
+    isMsGraphAuthenticated(): boolean;
+    getMsGraphAccount(): { name?: string; email?: string } | null;
+    onMsGraphAuthChange(handler: (authenticated: boolean) => void): void;
   };
 };
 
@@ -1093,7 +1316,6 @@ export default async function createPlugin(context: HostPluginContext) {
 
   // Microsoft Graph 클라이언트 초기화
   const client = new GraphClient(context.hostRoot);
-  await client.loadSavedToken();
 
   // API 키 조회
   const apiKey =
@@ -1108,47 +1330,52 @@ export default async function createPlugin(context: HostPluginContext) {
     { keyword: "email", skillId: "email_list" },
   ]);
 
-  if (client.isAuthenticated()) {
-    context.log(`authenticated as ${client.getAccountName()}`);
-  }
+  // MS Graph 인증 상태 변경 감지
+  hostApi.onMsGraphAuthChange((authenticated) => {
+    context.log(`MS Graph auth: ${authenticated}`);
+  });
 
   return {
     handlers: {
+      "email_login": async () => {
+        await hostApi.startMsGraphAuth();
+        return {
+          authenticated: hostApi.isMsGraphAuthenticated(),
+          account: hostApi.getMsGraphAccount(),
+        };
+      },
+
       "email_status": async () => ({
-        authenticated: client.isAuthenticated(),
-        account: client.getAccountName() ?? undefined,
+        authenticated: hostApi.isMsGraphAuthenticated(),
+        account: hostApi.getMsGraphAccount() ?? undefined,
       }),
 
       "email_list": async (payload?: unknown) => {
-        if (!client.isAuthenticated()) {
-          throw new Error("먼저 로그인해주세요");
-        }
+        const token = await hostApi.getMsGraphToken();
+        if (!token) throw new Error("먼저 로그인해주세요 (email_login)");
         const p = (payload ?? {}) as { top?: number };
-        return client.listEmails(p.top ?? 20);
+        return client.listEmails(token, p.top ?? 20);
       },
 
       "email_read": async (payload?: unknown) => {
-        if (!client.isAuthenticated()) {
-          throw new Error("먼저 로그인해주세요");
-        }
+        const token = await hostApi.getMsGraphToken();
+        if (!token) throw new Error("먼저 로그인해주세요 (email_login)");
         const p = (payload ?? {}) as { id?: string };
         if (!p.id) throw new Error("id가 필요합니다");
-        return client.readEmail(p.id);
+        return client.readEmail(token, p.id);
       },
 
       "email_analyze": async (payload?: unknown) => {
-        if (!client.isAuthenticated()) {
-          throw new Error("먼저 로그인해주세요");
-        }
+        const token = await hostApi.getMsGraphToken();
+        if (!token) throw new Error("먼저 로그인해주세요 (email_login)");
         const p = (payload ?? {}) as { id?: string };
         if (!p.id) throw new Error("id가 필요합니다");
 
-        const email = await client.readEmail(p.id);
+        const email = await client.readEmail(token, p.id);
         const analysis = apiKey
           ? await analyzeEmailWithAI(email, apiKey)
           : { actionRequired: false, tasks: [] };
 
-        // 액션 필요 이벤트 발행
         if (analysis.actionRequired) {
           hostApi.emitEvent("email.action_needed", {
             emailId: p.id,
@@ -1157,7 +1384,6 @@ export default async function createPlugin(context: HostPluginContext) {
           });
         }
 
-        // 태스크 자동 생성
         for (const task of analysis.tasks ?? []) {
           hostApi.addTask({
             title: task.title.slice(0, 100),
@@ -1170,7 +1396,7 @@ export default async function createPlugin(context: HostPluginContext) {
 
         return { email, analysis, isAI: !!apiKey };
       },
-    },
+    } satisfies Record<string, PluginToolHandler>,
   };
 }
 ```
@@ -1183,7 +1409,34 @@ export default async function createPlugin(context: HostPluginContext) {
   "name": "LVIS Email",
   "version": "1.0.0",
   "entry": "../../../node_modules/@lvis/plugin-email/dist/hostPlugin.js",
-  "methods": ["email_status", "email_list", "email_read", "email_analyze"],
+  "tools": ["email_login", "email_status", "email_list", "email_read", "email_analyze"],
+  "toolSchemas": {
+    "email_login": {
+      "description": "Microsoft 365 계정으로 로그인합니다. 이메일 조회 전 반드시 호출해야 합니다.",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    "email_list": {
+      "description": "수신함의 최근 이메일 목록을 반환합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "top": { "type": "number", "description": "최대 조회 건수 (기본: 20)" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "email_read": {
+      "description": "특정 이메일의 본문을 조회합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "이메일 ID" }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    }
+  },
   "config": {
     "openaiApiKey": ""
   },
@@ -1217,17 +1470,19 @@ export default async function createPlugin(context: HostPluginContext) {
   - [ ] `plugin.json` 생성
   - [ ] `id`, `name`, `version` 설정
   - [ ] `entry` 경로 (hostPlugin.js)
-  - [ ] `methods` 배열 (언더스코어 형식)
+  - [ ] `tools` 배열 (언더스코어 형식)
+  - [ ] `toolSchemas` 작성 (LLM function calling 정확도 향상)
   - [ ] `config` 기본값 (있는 경우)
   - [ ] `ui` 확장 (있는 경우)
 
 - [ ] **hostPlugin.ts 구현**
-  - [ ] `createPlugin` 함수 내보내기
+  - [ ] `createPlugin` 함수 내보내기 (`PluginToolHandler` 타입 사용)
   - [ ] `hostApi.registerKeywords()` 호출
   - [ ] 이벤트 발행 (`hostApi.emitEvent()`)
   - [ ] 도구 핸들러 구현 (`handlers` 객체)
   - [ ] 오류 처리 (throw 명시적)
   - [ ] 로깅 (`context.log()`)
+  - [ ] Electron IPC 직접 사용 금지 (`ipcRenderer` / `ipcMain` import 금지)
 
 - [ ] **테스팅**
   - [ ] 단위 테스트 작성 (`test/*.test.ts`)
@@ -1238,6 +1493,7 @@ export default async function createPlugin(context: HostPluginContext) {
   - [ ] UI 모듈 작성 (`src/ui/*.js`)
   - [ ] `plugin.json`의 `ui` 섹션 설정
   - [ ] 빌드 스크립트에서 UI 파일 복사
+  - [ ] UI에서 도구 호출 시 `hostApi.callTool()` 사용 (IPC 직접 사용 금지)
 
 - [ ] **빌드 및 배포**
   - [ ] `npm run build` 성공
@@ -1246,6 +1502,27 @@ export default async function createPlugin(context: HostPluginContext) {
   - [ ] `plugin.json` 복사
   - [ ] `registry.json`에 항목 추가
   - [ ] 호스트 재시작 후 플러그인 로드 확인
+
+---
+
+## 향후 계획 (미구현)
+
+이 섹션은 아직 구현되지 않은 기능을 기록합니다. 본문 예제에서 이 기능들을 사용하지 마세요.
+
+### Phase 2 예정
+
+| 기능 | 설명 |
+|------|------|
+| `startupTimeoutMs` | startupTools 실행 시 타임아웃 (매니페스트 필드) |
+| `logEvent()` | HostApi 로그 이벤트 기록 메서드 |
+| `onShutdown()` | HostApi 앱 종료 훅 등록 메서드 |
+
+### Phase 3 예정
+
+| 기능 | 설명 |
+|------|------|
+| `signature` / `signatureAlgorithm` | 플러그인 코드 서명 검증 (매니페스트 필드) |
+| 플러그인 마켓플레이스 | 원격 플러그인 검색 및 설치 UI |
 
 ---
 

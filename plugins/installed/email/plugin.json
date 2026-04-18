@@ -5,7 +5,7 @@
   "deployment": "managed",
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-email/dist/hostPlugin.js",
-  "methods": [
+  "tools": [
     "email_status",
     "email_auth",
     "email_list",
@@ -23,13 +23,196 @@
     "mail-source",
     "background-watcher"
   ],
-  "startupMethods": [
+  "startupTools": [
     "email_start_watcher"
   ],
   "eventSubscriptions": [
     "email.action.needed",
     "email.new"
   ],
+  "toolSchemas": {
+    "email_status": {
+      "description": "Microsoft Graph 인증 상태와 LLM 분석 활성화 여부를 반환합니다. 인자 없음. 성공 시 { authenticated, account?, llmEnabled }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "email_auth": {
+      "description": "Microsoft 계정으로 로그인합니다. 이미 인증된 경우 즉시 반환합니다. 인자 없음. 성공 시 { authenticated, account? }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "email_list": {
+      "description": "받은 편지함의 최근 이메일 목록을 가져옵니다. 로그인 필요. 성공 시 이메일 배열을 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "top": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "가져올 이메일 최대 건수 (기본값: 20)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "email_read": {
+      "description": "특정 이메일 메시지 전체 내용을 조회합니다. 로그인 필요. 성공 시 이메일 상세 객체를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "조회할 이메일의 Microsoft Graph 메시지 ID"
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    "email_analyze": {
+      "description": "이메일을 분석하여 액션 필요 여부, 마감일, 의도, 우선순위 등을 추출합니다. LLM 키가 있으면 AI 분석, 없으면 키워드 분석. 로그인 필요. 성공 시 { email, analysis }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "분석할 이메일의 Microsoft Graph 메시지 ID"
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    "email_reply": {
+      "description": "특정 이메일에 답장을 보냅니다. 로그인 필요. 성공 시 { sent: true }를 반환하고 답장 기록을 저장합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "답장할 원본 이메일의 Microsoft Graph 메시지 ID"
+          },
+          "body": {
+            "type": "string",
+            "description": "답장 본문 텍스트"
+          },
+          "subject": {
+            "type": "string",
+            "description": "답장 제목 (기록용, 선택 사항)"
+          },
+          "to": {
+            "type": "string",
+            "description": "수신자 이메일 주소 (기록용, 선택 사항)"
+          }
+        },
+        "required": ["id", "body"],
+        "additionalProperties": false
+      }
+    },
+    "email_get_sent_replies": {
+      "description": "이번 세션에서 보낸 모든 답장 기록 목록을 반환합니다. 인자 없음. 각 항목에 emailId, subject, to, body, sentAt이 포함됩니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "email_get_sent_reply": {
+      "description": "특정 이메일에 대해 보낸 답장 기록을 조회합니다. 없으면 null 반환.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "조회할 원본 이메일의 Microsoft Graph 메시지 ID"
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    "email_start_watcher": {
+      "description": "새 이메일 도착을 주기적으로 폴링하는 감시자를 시작합니다. 로그인 필요. 성공 시 { started: true, running: true }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "intervalMs": {
+            "type": "integer",
+            "minimum": 5000,
+            "description": "폴링 간격 밀리초 (기본값: 30000)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "email_stop_watcher": {
+      "description": "이메일 감시자를 중지합니다. 인자 없음. 성공 시 { stopped: true }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "email_get_notifications": {
+      "description": "감시자가 감지한 미처리 이메일 알림 목록을 반환합니다. 인자 없음.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "email_create_event": {
+      "description": "Outlook 캘린더에 새 일정을 생성합니다. 로그인 필요. 성공 시 생성된 이벤트 객체를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "일정 제목"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "일정 시작 시각 (ISO 8601, 예: 2026-04-18T09:00:00)"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "일정 종료 시각 (ISO 8601, 예: 2026-04-18T10:00:00)"
+          },
+          "body": {
+            "type": "string",
+            "description": "일정 본문/메모 (선택)"
+          },
+          "location": {
+            "type": "string",
+            "description": "장소 (선택)"
+          }
+        },
+        "required": ["title", "start", "end"],
+        "additionalProperties": false
+      }
+    }
+  },
   "config": {},
   "ui": [
     {

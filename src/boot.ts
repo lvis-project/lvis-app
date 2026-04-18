@@ -203,10 +203,10 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   });
 
   await pluginRuntime.startAll();
-  console.log("[lvis] boot: plugins loaded:", pluginRuntime.listMethods());
+  console.log("[lvis] boot: plugins loaded:", pluginRuntime.listToolNames());
 
-  // 선언형 startupMethods 자동 실행 (플러그인별 watcher/bootstrap 훅)
-  runManifestStartupMethods(pluginRuntime);
+  // 선언형 startupTools 자동 실행 (플러그인별 watcher/bootstrap 훅)
+  runManifestStartupTools(pluginRuntime);
 
   // 플러그인 메서드를 ToolRegistry에 등록 (범용)
   registerPluginTools(pluginRuntime, toolRegistry);
@@ -350,11 +350,11 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     memoryManager,
     toolRegistry,
     getPluginSchemas: () => {
-      const methods = pluginRuntime.listMethods();
-      if (methods.length === 0) return "";
+      const tools = pluginRuntime.listToolNames();
+      if (tools.length === 0) return "";
       return [
         "<active-plugins>",
-        `활성 플러그인 메서드: ${methods.join(", ")}`,
+        `활성 플러그인 도구: ${tools.join(", ")}`,
         "</active-plugins>",
       ].join("\n");
     },
@@ -522,19 +522,19 @@ function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: ToolReg
   }
 }
 
-function runManifestStartupMethods(pluginRuntime: PluginRuntime): void {
-  const loadedMethods = new Set(pluginRuntime.listMethods());
+function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
+  const loadedTools = new Set(pluginRuntime.listToolNames());
   for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
-    for (const method of manifest.startupMethods ?? []) {
-      if (!loadedMethods.has(method)) {
+    for (const tool of manifest.startupTools ?? []) {
+      if (!loadedTools.has(tool)) {
         console.warn(
-          `[lvis] boot: startup method not loaded (plugin=${pluginId}, method=${method})`,
+          `[lvis] boot: startup tool not loaded (plugin=${pluginId}, tool=${tool})`,
         );
         continue;
       }
-      pluginRuntime.call(method, {}).catch((e: Error) =>
+      pluginRuntime.call(tool, {}).catch((e: Error) =>
         console.log(
-          `[lvis] boot: startup method failed (non-fatal, plugin=${pluginId}, method=${method}):`,
+          `[lvis] boot: startup tool failed (non-fatal, plugin=${pluginId}, tool=${tool}):`,
           e.message,
         ),
       );
@@ -632,13 +632,13 @@ function registerMailSourceNotifications(
 function findMethodByCapability(
   pluginRuntime: PluginRuntime,
   capability: string,
-  matcher: (method: string) => boolean,
+  matcher: (tool: string) => boolean,
 ): string | undefined {
   const pluginId = pluginRuntime.findPluginIdByCapability(capability);
   if (!pluginId) return undefined;
   const manifest = pluginRuntime.getPluginManifest(pluginId);
   if (!manifest) return undefined;
-  return manifest.methods.find(matcher);
+  return manifest.tools.find(matcher);
 }
 
 function registerBuiltinTools(
