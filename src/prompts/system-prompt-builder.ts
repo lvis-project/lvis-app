@@ -205,21 +205,30 @@ export class SystemPromptBuilder {
     });
 
     // ⑧ Conversation Summary — ConversationLoop에서 Auto-Compact 시 동적 추가
-    // ⑨ OS / Environment (부팅 시)
+    // ⑨ OS / Environment (매 턴)
     this.sources.push({
       id: 9,
       name: "OS / Environment",
-      refresh: "static",
+      refresh: "per-turn",
       build: () => {
         const now = new Date();
+        const kstParts = new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Seoul",
+          year: "numeric", month: "2-digit", day: "2-digit",
+          hour: "2-digit", minute: "2-digit", second: "2-digit",
+          hour12: false,
+        }).formatToParts(now);
+        const pick = (type: string) => kstParts.find((p) => p.type === type)?.value ?? "00";
+        const kstIso = `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}:${pick("second")}+09:00`;
         return [
           "<environment>",
           `OS: ${platform()}`,
           `Host: ${hostname()}`,
           `User: ${userInfo().username}`,
           `Home: ${homedir()}`,
-          `Time: ${now.toISOString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
+          `Time: ${kstIso} (KST, UTC+9)`,
           `Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`,
+          "NOTE: 날짜/시간 관련 도구 호출 시 반드시 KST(한국 표준시) 기준으로 위와 같은 ISO 8601 형식(+09:00 offset 포함)으로 전달하세요.",
           "</environment>",
         ].join("\n");
       },
