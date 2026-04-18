@@ -49,6 +49,7 @@ import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
 import { useContextBudget } from "./hooks/use-context-budget.js";
 import { useCostEstimate } from "./hooks/use-cost-estimate.js";
+import { useStarred } from "./hooks/use-starred.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./components/BriefingCard.js";
@@ -131,13 +132,10 @@ export function App() {
     nextMatch: searchNext,
     prevMatch: searchPrev,
   } = useSearch(entries);
-  const [starred, setStarred] = useState<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>([]);
+  const { starred, refreshStarred, isEntryStarred: starredIsEntry, handleToggleStar: starredToggle } = useStarred(api);
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [sessions, setSessions] = useState<Array<{ id: string; modifiedAt: string }>>([]);
 
-  const refreshStarred = useCallback(async () => {
-    try { const list = await api.starredList(); setStarred(list); } catch { /* ignore */ }
-  }, [api]);
   const refreshSessionId = useCallback(async () => {
     try { const h = await api.chatGetHistory(); setCurrentSessionId(h.sessionId); } catch { /* ignore */ }
   }, [api]);
@@ -178,12 +176,10 @@ export function App() {
     return map;
   }, [entries]);
 
-  const isEntryStarred = useCallback((entryIdx: number): string | null => {
-    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-    if (histIdx === undefined) return null;
-    const match = starred.find((s) => s.sessionId === currentSessionId && s.messageIndex === histIdx);
-    return match?.id ?? null;
-  }, [starred, currentSessionId, entryIndexToHistoryIndex]);
+  const isEntryStarred = useCallback(
+    (entryIdx: number): string | null => starredIsEntry(entryIdx, currentSessionId, entryIndexToHistoryIndex),
+    [starredIsEntry, currentSessionId, entryIndexToHistoryIndex],
+  );
 
   // ─── Search (Ctrl/Cmd+F) — provided by useSearch hook ─────
 
@@ -207,20 +203,11 @@ export function App() {
 
   // ─── Retry with deeper thinking — provided by useChatState ─────
 
-  // ─── Star toggle ───────────────────────────────
-  const handleToggleStar = useCallback(async (entryIdx: number) => {
-    const entry = entries[entryIdx];
-    if (!entry || (entry.kind !== "user" && entry.kind !== "assistant")) return;
-    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-    if (histIdx === undefined) return;
-    const existingId = isEntryStarred(entryIdx);
-    if (existingId) {
-      await api.starredRemove({ id: existingId });
-    } else {
-      await api.starredAdd({ sessionId: currentSessionId, messageIndex: histIdx, role: entry.kind, text: entry.text });
-    }
-    await refreshStarred();
-  }, [entries, entryIndexToHistoryIndex, isEntryStarred, api, currentSessionId, refreshStarred]);
+  // ─── Star toggle (Phase 5 hook) ───────────────────────────────
+  const handleToggleStar = useCallback(
+    (entryIdx: number) => starredToggle(entryIdx, entries, currentSessionId, entryIndexToHistoryIndex),
+    [starredToggle, entries, currentSessionId, entryIndexToHistoryIndex],
+  );
 
   // ─── Export ────────────────────────────────────
   const handleExport = useCallback(async (format: "markdown" | "json") => {
@@ -328,7 +315,7 @@ export function App() {
   const isMountedRef = useRef(true);
   useEffect(() => {
     void refreshMarketplace(); void refreshViews(); void checkApiKey();
-    void refreshStarred(); void refreshSessionId();
+    void refreshSessionId();
 
     // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
     api.getBriefing().then((text) => {
