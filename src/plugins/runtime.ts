@@ -1,6 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+// ajv + ajv-formats ship a CJS default export; ESM interop requires the
+// `.default ?? module` dance below. We keep the raw namespace import here so
+// the runtime resolves the default robustly across bundlers.
+import * as AjvModule from "ajv";
+import * as AddFormatsModule from "ajv-formats";
+import type { ValidateFunction } from "ajv";
 import type {
   PluginManifest,
   PluginToolHandler,
@@ -12,6 +19,20 @@ import type {
 import { readPluginRegistry, resolveManifestPathsFromRegistry, updatePluginRegistry } from "./registry.js";
 import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
 import type { PluginSignatureVerifier } from "./signature-verifier.js";
+
+/**
+ * Sprint 4-B §B-3 — destructive tool patterns that must never be exposed
+ * through the renderer IPC path (uiCallable allowlist) unless the plugin is
+ * signed AND deployed as "managed". Matches suffix-style tool names like
+ * `email_send`, `file_delete`, `calendar_remove`, etc.
+ */
+export const DESTRUCTIVE_TOOL_PATTERNS: RegExp[] = [
+  /_(delete|remove|send|destroy|erase|purge)$/i,
+];
+
+function isDestructiveToolName(name: string): boolean {
+  return DESTRUCTIVE_TOOL_PATTERNS.some((re) => re.test(name));
+}
 
 type LoadedPlugin = {
   manifest: PluginManifest;
@@ -77,6 +98,8 @@ export class PluginRuntime {
    */
   private readonly disposers = new Map<string, Array<() => void>>();
   private loaded = false;
+  /** Sprint 4-B §B-1 — lazily-compiled AJV validator for plugin.schema.json. */
+  private manifestValidator: ValidateFunction | null = null;
 
   constructor(options: PluginRuntimeOptions) {
     this.hostRoot = resolve(options.hostRoot);
@@ -533,6 +556,20 @@ export class PluginRuntime {
       );
     };
 
+    // Sprint 4-B §B-1 — AJV validation against schemas/plugin.schema.json.
+    // Surfaces every violation prefixed with `[manifest:<pluginId>]` so the
+    // operator sees all errors at once. Hand-rolled cross-field checks below
+    // remain authoritative for fields AJV cannot express.
+    const validator = await this.getManifestValidator();
+    if (validator && !validator(parsed)) {
+      const errs = (validator.errors ?? [])
+        .map((e) => `${e.instancePath || "/"} ${e.message ?? ""}`.trim())
+        .join("; ");
+      throw new Error(
+        `[manifest:${pid}] schema validation failed (${path}): ${errs}`,
+      );
+    }
+
     if (typeof parsed.id !== "string" || parsed.id.length === 0) {
       fail("id", "must be a non-empty string", `"id": "com.lge.meeting-recorder"`);
     }
@@ -592,6 +629,21 @@ export class PluginRuntime {
       }
     }
 
+    // Sprint 4-A — surface any remaining testMode flag in a managed plugin
+    // manifest. testMode may legitimately appear in dev/fixture builds but
+    // should NEVER ship inside a managed-deployment install.
+    if (
+      parsed.deployment === "managed" &&
+      parsed.config &&
+      typeof parsed.config === "object" &&
+      (parsed.config as Record<string, unknown>).testMode === true
+    ) {
+      console.warn(
+        `[plugin-runtime] managed plugin '${pid}' has config.testMode=true (${path}). ` +
+        `testMode is a development flag and must not ship in production installs — please remove it from the installed manifest.`,
+      );
+    }
+
     if (parsed.startupTimeoutMs !== undefined) {
       // Schema declares integer; runtime enforces matching constraint.
       if (typeof parsed.startupTimeoutMs !== "number" || !Number.isInteger(parsed.startupTimeoutMs) || parsed.startupTimeoutMs <= 0) {
@@ -603,7 +655,108 @@ export class PluginRuntime {
       }
     }
 
+    // Sprint 4-B §B-3 — uiCallable ⊂ tools + destructive-pattern guard.
+    // uiCallable is the renderer IPC allowlist (lvis:plugins:call); anything
+    // not in manifest.tools is unreachable anyway. Destructive verbs
+    // (delete/remove/send/destroy/erase/purge) are rejected unless the plugin
+    // is managed AND signed — users cannot bypass approval gates via UI.
+    const uiCallable = Array.isArray(parsed.uiCallable) ? parsed.uiCallable : [];
+    for (let i = 0; i < uiCallable.length; i += 1) {
+      const method = uiCallable[i];
+      if (typeof method !== "string") {
+        fail(
+          `uiCallable[${i}]`,
+          "must be a string",
+          `"uiCallable": ["meeting_summary_get"]`,
+        );
+      }
+      if (!parsed.tools.includes(method)) {
+        fail(
+          `uiCallable[${i}]`,
+          `entry '${method}' is not declared in tools[]`,
+          `add "${method}" to tools[] or remove it from uiCallable[]`,
+        );
+      }
+      if (isDestructiveToolName(method)) {
+        // Managed + signed plugins may expose destructive verbs (e.g. admin
+        // tooling); everything else is rejected at manifest load time and
+        // audit-logged so operators see the attempt.
+        const managedAndSigned =
+          parsed.deployment === "managed" && this.signatureVerifier !== undefined;
+        if (!managedAndSigned) {
+          this.auditLog?.("error", "plugin_uiCallable_destructive_rejected", {
+            pluginId: pid,
+            method,
+            deployment: parsed.deployment ?? "user",
+          });
+          fail(
+            `uiCallable[${i}]`,
+            `destructive tool '${method}' cannot be exposed via uiCallable (managed+signed plugins only)`,
+            `route '${method}' through ConversationLoop (permission+approval) instead`,
+          );
+        }
+      }
+    }
+
     return parsed;
+  }
+
+  /**
+   * Sprint 4-B §B-1 — lazy-load + compile plugin.schema.json into an AJV
+   * validator. AJV is configured with `strict: true` + `allErrors: true` so
+   * every violation surfaces in one pass. Compilation failure is logged and
+   * returns `null`; readManifest falls back to hand-rolled checks to stay
+   * operational.
+   */
+  private async getManifestValidator(): Promise<ValidateFunction | null> {
+    if (this.manifestValidator) return this.manifestValidator;
+    try {
+      const hereDir = dirname(fileURLToPath(import.meta.url));
+      // dist/src/plugins -> ../../../schemas, src/plugins -> ../../schemas
+      const candidates = [
+        resolve(hereDir, "../../../schemas/plugin.schema.json"),
+        resolve(hereDir, "../../schemas/plugin.schema.json"),
+      ];
+      let schemaBytes: string | null = null;
+      for (const candidate of candidates) {
+        try {
+          schemaBytes = await readFile(candidate, "utf-8");
+          break;
+        } catch {
+          // try next
+        }
+      }
+      if (!schemaBytes) {
+        console.warn("[plugin-runtime] plugin.schema.json not found — AJV validation disabled");
+        return null;
+      }
+      const schema = JSON.parse(schemaBytes);
+      // Ajv default export compat for ESM/CJS interop.
+      const AjvAny = AjvModule as unknown as { default?: unknown };
+      const AjvCtor = (AjvAny.default ?? AjvModule) as new (opts?: unknown) => {
+        compile: (schema: unknown) => ValidateFunction;
+      };
+      // strictRequired=false — if/then branches reference properties declared
+      // on the outer `properties` block; AJV's strict mode otherwise flags
+      // these as "property not defined inside the same schema object".
+      const ajv = new AjvCtor({
+        strict: true,
+        strictRequired: false,
+        allErrors: true,
+        allowUnionTypes: true,
+      });
+      const AddAny = AddFormatsModule as unknown as { default?: unknown };
+      const addFormatsFn = (AddAny.default ?? AddFormatsModule) as (a: unknown) => void;
+      addFormatsFn(ajv);
+      this.manifestValidator = ajv.compile(schema);
+      return this.manifestValidator;
+    } catch (err) {
+      console.warn(
+        "[plugin-runtime] AJV compile failed — falling back to hand-rolled checks:",
+        (err as Error).message,
+      );
+      return null;
+    }
   }
 
   private resolveEntryPath(pluginRoot: string, entry: string): string {

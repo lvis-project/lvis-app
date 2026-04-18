@@ -237,15 +237,21 @@ type HostPluginContext = {
   hostApi: {
     registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
     emitEvent(eventType: string, data?: unknown): void;
-    onEvent(eventType: string, handler: (data: unknown) => void): void;
+    // Returns an unsubscribe disposer; call it to remove the handler.
+    onEvent(eventType: string, handler: (data: unknown) => void): () => void;
     addTask(task: { title: string; description?: string; source: string; sourceRef?: string; priority?: string }): void;
     saveNote(title: string, content: string): void;
     getSecret(key: string): string | null;
+    // Microsoft Graph shared auth — requires manifest.capabilities ⊇ ["ms-graph-consumer"]
     getMsGraphToken(): Promise<string | null>;
-    startMsGraphAuth(): Promise<void>;
+    startMsGraphAuth(openBrowser: (url: string) => Promise<void>): Promise<void>;
     isMsGraphAuthenticated(): boolean;
-    getMsGraphAccount(): { name?: string; email?: string } | null;
-    onMsGraphAuthChange(handler: (authenticated: boolean) => void): void;
+    getMsGraphAccount(): string | null;
+    onMsGraphAuthChange(handler: () => void): void;
+    // Sprint 1-A — shared services.
+    callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string>;
+    logEvent(level: "info" | "warn" | "error", message: string, data?: unknown): void;
+    onShutdown(handler: () => void | Promise<void>): void;
   };
 };
 
@@ -1505,24 +1511,38 @@ export default async function createPlugin(context: HostPluginContext) {
 
 ---
 
-## 향후 계획 (미구현)
+## uiCallable allowlist 및 보안 경계 (IPC trust boundary)
 
-이 섹션은 아직 구현되지 않은 기능을 기록합니다. 본문 예제에서 이 기능들을 사용하지 마세요.
+`manifest.uiCallable[]`은 렌더러 UI가 `lvis:plugins:call` IPC 로 **직접** 호출할 수
+있는 도구 이름의 allowlist 이다. 이 목록에 없는 도구는 ConversationLoop 경로
+(permission / scope / expansion cap / ApprovalGate) 를 **반드시** 거쳐야 한다.
 
-### Phase 2 예정
+### 규칙 (Sprint 4-B §B-3 호스트 강제)
 
-| 기능 | 설명 |
-|------|------|
-| `startupTimeoutMs` | startupTools 실행 시 타임아웃 (매니페스트 필드) |
-| `logEvent()` | HostApi 로그 이벤트 기록 메서드 |
-| `onShutdown()` | HostApi 앱 종료 훅 등록 메서드 |
+1. `uiCallable ⊂ tools` — 목록에 없는 이름은 런타임 로드 실패.
+2. 파괴적 동사 접미사는 원칙적으로 금지. 다음 패턴과 일치하는 이름은
+   `deployment: "managed"` **AND** 서명 검증 통과 **일 때만** 허용:
+   - `_delete`, `_remove`, `_send`, `_destroy`, `_erase`, `_purge` (대소문자 무관)
+   - user 플러그인이 해당 도구를 `uiCallable` 에 넣으면 매니페스트 로드 시 거부 + `AuditLogger` 기록.
+3. 일반 사용자 플러그인은 위 동사를 쓰는 도구를 ConversationLoop 으로만 노출할 것.
+   사용자 확인이 필요한 흐름은 PermissionManager 가 강제한다.
 
-### Phase 3 예정
+### Sprint 4-B §B-4 — 서명 검증 (managed plugins)
 
-| 기능 | 설명 |
-|------|------|
-| `signature` / `signatureAlgorithm` | 플러그인 코드 서명 검증 (매니페스트 필드) |
-| 플러그인 마켓플레이스 | 원격 플러그인 검색 및 설치 UI |
+- `deployment: "managed"` 매니페스트는 ed25519 detached signature (`plugin.json.sig`) 필수.
+- 개발 중 우회: `LVIS_DEV_SKIP_SIG=1` 환경변수 (프로덕션 금지).
+- user 플러그인은 서명 없어도 로드되나 경고 로그 + 감사 이벤트가 기록된다.
+
+### Sprint 4-B §B-5 — capability 선언 게이트
+
+- `hostApi.getMsGraphToken` / `startMsGraphAuth` / `isMsGraphAuthenticated` /
+  `getMsGraphAccount` / `onMsGraphAuthChange` 는 `capabilities: ["ms-graph-consumer"]`
+  를 선언한 플러그인만 호출 가능. 미선언 시 `capability not declared: ms-graph-consumer` 예외.
+
+### Sprint 4-B §B-7 — callLlm 레이트리밋
+
+- 플러그인별 토큰 버킷: 기본 10분당 20회. 초과 시 `rate-limit exceeded` 예외.
+- 호출 시마다 `AuditLogger` 에 `plugin.callLlm` 이벤트 기록 (`pluginId`, `promptLen`, `maxTokens`).
 
 ---
 

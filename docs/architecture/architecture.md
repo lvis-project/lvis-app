@@ -2032,6 +2032,18 @@ stateDiagram-v2
 | `logEvent(level, message, data?)` | **[Phase 2]** 호스트 감사 로그에 플러그인 이벤트 기록. `level`: `"info"\|"warn"\|"error"` | 전체 |
 | `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
 
+**Microsoft Graph 공유 인증 (`ms-graph-consumer` capability gated):**
+
+| 메서드 | 설명 | 소비 플러그인 |
+|--------|------|--------------|
+| `getMsGraphToken()` | 현재 세션의 Microsoft Graph Bearer 토큰을 반환(미인증 시 `null`). 각 플러그인이 직접 MSAL 인스턴스를 운영하지 않고 호스트의 단일 토큰 캐시를 공유. | email, calendar |
+| `startMsGraphAuth(openBrowser)` | OAuth 2.0 브라우저 플로우 개시. `openBrowser(url)` 콜백으로 시스템 브라우저를 열고, 호스트가 리다이렉트 URI 를 수신해 토큰을 교환한다. | email, calendar |
+| `isMsGraphAuthenticated()` | 현재 인증 상태 (동기). 툴 호출 전 가드에 사용. | email, calendar |
+| `getMsGraphAccount()` | 로그인된 계정 이메일(UPN) 반환. 미인증 시 `null`. | email, calendar |
+| `onMsGraphAuthChange(handler)` | 토큰 갱신·로그아웃 이벤트 구독. UI 상태 뱃지 동기화에 사용. | email, calendar |
+
+이 5개 메서드는 `capabilities: ["ms-graph-consumer"]` 매니페스트 선언을 요구한다 (§9.6 deployment guard 가 정책상 게이팅). `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `worker-client`, `knowledge-index` 가 사용된다.
+
 **HostApi 확장 원칙 ("3+ 플러그인 규칙"):** 새 메서드는 3개 이상의 플러그인이 동일 기능을 필요로 하거나, 보안·감사 제어가 필요한 경우에만 추가한다. 상세: `docs/references/plugin-tool-schema-design.md` §6
 
 ### 9.4b IPC/RPC 범위 — 플러그인 통신 경계

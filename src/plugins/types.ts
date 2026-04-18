@@ -23,6 +23,21 @@ export interface PluginManifest {
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   keywords?: Array<{ keyword: string; skillId: string }>;
+  /**
+   * 플러그인이 요구/제공하는 capability 태그. 정책·UI·게이팅에 사용되며
+   * kebab-case 컨벤션을 따른다.
+   *
+   * 현재 사용 중인 capability:
+   * - `meeting-recorder` — 실시간 음성 캡처 및 STT (meeting)
+   * - `mail-source` — 이메일 소스 연결 (email)
+   * - `calendar-source` — 캘린더 소스 연결 (calendar)
+   * - `background-watcher` — `startupTools` 로 백그라운드 폴러/감시자 기동 (email, calendar)
+   * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼 (pageindex)
+   * - `knowledge-index` — 문서 인덱스/검색 기능 제공 (pageindex)
+   * - `ms-graph-consumer` — HostApi 의 MS Graph 메서드(`getMsGraphToken`,
+   *   `startMsGraphAuth`, `isMsGraphAuthenticated`, `getMsGraphAccount`,
+   *   `onMsGraphAuthChange`) 사용. §9.4a 참고. (email, calendar)
+   */
   capabilities?: string[];
   startupTools?: string[];
   eventSubscriptions?: string[];

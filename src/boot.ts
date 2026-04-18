@@ -14,6 +14,8 @@ import { MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/mark
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
 import { PluginDeploymentGuard } from "./plugins/deployment-guard.js";
+import { PluginSignatureVerifier } from "./plugins/signature-verifier.js";
+import { BUNDLED_PUBLISHER_PUBLIC_KEYS } from "./plugins/publisher-keys.js";
 import { StarredStore } from "./data/starred-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
@@ -46,6 +48,7 @@ import {
   createHookRunner,
   createConversationLoop,
   createCallLlm,
+  createCallLlmForPlugin,
 } from "./boot/conversation.js";
 
 export type { AppServices } from "./boot/types.js";
@@ -137,13 +140,62 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   const llmCallerRef: {
     fn: ((prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string>) | null;
   } = { fn: null };
+  // Sprint 4-B §B-7 — plugin-scoped callLlm with per-plugin rate-limit + audit.
+  // Late-bound like llmCallerRef; plugin HostApi routes through this when set.
+  const pluginCallLlmRef: {
+    fn:
+      | ((
+          pluginId: string,
+          prompt: string,
+          opts?: { maxTokens?: number; systemPrompt?: string },
+        ) => Promise<string>)
+      | null;
+  } = { fn: null };
   let conversationLoopRef: import("./engine/conversation-loop.js").ConversationLoop | null = null;
 
-  const pluginRuntime = new PluginRuntime({
+  // Sprint 4-B §B-4 — signature verifier wired end-to-end.
+  // Dev escape hatch LVIS_DEV_SKIP_SIG=1 disables the verifier entirely (so
+  // managed plugins still load without a .sig during local development).
+  // TODO(production): ship production publisher public key + enforce in CI.
+  const skipSig = process.env.LVIS_DEV_SKIP_SIG === "1";
+  const signatureVerifier = skipSig
+    ? undefined
+    : new PluginSignatureVerifier({
+        publisherPublicKeysPem: BUNDLED_PUBLISHER_PUBLIC_KEYS,
+      });
+  if (skipSig) {
+    console.warn("[lvis] boot: LVIS_DEV_SKIP_SIG=1 — plugin signature verification disabled (dev-only)");
+  }
+
+  // Capability gate helper (§B-5) — msGraph HostApi methods are only callable
+  // by plugins that declare `ms-graph-consumer` in manifest.capabilities.
+  // Forward-declared here so createHostApi (which runs per-plugin at load
+  // time, AFTER the manifest is registered) can query the live pluginRuntime.
+  let pluginRuntime: PluginRuntime;
+  const capabilityDeniedMsg = (pluginId: string) =>
+    `[plugin:${pluginId}] capability not declared: ms-graph-consumer`;
+  const hasMsGraphCapability = (pluginId: string): boolean => {
+    const manifest = pluginRuntime?.getPluginManifest(pluginId);
+    return manifest?.capabilities?.includes("ms-graph-consumer") ?? false;
+  };
+
+  pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
     registryPath: resolve(projectRoot, "plugins/registry.json"),
     configOverrides,
     deploymentGuard,
+    signatureVerifier,
+    auditLog: (level, message, data) => {
+      try {
+        bootAuditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "plugin-runtime",
+          type: level === "error" ? "error" : "tool_call",
+          input: `[${level.toUpperCase()}] ${message}`,
+          output: data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
+        });
+      } catch {}
+    },
     onDisable: (pluginId) => {
       keywordEngine.unregisterByPlugin(pluginId);
       toolRegistry.unregisterByPlugin(pluginId);
@@ -187,15 +239,32 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       getSecret: (key) => {
         return settingsService.getSecret(key);
       },
-      // ─── Microsoft Graph 공유 인증 ────────────────────────────────
-      getMsGraphToken: () => msGraphService.getAccessToken(),
+      // ─── Microsoft Graph 공유 인증 (§B-5: capability-gated) ──────────
+      getMsGraphToken: () => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        return msGraphService.getAccessToken();
+      },
       startMsGraphAuth: async (openBrowser) => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
         await msGraphService.startInteractiveAuth(openBrowser);
       },
-      isMsGraphAuthenticated: () => msGraphService.isAuthenticated(),
-      getMsGraphAccount: () => msGraphService.getAccountName(),
-      onMsGraphAuthChange: (handler) => msGraphService.onAuthChange(handler),
+      isMsGraphAuthenticated: () => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        return msGraphService.isAuthenticated();
+      },
+      getMsGraphAccount: () => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        return msGraphService.getAccountName();
+      },
+      onMsGraphAuthChange: (handler) => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        msGraphService.onAuthChange(handler);
+      },
       callLlm: async (prompt, opts) => {
+        // Sprint 4-B §B-7 — rate-limited + audited path; fall back to the
+        // raw llmCallerRef only if the plugin-scoped ref hasn't been wired yet
+        // (e.g. during early startup before conversationLoop construction).
+        if (pluginCallLlmRef.fn) return pluginCallLlmRef.fn(pluginId, prompt, opts);
         if (!llmCallerRef.fn) throw new Error("LLM provider not ready");
         return llmCallerRef.fn(prompt, opts);
       },
@@ -400,7 +469,9 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // Late-binding 주입 — 두 ref 모두 여기서 채워진다.
   conversationLoopRef = conversationLoop;
   llmCallerRef.fn = createCallLlm(conversationLoop);
-  console.log("[lvis] boot: plugin callLlm ready");
+  // Sprint 4-B §B-7 — plugin-scoped callLlm with rate-limit + audit.
+  pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
+  console.log("[lvis] boot: plugin callLlm ready (rate-limited)");
 
   // Feature 4: 월요일 주간 일정 캐시 로드 (KST 기준)
   loadWeeklyCalendarIfMonday(pluginRuntime, proactiveEngine);

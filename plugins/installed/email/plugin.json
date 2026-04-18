@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "deployment": "managed",
   "publisher": "LG Electronics IT",
+  "startupTimeoutMs": 3000,
   "entry": "../../../node_modules/@lvis/plugin-email/dist/hostPlugin.js",
   "description": "Outlook 이메일 읽기·분석·답장 및 할 일 생성",
   "tools": [
@@ -22,7 +23,8 @@
   ],
   "capabilities": [
     "mail-source",
-    "background-watcher"
+    "background-watcher",
+    "ms-graph-consumer"
   ],
   "startupTools": [
     "email_start_watcher"

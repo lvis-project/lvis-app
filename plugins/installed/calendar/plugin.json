@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "deployment": "managed",
   "publisher": "LG Electronics IT",
+  "startupTimeoutMs": 3000,
   "entry": "../../../node_modules/@lvis/plugin-calendar/dist/hostPlugin.js",
   "description": "Outlook 캘린더 일정 조회·생성·수정·삭제 및 알림",
   "tools": [
@@ -22,7 +23,8 @@
   ],
   "capabilities": [
     "calendar-source",
-    "background-watcher"
+    "background-watcher",
+    "ms-graph-consumer"
   ],
   "startupTools": [
     "calendar_start_watcher"
