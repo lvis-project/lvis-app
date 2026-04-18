@@ -1508,6 +1508,8 @@ function App() {
     });
     return hits;
   }, [entries, searchQuery, searchCase]);
+  // O(1) membership check for per-entry highlight in the big render loop.
+  const searchMatchSet = useMemo(() => new Set(searchMatches), [searchMatches]);
   useEffect(() => {
     if (searchIdx >= searchMatches.length) setSearchIdx(0);
   }, [searchMatches, searchIdx]);
@@ -1518,6 +1520,8 @@ function App() {
     const histIdx = entryIndexToHistoryIndex.get(entryIdx);
     if (histIdx === undefined) return;
     setEditBusy(true);
+    const prevEntries = entries;
+    let failed = false;
     try {
       // Truncate renderer entries up to (but not including) the edited user
       // bubble; the streaming response will repopulate from there.
@@ -1525,15 +1529,24 @@ function App() {
       streamRef.current = "";
       thoughtRef.current = "";
       setStreaming(true);
-      await api.chatEditResend(histIdx, newText);
+      const res = await api.chatEditResend(histIdx, newText);
+      if (!res?.ok) {
+        failed = true;
+        // Restore the prior entries so the user doesn't lose context, and
+        // surface the failure via the existing assistant-error channel.
+        setEntries(setAssistantError(prevEntries, `편집 실패: ${res?.error ?? "알 수 없는 오류"}`, thoughtRef.current));
+      }
     } catch (err) {
+      failed = true;
       setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current));
     } finally {
       setEditBusy(false);
-      setEditingEntryIdx(null);
       setStreaming(false);
+      // Only exit editing mode on success; on failure keep the editor open
+      // so the user can retry without losing their draft.
+      if (!failed) setEditingEntryIdx(null);
     }
-  }, [api, entryIndexToHistoryIndex]);
+  }, [api, entries, entryIndexToHistoryIndex]);
 
   // ─── Fork ──────────────────────────────────────
   const handleFork = useCallback(async (entryIdx: number) => {
@@ -1548,6 +1561,7 @@ function App() {
 
   // ─── Retry with deeper thinking ────────────────
   const handleRetryEffort = useCallback(async () => {
+    const prevEntries = entries;
     // Strip the last assistant+reasoning so streaming replaces them cleanly.
     setEntries((p) => {
       const next = [...p];
@@ -1560,13 +1574,17 @@ function App() {
     thoughtRef.current = "";
     setStreaming(true);
     try {
-      await api.chatRetryEffort({ enableThinking: true, thinkingBudgetTokens: 20000 });
+      const res = await api.chatRetryEffort({ enableThinking: true, thinkingBudgetTokens: 20000 });
+      if (!res?.ok) {
+        // Restore the prior entries + surface failure via existing status.
+        setEntries(setAssistantError(prevEntries, `재시도 실패: ${res?.error ?? "알 수 없는 오류"}`, thoughtRef.current));
+      }
     } catch (err) {
       setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current));
     } finally {
       setStreaming(false);
     }
-  }, [api]);
+  }, [api, entries]);
 
   // ─── Star toggle ───────────────────────────────
   const handleToggleStar = useCallback(async (entryIdx: number) => {
@@ -1908,7 +1926,7 @@ function App() {
                 )}
                 {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
                 {entries.map((entry, idx) => {
-                  const isMatch = searchMatches.includes(idx);
+                  const isMatch = searchMatchSet.has(idx);
                   const isCurrentMatch = searchOpen && searchMatches[searchIdx] === idx;
                   const ringCls = isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
                   if (entry.kind === "user") {

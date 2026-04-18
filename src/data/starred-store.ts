@@ -50,7 +50,24 @@ export class StarredStore {
       }
       const parsed = JSON.parse(raw) as unknown;
       if (Array.isArray(parsed)) {
-        this.cache = parsed as StarredMessage[];
+        const valid: StarredMessage[] = [];
+        for (const item of parsed) {
+          if (
+            item &&
+            typeof item === "object" &&
+            typeof (item as StarredMessage).id === "string" &&
+            typeof (item as StarredMessage).sessionId === "string" &&
+            typeof (item as StarredMessage).messageIndex === "number" &&
+            typeof (item as StarredMessage).role === "string" &&
+            typeof (item as StarredMessage).text === "string" &&
+            typeof (item as StarredMessage).starredAt === "string"
+          ) {
+            valid.push(item as StarredMessage);
+          } else {
+            console.warn("[starred-store] skipping invalid entry:", item);
+          }
+        }
+        this.cache = valid;
       } else {
         this.cache = [];
       }

@@ -76,7 +76,7 @@ export interface AppServices {
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
   /** Sprint 4.C — starred messages persistence (~/.lvis/starred.json) */
-  starredStore: StarredStore;
+  starredStore?: StarredStore;
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
   refreshPluginNotifications?: () => void;
 }
