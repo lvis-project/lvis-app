@@ -31,7 +31,8 @@ describe("VercelUnifiedProvider openai — reasoning_effort mapping", () => {
     expect(mapReasoningEffort(3000)).toBe("low");
     expect(mapReasoningEffort(5000)).toBe("medium");
     expect(mapReasoningEffort(7999)).toBe("medium");
-    expect(mapReasoningEffort(8000)).toBe("high");
+    expect(mapReasoningEffort(8000)).toBe("medium");
+    expect(mapReasoningEffort(8001)).toBe("high");
     expect(mapReasoningEffort(32_000)).toBe("high");
   });
 
@@ -444,6 +445,69 @@ describe("VercelUnifiedProvider openai-compatible", () => {
 
     vi.doUnmock("ai");
     vi.doUnmock("@ai-sdk/openai-compatible");
+  });
+});
+
+describe("VercelUnifiedProvider openai — custom baseUrl proxy guard", () => {
+  it("drops reasoning_effort on tool turns for gpt-5.x when custom baseUrl is set", async () => {
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      fullStream: (async function* () {
+        yield {
+          type: "tool-call",
+          toolCallId: "c1",
+          toolName: "t",
+          input: {},
+        };
+        yield {
+          type: "finish",
+          finishReason: "tool-calls",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/openai", () => ({
+      createOpenAI: () => ({
+        responses: vi.fn(() => ({ __mock: "responses" })),
+        chat: vi.fn(() => ({ __mock: "chat" })),
+      }),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider(
+      "openai",
+      "test-key",
+      "https://proxy.example/v1",
+    );
+
+    await collect(
+      provider.streamTurn({
+        model: "gpt-5.4-mini",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+        enableThinking: true,
+        thinkingBudgetTokens: 10_000,
+        tools: [
+          {
+            name: "t",
+            description: "t",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ],
+      }),
+    );
+
+    const callArg = streamTextSpy.mock.calls[0]![0] as Record<string, unknown>;
+    // Custom baseUrl proxy may not support Responses API — treat as Chat-only.
+    expect(callArg.providerOptions).toBeUndefined();
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/openai");
   });
 });
 

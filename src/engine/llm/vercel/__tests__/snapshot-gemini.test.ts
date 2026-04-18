@@ -343,12 +343,12 @@ describe("VercelUnifiedProvider gemini — adapter smoke (mocked ai.streamText)"
     vi.doUnmock("@ai-sdk/google");
   });
 
-  it("vendor=openai yields error event (P2 scope — not yet implemented in P1)", async () => {
+  it("vendor=claude yields error event (P3 scope — not yet implemented in P2)", async () => {
     const { VercelUnifiedProvider } = await import("../adapter.js");
-    const provider = new VercelUnifiedProvider("openai", "k");
+    const provider = new VercelUnifiedProvider("claude", "k");
     const events: any[] = [];
     for await (const ev of provider.streamTurn({
-      model: "gpt-5.4",
+      model: "claude-sonnet-4-6",
       systemPrompt: "",
       messages: [],
     })) {
