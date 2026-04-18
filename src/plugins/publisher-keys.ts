@@ -1,28 +1,69 @@
 /**
  * Bundled publisher public keys for plugin manifest signature verification.
  *
- * Sprint 4-B §B-4 — wired end-to-end via boot.ts. Managed plugins whose `.sig`
- * cannot be verified against any key here are fail-closed (not loaded) unless
- * the dev escape hatch `LVIS_DEV_SKIP_SIG=1` is set. User plugins with missing
- * signatures still load with a warning.
+ * AP-1 follow-up: this module now consumes `MARKETPLACE_PUBLIC_KEYS` from
+ * `@lvis/plugin-sdk/keys` (v1.0.1) — the single source of truth for trusted
+ * marketplace signing keys. Key rotation is now managed by bumping the SDK
+ * submodule rather than hand-editing arrays here.
  *
- * TODO(production): replace the development key below with the production
- * LGE publisher key once the signing pipeline is in place. The current key is
- * intended for development and CI fixtures only — it is documented as
- * "development-only" so it is obvious on audit.
+ * The SDK ships raw 32-byte ed25519 public keys (base64) keyed by `key_id`.
+ * The host's `PluginSignatureVerifier` consumes PEM SPKI strings, so this
+ * module converts each raw key into its PEM SPKI form at import time.
+ *
+ * Managed plugins whose `.sig` cannot be verified against any key here are
+ * fail-closed (not loaded) unless the dev escape hatch `LVIS_DEV_SKIP_SIG=1`
+ * is set. User plugins with missing signatures still load with a warning.
  */
 
-/** Development-only ed25519 SPKI public key (PEM). NOT FOR PRODUCTION USE. */
-export const DEVELOPMENT_PUBLISHER_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
------END PUBLIC KEY-----
-`;
+import { createPublicKey } from "node:crypto";
+import { MARKETPLACE_PUBLIC_KEYS } from "@lvis/plugin-sdk/keys";
 
 /**
- * Host-bundled publisher public keys. Extend this array with rotated keys; the
- * verifier accepts a signature that matches ANY configured key. Keep entries
- * annotated with the key purpose (development / production / rotated-YYYY-MM).
+ * Ed25519 SPKI DER prefix (12 bytes): SEQUENCE, length, SEQUENCE, OID
+ * 1.3.101.112, BIT STRING, 0 unused bits. Followed by the 32-byte raw key.
+ * See RFC 8410 §4.
  */
-export const BUNDLED_PUBLISHER_PUBLIC_KEYS: string[] = [
-  DEVELOPMENT_PUBLISHER_PUBLIC_KEY_PEM,
-];
+const ED25519_SPKI_DER_PREFIX = Buffer.from([
+  0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+]);
+
+function rawEd25519ToPem(rawBase64: string): string {
+  const raw = Buffer.from(rawBase64, "base64");
+  if (raw.length !== 32) {
+    throw new Error(
+      `Invalid ed25519 public key length: expected 32 bytes, got ${raw.length}`,
+    );
+  }
+  const spkiDer = Buffer.concat([ED25519_SPKI_DER_PREFIX, raw]);
+  const key = createPublicKey({ key: spkiDer, format: "der", type: "spki" });
+  return key.export({ type: "spki", format: "pem" }).toString();
+}
+
+/**
+ * Bundled publisher keys as raw 32-byte Buffers, keyed by `key_id`. Exposed
+ * for the marketplace artifact installer (consumes raw ed25519 keys for
+ * envelope signature verification — see AP-1 FU installFromMarketplace wire
+ * once S2 lands).
+ */
+export function getBundledPublicKeys(): Record<string, Buffer> {
+  return Object.fromEntries(
+    (Object.entries(MARKETPLACE_PUBLIC_KEYS) as [string, string][]).map(([id, b64]) => {
+      const buf = Buffer.from(b64, "base64");
+      if (buf.length !== 32) {
+        throw new Error(
+          `Invalid bundled ed25519 public key for key_id="${id}": expected 32 raw bytes, got ${buf.length}`,
+        );
+      }
+      return [id, buf];
+    }),
+  );
+}
+
+/**
+ * Host-bundled publisher public keys in PEM SPKI form. Consumed by
+ * `PluginSignatureVerifier` (manifest signature path). The verifier accepts
+ * a signature that matches ANY configured key — additive rotation is safe.
+ */
+export const BUNDLED_PUBLISHER_PUBLIC_KEYS: string[] = (
+  Object.values(MARKETPLACE_PUBLIC_KEYS) as string[]
+).map(rawEd25519ToPem);

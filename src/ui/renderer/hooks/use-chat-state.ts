@@ -1,0 +1,218 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  applyToolEnd,
+  applyToolStart,
+  finalizeStreamingAssistant,
+  finalizeStreamingReasoning,
+  setAssistantError,
+  upsertStreamingAssistant,
+  upsertStreamingReasoning,
+  type ChatEntry,
+} from "../../../lib/chat-stream-state.js";
+import type { LvisApi } from "../types.js";
+
+/**
+ * Phase 5 — chat state + stream hook.
+ *
+ * Owns everything chat-lifecycle: entries, streaming flag, the IPC
+ * stream subscription (finalize/tool/error/redact/compact/done), edit state,
+ * and edit/retry handlers.
+ *
+ * `setEntries` is still exposed for App-level flows (briefing seeding,
+ * session load, fork truncation, handleAsk user append + error path).
+ */
+export function useChatState(api: LvisApi) {
+  const [entries, setEntries] = useState<ChatEntry[]>([]);
+  const [streaming, setStreaming] = useState(false);
+  const streamRef = useRef("");
+  const thoughtRef = useRef("");
+
+  const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+
+  // Guard against setState after unmount — Fix 1 (PR #98).
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  // Map renderer `entries` (which include reasoning/tool_group/system) to
+  // backend history indices which only track user + assistant messages.
+  const entryIndexToHistoryIndex = useMemo(() => {
+    const map = new Map<number, number>();
+    let backend = 0;
+    entries.forEach((e, i) => {
+      if (e.kind === "user" || e.kind === "assistant") {
+        map.set(i, backend);
+        backend += 1;
+      }
+    });
+    return map;
+  }, [entries]);
+
+  // Stream subscription — Phase 5: absorbed from App.tsx.
+  useEffect(() => {
+    const unsub = api.onChatStream((ev) => {
+      if (!aliveRef.current) return;
+      if (process.env.VITE_DEBUG_STREAM === "1") console.log("[lvis:chat:stream]", ev);
+      if (ev.type === "text_delta" && ev.text) {
+        streamRef.current += ev.text;
+        setEntries((p) => upsertStreamingAssistant(p, streamRef.current));
+      } else if (ev.type === "reasoning_delta" && ev.text) {
+        thoughtRef.current += ev.text;
+        setEntries((p) => upsertStreamingReasoning(p, thoughtRef.current));
+      } else if (ev.type === "assistant_round") {
+        setEntries((p) => {
+          let next = finalizeStreamingReasoning(p, ev.thought ?? thoughtRef.current);
+          next = finalizeStreamingAssistant(next, ev.text ?? streamRef.current);
+          return next;
+        });
+        streamRef.current = "";
+        thoughtRef.current = "";
+      } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
+        const { groupId, toolUseId, displayOrder = 0, name, input } = ev;
+        setEntries((p) => applyToolStart(p, { groupId, toolUseId, displayOrder, name, input }));
+      } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
+        const { groupId, toolUseId, result, isError } = ev;
+        setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError }));
+      } else if (ev.type === "error") {
+        setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current));
+        streamRef.current = "";
+        thoughtRef.current = "";
+      } else if (ev.type === "redact_notice") {
+        // Sprint E §3 — user draft 에서 PII 가 리댁트되었음을 알리는 시스템 배지.
+        const count = (ev as unknown as { count?: number }).count ?? 0;
+        const byKind = (ev as unknown as { byKind?: Record<string, number> }).byKind ?? {};
+        const kindLabel = Object.entries(byKind)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(", ");
+        setEntries((p) => [
+          ...p,
+          { kind: "system", text: `🔒 전송 전 PII ${count}건 리댁트됨${kindLabel ? ` (${kindLabel})` : ""}` },
+        ]);
+      } else if (ev.type === "compact_notice") {
+        const n = ev.removedMessages ?? 0;
+        setEntries((p) => [...p, { kind: "system", text: `💾 이전 ${n}개 대화를 요약했습니다 (목표·결정사항 보존)` }]);
+      } else if (ev.type === "done") {
+        if (streamRef.current || thoughtRef.current) {
+          setEntries((p) => {
+            let next = finalizeStreamingReasoning(p, thoughtRef.current);
+            next = finalizeStreamingAssistant(next, streamRef.current);
+            return next;
+          });
+          streamRef.current = "";
+          thoughtRef.current = "";
+        }
+      }
+    });
+    return () => { unsub(); };
+  }, [api]);
+
+  const handleEditSave = useCallback(
+    async (entryIdx: number, newText: string) => {
+      const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+      if (histIdx === undefined) return;
+      setEditBusy(true);
+      const prevEntries = entries;
+      let failed = false;
+      try {
+        setEntries((p) => [...p.slice(0, entryIdx), { kind: "user", text: newText }]);
+        streamRef.current = "";
+        thoughtRef.current = "";
+        setStreaming(true);
+        const res = await api.chatEditResend(histIdx, newText);
+        if (!res?.ok) {
+          failed = true;
+          setEntries(
+            setAssistantError(
+              prevEntries,
+              `편집 실패: ${res?.error ?? "알 수 없는 오류"}`,
+              thoughtRef.current,
+            ),
+          );
+        }
+      } catch (err) {
+        failed = true;
+        setEntries((p) =>
+          setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current),
+        );
+      } finally {
+        setEditBusy(false);
+        setStreaming(false);
+        if (!failed) setEditingEntryIdx(null);
+      }
+    },
+    [api, entries, entryIndexToHistoryIndex],
+  );
+
+  const handleRetryEffort = useCallback(async () => {
+    const prevEntries = entries;
+    setEntries((p) => {
+      const next = [...p];
+      while (
+        next.length > 0 &&
+        (next[next.length - 1].kind === "assistant" ||
+          next[next.length - 1].kind === "reasoning" ||
+          next[next.length - 1].kind === "tool_group")
+      ) {
+        next.pop();
+      }
+      return next;
+    });
+    streamRef.current = "";
+    thoughtRef.current = "";
+    setStreaming(true);
+    try {
+      const res = await api.chatRetryEffort({
+        enableThinking: true,
+        thinkingBudgetTokens: 20000,
+      });
+      if (!res?.ok) {
+        setEntries(
+          setAssistantError(
+            prevEntries,
+            `재시도 실패: ${res?.error ?? "알 수 없는 오류"}`,
+            thoughtRef.current,
+          ),
+        );
+      }
+    } catch (err) {
+      setEntries((p) =>
+        setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current),
+      );
+    } finally {
+      setStreaming(false);
+    }
+  }, [api, entries]);
+
+  // Used by handleAsk in App.tsx to reset stream accumulators before chatSend.
+  const resetStreamAccumulators = useCallback(() => {
+    streamRef.current = "";
+    thoughtRef.current = "";
+  }, []);
+
+  // Used by handleAsk error path to show an error bubble with the current thought.
+  const setErrorWithThought = useCallback((message: string) => {
+    setEntries((p) => setAssistantError(p, message, thoughtRef.current));
+    streamRef.current = "";
+    thoughtRef.current = "";
+  }, []);
+
+  return {
+    entries,
+    setEntries,
+    streaming,
+    setStreaming,
+    editingEntryIdx,
+    setEditingEntryIdx,
+    editBusy,
+    entryIndexToHistoryIndex,
+    handleEditSave,
+    handleRetryEffort,
+    resetStreamAccumulators,
+    setErrorWithThought,
+  };
+}

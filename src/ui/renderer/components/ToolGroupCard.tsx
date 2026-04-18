@@ -103,7 +103,7 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
       {htmlPreviews.length > 0 && (
         <div className="border-t px-3 py-2">
           {htmlPreviews.map((p) => (
-            <HtmlPreview key={p.toolUseId} payload={p.payload} />
+            <HtmlPreview key={p.toolUseId} payload={p.payload} allowScripts={true} />
           ))}
         </div>
       )}

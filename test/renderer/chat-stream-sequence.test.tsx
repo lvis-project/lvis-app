@@ -1,0 +1,97 @@
+/**
+ * Phase 3.2 safety net — onChatStream event sequencing.
+ *
+ * Covers the four event kinds most likely to regress during hook extraction:
+ *  - text_delta accumulation
+ *  - reasoning_delta -> ReasoningCard rendering
+ *  - tool_start/tool_end -> ToolGroupCard rendering
+ *  - assistant_round / done -> finalize (streaming flag false)
+ */
+import "./setup.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { act, waitFor, fireEvent } from "@testing-library/react";
+import { renderApp } from "./render-app.js";
+
+async function submit(container: HTMLElement, text: string): Promise<void> {
+  const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+  await act(async () => {
+    fireEvent.change(textarea, { target: { value: text } });
+    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
+  });
+}
+
+describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
+  it("text_delta events accumulate into the streaming assistant entry", async () => {
+    const { container, api, emitChatStream } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    await submit(container, "ask");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "Part A " });
+      emitChatStream({ type: "text_delta", text: "Part B" });
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("Part A Part B");
+    });
+  });
+
+  it("reasoning_delta events render reasoning content", async () => {
+    const { container, api, emitChatStream } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    await submit(container, "think");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+
+    await act(async () => {
+      emitChatStream({ type: "reasoning_delta", text: "inner reasoning chain" });
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("inner reasoning chain");
+    });
+  });
+
+  it("tool_start renders a tool group card for the tool call", async () => {
+    const { container, api, emitChatStream } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    await submit(container, "use tool");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+
+    await act(async () => {
+      emitChatStream({
+        type: "tool_start",
+        groupId: "g1",
+        toolUseId: "t1",
+        displayOrder: 0,
+        name: "knowledge_search",
+        input: { query: "hello" },
+      });
+    });
+    // ToolGroupCard renders "도구 사용 중" while running (collapsed by default);
+    // that's enough to prove the tool_group entry was created.
+    await waitFor(() => {
+      expect(container.textContent).toContain("도구 사용 중");
+    });
+  });
+
+  it("assistant_round + done finalize the streaming entry", async () => {
+    const { container, api, emitChatStream } = await renderApp();
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    await submit(container, "complete");
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "final text" });
+      emitChatStream({ type: "assistant_round", text: "final text" });
+      emitChatStream({ type: "done" });
+    });
+    await waitFor(() => {
+      // Content rendered, and the "응답을 작성하는 중..." spinner text is gone.
+      expect(container.textContent).toContain("final text");
+      expect(container.textContent).not.toContain("응답을 작성하는 중...");
+    });
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});

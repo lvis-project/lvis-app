@@ -111,6 +111,54 @@ export interface PluginRegistry {
   plugins: PluginRegistryEntry[];
 }
 
+/**
+ * S2 — Signature envelope sidecar served by `/api/v1/plugins/{slug}/download.sig`.
+ * Matches the server's §0.1 dual-sign format.
+ */
+export interface SignatureEnvelope {
+  version: 1;
+  /** Unix seconds. Used for clock-skew guard + revocation. */
+  iat: number;
+  /** Hex-encoded SHA-256 of the tarball bytes. */
+  artifact_sha256: string;
+  signatures: Array<{
+    key_id: string;
+    alg: "ed25519";
+    /** Base64-encoded raw 64-byte signature. */
+    sig: string;
+  }>;
+}
+
+/** S2 — result of verifying a {@link SignatureEnvelope} against a tarball. */
+export interface VerifyResult {
+  ok: boolean;
+  key_id?: string;
+  reason?: string;
+}
+
+/**
+ * S14 — dependency specification extracted from plugin manifest's `requires` block.
+ * Capabilities are kebab-case tags matching `^[a-z][a-z0-9-]*$`.
+ */
+export interface RequiresSpec {
+  capabilities: string[];
+}
+
+/**
+ * S14 — thrown by marketplace install preflight when required capabilities
+ * are not satisfied by currently-installed plugins.
+ */
+export class MissingDependenciesError extends Error {
+  readonly missing: string[];
+  constructor(missing: string[]) {
+    super(
+      `Plugin requires capabilities not provided by installed plugins: ${missing.join(", ")}`,
+    );
+    this.missing = missing;
+    this.name = "MissingDependenciesError";
+  }
+}
+
 export interface PluginMarketplaceItem {
   id: string;
   name: string;
@@ -122,6 +170,8 @@ export interface PluginMarketplaceItem {
   ui?: PluginUiExtension[];
   deployment?: DeploymentMode;
   publisher?: string;
+  /** S14: dependency capabilities this plugin requires. */
+  requires?: RequiresSpec;
 }
 
 /**

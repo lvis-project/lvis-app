@@ -333,29 +333,38 @@ export function registerIpcHandlers(
   });
   ipcMain.handle("lvis:permission:add-rule", async (_e, pattern: string, action: "allow" | "deny") => {
     // §F8: 입력 검증
-    if (typeof pattern !== "string" || pattern.trim().length === 0) {
+    const normalized = pattern.trim();
+    if (typeof pattern !== "string" || normalized.length === 0) {
       return { ok: false, error: "invalid-pattern", message: "패턴은 빈 문자열일 수 없습니다." };
     }
-    if (pattern.length > 128) {
+    if (normalized.length > 128) {
       return { ok: false, error: "invalid-pattern", message: "패턴은 128자를 초과할 수 없습니다." };
     }
     if (action !== "allow" && action !== "deny") {
       return { ok: false, error: "invalid-action", message: `유효하지 않은 action: '${action}'. 허용값: allow, deny` };
     }
     const pm = conversationLoop.permissionManager;
-    if (!pm) return { ok: false };
-    if (action === "allow") {
-      await pm.addAlwaysAllowedPersist(pattern);
-    } else {
-      await pm.addAlwaysDeniedPersist(pattern);
+    if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
+    try {
+      if (action === "allow") {
+        await pm.addAlwaysAllowedPersist(normalized);
+      } else {
+        await pm.addAlwaysDeniedPersist(normalized);
+      }
+      return { ok: true, rule: { pattern: normalized, action } };
+    } catch (e) {
+      return { ok: false, error: "add-failed", message: (e as Error).message };
     }
-    return { ok: true };
   });
   ipcMain.handle("lvis:permission:remove-rule", async (_e, pattern: string, action: "allow" | "deny") => {
     const pm = conversationLoop.permissionManager;
-    if (!pm) return { ok: false };
-    await pm.removeRule(pattern, action);
-    return { ok: true };
+    if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
+    try {
+      await pm.removeRule(pattern, action);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: "remove-failed", message: (e as Error).message };
+    }
   });
 
   // ─── Approval Gate (§6.3 Layer 3 + §8) ────────
