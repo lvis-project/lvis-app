@@ -12,7 +12,7 @@
  *   5. idleScheduler.signalConversation (Agent 5 §6.1)
  */
 
-import { shouldCompact, compactMessages, getModelContextWindow } from "../engine/auto-compact.js";
+import { shouldCompact, compactMessages, microcompactMessages, getModelContextWindow } from "../engine/auto-compact.js";
 import type { GenericMessage, TokenUsage, LLMVendor } from "../engine/llm/types.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
@@ -51,18 +51,29 @@ export class PostTurnHookChain {
   async run(ctx: PostTurnHookContext): Promise<GenericMessage[] | null> {
     let compactedMessages: GenericMessage[] | null = null;
 
-    // 1. Auto-Compact (§4.5.4)
-    // 모델 컨텍스트 윈도우 대비 사용률이 설정값(기본 80%) 이상이면 자동 압축 (아키텍처 §4.5.4)
-    // thresholdPct는 CompactConfig에서 조정 가능하며 기본값은 0.8
+    // 1. Auto-Compact (§4.5.4) — 2-stage
+    //    Stage 1a (preventive): microcompact — 매 턴 실행, 오래된 tool_result를 stub으로 교체
+    //    Stage 1b (threshold):  full compact — 사용률 임계치 초과 시 LLM-free 요약으로 압축
     try {
       const autoCompactEnabled = this.deps.settingsService?.get("chat").autoCompact ?? true;
       if (autoCompactEnabled) {
+        // Stage 1a: microcompact (항상 실행, 저비용)
+        const { messages: afterMicro, result: mr } = microcompactMessages(ctx.messages);
+        let working = afterMicro;
+        if (mr.stripped) {
+          compactedMessages = afterMicro;
+          console.log(
+            `[post-turn] microcompact: stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars`,
+          );
+        }
+
+        // Stage 1b: threshold-triggered full compact
         const llmSettings = this.deps.settingsService?.get("llm");
         const contextWindow = llmSettings
           ? getModelContextWindow(llmSettings.provider as LLMVendor, llmSettings.model as string)
           : undefined;
         if (shouldCompact(ctx.cumulativeUsage, contextWindow)) {
-          const { messages: compacted, result: cr } = compactMessages(ctx.messages);
+          const { messages: compacted, result: cr } = compactMessages(working, undefined, "auto");
           if (cr.compacted) {
             compactedMessages = compacted;
             console.log(

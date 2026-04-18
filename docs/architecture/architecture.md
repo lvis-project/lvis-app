@@ -814,9 +814,14 @@ sequenceDiagram
 | **지속성** | assistant `thought`는 히스토리에 저장되어 tool round-trip 후에도 reasoning 모델의 문맥이 유지된다. |
 | **거버넌스 동기화** | 대화 루프는 로컬 GovernancePolicy를 조회하고, 상위 정책 동기화 서버의 broadcast로 갱신되는 설계를 전제로 한다. |
 
-#### 4.5.4 컨텍스트 관리 — Auto-Compact
+#### 4.5.4 컨텍스트 관리 — Auto-Compact (2-stage)
 
-문서의 **목표 설계**는 컨텍스트 **사용률 기준 Auto-Compact**다. 기본 임계치는 **40%**이며, 사용자가 **20% 단위(20 / 40 / 60 / 80%)** 로 조정할 수 있다. 현재 구현 단계는 `inputTokens >= 80_000`과 on/off 토글로 단순화되어 있으므로, 문서에는 **현재 구현**과 **목표 설계**를 함께 남긴다.
+LVIS는 OpenHarness 레퍼런스를 따라 **2-stage compact** 를 채택한다:
+
+- **Stage 1a — Microcompact (preventive, LLM-free)**: 매 post-turn마다 실행. `microcompactMessages()` 가 오래된 `tool_result` 메시지 body를 stub(`[tool_result stripped: tool=X, origLen=N]`)으로 교체해 토큰을 낮춘다. `MessageMeta.stripped=true` 로 표시되어 **idempotent** 이며, 최근 N개(기본 4)는 원본 유지, `toolUseId` 참조 무결성은 그대로 보존된다.
+- **Stage 1b — Full compact (threshold-gated, LLM-free 요약)**: `shouldCompact()` 가 사용률 임계치(기본 80%) 초과를 감지하면 `compactMessages()` 가 보존 구간을 제외한 이전 메시지를 요약으로 교체. 생성된 summary user 메시지는 `MessageMeta.compactBoundary=true` 로 마킹되어 **double-compact 를 방지** 한다 (marker 이후만 재요약 대상).
+
+목표 설계와 현재 구현 모두 사용률 기준 자동 트리거(20% 단위 조정 20/40/60/80%)를 따른다. 즉, Stage 1b는 고정 `inputTokens` 비교가 아니라 `shouldCompact(cumulativeUsage, contextWindow)` 로 계산되며, 누적 사용량이 `contextWindow × thresholdPct`(기본 80%) 를 넘으면 발동한다. Stage 1a는 **항상 실행** 되므로 threshold와 독립적으로 토큰 압력을 완화한다.
 
 ```mermaid
 flowchart LR
@@ -1808,22 +1813,8 @@ graph TB
     "version": "1.2.0",
     "description": "STT 기반 회의록 자동 작성 플러그인",
     "author": "DX Platform Team",
-    "permissions": ["microphone", "local-storage", "lgenie-session", "ui-slot:sidebar", "ui-slot:toolbar"],
+    "methods": ["meeting_start", "meeting_stop", "meeting_summarize"],
     "keywords": ["회의록", "녹음", "회의", "미팅", "meeting"],
-    "skills": [
-        {
-            "name": "meeting_record",
-            "trigger": ["회의록 작성", "회의 녹음", "미팅 기록"],
-            "entry": "skills/meeting_record.js"
-        }
-    ],
-    "tools": [
-        {
-            "name": "stt_transcribe",
-            "entry": "tools/stt_transcribe.js",
-            "description": "음성을 텍스트로 변환"
-        }
-    ],
     "ui": {
         "sidebar": "ui/MeetingSidebar.jsx",
         "toolbar": "ui/MeetingToolbar.jsx",
@@ -2105,7 +2096,7 @@ graph TB
 | **업데이트** | 정책 push 시 강제 | 사용자 opt-in |
 | **서명 검증** | LG Internal Root CA 필수 (실패 시 load 거부) | 정책에 따라 `warn` / `require` / `off` |
 | **Directory** | `~/.lvis/plugins/managed/<id>/<version>/` | `~/.lvis/plugins/user/<id>/` |
-| **Manifest 필드** | `deployment: "managed"`, `publisher`, `signature`, `publishedAt` | `deployment: "user"` |
+| **Manifest 필드** | `deployment: "managed"`, `publisher` | `deployment: "user"` |
 | **Settings UI** | lock icon + "회사 배포" 표시, 제거 / 비활성화 버튼 잠금 | 정상 토글 |
 | **차단 시나리오** | 정책 `deny_list` 발행 → 다음 boot 시 자동 제거 | 정책 매치 시 즉시 비활성화 |
 | **감사 로깅** | managed sync 이벤트는 사내 감사 endpoint push 대상 | 로컬 audit log 중심 |
@@ -2119,15 +2110,9 @@ graph TB
   "name": "LVIS PageIndex",
   "version": "0.2.0",
   "entry": "dist/index.js",
-  "methods": ["index_scan", "chat_preview", "..."],
+  "methods": ["index_scan", "chat_preview"],
   "deployment": "managed",
-  "publisher": "LG Electronics IT",
-  "publisherId": "lge.it",
-  "publishedAt": "2026-04-13T12:00:00Z",
-  "signature": "base64(ECDSA-P256-SHA256(manifest_body))",
-  "signatureAlgorithm": "ECDSA-P256-SHA256",
-  "minAppVersion": "1.0.0",
-  "maxAppVersion": "1.5.0"
+  "publisher": "LG Electronics IT"
 }
 ```
 
@@ -2191,12 +2176,6 @@ Step 1-8:  기존 boot sequence
   "nextCheckAt": "2026-04-14T21:00:00Z"
 }
 ```
-
-**Phase 분리**
-
-- **Phase 1.5**: deployment mode 타입 + manifest 확장 + `PluginDeploymentGuard` 경량 구현 + UI 잠금 표시
-- **Phase 2**: Managed Policy Sync + Installer + IT Admin API 실연결 + SSO 토큰 경로
-- **Phase 3**: ECDSA 서명 검증 + LG CA 체인 + 오프라인 cache TTL + 사내 감사 endpoint 연동
 
 ---
 

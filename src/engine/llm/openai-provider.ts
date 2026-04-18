@@ -30,12 +30,33 @@ export class OpenAIProvider implements LLMProvider {
 
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
     const modelLower = params.model.toLowerCase();
-    // o1, o3 및 'reasoning'이 포함된 모델은 추론 모델로 분류
-    const isReasoningModel = modelLower.includes("o1") || modelLower.includes("o3") || modelLower.includes("reasoning");
-    // gpt-4o 계열, gpt-4.5, gpt-5 및 추론 모델은 max_completion_tokens 사용 권장/필수
-    const useMaxCompletionTokens = isReasoningModel || modelLower.includes("gpt-4o") || modelLower.includes("gpt-4.5") || modelLower.includes("gpt-5");
+    // Reasoning-capable families: o-series (o1/o3/o4+) and gpt-5.x.
+    // Chat-completions emits reasoning_content deltas when reasoning is active
+    // for these families; the call-site toggles visibility via reasoning_effort.
+    const isReasoningModel =
+      modelLower.includes("o1") ||
+      modelLower.includes("o3") ||
+      modelLower.includes("o4") ||
+      modelLower.includes("gpt-5") ||
+      modelLower.includes("reasoning");
+    // Reasoning + gpt-4o / gpt-4.5 families require max_completion_tokens.
+    const useMaxCompletionTokens =
+      isReasoningModel ||
+      modelLower.includes("gpt-4o") ||
+      modelLower.includes("gpt-4.5");
 
-    console.log(`[OpenAIProvider] model="${params.model}", isReasoning=${isReasoningModel}, useMaxCompletionTokens=${useMaxCompletionTokens}`);
+    // Map LVIS settings onto OpenAI's reasoning_effort. Budgets above ~8k are
+    // "high", below ~3k are "low"; the middle band maps to "medium". This keeps
+    // our single Claude-style budget knob working for OpenAI too.
+    const useThinking = params.enableThinking === true && isReasoningModel;
+    const budget = params.thinkingBudgetTokens ?? 10_000;
+    const reasoningEffort: "low" | "medium" | "high" = budget >= 8000
+      ? "high"
+      : budget <= 3000
+        ? "low"
+        : "medium";
+
+    console.log(`[OpenAIProvider] model="${params.model}", isReasoning=${isReasoningModel}, useMaxCompletionTokens=${useMaxCompletionTokens}, reasoning=${useThinking ? reasoningEffort : "off"}`);
 
     const messages = toOpenAIMessages(params.systemPrompt, params.messages, isReasoningModel);
     const tools = params.tools?.map(toOpenAITool);
@@ -48,6 +69,7 @@ export class OpenAIProvider implements LLMProvider {
           : { max_tokens: params.maxTokens ?? 4096 }),
         messages,
         ...(tools && tools.length > 0 && { tools }),
+        ...(useThinking && { reasoning_effort: reasoningEffort }),
         stream: true,
       });
 

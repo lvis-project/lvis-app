@@ -9,7 +9,11 @@
  * - 최근 N개 메시지는 보존 (기본 4)
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
-import type { GenericMessage, TokenUsage, LLMVendor } from "./llm/types.js";
+import type { GenericMessage, TokenUsage, LLMVendor, ConversationCarryover } from "./llm/types.js";
+import { serializeMessageForEstimation } from "./llm/types.js";
+
+/** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
+const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
 
 // ─── Context Window Registry ─────────────────────────
 
@@ -180,6 +184,12 @@ export interface CompactResult {
   summary?: string;
   /** 확보된 예상 토큰 수 */
   freedTokens: number;
+  /**
+   * 컴팩션 트리거 종류.
+   * - "auto": 토큰 임계치 기반 사전 컴팩션 (PostTurnHookChain)
+   * - "reactive": 벤더 context-length 오류 수신 후 즉시 컴팩션
+   */
+  trigger?: "auto" | "reactive";
 }
 
 const DEFAULT_CONFIG: CompactConfig = {
@@ -199,17 +209,9 @@ export function estimateTokens(text: string): number {
 export function estimateMessagesTokens(messages: GenericMessage[]): number {
   let total = 0;
   for (const msg of messages) {
-    total += estimateTokens(msg.content);
-    if (msg.role === "assistant") {
-      if (msg.thought) {
-        total += estimateTokens(msg.thought);
-      }
-      if (msg.toolCalls) {
-        for (const tc of msg.toolCalls) {
-          total += estimateTokens(JSON.stringify(tc.input));
-        }
-      }
-    }
+    // Estimate tokens from the complete canonical serialization so that
+    // assistant thinkingBlocks (extended thinking) are counted as well.
+    total += estimateTokens(serializeMessageForEstimation(msg));
   }
   return total;
 }
@@ -249,15 +251,36 @@ export function shouldCompact(
 export function compactMessages(
   messages: GenericMessage[],
   config: CompactConfig = DEFAULT_CONFIG,
+  trigger?: "auto" | "reactive",
 ): { messages: GenericMessage[]; result: CompactResult } {
   if (messages.length <= config.preserveRecentMessages) {
     return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
   }
 
-  // 보존할 메시지 경계 찾기
-  const preserveFrom = findSafeBoundary(messages, messages.length - config.preserveRecentMessages);
-  const toCompact = messages.slice(0, preserveFrom);
-  const toPreserve = messages.slice(preserveFrom);
+  // 기존 경계 marker가 있으면 절대 re-summarize 하지 않음 (double-compact 방지)
+  // marker 이전 메시지는 이미 요약 대상이었으므로, 요약은 마지막 marker 이후부터만 수행
+  let lastMarkerIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === "user" && m.meta?.compactBoundary === true) {
+      lastMarkerIdx = i;
+    }
+  }
+
+  // 보존할 메시지 경계 찾기 (marker 이후 구간에서만 요약)
+  const idealBoundary = messages.length - config.preserveRecentMessages;
+  const preserveFrom = findSafeBoundary(messages, idealBoundary);
+  // 요약 대상은 marker(+ack) 다음부터 preserveFrom까지.
+  // compactMessages는 marker 뒤에 ACK assistant 메시지를 붙이므로 그 경우 한 칸 더 skip.
+  const ackAfterMarker =
+    lastMarkerIdx >= 0 &&
+    messages[lastMarkerIdx + 1]?.role === "assistant" &&
+    messages[lastMarkerIdx + 1]?.content === POST_COMPACT_ACK;
+  const compactStart = lastMarkerIdx >= 0 ? (ackAfterMarker ? lastMarkerIdx + 2 : lastMarkerIdx + 1) : 0;
+  const effectivePreserveFrom = Math.max(preserveFrom, compactStart);
+  const preAnchor = messages.slice(0, compactStart); // 이전 marker + 그 앞 (있다면)
+  const toCompact = messages.slice(compactStart, effectivePreserveFrom);
+  const toPreserve = messages.slice(effectivePreserveFrom);
 
   if (toCompact.length === 0) {
     return { messages, result: { compacted: false, removedMessages: 0, freedTokens: 0 } };
@@ -267,10 +290,24 @@ export function compactMessages(
   const summary = generateSummary(toCompact, config.summaryBudgetTokens);
   const freedTokens = estimateMessagesTokens(toCompact) - estimateTokens(summary);
 
+  // carryover 추출: 요약 대상 메시지에서 목표·산출물·결정사항을 추출
+  const carryover = extractCarryover(toCompact);
+
   // 요약 메시지 + 보존 메시지
+  const boundaryMessage: GenericMessage = {
+    role: "user",
+    content: `[이전 대화 요약]\n${summary}`,
+    meta: {
+      compactBoundary: true,
+      removedCount: toCompact.length,
+      compactedAt: new Date().toISOString(),
+      carryover,
+    },
+  };
   const compactedMessages: GenericMessage[] = [
-    { role: "user", content: `[이전 대화 요약]\n${summary}` },
-    { role: "assistant", content: "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다." },
+    ...preAnchor,
+    boundaryMessage,
+    { role: "assistant", content: POST_COMPACT_ACK },
     ...toPreserve,
   ];
 
@@ -281,8 +318,238 @@ export function compactMessages(
       removedMessages: toCompact.length,
       summary,
       freedTokens: Math.max(0, freedTokens),
+      ...(trigger !== undefined && { trigger }),
     },
   };
+}
+
+// ─── Microcompact (Stage 1 — preventive, LLM-free) ──
+
+export interface MicrocompactConfig {
+  /** 말단에서부터 이 개수만큼의 tool_result는 raw 유지 (기본 4) */
+  preserveRecentToolResults: number;
+}
+
+export interface MicrocompactResult {
+  /** 실제 strip이 일어났는지 여부 */
+  stripped: boolean;
+  /** strip된 tool_result 개수 */
+  strippedCount: number;
+  /** 확보된 총 바이트 수 (문자열 길이 기준) */
+  freedChars: number;
+}
+
+const DEFAULT_MICROCOMPACT_CONFIG: MicrocompactConfig = {
+  preserveRecentToolResults: 4,
+};
+
+/**
+ * Stage 1 — Preventive, LLM-free microcompact.
+ *
+ * 오래된 tool_result 메시지 content를 stub string으로 교체해 히스토리 크기를 낮춘다.
+ * - 최근 `preserveRecentToolResults` 개는 원본 유지 (assistant가 참조 가능성 있음)
+ * - 이미 stripped된 메시지는 skip (idempotent)
+ * - `toolUseId`는 절대 변경하지 않음 — 다른 메시지 참조 무결성 보존
+ * - 입력 array는 mutate하지 않고 새 배열 반환. strip된 메시지만 새 객체, 나머지는 reference-equal.
+ */
+export function microcompactMessages(
+  messages: GenericMessage[],
+  config: MicrocompactConfig = DEFAULT_MICROCOMPACT_CONFIG,
+): { messages: GenericMessage[]; result: MicrocompactResult } {
+  const preserveCount = Math.max(0, config.preserveRecentToolResults);
+
+  // tool_result 인덱스를 순서대로 수집
+  const toolResultIndices: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === "tool_result") toolResultIndices.push(i);
+  }
+
+  if (toolResultIndices.length <= preserveCount) {
+    return {
+      messages,
+      result: { stripped: false, strippedCount: 0, freedChars: 0 },
+    };
+  }
+
+  // 끝에서부터 preserveCount 개를 제외한 인덱스가 strip 후보
+  const stripCandidates = toolResultIndices.slice(0, toolResultIndices.length - preserveCount);
+  // 후보 전원이 이미 stripped면 새 배열 생성 없이 early return (per-turn allocation 회피)
+  if (stripCandidates.every((i) => (messages[i] as { meta?: { stripped?: boolean } }).meta?.stripped === true)) {
+    return {
+      messages,
+      result: { stripped: false, strippedCount: 0, freedChars: 0 },
+    };
+  }
+  const stripCandidateIdxSet = new Set(stripCandidates);
+
+  let strippedCount = 0;
+  let freedChars = 0;
+  const nowIso = new Date().toISOString();
+
+  const out = messages.map((msg, i) => {
+    if (!stripCandidateIdxSet.has(i)) return msg;
+    if (msg.role !== "tool_result") return msg;
+    if (msg.meta?.stripped === true) return msg; // idempotent
+
+    const origLen = msg.content.length;
+    const stub = `[tool_result stripped: tool=${msg.toolName ?? "?"}, origLen=${origLen}]`;
+    freedChars += Math.max(0, origLen - stub.length);
+    strippedCount += 1;
+
+    return {
+      role: "tool_result",
+      toolUseId: msg.toolUseId,
+      toolName: msg.toolName,
+      isError: msg.isError,
+      content: stub,
+      meta: {
+        ...(msg.meta ?? {}),
+        stripped: true,
+        originalLength: origLen,
+        strippedAt: nowIso,
+      },
+    } as GenericMessage;
+  });
+
+  return {
+    messages: out,
+    result: {
+      stripped: strippedCount > 0,
+      strippedCount,
+      freedChars,
+    },
+  };
+}
+
+// ─── Reactive Recovery ──────────────────────────────
+
+/**
+ * 벤더별 "context too long" 오류인지 판별.
+ *
+ * 입력 형태별 처리 (duck-typing):
+ * - `Error` 인스턴스: `.message` 문자열 검사 + `.code === "context_length_exceeded"` 검사
+ * - `string`: 직접 검사 (StreamEvent `{type:"error", error:string}` 경로)
+ * - `{message: string}` 객체: `.message` 필드 검사
+ * - `{error: string}` 객체: `.error` 필드 검사
+ *
+ * 메시지 패턴:
+ * - Anthropic: "prompt is too long"
+ * - OpenAI / Copilot: `.code === "context_length_exceeded"` 또는 "maximum context length"
+ * - Gemini: "context window"
+ *
+ * 주의: `error.type` 필드나 HTTP 상태 코드는 직접 검사하지 않음.
+ * 벤더가 이를 노출하는 경우에도 message 패턴 매칭으로 충분히 커버됨.
+ */
+export function isContextLengthError(err: unknown): boolean {
+  let rawMsg: string;
+  if (err instanceof Error) {
+    rawMsg = err.message;
+  } else if (typeof err === "string") {
+    rawMsg = err;
+  } else if (err !== null && typeof err === "object") {
+    // {message: string} or {error: string} (StreamEvent-style)
+    const asObj = err as Record<string, unknown>;
+    rawMsg = typeof asObj["message"] === "string"
+      ? asObj["message"]
+      : typeof asObj["error"] === "string"
+        ? asObj["error"]
+        : "";
+  } else {
+    return false;
+  }
+
+  const msg = rawMsg.toLowerCase();
+  // code field (Error instances only)
+  if (err instanceof Error) {
+    const code = (err as { code?: string }).code;
+    if (code === "context_length_exceeded") return true;
+  }
+
+  // Anthropic: "prompt is too long" (status 400, type invalid_request_error)
+  if (msg.includes("prompt is too long")) return true;
+
+  // OpenAI fallback message
+  if (msg.includes("maximum context length")) return true;
+
+  // Gemini: "The input token count (N) exceeds the maximum number of tokens allowed"
+  //         "Input exceeds the context window size"
+  if ((msg.includes("exceeds the maximum") && msg.includes("token")) ||
+      msg.includes("input token count") ||
+      msg.includes("context window")) return true;
+
+  return false;
+}
+
+// ─── Carryover Extraction ────────────────────────────
+
+/**
+ * 메시지 배열에서 `ConversationCarryover`를 추출.
+ *
+ * - goals: user 메시지 중 행위 키워드(해줘/구현/작성/create/implement 등)를 포함한
+ *   문장의 첫 100자. 최대 5개 — 넘치면 오래된 것부터 제거.
+ * - artifacts: assistant 메시지에서 파일 경로 패턴(*.ts/js/py/…) 또는
+ *   "생성/저장/created/wrote" 직후 파일명. 최대 10개.
+ * - decisions: assistant 메시지에서 "결정/선택/채택/decided/chose" 이후 문장.
+ *   최대 5개.
+ */
+export function extractCarryover(messages: GenericMessage[]): ConversationCarryover {
+  const goals: string[] = [];
+  const artifacts: string[] = [];
+  const decisions: string[] = [];
+
+  const goalKeywords =
+    /해줘|만들어|작성|구현|수정|추가|삭제|분석|검토|배포|테스트|fix|create|implement|update|refactor|add|remove|analyze|deploy/i;
+  const artifactPathRe =
+    /(?:^|\s)((?:[\w.-]+\/)*[\w.-]+\.(?:ts|tsx|js|jsx|py|json|md|yaml|yml|sh|css|html))\b/gm;
+  const artifactPhraseRe =
+    /(?:생성|작성\s*완료|저장|created?|wrote?|saved?)\s+[`'"]?([\w./\\-]+\.\w+)[`'"]?/gi;
+  const decisionRe =
+    /(?:결정|선택|채택|→|⇒|decided?|chose?|selected?)\s*[:：]?\s*(.{5,100})/gi;
+
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      if (!msg.content.startsWith("[이전 대화 요약]") && goalKeywords.test(msg.content)) {
+        const snippet = msg.content.slice(0, 100).replace(/\n/g, " ").trim();
+        if (snippet && !goals.includes(snippet)) {
+          goals.push(snippet);
+          if (goals.length > 5) goals.shift();
+        }
+      }
+    } else if (msg.role === "assistant") {
+      const content = msg.content;
+
+      let m: RegExpExecArray | null;
+
+      artifactPathRe.lastIndex = 0;
+      while ((m = artifactPathRe.exec(content)) !== null) {
+        const p = m[1].trim();
+        if (p && !artifacts.includes(p)) {
+          artifacts.push(p);
+          if (artifacts.length > 10) artifacts.shift();
+        }
+      }
+
+      artifactPhraseRe.lastIndex = 0;
+      while ((m = artifactPhraseRe.exec(content)) !== null) {
+        const p = m[1].trim();
+        if (p && !artifacts.includes(p)) {
+          artifacts.push(p);
+          if (artifacts.length > 10) artifacts.shift();
+        }
+      }
+
+      decisionRe.lastIndex = 0;
+      while ((m = decisionRe.exec(content)) !== null) {
+        const dec = m[1].trim().slice(0, 100);
+        if (dec && !decisions.includes(dec)) {
+          decisions.push(dec);
+          if (decisions.length > 5) decisions.shift();
+        }
+      }
+    }
+  }
+
+  return { goals, artifacts, decisions };
 }
 
 // ─── Private Helpers ────────────────────────────────

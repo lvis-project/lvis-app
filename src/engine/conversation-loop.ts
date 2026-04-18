@@ -10,9 +10,9 @@
 import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, getModelContextWindow } from "./auto-compact.js";
+import { shouldCompact, compactMessages, isContextLengthError, getModelContextWindow } from "./auto-compact.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
-import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage } from "./llm/types.js";
+import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage, ThinkingBlock } from "./llm/types.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
@@ -342,7 +342,8 @@ ${briefingData}
     systemPrompt: string,
     callbacks?: TurnCallbacks,
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage }> {
-    const model = this.deps.settingsService.get("llm").model;
+    const llmSettings = this.deps.settingsService.get("llm");
+    const model = llmSettings.model;
     const toolSchemas: ToolSchema[] = this.deps.toolRegistry.getToolSchemas().map((s) => ({
       name: s.name,
       description: s.description,
@@ -356,53 +357,139 @@ ${briefingData}
     // turn당 knowledge 도구 호출 횟수 카운터 (depth ≤ 3 hard cap)
     let knowledgeCallCount = 0;
     let roundIndex = 0;
+    // Reactive compact recovery: context-length 오류 발생 시 1회 compact 후 재시도
+    // turn당 1회만 허용 — for 루프 밖에 선언
+    let reactiveCompacted = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       // §4.5.3: 벤더 추상화 스트리밍
       let textContent = "";
       let thoughtContent = "";
+      let roundThinkingBlocks: ThinkingBlock[] = [];
       const pendingToolCalls: ToolCallBlock[] = [];
       let stopReason: "end_turn" | "tool_use" = "end_turn";
 
-      for await (const event of this.provider!.streamTurn({
-        model,
-        systemPrompt,
-        messages: this.history.getMessages(),
-        tools: toolSchemas.length > 0 ? toolSchemas : undefined,
-        maxTokens: 4096,
-      })) {
-        switch (event.type) {
-          case "reasoning_delta":
-            thoughtContent += event.text;
-            callbacks?.onReasoningDelta?.(event.text);
-            break;
-          case "text_delta":
-            textContent += event.text;
-            callbacks?.onTextDelta?.(event.text);
-            break;
-          case "tool_call":
-            pendingToolCalls.push({ id: event.id, name: event.name, input: event.input });
-            break;
-          case "message_complete":
-            stopReason = event.stopReason;
-            if (event.usage) {
-              turnUsage = event.usage;
-              this.cumulativeUsage.inputTokens += event.usage.inputTokens;
-              this.cumulativeUsage.outputTokens += event.usage.outputTokens;
-            }
-            break;
-          case "error":
-            callbacks?.onError?.(event.error);
-            this.history.append({ role: "assistant", content: `오류: ${event.error}` });
-            return { text: `오류: ${event.error}`, toolCalls: allToolCalls, usage: turnUsage };
+      const collectStream = async (messages: ReturnType<typeof this.history.getMessages>) => {
+        textContent = "";
+        thoughtContent = "";
+        roundThinkingBlocks = [];
+        pendingToolCalls.length = 0;
+        stopReason = "end_turn";
+        // Snapshot cumulativeUsage so a partial stream that errors mid-flight
+        // does not double-count tokens when we retry after reactive compact.
+        const usageSnapshot = {
+          inputTokens: this.cumulativeUsage.inputTokens,
+          outputTokens: this.cumulativeUsage.outputTokens,
+        };
+        const restoreUsage = () => {
+          this.cumulativeUsage.inputTokens = usageSnapshot.inputTokens;
+          this.cumulativeUsage.outputTokens = usageSnapshot.outputTokens;
+        };
+
+        const llmSettings = this.deps.settingsService.get("llm");
+        for await (const event of this.provider!.streamTurn({
+          model,
+          systemPrompt,
+          messages,
+          tools: toolSchemas.length > 0 ? toolSchemas : undefined,
+          maxTokens: 4096,
+          enableThinking: llmSettings.enableThinking,
+          thinkingBudgetTokens: llmSettings.thinkingBudgetTokens,
+        })) {
+          switch (event.type) {
+            case "reasoning_delta":
+              thoughtContent += event.text;
+              callbacks?.onReasoningDelta?.(event.text);
+              break;
+            case "text_delta":
+              textContent += event.text;
+              callbacks?.onTextDelta?.(event.text);
+              break;
+            case "tool_call":
+              pendingToolCalls.push({ id: event.id, name: event.name, input: event.input });
+              break;
+            case "message_complete":
+              stopReason = event.stopReason;
+              if (event.thinkingBlocks && event.thinkingBlocks.length > 0) {
+                roundThinkingBlocks = event.thinkingBlocks;
+              }
+              if (event.usage) {
+                turnUsage = event.usage;
+                this.cumulativeUsage.inputTokens += event.usage.inputTokens;
+                this.cumulativeUsage.outputTokens += event.usage.outputTokens;
+              }
+              break;
+            case "error":
+              // context-length 오류를 stream event로 수신한 경우 → compact + retry
+              if (isContextLengthError(event.error) && !reactiveCompacted) {
+                restoreUsage();
+                return { earlyReturn: false as const, streamContextError: event.error };
+              }
+              callbacks?.onError?.(event.error);
+              // Escalate message when second attempt (post-compact) also fails.
+              const userMsg = reactiveCompacted && isContextLengthError(event.error)
+                ? `오류: 대화 기록을 압축한 뒤에도 모델 컨텍스트 한도를 초과했습니다. 새 세션을 시작하거나 이전 첨부를 정리해 주세요 (원인: ${event.error})`
+                : `오류: ${event.error}`;
+              this.history.append({ role: "assistant", content: userMsg });
+              return { earlyReturn: true as const, text: userMsg };
+          }
+        }
+        return { earlyReturn: false as const };
+      };
+
+      // Snapshot at outer scope too: catch-path throws bypass collectStream's restoreUsage.
+      const outerUsageSnapshot = {
+        inputTokens: this.cumulativeUsage.inputTokens,
+        outputTokens: this.cumulativeUsage.outputTokens,
+      };
+      let streamResult = await collectStream(this.history.getMessages()).catch((err: unknown) => {
+        if (isContextLengthError(err)) {
+          // throw-path did not hit the restoreUsage inside collectStream; do it here
+          this.cumulativeUsage.inputTokens = outerUsageSnapshot.inputTokens;
+          this.cumulativeUsage.outputTokens = outerUsageSnapshot.outputTokens;
+          return { earlyReturn: false as const, contextError: err };
+        }
+        throw err;
+      });
+
+      // context-length 오류 → compact 후 1회 재시도 (throw 경로 또는 stream event 경로)
+      const throwCtxError = !streamResult.earlyReturn && (streamResult as { contextError?: unknown }).contextError;
+      const streamCtxError = !streamResult.earlyReturn && (streamResult as { streamContextError?: string }).streamContextError;
+      if ((throwCtxError || streamCtxError) && !reactiveCompacted) {
+        reactiveCompacted = true;
+        let compacted = false;
+        try {
+          const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages(), undefined, "reactive");
+          if (cr.compacted) {
+            compacted = true;
+            this.history.clear();
+            this.history.restore(compactedMsgs);
+            console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+          }
+        } catch (compactErr) {
+          console.warn("[lvis] reactive-compact: compactMessages threw, skipping retry:", compactErr);
+        }
+        if (compacted) {
+          streamResult = await collectStream(this.history.getMessages());
+        } else {
+          // compact가 아무것도 하지 않았으면 재시도해도 의미 없음 — 원래 오류 재전파
+          if (throwCtxError) throw (streamResult as { contextError?: unknown }).contextError;
+          throw new Error((streamResult as { streamContextError?: string }).streamContextError);
         }
       }
 
-      // assistant 응답을 히스토리에 추가
+      if (streamResult.earlyReturn) {
+        return { text: streamResult.text, toolCalls: allToolCalls, usage: turnUsage };
+      }
+
+      // assistant 응답을 히스토리에 추가 — thinkingBlocks는 tool_use 체인이
+      // 이어지는 다음 요청에만 signature 그대로 포함되어야 Anthropic이 수락한다.
+      const preserveThinkingBlocks = stopReason === "tool_use" && pendingToolCalls.length > 0;
       this.history.append({
         role: "assistant",
         content: textContent,
         ...(thoughtContent && { thought: thoughtContent }),
+        ...(preserveThinkingBlocks && roundThinkingBlocks.length > 0 && { thinkingBlocks: roundThinkingBlocks }),
         ...(pendingToolCalls.length > 0 && { toolCalls: pendingToolCalls }),
       });
       callbacks?.onAssistantRound?.({

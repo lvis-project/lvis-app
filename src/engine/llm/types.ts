@@ -27,10 +27,87 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
 
 // ─── 범용 메시지 ────────────────────────────────────
 
+/**
+ * Optional per-message metadata for lifecycle bookkeeping (auto-compact, microcompact,
+ * boundary markers, etc.). All fields optional so existing callers remain unaffected.
+ */
+export interface ConversationCarryover {
+  goals: string[];
+  artifacts: string[];
+  decisions: string[];
+}
+
+export interface MessageMeta {
+  /** microcompact가 tool_result content를 stub으로 교체했는지 여부 */
+  stripped?: boolean;
+  /** stripped 되기 전 원본 content의 문자열 길이(JS string.length — UTF-16 code units, bytes 아님) */
+  originalLength?: number;
+  /** compactMessages()가 생성한 요약 경계 marker인지 여부 (idempotency) */
+  compactBoundary?: boolean;
+  /** 경계 marker의 경우, 요약 대상이 된 메시지 수 */
+  removedCount?: number;
+  /** microcompact strip 발생 ISO timestamp */
+  strippedAt?: string;
+  /** compactMessages 실행 ISO timestamp */
+  compactedAt?: string;
+  /** compact boundary 생성 시 추출된 carryover (목표·산출물·결정사항) */
+  carryover?: ConversationCarryover;
+}
+
+/**
+ * Claude extended-thinking block preserved verbatim. Both the thinking text and
+ * its signature MUST be echoed back in the next request when tool use is still
+ * in-flight — otherwise Anthropic rejects the message as tampered.
+ */
+export interface ThinkingBlock {
+  thinking: string;
+  signature: string;
+}
+
 export type GenericMessage =
-  | { role: "user"; content: string }
-  | { role: "assistant"; content: string; thought?: string; toolCalls?: ToolCallBlock[] }
-  | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean };
+  | { role: "user"; content: string; meta?: MessageMeta }
+  | { role: "assistant"; content: string; thought?: string; thinkingBlocks?: ThinkingBlock[]; toolCalls?: ToolCallBlock[]; meta?: MessageMeta }
+  | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean; meta?: MessageMeta };
+
+/**
+ * Canonical serialized form for message-size / token-estimation logic.
+ * Includes all prompt-bearing fields, notably assistant thinkingBlocks,
+ * so callers do not undercount context usage when extended thinking is enabled.
+ */
+export function serializeThinkingBlocksForEstimation(thinkingBlocks?: ThinkingBlock[]): string {
+  if (!thinkingBlocks || thinkingBlocks.length === 0) return "";
+  return JSON.stringify(thinkingBlocks);
+}
+
+export function serializeMessageForEstimation(message: GenericMessage): string {
+  switch (message.role) {
+    case "user":
+      return JSON.stringify({
+        role: message.role,
+        content: message.content,
+      });
+    case "assistant":
+      return JSON.stringify({
+        role: message.role,
+        content: message.content,
+        thought: message.thought ?? "",
+        thinkingBlocks: message.thinkingBlocks ?? [],
+        toolCalls: message.toolCalls ?? [],
+      });
+    case "tool_result":
+      return JSON.stringify({
+        role: message.role,
+        toolUseId: message.toolUseId,
+        toolName: message.toolName ?? "",
+        content: message.content,
+        isError: message.isError ?? false,
+      });
+  }
+}
+
+export function estimateMessageCharacters(message: GenericMessage): number {
+  return serializeMessageForEstimation(message).length;
+}
 
 export interface ToolCallBlock {
   id: string;
@@ -56,7 +133,7 @@ export type StreamEvent =
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
-  | { type: "message_complete"; stopReason: "end_turn" | "tool_use"; usage?: TokenUsage }
+  | { type: "message_complete"; stopReason: "end_turn" | "tool_use"; usage?: TokenUsage; thinkingBlocks?: ThinkingBlock[] }
   | { type: "error"; error: string };
 
 export interface TokenUsage {
@@ -74,6 +151,10 @@ export interface StreamTurnParams {
   messages: GenericMessage[];
   tools?: ToolSchema[];
   maxTokens?: number;
+  /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */
+  enableThinking?: boolean;
+  /** Token budget for Claude extended thinking (1024–32000). Defaults to 10 000 when enableThinking is true. */
+  thinkingBudgetTokens?: number;
 }
 
 export interface LLMProvider {
