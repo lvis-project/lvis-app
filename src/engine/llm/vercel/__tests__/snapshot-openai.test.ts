@@ -326,7 +326,7 @@ describe("VercelUnifiedProvider copilot — L1/L2/L3 (mocked streamText)", () =>
 
     const callArg = streamTextSpy.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArg.providerOptions).toEqual({
-      openai: { reasoningEffort: "high" },
+      openai: { reasoningEffort: "high", reasoningSummary: "detailed" },
     });
 
     vi.doUnmock("ai");
@@ -384,7 +384,7 @@ describe("VercelUnifiedProvider copilot — L1/L2/L3 (mocked streamText)", () =>
 
     const callArg = streamTextSpy.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArg.providerOptions).toEqual({
-      openai: { reasoningEffort: "high" },
+      openai: { reasoningEffort: "high", reasoningSummary: "detailed" },
     });
 
     vi.doUnmock("ai");
