@@ -157,12 +157,20 @@ export type LvisApprovalApi = {
 
 export type PermissionRule = { pattern: string; action: "allow" | "deny"; source?: string };
 
+export type AddRuleResult =
+  | { ok: true; rule: PermissionRule }
+  | { ok: false; error: string; message?: string };
+
+export type RemoveRuleResult =
+  | { ok: true }
+  | { ok: false; error: string; message?: string };
+
 export type LvisPermissionApi = {
   getMode: () => Promise<{ mode: string }>;
   setMode: (mode: string) => Promise<{ ok: boolean; mode: string }>;
   listRules: () => Promise<PermissionRule[]>;
-  addRule: (pattern: string, action: string) => Promise<{ ok: boolean }>;
-  removeRule: (pattern: string, action: string) => Promise<{ ok: boolean }>;
+  addRule: (pattern: string, action: string) => Promise<AddRuleResult>;
+  removeRule: (pattern: string, action: string) => Promise<RemoveRuleResult>;
 };
 
 export type LvisPolicyApi = {

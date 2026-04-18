@@ -343,19 +343,27 @@ export function registerIpcHandlers(
       return { ok: false, error: "invalid-action", message: `유효하지 않은 action: '${action}'. 허용값: allow, deny` };
     }
     const pm = conversationLoop.permissionManager;
-    if (!pm) return { ok: false };
-    if (action === "allow") {
-      await pm.addAlwaysAllowedPersist(pattern);
-    } else {
-      await pm.addAlwaysDeniedPersist(pattern);
+    if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
+    try {
+      if (action === "allow") {
+        await pm.addAlwaysAllowedPersist(pattern);
+      } else {
+        await pm.addAlwaysDeniedPersist(pattern);
+      }
+      return { ok: true, rule: { pattern, action } };
+    } catch (e) {
+      return { ok: false, error: "add-failed", message: (e as Error).message };
     }
-    return { ok: true };
   });
   ipcMain.handle("lvis:permission:remove-rule", async (_e, pattern: string, action: "allow" | "deny") => {
     const pm = conversationLoop.permissionManager;
-    if (!pm) return { ok: false };
-    await pm.removeRule(pattern, action);
-    return { ok: true };
+    if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
+    try {
+      await pm.removeRule(pattern, action);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: "remove-failed", message: (e as Error).message };
+    }
   });
 
   // ─── Approval Gate (§6.3 Layer 3 + §8) ────────
