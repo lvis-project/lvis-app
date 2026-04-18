@@ -24,15 +24,30 @@ export interface CreateProviderOptions {
   useVercelSdk?: LLMUseVercelSdk;
 }
 
+/**
+ * Vendors for which VercelUnifiedProvider is fully implemented in the current
+ * phase. If the flag selects a vendor whose path hasn't landed yet, we fall
+ * back to the legacy provider silently rather than yielding an error at turn time.
+ *
+ * P3 state: all four vendors implemented (gemini P1, openai/copilot P2, claude P3).
+ */
+const IMPLEMENTED_VENDORS: ReadonlySet<LLMVendor> = new Set<LLMVendor>([
+  "gemini",
+  "openai",
+  "copilot",
+  "claude",
+]);
+
 function shouldUseVercel(
   vendor: LLMVendor,
   flag: LLMUseVercelSdk | undefined,
 ): boolean {
   if (!flag || flag === "none") return false;
-  // P2: openai flag covers both "openai" and "copilot" (they share the
-  // OpenAI-family adapter path). "all" covers everything except "claude"
-  // (still legacy pending P3).
-  if (flag === "all") return vendor !== "claude";
+  // Safety gate: fall back to legacy if this vendor's Vercel path isn't wired yet.
+  if (!IMPLEMENTED_VENDORS.has(vendor)) return false;
+  // P3: "all" covers all vendors now that Claude path has landed.
+  if (flag === "all") return true;
+  // P2: openai flag covers both "openai" and "copilot" (shared adapter path).
   if (flag === "openai") return vendor === "openai" || vendor === "copilot";
   return flag === vendor;
 }

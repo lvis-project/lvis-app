@@ -7,17 +7,38 @@
  *   - assistant tool call → { role: "assistant", content: [{ type: "tool-call", ... }] }
  *   - tool_result → { role: "tool", content: [{ type: "tool-result", ... }] }
  *
- * Gemini does not emit thinkingBlocks; they are ignored here. Upstream
- * GenericMessage retains them intact for other vendors.
- *
- * TODO(P2): OpenAI reasoning model specifics (reasoning_effort passthrough).
- * TODO(P3): Claude thinkingBlocks + signature round-trip + cacheControl.
+ * P3 — Claude thinkingBlocks round-trip:
+ *   - assistant.thinkingBlocks[] → prepended as { type: "reasoning", text,
+ *     providerOptions: { anthropic: { signature } } } parts when vendor="claude".
+ *     Outbound reasoning parts carry `providerOptions.anthropic.signature`;
+ *     inbound stream events arrive via `providerMetadata.anthropic.signature`.
+ *     Order matters: reasoning parts must precede text and tool-call parts so
+ *     Anthropic's signature-verified thinking chain is echoed verbatim.
+ *   - Blocks with missing/empty signatures are skipped (log-and-skip via
+ *     signature-shim) — Anthropic rejects tampered echoes.
+ *   - [HIGH PRIVACY] thinkingBlocks MUST NOT be serialised when outgoing vendor
+ *     is NOT "claude". Pass `vendor` to genericToModelMessages() to enforce this.
  */
 import type { ModelMessage } from "ai";
-import type { GenericMessage } from "../types.js";
+import type { GenericMessage, LLMVendor } from "../types.js";
+
+type AssistantPart =
+  | { type: "text"; text: string }
+  | {
+      type: "reasoning";
+      text: string;
+      providerOptions?: { anthropic?: { signature: string } };
+    }
+  | {
+      type: "tool-call";
+      toolCallId: string;
+      toolName: string;
+      input: unknown;
+    };
 
 export function genericToModelMessages(
   messages: GenericMessage[],
+  vendor: LLMVendor = "claude",
 ): ModelMessage[] {
   const out: ModelMessage[] = [];
 
@@ -31,15 +52,33 @@ export function genericToModelMessages(
     }
 
     if (msg.role === "assistant") {
-      const parts: Array<
-        | { type: "text"; text: string }
-        | {
-            type: "tool-call";
-            toolCallId: string;
-            toolName: string;
-            input: unknown;
+      const parts: AssistantPart[] = [];
+
+      // Reasoning FIRST — Anthropic requires thinking blocks to precede text
+      // and tool_use in the content array, with signatures verbatim from the
+      // prior turn.
+      // [HIGH PRIVACY] thinkingBlocks are Claude-specific signed thoughts.
+      // They MUST NOT be forwarded to non-Claude vendors (Gemini/OpenAI do not
+      // understand them and the signed content must not leave the Claude path).
+      if (vendor === "claude" && msg.thinkingBlocks) {
+        for (const tb of msg.thinkingBlocks) {
+          if (typeof tb.signature !== "string" || tb.signature.length === 0) {
+            // Defense-in-depth: thinkingBlocks may be deserialized from persisted
+            // history where signatures were trimmed. Guard here ensures we never
+            // echo a signature-less block to Anthropic (400).
+            // eslint-disable-next-line no-console
+            console.warn(
+              "[message-mapper] thinkingBlock missing signature — skipping",
+            );
+            continue;
           }
-      > = [];
+          parts.push({
+            type: "reasoning",
+            text: tb.thinking,
+            providerOptions: { anthropic: { signature: tb.signature } },
+          });
+        }
+      }
 
       if (msg.content) {
         parts.push({ type: "text", text: msg.content });
