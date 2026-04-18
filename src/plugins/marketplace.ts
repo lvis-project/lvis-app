@@ -5,7 +5,9 @@ import { spawn } from "node:child_process";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
-import type { PluginMarketplaceItem, PluginUiExtension } from "./types.js";
+import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
+import { MissingDependenciesError } from "./types.js";
+import { resolveDependencies } from "./dependency-resolver.js";
 import {
   installFromMarketplace,
   isMarketplaceDirectPreferred,
@@ -163,6 +165,15 @@ export class PluginMarketplaceService {
       const guardResult = await this.deploymentGuard.canInstall(pluginId, "user", plugin.deployment);
       if (!guardResult.allowed) {
         throw new Error(guardResult.reason ?? `Plugin install denied: ${pluginId}`);
+      }
+    }
+
+    // S14: dependency preflight — reject install if required capabilities are not met
+    if (plugin.requires && plugin.requires.capabilities.length > 0) {
+      const installedManifests = await this.loadInstalledManifests();
+      const result = resolveDependencies(plugin.requires.capabilities, installedManifests);
+      if (!result.ok) {
+        throw new MissingDependenciesError(result.missing);
       }
     }
 
@@ -560,6 +571,31 @@ export class PluginMarketplaceService {
   private isWithin(basePath: string, targetPath: string): boolean {
     const rel = relative(basePath, targetPath);
     return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  }
+
+  /**
+   * S14: load manifests for all currently-installed plugins so the dependency
+   * resolver can inspect their `capabilities[]`.  Skips entries whose manifest
+   * cannot be read or parsed (fail-open — a corrupt manifest must not block
+   * unrelated installs).
+   */
+  private async loadInstalledManifests(): Promise<PluginManifest[]> {
+    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
+    if (!registry) return [];
+    const manifests: PluginManifest[] = [];
+    for (const entry of registry.plugins) {
+      if (entry.enabled === false) continue;
+      const abs = isAbsolute(entry.manifestPath)
+        ? entry.manifestPath
+        : resolve(dirname(this.registryPath), entry.manifestPath);
+      try {
+        const raw = await readFile(abs, "utf-8");
+        manifests.push(JSON.parse(raw) as PluginManifest);
+      } catch {
+        // skip unreadable manifest
+      }
+    }
+    return manifests;
   }
   private async runNpmInstall(packageSpec: string): Promise<void> {
     await new Promise<void>((resolvePromise, rejectPromise) => {
