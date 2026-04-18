@@ -10,12 +10,6 @@ import { VercelUnifiedProvider } from "./vercel/adapter.js";
 
 const COPILOT_BASE_URL = "https://models.github.ai/inference";
 
-/** Extra config for vendors that need more than (apiKey, baseUrl). */
-export interface VertexConfig {
-  project?: string;
-  location?: string;
-}
-
 export function createProvider(config: ProviderConfig): LLMProvider {
   // Copilot needs its default baseUrl when none is configured so the
   // Vercel adapter hits the right endpoint.
