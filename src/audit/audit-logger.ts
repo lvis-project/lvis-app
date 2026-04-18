@@ -12,7 +12,7 @@ import { homedir } from "node:os";
 export interface AuditEntry {
   timestamp: string;
   sessionId: string;
-  type: "turn" | "tool_call" | "approval" | "error" | "mcp_connect" | "kill_switch";
+  type: "turn" | "tool_call" | "approval" | "warn" | "error" | "mcp_connect" | "kill_switch";
   input?: string;
   output?: string;
   toolCalls?: Array<{
