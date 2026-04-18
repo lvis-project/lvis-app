@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, PanelsTopLeft, ChevronDown, Star, Download, Pencil, GitBranch, X as XIcon, Paperclip, Globe, User, History } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
+import { Search } from "lucide-react";
 import {
   DEFAULT_ROLE_PRESETS,
   ROLE_PRESETS_CHANGED_EVENT,
@@ -16,14 +15,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { Badge } from "../../components/ui/badge.js";
 import { Input } from "../../components/ui/input.js";
 import { Textarea } from "../../components/ui/textarea.js";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip.js";
+import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../../components/ui/command.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
-import { Separator } from "../../components/ui/separator.js";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "../../components/ui/sheet.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import {
   appendUserEntry,
@@ -61,6 +56,7 @@ import { ToolApprovalDialog } from "./components/ToolApprovalDialog.js";
 import { UsageDashboard } from "./components/UsageDashboard.js";
 import { TaskView } from "./components/TaskView.js";
 import { StarredView } from "./components/StarredView.js";
+import { MainToolbar } from "./MainToolbar.js";
 import { ChatView } from "./ChatView.js";
 import { Sidebar } from "./Sidebar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
@@ -521,74 +517,25 @@ export function App() {
 
         {/* Main */}
         <main className="flex min-h-0 flex-col">
-          <div className="border-b bg-card px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <Tabs value={activeView} onValueChange={setActiveView}><TabsList>
-                <TabsTrigger value="home">홈</TabsTrigger><TabsTrigger value="tasks">태스크</TabsTrigger>
-                <TabsTrigger value="starred">즐겨찾기{starred.length > 0 ? <span className="ml-1 text-[10px] text-muted-foreground">({starred.length})</span> : null}</TabsTrigger>
-                {pluginViews.map((i) => <TabsTrigger key={toViewKey(i)} value={toViewKey(i)}>{getPluginViewLabel(i)}</TabsTrigger>)}
-              </TabsList></Tabs>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => void handleNewChat()}><Plus className="mr-1 h-4 w-4" />새 대화</Button>
-                <DropdownMenu onOpenChange={(open) => { if (open) void refreshSessions(); }}>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={streaming}
-                      title={streaming ? "응답 생성 중에는 세션을 바꿀 수 없습니다" : "대화 기록 불러오기"}
-                    ><History className="mr-1 h-4 w-4" />기록</Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="max-h-[480px] w-[300px] overflow-y-auto">
-                    {sessions.length === 0 ? (
-                      <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                        저장된 대화가 없습니다.
-                      </DropdownMenuItem>
-                    ) : (
-                      sessions.map((s) => {
-                        const isCurrent = s.id === currentSessionId;
-                        return (
-                          <DropdownMenuItem
-                            key={s.id}
-                            onClick={() => void handleLoadSession(s.id)}
-                            className={isCurrent ? "bg-muted/50" : ""}
-                          >
-                            <div className="flex w-full flex-col">
-                              <span className="text-xs tabular-nums">
-                                {new Date(s.modifiedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
-                              </span>
-                              <span className="font-mono text-[10px] opacity-60">#{s.id.slice(0, 8)}{isCurrent ? " · 현재" : ""}</span>
-                            </div>
-                          </DropdownMenuItem>
-                        );
-                      })
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" title="내보내기"><Download className="mr-1 h-4 w-4" />내보내기</Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => void handleExport("markdown")}>Markdown (.md)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => void handleExport("json")}>JSON (.json)</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button variant="outline" size="sm" onClick={searchToggleOverlay} title="대화 검색 (Ctrl/Cmd+F)"><Search className="mr-1 h-4 w-4" />찾기</Button>
-                <Sheet open={sheetOpen} onOpenChange={setSheetOpen}><SheetTrigger asChild><Button variant="outline" size="sm"><PanelsTopLeft className="mr-1 h-4 w-4" />뷰</Button></SheetTrigger>
-                  <SheetContent side="right"><SheetHeader><SheetTitle>뷰 관리</SheetTitle><SheetDescription>빠른 이동</SheetDescription></SheetHeader><Separator className="my-4" />
-                    <div className="space-y-2">
-                      <Button variant={activeView === "home" ? "default" : "secondary"} className="w-full justify-start" onClick={() => { setActiveView("home"); setSheetOpen(false); }}>홈</Button>
-                      <Button variant={activeView === "tasks" ? "default" : "secondary"} className="w-full justify-start" onClick={() => { setActiveView("tasks"); setSheetOpen(false); }}>태스크</Button>
-                      {pluginViews.map((i) => { const k = toViewKey(i); return <Button key={k} variant={activeView === k ? "default" : "secondary"} className="w-full justify-start" onClick={() => { setActiveView(k); setSheetOpen(false); }}>{getPluginViewLabel(i)}</Button>; })}
-                    </div>
-                  </SheetContent>
-                </Sheet>
-                <Tooltip><TooltipTrigger asChild><Button variant={hasApiKey === false ? "destructive" : "outline"} size="sm" onClick={() => setSettingsOpen(true)}><KeyRound className="mr-1 h-4 w-4" />설정</Button></TooltipTrigger><TooltipContent>{hasApiKey ? "LLM 설정" : "API 키를 설정해 주세요"}</TooltipContent></Tooltip>
-                <Tooltip><TooltipTrigger asChild><Button variant="outline" size="sm" onClick={() => setCommandOpen(true)}><CommandIcon className="mr-1 h-4 w-4" />Cmd</Button></TooltipTrigger><TooltipContent>Ctrl/Cmd + K</TooltipContent></Tooltip>
-              </div>
-            </div>
-          </div>
+          <MainToolbar
+            activeView={activeView}
+            setActiveView={setActiveView}
+            pluginViews={pluginViews}
+            starredCount={starred.length}
+            streaming={streaming}
+            hasApiKey={hasApiKey}
+            sessions={sessions}
+            currentSessionId={currentSessionId}
+            sheetOpen={sheetOpen}
+            setSheetOpen={setSheetOpen}
+            onNewChat={() => void handleNewChat()}
+            onRefreshSessions={refreshSessions}
+            onLoadSession={handleLoadSession}
+            onExport={handleExport}
+            onSearchToggle={searchToggleOverlay}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenCommand={() => setCommandOpen(true)}
+          />
 
           {/* Content */}
           {activeView === "tasks" ? <TaskView api={api} /> : activeView === "starred" ? (
