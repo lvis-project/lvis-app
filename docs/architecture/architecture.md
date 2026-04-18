@@ -1806,101 +1806,79 @@ graph TB
 
 ### 9.2 Plugin Manifest Spec
 
-```json
-{
-    "id": "com.lge.meeting-recorder",
-    "name": "회의록 녹음",
-    "version": "1.2.0",
-    "description": "STT 기반 회의록 자동 작성 플러그인",
-    "author": "DX Platform Team",
-    "permissions": ["microphone", "local-storage", "lgenie-session", "ui-slot:sidebar", "ui-slot:toolbar"],
-    "keywords": ["회의록", "녹음", "회의", "미팅", "meeting"],
-    "skills": [
-        {
-            "name": "meeting_record",
-            "trigger": ["회의록 작성", "회의 녹음", "미팅 기록"],
-            "entry": "skills/meeting_record.js"
-        }
-    ],
-    "tools": [
-        {
-            "name": "stt_transcribe",
-            "entry": "tools/stt_transcribe.js",
-            "description": "음성을 텍스트로 변환"
-        }
-    ],
-    "ui": {
-        "sidebar": "ui/MeetingSidebar.jsx",
-        "toolbar": "ui/MeetingToolbar.jsx",
-        "chatWidget": "ui/MeetingChatWidget.jsx"
-    },
-    "hooks": {
-        "PreToolUse": "hooks/pre-meeting.js",
-        "PostToolUse": "hooks/post-meeting.js"
-    },
-    "events": {
-        "emit": ["meeting.started", "meeting.ended", "meeting.summary.created"],
-        "subscribe": ["calendar.event.started"]
-    },
-    "dependencies": {
-        "translation-plugin": ">=1.0.0"
-    },
-    "lgenie": {
-        "requiredModels": ["stt-whisper", "summary-v2"],
-        "optionalModels": ["translation-nmt"]
-    }
-}
-```
-
-> LLM에 노출되는 skill / tool / method 식별자는 모두 lower snake_case(예: `meeting_record`, `stt_transcribe`, `index_scan`)를 사용한다. 호스트는 manifest 값을 그대로 등록하며, 도트를 언더스코어로 바꾸는 런타임 변환은 없다. 이벤트 채널 이름은 별도 네임스페이스이므로 dotted form을 유지한다.
-
-**`python` 섹션 — 런타임 의존 플러그인 명세**
-
-Python 런타임이 필요한 플러그인은 manifest에 `python` 섹션을 선언할 수 있다. 호스트 앱은 `lvis-app/src/main/python-runtime.ts`의 bootstrap 경로를 통해 `uv` 기반 venv를 준비하므로, 목표 설계는 사용자에게 Python 수동 설치를 요구하지 않는 것이다.
+현행 매니페스트 스키마는 `schemas/plugin.schema.json` (AJV strict, `additionalProperties: false`) 이 단일 진실 소스다. 검증 플로우·에러 포맷·capability taxonomy·uiCallable 보안 경계 등 상세 규격은 `docs/references/plugin-tool-schema-design.md` (v4) 에 정의되어 있으며, 아래는 호스트-측 구조와 필드 관계 요약이다.
 
 ```json
 {
-  "python": {
-    "managedBy": "lvis-app",
-    "requirementsLock": "python-requirements.lock"
-  }
-}
-```
+  "id": "lvis-plugin-meeting",
+  "name": "회의록 녹음",
+  "version": "1.3.0",
+  "description": "마이크 입력을 실시간으로 전사하고 요약해 회의록을 자동 생성합니다.",
+  "entry": "dist/index.js",
+  "publisher": "LG Electronics DX Platform Team",
+  "deployment": "managed",
+  "startupTimeoutMs": 8000,
 
-| 필드 | 타입 | 설명 |
-| --- | --- | --- |
-| `managedBy` | `"lvis-app"` | 런타임 관리 주체. 호스트가 venv provisioning을 맡는다는 선언 |
-| `requirementsLock` | string | `python-requirements.lock` 경로 (플러그인 루트 기준). `uv pip sync --frozen` 입력 |
+  "tools": ["meeting_start", "meeting_push_chunk", "meeting_stop", "meeting_transcript", "meeting_sessions"],
+  "uiCallable": ["meeting_transcript", "meeting_sessions"],
+  "startupTools": [],
+  "capabilities": ["meeting-recorder"],
 
-**`toolSchemas` 필드 — LLM 파라미터 명세 (Phase 1 신규)**
+  "eventSubscriptions": ["calendar.event.started"],
+  "notificationEvents": [
+    { "event": "meeting.summary.created", "titleField": "title", "bodyField": "summary" }
+  ],
 
-LLM이 메서드 파라미터를 잘못 추론하는 경우에만 선택적으로 추가한다. 없으면 generic `{ payload: object }` fallback이 유지된다.
+  "keywords": [
+    { "keyword": "회의록", "skillId": "meeting" },
+    { "keyword": "녹음",   "skillId": "meeting" }
+  ],
 
-```json
-{
-  "tools": ["meeting_start", "meeting_push_chunk"],
   "toolSchemas": {
     "meeting_push_chunk": {
-      "description": "PCM16LE 오디오 청크를 세션에 추가",
+      "description": "PCM16LE 오디오 청크를 세션에 추가. STT는 비동기 처리.",
       "inputSchema": {
         "type": "object",
         "required": ["sessionId", "chunk"],
         "properties": {
           "sessionId": { "type": "string" },
-          "chunk": {
-            "type": "object",
-            "required": ["pcm16leMono", "sampleRate"],
-            "properties": {
-              "pcm16leMono": { "type": "array", "items": { "type": "integer" } },
-              "sampleRate": { "type": "integer", "enum": [16000, 44100, 48000] }
-            }
-          }
+          "chunk": { "type": "object" }
         }
       }
     }
-  }
+  },
+
+  "ui": [
+    { "id": "meeting-sidebar", "slot": "sidebar", "kind": "embedded-module",
+      "title": "회의록", "entry": "ui/sidebar.js", "exportName": "MeetingSidebar" }
+  ]
 }
 ```
+
+**필드 요약:**
+
+| 필드 | 타입 | 역할 |
+|------|------|------|
+| `id` | string (`^[a-zA-Z][a-zA-Z0-9._-]*$`, 3~128자) | 플러그인 식별자. **flat form 권장** (번들 플러그인은 모두 flat); dot form 허용. |
+| `name`, `version`, `entry`, `description` | string | 메타데이터. `description` ≤ 280자, `version` anchored semver. |
+| `tools` | **`string[]` (flat 이름 배열, snake_case 강제)** | LLM 에 노출되는 tool name. `^[a-zA-Z_][a-zA-Z0-9_]*$` — 도트·하이픈 금지. 호스트는 이 배열을 그대로 Tool Registry 에 등록한다 (런타임 변환 없음). |
+| `toolSchemas` | **`Record<string, { description, inputSchema, $schema? }>` (map form)** | LLM 파라미터 추론용 JSON Schema draft-07. `description` minLength 10, `inputSchema.type` const `"object"` 필수. 런타임 payload 재검증은 수행하지 않는다. |
+| `uiCallable` | `string[]` (subset of `tools[]`) | Renderer `lvis:plugins:call` IPC 허용 allowlist. destructive verb suffix (`_(delete\|remove\|send\|destroy\|erase\|purge)$/i`) 는 managed+signed 예외 외 차단. |
+| `capabilities` | **closed enum** (`src/plugins/capabilities.ts`) | `ms-graph-consumer` (MS Graph HostApi 게이트), `mail-source` / `calendar-source` / `meeting-recorder` / `knowledge-index` (emit namespace 게이트) — 이상 5종 **enforced**. `background-watcher`, `worker-client` — advisory. |
+| `deployment` | `"managed" \| "user"` | managed 는 ed25519 서명 필수 (fail-closed); user 는 warn-on-missing. |
+| `startupTimeoutMs` | integer (1~60000) | `Promise.race` 기반 start() 하드 타임아웃. 초과 시 fail-soft drop. |
+| `startupTools` | `string[]` (subset of `tools[]`) | boot 시 자동 호출되는 tool 이름 (백그라운드 watcher 등). |
+| `eventSubscriptions` | `string[]` | 호스트 이벤트 구독 대상. `memory.private.*` / `settings.apiKey.*` / `audit.*` / `dlp.*` (`PLUGIN_PRIVATE_NAMESPACES`) 는 **거부**. public namespace (`meeting` / `calendar` / `email` / `index` / `task` / `briefing`) 는 허용, 그 외는 warn. |
+| `notificationEvents` | `Array<{ event, titleField?, bodyField? }>` | `registerPluginNotifications()` 가 manifest 만 읽어 OS 알림 핸들러를 자동 배선. |
+| `keywords` | `Array<{ keyword, skillId }>` | boot 시 KeywordEngine 에 등록. |
+| `ui` | `PluginUiExtension[]` | UI slot 마운트 명세. slot 현재 `"sidebar"` 만 지원. |
+| `publisher` | string | 감사 로그·마켓플레이스 표시. |
+
+> **Deprecated (현재 스키마에서 제거됨):** 아래 legacy 셰이프는 AJV `additionalProperties: false` 이므로 매니페스트에 포함하면 로드 거부된다: top-level `permissions[]` 문자열 배열, nested 객체 형태의 `tools[{ name, entry, description }]`, `skills[]`, 객체 형태의 `ui`, `hooks`, `events`, `dependencies`, `lgenie`, `python`. 이전 설계 초안은 git history (pre-Sprint-3-B) 에서만 확인 가능하다.
+
+**서명 검증 (Sprint 3-B §9.6):** managed 플러그인은 `plugin.json.sig` (ed25519, base64) 필수. 서명 도구: `scripts/sign-manifest.mjs`. 검증: `src/plugins/signature-verifier.ts` + `src/plugins/publisher-keys.ts`.
+
+**검증 플로우:** JSON.parse → AJV (`schemas/plugin.schema.json`) → cross-field (tool-name regex, `startupTools ⊂ tools`, `uiCallable ⊂ tools`, destructive-verb guard, `startupTimeoutMs > 0`) → ed25519 signature → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.4.
 
 규칙:
 - top-level `"type": "object"` 필수 (OpenAI / Claude / Gemini 공통 요구사항)
