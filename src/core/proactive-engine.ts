@@ -60,6 +60,12 @@ export interface ProactiveEngineDeps {
   setLastBriefingDate?: (dateKst: string) => void;
   /** Returns ISO timestamp of last user dismissal. */
   getLastDismissedAt?: () => string | undefined;
+  /**
+   * Sprint E §2 — 최근 사용자 브리핑 피드백 (dismiss 사유 기록).
+   * LLM 프롬프트에 "User feedback memory:" 섹션으로 주입되어 점진적 튜닝을 유도.
+   * Absence = no feedback context (backwards compatible).
+   */
+  getRecentBriefingFeedback?: () => Array<{ date: string; reason: string; details: string }>;
 }
 
 /** Result of a daily briefing attempt. */
@@ -503,6 +509,18 @@ export class ProactiveEngine {
         if (remainingTodayEvents > 0) {
           lines.push(`  - 외 ${remainingTodayEvents}건`);
         }
+      }
+    }
+
+    // Sprint E §2 — user feedback memory (최근 5건)
+    const feedback = this.deps.getRecentBriefingFeedback?.() ?? [];
+    if (feedback.length > 0) {
+      const sanitize = (s: string): string =>
+        s.replace(/[\r\n]+/g, " ").replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+      lines.push("User feedback memory (최근 브리핑 dismiss 사유 — 다음 브리핑 톤 조정에 참고):");
+      for (const f of feedback.slice(-5)) {
+        const details = f.details ? ` — ${sanitize(f.details)}` : "";
+        lines.push(`  - [${sanitize(f.date)}] ${sanitize(f.reason)}${details}`);
       }
     }
 

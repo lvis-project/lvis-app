@@ -51,6 +51,11 @@ export function createProactiveEngine(opts: {
     getLastBriefingDate,
     setLastBriefingDate,
     getLastDismissedAt,
+    // Sprint E §2 — 최근 브리핑 피드백 (dismiss 사유). 파일 부재 시 빈 배열.
+    getRecentBriefingFeedback: () => {
+      try { return memoryManager.readRecentBriefingFeedback(5); }
+      catch { return []; }
+    },
   });
   proactiveEngine.setEventHints(buildManifestEventHints(pluginRuntime));
 

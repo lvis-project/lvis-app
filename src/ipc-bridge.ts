@@ -9,6 +9,7 @@ import { writeFile } from "node:fs/promises";
 import type { AppServices } from "./boot.js";
 import type { ApprovalDecision } from "./permissions/approval-gate.js";
 import { loadPolicy, savePolicy } from "./permissions/policy-store.js";
+import { redactForLLM } from "./audit/dlp-filter.js";
 import type { GenericMessage } from "./engine/llm/types.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
 import type { WebContents } from "electron";
@@ -186,7 +187,25 @@ export function registerIpcHandlers(
 
   ipcMain.handle("lvis:chat:send", async (_e, input: string) => {
     const win = getMainWindow();
-    return runStreamedTurn(conversationLoop, input, win?.webContents, "lvis:chat:stream");
+    // Sprint E §3 — privacy.piiRedactEnabled: user draft 를 LLM 으로 보내기 전 PII 리댁트.
+    let effective = input;
+    const privacy = settingsService.get("privacy");
+    if (privacy?.piiRedactEnabled && typeof input === "string") {
+      const r = redactForLLM(input);
+      if (r.totalCount > 0) {
+        effective = r.redacted;
+        win?.webContents?.send("lvis:chat:stream", {
+          type: "redact_notice",
+          count: r.totalCount,
+          byKind: r.counts,
+        });
+        console.warn(
+          `[DLP] user draft redacted — count=${r.totalCount}`,
+          r.counts,
+        );
+      }
+    }
+    return runStreamedTurn(conversationLoop, effective, win?.webContents, "lvis:chat:stream");
   });
 
   ipcMain.handle("lvis:chat:new", () => {
@@ -363,7 +382,7 @@ export function registerIpcHandlers(
   // accidental double-click / rapid-fire IPC abuse.
   let lastDismissAcceptedAt = 0;
   const DISMISS_DEBOUNCE_MS = 1000;
-  ipcMain.handle("lvis:proactive:dismiss-briefing", () => {
+  ipcMain.handle("lvis:proactive:dismiss-briefing", (_e, feedback?: { reason?: string; details?: string }) => {
     const now = Date.now();
     if (now - lastDismissAcceptedAt < DISMISS_DEBOUNCE_MS) {
       return { ok: false, debounced: true };
@@ -373,6 +392,18 @@ export function registerIpcHandlers(
     settingsService.patch({
       proactive: { ...cur, lastDismissedAt: new Date(now).toISOString() },
     });
+    // Sprint E §2 — persist user feedback to ~/.lvis/notes/briefing-feedback.md
+    const allowed = new Set(["inaccurate", "uninteresting", "busy", "other"]);
+    if (feedback?.reason && allowed.has(feedback.reason)) {
+      try {
+        memoryManager.appendBriefingFeedback({
+          reason: feedback.reason as "inaccurate" | "uninteresting" | "busy" | "other",
+          details: feedback.details,
+        });
+      } catch (err) {
+        console.warn("[lvis] briefing feedback persist failed:", (err as Error).message);
+      }
+    }
     return { ok: true };
   });
 
