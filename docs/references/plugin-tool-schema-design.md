@@ -53,6 +53,17 @@ interface PluginManifest {
   capabilities?: string[];
   startupTools?: string[];
   eventSubscriptions?: string[];
+  /**
+   * [Phase 1 신규] OS 네이티브 알림으로 자동 노출할 이벤트 선언.
+   * `titleField` / `bodyField`는 이벤트 payload에서 문자열을 꺼낼 dot-path.
+   * 호스트의 `registerPluginNotifications()`가 manifest만 읽어 onEvent 핸들러를
+   * 자동 등록하므로, 플러그인은 알림 호출 코드를 별도로 작성하지 않는다.
+   */
+  notificationEvents?: Array<{
+    event: string;
+    titleField?: string;
+    bodyField?: string;
+  }>;
   deployment?: "managed" | "user";
   publisher?: string;
   /** Python 런타임이 필요한 플러그인 전용. */
@@ -77,6 +88,7 @@ interface PluginManifest {
 | `ui[]` | plugin-ui-host.tsx 마운트 | boot + UI 렌더 |
 | `startupTools[]` | boot 시 자동 호출 (init 류) | boot |
 | `eventSubscriptions[]` | ProactiveEngine 연동 참고 | boot |
+| `notificationEvents[]` | `registerPluginNotifications()` — OS 알림 자동 등록 | boot + 플러그인 install/uninstall |
 | `deployment` | DeploymentGuard | install + uninstall |
 
 **plugin.json 전체 예시 (meeting 플러그인):**
@@ -236,8 +248,25 @@ top-level은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구사
 | `isMsGraphAuthenticated()` | handler 진입부에서 인증 상태 확인 | — |
 | `getMsGraphAccount()` | 현재 로그인 계정 이메일 조회 | — |
 | `onMsGraphAuthChange(handler)` | 인증 상태 변화 감지 (logout 처리 등) | — |
+| `callLlm(prompt, options?)` | **[Phase 1 신규]** 호스트 LLM으로 단발 텍스트 생성. 선제성 제안 본문 생성·분류·요약 등 | 대화 히스토리·streaming·tool_use 필요 시 (플러그인이 직접 SDK 사용) |
 | `logEvent(level, message, data?)` | **[Phase 2 신규]** 호스트 감사 로그에 플러그인 이벤트 기록 | 디버그 전용 고빈도 로깅 (성능) |
 | `onShutdown(handler)` | **[Phase 2 신규]** 앱 종료 전 정리 작업 (DB flush, 파일 저장 등) | 긴 비동기 작업 (5s 제한 있음) |
+
+### callLlm 상세
+
+```typescript
+// 플러그인이 선제성 제안 본문을 생성하는 예
+const suggestion = await hostApi.callLlm(
+  `다음 이메일이 미팅 제안인지 판단하고, 제안이면 제목·일시를 한국어로 요약: ${emailBody}`,
+  { maxTokens: 300, systemPrompt: "당신은 캘린더 보조 비서입니다." }
+);
+```
+
+- 호스트 `ConversationLoop.generateText()`에 위임 — 사용자가 설정한 현재 벤더·모델이 그대로 사용된다.
+- **대화 히스토리와 무관한 단발 호출**: 매번 독립. multi-turn 대화가 필요하면 플러그인이 직접 SDK 사용.
+- `provider.streamTurn()`에서 `error` 이벤트가 오면 throw — 부분 응답을 성공으로 삼지 않는다.
+- LLM이 설정되지 않은 상태에서 호출하면 `"LLM provider not configured"` throw.
+- **Surface를 의도적으로 좁게 유지**: streaming·tool_choice·thinking 등 vendor 편차가 큰 기능은 제외. §6.3 참조.
 
 ### logEvent 상세
 
@@ -528,7 +557,7 @@ HostApi에 새 메서드를 추가하려면:
 | **worker_threads / process 격리** | in-process + try/catch로 95% 장애 커버. 격리 시 IPC 오버헤드 + 디버깅 복잡도 증가. 실제 장애 패턴이 요구할 때 재논의. |
 | **manifest signature 검증 재도입** | 배포 파이프라인(CI/CD, managed installer)이 무결성을 보장. 런타임 재검증은 이중화. |
 | **`permissions[]` 선언형 필드** | HostApi 자체가 capability gate. 선언만 하고 강제하지 않으면 거짓 보안감. |
-| **LLM invoke HostApi 추상화** | vendor별 streaming·thinking·tool_choice 편차가 커서 단일 추상화 불가. 플러그인이 직접 SDK 사용. |
+| **LLM invoke HostApi 추상화 (full surface)** | 단발 텍스트 생성 `callLlm()`만 Phase 1에서 채택 (§4 참조). streaming·tool_choice·thinking·multi-turn 등 vendor 편차가 큰 surface는 여전히 기각 — 필요한 플러그인이 직접 SDK를 사용한다. |
 | **파일 watcher HostApi (`watchFiles`)** | pageindex 1개 플러그인만 필요. "3+ 플러그인 규칙" 미충족. 플러그인이 chokidar 직접 사용. |
 | **zod 자동 schema 추출** | 번들 크기 증가, zod 버전 충돌 위험. 수기 작성이 LLM 최적화 면에서도 우수. |
 | **`toolSchemas` output schema (Phase 1)** | 응답은 LLM이 string으로 재소비 가능. 추가 이득 없음. Phase 2에서 필요 시 재검토. |
@@ -541,7 +570,7 @@ HostApi에 새 메서드를 추가하려면:
 
 ### 명명 규칙
 
-- **LLM tool name**: `^[a-zA-Z_][a-zA-Z0-9_]*$` — underscore 형식. `methods[]`에 직접 선언.
+- **LLM tool name**: `^[a-zA-Z_][a-zA-Z0-9_]*$` — underscore 형식. `tools[]`에 직접 선언.
 - **플러그인 ID**: dot 형식 (`com.lge.meeting-recorder`). LLM에 노출 안 됨.
 - **이벤트 채널**: dot 형식 (`meeting.started`, `email.action.needed`). 별도 네임스페이스.
 - 런타임 변환 없음 — manifest에 선언한 이름이 그대로 Tool Registry에 등록됨.
@@ -577,7 +606,7 @@ HostApi에 새 메서드를 추가하려면:
 
 ```
 my-plugin/
-  plugin.json          ← manifest (id, name, version, entry, methods)
+  plugin.json          ← manifest (id, name, version, entry, tools)
   package.json
   tsconfig.json
   src/
@@ -613,7 +642,7 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
       log("플러그인 시작");
     },
 
-    // 4. 메서드 구현 — methods[]에 선언한 이름과 1:1 매칭
+    // 4. 도구 구현 — tools[]에 선언한 이름과 1:1 매칭
     handlers: {
       my_action: async (payload?: unknown) => {
         const p = (payload ?? {}) as { input?: string };
@@ -641,7 +670,7 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
 
 ### 첫 메서드까지 체크리스트
 
-- [ ] `methods[]` 이름과 `handlers` 키가 정확히 일치하는지 확인
+- [ ] `tools[]` 이름과 `handlers` 키가 정확히 일치하는지 확인
 - [ ] 모든 handler가 `payload?: unknown`을 타입 캐스팅 후 사용하는지 확인
 - [ ] 필수 파라미터 누락 시 `throw new Error()`로 명확한 에러 메시지
 - [ ] `dist/index.js`가 `RuntimePluginFactory`를 default export하는지 확인
