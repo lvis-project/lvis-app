@@ -772,7 +772,12 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
             vertexLocation: vertexLocation.trim() || undefined,
             temperature,
             maxOutputTokens,
-            seed: seedInput.trim() === "" ? undefined : Number.parseInt(seedInput.trim(), 10),
+            seed: (() => {
+              const raw = seedInput.trim();
+              if (raw === "") return undefined;
+              const n = Number.parseInt(raw, 10);
+              return Number.isFinite(n) ? n : undefined;
+            })(),
             responseFormat,
             stopSequences: stopSequencesText
               .split("\n")

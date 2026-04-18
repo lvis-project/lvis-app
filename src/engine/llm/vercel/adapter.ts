@@ -267,7 +267,7 @@ export class VercelUnifiedProvider implements LLMProvider {
         smoothing === "word"
           ? smoothStream({ chunking: "word" })
           : smoothing === "char"
-            ? smoothStream({ chunking: /./ })
+            ? smoothStream({ chunking: /./u })
             : undefined;
 
       // Wrap streamText() in try/catch to also capture synchronous construction
