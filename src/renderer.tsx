@@ -57,7 +57,6 @@ import { PluginUiHostView, type PluginUiExtensionView } from "./plugin-ui-host.j
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { approvalQueueReducer } from "./lib/approval-queue-reducer.js";
-import { REASONING_EFFORT_STEPS as _REASONING_EFFORT_STEPS } from "./engine/llm/reasoning-budget.js";
 import {
   appendUserEntry,
   applyToolEnd,
@@ -400,12 +399,17 @@ const WEB_PROVIDERS = [
   { id: "google", label: "Google Search", placeholder: "API Key...", needsKey: true },
 ] as const;
 
-// Reasoning effort slider steps — sourced from shared reasoning-budget.ts.
-// Labels are capitalised for display; budgets are the canonical shared values.
-const REASONING_EFFORT_STEPS = _REASONING_EFFORT_STEPS.map((s) => ({
-  label: (s.label.charAt(0).toUpperCase() + s.label.slice(1)) as string,
-  budget: s.budget as number,
-}));
+// Reasoning effort slider steps. Budget values are chosen to land cleanly in
+// both `mapReasoningEffort()` (OpenAI: ≤3000=low, ≤8000=medium, >8000=high)
+// and `mapBudgetToEffort()` (Claude adaptive: ≤3000=low, ≤6000=medium,
+// ≤16000=high, >16000=max) in vercel/adapter.ts. Keep values in sync if those
+// thresholds change.
+const REASONING_EFFORT_STEPS = [
+  { label: "Low", budget: 2000 },
+  { label: "Medium", budget: 6000 },
+  { label: "High", budget: 12_000 },
+  { label: "Max", budget: 24_000 },
+] as const;
 
 function budgetToEffortIndex(budget: number): number {
   let closest = 0;
