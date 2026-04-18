@@ -11,6 +11,7 @@
  */
 
 import type { IdleState } from "../main/idle-scheduler.js";
+import { categorizeEvent } from "../plugins/capabilities.js";
 
 export interface BriefingItem {
   category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
@@ -530,7 +531,7 @@ export class ProactiveEngine {
 }
 
 function inferHintFromEventType(eventType: string): ProactiveEventHint | undefined {
-  const [prefix] = eventType.split(".");
+  const prefix = categorizeEvent(eventType);
   if (prefix === "meeting") {
     return { category: "meeting", priority: "medium", title: "회의 이벤트" };
   }

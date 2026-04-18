@@ -14,8 +14,8 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { ProactiveEngine } from "../core/proactive-engine.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import { categorizeEvent, classifySubscription } from "../plugins/capabilities.js";
 import { pluginToolsForRegistration } from "../plugins/plugin-tool-adapter.js";
-import { classifySubscription } from "../plugins/capabilities.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
 
 /** 현재 LLM 벤더의 API 키를 모든 플러그인에 범용으로 전달 */
@@ -126,7 +126,7 @@ export function buildManifestEventHints(
   const hints: Record<string, import("../core/proactive-engine.js").ProactiveEventHint> = {};
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
     for (const eventType of manifest.eventSubscriptions ?? []) {
-      const [prefix] = eventType.split(".");
+      const prefix = categorizeEvent(eventType);
       if (prefix === "meeting") {
         hints[eventType] = {
           category: "meeting",

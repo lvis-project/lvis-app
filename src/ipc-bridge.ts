@@ -129,6 +129,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:starred:list",
   "lvis:starred:add",
   "lvis:starred:remove",
+  "lvis:plugins:cards",
 ]);
 
 /**
@@ -296,6 +297,7 @@ export function registerIpcHandlers(
     return result;
   });
   ipcMain.handle("lvis:plugins:ui:list", () => pluginRuntime.listUiExtensions());
+  ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
   // H2: renderer-originated plugin calls go through callFromUi() which enforces
   // the per-plugin uiCallable[] allowlist. Methods not declared there must go
   // through ConversationLoop so permission / scope / expansion caps apply.

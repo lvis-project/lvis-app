@@ -159,6 +159,17 @@ export const PLUGIN_PRIVATE_NAMESPACES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Categorize an event type by its namespace prefix.
+ * Returns the prefix when it is a known public namespace, otherwise "other".
+ * Single source of truth — replaces ad-hoc prefix splits in proactive-engine
+ * and boot/plugins.
+ */
+export function categorizeEvent(eventType: string): string {
+  const prefix = eventType.split(".")[0] ?? "";
+  return PUBLIC_EVENT_NAMESPACES.has(prefix) ? prefix : "other";
+}
+
+/**
  * Returns the capability required to emit an event of this type, or
  * undefined when the namespace is not gated.
  */

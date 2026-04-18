@@ -59,6 +59,10 @@ export interface PluginCard {
   name: string;
   description: string;
   sampleTools: string[];
+  /** All tool names declared in the manifest (filtered by toolRegistry visibility when provided). */
+  tools: string[];
+  /** Capability tags declared in manifest.capabilities. */
+  capabilities: string[];
 }
 
 export interface PluginRuntimeOptions {
@@ -497,6 +501,8 @@ export class PluginRuntime {
         name: manifest.name,
         description,
         sampleTools,
+        tools: filteredTools,
+        capabilities: manifest.capabilities ?? [],
       });
     }
     return cards;

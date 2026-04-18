@@ -61,6 +61,7 @@ const api = {
   installMarketplacePlugin: async (pluginId: string) => ipcRenderer.invoke("lvis:plugins:install", pluginId),
   uninstallMarketplacePlugin: async (pluginId: string) => ipcRenderer.invoke("lvis:plugins:uninstall", pluginId),
   listPluginUiExtensions: async () => ipcRenderer.invoke("lvis:plugins:ui:list"),
+  listPluginCards: async () => ipcRenderer.invoke("lvis:plugins:cards"),
   callPluginMethod: async (method: string, payload?: unknown) => ipcRenderer.invoke("lvis:plugins:call", method, payload),
 
   // ─── Tasks ───────────────────────────────────────
