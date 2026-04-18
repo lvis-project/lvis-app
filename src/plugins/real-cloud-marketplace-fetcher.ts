@@ -22,7 +22,7 @@ import {
   NetworkGuardError,
 } from "../core/network-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
-import type { PluginMarketplaceItem, PluginUiExtension } from "./types.js";
+import type { PluginMarketplaceItem, PluginUiExtension, RequiresSpec } from "./types.js";
 
 export interface RealCloudMarketplaceConfig {
   baseUrl: string;
@@ -55,6 +55,8 @@ interface ServerCatalogRow {
   publisher?: string;
   latest_stable_version?: string;
   latestStableVersion?: string;
+  /** S14: requires.capabilities[] exposed by the server catalog. */
+  requires?: { capabilities?: unknown[] } | null;
 }
 
 export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
@@ -205,6 +207,17 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
       item.deployment = row.deployment;
     }
     if (row.publisher) item.publisher = row.publisher;
+
+    // S14: map requires.capabilities[] from the catalog row
+    if (row.requires && typeof row.requires === "object") {
+      const caps = row.requires.capabilities;
+      const requires: RequiresSpec = {
+        capabilities: Array.isArray(caps)
+          ? caps.filter((c): c is string => typeof c === "string")
+          : [],
+      };
+      item.requires = requires;
+    }
 
     return item;
   }
