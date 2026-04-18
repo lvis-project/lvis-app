@@ -38,7 +38,6 @@
     "email_auth",
     "email_list",
     "email_analyze",
-    "email_reply",
     "email_get_sent_replies",
     "email_get_notifications",
     "email_create_event"
