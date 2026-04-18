@@ -72,6 +72,7 @@ import { UsageDashboard } from "./ui/renderer/components/UsageDashboard.js";
 import { RolesTab } from "./ui/renderer/tabs/RolesTab.js";
 import { PermissionsTab } from "./ui/renderer/tabs/PermissionsTab.js";
 import { useSettings } from "./ui/renderer/hooks/use-settings.js";
+import { useChatState } from "./ui/renderer/hooks/use-chat-state.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./ui/renderer/components/BriefingCard.js";
@@ -646,12 +647,22 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
 export function App() {
   const api = useMemo(() => getApi(), []);
 
-  // Chat state
-  const [entries, setEntries] = useState<ChatEntry[]>([]);
+  // Chat state — Phase 3.2 hook
+  const {
+    entries,
+    setEntries,
+    streaming,
+    setStreaming,
+    streamRef,
+    thoughtRef,
+    editingEntryIdx,
+    setEditingEntryIdx,
+    editBusy,
+    handleEditSave: chatHandleEditSave,
+    handleRetryEffort,
+    finalizeLeftoverStream,
+  } = useChatState(api);
   const [question, setQuestion] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const streamRef = useRef("");
-  const thoughtRef = useRef("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // App state
@@ -695,9 +706,7 @@ export function App() {
   const [langLock, setLangLock] = useState<"off" | "ko" | "en">("off");
   const [maxOutputTokens] = useState<number>(4096);
 
-  // Sprint 4.C — conversation UX state
-  const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
-  const [editBusy, setEditBusy] = useState(false);
+  // Sprint 4.C — conversation UX state (editingEntryIdx / editBusy now in useChatState)
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchCase, setSearchCase] = useState(false);
@@ -775,38 +784,12 @@ export function App() {
   }, [searchMatches, searchIdx]);
   const searchHighlight = searchOpen ? searchQuery : "";
 
-  // ─── Edit & resend ─────────────────────────────
-  const handleEditSave = useCallback(async (entryIdx: number, newText: string) => {
-    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-    if (histIdx === undefined) return;
-    setEditBusy(true);
-    const prevEntries = entries;
-    let failed = false;
-    try {
-      // Truncate renderer entries up to (but not including) the edited user
-      // bubble; the streaming response will repopulate from there.
-      setEntries((p) => [...p.slice(0, entryIdx), { kind: "user", text: newText }]);
-      streamRef.current = "";
-      thoughtRef.current = "";
-      setStreaming(true);
-      const res = await api.chatEditResend(histIdx, newText);
-      if (!res?.ok) {
-        failed = true;
-        // Restore the prior entries so the user doesn't lose context, and
-        // surface the failure via the existing assistant-error channel.
-        setEntries(setAssistantError(prevEntries, `편집 실패: ${res?.error ?? "알 수 없는 오류"}`, thoughtRef.current));
-      }
-    } catch (err) {
-      failed = true;
-      setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current));
-    } finally {
-      setEditBusy(false);
-      setStreaming(false);
-      // Only exit editing mode on success; on failure keep the editor open
-      // so the user can retry without losing their draft.
-      if (!failed) setEditingEntryIdx(null);
-    }
-  }, [api, entries, entryIndexToHistoryIndex]);
+  // ─── Edit & resend (delegates to useChatState) ─────────────
+  const handleEditSave = useCallback(
+    (entryIdx: number, newText: string) =>
+      chatHandleEditSave(entryIdx, newText, entryIndexToHistoryIndex),
+    [chatHandleEditSave, entryIndexToHistoryIndex],
+  );
 
   // ─── Fork ──────────────────────────────────────
   const handleFork = useCallback(async (entryIdx: number) => {
@@ -819,32 +802,7 @@ export function App() {
     }
   }, [api, entryIndexToHistoryIndex, refreshSessionId]);
 
-  // ─── Retry with deeper thinking ────────────────
-  const handleRetryEffort = useCallback(async () => {
-    const prevEntries = entries;
-    // Strip the last assistant+reasoning so streaming replaces them cleanly.
-    setEntries((p) => {
-      const next = [...p];
-      while (next.length > 0 && (next[next.length - 1].kind === "assistant" || next[next.length - 1].kind === "reasoning" || next[next.length - 1].kind === "tool_group")) {
-        next.pop();
-      }
-      return next;
-    });
-    streamRef.current = "";
-    thoughtRef.current = "";
-    setStreaming(true);
-    try {
-      const res = await api.chatRetryEffort({ enableThinking: true, thinkingBudgetTokens: 20000 });
-      if (!res?.ok) {
-        // Restore the prior entries + surface failure via existing status.
-        setEntries(setAssistantError(prevEntries, `재시도 실패: ${res?.error ?? "알 수 없는 오류"}`, thoughtRef.current));
-      }
-    } catch (err) {
-      setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current));
-    } finally {
-      setStreaming(false);
-    }
-  }, [api, entries]);
+  // ─── Retry with deeper thinking — provided by useChatState ─────
 
   // ─── Star toggle ───────────────────────────────
   const handleToggleStar = useCallback(async (entryIdx: number) => {
@@ -1097,15 +1055,7 @@ export function App() {
         const n = ev.removedMessages ?? 0;
         setEntries((p) => [...p, { kind: "system", text: `💾 이전 ${n}개 대화를 요약했습니다 (목표·결정사항 보존)` }]);
       } else if (ev.type === "done") {
-        if (streamRef.current || thoughtRef.current) {
-          setEntries((p) => {
-            let next = finalizeStreamingReasoning(p, thoughtRef.current);
-            next = finalizeStreamingAssistant(next, streamRef.current);
-            return next;
-          });
-          streamRef.current = "";
-          thoughtRef.current = "";
-        }
+        finalizeLeftoverStream();
       }
     });
     const onKey = (e: KeyboardEvent) => {
