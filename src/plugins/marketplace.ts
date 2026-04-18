@@ -419,10 +419,17 @@ export class PluginMarketplaceService {
     // whose cached manifest still exists on disk.
     for (let i = entries.length - 1; i >= 0; i--) {
       const candidate = entries[i].version;
+      // PR#44 Copilot: guard against empty/whitespace/invalid version dirs —
+      // they must be non-empty strings and the cached manifest must exist and
+      // parse as JSON with a matching `version` field. Invalid entries are
+      // skipped rather than treated as missing.
+      if (!candidate || typeof candidate !== "string" || candidate.trim().length === 0) continue;
       if (candidate === currentVersion) continue;
       const cachedManifest = resolve(this.cacheRoot, pluginId, candidate, "plugin.json");
       try {
-        await readFile(cachedManifest, "utf-8");
+        const raw = await readFile(cachedManifest, "utf-8");
+        const parsed = JSON.parse(raw) as { version?: string };
+        if (!parsed.version) continue;
         return candidate;
       } catch {
         continue;

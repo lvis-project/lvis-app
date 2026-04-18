@@ -161,6 +161,18 @@ export function createScheduleSignal(opts: {
 }): { name: string; evaluate: SignalEvaluator } {
   const hhmm = opts.hhmmKst ?? "08:30";
   const [targetH, targetM] = hhmm.split(":").map((x) => Number.parseInt(x, 10));
+  // PR#44 Copilot: validate parseInt — reject NaN and out-of-range values so a
+  // malformed config string doesn't silently turn into fires at t=NaN (which
+  // would compare false-ish and hide the misconfiguration).
+  const isValidHm = (h: number, m: number): boolean =>
+    Number.isFinite(h) && Number.isFinite(m) && h >= 0 && h <= 23 && m >= 0 && m <= 59;
+  if (!isValidHm(targetH, targetM)) {
+    console.warn(`[proactive-coordinator] invalid hhmmKst "${hhmm}" — scheduleSignal disabled`);
+    return {
+      name: "scheduleSignal",
+      evaluate: () => null,
+    };
+  }
   return {
     name: "scheduleSignal",
     evaluate: (now) => {
@@ -172,6 +184,10 @@ export function createScheduleSignal(opts: {
         hour12: false,
       }).format(now);
       const [curH, curM] = fmt.split(":").map((x) => Number.parseInt(x, 10));
+      if (!isValidHm(curH, curM)) {
+        console.warn(`[proactive-coordinator] Intl DateTimeFormat produced invalid hh:mm "${fmt}"`);
+        return null;
+      }
       const curMinutes = curH * 60 + curM;
       const tgtMinutes = targetH * 60 + targetM;
       // fire inside [target, target+5min) window (60s tick + grace)

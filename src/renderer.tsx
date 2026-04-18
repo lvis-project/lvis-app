@@ -817,6 +817,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                   type="button"
                   role="checkbox"
                   aria-checked={enableDailyBriefing}
+                  aria-labelledby="daily-briefing-toggle-label"
                   className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${enableDailyBriefing ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}
                   onClick={() => setEnableDailyBriefing((prev) => !prev)}
                 >
@@ -825,7 +826,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                   )}
                 </button>
                 <div className="space-y-0.5">
-                  <p className="text-sm font-medium">데일리 브리핑 활성화</p>
+                  <p id="daily-briefing-toggle-label" className="text-sm font-medium">데일리 브리핑 활성화</p>
                   <p className="text-[11px] text-muted-foreground">기본값은 꺼짐입니다. 켜면 idle scan 중 요약이 생성됩니다.</p>
                 </div>
               </div>
@@ -1362,8 +1363,24 @@ function App() {
                 {briefing && (
                   <BriefingCard
                     briefing={briefing}
-                    onDismiss={() => { void api.dismissBriefing(); setBriefing(null); }}
-                    onSnooze={() => { void api.snoozeBriefing(); setBriefing(null); }}
+                    onDismiss={() => {
+                      // PR#44 Copilot: await IPC result; hide only on ok:true.
+                      // debounced/error keeps card visible so user can retry.
+                      void api.dismissBriefing().then((r) => {
+                        if (r?.ok) setBriefing(null);
+                        else console.warn("[lvis] dismissBriefing skipped:", r);
+                      }).catch((e: Error) => {
+                        console.warn("[lvis] dismissBriefing failed:", e.message);
+                      });
+                    }}
+                    onSnooze={() => {
+                      void api.snoozeBriefing().then((r) => {
+                        if (r?.ok) setBriefing(null);
+                        else console.warn("[lvis] snoozeBriefing skipped:", r);
+                      }).catch((e: Error) => {
+                        console.warn("[lvis] snoozeBriefing failed:", e.message);
+                      });
+                    }}
                   />
                 )}
                 {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}

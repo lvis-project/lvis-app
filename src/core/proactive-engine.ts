@@ -470,7 +470,13 @@ export class ProactiveEngine {
     // order, so existing tests that assert exact prompt output stay stable.
     const excerpts = this.deps.getRecentMemoryExcerpts?.() ?? [];
     if (excerpts.length > 0) {
-      const trimmed = excerpts.slice(0, 3).map((s) => s.trim()).filter((s) => s.length > 0);
+      // PR#44 Copilot: memory note titles are user-controlled and flow INSIDE
+      // the <daily-briefing-data> tag. Strip newlines and escape angle
+      // brackets so a crafted title cannot close the tag or inject prompt
+      // directives.
+      const sanitize = (s: string): string =>
+        s.replace(/[\r\n]+/g, " ").replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+      const trimmed = excerpts.slice(0, 3).map(sanitize).filter((s) => s.length > 0);
       if (trimmed.length > 0) {
         lines.push(`사용자 목소리 힌트: 최근 메모 — ${trimmed.join(" / ")}. 이 어휘·톤을 자연스럽게 반영해 주세요.`);
       }

@@ -320,12 +320,13 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   if (idleScheduler) {
     const existing = idleScheduler;
     // Chain: keep existing state listener and also notify coordinator.
-    const prevListener = (state: import("./main/idle-scheduler.js").IdleState) => {
+    const notifyCoordinator = (state: import("./main/idle-scheduler.js").IdleState) => {
       if (state === "IDLE_SCAN") proactiveCoordinator.notify("idle-scan");
     };
-    // Note: setStateChangeListener supports only one — it's already wired
-    // above to trigger briefing directly. We wrap by re-setting with a
-    // composite that invokes both paths.
+    // PR#44 Copilot: setStateChangeListener accepts only one listener; this
+    // `composite` IS the idle-scheduler wiring for proactive — it fans the
+    // IDLE_SCAN signal into (a) direct briefing generation and (b) the
+    // coordinator notifier above.
     const composite = (
       newState: import("./main/idle-scheduler.js").IdleState,
       oldState: import("./main/idle-scheduler.js").IdleState,
@@ -350,7 +351,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
             console.warn("[lvis] boot: daily briefing trigger failed (non-fatal):", e.message),
           );
       }
-      prevListener(newState);
+      notifyCoordinator(newState);
       void oldState; void reason;
     };
     existing.setStateChangeListener(composite);

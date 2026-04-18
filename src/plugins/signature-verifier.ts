@@ -54,8 +54,19 @@ export class PluginSignatureVerifier {
     let sigRaw: Buffer;
     try {
       sigRaw = await readFile(`${manifestPath}.sig`);
-    } catch {
-      return { valid: false, sha256, reason: "signature file missing" };
+    } catch (err) {
+      // PR#44 Copilot: differentiate ENOENT (truly missing) from any other
+      // filesystem failure (permissions, EIO, etc.) so operators can tell the
+      // difference between "not signed yet" and "we couldn't read it".
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        return { valid: false, sha256, reason: "signature file missing" };
+      }
+      return {
+        valid: false,
+        sha256,
+        reason: `signature file io-error: ${code ?? "unknown"} — ${(err as Error).message}`,
+      };
     }
 
     const signature = normalizeSignature(sigRaw);
