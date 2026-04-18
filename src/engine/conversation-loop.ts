@@ -185,17 +185,14 @@ export class ConversationLoop {
 
     try {
       const baseUrl = llmSettings.baseUrls?.[vendor];
-      this.provider = createProvider(
-        {
-          vendor,
-          apiKey: apiKey ?? "",
-          model: llmSettings.model,
-          ...(baseUrl ? { baseUrl } : {}),
-          ...(llmSettings.vertexProject ? { vertexProject: llmSettings.vertexProject } : {}),
-          ...(llmSettings.vertexLocation ? { vertexLocation: llmSettings.vertexLocation } : {}),
-        },
-        { useVercelSdk: llmSettings.useVercelSdk ?? "none" },
-      );
+      this.provider = createProvider({
+        vendor,
+        apiKey: apiKey ?? "",
+        model: llmSettings.model,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(llmSettings.vertexProject ? { vertexProject: llmSettings.vertexProject } : {}),
+        ...(llmSettings.vertexLocation ? { vertexLocation: llmSettings.vertexLocation } : {}),
+      });
     } catch {
       this.provider = null;
     }

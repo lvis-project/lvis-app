@@ -50,3 +50,26 @@ Installed on P0 branch:
 
 Note: `^6.1.x` of `ai` does not exist yet; pin stays at `~6.0.168` until a
 compatible 6.1 ships.
+
+## Completion — 2026-04-18 (P4)
+
+Migration complete. Legacy per-vendor providers and the `useVercelSdk`
+feature flag have been removed; `VercelUnifiedProvider` is the sole LLM path
+for all six supported vendors (claude, openai, gemini, copilot, azure-foundry,
+vertex-ai).
+
+Removed in P4:
+
+- `src/engine/llm/claude-provider.ts`
+- `src/engine/llm/openai-provider.ts`
+- `src/engine/llm/gemini-provider.ts`
+- `src/engine/llm/__tests__/claude-provider.test.ts`
+- `src/engine/llm/__tests__/openai-provider.test.ts`
+- `src/engine/llm/vercel/__tests__/snapshot.test.ts` (baseline-parity todos)
+- `scripts/test-openai-provider.ts`
+- `LLMSettings.useVercelSdk` field + `LLMUseVercelSdk` type
+- `IMPLEMENTED_VENDORS` / `VERCEL_ONLY_VENDORS` split in `provider-factory.ts`
+- "Vercel SDK 경로만 적용" UI notes in renderer settings
+
+`createProvider()` is now a single-path thin wrapper around
+`new VercelUnifiedProvider(...)`.

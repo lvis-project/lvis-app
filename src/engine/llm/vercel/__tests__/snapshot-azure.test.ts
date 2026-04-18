@@ -96,17 +96,14 @@ describe("VercelUnifiedProvider azure-foundry", () => {
     vi.doUnmock("ai");
   });
 
-  it("is vercel-routed via factory regardless of useVercelSdk flag", async () => {
+  it("is vercel-routed via factory", async () => {
     vi.resetModules();
     const { createProvider } = await import("../../provider-factory.js");
-    const p = createProvider(
-      {
-        vendor: "azure-foundry",
-        apiKey: "k",
-        baseUrl: "https://example.openai.azure.com/openai/deployments/x/",
-      },
-      { useVercelSdk: "none" }, // flag off — must still take Vercel path
-    );
+    const p = createProvider({
+      vendor: "azure-foundry",
+      apiKey: "k",
+      baseUrl: "https://example.openai.azure.com/openai/deployments/x/",
+    });
     expect(p.constructor.name).toBe("VercelUnifiedProvider");
   });
 });

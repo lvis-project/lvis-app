@@ -151,7 +151,7 @@ export type ResponseFormat =
   | "json"
   | { type: "json-schema"; schema: object };
 
-/** Sprint A: stream-delta smoothing mode (Vercel AI SDK path only). */
+/** Sprint A: stream-delta smoothing mode (word/char chunking via Vercel smoothStream). */
 export type StreamSmoothing = "none" | "word" | "char";
 
 export interface StreamTurnParams {
@@ -171,7 +171,7 @@ export interface StreamTurnParams {
   responseFormat?: ResponseFormat;
   /** Sprint A: model-side stop sequences. */
   stopSequences?: string[];
-  /** Sprint A: client-side stream smoothing (Vercel SDK path only — no-op for legacy providers). */
+  /** Sprint A: client-side stream smoothing (word/char chunking via Vercel smoothStream). */
   streamSmoothing?: StreamSmoothing;
   /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */
   enableThinking?: boolean;
