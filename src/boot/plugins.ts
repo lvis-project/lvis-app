@@ -50,6 +50,12 @@ export function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: 
   }
 }
 
+/**
+ * Phase 5 §5 — fail-soft startupTools.
+ * One throwing startupTool does NOT unload the plugin and does NOT abort the
+ * remaining startupTools. Each failure is logged as a warning so operators
+ * can diagnose, while the plugin keeps serving the rest of its handlers.
+ */
 export function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
   const loadedTools = new Set(pluginRuntime.listToolNames());
   for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
@@ -60,12 +66,15 @@ export function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
         );
         continue;
       }
-      pluginRuntime.call(tool, {}).catch((e: Error) =>
-        console.log(
-          `[lvis] boot: startup tool failed (non-fatal, plugin=${pluginId}, tool=${tool}):`,
-          e.message,
-        ),
-      );
+      // fail-soft: catch + warn, never unload the plugin, never abort sibling
+      // startupTools. The loaded plugin list is unaffected.
+      pluginRuntime.call(tool, {}).catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(
+          `[lvis] boot: startup-tool-failed (non-fatal, plugin=${pluginId}, tool=${tool}):`,
+          msg,
+        );
+      });
     }
   }
 }
