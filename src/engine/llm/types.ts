@@ -124,7 +124,7 @@ export type StreamEvent =
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: Record<string, unknown> }
   | { type: "message_complete"; stopReason: "end_turn" | "tool_use"; usage?: TokenUsage; thinkingBlocks?: ThinkingBlock[] }
-  | { type: "error"; error: string };
+  | { type: "error"; error: string; classification?: string };
 
 export interface TokenUsage {
   inputTokens: number;
@@ -145,6 +145,8 @@ export interface StreamTurnParams {
   enableThinking?: boolean;
   /** Token budget for Claude extended thinking (1024–32000). Defaults to 10 000 when enableThinking is true. */
   thinkingBudgetTokens?: number;
+  /** Abort signal to cancel the streaming request. Providers forward to the underlying SDK when supported. */
+  abortSignal?: AbortSignal;
 }
 
 export interface LLMProvider {

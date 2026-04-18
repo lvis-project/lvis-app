@@ -34,7 +34,10 @@ export class GeminiProvider implements LLMProvider {
 
       // 전체 히스토리를 Content 배열로 변환 (Stateless 방식)
       const contents = toGeminiContents(params.messages);
-      const result = await model.generateContentStream({ contents });
+      const result = await model.generateContentStream(
+        { contents },
+        params.abortSignal ? { signal: params.abortSignal } : undefined,
+      );
 
       let hasToolCalls = false;
 

@@ -19,10 +19,11 @@ should be effectively unchanged until P1 wires the adapter into
 Re-measure at these checkpoints:
 
 - After P0 stubs (this branch) — expect ≈ no change
-- After P1 (Claude path live) — expect the `ai` + `@ai-sdk/anthropic` code
+- After P1 (Gemini path live) — expect the `ai` + `@ai-sdk/google` code
   to enter the Electron main bundle
-- After P3 (all vendors migrated and legacy providers deleted) — net delta vs.
-  the Anthropic/OpenAI/Google SDKs we remove
+- After P2 (OpenAI path live) — expect `@ai-sdk/openai` to enter the bundle
+- After P3 (Claude path live; all vendors migrated and legacy providers
+  deleted) — net delta vs. the Anthropic/OpenAI/Google SDKs we remove
 
 ## Top-10 heaviest modules
 

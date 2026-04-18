@@ -71,16 +71,19 @@ export class OpenAIProvider implements LLMProvider {
     console.log(`[OpenAIProvider] model="${params.model}", isReasoning=${isReasoningModel}, useMaxCompletionTokens=${useMaxCompletionTokens}, reasoning=${useThinking ? reasoningEffort : "off"}, tools=${hasTools}`);
 
     try {
-      const stream = await this.client.chat.completions.create({
-        model: params.model,
-        ...(useMaxCompletionTokens
-          ? { max_completion_tokens: params.maxTokens ?? 4096 }
-          : { max_tokens: params.maxTokens ?? 4096 }),
-        messages,
-        ...(hasTools && { tools }),
-        ...(useThinking && { reasoning_effort: reasoningEffort }),
-        stream: true,
-      });
+      const stream = await this.client.chat.completions.create(
+        {
+          model: params.model,
+          ...(useMaxCompletionTokens
+            ? { max_completion_tokens: params.maxTokens ?? 4096 }
+            : { max_tokens: params.maxTokens ?? 4096 }),
+          messages,
+          ...(hasTools && { tools }),
+          ...(useThinking && { reasoning_effort: reasoningEffort }),
+          stream: true,
+        },
+        params.abortSignal ? { signal: params.abortSignal } : undefined,
+      );
 
       // 스트리밍 파싱: text delta + tool_call 수집
       const pendingToolCalls = new Map<number, { id: string; name: string; args: string }>();

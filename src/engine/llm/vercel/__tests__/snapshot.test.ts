@@ -8,8 +8,8 @@
  *   L4 — Signature:  assistant.thinkingBlocks (thinking + signature) round-trips
  *
  * All tests are `.todo` in P0. They will be filled as each vendor lands
- * (Anthropic P1, OpenAI P2, Gemini P3). Baselines live in
- * test/fixtures/vercel-migration/.
+ * in the actual rollout order: "gemini" (P1) → "openai" (P2) → "claude" (P3)
+ * → "all". Baselines live in test/fixtures/vercel-migration/.
  */
 import { describe, it } from "vitest";
 

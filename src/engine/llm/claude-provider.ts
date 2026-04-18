@@ -55,9 +55,16 @@ export class ClaudeProvider implements LLMProvider {
             thinking: { type: "enabled", budget_tokens: thinkingBudget },
           }),
         },
-        useThinking && tools && tools.length > 0
-          ? { headers: { "anthropic-beta": INTERLEAVED_THINKING_BETA } }
-          : undefined,
+        (() => {
+          const opts: Record<string, unknown> = {};
+          if (useThinking && tools && tools.length > 0) {
+            opts.headers = { "anthropic-beta": INTERLEAVED_THINKING_BETA };
+          }
+          if (params.abortSignal) {
+            opts.signal = params.abortSignal;
+          }
+          return Object.keys(opts).length > 0 ? opts : undefined;
+        })(),
       );
 
       const toolCalls: ToolCallBlock[] = [];
