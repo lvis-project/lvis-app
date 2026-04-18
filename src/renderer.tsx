@@ -1,6 +1,45 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft, ChevronDown, ChevronRight, Star, Download, Pencil, GitBranch, RefreshCw, X as XIcon } from "lucide-react";
+import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft, ChevronDown, ChevronRight, Star, Download, Pencil, GitBranch, RefreshCw, X as XIcon, Paperclip, Globe, User } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover.js";
+import {
+  DEFAULT_ROLE_PRESETS,
+  buildPresetPrefix,
+  loadRolePresets,
+  saveRolePresets,
+  resetRolePresets,
+  type RolePreset,
+} from "./data/role-presets.js";
+import { costTier, estimateTurnCost, formatCostBadge } from "./lib/cost-estimator.js";
+
+// Minimal renderer-side pricing lookup (mirrors engine/llm/pricing.ts). Renderer is
+// browser-bundled and must not import the engine module (it references process.env).
+const RENDERER_PRICING: Record<string, Record<string, { inputPer1M: number; outputPer1M: number }>> = {
+  claude: {
+    "claude-sonnet-4-6": { inputPer1M: 3, outputPer1M: 15 },
+    "claude-sonnet-4-5": { inputPer1M: 3, outputPer1M: 15 },
+    "claude-opus-4-6":   { inputPer1M: 15, outputPer1M: 75 },
+    "claude-opus-4-5":   { inputPer1M: 15, outputPer1M: 75 },
+    "claude-haiku-4-5":  { inputPer1M: 1, outputPer1M: 5 },
+  },
+  openai: {
+    "gpt-5.4":      { inputPer1M: 1.25, outputPer1M: 10 },
+    "gpt-5.4-mini": { inputPer1M: 1.25, outputPer1M: 10 },
+    "gpt-5.4-nano": { inputPer1M: 0.5,  outputPer1M: 4 },
+    "gpt-5.4-pro":  { inputPer1M: 5,    outputPer1M: 40 },
+    "gpt-5":        { inputPer1M: 1.25, outputPer1M: 10 },
+    "gpt-4.1":      { inputPer1M: 2,    outputPer1M: 8 },
+    "gpt-4.1-mini": { inputPer1M: 0.4,  outputPer1M: 1.6 },
+  },
+  gemini:  { "gemini-2.5-flash": { inputPer1M: 0, outputPer1M: 0 }, "gemini-2.5-pro": { inputPer1M: 0, outputPer1M: 0 } },
+  copilot: { "gpt-4.1": { inputPer1M: 0, outputPer1M: 0 } },
+};
+function rendererPricing(vendor: string, model: string): { inputPer1M: number; outputPer1M: number } {
+  const table = RENDERER_PRICING[vendor] ?? {};
+  if (table[model]) return table[model];
+  for (const k of Object.keys(table)) if (model.startsWith(k)) return table[k];
+  return { inputPer1M: 0, outputPer1M: 0 };
+}
 import { Button } from "./components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
 import { Badge } from "./components/ui/badge.js";
@@ -645,6 +684,76 @@ function PermissionsTab() {
 
 // ─── SettingsDialog ─────────────────────────────────
 
+// ─── RolesTab (Sprint B) ────────────────────────────
+function RolesTab() {
+  const [list, setList] = useState<RolePreset[]>(() => loadRolePresets());
+  const [draft, setDraft] = useState<RolePreset>({ id: "", name: "", systemPromptAdd: "", effort: "medium", temperature: 0.5 });
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const persist = useCallback((next: RolePreset[]) => { setList(next); saveRolePresets(next); }, []);
+
+  const startEdit = (p: RolePreset) => { setEditingId(p.id); setDraft({ ...p }); };
+  const cancelEdit = () => { setEditingId(null); setDraft({ id: "", name: "", systemPromptAdd: "", effort: "medium", temperature: 0.5 }); };
+  const saveDraft = () => {
+    if (!draft.name.trim()) return;
+    const id = editingId ?? draft.name.toLowerCase().replace(/\s+/g, "-") + "-" + Math.random().toString(36).slice(2, 6);
+    const next = editingId
+      ? list.map((p) => p.id === editingId ? { ...draft, id } : p)
+      : [...list, { ...draft, id }];
+    persist(next);
+    cancelEdit();
+  };
+  const removePreset = (id: string) => {
+    const target = list.find((p) => p.id === id);
+    if (target?.isDefault) return;
+    persist(list.filter((p) => p.id !== id));
+  };
+  const doReset = () => { setList(resetRolePresets()); cancelEdit(); };
+
+  return (
+    <div className="space-y-3 pt-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">프리셋은 전송할 때 시스템 프롬프트 앞에 주입됩니다.</p>
+        <Button size="sm" variant="ghost" onClick={doReset}>기본값으로 리셋</Button>
+      </div>
+      <div className="space-y-2">
+        {list.map((p) => (
+          <div key={p.id} className="rounded-md border p-2">
+            <div className="flex items-center justify-between">
+              <div className="font-medium text-sm">{p.name} {p.isDefault ? <Badge variant="secondary" className="ml-1 text-[10px]">기본</Badge> : null}</div>
+              <div className="flex gap-1">
+                <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => startEdit(p)}>편집</Button>
+                {!p.isDefault && <Button size="sm" variant="ghost" className="h-7 text-[11px] text-destructive" onClick={() => removePreset(p.id)}>삭제</Button>}
+              </div>
+            </div>
+            <div className="mt-1 text-[11px] text-muted-foreground">effort: {p.effort} · temperature: {p.temperature}</div>
+            {p.systemPromptAdd && <div className="mt-1 line-clamp-2 text-xs">{p.systemPromptAdd}</div>}
+          </div>
+        ))}
+      </div>
+      <div className="rounded-md border p-3 space-y-2">
+        <div className="text-sm font-medium">{editingId ? "프리셋 편집" : "새 프리셋"}</div>
+        <Input placeholder="이름" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+        <Textarea placeholder="systemPromptAdd — 시스템 프롬프트에 주입될 지시사항" value={draft.systemPromptAdd} onChange={(e) => setDraft({ ...draft, systemPromptAdd: e.target.value })} className="min-h-[80px]" />
+        <div className="flex items-center gap-2 text-xs">
+          <label className="flex items-center gap-1">effort:
+            <select className="rounded border bg-background px-1 py-0.5" value={draft.effort} onChange={(e) => setDraft({ ...draft, effort: e.target.value as any })}>
+              <option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-1">temperature:
+            <Input className="h-7 w-20" type="number" step="0.1" min="0" max="2" value={draft.temperature} onChange={(e) => setDraft({ ...draft, temperature: Number(e.target.value) })} />
+          </label>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={saveDraft} disabled={!draft.name.trim()}>{editingId ? "업데이트" : "추가"}</Button>
+          {editingId && <Button size="sm" variant="ghost" onClick={cancelEdit}>취소</Button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; api: LvisApi; onSaved: () => void }) {
   const [tab, setTab] = useState("llm");
   const [vendor, setVendor] = useState("claude");
@@ -779,6 +888,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
             <TabsTrigger value="web" className="flex-1">검색 (Web)</TabsTrigger>
             <TabsTrigger value="proactive" className="flex-1">브리핑</TabsTrigger>
             <TabsTrigger value="permissions" className="flex-1">권한</TabsTrigger>
+            <TabsTrigger value="roles" className="flex-1">역할</TabsTrigger>
             <TabsTrigger value="usage" className="flex-1">사용량</TabsTrigger>
           </TabsList>
 
@@ -979,13 +1089,17 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
             <PermissionsTab />
           </TabsContent>
 
+          <TabsContent value="roles">
+            <RolesTab />
+          </TabsContent>
+
           <TabsContent value="usage">
             <UsageDashboard api={api} />
           </TabsContent>
         </Tabs>
         <DialogFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
-          {tab !== "permissions" && tab !== "usage" && (
+          {tab !== "permissions" && tab !== "usage" && tab !== "roles" && (
             <Button onClick={() => void save()} disabled={saving || !settingsLoaded}>{saving ? "저장 중..." : "저장"}</Button>
           )}
         </DialogFooter>
@@ -1578,6 +1692,21 @@ function App() {
   const approvalQueueRef = useRef<ApprovalRequest[]>([]);
   useEffect(() => { approvalQueueRef.current = approvalQueue; }, [approvalQueue]);
 
+  // Sprint B — role preset, cost preview, attached docs, language lock
+  const [rolePresets, setRolePresets] = useState<RolePreset[]>(() => DEFAULT_ROLE_PRESETS);
+  useEffect(() => { setRolePresets(loadRolePresets()); }, []);
+  const [activePresetId, setActivePresetId] = useState<string>("default");
+  const activePreset = useMemo(
+    () => rolePresets.find((p) => p.id === activePresetId) ?? rolePresets[0] ?? null,
+    [rolePresets, activePresetId],
+  );
+  const [attachedDocs, setAttachedDocs] = useState<Array<{ id: string; name: string }>>([]);
+  const [docPopoverOpen, setDocPopoverOpen] = useState(false);
+  const [indexedDocs, setIndexedDocs] = useState<Array<{ id: string; name: string }>>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [langLock, setLangLock] = useState<"off" | "ko" | "en">("off");
+  const [maxOutputTokens] = useState<number>(4096);
+
   // Sprint 4.C — conversation UX state
   const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
   const [editBusy, setEditBusy] = useState(false);
@@ -1818,25 +1947,87 @@ function App() {
     try { await api.updateSettings({ llm: { enableThinking: next } } as any); } catch { /* ignore */ }
   }, [api]);
 
+  // ─── Sprint B: compose outgoing message with preset + language + attached docs ──
+  const composeOutgoing = useCallback((raw: string): string => {
+    const parts: string[] = [];
+    const presetPrefix = buildPresetPrefix(activePreset);
+    if (presetPrefix) parts.push(presetPrefix.trimEnd());
+    if (attachedDocs.length > 0) {
+      const lines = attachedDocs.map((d) => `- ${d.name} (id: ${d.id})`).join("\n");
+      parts.push(`[Attached documents — use knowledge_search / document_structure to read them]\n${lines}`);
+    }
+    if (langLock === "ko") parts.push("Respond in Korean only.");
+    else if (langLock === "en") parts.push("Respond in English only.");
+    parts.push(raw);
+    return parts.join("\n\n");
+  }, [activePreset, attachedDocs, langLock]);
+
   // ─── Chat ─────────────────────────────────────
   const handleAsk = useCallback(async (q: string) => {
     const t = q.trim(); if (!t || streaming) return;
     if (!(await checkApiKey())) { setSettingsOpen(true); return; }
     setQuestion("");
-    // User entry
+    const outgoing = composeOutgoing(t);
     setEntries((p) => appendUserEntry(p, t));
     streamRef.current = "";
     thoughtRef.current = "";
     setStreaming(true);
     try {
-      await api.chatSend(t);
+      await api.chatSend(outgoing);
       // Final state set by stream events + done
     } catch (err) {
       setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current));
       streamRef.current = "";
       thoughtRef.current = "";
     } finally { setStreaming(false); }
-  }, [api, streaming, checkApiKey]);
+  }, [api, streaming, checkApiKey, composeOutgoing]);
+
+  // ─── Sprint B: PageIndex document list loader ───────────────
+  const refreshIndexedDocs = useCallback(async () => {
+    setDocsLoading(true);
+    try {
+      const tries = ["page_index_list_documents", "pageindex_list_documents", "com.lge.pageindex.listDocuments"];
+      let result: unknown = null;
+      for (const m of tries) {
+        try { result = await api.callPluginMethod(m, {}); if (result) break; } catch { /* try next */ }
+      }
+      const list = Array.isArray(result) ? result : (result as any)?.documents ?? (result as any)?.items ?? [];
+      const normalized: Array<{ id: string; name: string }> = (list as any[])
+        .map((d) => ({ id: String(d.id ?? d.docId ?? d.path ?? ""), name: String(d.name ?? d.title ?? d.filename ?? d.path ?? d.id ?? "") }))
+        .filter((d) => d.id && d.name);
+      setIndexedDocs(normalized);
+    } catch {
+      setIndexedDocs([]);
+    } finally {
+      setDocsLoading(false);
+    }
+  }, [api]);
+
+  // ─── Sprint B: pre-send cost estimate ─────────────
+  const costEstimate = useMemo(() => {
+    const pricing = rendererPricing(llmVendor, llmModel);
+    const historySerialized = entries.map((e) => {
+      if (e.kind === "user" || e.kind === "assistant" || e.kind === "reasoning" || e.kind === "system") {
+        return JSON.stringify({ kind: e.kind, text: (e as any).text ?? "" });
+      }
+      if (e.kind === "tool_group") {
+        return JSON.stringify({
+          kind: "tool_group",
+          tools: (e.tools ?? []).map((t: any) => ({ input: t.input ?? {}, result: t.result ?? "" })),
+        });
+      }
+      return "";
+    }).filter(Boolean);
+    const draft = question ? composeOutgoing(question) : "";
+    return estimateTurnCost({ historySerialized, draft, maxOutputTokens, pricing });
+  }, [entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing]);
+  const costBadgeClass = (() => {
+    const t = costTier(costEstimate.total);
+    if (t === "trivial") return "text-muted-foreground";
+    if (t === "low") return "text-emerald-500";
+    if (t === "medium") return "text-amber-500";
+    return "text-red-500";
+  })();
 
   const handleNewChat = useCallback(async () => { await api.chatNew(); setEntries([]); void refreshSessionId(); }, [api, refreshSessionId]);
 
@@ -2186,18 +2377,100 @@ function App() {
                   <div className={`font-mono ${contextColor}`} title="추정 토큰 사용량 (대화 기반)">
                     {usedTokens.toLocaleString()} / {contextBudget.toLocaleString()} tokens ({contextPercent}%)
                   </div>
-                  {vendorSupportsThinking && (
-                    <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        className="h-3.5 w-3.5"
-                        checked={enableThinkingChat}
-                        onChange={(e) => void toggleThinking(e.target.checked)}
-                      />
-                      <span>Thinking</span>
-                    </label>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {/* Sprint B — Role preset dropdown */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-7 gap-1 text-[11px]" title="역할 프리셋 선택">
+                          <User className="h-3 w-3" /> {activePreset?.name ?? "기본"} <ChevronDown className="h-3 w-3 opacity-60" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {rolePresets.map((p) => (
+                          <DropdownMenuItem key={p.id} onClick={() => setActivePresetId(p.id)}>
+                            <span className={activePresetId === p.id ? "font-semibold" : ""}>{p.name}</span>
+                            {p.isDefault ? null : <span className="ml-2 text-[10px] text-muted-foreground">effort: {p.effort} · t {p.temperature}</span>}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    {/* Sprint B — PageIndex attach */}
+                    <Popover open={docPopoverOpen} onOpenChange={(o) => { setDocPopoverOpen(o); if (o) void refreshIndexedDocs(); }}>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-7 gap-1 text-[11px]" title="문서 첨부">
+                          <Paperclip className="h-3 w-3" />
+                          {attachedDocs.length > 0 ? <span>{attachedDocs.length}</span> : null}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-72 p-2">
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="text-xs font-medium">인덱싱된 문서</span>
+                          <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => void refreshIndexedDocs()}>새로고침</Button>
+                        </div>
+                        <div className="max-h-64 overflow-y-auto">
+                          {docsLoading ? (
+                            <div className="py-6 text-center text-xs text-muted-foreground">로딩 중...</div>
+                          ) : indexedDocs.length === 0 ? (
+                            <div className="py-6 text-center text-xs text-muted-foreground">문서가 없습니다. PageIndex 플러그인에서 먼저 인덱싱하세요.</div>
+                          ) : (
+                            <div className="space-y-1">
+                              {indexedDocs.map((d) => {
+                                const attached = attachedDocs.some((a) => a.id === d.id);
+                                return (
+                                  <button
+                                    key={d.id}
+                                    className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-muted ${attached ? "bg-muted" : ""}`}
+                                    onClick={() => setAttachedDocs((prev) => attached ? prev.filter((a) => a.id !== d.id) : [...prev, d])}
+                                  >
+                                    <input type="checkbox" checked={attached} readOnly className="h-3 w-3" />
+                                    <span className="truncate">{d.name}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    {/* Sprint B — Language lock toggle */}
+                    <Button
+                      variant={langLock === "off" ? "outline" : "default"}
+                      size="sm"
+                      className="h-7 gap-1 text-[11px]"
+                      title="응답 언어 강제"
+                      onClick={() => setLangLock((v) => v === "off" ? "ko" : v === "ko" ? "en" : "off")}
+                    >
+                      <Globe className="h-3 w-3" />
+                      {langLock === "off" ? "자동" : langLock === "ko" ? "한국어" : "English"}
+                    </Button>
+                    {vendorSupportsThinking && (
+                      <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5"
+                          checked={enableThinkingChat}
+                          onChange={(e) => void toggleThinking(e.target.checked)}
+                        />
+                        <span>Thinking</span>
+                      </label>
+                    )}
+                  </div>
                 </div>
+                {/* Sprint B — attached-doc chips */}
+                {attachedDocs.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {attachedDocs.map((d) => (
+                      <span key={d.id} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px]">
+                        <span>🗎 {d.name}</span>
+                        <button
+                          className="rounded-full p-0.5 hover:bg-background"
+                          onClick={() => setAttachedDocs((prev) => prev.filter((a) => a.id !== d.id))}
+                          title="첨부 해제"
+                        ><XIcon className="h-3 w-3" /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="grid grid-cols-[1fr_auto] gap-2">
                   <Textarea value={question} onChange={(e) => setQuestion(e.target.value)}
                     onKeyDown={(e) => {
@@ -2209,7 +2482,21 @@ function App() {
                     }}
                     placeholder={hasApiKey === false ? "API 키를 먼저 설정해 주세요..." : "질문 입력 (Enter 전송 / Shift+Enter 줄바꿈) · /command 사용 가능"}
                     className="min-h-[76px]" disabled={streaming} />
-                  <Button onClick={() => void handleAsk(question)} disabled={streaming || !question.trim() || contextOverflowPct >= 0.95}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
+                  <div className="flex flex-col items-stretch gap-1">
+                    <Button onClick={() => void handleAsk(question)} disabled={streaming || !question.trim() || contextOverflowPct >= 0.95}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className={`text-center text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
+                          {formatCostBadge(costEstimate.total)}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="text-xs">
+                        <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
+                        <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
+                        <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
               </div>
             </div>
