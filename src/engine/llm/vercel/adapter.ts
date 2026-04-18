@@ -12,11 +12,14 @@
  *   - vendor="copilot"           → createOpenAI({ baseURL }).chat(model) (Chat Completions only),
  *                                  with reasoning_effort dropped on tool turns (400 guard).
  *   - vendor="openai-compatible" → createOpenAICompatible({ baseURL })(model).
- * P3 status: Claude path still throws.
- *
- * TODO(P3): Implement Claude path (thinkingBlocks + signature + cacheControl).
+ * P3 status: Claude path implemented.
+ *   - vendor="claude" → createAnthropic(...).languageModel(model)
+ *     • thinking: adaptive (claude-4.x) or budget-based (claude-3.x)
+ *     • interleaved-thinking-2025-05-14 beta header only when thinking+tools
+ *     • signatures consumed per-step from fullStream (#12433 safe)
  */
 import { streamText, jsonSchema, tool, type ModelMessage } from "ai";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
@@ -68,6 +71,47 @@ export function mapReasoningEffort(
   return "medium";
 }
 
+/**
+ * Map LVIS thinking budget (tokens) to Anthropic adaptive-thinking effort.
+ *   budget ≤ 3 000 → "low"
+ *   budget ≤ 6 000 → "medium"
+ *   budget ≤ 16 000 → "high"
+ *   budget >  16 000 → "max"
+ * Used for claude-4.x adaptive thinking. claude-3.x uses `budgetTokens` directly.
+ */
+export function mapBudgetToEffort(
+  budget: number,
+): "low" | "medium" | "high" | "max" {
+  if (budget <= 3000) return "low";
+  if (budget <= 6000) return "medium";
+  if (budget <= 16_000) return "high";
+  return "max";
+}
+
+/**
+ * Detect Claude families that support adaptive thinking (≥ v4).
+ *
+ * Version-parse so claude-5.x (and later) are future-proofed automatically.
+ * Matches:
+ *   claude-sonnet-4-20260101 → major 4
+ *   claude-opus-4            → major 4
+ *   claude-5-sonnet-...      → major 5
+ *   claude-5                 → major 5
+ * Non-matches (→ budget-based "enabled" thinking):
+ *   claude-3-5-sonnet-latest, claude-3-opus-20240229
+ */
+export function supportsAdaptiveThinking(modelId: string): boolean {
+  const m = modelId.toLowerCase();
+  const match = m.match(/claude-[a-z]+-(\d+)/) || m.match(/claude-(\d+)/);
+  if (!match) return false;
+  return parseInt(match[1]!, 10) >= 4;
+}
+
+/** @deprecated use supportsAdaptiveThinking — kept for backward compat. */
+export const isClaude4Family = supportsAdaptiveThinking;
+
+const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
+
 export class VercelUnifiedProvider implements LLMProvider {
   private static warnedCompatThinking = false;
   readonly vendor: LLMVendor;
@@ -93,23 +137,9 @@ export class VercelUnifiedProvider implements LLMProvider {
 
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
     const slot = this.vendorSlot;
-    if (slot === "claude") {
-      // Match legacy provider contract: yield an error StreamEvent rather
-      // than throwing, so conversation-loop handles all provider failures
-      // uniformly. Note: IMPLEMENTED_VENDORS in provider-factory should
-      // normally prevent us from ever reaching this branch for "claude"
-      // while P3 is pending (safe fallback to legacy).
-      yield {
-        type: "error",
-        error:
-          `VercelUnifiedProvider: vendor "claude" not implemented yet (P3). ` +
-          "Set settings.llm.useVercelSdk to exclude 'claude'.",
-      };
-      return;
-    }
 
     try {
-      const messages: ModelMessage[] = genericToModelMessages(params.messages);
+      const messages: ModelMessage[] = genericToModelMessages(params.messages, this.vendor);
       const tools = buildTools(params.tools);
       const hasTools = Boolean(tools && Object.keys(tools).length > 0);
 
@@ -154,9 +184,35 @@ export class VercelUnifiedProvider implements LLMProvider {
         isOpenAIReasoning &&
         !suppressReasoningForToolTurn;
 
-      const providerOptions = useReasoning
-        ? { openai: { reasoningEffort } }
-        : undefined;
+      let providerOptions: Record<string, Record<string, unknown>> | undefined =
+        useReasoning ? { openai: { reasoningEffort } } : undefined;
+
+      // Anthropic-specific wiring: adaptive (4.x) vs budget-based (3.x) thinking
+      // plus interleaved-thinking beta header when thinking+tools coincide.
+      let headers: Record<string, string> | undefined;
+      if (slot === "claude") {
+        const thinkingEnabled = params.enableThinking === true;
+        const anthropicOpts: Record<string, unknown> = {};
+        if (thinkingEnabled) {
+          if (supportsAdaptiveThinking(params.model)) {
+            anthropicOpts.thinking = {
+              type: "adaptive",
+              effort: mapBudgetToEffort(budget),
+            };
+          } else {
+            anthropicOpts.thinking = {
+              type: "enabled",
+              budgetTokens: budget,
+            };
+          }
+        }
+        if (Object.keys(anthropicOpts).length > 0) {
+          providerOptions = { ...(providerOptions ?? {}), anthropic: anthropicOpts };
+        }
+        if (thinkingEnabled && hasTools) {
+          headers = { "anthropic-beta": INTERLEAVED_THINKING_BETA };
+        }
+      }
 
       // Wrap streamText() in try/catch to also capture synchronous construction
       // errors (e.g. APICallError thrown pre-stream), not just mid-stream errors.
@@ -169,7 +225,14 @@ export class VercelUnifiedProvider implements LLMProvider {
           ...(tools ? { tools } : {}),
           ...(params.maxTokens ? { maxOutputTokens: params.maxTokens } : {}),
           ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
-          ...(providerOptions ? { providerOptions } : {}),
+          ...(providerOptions
+            ? {
+                providerOptions: providerOptions as Parameters<
+                  typeof streamText
+                >[0]["providerOptions"],
+              }
+            : {}),
+          ...(headers ? { headers } : {}),
         });
         fullStream = result.fullStream as AsyncIterable<
           Record<string, unknown> & { type: string }
@@ -197,6 +260,15 @@ export class VercelUnifiedProvider implements LLMProvider {
 
   private resolveModel(modelId: string, _hasTools: boolean) {
     const slot = this.vendorSlot;
+
+    if (slot === "claude") {
+      const anthropic = createAnthropic({
+        apiKey: this.apiKey,
+        ...(this.baseUrl ? { baseURL: this.baseUrl } : {}),
+        ...(this.customFetch ? { fetch: this.customFetch } : {}),
+      });
+      return anthropic.languageModel(modelId);
+    }
 
     if (slot === "gemini") {
       const google = createGoogleGenerativeAI({
