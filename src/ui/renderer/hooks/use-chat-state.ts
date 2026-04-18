@@ -57,7 +57,18 @@ export function useChatState(api: LvisApi) {
   useEffect(() => {
     const unsub = api.onChatStream((ev) => {
       if (!aliveRef.current) return;
-      if (process.env.VITE_DEBUG_STREAM === "1") console.log("[lvis:chat:stream]", ev);
+      // `process` is not defined in the renderer (browser context — esbuild
+      // bundles with --platform=browser and no `define:process.env.*`). An
+      // unguarded `process.env` reference throws ReferenceError on EVERY
+      // stream event, killing the entire listener so text_delta /
+      // reasoning_delta / message_complete never get processed — the user
+      // sees an empty response. Guard with typeof.
+      if (
+        typeof process !== "undefined" &&
+        process.env?.VITE_DEBUG_STREAM === "1"
+      ) {
+        console.log("[lvis:chat:stream]", ev);
+      }
       if (ev.type === "text_delta" && ev.text) {
         streamRef.current += ev.text;
         setEntries((p) => upsertStreamingAssistant(p, streamRef.current));
