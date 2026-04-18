@@ -7,18 +7,13 @@ import {
   loadRolePresets,
   type RolePreset,
 } from "../../data/role-presets.js";
-import { costTier, estimateTurnCost, formatCostBadge } from "../../lib/cost-estimator.js";
+import { costTier, estimateTurnCost } from "../../lib/cost-estimator.js";
 import { lookupPricing } from "../../shared/pricing-data.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { Button } from "../../components/ui/button.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
-import { Badge } from "../../components/ui/badge.js";
-import { Input } from "../../components/ui/input.js";
-import { Textarea } from "../../components/ui/textarea.js";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../../components/ui/command.js";
-import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import {
   appendUserEntry,
@@ -27,35 +22,20 @@ import {
   finalizeStreamingReasoning,
   finalizeStreamingAssistant,
   setAssistantError,
-  type ChatEntry,
   upsertStreamingReasoning,
   upsertStreamingAssistant,
 } from "../../lib/chat-stream-state.js";
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import type {
-  LvisApi,
   MarketplaceItem,
-  PluginCardSummary,
   PluginUiExtension,
-  Task,
 } from "./types.js";
-import {
-  PRIORITY_CLASS,
-  REASONING_EFFORT_STEPS,
-  VENDORS,
-  WEB_PROVIDERS,
-  budgetToEffortIndex,
-  formatTaskSource,
-} from "./constants.js";
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
-import { highlightText } from "./utils/html-preview.js";
 import { historyToEntries } from "./utils/history.js";
-import { BriefingCard } from "./components/BriefingCard.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { PluginInstallDialog } from "./dialogs/PluginInstallDialog.js";
 import { PluginUninstallDialog } from "./dialogs/PluginUninstallDialog.js";
-import { UsageDashboard } from "./components/UsageDashboard.js";
 import { TaskView } from "./components/TaskView.js";
 import { StarredView } from "./components/StarredView.js";
 import { MainToolbar } from "./MainToolbar.js";
