@@ -272,7 +272,7 @@ export function BriefingCard({
             {([
               ["inaccurate", "내용이 부정확해요"],
               ["uninteresting", "관심 없는 내용이에요"],
-              ["busy", "지금은 바쁘지 않아요"],
+              ["busy", "지금은 바빠요"],
               ["other", "기타"],
             ] as const).map(([value, label]) => (
               <label key={value} className="flex items-center gap-2">
@@ -930,7 +930,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
           proactive: { enableDailyBriefing } as any,
-          privacy: { piiRedactEnabled } as any,
+          privacy: { piiRedactEnabled },
         } as any);
       }
       // permissions 탭: 각 항목이 즉시 저장되므로 별도 save 불필요
@@ -1254,7 +1254,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                 </button>
                 <div className="space-y-0.5">
                   <p id="pii-redact-toggle-label" className="text-sm font-medium">PII 리댁트 활성화 (기본 OFF)</p>
-                  <p className="text-[11px] text-muted-foreground">감사 로그에 리댁트 건수가 기록되며, 응답 하단에 🔒 배지로 건수가 표시됩니다.</p>
+                  <p className="text-[11px] text-muted-foreground">전송 직전 이메일/전화번호/주민번호/카드번호를 `[REDACTED:*]`로 치환하고, 리댁트 발생 시 응답 영역에 🔒 알림을 잠시 표시합니다. 감사 로그에도 건수가 기록됩니다.</p>
                 </div>
               </div>
             </div>
@@ -2259,6 +2259,17 @@ function App() {
         setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current));
         streamRef.current = "";
         thoughtRef.current = "";
+      } else if (ev.type === "redact_notice") {
+        // Sprint E §3 — user draft 에서 PII 가 리댁트되었음을 알리는 시스템 배지.
+        const count = (ev as unknown as { count?: number }).count ?? 0;
+        const byKind = (ev as unknown as { byKind?: Record<string, number> }).byKind ?? {};
+        const kindLabel = Object.entries(byKind)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(", ");
+        setEntries((p) => [
+          ...p,
+          { kind: "system", text: `🔒 전송 전 PII ${count}건 리댁트됨${kindLabel ? ` (${kindLabel})` : ""}` },
+        ]);
       } else if (ev.type === "compact_notice") {
         const n = ev.removedMessages ?? 0;
         setEntries((p) => [...p, { kind: "system", text: `💾 이전 ${n}개 대화를 요약했습니다 (목표·결정사항 보존)` }]);

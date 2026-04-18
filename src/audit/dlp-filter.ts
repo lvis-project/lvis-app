@@ -55,12 +55,6 @@ const DLP_PATTERNS: DlpPattern[] = [
 ];
 
 /**
- * 텍스트에서 민감 데이터 패턴을 검사하고 마스킹한다.
- *
- * @param text - 검사할 원본 텍스트
- * @returns masked: 마스킹된 텍스트, detections: 탐지된 패턴명 목록
- */
-/**
  * Sprint E §3 — 사용자 draft 를 LLM 으로 보내기 전 PII 를 `[REDACTED:*]` 로
  * 전체 치환한다. maskSensitiveData 와 달리 부분 마스킹이 아닌 완전 제거
  * (카드 뒷 4자리 미보존) — 전송 방지 목적이 우선.
@@ -121,6 +115,12 @@ export function redactForLLM(text: string): RedactResult {
   return { redacted: out, counts, totalCount };
 }
 
+/**
+ * 텍스트에서 민감 데이터 패턴을 검사하고 마스킹한다.
+ *
+ * @param text - 검사할 원본 텍스트
+ * @returns masked: 마스킹된 텍스트, detections: 탐지된 패턴명 목록
+ */
 export function maskSensitiveData(text: string): DlpResult {
   const detections: string[] = [];
   let masked = text;

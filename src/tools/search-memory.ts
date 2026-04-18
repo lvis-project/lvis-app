@@ -66,10 +66,11 @@ export function scoreNotes(
     return notes.map(() => 0);
   }
 
-  const docTokens: string[][] = notes.map((n) => [
-    ...tokenize(n.title),
-    ...tokenize(n.title), // title weight x2 via repetition
-    ...tokenize(n.content),
+  const titleTokens: string[][] = notes.map((n) => tokenize(n.title));
+  const contentTokens: string[][] = notes.map((n) => tokenize(n.content));
+  const docTokens: string[][] = notes.map((_, i) => [
+    ...titleTokens[i],
+    ...contentTokens[i],
   ]);
   const docLens = docTokens.map((t) => t.length);
   const avgDl =
@@ -91,13 +92,16 @@ export function scoreNotes(
     const dl = docLens[i] || 1;
     const tf = new Map<string, number>();
     for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+    const titleSet = new Set(titleTokens[i]);
     let s = 0;
     for (const q of queryTokens) {
       const f = tf.get(q) ?? 0;
       if (f === 0) continue;
       const num = f * (BM25_K1 + 1);
       const denom = f + BM25_K1 * (1 - BM25_B + BM25_B * (dl / avgDl));
-      s += idf(q) * (num / denom);
+      const base = idf(q) * (num / denom);
+      // title 토큰에 매칭되면 TITLE_WEIGHT 배 가중.
+      s += titleSet.has(q) ? base * TITLE_WEIGHT : base;
     }
     return s;
   });
@@ -128,7 +132,8 @@ export function rankNotes(
 function truncate(text: string, maxChars: number): string {
   const flat = (text ?? "").replace(/\s+/g, " ").trim();
   if (flat.length <= maxChars) return flat;
-  return flat.slice(0, maxChars) + "...";
+  if (maxChars <= 3) return flat.slice(0, maxChars);
+  return flat.slice(0, maxChars - 3) + "...";
 }
 
 /**

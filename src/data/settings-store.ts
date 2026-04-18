@@ -45,18 +45,6 @@ export interface LLMSettings {
    * produce inconsistent message histories.
    */
   useVercelSdk?: LLMUseVercelSdk;
-  /** Sprint A — advanced generation settings. All optional; defaults applied in conversation-loop. */
-  temperature?: number;
-  /** Sprint A — max output tokens (renames maxTokens for clarity). */
-  maxOutputTokens?: number;
-  /** Sprint A — deterministic sampling seed. Undefined = random. */
-  seed?: number;
-  /** Sprint A — response format. "text" (default) or "json" (vendor-mapped). */
-  responseFormat?: "text" | "json";
-  /** Sprint A — stop sequences forwarded to the provider. */
-  stopSequences?: string[];
-  /** Sprint A — client-side stream smoothing (Vercel path only). */
-  streamSmoothing?: "none" | "word" | "char";
 }
 
 /** Scope for the Vercel AI SDK migration feature flag. */
@@ -131,10 +119,6 @@ const DEFAULT_SETTINGS: AppSettings = {
     enableThinking: true,
     thinkingBudgetTokens: 10_000,
     useVercelSdk: "none",
-    temperature: 0.7,
-    maxOutputTokens: 4096,
-    responseFormat: "text",
-    streamSmoothing: "none",
   },
   chat: {
     systemPrompt:
