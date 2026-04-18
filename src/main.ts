@@ -125,6 +125,11 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      // render_html tool renders LLM-produced HTML inside an Electron
+      // <webview>. The webview runs on its own webContents / OS process so
+      // a malicious or runaway payload (e.g. `while(true){}`) can't freeze
+      // the main UI. The <webview> tag is gated by webPreferences.webviewTag.
+      webviewTag: true,
       preload: preloadPath,
     },
   });
@@ -202,6 +207,21 @@ async function main() {
     }
   }
 }
+
+// render_html tool webview hardening — the <webview> element carries LLM
+// authored HTML. It loads a data: URL and must never navigate anywhere else
+// (a click on <a href="…"> would bypass the injected meta CSP by moving to a
+// new document). Deny every non-data navigation and new-window attempt on
+// any webview webContents as soon as it's created.
+app.on("web-contents-created", (_event, contents) => {
+  if (contents.getType() !== "webview") return;
+  contents.on("will-navigate", (navEvent, url) => {
+    if (!url.startsWith("data:") && !url.startsWith("about:")) {
+      navEvent.preventDefault();
+    }
+  });
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
