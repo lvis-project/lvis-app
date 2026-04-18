@@ -31,7 +31,9 @@
     "test:meeting-flow": "bun run prepare:plugins && tsx scripts/test-meeting-flow.ts",
     "test:meeting-flow:npm": "npm run prepare:plugins:npm && tsx scripts/test-meeting-flow.ts",
     "test:main-flow": "bun run prepare:plugins && tsx scripts/test-main-flow.ts",
-    "test:main-flow:npm": "npm run prepare:plugins:npm && tsx scripts/test-main-flow.ts"
+    "test:main-flow:npm": "npm run prepare:plugins:npm && tsx scripts/test-main-flow.ts",
+    "sign:manifest": "node scripts/sign-manifest.mjs",
+    "keygen:publisher": "node scripts/keygen-publisher.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "~3.0.71",
