@@ -196,8 +196,14 @@ export class VercelUnifiedProvider implements LLMProvider {
         isOpenAIReasoning &&
         !suppressReasoningForToolTurn;
 
+      // `reasoningSummary: 'detailed'` makes the Responses API stream
+      // `response.reasoning_summary_text.delta` events — without it the model
+      // reasons silently and the UI ReasoningCard never populates. This is
+      // what enables the "think → tool → think" UX per the migration doc §4 row 6.
       let providerOptions: Record<string, Record<string, unknown>> | undefined =
-        useReasoning ? { openai: { reasoningEffort } } : undefined;
+        useReasoning
+          ? { openai: { reasoningEffort, reasoningSummary: "detailed" } }
+          : undefined;
 
       // Anthropic-specific wiring: adaptive (4.x) vs budget-based (3.x) thinking
       // plus interleaved-thinking beta header when thinking+tools coincide.

@@ -330,6 +330,31 @@ const WEB_PROVIDERS = [
   { id: "google", label: "Google Search", placeholder: "API Key...", needsKey: true },
 ] as const;
 
+// Reasoning effort slider steps. Budget values are chosen to land cleanly in
+// both `mapReasoningEffort()` (OpenAI: ≤3000=low, ≤8000=medium, >8000=high)
+// and `mapBudgetToEffort()` (Claude adaptive: ≤3000=low, ≤6000=medium,
+// ≤16000=high, >16000=max) in vercel/adapter.ts. Keep values in sync if those
+// thresholds change.
+const REASONING_EFFORT_STEPS = [
+  { label: "Low", budget: 2000 },
+  { label: "Medium", budget: 6000 },
+  { label: "High", budget: 12_000 },
+  { label: "Max", budget: 24_000 },
+] as const;
+
+function budgetToEffortIndex(budget: number): number {
+  let closest = 0;
+  let minDiff = Math.abs(REASONING_EFFORT_STEPS[0]!.budget - budget);
+  for (let i = 1; i < REASONING_EFFORT_STEPS.length; i++) {
+    const diff = Math.abs(REASONING_EFFORT_STEPS[i]!.budget - budget);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closest = i;
+    }
+  }
+  return closest;
+}
+
 // ─── PermissionsTab ─────────────────────────────────
 
 type ExecMode = "default" | "strict" | "auto";
@@ -836,18 +861,38 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                 <span>Extended Thinking / Reasoning</span>
                 <input type="checkbox" className="h-4 w-4" checked={enableThinking} onChange={(e) => setEnableThinking(e.target.checked)} />
               </label>
-              <p className="text-[11px] text-muted-foreground">모델 내부 추론 과정을 스트리밍으로 표시합니다. Claude는 명시 활성화(Sonnet 4.5+/Opus 4+), OpenAI o-계열(o1/o3/reasoning)은 자동, Gemini 2.0+는 모델 지원 시 자동.</p>
-              {enableThinking && vendor === "claude" && (
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Thinking Budget (tokens) — Claude 전용</label>
-                  <Input
-                    type="number"
-                    min={1024}
-                    max={32000}
-                    step={1000}
-                    value={thinkingBudget}
-                    onChange={(e) => setThinkingBudget(Math.max(1024, Math.min(32000, Number(e.target.value) || 10_000)))}
+              <p className="text-[11px] text-muted-foreground">모델 내부 추론 과정을 스트리밍으로 표시합니다. Claude는 명시 활성화(Sonnet 4.5+/Opus 4+), OpenAI o-계열·gpt-5는 Responses API 자동, Gemini 2.0+는 모델 지원 시 자동.</p>
+              {enableThinking && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-muted-foreground">Reasoning Effort</label>
+                    <span className="text-xs font-medium tabular-nums">
+                      {REASONING_EFFORT_STEPS[budgetToEffortIndex(thinkingBudget)]!.label}
+                      <span className="ml-2 text-muted-foreground">· {thinkingBudget.toLocaleString()} tokens</span>
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={REASONING_EFFORT_STEPS.length - 1}
+                    step={1}
+                    value={budgetToEffortIndex(thinkingBudget)}
+                    onChange={(e) =>
+                      setThinkingBudget(
+                        REASONING_EFFORT_STEPS[Number(e.target.value)]!.budget,
+                      )
+                    }
+                    className="w-full accent-primary"
+                    aria-label="Reasoning effort"
                   />
+                  <div className="flex justify-between text-[10px] text-muted-foreground">
+                    {REASONING_EFFORT_STEPS.map((s) => (
+                      <span key={s.label}>{s.label}</span>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    높을수록 더 많은 사고 토큰을 사용해 꼼꼼히 추론하지만 지연 시간과 비용이 증가합니다. 현재 이 설정은 Claude·OpenAI에 적용되며, Gemini는 모델이 지원하는 경우 추론 표시만 자동으로 동작하고 이 예산 값은 적용되지 않습니다.
+                  </p>
                 </div>
               )}
             </div>
