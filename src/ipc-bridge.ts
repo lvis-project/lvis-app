@@ -139,14 +139,25 @@ const RESERVED_HOST_CHANNELS = new Set([
  * an embedded webview navigating to a remote origin, or a plugin-spawned
  * BrowserView) is rejected with `{ok:false, error:"unauthorized-frame"}`.
  */
-function validateSender(event: IpcMainInvokeEvent | null | undefined): boolean {
+export function validateSender(event: IpcMainInvokeEvent | null | undefined): boolean {
   // Tests may invoke handlers with a synthetic event that omits senderFrame;
   // treat missing frame as trusted so unit tests keep their direct-call
   // ergonomics. Production always supplies a real IpcMainInvokeEvent.
   const frame = event?.senderFrame;
   if (!frame) return true;
-  const url = frame.url ?? "";
-  return url.startsWith("file://") || url.startsWith("http://localhost");
+  const rawUrl = frame.url ?? "";
+  // Parse the frame URL and allowlist only exact origins we control. The
+  // previous `startsWith("http://localhost")` check matched hostile hosts
+  // like `http://localhost.attacker.com` (audit finding: CRITICAL).
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol === "file:") return true;
+    if (url.protocol === "http:" && url.hostname === "localhost") return true;
+    if (url.protocol === "http:" && url.hostname === "127.0.0.1") return true;
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
