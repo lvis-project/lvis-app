@@ -146,6 +146,9 @@ export function registerIpcHandlers(
       onError: (error) => {
         win?.webContents.send("lvis:chat:stream", { type: "error", error });
       },
+      onCompactOccurred: ({ removedMessages, freedTokens }) => {
+        win?.webContents.send("lvis:chat:stream", { type: "compact_notice", removedMessages, freedTokens });
+      },
     });
     win?.webContents.send("lvis:chat:stream", { type: "done" });
     return result;

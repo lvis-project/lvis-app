@@ -3,7 +3,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   PluginManifest,
-  PluginMethodHandler,
+  PluginToolHandler,
   PluginUiExtension,
   PluginHostApi,
   RuntimePlugin,
@@ -16,8 +16,20 @@ type LoadedPlugin = {
   manifest: PluginManifest;
   pluginRoot: string;
   instance: RuntimePlugin;
-  methods: Map<string, PluginMethodHandler>;
+  methods: Map<string, PluginToolHandler>;
 };
+
+/**
+ * Phase 1.5 Option C — 비활성 plugin 카탈로그 카드.
+ * SystemPromptBuilder가 "사용 가능한 플러그인 (비활성)" 섹션 렌더링,
+ * request_plugin 메타 툴이 허용 가능한 pluginId 목록 산출에 사용.
+ */
+export interface PluginCard {
+  id: string;
+  name: string;
+  description: string;
+  sampleTools: string[];
+}
 
 export interface PluginRuntimeOptions {
   hostRoot: string;
@@ -28,6 +40,12 @@ export interface PluginRuntimeOptions {
   createHostApi?: (pluginId: string) => PluginHostApi;
   /** Phase 1.5 §7.3: disable 시 managed 플러그인 차단 */
   deploymentGuard?: PluginDeploymentGuard;
+  /**
+   * HIGH-1: plugin disable 시 호출되는 콜백.
+   * keywordEngine.unregisterByPlugin / toolRegistry.unregisterByPlugin /
+   * conversationLoop.onPluginDisabled 을 boot.ts에서 주입한다.
+   */
+  onDisable?: (pluginId: string) => void;
 }
 
 export class PluginRuntime {
@@ -37,8 +55,9 @@ export class PluginRuntime {
   private readonly configOverrides: Record<string, Record<string, unknown>>;
   private readonly createHostApi?: (pluginId: string) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
+  private readonly onDisable?: (pluginId: string) => void;
   private readonly plugins = new Map<string, LoadedPlugin>();
-  private readonly methodMap = new Map<string, { pluginId: string; handler: PluginMethodHandler }>();
+  private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
   private loaded = false;
 
   constructor(options: PluginRuntimeOptions) {
@@ -48,6 +67,7 @@ export class PluginRuntime {
     this.configOverrides = options.configOverrides ?? {};
     this.createHostApi = options.createHostApi;
     this.deploymentGuard = options.deploymentGuard;
+    this.onDisable = options.onDisable;
   }
 
   async load(): Promise<void> {
@@ -88,17 +108,21 @@ export class PluginRuntime {
         hostApi,
       });
 
-      const methods = new Map<string, PluginMethodHandler>();
-      for (const methodName of manifest.methods) {
-        const handler = instance.handlers[methodName];
+      const methods = new Map<string, PluginToolHandler>();
+      for (const toolName of manifest.tools) {
+        const handler = instance.handlers[toolName];
         if (!handler) {
-          throw new Error(`Missing handler '${methodName}' in plugin '${manifest.id}'`);
+          // Fail-soft: skip this tool but keep the plugin loaded so its other
+          // tools stay usable. Silent full-plugin drop misleads users into
+          // thinking the whole plugin is broken.
+          console.warn(`[plugin:${manifest.id}] missing handler '${toolName}' — tool disabled`);
+          continue;
         }
-        methods.set(methodName, handler);
-        if (this.methodMap.has(methodName)) {
-          throw new Error(`Duplicate plugin method registered: ${methodName}`);
+        methods.set(toolName, handler);
+        if (this.methodMap.has(toolName)) {
+          throw new Error(`Duplicate plugin method registered: ${toolName}`);
         }
-        this.methodMap.set(methodName, { pluginId: manifest.id, handler });
+        this.methodMap.set(toolName, { pluginId: manifest.id, handler });
       }
 
       // 매니페스트에 선언된 키워드 자동 등록
@@ -184,6 +208,9 @@ export class PluginRuntime {
         }
       });
     }
+
+    // HIGH-1: keyword / tool / scope state 정리
+    this.onDisable?.(pluginId);
   }
 
   async call(method: string, payload?: unknown): Promise<unknown> {
@@ -204,6 +231,48 @@ export class PluginRuntime {
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {
     return this.plugins.get(pluginId)?.manifest;
+  }
+
+  /**
+   * Phase 1.5 Option C — listPluginCards()
+   *
+   * LLM 판단 기반 lazy-load 요청을 위한 카탈로그. 각 loaded plugin의
+   * pluginId, name, 1-line description, 샘플 tool names (최대 3개)를 반환한다.
+   * SystemPromptBuilder가 비활성 plugin 목록을 렌더할 때 사용.
+   */
+  listPluginCards(toolRegistry?: { getVisibleTools(): Array<{ name: string }> }): PluginCard[] {
+    const visibleNames = toolRegistry
+      ? new Set(toolRegistry.getVisibleTools().map((t) => t.name))
+      : null;
+    const cards: PluginCard[] = [];
+    for (const [pluginId, plugin] of this.plugins) {
+      const manifest = plugin.manifest;
+      const allTools = manifest.tools ?? [];
+      const filteredTools = visibleNames
+        ? allTools.filter((t) => visibleNames.has(t))
+        : allTools;
+      const sampleTools = filteredTools.slice(0, 3);
+      // Prefer first 3-5 toolSchemas descriptions joined; else fallback.
+      let description: string;
+      const schemas = manifest.toolSchemas;
+      if (schemas) {
+        const parts: string[] = [];
+        for (const toolName of sampleTools) {
+          const desc = schemas[toolName]?.description;
+          if (desc) parts.push(desc);
+        }
+        description = parts.length > 0 ? parts.join(" / ") : `Plugin: ${manifest.name}`;
+      } else {
+        description = `Plugin: ${manifest.name}`;
+      }
+      cards.push({
+        id: pluginId,
+        name: manifest.name,
+        description,
+        sampleTools,
+      });
+    }
+    return cards;
   }
 
   listPluginManifests(): Array<{ pluginId: string; manifest: PluginManifest }> {

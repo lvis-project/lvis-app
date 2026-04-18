@@ -162,21 +162,33 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     userInstalledDir: resolve(projectRoot, "plugins/installed"),
   });
 
-  // LLM 호출 레퍼런스 — ConversationLoop 생성 후 주입됨
-  // 플러그인 callLlm()이 이 ref를 통해 LLM에 접근
+  // Late-binding refs — conversationLoop은 pluginRuntime 이후에 생성되므로
+  // pluginRuntime 구성 시점에는 null로 시작하고, conversationLoop 생성 직후 주입한다.
+  //   - llmCallerRef: 플러그인 callLlm()의 LLM 진입점
+  //   - conversationLoopRef: onDisable 콜백이 conversationLoop에 접근하기 위한 핸들
   const llmCallerRef: {
     fn: ((prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string>) | null;
   } = { fn: null };
+  let conversationLoopRef: import("./engine/conversation-loop.js").ConversationLoop | null = null;
 
   const pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
     registryPath: resolve(projectRoot, "plugins/registry.json"),
     configOverrides,
     deploymentGuard,
+    onDisable: (pluginId) => {
+      keywordEngine.unregisterByPlugin(pluginId);
+      toolRegistry.unregisterByPlugin(pluginId);
+      conversationLoopRef?.onPluginDisabled(pluginId);
+    },
     // 플러그인별 스코프된 HostApi 팩토리
     createHostApi: (pluginId: string): PluginHostApi => ({
       registerKeywords: (keywords) => {
-        keywordEngine.registerKeywords(keywords);
+        // Phase 1 Lazy Tool Scoping — plugin 호출 경로에서 pluginId 자동 주입.
+        // 플러그인 소스는 수정하지 않고 host가 origin을 tag한다.
+        keywordEngine.registerKeywords(
+          keywords.map((k) => ({ ...k, pluginId })),
+        );
         console.log(`[lvis] plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
@@ -229,6 +241,34 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // 빌트인 도구 등록 (호스트 자체 기능)
   registerBuiltinTools(memoryManager, toolRegistry, settingsService);
+
+  // Phase 1.5 Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
+  // execute는 no-op — 실제 scope 확장은 ConversationLoop.queryLoop이 가로챈다.
+  toolRegistry.register(createDynamicTool({
+    name: "request_plugin",
+    description:
+      "현재 비활성화된 플러그인 중 이번 턴 작업에 필요한 것을 활성화 요청합니다. " +
+      "비활성 플러그인 목록은 system prompt '사용 가능한 플러그인' 섹션 참조. " +
+      "활성화 후 같은 턴 내에서 해당 플러그인의 tool을 호출할 수 있습니다.",
+    source: "builtin",
+    category: "read",
+    isReadOnly: () => true,
+    jsonSchema: {
+      type: "object",
+      required: ["pluginId"],
+      properties: {
+        pluginId: {
+          type: "string",
+          description: "활성화할 플러그인 ID (카탈로그의 bold 부분)",
+        },
+      },
+    },
+    // Handled inline by ConversationLoop; fallback if executor reaches it.
+    execute: async () => ({
+      output: "request_plugin은 대화 루프에서 직접 처리됩니다.",
+      isError: false,
+    }),
+  }));
 
   // §4.4 HybridRetriever + Knowledge Tools DI (Agent 3 산출물 연결)
   // §6.1 IdleSchedulerService 배선 (Agent 5 산출물)
@@ -374,6 +414,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
         "</active-plugins>",
       ].join("\n");
     },
+    // Phase 1.5 Option C — 비활성 plugin 카탈로그 공급.
+    getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
   });
 
   // §6.3: PermissionManager (Layer 2-3)
@@ -474,9 +516,12 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     bashAstValidator,
     approvalGate,
     hookRunner,
+    // Phase 1.5 Option C — request_plugin 메타 툴 pluginId 검증용.
+    pluginRuntime,
   });
 
-  // LLM ref 주입 — 이 시점부터 플러그인 callLlm() 사용 가능
+  // Late-binding 주입 — 두 ref 모두 여기서 채워진다.
+  conversationLoopRef = conversationLoop;
   llmCallerRef.fn = (prompt, opts) =>
     conversationLoop.generateText(prompt, opts?.maxTokens, opts?.systemPrompt);
   console.log("[lvis] boot: plugin callLlm ready");
