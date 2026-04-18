@@ -114,4 +114,25 @@ describe("OpenAIProvider", () => {
     expect(request.reasoning_effort).toBeUndefined();
     expect(request.tools).toHaveLength(1);
   });
+
+  it("includes reasoning_effort on text-only turns when thinking is enabled (gpt-5.x, no tools)", async () => {
+    createMock.mockReset();
+    createMock.mockResolvedValue((async function* () {
+      yield { choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] };
+    })());
+
+    const provider = new OpenAIProvider("test-key");
+    for await (const _ of provider.streamTurn({
+      model: "gpt-5.4-mini",
+      systemPrompt: "s",
+      messages: [{ role: "user", content: "hi" }],
+      enableThinking: true,
+      thinkingBudgetTokens: 10_000,
+      maxTokens: 64,
+    })) { void _; }
+
+    const request = createMock.mock.calls[0]?.[0];
+    expect(request.reasoning_effort).toBeDefined();
+    expect(request.tools).toBeUndefined();
+  });
 });

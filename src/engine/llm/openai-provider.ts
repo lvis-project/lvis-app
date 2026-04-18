@@ -59,12 +59,14 @@ export class OpenAIProvider implements LLMProvider {
     const tools = params.tools?.map(toOpenAITool);
 
     // OpenAI /v1/chat/completions rejects `reasoning_effort` with 400 when
-    // function tools are present for gpt-5.x (use /v1/responses instead).
-    // Drop reasoning_effort on tool turns to keep the chat endpoint working;
-    // reasoning still applies on text-only turns.
+    // function tools are present — but only for gpt-5.x models (the restriction
+    // does not apply to o1/o3/o4, which support reasoning + tools on this
+    // endpoint). Drop reasoning_effort only for gpt-5.x tool turns; other
+    // reasoning families keep it. Longer-term: migrate gpt-5.x to /v1/responses.
+    const isGpt5 = modelLower.includes("gpt-5");
     const hasTools = Boolean(tools && tools.length > 0);
     const useThinking =
-      params.enableThinking === true && isReasoningModel && !hasTools;
+      params.enableThinking === true && isReasoningModel && !(isGpt5 && hasTools);
 
     console.log(`[OpenAIProvider] model="${params.model}", isReasoning=${isReasoningModel}, useMaxCompletionTokens=${useMaxCompletionTokens}, reasoning=${useThinking ? reasoningEffort : "off"}, tools=${hasTools}`);
 
