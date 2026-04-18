@@ -1,23 +1,25 @@
-import { useCallback, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  applyToolEnd,
+  applyToolStart,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
   setAssistantError,
+  upsertStreamingAssistant,
+  upsertStreamingReasoning,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
 
 /**
- * Phase 3.2 — chat state hook.
+ * Phase 5 — chat state + stream hook.
  *
- * Owns: entries, streaming flag, stream accumulator refs, edit state,
- * and the edit / retry handlers. The stream-event subscription lives in
- * App.tsx still (it touches briefing / other non-chat side effects), but
- * this hook exposes `setEntries` / refs / `setStreaming` so the subscription
- * can drive them.
+ * Owns everything chat-lifecycle: entries, streaming flag, the IPC
+ * stream subscription (finalize/tool/error/redact/compact/done), edit state,
+ * and edit/retry handlers.
  *
- * Handlers that need `entryIndexToHistoryIndex` (computed in App from
- * `entries`) receive it as an argument rather than duplicating the memo.
+ * `setEntries` is still exposed for App-level flows (briefing seeding,
+ * session load, fork truncation, handleAsk user append + error path).
  */
 export function useChatState(api: LvisApi) {
   const [entries, setEntries] = useState<ChatEntry[]>([]);
@@ -30,7 +32,6 @@ export function useChatState(api: LvisApi) {
 
   // Map renderer `entries` (which include reasoning/tool_group/system) to
   // backend history indices which only track user + assistant messages.
-  // This lets edit/fork/star carry the correct `messageIndex`.
   const entryIndexToHistoryIndex = useMemo(() => {
     const map = new Map<number, number>();
     let backend = 0;
@@ -43,11 +44,65 @@ export function useChatState(api: LvisApi) {
     return map;
   }, [entries]);
 
+  // Stream subscription — Phase 5: absorbed from App.tsx.
+  useEffect(() => {
+    const unsub = api.onChatStream((ev) => {
+      if (process.env.NODE_ENV !== "production") console.log("[lvis:chat:stream]", ev);
+      if (ev.type === "text_delta" && ev.text) {
+        streamRef.current += ev.text;
+        setEntries((p) => upsertStreamingAssistant(p, streamRef.current));
+      } else if (ev.type === "reasoning_delta" && ev.text) {
+        thoughtRef.current += ev.text;
+        setEntries((p) => upsertStreamingReasoning(p, thoughtRef.current));
+      } else if (ev.type === "assistant_round") {
+        setEntries((p) => {
+          let next = finalizeStreamingReasoning(p, ev.thought ?? thoughtRef.current);
+          next = finalizeStreamingAssistant(next, ev.text ?? streamRef.current);
+          return next;
+        });
+        streamRef.current = "";
+        thoughtRef.current = "";
+      } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
+        const { groupId, toolUseId, displayOrder = 0, name, input } = ev;
+        setEntries((p) => applyToolStart(p, { groupId, toolUseId, displayOrder, name, input }));
+      } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
+        const { groupId, toolUseId, result, isError } = ev;
+        setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError }));
+      } else if (ev.type === "error") {
+        setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current));
+        streamRef.current = "";
+        thoughtRef.current = "";
+      } else if (ev.type === "redact_notice") {
+        // Sprint E §3 — user draft 에서 PII 가 리댁트되었음을 알리는 시스템 배지.
+        const count = (ev as unknown as { count?: number }).count ?? 0;
+        const byKind = (ev as unknown as { byKind?: Record<string, number> }).byKind ?? {};
+        const kindLabel = Object.entries(byKind)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(", ");
+        setEntries((p) => [
+          ...p,
+          { kind: "system", text: `🔒 전송 전 PII ${count}건 리댁트됨${kindLabel ? ` (${kindLabel})` : ""}` },
+        ]);
+      } else if (ev.type === "compact_notice") {
+        const n = ev.removedMessages ?? 0;
+        setEntries((p) => [...p, { kind: "system", text: `💾 이전 ${n}개 대화를 요약했습니다 (목표·결정사항 보존)` }]);
+      } else if (ev.type === "done") {
+        if (streamRef.current || thoughtRef.current) {
+          setEntries((p) => {
+            let next = finalizeStreamingReasoning(p, thoughtRef.current);
+            next = finalizeStreamingAssistant(next, streamRef.current);
+            return next;
+          });
+          streamRef.current = "";
+          thoughtRef.current = "";
+        }
+      }
+    });
+    return () => { unsub(); };
+  }, [api]);
+
   const handleEditSave = useCallback(
-    async (
-      entryIdx: number,
-      newText: string,
-    ) => {
+    async (entryIdx: number, newText: string) => {
       const histIdx = entryIndexToHistoryIndex.get(entryIdx);
       if (histIdx === undefined) return;
       setEditBusy(true);
@@ -123,17 +178,17 @@ export function useChatState(api: LvisApi) {
     }
   }, [api, entries]);
 
-  // Used by App's `done` stream branch to finalize leftover streaming state.
-  const finalizeLeftoverStream = useCallback(() => {
-    if (streamRef.current || thoughtRef.current) {
-      setEntries((p) => {
-        let next = finalizeStreamingReasoning(p, thoughtRef.current);
-        next = finalizeStreamingAssistant(next, streamRef.current);
-        return next;
-      });
-      streamRef.current = "";
-      thoughtRef.current = "";
-    }
+  // Used by handleAsk in App.tsx to reset stream accumulators before chatSend.
+  const resetStreamAccumulators = useCallback(() => {
+    streamRef.current = "";
+    thoughtRef.current = "";
+  }, []);
+
+  // Used by handleAsk error path to show an error bubble with the current thought.
+  const setErrorWithThought = useCallback((message: string) => {
+    setEntries((p) => setAssistantError(p, message, thoughtRef.current));
+    streamRef.current = "";
+    thoughtRef.current = "";
   }, []);
 
   return {
@@ -141,14 +196,13 @@ export function useChatState(api: LvisApi) {
     setEntries,
     streaming,
     setStreaming,
-    streamRef: streamRef as MutableRefObject<string>,
-    thoughtRef: thoughtRef as MutableRefObject<string>,
     editingEntryIdx,
     setEditingEntryIdx,
     editBusy,
     entryIndexToHistoryIndex,
     handleEditSave,
     handleRetryEffort,
-    finalizeLeftoverStream,
+    resetStreamAccumulators,
+    setErrorWithThought,
   };
 }

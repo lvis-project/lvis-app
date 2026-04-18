@@ -8,21 +8,11 @@ import {
 } from "../../data/role-presets.js";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
-import { Button } from "../../components/ui/button.js";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../../components/ui/command.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
-import {
-  appendUserEntry,
-  applyToolEnd,
-  applyToolStart,
-  finalizeStreamingReasoning,
-  finalizeStreamingAssistant,
-  setAssistantError,
-  upsertStreamingReasoning,
-  upsertStreamingAssistant,
-} from "../../lib/chat-stream-state.js";
+import { appendUserEntry } from "../../lib/chat-stream-state.js";
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import type {
@@ -30,7 +20,6 @@ import type {
   PluginUiExtension,
 } from "./types.js";
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
-import { historyToEntries } from "./utils/history.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { PluginInstallDialog } from "./dialogs/PluginInstallDialog.js";
 import { PluginUninstallDialog } from "./dialogs/PluginUninstallDialog.js";
@@ -66,15 +55,14 @@ export function App() {
     setEntries,
     streaming,
     setStreaming,
-    streamRef,
-    thoughtRef,
     editingEntryIdx,
     setEditingEntryIdx,
     editBusy,
     entryIndexToHistoryIndex,
     handleEditSave,
     handleRetryEffort,
-    finalizeLeftoverStream,
+    resetStreamAccumulators,
+    setErrorWithThought,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -218,18 +206,15 @@ export function App() {
     setQuestion("");
     const outgoing = composeOutgoing(t);
     setEntries((p) => appendUserEntry(p, t));
-    streamRef.current = "";
-    thoughtRef.current = "";
+    resetStreamAccumulators();
     setStreaming(true);
     try {
       await api.chatSend(outgoing);
       // Final state set by stream events + done
     } catch (err) {
-      setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current));
-      streamRef.current = "";
-      thoughtRef.current = "";
+      setErrorWithThought(`오류: ${(err as Error).message}`);
     } finally { setStreaming(false); }
-  }, [api, streaming, checkApiKey, composeOutgoing]);
+  }, [api, streaming, checkApiKey, composeOutgoing, setEntries, resetStreamAccumulators, setStreaming, setErrorWithThought]);
 
   // ─── Sprint B: PageIndex document list loader ───────────────
   const refreshIndexedDocs = useCallback(async () => {
@@ -286,50 +271,6 @@ export function App() {
       if (text && isMountedRef.current) setEntries([{ kind: "assistant", text }]);
     }).catch(() => {});
     const dv = api.onViewActivate((k) => { if (isMountedRef.current) setActiveView(k); });
-    const ds = api.onChatStream((ev) => {
-      if (process.env.NODE_ENV !== "production") console.log("[lvis:chat:stream]", ev);
-      if (ev.type === "text_delta" && ev.text) {
-        streamRef.current += ev.text;
-        setEntries((p) => upsertStreamingAssistant(p, streamRef.current));
-      } else if (ev.type === "reasoning_delta" && ev.text) {
-        thoughtRef.current += ev.text;
-        setEntries((p) => upsertStreamingReasoning(p, thoughtRef.current));
-      } else if (ev.type === "assistant_round") {
-        setEntries((p) => {
-          let next = finalizeStreamingReasoning(p, ev.thought ?? thoughtRef.current);
-          next = finalizeStreamingAssistant(next, ev.text ?? streamRef.current);
-          return next;
-        });
-        streamRef.current = "";
-        thoughtRef.current = "";
-      } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, displayOrder = 0, name, input } = ev;
-        setEntries((p) => applyToolStart(p, { groupId, toolUseId, displayOrder, name, input }));
-      } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, result, isError } = ev;
-        setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError }));
-      } else if (ev.type === "error") {
-        setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current));
-        streamRef.current = "";
-        thoughtRef.current = "";
-      } else if (ev.type === "redact_notice") {
-        // Sprint E §3 — user draft 에서 PII 가 리댁트되었음을 알리는 시스템 배지.
-        const count = (ev as unknown as { count?: number }).count ?? 0;
-        const byKind = (ev as unknown as { byKind?: Record<string, number> }).byKind ?? {};
-        const kindLabel = Object.entries(byKind)
-          .map(([k, v]) => `${k}:${v}`)
-          .join(", ");
-        setEntries((p) => [
-          ...p,
-          { kind: "system", text: `🔒 전송 전 PII ${count}건 리댁트됨${kindLabel ? ` (${kindLabel})` : ""}` },
-        ]);
-      } else if (ev.type === "compact_notice") {
-        const n = ev.removedMessages ?? 0;
-        setEntries((p) => [...p, { kind: "system", text: `💾 이전 ${n}개 대화를 요약했습니다 (목표·결정사항 보존)` }]);
-      } else if (ev.type === "done") {
-        finalizeLeftoverStream();
-      }
-    });
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); }
       // Sprint 4.C: Ctrl/Cmd+F handled by useSearch hook
@@ -337,7 +278,7 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => {
       isMountedRef.current = false;
-      dv(); ds();
+      dv();
       window.removeEventListener("keydown", onKey);
     };
   }, []);
