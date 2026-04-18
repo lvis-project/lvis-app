@@ -36,6 +36,34 @@ export interface ProactiveEngineDeps {
   getTaskSummary: () => Array<{ title: string; priority: string; status: string; dueAt?: string; source: string }>;
   getRecentNotes: () => Array<{ title: string; filename: string }>;
   getRecentSessions: () => Array<{ id: string; modifiedAt: Date }>;
+  /**
+   * §14.4 feature-flag pattern. Called at briefing time so a settings change
+   * takes effect without service restart. Default OFF when undefined.
+   */
+  isDailyBriefingEnabled?: () => boolean;
+  /**
+   * §7 LLM synthesis entrypoint. Wired to HostApi.callLlm() in boot.ts.
+   * Absence disables LLM summarization (test/noop contexts).
+   */
+  callLlm?: (prompt: string, options?: { maxTokens?: number; systemPrompt?: string }) => Promise<string>;
+  /** Returns KST YYYY-MM-DD of last briefing, or undefined if never. */
+  getLastBriefingDate?: () => string | undefined;
+  /** Persists KST YYYY-MM-DD of the briefing just generated. */
+  setLastBriefingDate?: (dateKst: string) => void;
+  /** Returns ISO timestamp of last user dismissal. */
+  getLastDismissedAt?: () => string | undefined;
+}
+
+/** Result of a daily briefing attempt. */
+export type DailyBriefingResult =
+  | { status: "generated"; briefing: Briefing }
+  | { status: "skipped"; reason: "disabled" | "no_llm" | "not_idle" | "already_today" | "recently_dismissed" | "no_signals" };
+
+export interface DailyBriefingOptions {
+  /** IdleScheduler state at call time. Only "long_idle" proceeds. */
+  idleState?: string;
+  /** Override "now" for tests. */
+  now?: Date;
 }
 
 export interface ProactiveEventHint {
@@ -281,6 +309,93 @@ export class ProactiveEngine {
       generatedAt: now,
       items,
       summary: lines.join("\n"),
+    };
+  }
+
+  /** KST 기준 YYYY-MM-DD 반환 (once-per-day dedupe 키) */
+  private kstDateKey(now: Date): string {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(now);
+  }
+
+  /**
+   * §7 Daily Briefing — gated LLM 요약 생성.
+   *
+   * 게이팅 순서 (최소-비용 → 최대-비용):
+   *   1. feature flag off       → skipped:disabled
+   *   2. callLlm 미주입           → skipped:no_llm
+   *   3. idle state ≠ long_idle → skipped:not_idle
+   *   4. 오늘 이미 생성           → skipped:already_today
+   *   5. 24h 내 사용자 dismiss    → skipped:recently_dismissed
+   *   6. 수집된 signal이 전무     → skipped:no_signals
+   *
+   * §14.4: flag가 기본 off이므로 production default는 no-op.
+   */
+  async generateDailyBriefing(options: DailyBriefingOptions = {}): Promise<DailyBriefingResult> {
+    const now = options.now ?? new Date();
+
+    // 1) feature flag
+    const enabled = this.deps.isDailyBriefingEnabled?.() ?? false;
+    if (!enabled) return { status: "skipped", reason: "disabled" };
+
+    // 2) callLlm
+    if (!this.deps.callLlm) return { status: "skipped", reason: "no_llm" };
+
+    // 3) idle state — undefined을 허용하지 않음 (호출자 책임). boot 배선 단계에서는
+    //    IdleScheduler.getState() 결과를 전달해야 한다.
+    if (options.idleState !== "long_idle") {
+      return { status: "skipped", reason: "not_idle" };
+    }
+
+    // 4) once-per-day dedupe — KST 일자 기준
+    const todayKst = this.kstDateKey(now);
+    const lastDate = this.deps.getLastBriefingDate?.();
+    if (lastDate === todayKst) {
+      return { status: "skipped", reason: "already_today" };
+    }
+
+    // 5) dismissal suppression (24h)
+    const dismissedAt = this.deps.getLastDismissedAt?.();
+    if (dismissedAt) {
+      const dismissedMs = new Date(dismissedAt).getTime();
+      if (Number.isFinite(dismissedMs) && now.getTime() - dismissedMs < 24 * 60 * 60 * 1000) {
+        return { status: "skipped", reason: "recently_dismissed" };
+      }
+    }
+
+    // 6) signal 수집
+    const items = this.collectBriefingItems();
+    const promptData = this.getBriefingPromptData();
+    if (items.length === 0 && promptData.trim().length === 0) {
+      return { status: "skipped", reason: "no_signals" };
+    }
+
+    // LLM 요약 — 실패 시 텍스트 브리핑으로 폴백
+    const systemPrompt =
+      "당신은 LVIS의 능동적 일일 브리핑 어시스턴트입니다. 주어진 signal을 바탕으로 " +
+      "사용자에게 하루를 시작하는 간결한 한국어 브리핑을 3~5문장으로 요약하세요. " +
+      "우선순위가 높은 항목을 먼저 언급하고, 불필요한 수식어는 피하세요.";
+    const userPrompt = promptData.length > 0
+      ? promptData
+      : items.map((i) => `[${i.priority}] ${i.category}: ${i.title}${i.detail ? ` (${i.detail})` : ""}`).join("\n");
+
+    let summary: string;
+    try {
+      summary = await this.deps.callLlm(userPrompt, { maxTokens: 600, systemPrompt });
+    } catch (err) {
+      console.warn("[proactive] LLM briefing failed, falling back to text:", (err as Error).message);
+      summary = this.generateTextBriefing().summary ?? "";
+    }
+
+    // dedupe 마커 persist
+    this.deps.setLastBriefingDate?.(todayKst);
+
+    return {
+      status: "generated",
+      briefing: {
+        generatedAt: now.toISOString(),
+        items,
+        summary,
+      },
     };
   }
 
