@@ -80,7 +80,8 @@ export class ClaudeProvider implements LLMProvider {
         if (block.type === "thinking") {
           const signature = (block as unknown as { signature?: string }).signature;
           if (typeof signature !== "string" || signature.length === 0) {
-            throw new Error("Claude 응답의 thinking 블록에 유효한 signature가 없습니다.");
+            // signature가 없거나 빈 문자열이면 다음 tool round에서 Anthropic 400을 유발하므로 skip
+            continue;
           }
           thinkingBlocks.push({
             thinking: block.thinking,

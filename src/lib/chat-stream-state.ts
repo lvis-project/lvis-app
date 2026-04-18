@@ -13,6 +13,8 @@ export type StreamEvent = {
   roundIndex?: number;
   stopReason?: "end_turn" | "tool_use";
   hasToolCalls?: boolean;
+  removedMessages?: number;
+  freedTokens?: number;
 };
 
 export type ToolEntryItem = {
@@ -28,7 +30,8 @@ export type ChatEntry =
   | { kind: "user"; text: string }
   | { kind: "reasoning"; text: string; streaming?: boolean }
   | { kind: "assistant"; text: string; streaming?: boolean }
-  | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] };
+  | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
+  | { kind: "system"; text: string };
 
 type ReasoningEntry = Extract<ChatEntry, { kind: "reasoning" }>;
 type AssistantEntry = Extract<ChatEntry, { kind: "assistant" }>;

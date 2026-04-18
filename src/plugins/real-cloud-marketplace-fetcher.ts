@@ -179,7 +179,7 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
       row.packageSpec ??
       (version ? `${packageName}@${version}` : packageName);
 
-    const methods = Array.isArray(row.methods)
+    const tools = Array.isArray(row.methods)
       ? (row.methods as unknown[]).filter((m): m is string => typeof m === "string")
       : [];
 
@@ -193,7 +193,7 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
       description: row.description ?? "",
       packageSpec,
       packageName,
-      methods,
+      tools,
     };
 
     const defaultConfig = row.default_config ?? row.defaultConfig;

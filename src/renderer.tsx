@@ -1094,7 +1094,7 @@ function App() {
     }).catch(() => {});
     const dv = api.onViewActivate((k) => setActiveView(k));
     const ds = api.onChatStream((ev) => {
-      console.log("[lvis:chat:stream]", ev);
+      if (process.env.NODE_ENV !== "production") console.log("[lvis:chat:stream]", ev);
       if (ev.type === "text_delta" && ev.text) {
         streamRef.current += ev.text;
         setEntries((p) => upsertStreamingAssistant(p, streamRef.current));
@@ -1119,6 +1119,9 @@ function App() {
         setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current));
         streamRef.current = "";
         thoughtRef.current = "";
+      } else if (ev.type === "compact_notice") {
+        const n = ev.removedMessages ?? 0;
+        setEntries((p) => [...p, { kind: "system", text: `💾 이전 ${n}개 대화를 요약했습니다 (목표·결정사항 보존)` }]);
       } else if (ev.type === "done") {
         if (streamRef.current || thoughtRef.current) {
           setEntries((p) => {
@@ -1241,6 +1244,7 @@ function App() {
                   if (entry.kind === "user") return <div key={idx} className="ml-auto max-w-[85%] rounded-md border bg-primary px-3 py-2 text-sm text-primary-foreground"><div className="mb-1 text-[11px] text-muted-foreground">나</div><div className="whitespace-pre-wrap">{entry.text}</div></div>;
                   if (entry.kind === "reasoning") return <ReasoningCard key={idx} entry={entry} />;
                   if (entry.kind === "tool_group") return <ToolGroupCard key={entry.groupId} group={entry} />;
+                  if (entry.kind === "system") return <div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>;
                   return <AssistantCard key={idx} entry={entry} />;
                 })}
                 <div ref={chatEndRef} />

@@ -57,7 +57,7 @@ describe("PluginRuntime.disable", () => {
       name: id,
       version: "1.0.0",
       entry: "entry.mjs",
-      methods: [methodName],
+      tools: [methodName],
     };
     if (deployment) manifest.deployment = deployment;
     const manifestPath = join(pluginDir, "plugin.json");
@@ -167,7 +167,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", methods: ["com_lge_test_hello"] };
+    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", tools: ["com_lge_test_hello"] };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: pluginId, manifestPath, enabled: true }]);
@@ -193,7 +193,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", methods: ["bad.method"] };
+    const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad.method"] };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-plugin", manifestPath, enabled: true }]);
@@ -215,7 +215,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", methods: ["1bad_name"] };
+    const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["1bad_name"] };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-leading-digit", manifestPath, enabled: true }]);
@@ -237,7 +237,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", methods: ["bad-name"] };
+    const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad-name"] };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-hyphen", manifestPath, enabled: true }]);
@@ -271,7 +271,7 @@ describe("PluginRuntime.disable", () => {
         name: "meta-plugin",
         version: "1.0.0",
         entry: "entry.mjs",
-        methods: ["meta_ping"],
+        tools: ["meta_ping"],
         capabilities: ["meta-capability"],
         startupTools: ["meta_ping"],
       }),

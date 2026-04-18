@@ -185,7 +185,7 @@ describe("ClaudeProvider", () => {
   });
 
   describe("signature validation", () => {
-    it("yields an error event when a thinking block has an empty signature", async () => {
+    it("silently skips a thinking block with an empty signature (no error emitted)", async () => {
       makeStream({
         stop_reason: "tool_use",
         content: [
@@ -195,12 +195,16 @@ describe("ClaudeProvider", () => {
       });
 
       const events = await collect({ enableThinking: true });
+      // empty signature is silently skipped — no error event, message_complete is emitted
       const errorEvent = events.find((e) => e.type === "error");
-      expect(errorEvent).toBeDefined();
-      expect(errorEvent?.error).toBe("Claude 응답의 thinking 블록에 유효한 signature가 없습니다.");
+      expect(errorEvent).toBeUndefined();
+      const completeEvent = events.find((e) => e.type === "message_complete");
+      expect(completeEvent).toBeDefined();
+      // thinking block with invalid signature must NOT appear in thinkingBlocks
+      expect((completeEvent as { thinkingBlocks?: unknown[] })?.thinkingBlocks).toBeUndefined();
     });
 
-    it("yields an error event when a thinking block is missing a signature", async () => {
+    it("silently skips a thinking block missing a signature (no error emitted)", async () => {
       makeStream({
         stop_reason: "tool_use",
         content: [
@@ -210,9 +214,11 @@ describe("ClaudeProvider", () => {
       });
 
       const events = await collect({ enableThinking: true });
+      // missing signature is silently skipped — no error event
       const errorEvent = events.find((e) => e.type === "error");
-      expect(errorEvent).toBeDefined();
-      expect(errorEvent?.error).toBe("Claude 응답의 thinking 블록에 유효한 signature가 없습니다.");
+      expect(errorEvent).toBeUndefined();
+      const completeEvent = events.find((e) => e.type === "message_complete");
+      expect(completeEvent).toBeDefined();
     });
   });
 });

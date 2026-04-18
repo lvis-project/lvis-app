@@ -94,7 +94,7 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
       name: "Acme Notes",
       packageName: "@acme/notes",
       packageSpec: "@acme/notes@1.2.3",
-      methods: ["notes.add", "notes.list"],
+      tools: ["notes.add", "notes.list"],
       deployment: "user",
       publisher: "Acme",
     });
