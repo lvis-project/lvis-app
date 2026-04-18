@@ -33,7 +33,8 @@
     "test:main-flow": "bun run prepare:plugins && tsx scripts/test-main-flow.ts",
     "test:main-flow:npm": "npm run prepare:plugins:npm && tsx scripts/test-main-flow.ts",
     "sign:manifest": "node scripts/sign-manifest.mjs",
-    "keygen:publisher": "node scripts/keygen-publisher.mjs"
+    "keygen:publisher": "node scripts/keygen-publisher.mjs",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "~3.0.71",
@@ -64,6 +65,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "electron-updater": "~6.8.3",
     "lucide-react": "^1.7.0",
     "openai": "^6.34.0",
     "react": "^19.2.4",
@@ -103,6 +105,15 @@
     "esbuild"
   ],
   "build": {
+    "appId": "com.lge.lvis",
+    "productName": "LVIS",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "lvis-project",
+        "repo": "lvis-app"
+      }
+    ],
     "extraResources": [
       {
         "from": "resources/uv/${os}${arch}",

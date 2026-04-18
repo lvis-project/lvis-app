@@ -25,6 +25,9 @@ import { withMsGraphRetry } from "./main/ms-graph-retry.js";
 
 import { emitEvent, onEvent, type AppServices } from "./boot/types.js";
 import { bootstrapCoreServices } from "./boot/services.js";
+import { createAutoUpdater } from "./main/auto-updater.js";
+import { startCrashReporter } from "./main/crash-reporter.js";
+import { TelemetryService } from "./main/telemetry.js";
 import {
   buildPluginConfigOverrides,
   registerPluginTools,
@@ -514,12 +517,52 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // Sprint 4.C — starred messages store (persisted in ~/.lvis/starred.json)
   const starredStore = new StarredStore();
 
+  // Production release prep — auto-updater, crash reporter, telemetry.
+  // All default-off or read user settings; no-op in dev without publish config.
+  let telemetry: TelemetryService | undefined;
+  let autoUpdaterStop: (() => void) | undefined;
+  try {
+    startCrashReporter({
+      userDataPath: app.getPath("userData"),
+      telemetry: settingsService.get("telemetry"),
+    });
+    telemetry = new TelemetryService({
+      // Accessor form — re-reads settings each flush so user toggles apply live.
+      settings: () => settingsService.get("telemetry"),
+      appVersion: app.getVersion(),
+    });
+    telemetry.start();
+    telemetry.track("app_start");
+    const updater = createAutoUpdater({
+      mainWindow,
+      isEnabled: () => settingsService.get("updates")?.autoCheckEnabled ?? true,
+    });
+    updater.start();
+    autoUpdaterStop = updater.stop;
+    // Retain telemetry + updater-stop on AppServices so main.ts's before-quit
+    // path (which already has `services`) can flush + clear the interval.
+    const retainedTelemetry = telemetry;
+    app.prependOnceListener("before-quit", () => {
+      try { autoUpdaterStop?.(); } catch { /* noop */ }
+      try {
+        retainedTelemetry.stop();
+        void retainedTelemetry.flush();
+      } catch (err) {
+        console.warn("[lvis] shutdown: telemetry final flush failed:", (err as Error).message);
+      }
+    });
+    console.log("[lvis] boot: release prep wired (updater/crash/telemetry)");
+  } catch (err) {
+    console.warn("[lvis] boot: release prep init failed (non-fatal):", (err as Error).message);
+  }
+
   return {
     pluginRuntime, pluginMarketplace, taskService, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore,
+    telemetry, autoUpdaterStop,
     refreshPluginNotifications: () => {
       disposePluginNotifications();
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
