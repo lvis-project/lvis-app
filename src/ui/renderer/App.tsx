@@ -54,6 +54,7 @@ import { historyToEntries } from "./utils/history.js";
 import { BriefingCard } from "./components/BriefingCard.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { PluginInstallDialog } from "./dialogs/PluginInstallDialog.js";
+import { PluginUninstallDialog } from "./dialogs/PluginUninstallDialog.js";
 import { UsageDashboard } from "./components/UsageDashboard.js";
 import { TaskView } from "./components/TaskView.js";
 import { StarredView } from "./components/StarredView.js";
@@ -615,7 +616,7 @@ export function App() {
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <PluginInstallDialog target={installTarget} onClose={() => setInstallTarget(null)} onConfirm={installPlugin} working={working} />
       <Dialog open={commandOpen} onOpenChange={setCommandOpen}><DialogContent><DialogHeader><DialogTitle>Command</DialogTitle><DialogDescription>빠른 실행</DialogDescription></DialogHeader><Command><CommandInput placeholder="검색..." value={commandQuery} onValueChange={setCommandQuery} /><CommandList><CommandEmpty>결과 없음</CommandEmpty><CommandGroup heading="Actions">{commandActions.filter((a) => !commandQuery || a.label.toLowerCase().includes(commandQuery.toLowerCase())).map((a) => <CommandItem key={a.id} onSelect={() => { setCommandOpen(false); setCommandQuery(""); void a.run(); }}><Search className="mr-2 h-4 w-4" />{a.label}</CommandItem>)}</CommandGroup></CommandList></Command></DialogContent></Dialog>
-      <Dialog open={!!uninstallTarget} onOpenChange={(o) => !o && setUninstallTarget(null)}><DialogContent><DialogHeader><DialogTitle>플러그인 제거</DialogTitle><DialogDescription>{uninstallTarget ? `'${uninstallTarget.name}' 제거?` : ""}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setUninstallTarget(null)}>취소</Button><Button variant="destructive" onClick={async () => { if (!uninstallTarget) return; const id = uninstallTarget.id; setUninstallTarget(null); await uninstallPlugin(id); }} disabled={working}>제거</Button></DialogFooter></DialogContent></Dialog>
+      <PluginUninstallDialog target={uninstallTarget} onClose={() => setUninstallTarget(null)} onConfirm={uninstallPlugin} working={working} />
     </TooltipProvider>
   );
 }
