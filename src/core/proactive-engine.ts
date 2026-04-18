@@ -289,12 +289,15 @@ export class ProactiveEngine {
       lines.push(...emailDetails);
     }
 
-    // 오늘 캘린더 일정 상세
+    // 오늘 캘린더 일정 상세 (KST 기준 당일만 — 주간 캐시가 로드돼 있어도 다른 날 이벤트는 제외)
     if (this.calendarEventsCache.length > 0) {
       const now = new Date();
+      const kstDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" });
+      const todayKstDate = kstDateFormatter.format(now);
       const maxDetailedTodayEvents = 8;
       const todayEvents = this.calendarEventsCache
         .filter((e) => !e.isAllDay)
+        .filter((e) => kstDateFormatter.format(new Date(e.start)) === todayKstDate)
         .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
       if (todayEvents.length > 0) {
         lines.push("오늘 일정:");
