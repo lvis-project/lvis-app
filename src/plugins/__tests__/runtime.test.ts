@@ -346,7 +346,7 @@ describe("PluginRuntime.disable", () => {
         version: "1.0.0",
         entry: "entry.mjs",
         tools: ["meta_ping"],
-        capabilities: ["meta-capability"],
+        capabilities: ["worker-client"],
         startupTools: ["meta_ping"],
       }),
       "utf-8",
@@ -357,8 +357,8 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
 
-    expect(runtime.findPluginIdByCapability("meta-capability")).toBe("meta-plugin");
-    expect(runtime.listPluginIdsByCapability("meta-capability")).toEqual(["meta-plugin"]);
+    expect(runtime.findPluginIdByCapability("worker-client")).toBe("meta-plugin");
+    expect(runtime.listPluginIdsByCapability("worker-client")).toEqual(["meta-plugin"]);
 
     const manifest = runtime.getPluginManifest("meta-plugin");
     expect(manifest?.startupTools).toEqual(["meta_ping"]);

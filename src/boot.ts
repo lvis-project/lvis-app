@@ -20,6 +20,7 @@ import { StarredStore } from "./data/starred-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
 import type { PluginHostApi } from "./plugins/types.js";
+import { requiredCapabilityForEmit } from "./plugins/capabilities.js";
 
 import { emitEvent, onEvent, type AppServices } from "./boot/types.js";
 import { bootstrapCoreServices } from "./boot/services.js";
@@ -212,6 +213,19 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
         console.log(`[lvis] plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
+        // Phase 5 — capability gate on event emission.
+        // Plugins emitting email.*/calendar.*/meeting.*/index.* must declare
+        // the corresponding capability; otherwise the event is dropped + warned.
+        const requiredCap = requiredCapabilityForEmit(type);
+        if (requiredCap) {
+          const manifest = pluginRuntime?.getPluginManifest(pluginId);
+          if (!manifest?.capabilities?.includes(requiredCap)) {
+            console.warn(
+              `[lvis] plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${requiredCap}'`,
+            );
+            return;
+          }
+        }
         emitEvent(type, { pluginId, ...((data as Record<string, unknown>) ?? {}) });
       },
       onEvent: (type, handler) => {
