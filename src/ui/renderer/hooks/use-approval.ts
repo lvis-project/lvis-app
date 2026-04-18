@@ -16,18 +16,38 @@ export function useApproval() {
   // In-flight guard — prevents double-click from dropping the pending item
   // between shift() and respond(). See Copilot HIGH #2.
   const inFlightRef = useRef<boolean>(false);
+  // Fix 5 (PR #97) — aliveRef symmetry with use-briefing: guard late setQueue
+  // from async `respond()` callbacks resolving after unmount.
+  const aliveRef = useRef(true);
   useEffect(() => {
     queueRef.current = queue;
   }, [queue]);
 
   useEffect(() => {
-    if (!window.lvis?.approval) return;
+    aliveRef.current = true;
+    if (!window.lvis?.approval) {
+      return () => {
+        aliveRef.current = false;
+      };
+    }
     const unsub = window.lvis.approval.onRequest((req) => {
+      if (!aliveRef.current) return;
       setQueue((q) => approvalQueueReducer(q, { type: "push", req }));
     });
-    return unsub;
+    return () => {
+      aliveRef.current = false;
+      unsub();
+    };
   }, []);
 
+  /**
+   * Decide the currently-pending approval request.
+   *
+   * On `respond()` rejection we only log — we do NOT re-push the request onto
+   * the queue. The main process has likely already emitted a response (or the
+   * request is no longer actionable), and re-pushing causes a double-display
+   * bug where the user sees the same modal twice. See Fix 5 (PR #97).
+   */
   const decide = useCallback(
     async (choice: ApprovalChoice, pattern?: string) => {
       if (inFlightRef.current) return;
@@ -44,6 +64,9 @@ export function useApproval() {
             rememberPattern: pattern,
           });
         }
+      } catch (err) {
+        // Log only — do NOT re-push. See JSDoc above.
+        console.warn("[lvis] approval.respond failed:", (err as Error).message);
       } finally {
         inFlightRef.current = false;
       }
