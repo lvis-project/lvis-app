@@ -50,6 +50,7 @@ import { useSearch } from "./hooks/use-search.js";
 import { useContextBudget } from "./hooks/use-context-budget.js";
 import { useCostEstimate } from "./hooks/use-cost-estimate.js";
 import { useStarred } from "./hooks/use-starred.js";
+import { useSessions } from "./hooks/use-sessions.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./components/BriefingCard.js";
@@ -133,33 +134,19 @@ export function App() {
     prevMatch: searchPrev,
   } = useSearch(entries);
   const { starred, refreshStarred, isEntryStarred: starredIsEntry, handleToggleStar: starredToggle } = useStarred(api);
-  const [currentSessionId, setCurrentSessionId] = useState<string>("");
-  const [sessions, setSessions] = useState<Array<{ id: string; modifiedAt: string }>>([]);
+  const {
+    currentSessionId,
+    sessions,
+    refreshSessionId,
+    refreshSessions,
+    handleLoadSession: sessionLoad,
+    handleFork: sessionFork,
+  } = useSessions(api);
 
-  const refreshSessionId = useCallback(async () => {
-    try { const h = await api.chatGetHistory(); setCurrentSessionId(h.sessionId); } catch { /* ignore */ }
-  }, [api]);
-  const refreshSessions = useCallback(async () => {
-    try {
-      const r = await api.chatSessions();
-      setSessions(r.sessions);
-      setCurrentSessionId(r.current);
-    } catch { /* ignore */ }
-  }, [api]);
-  const handleLoadSession = useCallback(async (sessionId: string) => {
-    // Don't swap sessions mid-stream — ConversationLoop.runTurn() has no
-    // concurrency guard, so replacing history while a turn is writing to it
-    // would race. The "기록" button is also disabled during streaming, but
-    // keep this guard here too for programmatic callers (e.g. starred jump).
-    if (streaming) return;
-    try {
-      const res = await api.chatLoadSession(sessionId);
-      if (!res?.ok) return;
-      const h = await api.chatGetHistory();
-      setEntries(historyToEntries(h.messages));
-      setCurrentSessionId(h.sessionId);
-    } catch { /* ignore */ }
-  }, [api, streaming]);
+  const handleLoadSession = useCallback(
+    (sessionId: string) => sessionLoad(sessionId, streaming, setEntries),
+    [sessionLoad, streaming, setEntries],
+  );
 
   // Map renderer `entries` (which include reasoning/tool_group/system) to
   // backend history indices which only track user + assistant messages.
@@ -190,16 +177,15 @@ export function App() {
     [chatHandleEditSave, entryIndexToHistoryIndex],
   );
 
-  // ─── Fork ──────────────────────────────────────
-  const handleFork = useCallback(async (entryIdx: number) => {
-    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-    if (histIdx === undefined) return;
-    const res = await api.chatFork(histIdx);
-    if (res.ok) {
-      setEntries((p) => p.slice(0, entryIdx + 1));
-      await refreshSessionId();
-    }
-  }, [api, entryIndexToHistoryIndex, refreshSessionId]);
+  // ─── Fork (Phase 5 hook) ──────────────────────────────────────
+  const handleFork = useCallback(
+    async (entryIdx: number) => {
+      const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+      if (histIdx === undefined) return;
+      await sessionFork(histIdx, entryIdx, setEntries);
+    },
+    [entryIndexToHistoryIndex, sessionFork, setEntries],
+  );
 
   // ─── Retry with deeper thinking — provided by useChatState ─────
 
@@ -315,7 +301,6 @@ export function App() {
   const isMountedRef = useRef(true);
   useEffect(() => {
     void refreshMarketplace(); void refreshViews(); void checkApiKey();
-    void refreshSessionId();
 
     // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
     api.getBriefing().then((text) => {
