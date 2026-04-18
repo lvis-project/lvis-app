@@ -68,10 +68,21 @@ export type DailyBriefingResult =
   | { status: "skipped"; reason: "disabled" | "no_llm" | "not_idle" | "already_today" | "recently_dismissed" | "no_signals" | "in_flight" };
 
 export interface DailyBriefingOptions {
-  /** IdleScheduler state at call time. Only "long_idle" proceeds. */
+  /**
+   * IdleScheduler state at call time. Accepts:
+   *   - "long_idle": classic idle-scan path
+   *   - "triggered": bypass idle gate (Sprint 3-A-2 coordinator non-idle signals)
+   * Any other value → skipped:not_idle.
+   */
   idleState?: IdleState | string;
   /** Override "now" for tests. */
   now?: Date;
+  /**
+   * Sprint 3-A-2: free-form human-readable reason from the
+   * ProactiveTriggerCoordinator (e.g. "schedule:08:30", "meeting-in-10m",
+   * "task-deadline-2h"). Logged alongside result for observability.
+   */
+  triggerReason?: string;
 }
 
 export interface ProactiveEventHint {
@@ -363,9 +374,9 @@ export class ProactiveEngine {
     // 2) callLlm
     if (!this.deps.callLlm) return { status: "skipped", reason: "no_llm" };
 
-    // 3) idle state — undefined을 허용하지 않음 (호출자 책임). boot 배선 단계에서는
-    //    IdleScheduler.getState() 결과를 전달해야 한다.
-    if (options.idleState !== "long_idle") {
+    // 3) idle state — accepted values: "long_idle" (classic idle path) or
+    //    "triggered" (Sprint 3-A-2 ProactiveTriggerCoordinator non-idle signal).
+    if (options.idleState !== "long_idle" && options.idleState !== "triggered") {
       return { status: "skipped", reason: "not_idle" };
     }
 

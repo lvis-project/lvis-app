@@ -6,6 +6,14 @@ import type { TaskService } from "../taskService.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import { ProactiveEngine } from "../core/proactive-engine.js";
 import {
+  ProactiveTriggerCoordinator,
+  createIdleSignal,
+  createScheduleSignal,
+  createMeetingSignal,
+  createTaskDeadlineSignal,
+  type UpcomingEvent,
+} from "../core/proactive-trigger-coordinator.js";
+import {
   buildManifestEventHints,
   findMethodByCapability,
   registerManifestEventSubscriptions,
@@ -72,6 +80,76 @@ export function loadCalendarToday(
       })
       .catch((e: Error) => console.log("[lvis] boot: calendar today load failed (non-fatal):", e.message));
   }
+}
+
+/**
+ * Sprint 3-A-2: wire ProactiveTriggerCoordinator with 4 default signals.
+ * Flag default OFF — scheduleSignal only fires when `isEnabled()` returns true.
+ * Calendar events are fetched via capability lookup (NO plugin-id hardcoding).
+ */
+export function createProactiveTriggerCoordinator(opts: {
+  proactiveEngine: ProactiveEngine;
+  taskService: TaskService;
+  pluginRuntime: PluginRuntime;
+  isIdleScanActive: () => boolean;
+  isScheduleEnabled: () => boolean;
+  getScheduleTimeKst?: () => string;
+  getScheduleLastFiredDayKey: () => string | undefined;
+  setScheduleLastFiredDayKey: (key: string) => void;
+  logger?: (msg: string) => void;
+}): ProactiveTriggerCoordinator {
+  const meetingShown = new Set<string>();
+  const taskShown = new Set<string>();
+  let cachedEvents: UpcomingEvent[] = [];
+
+  const calendarListMethod = findMethodByCapability(
+    opts.pluginRuntime,
+    "calendar-source",
+    (m) => m.endsWith("_list") || m.endsWith("_today"),
+  );
+
+  // Refresh calendar events opportunistically; swallow errors.
+  const refreshEvents = (): void => {
+    if (!calendarListMethod) return;
+    opts.pluginRuntime
+      .call(calendarListMethod, {})
+      .then((r: unknown) => {
+        if (Array.isArray(r)) cachedEvents = r as UpcomingEvent[];
+      })
+      .catch(() => {
+        /* non-fatal */
+      });
+  };
+  refreshEvents();
+
+  const coordinator = new ProactiveTriggerCoordinator({
+    proactiveEngine: opts.proactiveEngine,
+    logger: opts.logger,
+    evaluators: [
+      createIdleSignal(opts.isIdleScanActive),
+      createScheduleSignal({
+        hhmmKst: opts.getScheduleTimeKst?.() ?? "08:30",
+        isEnabled: opts.isScheduleEnabled,
+        getLastFiredDayKey: opts.getScheduleLastFiredDayKey,
+        setLastFiredDayKey: opts.setScheduleLastFiredDayKey,
+      }),
+      createMeetingSignal({
+        getEvents: () => {
+          refreshEvents();
+          return cachedEvents;
+        },
+        getShownSet: () => meetingShown,
+      }),
+      createTaskDeadlineSignal({
+        getTasks: () => opts.taskService.getPendingByPriority().map((t) => ({
+          id: t.id, title: t.title, status: t.status, dueAt: t.dueAt ?? undefined,
+        })),
+        getShownSet: () => taskShown,
+      }),
+    ],
+  });
+
+  return coordinator;
 }
 
 /** Feature 4: 월요일 주간 일정 캐시 로드 (KST 기준) */

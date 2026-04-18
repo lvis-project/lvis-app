@@ -33,6 +33,7 @@ import {
 } from "./boot/tools.js";
 import {
   createProactiveEngine,
+  createProactiveTriggerCoordinator,
   loadCalendarToday,
   loadWeeklyCalendarIfMonday,
 } from "./boot/proactive.js";
@@ -299,34 +300,60 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     getLastDismissedAt: () => settingsService.get("proactive")?.lastDismissedAt,
   });
 
-  // Sprint 2-D: IdleScheduler IDLE_SCAN 진입 시 Daily Briefing 트리거.
-  // IdleSchedulerService의 "IDLE_SCAN" 상태를 ProactiveEngine이 기대하는
-  // "long_idle"로 매핑. 플래그 off이거나 이미 오늘 생성됐으면 엔진 측 게이팅이
-  // skipped를 반환하므로 여기서는 invariants 없이 호출만 한다.
+  // Sprint 3-A-2: ProactiveTriggerCoordinator — condition-based heartbeat
+  // (schedule / meeting / task-deadline / idle). Flag default OFF via proactive
+  // settings; kill-switch DISABLE_PROACTIVE_COORDINATOR=1. Idle path above
+  // remains wired for back-compat; coordinator idleSignal fires in parallel
+  // but engine-level debounce (30min) + once-per-day gate collapse duplicates.
+  let proactiveScheduleLastDay: string | undefined;
+  const proactiveCoordinator = createProactiveTriggerCoordinator({
+    proactiveEngine,
+    taskService,
+    pluginRuntime,
+    isIdleScanActive: () => idleScheduler?.getState() === "IDLE_SCAN",
+    isScheduleEnabled: () =>
+      settingsService.get("proactive")?.enableDailyBriefing ?? false,
+    getScheduleLastFiredDayKey: () => proactiveScheduleLastDay,
+    setScheduleLastFiredDayKey: (key) => { proactiveScheduleLastDay = key; },
+  });
+  proactiveCoordinator.start();
   if (idleScheduler) {
-    idleScheduler.setStateChangeListener((newState) => {
-      if (newState !== "IDLE_SCAN") return;
-      proactiveEngine
-        .generateDailyBriefing({ idleState: "long_idle" })
-        .then((r) => {
-          if (r.status === "generated") {
-            console.log("[lvis] boot: daily briefing generated on idle");
-            const win = mainWindow;
-            if (!win.isDestroyed()) {
-              try {
-                win.webContents.send("lvis:proactive:briefing", r.briefing);
-              } catch (e) {
-                console.warn("[lvis] boot: briefing webContents.send failed:", (e as Error).message);
+    const existing = idleScheduler;
+    // Chain: keep existing state listener and also notify coordinator.
+    const prevListener = (state: import("./main/idle-scheduler.js").IdleState) => {
+      if (state === "IDLE_SCAN") proactiveCoordinator.notify("idle-scan");
+    };
+    // Note: setStateChangeListener supports only one — it's already wired
+    // above to trigger briefing directly. We wrap by re-setting with a
+    // composite that invokes both paths.
+    const composite = (
+      newState: import("./main/idle-scheduler.js").IdleState,
+      oldState: import("./main/idle-scheduler.js").IdleState,
+      reason: string,
+    ): void => {
+      if (newState === "IDLE_SCAN") {
+        proactiveEngine
+          .generateDailyBriefing({ idleState: "long_idle" })
+          .then((r) => {
+            if (r.status === "generated") {
+              const win = mainWindow;
+              if (!win.isDestroyed()) {
+                try {
+                  win.webContents.send("lvis:proactive:briefing", r.briefing);
+                } catch (e) {
+                  console.warn("[lvis] boot: briefing webContents.send failed:", (e as Error).message);
+                }
               }
             }
-          } else {
-            console.log(`[lvis] boot: daily briefing skipped (${r.reason})`);
-          }
-        })
-        .catch((e: Error) =>
-          console.warn("[lvis] boot: daily briefing trigger failed (non-fatal):", e.message),
-        );
-    });
+          })
+          .catch((e: Error) =>
+            console.warn("[lvis] boot: daily briefing trigger failed (non-fatal):", e.message),
+          );
+      }
+      prevListener(newState);
+      void oldState; void reason;
+    };
+    existing.setStateChangeListener(composite);
   }
 
   // 오늘 일정 초기 로드 (calendar-source capability 플러그인에서 *_today 메서드 자동 탐색)
