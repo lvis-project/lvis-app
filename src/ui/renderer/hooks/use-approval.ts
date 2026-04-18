@@ -13,6 +13,9 @@ import type { ApprovalChoice, ApprovalRequest } from "../types.js";
 export function useApproval() {
   const [queue, setQueue] = useState<ApprovalRequest[]>([]);
   const queueRef = useRef<ApprovalRequest[]>([]);
+  // In-flight guard — prevents double-click from dropping the pending item
+  // between shift() and respond(). See Copilot HIGH #2.
+  const inFlightRef = useRef<boolean>(false);
   useEffect(() => {
     queueRef.current = queue;
   }, [queue]);
@@ -27,16 +30,22 @@ export function useApproval() {
 
   const decide = useCallback(
     async (choice: ApprovalChoice, pattern?: string) => {
+      if (inFlightRef.current) return;
       const current = queueRef.current[0];
       if (!current) return;
+      inFlightRef.current = true;
       // shift 먼저 — respond 완료 전에 다음 항목 표시
       setQueue((q) => approvalQueueReducer(q, { type: "shift" }));
-      if (window.lvis?.approval) {
-        await window.lvis.approval.respond({
-          requestId: current.id,
-          choice,
-          rememberPattern: pattern,
-        });
+      try {
+        if (window.lvis?.approval) {
+          await window.lvis.approval.respond({
+            requestId: current.id,
+            choice,
+            rememberPattern: pattern,
+          });
+        }
+      } finally {
+        inFlightRef.current = false;
       }
     },
     [],
