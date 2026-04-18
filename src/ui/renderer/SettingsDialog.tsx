@@ -92,20 +92,32 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
   useEffect(() => {
     if (!open) return;
     const v = VENDORS.find((x) => x.id === vendor);
-    if (v) {
-      void api.hasApiKey(vendor).then(setHasKey);
-      void api.getSettings().then(s => {
-        if (s.llm.provider !== vendor) setModel(v.defaultModel);
-        else setModel(s.llm.model);
-        setBaseUrl((s.llm.baseUrls ?? {})[vendor as any] ?? "");
-      });
-    }
+    if (!v) return;
+    let cancelled = false;
+    void api.hasApiKey(vendor).then((k) => {
+      if (!cancelled) setHasKey(k);
+    });
+    void api.getSettings().then((s) => {
+      if (cancelled) return;
+      if (s.llm.provider !== vendor) setModel(v.defaultModel);
+      else setModel(s.llm.model);
+      setBaseUrl((s.llm.baseUrls ?? {})[vendor as any] ?? "");
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [vendor, open, api]);
 
   // 웹 프로바이더 변경 시 키 상태 확인
   useEffect(() => {
     if (!open) return;
-    void api.hasWebApiKey(webProvider).then(setHasWebKey);
+    let cancelled = false;
+    void api.hasWebApiKey(webProvider).then((k) => {
+      if (!cancelled) setHasWebKey(k);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [webProvider, open, api]);
 
   const save = async () => {

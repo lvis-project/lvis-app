@@ -37,14 +37,19 @@ export function parseRenderHtmlResult(raw: string | undefined): RenderHtmlPayloa
   return null;
 }
 
-export function highlightText(text: string, query?: string): React.ReactNode {
+export function highlightText(
+  text: string,
+  query?: string,
+  opts?: { caseSensitive?: boolean },
+): React.ReactNode {
   if (!query || !text) return null;
-  const q = query.toLowerCase();
-  const lower = text.toLowerCase();
+  const caseSensitive = opts?.caseSensitive ?? false;
+  const haystack = caseSensitive ? text : text.toLowerCase();
+  const needle = caseSensitive ? query : query.toLowerCase();
   const parts: React.ReactNode[] = [];
   let i = 0;
   while (i < text.length) {
-    const found = lower.indexOf(q, i);
+    const found = haystack.indexOf(needle, i);
     if (found < 0) {
       parts.push(text.slice(i));
       break;

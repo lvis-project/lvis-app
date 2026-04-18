@@ -100,9 +100,15 @@ export function PermissionsTab() {
     if (!pattern) return;
     setRulesBusy(true);
     try {
-      await window.lvis.permission.addRule(pattern, newAction);
-      setNewPattern("");
-      await refreshRules();
+      const res = await window.lvis.permission.addRule(pattern, newAction);
+      if (res.ok) {
+        setNewPattern("");
+        await refreshRules();
+      } else {
+        showBanner("error", res.message ?? `규칙 추가 실패 (${res.error})`);
+      }
+    } catch (e) {
+      showBanner("error", `규칙 추가 중 오류: ${(e as Error).message}`);
     } finally {
       setRulesBusy(false);
     }
@@ -111,8 +117,14 @@ export function PermissionsTab() {
   const handleRemoveRule = async (pattern: string, action: "allow" | "deny") => {
     setRulesBusy(true);
     try {
-      await window.lvis.permission.removeRule(pattern, action);
-      await refreshRules();
+      const res = await window.lvis.permission.removeRule(pattern, action);
+      if (res.ok) {
+        await refreshRules();
+      } else {
+        showBanner("error", res.message ?? `규칙 삭제 실패 (${res.error})`);
+      }
+    } catch (e) {
+      showBanner("error", `규칙 삭제 중 오류: ${(e as Error).message}`);
     } finally {
       setRulesBusy(false);
     }
