@@ -128,6 +128,7 @@ export class VercelUnifiedProvider implements LLMProvider {
   ) {
     // Expose a core-compatible vendor on the interface; "openai-compatible"
     // is reported as "openai" so downstream vendor-gated logic keeps working.
+    // "azure-foundry" and "vercel-gateway" are first-class LLMVendor values.
     this.vendor = (vendor === "openai-compatible" ? "openai" : vendor) as LLMVendor;
     this.vendorSlot = vendor;
     this.apiKey = apiKey;
@@ -316,6 +317,38 @@ export class VercelUnifiedProvider implements LLMProvider {
         ...(this.customFetch ? { fetch: this.customFetch } : {}),
       });
       return compat(modelId);
+    }
+
+    if (slot === "azure-foundry") {
+      // Azure AI Foundry exposes an OpenAI-compatible surface on a per-deployment
+      // endpoint like https://{resource}.openai.azure.com/openai/deployments/{deployment}/.
+      // Route through createOpenAICompatible so we don't add Azure SDK to legacy paths.
+      if (!this.baseUrl) {
+        throw new Error(
+          "VercelUnifiedProvider(azure-foundry): baseUrl is required " +
+            "(e.g. https://{resource}.openai.azure.com/openai/deployments/{deployment}/)",
+        );
+      }
+      const azure = createOpenAICompatible({
+        name: "azure-foundry",
+        baseURL: this.baseUrl,
+        apiKey: this.apiKey,
+        ...(this.customFetch ? { fetch: this.customFetch } : {}),
+      });
+      return azure(modelId);
+    }
+
+    if (slot === "vercel-gateway") {
+      // Vercel AI Gateway speaks OpenAI-compatible; model IDs use
+      // `{provider}/{model}` form (e.g. `openai/gpt-4o`, `anthropic/claude-3.5-sonnet`).
+      const baseURL = this.baseUrl || "https://ai-gateway.vercel.sh/v1";
+      const gateway = createOpenAICompatible({
+        name: "vercel-gateway",
+        baseURL,
+        apiKey: this.apiKey,
+        ...(this.customFetch ? { fetch: this.customFetch } : {}),
+      });
+      return gateway(modelId);
     }
 
     throw new Error(`VercelUnifiedProvider: unknown vendor slot "${slot}"`);

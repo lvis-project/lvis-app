@@ -36,12 +36,25 @@ const IMPLEMENTED_VENDORS: ReadonlySet<LLMVendor> = new Set<LLMVendor>([
   "openai",
   "copilot",
   "claude",
+  "azure-foundry",
+  "vercel-gateway",
+]);
+
+/**
+ * Vendors that have NO legacy provider equivalent — they MUST route through
+ * VercelUnifiedProvider regardless of the `useVercelSdk` flag setting.
+ */
+const VERCEL_ONLY_VENDORS: ReadonlySet<LLMVendor> = new Set<LLMVendor>([
+  "azure-foundry",
+  "vercel-gateway",
 ]);
 
 function shouldUseVercel(
   vendor: LLMVendor,
   flag: LLMUseVercelSdk | undefined,
 ): boolean {
+  // Vercel-only vendors bypass the flag — there is no legacy path to fall back to.
+  if (VERCEL_ONLY_VENDORS.has(vendor)) return true;
   if (!flag || flag === "none") return false;
   // Safety gate: fall back to legacy if this vendor's Vercel path isn't wired yet.
   if (!IMPLEMENTED_VENDORS.has(vendor)) return false;
@@ -81,6 +94,10 @@ export function createProvider(
     case "gemini":
       return new GeminiProvider(config.apiKey);
 
+    case "azure-foundry":
+    case "vercel-gateway":
+      // Should have been routed via shouldUseVercel() above — defensive fallback.
+      return new VercelUnifiedProvider(config.vendor, config.apiKey, config.baseUrl);
 
     default:
       throw new Error(`지원하지 않는 LLM 벤더: ${config.vendor}`);

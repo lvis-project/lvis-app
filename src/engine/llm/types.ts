@@ -7,13 +7,21 @@
 
 // ─── Vendor ─────────────────────────────────────────
 
-export type LLMVendor = "claude" | "openai" | "gemini" | "copilot";
+export type LLMVendor =
+  | "claude"
+  | "openai"
+  | "gemini"
+  | "copilot"
+  | "azure-foundry"
+  | "vercel-gateway";
 
 export const LLM_VENDOR_LABELS: Record<LLMVendor, string> = {
   claude: "Anthropic Claude",
   openai: "OpenAI",
   gemini: "Google Gemini",
   copilot: "GitHub Copilot",
+  "azure-foundry": "Azure AI Foundry",
+  "vercel-gateway": "Vercel AI Gateway",
 };
 
 export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
@@ -21,6 +29,8 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
   openai: "gpt-5.4",             // GPT-5.4 — 1.05M context, OpenAI 최신 (2026-03)
   gemini: "gemini-2.5-flash",    // Gemini 2.5 Flash — 1M context (2025)
   copilot: "gpt-4.1",            // GitHub Copilot 기본 모델 (2025-05)
+  "azure-foundry": "gpt-4o",     // Azure deployment name — user must override with their own deployment
+  "vercel-gateway": "openai/gpt-4o", // Gateway routes in `{provider}/{model}` form
 };
 
 // ─── 범용 메시지 ────────────────────────────────────

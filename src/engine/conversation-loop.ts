@@ -178,8 +178,9 @@ export class ConversationLoop {
     }
 
     try {
+      const baseUrl = llmSettings.baseUrls?.[vendor];
       this.provider = createProvider(
-        { vendor, apiKey, model: llmSettings.model },
+        { vendor, apiKey, model: llmSettings.model, ...(baseUrl ? { baseUrl } : {}) },
         { useVercelSdk: llmSettings.useVercelSdk ?? "none" },
       );
     } catch {
