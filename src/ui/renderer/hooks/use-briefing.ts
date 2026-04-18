@@ -19,7 +19,7 @@ export function useBriefing(api: LvisApi) {
     });
     return () => {
       alive = false;
-      unsubscribe?.();
+      unsubscribe();
     };
   }, [api]);
 
