@@ -7,12 +7,6 @@
  */
 export type DeploymentMode = "managed" | "user";
 
-export interface PluginIpcBinding {
-  channel: string;
-  method: string;
-  args?: string[];
-}
-
 export interface PluginManifest {
   /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.lge.meeting-recorder`. */
   id: string;
@@ -23,12 +17,12 @@ export interface PluginManifest {
    * LLM에 노출되는 도구 이름 배열. `^[a-zA-Z_][a-zA-Z0-9_]*$` 필수 — 도트/하이픈 금지.
    * 런타임이 이 값을 그대로 tool name으로 사용한다.
    */
-  methods: string[];
+  tools: string[];
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   keywords?: Array<{ keyword: string; skillId: string }>;
   capabilities?: string[];
-  startupMethods?: string[];
+  startupTools?: string[];
   eventSubscriptions?: string[];
   /**
    * OS 네이티브 알림으로 표시할 이벤트 선언.
@@ -39,9 +33,25 @@ export interface PluginManifest {
     titleField?: string;
     bodyField?: string;
   }>;
-  ipcBindings?: PluginIpcBinding[];
   deployment?: DeploymentMode;
   publisher?: string;
+  /**
+   * LLM이 도구를 호출할 때 사용하는 JSON Schema (draft-07).
+   * 키: tool 이름 (tools 배열 내 값과 동일), 값: { description, inputSchema }
+   */
+  toolSchemas?: Record<
+    string,
+    {
+      description: string;
+      inputSchema: {
+        $schema?: string;
+        type: "object";
+        properties: Record<string, unknown>;
+        required?: string[];
+        additionalProperties?: boolean;
+      };
+    }
+  >;
 }
 
 export interface PluginUiExtension {
@@ -74,7 +84,7 @@ export interface PluginMarketplaceItem {
   description: string;
   packageSpec: string;
   packageName: string;
-  methods: string[];
+  tools: string[];
   defaultConfig?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   deployment?: DeploymentMode;
@@ -124,12 +134,12 @@ export interface PluginRuntimeContext {
   hostApi: PluginHostApi;
 }
 
-export type PluginMethodHandler = (payload?: unknown) => Promise<unknown> | unknown;
+export type PluginToolHandler = (payload?: unknown) => Promise<unknown> | unknown;
 
 export interface RuntimePlugin {
   start?: () => Promise<void> | void;
   stop?: () => Promise<void> | void;
-  handlers: Record<string, PluginMethodHandler>;
+  handlers: Record<string, PluginToolHandler>;
 }
 
 export type RuntimePluginFactory = (context: PluginRuntimeContext) => Promise<RuntimePlugin> | RuntimePlugin;

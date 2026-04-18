@@ -1813,8 +1813,22 @@ graph TB
     "version": "1.2.0",
     "description": "STT 기반 회의록 자동 작성 플러그인",
     "author": "DX Platform Team",
-    "methods": ["meeting_start", "meeting_stop", "meeting_summarize"],
+    "permissions": ["microphone", "local-storage", "lgenie-session", "ui-slot:sidebar", "ui-slot:toolbar"],
     "keywords": ["회의록", "녹음", "회의", "미팅", "meeting"],
+    "skills": [
+        {
+            "name": "meeting_record",
+            "trigger": ["회의록 작성", "회의 녹음", "미팅 기록"],
+            "entry": "skills/meeting_record.js"
+        }
+    ],
+    "tools": [
+        {
+            "name": "stt_transcribe",
+            "entry": "tools/stt_transcribe.js",
+            "description": "음성을 텍스트로 변환"
+        }
+    ],
     "ui": {
         "sidebar": "ui/MeetingSidebar.jsx",
         "toolbar": "ui/MeetingToolbar.jsx",
@@ -1858,6 +1872,52 @@ Python 런타임이 필요한 플러그인은 manifest에 `python` 섹션을 선
 | `managedBy` | `"lvis-app"` | 런타임 관리 주체. 호스트가 venv provisioning을 맡는다는 선언 |
 | `requirementsLock` | string | `python-requirements.lock` 경로 (플러그인 루트 기준). `uv pip sync --frozen` 입력 |
 
+**`toolSchemas` 필드 — LLM 파라미터 명세 (Phase 1 신규)**
+
+LLM이 메서드 파라미터를 잘못 추론하는 경우에만 선택적으로 추가한다. 없으면 generic `{ payload: object }` fallback이 유지된다.
+
+```json
+{
+  "tools": ["meeting_start", "meeting_push_chunk"],
+  "toolSchemas": {
+    "meeting_push_chunk": {
+      "description": "PCM16LE 오디오 청크를 세션에 추가",
+      "inputSchema": {
+        "type": "object",
+        "required": ["sessionId", "chunk"],
+        "properties": {
+          "sessionId": { "type": "string" },
+          "chunk": {
+            "type": "object",
+            "required": ["pcm16leMono", "sampleRate"],
+            "properties": {
+              "pcm16leMono": { "type": "array", "items": { "type": "integer" } },
+              "sampleRate": { "type": "integer", "enum": [16000, 44100, 48000] }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+규칙:
+- top-level `"type": "object"` 필수 (OpenAI / Claude / Gemini 공통 요구사항)
+- JSON Schema draft-07
+- 플러그인 저자가 수기 작성 — zod 자동추출 금지
+- 호스트는 이 스키마를 LLM system prompt의 tool schema로 삽입. 런타임 검증은 수행하지 않음.
+- 상세 작성 가이드: `docs/references/plugin-tool-schema-design.md` §3
+
+**`toolSchemas` 도입 경위 — LLM 파라미터 추론 관찰**
+
+번들 플러그인 4개를 운영하면서 두 가지 패턴에서 LLM 파라미터 추론 실패가 반복 관찰되었다:
+
+1. **바이너리/배열 데이터** (`meeting_push_chunk.chunk.pcm16leMono`): LLM이 `number[]` 대신 base64 string을 시도.
+2. **nested required + 배열 항목** (`calendar_create.attendees`): LLM이 `string[]` 대신 단일 문자열 전달.
+
+기존 generic schema(`{ payload: object }`)는 LLM에 파라미터 구조를 전달하지 않아 이 문제를 해결할 수 없었다. `toolSchemas`를 선택적 필드로 도입하면 기존 플러그인에 하위 호환성을 유지하면서 필요한 메서드만 점진적으로 명세를 추가할 수 있다.
+
 ### 9.3 UI Slot System
 
 ```mermaid
@@ -1898,6 +1958,12 @@ graph TB
     MEETING_SIDEBAR -.-> SIDEBAR_SLOT
     MEETING_WIDGET -.-> CHAT_WIDGET_SLOT
 ```
+
+### 9.3a Plugin Runtime — Startup 정책 (현행)
+
+boot 시 `PluginRuntime.startAll()`은 로드된 플러그인을 순차 `await`하며 개별 실패를 try/catch로 격리한다. 실패한 플러그인은 `toolMap`에서 제거되고 나머지는 정상 동작한다. 타임아웃/병렬화는 아직 없다.
+
+**Phase 2 계획 (미구현):** `Promise.allSettled` 병렬 + slow-plugin 경고 + `manifest.startupTimeoutMs` AbortController. `PluginManifest`에도 아직 이 필드가 없으며 문서의 필드 표는 현행 스펙으로 간주하지 말 것.
 
 ### 9.4 Plugin Scenario — 회의록 플러그인
 
@@ -1945,6 +2011,52 @@ stateDiagram-v2
 
     BEFORE --> AFTER: 플러그인 설치
 ```
+
+### 9.4a HostApi — 플러그인 ↔ 호스트 계약
+
+`PluginHostApi` 인터페이스 (`src/plugins/types.ts`). 플러그인이 호스트 서비스에 접근하는 유일한 경로이며, 이 인터페이스 자체가 capability gate 역할을 한다.
+
+| 메서드 | 설명 | 소비 플러그인 |
+|--------|------|--------------|
+| `registerKeywords(keywords)` | KeywordEngine에 트리거 키워드 등록 (boot 시 1회) | 전체 |
+| `emitEvent(name, payload)` | 다른 플러그인·ProactiveEngine에 이벤트 발행 | 전체 |
+| `onEvent(name, handler)` | 이벤트 구독 | 전체 |
+| `addTask(task)` | LVIS 태스크 생성 (`~/.lvis/tasks/`) | meeting, email |
+| `saveNote(title, content)` | `~/.lvis/notes/`에 메모 저장 | meeting |
+| `getSecret(key)` | 암호화된 API 키 조회 | meeting, email, calendar |
+| `getMsGraphToken()` | Microsoft Graph Bearer 토큰 획득 | email, calendar |
+| `startMsGraphAuth(openBrowser)` | OAuth 2.0 브라우저 플로우 개시 | email, calendar |
+| `isMsGraphAuthenticated()` | 현재 인증 상태 조회 | email, calendar |
+| `getMsGraphAccount()` | 로그인 계정 이메일 반환 | email, calendar |
+| `onMsGraphAuthChange(handler)` | 인증 상태 변화 구독 | email, calendar |
+| `logEvent(level, message, data?)` | **[Phase 2]** 호스트 감사 로그에 플러그인 이벤트 기록. `level`: `"info"\|"warn"\|"error"` | 전체 |
+| `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
+
+**HostApi 확장 원칙 ("3+ 플러그인 규칙"):** 새 메서드는 3개 이상의 플러그인이 동일 기능을 필요로 하거나, 보안·감사 제어가 필요한 경우에만 추가한다. 상세: `docs/references/plugin-tool-schema-design.md` §6
+
+### 9.4b IPC/RPC 범위 — 플러그인 통신 경계
+
+> **상세:** `docs/references/plugin-tool-schema-design.md` §4.5
+
+LVIS는 IPC/RPC를 **시스템 레벨 전용**으로 확정한다. 플러그인은 IPC/RPC 개념을 알 필요가 없다.
+
+**시스템 레벨 IPC (호스트만 사용):**
+
+| 영역 | 채널/프로토콜 | 용도 |
+|------|---------------|------|
+| Host ↔ Renderer | Electron `ipcMain.handle()` (`lvis:settings:*`, `lvis:chat:*` 등) | UI ↔ 메인 프로세스 상태 동기화 |
+| Marketplace / Governance | HTTPS REST | 플러그인 카탈로그·정책·감사 업로드 |
+| MCP | stdio/HTTP | 외부 MCP 서버 통신 |
+
+**플러그인 통신 경계 (tool 레벨만):**
+
+- LLM → plugin tool: `ToolRegistry` 경유. IPC 채널 없음.
+- Renderer UI → plugin tool: 호스트 generic 핸들러 `lvis:plugins:call(toolName, payload)` 단 하나. 플러그인이 채널 직접 선언 불가.
+- Plugin → host service: `PluginHostApi` 메서드 직접 호출 (in-process). IPC 미사용.
+- Plugin → plugin: 이벤트 버스(`emitEvent` / `onEvent`)만. 직접 호출 불가.
+
+매니페스트에 IPC 바인딩 필드는 없으며, 플러그인 번들에서 `ipcRenderer`/`ipcMain` 직접 사용은 금지된다.
+모든 플러그인 tool 호출은 **ToolRegistry → PermissionManager → ApprovalGate** 단일 경로로 흐른다.
 
 ### 9.5 MCP Protocol Architecture — 외부 도구 연동 프로토콜
 
@@ -2094,7 +2206,7 @@ graph TB
 | **설치 시점** | LVIS boot 시 Managed Policy Sync에서 자동 | 사용자 명시 액션 |
 | **삭제 권한** | 회사만 (`PluginDeploymentGuard.canUninstall()` = false) | 사용자 자유 |
 | **업데이트** | 정책 push 시 강제 | 사용자 opt-in |
-| **서명 검증** | LG Internal Root CA 필수 (실패 시 load 거부) | 정책에 따라 `warn` / `require` / `off` |
+| **서명 검증** | **[Phase 3 계획]** LG Internal Root CA 필수 (실패 시 load 거부). 현 스키마는 서명 필드 미지원. | **[Phase 3 계획]** 정책에 따라 `warn` / `require` / `off` |
 | **Directory** | `~/.lvis/plugins/managed/<id>/<version>/` | `~/.lvis/plugins/user/<id>/` |
 | **Manifest 필드** | `deployment: "managed"`, `publisher` | `deployment: "user"` |
 | **Settings UI** | lock icon + "회사 배포" 표시, 제거 / 비활성화 버튼 잠금 | 정상 토글 |
@@ -2110,15 +2222,15 @@ graph TB
   "name": "LVIS PageIndex",
   "version": "0.2.0",
   "entry": "dist/index.js",
-  "methods": ["index_scan", "chat_preview"],
+  "tools": ["index_scan", "chat_preview", "..."],
   "deployment": "managed",
   "publisher": "LG Electronics IT"
 }
 ```
 
-> `methods[]` 는 lower snake_case LLM tool name이며 (`calendar_today`, `email_start_watcher` 등), boot/runtime/keyword registration 경로에서도 동일한 이름이 그대로 전달된다. dotted form은 이벤트 이름에만 사용한다.
+> `tools[]` 는 lower snake_case LLM tool name이며 (`calendar_today`, `email_start_watcher` 등), boot/runtime/keyword registration 경로에서도 동일한 이름이 그대로 전달된다. dotted form은 이벤트 이름에만 사용한다.
 
-`user` deployment manifest는 `signature`가 optional이며, 정책에서 `requireUserSignature: true`일 때 필수로 승격된다.
+**Phase 3 계획 (미구현):** managed 매니페스트에 서명/게시 메타데이터를 추가한다. 구체적으로는 `publisherId`, `publishedAt` (ISO 8601), `signature` (base64 ECDSA-P256-SHA256), `signatureAlgorithm`, `minAppVersion`/`maxAppVersion`. 현재 스키마는 이 필드를 수용하지 않으며, runtime이 서명을 검증하지도 않는다.
 
 **Boot Sequence 확장 (§4.2 보강)**
 
@@ -2176,6 +2288,12 @@ Step 1-8:  기존 boot sequence
   "nextCheckAt": "2026-04-14T21:00:00Z"
 }
 ```
+
+**Phase 분리**
+
+- **Phase 1.5**: deployment mode 타입 + manifest 확장 + `PluginDeploymentGuard` 경량 구현 + UI 잠금 표시
+- **Phase 2**: Managed Policy Sync + Installer + IT Admin API 실연결 + SSO 토큰 경로
+- **Phase 3**: ECDSA 서명 검증 + LG CA 체인 + 오프라인 cache TTL + 사내 감사 endpoint 연동
 
 ---
 

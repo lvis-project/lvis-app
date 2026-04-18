@@ -4,7 +4,7 @@
   "title": "LVIS Plugin Manifest",
   "description": "Validates plugin.json manifest files for LVIS plugins (§9)",
   "type": "object",
-  "required": ["id", "name", "version", "entry", "methods"],
+  "required": ["id", "name", "version", "entry", "tools"],
   "additionalProperties": false,
   "properties": {
     "id": {
@@ -21,7 +21,7 @@
       "description": "Semver version string"
     },
     "entry": { "type": "string", "minLength": 1 },
-    "methods": {
+    "tools": {
       "type": "array",
       "items": {
         "type": "string",
@@ -65,7 +65,7 @@
       "type": "array",
       "items": { "type": "string" }
     },
-    "startupMethods": {
+    "startupTools": {
       "type": "array",
       "items": { "type": "string" }
     },
@@ -73,19 +73,35 @@
       "type": "array",
       "items": { "type": "string" }
     },
-    "ipcBindings": {
-      "type": "array",
-      "items": {
+    "deployment": { "enum": ["managed", "user"] },
+    "publisher": { "type": "string" },
+    "toolSchemas": {
+      "type": "object",
+      "description": "LLM이 메서드를 호출할 때 사용하는 JSON Schema (draft-07). 키: method 이름, 값: { description, inputSchema }",
+      "additionalProperties": {
         "type": "object",
-        "required": ["channel", "method"],
+        "required": ["description", "inputSchema"],
+        "additionalProperties": false,
         "properties": {
-          "channel": { "type": "string" },
-          "method": { "type": "string" },
-          "args": { "type": "array", "items": { "type": "string" } }
+          "description": {
+            "type": "string",
+            "minLength": 10,
+            "description": "LLM이 이해할 메서드 설명 (when/what/returns)"
+          },
+          "inputSchema": {
+            "type": "object",
+            "required": ["type", "properties"],
+            "description": "JSON Schema draft-07 입력 스키마",
+            "properties": {
+              "$schema": { "type": "string" },
+              "type": { "const": "object" },
+              "properties": { "type": "object" },
+              "required": { "type": "array", "items": { "type": "string" } },
+              "additionalProperties": { "type": "boolean" }
+            }
+          }
         }
       }
-    },
-    "deployment": { "enum": ["managed", "user"] },
-    "publisher": { "type": "string" }
+    }
   }
 }

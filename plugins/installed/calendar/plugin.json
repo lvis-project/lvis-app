@@ -5,7 +5,7 @@
   "deployment": "managed",
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-calendar/dist/hostPlugin.js",
-  "methods": [
+  "tools": [
     "calendar_status",
     "calendar_auth",
     "calendar_list",
@@ -23,13 +23,217 @@
     "calendar-source",
     "background-watcher"
   ],
-  "startupMethods": [
+  "startupTools": [
     "calendar_start_watcher"
   ],
   "eventSubscriptions": [
     "meeting.ended",
     "email.action.needed"
   ],
+  "toolSchemas": {
+    "calendar_status": {
+      "description": "Microsoft Graph 인증 상태와 watcher 실행 여부를 반환합니다. 인자 없음. 성공 시 { authenticated, account?, watcherRunning }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "calendar_auth": {
+      "description": "Microsoft 계정으로 로그인합니다. 이미 인증된 경우 즉시 반환합니다. 인자 없음. 성공 시 { authenticated, account? }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "calendar_list": {
+      "description": "향후 N일간의 Outlook 일정 목록을 반환합니다. 로그인 필요. 성공 시 일정 배열을 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90,
+            "description": "조회할 일수 (기본값: 7)"
+          },
+          "top": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "최대 반환 건수 (기본값: 50)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "calendar_today": {
+      "description": "오늘의 Outlook 일정 목록을 반환합니다. 로그인 필요. 인자 없음.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "calendar_get": {
+      "description": "특정 일정 단건을 조회합니다. 로그인 필요. 성공 시 일정 상세 객체를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "조회할 일정의 Microsoft Graph 이벤트 ID"
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    "calendar_create": {
+      "description": "Outlook 캘린더에 새 일정을 생성합니다. 로그인 필요. 성공 시 생성된 이벤트 객체를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "일정 제목"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "일정 시작 시각 (ISO 8601, 예: 2026-04-18T09:00:00)"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "일정 종료 시각 (ISO 8601, 예: 2026-04-18T10:00:00)"
+          },
+          "body": {
+            "type": "string",
+            "description": "일정 본문/메모 (선택)"
+          },
+          "location": {
+            "type": "string",
+            "description": "장소 (선택)"
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "IANA 시간대 (선택, 예: Asia/Seoul)"
+          },
+          "attendees": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "참석자 이메일 주소 목록 (선택)"
+          }
+        },
+        "required": ["title", "start", "end"],
+        "additionalProperties": false
+      }
+    },
+    "calendar_update": {
+      "description": "기존 Outlook 일정을 수정합니다. 로그인 필요. 수정할 필드만 전달하면 됩니다. 성공 시 수정된 이벤트 객체를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "수정할 일정의 Microsoft Graph 이벤트 ID"
+          },
+          "title": {
+            "type": "string",
+            "description": "새 일정 제목 (선택)"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "새 시작 시각 (ISO 8601, 선택)"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "새 종료 시각 (ISO 8601, 선택)"
+          },
+          "body": {
+            "type": "string",
+            "description": "새 본문/메모 (선택)"
+          },
+          "location": {
+            "type": "string",
+            "description": "새 장소 (선택)"
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "IANA 시간대 (선택)"
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    "calendar_delete": {
+      "description": "Outlook 일정을 삭제합니다. 로그인 필요. 성공 시 { deleted: true }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "삭제할 일정의 Microsoft Graph 이벤트 ID"
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    },
+    "calendar_start_watcher": {
+      "description": "Outlook 일정 변경을 주기적으로 폴링하는 감시자를 시작합니다. 15분/1분 전 알림 이벤트를 발행합니다. 로그인 필요. 성공 시 { started: true, running: true }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "intervalMs": {
+            "type": "integer",
+            "minimum": 60000,
+            "description": "폴링 간격 밀리초 (기본값: 1800000 = 30분)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "calendar_stop_watcher": {
+      "description": "일정 감시자를 중지합니다. 인자 없음. 성공 시 { stopped: true }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "calendar_open_url": {
+      "description": "외부 일정 링크(https만 허용)를 기본 브라우저로 엽니다. 성공 시 { opened: true }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "열 URL (https 스킴만 허용)"
+          }
+        },
+        "required": ["url"],
+        "additionalProperties": false
+      }
+    }
+  },
   "config": {},
   "ui": [
     {

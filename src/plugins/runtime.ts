@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
-  PluginIpcBinding,
   PluginManifest,
   PluginMethodHandler,
   PluginUiExtension,
@@ -195,7 +194,7 @@ export class PluginRuntime {
     return entry.handler(payload);
   }
 
-  listMethods(): string[] {
+  listToolNames(): string[] {
     return [...this.methodMap.keys()].sort();
   }
 
@@ -236,16 +235,6 @@ export class PluginRuntime {
     return result;
   }
 
-  listIpcBindings(): Array<PluginIpcBinding & { pluginId: string }> {
-    const result: Array<PluginIpcBinding & { pluginId: string }> = [];
-    for (const [pluginId, plugin] of this.plugins) {
-      for (const binding of plugin.manifest.ipcBindings ?? []) {
-        result.push({ pluginId, ...binding });
-      }
-    }
-    return result;
-  }
-
   /**
    * Retrieve a loaded plugin's instance by id.
    * Returns undefined when the plugin failed to load or is not registered.
@@ -275,14 +264,14 @@ export class PluginRuntime {
   private async readManifest(path: string): Promise<PluginManifest> {
     const raw = await readFile(path, "utf-8");
     const parsed = JSON.parse(raw) as PluginManifest;
-    if (!parsed.id || !parsed.entry || !Array.isArray(parsed.methods)) {
+    if (!parsed.id || !parsed.entry || !Array.isArray(parsed.tools)) {
       throw new Error(`Invalid plugin manifest: ${path}`);
     }
     // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor requirement).
     // Plugin id is the package identity and may contain dots (e.g. com.lge.meeting-recorder),
     // but methods are LLM tool names — no dots allowed, no runtime conversion is performed.
     const TOOL_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-    for (const method of parsed.methods) {
+    for (const method of parsed.tools) {
       if (!TOOL_NAME_PATTERN.test(method)) {
         throw new Error(
           `Invalid tool name '${method}' in plugin '${parsed.id}': ` +
@@ -292,42 +281,16 @@ export class PluginRuntime {
       }
     }
 
-    if (parsed.startupMethods !== undefined && !Array.isArray(parsed.startupMethods)) {
+    if (parsed.startupTools !== undefined && !Array.isArray(parsed.startupTools)) {
       throw new Error(
-        `Invalid manifest for plugin '${parsed.id}': 'startupMethods' must be an array of strings`,
+        `Invalid manifest for plugin '${parsed.id}': 'startupTools' must be an array of strings`,
       );
     }
-    for (const startupMethod of parsed.startupMethods ?? []) {
-      if (!parsed.methods.includes(startupMethod)) {
+    for (const startupMethod of parsed.startupTools ?? []) {
+      if (!parsed.tools.includes(startupMethod)) {
         throw new Error(
-          `Invalid startupMethods entry '${startupMethod}' in plugin '${parsed.id}': ` +
-          `method is not declared in methods[]`,
-        );
-      }
-    }
-
-    if (parsed.ipcBindings !== undefined && !Array.isArray(parsed.ipcBindings)) {
-      throw new Error(
-        `Invalid manifest for plugin '${parsed.id}': 'ipcBindings' must be an array of objects`,
-      );
-    }
-    for (const binding of parsed.ipcBindings ?? []) {
-      if (!binding.channel || typeof binding.channel !== "string") {
-        throw new Error(`Invalid ipcBindings entry in plugin '${parsed.id}': missing channel`);
-      }
-      if (!binding.method || typeof binding.method !== "string") {
-        throw new Error(`Invalid ipcBindings entry in plugin '${parsed.id}': missing method`);
-      }
-      if (binding.args !== undefined && !Array.isArray(binding.args)) {
-        throw new Error(
-          `Invalid ipcBindings entry for channel '${binding.channel}' in plugin '${parsed.id}': ` +
-          `'args' must be an array of strings`,
-        );
-      }
-      if (!parsed.methods.includes(binding.method)) {
-        throw new Error(
-          `Invalid ipcBindings method '${binding.method}' in plugin '${parsed.id}': ` +
-          `method is not declared in methods[]`,
+          `Invalid startupTools entry '${startupMethod}' in plugin '${parsed.id}': ` +
+          `method is not declared in tools[]`,
         );
       }
     }
