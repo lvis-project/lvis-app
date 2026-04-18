@@ -885,6 +885,9 @@ function createNoopHostApi(): PluginHostApi {
     isMsGraphAuthenticated: () => false,
     getMsGraphAccount: () => null,
     onMsGraphAuthChange: () => {},
+    withMsGraphRetry: async () => {
+      throw new Error("MS Graph not available in noop context");
+    },
     callLlm: async () => { throw new Error("LLM not available in noop context"); },
     logEvent: () => {},
     onShutdown: () => {},
