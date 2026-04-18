@@ -29,7 +29,11 @@ function shouldUseVercel(
   flag: LLMUseVercelSdk | undefined,
 ): boolean {
   if (!flag || flag === "none") return false;
-  if (flag === "all") return vendor !== "copilot"; // copilot stays on legacy OpenAI path for now
+  // P2: openai flag covers both "openai" and "copilot" (they share the
+  // OpenAI-family adapter path). "all" covers everything except "claude"
+  // (still legacy pending P3).
+  if (flag === "all") return vendor !== "claude";
+  if (flag === "openai") return vendor === "openai" || vendor === "copilot";
   return flag === vendor;
 }
 
@@ -40,7 +44,13 @@ export function createProvider(
   // Feature flag: evaluate once-per-conversation upstream; we just honour the
   // resolved value here. Do NOT read settings inside per-turn call paths.
   if (shouldUseVercel(config.vendor, options.useVercelSdk)) {
-    return new VercelUnifiedProvider(config.vendor, config.apiKey, config.baseUrl);
+    // Copilot needs its default baseUrl when none is configured so the
+    // Vercel adapter hits the right endpoint.
+    const baseUrl =
+      config.vendor === "copilot"
+        ? (config.baseUrl ?? COPILOT_BASE_URL)
+        : config.baseUrl;
+    return new VercelUnifiedProvider(config.vendor, config.apiKey, baseUrl);
   }
 
   switch (config.vendor) {
