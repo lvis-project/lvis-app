@@ -16,7 +16,8 @@
     "calendar_delete",
     "calendar_start_watcher",
     "calendar_stop_watcher",
-    "calendar_open_url"
+    "calendar_open_url",
+    "calendar_detect_patterns"
   ],
   "capabilities": [
     "calendar-source",
@@ -26,7 +27,8 @@
     "calendar_start_watcher"
   ],
   "eventSubscriptions": [
-    "meeting.ended"
+    "meeting.ended",
+    "email.action.needed"
   ],
   "toolSchemas": {
     "calendar_status": {
@@ -228,6 +230,22 @@
           }
         },
         "required": ["url"],
+        "additionalProperties": false
+      }
+    },
+    "calendar_detect_patterns": {
+      "description": "향후 N일간(기본 28일, 최대 100건)의 일정에서 반복 패턴을 감지합니다. 로그인 필요. 패턴 발견 시 각 항목마다 calendar.pattern.detected 이벤트를 발행하고 { patterns: [...] }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90,
+            "description": "패턴 감지 대상 기간(일) — 기본값 28"
+          }
+        },
         "additionalProperties": false
       }
     }

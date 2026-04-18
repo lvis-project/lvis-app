@@ -52,6 +52,54 @@ UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인
 - 메인 프로세스는 IPC를 플러그인 메서드 호출로 브리지하며, 플러그인 추가/교체 시 매니페스트 변경만으로 확장 가능합니다.
 - 라이프사이클(`start`/`stop`)은 runtime이 일괄 관리합니다.
 
+## 선제성 엔진 (Proactive Engine)
+
+`src/core/proactive-engine.ts`가 앱 부팅 시 초기화되어 사용자에게 선제적 정보를 제공합니다.
+
+### 데일리 브리핑
+
+앱 시작 시 `ProactiveEngine.collectBriefingItems()`가 실행되어 태스크, 이메일, **캘린더 일정**을 통합한 브리핑을 생성합니다.
+
+- **진행 중 미팅** (high priority): 현재 시각 기준 시작~종료 사이인 일정
+- **예정 미팅** (medium priority): 향후 2시간 이내 일정
+- **종일 일정** (low priority): 당일 종일 이벤트
+
+캘린더 데이터는 앱 부팅 시 기본적으로 `calendar_today`를 통해 당일 일정만 로드되어 캐시에 저장됩니다 (`calendarEventsCache`). 월요일에는 추가로 `calendar_list({ days: 7 })`를 호출해 주간 일정 캐시를 갱신합니다.  
+`getBriefingPromptData()`는 이 캐시를 바탕으로 오늘 일정 요약 텍스트(최대 8건)를 LLM 프롬프트에 자동으로 포함합니다.
+
+### 캘린더 플러그인 선제성 기능
+
+| # | 기능 | 트리거 | 출력 이벤트 |
+|---|------|--------|------------|
+| 1 | **일정 생성 시 충돌 감지** | `calendar_create` 호출 | 응답에 `conflictWarning`, `alternativeSlots` 포함 |
+| 2 | **이메일 → 미팅 요청 자동 감지** | `email.action.needed` 이벤트 | `calendar.from_email.suggested` |
+| 3 | **월요일 주간 일정 요약** | 앱 부팅 (월요일) | ProactiveEngine 캐시 갱신 |
+| 4 | **반복 패턴 감지** | `calendar_detect_patterns` 호출 | `calendar.pattern.detected` 이벤트, UI에 표시 |
+
+### OS 알림 (manifest 선언형)
+
+플러그인은 `plugin.json`의 `notificationEvents`에 OS 알림을 띄울 이벤트를 선언합니다. `boot.ts`는 플러그인을 알 필요 없이 manifest만 읽어 자동 등록합니다:
+
+```json
+{
+  "notificationEvents": [
+    { "event": "email.new", "titleField": "sender", "bodyField": "subject" }
+  ]
+}
+```
+
+### 이벤트 버스
+
+선제성 기능은 `emitEvent` / `onEvent` 기반 비동기 이벤트 버스로 통신합니다:
+
+| 이벤트 | 발행자 | 구독자 |
+|--------|--------|--------|
+| `calendar.from_email.suggested` | calendar hostPlugin | — |
+| `calendar.pattern.detected` | calendar hostPlugin | calendar UI |
+| `email.action.needed` | email hostPlugin | calendar hostPlugin |
+| `email.new` | email hostPlugin | boot.ts (OS 알림) |
+| `meeting.ended` | meeting hostPlugin | calendar hostPlugin |
+
 ## 설치
 ```bash
 bun install
