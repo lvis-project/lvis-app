@@ -47,30 +47,31 @@ export function useSettings(api: LvisApi): UseSettingsResult {
       if (!isMountedRef.current) return;
       setLlmVendor(s.llm.provider);
       setLlmModel(s.llm.model);
-      setEnableThinkingChat(s.llm.enableThinking ?? false);
+      setEnableThinkingChat(s.llm.enableThinking ?? true);
     } catch {
       /* ignore */
     }
   }, [api]);
 
-  // Mount: load vendor/model/thinking cache + context overflow snapshot.
+  // Mount: load vendor/model/thinking cache + context overflow snapshot in one call.
   useEffect(() => {
-    void refresh();
     api
       .getSettings()
       .then((s) => {
-        if (isMountedRef.current) {
-          setCurrentLlmSettings({ provider: s.llm.provider, model: s.llm.model });
-        }
+        if (!isMountedRef.current) return;
+        setLlmVendor(s.llm.provider);
+        setLlmModel(s.llm.model);
+        setEnableThinkingChat(s.llm.enableThinking ?? true);
+        setCurrentLlmSettings({ provider: s.llm.provider, model: s.llm.model });
       })
       .catch(() => {});
-  }, [refresh, api]);
+  }, [api]);
 
   const toggleThinking = useCallback(
     async (next: boolean) => {
       setEnableThinkingChat(next);
       try {
-        await api.updateSettings({ llm: { enableThinking: next } } as any);
+        await api.updateSettings({ llm: { enableThinking: next } });
       } catch {
         /* ignore */
       }
