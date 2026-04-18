@@ -24,6 +24,7 @@ import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import type { StarredStore } from "../data/starred-store.js";
 import type { TelemetryService } from "../main/telemetry.js";
+import type { TaskSourceRegistry } from "../plugins/task-source-registry.js";
 
 export type EventHandler = (data: unknown) => void;
 
@@ -59,6 +60,7 @@ export interface AppServices {
   pluginRuntime: PluginRuntime;
   pluginMarketplace: PluginMarketplaceService;
   taskService: TaskService;
+  taskSourceRegistry: TaskSourceRegistry;
   settingsService: SettingsService;
   memoryManager: MemoryManager;
   keywordEngine: KeywordEngine;
