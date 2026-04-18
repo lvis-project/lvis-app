@@ -172,7 +172,13 @@ export class ConversationLoop {
     const vendor = llmSettings.provider;
     const apiKey = this.deps.settingsService.getSecret(secretKeyFor(vendor));
 
-    if (!apiKey) {
+    // Vertex AI uses service account / ADC — apiKey not required, but project is.
+    const isVertex = vendor === "vertex-ai";
+    if (!apiKey && !isVertex) {
+      this.provider = null;
+      return;
+    }
+    if (isVertex && !llmSettings.vertexProject && !process.env.GOOGLE_CLOUD_PROJECT && !process.env.GCLOUD_PROJECT) {
       this.provider = null;
       return;
     }
@@ -180,7 +186,14 @@ export class ConversationLoop {
     try {
       const baseUrl = llmSettings.baseUrls?.[vendor];
       this.provider = createProvider(
-        { vendor, apiKey, model: llmSettings.model, ...(baseUrl ? { baseUrl } : {}) },
+        {
+          vendor,
+          apiKey: apiKey ?? "",
+          model: llmSettings.model,
+          ...(baseUrl ? { baseUrl } : {}),
+          ...(llmSettings.vertexProject ? { vertexProject: llmSettings.vertexProject } : {}),
+          ...(llmSettings.vertexLocation ? { vertexLocation: llmSettings.vertexLocation } : {}),
+        },
         { useVercelSdk: llmSettings.useVercelSdk ?? "none" },
       );
     } catch {

@@ -36,7 +36,7 @@ import {
 type MarketplaceItem = { id: string; name: string; description: string; packageSpec: string; installed: boolean; enabled: boolean; isManaged?: boolean };
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
-type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number; baseUrls?: Record<string, string> }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string } };
+type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number; baseUrls?: Record<string, string>; vertexProject?: string; vertexLocation?: string }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string } };
 
 // ─── Usage types (Sprint 4.B) ───────────────────────
 type UsageTotals = { inputTokens: number; outputTokens: number; totalTokens: number; cost: number };
@@ -320,11 +320,8 @@ const VENDORS = [
   { id: "gemini", label: "Google Gemini", placeholder: "AIza...", defaultModel: "gemini-2.0-flash", needsBaseUrl: false },
   { id: "copilot", label: "GitHub Copilot", placeholder: "ghp_...", defaultModel: "gpt-4o", needsBaseUrl: false },
   { id: "azure-foundry", label: "Azure AI Foundry", placeholder: "Azure API key...", defaultModel: "gpt-4o", needsBaseUrl: true, baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/deployments/{deployment}/" },
-  { id: "vercel-gateway", label: "Vercel AI Gateway", placeholder: "vck_... or Vercel token", defaultModel: "openai/gpt-4o", needsBaseUrl: true, baseUrlPlaceholder: "https://ai-gateway.vercel.sh/v1 (default)" },
+  { id: "vertex-ai", label: "Google Vertex AI", placeholder: "service account (unused — uses ADC)", defaultModel: "gemini-2.5-flash", needsBaseUrl: false },
 ] as const;
-
-// Vendors that support extended thinking / reasoning in LVIS.
-const THINKING_CAPABLE_VENDORS = new Set<string>(["claude", "openai", "copilot", "gemini", "azure-foundry", "vercel-gateway"]);
 
 const WEB_PROVIDERS = [
   { id: "duckduckgo", label: "DuckDuckGo", placeholder: "키 불필요", needsKey: false },
@@ -638,8 +635,12 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
   const [webKeyInput, setWebKeyInput] = useState("");
   const [hasWebKey, setHasWebKey] = useState(false);
 
-  // Per-vendor baseUrl (Azure AI Foundry requires it; Vercel Gateway optional).
+  // Per-vendor baseUrl (Azure AI Foundry requires it; OpenAI/Copilot proxy optional).
   const [baseUrl, setBaseUrl] = useState("");
+
+  // Vertex AI — GCP project + region (vendor uses service account / ADC, not apiKey).
+  const [vertexProject, setVertexProject] = useState("");
+  const [vertexLocation, setVertexLocation] = useState("");
 
   // Sprint 3-A: proactive Daily Briefing toggle (§7, §14.4 feature flag).
   const [enableDailyBriefing, setEnableDailyBriefing] = useState(false);
@@ -659,6 +660,8 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       setVendor(s.llm.provider);
       setModel(s.llm.model);
       setBaseUrl((s.llm.baseUrls ?? {})[s.llm.provider] ?? "");
+      setVertexProject(s.llm.vertexProject ?? "");
+      setVertexLocation(s.llm.vertexLocation ?? "");
       setEnableThinking(s.llm.enableThinking ?? true);
       setThinkingBudget(s.llm.thinkingBudgetTokens ?? 10_000);
       setAutoCompact(s.chat.autoCompact ?? true);
@@ -726,7 +729,9 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
             baseUrls: mergedBaseUrls as any,
             enableThinking,
             thinkingBudgetTokens: thinkingBudget,
-          },
+            vertexProject: vertexProject.trim() || undefined,
+            vertexLocation: vertexLocation.trim() || undefined,
+          } as any,
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
           proactive: { enableDailyBriefing } as any,
@@ -766,7 +771,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                 ))}
               </select>
             </div>
-            {vendorInfo.needsBaseUrl !== undefined && (
+            {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
               <div className="space-y-2">
                 <label className="text-sm font-medium">
                   Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : " (선택)"}
@@ -783,22 +788,48 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                     {" "}— 모델 필드에는 deployment 이름을 입력합니다.
                   </p>
                 )}
-                {vendor === "vercel-gateway" && (
+                {(vendor === "openai" || vendor === "copilot") && (
                   <p className="text-[11px] text-muted-foreground">
-                    비워두면 기본 게이트웨이(<code>https://ai-gateway.vercel.sh/v1</code>)를 사용합니다.
-                    모델 ID는 <code>provider/model</code> 형식(예: <code>openai/gpt-4o</code>).
+                    이 설정은 Vercel SDK 경로 사용 시 프록시/커스텀 엔드포인트로만 사용됩니다.
                   </p>
                 )}
               </div>
             )}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">{vendorInfo.label} API 키</label>
-              <div className="flex items-center gap-2">
-                {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
-                {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
+            {vendor === "vertex-ai" && (
+              <div className="space-y-2 rounded-md border p-3">
+                <p className="text-sm font-medium">Google Vertex AI</p>
+                <p className="text-[11px] text-muted-foreground">
+                  서비스 계정 또는 ADC(<code>gcloud auth application-default login</code>)로 인증합니다.
+                  API 키는 사용하지 않으며, <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수로 서비스 계정 JSON 경로를 지정할 수 있습니다.
+                </p>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">GCP Project ID *</label>
+                  <Input
+                    value={vertexProject}
+                    onChange={(e) => setVertexProject(e.target.value)}
+                    placeholder="my-gcp-project"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Location (region) — 선택</label>
+                  <Input
+                    value={vertexLocation}
+                    onChange={(e) => setVertexLocation(e.target.value)}
+                    placeholder="us-central1 (기본값)"
+                  />
+                </div>
               </div>
-              <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
-            </div>
+            )}
+            {vendor !== "vertex-ai" && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{vendorInfo.label} API 키</label>
+                <div className="flex items-center gap-2">
+                  {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
+                  {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
+                </div>
+                <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
+              </div>
+            )}
             <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
             <div className="space-y-2 rounded-md border p-3">
               <label className="flex items-center justify-between text-sm font-medium">
@@ -1689,9 +1720,12 @@ function App() {
   useEffect(() => { void refreshLlmSettings(); }, [refreshLlmSettings]);
 
   // Rough per-model context budget (input+output tokens) used to show % filled.
+  // NOTE: 1M context for Claude Sonnet 4.6 is a beta feature gated on a specific
+  // API beta header — currently we assume the default 200k for all Claude models;
+  // 1M beta detection is tracked as a followup.
   const contextBudget = useMemo(() => {
     const m = (llmModel || "").toLowerCase();
-    if (m.includes("claude")) return 200_000; // Claude 4.x+ 200k; 1M on sonnet-4-6 via beta
+    if (m.includes("claude")) return 200_000;
     if (m.includes("gpt-5") || m.includes("gpt-4.1")) return 1_000_000;
     if (m.includes("gpt-4o") || m.includes("gpt-4")) return 128_000;
     if (m.includes("gemini")) return 1_000_000;
@@ -1699,22 +1733,26 @@ function App() {
     return 128_000;
   }, [llmModel]);
 
-  // Estimated tokens in current conversation (chars/4 ≈ tokens — matches
-  // serializeMessageForEstimation's length-based heuristic used elsewhere).
+  // Estimated tokens — mirrors engine-side serializeMessageForEstimation heuristic
+  // (see src/engine/llm/types.ts:85): per-message `Math.ceil(serializedLength / 4) + 1`.
   const usedTokens = useMemo(() => {
-    let chars = 0;
+    let total = 0;
     for (const e of entries) {
-      if (e.kind === "user") chars += e.text.length;
-      else if (e.kind === "assistant") chars += e.text.length;
-      else if (e.kind === "reasoning") chars += e.text.length;
-      else if (e.kind === "tool_group") {
-        for (const t of e.tools ?? []) {
-          chars += JSON.stringify((t as any).input ?? {}).length;
-          chars += ((t as any).result ?? "").length;
-        }
-      } else if (e.kind === "system") chars += e.text.length;
+      let serialized = "";
+      if (e.kind === "user" || e.kind === "assistant" || e.kind === "reasoning" || e.kind === "system") {
+        serialized = JSON.stringify({ kind: e.kind, text: e.text ?? "" });
+      } else if (e.kind === "tool_group") {
+        serialized = JSON.stringify({
+          kind: "tool_group",
+          tools: (e.tools ?? []).map((t: any) => ({
+            input: t.input ?? {},
+            result: t.result ?? "",
+          })),
+        });
+      }
+      if (serialized) total += Math.ceil(serialized.length / 4) + 1;
     }
-    return Math.ceil(chars / 4);
+    return total;
   }, [entries]);
   const contextPercent = Math.min(100, Math.round((usedTokens / contextBudget) * 100));
   const contextColor =
@@ -1723,7 +1761,8 @@ function App() {
   const vendorSupportsThinking = useMemo(() => {
     if (llmVendor === "claude") return true;
     if (llmVendor === "gemini") return true;
-    if (llmVendor === "openai" || llmVendor === "copilot" || llmVendor === "azure-foundry" || llmVendor === "vercel-gateway") {
+    if (llmVendor === "vertex-ai") return true;
+    if (llmVendor === "openai" || llmVendor === "copilot" || llmVendor === "azure-foundry") {
       const m = (llmModel || "").toLowerCase();
       return m.includes("gpt-5") || m.includes("o1") || m.includes("o3") || m.includes("o4");
     }

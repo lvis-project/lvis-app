@@ -8,7 +8,7 @@ export type LLMVendor =
   | "gemini"
   | "copilot"
   | "azure-foundry"
-  | "vercel-gateway";
+  | "vertex-ai";
 
 export interface LLMSettings {
   provider: LLMVendor;
@@ -17,10 +17,19 @@ export interface LLMSettings {
    * Per-vendor baseUrl overrides (keyed by vendor). Required for:
    *   - azure-foundry: `https://{resource}.openai.azure.com/openai/deployments/{deployment}/`
    * Optional for:
-   *   - vercel-gateway: defaults to `https://ai-gateway.vercel.sh/v1`
    *   - openai / copilot: proxy endpoints
+   * Not used by:
+   *   - vertex-ai: uses project + location instead (see vertexProject / vertexLocation)
    */
   baseUrls?: Partial<Record<LLMVendor, string>>;
+  /**
+   * Vertex AI — GCP project ID (required for vendor="vertex-ai").
+   * Auth flows via service account: either GOOGLE_APPLICATION_CREDENTIALS env
+   * pointing at a credentials JSON, or Application Default Credentials (ADC).
+   */
+  vertexProject?: string;
+  /** Vertex AI — GCP region (e.g. "us-central1"). Defaults to "us-central1". */
+  vertexLocation?: string;
   /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */
   enableThinking?: boolean;
   /** Token budget for Claude extended thinking (1024–32000). Only used when enableThinking is true. */
@@ -259,7 +268,7 @@ export class SettingsService {
         "gemini",
         "copilot",
         "azure-foundry",
-        "vercel-gateway",
+        "vertex-ai",
       ] as const;
       if (!(SUPPORTED_VENDORS as readonly string[]).includes(llm.provider)) {
         llm.provider = DEFAULT_SETTINGS.llm.provider;

@@ -13,7 +13,7 @@ export type LLMVendor =
   | "gemini"
   | "copilot"
   | "azure-foundry"
-  | "vercel-gateway";
+  | "vertex-ai";
 
 export const LLM_VENDOR_LABELS: Record<LLMVendor, string> = {
   claude: "Anthropic Claude",
@@ -21,7 +21,7 @@ export const LLM_VENDOR_LABELS: Record<LLMVendor, string> = {
   gemini: "Google Gemini",
   copilot: "GitHub Copilot",
   "azure-foundry": "Azure AI Foundry",
-  "vercel-gateway": "Vercel AI Gateway",
+  "vertex-ai": "Google Vertex AI",
 };
 
 export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
@@ -30,7 +30,7 @@ export const LLM_DEFAULT_MODELS: Record<LLMVendor, string> = {
   gemini: "gemini-2.5-flash",    // Gemini 2.5 Flash — 1M context (2025)
   copilot: "gpt-4.1",            // GitHub Copilot 기본 모델 (2025-05)
   "azure-foundry": "gpt-4o",     // Azure deployment name — user must override with their own deployment
-  "vercel-gateway": "openai/gpt-4o", // Gateway routes in `{provider}/{model}` form
+  "vertex-ai": "gemini-2.5-flash", // Vertex AI uses Gemini models by default
 };
 
 // ─── 범용 메시지 ────────────────────────────────────
@@ -166,7 +166,12 @@ export interface LLMProvider {
 
 export interface ProviderConfig {
   vendor: LLMVendor;
+  /** API key. Optional for vendor="vertex-ai" (uses service account / ADC). */
   apiKey: string;
   model?: string;
   baseUrl?: string;
+  /** Vertex AI — GCP project ID (required for vendor="vertex-ai"). */
+  vertexProject?: string;
+  /** Vertex AI — GCP region (default "us-central1"). */
+  vertexLocation?: string;
 }
