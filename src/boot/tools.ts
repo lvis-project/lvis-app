@@ -13,6 +13,7 @@ import type { PluginRuntime } from "../plugins/runtime.js";
 import type { AuditService } from "../main/audit-service.js";
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import { createKnowledgeSearchTools } from "../tools/knowledge-search.js";
+import { createSearchMemoryTool, memoryManagerNotesAdapter } from "../tools/search-memory.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, type WorkerClientLite } from "../main/idle-scheduler.js";
@@ -215,6 +216,9 @@ export function registerBuiltinTools(
           .map((n) => ({ title: n.title, filename: n.filename }));
         return { output: JSON.stringify(results), isError: false };
       },
+    }),
+    createSearchMemoryTool({
+      getNotes: memoryManagerNotesAdapter(memoryManager),
     }),
     createDynamicTool({
       name: "memory_list",

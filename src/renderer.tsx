@@ -76,7 +76,7 @@ import {
 type MarketplaceItem = { id: string; name: string; description: string; packageSpec: string; installed: boolean; enabled: boolean; isManaged?: boolean };
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
-type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number; baseUrls?: Record<string, string>; vertexProject?: string; vertexLocation?: string; temperature?: number; maxOutputTokens?: number; seed?: number; responseFormat?: "text" | "json"; stopSequences?: string[]; streamSmoothing?: "none" | "word" | "char" }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string } };
+type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number; baseUrls?: Record<string, string>; vertexProject?: string; vertexLocation?: string; temperature?: number; maxOutputTokens?: number; seed?: number; responseFormat?: "text" | "json"; stopSequences?: string[]; streamSmoothing?: "none" | "word" | "char" }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string }; privacy?: { piiRedactEnabled: boolean } };
 
 // ─── Usage types (Sprint 4.B) ───────────────────────
 type UsageTotals = { inputTokens: number; outputTokens: number; totalTokens: number; cost: number };
@@ -132,7 +132,7 @@ type LvisApi = {
   getOverdueTasks: () => Promise<Task[]>;
   getBriefing: () => Promise<string | null>;
   onProactiveBriefing: (h: (b: BriefingPayload) => void) => () => void;
-  dismissBriefing: () => Promise<{ ok: boolean; debounced?: boolean }>;
+  dismissBriefing: (feedback?: { reason: string; details?: string }) => Promise<{ ok: boolean; debounced?: boolean }>;
   snoozeBriefing: () => Promise<{ ok: boolean; lastDismissedAt?: string }>;
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
@@ -237,9 +237,13 @@ export function BriefingCard({
   onSnooze,
 }: {
   briefing: BriefingPayload;
-  onDismiss: () => void;
+  onDismiss: (feedback?: { reason: string; details?: string }) => void;
   onSnooze: () => void;
 }) {
+  // Sprint E §2 — reason picker shown after user clicks 닫기.
+  const [askReason, setAskReason] = useState(false);
+  const [reason, setReason] = useState<"" | "inaccurate" | "uninteresting" | "busy" | "other">("");
+  const [details, setDetails] = useState("");
   const generatedLabel = useMemo(() => {
     try {
       return new Date(briefing.generatedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
@@ -258,11 +262,37 @@ export function BriefingCard({
           </div>
           <div className="flex gap-1">
             <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onSnooze}>1시간 뒤 다시</Button>
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onDismiss}>닫기</Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setAskReason(true)}>닫기</Button>
           </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-2 pt-0">
+        {askReason && (
+          <div className="space-y-2 rounded-md border border-primary/30 bg-background p-2 text-xs">
+            <p className="font-medium">왜 닫았나요? (선택)</p>
+            {([
+              ["inaccurate", "내용이 부정확해요"],
+              ["uninteresting", "관심 없는 내용이에요"],
+              ["busy", "지금은 바쁘지 않아요"],
+              ["other", "기타"],
+            ] as const).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2">
+                <input type="radio" name="briefing-reason" value={value} checked={reason === value} onChange={() => setReason(value)} />
+                <span>{label}</span>
+              </label>
+            ))}
+            {reason === "other" && (
+              <Input value={details} onChange={(e) => setDetails(e.target.value)} placeholder="자유 입력 (선택)" className="h-7 text-xs" />
+            )}
+            <div className="flex justify-end gap-1 pt-1">
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setAskReason(false); onDismiss(); }}>건너뛰고 닫기</Button>
+              <Button size="sm" className="h-7 text-xs" disabled={!reason} onClick={() => {
+                setAskReason(false);
+                onDismiss({ reason, details: reason === "other" ? details : undefined });
+              }}>피드백 보내고 닫기</Button>
+            </div>
+          </div>
+        )}
         {briefing.summary && (
           <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{briefing.summary}</p>
         )}
@@ -783,6 +813,8 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
   const [stopSequencesText, setStopSequencesText] = useState<string>("");
   const [streamSmoothing, setStreamSmoothing] = useState<"none" | "word" | "char">("none");
 
+  // Sprint E §3 — PII 리댁트 토글 (기본 OFF).
+  const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
@@ -818,6 +850,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       if (cancelled) return;
       setHasWebKey(webApiKeySet);
       setEnableDailyBriefing(s.proactive?.enableDailyBriefing ?? false);
+      setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
       setSettingsLoaded(true);
     })();
     return () => {
@@ -893,6 +926,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
           proactive: { enableDailyBriefing } as any,
+          privacy: { piiRedactEnabled } as any,
         } as any);
       }
       // permissions 탭: 각 항목이 즉시 저장되므로 별도 save 불필요
@@ -912,6 +946,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
             <TabsTrigger value="chat" className="flex-1">채팅</TabsTrigger>
             <TabsTrigger value="web" className="flex-1">검색 (Web)</TabsTrigger>
             <TabsTrigger value="proactive" className="flex-1">브리핑</TabsTrigger>
+            <TabsTrigger value="privacy" className="flex-1">프라이버시</TabsTrigger>
             <TabsTrigger value="permissions" className="flex-1">권한</TabsTrigger>
             <TabsTrigger value="roles" className="flex-1">역할</TabsTrigger>
             <TabsTrigger value="usage" className="flex-1">사용량</TabsTrigger>
@@ -1189,6 +1224,33 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                 <div className="space-y-0.5">
                   <p id="daily-briefing-toggle-label" className="text-sm font-medium">데일리 브리핑 활성화</p>
                   <p className="text-[11px] text-muted-foreground">기본값은 꺼짐입니다. 켜면 idle scan 중 요약이 생성됩니다.</p>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="privacy" className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-medium">PII 리댁트</p>
+                <p className="text-[11px] text-muted-foreground">활성화 시 LLM으로 전송 전에 이메일·전화·신용카드 등 개인정보를 [REDACTED:*]로 치환합니다. 기본값은 꺼짐.</p>
+              </div>
+              <div className="flex items-center gap-3 rounded-md border px-3 py-3">
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={piiRedactEnabled}
+                  aria-labelledby="pii-redact-toggle-label"
+                  className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${piiRedactEnabled ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}
+                  onClick={() => setPiiRedactEnabled((prev) => !prev)}
+                >
+                  {piiRedactEnabled && (
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
+                  )}
+                </button>
+                <div className="space-y-0.5">
+                  <p id="pii-redact-toggle-label" className="text-sm font-medium">PII 리댁트 활성화 (기본 OFF)</p>
+                  <p className="text-[11px] text-muted-foreground">감사 로그에 리댁트 건수가 기록되며, 응답 하단에 🔒 배지로 건수가 표시됩니다.</p>
                 </div>
               </div>
             </div>
@@ -2393,10 +2455,10 @@ function App() {
                 {briefing && (
                   <BriefingCard
                     briefing={briefing}
-                    onDismiss={() => {
+                    onDismiss={(feedback) => {
                       // PR#44 Copilot: await IPC result; hide only on ok:true.
                       // debounced/error keeps card visible so user can retry.
-                      void api.dismissBriefing().then((r) => {
+                      void api.dismissBriefing(feedback).then((r) => {
                         if (r?.ok) setBriefing(null);
                         else console.warn("[lvis] dismissBriefing skipped:", r);
                       }).catch((e: Error) => {

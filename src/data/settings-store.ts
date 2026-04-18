@@ -73,6 +73,16 @@ export interface AppSettings {
   webSearch: WebSearchSettings;
   marketplace: MarketplaceSettings;
   proactive: ProactiveSettings;
+  privacy: PrivacySettings;
+}
+
+/**
+ * Sprint E §3 — Privacy tab. Default OFF.
+ * piiRedactEnabled: 활성화 시 user draft 를 LLM 으로 보내기 전 DLPFilter 로
+ *   이메일/전화/신용카드 등을 `[REDACTED:*]` 로 치환한다. 감사 로그에 건수 기록.
+ */
+export interface PrivacySettings {
+  piiRedactEnabled: boolean;
 }
 
 /**
@@ -139,6 +149,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   proactive: {
     enableDailyBriefing: false,
+  },
+  privacy: {
+    piiRedactEnabled: false,
   },
 };
 
@@ -209,6 +222,9 @@ export class SettingsService {
     }
     if (partial.proactive) {
       this.settings.proactive = { ...this.settings.proactive, ...partial.proactive };
+    }
+    if (partial.privacy) {
+      this.settings.privacy = { ...this.settings.privacy, ...partial.privacy };
     }
     this.saveSettings();
     return this.getAll();
@@ -296,6 +312,7 @@ export class SettingsService {
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
         marketplace: { ...DEFAULT_SETTINGS.marketplace, ...parsed.marketplace },
         proactive: { ...DEFAULT_SETTINGS.proactive, ...parsed.proactive },
+        privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);
