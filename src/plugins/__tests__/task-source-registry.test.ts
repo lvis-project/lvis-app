@@ -63,4 +63,24 @@ describe("deriveCategoryId", () => {
   it("ignores empty string explicit source", () => {
     expect(deriveCategoryId("com.lge.email", "")).toBe("email");
   });
+
+  it("does not throw when explicitSource is an object (falls back to pluginId)", () => {
+    // A buggy plugin might pass `source: { x: 1 }` — the previous
+    // `explicitSource && explicitSource.trim()` would throw on this.
+    expect(() =>
+      deriveCategoryId("com.lge.email", { x: 1 } as unknown as string),
+    ).not.toThrow();
+    expect(deriveCategoryId("com.lge.email", { x: 1 } as unknown as string)).toBe("email");
+  });
+
+  it("does not throw when explicitSource is a number (falls back to pluginId)", () => {
+    expect(() =>
+      deriveCategoryId("com.lge.email", 42 as unknown as string),
+    ).not.toThrow();
+    expect(deriveCategoryId("com.lge.email", 42 as unknown as string)).toBe("email");
+  });
+
+  it("ignores null explicitSource", () => {
+    expect(deriveCategoryId("com.lge.email", null as unknown as string)).toBe("email");
+  });
 });

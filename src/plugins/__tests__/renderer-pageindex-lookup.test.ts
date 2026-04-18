@@ -11,7 +11,11 @@ import type { PluginCard } from "../runtime.js";
 
 function findListDocumentTool(cards: PluginCard[]): string | undefined {
   const indexPlugin = cards.find((c) => c.capabilities.includes("knowledge-index"));
-  return indexPlugin?.tools.find((t) => /list.*document/i.test(t));
+  const matchesListDocs = (name: string): boolean => {
+    const n = name.toLowerCase();
+    return /list.*document/.test(n) || /index.*document/.test(n);
+  };
+  return indexPlugin?.tools.find(matchesListDocs);
 }
 
 describe("renderer PageIndex capability lookup", () => {
@@ -35,6 +39,13 @@ describe("renderer PageIndex capability lookup", () => {
       { id: "com.lge.pageindex", name: "PageIndex", description: "", sampleTools: [], tools: ["page_index_search"], capabilities: ["knowledge-index"] },
     ];
     expect(findListDocumentTool(cards)).toBeUndefined();
+  });
+
+  it("matches pageindex `index_documents` style (no 'list' verb)", () => {
+    const cards: PluginCard[] = [
+      { id: "com.lge.pageindex", name: "PageIndex", description: "", sampleTools: [], tools: ["index_documents", "index_search"], capabilities: ["knowledge-index"] },
+    ];
+    expect(findListDocumentTool(cards)).toBe("index_documents");
   });
 
   it("matches alternative tool name patterns", () => {

@@ -67,8 +67,13 @@ export class TaskSourceRegistry {
  * - Otherwise derive from the last segment of the plugin's dotted ID
  *   (e.g. "com.lge.meeting-recorder" → "meeting-recorder").
  */
-export function deriveCategoryId(pluginId: string, explicitSource: string | undefined): string {
-  if (explicitSource && explicitSource.trim()) return explicitSource.trim();
+export function deriveCategoryId(pluginId: string, explicitSource: unknown): string {
+  // Guard against non-string inputs — a buggy plugin might pass a number or
+  // object (e.g. `addTask({ source: { name: "x" } })`). The previous
+  // truthy + `.trim()` shape would throw on those. Only trust strings.
+  if (typeof explicitSource === "string" && explicitSource.trim()) {
+    return explicitSource.trim();
+  }
   const parts = pluginId.split(".");
   return parts[parts.length - 1] ?? pluginId;
 }
