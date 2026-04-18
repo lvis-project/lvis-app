@@ -40,9 +40,10 @@ export class ClaudeProvider implements LLMProvider {
       // budget.  We reserve thinkingBudget tokens for reasoning and add 4 096
       // (the default non-thinking ceiling) as a minimum headroom for visible
       // output, matching Anthropic's documentation recommendation.
+      const maxOut = params.maxOutputTokens ?? params.maxTokens ?? 4096;
       const maxTokens = useThinking
-        ? Math.max(params.maxTokens ?? 4096, thinkingBudget + 4096)
-        : (params.maxTokens ?? 4096);
+        ? Math.max(maxOut, thinkingBudget + 4096)
+        : maxOut;
 
       const stream = this.client.messages.stream(
         {
@@ -51,6 +52,10 @@ export class ClaudeProvider implements LLMProvider {
           system: params.systemPrompt,
           messages,
           ...(tools && tools.length > 0 && { tools }),
+          ...(params.temperature !== undefined && { temperature: params.temperature }),
+          ...(params.stopSequences && params.stopSequences.length > 0 && {
+            stop_sequences: params.stopSequences,
+          }),
           ...(useThinking && {
             thinking: { type: "enabled", budget_tokens: thinkingBudget },
           }),

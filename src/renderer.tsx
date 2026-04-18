@@ -36,7 +36,7 @@ import {
 type MarketplaceItem = { id: string; name: string; description: string; packageSpec: string; installed: boolean; enabled: boolean; isManaged?: boolean };
 type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
-type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number; baseUrls?: Record<string, string>; vertexProject?: string; vertexLocation?: string }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string } };
+type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number; baseUrls?: Record<string, string>; vertexProject?: string; vertexLocation?: string; temperature?: number; maxOutputTokens?: number; seed?: number; responseFormat?: "text" | "json"; stopSequences?: string[]; streamSmoothing?: "none" | "word" | "char" }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string } };
 
 // ─── Usage types (Sprint 4.B) ───────────────────────
 type UsageTotals = { inputTokens: number; outputTokens: number; totalTokens: number; cost: number };
@@ -670,6 +670,14 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
   // Sprint 3-A: proactive Daily Briefing toggle (§7, §14.4 feature flag).
   const [enableDailyBriefing, setEnableDailyBriefing] = useState(false);
 
+  // Sprint A — advanced generation controls.
+  const [temperature, setTemperature] = useState<number>(0.7);
+  const [maxOutputTokens, setMaxOutputTokens] = useState<number>(4096);
+  const [seedInput, setSeedInput] = useState<string>("");
+  const [responseFormat, setResponseFormat] = useState<"text" | "json">("text");
+  const [stopSequencesText, setStopSequencesText] = useState<string>("");
+  const [streamSmoothing, setStreamSmoothing] = useState<"none" | "word" | "char">("none");
+
   const [saving, setSaving] = useState(false);
 
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
@@ -689,6 +697,12 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
       setVertexLocation(s.llm.vertexLocation ?? "");
       setEnableThinking(s.llm.enableThinking ?? true);
       setThinkingBudget(s.llm.thinkingBudgetTokens ?? 10_000);
+      setTemperature(s.llm.temperature ?? 0.7);
+      setMaxOutputTokens(s.llm.maxOutputTokens ?? 4096);
+      setSeedInput(s.llm.seed !== undefined ? String(s.llm.seed) : "");
+      setResponseFormat(s.llm.responseFormat ?? "text");
+      setStopSequencesText((s.llm.stopSequences ?? []).join("\n"));
+      setStreamSmoothing(s.llm.streamSmoothing ?? "none");
       setAutoCompact(s.chat.autoCompact ?? true);
       const apiKeySet = await api.hasApiKey(s.llm.provider);
       if (cancelled) return;
@@ -756,6 +770,15 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
             thinkingBudgetTokens: thinkingBudget,
             vertexProject: vertexProject.trim() || undefined,
             vertexLocation: vertexLocation.trim() || undefined,
+            temperature,
+            maxOutputTokens,
+            seed: seedInput.trim() === "" ? undefined : Number.parseInt(seedInput.trim(), 10),
+            responseFormat,
+            stopSequences: stopSequencesText
+              .split("\n")
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0),
+            streamSmoothing,
           } as any,
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
@@ -775,6 +798,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="w-full">
             <TabsTrigger value="llm" className="flex-1">지능 (LLM)</TabsTrigger>
+            <TabsTrigger value="advanced" className="flex-1">고급</TabsTrigger>
             <TabsTrigger value="chat" className="flex-1">채팅</TabsTrigger>
             <TabsTrigger value="web" className="flex-1">검색 (Web)</TabsTrigger>
             <TabsTrigger value="proactive" className="flex-1">브리핑</TabsTrigger>
@@ -895,6 +919,90 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                   </p>
                 </div>
               )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="advanced" className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">Temperature</label>
+                <span className="text-xs tabular-nums text-muted-foreground">{temperature.toFixed(1)}</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1.5}
+                step={0.1}
+                value={temperature}
+                onChange={(e) => setTemperature(Number(e.target.value))}
+                className="w-full accent-primary"
+                aria-label="Temperature"
+              />
+              <p className="text-[11px] text-muted-foreground">0에 가까울수록 결정적, 높을수록 창의적.</p>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">Max Output Tokens</label>
+                <span className="text-xs tabular-nums text-muted-foreground">{maxOutputTokens.toLocaleString()}</span>
+              </div>
+              <input
+                type="range"
+                min={128}
+                max={8192}
+                step={128}
+                value={maxOutputTokens}
+                onChange={(e) => setMaxOutputTokens(Number(e.target.value))}
+                className="w-full accent-primary"
+                aria-label="Max output tokens"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Seed</label>
+              <Input
+                type="number"
+                value={seedInput}
+                onChange={(e) => setSeedInput(e.target.value)}
+                placeholder="비워 두면 랜덤"
+              />
+              <p className="text-[11px] text-muted-foreground">정수 입력 시 벤더가 지원하면 결정론적 샘플링.</p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Response Format</label>
+              <select
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                value={responseFormat}
+                onChange={(e) => setResponseFormat(e.target.value as "text" | "json")}
+              >
+                <option value="text">Text</option>
+                <option value="json">JSON</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Stop Sequences</label>
+              <textarea
+                className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
+                value={stopSequencesText}
+                onChange={(e) => setStopSequencesText(e.target.value)}
+                placeholder="한 줄에 하나씩"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Stream Smoothing</label>
+              <div className="flex gap-4 text-sm">
+                {(["none", "word", "char"] as const).map((opt) => (
+                  <label key={opt} className="flex items-center gap-1">
+                    <input
+                      type="radio"
+                      name="stream-smoothing"
+                      value={opt}
+                      checked={streamSmoothing === opt}
+                      onChange={() => setStreamSmoothing(opt)}
+                    />
+                    {opt === "none" ? "None" : opt === "word" ? "Word" : "Char"}
+                  </label>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">Vercel SDK 경로만 적용.</p>
             </div>
           </TabsContent>
 
