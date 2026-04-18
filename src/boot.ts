@@ -5,7 +5,7 @@
  * 플러그인 특정 코드 없음 — 모든 플러그인은 HostApi를 통해 자기 등록.
  */
 import { resolve } from "node:path";
-import { app } from "electron";
+import { app, Notification } from "electron";
 import type { BrowserWindow } from "electron";
 import { PluginRuntime } from "./plugins/runtime.js";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
@@ -652,7 +652,7 @@ function registerMailSourceNotifications(
   for (const eventType of eventTypes) {
     onEvent(eventType, (data) => {
       const d = data as { subject?: string; sender?: string; replyNeeded?: boolean; importance?: string };
-      const { Notification } = require("electron") as typeof import("electron");
+      
       if (!Notification.isSupported()) return;
       const urgency = d.importance === "high" || d.replyNeeded;
       const notif = new Notification({
@@ -676,7 +676,7 @@ function registerCalendarBriefingNotifications(
 
   onEvent("calendar.prebriefing.ready", (data) => {
     const d = data as { event?: { subject?: string }; briefing?: string; minutesUntilStart?: number };
-    const { Notification } = require("electron") as typeof import("electron");
+    
     if (!Notification.isSupported()) return;
     const notif = new Notification({
       title: `📅 ${d.event?.subject ?? "미팅"} — ${d.minutesUntilStart ?? 15}분 후`,
@@ -689,7 +689,7 @@ function registerCalendarBriefingNotifications(
 
   onEvent("calendar.from_email.suggested", (data) => {
     const d = data as { emailSubject?: string; sender?: string; rawText?: string };
-    const { Notification } = require("electron") as typeof import("electron");
+    
     if (!Notification.isSupported()) return;
     const notif = new Notification({
       title: "📅 이메일에서 미팅 요청 감지",

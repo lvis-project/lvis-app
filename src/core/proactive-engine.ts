@@ -145,7 +145,7 @@ export class ProactiveEngine {
 
       // 진행 중 일정 — 높은 우선순위
       for (const ev of ongoingEvents) {
-        const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+        const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" });
         items.push({
           category: "calendar",
           priority: "high",
@@ -156,7 +156,7 @@ export class ProactiveEngine {
 
       // 예정 일정 (최대 3개)
       for (const ev of upcomingEvents.slice(0, 3)) {
-        const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+        const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" });
         const minutesUntil = Math.round((new Date(ev.start).getTime() - now.getTime()) / 60000);
         const soon = minutesUntil <= 30;
         items.push({
@@ -300,8 +300,8 @@ export class ProactiveEngine {
         lines.push("오늘 일정:");
         const detailedTodayEvents = todayEvents.slice(0, maxDetailedTodayEvents);
         for (const ev of detailedTodayEvents) {
-          const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
-          const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+          const startTime = new Date(ev.start).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" });
+          const endTime = new Date(ev.end).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" });
           const isOngoing = new Date(ev.start) <= now && new Date(ev.end) > now;
           lines.push(`  - ${isOngoing ? "[진행중] " : ""}${startTime}~${endTime} ${ev.subject}${ev.location ? ` @ ${ev.location}` : ""}${ev.isOnlineMeeting ? " (온라인 미팅)" : ""}`);
         }

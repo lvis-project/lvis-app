@@ -152,17 +152,20 @@ export class SystemPromptBuilder {
     this.sources.push({
       id: 9,
       name: "OS / Environment",
-      refresh: "static",
+      refresh: "per-turn",
       build: () => {
         const now = new Date();
+        const KST = "Asia/Seoul";
+        const kstTime = now.toLocaleString("sv-SE", { timeZone: KST, hour12: false }).replace("T", " ");
         return [
           "<environment>",
           `OS: ${platform()}`,
           `Host: ${hostname()}`,
           `User: ${userInfo().username}`,
           `Home: ${homedir()}`,
-          `Time: ${now.toISOString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
+          `Time: ${kstTime} KST (Asia/Seoul, UTC+9)`,
           `Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`,
+          "NOTE: 날짜/시간 관련 도구 호출 시 반드시 KST(한국 표준시) 기준으로 ISO 형식(예: 2026-04-17T22:46:00+09:00)으로 전달하세요.",
           "</environment>",
         ].join("\n");
       },
