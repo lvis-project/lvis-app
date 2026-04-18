@@ -193,6 +193,7 @@ describe("telemetry", () => {
       settings: () => ({ enabled: true, endpoint: "https://t.example/ingest" }),
       appVersion: "9.9.9",
       fetchImpl,
+      allowlistEnv: "t.example",
     });
     svc.track("app_start");
     svc.track("chat_turn", { durMs: 1234 });
@@ -234,6 +235,7 @@ describe("telemetry", () => {
     const svc = new TelemetryService({
       settings: () => ({ enabled: true, endpoint: "https://t.example/ingest" }),
       fetchImpl,
+      allowlistEnv: "t.example",
     });
     svc.track("app_start");
     await svc.flush();
@@ -246,6 +248,7 @@ describe("telemetry", () => {
     let enabled = true;
     const svc = new TelemetryService({
       settings: () => ({ enabled, endpoint: "https://t.example/ingest" }),
+      allowlistEnv: "t.example",
     });
     expect(svc.isActive()).toBe(true);
     enabled = false;

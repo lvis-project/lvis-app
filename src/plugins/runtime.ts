@@ -182,7 +182,21 @@ export class PluginRuntime {
         }
       }
 
-      const entryPath = this.resolveEntryPath(pluginRoot, manifest.entry);
+      let entryPath: string;
+      try {
+        entryPath = this.resolveEntryPath(pluginRoot, manifest.entry);
+      } catch (err) {
+        // Bonus security hardening: reject + audit manifests whose entry
+        // escapes the plugin directory. Plugin is dropped fail-soft.
+        const reason = (err as Error).message;
+        console.error(`[plugin-runtime] ${manifest.id} rejected: ${reason}`);
+        this.auditLog?.("error", "plugin_entry_path_rejected", {
+          pluginId: manifest.id,
+          entry: manifest.entry,
+          reason,
+        });
+        continue;
+      }
       const module = (await import(pathToFileURL(entryPath).href)) as {
         default?: RuntimePluginFactory;
         createPlugin?: RuntimePluginFactory;
@@ -532,7 +546,22 @@ export class PluginRuntime {
     for (const [pluginId, plugin] of this.plugins) {
       for (const extension of plugin.manifest.ui ?? []) {
         const entrySource = extension.entry ?? extension.page;
-        const entryPath = entrySource ? this.resolveEntryPath(plugin.pluginRoot, entrySource) : undefined;
+        let entryPath: string | undefined;
+        if (entrySource) {
+          try {
+            entryPath = this.resolveEntryPath(plugin.pluginRoot, entrySource);
+          } catch (err) {
+            console.warn(
+              `[plugin-runtime] ui entry rejected for '${pluginId}': ${(err as Error).message}`,
+            );
+            this.auditLog?.("error", "plugin_ui_entry_path_rejected", {
+              pluginId,
+              entry: entrySource,
+              reason: (err as Error).message,
+            });
+            continue;
+          }
+        }
         result.push({
           pluginId,
           extension,
@@ -846,8 +875,25 @@ export class PluginRuntime {
   }
 
   private resolveEntryPath(pluginRoot: string, entry: string): string {
-    if (isAbsolute(entry)) return entry;
-    return resolve(pluginRoot, entry);
+    // Bonus security hardening: reject absolute paths and any relative path
+    // that escapes the plugin directory via `..` traversal. Without this, a
+    // hostile manifest.entry (e.g. "../../../etc/passwd.js") could cause the
+    // host to `import()` an arbitrary file on disk.
+    if (isAbsolute(entry)) {
+      throw new Error(
+        `Plugin entry must be a relative path inside the plugin directory, got absolute: ${entry}`,
+      );
+    }
+    const pluginRootResolved = resolve(pluginRoot);
+    const resolved = resolve(pluginRootResolved, entry);
+    const pluginRootWithSep =
+      pluginRootResolved.endsWith("/") ? pluginRootResolved : `${pluginRootResolved}/`;
+    if (resolved !== pluginRootResolved && !resolved.startsWith(pluginRootWithSep)) {
+      throw new Error(
+        `Plugin entry '${entry}' resolves outside plugin directory (${pluginRootResolved})`,
+      );
+    }
+    return resolved;
   }
 
   private async resolveManifestPaths(): Promise<string[]> {

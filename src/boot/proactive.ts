@@ -4,6 +4,7 @@
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { TaskService } from "../taskService.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
+import type { AuditLogger } from "../audit/audit-logger.js";
 import { ProactiveEngine } from "../core/proactive-engine.js";
 import {
   ProactiveTriggerCoordinator,
@@ -31,11 +32,14 @@ export function createProactiveEngine(opts: {
   getLastBriefingDate?: () => string | undefined;
   setLastBriefingDate?: (dateKst: string) => void;
   getLastDismissedAt?: () => string | undefined;
+  /** M4: audit sink for plugin subscription capability violations. */
+  auditLogger?: Pick<AuditLogger, "log">;
 }): ProactiveEngine {
   const {
     taskService, memoryManager, pluginRuntime,
     isDailyBriefingEnabled, callLlm,
     getLastBriefingDate, setLastBriefingDate, getLastDismissedAt,
+    auditLogger,
   } = opts;
   const proactiveEngine = new ProactiveEngine({
     getTaskSummary: () => taskService.getPendingByPriority().map((t) => ({
@@ -60,7 +64,7 @@ export function createProactiveEngine(opts: {
   proactiveEngine.setEventHints(buildManifestEventHints(pluginRuntime));
 
   // 이벤트 버스 → Proactive Engine 연동 (manifest.eventSubscriptions 선언 기반)
-  registerManifestEventSubscriptions(pluginRuntime, proactiveEngine);
+  registerManifestEventSubscriptions(pluginRuntime, proactiveEngine, auditLogger);
 
   return proactiveEngine;
 }

@@ -13,6 +13,7 @@ import type { PluginRuntime } from "../plugins/runtime.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { ProactiveEngine } from "../core/proactive-engine.js";
+import type { AuditLogger } from "../audit/audit-logger.js";
 import { pluginToolsForRegistration } from "../plugins/plugin-tool-adapter.js";
 import { classifySubscription } from "../plugins/capabilities.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
@@ -82,6 +83,7 @@ export function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
 export function registerManifestEventSubscriptions(
   pluginRuntime: PluginRuntime,
   proactiveEngine: ProactiveEngine,
+  auditLogger?: Pick<AuditLogger, "log">,
 ): void {
   const eventTypes = new Set<string>();
   for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
@@ -91,6 +93,15 @@ export function registerManifestEventSubscriptions(
       // neutral namespaces pass with a warn so ops can track drift.
       const verdict = classifySubscription(eventType);
       if (verdict === "private") {
+        // M4: audit-log unauthorized private namespace subscription attempts.
+        try {
+          auditLogger?.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "error",
+            input: `[plugin:${pluginId}] plugin_subscription_private_denied eventType=${eventType}`,
+          });
+        } catch { /* audit must not break host */ }
         console.warn(
           `[lvis] plugin:${pluginId} eventSubscriptions['${eventType}'] dropped — private namespace`,
         );
