@@ -21,7 +21,12 @@ export function ReasoningCard({
   entry: Extract<ChatEntry, { kind: "reasoning" }>;
 }) {
   const streaming = entry.streaming === true;
-  const [open, setOpen] = useState(true);
+  // Initial open state mirrors streaming: live turns start expanded so deltas
+  // are visible, already-complete entries (session history reload, non-
+  // streaming rehydrated turns) start collapsed — otherwise the auto-collapse
+  // effect below never runs for them (no streaming→done edge) and every past
+  // reasoning block in history would render fully expanded.
+  const [open, setOpen] = useState(streaming);
   const wasStreamingRef = useRef(streaming);
 
   useEffect(() => {

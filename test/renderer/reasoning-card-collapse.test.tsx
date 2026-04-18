@@ -54,4 +54,19 @@ describe("ReasoningCard", () => {
     const { queryByText } = render(card(true));
     expect(queryByText("thinking content here")).toBeInTheDocument();
   });
+
+  it("starts collapsed when mounted already-complete (session history rehydrate)", () => {
+    // Reasoning entries rebuilt from `historyToEntries` (PR #60 session
+    // picker) arrive with streaming=false on first render. The auto-collapse
+    // effect only fires on a streaming true→false edge, so initial open must
+    // also depend on `streaming` — otherwise past thoughts render expanded.
+    const { queryByText, getByRole } = render(card(false));
+    expect(queryByText("생각 정리")).toBeInTheDocument();
+    expect(queryByText("thinking content here")).not.toBeInTheDocument();
+    expect(getByRole("button")).not.toBeDisabled();
+
+    // And the header is still interactive: click to inspect the cached thought.
+    fireEvent.click(getByRole("button"));
+    expect(queryByText("thinking content here")).toBeInTheDocument();
+  });
 });
