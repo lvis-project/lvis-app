@@ -2,7 +2,7 @@ import { safeStorage } from "electron";
 import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-export type LLMVendor = "claude" | "openai" | "gemini" | "copilot" | "lgenie";
+export type LLMVendor = "claude" | "openai" | "gemini" | "copilot";
 
 export interface LLMSettings {
   provider: LLMVendor;
@@ -190,8 +190,20 @@ export class SettingsService {
       const raw = readFileSync(this.settingsPath, "utf-8");
       const parsed = JSON.parse(raw) as any;
       const llm = { ...DEFAULT_SETTINGS.llm, ...parsed.llm };
+      // MEDIUM-2: enableThinking은 Claude 전용 기능.
+      // 파일에 명시되지 않은 경우, Claude면 true(기본값 유지), 그 외엔 false로 강제.
+      if (parsed.llm?.enableThinking === undefined && llm.provider !== "claude") {
+        llm.enableThinking = false;
+      }
       // Migrate pre-thinking Claude models so enableThinking doesn't fail on load.
       if (llm.provider === "claude" && /^claude-sonnet-4-2025/i.test(llm.model)) {
+        llm.model = DEFAULT_SETTINGS.llm.model;
+      }
+      // Migrate removed/unsupported vendors (e.g. pre-strip "lgenie") onto the
+      // current default so provider-factory doesn't throw at turn time.
+      const SUPPORTED_VENDORS = ["claude", "openai", "gemini", "copilot"] as const;
+      if (!(SUPPORTED_VENDORS as readonly string[]).includes(llm.provider)) {
+        llm.provider = DEFAULT_SETTINGS.llm.provider;
         llm.model = DEFAULT_SETTINGS.llm.model;
       }
       return {
