@@ -20,12 +20,19 @@
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { PluginRuntime } from "../runtime.js";
 import type { PluginSignatureVerifier } from "../signature-verifier.js";
 
 const DESTRUCTIVE_SUFFIX = /_(delete|remove|send|destroy|erase|purge|reply|create|update)$/i;
+
+// ESM compatibility: `__dirname` is not defined under NodeNext/ESM. Derive it
+// from `import.meta.url` so this suite runs under both vitest's CJS shim and
+// a future pure-ESM runner. (Audit finding: CRITICAL+.)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const installedRoot = resolve(__dirname, "..", "..", "..", "plugins", "installed");
 
