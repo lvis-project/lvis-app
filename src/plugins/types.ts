@@ -111,6 +111,31 @@ export interface PluginRegistry {
   plugins: PluginRegistryEntry[];
 }
 
+/**
+ * S2 — Signature envelope sidecar served by `/api/v1/plugins/{slug}/download.sig`.
+ * Matches the server's §0.1 dual-sign format.
+ */
+export interface SignatureEnvelope {
+  version: 1;
+  /** Unix seconds. Used for clock-skew guard + revocation. */
+  iat: number;
+  /** Hex-encoded SHA-256 of the tarball bytes. */
+  artifact_sha256: string;
+  signatures: Array<{
+    key_id: string;
+    alg: "ed25519";
+    /** Base64-encoded raw 64-byte signature. */
+    sig: string;
+  }>;
+}
+
+/** S2 — result of verifying a {@link SignatureEnvelope} against a tarball. */
+export interface VerifyResult {
+  ok: boolean;
+  key_id?: string;
+  reason?: string;
+}
+
 export interface PluginMarketplaceItem {
   id: string;
   name: string;
