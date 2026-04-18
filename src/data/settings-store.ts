@@ -15,14 +15,17 @@ export interface LLMSettings {
    * Vercel AI SDK migration feature flag (see docs/references/vercel-ai-sdk-migration.md).
    * Scope controls which vendor(s) route through VercelUnifiedProvider.
    * Default "none" → legacy providers (P0 is inert).
-   * P1 rollout: "claude" → "all".
+   * Rollout order: "gemini" (P1) → "openai" (P2) → "claude" (P3) → "all".
    *
    * IMPORTANT: must be evaluated ONCE per conversation, not per turn
    * (migration doc §5.1 principle 5) — flipping mid-conversation would
    * produce inconsistent message histories.
    */
-  useVercelSdk?: "none" | "gemini" | "openai" | "claude" | "all";
+  useVercelSdk?: LLMUseVercelSdk;
 }
+
+/** Scope for the Vercel AI SDK migration feature flag. */
+export type LLMUseVercelSdk = "none" | "gemini" | "openai" | "claude" | "all";
 
 export interface ChatSettings {
   systemPrompt: string;

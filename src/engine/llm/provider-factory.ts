@@ -13,18 +13,20 @@ import { ClaudeProvider } from "./claude-provider.js";
 import { OpenAIProvider } from "./openai-provider.js";
 import { GeminiProvider } from "./gemini-provider.js";
 import { VercelUnifiedProvider } from "./vercel/adapter.js";
+import type { LLMUseVercelSdk } from "../../data/settings-store.js";
 
 const COPILOT_BASE_URL = "https://models.github.ai/inference";
 
-export type UseVercelSdk = "none" | "gemini" | "openai" | "claude" | "all";
+/** @deprecated Use `LLMUseVercelSdk` from settings-store instead. Kept as alias for backwards compat. */
+export type UseVercelSdk = LLMUseVercelSdk;
 
 export interface CreateProviderOptions {
-  useVercelSdk?: UseVercelSdk;
+  useVercelSdk?: LLMUseVercelSdk;
 }
 
 function shouldUseVercel(
   vendor: LLMVendor,
-  flag: UseVercelSdk | undefined,
+  flag: LLMUseVercelSdk | undefined,
 ): boolean {
   if (!flag || flag === "none") return false;
   if (flag === "all") return vendor !== "copilot"; // copilot stays on legacy OpenAI path for now
