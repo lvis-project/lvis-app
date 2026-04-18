@@ -3,7 +3,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   PluginManifest,
-  PluginMethodHandler,
+  PluginToolHandler,
   PluginUiExtension,
   PluginHostApi,
   RuntimePlugin,
@@ -16,7 +16,7 @@ type LoadedPlugin = {
   manifest: PluginManifest;
   pluginRoot: string;
   instance: RuntimePlugin;
-  methods: Map<string, PluginMethodHandler>;
+  methods: Map<string, PluginToolHandler>;
 };
 
 export interface PluginRuntimeOptions {
@@ -38,7 +38,7 @@ export class PluginRuntime {
   private readonly createHostApi?: (pluginId: string) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly plugins = new Map<string, LoadedPlugin>();
-  private readonly methodMap = new Map<string, { pluginId: string; handler: PluginMethodHandler }>();
+  private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
   private loaded = false;
 
   constructor(options: PluginRuntimeOptions) {
@@ -88,17 +88,17 @@ export class PluginRuntime {
         hostApi,
       });
 
-      const methods = new Map<string, PluginMethodHandler>();
-      for (const methodName of manifest.methods) {
-        const handler = instance.handlers[methodName];
+      const methods = new Map<string, PluginToolHandler>();
+      for (const toolName of manifest.tools) {
+        const handler = instance.handlers[toolName];
         if (!handler) {
-          throw new Error(`Missing handler '${methodName}' in plugin '${manifest.id}'`);
+          throw new Error(`Missing handler '${toolName}' in plugin '${manifest.id}'`);
         }
-        methods.set(methodName, handler);
-        if (this.methodMap.has(methodName)) {
-          throw new Error(`Duplicate plugin method registered: ${methodName}`);
+        methods.set(toolName, handler);
+        if (this.methodMap.has(toolName)) {
+          throw new Error(`Duplicate plugin method registered: ${toolName}`);
         }
-        this.methodMap.set(methodName, { pluginId: manifest.id, handler });
+        this.methodMap.set(toolName, { pluginId: manifest.id, handler });
       }
 
       // 매니페스트에 선언된 키워드 자동 등록

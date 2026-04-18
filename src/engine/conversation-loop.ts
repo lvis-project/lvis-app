@@ -482,7 +482,7 @@ ${briefingData}
 
       // assistant 응답을 히스토리에 추가 — thinkingBlocks는 tool_use 체인이
       // 이어지는 다음 요청에만 signature 그대로 포함되어야 Anthropic이 수락한다.
-      const preserveThinkingBlocks = stopReason === "tool_use" && pendingToolCalls.length > 0;
+      const preserveThinkingBlocks = (stopReason as string) === "tool_use" && pendingToolCalls.length > 0;
       this.history.append({
         role: "assistant",
         content: textContent,
