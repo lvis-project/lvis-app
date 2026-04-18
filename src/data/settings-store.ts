@@ -11,6 +11,17 @@ export interface LLMSettings {
   enableThinking?: boolean;
   /** Token budget for Claude extended thinking (1024–32000). Only used when enableThinking is true. */
   thinkingBudgetTokens?: number;
+  /**
+   * Vercel AI SDK migration feature flag (see docs/references/vercel-ai-sdk-migration.md).
+   * Scope controls which vendor(s) route through VercelUnifiedProvider.
+   * Default "none" → legacy providers (P0 is inert).
+   * P1 rollout: "claude" → "all".
+   *
+   * IMPORTANT: must be evaluated ONCE per conversation, not per turn
+   * (migration doc §5.1 principle 5) — flipping mid-conversation would
+   * produce inconsistent message histories.
+   */
+  useVercelSdk?: "none" | "gemini" | "openai" | "claude" | "all";
 }
 
 export interface ChatSettings {
@@ -71,6 +82,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     model: "claude-sonnet-4-6",
     enableThinking: true,
     thinkingBudgetTokens: 10_000,
+    useVercelSdk: "none",
   },
   chat: {
     systemPrompt:
