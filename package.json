@@ -56,6 +56,8 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tailwindcss/typography": "^0.5.19",
     "ai": "~6.0.168",
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
     "better-sqlite3": "^12.8.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

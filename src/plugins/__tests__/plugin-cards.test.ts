@@ -55,9 +55,9 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       name: "Meeting",
       tools: ["meeting_start", "meeting_push_chunk", "meeting_stop", "meeting_extra"],
       toolSchemas: {
-        meeting_start: { description: "회의 시작", inputSchema: { type: "object", properties: {} } },
-        meeting_push_chunk: { description: "오디오 청크 전송", inputSchema: { type: "object", properties: {} } },
-        meeting_stop: { description: "회의 종료", inputSchema: { type: "object", properties: {} } },
+        meeting_start: { description: "회의 시작 명령 — 녹음 개시", inputSchema: { type: "object", properties: {} } },
+        meeting_push_chunk: { description: "오디오 청크 전송 (스트리밍)", inputSchema: { type: "object", properties: {} } },
+        meeting_stop: { description: "회의 종료 명령 — 녹음 중단", inputSchema: { type: "object", properties: {} } },
       },
     });
 
