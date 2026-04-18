@@ -48,6 +48,7 @@ import { StarredStore } from "./data/starred-store.js";
 import { FeedbackStore } from "./data/feedback-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
+import { openAuthWindow as openAuthWindowService } from "./main/auth-window-service.js";
 
 import { type AppServices } from "./boot/types.js";
 import { bootstrapCoreServices } from "./boot/services.js";
@@ -117,6 +118,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     msGraphService,
     pythonPath,
     bootAuditLogger,
+    mainWindow,
+    openAuthWindowService,
   });
 
   // §4.2 Step 4: builtin tools + request_plugin meta tool.

@@ -1143,5 +1143,6 @@ function createNoopHostApi(): PluginHostApi {
     callLlm: async () => { throw new Error("LLM not available in noop context"); },
     logEvent: () => {},
     onShutdown: () => {},
+    openAuthWindow: async () => { throw new Error("openAuthWindow not available in noop context"); },
   };
 }

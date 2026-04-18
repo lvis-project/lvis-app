@@ -261,6 +261,34 @@ export interface PluginHostApi {
    * are logged but do not block quit.
    */
   onShutdown(handler: () => void | Promise<void>): void;
+
+  // ─── 외부 포털 interactive 인증 (쿠키 수집) ──────────────────────────
+  /**
+   * Electron BrowserWindow로 외부 포털 로그인 페이지를 띄우고,
+   * 사용자가 직접 로그인 완료한 시점(`completionUrlPatterns` 매칭)의 쿠키를 수집.
+   *
+   * Selenium/webdriver 없이 Electron 내장 Chromium을 사용한다.
+   * 반환된 쿠키는 플러그인이 직접 HTTP 요청에 싣는다 — 호스트가 세션을 보관하지 않는다.
+   *
+   * §6.1 "3+ 플러그인 규칙" 예외 #2 (보안·감사 통제 필요)로 정당화 — 외부 포털 쿠키
+   * 수집은 민감 자산 취급이므로 단일 플러그인 사용처여도 HostApi에서 제공한다.
+   */
+  openAuthWindow(options: {
+    url: string;
+    completionUrlPatterns: string[];
+    cookieHosts: string[];
+    timeoutMs?: number;
+    windowTitle?: string;
+    persistPartition?: string;
+  }): Promise<Array<{
+    name: string;
+    value: string;
+    domain?: string;
+    path?: string;
+    secure?: boolean;
+    httpOnly?: boolean;
+    expirationDate?: number;
+  }>>;
 }
 
 /**

@@ -70,6 +70,11 @@ export interface InitPluginRuntimeInput {
   msGraphService: MsGraphService;
   pythonPath: string | undefined;
   bootAuditLogger: AuditLogger;
+  mainWindow: BrowserWindow;
+  openAuthWindowService: (
+    parent: BrowserWindow,
+    opts: Parameters<PluginHostApi["openAuthWindow"]>[0],
+  ) => ReturnType<PluginHostApi["openAuthWindow"]>;
 }
 
 export interface InitPluginRuntimeOutput {
@@ -98,6 +103,8 @@ export async function initPluginRuntime(
     msGraphService,
     pythonPath,
     bootAuditLogger,
+    mainWindow,
+    openAuthWindowService,
   } = input;
 
   // Plugin shutdown handler registry — fires on before-quit (see Sprint 1-A A3).
@@ -299,6 +306,26 @@ export async function initPluginRuntime(
       },
       onShutdown: (handler) => {
         pluginShutdownHandlers.push({ pluginId, handler });
+      },
+      // ─── 외부 포털 interactive 인증 (쿠키 수집) ───────────────────
+      // `external-auth-consumer` capability 로 게이팅 — 쿠키는 민감 자산이므로
+      // 선언적 opt-in 없이는 호출 거부. 사용 흔적은 AuditLogger 에 남긴다.
+      openAuthWindow: async (opts) => {
+        if (!manifest.capabilities?.includes("external-auth-consumer")) {
+          throw new Error(
+            `[plugin:${pluginId}] capability not declared: external-auth-consumer`,
+          );
+        }
+        console.log(`[lvis] plugin:${pluginId} openAuthWindow url=${opts.url}`);
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "tool_call",
+            input: `[plugin:${pluginId}] openAuthWindow url=${opts.url} cookieHosts=${opts.cookieHosts.join("|")}`,
+          });
+        } catch { /* audit must not break host */ }
+        return openAuthWindowService(mainWindow, opts);
       },
     }),
   });
