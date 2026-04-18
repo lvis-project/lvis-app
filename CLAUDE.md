@@ -24,10 +24,8 @@ src/
     auto-compact.ts           — Token-aware history compression
     llm/
       types.ts                — Vendor-agnostic LLM interfaces
-      claude-provider.ts      — Anthropic SDK
-      openai-provider.ts      — OpenAI SDK (+ reasoning models)
-      gemini-provider.ts      — Google Generative AI
-      provider-factory.ts     — Vendor selection factory
+      provider-factory.ts     — Vendor selection factory (routes to VercelUnifiedProvider)
+      vercel/                 — VercelUnifiedProvider — single LLM adapter for all vendors
 
   tools/                      — 1-file-per-tool (Tier S3 BaseTool pattern)
     executor.ts               — §4.5.6 8-step pipeline with hooks (was tool-executor.ts)
