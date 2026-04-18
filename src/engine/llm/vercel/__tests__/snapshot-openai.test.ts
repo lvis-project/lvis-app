@@ -512,17 +512,19 @@ describe("VercelUnifiedProvider openai — custom baseUrl proxy guard", () => {
 });
 
 describe("VercelUnifiedProvider claude (still stubbed)", () => {
-  it("vendor=claude throws (P3 scope)", async () => {
+  it("vendor=claude yields error event (P3 scope — not yet implemented in P2)", async () => {
     const { VercelUnifiedProvider } = await import("../adapter.js");
     const provider = new VercelUnifiedProvider("claude", "k");
-    await expect(async () => {
-      for await (const _ of provider.streamTurn({
-        model: "claude-sonnet-4-6",
-        systemPrompt: "",
-        messages: [],
-      })) {
-        void _;
-      }
-    }).rejects.toThrow(/not yet implemented/);
+    const events: any[] = [];
+    for await (const ev of provider.streamTurn({
+      model: "claude-sonnet-4-6",
+      systemPrompt: "",
+      messages: [],
+    })) {
+      events.push(ev);
+    }
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    expect(events[0].type).toBe("error");
+    expect(events[0].error).toMatch(/not implemented yet/);
   });
 });
