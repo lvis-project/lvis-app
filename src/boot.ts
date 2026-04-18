@@ -22,6 +22,7 @@ import { McpManager } from "./mcp/mcp-manager.js";
 import type { PluginHostApi } from "./plugins/types.js";
 import { requiredCapabilityForEmit } from "./plugins/capabilities.js";
 import { withMsGraphRetry } from "./main/ms-graph-retry.js";
+import { TaskSourceRegistry, deriveCategoryId } from "./plugins/task-source-registry.js";
 
 import { emitEvent, onEvent, type AppServices } from "./boot/types.js";
 import { bootstrapCoreServices } from "./boot/services.js";
@@ -117,6 +118,9 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       app.quit();
     })();
   });
+
+  // TaskSource 자기 등록 레지스트리 — 플러그인이 addTask 시 자동 등록
+  const taskSourceRegistry = new TaskSourceRegistry();
 
   // §4.2 Step 3-4: 플러그인 초기화 (범용 — 플러그인 특정 코드 없음)
   // API 키를 플러그인에 범용적으로 전달
@@ -255,10 +259,12 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
         return unsubscribe;
       },
       addTask: (task) => {
+        const categoryId = deriveCategoryId(pluginId, task.source);
+        taskSourceRegistry.register({ id: categoryId, origin: "plugin", pluginId });
         taskService.add({
           title: task.title,
           description: task.description,
-          source: task.source as "email" | "meeting" | "calendar" | "teams" | "manual",
+          source: categoryId,
           sourceRef: task.sourceRef,
           priority: task.priority ?? "medium",
           status: "pending",
@@ -576,7 +582,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   }
 
   return {
-    pluginRuntime, pluginMarketplace, taskService, settingsService,
+    pluginRuntime, pluginMarketplace, taskService, taskSourceRegistry, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, postTurnHookChain,
