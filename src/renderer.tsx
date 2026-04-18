@@ -71,6 +71,7 @@ import { ChatSearchOverlay } from "./ui/renderer/components/ChatSearchOverlay.js
 import { UsageDashboard } from "./ui/renderer/components/UsageDashboard.js";
 import { RolesTab } from "./ui/renderer/tabs/RolesTab.js";
 import { PermissionsTab } from "./ui/renderer/tabs/PermissionsTab.js";
+import { useSettings } from "./ui/renderer/hooks/use-settings.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./ui/renderer/components/BriefingCard.js";
@@ -865,8 +866,15 @@ export function App() {
     try { await api.chatExport(format); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
   }, [api]);
 
-  // Sprint 4.B — context overflow tracking
-  const [currentLlmSettings, setCurrentLlmSettings] = useState<{ provider: string; model: string } | null>(null);
+  // Sprint 4.B — context overflow tracking + LLM settings cache (Phase 3.1 hook)
+  const {
+    llmVendor,
+    llmModel,
+    enableThinkingChat,
+    currentLlmSettings,
+    refresh: refreshLlmSettings,
+    toggleThinking,
+  } = useSettings(api);
 
   const contextOverflowPct = useMemo(() => {
     const CONTEXT_WINDOWS: Record<string, number> = {
@@ -887,20 +895,6 @@ export function App() {
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
-
-  // Cached LLM settings for chat input bar (vendor + thinking toggle + context budget).
-  const [llmVendor, setLlmVendor] = useState<string>("claude");
-  const [llmModel, setLlmModel] = useState<string>("");
-  const [enableThinkingChat, setEnableThinkingChat] = useState<boolean>(true);
-  const refreshLlmSettings = useCallback(async () => {
-    try {
-      const s = await api.getSettings();
-      setLlmVendor(s.llm.provider);
-      setLlmModel(s.llm.model);
-      setEnableThinkingChat(s.llm.enableThinking ?? false);
-    } catch { /* ignore */ }
-  }, [api]);
-  useEffect(() => { void refreshLlmSettings(); }, [refreshLlmSettings]);
 
   // Rough per-model context budget (input+output tokens) used to show % filled.
   // NOTE: we currently assume the default 200k for all Claude models. The
@@ -947,11 +941,6 @@ export function App() {
     () => vendorSupportsThinkingShared(llmVendor, llmModel),
     [llmVendor, llmModel],
   );
-  const toggleThinking = useCallback(async (next: boolean) => {
-    setEnableThinkingChat(next);
-    try { await api.updateSettings({ llm: { enableThinking: next } } as any); } catch { /* ignore */ }
-  }, [api]);
-
   // ─── Sprint B: compose outgoing message with preset + language + attached docs ──
   const composeOutgoing = useCallback((raw: string): string => {
     const parts: string[] = [];
@@ -1060,11 +1049,6 @@ export function App() {
   useEffect(() => {
     void refreshMarketplace(); void refreshViews(); void checkApiKey();
     void refreshStarred(); void refreshSessionId();
-
-    // Sprint 4.B: load LLM settings for context overflow calculation
-    api.getSettings().then((s) => {
-      if (isMountedRef.current) setCurrentLlmSettings({ provider: s.llm.provider, model: s.llm.model });
-    }).catch(() => {});
 
     // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
     api.getBriefing().then((text) => {
