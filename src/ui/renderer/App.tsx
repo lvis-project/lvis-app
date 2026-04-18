@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, PanelsTopLeft, ChevronDown, Star, Download, Pencil, GitBranch, X as XIcon, Paperclip, Globe, User, History } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
+import { Search } from "lucide-react";
 import {
   DEFAULT_ROLE_PRESETS,
   ROLE_PRESETS_CHANGED_EVENT,
@@ -8,22 +7,13 @@ import {
   loadRolePresets,
   type RolePreset,
 } from "../../data/role-presets.js";
-import { costTier, estimateTurnCost, formatCostBadge } from "../../lib/cost-estimator.js";
+import { costTier, estimateTurnCost } from "../../lib/cost-estimator.js";
 import { lookupPricing } from "../../shared/pricing-data.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { Button } from "../../components/ui/button.js";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
-import { Badge } from "../../components/ui/badge.js";
-import { Input } from "../../components/ui/input.js";
-import { Textarea } from "../../components/ui/textarea.js";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs.js";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip.js";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
+import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../../components/ui/command.js";
-import { ScrollArea } from "../../components/ui/scroll-area.js";
-import { Separator } from "../../components/ui/separator.js";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "../../components/ui/sheet.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import {
   appendUserEntry,
@@ -32,33 +22,23 @@ import {
   finalizeStreamingReasoning,
   finalizeStreamingAssistant,
   setAssistantError,
-  type ChatEntry,
   upsertStreamingReasoning,
   upsertStreamingAssistant,
 } from "../../lib/chat-stream-state.js";
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import type {
-  LvisApi,
   MarketplaceItem,
-  PluginCardSummary,
   PluginUiExtension,
-  Task,
 } from "./types.js";
-import {
-  PRIORITY_CLASS,
-  REASONING_EFFORT_STEPS,
-  VENDORS,
-  WEB_PROVIDERS,
-  budgetToEffortIndex,
-  formatTaskSource,
-} from "./constants.js";
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
-import { highlightText } from "./utils/html-preview.js";
 import { historyToEntries } from "./utils/history.js";
-import { BriefingCard } from "./components/BriefingCard.js";
-import { ToolApprovalDialog } from "./components/ToolApprovalDialog.js";
-import { UsageDashboard } from "./components/UsageDashboard.js";
+import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
+import { PluginInstallDialog } from "./dialogs/PluginInstallDialog.js";
+import { PluginUninstallDialog } from "./dialogs/PluginUninstallDialog.js";
+import { TaskView } from "./components/TaskView.js";
+import { StarredView } from "./components/StarredView.js";
+import { MainToolbar } from "./MainToolbar.js";
 import { ChatView } from "./ChatView.js";
 import { Sidebar } from "./Sidebar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
@@ -72,70 +52,6 @@ import { useSearch } from "./hooks/use-search.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./components/BriefingCard.js";
-
-// ─── TaskView ───────────────────────────────────────
-
-function TaskView({ api }: { api: LvisApi }) {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [filter, setFilter] = useState<"pending"|"today"|"overdue"|"done">("pending");
-  const [loading, setLoading] = useState(true);
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      let r: Task[];
-      if (filter === "today") r = await api.getTodayTasks();
-      else if (filter === "overdue") r = await api.getOverdueTasks();
-      else if (filter === "done") r = await api.queryTasks({ status: "done" });
-      else r = await api.queryTasks({ status: "pending" });
-      setTasks(r);
-    } catch { setTasks([]); } finally { setLoading(false); }
-  }, [filter, api]);
-  useEffect(() => { void load(); }, [load]);
-  const isDone = filter === "done";
-  return (
-    <div className="flex min-h-0 flex-1 flex-col p-4">
-      <Card className="flex h-full min-h-0 flex-col">
-        <CardHeader>
-          <div className="flex items-center justify-between"><CardTitle>태스크</CardTitle><Button size="sm" variant="outline" onClick={() => void load()}>새로고침</Button></div>
-          <CardDescription>이메일·미팅에서 수집된 할 일 목록</CardDescription>
-        </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-          <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
-            <TabsList className="w-full">
-              <TabsTrigger value="pending" className="flex-1">진행중</TabsTrigger>
-              <TabsTrigger value="today" className="flex-1">오늘 마감</TabsTrigger>
-              <TabsTrigger value="overdue" className="flex-1">기한 초과</TabsTrigger>
-              <TabsTrigger value="done" className="flex-1">완료됨</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <ScrollArea className="flex-1">
-            {loading ? <div className="py-8 text-center text-sm text-muted-foreground">로딩 중...</div> : tasks.length === 0 ? <div className="py-8 text-center text-sm text-muted-foreground">태스크가 없습니다.</div> : (
-              <div className="space-y-2 pr-2">
-                {tasks.map((t) => (
-                  <div key={t.id} className={`flex items-start gap-2 rounded-md border p-3 ${isDone ? "opacity-60" : ""}`}>
-                    <button className={`mt-0.5 h-4 w-4 flex-shrink-0 rounded border ${isDone ? "border-primary bg-primary" : "border-muted-foreground hover:border-primary"}`}
-                      onClick={() => void api.updateTask(t.id, { status: isDone ? "pending" : "done" }).then(() => load())}>
-                      {isDone ? <span className="flex h-full w-full items-center justify-center text-[8px] text-primary-foreground">✓</span> : null}
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`text-sm font-medium ${isDone ? "line-through" : ""}`}>{t.title}</span>
-                        <Badge variant="outline" className="text-[10px]">{formatTaskSource(t.source)}</Badge>
-                        <span className={`text-[10px] font-semibold ${PRIORITY_CLASS[t.priority]}`}>{t.priority}</span>
-                      </div>
-                      {t.description ? <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{t.description}</p> : null}
-                    </div>
-                    <button className="flex-shrink-0 text-[10px] text-muted-foreground hover:text-destructive" onClick={() => void api.deleteTask(t.id).then(() => load())}>✕</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
 
 // ─── App ────────────────────────────────────────────
 
@@ -583,119 +499,36 @@ export function App() {
 
         {/* Main */}
         <main className="flex min-h-0 flex-col">
-          <div className="border-b bg-card px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <Tabs value={activeView} onValueChange={setActiveView}><TabsList>
-                <TabsTrigger value="home">홈</TabsTrigger><TabsTrigger value="tasks">태스크</TabsTrigger>
-                <TabsTrigger value="starred">즐겨찾기{starred.length > 0 ? <span className="ml-1 text-[10px] text-muted-foreground">({starred.length})</span> : null}</TabsTrigger>
-                {pluginViews.map((i) => <TabsTrigger key={toViewKey(i)} value={toViewKey(i)}>{getPluginViewLabel(i)}</TabsTrigger>)}
-              </TabsList></Tabs>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => void handleNewChat()}><Plus className="mr-1 h-4 w-4" />새 대화</Button>
-                <DropdownMenu onOpenChange={(open) => { if (open) void refreshSessions(); }}>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={streaming}
-                      title={streaming ? "응답 생성 중에는 세션을 바꿀 수 없습니다" : "대화 기록 불러오기"}
-                    ><History className="mr-1 h-4 w-4" />기록</Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="max-h-[480px] w-[300px] overflow-y-auto">
-                    {sessions.length === 0 ? (
-                      <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                        저장된 대화가 없습니다.
-                      </DropdownMenuItem>
-                    ) : (
-                      sessions.map((s) => {
-                        const isCurrent = s.id === currentSessionId;
-                        return (
-                          <DropdownMenuItem
-                            key={s.id}
-                            onClick={() => void handleLoadSession(s.id)}
-                            className={isCurrent ? "bg-muted/50" : ""}
-                          >
-                            <div className="flex w-full flex-col">
-                              <span className="text-xs tabular-nums">
-                                {new Date(s.modifiedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
-                              </span>
-                              <span className="font-mono text-[10px] opacity-60">#{s.id.slice(0, 8)}{isCurrent ? " · 현재" : ""}</span>
-                            </div>
-                          </DropdownMenuItem>
-                        );
-                      })
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" title="내보내기"><Download className="mr-1 h-4 w-4" />내보내기</Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => void handleExport("markdown")}>Markdown (.md)</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => void handleExport("json")}>JSON (.json)</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button variant="outline" size="sm" onClick={searchToggleOverlay} title="대화 검색 (Ctrl/Cmd+F)"><Search className="mr-1 h-4 w-4" />찾기</Button>
-                <Sheet open={sheetOpen} onOpenChange={setSheetOpen}><SheetTrigger asChild><Button variant="outline" size="sm"><PanelsTopLeft className="mr-1 h-4 w-4" />뷰</Button></SheetTrigger>
-                  <SheetContent side="right"><SheetHeader><SheetTitle>뷰 관리</SheetTitle><SheetDescription>빠른 이동</SheetDescription></SheetHeader><Separator className="my-4" />
-                    <div className="space-y-2">
-                      <Button variant={activeView === "home" ? "default" : "secondary"} className="w-full justify-start" onClick={() => { setActiveView("home"); setSheetOpen(false); }}>홈</Button>
-                      <Button variant={activeView === "tasks" ? "default" : "secondary"} className="w-full justify-start" onClick={() => { setActiveView("tasks"); setSheetOpen(false); }}>태스크</Button>
-                      {pluginViews.map((i) => { const k = toViewKey(i); return <Button key={k} variant={activeView === k ? "default" : "secondary"} className="w-full justify-start" onClick={() => { setActiveView(k); setSheetOpen(false); }}>{getPluginViewLabel(i)}</Button>; })}
-                    </div>
-                  </SheetContent>
-                </Sheet>
-                <Tooltip><TooltipTrigger asChild><Button variant={hasApiKey === false ? "destructive" : "outline"} size="sm" onClick={() => setSettingsOpen(true)}><KeyRound className="mr-1 h-4 w-4" />설정</Button></TooltipTrigger><TooltipContent>{hasApiKey ? "LLM 설정" : "API 키를 설정해 주세요"}</TooltipContent></Tooltip>
-                <Tooltip><TooltipTrigger asChild><Button variant="outline" size="sm" onClick={() => setCommandOpen(true)}><CommandIcon className="mr-1 h-4 w-4" />Cmd</Button></TooltipTrigger><TooltipContent>Ctrl/Cmd + K</TooltipContent></Tooltip>
-              </div>
-            </div>
-          </div>
+          <MainToolbar
+            activeView={activeView}
+            setActiveView={setActiveView}
+            pluginViews={pluginViews}
+            starredCount={starred.length}
+            streaming={streaming}
+            hasApiKey={hasApiKey}
+            sessions={sessions}
+            currentSessionId={currentSessionId}
+            sheetOpen={sheetOpen}
+            setSheetOpen={setSheetOpen}
+            onNewChat={() => void handleNewChat()}
+            onRefreshSessions={refreshSessions}
+            onLoadSession={handleLoadSession}
+            onExport={handleExport}
+            onSearchToggle={searchToggleOverlay}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenCommand={() => setCommandOpen(true)}
+          />
 
           {/* Content */}
           {activeView === "tasks" ? <TaskView api={api} /> : activeView === "starred" ? (
-            <div className="flex min-h-0 flex-1 flex-col p-4">
-              <Card className="flex h-full min-h-0 flex-col">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>즐겨찾기</CardTitle>
-                    <Button size="sm" variant="outline" onClick={() => void refreshStarred()}>새로고침</Button>
-                  </div>
-                  <CardDescription>별표한 메시지는 전체 대화에서 모아볼 수 있습니다.</CardDescription>
-                </CardHeader>
-                <CardContent className="flex min-h-0 flex-1 flex-col">
-                  <ScrollArea className="flex-1">
-                    {starred.length === 0 ? (
-                      <div className="py-8 text-center text-sm text-muted-foreground">즐겨찾기한 메시지가 없습니다.</div>
-                    ) : (
-                      <div className="space-y-2 pr-2">
-                        {starred.map((s) => (
-                          <div key={s.id} className="rounded-md border p-3 text-sm">
-                            <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                              <Badge variant="outline" className="text-[10px]">{s.role}</Badge>
-                              <span>{new Date(s.starredAt).toLocaleString("ko-KR")}</span>
-                              <span className="font-mono opacity-60">#{s.sessionId.slice(0, 8)}</span>
-                              <button className="ml-auto rounded p-0.5 hover:bg-muted" title="해제" onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
-                                <XIcon className="h-3 w-3" />
-                              </button>
-                            </div>
-                            <button
-                              className="w-full whitespace-pre-wrap break-words text-left text-sm hover:opacity-80"
-                              onClick={async () => {
-                                if (s.sessionId !== currentSessionId) {
-                                  await handleLoadSession(s.sessionId);
-                                }
-                                setActiveView("home");
-                              }}
-                            >{s.text.slice(0, 300)}{s.text.length > 300 ? "…" : ""}</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </div>
+            <StarredView
+              api={api}
+              starred={starred}
+              currentSessionId={currentSessionId}
+              refreshStarred={refreshStarred}
+              onJumpToSession={handleLoadSession}
+              onActivateHome={() => setActiveView("home")}
+            />
           ) : activeView === "home" ? (
             <ChatView
               entries={entries}
@@ -760,15 +593,10 @@ export function App() {
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
-      <ToolApprovalDialog
-        open={approvalQueue.length > 0}
-        request={approvalQueue[0] ?? null}
-        pendingCount={approvalQueue.length}
-        onDecide={(choice, pattern) => void handleApprovalDecide(choice, pattern)}
-      />
-      <Dialog open={!!installTarget} onOpenChange={(o) => !o && setInstallTarget(null)}><DialogContent><DialogHeader><DialogTitle>플러그인 설치</DialogTitle><DialogDescription>{installTarget ? `'${installTarget.name}' 설치?` : ""}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setInstallTarget(null)}>취소</Button><Button onClick={async () => { if (!installTarget) return; const id = installTarget.id; setInstallTarget(null); await installPlugin(id); }} disabled={working}>설치</Button></DialogFooter></DialogContent></Dialog>
+      <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
+      <PluginInstallDialog target={installTarget} onClose={() => setInstallTarget(null)} onConfirm={installPlugin} working={working} />
       <Dialog open={commandOpen} onOpenChange={setCommandOpen}><DialogContent><DialogHeader><DialogTitle>Command</DialogTitle><DialogDescription>빠른 실행</DialogDescription></DialogHeader><Command><CommandInput placeholder="검색..." value={commandQuery} onValueChange={setCommandQuery} /><CommandList><CommandEmpty>결과 없음</CommandEmpty><CommandGroup heading="Actions">{commandActions.filter((a) => !commandQuery || a.label.toLowerCase().includes(commandQuery.toLowerCase())).map((a) => <CommandItem key={a.id} onSelect={() => { setCommandOpen(false); setCommandQuery(""); void a.run(); }}><Search className="mr-2 h-4 w-4" />{a.label}</CommandItem>)}</CommandGroup></CommandList></Command></DialogContent></Dialog>
-      <Dialog open={!!uninstallTarget} onOpenChange={(o) => !o && setUninstallTarget(null)}><DialogContent><DialogHeader><DialogTitle>플러그인 제거</DialogTitle><DialogDescription>{uninstallTarget ? `'${uninstallTarget.name}' 제거?` : ""}</DialogDescription></DialogHeader><DialogFooter><Button variant="secondary" onClick={() => setUninstallTarget(null)}>취소</Button><Button variant="destructive" onClick={async () => { if (!uninstallTarget) return; const id = uninstallTarget.id; setUninstallTarget(null); await uninstallPlugin(id); }} disabled={working}>제거</Button></DialogFooter></DialogContent></Dialog>
+      <PluginUninstallDialog target={uninstallTarget} onClose={() => setUninstallTarget(null)} onConfirm={uninstallPlugin} working={working} />
     </TooltipProvider>
   );
 }
