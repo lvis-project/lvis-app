@@ -24,6 +24,7 @@ describe("PluginRuntime.disable", () => {
 
   afterEach(async () => {
     await rm(testDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
   });
 
   async function writeFakePlugin(

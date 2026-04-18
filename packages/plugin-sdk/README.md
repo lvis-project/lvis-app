@@ -18,4 +18,4 @@ const createPlugin: RuntimePluginFactory = ({ pluginId, hostApi, config }) => ({
 export default createPlugin;
 ```
 
-No runtime code — the package emits declarations only. Plugin repos add `@lvis/plugin-sdk` to their `devDependencies` and rely on the host repo publishing updates when the plugin contract changes.
+No runtime code — the package emits `.d.ts` declarations only (`emitDeclarationOnly: true`, no `main` export). Plugin repos add `@lvis/plugin-sdk` to their `devDependencies` and rely on the host repo publishing updates when the plugin contract changes.

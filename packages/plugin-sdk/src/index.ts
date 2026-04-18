@@ -18,15 +18,37 @@ export interface PluginManifest {
   description?: string;
   entry: string;
   tools: string[];
-  toolSchemas?: Record<string, {
-    description?: string;
-    inputSchema: Record<string, unknown>;
-  }>;
+  /**
+   * LLM이 도구를 호출할 때 사용하는 JSON Schema (draft-07).
+   * 키: tool 이름 (tools 배열 내 값과 동일), 값: { description, inputSchema }
+   */
+  toolSchemas?: Record<
+    string,
+    {
+      description: string;
+      inputSchema: {
+        $schema?: string;
+        type: "object";
+        properties: Record<string, unknown>;
+        required?: string[];
+        additionalProperties?: boolean;
+      };
+    }
+  >;
   startupTools?: string[];
+  /**
+   * Optional hard startup timeout (ms, positive integer). Host enforces via
+   * Promise.race; slow plugins are fail-soft dropped without cancellation.
+   */
   startupTimeoutMs?: number;
   eventSubscriptions?: string[];
   keywords?: Array<{ keyword: string; skillId: string }>;
   capabilities?: string[];
+  notificationEvents?: Array<{
+    event: string;
+    titleField?: string;
+    bodyField?: string;
+  }>;
   ui?: PluginUiExtension[];
   config?: Record<string, unknown>;
   deployment?: DeploymentMode;
@@ -35,23 +57,40 @@ export interface PluginManifest {
 
 export interface PluginUiExtension {
   id: string;
-  slot: "sidebar" | "toolbar" | "chat-widget";
-  entry: string;
-  title?: string;
+  slot: "sidebar";
+  kind: "embedded-module" | "embedded-page" | "info-card";
+  displayName?: string;
+  title: string;
+  description?: string;
+  defaults?: Record<string, unknown>;
+  entry?: string;
+  exportName?: string;
+  page?: string;
 }
 
 export interface PluginHostApi {
   registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
-  emitEvent(type: string, payload?: unknown): void;
-  onEvent(type: string, handler: (payload: unknown) => void): void;
-  addTask(task: { title: string; body?: string; priority?: "low" | "normal" | "high" }): void;
-  saveNote(note: { id: string; title: string; body: string; tags?: string[] }): void;
+  emitEvent(eventType: string, data?: unknown): void;
+  onEvent(eventType: string, handler: (data: unknown) => void): void;
+  addTask(task: {
+    title: string;
+    description?: string;
+    source: string;
+    sourceRef?: string;
+    priority?: "high" | "medium" | "low";
+  }): void;
+  saveNote(title: string, content: string): void;
   getSecret(key: string): string | null;
+
+  // Microsoft Graph
   getMsGraphToken(): Promise<string | null>;
   startMsGraphAuth(openBrowser: (url: string) => Promise<void>): Promise<void>;
   isMsGraphAuthenticated(): boolean;
-  getMsGraphAccount(): { email: string; name: string } | null;
+  getMsGraphAccount(): string | null;
   onMsGraphAuthChange(handler: () => void): void;
+
+  // LLM + lifecycle + logging
+  callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string>;
   logEvent(level: "info" | "warn" | "error", message: string, data?: unknown): void;
   onShutdown(handler: () => void | Promise<void>): void;
 }
@@ -61,6 +100,7 @@ export interface PluginRuntimeContext {
   hostRoot: string;
   pluginRoot: string;
   config?: Record<string, unknown>;
+  log: (message: string, meta?: unknown) => void;
   hostApi: PluginHostApi;
 }
 

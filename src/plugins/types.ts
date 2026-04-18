@@ -38,17 +38,19 @@ export interface PluginManifest {
   deployment?: DeploymentMode;
   publisher?: string;
   /**
+   * Sprint 1-A A1 — optional hard startup timeout (ms, positive integer).
+   * When declared, PluginRuntime enforces a `Promise.race`-based timeout on
+   * the plugin's `start()` call — the running task is NOT cancelled
+   * (no AbortController is wired through); the host simply drops the slow
+   * plugin fail-soft while leaving other plugins untouched. When absent, the
+   * runtime still emits a slow-plugin warning after a default threshold
+   * (5000ms).
+   */
+  startupTimeoutMs?: number;
+  /**
    * LLM이 도구를 호출할 때 사용하는 JSON Schema (draft-07).
    * 키: tool 이름 (tools 배열 내 값과 동일), 값: { description, inputSchema }
    */
-  /**
-   * Sprint 1-A A1 — optional hard startup timeout (ms).
-   * When declared, PluginRuntime enforces an AbortController-based timeout on
-   * the plugin's `start()` call; plugins exceeding this limit are fail-soft
-   * dropped while leaving other plugins untouched. When absent, the runtime
-   * still emits a slow-plugin warning after a default threshold (5000ms).
-   */
-  startupTimeoutMs?: number;
   toolSchemas?: Record<
     string,
     {

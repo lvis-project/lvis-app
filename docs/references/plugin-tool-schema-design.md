@@ -74,7 +74,7 @@ interface PluginManifest {
 }
 ```
 
-**현행 (Sprint 1-A 이후):** `startupTimeoutMs?: number` — boot 병렬 로딩 시 플러그인별 AbortController 하드 타임아웃. 미선언 시 무제한 + 5s slow-warn만.
+**현행 (Sprint 1-A 이후):** `startupTimeoutMs?: number` — boot 병렬 로딩 시 플러그인별 `Promise.race` 기반 하드 타임아웃. 타임아웃 시 해당 플러그인은 fail-soft drop되지만 실제 `start()` 작업은 cancellation되지 않는다 (AbortController 미사용). 미선언 시 무제한 + 5s slow-warn만.
 
 **각 필드의 런타임 소비처:**
 

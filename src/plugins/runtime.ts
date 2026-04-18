@@ -169,9 +169,10 @@ export class PluginRuntime {
           if (!plugin.instance.start) return;
           const hardTimeoutMs = plugin.manifest.startupTimeoutMs;
           if (hardTimeoutMs && hardTimeoutMs > 0) {
-            // Promise.race enforces the timeout. A future PluginRuntimeContext
-            // may pass an AbortSignal; for now we don't expose one, so skip
-            // the decorative controller to avoid implying cancellation support.
+            // Promise.race enforces the timeout. The underlying start() is NOT
+            // cancelled — no AbortController is wired through; the host simply
+            // drops the plugin fail-soft once the timer rejects. Adding an
+            // AbortSignal would require a PluginRuntimeContext change.
             let timer: NodeJS.Timeout | undefined;
             const timeout = new Promise<never>((_, reject) => {
               timer = setTimeout(() => {
@@ -460,10 +461,19 @@ export class PluginRuntime {
         `"startupTools": ["meeting_watch"]`,
       );
     }
-    for (const startupMethod of parsed.startupTools ?? []) {
+    const startupTools = parsed.startupTools ?? [];
+    for (let i = 0; i < startupTools.length; i += 1) {
+      const startupMethod = startupTools[i];
+      if (typeof startupMethod !== "string") {
+        fail(
+          `startupTools[${i}]`,
+          "must be a string",
+          `"startupTools": ["meeting_watch"]`,
+        );
+      }
       if (!parsed.tools.includes(startupMethod)) {
         fail(
-          "startupTools",
+          `startupTools[${i}]`,
           `entry '${startupMethod}' is not declared in tools[]`,
           `add "${startupMethod}" to tools[] or remove it from startupTools[]`,
         );
@@ -471,10 +481,11 @@ export class PluginRuntime {
     }
 
     if (parsed.startupTimeoutMs !== undefined) {
-      if (typeof parsed.startupTimeoutMs !== "number" || !Number.isFinite(parsed.startupTimeoutMs) || parsed.startupTimeoutMs <= 0) {
+      // Schema declares integer; runtime enforces matching constraint.
+      if (typeof parsed.startupTimeoutMs !== "number" || !Number.isInteger(parsed.startupTimeoutMs) || parsed.startupTimeoutMs <= 0) {
         fail(
           "startupTimeoutMs",
-          "must be a positive finite number (ms)",
+          "must be a positive integer (ms)",
           `"startupTimeoutMs": 8000`,
         );
       }

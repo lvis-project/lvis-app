@@ -130,13 +130,13 @@ export class ProactiveEngine {
   }
 
   /** 브리핑 데이터 수집 — LLM 요약 전 단계 */
-  collectBriefingItems(): BriefingItem[] {
+  collectBriefingItems(now: Date = new Date()): BriefingItem[] {
     const items: BriefingItem[] = [];
 
     // 1. 태스크 (미완료, 기한 임박)
     const tasks = this.deps.getTaskSummary();
     const pendingTasks = tasks.filter((t) => t.status === "pending");
-    const today = this.kstDateKey(new Date());
+    const today = this.kstDateKey(now);
 
     for (const task of pendingTasks.slice(0, 10)) {
       const isUrgent = task.priority === "high" || (task.dueAt && task.dueAt <= today);
@@ -162,7 +162,7 @@ export class ProactiveEngine {
     // 3. 최근 세션 (미완료 대화)
     const sessions = this.deps.getRecentSessions();
     const recentSessions = sessions.filter((s) => {
-      const age = Date.now() - s.modifiedAt.getTime();
+      const age = now.getTime() - s.modifiedAt.getTime();
       return age < 24 * 60 * 60 * 1000; // 24시간 내
     });
     if (recentSessions.length > 0) {
@@ -175,7 +175,7 @@ export class ProactiveEngine {
     }
 
     // 4. 수집된 플러그인 이벤트 (최근 24시간)
-    const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const recentCutoff = now.getTime() - 24 * 60 * 60 * 1000;
     const recentEvents = this.eventLog.filter(
       (e) => new Date(e.timestamp).getTime() > recentCutoff,
     );
@@ -184,7 +184,6 @@ export class ProactiveEngine {
 
     // 5. 오늘 캘린더 일정 — KST 기준 당일로 범위 제한 (주간 캐시가 로드돼도 오늘 것만)
     if (this.calendarEventsCache.length > 0) {
-      const now = new Date();
       const bounds = this.kstTodayBoundsMs(now);
       const todayCache = this.calendarEventsCache.filter((e) => this.overlapsKstToday(e, bounds));
       const upcomingEvents = todayCache
@@ -380,9 +379,9 @@ export class ProactiveEngine {
       }
     }
 
-    // 6) signal 수집
-    const items = this.collectBriefingItems();
-    const promptData = this.getBriefingPromptData();
+    // 6) signal 수집 — items once, passed into prompt builder for consistency
+    const items = this.collectBriefingItems(now);
+    const promptData = this.getBriefingPromptData(items, now);
     if (items.length === 0 && promptData.trim().length === 0) {
       return { status: "skipped", reason: "no_signals" };
     }
@@ -420,12 +419,16 @@ export class ProactiveEngine {
     };
   }
 
-  /** LLM 브리핑용 프롬프트 데이터 생성 (ConversationLoop에서 호출) */
-  getBriefingPromptData(): string {
-    const items = this.collectBriefingItems();
+  /**
+   * LLM 브리핑용 프롬프트 데이터 생성 (ConversationLoop에서 호출).
+   * items/now는 선택적이며, 생략 시 내부에서 collectBriefingItems(now)로 생성한다.
+   * 동일 호출에서 한 번 수집한 items를 재사용하고 싶을 때는 명시 전달한다.
+   */
+  getBriefingPromptData(items?: BriefingItem[], now: Date = new Date()): string {
+    const resolvedItems = items ?? this.collectBriefingItems(now);
 
     // 최근 24시간 미처리 이메일 목록 (상세)
-    const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const recentCutoff = now.getTime() - 24 * 60 * 60 * 1000;
     const emailDetails = this.eventLog
       .filter((e) => e.type === "email.action.needed" && new Date(e.timestamp).getTime() > recentCutoff)
       .map((e) => {
@@ -433,11 +436,11 @@ export class ProactiveEngine {
         return `  - "${d.subject ?? "제목 없음"}"${d.sender ? ` (from: ${d.sender})` : ""}${d.deadline ? ` [마감: ${d.deadline}]` : ""}${d.intent ? ` — ${d.intent}` : ""}`;
       });
 
-    if (items.length === 0 && emailDetails.length === 0) return "";
+    if (resolvedItems.length === 0 && emailDetails.length === 0) return "";
 
     const lines = [
       "<daily-briefing-data>",
-      ...items.map((i) => `[${i.priority}] ${i.category}: ${i.title}${i.detail ? ` (${i.detail})` : ""}`),
+      ...resolvedItems.map((i) => `[${i.priority}] ${i.category}: ${i.title}${i.detail ? ` (${i.detail})` : ""}`),
     ];
 
     if (emailDetails.length > 0) {
@@ -447,7 +450,6 @@ export class ProactiveEngine {
 
     // 오늘 캘린더 일정 상세 (KST 기준 당일과 overlap — 멀티데이/자정 걸친 일정 포함)
     if (this.calendarEventsCache.length > 0) {
-      const now = new Date();
       const bounds = this.kstTodayBoundsMs(now);
       const maxDetailedTodayEvents = 8;
       const todayEvents = this.calendarEventsCache

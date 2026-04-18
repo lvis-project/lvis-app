@@ -184,10 +184,11 @@ export class ConversationLoop {
     const engine = this.deps.proactiveEngine;
     if (!engine || !this.provider) return null;
 
-    const items = engine.collectBriefingItems();
+    const now = new Date();
+    const items = engine.collectBriefingItems(now);
     if (items.length === 0) return null;
 
-    const briefingData = engine.getBriefingPromptData();
+    const briefingData = engine.getBriefingPromptData(items, now);
     const today = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul", weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
     const prompt = `당신은 LVIS, 사용자의 AI 비서입니다. 아침 브리핑을 보고합니다.
