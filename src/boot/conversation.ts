@@ -161,6 +161,72 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
  * callLlm의 maxTokens는 플러그인이 실수로 큰 값을 넘겨 지연·비용 폭발이 나지
  * 않도록 호스트에서 sanitize: 유효한 양의 정수만 수용하고 상한(CALL_LLM_MAX_TOKENS_CEILING)
  * 으로 clamp. 유효하지 않으면 undefined로 넘겨 generateText의 기본값(400)을 사용.
+ *
+ * Sprint 4-B §B-7 — per-pluginId token bucket (default 20 calls / 10 min) +
+ * audit event on every call. The bucket is a sliding-window counter keyed by
+ * pluginId. Exceeding plugins receive a thrown Error; the audit logger still
+ * records the attempt so operators can spot runaway plugins.
+ */
+export interface CallLlmRateLimitOptions {
+  /** Per-plugin max calls inside the window. Default 20. */
+  maxCalls?: number;
+  /** Window size in ms. Default 10 minutes. */
+  windowMs?: number;
+}
+
+export function createCallLlmForPlugin(
+  conversationLoop: ConversationLoop,
+  auditLogger: AuditLogger,
+  options: CallLlmRateLimitOptions = {},
+): (pluginId: string, prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string> {
+  const CALL_LLM_MAX_TOKENS_CEILING = 4096;
+  const maxCalls = options.maxCalls ?? 20;
+  const windowMs = options.windowMs ?? 10 * 60 * 1000;
+  const buckets = new Map<string, number[]>();
+
+  return async (pluginId, prompt, opts) => {
+    // Sliding window: drop timestamps outside the window, then count.
+    const now = Date.now();
+    const arr = buckets.get(pluginId) ?? [];
+    const fresh = arr.filter((t) => now - t < windowMs);
+    if (fresh.length >= maxCalls) {
+      try {
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "plugin",
+          type: "error",
+          input: `[plugin:${pluginId}] callLlm rate-limit exceeded (${fresh.length}/${maxCalls} in ${windowMs}ms)`,
+        });
+      } catch {}
+      throw new Error(
+        `[plugin:${pluginId}] callLlm rate-limit exceeded — ${maxCalls} calls per ${windowMs}ms`,
+      );
+    }
+    fresh.push(now);
+    buckets.set(pluginId, fresh);
+
+    let maxTokens: number | undefined;
+    const raw = opts?.maxTokens;
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      maxTokens = Math.min(Math.floor(raw), CALL_LLM_MAX_TOKENS_CEILING);
+    }
+
+    try {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "plugin",
+        type: "tool_call",
+        input: `[plugin:${pluginId}] callLlm promptLen=${prompt.length} maxTokens=${maxTokens ?? "default"}`,
+      });
+    } catch {}
+
+    return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt);
+  };
+}
+
+/**
+ * Back-compat entry point for non-plugin callers (e.g. ProactiveEngine) that
+ * don't carry a pluginId. These are not rate-limited.
  */
 export function createCallLlm(
   conversationLoop: ConversationLoop,
