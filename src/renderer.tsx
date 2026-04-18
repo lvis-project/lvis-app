@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { Search, MoreHorizontal, Command as CommandIcon, KeyRound, Plus, Loader2, Wrench, PanelsTopLeft, ChevronDown, ChevronRight, Star, Download, Pencil, GitBranch, RefreshCw, X as XIcon } from "lucide-react";
 import { Button } from "./components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
 import { Badge } from "./components/ui/badge.js";
@@ -38,6 +38,17 @@ type PluginUiExtension = PluginUiExtensionView;
 type Task = { id: string; title: string; description?: string; source: "email"|"meeting"|"calendar"|"teams"|"manual"; priority: "high"|"medium"|"low"; status: "pending"|"done"|"snoozed"; dueAt?: string; createdAt: string; updatedAt: string };
 type AppSettings = { llm: { provider: string; model: string; enableThinking?: boolean; thinkingBudgetTokens?: number }; chat: { systemPrompt: string; autoCompact: boolean }; webSearch: { provider: string }; proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string } };
 
+// ─── Usage types (Sprint 4.B) ───────────────────────
+type UsageTotals = { inputTokens: number; outputTokens: number; totalTokens: number; cost: number };
+type UsagePerX = UsageTotals & { vendor: string; model: string };
+type UsageTrendPt = UsageTotals & { date: string };
+type UsageConv = UsageTotals & { sessionId: string; turns: number; firstInput?: string };
+type UsageSummaryShape = {
+  today: UsageTotals; thisWeek: UsageTotals; thisMonth: UsageTotals;
+  perVendor: UsagePerX[]; perModel: UsagePerX[];
+  trend: UsageTrendPt[]; topConversations: UsageConv[]; generatedAt: string;
+};
+
 export type BriefingPayload = {
   generatedAt: string;
   items: Array<{ category: string; priority: string; title: string; detail?: string }>;
@@ -57,6 +68,14 @@ type LvisApi = {
   chatSend: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
+  chatGetHistory: () => Promise<{ sessionId: string; messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }> }>;
+  chatEditResend: (messageIndex: number, newText: string) => Promise<{ ok: boolean; error?: string }>;
+  chatFork: (messageIndex: number) => Promise<{ ok: boolean; sessionId: string | null }>;
+  chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
+  chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  starredList: () => Promise<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>;
+  starredAdd: (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => Promise<{ ok: boolean; entry?: { id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string } }>;
+  starredRemove: (opts: { id?: string; sessionId?: string; messageIndex?: number }) => Promise<{ ok: boolean }>;
   memoryListNotes: () => Promise<Array<{ filename: string; title: string; content: string }>>;
   memorySaveNote: (t: string, c: string) => Promise<unknown>;
   memoryDeleteNote: (f: string) => Promise<void>;
@@ -76,6 +95,7 @@ type LvisApi = {
   dismissBriefing: () => Promise<{ ok: boolean; debounced?: boolean }>;
   snoozeBriefing: () => Promise<{ ok: boolean; lastDismissedAt?: string }>;
   onViewActivate: (h: (k: string) => void) => () => void;
+  getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
 };
 
 // ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─
@@ -712,6 +732,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
             <TabsTrigger value="web" className="flex-1">검색 (Web)</TabsTrigger>
             <TabsTrigger value="proactive" className="flex-1">브리핑</TabsTrigger>
             <TabsTrigger value="permissions" className="flex-1">권한</TabsTrigger>
+            <TabsTrigger value="usage" className="flex-1">사용량</TabsTrigger>
           </TabsList>
 
           <TabsContent value="llm" className="space-y-4 pt-4">
@@ -836,10 +857,14 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
           <TabsContent value="permissions">
             <PermissionsTab />
           </TabsContent>
+
+          <TabsContent value="usage">
+            <UsageDashboard api={api} />
+          </TabsContent>
         </Tabs>
         <DialogFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
-          {tab !== "permissions" && (
+          {tab !== "permissions" && tab !== "usage" && (
             <Button onClick={() => void save()} disabled={saving || !settingsLoaded}>{saving ? "저장 중..." : "저장"}</Button>
           )}
         </DialogFooter>
@@ -1114,21 +1139,289 @@ function ReasoningCard({ entry }: { entry: Extract<ChatEntry, { kind: "reasoning
   );
 }
 
-function AssistantCard({ entry }: { entry: Extract<ChatEntry, { kind: "assistant" }> }) {
+function AssistantCard({
+  entry,
+  highlightQuery,
+  actions,
+  isStarred,
+}: {
+  entry: Extract<ChatEntry, { kind: "assistant" }>;
+  highlightQuery?: string;
+  actions?: { onRetry?: () => void; onFork?: () => void; onToggleStar?: () => void };
+  isStarred?: boolean;
+}) {
   const title = entry.streaming ? "LVIS 응답 작성 중" : "LVIS 응답";
-
+  const highlighted = highlightText(entry.text, highlightQuery);
+  // Sprint 4.B: rough token estimate for tooltip (~4 chars/token)
+  const outputTokens = Math.ceil(entry.text.length / 4);
   return (
-    <div className="max-w-[85%] rounded-md border bg-card px-3 py-2 text-sm">
+    <div className="group relative max-w-[85%] rounded-md border bg-card px-3 py-2 text-sm">
       <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
         {title}
         {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+        {isStarred ? <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> : null}
+        {!entry.streaming && outputTokens > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="ml-auto cursor-default rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
+                ~{outputTokens >= 1000 ? `${(outputTokens / 1000).toFixed(1)}k` : outputTokens} tok
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              <div>출력 토큰(추정): {outputTokens.toLocaleString()}</div>
+              <div className="text-muted-foreground">실제값은 감사 로그에서 확인 가능</div>
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {actions && !entry.streaming ? (
+          <div className="hidden gap-1 group-hover:flex">
+            {actions.onRetry && (
+              <Tooltip><TooltipTrigger asChild>
+                <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onRetry} title="다시 시도 (깊이: high)">
+                  <RefreshCw className="h-3 w-3" />
+                </button>
+              </TooltipTrigger><TooltipContent>다시 시도 (깊이: high)</TooltipContent></Tooltip>
+            )}
+            {actions.onFork && (
+              <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onFork} title="분기"><GitBranch className="h-3 w-3" /></button>
+            )}
+            {actions.onToggleStar && (
+              <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onToggleStar} title="즐겨찾기">
+                <Star className={`h-3 w-3 ${isStarred ? "fill-yellow-400 text-yellow-400" : ""}`} />
+              </button>
+            )}
+          </div>
+        ) : null}
       </div>
 
       <div className="prose prose-sm prose-invert max-w-none break-words">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {entry.text || (entry.streaming ? "응답을 작성하는 중..." : "")}
-        </ReactMarkdown>
+        {highlightQuery && highlighted ? (
+          <div className="whitespace-pre-wrap">{highlighted}</div>
+        ) : (
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {entry.text || (entry.streaming ? "응답을 작성하는 중..." : "")}
+          </ReactMarkdown>
+        )}
       </div>
+    </div>
+  );
+}
+
+// ─── Sprint 4.C helpers ─────────────────────────────
+
+function highlightText(text: string, query?: string): React.ReactNode {
+  if (!query || !text) return null;
+  const q = query.toLowerCase();
+  const lower = text.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const found = lower.indexOf(q, i);
+    if (found < 0) { parts.push(text.slice(i)); break; }
+    if (found > i) parts.push(text.slice(i, found));
+    parts.push(<mark key={found} className="bg-yellow-300/60 text-foreground">{text.slice(found, found + query.length)}</mark>);
+    i = found + query.length;
+  }
+  return <>{parts}</>;
+}
+
+/**
+ * Sprint 4.C: Inline editor for resending a user message. Renders as a
+ * compact Textarea over the original bubble with Save/Cancel controls.
+ */
+function UserMessageEditor({
+  initialText,
+  onCancel,
+  onSave,
+  busy,
+}: {
+  initialText: string;
+  onCancel: () => void;
+  onSave: (next: string) => void;
+  busy: boolean;
+}) {
+  const [draft, setDraft] = useState(initialText);
+  return (
+    <div className="ml-auto w-full max-w-[85%] rounded-md border bg-primary/5 p-2 text-sm">
+      <Textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        className="min-h-[60px] text-sm"
+        autoFocus
+      />
+      <div className="mt-1 flex justify-end gap-1">
+        <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={onCancel} disabled={busy}>취소</Button>
+        <Button size="sm" className="h-6 text-xs" onClick={() => onSave(draft)} disabled={busy || !draft.trim()}>저장 후 재전송</Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Sprint 4.C: Ctrl/Cmd+F overlay for in-conversation search. Scans
+ * user + assistant entries. Parent owns the query state so message
+ * rendering can re-highlight matches.
+ */
+function ChatSearchOverlay({
+  open,
+  query,
+  caseSensitive,
+  matchCount,
+  currentIdx,
+  onChangeQuery,
+  onToggleCase,
+  onNext,
+  onPrev,
+  onClose,
+}: {
+  open: boolean;
+  query: string;
+  caseSensitive: boolean;
+  matchCount: number;
+  currentIdx: number;
+  onChangeQuery: (v: string) => void;
+  onToggleCase: () => void;
+  onNext: () => void;
+  onPrev: () => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="absolute right-4 top-2 z-20 flex items-center gap-2 rounded-md border bg-card px-2 py-1 shadow-md">
+      <Search className="h-3.5 w-3.5 text-muted-foreground" />
+      <Input
+        autoFocus
+        value={query}
+        onChange={(e) => onChangeQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); if (e.shiftKey) onPrev(); else onNext(); }
+          if (e.key === "Escape") { e.preventDefault(); onClose(); }
+        }}
+        placeholder="대화 검색..."
+        className="h-7 w-48 text-xs"
+      />
+      <span className="text-[10px] text-muted-foreground tabular-nums">{matchCount === 0 ? "0/0" : `${currentIdx + 1}/${matchCount}`}</span>
+      <button
+        className={`rounded px-1 text-[10px] ${caseSensitive ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+        onClick={onToggleCase}
+        title="대소문자 구분"
+      >Aa</button>
+      <button className="rounded p-0.5 hover:bg-muted" onClick={onPrev} title="이전"><ChevronRight className="h-3 w-3 rotate-180" /></button>
+      <button className="rounded p-0.5 hover:bg-muted" onClick={onNext} title="다음"><ChevronRight className="h-3 w-3" /></button>
+      <button className="rounded p-0.5 hover:bg-muted" onClick={onClose} title="닫기"><XIcon className="h-3 w-3" /></button>
+    </div>
+  );
+}
+
+// ─── Usage Dashboard (Sprint 4.B) ──────────────────
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return `${n}`;
+}
+function formatCost(n: number): string {
+  if (n === 0) return "$0";
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  return `$${n.toFixed(2)}`;
+}
+
+function Sparkline({ points, width = 260, height = 48 }: { points: number[]; width?: number; height?: number }) {
+  if (points.length === 0) return <div className="text-xs text-muted-foreground">데이터 없음</div>;
+  const max = Math.max(...points, 1);
+  const step = points.length > 1 ? width / (points.length - 1) : 0;
+  const path = points
+    .map((v, i) => `${i === 0 ? "M" : "L"} ${(i * step).toFixed(1)} ${(height - (v / max) * (height - 4) - 2).toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg width={width} height={height} className="block">
+      <path d={path} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-primary" />
+    </svg>
+  );
+}
+
+function UsageDashboard({ api }: { api: LvisApi }) {
+  const [summary, setSummary] = useState<UsageSummaryShape | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState<7 | 30>(7);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    api.getUsageSummary(60).then((s) => { if (active) { setSummary(s); setLoading(false); } }).catch(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [api]);
+
+  if (loading) return <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>;
+  if (!summary) return <div className="py-6 text-center text-sm text-muted-foreground">사용량 데이터를 불러올 수 없습니다.</div>;
+
+  const trendSlice = summary.trend.slice(-range);
+  const sparkPoints = trendSlice.map((p) => p.totalTokens);
+
+  return (
+    <div className="space-y-4 pt-4">
+      <div className="grid grid-cols-3 gap-2">
+        {([
+          { label: "오늘", v: summary.today },
+          { label: "이번 주", v: summary.thisWeek },
+          { label: "이번 달", v: summary.thisMonth },
+        ] as const).map(({ label, v }) => (
+          <Card key={label}>
+            <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">{label}</CardTitle></CardHeader>
+            <CardContent className="space-y-0.5 px-3 pb-3">
+              <div className="text-lg font-semibold">{formatTokens(v.totalTokens)}</div>
+              <div className="text-xs text-muted-foreground">in {formatTokens(v.inputTokens)} / out {formatTokens(v.outputTokens)}</div>
+              <div className="text-xs font-medium">{formatCost(v.cost)}</div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader className="pb-1 pt-3 px-3 flex-row items-center justify-between">
+          <CardTitle className="text-xs text-muted-foreground">토큰 추이</CardTitle>
+          <div className="flex gap-1">
+            <Button size="sm" variant={range === 7 ? "default" : "outline"} onClick={() => setRange(7)} className="h-6 px-2 text-[11px]">7d</Button>
+            <Button size="sm" variant={range === 30 ? "default" : "outline"} onClick={() => setRange(30)} className="h-6 px-2 text-[11px]">30d</Button>
+          </div>
+        </CardHeader>
+        <CardContent className="px-3 pb-3"><Sparkline points={sparkPoints} /></CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">벤더별 사용량</CardTitle></CardHeader>
+        <CardContent className="px-3 pb-3">
+          {summary.perVendor.length === 0 ? <div className="text-xs text-muted-foreground">데이터 없음</div> : (
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1">벤더</th><th>토큰</th><th>비용</th></tr></thead>
+              <tbody>
+                {summary.perVendor.map((v) => (
+                  <tr key={v.vendor} className="border-t"><td className="py-1 font-mono">{v.vendor}</td><td>{formatTokens(v.totalTokens)}</td><td>{formatCost(v.cost)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs text-muted-foreground">비용 상위 대화 5</CardTitle></CardHeader>
+        <CardContent className="px-3 pb-3">
+          {summary.topConversations.length === 0 ? <div className="text-xs text-muted-foreground">데이터 없음</div> : (
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-muted-foreground"><th className="py-1">세션</th><th>턴</th><th>토큰</th><th>비용</th></tr></thead>
+              <tbody>
+                {summary.topConversations.map((c) => (
+                  <tr key={c.sessionId} className="border-t">
+                    <td className="py-1 max-w-[120px] truncate font-mono" title={c.firstInput ?? c.sessionId}>{c.sessionId.slice(0, 12)}</td>
+                    <td>{c.turns}</td><td>{formatTokens(c.totalTokens)}</td><td>{formatCost(c.cost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -1164,6 +1457,175 @@ function App() {
   const approvalQueueRef = useRef<ApprovalRequest[]>([]);
   useEffect(() => { approvalQueueRef.current = approvalQueue; }, [approvalQueue]);
 
+  // Sprint 4.C — conversation UX state
+  const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchCase, setSearchCase] = useState(false);
+  const [searchIdx, setSearchIdx] = useState(0);
+  const [starred, setStarred] = useState<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>("");
+
+  const refreshStarred = useCallback(async () => {
+    try { const list = await api.starredList(); setStarred(list); } catch { /* ignore */ }
+  }, [api]);
+  const refreshSessionId = useCallback(async () => {
+    try { const h = await api.chatGetHistory(); setCurrentSessionId(h.sessionId); } catch { /* ignore */ }
+  }, [api]);
+
+  // Map renderer `entries` (which include reasoning/tool_group/system) to
+  // backend history indices which only track user + assistant messages.
+  // This lets edit/fork/star carry the correct `messageIndex`.
+  const entryIndexToHistoryIndex = useMemo(() => {
+    const map = new Map<number, number>();
+    let backend = 0;
+    entries.forEach((e, i) => {
+      if (e.kind === "user" || e.kind === "assistant") {
+        map.set(i, backend);
+        backend += 1;
+      }
+    });
+    return map;
+  }, [entries]);
+
+  const isEntryStarred = useCallback((entryIdx: number): string | null => {
+    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+    if (histIdx === undefined) return null;
+    const match = starred.find((s) => s.sessionId === currentSessionId && s.messageIndex === histIdx);
+    return match?.id ?? null;
+  }, [starred, currentSessionId, entryIndexToHistoryIndex]);
+
+  // ─── Search (Ctrl/Cmd+F) ──────────────────────
+  const searchMatches = useMemo(() => {
+    if (!searchQuery) return [] as number[];
+    const q = searchCase ? searchQuery : searchQuery.toLowerCase();
+    const hits: number[] = [];
+    entries.forEach((e, i) => {
+      if (e.kind !== "user" && e.kind !== "assistant") return;
+      const t = searchCase ? e.text : e.text.toLowerCase();
+      if (t.includes(q)) hits.push(i);
+    });
+    return hits;
+  }, [entries, searchQuery, searchCase]);
+  // O(1) membership check for per-entry highlight in the big render loop.
+  const searchMatchSet = useMemo(() => new Set(searchMatches), [searchMatches]);
+  useEffect(() => {
+    if (searchIdx >= searchMatches.length) setSearchIdx(0);
+  }, [searchMatches, searchIdx]);
+  const searchHighlight = searchOpen ? searchQuery : "";
+
+  // ─── Edit & resend ─────────────────────────────
+  const handleEditSave = useCallback(async (entryIdx: number, newText: string) => {
+    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+    if (histIdx === undefined) return;
+    setEditBusy(true);
+    const prevEntries = entries;
+    let failed = false;
+    try {
+      // Truncate renderer entries up to (but not including) the edited user
+      // bubble; the streaming response will repopulate from there.
+      setEntries((p) => [...p.slice(0, entryIdx), { kind: "user", text: newText }]);
+      streamRef.current = "";
+      thoughtRef.current = "";
+      setStreaming(true);
+      const res = await api.chatEditResend(histIdx, newText);
+      if (!res?.ok) {
+        failed = true;
+        // Restore the prior entries so the user doesn't lose context, and
+        // surface the failure via the existing assistant-error channel.
+        setEntries(setAssistantError(prevEntries, `편집 실패: ${res?.error ?? "알 수 없는 오류"}`, thoughtRef.current));
+      }
+    } catch (err) {
+      failed = true;
+      setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current));
+    } finally {
+      setEditBusy(false);
+      setStreaming(false);
+      // Only exit editing mode on success; on failure keep the editor open
+      // so the user can retry without losing their draft.
+      if (!failed) setEditingEntryIdx(null);
+    }
+  }, [api, entries, entryIndexToHistoryIndex]);
+
+  // ─── Fork ──────────────────────────────────────
+  const handleFork = useCallback(async (entryIdx: number) => {
+    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+    if (histIdx === undefined) return;
+    const res = await api.chatFork(histIdx);
+    if (res.ok) {
+      setEntries((p) => p.slice(0, entryIdx + 1));
+      await refreshSessionId();
+    }
+  }, [api, entryIndexToHistoryIndex, refreshSessionId]);
+
+  // ─── Retry with deeper thinking ────────────────
+  const handleRetryEffort = useCallback(async () => {
+    const prevEntries = entries;
+    // Strip the last assistant+reasoning so streaming replaces them cleanly.
+    setEntries((p) => {
+      const next = [...p];
+      while (next.length > 0 && (next[next.length - 1].kind === "assistant" || next[next.length - 1].kind === "reasoning" || next[next.length - 1].kind === "tool_group")) {
+        next.pop();
+      }
+      return next;
+    });
+    streamRef.current = "";
+    thoughtRef.current = "";
+    setStreaming(true);
+    try {
+      const res = await api.chatRetryEffort({ enableThinking: true, thinkingBudgetTokens: 20000 });
+      if (!res?.ok) {
+        // Restore the prior entries + surface failure via existing status.
+        setEntries(setAssistantError(prevEntries, `재시도 실패: ${res?.error ?? "알 수 없는 오류"}`, thoughtRef.current));
+      }
+    } catch (err) {
+      setEntries((p) => setAssistantError(p, `오류: ${(err as Error).message}`, thoughtRef.current));
+    } finally {
+      setStreaming(false);
+    }
+  }, [api, entries]);
+
+  // ─── Star toggle ───────────────────────────────
+  const handleToggleStar = useCallback(async (entryIdx: number) => {
+    const entry = entries[entryIdx];
+    if (!entry || (entry.kind !== "user" && entry.kind !== "assistant")) return;
+    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+    if (histIdx === undefined) return;
+    const existingId = isEntryStarred(entryIdx);
+    if (existingId) {
+      await api.starredRemove({ id: existingId });
+    } else {
+      await api.starredAdd({ sessionId: currentSessionId, messageIndex: histIdx, role: entry.kind, text: entry.text });
+    }
+    await refreshStarred();
+  }, [entries, entryIndexToHistoryIndex, isEntryStarred, api, currentSessionId, refreshStarred]);
+
+  // ─── Export ────────────────────────────────────
+  const handleExport = useCallback(async (format: "markdown" | "json") => {
+    try { await api.chatExport(format); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
+  }, [api]);
+
+  // Sprint 4.B — context overflow tracking
+  const [currentLlmSettings, setCurrentLlmSettings] = useState<{ provider: string; model: string } | null>(null);
+
+  const contextOverflowPct = useMemo(() => {
+    const CONTEXT_WINDOWS: Record<string, number> = {
+      "claude-sonnet-4-6": 1_000_000, "claude-opus-4-6": 1_000_000,
+      "claude-sonnet-4-5": 200_000, "claude-opus-4-5": 200_000,
+      "gpt-5.4": 1_050_000, "gpt-5.4-mini": 1_050_000,
+      "gpt-5": 400_000, "gpt-4.1": 1_000_000, "gpt-4.1-mini": 1_000_000,
+      "gemini-2.5-flash": 1_000_000, "gemini-2.5-pro": 2_000_000,
+    };
+    const model = currentLlmSettings?.model ?? "";
+    const contextWindow = CONTEXT_WINDOWS[model] ?? 128_000;
+    const estimatedTokens = entries.reduce((sum, e) => {
+      if (e.kind === "user" || e.kind === "assistant") return sum + Math.ceil(e.text.length / 4);
+      return sum;
+    }, 0);
+    return estimatedTokens / contextWindow;
+  }, [entries, currentLlmSettings]);
+
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
 
@@ -1187,7 +1649,7 @@ function App() {
     } finally { setStreaming(false); }
   }, [api, streaming, checkApiKey]);
 
-  const handleNewChat = useCallback(async () => { await api.chatNew(); setEntries([]); }, [api]);
+  const handleNewChat = useCallback(async () => { await api.chatNew(); setEntries([]); void refreshSessionId(); }, [api, refreshSessionId]);
 
   // ─── Plugin actions ───────────────────────────
   const refreshViews = async () => { const v = (await api.listPluginUiExtensions()).filter((i) => i.extension.slot === "sidebar"); setPluginViews(v); return v; };
@@ -1203,6 +1665,12 @@ function App() {
   const isMountedRef = useRef(true);
   useEffect(() => {
     void refreshMarketplace(); void refreshViews(); void checkApiKey();
+    void refreshStarred(); void refreshSessionId();
+
+    // Sprint 4.B: load LLM settings for context overflow calculation
+    api.getSettings().then((s) => {
+      if (isMountedRef.current) setCurrentLlmSettings({ provider: s.llm.provider, model: s.llm.model });
+    }).catch(() => {});
 
     // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
     api.getBriefing().then((text) => {
@@ -1251,7 +1719,11 @@ function App() {
         }
       }
     });
-    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); } };
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCommandOpen(true); }
+      // Sprint 4.C: Ctrl/Cmd+F opens in-conversation search
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") { e.preventDefault(); setSearchOpen(true); }
+    };
     window.addEventListener("keydown", onKey);
     return () => {
       isMountedRef.current = false;
@@ -1330,10 +1802,21 @@ function App() {
             <div className="flex items-center justify-between gap-3">
               <Tabs value={activeView} onValueChange={setActiveView}><TabsList>
                 <TabsTrigger value="home">홈</TabsTrigger><TabsTrigger value="tasks">태스크</TabsTrigger>
+                <TabsTrigger value="starred">즐겨찾기{starred.length > 0 ? <span className="ml-1 text-[10px] text-muted-foreground">({starred.length})</span> : null}</TabsTrigger>
                 {pluginViews.map((i) => <TabsTrigger key={toViewKey(i)} value={toViewKey(i)}>{getPluginViewLabel(i)}</TabsTrigger>)}
               </TabsList></Tabs>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => void handleNewChat()}><Plus className="mr-1 h-4 w-4" />새 대화</Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" title="내보내기"><Download className="mr-1 h-4 w-4" />내보내기</Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => void handleExport("markdown")}>Markdown (.md)</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => void handleExport("json")}>JSON (.json)</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button variant="outline" size="sm" onClick={() => setSearchOpen((v) => !v)} title="대화 검색 (Ctrl/Cmd+F)"><Search className="mr-1 h-4 w-4" />찾기</Button>
                 <Sheet open={sheetOpen} onOpenChange={setSheetOpen}><SheetTrigger asChild><Button variant="outline" size="sm"><PanelsTopLeft className="mr-1 h-4 w-4" />뷰</Button></SheetTrigger>
                   <SheetContent side="right"><SheetHeader><SheetTitle>뷰 관리</SheetTitle><SheetDescription>빠른 이동</SheetDescription></SheetHeader><Separator className="my-4" />
                     <div className="space-y-2">
@@ -1350,8 +1833,66 @@ function App() {
           </div>
 
           {/* Content */}
-          {activeView === "tasks" ? <TaskView api={api} /> : activeView === "home" ? (
-            <div className="grid min-h-0 flex-1 grid-rows-[1fr_auto]">
+          {activeView === "tasks" ? <TaskView api={api} /> : activeView === "starred" ? (
+            <div className="flex min-h-0 flex-1 flex-col p-4">
+              <Card className="flex h-full min-h-0 flex-col">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>즐겨찾기</CardTitle>
+                    <Button size="sm" variant="outline" onClick={() => void refreshStarred()}>새로고침</Button>
+                  </div>
+                  <CardDescription>별표한 메시지는 전체 대화에서 모아볼 수 있습니다.</CardDescription>
+                </CardHeader>
+                <CardContent className="flex min-h-0 flex-1 flex-col">
+                  <ScrollArea className="flex-1">
+                    {starred.length === 0 ? (
+                      <div className="py-8 text-center text-sm text-muted-foreground">즐겨찾기한 메시지가 없습니다.</div>
+                    ) : (
+                      <div className="space-y-2 pr-2">
+                        {starred.map((s) => (
+                          <div key={s.id} className="rounded-md border p-3 text-sm">
+                            <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                              <Badge variant="outline" className="text-[10px]">{s.role}</Badge>
+                              <span>{new Date(s.starredAt).toLocaleString("ko-KR")}</span>
+                              <span className="font-mono opacity-60">#{s.sessionId.slice(0, 8)}</span>
+                              <button className="ml-auto rounded p-0.5 hover:bg-muted" title="해제" onClick={() => { void api.starredRemove({ id: s.id }).then(() => refreshStarred()); }}>
+                                <XIcon className="h-3 w-3" />
+                              </button>
+                            </div>
+                            <button
+                              className="w-full whitespace-pre-wrap break-words text-left text-sm hover:opacity-80"
+                              onClick={async () => {
+                                // Jump to that message in context — load the session,
+                                // then switch to home so it's visible.
+                                if (s.sessionId !== currentSessionId) {
+                                  // no public IPC for load-session yet beyond the existing
+                                  // lvis:chat:load-session — leave as future enhancement.
+                                }
+                                setActiveView("home");
+                              }}
+                            >{s.text.slice(0, 300)}{s.text.length > 300 ? "…" : ""}</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+          ) : activeView === "home" ? (
+            <div className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto]">
+              <ChatSearchOverlay
+                open={searchOpen}
+                query={searchQuery}
+                caseSensitive={searchCase}
+                matchCount={searchMatches.length}
+                currentIdx={searchIdx}
+                onChangeQuery={(v) => { setSearchQuery(v); setSearchIdx(0); }}
+                onToggleCase={() => setSearchCase((v) => !v)}
+                onNext={() => setSearchIdx((i) => (searchMatches.length === 0 ? 0 : (i + 1) % searchMatches.length))}
+                onPrev={() => setSearchIdx((i) => (searchMatches.length === 0 ? 0 : (i - 1 + searchMatches.length) % searchMatches.length))}
+                onClose={() => { setSearchOpen(false); setSearchQuery(""); }}
+              />
               {hasApiKey === false && (
                 <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
                   <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>API 키 설정 필요</CardTitle><CardDescription>채팅을 시작하려면 Claude API 키를 설정해 주세요.</CardDescription></CardHeader>
@@ -1385,14 +1926,72 @@ function App() {
                 )}
                 {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
                 {entries.map((entry, idx) => {
-                  if (entry.kind === "user") return <div key={idx} className="ml-auto max-w-[85%] rounded-md border bg-primary px-3 py-2 text-sm text-primary-foreground"><div className="mb-1 text-[11px] text-muted-foreground">나</div><div className="whitespace-pre-wrap">{entry.text}</div></div>;
+                  const isMatch = searchMatchSet.has(idx);
+                  const isCurrentMatch = searchOpen && searchMatches[searchIdx] === idx;
+                  const ringCls = isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
+                  if (entry.kind === "user") {
+                    if (editingEntryIdx === idx) {
+                      return (
+                        <UserMessageEditor
+                          key={idx}
+                          initialText={entry.text}
+                          busy={editBusy}
+                          onCancel={() => setEditingEntryIdx(null)}
+                          onSave={(next) => void handleEditSave(idx, next)}
+                        />
+                      );
+                    }
+                    const starId = isEntryStarred(idx);
+                    const starActive = !!starId;
+                    return (
+                      <div key={idx} className={`group relative ml-auto max-w-[85%] rounded-md border bg-primary px-3 py-2 text-sm text-primary-foreground ${ringCls}`}>
+                        <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <span>나</span>
+                          {starActive ? <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> : null}
+                          <div className="ml-auto hidden gap-1 group-hover:flex">
+                            <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
+                            <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void handleFork(idx)}><GitBranch className="h-3 w-3" /></button>
+                            <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void handleToggleStar(idx)}>
+                              <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="whitespace-pre-wrap">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
+                      </div>
+                    );
+                  }
                   if (entry.kind === "reasoning") return <ReasoningCard key={idx} entry={entry} />;
                   if (entry.kind === "tool_group") return <ToolGroupCard key={entry.groupId} group={entry} />;
                   if (entry.kind === "system") return <div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>;
-                  return <AssistantCard key={idx} entry={entry} />;
+                  return (
+                    <div key={idx} className={`${ringCls} rounded-md`}>
+                      <AssistantCard
+                        entry={entry}
+                        highlightQuery={searchHighlight}
+                        isStarred={!!isEntryStarred(idx)}
+                        actions={{
+                          onRetry: () => void handleRetryEffort(),
+                          onFork: () => void handleFork(idx),
+                          onToggleStar: () => void handleToggleStar(idx),
+                        }}
+                      />
+                    </div>
+                  );
                 })}
                 <div ref={chatEndRef} />
               </div></ScrollArea>
+              {contextOverflowPct >= 0.95 && (
+                <div className="border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive flex items-center gap-2">
+                  <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
+                  <span>— 자동 압축이 필요합니다. 전송이 일시 차단됩니다.</span>
+                </div>
+              )}
+              {contextOverflowPct >= 0.80 && contextOverflowPct < 0.95 && (
+                <div className="border-t bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                  <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
+                  <span>— 곧 자동 압축됩니다.</span>
+                </div>
+              )}
               <div className="grid grid-cols-[1fr_auto] gap-2 border-t bg-card p-3">
                 <Textarea value={question} onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => {
@@ -1404,7 +2003,7 @@ function App() {
                   }}
                   placeholder={hasApiKey === false ? "API 키를 먼저 설정해 주세요..." : "질문 입력 (Enter 전송 / Shift+Enter 줄바꿈) · /command 사용 가능"}
                   className="min-h-[76px]" disabled={streaming} />
-                <Button onClick={() => void handleAsk(question)} disabled={streaming || !question.trim()}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
+                <Button onClick={() => void handleAsk(question)} disabled={streaming || !question.trim() || contextOverflowPct >= 0.95}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
               </div>
             </div>
           ) : (

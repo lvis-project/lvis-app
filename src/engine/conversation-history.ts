@@ -36,6 +36,16 @@ export class ConversationHistory {
     this.trim();
   }
 
+  /**
+   * Sprint 4.C — edit/fork support. Keep only the first `count` messages.
+   * No-op if `count` is >= current length or negative.
+   */
+  truncate(count: number): void {
+    if (count < 0) return;
+    if (count >= this.messages.length) return;
+    this.messages = this.messages.slice(0, count);
+  }
+
   get length(): number {
     return this.messages.length;
   }
