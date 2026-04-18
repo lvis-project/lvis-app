@@ -59,20 +59,39 @@ export class VercelUnifiedProvider implements LLMProvider {
       const messages: ModelMessage[] = genericToModelMessages(params.messages);
       const tools = buildTools(params.tools);
 
-      const result = streamText({
-        model: google(params.model),
-        system: params.systemPrompt,
-        messages,
-        ...(tools ? { tools } : {}),
-        ...(params.maxTokens ? { maxOutputTokens: params.maxTokens } : {}),
-      });
+      // Wrap streamText() in try/catch to also capture synchronous construction
+      // errors (e.g. APICallError thrown pre-stream), not just mid-stream errors.
+      let fullStream: AsyncIterable<Record<string, unknown> & { type: string }>;
+      try {
+        const result = streamText({
+          model: google(params.model),
+          system: params.systemPrompt,
+          messages,
+          ...(tools ? { tools } : {}),
+          ...(params.maxTokens ? { maxOutputTokens: params.maxTokens } : {}),
+          ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+        });
+        fullStream = result.fullStream as AsyncIterable<
+          Record<string, unknown> & { type: string }
+        >;
+      } catch (syncErr) {
+        const mapped = mapAiSdkErrorToLvis(syncErr);
+        yield {
+          type: "error",
+          error: mapped.userMessage,
+          classification: mapped.classification,
+        };
+        return;
+      }
 
-      yield* fullStreamToStreamEvent(
-        result.fullStream as AsyncIterable<Record<string, unknown> & { type: string }>,
-      );
+      yield* fullStreamToStreamEvent(fullStream);
     } catch (err) {
       const mapped = mapAiSdkErrorToLvis(err);
-      yield { type: "error", error: mapped.userMessage };
+      yield {
+        type: "error",
+        error: mapped.userMessage,
+        classification: mapped.classification,
+      };
     }
   }
 }
