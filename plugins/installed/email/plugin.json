@@ -26,9 +26,9 @@
   "startupMethods": [
     "email_start_watcher"
   ],
-  "eventSubscriptions": [
-    "email.action.needed",
-    "email.new"
+  "eventSubscriptions": [],
+  "notificationEvents": [
+    { "event": "email.new", "titleField": "sender", "bodyField": "subject" }
   ],
   "config": {},
   "ui": [

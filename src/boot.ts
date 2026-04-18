@@ -413,8 +413,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       .catch((e: Error) => console.log("[lvis] boot: calendar today load failed (non-fatal):", e.message));
   }
 
-  // 메일 소스 플러그인의 신규 이벤트 알림 (manifest 선언 기반)
-  registerMailSourceNotifications(pluginRuntime, mainWindow);
+  // manifest.notificationEvents 선언 기반 OS 알림 등록 (플러그인 무관)
+  registerPluginNotifications(pluginRuntime, mainWindow);
 
   // §4.5 + Agent 6: PostTurnHookChain 조립
   const bootAuditLogger = new AuditLogger();
@@ -475,10 +475,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     conversationLoop.generateText(prompt, opts?.maxTokens, opts?.systemPrompt);
   console.log("[lvis] boot: plugin callLlm ready");
 
-  // Feature 1: 미팅 브리핑 네이티브 알림
-  registerCalendarBriefingNotifications(pluginRuntime, mainWindow);
-
-  // Feature 4: 월요일 주간 일정 캐시 로드 (브리핑에 주간 컨텍스트 포함)
+  // Feature 4: 월요일 주간 일정 캐시 로드
   const isMonday = new Date().getDay() === 1;
   const calendarListMethod = findMethodByCapability(
     pluginRuntime, "calendar-source", (m) => m.endsWith("_list"),
@@ -632,70 +629,32 @@ function buildManifestEventHints(
   return hints;
 }
 
-function registerMailSourceNotifications(
+/** manifest.notificationEvents 선언 기반으로 OS 알림을 등록한다. 플러그인 특정 코드 없음. */
+function registerPluginNotifications(
   pluginRuntime: PluginRuntime,
   mainWindow: BrowserWindow,
 ): void {
-  const eventTypes = new Set<string>();
-  for (const pluginId of pluginRuntime.listPluginIdsByCapability("mail-source")) {
-    const manifest = pluginRuntime.getPluginManifest(pluginId);
-    for (const eventType of manifest?.eventSubscriptions ?? []) {
-      if (eventType.endsWith(".new")) {
-        eventTypes.add(eventType);
-      }
-    }
-  }
+  if (!Notification.isSupported()) return;
 
-  for (const eventType of eventTypes) {
-    onEvent(eventType, (data) => {
-      const d = data as { subject?: string; sender?: string; replyNeeded?: boolean; importance?: string };
-      
-      if (!Notification.isSupported()) return;
-      const urgency = d.importance === "high" || d.replyNeeded;
-      const notif = new Notification({
-        title: urgency ? `📧 회신 필요 — ${d.sender ?? "알 수 없음"}` : `📧 새 메일 — ${d.sender ?? "알 수 없음"}`,
-        body: d.subject ?? "(제목 없음)",
-        silent: false,
+  for (const { manifest } of pluginRuntime.listPluginManifests()) {
+    for (const spec of manifest.notificationEvents ?? []) {
+      onEvent(spec.event, (data) => {
+        const title = spec.titleField ? getFieldByPath(data, spec.titleField) : spec.event;
+        const body = spec.bodyField ? getFieldByPath(data, spec.bodyField) : "";
+        if (!title) return;
+        const notif = new Notification({ title, body, silent: false });
+        notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
+        notif.show();
       });
-      notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
-      notif.show();
-    });
+    }
   }
 }
 
-function registerCalendarBriefingNotifications(
-  pluginRuntime: PluginRuntime,
-  mainWindow: BrowserWindow,
-): void {
-  // calendar-source 플러그인의 prebriefing 이벤트만 알림
-  const calendarPluginId = pluginRuntime.findPluginIdByCapability("calendar-source");
-  if (!calendarPluginId) return;
-
-  onEvent("calendar.prebriefing.ready", (data) => {
-    const d = data as { event?: { subject?: string }; briefing?: string; minutesUntilStart?: number };
-    
-    if (!Notification.isSupported()) return;
-    const notif = new Notification({
-      title: `📅 ${d.event?.subject ?? "미팅"} — ${d.minutesUntilStart ?? 15}분 후`,
-      body: d.briefing ?? "(브리핑 없음)",
-      silent: false,
-    });
-    notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
-    notif.show();
-  });
-
-  onEvent("calendar.from_email.suggested", (data) => {
-    const d = data as { emailSubject?: string; sender?: string; rawText?: string };
-    
-    if (!Notification.isSupported()) return;
-    const notif = new Notification({
-      title: "📅 이메일에서 미팅 요청 감지",
-      body: `${d.sender ? `${d.sender} — ` : ""}${d.emailSubject ?? ""}${d.rawText ? `\n${d.rawText.slice(0, 80)}` : ""}`,
-      silent: false,
-    });
-    notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
-    notif.show();
-  });
+function getFieldByPath(data: unknown, path: string): string {
+  const parts = path.split(".");
+  let val: unknown = data;
+  for (const p of parts) val = (val as Record<string, unknown>)?.[p];
+  return typeof val === "string" ? val : "";
 }
 
 function findMethodByCapability(

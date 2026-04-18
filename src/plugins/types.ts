@@ -30,6 +30,15 @@ export interface PluginManifest {
   capabilities?: string[];
   startupMethods?: string[];
   eventSubscriptions?: string[];
+  /**
+   * OS 네이티브 알림으로 표시할 이벤트 선언.
+   * titleField / bodyField 는 이벤트 데이터의 점(.) 경로.
+   */
+  notificationEvents?: Array<{
+    event: string;
+    titleField?: string;
+    bodyField?: string;
+  }>;
   ipcBindings?: PluginIpcBinding[];
   deployment?: DeploymentMode;
   publisher?: string;

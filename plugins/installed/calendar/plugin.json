@@ -28,10 +28,7 @@
   ],
   "eventSubscriptions": [
     "meeting.ended",
-    "calendar.event.upcoming",
-    "calendar.prebriefing.ready",
-    "calendar.from_email.suggested",
-    "calendar.pattern.detected"
+    "email.action.needed"
   ],
   "config": {},
   "ui": [
