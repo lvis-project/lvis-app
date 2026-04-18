@@ -26,9 +26,14 @@ bun run keygen:publisher
 # or: node scripts/keygen-publisher.mjs
 ```
 
-This prints two PEM blocks to stdout: the PKCS8 private key first, then the
-SPKI public key. Never commit either block. Paste the private key into the
-LGE IT secrets vault; paste the public key into `publisher-keys.ts`.
+This prints two raw PEM blocks to stdout: the PKCS8 private key first (followed
+by a blank line), then the SPKI public key. Output is plain PEM with no `#`
+comment lines, so it can be pasted directly into an env var or secrets store
+without breaking PEM parsing. Never commit either block. Paste the private key
+into the LGE IT secrets vault; paste the public key into `publisher-keys.ts`.
+
+To get human-readable annotated output (with `#` comment headers), pass
+`--annotated`. Do **not** use `--annotated` output when setting env vars.
 
 ## 3. Key storage
 
@@ -147,11 +152,24 @@ insider incident):
 
 Rotation SLA: **full rotation within 24h** of confirmed compromise.
 
+## `.sig` file format
+
+`plugin.json.sig` contains the raw ed25519 signature encoded as **base64**
+(no newlines, no PEM headers). This is the format produced by
+`scripts/sign-manifest.mjs` and accepted by `PluginSignatureVerifier`
+(`src/plugins/signature-verifier.ts`).
+
+> **Note:** If any guide (including older versions of this document or
+> `plugin-development.md` prior to Sprint 4-B) refers to a "binary" `.sig`
+> file, that description is **out-of-date**. The authoritative format is
+> base64 as of Sprint 4-B. Cross-ref: `plugin-development.md` ≥ Sprint 4-B
+> 기준 base64 encoding; 기존 가이드에 'binary' 표기 있다면 out-of-date.
+
 ## Cross-references
 
 - `docs/architecture/architecture.md` §9.6 — plugin deployment model
 - `docs/architecture/architecture.md` §14.2 — signing / governance
 - `docs/architecture/plugin-deployment-model.md`
-- `src/plugins/signature-verifier.ts` — host verify implementation
+- `src/plugins/signature-verifier.ts` — host verify implementation (accepts base64 `.sig`)
 - `src/plugins/publisher-keys.ts` — bundled public keys
 - `scripts/sign-manifest.mjs` / `scripts/keygen-publisher.mjs` — tooling

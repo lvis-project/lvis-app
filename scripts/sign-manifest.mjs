@@ -100,8 +100,17 @@ if (checkMode) {
 // Signing mode
 const pem = process.env.LVIS_PUBLISHER_SIGNING_KEY;
 if (!pem) {
+  const inCI = process.env.CI === "true";
+  const allowUnsignedDev = process.argv.includes("--allow-unsigned-dev");
+  if (inCI || !allowUnsignedDev) {
+    console.error(
+      "[sign-manifest] LVIS_PUBLISHER_SIGNING_KEY not set." +
+        (inCI ? " Running in CI — unsigned builds are not allowed." : " Pass --allow-unsigned-dev to skip signing in non-CI dev environments."),
+    );
+    process.exit(1);
+  }
   console.warn(
-    "[sign-manifest] LVIS_PUBLISHER_SIGNING_KEY not set — skipping signature (dev mode).",
+    "[sign-manifest] LVIS_PUBLISHER_SIGNING_KEY not set — skipping signature (--allow-unsigned-dev).",
   );
   process.exit(0);
 }
