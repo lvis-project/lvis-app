@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +24,7 @@ describe("PluginRuntime.disable", () => {
 
   afterEach(async () => {
     await rm(testDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
   });
 
   async function writeFakePlugin(
@@ -179,7 +180,7 @@ describe("PluginRuntime.disable", () => {
     expect(runtime.listToolNames()).toContain("com_lge_test_hello");
   });
 
-  it("plugin with dot-notation method name fails to load with a clear error", async () => {
+  it("plugin with dot-notation method name is dropped fail-soft with a clear error", async () => {
     // Methods are LLM tool names and must not contain dots
     const pluginDir = join(installedDir, "bad-plugin");
     await mkdir(pluginDir, { recursive: true });
@@ -198,11 +199,15 @@ describe("PluginRuntime.disable", () => {
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-plugin", manifestPath, enabled: true }]);
 
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
-    await expect(runtime.load()).rejects.toThrow(/Invalid tool name 'bad\.method'/);
+    await runtime.load();
+    expect(runtime.listPluginIds()).not.toContain("bad-plugin");
+    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad\.method'/));
+    errSpy.mockRestore();
   });
 
-  it("plugin with method name starting with digit fails to load", async () => {
+  it("plugin with method name starting with digit is dropped fail-soft", async () => {
     const pluginDir = join(installedDir, "bad-leading-digit");
     await mkdir(pluginDir, { recursive: true });
 
@@ -220,11 +225,15 @@ describe("PluginRuntime.disable", () => {
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-leading-digit", manifestPath, enabled: true }]);
 
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
-    await expect(runtime.load()).rejects.toThrow(/Invalid tool name '1bad_name'/);
+    await runtime.load();
+    expect(runtime.listPluginIds()).not.toContain("bad-leading-digit");
+    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name '1bad_name'/));
+    errSpy.mockRestore();
   });
 
-  it("plugin with hyphen in method name fails to load", async () => {
+  it("plugin with hyphen in method name is dropped fail-soft", async () => {
     const pluginDir = join(installedDir, "bad-hyphen");
     await mkdir(pluginDir, { recursive: true });
 
@@ -242,8 +251,12 @@ describe("PluginRuntime.disable", () => {
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-hyphen", manifestPath, enabled: true }]);
 
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = makeRuntime();
-    await expect(runtime.load()).rejects.toThrow(/Invalid tool name 'bad-name'/);
+    await runtime.load();
+    expect(runtime.listPluginIds()).not.toContain("bad-hyphen");
+    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad-name'/));
+    errSpy.mockRestore();
   });
 
   it("exposes capability/manifest/ipc binding metadata from loaded plugins", async () => {

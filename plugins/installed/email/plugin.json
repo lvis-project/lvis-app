@@ -5,6 +5,7 @@
   "deployment": "managed",
   "publisher": "LG Electronics IT",
   "entry": "../../../node_modules/@lvis/plugin-email/dist/hostPlugin.js",
+  "description": "Outlook 이메일 읽기·분석·답장 및 할 일 생성",
   "tools": [
     "email_status",
     "email_auth",

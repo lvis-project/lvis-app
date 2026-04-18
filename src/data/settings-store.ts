@@ -23,6 +23,23 @@ export interface AppSettings {
   chat: ChatSettings;
   webSearch: WebSearchSettings;
   marketplace: MarketplaceSettings;
+  proactive: ProactiveSettings;
+}
+
+/**
+ * §7 Proactive Engine — Daily Briefing feature flag.
+ * §14.4 feature-flag pattern: default OFF to prevent noise.
+ *
+ * - `enableDailyBriefing`  — master switch for LLM-synthesized daily briefing
+ * - `lastBriefingAt`       — ISO date (YYYY-MM-DD in KST) of most recent briefing,
+ *                            used for once-per-day dedupe (persisted across restarts).
+ * - `lastDismissedAt`      — ISO timestamp of last user dismissal; suppresses
+ *                            re-trigger for 24h.
+ */
+export interface ProactiveSettings {
+  enableDailyBriefing: boolean;
+  lastBriefingAt?: string;
+  lastDismissedAt?: string;
 }
 
 export interface WebSearchSettings {
@@ -65,6 +82,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   marketplace: {
     backend: "mock",
+  },
+  proactive: {
+    enableDailyBriefing: false,
   },
 };
 
@@ -132,6 +152,9 @@ export class SettingsService {
     if (partial.webSearch) this.settings.webSearch = { ...this.settings.webSearch, ...partial.webSearch };
     if (partial.marketplace) {
       this.settings.marketplace = { ...this.settings.marketplace, ...partial.marketplace };
+    }
+    if (partial.proactive) {
+      this.settings.proactive = { ...this.settings.proactive, ...partial.proactive };
     }
     this.saveSettings();
     return this.getAll();
@@ -211,6 +234,7 @@ export class SettingsService {
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
         marketplace: { ...DEFAULT_SETTINGS.marketplace, ...parsed.marketplace },
+        proactive: { ...DEFAULT_SETTINGS.proactive, ...parsed.proactive },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);

@@ -1963,7 +1963,7 @@ graph TB
 
 boot 시 `PluginRuntime.startAll()`은 로드된 플러그인을 순차 `await`하며 개별 실패를 try/catch로 격리한다. 실패한 플러그인은 `toolMap`에서 제거되고 나머지는 정상 동작한다. 타임아웃/병렬화는 아직 없다.
 
-**Phase 2 계획 (미구현):** `Promise.allSettled` 병렬 + slow-plugin 경고 + `manifest.startupTimeoutMs` AbortController. `PluginManifest`에도 아직 이 필드가 없으며 문서의 필드 표는 현행 스펙으로 간주하지 말 것.
+**현행 (Sprint 1-A 이후):** `PluginRuntime.startAll`은 `Promise.allSettled` 병렬 실행, 5초 초과 시 slow-plugin warn 로깅, `manifest.startupTimeoutMs` 선언 시 `Promise.race` 기반 하드 타임아웃 적용(실제 플러그인 작업은 cancellation되지 않으며, 호스트가 해당 플러그인을 drop하고 계속 진행한다). 실패한 플러그인은 fail-soft로 drop되며 나머지는 계속 로드된다.
 
 ### 9.4 Plugin Scenario — 회의록 플러그인
 

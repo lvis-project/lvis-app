@@ -184,10 +184,11 @@ export class ConversationLoop {
     const engine = this.deps.proactiveEngine;
     if (!engine || !this.provider) return null;
 
-    const items = engine.collectBriefingItems();
+    const now = new Date();
+    const items = engine.collectBriefingItems(now);
     if (items.length === 0) return null;
 
-    const briefingData = engine.getBriefingPromptData();
+    const briefingData = engine.getBriefingPromptData(items, now);
     const today = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul", weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
     const prompt = `당신은 LVIS, 사용자의 AI 비서입니다. 아침 브리핑을 보고합니다.
@@ -401,15 +402,25 @@ ${briefingData}
     // next turn's fallback sees every plugin that was activated here.
     const mutableScope = scope;
     let pluginExpansions = 0;
-    const rebuildToolSchemas = (): ToolSchema[] =>
-      this.deps.toolRegistry.getToolSchemasForScope(mutableScope).map((s) => ({
-        name: s.name,
-        description: s.description,
-        // Tool.toJsonSchema() returns `unknown` (may be Zod-generated or raw
-        // plugin/MCP schema); LLM providers all expect the flat
-        // `{type: "object", properties, required?}` shape.
-        inputSchema: s.input_schema as ToolSchema["inputSchema"],
-      }));
+    const rebuildToolSchemas = (): ToolSchema[] => {
+      const raw = this.deps.toolRegistry.getToolSchemasForScope(mutableScope);
+      const result: ToolSchema[] = [];
+      for (const s of raw) {
+        try {
+          result.push({
+            name: s.name,
+            description: s.description,
+            // Tool.toJsonSchema() returns `unknown` (may be Zod-generated or raw
+            // plugin/MCP schema); LLM providers all expect the flat
+            // `{type: "object", properties, required?}` shape.
+            inputSchema: s.input_schema as ToolSchema["inputSchema"],
+          });
+        } catch (err) {
+          console.warn(`[lvis] rebuildToolSchemas: tool '${s.name}' schema 변환 실패, 건너뜀:`, err);
+        }
+      }
+      return result;
+    };
     let toolSchemas: ToolSchema[] = rebuildToolSchemas();
     const allToolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }> = [];
     let turnUsage: TokenUsage | undefined;
@@ -595,7 +606,7 @@ ${briefingData}
         } else if (!availableIds.includes(pluginId)) {
           requestPluginResults.push({
             tool_use_id: tu.id,
-            content: `Unknown pluginId '${pluginId}'. Available: ${availableIds.join(", ") || "(none)"}`,
+            content: `알 수 없는 플러그인 ID '${pluginId}'. 사용 가능: ${availableIds.join(", ") || "(없음)"}`,
             is_error: true,
           });
         } else if (pluginExpansions >= MAX_PLUGIN_EXPANSION) {
@@ -612,7 +623,7 @@ ${briefingData}
           const addedToolCount = Math.max(0, toolSchemas.length - prevToolCount);
           requestPluginResults.push({
             tool_use_id: tu.id,
-            content: `Plugin '${pluginId}' activated. ${addedToolCount} new tool(s) now available (${toolSchemas.length} total in scope).`,
+            content: `플러그인 '${pluginId}' 활성화됨. ${addedToolCount}개 도구 추가됨 (현재 ${toolSchemas.length}개 사용 가능).`,
             is_error: false,
           });
           allToolCalls.push({
@@ -636,7 +647,13 @@ ${briefingData}
 
       // request_plugin만 있고 실제 실행할 tool이 없으면 다음 round로 진입
       // (LLM이 새로 활성화된 plugin의 tool을 호출할 수 있도록).
+      // C9: request_plugin 전용 round는 MAX_TOOL_ROUNDS 카운트에서 제외.
+      // Copilot: 활성화에 실제로 성공한 경우에만 round를 되돌린다. 실패한
+      // request_plugin(unknown id, over-limit)만 반복되면 round 예산이 정상
+      // 소모되어야 무한 루프가 발생하지 않는다.
       if (remainingToolUses.length === 0) {
+        const successfulActivation = requestPluginResults.some((r) => !r.is_error);
+        if (successfulActivation) round--;
         continue;
       }
 
