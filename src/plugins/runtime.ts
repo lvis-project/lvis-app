@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 // ajv + ajv-formats ship a CJS default export; ESM interop requires the
@@ -33,6 +33,39 @@ import type { PluginSignatureVerifier } from "./signature-verifier.js";
  *
  * Legacy blocklist export retained for backwards-compat (tests may import).
  */
+/**
+ * Resolve a plugin's manifest `entry` path relative to the plugin root.
+ *
+ * Security: rejects absolute paths and any relative path that escapes the
+ * plugin directory via `..` traversal. Without this guard a hostile
+ * `manifest.entry` (e.g. `"../../../etc/passwd.js"`) could cause the host to
+ * `import()` an arbitrary file on disk.
+ *
+ * Implementation note: we use `path.relative()` + an `isAbsolute` / `..` check
+ * rather than a string-prefix comparison so the check works on Windows
+ * (where `path.resolve()` returns backslash-separated paths) as well as POSIX.
+ *
+ * Exported for unit testing.
+ */
+export function resolvePluginEntryPath(pluginRoot: string, entry: string): string {
+  if (isAbsolute(entry)) {
+    throw new Error(
+      `Plugin entry must be a relative path inside the plugin directory, got absolute: ${entry}`,
+    );
+  }
+  const pluginRootResolved = resolve(pluginRoot);
+  const resolved = resolve(pluginRootResolved, entry);
+  if (resolved !== pluginRootResolved) {
+    const rel = relative(pluginRootResolved, resolved);
+    if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+      throw new Error(
+        `Plugin entry '${entry}' resolves outside plugin directory (${pluginRootResolved})`,
+      );
+    }
+  }
+  return resolved;
+}
+
 export const UI_CALLABLE_SAFE_VERBS = /_(get|list|search|read|show|query|preview|count|status|find|describe|inspect)$/i;
 export const DESTRUCTIVE_TOOL_PATTERNS: RegExp[] = [
   /_(delete|remove|send|destroy|erase|purge)$/i,
@@ -881,25 +914,7 @@ export class PluginRuntime {
   }
 
   private resolveEntryPath(pluginRoot: string, entry: string): string {
-    // Bonus security hardening: reject absolute paths and any relative path
-    // that escapes the plugin directory via `..` traversal. Without this, a
-    // hostile manifest.entry (e.g. "../../../etc/passwd.js") could cause the
-    // host to `import()` an arbitrary file on disk.
-    if (isAbsolute(entry)) {
-      throw new Error(
-        `Plugin entry must be a relative path inside the plugin directory, got absolute: ${entry}`,
-      );
-    }
-    const pluginRootResolved = resolve(pluginRoot);
-    const resolved = resolve(pluginRootResolved, entry);
-    const pluginRootWithSep =
-      pluginRootResolved.endsWith("/") ? pluginRootResolved : `${pluginRootResolved}/`;
-    if (resolved !== pluginRootResolved && !resolved.startsWith(pluginRootWithSep)) {
-      throw new Error(
-        `Plugin entry '${entry}' resolves outside plugin directory (${pluginRootResolved})`,
-      );
-    }
-    return resolved;
+    return resolvePluginEntryPath(pluginRoot, entry);
   }
 
   private async resolveManifestPaths(): Promise<string[]> {

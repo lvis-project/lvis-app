@@ -1967,7 +1967,7 @@ function UsageDashboard({ api }: { api: LvisApi }) {
 
 // ─── App ────────────────────────────────────────────
 
-function App() {
+export function App() {
   const api = useMemo(() => getApi(), []);
 
   // Chat state
@@ -2903,6 +2903,9 @@ function App() {
 }
 
 // ─── Bootstrap ──────────────────────────────────────
-const root = document.getElementById("root");
-if (!root) throw new Error("root not found");
-createRoot(root).render(<App />);
+// Guard with `typeof document` so importing <App /> from a jsdom test
+// harness (no #root) doesn't double-mount or throw.
+if (typeof document !== "undefined") {
+  const root = document.getElementById("root");
+  if (root) createRoot(root).render(<App />);
+}

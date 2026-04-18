@@ -69,6 +69,26 @@ export function validateTelemetryEndpoint(
   return { valid: true };
 }
 
+/**
+ * Strip userinfo, query string, and fragment from a URL before it is written
+ * to the audit log. Query/fragment may contain bearer tokens or secrets; the
+ * userinfo segment (`user:pass@host`) is an obvious credential leak. Keep
+ * only `protocol//host/pathname`.
+ *
+ * Non-URL inputs are truncated to 200 chars with a marker so we still have
+ * some trace of what was rejected without bleeding secrets.
+ */
+export function sanitizeUrlForAudit(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    // Not a URL — strip obvious separators and truncate.
+    return `[unparseable] ${raw.slice(0, 80)}`;
+  }
+}
+
 export type TelemetryEventName =
   | "app_start"
   | "chat_turn"
@@ -142,9 +162,13 @@ export class TelemetryService {
         this.deps.auditLogger?.log({
           timestamp: new Date().toISOString(),
           sessionId: "telemetry",
-          type: "error",
+          // Warn-level: rejection is expected on misconfig; the app still
+          // functions (telemetry disabled for session). Not an error.
+          type: "warn",
           input: `[telemetry] endpoint rejected: ${result.reason}`,
-          output: typeof endpoint === "string" ? endpoint.slice(0, 200) : undefined,
+          // Sanitize: never log raw URL — may contain userinfo (user:pass@),
+          // query-string secrets, or fragment tokens. Keep only protocol+host+path.
+          output: sanitizeUrlForAudit(endpoint),
         });
       } catch {
         // audit failure must not break app
