@@ -34,11 +34,11 @@
     "email.action.needed"
   ],
   "uiCallable": [
-    "calendar_status",
-    "calendar_auth",
     "calendar_list",
-    "calendar_delete",
-    "calendar_open_url",
+    "calendar_today",
+    "calendar_get",
+    "calendar_start_watcher",
+    "calendar_stop_watcher",
     "calendar_detect_patterns"
   ],
   "toolSchemas": {
