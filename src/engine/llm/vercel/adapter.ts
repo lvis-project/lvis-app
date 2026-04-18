@@ -106,6 +106,7 @@ export interface VercelProviderExtras {
 
 export class VercelUnifiedProvider implements LLMProvider {
   private static warnedCompatThinking = false;
+  private static warnedReasoningSamplingDrop = false;
   readonly vendor: LLMVendor;
   private readonly vendorSlot: VercelVendor;
   private readonly apiKey: string;
@@ -220,6 +221,28 @@ export class VercelUnifiedProvider implements LLMProvider {
       // precedence over legacy `maxTokens` when provided.
       const effectiveMaxOutputTokens = params.maxOutputTokens ?? params.maxTokens;
 
+      // OpenAI reasoning models on the **Responses API** reject sampling
+      // controls (temperature, seed) — passing them surfaces an "AI SDK
+      // Warning" AND (depending on SDK version) an APICallError that
+      // terminates the stream mid-turn. Only the native OpenAI slot routes
+      // through `openai.responses()` (see resolveModel:337-339); the Copilot
+      // slot always uses Chat Completions and accepts temperature/seed, so we
+      // must not drop for copilot. stopSequences is kept — Responses API
+      // accepts it.
+      const dropSamplingParams =
+        slot === "openai" && isOpenAIReasoningModel(params.model);
+      if (
+        dropSamplingParams &&
+        (params.temperature !== undefined || params.seed !== undefined) &&
+        !VercelUnifiedProvider.warnedReasoningSamplingDrop
+      ) {
+        VercelUnifiedProvider.warnedReasoningSamplingDrop = true;
+        console.warn(
+          "[VercelUnifiedProvider] OpenAI Responses API does not support " +
+            "temperature/seed on reasoning models — dropping before dispatch.",
+        );
+      }
+
       // Sprint A: map responseFormat → providerOptions per vendor (JSON mode).
       if (params.responseFormat) {
         const rf = params.responseFormat;
@@ -264,8 +287,12 @@ export class VercelUnifiedProvider implements LLMProvider {
           messages,
           ...(tools ? { tools } : {}),
           ...(effectiveMaxOutputTokens ? { maxOutputTokens: effectiveMaxOutputTokens } : {}),
-          ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
-          ...(params.seed !== undefined ? { seed: params.seed } : {}),
+          ...(!dropSamplingParams && params.temperature !== undefined
+            ? { temperature: params.temperature }
+            : {}),
+          ...(!dropSamplingParams && params.seed !== undefined
+            ? { seed: params.seed }
+            : {}),
           ...(params.stopSequences && params.stopSequences.length > 0
             ? { stopSequences: params.stopSequences }
             : {}),
