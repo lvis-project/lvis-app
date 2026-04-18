@@ -22,9 +22,6 @@ export function createProvider(config: ProviderConfig): LLMProvider {
     case "gemini":
       return new GeminiProvider(config.apiKey);
 
-    case "lgenie":
-      // Phase 4: lgenie 전용 provider 구현 예정
-      throw new Error("LGenie provider는 아직 구현되지 않았습니다. 다른 벤더를 선택해 주세요.");
 
     default:
       throw new Error(`지원하지 않는 LLM 벤더: ${config.vendor}`);
