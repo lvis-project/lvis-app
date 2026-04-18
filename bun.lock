@@ -17,6 +17,7 @@
         "@lvis/plugin-email": "file:../lvis-plugin-email",
         "@lvis/plugin-meeting": "file:../lvis-plugin-meeting",
         "@lvis/plugin-pageindex": "file:../lvis-plugin-pageindex",
+        "@lvis/plugin-sdk": "file:./packages/plugin-sdk",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "^2.1.16",
         "@radix-ui/react-popover": "^1.1.15",
@@ -225,6 +226,8 @@
     "@lvis/plugin-meeting": ["@lvis/plugin-meeting@file:../lvis-plugin-meeting", { "devDependencies": { "@types/node": "^24.0.0", "tsup": "^8.2.4", "typescript": "^5.8.3", "vitest": "^4.1.4" } }],
 
     "@lvis/plugin-pageindex": ["@lvis/plugin-pageindex@file:../lvis-plugin-pageindex", { "dependencies": { "chokidar": "^5.0.0" }, "devDependencies": { "@types/node": "^24.0.0", "tsup": "^8.2.4", "typescript": "^5.8.3", "vitest": "^4.1.4" } }],
+
+    "@lvis/plugin-sdk": ["@lvis/plugin-sdk@file:packages/plugin-sdk", { "devDependencies": { "typescript": "^5.4.0" } }],
 
     "@malept/cross-spawn-promise": ["@malept/cross-spawn-promise@2.0.0", "", { "dependencies": { "cross-spawn": "^7.0.1" } }, "sha512-1DpKU0Z5ThltBwjNySMC14g0CkbyhCaz9FkhxqNsZI6uAPJXFS8cMXlBKo26FJ8ZuW6S9GCMcR9IO5k2X5/9Fg=="],
 
