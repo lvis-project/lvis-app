@@ -230,6 +230,15 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
         if (requiredCap) {
           const manifest = pluginRuntime?.getPluginManifest(pluginId);
           if (!manifest?.capabilities?.includes(requiredCap)) {
+            // M4: audit-log capability violations so operators see attempts.
+            try {
+              bootAuditLogger.log({
+                timestamp: new Date().toISOString(),
+                sessionId: "plugin",
+                type: "error",
+                input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} actual=${(manifest?.capabilities ?? []).join("|")}`,
+              });
+            } catch { /* audit must not break host */ }
             console.warn(
               `[lvis] plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${requiredCap}'`,
             );
@@ -396,6 +405,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       settingsService.patch({ proactive: { ...cur, lastBriefingAt: dateKst } });
     },
     getLastDismissedAt: () => settingsService.get("proactive")?.lastDismissedAt,
+    auditLogger: bootAuditLogger,
   });
 
   // Sprint 3-A-2: ProactiveTriggerCoordinator — condition-based heartbeat
@@ -536,6 +546,9 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       // Accessor form — re-reads settings each flush so user toggles apply live.
       settings: () => settingsService.get("telemetry"),
       appVersion: app.getVersion(),
+      // M2: endpoint validation (https + allowlist; localhost blocked when packaged).
+      isPackaged: app.isPackaged,
+      auditLogger: bootAuditLogger,
     });
     telemetry.start();
     telemetry.track("app_start");
