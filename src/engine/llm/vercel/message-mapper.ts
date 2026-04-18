@@ -59,8 +59,9 @@ export function genericToModelMessages(
       if (msg.thinkingBlocks) {
         for (const tb of msg.thinkingBlocks) {
           if (typeof tb.signature !== "string" || tb.signature.length === 0) {
-            // Skip signature-less blocks — sending them would trigger
-            // Anthropic 400 on the next tool round.
+            // Defense-in-depth: thinkingBlocks may be deserialized from persisted
+            // history where signatures were trimmed. Guard here ensures we never
+            // echo a signature-less block to Anthropic (400).
             // eslint-disable-next-line no-console
             console.warn(
               "[message-mapper] thinkingBlock missing signature — skipping",

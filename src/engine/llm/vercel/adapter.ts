@@ -88,12 +88,27 @@ export function mapBudgetToEffort(
   return "max";
 }
 
-/** Detect Claude 4.x family (adaptive thinking). Claude 3.x uses budget-based. */
-export function isClaude4Family(model: string): boolean {
-  const m = model.toLowerCase();
-  // Matches: claude-sonnet-4-5, claude-sonnet-4-6, claude-opus-4, claude-4.x, etc.
-  return /claude-(sonnet|opus|haiku)-4|claude-4/.test(m);
+/**
+ * Detect Claude families that support adaptive thinking (≥ v4).
+ *
+ * Version-parse so claude-5.x (and later) are future-proofed automatically.
+ * Matches:
+ *   claude-sonnet-4-20260101 → major 4
+ *   claude-opus-4            → major 4
+ *   claude-5-sonnet-...      → major 5
+ *   claude-5                 → major 5
+ * Non-matches (→ budget-based "enabled" thinking):
+ *   claude-3-5-sonnet-latest, claude-3-opus-20240229
+ */
+export function supportsAdaptiveThinking(modelId: string): boolean {
+  const m = modelId.toLowerCase();
+  const match = m.match(/claude-[a-z]+-(\d+)/) || m.match(/claude-(\d+)/);
+  if (!match) return false;
+  return parseInt(match[1]!, 10) >= 4;
 }
+
+/** @deprecated use supportsAdaptiveThinking — kept for backward compat. */
+export const isClaude4Family = supportsAdaptiveThinking;
 
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 
@@ -179,7 +194,7 @@ export class VercelUnifiedProvider implements LLMProvider {
         const thinkingEnabled = params.enableThinking === true;
         const anthropicOpts: Record<string, unknown> = {};
         if (thinkingEnabled) {
-          if (isClaude4Family(params.model)) {
+          if (supportsAdaptiveThinking(params.model)) {
             anthropicOpts.thinking = {
               type: "adaptive",
               effort: mapBudgetToEffort(budget),
@@ -210,7 +225,13 @@ export class VercelUnifiedProvider implements LLMProvider {
           ...(tools ? { tools } : {}),
           ...(params.maxTokens ? { maxOutputTokens: params.maxTokens } : {}),
           ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
-          ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
+          ...(providerOptions
+            ? {
+                providerOptions: providerOptions as Parameters<
+                  typeof streamText
+                >[0]["providerOptions"],
+              }
+            : {}),
           ...(headers ? { headers } : {}),
         });
         fullStream = result.fullStream as AsyncIterable<

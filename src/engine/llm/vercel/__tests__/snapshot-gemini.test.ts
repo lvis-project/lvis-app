@@ -349,21 +349,7 @@ describe("VercelUnifiedProvider gemini — adapter smoke (mocked ai.streamText)"
     vi.doUnmock("@ai-sdk/google");
   });
 
-  it("vendor=claude yields error event (P3 scope — not yet implemented in P2)", async () => {
-    const { VercelUnifiedProvider } = await import("../adapter.js");
-    const provider = new VercelUnifiedProvider("claude", "k");
-    const events: any[] = [];
-    for await (const ev of provider.streamTurn({
-      model: "claude-sonnet-4-6",
-      systemPrompt: "",
-      messages: [],
-    })) {
-      events.push(ev);
-    }
-    expect(events.length).toBeGreaterThanOrEqual(1);
-    expect(events[0].type).toBe("error");
-    expect(events[0].error).toMatch(/not implemented yet/);
-  });
+  // P3: vendor=claude is now implemented — see snapshot-claude.test.ts.
 });
 
 describe("stream-mapper — usage v4/v5 fallback", () => {
