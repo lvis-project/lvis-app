@@ -6,6 +6,13 @@ import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePlugin
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PluginMarketplaceItem, PluginUiExtension } from "./types.js";
+import {
+  installFromMarketplace,
+  isMarketplaceDirectPreferred,
+  isNpmFallbackEnabled,
+  MarketplaceInstallerError,
+} from "./marketplace-installer.js";
+import { getBundledPublicKeys } from "./publisher-keys.js";
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 
@@ -88,6 +95,8 @@ export class PluginMarketplaceService {
    * breadcrumb + history.json from corruption.
    */
   private readonly locks = new Map<string, Promise<void>>();
+  /** Optional diagnostic logger. Injected in tests; no-op in production. */
+  readonly log?: (message: string, ...args: unknown[]) => void;
 
   constructor(
     appRoot: string,
@@ -161,7 +170,44 @@ export class PluginMarketplaceService {
     // before it gets overwritten so rollbackPlugin() can restore it.
     await this.cacheCurrentVersion(pluginId);
 
-    await this.runNpmInstall(plugin.packageSpec);
+    // AP-1 FU Task B: marketplace-direct path (feature-flag gated).
+    // When LVIS_MARKETPLACE_PREFER_DIRECT=1, attempt the signed binary
+    // delivery path before falling back to npm.
+    if (isMarketplaceDirectPreferred()) {
+      // Derive version from packageSpec (e.g. "@lvis/foo@1.2.3" → "1.2.3").
+      const versionMatch = plugin.packageSpec.match(/@([^@]+)$/);
+      const version = versionMatch ? versionMatch[1] : "latest";
+      // Adapt MarketplaceFetcher → MarketplaceHttp interface.
+      const http = {
+        downloadArtifact: async (slug: string, ver: string) => {
+          const { zipBuffer, sha256 } = await this.fetcher.downloadVersion(slug, ver);
+          return { body: zipBuffer, sha256Header: sha256, status: 200 };
+        },
+        fetchSignatureEnvelope: async (_slug: string, _ver: string) => {
+          throw new MarketplaceInstallerError(
+            "ENVELOPE_FETCH_NOT_SUPPORTED",
+            "current fetcher does not support fetchSignatureEnvelope",
+          );
+        },
+      };
+      try {
+        await installFromMarketplace(pluginId, version, {
+          http,
+          publicKeys: getBundledPublicKeys(),
+        });
+        // Continue to post-flight registry update below.
+      } catch (err) {
+        if (!isNpmFallbackEnabled()) throw err;
+        this.log?.(
+          `marketplace-direct failed (${err instanceof MarketplaceInstallerError ? err.code : "unknown"}), falling back to npm`,
+          err,
+        );
+        // Fall through to npm path.
+        await this.runNpmInstall(plugin.packageSpec);
+      }
+    } else {
+      await this.runNpmInstall(plugin.packageSpec);
+    }
     const manifestPath = await this.writeInstalledManifest(plugin);
     // Cache the freshly-installed version too so rollback targets don't
     // include the version we just promoted to "current".
