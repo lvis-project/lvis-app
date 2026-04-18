@@ -17,6 +17,12 @@ import type { LLMUseVercelSdk } from "../../data/settings-store.js";
 
 const COPILOT_BASE_URL = "https://models.github.ai/inference";
 
+/** Extra config for vendors that need more than (apiKey, baseUrl). */
+export interface VertexConfig {
+  project?: string;
+  location?: string;
+}
+
 /** @deprecated Use `LLMUseVercelSdk` from settings-store instead. Kept as alias for backwards compat. */
 export type UseVercelSdk = LLMUseVercelSdk;
 
@@ -29,19 +35,34 @@ export interface CreateProviderOptions {
  * phase. If the flag selects a vendor whose path hasn't landed yet, we fall
  * back to the legacy provider silently rather than yielding an error at turn time.
  *
- * P3 state: all four vendors implemented (gemini P1, openai/copilot P2, claude P3).
+ * State: six supported vendors (claude, openai, gemini, copilot, azure-foundry, vertex-ai).
+ * Legacy-capable: gemini (P1), openai/copilot (P2), claude (P3).
+ * Vercel-only:    azure-foundry, vertex-ai (no legacy provider equivalent).
  */
 const IMPLEMENTED_VENDORS: ReadonlySet<LLMVendor> = new Set<LLMVendor>([
   "gemini",
   "openai",
   "copilot",
   "claude",
+  "azure-foundry",
+  "vertex-ai",
+]);
+
+/**
+ * Vendors that have NO legacy provider equivalent — they MUST route through
+ * VercelUnifiedProvider regardless of the `useVercelSdk` flag setting.
+ */
+const VERCEL_ONLY_VENDORS: ReadonlySet<LLMVendor> = new Set<LLMVendor>([
+  "azure-foundry",
+  "vertex-ai",
 ]);
 
 function shouldUseVercel(
   vendor: LLMVendor,
   flag: LLMUseVercelSdk | undefined,
 ): boolean {
+  // Vercel-only vendors bypass the flag — there is no legacy path to fall back to.
+  if (VERCEL_ONLY_VENDORS.has(vendor)) return true;
   if (!flag || flag === "none") return false;
   // Safety gate: fall back to legacy if this vendor's Vercel path isn't wired yet.
   if (!IMPLEMENTED_VENDORS.has(vendor)) return false;
@@ -65,7 +86,10 @@ export function createProvider(
       config.vendor === "copilot"
         ? (config.baseUrl ?? COPILOT_BASE_URL)
         : config.baseUrl;
-    return new VercelUnifiedProvider(config.vendor, config.apiKey, baseUrl);
+    return new VercelUnifiedProvider(config.vendor, config.apiKey, baseUrl, undefined, {
+      vertexProject: config.vertexProject,
+      vertexLocation: config.vertexLocation,
+    });
   }
 
   switch (config.vendor) {
@@ -81,6 +105,13 @@ export function createProvider(
     case "gemini":
       return new GeminiProvider(config.apiKey);
 
+    case "azure-foundry":
+    case "vertex-ai":
+      // Should have been routed via shouldUseVercel() above — defensive fallback.
+      return new VercelUnifiedProvider(config.vendor, config.apiKey, config.baseUrl, undefined, {
+        vertexProject: config.vertexProject,
+        vertexLocation: config.vertexLocation,
+      });
 
     default:
       throw new Error(`지원하지 않는 LLM 벤더: ${config.vendor}`);
