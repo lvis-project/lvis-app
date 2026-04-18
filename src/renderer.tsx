@@ -1955,6 +1955,11 @@ function App() {
     } catch { /* ignore */ }
   }, [api]);
   const handleLoadSession = useCallback(async (sessionId: string) => {
+    // Don't swap sessions mid-stream — ConversationLoop.runTurn() has no
+    // concurrency guard, so replacing history while a turn is writing to it
+    // would race. The "기록" button is also disabled during streaming, but
+    // keep this guard here too for programmatic callers (e.g. starred jump).
+    if (streaming) return;
     try {
       const res = await api.chatLoadSession(sessionId);
       if (!res?.ok) return;
@@ -1962,7 +1967,7 @@ function App() {
       setEntries(historyToEntries(h.messages));
       setCurrentSessionId(h.sessionId);
     } catch { /* ignore */ }
-  }, [api]);
+  }, [api, streaming]);
 
   // Map renderer `entries` (which include reasoning/tool_group/system) to
   // backend history indices which only track user + assistant messages.
@@ -2440,11 +2445,18 @@ function App() {
                 <Button variant="outline" size="sm" onClick={() => void handleNewChat()}><Plus className="mr-1 h-4 w-4" />새 대화</Button>
                 <DropdownMenu onOpenChange={(open) => { if (open) void refreshSessions(); }}>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" title="대화 기록 불러오기"><History className="mr-1 h-4 w-4" />기록</Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={streaming}
+                      title={streaming ? "응답 생성 중에는 세션을 바꿀 수 없습니다" : "대화 기록 불러오기"}
+                    ><History className="mr-1 h-4 w-4" />기록</Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="max-h-[480px] w-[300px] overflow-y-auto">
                     {sessions.length === 0 ? (
-                      <div className="px-3 py-2 text-xs text-muted-foreground">저장된 대화가 없습니다.</div>
+                      <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+                        저장된 대화가 없습니다.
+                      </DropdownMenuItem>
                     ) : (
                       sessions.map((s) => {
                         const isCurrent = s.id === currentSessionId;
@@ -2455,7 +2467,9 @@ function App() {
                             className={isCurrent ? "bg-muted/50" : ""}
                           >
                             <div className="flex w-full flex-col">
-                              <span className="text-xs tabular-nums">{new Date(s.modifiedAt).toLocaleString("ko-KR")}</span>
+                              <span className="text-xs tabular-nums">
+                                {new Date(s.modifiedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
+                              </span>
                               <span className="font-mono text-[10px] opacity-60">#{s.id.slice(0, 8)}{isCurrent ? " · 현재" : ""}</span>
                             </div>
                           </DropdownMenuItem>
