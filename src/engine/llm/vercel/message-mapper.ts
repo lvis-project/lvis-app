@@ -7,14 +7,34 @@
  *   - assistant tool call → { role: "assistant", content: [{ type: "tool-call", ... }] }
  *   - tool_result → { role: "tool", content: [{ type: "tool-result", ... }] }
  *
- * Gemini does not emit thinkingBlocks; they are ignored here. Upstream
- * GenericMessage retains them intact for other vendors.
+ * P3 — Claude thinkingBlocks round-trip:
+ *   - assistant.thinkingBlocks[] → prepended as { type: "reasoning", text,
+ *     providerMetadata: { anthropic: { signature } } } parts. Order matters:
+ *     reasoning parts must precede text and tool-call parts so Anthropic's
+ *     signature-verified thinking chain is echoed verbatim.
+ *   - Blocks with missing/empty signatures are skipped (log-and-skip via
+ *     signature-shim) — Anthropic rejects tampered echoes.
  *
- * TODO(P2): OpenAI reasoning model specifics (reasoning_effort passthrough).
- * TODO(P3): Claude thinkingBlocks + signature round-trip + cacheControl.
+ * Non-Anthropic providers simply ignore reasoning parts they don't understand
+ * (Gemini/OpenAI adapters drop them on input), so including the thinkingBlocks
+ * path here is safe across vendors.
  */
 import type { ModelMessage } from "ai";
 import type { GenericMessage } from "../types.js";
+
+type AssistantPart =
+  | { type: "text"; text: string }
+  | {
+      type: "reasoning";
+      text: string;
+      providerOptions?: { anthropic?: { signature: string } };
+    }
+  | {
+      type: "tool-call";
+      toolCallId: string;
+      toolName: string;
+      input: unknown;
+    };
 
 export function genericToModelMessages(
   messages: GenericMessage[],
@@ -31,15 +51,29 @@ export function genericToModelMessages(
     }
 
     if (msg.role === "assistant") {
-      const parts: Array<
-        | { type: "text"; text: string }
-        | {
-            type: "tool-call";
-            toolCallId: string;
-            toolName: string;
-            input: unknown;
+      const parts: AssistantPart[] = [];
+
+      // Reasoning FIRST — Anthropic requires thinking blocks to precede text
+      // and tool_use in the content array, with signatures verbatim from the
+      // prior turn.
+      if (msg.thinkingBlocks) {
+        for (const tb of msg.thinkingBlocks) {
+          if (typeof tb.signature !== "string" || tb.signature.length === 0) {
+            // Skip signature-less blocks — sending them would trigger
+            // Anthropic 400 on the next tool round.
+            // eslint-disable-next-line no-console
+            console.warn(
+              "[message-mapper] thinkingBlock missing signature — skipping",
+            );
+            continue;
           }
-      > = [];
+          parts.push({
+            type: "reasoning",
+            text: tb.thinking,
+            providerOptions: { anthropic: { signature: tb.signature } },
+          });
+        }
+      }
 
       if (msg.content) {
         parts.push({ type: "text", text: msg.content });

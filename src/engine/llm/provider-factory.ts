@@ -30,9 +30,9 @@ function shouldUseVercel(
 ): boolean {
   if (!flag || flag === "none") return false;
   // P2: openai flag covers both "openai" and "copilot" (they share the
-  // OpenAI-family adapter path). "all" covers everything except "claude"
-  // (still legacy pending P3).
-  if (flag === "all") return vendor !== "claude";
+  // OpenAI-family adapter path).
+  // P3: "all" now covers claude too (Vercel Claude path landed).
+  if (flag === "all") return true;
   if (flag === "openai") return vendor === "openai" || vendor === "copilot";
   return flag === vendor;
 }
