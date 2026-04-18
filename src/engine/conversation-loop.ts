@@ -294,12 +294,14 @@ ${briefingData}
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
     // build() 호출 전에 setToolScope 수행.
     const scope = this.resolveToolScope(input);
-    this.lastTurnScope = scope.activePluginIds;
     // Guard: test mocks may stub SystemPromptBuilder without this method.
     this.deps.systemPromptBuilder.setToolScope?.(scope);
 
     const systemPrompt = this.deps.systemPromptBuilder.build();
     const result = await this.queryLoop(systemPrompt, scope, callbacks);
+    // lastTurnScope must reflect any Option C request_plugin expansions so
+    // the next turn's keyword-miss fallback keeps those plugins visible.
+    this.lastTurnScope = new Set(scope.activePluginIds);
 
     // §4.5.5 Post-Turn Hook Chain (Agent 6: compact → saveSession → extractMemory → audit → idle-poke)
     if (this.deps.postTurnHookChain) {
@@ -330,7 +332,7 @@ ${briefingData}
         if (cr.compacted) {
           this.history.clear();
           this.history.restore(compacted);
-          console.log(`[lvis] auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+          if (process.env.NODE_ENV !== "production") console.log(`[lvis] auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
           callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
         }
       }
@@ -360,13 +362,11 @@ ${briefingData}
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const model = llmSettings.model;
-    // Phase 1.5 Option C: scope is now mutable within the turn — request_plugin
-    // tool_use results mutate activePluginIds, and toolSchemas are rebuilt each round.
-    const mutableScope: ToolScope = {
-      activePluginIds: new Set(scope.activePluginIds),
-      includeBuiltins: scope.includeBuiltins,
-      includeMcp: scope.includeMcp,
-    };
+    // Phase 1.5 Option C: scope is mutable within the turn — request_plugin
+    // tool_use results add to scope.activePluginIds, and toolSchemas are
+    // rebuilt each round. Mutating the caller's Set directly means the
+    // next turn's fallback sees every plugin that was activated here.
+    const mutableScope = scope;
     let pluginExpansions = 0;
     const rebuildToolSchemas = (): ToolSchema[] =>
       this.deps.toolRegistry.getToolSchemasForScope(mutableScope).map((s) => ({
@@ -492,7 +492,7 @@ ${briefingData}
             compacted = true;
             this.history.clear();
             this.history.restore(compactedMsgs);
-            console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+            if (process.env.NODE_ENV !== "production") console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
           }
         } catch (compactErr) {
           console.warn("[lvis] reactive-compact: compactMessages threw, skipping retry:", compactErr);
@@ -574,11 +574,7 @@ ${briefingData}
           mutableScope.activePluginIds.add(pluginId);
           pluginExpansions += 1;
           toolSchemas = rebuildToolSchemas();
-          const newPluginToolCount = toolSchemas.filter((s) =>
-            // heuristic: count tools whose schemas appeared after expansion is noisy;
-            // just report total schema count now visible.
-            true,
-          ).length;
+          const newPluginToolCount = toolSchemas.length;
           requestPluginResults.push({
             tool_use_id: tu.id,
             content: `Plugin '${pluginId}' activated. ${newPluginToolCount} tools now available.`,

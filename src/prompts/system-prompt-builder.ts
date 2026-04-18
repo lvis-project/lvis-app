@@ -176,7 +176,7 @@ export class SystemPromptBuilder {
         ];
         for (const c of inactive) {
           const sample = c.sampleTools.length > 0 ? `: ${c.sampleTools.join(", ")}` : "";
-          lines.push(`- **${c.id}** (${c.description})${sample}`);
+          lines.push(`- **${c.id}** — ${c.name}: ${c.description}${sample}`);
         }
         return lines.join("\n");
       },

@@ -110,10 +110,17 @@ export class ToolRegistry {
       .filter((tool) => {
         if (tool.source === "builtin") return scope.includeBuiltins;
         if (tool.source === "mcp") return scope.includeMcp;
-        // plugin / other sources gated by pluginId
-        if (tool.pluginId) return active.has(tool.pluginId);
-        // Unknown source without pluginId — be conservative, treat as builtin
-        return scope.includeBuiltins;
+        if (tool.source === "plugin") {
+          // A plugin tool without a pluginId is a registration bug; drop it
+          // rather than expose a misconfigured tool as if it were a builtin.
+          if (!tool.pluginId) {
+            console.warn(`[tool-registry] plugin tool '${tool.name}' missing pluginId — skipped in scope filter`);
+            return false;
+          }
+          return active.has(tool.pluginId);
+        }
+        // Fallback for any new source kind added later — exclude from scope.
+        return false;
       })
       .map((tool) => ({
         name: tool.name,
