@@ -522,8 +522,18 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // Late-binding 주입 — 두 ref 모두 여기서 채워진다.
   conversationLoopRef = conversationLoop;
-  llmCallerRef.fn = (prompt, opts) =>
-    conversationLoop.generateText(prompt, opts?.maxTokens, opts?.systemPrompt);
+  // callLlm의 maxTokens는 플러그인이 실수로 큰 값을 넘겨 지연·비용 폭발이 나지 않도록
+  // 호스트에서 sanitize: 유효한 양의 정수만 수용하고 상한(CALL_LLM_MAX_TOKENS_CEILING)
+  // 으로 clamp. 유효하지 않으면 undefined로 넘겨 generateText의 기본값(400)을 사용.
+  const CALL_LLM_MAX_TOKENS_CEILING = 4096;
+  llmCallerRef.fn = (prompt, opts) => {
+    let maxTokens: number | undefined;
+    const raw = opts?.maxTokens;
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      maxTokens = Math.min(Math.floor(raw), CALL_LLM_MAX_TOKENS_CEILING);
+    }
+    return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt);
+  };
   console.log("[lvis] boot: plugin callLlm ready");
 
   // Feature 4: 월요일 주간 일정 캐시 로드 (KST 기준)
@@ -729,7 +739,12 @@ function registerPluginNotifications(
         const title = resolvedTitle || event;
         const body = bodyField ? getFieldByPath(data, bodyField) : "";
         const notif = new Notification({ title, body, silent: false });
-        notif.on("click", () => { mainWindow.show(); mainWindow.focus(); });
+        notif.on("click", () => {
+          // macOS에서 창 닫힌 뒤에도 알림이 살아 있을 수 있음 — destroyed 창 접근 시 throw 방지
+          if (mainWindow.isDestroyed()) return;
+          mainWindow.show();
+          mainWindow.focus();
+        });
         notif.show();
       };
       onEvent(event, handler);
