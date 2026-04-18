@@ -7,9 +7,13 @@ const DEFAULT_CONTEXT_WINDOW = 128_000;
 /**
  * Phase 5 — context budget hook.
  *
- * Computes per-model context window + current usage estimate (chars/4 heuristic
- * matching engine-side serializeMessageForEstimation in src/engine/llm/types.ts)
- * plus overflow indicators for the chat composer.
+ * Computes per-model context window + current usage estimate via a chars/4
+ * heuristic that approximates the engine's token count (±20%). It is NOT the
+ * authoritative estimator — the hook omits richer fields (thinkingBlocks,
+ * toolCalls, toolUseId, toolName, etc.) that `serializeMessageForEstimation`
+ * in `src/engine/llm/types.ts` serializes for the auto-compact trigger. Use
+ * this only for UI overflow badges; real budget decisions must go through the
+ * engine-side serializer.
  *
  * Context-window source: `src/shared/pricing-data.ts` (single source of truth,
  * shared with cost-estimator). Unknown vendor/model falls back to 128k.
@@ -26,6 +30,10 @@ export function useContextBudget(params: {
     return pricing?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
   }, [llmVendor, llmModel]);
 
+  // Keyed on length + last-entry identity (matches use-cost-estimate pattern):
+  // during streaming, `entries` reference changes per delta but only the last
+  // entry mutates. Re-serialize only when a new entry is appended or the
+  // tail entry's object identity changes.
   const usedTokens = useMemo(() => {
     let total = 0;
     for (const e of entries) {
@@ -44,7 +52,8 @@ export function useContextBudget(params: {
       if (serialized) total += Math.ceil(serialized.length / 4) + 1;
     }
     return total;
-  }, [entries]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries.length, entries[entries.length - 1]]);
 
   const contextOverflowPct = useMemo(() => {
     // Rough character-count estimate (~4 chars/token) used for overflow badge.

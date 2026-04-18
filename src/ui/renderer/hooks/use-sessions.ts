@@ -55,11 +55,22 @@ export function useSessions(api: LvisApi) {
   );
 
   const handleFork = useCallback(
-    async (histIdx: number, entryIdx: number, setEntries: (fn: (prev: ChatEntry[]) => ChatEntry[]) => void) => {
-      const res = await api.chatFork(histIdx);
-      if (res.ok) {
-        setEntries((p) => p.slice(0, entryIdx + 1));
-        await refreshSessionId();
+    async (
+      histIdx: number,
+      entryIdx: number,
+      setEntries: (fn: (prev: ChatEntry[]) => ChatEntry[]) => void,
+    ): Promise<{ ok: boolean }> => {
+      try {
+        const res = await api.chatFork(histIdx);
+        if (res.ok) {
+          setEntries((p) => p.slice(0, entryIdx + 1));
+          await refreshSessionId();
+          return { ok: true };
+        }
+        return { ok: false };
+      } catch (err) {
+        console.warn("[useSessions] fork failed", err);
+        return { ok: false };
       }
     },
     [api, refreshSessionId],

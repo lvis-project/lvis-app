@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
 
@@ -26,14 +26,21 @@ export function useStarred(api: LvisApi) {
 
   useEffect(() => { void refreshStarred(); }, [refreshStarred]);
 
+  // O(1) lookup index keyed by `${sessionId}:${messageIndex}` → starred id.
+  // Avoids O(n×m) linear scan when rendering many entries.
+  const starredIndex = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of starred) map.set(`${s.sessionId}:${s.messageIndex}`, s.id);
+    return map;
+  }, [starred]);
+
   const isEntryStarred = useCallback(
     (entryIdx: number, currentSessionId: string, entryIndexToHistoryIndex: Map<number, number>): string | null => {
       const histIdx = entryIndexToHistoryIndex.get(entryIdx);
       if (histIdx === undefined) return null;
-      const match = starred.find((s) => s.sessionId === currentSessionId && s.messageIndex === histIdx);
-      return match?.id ?? null;
+      return starredIndex.get(`${currentSessionId}:${histIdx}`) ?? null;
     },
-    [starred],
+    [starredIndex],
   );
 
   const handleToggleStar = useCallback(
@@ -48,17 +55,22 @@ export function useStarred(api: LvisApi) {
       const histIdx = entryIndexToHistoryIndex.get(entryIdx);
       if (histIdx === undefined) return;
       const existingId = isEntryStarred(entryIdx, currentSessionId, entryIndexToHistoryIndex);
-      if (existingId) {
-        await api.starredRemove({ id: existingId });
-      } else {
-        await api.starredAdd({
-          sessionId: currentSessionId,
-          messageIndex: histIdx,
-          role: entry.kind,
-          text: entry.text,
-        });
+      try {
+        if (existingId) {
+          await api.starredRemove({ id: existingId });
+        } else {
+          await api.starredAdd({
+            sessionId: currentSessionId,
+            messageIndex: histIdx,
+            role: entry.kind,
+            text: entry.text,
+          });
+        }
+        await refreshStarred();
+      } catch (err) {
+        // Caller uses `void handleToggleStar(...)`, so don't re-throw.
+        console.warn("[useStarred] toggle failed", err);
       }
-      await refreshStarred();
     },
     [api, isEntryStarred, refreshStarred],
   );
