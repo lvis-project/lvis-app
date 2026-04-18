@@ -991,7 +991,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                 )}
                 {(vendor === "openai" || vendor === "copilot") && (
                   <p className="text-[11px] text-muted-foreground">
-                    이 설정은 Vercel SDK 경로 사용 시 프록시/커스텀 엔드포인트로만 사용됩니다.
+                    프록시 또는 커스텀 엔드포인트를 사용하는 경우에만 입력합니다.
                   </p>
                 )}
               </div>
@@ -1154,7 +1154,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                   </label>
                 ))}
               </div>
-              <p className="text-[11px] text-muted-foreground">Vercel SDK 경로만 적용.</p>
+              <p className="text-[11px] text-muted-foreground">출력 스트림을 단어/문자 단위로 부드럽게 표시합니다.</p>
             </div>
           </TabsContent>
 

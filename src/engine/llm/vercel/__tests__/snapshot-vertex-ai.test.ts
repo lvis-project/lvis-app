@@ -163,13 +163,10 @@ describe("VercelUnifiedProvider vertex-ai", () => {
     vi.doUnmock("@ai-sdk/google-vertex");
   });
 
-  it("is vercel-routed via factory regardless of useVercelSdk flag", async () => {
+  it("is vercel-routed via factory", async () => {
     vi.resetModules();
     const { createProvider } = await import("../../provider-factory.js");
-    const p = createProvider(
-      { vendor: "vertex-ai", apiKey: "", vertexProject: "p" },
-      { useVercelSdk: "none" },
-    );
+    const p = createProvider({ vendor: "vertex-ai", apiKey: "", vertexProject: "p" });
     expect(p.constructor.name).toBe("VercelUnifiedProvider");
   });
 });

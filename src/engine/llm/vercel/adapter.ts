@@ -1,22 +1,6 @@
 /**
- * VercelUnifiedProvider.
- *
- * Per docs/references/vercel-ai-sdk-migration.md §5.2, this is the single
- * adapter that will replace claude-provider/openai-provider/gemini-provider
- * once phases P1-P3 land.
- *
- * P1 status: Gemini path implemented.
- * P2 status: OpenAI + Copilot + openai-compatible paths implemented.
- *   - vendor="openai"            → createOpenAI(...).responses(model) for gpt-5/o-series
- *                                  (Responses API auto-routing) and .chat() for legacy models.
- *   - vendor="copilot"           → createOpenAI({ baseURL }).chat(model) (Chat Completions only),
- *                                  with reasoning_effort dropped on tool turns (400 guard).
- *   - vendor="openai-compatible" → createOpenAICompatible({ baseURL })(model).
- * P3 status: Claude path implemented.
- *   - vendor="claude" → createAnthropic(...).languageModel(model)
- *     • thinking: adaptive (claude-4.x) or budget-based (claude-3.x)
- *     • interleaved-thinking-2025-05-14 beta header only when thinking+tools
- *     • signatures consumed per-step from fullStream (#12433 safe)
+ * Vercel AI SDK unified adapter. Single LLM provider since P4 migration
+ * (2026-04-xx) — replaces per-vendor claude/openai/gemini implementations.
  */
 import { streamText, jsonSchema, smoothStream, tool, type ModelMessage } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
