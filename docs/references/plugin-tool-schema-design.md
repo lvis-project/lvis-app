@@ -74,7 +74,7 @@ interface PluginManifest {
 }
 ```
 
-**Phase 2 계획 (미구현 필드):** `startupTimeoutMs` — boot 병렬 로딩 시 AbortController. 현 `PluginManifest`에 존재하지 않으며 runtime이 읽지 않는다.
+**현행 (Sprint 1-A 이후):** `startupTimeoutMs?: number` — boot 병렬 로딩 시 플러그인별 AbortController 하드 타임아웃. 미선언 시 무제한 + 5s slow-warn만.
 
 **각 필드의 런타임 소비처:**
 
@@ -248,9 +248,9 @@ top-level은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구사
 | `isMsGraphAuthenticated()` | handler 진입부에서 인증 상태 확인 | — |
 | `getMsGraphAccount()` | 현재 로그인 계정 이메일 조회 | — |
 | `onMsGraphAuthChange(handler)` | 인증 상태 변화 감지 (logout 처리 등) | — |
-| `callLlm(prompt, options?)` | **[Phase 1 신규]** 호스트 LLM으로 단발 텍스트 생성. 선제성 제안 본문 생성·분류·요약 등 | 대화 히스토리·streaming·tool_use 필요 시 (플러그인이 직접 SDK 사용) |
-| `logEvent(level, message, data?)` | **[Phase 2 신규]** 호스트 감사 로그에 플러그인 이벤트 기록 | 디버그 전용 고빈도 로깅 (성능) |
-| `onShutdown(handler)` | **[Phase 2 신규]** 앱 종료 전 정리 작업 (DB flush, 파일 저장 등) | 긴 비동기 작업 (5s 제한 있음) |
+| `callLlm(prompt, options?)` | **[현행]** 호스트 LLM으로 단발 텍스트 생성. 선제성 제안 본문 생성·분류·요약 등 | 대화 히스토리·streaming·tool_use 필요 시 (플러그인이 직접 SDK 사용) |
+| `logEvent(level, message, data?)` | **[현행 Sprint 1-A]** 호스트 감사 로그에 플러그인 이벤트 기록 | 디버그 전용 고빈도 로깅 (성능) |
+| `onShutdown(handler)` | **[현행 Sprint 1-A]** 앱 종료 전 정리 작업 (DB flush, 파일 저장 등) | 긴 비동기 작업 (5s 제한 있음) |
 
 ### callLlm 상세
 
