@@ -47,7 +47,7 @@ function rawEd25519ToPem(rawBase64: string): string {
  */
 export function getBundledPublicKeys(): Record<string, Buffer> {
   return Object.fromEntries(
-    Object.entries(MARKETPLACE_PUBLIC_KEYS).map(([id, b64]) => [
+    (Object.entries(MARKETPLACE_PUBLIC_KEYS) as [string, string][]).map(([id, b64]) => [
       id,
       Buffer.from(b64, "base64"),
     ]),
@@ -59,6 +59,6 @@ export function getBundledPublicKeys(): Record<string, Buffer> {
  * `PluginSignatureVerifier` (manifest signature path). The verifier accepts
  * a signature that matches ANY configured key — additive rotation is safe.
  */
-export const BUNDLED_PUBLISHER_PUBLIC_KEYS: string[] = Object.values(
-  MARKETPLACE_PUBLIC_KEYS,
+export const BUNDLED_PUBLISHER_PUBLIC_KEYS: string[] = (
+  Object.values(MARKETPLACE_PUBLIC_KEYS) as string[]
 ).map(rawEd25519ToPem);
