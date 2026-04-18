@@ -92,4 +92,26 @@ describe("OpenAIProvider", () => {
       }],
     });
   });
+
+  it("omits reasoning_effort when function tools are present (gpt-5.x /v1/chat/completions rejects the combo)", async () => {
+    createMock.mockReset();
+    createMock.mockResolvedValue((async function* () {
+      yield { choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] };
+    })());
+
+    const provider = new OpenAIProvider("test-key");
+    for await (const _ of provider.streamTurn({
+      model: "gpt-5.4-mini",
+      systemPrompt: "s",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "noop", description: "", inputSchema: { type: "object", properties: {} } }],
+      enableThinking: true,
+      thinkingBudgetTokens: 10_000,
+      maxTokens: 64,
+    })) { void _; }
+
+    const request = createMock.mock.calls[0]?.[0];
+    expect(request.reasoning_effort).toBeUndefined();
+    expect(request.tools).toHaveLength(1);
+  });
 });
