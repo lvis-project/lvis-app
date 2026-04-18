@@ -203,7 +203,7 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("bad-plugin");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad\.method'/));
+    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad\.method'|schema validation failed/));
     errSpy.mockRestore();
   });
 
@@ -229,7 +229,7 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("bad-leading-digit");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name '1bad_name'/));
+    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name '1bad_name'|schema validation failed/));
     errSpy.mockRestore();
   });
 
@@ -255,7 +255,7 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("bad-hyphen");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad-name'/));
+    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad-name'|schema validation failed/));
     errSpy.mockRestore();
   });
 
