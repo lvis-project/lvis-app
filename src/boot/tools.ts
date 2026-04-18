@@ -14,6 +14,7 @@ import type { AuditService } from "../main/audit-service.js";
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import { createKnowledgeSearchTools } from "../tools/knowledge-search.js";
 import { createSearchMemoryTool, memoryManagerNotesAdapter } from "../tools/search-memory.js";
+import { createRenderHtmlTool } from "../tools/render-html.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, type WorkerClientLite } from "../main/idle-scheduler.js";
@@ -378,6 +379,7 @@ export function registerBuiltinTools(
         }
       },
     }),
+    createRenderHtmlTool(),
   ];
 
   toolRegistry.registerBatch(builtins);
