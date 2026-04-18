@@ -794,7 +794,7 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
                     ))}
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    높을수록 더 많은 사고 토큰을 사용해 꼼꼼히 추론하지만 지연 시간과 비용이 증가합니다. Claude·OpenAI·Gemini 에 공통으로 적용됩니다.
+                    높을수록 더 많은 사고 토큰을 사용해 꼼꼼히 추론하지만 지연 시간과 비용이 증가합니다. 현재 이 설정은 Claude·OpenAI에 적용되며, Gemini는 모델이 지원하는 경우 추론 표시만 자동으로 동작하고 이 예산 값은 적용되지 않습니다.
                   </p>
                 </div>
               )}

@@ -130,8 +130,11 @@ export class SystemPromptBuilder {
     // 호출 사이에 추론 흐름이 드러나도록 유도하는 목적 (migration doc lever 2).
     // 병렬/순차 전략은 하드코딩 플래그로 강제하지 않고 LLM이 문맥에 맞게
     // 스스로 선택하도록 한다 (lever 1 — LLM 결정 사항).
+    //
+    // id=4.5: 장래 Phase 4 의 ④ Org Context (id=4) 와 충돌하지 않도록 분수형 id
+    // 사용. 정렬은 1 < 2 < 3 < 4 < 4.5 < 5 < 6 < ... 로 자연스럽게 ⑤ 앞에 삽입된다.
     this.sources.push({
-      id: 4,
+      id: 4.5,
       name: "Tool Use Strategy",
       refresh: "static",
       build: () => TOOL_USE_STRATEGY,
