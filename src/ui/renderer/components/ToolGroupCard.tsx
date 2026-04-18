@@ -32,7 +32,7 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
     .filter((p): p is { toolUseId: string; payload: RenderHtmlPayload } => p.payload !== null);
 
   return (
-    <div className="mx-4 rounded border border-dashed text-xs text-muted-foreground">
+    <div className="max-w-[85%] rounded-md border border-dashed text-xs text-muted-foreground">
       <button
         className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
         onClick={() => setOpen((o) => !o)}
