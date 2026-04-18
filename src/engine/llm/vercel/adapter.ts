@@ -43,10 +43,16 @@ export class VercelUnifiedProvider implements LLMProvider {
 
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
     if (this.vendor !== "gemini") {
-      throw new Error(
-        `VercelUnifiedProvider: vendor "${this.vendor}" not yet implemented (P1 = gemini only). ` +
+      // Match legacy provider contract: surface unsupported vendors as an
+      // error stream event rather than a throw, so callers' stream-consumer
+      // logic (conversation-loop) handles it uniformly.
+      yield {
+        type: "error",
+        error:
+          `VercelUnifiedProvider: vendor "${this.vendor}" not implemented yet (P1 = gemini only). ` +
           "Set settings.llm.useVercelSdk='none' or 'gemini'.",
-      );
+      };
+      return;
     }
 
     try {

@@ -35,7 +35,12 @@ export function mapAiSdkErrorToLvis(err: unknown): MappedError {
   } else if (typeof err === "string") {
     raw = err;
   } else {
-    raw = JSON.stringify(err);
+    // JSON.stringify can throw on circular refs / BigInt; fall back to String().
+    try {
+      raw = JSON.stringify(err);
+    } catch {
+      raw = String(err);
+    }
   }
 
   const classified = classifyProviderError(raw);

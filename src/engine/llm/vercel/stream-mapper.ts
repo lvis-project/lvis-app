@@ -93,12 +93,19 @@ export async function* fullStreamToStreamEvent(
       }
       case "error": {
         const err = (part as { error?: unknown }).error;
-        const msg =
-          err instanceof Error
-            ? err.message
-            : typeof err === "string"
-              ? err
-              : JSON.stringify(err);
+        let msg: string;
+        if (err instanceof Error) {
+          msg = err.message;
+        } else if (typeof err === "string") {
+          msg = err;
+        } else {
+          // JSON.stringify can throw on circular refs / BigInt; fall back to String().
+          try {
+            msg = JSON.stringify(err);
+          } catch {
+            msg = String(err);
+          }
+        }
         yield { type: "error", error: msg };
         break;
       }
