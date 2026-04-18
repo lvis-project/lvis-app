@@ -203,6 +203,7 @@ ${briefingData}
     })) {
       if (ev.type === "text_delta" && ev.text) text += ev.text;
       if (ev.type === "message_complete") break;
+      if (ev.type === "error") throw new Error(`LLM stream error: ${ev.error}`);
     }
     return text.trim();
   }
