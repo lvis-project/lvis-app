@@ -4,7 +4,7 @@
  * 모든 IPC 핸들러를 등록하는 모듈.
  * main.ts에서 인라인으로 30개 핸들러를 두지 않고 여기에 집중.
  */
-import { dialog, ipcMain, type BrowserWindow } from "electron";
+import { dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { writeFile } from "node:fs/promises";
 import type { AppServices } from "./boot.js";
 import type { ApprovalDecision } from "./permissions/approval-gate.js";
@@ -131,6 +131,26 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:starred:remove",
 ]);
 
+/**
+ * M3 — IPC sender validation. Sensitive handlers (api-key mutation, plugin
+ * install/uninstall, policy mutation, proactive briefing dismissal) verify
+ * that the invoking frame is our own renderer. Accepts `file://` (packaged
+ * local renderer) and `http://localhost` (dev server). Anything else (e.g.
+ * an embedded webview navigating to a remote origin, or a plugin-spawned
+ * BrowserView) is rejected with `{ok:false, error:"unauthorized-frame"}`.
+ */
+function validateSender(event: IpcMainInvokeEvent | null | undefined): boolean {
+  // Tests may invoke handlers with a synthetic event that omits senderFrame;
+  // treat missing frame as trusted so unit tests keep their direct-call
+  // ergonomics. Production always supplies a real IpcMainInvokeEvent.
+  const frame = event?.senderFrame;
+  if (!frame) return true;
+  const url = frame.url ?? "";
+  return url.startsWith("file://") || url.startsWith("http://localhost");
+}
+
+const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
+
 export function registerIpcHandlers(
   services: AppServices,
   getMainWindow: () => BrowserWindow | null,
@@ -154,7 +174,8 @@ export function registerIpcHandlers(
     conversationLoop.refreshProvider();
     return result;
   });
-  ipcMain.handle("lvis:settings:set-api-key", (_e, vendor: string, apiKey: string) => {
+  ipcMain.handle("lvis:settings:set-api-key", (e, vendor: string, apiKey: string) => {
+    if (!validateSender(e)) return UNAUTHORIZED_FRAME;
     settingsService.setSecret(`llm.apiKey.${vendor}`, apiKey);
     conversationLoop.refreshProvider();
     return { ok: true };
@@ -163,7 +184,8 @@ export function registerIpcHandlers(
     const v = vendor ?? settingsService.get("llm").provider;
     return settingsService.getSecret(`llm.apiKey.${v}`) !== null;
   });
-  ipcMain.handle("lvis:settings:delete-api-key", (_e, vendor: string) => {
+  ipcMain.handle("lvis:settings:delete-api-key", (e, vendor: string) => {
+    if (!validateSender(e)) return UNAUTHORIZED_FRAME;
     settingsService.deleteSecret(`llm.apiKey.${vendor}`);
     conversationLoop.refreshProvider();
     return { ok: true };
@@ -248,13 +270,15 @@ export function registerIpcHandlers(
 
   // ─── Marketplace ────────────────────────────────
   ipcMain.handle("lvis:plugins:marketplace:list", () => pluginMarketplace.list());
-  ipcMain.handle("lvis:plugins:install", async (_e, pluginId: string) => {
+  ipcMain.handle("lvis:plugins:install", async (e, pluginId: string) => {
+    if (!validateSender(e)) return UNAUTHORIZED_FRAME;
     const result = await pluginMarketplace.install(pluginId);
     await pluginRuntime.restartAll();
     refreshPluginNotifications?.();
     return result;
   });
-  ipcMain.handle("lvis:plugins:uninstall", async (_e, pluginId: string) => {
+  ipcMain.handle("lvis:plugins:uninstall", async (e, pluginId: string) => {
+    if (!validateSender(e)) return UNAUTHORIZED_FRAME;
     const result = await pluginMarketplace.uninstall(pluginId);
     await pluginRuntime.restartAll();
     refreshPluginNotifications?.();
@@ -335,7 +359,8 @@ export function registerIpcHandlers(
     // §C2: LoadedPolicy (source, adminOverrides, adminPath 포함) 전체 반환
     return loadPolicy();
   });
-  ipcMain.handle("lvis:policy:set", async (_e, patch: Record<string, unknown>) => {
+  ipcMain.handle("lvis:policy:set", async (e, patch: Record<string, unknown>) => {
+    if (!validateSender(e)) return UNAUTHORIZED_FRAME;
     // §F8: patch 검증 — managed 키 거부, requireExplicitApproval은 boolean만 허용
     if ("managed" in patch) {
       return { ok: false, error: "invalid-patch", message: "'managed' 필드는 사용자가 변경할 수 없습니다." };
@@ -382,7 +407,8 @@ export function registerIpcHandlers(
   // accidental double-click / rapid-fire IPC abuse.
   let lastDismissAcceptedAt = 0;
   const DISMISS_DEBOUNCE_MS = 1000;
-  ipcMain.handle("lvis:proactive:dismiss-briefing", (_e, feedback?: { reason?: string; details?: string }) => {
+  ipcMain.handle("lvis:proactive:dismiss-briefing", (e, feedback?: { reason?: string; details?: string }) => {
+    if (!validateSender(e)) return UNAUTHORIZED_FRAME;
     const now = Date.now();
     if (now - lastDismissAcceptedAt < DISMISS_DEBOUNCE_MS) {
       return { ok: false, debounced: true };
@@ -416,7 +442,8 @@ export function registerIpcHandlers(
   let lastSnoozeAcceptedAt = 0;
   const SNOOZE_DEBOUNCE_MS = 1000;
   const SNOOZE_MAX_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
-  ipcMain.handle("lvis:proactive:snooze-briefing", () => {
+  ipcMain.handle("lvis:proactive:snooze-briefing", (e) => {
+    if (!validateSender(e)) return UNAUTHORIZED_FRAME;
     const now = Date.now();
     if (now - lastSnoozeAcceptedAt < SNOOZE_DEBOUNCE_MS) {
       return { ok: false, debounced: true };

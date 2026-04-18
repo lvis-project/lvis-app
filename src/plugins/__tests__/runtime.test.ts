@@ -271,7 +271,7 @@ describe("PluginRuntime.disable", () => {
       `export default async function createPlugin(ctx) {
   return {
     handlers: {
-      "uic_public": async () => "public-ok",
+      "uic_get": async () => "public-ok",
       "uic_private": async () => "private-ok",
     },
   };
@@ -288,8 +288,8 @@ describe("PluginRuntime.disable", () => {
         name: "ui-callable",
         version: "1.0.0",
         entry: "entry.mjs",
-        tools: ["uic_public", "uic_private"],
-        uiCallable: ["uic_public"],
+        tools: ["uic_get", "uic_private"],
+        uiCallable: ["uic_get"],
       }),
       "utf-8",
     );
@@ -298,7 +298,7 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
 
-    await expect(runtime.callFromUi("uic_public")).resolves.toBe("public-ok");
+    await expect(runtime.callFromUi("uic_get")).resolves.toBe("public-ok");
     await expect(runtime.callFromUi("uic_private")).rejects.toThrow(
       /not UI-callable/,
     );
