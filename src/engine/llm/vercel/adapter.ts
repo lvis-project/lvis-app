@@ -146,7 +146,7 @@ export class VercelUnifiedProvider implements LLMProvider {
     const slot = this.vendorSlot;
 
     try {
-      const messages: ModelMessage[] = genericToModelMessages(params.messages);
+      const messages: ModelMessage[] = genericToModelMessages(params.messages, this.vendor);
       const tools = buildTools(params.tools);
       const hasTools = Boolean(tools && Object.keys(tools).length > 0);
 

@@ -9,18 +9,18 @@
  *
  * P3 — Claude thinkingBlocks round-trip:
  *   - assistant.thinkingBlocks[] → prepended as { type: "reasoning", text,
- *     providerMetadata: { anthropic: { signature } } } parts. Order matters:
- *     reasoning parts must precede text and tool-call parts so Anthropic's
- *     signature-verified thinking chain is echoed verbatim.
+ *     providerOptions: { anthropic: { signature } } } parts when vendor="claude".
+ *     Outbound reasoning parts carry `providerOptions.anthropic.signature`;
+ *     inbound stream events arrive via `providerMetadata.anthropic.signature`.
+ *     Order matters: reasoning parts must precede text and tool-call parts so
+ *     Anthropic's signature-verified thinking chain is echoed verbatim.
  *   - Blocks with missing/empty signatures are skipped (log-and-skip via
  *     signature-shim) — Anthropic rejects tampered echoes.
- *
- * Non-Anthropic providers simply ignore reasoning parts they don't understand
- * (Gemini/OpenAI adapters drop them on input), so including the thinkingBlocks
- * path here is safe across vendors.
+ *   - [HIGH PRIVACY] thinkingBlocks MUST NOT be serialised when outgoing vendor
+ *     is NOT "claude". Pass `vendor` to genericToModelMessages() to enforce this.
  */
 import type { ModelMessage } from "ai";
-import type { GenericMessage } from "../types.js";
+import type { GenericMessage, LLMVendor } from "../types.js";
 
 type AssistantPart =
   | { type: "text"; text: string }
@@ -38,6 +38,7 @@ type AssistantPart =
 
 export function genericToModelMessages(
   messages: GenericMessage[],
+  vendor: LLMVendor = "claude",
 ): ModelMessage[] {
   const out: ModelMessage[] = [];
 
@@ -56,7 +57,10 @@ export function genericToModelMessages(
       // Reasoning FIRST — Anthropic requires thinking blocks to precede text
       // and tool_use in the content array, with signatures verbatim from the
       // prior turn.
-      if (msg.thinkingBlocks) {
+      // [HIGH PRIVACY] thinkingBlocks are Claude-specific signed thoughts.
+      // They MUST NOT be forwarded to non-Claude vendors (Gemini/OpenAI do not
+      // understand them and the signed content must not leave the Claude path).
+      if (vendor === "claude" && msg.thinkingBlocks) {
         for (const tb of msg.thinkingBlocks) {
           if (typeof tb.signature !== "string" || tb.signature.length === 0) {
             // Defense-in-depth: thinkingBlocks may be deserialized from persisted

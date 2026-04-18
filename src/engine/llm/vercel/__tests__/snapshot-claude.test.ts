@@ -535,3 +535,74 @@ describe("Claude — L4 signature byte-equality round-trip", () => {
     ]);
   });
 });
+
+// ────────────────────────────────────────────────────────────────
+// [HIGH PRIVACY] Cross-vendor thinkingBlocks leak prevention
+// ────────────────────────────────────────────────────────────────
+
+describe("message-mapper — cross-vendor thinkingBlocks leak prevention", () => {
+  it("strips thinkingBlocks when vendor=gemini (must never send Claude signed thoughts to Gemini)", () => {
+    const result = genericToModelMessages(
+      [
+        {
+          role: "assistant",
+          content: "visible text",
+          thinkingBlocks: [
+            { thinking: "secret thought", signature: "sig-secret-1" },
+          ],
+        },
+      ],
+      "gemini",
+    );
+
+    const asst = result[0] as { role: string; content: Array<Record<string, unknown>> };
+    expect(asst.role).toBe("assistant");
+    // No reasoning parts — thinkingBlocks must be stripped for non-claude vendors
+    const reasoningParts = asst.content.filter((p) => p.type === "reasoning");
+    expect(reasoningParts).toHaveLength(0);
+    // Text part still present
+    expect(asst.content.some((p) => p.type === "text")).toBe(true);
+  });
+
+  it("strips thinkingBlocks when vendor=openai (signed thoughts must not reach OpenAI)", () => {
+    const result = genericToModelMessages(
+      [
+        {
+          role: "assistant",
+          content: "answer",
+          thinkingBlocks: [
+            { thinking: "internal reasoning", signature: "sig-secret-2" },
+          ],
+        },
+      ],
+      "openai",
+    );
+
+    const asst = result[0] as { content: Array<Record<string, unknown>> };
+    const reasoningParts = asst.content.filter((p) => p.type === "reasoning");
+    expect(reasoningParts).toHaveLength(0);
+  });
+
+  it("preserves thinkingBlocks when vendor=claude (round-trip must be intact)", () => {
+    const result = genericToModelMessages(
+      [
+        {
+          role: "assistant",
+          content: "answer",
+          thinkingBlocks: [
+            { thinking: "claude thought", signature: "sig-claude-ok" },
+          ],
+        },
+      ],
+      "claude",
+    );
+
+    const asst = result[0] as { content: Array<Record<string, unknown>> };
+    const reasoningParts = asst.content.filter((p) => p.type === "reasoning");
+    expect(reasoningParts).toHaveLength(1);
+    expect(
+      (reasoningParts[0] as { providerOptions: { anthropic: { signature: string } } })
+        .providerOptions.anthropic.signature,
+    ).toBe("sig-claude-ok");
+  });
+});
