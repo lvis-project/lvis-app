@@ -7,8 +7,6 @@ import {
   type RolePreset,
 } from "../../data/role-presets.js";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
-import { costTier, estimateTurnCost } from "../../lib/cost-estimator.js";
-import { lookupPricing } from "../../shared/pricing-data.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { Button } from "../../components/ui/button.js";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
@@ -50,6 +48,7 @@ import { useBriefing } from "./hooks/use-briefing.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
 import { useContextBudget } from "./hooks/use-context-budget.js";
+import { useCostEstimate } from "./hooks/use-cost-estimate.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./components/BriefingCard.js";
@@ -303,38 +302,15 @@ export function App() {
     }
   }, [api]);
 
-  // ─── Sprint B: pre-send cost estimate ─────────────
-  // Keystrokes in the input box re-run the cost memo via `question`, but the
-  // expensive JSON.stringify over every prior entry only depends on `entries`.
-  // Memoize it separately, keyed on length + last-entry identity, so typing a
-  // draft in long sessions doesn't re-serialize the whole conversation.
-  const historySerialized = useMemo(() => {
-    return entries.map((e) => {
-      if (e.kind === "user" || e.kind === "assistant" || e.kind === "reasoning" || e.kind === "system") {
-        return JSON.stringify({ kind: e.kind, text: (e as any).text ?? "" });
-      }
-      if (e.kind === "tool_group") {
-        return JSON.stringify({
-          kind: "tool_group",
-          tools: (e.tools ?? []).map((t: any) => ({ input: t.input ?? {}, result: t.result ?? "" })),
-        });
-      }
-      return "";
-    }).filter(Boolean);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries.length, entries[entries.length - 1]]);
-  const costEstimate = useMemo(() => {
-    const pricing = lookupPricing(llmVendor, llmModel);
-    const draft = question ? composeOutgoing(question) : "";
-    return estimateTurnCost({ historySerialized, draft, maxOutputTokens, pricing });
-  }, [historySerialized, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing]);
-  const costBadgeClass = (() => {
-    const t = costTier(costEstimate.total);
-    if (t === "trivial") return "text-muted-foreground";
-    if (t === "low") return "text-emerald-500";
-    if (t === "medium") return "text-amber-500";
-    return "text-red-500";
-  })();
+  // ─── Sprint B: pre-send cost estimate (Phase 5 hook) ─────────────
+  const { costEstimate, costBadgeClass } = useCostEstimate({
+    entries,
+    question,
+    llmVendor,
+    llmModel,
+    maxOutputTokens,
+    composeOutgoing,
+  });
 
   const handleNewChat = useCallback(async () => { await api.chatNew(); setEntries([]); void refreshSessionId(); }, [api, refreshSessionId]);
 
