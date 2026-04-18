@@ -59,6 +59,8 @@ export type AppSettings = {
   privacy?: { piiRedactEnabled: boolean };
 };
 
+export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
+
 // ─── Usage types (Sprint 4.B) ───────────────────────
 export type UsageTotals = { inputTokens: number; outputTokens: number; totalTokens: number; cost: number };
 export type UsagePerX = UsageTotals & { vendor: string; model: string };
@@ -83,7 +85,7 @@ export type BriefingPayload = {
 
 export type LvisApi = {
   getSettings: () => Promise<AppSettings>;
-  updateSettings: (p: Partial<AppSettings>) => Promise<AppSettings>;
+  updateSettings: (patch: DeepPartial<AppSettings>) => Promise<AppSettings>;
   setApiKey: (vendor: string, k: string) => Promise<{ ok: true }>;
   hasApiKey: (vendor?: string) => Promise<boolean>;
   deleteApiKey: (vendor: string) => Promise<{ ok: true }>;
