@@ -11,7 +11,7 @@
  * - 사용자 제어: 직접 확인·편집·삭제 가능
  * - 세션 독립: 파일은 영속, 인메모리는 휘발
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
 
@@ -152,6 +152,55 @@ export class MemoryManager {
   /** ~/.lvis/ 경로 반환 */
   getDir(): string {
     return this.lvisDir;
+  }
+
+  // ─── Sprint E: Briefing feedback loop (user dissatisfaction → gradual tailoring) ─
+
+  /**
+   * 브리핑 dismiss 이유를 briefing-feedback.md 에 append.
+   * Sprint E §2 — 사용자 피드백 루프. Proactive Engine 이 최근 5건을 읽어
+   * LLM 프롬프트에 "User feedback memory:" 섹션으로 주입한다.
+   */
+  appendBriefingFeedback(entry: {
+    reason: "inaccurate" | "uninteresting" | "busy" | "other";
+    details?: string;
+    date?: string;
+  }): void {
+    const date = entry.date ?? new Date().toISOString().slice(0, 10);
+    const block =
+      `---\n` +
+      `date: ${date}\n` +
+      `reason: ${entry.reason}\n` +
+      `details: ${(entry.details ?? "").replace(/\r?\n/g, " ").trim()}\n` +
+      `---\n\n`;
+    const path = join(this.notesDir, "briefing-feedback.md");
+    if (!existsSync(path)) {
+      writeFileSync(
+        path,
+        "# 브리핑 피드백 로그\n\n> 사용자가 브리핑을 닫을 때 남긴 이유가 기록됩니다. ProactiveEngine이 최근 5건을 LLM 컨텍스트에 주입합니다.\n\n" +
+          block,
+        "utf-8",
+      );
+    } else {
+      appendFileSync(path, block, "utf-8");
+    }
+  }
+
+  /** 최근 N건의 브리핑 피드백을 파싱해 반환 (신규가 마지막). */
+  readRecentBriefingFeedback(limit = 5): Array<{ date: string; reason: string; details: string }> {
+    const path = join(this.notesDir, "briefing-feedback.md");
+    if (!existsSync(path)) return [];
+    const content = readFileSync(path, "utf-8");
+    const blocks = content.split(/^---\s*$/m);
+    const out: Array<{ date: string; reason: string; details: string }> = [];
+    for (const b of blocks) {
+      const date = b.match(/date:\s*(.+)/)?.[1]?.trim();
+      const reason = b.match(/reason:\s*(.+)/)?.[1]?.trim();
+      if (!date || !reason) continue;
+      const details = b.match(/details:\s*(.+)/)?.[1]?.trim() ?? "";
+      out.push({ date, reason, details });
+    }
+    return out.slice(-limit);
   }
 
   // ─── Private ──────────────────────────────────────
