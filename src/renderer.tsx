@@ -941,10 +941,10 @@ function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; o
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl">
         <DialogHeader><DialogTitle>설정</DialogTitle><DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription></DialogHeader>
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="w-full">
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 [&>*]:!grow-0 [&>*]:!shrink-0 [&>*]:!basis-auto">
             <TabsTrigger value="llm" className="flex-1">지능 (LLM)</TabsTrigger>
             <TabsTrigger value="advanced" className="flex-1">고급</TabsTrigger>
             <TabsTrigger value="chat" className="flex-1">채팅</TabsTrigger>
