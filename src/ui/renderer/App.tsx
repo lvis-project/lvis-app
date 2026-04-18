@@ -3,10 +3,10 @@ import { Search } from "lucide-react";
 import {
   DEFAULT_ROLE_PRESETS,
   ROLE_PRESETS_CHANGED_EVENT,
-  buildPresetPrefix,
   loadRolePresets,
   type RolePreset,
 } from "../../data/role-presets.js";
+import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { costTier, estimateTurnCost } from "../../lib/cost-estimator.js";
 import { lookupPricing } from "../../shared/pricing-data.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
@@ -303,19 +303,10 @@ export function App() {
     [llmVendor, llmModel],
   );
   // ─── Sprint B: compose outgoing message with preset + language + attached docs ──
-  const composeOutgoing = useCallback((raw: string): string => {
-    const parts: string[] = [];
-    const presetPrefix = buildPresetPrefix(activePreset);
-    if (presetPrefix) parts.push(presetPrefix.trimEnd());
-    if (attachedDocs.length > 0) {
-      const lines = attachedDocs.map((d) => `- ${d.name} (id: ${d.id})`).join("\n");
-      parts.push(`[Attached documents — use knowledge_search / document_structure to read them]\n${lines}`);
-    }
-    if (langLock === "ko") parts.push("Respond in Korean only.");
-    else if (langLock === "en") parts.push("Respond in English only.");
-    parts.push(raw);
-    return parts.join("\n\n");
-  }, [activePreset, attachedDocs, langLock]);
+  const composeOutgoing = useCallback(
+    (raw: string): string => composeOutgoingUtil({ raw, activePreset, attachedDocs, langLock }),
+    [activePreset, attachedDocs, langLock],
+  );
 
   // ─── Chat ─────────────────────────────────────
   const handleAsk = useCallback(async (q: string) => {
