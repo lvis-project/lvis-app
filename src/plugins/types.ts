@@ -153,6 +153,17 @@ export interface PluginHostApi {
   getMsGraphAccount(): string | null;
   onMsGraphAuthChange(handler: () => void): void;
 
+  /**
+   * Sprint 4-D T1: 한 번만 401 재시도를 수행하는 Graph API 호출 래퍼.
+   * 플러그인 (calendar/email) 에서 모든 Graph 호출을 이 함수로 감싼다.
+   * 내부적으로 `getMsGraphToken()` 을 사용하며, 호스트의 silent refresh 와
+   * 결합되어 토큰 만료 중 in-flight 요청이 자동 복구된다.
+   *
+   * @throws MsGraphAuthRequiredError 재인증 필요 시
+   * @throws 그 외 `fn` 이 던진 에러 (401 두 번이면 원래 에러 재던짐)
+   */
+  withMsGraphRetry<T>(fn: (token: string) => Promise<T>): Promise<T>;
+
   // ─── LLM 접근 (선제성 기능용) ────────────────────────────────────────
   /**
    * 호스트 LLM 프로바이더를 통한 텍스트 생성.

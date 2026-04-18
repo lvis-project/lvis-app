@@ -55,7 +55,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
     "ms-graph-consumer",
     {
       description:
-        "Required to call HostApi MS Graph auth methods (getMsGraphToken, startMsGraphAuth, isMsGraphAuthenticated, getMsGraphAccount, onMsGraphAuthChange).",
+        "Required to call HostApi MS Graph auth methods (getMsGraphToken, startMsGraphAuth, isMsGraphAuthenticated, getMsGraphAccount, onMsGraphAuthChange, withMsGraphRetry).",
       enforcement: "enforced",
       gates: [
         "getMsGraphToken",
@@ -63,6 +63,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
         "isMsGraphAuthenticated",
         "getMsGraphAccount",
         "onMsGraphAuthChange",
+        "withMsGraphRetry",
       ],
     },
   ],

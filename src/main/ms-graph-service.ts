@@ -40,7 +40,9 @@ export class MsGraphService {
   private tokenExpiry: Date | null = null;
   private accountName: string | null = null;
   private authInProgress: Promise<void> | null = null;
+  private pendingSilentRefresh: Promise<string | null> | null = null;
   private changeHandlers: AuthChangeHandler[] = [];
+  private authExpiredHandlers: AuthChangeHandler[] = [];
 
   constructor(lvisRoot: string) {
     this.tokenPath = resolve(lvisRoot, "ms-graph-token.json");
@@ -84,10 +86,85 @@ export class MsGraphService {
     return this.accountName;
   }
 
-  /** 현재 유효한 액세스 토큰 반환. 없으면 null */
+  /**
+   * 현재 유효한 액세스 토큰 반환.
+   *
+   * Sprint 4-D T1: 캐시된 토큰이 만료되었거나 없으면 MSAL 의 내부 캐시에 저장된
+   * refresh token 을 이용해 `acquireTokenSilent` 로 조용히 갱신한다.
+   * - 갱신 성공: 새 토큰 캐시 + 반환
+   * - `InteractionRequired` 류 실패 (refresh token 만료 등): `ms-graph.auth.expired`
+   *   핸들러 통지 + null 반환 (호출측이 `startMsGraphAuth` 유도)
+   * - 일시적 네트워크 오류: null 반환 (expired 통지 X — 다음 호출에서 재시도)
+   *
+   * 동시 호출은 단일 in-flight promise 로 코얼레스 (thundering herd 방지).
+   */
   async getAccessToken(): Promise<string | null> {
     if (this.isAuthenticated()) return this.accessToken;
-    return null;
+
+    // 이미 진행 중인 silent refresh 가 있으면 합류
+    if (this.pendingSilentRefresh) return this.pendingSilentRefresh;
+
+    this.pendingSilentRefresh = this.silentRefresh().finally(() => {
+      this.pendingSilentRefresh = null;
+    });
+    return this.pendingSilentRefresh;
+  }
+
+  /** MSAL refresh token 으로 조용히 갱신 시도 */
+  private async silentRefresh(): Promise<string | null> {
+    const cache = this.pca.getTokenCache();
+    let account;
+    try {
+      const all = await cache.getAllAccounts();
+      if (this.accountName) {
+        account = all.find((a) => a.username === this.accountName);
+      }
+      if (!account) account = all[0];
+    } catch (err) {
+      console.warn("[ms-graph] silent refresh: account lookup failed —", err);
+      return null;
+    }
+    if (!account) {
+      // 저장된 계정 없음 → 인터랙티브 로그인 필요
+      return null;
+    }
+
+    try {
+      const result = await this.pca.acquireTokenSilent({
+        scopes: MS_GRAPH_SCOPES,
+        account,
+      });
+      if (!result || !result.accessToken || !result.expiresOn) {
+        return null;
+      }
+      const accountId =
+        result.account?.username ?? result.account?.name ?? this.accountName ?? "Unknown";
+      await this.persistToken(result.accessToken, result.expiresOn, accountId);
+      console.log(`[ms-graph] silent refresh 성공 — ${accountId}`);
+      this.notifyChange();
+      return result.accessToken;
+    } catch (err) {
+      // MSAL 은 refresh token 만료 / 사용자 재동의 필요 등은 InteractionRequiredAuthError
+      const name =
+        (err as { name?: string } | null)?.name ??
+        (err as { errorCode?: string } | null)?.errorCode ??
+        "";
+      const msg = (err as Error | null)?.message ?? "";
+      const isInteractionRequired =
+        name === "InteractionRequiredAuthError" ||
+        /interaction_required|invalid_grant|no_tokens_found|no_account_found/i.test(
+          `${name} ${msg}`,
+        );
+      if (isInteractionRequired) {
+        console.warn("[ms-graph] silent refresh: 재인증 필요 —", msg || name);
+        this.accessToken = null;
+        this.tokenExpiry = null;
+        this.notifyAuthExpired();
+      } else {
+        console.warn("[ms-graph] silent refresh: 일시적 실패 —", msg || name);
+      }
+      return null;
+    }
   }
 
   /** 브라우저 기반 인터랙티브 인증 시작 */
@@ -131,6 +208,15 @@ export class MsGraphService {
     this.changeHandlers.push(handler);
   }
 
+  /**
+   * Sprint 4-D T1: silent refresh 가 `InteractionRequired` 로 실패했을 때
+   * (refresh token 만료 → 사용자 재로그인 필요) 호출되는 핸들러 등록.
+   * 렌더러 측 `ms-graph.auth.expired` 배너 트리거 지점.
+   */
+  onAuthExpired(handler: AuthChangeHandler): void {
+    this.authExpiredHandlers.push(handler);
+  }
+
   private async persistToken(token: string, expiry: Date, account: string): Promise<void> {
     this.accessToken = token;
     this.tokenExpiry = expiry;
@@ -155,6 +241,12 @@ export class MsGraphService {
 
   private notifyChange(): void {
     for (const h of this.changeHandlers) {
+      try { h(); } catch { /* ignore */ }
+    }
+  }
+
+  private notifyAuthExpired(): void {
+    for (const h of this.authExpiredHandlers) {
       try { h(); } catch { /* ignore */ }
     }
   }

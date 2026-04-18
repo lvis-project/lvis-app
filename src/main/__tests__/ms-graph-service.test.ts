@@ -22,6 +22,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const {
   mockSafeStorage,
   mockAcquireTokenInteractive,
+  mockAcquireTokenSilent,
+  mockGetAccountByUsername,
+  mockGetAllAccounts,
   mockReadFile,
   mockWriteFile,
   mockMkdir,
@@ -33,6 +36,9 @@ const {
       decryptString: vi.fn((b: Buffer) => b.toString().replace(/^enc:/, "")),
     },
     mockAcquireTokenInteractive: vi.fn(),
+    mockAcquireTokenSilent: vi.fn(),
+    mockGetAccountByUsername: vi.fn(),
+    mockGetAllAccounts: vi.fn(),
     mockReadFile: vi.fn(),
     mockWriteFile: vi.fn(),
     mockMkdir: vi.fn(async () => undefined),
@@ -48,6 +54,13 @@ vi.mock("electron", () => ({
 vi.mock("@azure/msal-node", () => {
   class MockPublicClientApplication {
     acquireTokenInteractive = mockAcquireTokenInteractive;
+    acquireTokenSilent = mockAcquireTokenSilent;
+    getTokenCache() {
+      return {
+        getAccountByUsername: mockGetAccountByUsername,
+        getAllAccounts: mockGetAllAccounts,
+      };
+    }
   }
   return { PublicClientApplication: MockPublicClientApplication };
 });
@@ -91,6 +104,8 @@ describe("MsGraphService", () => {
     mockSafeStorage.decryptString.mockImplementation((b: Buffer) => b.toString().replace(/^enc:/, ""));
     mockMkdir.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
+    mockGetAccountByUsername.mockResolvedValue(null);
+    mockGetAllAccounts.mockResolvedValue([]);
   });
 
   // ── 1: valid plain-prefixed token ──────────────────────────────────────────
@@ -280,5 +295,210 @@ describe("MsGraphService", () => {
 
     const svc = new MsGraphService("/tmp/test-userData");
     expect(svc.isAuthenticated()).toBe(false);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Sprint 4-D T1 — Silent refresh
+  // ══════════════════════════════════════════════════════════════════════════
+
+  describe("silent refresh (Sprint 4-D T1)", () => {
+    const mockAccount = { username: "user@example.com", name: "User" };
+
+    it("expired token → acquireTokenSilent called → returns fresh token", async () => {
+      // Start with an expired token
+      mockReadFile.mockResolvedValue(
+        makeSavedJson({ accessToken: "plain:old-token", expiry: pastExpiry() }),
+      );
+      mockGetAllAccounts.mockResolvedValue([mockAccount]);
+      const newExpiry = new Date(Date.now() + 3_600_000);
+      mockAcquireTokenSilent.mockResolvedValue({
+        accessToken: "refreshed-token",
+        expiresOn: newExpiry,
+        account: mockAccount,
+      });
+
+      const svc = new MsGraphService("/tmp/test-userData");
+      await svc.loadSavedToken(); // expired so nothing loaded
+      const token = await svc.getAccessToken();
+
+      expect(mockAcquireTokenSilent).toHaveBeenCalledOnce();
+      expect(mockAcquireTokenSilent.mock.calls[0][0]).toMatchObject({ account: mockAccount });
+      expect(token).toBe("refreshed-token");
+      expect(svc.isAuthenticated()).toBe(true);
+    });
+
+    it("silent refresh InteractionRequired → returns null + fires onAuthExpired", async () => {
+      mockGetAllAccounts.mockResolvedValue([mockAccount]);
+      const err = Object.assign(new Error("interaction_required"), {
+        name: "InteractionRequiredAuthError",
+      });
+      mockAcquireTokenSilent.mockRejectedValue(err);
+
+      const svc = new MsGraphService("/tmp/test-userData");
+      const expiredHandler = vi.fn();
+      svc.onAuthExpired(expiredHandler);
+
+      const token = await svc.getAccessToken();
+      expect(token).toBeNull();
+      expect(expiredHandler).toHaveBeenCalledOnce();
+      expect(svc.isAuthenticated()).toBe(false);
+    });
+
+    it("silent refresh transient error → returns null, does NOT fire onAuthExpired", async () => {
+      mockGetAllAccounts.mockResolvedValue([mockAccount]);
+      mockAcquireTokenSilent.mockRejectedValue(new Error("ETIMEDOUT"));
+
+      const svc = new MsGraphService("/tmp/test-userData");
+      const expiredHandler = vi.fn();
+      svc.onAuthExpired(expiredHandler);
+
+      const token = await svc.getAccessToken();
+      expect(token).toBeNull();
+      expect(expiredHandler).not.toHaveBeenCalled();
+    });
+
+    it("no cached account → returns null without calling acquireTokenSilent", async () => {
+      mockGetAllAccounts.mockResolvedValue([]);
+      mockGetAccountByUsername.mockResolvedValue(null);
+
+      const svc = new MsGraphService("/tmp/test-userData");
+      const token = await svc.getAccessToken();
+
+      expect(mockAcquireTokenSilent).not.toHaveBeenCalled();
+      expect(token).toBeNull();
+    });
+
+    it("concurrent getAccessToken calls share a single in-flight refresh promise", async () => {
+      mockGetAllAccounts.mockResolvedValue([mockAccount]);
+      let resolveSilent!: (v: unknown) => void;
+      mockAcquireTokenSilent.mockReturnValue(
+        new Promise((r) => {
+          resolveSilent = r;
+        }),
+      );
+
+      const svc = new MsGraphService("/tmp/test-userData");
+      const p1 = svc.getAccessToken();
+      const p2 = svc.getAccessToken();
+      const p3 = svc.getAccessToken();
+
+      // Flush microtasks so silentRefresh() gets past the `getAllAccounts` await
+      // and reaches `acquireTokenSilent`, but does not resolve yet (promise held).
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // All three should be awaiting the same refresh
+      expect(mockAcquireTokenSilent).toHaveBeenCalledTimes(1);
+
+      resolveSilent({
+        accessToken: "shared-refresh-token",
+        expiresOn: new Date(Date.now() + 3_600_000),
+        account: mockAccount,
+      });
+
+      const [t1, t2, t3] = await Promise.all([p1, p2, p3]);
+      expect(t1).toBe("shared-refresh-token");
+      expect(t2).toBe("shared-refresh-token");
+      expect(t3).toBe("shared-refresh-token");
+      expect(mockAcquireTokenSilent).toHaveBeenCalledTimes(1);
+    });
+
+    it("cached valid token → short-circuits, no silent refresh call", async () => {
+      mockReadFile.mockResolvedValue(makeSavedJson({ accessToken: "plain:fresh-token" }));
+
+      const svc = new MsGraphService("/tmp/test-userData");
+      await svc.loadSavedToken();
+      const token = await svc.getAccessToken();
+
+      expect(token).toBe("fresh-token");
+      expect(mockAcquireTokenSilent).not.toHaveBeenCalled();
+    });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Sprint 4-D T1 — withMsGraphRetry helper
+// ══════════════════════════════════════════════════════════════════════════
+
+import { withMsGraphRetry, is401, MsGraphAuthRequiredError } from "../ms-graph-retry.js";
+
+describe("withMsGraphRetry (Sprint 4-D T1)", () => {
+  it("happy path: single call, returns result", async () => {
+    const getToken = vi.fn<[], Promise<string | null>>().mockResolvedValue("tok-1");
+    const fn = vi.fn(async (_t: string) => "ok");
+    const result = await withMsGraphRetry(fn, getToken);
+    expect(result).toBe("ok");
+    expect(fn).toHaveBeenCalledOnce();
+    expect(fn).toHaveBeenCalledWith("tok-1");
+    expect(getToken).toHaveBeenCalledOnce();
+  });
+
+  it("401 on first attempt → refetches token → retries once → success", async () => {
+    const getToken = vi
+      .fn<[], Promise<string | null>>()
+      .mockResolvedValueOnce("stale")
+      .mockResolvedValueOnce("fresh");
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("Unauthorized"), { status: 401 }))
+      .mockResolvedValueOnce("ok");
+
+    const result = await withMsGraphRetry(fn, getToken);
+    expect(result).toBe("ok");
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(fn).toHaveBeenNthCalledWith(1, "stale");
+    expect(fn).toHaveBeenNthCalledWith(2, "fresh");
+  });
+
+  it("401 twice → throws original error", async () => {
+    const firstErr = Object.assign(new Error("first 401"), { status: 401 });
+    const secondErr = Object.assign(new Error("second 401"), { status: 401 });
+    const getToken = vi
+      .fn<[], Promise<string | null>>()
+      .mockResolvedValue("tok");
+    const fn = vi.fn().mockRejectedValueOnce(firstErr).mockRejectedValueOnce(secondErr);
+
+    await expect(withMsGraphRetry(fn, getToken)).rejects.toBe(firstErr);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("non-401 error → does NOT retry, propagates immediately", async () => {
+    const err = Object.assign(new Error("Server error"), { status: 500 });
+    const getToken = vi.fn<[], Promise<string | null>>().mockResolvedValue("tok");
+    const fn = vi.fn().mockRejectedValueOnce(err);
+
+    await expect(withMsGraphRetry(fn, getToken)).rejects.toBe(err);
+    expect(fn).toHaveBeenCalledOnce();
+    expect(getToken).toHaveBeenCalledOnce();
+  });
+
+  it("getToken returns null on first call → throws MsGraphAuthRequiredError", async () => {
+    const getToken = vi.fn<[], Promise<string | null>>().mockResolvedValue(null);
+    const fn = vi.fn();
+    await expect(withMsGraphRetry(fn, getToken)).rejects.toBeInstanceOf(
+      MsGraphAuthRequiredError,
+    );
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("401 then getToken returns null on retry → rethrows original 401", async () => {
+    const firstErr = Object.assign(new Error("first 401"), { status: 401 });
+    const getToken = vi
+      .fn<[], Promise<string | null>>()
+      .mockResolvedValueOnce("tok")
+      .mockResolvedValueOnce(null);
+    const fn = vi.fn().mockRejectedValueOnce(firstErr);
+
+    await expect(withMsGraphRetry(fn, getToken)).rejects.toBe(firstErr);
+  });
+
+  it("is401 detects various 401 shapes", () => {
+    expect(is401({ status: 401 })).toBe(true);
+    expect(is401({ statusCode: 401 })).toBe(true);
+    expect(is401({ response: { status: 401 } })).toBe(true);
+    expect(is401(new Error("Graph API 오류 401"))).toBe(true);
+    expect(is401({ status: 500 })).toBe(false);
+    expect(is401(null)).toBe(false);
+    expect(is401(undefined)).toBe(false);
   });
 });
