@@ -22,6 +22,7 @@ import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { AuditService } from "../main/audit-service.js";
 import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
+import type { StarredStore } from "../data/starred-store.js";
 
 export type EventHandler = (data: unknown) => void;
 
@@ -74,6 +75,8 @@ export interface AppServices {
   approvalGate?: ApprovalGate;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
+  /** Sprint 4.C — starred messages persistence (~/.lvis/starred.json) */
+  starredStore?: StarredStore;
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
   refreshPluginNotifications?: () => void;
 }

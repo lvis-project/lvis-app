@@ -4,10 +4,62 @@
  * 모든 IPC 핸들러를 등록하는 모듈.
  * main.ts에서 인라인으로 30개 핸들러를 두지 않고 여기에 집중.
  */
-import { ipcMain, type BrowserWindow } from "electron";
+import { dialog, ipcMain, type BrowserWindow } from "electron";
+import { writeFile } from "node:fs/promises";
 import type { AppServices } from "./boot.js";
 import type { ApprovalDecision } from "./permissions/approval-gate.js";
 import { loadPolicy, savePolicy } from "./permissions/policy-store.js";
+import type { GenericMessage } from "./engine/llm/types.js";
+import type { ConversationLoop } from "./engine/conversation-loop.js";
+import type { WebContents } from "electron";
+
+/**
+ * Convert the UI's "user-assistant-only ordinal" to the real index into
+ * ConversationHistory.messages (which also contains tool_result entries).
+ * The renderer counts only user + assistant messages; backend handlers must
+ * translate before touching the raw message array — otherwise edit/fork/star
+ * target the wrong message in conversations that used tools.
+ */
+function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number): number {
+  if (ordinal < 0) return -1;
+  let count = 0;
+  for (let i = 0; i < history.length; i++) {
+    if (history[i].role === "user" || history[i].role === "assistant") {
+      if (count === ordinal) return i;
+      count += 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Shared helper: wire ConversationLoop.runTurn callbacks to a single stream
+ * channel. Used by both `lvis:chat:send` and the edit/retry flows so callback
+ * wiring isn't duplicated.
+ */
+async function runStreamedTurn(
+  conversationLoop: ConversationLoop,
+  input: string,
+  webContents: WebContents | undefined,
+  channel: string,
+): Promise<unknown> {
+  const send = (payload: unknown) => webContents?.send(channel, payload);
+  const result = await conversationLoop.runTurn(input, {
+    onReasoningDelta: (text) => send({ type: "reasoning_delta", text }),
+    onTextDelta: (text) => send({ type: "text_delta", text }),
+    onAssistantRound: ({ roundIndex, text, thought, stopReason, hasToolCalls }) =>
+      send({ type: "assistant_round", roundIndex, text, thought, stopReason, hasToolCalls }),
+    onToolStart: (name, toolInput, meta) =>
+      send({ type: "tool_start", name, input: toolInput, ...meta }),
+    onToolEnd: (name, toolResult, isError, meta) =>
+      send({ type: "tool_end", name, result: toolResult, isError, ...meta }),
+    onError: (error) => send({ type: "error", error }),
+    onCompactOccurred: ({ removedMessages, freedTokens }) =>
+      send({ type: "compact_notice", removedMessages, freedTokens }),
+  });
+  send({ type: "done" });
+  return result;
+}
 
 /**
  * All IPC channels reserved by the host. Plugin manifests must not declare
@@ -65,6 +117,17 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:briefing:get",
   "lvis:proactive:dismiss-briefing",
   "lvis:proactive:snooze-briefing",
+  // Sprint 4.B — usage observability
+  "lvis:usage:summary",
+  // Sprint 4.C — conversation UX
+  "lvis:chat:get-history",
+  "lvis:chat:edit-resend",
+  "lvis:chat:fork",
+  "lvis:chat:retry-effort",
+  "lvis:chat:export",
+  "lvis:starred:list",
+  "lvis:starred:add",
+  "lvis:starred:remove",
 ]);
 
 export function registerIpcHandlers(
@@ -80,6 +143,7 @@ export function registerIpcHandlers(
     conversationLoop,
     approvalGate,
     refreshPluginNotifications,
+    starredStore,
   } = services;
 
   // ─── Settings (벤더별 API 키) ────────────────────
@@ -122,38 +186,7 @@ export function registerIpcHandlers(
 
   ipcMain.handle("lvis:chat:send", async (_e, input: string) => {
     const win = getMainWindow();
-    const result = await conversationLoop.runTurn(input, {
-      onReasoningDelta: (text) => {
-        win?.webContents.send("lvis:chat:stream", { type: "reasoning_delta", text });
-      },
-      onTextDelta: (text) => {
-        win?.webContents.send("lvis:chat:stream", { type: "text_delta", text });
-      },
-      onAssistantRound: ({ roundIndex, text, thought, stopReason, hasToolCalls }) => {
-        win?.webContents.send("lvis:chat:stream", {
-          type: "assistant_round",
-          roundIndex,
-          text,
-          thought,
-          stopReason,
-          hasToolCalls,
-        });
-      },
-      onToolStart: (name, toolInput, meta) => {
-        win?.webContents.send("lvis:chat:stream", { type: "tool_start", name, input: toolInput, ...meta });
-      },
-      onToolEnd: (name, toolResult, isError, meta) => {
-        win?.webContents.send("lvis:chat:stream", { type: "tool_end", name, result: toolResult, isError, ...meta });
-      },
-      onError: (error) => {
-        win?.webContents.send("lvis:chat:stream", { type: "error", error });
-      },
-      onCompactOccurred: ({ removedMessages, freedTokens }) => {
-        win?.webContents.send("lvis:chat:stream", { type: "compact_notice", removedMessages, freedTokens });
-      },
-    });
-    win?.webContents.send("lvis:chat:stream", { type: "done" });
-    return result;
+    return runStreamedTurn(conversationLoop, input, win?.webContents, "lvis:chat:stream");
   });
 
   ipcMain.handle("lvis:chat:new", () => {
@@ -318,6 +351,12 @@ export function registerIpcHandlers(
   // ─── Daily Briefing ──────────────────────────────
   ipcMain.handle("lvis:briefing:get", () => conversationLoop.generateBriefing());
 
+  // ─── Usage Observability (Sprint 4.B) ───────────
+  ipcMain.handle("lvis:usage:summary", async (_e, days?: number) => {
+    const { getUsageSummary } = await import("./engine/usage-stats.js");
+    return getUsageSummary(typeof days === "number" ? days : 60);
+  });
+
   // Sprint 2-D: user dismissal — sets lastDismissedAt, which suppresses the
   // gated ProactiveEngine.generateDailyBriefing for the following 24h.
   // Sprint 3-A (M1): debounce accepted dismisses to min 1s apart to prevent
@@ -366,5 +405,161 @@ export function registerIpcHandlers(
       proactive: { ...cur, lastDismissedAt: shifted },
     });
     return { ok: true, lastDismissedAt: shifted };
+  });
+
+  // ─── Sprint 4.C: Conversation UX ─────────────────────
+  const streamTurn = async (input: string) => {
+    const win = getMainWindow();
+    return runStreamedTurn(conversationLoop, input, win?.webContents, "lvis:chat:stream");
+  };
+
+  ipcMain.handle("lvis:chat:get-history", () => {
+    const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
+    return {
+      sessionId: conversationLoop.getSessionId(),
+      messages: messages.map((m, i) => ({
+        index: i,
+        role: m.role,
+        content: m.role === "tool_result" ? m.content : (m as { content: string }).content,
+        toolName: m.role === "tool_result" ? m.toolName : undefined,
+        isError: m.role === "tool_result" ? m.isError : undefined,
+      })),
+    };
+  });
+
+  ipcMain.handle("lvis:chat:edit-resend", async (_e, messageIndex: number, newText: string) => {
+    if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };
+    if (typeof newText !== "string" || newText.trim().length === 0) return { ok: false, error: "empty-text" };
+    // messageIndex is a user-assistant-only ordinal from the UI; convert to
+    // the real history index before truncating so tool_result entries
+    // (which the UI does not count) aren't mis-targeted.
+    const history = conversationLoop.getHistory().getMessages() as GenericMessage[];
+    const realIdx = entryOrdinalToHistoryIndex(history, messageIndex);
+    if (realIdx < 0) return { ok: false, error: "index-out-of-range" };
+    conversationLoop.getHistory().truncate(realIdx);
+    const result = await streamTurn(newText);
+    return { ok: true, result };
+  });
+
+  ipcMain.handle("lvis:chat:fork", (_e, messageIndex: number) => {
+    const current = conversationLoop.getHistory().getMessages() as GenericMessage[];
+    let upto = current.length;
+    if (typeof messageIndex === "number" && messageIndex >= 0) {
+      const realIdx = entryOrdinalToHistoryIndex(current, messageIndex);
+      if (realIdx >= 0) upto = Math.min(realIdx + 1, current.length);
+    }
+    const slice = current.slice(0, upto);
+    if (current.length > 0) {
+      memoryManager.saveSession(conversationLoop.getSessionId(), current);
+    }
+    const newId = crypto.randomUUID();
+    memoryManager.saveSession(newId, slice);
+    const loaded = conversationLoop.loadSession(newId);
+    return { ok: loaded, sessionId: loaded ? newId : null };
+  });
+
+  ipcMain.handle("lvis:chat:retry-effort", async (
+    _e,
+    opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean },
+  ) => {
+    const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") { lastUserIdx = i; break; }
+    }
+    if (lastUserIdx < 0) return { ok: false, error: "no-user-message" };
+    const lastUser = messages[lastUserIdx] as { role: "user"; content: string };
+    conversationLoop.getHistory().truncate(lastUserIdx);
+
+    const prevLlm = settingsService.get("llm");
+    const nextLlm = {
+      ...prevLlm,
+      enableThinking: opts?.enableThinking ?? true,
+      thinkingBudgetTokens: opts?.thinkingBudgetTokens ?? 20000,
+    };
+    settingsService.patch({ llm: nextLlm });
+    conversationLoop.refreshProvider();
+    try {
+      const result = await streamTurn(lastUser.content);
+      return { ok: true, result };
+    } finally {
+      settingsService.patch({ llm: prevLlm });
+      conversationLoop.refreshProvider();
+    }
+  });
+
+  ipcMain.handle("lvis:chat:export", async (_e, format: "markdown" | "json") => {
+    const win = getMainWindow();
+    if (format !== "markdown" && format !== "json") return { ok: false, error: "invalid-format" };
+    const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
+    if (messages.length === 0) return { ok: false, error: "empty" };
+
+    const sessionId = conversationLoop.getSessionId();
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const defaultName = `lvis-chat-${sessionId.slice(0, 8)}-${stamp}.${format === "markdown" ? "md" : "json"}`;
+    const dialogOptions = {
+      title: "대화 내보내기",
+      defaultPath: defaultName,
+      filters: format === "markdown"
+        ? [{ name: "Markdown", extensions: ["md"] }]
+        : [{ name: "JSON", extensions: ["json"] }],
+    };
+    const res = win
+      ? await dialog.showSaveDialog(win, dialogOptions)
+      : await dialog.showSaveDialog(dialogOptions);
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+
+    let body: string;
+    if (format === "json") {
+      body = JSON.stringify({ sessionId, exportedAt: new Date().toISOString(), messages }, null, 2);
+    } else {
+      const lines: string[] = [`# LVIS 대화 내보내기`, ``, `- 세션: ${sessionId}`, `- 내보낸 시각: ${new Date().toISOString()}`, ``];
+      for (const m of messages) {
+        if (m.role === "user") {
+          lines.push(`## User`, ``, m.content, ``);
+        } else if (m.role === "assistant") {
+          lines.push(`## Assistant`, ``);
+          if (m.thought) lines.push(`> _reasoning:_ ${m.thought.replace(/\n/g, " ")}`, ``);
+          lines.push(m.content, ``);
+          if (m.toolCalls && m.toolCalls.length > 0) {
+            for (const tc of m.toolCalls) {
+              lines.push(`### Tool call: \`${tc.name}\``, ``, "```json", JSON.stringify(tc.input, null, 2), "```", ``);
+            }
+          }
+        } else if (m.role === "tool_result") {
+          lines.push(`### Tool result${m.toolName ? `: \`${m.toolName}\`` : ""}${m.isError ? " (error)" : ""}`, ``, "```", m.content, "```", ``);
+        }
+      }
+      body = lines.join("\n");
+    }
+    await writeFile(res.filePath, body, "utf-8");
+    return { ok: true, filePath: res.filePath };
+  });
+
+  // ─── Starred messages (~/.lvis/starred.json) ────────
+  ipcMain.handle("lvis:starred:list", () => {
+    if (!starredStore) return [];
+    return starredStore.list();
+  });
+  ipcMain.handle("lvis:starred:add", (_e, entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => {
+    if (!starredStore) return { ok: false, error: "no-starred-store" };
+    if (typeof entry?.messageIndex !== "number" || entry.messageIndex < 0) return { ok: false, error: "invalid-index" };
+    if (typeof entry?.text !== "string") return { ok: false, error: "invalid-text" };
+    const sessionId = entry.sessionId ?? conversationLoop.getSessionId();
+    // NB: messageIndex here is the UI's user-assistant ordinal. Starred
+    // storage treats it as an opaque identifier — the renderer's
+    // isEntryStarred() compares against the same ordinal so display stays
+    // stable across reloads. Edit/fork/retry paths, which touch the raw
+    // history array, translate via entryOrdinalToHistoryIndex instead.
+    const record = starredStore.add({ sessionId, messageIndex: entry.messageIndex, role: entry.role, text: entry.text });
+    return { ok: true, entry: record };
+  });
+  ipcMain.handle("lvis:starred:remove", (_e, opts: { id?: string; sessionId?: string; messageIndex?: number }) => {
+    if (!starredStore) return { ok: false, error: "no-starred-store" };
+    if (opts?.id) return { ok: starredStore.remove(opts.id) };
+    if (opts?.sessionId && typeof opts.messageIndex === "number") {
+      return { ok: starredStore.removeBySessionAndIndex(opts.sessionId, opts.messageIndex) };
+    }
+    return { ok: false, error: "invalid-args" };
   });
 }

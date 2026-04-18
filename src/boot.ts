@@ -14,6 +14,7 @@ import { MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/mark
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
 import { PluginDeploymentGuard } from "./plugins/deployment-guard.js";
+import { StarredStore } from "./data/starred-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
 import type { PluginHostApi } from "./plugins/types.js";
@@ -420,12 +421,15 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   console.log("[lvis] boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
 
+  // Sprint 4.C — starred messages store (persisted in ~/.lvis/starred.json)
+  const starredStore = new StarredStore();
+
   return {
     pluginRuntime, pluginMarketplace, taskService, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, postTurnHookChain,
-    approvalGate, knowledgeAvailable,
+    approvalGate, knowledgeAvailable, starredStore,
     refreshPluginNotifications: () => {
       disposePluginNotifications();
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
