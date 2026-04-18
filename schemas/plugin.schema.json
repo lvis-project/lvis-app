@@ -83,7 +83,19 @@
     },
     "capabilities": {
       "type": "array",
-      "items": { "type": "string" }
+      "description": "Closed vocabulary — see src/plugins/capabilities.ts (KNOWN_CAPABILITIES). Unknown values fail validation so typos don't silently grant nothing.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "ms-graph-consumer",
+          "mail-source",
+          "calendar-source",
+          "meeting-recorder",
+          "knowledge-index",
+          "background-watcher",
+          "worker-client"
+        ]
+      }
     },
     "startupTools": {
       "type": "array",

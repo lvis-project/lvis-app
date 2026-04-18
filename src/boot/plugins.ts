@@ -14,6 +14,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { ProactiveEngine } from "../core/proactive-engine.js";
 import { pluginToolsForRegistration } from "../plugins/plugin-tool-adapter.js";
+import { classifySubscription } from "../plugins/capabilities.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
 
 /** 현재 LLM 벤더의 API 키를 모든 플러그인에 범용으로 전달 */
@@ -74,8 +75,23 @@ export function registerManifestEventSubscriptions(
   proactiveEngine: ProactiveEngine,
 ): void {
   const eventTypes = new Set<string>();
-  for (const { manifest } of pluginRuntime.listPluginManifests()) {
+  for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
     for (const eventType of manifest.eventSubscriptions ?? []) {
+      // Phase 5 — namespace allowlist. Private namespaces (memory.private.*,
+      // settings.apiKey.*, audit.*, dlp.*) are never exposed to plugins;
+      // neutral namespaces pass with a warn so ops can track drift.
+      const verdict = classifySubscription(eventType);
+      if (verdict === "private") {
+        console.warn(
+          `[lvis] plugin:${pluginId} eventSubscriptions['${eventType}'] dropped — private namespace`,
+        );
+        continue;
+      }
+      if (verdict === "neutral") {
+        console.warn(
+          `[lvis] plugin:${pluginId} eventSubscriptions['${eventType}'] — outside public allowlist (allowed with warn)`,
+        );
+      }
       eventTypes.add(eventType);
     }
   }
