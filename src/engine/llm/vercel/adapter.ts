@@ -41,14 +41,21 @@ export type VercelVendor = LLMVendor | "openai-compatible";
 
 const COPILOT_BASE_URL = "https://models.github.ai/inference";
 
-/** Detect OpenAI reasoning-model families (Responses API + reasoning_effort support). */
+/**
+ * Detect OpenAI reasoning-model families (Responses API + reasoning_effort support).
+ *
+ * Parity with legacy openai-provider.ts: include the "reasoning" keyword and
+ * "o1" family so custom/aliased model names route through the reasoning path
+ * the same way the legacy provider did.
+ */
 export function isOpenAIReasoningModel(model: string): boolean {
   const m = model.toLowerCase();
   return (
     m.includes("gpt-5") ||
     m.includes("o1") ||
     m.includes("o3") ||
-    m.includes("o4")
+    m.includes("o4") ||
+    m.includes("reasoning")
   );
 }
 
