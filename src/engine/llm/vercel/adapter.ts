@@ -221,12 +221,16 @@ export class VercelUnifiedProvider implements LLMProvider {
       // precedence over legacy `maxTokens` when provided.
       const effectiveMaxOutputTokens = params.maxOutputTokens ?? params.maxTokens;
 
-      // OpenAI reasoning models (gpt-5.x, o-series) reject sampling controls
-      // (temperature, seed) on the Responses API — passing them surfaces an
-      // "AI SDK Warning" AND (depending on SDK version) an APICallError that
-      // terminates the stream mid-turn. Gate them off for this family.
-      // stopSequences is kept — Responses API accepts it.
-      const dropSamplingParams = isOpenAIReasoning;
+      // OpenAI reasoning models on the **Responses API** reject sampling
+      // controls (temperature, seed) — passing them surfaces an "AI SDK
+      // Warning" AND (depending on SDK version) an APICallError that
+      // terminates the stream mid-turn. Only the native OpenAI slot routes
+      // through `openai.responses()` (see resolveModel:337-339); the Copilot
+      // slot always uses Chat Completions and accepts temperature/seed, so we
+      // must not drop for copilot. stopSequences is kept — Responses API
+      // accepts it.
+      const dropSamplingParams =
+        slot === "openai" && isOpenAIReasoningModel(params.model);
       if (
         dropSamplingParams &&
         (params.temperature !== undefined || params.seed !== undefined) &&
@@ -234,8 +238,8 @@ export class VercelUnifiedProvider implements LLMProvider {
       ) {
         VercelUnifiedProvider.warnedReasoningSamplingDrop = true;
         console.warn(
-          "[VercelUnifiedProvider] OpenAI reasoning models do not support " +
-            "temperature/seed — dropping these params before dispatch.",
+          "[VercelUnifiedProvider] OpenAI Responses API does not support " +
+            "temperature/seed on reasoning models — dropping before dispatch.",
         );
       }
 
