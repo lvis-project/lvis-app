@@ -89,6 +89,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:memory:notes:save",
   "lvis:memory:notes:delete",
   "lvis:memory:notes:search",
+  "lvis:memory:sessions:search",
   "lvis:memory:lvis-md:get",
   "lvis:memory:lvis-md:update",
   "lvis:memory:user-prefs:get",
@@ -337,6 +338,10 @@ export function registerIpcHandlers(
   // read-only, sender guard optional
   ipcMain.handle("lvis:memory:notes:search", (_e, query: string) =>
     memoryManager.searchNotes(query),
+  );
+  // read-only, sender guard optional — D5 memory search panel
+  ipcMain.handle("lvis:memory:sessions:search", (_e, query: string) =>
+    memoryManager.searchSessions(query),
   );
   // read-only, sender guard optional
   ipcMain.handle("lvis:memory:lvis-md:get", () => memoryManager.getLvisMd());

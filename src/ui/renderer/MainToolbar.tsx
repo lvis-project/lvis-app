@@ -1,4 +1,4 @@
-import { Search, Command as CommandIcon, KeyRound, Plus, PanelsTopLeft, Download, History } from "lucide-react";
+import { Search, Command as CommandIcon, KeyRound, Plus, PanelsTopLeft, Download, History, BookOpen } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsList, TabsTrigger } from "../../components/ui/tabs.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
@@ -53,6 +53,7 @@ export function MainToolbar({
         <Tabs value={activeView} onValueChange={setActiveView}><TabsList>
           <TabsTrigger value="home">홈</TabsTrigger><TabsTrigger value="tasks">태스크</TabsTrigger>
           <TabsTrigger value="starred">즐겨찾기{starredCount > 0 ? <span className="ml-1 text-[10px] text-muted-foreground">({starredCount})</span> : null}</TabsTrigger>
+          <TabsTrigger value="memory"><BookOpen className="mr-1 h-3 w-3" />메모리</TabsTrigger>
           {pluginViews.map((i) => <TabsTrigger key={toViewKey(i)} value={toViewKey(i)}>{getPluginViewLabel(i)}</TabsTrigger>)}
         </TabsList></Tabs>
         <div className="flex items-center gap-2">

@@ -13,6 +13,7 @@ import { PluginUninstallDialog } from "./dialogs/PluginUninstallDialog.js";
 import { CommandPaletteDialog } from "./dialogs/CommandPaletteDialog.js";
 import { TaskView } from "./components/TaskView.js";
 import { StarredView } from "./components/StarredView.js";
+import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { ChatView } from "./ChatView.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
@@ -246,7 +247,7 @@ export function App() {
           />
 
           {/* Content */}
-          {activeView === "tasks" ? <TaskView api={api} /> : activeView === "starred" ? (
+          {activeView === "memory" ? <MemorySearchPanel api={api} /> : activeView === "tasks" ? <TaskView api={api} /> : activeView === "starred" ? (
             <StarredView
               api={api}
               starred={starred}

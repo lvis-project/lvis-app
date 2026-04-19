@@ -54,6 +54,7 @@ const api = {
   memorySaveNote: async (title: string, content: string) => ipcRenderer.invoke("lvis:memory:notes:save", title, content),
   memoryDeleteNote: async (filename: string) => ipcRenderer.invoke("lvis:memory:notes:delete", filename),
   memorySearchNotes: async (query: string) => ipcRenderer.invoke("lvis:memory:notes:search", query),
+  memorySearchSessions: async (query: string) => ipcRenderer.invoke("lvis:memory:sessions:search", query),
   memoryGetLvisMd: async () => ipcRenderer.invoke("lvis:memory:lvis-md:get") as Promise<string>,
   memoryUpdateLvisMd: async (content: string) => ipcRenderer.invoke("lvis:memory:lvis-md:update", content),
   memoryGetUserPrefs: async () => ipcRenderer.invoke("lvis:memory:user-prefs:get") as Promise<string>,
