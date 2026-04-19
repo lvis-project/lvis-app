@@ -1,8 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import * as nodeFs from "node:fs";
 import { PluginRuntime } from "../runtime.js";
+
+// ---------------------------------------------------------------------------
+// Module-level mock — hoisted by vitest before any imports.
+//
+// Wrap realpathSync with vi.fn() so regression tests can assert it is called
+// during reloadPlugin(). All other node:fs exports (and the real fs behaviour)
+// pass through unchanged, so existing tests that hit the real filesystem are
+// unaffected.
+// ---------------------------------------------------------------------------
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    realpathSync: vi.fn(actual.realpathSync as typeof actual.realpathSync),
+  };
+});
 
 /**
  * I2 — PluginRuntime.reloadPlugin() unit tests.
@@ -133,5 +150,31 @@ describe("PluginRuntime.reloadPlugin", () => {
     const dir = runtime.getPluginEntryDir("p-dir");
     expect(dir).toBe(join(installedDir, "p-dir"));
     expect(runtime.getPluginEntryDir("missing")).toBeUndefined();
+  });
+
+  it("reloadPlugin canonicalizes entry path via realpathSync (Windows 8.3 safety)", async () => {
+    const manifestPath = await writePlugin("p-realpath", "a");
+    await writeRegistry([{ id: "p-realpath", manifestPath }]);
+
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    await runtime.load();
+
+    // Clear call history accumulated during load() so we only observe calls
+    // that happen inside the reloadPlugin() invocation below.
+    vi.mocked(nodeFs.realpathSync).mockClear();
+
+    await runtime.reloadPlugin("p-realpath");
+
+    // realpathSync must have been invoked with the plugin's entry path.
+    // This confirms the Windows 8.3 short-path canonicalization block
+    // (RUNNER~1 → full canonical path to avoid %7E in the file:// URL)
+    // is reached inside reloadPlugin(), matching the identical pattern
+    // already present in load().
+    const calls = vi.mocked(nodeFs.realpathSync).mock.calls.map((args) => String(args[0]));
+    const entryCall = calls.find((c) => c.endsWith("entry.mjs"));
+    expect(entryCall).toBeDefined();
+
+    // Plugin must remain functional after the reload.
+    expect(runtime.listPluginIds()).toContain("p-realpath");
   });
 });
