@@ -24,6 +24,7 @@ import electronPath from "electron";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
+const binDir = resolve(repoRoot, "node_modules/.bin");
 const mainOutput = resolve(repoRoot, "dist/src/main.js");
 const htmlSrc = resolve(repoRoot, "src/index.html");
 const htmlOut = resolve(repoRoot, "dist/src/index.html");
@@ -40,12 +41,27 @@ function log(tag, msg) {
   process.stdout.write(`[dev:${tag}] ${msg}\n`);
 }
 
+function resolveLocalBin(name) {
+  const candidates = process.platform === "win32"
+    ? [resolve(binDir, `${name}.exe`), resolve(binDir, `${name}.cmd`), resolve(binDir, name)]
+    : [resolve(binDir, name)];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return name;
+}
+
 function spawnWatcher(tag, cmd, args, opts = {}) {
   const child = spawn(cmd, args, {
     cwd: repoRoot,
     stdio: ["ignore", "inherit", "inherit"],
     env: { ...process.env, LVIS_DEV: "1" },
+    shell: process.platform === "win32" && cmd.toLowerCase().endsWith(".cmd"),
     ...opts,
+  });
+  child.on("error", (err) => {
+    log(tag, `spawn failed: ${err.message}`);
+    shutdown(1);
   });
   child.on("exit", (code) => {
     if (!shuttingDown) log(tag, `watcher exited code=${code}`);
@@ -70,7 +86,12 @@ function launchElectron() {
   electronProc = spawn(electronPath, [mainOutput], {
     cwd: repoRoot,
     stdio: "inherit",
-    env: { ...process.env, LVIS_DEV: "1", ELECTRON_RUN_AS_NODE: undefined },
+    env: (() => { const e = { ...process.env, LVIS_DEV: "1", LVIS_DEV_SKIP_SIG: process.env.LVIS_DEV_SKIP_SIG ?? "1" }; delete e.ELECTRON_RUN_AS_NODE; return e; })(),
+  });
+  electronProc.on("error", (err) => {
+    log("electron", `spawn failed: ${err.message}`);
+    electronProc = null;
+    shutdown(1);
   });
   electronProc.on("exit", (code, signal) => {
     log("electron", `exited code=${code} signal=${signal ?? "-"}`);
@@ -132,6 +153,10 @@ async function main() {
       stdio: "inherit",
       env: process.env,
     });
+    plugins.on("error", (err) => {
+      log("plugins", `spawn failed: ${err.message}`);
+      shutdown(1);
+    });
     await new Promise((res) => plugins.on("exit", res));
   }
 
@@ -144,39 +169,36 @@ async function main() {
   }
 
   // Main (tsc --watch)
-  spawnWatcher("main", "npx", ["tsc", "-p", "tsconfig.json", "--watch", "--preserveWatchOutput"]);
+  spawnWatcher("main", resolveLocalBin("tsc"), ["-p", "tsconfig.json", "--watch", "--preserveWatchOutput"]);
 
   // Preload (esbuild --watch)
-  spawnWatcher("preload", "npx", [
-    "esbuild",
+  spawnWatcher("preload", resolveLocalBin("esbuild"), [
     "src/preload.ts",
     "--bundle",
     "--platform=node",
     "--format=cjs",
     "--external:electron",
     "--outfile=dist/src/preload.js",
-    "--watch",
+    "--watch=forever",
   ]);
 
   // Renderer (esbuild --watch)
-  spawnWatcher("renderer", "npx", [
-    "esbuild",
+  spawnWatcher("renderer", resolveLocalBin("esbuild"), [
     "src/renderer.tsx",
     "--bundle",
     "--platform=browser",
     "--format=esm",
     "--outfile=dist/src/renderer.js",
-    "--watch",
+    "--watch=forever",
   ]);
 
   // Styles (tailwind --watch)
-  spawnWatcher("styles", "npx", [
-    "tailwindcss",
+  spawnWatcher("styles", resolveLocalBin("tailwindcss"), [
     "-i",
     "src/styles.css",
     "-o",
     "dist/src/styles.css",
-    "--watch",
+    "--watch=always",
   ]);
 
   const ok = await waitForMain();
