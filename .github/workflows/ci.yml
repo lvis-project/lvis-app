@@ -10,32 +10,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: lvis-app
           submodules: recursive
-      - uses: actions/checkout@v4
-        with:
-          repository: lvis-project/lvis-plugin-meeting
-          path: lvis-plugin-meeting
-          token: ${{ secrets.HOST_READ_TOKEN }}
-      - uses: actions/checkout@v4
-        with:
-          repository: lvis-project/lvis-plugin-email
-          path: lvis-plugin-email
-          token: ${{ secrets.HOST_READ_TOKEN }}
-      - uses: actions/checkout@v4
-        with:
-          repository: lvis-project/lvis-plugin-pageindex
-          path: lvis-plugin-pageindex
-          token: ${{ secrets.HOST_READ_TOKEN }}
-      - uses: actions/checkout@v4
-        with:
-          repository: lvis-project/lvis-plugin-calendar
-          path: lvis-plugin-calendar
-          token: ${{ secrets.HOST_READ_TOKEN }}
       - uses: oven-sh/setup-bun@v2
+      - name: Stub sibling plugin packages for CI
+        run: |
+          for pkg in meeting email pageindex calendar; do
+            dir="../lvis-plugin-$pkg"
+            mkdir -p "$dir/dist"
+            printf '{"name":"@lvis/plugin-%s","version":"0.0.0","main":"dist/hostPlugin.js"}\n' "$pkg" > "$dir/package.json"
+            touch "$dir/dist/hostPlugin.js"
+          done
       - run: bun install --frozen-lockfile
-        working-directory: lvis-app
       - run: bun run build
-        working-directory: lvis-app
       - run: bunx vitest run
-        working-directory: lvis-app
