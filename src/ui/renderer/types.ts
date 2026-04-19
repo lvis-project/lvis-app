@@ -108,6 +108,7 @@ export type LvisApi = {
   chatSessions: () => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string }> }>;
   chatLoadSession: (sessionId: string) => Promise<{ ok: boolean; sessionId: string | null }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
+  onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
   chatGetHistory: () => Promise<{ sessionId: string; messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }> }>;
   chatEditResend: (messageIndex: number, newText: string) => Promise<{ ok: boolean; error?: string }>;
   chatFork: (messageIndex: number) => Promise<{ ok: boolean; sessionId: string | null }>;
