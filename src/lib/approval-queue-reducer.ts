@@ -18,7 +18,8 @@ export const DEFAULT_APPROVAL_QUEUE_MAX = 50;
 
 export type ApprovalQueueAction =
   | { type: "push"; req: ApprovalRequest; max?: number }
-  | { type: "shift" };
+  | { type: "shift" }
+  | { type: "clear" };
 
 export function approvalQueueReducer(
   state: ApprovalRequest[],
@@ -37,6 +38,11 @@ export function approvalQueueReducer(
     }
     case "shift":
       return state.slice(1);
+    case "clear":
+      // D4 §4.5.3 — bulk approve/deny all pending approvals at once.
+      // Consumed by use-approval.decideAll() which respond()s every pending
+      // request with the same choice before emptying the queue.
+      return [];
   }
   // Copilot review fix: TypeScript discriminated union 이 모든 case 를 cover
   // 하지만 runtime 에서 알 수 없는 action 타입이 들어오는 경우 (e.g. IPC

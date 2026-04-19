@@ -80,5 +80,47 @@ export function useApproval() {
     [],
   );
 
-  return { queue, decide };
+  /**
+   * D4 §4.5.3 — bulk decide all currently-pending approval requests.
+   *
+   * Issues the same `choice` (typically "allow-once" or "deny-once") to every
+   * queued request in parallel, then clears the queue. Used by the "모두 허용"
+   * / "모두 거부" buttons that surface in {@link ToolApprovalDialog} whenever
+   * the LLM emits multiple tool_calls in one round (§4.5.3 parallel tool
+   * execution). "always" variants are intentionally excluded here because
+   * each pending request may target a different tool name, and blanket
+   * persistence across heterogeneous tools is a footgun — users must still
+   * pick "항상 허용" / "항상 거부" per-request.
+   */
+  const decideAll = useCallback(
+    async (choice: "allow-once" | "deny-once") => {
+      if (inFlightRef.current) return;
+      const snapshot = queueRef.current.slice();
+      if (snapshot.length === 0) return;
+      inFlightRef.current = true;
+      // Clear first — respond 완료 전에 대기 UI 치워서 재클릭 방지
+      setQueue((q) => approvalQueueReducer(q, { type: "clear" }));
+      try {
+        if (window.lvis?.approval) {
+          await Promise.all(
+            snapshot.map((req) =>
+              window
+                .lvis!.approval.respond({ requestId: req.id, choice })
+                .catch((err) => {
+                  console.warn(
+                    `[lvis] approval.respond failed for ${req.id}:`,
+                    (err as Error).message,
+                  );
+                }),
+            ),
+          );
+        }
+      } finally {
+        inFlightRef.current = false;
+      }
+    },
+    [],
+  );
+
+  return { queue, decide, decideAll };
 }
