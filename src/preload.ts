@@ -131,6 +131,19 @@ const api = {
       ipcRenderer.invoke("lvis:approval:respond", decision),
   },
 
+  // ─── Audit Log Search (Observability) ────────────
+  audit: {
+    search: async (filter: {
+      dateFrom?: string;
+      dateTo?: string;
+      type?: string;
+      textSearch?: string;
+      limit?: number;
+      offset?: number;
+    }) => ipcRenderer.invoke("lvis:audit:search", filter),
+    getStats: async (lastDays: number) => ipcRenderer.invoke("lvis:audit:stats", lastDays),
+  },
+
   // ─── View Events ─────────────────────────────────
   onViewActivate: (handler: (viewKey: string) => void) => {
     const listener = (_event: unknown, payload: { viewKey?: string }) => handler(payload?.viewKey ?? "home");
