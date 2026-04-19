@@ -130,6 +130,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:starred:add",
   "lvis:starred:remove",
   "lvis:plugins:cards",
+  "lvis:telemetry:consent-answer",
 ]);
 
 /**
@@ -641,5 +642,19 @@ export function registerIpcHandlers(
       return { ok: starredStore.removeBySessionAndIndex(opts.sessionId, opts.messageIndex) };
     }
     return { ok: false, error: "invalid-args" };
+  });
+
+  // S12 — telemetry consent prompt answer (Yes/No from renderer).
+  // MUST mark telemetryPromptAnswered=true regardless of answer so the
+  // prompt is never shown again. Only sets enabled=true on affirmative.
+  ipcMain.handle("lvis:telemetry:consent-answer", (_e, accepted: boolean) => {
+    settingsService.patch({
+      telemetry: {
+        ...settingsService.get("telemetry"),
+        telemetryPromptAnswered: true,
+        enabled: accepted === true,
+      },
+    });
+    return { ok: true };
   });
 }
