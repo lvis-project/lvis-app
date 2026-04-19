@@ -23,6 +23,9 @@ export default defineConfig({
       "dist/**",
       "plugins/**",
       ".claude/**",
+      // Playwright UI E2E specs run under the `playwright test` runner,
+      // not vitest. Excluded here to avoid double-execution + import errors.
+      "test/e2e/ui/**",
     ],
   },
   resolve: {
