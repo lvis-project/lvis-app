@@ -103,14 +103,45 @@ export class MemoryManager {
       });
   }
 
-  /** notes/ 키워드 검색 — Agent Loop에서 on-demand 참조 (§5 참조 방식) */
+  /** notes/ 키워드 검색 — Agent Loop에서 on-demand 참조 (§5 참조 방식). Cap 50. */
   searchNotes(query: string): NoteEntry[] {
     const lower = query.toLowerCase();
     return this.listNotes().filter(
       (note) =>
         note.title.toLowerCase().includes(lower) ||
         note.content.toLowerCase().includes(lower),
-    );
+    ).slice(0, 50);
+  }
+
+  /** sessions/ 키워드 검색 — D5 메모리 검색 패널용. Cap 50. */
+  searchSessions(query: string): Array<{ sessionId: string; matchedMessage: string; timestamp: string }> {
+    if (!existsSync(this.sessionsDir)) return [];
+    const lower = query.toLowerCase();
+    const results: Array<{ sessionId: string; matchedMessage: string; timestamp: string }> = [];
+    const files = readdirSync(this.sessionsDir).filter((f) => f.endsWith(".jsonl"));
+    for (const file of files) {
+      if (results.length >= 50) break;
+      const sessionId = file.replace(".jsonl", "");
+      const stat = statSync(join(this.sessionsDir, file));
+      const timestamp = stat.mtime.toISOString();
+      try {
+        const raw = readFileSync(join(this.sessionsDir, file), "utf-8");
+        const lines = raw.trim().split("\n").filter(Boolean);
+        for (const line of lines) {
+          if (results.length >= 50) break;
+          let msg: unknown;
+          try { msg = JSON.parse(line); } catch { continue; }
+          const content = (msg as Record<string, unknown>)?.content;
+          if (typeof content === "string" && content.toLowerCase().includes(lower)) {
+            results.push({ sessionId, matchedMessage: content, timestamp });
+            break; // one match per session
+          }
+        }
+      } catch {
+        // skip unreadable files
+      }
+    }
+    return results;
   }
 
   /** notes/ 전체를 하나의 문자열로 — SystemPromptBuilder에서 사용 */
