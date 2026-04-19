@@ -133,6 +133,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:telemetry:consent-answer",
   "lvis:audit:search",
   "lvis:audit:stats",
+  "lvis:plugins:perf-stats",
 ]);
 
 /**
@@ -302,6 +303,7 @@ export function registerIpcHandlers(
   });
   ipcMain.handle("lvis:plugins:ui:list", () => pluginRuntime.listUiExtensions());
   ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
+  ipcMain.handle("lvis:plugins:perf-stats", () => pluginRuntime.getPerfStats());
   // H2: renderer-originated plugin calls go through callFromUi() which enforces
   // the per-plugin uiCallable[] allowlist. Methods not declared there must go
   // through ConversationLoop so permission / scope / expansion caps apply.
