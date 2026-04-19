@@ -37,7 +37,11 @@ export function useSessions(api: LvisApi) {
   useEffect(() => { void refreshSessionId(); }, [refreshSessionId]);
 
   const handleLoadSession = useCallback(
-    async (sessionId: string, streaming: boolean, setEntries: (next: ChatEntry[]) => void) => {
+    async (
+      sessionId: string,
+      streaming: boolean,
+      applyLoadedSession: (entries: ChatEntry[]) => void,
+    ) => {
       // Don't swap sessions mid-stream — ConversationLoop.runTurn() has no
       // concurrency guard, so replacing history while a turn is writing to it
       // would race. The "기록" button is also disabled during streaming, but
@@ -47,7 +51,7 @@ export function useSessions(api: LvisApi) {
         const res = await api.chatLoadSession(sessionId);
         if (!res?.ok) return;
         const h = await api.chatGetHistory();
-        setEntries(historyToEntries(h.messages));
+        applyLoadedSession(historyToEntries(h.messages));
         setCurrentSessionId(h.sessionId);
       } catch { /* ignore */ }
     },
@@ -58,12 +62,12 @@ export function useSessions(api: LvisApi) {
     async (
       histIdx: number,
       entryIdx: number,
-      setEntries: (fn: (prev: ChatEntry[]) => ChatEntry[]) => void,
+      truncateToEntry: (entryIndex: number) => void,
     ): Promise<{ ok: boolean }> => {
       try {
         const res = await api.chatFork(histIdx);
         if (res.ok) {
-          setEntries((p) => p.slice(0, entryIdx + 1));
+          truncateToEntry(entryIdx);
           await refreshSessionId();
           return { ok: true };
         }
