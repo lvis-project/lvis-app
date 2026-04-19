@@ -120,6 +120,11 @@ export function App() {
     try { await api.chatAbort(); } catch { /* no-op */ }
   }, [api]);
 
+  const handleFeedback = useCallback(async (messageIdx: number, rating: "up" | "down", reason?: string) => {
+    if (!api.submitFeedback) return;
+    try { await api.submitFeedback({ sessionId: currentSessionId, messageIndex: messageIdx, rating, reason }); } catch { /* no-op */ }
+  }, [api, currentSessionId]);
+
   const handleExport = useCallback(async (format: "markdown" | "json") => {
     try { await api.chatExport(format); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
   }, [api]);
@@ -265,6 +270,7 @@ export function App() {
                 onRetryEffort={handleRetryEffort}
                 isEntryStarred={isEntryStarred}
                 onAbort={handleAbort}
+                onFeedback={handleFeedback}
               />
             </ChatContextProvider>
           ) : (

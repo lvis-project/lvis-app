@@ -159,6 +159,10 @@ const api = {
     getStats: async (lastDays: number) => ipcRenderer.invoke("lvis:audit:stats", lastDays),
   },
 
+  // ─── D6 — Message feedback ───────────────────────
+  submitFeedback: async (payload: { sessionId: string; messageIndex: number; rating: "up" | "down"; reason?: string }) =>
+    ipcRenderer.invoke("lvis:feedback:submit", payload) as Promise<{ ok: boolean; error?: string }>,
+
   // ─── View Events ─────────────────────────────────
   onViewActivate: (handler: (viewKey: string) => void) => {
     const listener = (_event: unknown, payload: { viewKey?: string }) => handler(payload?.viewKey ?? "home");

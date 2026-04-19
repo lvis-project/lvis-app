@@ -13,7 +13,7 @@ import { createInterface } from "node:readline";
 export interface AuditEntry {
   timestamp: string;
   sessionId: string;
-  type: "turn" | "tool_call" | "approval" | "warn" | "error" | "mcp_connect" | "kill_switch" | "dlp";
+  type: "turn" | "tool_call" | "approval" | "warn" | "error" | "mcp_connect" | "kill_switch" | "dlp" | "info";
   /** DLP hit payload — populated when type === "dlp" */
   dlp?: {
     byKind: Record<string, number>;
