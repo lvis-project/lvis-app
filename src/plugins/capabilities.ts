@@ -44,6 +44,7 @@ export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   "knowledge-index",
   "background-watcher",
   "worker-client",
+  "document-indexer",
 ]);
 
 /**
@@ -113,6 +114,15 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
     {
       description:
         "Advisory — signals the plugin wraps an external process (e.g. Python uv runtime). Not gated at runtime today.",
+      enforcement: "advisory",
+      gates: [],
+    },
+  ],
+  [
+    "document-indexer",
+    {
+      description:
+        "Advisory — signals the plugin can accept on-demand file paths for indexing via pageindex_scan. Used by host capability resolver for drag & drop IPC routing.",
       enforcement: "advisory",
       gates: [],
     },

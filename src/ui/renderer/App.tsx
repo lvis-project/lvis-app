@@ -32,6 +32,7 @@ import { useStarred } from "./hooks/use-starred.js";
 import { useSessions } from "./hooks/use-sessions.js";
 import { useMarketplaceUpdates } from "./hooks/use-marketplace-updates.js";
 import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
+import { DropZoneOverlay } from "./components/DropZoneOverlay.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { useIndexedDocs } from "./hooks/use-indexed-docs.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
@@ -286,6 +287,7 @@ export function App() {
       <PluginInstallDialog target={installTarget} onClose={() => setInstallTarget(null)} onConfirm={installPlugin} working={working} />
       <CommandPaletteDialog open={commandOpen} onOpenChange={setCommandOpen} actions={commandActions} />
       <PluginUninstallDialog target={uninstallTarget} onClose={() => setUninstallTarget(null)} onConfirm={uninstallPlugin} working={working} />
+      <DropZoneOverlay />
     </TooltipProvider>
   );
 }

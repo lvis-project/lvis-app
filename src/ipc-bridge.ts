@@ -14,6 +14,7 @@ import type { AuditLogger } from "./audit/audit-logger.js";
 import type { GenericMessage } from "./engine/llm/types.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
 import type { WebContents } from "electron";
+import { findMethodByCapability } from "./boot/plugins.js";
 
 /**
  * Convert the UI's "user-assistant-only ordinal" to the real index into
@@ -143,6 +144,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:plugins:perf-stats",
   "lvis:dlp:stats",
   "lvis:chat:abort",
+  "lvis:pageindex:scan-paths",
 ]);
 
 /**
@@ -844,4 +846,21 @@ export function registerIpcHandlers(
     });
     return { ok: true };
   });
+
+  // D7 — drag & drop file indexing via document-indexer capability.
+  // Resolves the plugin method by capability + suffix filter — NO plugin-id hardcoding.
+  ipcMain.handle("lvis:pageindex:scan-paths", async (e, payload: { paths: string[] }) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:pageindex:scan-paths", e); return UNAUTHORIZED_FRAME; }
+    const method = findMethodByCapability(pluginRuntime, "document-indexer", (m) => m.endsWith("_scan"));
+    if (!method) {
+      return { ok: false, error: "no-indexer" };
+    }
+    try {
+      const result = await pluginRuntime.call(method, { paths: payload.paths });
+      return { ok: true, ...(result as object) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
 }
+
