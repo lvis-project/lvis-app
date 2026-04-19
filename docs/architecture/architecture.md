@@ -368,6 +368,7 @@ graph TB
 ### 4.2 Boot Sequence — 부팅 시 동적 업데이트
 
 > **Phase 1 갱신 (2026-04-13)**: Step 0 (Python Runtime Bootstrap) 추가. `SettingsService` 초기화 이전 맨 첫 단계로 실행된다.
+> **Wave B/C 갱신 (2026-04-19)**: 세부 로직은 `src/boot/*.ts` 모듈로 분리 완료 (`services.ts`, `plugins.ts`, `proactive.ts`, `conversation.ts`, `tools.ts`, `types.ts`). Step 7은 `createProactiveTriggerCoordinator()` — **5개 신호** (idle / schedule / meeting / task-deadline / **post-turn**) 를 평가하는 coordinator를 구성한다 (`src/boot/proactive.ts`). PostTurnHookChain은 **6단계** (compact → saveSession → extractMemory → auditLog → idle-poke → **proactive-notify**) 를 순차 실행한다 (`src/hooks/post-turn-hook-chain.ts`).
 
 **부팅 소요 시간 (Phase 1 실측 추정):**
 
@@ -749,8 +750,8 @@ flowchart TB
 | **8. reasoning 누적** | `reasoning_delta` | 중간 생각은 별도 스트림 이벤트로 누적되고, assistant round와 분리해 UI에 표시 | OpenAI reasoning 모델도 replay 지원 |
 | **9. 거버넌스/도구 실행** | `GovernancePolicy` → `PermissionManager` → `ToolExecutor.executeAll()` | 도구 호출 전 정책 차단, 승인 판단, 실행을 순서대로 수행 | GovernancePolicy는 로컬 정책 캐시를 보고, 상위 동기화 서버 broadcast로 갱신되는 설계를 유지 |
 | **10. 라운드 확정** | `onAssistantRound` callback | tool 호출 전후의 assistant 텍스트/생각을 라운드 단위로 확정 | `thought` 필드로 세션에 저장 |
-| **11. 렌더링 반영** | `ipc-bridge.ts` → `renderer.tsx` | reasoning, tool_start/tool_end, assistant_round를 UI 타임라인으로 변환 | 도구 묶음은 시각적으로만 병합 가능 |
-| **12. 턴 후처리** | `PostTurnHookChain.run()` | auto-compact, saveSession, memory extraction, audit, proactive trigger, idle를 조율 | 현재 구현은 일부만 완료, 목표 설계를 문서에 유지 |
+| **11. 렌더링 반영** | `ipc-bridge.ts` → `ui/renderer/App.tsx` (composition root) | reasoning, tool_start/tool_end, assistant_round를 UI 타임라인으로 변환 | 도구 묶음은 시각적으로만 병합 가능 |
+| **12. 턴 후처리** | `PostTurnHookChain.run()` | auto-compact, saveSession, memory extraction, audit, idle-poke, proactive-notify 6단계 조율 | **B4**: `runTurn(input, callbacks, abortSignal?)` — Ctrl/Cmd+C IPC → AbortSignal 전파로 스트리밍 중단 지원 (PR #129). **B1**: `manualCompact()` / `resetAndResume(sessionId)` IPC 구현 (PR #125). |
 
 #### 4.5.3 스트리밍 아키텍처
 
@@ -853,34 +854,30 @@ flowchart LR
 
 #### 4.5.5 Post-Turn Hooks
 
-매 assistant 턴 완료 후 실행되는 후처리 파이프라인이다. 현재 구현은 **순차 chain** 이고, 목표 설계는 여기에 **Proactive Trigger** 와 **Plugin PostTurn** 을 포함한 coordinator를 유지한다.
+매 assistant 턴 완료 후 실행되는 후처리 파이프라인이다. **B5 이후 현재 구현은 6단계 순차 chain** 이고, 목표 설계는 여기에 **Plugin PostTurn** 을 포함한 coordinator를 유지한다.
 
 ```mermaid
 flowchart LR
     TURN_DONE["턴 완료"]
 
-    TURN_DONE --> COMPACT_CHK["1. Auto-Compact"]
+    TURN_DONE --> COMPACT_CHK["1. Auto-Compact<br/>(microcompact + threshold)"]
     COMPACT_CHK --> SAVE["2. saveSession(JSONL)"]
     SAVE --> MEM_EXT["3. Memory Extraction<br/>(기억해 패턴)"]
     MEM_EXT --> AUDIT_LOG["4. Audit Log"]
-    AUDIT_LOG --> PROACTIVE_EVAL["5. Proactive Trigger 평가"]
-    PROACTIVE_EVAL --> HEARTBEAT_CFG["설정 값 기반 heartbeat"]
-    PROACTIVE_EVAL --> HEARTBEAT_COND["조건 기반 heartbeat"]
-    HEARTBEAT_CFG --> PROACTIVE_EVT["briefing / notification event"]
-    HEARTBEAT_COND --> PROACTIVE_EVT
-    PROACTIVE_EVT --> PLUGIN_HOOK["6. Plugin PostTurn Hook"]
-    PLUGIN_HOOK --> IDLE["7. Idle signal"]
+    AUDIT_LOG --> IDLE["5. Idle poke<br/>(idleScheduler.signalConversation)"]
+    IDLE --> PROACTIVE_NOTIFY["6. Proactive coordinator notify<br/>(post-turn signal — B5)"]
+    PROACTIVE_NOTIFY --> PLUGIN_HOOK["7. Plugin PostTurn Hook<br/>(목표 설계)"]
 ```
 
 | Hook | 목표 설계 | 현재 구현 단계 |
 | --- | --- | --- |
-| **Auto-Compact** | 사용률 40% 기본값 + 20% 단위 설정 기반 자동 압축 | `chat.autoCompact` + 80k token threshold |
+| **Auto-Compact** | 사용률 40% 기본값 + 20% 단위 설정 기반 자동 압축 | `chat.autoCompact` + 80k token threshold. microcompact(항상) + full compact(임계치) 2-stage 구현 |
 | **saveSession** | 매 턴 세션 히스토리 저장 및 복구 포인트 생성 | `~/.lvis/sessions/<id>.jsonl`에 저장 |
 | **Memory Extraction** | 대화/도구 결과에서 기억할 내용을 구조화 저장 | `"기억해"`류 요청을 notes/로 자동 저장 |
 | **Audit Log** | 대화·도구·정책 차단·승인 이력을 기록 | 구현됨 |
-| **Proactive Trigger** | **설정 값 기반 heartbeat** + **조건 기반 heartbeat** 로 브리핑/알림 발생 | briefing generation과 idle signal은 존재, full trigger coordinator는 확장 예정 |
+| **Idle poke** | 다음 입력 대기 전 상태 갱신과 조용한 heartbeat 보조 신호 | idle scheduler 신호 전달 구현 |
+| **Proactive notify (B5)** | post-turn 후 ProactiveTriggerCoordinator에 신호 전달 | `coordinator.notify("post-turn")` — 10분 cooldown. PR #134 (B5) |
 | **Plugin PostTurn** | 활성 플러그인의 후처리 훅 실행 | 문서상 목표 설계 유지 |
-| **Idle signal** | 다음 입력 대기 전 상태 갱신과 조용한 heartbeat 보조 신호 | idle scheduler 신호 전달 구현 |
 
 #### 4.5.6 도구 실행 파이프라인 상세
 
@@ -963,7 +960,7 @@ sequenceDiagram
 | `findToolByName()` | `ToolRegistry.findByName()` | + Plugin · MCP 동적 등록 통합 레지스트리 |
 | `canUseTool()` | `GovernancePolicy` + `PermissionManager.checkDetailed()` | + source/trust aware approval gate + 정책 동기화 전제 |
 | `StreamingToolExecutor` | `ToolExecutor.executeAll()` | + groupId, displayOrder, bash validator, rate limit |
-| Post-sampling hooks | `PostTurnHookChain.run()` | 현재: JSONL saveSession + memory extraction + audit + idle, 목표: proactive trigger + plugin post-turn 확장 |
+| Post-sampling hooks | `PostTurnHookChain.run()` | 현재: compact(2-stage) + saveSession + memory extraction + audit + idle-poke + proactive-notify(B5). 목표: plugin post-turn 확장 |
 | Auto-compact | `AutoCompact` | 목표: 40% 기본값/20% 단위 설정, 현재: 80k token threshold + on/off |
 | Wait for next input | renderer idle state | + reasoning/tool/assistant 타임라인 유지 + proactive heartbeat 예정 |
 
@@ -1093,7 +1090,7 @@ lvis-app/src/
 │   ├── App.tsx                  # composition root
 │   ├── ChatView.tsx, Sidebar.tsx, SettingsDialog.tsx, MainToolbar.tsx
 │   ├── context/                 # ChatContext (state provider for ChatView subtree)
-│   ├── hooks/                   # 12 domain hooks (settings, chat-state, briefing,
+│   ├── hooks/                   # 14 domain hooks (settings, chat-state, briefing,
 │   │                            #  approval, search, context-budget, cost-estimate,
 │   │                            #  sessions, starred, plugin-marketplace, role-presets,
 │   │                            #  app-bootstrap, indexed-docs, marketplace-updates)
@@ -1104,7 +1101,8 @@ lvis-app/src/
 │   │                            #  MarketplaceUpdateBanner
 │   ├── dialogs/                 # ApprovalDialog, PluginInstallDialog,
 │   │                            #  PluginUninstallDialog, CommandPaletteDialog
-│   ├── tabs/                    # RolesTab, PermissionsTab
+│   ├── tabs/                    # RolesTab, PermissionsTab, AuditTab,
+│   │                            #  PluginPerfTab, PrivacyTab
 │   ├── utils/                   # cost-format, html-preview, history, compose
 │   └── types.ts, constants.ts, api-client.ts
 │
@@ -1422,6 +1420,15 @@ flowchart TB
 }
 ```
 
+**Wave C 보안 강화 (PR #130–#133):**
+
+| 항목 | 구현 | PR |
+| --- | --- | --- |
+| **D1 — DLP filter on approval args** | `webContents.send` 전 `redactForLLM()` 로 승인 요청 args를 DLP 필터링. 기밀 데이터가 renderer payload 로 노출되지 않도록 차단. | #130 |
+| **D2 — HMAC nonce on approval response** | 승인 응답에 HMAC nonce 첨부. renderer → main IPC 경로의 confused-deputy 공격 방어. | #132 |
+| **D3 — Approval queue cap** | `pending.size` 상한 초과 시 신규 요청 deny-once 처리. LLM 대량 tool_use 발행 시 리소스 보호. renderer 큐 깊이 UI 표시. | #131 |
+| **D4 — Parallel tool execution + bulk approval** | `ToolExecutor.executeAll()` 병렬 실행 활성화 + `ToolApprovalDialog` 다중 승인 UI (bulk approve/deny). | #133 |
+
 ### 6.4 Tool Registry & Taxonomy — 빌트인 도구 카탈로그
 
 > Lgenie가 호출할 수 있는 **빌트인 도구**와 **플러그인 도구**를 구분하고, 카테고리별로 분류한다.
@@ -1624,7 +1631,19 @@ DLP 통계는 audit NDJSON에서 `type = "dlp"` 엔트리만 집계한다.
 
 **IPC 채널**: `lvis:dlp:stats` (days → `DlpStats`)
 
-### 6.6.5 공통 설계 원칙
+### 6.6.5 HtmlPreview 보안 — partition 격리 (A5 PR #124)
+
+`HtmlPreview` 컴포넌트(`src/ui/renderer/components/HtmlPreview.tsx`)는 플러그인이 생성한 HTML을 `<webview>` 로 렌더링한다. A5 에서 실제 네트워크 차단이 구현되었다:
+
+- **파티션**: `<webview partition="lvis-render-html">` — 전용 세션 컨텍스트로 격리.
+- **webRequest 블록**: `installHtmlPreviewPartitionBlock()` (`src/main/html-preview-partition.ts`) 가 앱 `ready` 후 `session.fromPartition("lvis-render-html").webRequest.onBeforeRequest()` 로 **모든 http/https/ftp 요청을 차단** 한다. `file://` 및 `blob://` 만 허용.
+- **효과**: 악성 플러그인 HTML 이 외부 서버로 데이터를 유출하거나 원격 스크립트를 로드하는 것을 OS 네트워크 계층에서 차단한다.
+
+### 6.6.6 Playwright-Electron E2E 테스트 인프라 (E4 PR #135)
+
+`e2e/` 디렉터리(프로젝트 루트 기준)에 Playwright-electron 기반 UI E2E 인프라가 추가되었다. Electron 프로세스를 실제로 실행해 preload 로드 경로, IPC 라운드트립, renderer 마운트를 물리적으로 검증한다. CI workflow 는 opt-in (`E2E=1`) 으로 실행한다.
+
+### 6.6.7 공통 설계 원칙
 
 - **로컬 우선**: 모든 통계는 `~/.lvis/` 로컬 파일 기반. 서버 전송 없음.
 - **탭 분리**: `src/ui/renderer/tabs/` 아래 각 탭이 독립 컴포넌트. `SettingsDialog.tsx`는 탭 등록만 담당.
@@ -1677,7 +1696,9 @@ flowchart TB
     ACTION_SUGGEST --> TASK_CREATE
 ```
 
-**트리거 모델**
+**트리거 모델 — ProactiveTriggerCoordinator (Wave B/C 완료)**
+
+`ProactiveTriggerCoordinator` (`src/core/proactive-trigger-coordinator.ts`) 가 60s tick + 외부 이벤트 poke 로 아래 **5개 신호**를 평가해 `generateDailyBriefing()` 를 발동한다. 30분 debounce 내장.
 
 ```mermaid
 flowchart LR
@@ -1685,7 +1706,7 @@ flowchart LR
     EVENTS["이메일 · 캘린더 · 태스크 · Agent Hub · Approval Queue"]
     SCHEDULED["설정 값 기반 heartbeat"]
     CONDITIONAL["조건 기반 heartbeat"]
-    TRIGGER["Proactive Trigger"]
+    TRIGGER["ProactiveTriggerCoordinator"]
     OUTPUT["Briefing / Notification / Reminder"]
 
     SETTINGS --> SCHEDULED
@@ -1694,6 +1715,14 @@ flowchart LR
     CONDITIONAL --> TRIGGER
     TRIGGER --> OUTPUT
 ```
+
+| 신호 | 팩토리 함수 | 동작 |
+| --- | --- | --- |
+| **idle** | `createIdleSignal()` | IdleScheduler 가 IDLE_SCAN 상태일 때 fire |
+| **schedule** | `createScheduleSignal()` | KST 08:30 (기본) 5분 윈도우 내 1일 1회 fire |
+| **meeting** | `createMeetingSignal()` | calendar-source capability 플러그인 이벤트 — 미팅 10분 전 fire |
+| **task-deadline** | `createTaskDeadlineSignal()` | pending 태스크 dueAt 2시간 내 fire |
+| **post-turn** ✅ | `createPostTurnSignal()` | 대화 턴 완료 후 `PostTurnHookChain` → `coordinator.notify("post-turn")`. 10분 cooldown. (B5 PR #134) |
 
 | 트리거 유형 | 예시 | 의도 |
 | --- | --- | --- |
