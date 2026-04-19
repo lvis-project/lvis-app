@@ -82,6 +82,8 @@ const api = {
 
   // ─── Usage Observability (Sprint 4.B) ────────────
   getUsageSummary: async (days?: number) => ipcRenderer.invoke("lvis:usage:summary", days),
+  getUsageRange: async (opts: { dateFrom: string; dateTo: string }) => ipcRenderer.invoke("lvis:usage:range", opts),
+  exportUsageCsv: async (rows: Array<Record<string, string | number>>) => ipcRenderer.invoke("lvis:usage:export-csv", rows),
 
   // ─── Proactive (Sprint 3-A: briefing card + snooze/dismiss) ───
   onProactiveBriefing: (handler: (briefing: { generatedAt: string; items: Array<{ category: string; priority: string; title: string; detail?: string }>; summary?: string }) => void) => {

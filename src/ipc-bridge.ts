@@ -120,6 +120,8 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:proactive:snooze-briefing",
   // Sprint 4.B — usage observability
   "lvis:usage:summary",
+  "lvis:usage:range",
+  "lvis:usage:export-csv",
   // Sprint 4.C — conversation UX
   "lvis:chat:get-history",
   "lvis:chat:edit-resend",
@@ -427,6 +429,28 @@ export function registerIpcHandlers(
   ipcMain.handle("lvis:usage:summary", async (_e, days?: number) => {
     const { getUsageSummary } = await import("./engine/usage-stats.js");
     return getUsageSummary(typeof days === "number" ? days : 60);
+  });
+
+  ipcMain.handle("lvis:usage:range", async (_e, opts: { dateFrom: string; dateTo: string }) => {
+    const { getUsageRange } = await import("./engine/usage-stats.js");
+    return getUsageRange(opts);
+  });
+
+  ipcMain.handle("lvis:usage:export-csv", async (_e, rows: Array<Record<string, string | number>>) => {
+    const { dialog, BrowserWindow } = await import("electron");
+    const win = BrowserWindow.getFocusedWindow() ?? undefined;
+    const result = win
+      ? await dialog.showSaveDialog(win, { defaultPath: "lvis-usage.csv", filters: [{ name: "CSV", extensions: ["csv"] }] })
+      : await dialog.showSaveDialog({ defaultPath: "lvis-usage.csv", filters: [{ name: "CSV", extensions: ["csv"] }] });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    const { writeFileSync } = await import("node:fs");
+    const headers = ["date", "vendor", "model", "inputTokens", "outputTokens", "totalTokens", "cost"];
+    const lines = [
+      headers.join(","),
+      ...rows.map((r) => headers.map((h) => JSON.stringify(r[h] ?? "")).join(",")),
+    ];
+    writeFileSync(result.filePath, lines.join("\n"), "utf-8");
+    return { ok: true, filePath: result.filePath };
   });
 
   // Sprint 2-D: user dismissal — sets lastDismissedAt, which suppresses the
