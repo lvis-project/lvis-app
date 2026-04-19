@@ -12,7 +12,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../../components/ui/command.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
-import { appendUserEntry } from "../../lib/chat-stream-state.js";
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import type {
@@ -52,7 +51,6 @@ export function App() {
   // Chat state — Phase 3.2 hook
   const {
     entries,
-    setEntries,
     streaming,
     setStreaming,
     editingEntryIdx,
@@ -63,6 +61,11 @@ export function App() {
     handleRetryEffort,
     resetStreamAccumulators,
     setErrorWithThought,
+    seedBriefing,
+    clearForNewChat,
+    appendUserEntry,
+    applyLoadedSession,
+    truncateToEntry,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -133,8 +136,8 @@ export function App() {
   } = useSessions(api);
 
   const handleLoadSession = useCallback(
-    (sessionId: string) => sessionLoad(sessionId, streaming, setEntries),
-    [sessionLoad, streaming, setEntries],
+    (sessionId: string) => sessionLoad(sessionId, streaming, applyLoadedSession),
+    [sessionLoad, streaming, applyLoadedSession],
   );
 
   const isEntryStarred = useCallback(
@@ -149,9 +152,9 @@ export function App() {
     async (entryIdx: number) => {
       const histIdx = entryIndexToHistoryIndex.get(entryIdx);
       if (histIdx === undefined) return;
-      await sessionFork(histIdx, entryIdx, setEntries);
+      await sessionFork(histIdx, entryIdx, truncateToEntry);
     },
-    [entryIndexToHistoryIndex, sessionFork, setEntries],
+    [entryIndexToHistoryIndex, sessionFork, truncateToEntry],
   );
 
   // ─── Retry with deeper thinking — provided by useChatState ─────
@@ -205,7 +208,7 @@ export function App() {
     if (!(await checkApiKey())) { setSettingsOpen(true); return; }
     setQuestion("");
     const outgoing = composeOutgoing(t);
-    setEntries((p) => appendUserEntry(p, t));
+    appendUserEntry(t);
     resetStreamAccumulators();
     setStreaming(true);
     try {
@@ -214,7 +217,7 @@ export function App() {
     } catch (err) {
       setErrorWithThought(`오류: ${(err as Error).message}`);
     } finally { setStreaming(false); }
-  }, [api, streaming, checkApiKey, composeOutgoing, setEntries, resetStreamAccumulators, setStreaming, setErrorWithThought]);
+  }, [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, setStreaming, setErrorWithThought]);
 
   // ─── Sprint B: PageIndex document list loader ───────────────
   const refreshIndexedDocs = useCallback(async () => {
@@ -249,7 +252,7 @@ export function App() {
     composeOutgoing,
   });
 
-  const handleNewChat = useCallback(async () => { await api.chatNew(); setEntries([]); void refreshSessionId(); }, [api, refreshSessionId]);
+  const handleNewChat = useCallback(async () => { await api.chatNew(); clearForNewChat(); void refreshSessionId(); }, [api, refreshSessionId, clearForNewChat]);
 
   // ─── Plugin actions ───────────────────────────
   const refreshViews = async () => { const v = (await api.listPluginUiExtensions()).filter((i) => i.extension.slot === "sidebar"); setPluginViews(v); return v; };
@@ -268,7 +271,7 @@ export function App() {
 
     // 앱 시작 시 데일리 브리핑을 채팅 메시지로 전달
     api.getBriefing().then((text) => {
-      if (text && isMountedRef.current) setEntries([{ kind: "assistant", text }]);
+      if (text && isMountedRef.current) seedBriefing([{ kind: "assistant", text }]);
     }).catch(() => {});
     const dv = api.onViewActivate((k) => { if (isMountedRef.current) setActiveView(k); });
     const onKey = (e: KeyboardEvent) => {
