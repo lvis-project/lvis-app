@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { emitEvent, onEvent, offEvent } from "../boot/types.js";
+import { emitEvent, onEvent } from "../boot/types.js";
 import { requiredCapabilityForEmit, classifySubscription } from "../plugins/capabilities.js";
 
 /** Minimal capability-gated emitEvent stub (mirrors boot.ts §createHostApi) */
