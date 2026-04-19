@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  appendUserEntry,
   applyToolEnd,
   applyToolStart,
   finalizeStreamingAssistant,
@@ -18,8 +19,9 @@ import type { LvisApi } from "../types.js";
  * stream subscription (finalize/tool/error/redact/compact/done), edit state,
  * and edit/retry handlers.
  *
- * `setEntries` is still exposed for App-level flows (briefing seeding,
- * session load, fork truncation, handleAsk user append + error path).
+ * Exposes intent methods (seedBriefing / clearForNewChat / appendUserEntry /
+ * applyLoadedSession / truncateToEntry) instead of raw `setEntries` so that
+ * App-level orchestration cannot mutate entry shape directly.
  */
 export function useChatState(api: LvisApi) {
   const [entries, setEntries] = useState<ChatEntry[]>([]);
@@ -212,9 +214,31 @@ export function useChatState(api: LvisApi) {
     thoughtRef.current = "";
   }, []);
 
+  // ── Intent methods (replace raw setEntries) ──
+  const seedBriefing = useCallback((seeded: ChatEntry[]) => {
+    setEntries(seeded);
+  }, []);
+
+  const clearForNewChat = useCallback(() => {
+    setEntries([]);
+    streamRef.current = "";
+    thoughtRef.current = "";
+  }, []);
+
+  const appendUserMessage = useCallback((content: string): void => {
+    setEntries((p) => appendUserEntry(p, content));
+  }, []);
+
+  const applyLoadedSession = useCallback((loaded: ChatEntry[]) => {
+    setEntries(loaded);
+  }, []);
+
+  const truncateToEntry = useCallback((entryIndex: number) => {
+    setEntries((p) => p.slice(0, entryIndex + 1));
+  }, []);
+
   return {
     entries,
-    setEntries,
     streaming,
     setStreaming,
     editingEntryIdx,
@@ -225,5 +249,11 @@ export function useChatState(api: LvisApi) {
     handleRetryEffort,
     resetStreamAccumulators,
     setErrorWithThought,
+    // intent methods
+    seedBriefing,
+    clearForNewChat,
+    appendUserEntry: appendUserMessage,
+    applyLoadedSession,
+    truncateToEntry,
   };
 }
