@@ -76,6 +76,17 @@ export interface PluginManifest {
     string,
     {
       description: string;
+      /**
+       * §6.4 Tool versioning — optional semver string for this tool. When
+       * omitted, the plugin manifest's top-level `version` is used as the
+       * tool version so plugins that ship tools in lock-step with their
+       * release don't need to repeat themselves.
+       */
+      version?: string;
+      /** §6.4 — semver string marking deprecation; triggers runtime warn. */
+      deprecatedSince?: string;
+      /** §6.4 — name of the replacement tool (transparent redirect). */
+      replacedBy?: string;
       inputSchema: {
         $schema?: string;
         type: "object";

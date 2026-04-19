@@ -19,16 +19,80 @@
 import type { Tool } from "./base.js";
 import type { DenyRule } from "./types.js";
 
-export class ToolRegistry {
-  private readonly tools = new Map<string, Tool>();
-  private denyRules: DenyRule[] = [];
+/**
+ * §6.4 — observer fired whenever a deprecated tool is resolved via
+ * {@link ToolRegistry.findByName}. Supplies enough context for an audit
+ * listener (AuditLogger, cost-monitor) to log a `warn`/`tool_call` entry
+ * without pulling AuditLogger into this module.
+ */
+export interface DeprecationEvent {
+  /** Name the caller requested. */
+  requested: string;
+  /** Resolved tool (may differ from requested when `replacedBy` redirect fires). */
+  resolved: Tool;
+  deprecatedSince: string;
+  replacedBy?: string;
+}
 
-  /** Register a tool. Throws if a tool with the same name already exists. */
-  register(tool: Tool): void {
-    if (this.tools.has(tool.name)) {
-      throw new Error(`Tool already registered: ${tool.name}`);
+/**
+ * Compare two semver-ish version strings. Returns `a < b ? -1 : a > b ? 1 : 0`.
+ * Non-numeric segments fall back to lexical compare so pre-release tags
+ * (`1.0.0-beta`) still sort deterministically. Good enough for picking
+ * "latest" among registered versions without pulling in `semver`.
+ */
+function compareSemver(a: string, b: string): number {
+  const pa = a.split(/[.+-]/);
+  const pb = b.split(/[.+-]/);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const sa = pa[i] ?? "0";
+    const sb = pb[i] ?? "0";
+    const na = Number(sa);
+    const nb = Number(sb);
+    const bothNum = !Number.isNaN(na) && !Number.isNaN(nb);
+    if (bothNum) {
+      if (na !== nb) return na < nb ? -1 : 1;
+    } else {
+      if (sa !== sb) return sa < sb ? -1 : 1;
     }
-    this.tools.set(tool.name, tool);
+  }
+  return 0;
+}
+
+export class ToolRegistry {
+  /**
+   * `name → latest active tool` — fast path for the common lookup.
+   * Populated/updated on every register; may point at a deprecated tool when
+   * no active version exists.
+   */
+  private readonly tools = new Map<string, Tool>();
+  /**
+   * `name → (version → tool)` — secondary index that keeps every registered
+   * version so legacy callers can pin a specific version via
+   * {@link findByNameVersion} while the LLM-facing path sees only the latest.
+   */
+  private readonly versioned = new Map<string, Map<string, Tool>>();
+  private denyRules: DenyRule[] = [];
+  private deprecationHandler: ((event: DeprecationEvent) => void) | null = null;
+
+  /**
+   * Register a tool.
+   *
+   * - Same name + same version → throws (duplicate registration bug).
+   * - Same name + different version → stored in the version index; the
+   *   name→tool map points at whichever version is newest (semver compare)
+   *   and is not deprecated.
+   */
+  register(tool: Tool): void {
+    const versionMap = this.versioned.get(tool.name) ?? new Map<string, Tool>();
+    if (versionMap.has(tool.version)) {
+      throw new Error(
+        `Tool already registered: ${tool.name}@${tool.version}`,
+      );
+    }
+    versionMap.set(tool.version, tool);
+    this.versioned.set(tool.name, versionMap);
+    this.tools.set(tool.name, this.pickLatest(versionMap));
   }
 
   /** Bulk register — used by plugin load and builtin tool registration. */
@@ -36,15 +100,19 @@ export class ToolRegistry {
     for (const tool of tools) this.register(tool);
   }
 
-  /** Remove a single tool by name. No-op if absent. */
+  /** Remove a single tool by name (every registered version). No-op if absent. */
   unregister(name: string): void {
     this.tools.delete(name);
+    this.versioned.delete(name);
   }
 
   /** Remove every tool contributed by the given plugin. */
   unregisterByPlugin(pluginId: string): void {
-    for (const [name, tool] of this.tools) {
-      if (tool.pluginId === pluginId) this.tools.delete(name);
+    for (const [name, versionMap] of this.versioned) {
+      for (const [version, tool] of versionMap) {
+        if (tool.pluginId === pluginId) versionMap.delete(version);
+      }
+      this.syncLatest(name, versionMap);
     }
   }
 
@@ -53,14 +121,77 @@ export class ToolRegistry {
    * given MCP server in one pass. Called by McpManager.killSwitch.
    */
   unregisterByMcp(mcpServerId: string): void {
-    for (const [name, tool] of this.tools) {
-      if (tool.mcpServerId === mcpServerId) this.tools.delete(name);
+    for (const [name, versionMap] of this.versioned) {
+      for (const [version, tool] of versionMap) {
+        if (tool.mcpServerId === mcpServerId) versionMap.delete(version);
+      }
+      this.syncLatest(name, versionMap);
     }
   }
 
-  /** §4.5.6 lookup — used by the executor's Step 1 (Lookup). */
+  /**
+   * §4.5.6 lookup — used by the executor's Step 1 (Lookup).
+   *
+   * Resolution order:
+   *   1. Look up the `name → latest` map entry.
+   *   2. If the resolved tool carries `replacedBy`, follow the redirect to
+   *      the replacement tool (one-hop only to avoid cycles) and emit a
+   *      deprecation event for the legacy name.
+   *   3. If the resolved tool carries `deprecatedSince` (with no redirect),
+   *      still emit a deprecation event so audit/telemetry can observe it.
+   */
   findByName(name: string): Tool | undefined {
-    return this.tools.get(name);
+    const hit = this.tools.get(name);
+    if (!hit) return undefined;
+    if (hit.replacedBy) {
+      const replacement = this.tools.get(hit.replacedBy);
+      if (replacement) {
+        this.emitDeprecation({
+          requested: name,
+          resolved: replacement,
+          deprecatedSince: hit.deprecatedSince ?? hit.version,
+          replacedBy: hit.replacedBy,
+        });
+        return replacement;
+      }
+    }
+    if (hit.deprecatedSince) {
+      this.emitDeprecation({
+        requested: name,
+        resolved: hit,
+        deprecatedSince: hit.deprecatedSince,
+        replacedBy: hit.replacedBy,
+      });
+    }
+    return hit;
+  }
+
+  /**
+   * Pin a specific version — used by legacy callers that need the old
+   * behaviour during a deprecation window. Does NOT emit a deprecation
+   * event (caller has explicitly opted in).
+   */
+  findByNameVersion(name: string, version: string): Tool | undefined {
+    return this.versioned.get(name)?.get(version);
+  }
+
+  /** Every registered version of `name`, ordered oldest → newest. */
+  listVersions(name: string): Tool[] {
+    const map = this.versioned.get(name);
+    if (!map) return [];
+    return [...map.values()].sort((a, b) =>
+      compareSemver(a.version, b.version),
+    );
+  }
+
+  /**
+   * Install/replace the deprecation observer. Passing `null` clears it.
+   * Wired by boot.ts to {@link AuditLogger.log} so every deprecated-tool
+   * call lands in the daily JSONL + `warn` stream without coupling the
+   * registry to AuditLogger directly.
+   */
+  setDeprecationHandler(handler: ((event: DeprecationEvent) => void) | null): void {
+    this.deprecationHandler = handler;
   }
 
   /** Full tool list (includes denied tools — for diagnostics). */
@@ -165,6 +296,48 @@ export class ToolRegistry {
   }
 
   // ─── Private ──────────────────────────────────────
+
+  /**
+   * Pick the newest version from a version map, preferring active tools
+   * over deprecated ones. When every registered version is deprecated the
+   * newest deprecated tool wins — callers still see it but the deprecation
+   * observer fires on each lookup.
+   */
+  private pickLatest(versionMap: Map<string, Tool>): Tool {
+    const tools = [...versionMap.values()];
+    const active = tools.filter((t) => !t.deprecatedSince);
+    const pool = active.length > 0 ? active : tools;
+    return pool.reduce((best, cur) =>
+      compareSemver(cur.version, best.version) > 0 ? cur : best,
+    );
+  }
+
+  /** Recompute the `tools` map entry for `name` after a version change. */
+  private syncLatest(name: string, versionMap: Map<string, Tool>): void {
+    if (versionMap.size === 0) {
+      this.tools.delete(name);
+      this.versioned.delete(name);
+      return;
+    }
+    this.tools.set(name, this.pickLatest(versionMap));
+  }
+
+  private emitDeprecation(event: DeprecationEvent): void {
+    const redirect = event.replacedBy ? ` → ${event.replacedBy}` : "";
+    console.warn(
+      `[tool-registry] deprecated tool call: ${event.requested}@${event.resolved.version} (deprecatedSince=${event.deprecatedSince})${redirect}`,
+    );
+    if (this.deprecationHandler) {
+      try {
+        this.deprecationHandler(event);
+      } catch (err) {
+        console.warn(
+          `[tool-registry] deprecation handler threw:`,
+          (err as Error).message,
+        );
+      }
+    }
+  }
 
   private isDenied(name: string): boolean {
     return this.denyRules.some((rule) =>

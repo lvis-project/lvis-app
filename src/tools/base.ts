@@ -49,6 +49,25 @@ export interface Tool {
   readonly category?: ToolCategory;
   readonly pluginId?: string;
   readonly mcpServerId?: string;
+  /**
+   * §6.4 Tool versioning — semver string (e.g. "1.0.0"). Required so the
+   * registry can pick the latest implementation when multiple versions of the
+   * same tool are registered and so deprecation metadata has a concrete
+   * baseline. Hand-written tools default to "1.0.0" via {@link ZodTool}.
+   */
+  readonly version: string;
+  /**
+   * Semver string marking when this tool was deprecated. When present, the
+   * registry emits a warning on every invocation lookup so callers can
+   * observe usage during the migration window. Undefined = active tool.
+   */
+  readonly deprecatedSince?: string;
+  /**
+   * Name of the tool that replaces this one. When set, registry lookups for
+   * the deprecated name transparently redirect to the replacement tool so
+   * existing callers keep working through the deprecation window.
+   */
+  readonly replacedBy?: string;
 
   /** JSON Schema describing the input shape — sent to LLM providers. */
   toJsonSchema(): unknown;
@@ -84,6 +103,10 @@ export abstract class ZodTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny>
   readonly category?: ToolCategory;
   readonly pluginId?: string;
   readonly mcpServerId?: string;
+  /** §6.4 — default version for hand-written builtins. Override via `override readonly version = "2.0.0"`. */
+  readonly version: string = "1.0.0";
+  readonly deprecatedSince?: string;
+  readonly replacedBy?: string;
 
   toJsonSchema(): unknown {
     // zod v4 ships with native JSON Schema export.
@@ -126,6 +149,12 @@ export interface DynamicToolSpec {
   category?: ToolCategory;
   pluginId?: string;
   mcpServerId?: string;
+  /** §6.4 — semver. Defaults to "1.0.0" when omitted. */
+  version?: string;
+  /** §6.4 — semver string marking deprecation; enables warn on lookup. */
+  deprecatedSince?: string;
+  /** §6.4 — replacement tool name; enables transparent redirect. */
+  replacedBy?: string;
   /** Raw JSON Schema — used when no Zod schema is available (plugin/MCP). */
   jsonSchema: object;
   execute: (
@@ -150,6 +179,9 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     category: spec.category,
     pluginId: spec.pluginId,
     mcpServerId: spec.mcpServerId,
+    version: spec.version ?? "1.0.0",
+    deprecatedSince: spec.deprecatedSince,
+    replacedBy: spec.replacedBy,
     toJsonSchema: () => spec.jsonSchema,
     isReadOnly: spec.isReadOnly ?? ((): boolean => false),
     execute: spec.execute,
