@@ -169,6 +169,11 @@ export class ConversationLoop {
     this.lastTurnScope?.delete(pluginId);
   }
 
+  /** B4: Abort the current streaming turn. No-op if no turn in flight. */
+  abortCurrentTurn(): void {
+    this.currentAbortController?.abort();
+  }
+
   /** 설정 변경 시 Provider 재생성 — 벤더별 API 키 조회 */
   refreshProvider(): void {
     const llmSettings = this.deps.settingsService.get("llm");
@@ -203,11 +208,6 @@ export class ConversationLoop {
 
   hasProvider(): boolean {
     return this.provider !== null;
-  }
-
-  /** B4: Abort the current streaming turn. No-op if no turn in flight. */
-  abortCurrentTurn(): void {
-    this.currentAbortController?.abort();
   }
 
   /** 앱 시작 시 비서 스타일 데일리 브리핑 생성 — 항목 없으면 null 반환 */
@@ -420,15 +420,20 @@ ${briefingData}
     // B4: set up abort controller for this turn
     const ac = new AbortController();
     this.currentAbortController = ac;
-    // if caller passes an external signal, forward it
-    abortSignal?.addEventListener("abort", () => ac.abort(), { once: true });
+    if (abortSignal?.aborted) {
+      ac.abort();
+    } else {
+      abortSignal?.addEventListener("abort", () => ac.abort(), { once: true });
+    }
     const turnSignal = ac.signal;
+
 
     // §4.3 Step 1-2: 분류 + 라우팅
     const classification = this.deps.keywordEngine.classify(input);
     const routeResult = this.deps.routeEngine.route(classification);
 
     if (routeResult.route === "command") {
+      this.currentAbortController = null;
       return this.handleCommand(routeResult.command, routeResult.args, callbacks);
     }
 
@@ -573,6 +578,10 @@ ${briefingData}
           this.cumulativeUsage.outputTokens = usageSnapshot.outputTokens;
         };
 
+        // B4: check abort before entering the stream loop
+        if (abortSignal?.aborted) {
+          return { earlyReturn: true as const, text: textContent, interrupted: true };
+        }
         const llmSettings = this.deps.settingsService.get("llm");
         for await (const event of this.provider!.streamTurn({
           model,

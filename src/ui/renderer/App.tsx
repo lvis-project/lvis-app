@@ -115,6 +115,10 @@ export function App() {
     [starredToggle, entries, currentSessionId, entryIndexToHistoryIndex],
   );
 
+  const handleAbort = useCallback(async () => {
+    try { await api.chatAbort(); } catch { /* no-op */ }
+  }, [api]);
+
   const handleExport = useCallback(async (format: "markdown" | "json") => {
     try { await api.chatExport(format); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
   }, [api]);
@@ -259,6 +263,7 @@ export function App() {
                 onToggleStar={handleToggleStar}
                 onRetryEffort={handleRetryEffort}
                 isEntryStarred={isEntryStarred}
+                onAbort={handleAbort}
               />
             </ChatContextProvider>
           ) : (

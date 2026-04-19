@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import { ChevronDown, Globe, KeyRound, Loader2, Paperclip, Pencil, Star, User, X as XIcon, GitBranch } from "lucide-react";
+import { useCallback, useEffect } from "react";
+import { ChevronDown, Globe, KeyRound, Loader2, Paperclip, Pencil, Square, Star, User, X as XIcon, GitBranch } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
@@ -29,9 +29,11 @@ export interface ChatViewProps {
   onToggleStar: (idx: number) => void | Promise<void>;
   onRetryEffort: () => void | Promise<void>;
   isEntryStarred: (idx: number) => string | null;
+  /** B4: abort current streaming turn */
+  onAbort: () => void | Promise<void>;
 }
 
-export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred }: ChatViewProps) {
+export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort }: ChatViewProps) {
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef,
@@ -49,6 +51,21 @@ export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffor
   } = useChatContext();
 
   const handleAskCurrent = useCallback(() => { void onAsk(question); }, [onAsk, question]);
+
+  // B4: Ctrl/Cmd+C while streaming and no text selected → abort
+  useEffect(() => {
+    if (!streaming) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+        const sel = window.getSelection();
+        if (sel && sel.toString().length > 0) return; // let copy work normally
+        e.preventDefault();
+        void onAbort();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [streaming, onAbort]);
 
   return (
     <div className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto]">
@@ -258,7 +275,10 @@ export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffor
             placeholder={hasApiKey === false ? "API 키를 먼저 설정해 주세요..." : "질문 입력 (Enter 전송 / Shift+Enter 줄바꿈) · /command 사용 가능"}
             className="min-h-[76px]" disabled={streaming} />
           <div className="flex flex-col items-stretch gap-1">
-            <Button onClick={handleAskCurrent} disabled={streaming || !question.trim() || contextOverflowPct >= 0.95}>{streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : "전송"}</Button>
+            {streaming
+              ? <Button variant="destructive" onClick={() => void onAbort()} title="스트리밍 중단 (Ctrl/Cmd+C)"><Square className="h-4 w-4 mr-1" />중단</Button>
+              : <Button onClick={handleAskCurrent} disabled={!question.trim() || contextOverflowPct >= 0.95}><Loader2 className="h-4 w-4 mr-1 hidden" />전송</Button>
+            }
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className={`text-center text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">

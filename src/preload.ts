@@ -37,6 +37,7 @@ const api = {
   chatExport: async (format: "markdown" | "json") => ipcRenderer.invoke("lvis:chat:export", format),
   chatCompact: async () => ipcRenderer.invoke("lvis:chat:compact"),
   chatSessionResume: async (sessionId: string) => ipcRenderer.invoke("lvis:chat:session-resume", sessionId),
+  chatAbort: async () => ipcRenderer.invoke("lvis:chat:abort") as Promise<{ ok: boolean }>,
   starredList: async () => ipcRenderer.invoke("lvis:starred:list"),
   starredAdd: async (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) =>
     ipcRenderer.invoke("lvis:starred:add", entry),
