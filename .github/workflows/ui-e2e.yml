@@ -93,9 +93,6 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: lvis-app
         run: npx playwright test
-        env:
-          # Playwright on Windows uses native display — no DISPLAY env var needed
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "0"
 
       - name: Upload Playwright report
         if: always()
