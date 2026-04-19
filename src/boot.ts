@@ -273,8 +273,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
         });
         console.log(`[lvis] plugin:${pluginId} created task: "${task.title.slice(0, 50)}"`);
       },
-      saveNote: (title, content) => {
-        memoryManager.saveNote(title, content);
+      saveNote: async (title, content) => {
+        await memoryManager.saveNote(title, content);
         console.log(`[lvis] plugin:${pluginId} saved note: "${title}"`);
       },
       getSecret: (key) => {

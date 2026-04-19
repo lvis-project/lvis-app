@@ -189,7 +189,7 @@ export function registerBuiltinTools(
       },
       execute: async (rawInput) => {
         const args = (rawInput ?? {}) as Record<string, unknown>;
-        const note = memoryManager.saveNote(
+        const note = await memoryManager.saveNote(
           args.title as string,
           args.content as string,
         );
