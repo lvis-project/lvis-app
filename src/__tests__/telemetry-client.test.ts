@@ -125,8 +125,9 @@ describe("PluginTelemetryClient", () => {
     expect(scrubPii("1.2.3")).toBe("1.2.3");
   });
 
-  // 6. Flush sends correct payload fields
-  it("flush includes device_uuid and install_token in POST body", async () => {
+  // 6. Flush sends correct payload fields — install_token travels in the
+  //    Authorization header ONLY, never in the event body (S12 FU1).
+  it("flush sends install_token via Authorization header, never in body", async () => {
     const fetch = okFetch();
     const client = new PluginTelemetryClient(
       makeDeps({ fetchImpl: fetch, installToken: "ghp_test_token_abc" }),
@@ -141,10 +142,34 @@ describe("PluginTelemetryClient", () => {
     expect(ev.name).toBe("plugin_install");
     expect(typeof ev.device_uuid).toBe("string");
     expect(ev.device_uuid).toHaveLength(36); // UUID format
-    expect(ev.install_token).toBe("ghp_test_token_abc");
+    // Install token MUST NOT appear anywhere in the serialized body.
+    expect(ev.install_token).toBeUndefined();
+    expect(init.body as string).not.toContain("ghp_test_token_abc");
     // Authorization header set
     const headers = init.headers as Record<string, string>;
     expect(headers["Authorization"]).toBe("Bearer ghp_test_token_abc");
+  });
+
+  // 6b. Concurrent flush calls coalesce — only one POST per batch.
+  it("concurrent flush() calls share the in-flight request", async () => {
+    let resolveFetch: (v: Response) => void = () => {};
+    const fetch = vi.fn().mockImplementation(
+      () =>
+        new Promise<Response>((r) => {
+          resolveFetch = r;
+        }),
+    );
+    const client = new PluginTelemetryClient(
+      makeDeps({ fetchImpl: fetch as unknown as typeof globalThis.fetch }),
+    );
+    client.track("plugin_install", { slug: "com.lge.foo", version: "1.0.0" });
+    const a = client.flush();
+    const b = client.flush();
+    const c = client.flush();
+    resolveFetch({ ok: true, status: 200 } as Response);
+    await Promise.all([a, b, c]);
+    // Only one POST, regardless of how many overlapping flush() calls arrived.
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   // 7. Flush is a no-op when queue is empty
