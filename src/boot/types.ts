@@ -75,6 +75,7 @@ export interface AppServices {
   idleScheduler?: IdleSchedulerService;
   bashAstValidator: BashAstValidator;
   auditService: AuditService;
+  /** A3 — structured audit logger (JSONL, ~/.lvis/audit/) */
   auditLogger: AuditLogger;
   postTurnHookChain: PostTurnHookChain;
   /** B1: 승인 게이트 — mainWindow 준비 후 생성 */
