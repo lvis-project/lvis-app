@@ -9,7 +9,7 @@
  * Set to "0" or "false" to disable the check entirely.
  */
 import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve, dirname } from "node:path";
+import { isAbsolute, relative, resolve, dirname } from "node:path";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { readPluginRegistry } from "./registry.js";
 
@@ -59,11 +59,15 @@ export class PluginUpdateDetector {
 
       const updates: UpdateInfo[] = [];
 
+      // Build an O(1) lookup map to avoid O(n*m) catalog scans when many
+      // plugins are installed and the catalog is large.
+      const catalogById = new Map(catalogPlugins.map((p) => [p.id, p]));
+
       for (const entry of registry.plugins) {
         const installedVersion = await this.readInstalledVersion(entry.manifestPath);
         if (!installedVersion) continue;
 
-        const catalogEntry = catalogPlugins.find((p) => p.id === entry.id);
+        const catalogEntry = catalogById.get(entry.id);
         if (!catalogEntry?.version) continue;
 
         // Skip canary entries unless user opted in
@@ -86,9 +90,18 @@ export class PluginUpdateDetector {
   }
 
   private async readInstalledVersion(manifestPath: string): Promise<string | null> {
+    const registryDir = dirname(this.registryPath);
     const abs = isAbsolute(manifestPath)
       ? manifestPath
-      : resolve(dirname(this.registryPath), manifestPath);
+      : resolve(registryDir, manifestPath);
+    // Path-escape defense: resolved manifest must live beneath the registry
+    // directory. A crafted registry entry like "../../etc/passwd" would
+    // otherwise leak filesystem reads into arbitrary locations.
+    const rel = relative(registryDir, abs);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      console.warn("[update-detector] manifestPath escapes registry dir, skipping:", manifestPath);
+      return null;
+    }
     try {
       const raw = await readFile(abs, "utf-8");
       const parsed = JSON.parse(raw) as { version?: string };
@@ -100,25 +113,66 @@ export class PluginUpdateDetector {
 }
 
 /**
- * Simple semver comparison: returns true when `candidate` > `installed`.
- * Falls back to string comparison for non-semver values.
+ * Semver comparison: returns true when `candidate` > `installed`.
+ *
+ * Honors the semver precedence rule that a version with a pre-release tag
+ * has LOWER precedence than the same version without one
+ * (e.g. `1.0.0-beta.1` < `1.0.0`). Pre-release identifiers themselves are
+ * compared field-by-field: numeric identifiers compared numerically, non-
+ * numeric compared lexically, numeric always lower than non-numeric, and a
+ * shorter prerelease chain is lower when all preceding fields are equal
+ * (per semver.org §11).
+ *
+ * Falls back to string comparison for fully non-semver inputs.
  */
 export function isNewer(candidate: string, installed: string): boolean {
-  const parse = (v: string): number[] =>
-    v
-      .replace(/^v/, "")
-      .split(".")
-      .map((n) => parseInt(n, 10));
+  const split = (v: string): { main: number[]; pre: string[] | null } => {
+    const stripped = v.replace(/^v/, "");
+    const [core, preTag] = stripped.split("-", 2);
+    const main = core.split(".").map((n) => parseInt(n, 10));
+    const pre = preTag ? preTag.split(".") : null;
+    return { main, pre };
+  };
 
-  const a = parse(candidate);
-  const b = parse(installed);
-  const len = Math.max(a.length, b.length);
+  const a = split(candidate);
+  const b = split(installed);
+  const len = Math.max(a.main.length, b.main.length);
 
   for (let i = 0; i < len; i++) {
-    const ai = a[i] ?? 0;
-    const bi = b[i] ?? 0;
+    const ai = a.main[i] ?? 0;
+    const bi = b.main[i] ?? 0;
     if (Number.isNaN(ai) || Number.isNaN(bi)) return candidate > installed;
     if (ai !== bi) return ai > bi;
+  }
+
+  // Main versions equal — apply pre-release precedence.
+  // A version WITHOUT a prerelease outranks one WITH a prerelease.
+  if (a.pre === null && b.pre === null) return false;
+  if (a.pre === null && b.pre !== null) return true;   // candidate is stable, installed is pre
+  if (a.pre !== null && b.pre === null) return false;  // candidate is pre, installed is stable
+
+  // Both have prereleases — compare field-by-field.
+  const aPre = a.pre as string[];
+  const bPre = b.pre as string[];
+  const preLen = Math.max(aPre.length, bPre.length);
+  for (let i = 0; i < preLen; i++) {
+    const ax = aPre[i];
+    const bx = bPre[i];
+    // Shorter prerelease chain has lower precedence when all preceding fields match.
+    if (ax === undefined) return false;
+    if (bx === undefined) return true;
+    const aNum = /^\d+$/.test(ax);
+    const bNum = /^\d+$/.test(bx);
+    if (aNum && bNum) {
+      const an = parseInt(ax, 10);
+      const bn = parseInt(bx, 10);
+      if (an !== bn) return an > bn;
+    } else if (aNum !== bNum) {
+      // Numeric identifiers always have lower precedence than non-numeric.
+      return !aNum;
+    } else {
+      if (ax !== bx) return ax > bx;
+    }
   }
   return false;
 }

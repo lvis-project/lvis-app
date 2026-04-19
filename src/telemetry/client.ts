@@ -6,14 +6,22 @@
  *     explicitly answers the first-boot consent prompt (telemetryPromptAnswered=true
  *     AND enabled=true).
  *   - No PII. Payload contains only: event type, plugin slug, plugin version,
- *     error class name (for plugin_error), device_uuid (random, locally generated),
- *     install_token (GitHub App token from settings secret).
+ *     error class name (for plugin_error), device_uuid (random, locally generated).
+ *   - The GitHub App install token (used to authenticate to the marketplace)
+ *     travels ONLY in the Authorization header — NEVER in the event body.
+ *     Keeping secrets out of the JSON payload prevents accidental persistence
+ *     if the backend logs request bodies, and narrows the blast radius if a
+ *     batch is ever mirrored to an analytics sink.
  *   - PII scrubber strips absolute paths and email addresses from any string
  *     field before it leaves the process.
  *   - Transport: POST /telemetry/events to marketplace backend, batched.
+ *   - SSRF defense: endpoint host is validated against an allowlist derived
+ *     from the configured marketplace base URL before any network call.
+ *   - Concurrency: flush() is serialized by an in-flight guard so overlapping
+ *     timer ticks + explicit flush() calls can't duplicate-submit a batch.
  *
- * D6: install_token reuses the GitHub App token already stored as a secret
- *     under "marketplace.apiKey". No new auth mechanism introduced.
+ * D6: Authorization header reuses the GitHub App token already stored as a
+ *     secret under "marketplace.apiKey". No new auth mechanism introduced.
  */
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -46,11 +54,6 @@ export interface PluginTelemetryEvent {
   t: number;
   /** Per-device random UUID generated once and stored locally. */
   device_uuid: string;
-  /**
-   * GitHub App install token from settings secret "marketplace.apiKey".
-   * Absent when not configured.
-   */
-  install_token?: string;
 }
 
 // ─── PII scrubber ────────────────────────────────────────────────────────────
@@ -126,6 +129,12 @@ export class PluginTelemetryClient {
   private timer: NodeJS.Timeout | undefined;
   private readonly flushIntervalMs: number;
   private readonly fetchImpl: typeof fetch;
+  /**
+   * In-flight guard to prevent overlapping flush() calls from double-sending
+   * the same batch (e.g. a manually triggered flush racing the interval tick,
+   * or a long network call overlapping the next scheduled tick).
+   */
+  private flushInFlight: Promise<void> | null = null;
 
   constructor(private readonly deps: PluginTelemetryClientDeps) {
     this.deviceUuid = loadOrCreateDeviceUuid(deps.deviceUuidPath);
@@ -168,8 +177,9 @@ export class PluginTelemetryClient {
       // Only class name — never the message (may contain PII).
       event.errorClass = scrubPii(opts.errorClass);
     }
-    const token = this.deps.installToken();
-    if (token) event.install_token = token;
+    // The install token is intentionally NOT attached to the event body;
+    // it is sent only in the Authorization header by flush(). Keeping
+    // bearer tokens out of the JSON payload narrows the leak surface.
     this.queue.push(event);
   }
 
@@ -185,9 +195,28 @@ export class PluginTelemetryClient {
   }
 
   async flush(): Promise<void> {
+    // Serialize overlapping callers. If a flush is already in flight the
+    // caller awaits its completion instead of starting a second one that
+    // would re-POST the same batch.
+    if (this.flushInFlight) return this.flushInFlight;
+    this.flushInFlight = this.flushOnce().finally(() => {
+      this.flushInFlight = null;
+    });
+    return this.flushInFlight;
+  }
+
+  private async flushOnce(): Promise<void> {
     if (!this.isActive() || this.queue.length === 0) return;
     const base = this.deps.marketplaceBaseUrl()!.replace(/\/$/, "");
     const endpoint = `${base}/telemetry/events`;
+    // SSRF defense: telemetry may only POST to the same origin as the
+    // configured marketplace base URL. A malformed/attacker-controlled base
+    // URL (e.g. injected via settings manipulation) must not be able to
+    // redirect telemetry to arbitrary internal hosts.
+    if (!this.endpointMatchesBase(endpoint, base)) {
+      console.warn("[telemetry:plugin] endpoint failed allowlist check; dropping flush");
+      return;
+    }
     const batch = this.queue.slice(0);
     const batchLen = batch.length;
     const token = this.deps.installToken();
@@ -206,6 +235,23 @@ export class PluginTelemetryClient {
       this.queue.splice(0, batchLen);
     } catch (err) {
       console.warn("[telemetry:plugin] flush failed (re-queued):", (err as Error).message);
+    }
+  }
+
+  /**
+   * Returns true when `endpoint` shares protocol + host + port with `base`.
+   * Defense against SSRF via a tampered/misconfigured marketplace URL.
+   */
+  private endpointMatchesBase(endpoint: string, base: string): boolean {
+    try {
+      const ep = new URL(endpoint);
+      const bp = new URL(base);
+      if (ep.protocol !== "https:" && ep.protocol !== "http:") return false;
+      if (ep.protocol !== bp.protocol) return false;
+      if (ep.host !== bp.host) return false;
+      return true;
+    } catch {
+      return false;
     }
   }
 

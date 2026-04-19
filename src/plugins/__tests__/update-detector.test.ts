@@ -57,6 +57,28 @@ describe("isNewer", () => {
   it("handles v-prefix", () => {
     expect(isNewer("v1.1.0", "v1.0.0")).toBe(true);
   });
+  // S8 FU1 — semver pre-release precedence (semver.org §11)
+  it("treats stable as newer than same-version prerelease (1.0.0 > 1.0.0-beta.1)", () => {
+    expect(isNewer("1.0.0", "1.0.0-beta.1")).toBe(true);
+  });
+  it("treats prerelease as older than same-version stable (1.0.0-beta.1 < 1.0.0)", () => {
+    expect(isNewer("1.0.0-beta.1", "1.0.0")).toBe(false);
+  });
+  it("compares prerelease numeric identifiers numerically (1.0.0-beta.2 > 1.0.0-beta.1)", () => {
+    expect(isNewer("1.0.0-beta.2", "1.0.0-beta.1")).toBe(true);
+    expect(isNewer("1.0.0-beta.10", "1.0.0-beta.2")).toBe(true);
+  });
+  it("orders alpha < beta lexically when non-numeric", () => {
+    expect(isNewer("1.0.0-beta.1", "1.0.0-alpha.1")).toBe(true);
+    expect(isNewer("1.0.0-alpha.1", "1.0.0-beta.1")).toBe(false);
+  });
+  it("shorter prerelease chain has lower precedence (1.0.0-alpha.1 > 1.0.0-alpha)", () => {
+    expect(isNewer("1.0.0-alpha.1", "1.0.0-alpha")).toBe(true);
+  });
+  it("numeric identifiers have lower precedence than non-numeric", () => {
+    expect(isNewer("1.0.0-beta", "1.0.0-1")).toBe(true);
+    expect(isNewer("1.0.0-1", "1.0.0-beta")).toBe(false);
+  });
 });
 
 // ─── isUpdateCheckEnabled ────────────────────────────────────────────────────
