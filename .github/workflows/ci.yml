@@ -16,18 +16,22 @@ jobs:
         with:
           repository: lvis-project/lvis-plugin-meeting
           path: lvis-plugin-meeting
+          token: ${{ secrets.HOST_READ_TOKEN }}
       - uses: actions/checkout@v4
         with:
           repository: lvis-project/lvis-plugin-email
           path: lvis-plugin-email
+          token: ${{ secrets.HOST_READ_TOKEN }}
       - uses: actions/checkout@v4
         with:
           repository: lvis-project/lvis-plugin-pageindex
           path: lvis-plugin-pageindex
+          token: ${{ secrets.HOST_READ_TOKEN }}
       - uses: actions/checkout@v4
         with:
           repository: lvis-project/lvis-plugin-calendar
           path: lvis-plugin-calendar
+          token: ${{ secrets.HOST_READ_TOKEN }}
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
