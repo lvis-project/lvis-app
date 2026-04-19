@@ -56,9 +56,15 @@ function makeStalestat(): ReturnType<typeof fsMock.statSync> {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
+// Save the real platform value once at module-evaluation time (before any mock).
+const REAL_PLATFORM = process.platform;
+
 describe("ensureCorporateCa", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Mock process.platform to 'darwin' so extractByPlatform() calls extractMacos()
+    // which invokes execSync — required for extraction tests to pass on Linux CI.
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true, writable: true });
     // default: statSync throws ENOENT (no cache)
     mockedStatSync.mockImplementation(() => {
       const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -71,6 +77,7 @@ describe("ensureCorporateCa", () => {
   });
 
   afterEach(() => {
+    Object.defineProperty(process, "platform", { value: REAL_PLATFORM, configurable: true, writable: true });
     vi.resetModules();
   });
 
