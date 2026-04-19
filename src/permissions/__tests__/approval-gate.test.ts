@@ -33,6 +33,20 @@ function makeRequest(overrides?: Partial<RequestInput>): RequestInput {
   };
 }
 
+/**
+ * §D2: helper — pull the most recent (nonce, hmac) issued by the gate from
+ * the mock webContents.send call log, so tests can echo them back unchanged
+ * in the ApprovalDecision.
+ */
+function lastSentNonceHmac(wc: ReturnType<typeof makeMockWebContents>): {
+  nonce: string;
+  hmac: string;
+} {
+  const calls = wc.send.mock.calls;
+  const last = calls[calls.length - 1] as [string, ApprovalRequest];
+  return { nonce: last[1].nonce as string, hmac: last[1].hmac as string };
+}
+
 function makePolicy(overrides?: Partial<PolicyFile>): PolicyFile {
   return {
     version: 1,
@@ -53,13 +67,25 @@ describe("ApprovalGate", () => {
 
     const promise = gate.requestAndWait(req);
 
-    // gate enriches req with requireExplicit before sending
-    expect(wc.send).toHaveBeenCalledWith("lvis:approval:request", {
-      ...req,
-      requireExplicit: true,
-    });
+    // gate enriches req with requireExplicit + mints nonce/hmac before sending
+    expect(wc.send).toHaveBeenCalledWith(
+      "lvis:approval:request",
+      expect.objectContaining({
+        id: req.id,
+        toolName: req.toolName,
+        requireExplicit: true,
+        nonce: expect.any(String),
+        hmac: expect.any(String),
+      }),
+    );
 
-    const decision: ApprovalDecision = { requestId: req.id, choice: "allow-once" };
+    const { nonce, hmac } = lastSentNonceHmac(wc);
+    const decision: ApprovalDecision = {
+      requestId: req.id,
+      choice: "allow-once",
+      nonce,
+      hmac,
+    };
     gate.resolve(req.id, decision);
 
     const result = await promise;
@@ -96,10 +122,23 @@ describe("ApprovalGate", () => {
     const p1 = gate.requestAndWait(req1);
     const p2 = gate.requestAndWait(req2);
 
+    // First send was req-a, second was req-b — extract each nonce/hmac pair
+    const callA = wc.send.mock.calls[0] as [string, ApprovalRequest];
+    const callB = wc.send.mock.calls[1] as [string, ApprovalRequest];
     // req-b를 먼저 응답
-    gate.resolve("req-b", { requestId: "req-b", choice: "deny-once" });
+    gate.resolve("req-b", {
+      requestId: "req-b",
+      choice: "deny-once",
+      nonce: callB[1].nonce,
+      hmac: callB[1].hmac,
+    });
     // req-a를 나중에 응답
-    gate.resolve("req-a", { requestId: "req-a", choice: "allow-always" });
+    gate.resolve("req-a", {
+      requestId: "req-a",
+      choice: "allow-always",
+      nonce: callA[1].nonce,
+      hmac: callA[1].hmac,
+    });
 
     const [r1, r2] = await Promise.all([p1, p2]);
     expect(r1.choice).toBe("allow-always");
@@ -441,6 +480,128 @@ describe("ApprovalGate", () => {
     expect(memo).not.toContain("900101-1234567");
 
     gate.resolve(req.id, { requestId: req.id, choice: "deny-once" });
+  });
+
+  // ── D2: HMAC nonce / confused-deputy defense ─────────────
+
+  it("D2: happy path — valid nonce+hmac echo is honored", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({ id: "d2-ok" });
+    const promise = gate.requestAndWait(req);
+    const { nonce, hmac } = lastSentNonceHmac(wc);
+
+    // Payload must carry a non-empty nonce + hmac
+    expect(nonce).toMatch(/^[0-9a-f]+$/);
+    expect(hmac).toMatch(/^[0-9a-f]+$/);
+
+    gate.resolve("d2-ok", {
+      requestId: "d2-ok",
+      choice: "allow-once",
+      nonce,
+      hmac,
+    });
+    const result = await promise;
+    expect(result.choice).toBe("allow-once");
+  });
+
+  it("D2: missing nonce/hmac → forced deny-once", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({ id: "d2-missing" });
+    const promise = gate.requestAndWait(req);
+
+    // Renderer neglects to echo nonce+hmac
+    gate.resolve("d2-missing", {
+      requestId: "d2-missing",
+      choice: "allow-once",
+    });
+
+    const result = await promise;
+    expect(result.choice).toBe("deny-once");
+    expect(result.rememberPattern).toContain("approval integrity check failed");
+    expect(gate.pendingCount).toBe(0);
+  });
+
+  it("D2: wrong nonce → forced deny-once", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({ id: "d2-badnonce" });
+    const promise = gate.requestAndWait(req);
+    const { hmac } = lastSentNonceHmac(wc);
+
+    gate.resolve("d2-badnonce", {
+      requestId: "d2-badnonce",
+      choice: "allow-always",
+      nonce: "00000000000000000000000000000000",
+      hmac,
+    });
+    const result = await promise;
+    expect(result.choice).toBe("deny-once");
+    expect(result.rememberPattern).toContain("approval integrity check failed");
+  });
+
+  it("D2: wrong hmac → forced deny-once", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({ id: "d2-badhmac" });
+    const promise = gate.requestAndWait(req);
+    const { nonce, hmac } = lastSentNonceHmac(wc);
+    // Flip one hex char
+    const tamperedHmac =
+      (hmac[0] === "a" ? "b" : "a") + hmac.slice(1);
+
+    gate.resolve("d2-badhmac", {
+      requestId: "d2-badhmac",
+      choice: "allow-once",
+      nonce,
+      hmac: tamperedHmac,
+    });
+    const result = await promise;
+    expect(result.choice).toBe("deny-once");
+  });
+
+  it("D2: replay of a prior request's nonce/hmac against a different request fails", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+
+    // Issue two distinct approval requests
+    const p1 = gate.requestAndWait(makeRequest({ id: "d2-req-1", toolName: "tool_a" }));
+    const p2 = gate.requestAndWait(makeRequest({ id: "d2-req-2", toolName: "tool_b" }));
+    const call1 = wc.send.mock.calls[0] as [string, ApprovalRequest];
+    const call2 = wc.send.mock.calls[1] as [string, ApprovalRequest];
+
+    // Attacker replays req-1's nonce/hmac inside a response claiming to decide req-2
+    gate.resolve("d2-req-2", {
+      requestId: "d2-req-2",
+      choice: "allow-always",
+      nonce: call1[1].nonce,
+      hmac: call1[1].hmac,
+    });
+    const r2 = await p2;
+    expect(r2.choice).toBe("deny-once");
+
+    // Legitimate decide of req-1 still works
+    gate.resolve("d2-req-1", {
+      requestId: "d2-req-1",
+      choice: "allow-once",
+      nonce: call1[1].nonce,
+      hmac: call1[1].hmac,
+    });
+    const r1 = await p1;
+    expect(r1.choice).toBe("allow-once");
+  });
+
+  it("D2: nonce values are unique across requests (not constant)", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    gate.requestAndWait(makeRequest({ id: "d2-u1" }));
+    gate.requestAndWait(makeRequest({ id: "d2-u2" }));
+    const n1 = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1].nonce;
+    const n2 = (wc.send.mock.calls[1] as [string, ApprovalRequest])[1].nonce;
+    expect(n1).toBeTruthy();
+    expect(n2).toBeTruthy();
+    expect(n1).not.toBe(n2);
   });
 
   it("H3: duplicate slashes are collapsed and still blocked", async () => {

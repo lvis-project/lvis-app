@@ -11,6 +11,7 @@
  * - §A2: webContents 소멸 체크 + send 예외 처리 → deny-once + pending 정리.
  * - §S8: AuditLogger DI — requested/decided/timeout/send-failed 4개 phase 기록.
  */
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { WebContents } from "electron";
 import type { PolicyFile } from "./policy-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
@@ -96,6 +97,18 @@ export interface ApprovalRequest {
    * for the sensitive-path denial path.
    */
   sensitivePathPattern?: string | null;
+  /**
+   * §D2: Confused-deputy defense — random nonce bound to this request.
+   * The renderer MUST echo this value back unchanged in the
+   * {@link ApprovalDecision}. Paired with {@link hmac} for integrity.
+   */
+  nonce?: string;
+  /**
+   * §D2: HMAC-SHA256(sessionKey, `${id}|${nonce}|${canonicalArgs}`) —
+   * hex encoded. The main process re-derives this from the stored pending
+   * entry on receipt of the decision and rejects on mismatch.
+   */
+  hmac?: string;
 }
 
 export type ApprovalChoice =
@@ -109,6 +122,18 @@ export interface ApprovalDecision {
   choice: ApprovalChoice;
   /** allow-always / deny-always 일 때 영구화 패턴 (기본: 도구 이름 exact) */
   rememberPattern?: string;
+  /**
+   * §D2: Nonce originally issued with the {@link ApprovalRequest}. The
+   * renderer echoes it back verbatim. Missing or mismatched values cause
+   * the decision to be rejected and treated as deny-once.
+   */
+  nonce?: string;
+  /**
+   * §D2: HMAC originally issued with the {@link ApprovalRequest}. Echoed
+   * back by the renderer. The main process re-computes the expected HMAC
+   * from the pending entry and compares using timingSafeEqual.
+   */
+  hmac?: string;
 }
 
 // ─── IPC 채널 이름 (안정 상수) ────────────────────────
@@ -122,6 +147,65 @@ interface PendingEntry {
   resolve: (decision: ApprovalDecision) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  /** §D2: nonce issued for this request (echoed back verbatim) */
+  nonce: string;
+  /** §D2: expected HMAC for this request */
+  expectedHmac: string;
+}
+
+/**
+ * §D2: Deterministic canonicalization of arbitrary tool args for HMAC input.
+ * Sorts object keys recursively; stringifies with JSON. Non-JSON values
+ * (undefined, functions) are skipped just like JSON.stringify.
+ */
+function canonicalStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  const stringify = (v: unknown): string => {
+    if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
+    if (seen.has(v as object)) return '"[Circular]"';
+    seen.add(v as object);
+    if (Array.isArray(v)) {
+      return "[" + v.map((e) => stringify(e)).join(",") + "]";
+    }
+    const keys = Object.keys(v as Record<string, unknown>).sort();
+    return (
+      "{" +
+      keys
+        .map(
+          (k) =>
+            JSON.stringify(k) +
+            ":" +
+            stringify((v as Record<string, unknown>)[k]),
+        )
+        .join(",") +
+      "}"
+    );
+  };
+  return stringify(value);
+}
+
+/**
+ * §D2: constant-time comparison of the echoed (nonce, hmac) pair against
+ * the pending entry's expected values. Returns false if either field is
+ * missing or malformed; returns true only when both the nonce and HMAC
+ * match byte-for-byte.
+ */
+function verifyApprovalIntegrity(
+  entry: PendingEntry,
+  decision: ApprovalDecision,
+): boolean {
+  const { nonce, hmac } = decision;
+  if (typeof nonce !== "string" || typeof hmac !== "string") return false;
+  if (nonce.length !== entry.nonce.length) return false;
+  if (hmac.length !== entry.expectedHmac.length) return false;
+  const nonceA = Buffer.from(nonce);
+  const nonceB = Buffer.from(entry.nonce);
+  const hmacA = Buffer.from(hmac);
+  const hmacB = Buffer.from(entry.expectedHmac);
+  if (nonceA.length !== nonceB.length || hmacA.length !== hmacB.length) {
+    return false;
+  }
+  return timingSafeEqual(nonceA, nonceB) && timingSafeEqual(hmacA, hmacB);
 }
 
 // ─── ApprovalGate ────────────────────────────────────
@@ -135,6 +219,13 @@ export class ApprovalGate {
   private currentPolicy: PolicyFile;
   /** §S8: 감사 로거 (optional — 미주입 시 silent) */
   private readonly auditLogger?: AuditLogger;
+  /**
+   * §D2: Per-instance HMAC secret. 32 random bytes generated at construction
+   * time. Never leaves the main process — used only to sign/verify the nonce
+   * that rides along with approval requests. A fresh key each boot naturally
+   * scopes replay protection to the current ApprovalGate lifetime.
+   */
+  private readonly sessionKey: Buffer = randomBytes(32);
 
   constructor(
     webContents: WebContents,
@@ -236,6 +327,19 @@ export class ApprovalGate {
       input: `[approval:requested] ${fullReq.id} toolName=${fullReq.toolName} category=${fullReq.category} source=${fullReq.source ?? "unknown"}`,
     });
 
+    // §D2: mint nonce + HMAC, attach to outgoing request
+    const nonce = randomBytes(16).toString("hex");
+    const canonicalArgs = canonicalStringify(fullReq.args);
+    const signingInput = `${fullReq.id}|${nonce}|${fullReq.toolName}|${canonicalArgs}`;
+    const expectedHmac = createHmac("sha256", this.sessionKey)
+      .update(signingInput)
+      .digest("hex");
+    const signedReq: ApprovalRequest = {
+      ...fullReq,
+      nonce,
+      hmac: expectedHmac,
+    };
+
     return new Promise<ApprovalDecision>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(fullReq.id);
@@ -253,14 +357,21 @@ export class ApprovalGate {
         });
       }, this.timeoutMs);
 
-      this.pending.set(fullReq.id, { resolve, reject, timer });
+      this.pending.set(fullReq.id, {
+        resolve,
+        reject,
+        timer,
+        nonce,
+        expectedHmac,
+      });
 
       // 렌더러로 요청 발송 (main→renderer 단방향)
       // §D1: UI 표시용으로 args 의 민감정보를 마스킹. 원본 args 는 executor
       // 내부에 남아 tool 실행에는 그대로 사용됨.
+      // §D2: 마스킹된 payload 에 nonce+hmac 을 덧붙여 confused-deputy 방어.
       const dlpHits = new Set<string>();
-      const maskedReq: ApprovalRequest = {
-        ...fullReq,
+      const maskedSignedReq: ApprovalRequest = {
+        ...signedReq,
         args: maskArgsForDisplay(fullReq.args, dlpHits),
       };
       if (dlpHits.size > 0) {
@@ -273,7 +384,7 @@ export class ApprovalGate {
       }
       // §F2: send 실패(webContents 소멸 race) 시 pending 정리 후 deny-once
       try {
-        this.webContents.send(IPC_APPROVAL_REQUEST, maskedReq);
+        this.webContents.send(IPC_APPROVAL_REQUEST, maskedSignedReq);
       } catch (sendErr) {
         clearTimeout(timer);
         this.pending.delete(fullReq.id);
@@ -296,6 +407,28 @@ export class ApprovalGate {
   resolve(requestId: string, decision: ApprovalDecision): void {
     const entry = this.pending.get(requestId);
     if (!entry) return;
+
+    // §D2: Confused-deputy defense — verify nonce + HMAC BEFORE honoring the
+    // decision. A mismatch indicates either a malicious/compromised renderer,
+    // a replay of a stale decision, or a cross-request mix-up. Force
+    // deny-once and audit the failure.
+    if (!verifyApprovalIntegrity(entry, decision)) {
+      clearTimeout(entry.timer);
+      this.pending.delete(requestId);
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "approval-gate",
+        type: "approval",
+        output: `[approval:nonce-mismatch] ${requestId} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
+      });
+      entry.resolve({
+        requestId,
+        choice: "deny-once",
+        rememberPattern: "approval integrity check failed",
+      });
+      return;
+    }
+
     clearTimeout(entry.timer);
     this.pending.delete(requestId);
     // §S8 phase: decided
