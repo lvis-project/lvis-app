@@ -2965,6 +2965,133 @@ flowchart TB
 
 ---
 
+## 15. Security Hardening — 구현 완료 항목
+
+### 15.1 SDK 기반 퍼블리셔 키 관리 (AP-1 FU)
+
+플러그인 매니페스트 서명 검증에 사용되는 Ed25519 공개 키는 `@lvis/plugin-sdk/keys` (v1.0.1+)를 단일 소스로 삼는다. 호스트 앱이 직접 키 배열을 관리하지 않으며, SDK 서브모듈 버전 범프로 키 로테이션이 이루어진다.
+
+**파일**: `src/plugins/publisher-keys.ts`
+
+| 항목 | 내용 |
+|------|------|
+| 키 형식 | Ed25519 원시 32바이트 (base64) → PEM SPKI 변환 후 `PluginSignatureVerifier`에 전달 |
+| 소스 | `MARKETPLACE_PUBLIC_KEYS` from `@lvis/plugin-sdk/keys` |
+| 실패 정책 | Managed 플러그인은 서명 불일치 시 로드 거부 (fail-closed). `LVIS_DEV_SKIP_SIG=1`로 개발 우회 가능. User 플러그인은 서명 없을 경우 경고만 출력. |
+| 로테이션 | SDK 서브모듈 버전 범프 → `getBundledPublicKeys()` / `BUNDLED_PUBLISHER_PUBLIC_KEYS` 자동 갱신 |
+
+```typescript
+// src/plugins/publisher-keys.ts (요약)
+import { MARKETPLACE_PUBLIC_KEYS } from "@lvis/plugin-sdk/keys";
+
+export function getBundledPublicKeys(): Record<string, Buffer>  // raw ed25519 키
+export const BUNDLED_PUBLISHER_PUBLIC_KEYS: string[]            // PEM SPKI (PluginSignatureVerifier용)
+```
+
+---
+
+### 15.2 Marketplace Admin CSRF 보호 (F3)
+
+Marketplace FastAPI 서버는 Bearer 토큰 기반 REST API에 대해 `CSRFOriginMiddleware`를 적용한다. 쿠키 세션이 아닌 API 키 인증 환경에서 크로스-오리진 폼/fetch 제출을 차단한다.
+
+**파일**: `lvis-marketplace/server/src/lvis_marketplace/csrf.py`
+
+**설계 원칙**:
+- 안전 메서드(GET, HEAD, OPTIONS)는 무조건 통과
+- 상태 변경 메서드(POST, PUT, DELETE 등): `Origin` 헤더가 허용 목록에 없으면 **403 거부** (fail-closed)
+- `Origin`이 없거나 `"null"`인 경우: `Sec-Fetch-Site`를 폴백으로 확인. `same-origin` / `same-site` / `none`이 아니면 거부
+- `cors_origins`가 비어 있으면 미들웨어 등록 자체를 금지 (`ValueError` 발생) — 설정 오류를 시작 시점에 포착
+
+```python
+# 등록 조건: cors_origins가 비어 있지 않을 때만
+if settings.cors_origins:
+    app.add_middleware(CSRFOriginMiddleware, allowed_origins=settings.cors_origins)
+```
+
+| 케이스 | 결과 |
+|--------|------|
+| GET + 임의 Origin | 허용 |
+| POST + 허용된 Origin | 허용 |
+| POST + 미허용 Origin | 403 |
+| POST + Origin 없음 + Sec-Fetch-Site=same-origin | 허용 |
+| POST + Origin="null" + Sec-Fetch-Site 없음 | 403 |
+
+---
+
+### 15.3 D6 — 어시스턴트 메시지 피드백 (ThumbsUp/Down)
+
+사용자가 어시스턴트 응답에 엄지 위/아래로 평가할 수 있는 UI. 평가 결과는 감사 로그와 FeedbackStore에 분리 기록된다.
+
+**구현 컴포넌트**:
+
+| 컴포넌트 | 역할 |
+|----------|------|
+| `AssistantCard.tsx` | 카드 푸터에 ThumbsUp/ThumbsDown 아이콘 버튼. 👍 클릭 시 filled 전환, 👎 클릭 시 최대 200자 이유 입력란 표시 |
+| `src/ipc-bridge.ts` | `lvis:feedback:submit` IPC 채널 — sender 검증 후 AuditLogger에 `type="info"` 항목 기록, 👍 시 starredStore 자동 연동 |
+| `src/preload.ts` | `submitFeedback()` 브리지 메서드 |
+| `src/data/feedback-store.ts` | JSONL 영속 저장소 (§15.4 참조) |
+
+**감사 로그 형식**: `feedback:<rating>:<sessionId>:<messageIndex>[:<reason>]`
+
+**개인정보 분리**: 자유 텍스트 `reason`은 FeedbackStore에만 저장되며 감사 로그에는 포함되지 않음 (GDPR §17).
+
+---
+
+### 15.4 FeedbackStore — JSONL 피드백 영속화 (F2)
+
+**파일**: `src/data/feedback-store.ts`
+
+어시스턴트 메시지에 대한 사용자 평가를 `~/.lvis/feedback.jsonl`에 JSONL 형식으로 저장한다. StarredStore 패턴을 따르며, PII(자유 텍스트 이유)를 감사 인프라와 분리한다.
+
+```typescript
+interface FeedbackEntry {
+  id: string;          // uuid
+  sessionId: string;
+  messageIndex: number;
+  rating: "up" | "down";
+  reason?: string;     // 이 필드만 FeedbackStore에 저장 — 감사 로그 미포함
+  timestamp: string;   // ISO
+}
+```
+
+**보안 특성**:
+
+| 항목 | 내용 |
+|------|------|
+| 경로 제한 | `resolve(path)` → `~/.lvis/` 외부 경로 시 `Error` 발생 (path confinement) |
+| 심링크 방어 | 저장 디렉터리 `lstatSync` 확인 — 심링크이면 `Error` 발생 |
+| 파일 권한 | `appendFileSync(..., { mode: 0o600 })` — 소유자 읽기/쓰기 전용 |
+| 보존 기간 | 기본 90일. `prune()` 호출(앱 부팅 시)로 오래된 항목 자동 정리 |
+| 부팅 연동 | `boot.ts`에서 `FeedbackStore` 인스턴스 생성 후 IPC 브리지에 주입 |
+
+---
+
+### 15.5 D7 — 드래그 앤 드롭 파일 인덱싱
+
+**파일**: `src/ui/renderer/components/DropZoneOverlay.tsx`
+
+Electron 윈도우 전체에 드래그 앤 드롭 오버레이를 제공한다. 파일을 드롭하면 `document-indexer` capability를 가진 플러그인(PageIndex)에 경로를 전달하여 즉시 인덱싱한다.
+
+**동작 흐름**:
+1. `dragenter` 이벤트에서 `dataTransfer.types.includes("Files")` 확인 → 파일 드래그일 때만 오버레이 표시
+2. Electron 렌더러의 `File.path` 비표준 속성으로 절대 경로 추출
+3. `window.lvisApi.pageindexScanPaths(paths)` → IPC → `document-indexer` capability 플러그인
+4. 결과(`indexed`, `failed`)를 토스트로 표시 (3초 후 자동 소멸)
+
+**설계 제약**:
+- dragenter/dragleave는 자식 요소 전환마다 발화 → `dragCountRef` 카운터로 실제 윈도우 진입 상태 추적
+- 텍스트 선택 드래그는 `dataTransfer.files`가 없으므로 오버레이 미표시
+- 플러그인 미설치 시: `"no-indexer"` 에러로 사용자 안내
+
+| 응답 | UI 표시 |
+|------|---------|
+| `{ ok: true, indexed: N }` | `N개 파일 인덱싱 완료` |
+| `{ ok: true, indexed: N, failed: M }` | `N개 인덱싱 완료, M개 실패` |
+| `{ ok: false, error: "no-indexer" }` | `인덱서 플러그인을 찾을 수 없습니다` |
+| 기타 오류 | `오류: <message>` |
+
+---
+
 ## Appendix
 
 ### A. claw-code Harness Reference
