@@ -22,6 +22,10 @@ const GENERIC_PAYLOAD_SCHEMA = {
 
 interface ToolSchemaEntry {
   description?: string;
+  /** §6.4 Tool versioning — optional per-tool semver. Falls back to manifest.version. */
+  version?: string;
+  deprecatedSince?: string;
+  replacedBy?: string;
   inputSchema: Record<string, unknown>;
 }
 
@@ -51,6 +55,7 @@ function buildPluginTool(
   toolName: string,
   pluginId: string,
   schemaEntry: ToolSchemaEntry | undefined,
+  manifestVersion: string,
 ): Tool {
   const typed = isValidTypedSchema(schemaEntry?.inputSchema) ? schemaEntry!.inputSchema : undefined;
   const description = schemaEntry?.description ?? (typed ? typedDescription(toolName) : untypedDescription(toolName));
@@ -59,6 +64,9 @@ function buildPluginTool(
     description,
     source: "plugin",
     pluginId,
+    version: schemaEntry?.version ?? manifestVersion,
+    deprecatedSince: schemaEntry?.deprecatedSince,
+    replacedBy: schemaEntry?.replacedBy,
     jsonSchema: typed ?? GENERIC_PAYLOAD_SCHEMA,
     execute: async (rawInput) => {
       // Both typed and untyped paths accept a JSON-string input (some provider
@@ -102,7 +110,8 @@ export function pluginToolsForRegistration(
   manifest: PluginManifest,
 ): Tool[] {
   const schemas = manifest.toolSchemas ?? {};
+  const manifestVersion = manifest.version || "1.0.0";
   return (manifest.tools ?? []).map((tool) =>
-    buildPluginTool(pluginRuntime, tool, pluginId, schemas[tool]),
+    buildPluginTool(pluginRuntime, tool, pluginId, schemas[tool], manifestVersion),
   );
 }
