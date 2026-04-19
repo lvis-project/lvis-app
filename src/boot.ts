@@ -132,7 +132,13 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // §9.5 M4: marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
-  let marketplaceFetcher: MarketplaceFetcher;
+  // For "real-cloud" mode, pass an explicit fetcher so the service uses the
+  // network backend with catalog caching enabled.
+  // For "mock" mode, pass no fetcher — PluginMarketplaceService creates its
+  // own internal MockMarketplaceFetcher and disables catalog caching so that
+  // the bundled plugins/marketplace.json is always read fresh (no stale
+  // ~/.lvis/marketplace-cache/ data can shadow local changes).
+  let marketplaceFetcher: MarketplaceFetcher | undefined;
   if (
     marketplaceSettings.backend === "real-cloud" &&
     marketplaceSettings.realCloudBaseUrl
@@ -143,16 +149,17 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       allowPrivateNetwork: marketplaceSettings.realCloudAllowPrivateNetwork,
     });
     console.log("[lvis] boot: marketplace backend = real-cloud (%s)", marketplaceSettings.realCloudBaseUrl);
-  } else {
-    marketplaceFetcher = new MockMarketplaceFetcher(
-      resolve(projectRoot, "plugins/marketplace.json"),
-    );
   }
   const pluginMarketplace = new PluginMarketplaceService(
     projectRoot,
     deploymentGuard,
     marketplaceFetcher,
   );
+  // wireUpdateCheck needs a concrete fetcher for update detection.
+  // In mock mode, create a dedicated MockMarketplaceFetcher (caching is
+  // irrelevant for update checks — they always want fresh data).
+  const updateCheckFetcher: MarketplaceFetcher =
+    marketplaceFetcher ?? new MockMarketplaceFetcher(resolve(projectRoot, "plugins/marketplace.json"));
 
   // §4.5.9: SystemPromptBuilder.
   const systemPromptBuilder = createSystemPromptBuilder({
@@ -270,7 +277,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     projectRoot,
     mainWindow,
     settingsService,
-    marketplaceFetcher,
+    marketplaceFetcher: updateCheckFetcher,
   });
 
   // void unused imports avoidance — app reference retained for type imports.

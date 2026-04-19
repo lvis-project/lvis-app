@@ -4,8 +4,20 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/** Kill any processes occupying the pageindex worker port so E2E runs cleanly. */
+function killPageindexWorkers(): void {
+  try {
+    const raw = execSync('lsof -ti :43129 2>/dev/null || true').toString().trim();
+    const pids = raw.split('\n').filter(Boolean);
+    for (const pid of pids) {
+      try { process.kill(parseInt(pid), 'SIGKILL'); } catch { /* already dead */ }
+    }
+  } catch { /* lsof unavailable */ }
+}
 
 /**
  * Shared fixture: launches the built Electron main process with an
@@ -36,6 +48,8 @@ export const test = base.extend<ElectronFixtures>({
         `Electron main entry not found at ${mainEntry}. Run 'bun run build' before 'playwright test'.`,
       );
     }
+    // Kill any leftover pageindex worker from a previous run before launching
+    killPageindexWorkers();
     const app = await electron.launch({
       args: [mainEntry, `--user-data-dir=${userDataDir}`],
       env: {
@@ -48,11 +62,16 @@ export const test = base.extend<ElectronFixtures>({
     });
     await use(app);
     await app.close().catch(() => {});
+    // Ensure child Python workers spawned by pageindex are cleaned up
+    killPageindexWorkers();
   },
 
   mainWindow: async ({ app }, use) => {
     const win = await app.firstWindow();
-    await win.waitForLoadState('domcontentloaded');
+    // The app first loads a data: splash URL, then boots and replaces it with
+    // the real index.html. Wait for the toolbar tablist which only appears
+    // after React has mounted — this signals the boot sequence is complete.
+    await win.waitForSelector('[role="tablist"]', { timeout: 60_000 });
     await use(win);
   },
 });

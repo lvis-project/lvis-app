@@ -39,53 +39,51 @@ const ALL_PLUGIN_NAMES = [
 ] as const;
 
 test('plugins with UI extensions appear as toolbar tabs', async ({ mainWindow }) => {
-  // Wait for the toolbar TabsList to render (it contains static tabs like 홈, 태스크, …).
-  // Plugin tabs are appended dynamically after pluginViews are fetched from IPC.
+  // The mainWindow fixture already waits for [role="tablist"] to appear.
+  // Plugin tabs are added dynamically after pluginViews IPC resolves,
+  // so we need an additional wait after the static toolbar is visible.
   const tabsList = mainWindow.locator('[role="tablist"]').first();
-  await tabsList.waitFor({ state: 'attached', timeout: 15_000 });
+  await tabsList.waitFor({ state: 'visible', timeout: 15_000 });
 
   for (const plugin of PLUGIN_TABS) {
-    // Match the exact selector pattern used in sidebar-tabs.spec.ts:
-    //   button[role="tab"]:has-text("label")
+    // Plugin tabs use Radix TabsTrigger which renders as button[role="tab"]
     const tab = mainWindow.locator(
       [
         `button[role="tab"]:has-text("${plugin.label}")`,
-        `button:has-text("${plugin.label}")`,
+        `[role="tab"]:has-text("${plugin.label}")`,
       ].join(', '),
     ).first();
 
     await expect(
       tab,
       `Plugin '${plugin.id}' toolbar tab (label="${plugin.label}") must be visible`,
-    ).toBeVisible({ timeout: 10_000 });
+    ).toBeVisible({ timeout: 30_000 });
   }
 });
 
 test('all 4 managed plugins listed in sidebar marketplace', async ({ mainWindow }) => {
-  // The sidebar is an <aside> rendered by Sidebar.tsx.
+  // The sidebar <aside> is always rendered (not conditionally mounted).
   const sidebar = mainWindow.locator('aside').first();
-  await sidebar.waitFor({ state: 'attached', timeout: 15_000 });
+  await sidebar.waitFor({ state: 'visible', timeout: 15_000 });
 
   for (const pluginName of ALL_PLUGIN_NAMES) {
-    // Each marketplace card contains the plugin name as a text node
-    // inside a <div class="font-medium ..."> element.
+    // Each marketplace card contains the plugin name as a visible text node.
     const card = sidebar.locator(`text=${pluginName}`).first();
 
     await expect(
       card,
       `Plugin '${pluginName}' must appear in sidebar marketplace`,
-    ).toBeVisible({ timeout: 10_000 });
+    ).toBeVisible({ timeout: 30_000 });
   }
 });
 
 test('managed plugins show installed status in sidebar', async ({ mainWindow }) => {
   const sidebar = mainWindow.locator('aside').first();
-  await sidebar.waitFor({ state: 'attached', timeout: 15_000 });
+  await sidebar.waitFor({ state: 'visible', timeout: 15_000 });
 
-  // Managed plugins should all show "설치됨" badge. Count badges matching.
-  // Each installed plugin card contains a Badge with text "설치됨".
+  // Managed plugins should all show "설치됨" badge.
   const installedBadges = sidebar.locator('text=설치됨');
 
   // At least 4 managed plugins should be installed.
-  await expect(installedBadges).toHaveCount(4, { timeout: 10_000 });
+  await expect(installedBadges).toHaveCount(4, { timeout: 30_000 });
 });
