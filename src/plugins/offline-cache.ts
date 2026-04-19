@@ -8,8 +8,9 @@
  * No telemetry is emitted from cache operations.
  */
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { PluginMarketplaceItem } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -60,16 +61,23 @@ interface CatalogCacheFile {
 /**
  * Returns cached catalog items when the cache exists and has not expired,
  * otherwise returns `null`.
+ *
+ * Pass `{ allowStale: true }` to return items even when the TTL has expired
+ * (used as a network-failure fallback so the UI remains functional offline).
  */
 export async function getCachedCatalog(
   base?: string,
+  opts?: { allowStale?: boolean },
 ): Promise<PluginMarketplaceItem[] | null> {
   const { catalogFile } = cacheRoots(base);
   try {
     const raw = await readFile(catalogFile, "utf-8");
     const parsed = JSON.parse(raw) as CatalogCacheFile;
     if (!Array.isArray(parsed.items)) return null;
-    if (Date.now() - parsed.cachedAt > CATALOG_TTL_MS) return null;
+    // Reject missing/non-finite cachedAt — a malformed file must not be treated
+    // as non-expired (NaN arithmetic would otherwise bypass TTL).
+    if (typeof parsed.cachedAt !== "number" || !Number.isFinite(parsed.cachedAt) || parsed.cachedAt < 0) return null;
+    if (!opts?.allowStale && Date.now() - parsed.cachedAt > CATALOG_TTL_MS) return null;
     return parsed.items;
   } catch {
     return null;
@@ -107,8 +115,25 @@ interface TarballIndex {
   entries: TarballIndexEntry[];
 }
 
+/**
+ * Encodes `slug` and `version` into a safe flat filename.
+ * Replaces any character that is not alphanumeric, `-`, `_`, `.`, or `@` with
+ * `_` to prevent path traversal (e.g. `../` components in slug/version).
+ */
 function tarballFilename(slug: string, version: string): string {
-  return `${slug}-${version}.tar.gz`;
+  const safe = (s: string) => s.replace(/[^a-zA-Z0-9\-_.@]/g, "_");
+  return `${safe(slug)}-${safe(version)}.tar.gz`;
+}
+
+/**
+ * Throws if `filePath` is outside `dir` — defense-in-depth against any
+ * slug/version that slips through encoding.
+ */
+function assertWithinDir(dir: string, filePath: string): void {
+  const rel = relative(dir, filePath);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`Cache path escape detected: ${filePath} is outside ${dir}`);
+  }
 }
 
 async function readIndex(indexFile: string): Promise<TarballIndex> {
@@ -137,6 +162,7 @@ export async function getCachedTarball(
   const { tarballDir, indexFile } = cacheRoots(base);
   const filename = tarballFilename(slug, version);
   const filePath = resolve(tarballDir, filename);
+  assertWithinDir(tarballDir, filePath);
   try {
     const buf = await readFile(filePath);
     // Update LRU timestamp — best-effort, do not throw on failure.
@@ -167,6 +193,7 @@ export async function setCachedTarball(
     await mkdir(tarballDir, { recursive: true });
     const filename = tarballFilename(slug, version);
     const filePath = resolve(tarballDir, filename);
+    assertWithinDir(tarballDir, filePath);
 
     // Read index, remove stale entry for this slug+version if present.
     const index = await readIndex(indexFile);
@@ -219,7 +246,14 @@ async function evictLru(
 // ---------------------------------------------------------------------------
 
 async function atomicWrite(dest: string, data: string | Buffer): Promise<void> {
-  const tmp = `${dest}.tmp`;
-  await writeFile(tmp, data);
-  await rename(tmp, dest);
+  // Use a unique temp path (pid + random) to avoid concurrent-writer collisions
+  // and stale-tmp-from-prior-crash interference.
+  const tmp = `${dest}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  try {
+    await writeFile(tmp, data);
+    await rename(tmp, dest);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => undefined);
+    throw err;
+  }
 }

@@ -4,7 +4,7 @@
  * Covers: catalog cache hit/miss, TTL expiry, tarball cache hit/miss,
  * LRU eviction, feature flag, network fallback in list().
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -161,20 +161,36 @@ describe("tarball cache", () => {
 });
 
 // ---------------------------------------------------------------------------
-// network fallback — list() integration (unit-level via mock fetcher)
+// network fallback — getCachedCatalog allowStale contract
 // ---------------------------------------------------------------------------
 
-describe("marketplace list() network fallback", () => {
-  it("falls back to stale cache when fetcher throws", async () => {
-    // Write a stale-but-present catalog (expired TTL — simulate by not
-    // actually expiring; we just need the file to exist for the fallback path).
-    // We exercise the production code path indirectly here.
+describe("getCachedCatalog allowStale", () => {
+  it("returns expired items when allowStale=true", async () => {
     const items = [makeItem("cached-plugin")];
     await setCachedCatalog(items, tmpDir);
 
-    // Verify the catalog is readable.
-    const cached = await getCachedCatalog(tmpDir);
-    expect(cached).not.toBeNull();
-    expect(cached![0].id).toBe("cached-plugin");
+    // Force the cachedAt timestamp to be 8 days ago (past the 7-day TTL).
+    const catalogFile = resolve(tmpDir, "catalog.json");
+    const raw = JSON.parse(await readFile(catalogFile, "utf-8"));
+    raw.cachedAt = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    const { writeFile: wf } = await import("node:fs/promises");
+    await wf(catalogFile, JSON.stringify(raw));
+
+    // Normal read must return null (TTL expired).
+    const fresh = await getCachedCatalog(tmpDir);
+    expect(fresh).toBeNull();
+
+    // Stale read must return items (offline-fallback path).
+    const stale = await getCachedCatalog(tmpDir, { allowStale: true });
+    expect(stale).not.toBeNull();
+    expect(stale![0].id).toBe("cached-plugin");
+  });
+
+  it("returns null for malformed cachedAt even with allowStale=true", async () => {
+    const catalogFile = resolve(tmpDir, "catalog.json");
+    const { writeFile: wf } = await import("node:fs/promises");
+    await wf(catalogFile, JSON.stringify({ cachedAt: "not-a-number", items: [makeItem("x")] }));
+    const result = await getCachedCatalog(tmpDir, { allowStale: true });
+    expect(result).toBeNull();
   });
 });

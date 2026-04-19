@@ -143,8 +143,9 @@ export class PluginMarketplaceService {
         catalogPlugins = await this.fetcher.listPlugins();
         fetchedFromNetwork = true;
       } catch (err) {
-        // Network failure — fall back to stale cache if available.
-        const stale = useCache ? await getCachedCatalog(cacheBaseArg) : null;
+        // Network failure — fall back to stale cache if available (TTL bypassed
+        // intentionally: any cached data is better than a hard failure offline).
+        const stale = useCache ? await getCachedCatalog(cacheBaseArg, { allowStale: true }) : null;
         if (stale) {
           console.warn("[marketplace] network fetch failed, using stale cache:", (err as Error).message);
           catalogPlugins = stale;
