@@ -78,6 +78,34 @@ async function* attemptStream(
 export type ApiKeyGetter = (vendor: LLMVendor) => string;
 export type ProviderFactory = (config: ProviderConfig) => LLMProvider;
 
+/**
+ * Wraps a primary LLMProvider with fallback-chain semantics.
+ * Delegates streamTurn to streamWithFallback — transparent to all callers.
+ */
+export class FallbackProvider implements LLMProvider {
+  readonly vendor: LLMVendor;
+  constructor(
+    private readonly primary: LLMProvider,
+    private readonly chain: FallbackEntry[],
+    private readonly getApiKey: ApiKeyGetter,
+    private readonly auditLogger?: FallbackAuditLogger,
+    private readonly factory?: ProviderFactory,
+  ) {
+    this.vendor = primary.vendor;
+  }
+
+  streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    return streamWithFallback(
+      this.primary,
+      params,
+      this.chain,
+      this.getApiKey,
+      this.auditLogger,
+      this.factory,
+    );
+  }
+}
+
 export async function* streamWithFallback(
   primary: LLMProvider,
   params: StreamTurnParams,

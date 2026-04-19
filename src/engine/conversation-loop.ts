@@ -12,6 +12,7 @@ import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { shouldCompact, compactMessages, isContextLengthError, getModelContextWindow } from "./auto-compact.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
+import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
 import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage, ThinkingBlock } from "./llm/types.js";
 import { classifyProviderError } from "./llm/error-classifier.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
@@ -193,7 +194,7 @@ export class ConversationLoop {
 
     try {
       const baseUrl = llmSettings.baseUrls?.[vendor];
-      this.provider = createProvider({
+      const primary = createProvider({
         vendor,
         apiKey: apiKey ?? "",
         model: llmSettings.model,
@@ -201,6 +202,17 @@ export class ConversationLoop {
         ...(llmSettings.vertexProject ? { vertexProject: llmSettings.vertexProject } : {}),
         ...(llmSettings.vertexLocation ? { vertexLocation: llmSettings.vertexLocation } : {}),
       });
+      const chain = (llmSettings.fallbackChain ?? []).filter(
+        (e) => e.provider && e.model,
+      );
+      this.provider =
+        chain.length > 0
+          ? new FallbackProvider(
+              primary,
+              chain,
+              (v) => this.deps.settingsService.getSecret(secretKeyFor(v)) ?? "",
+            )
+          : primary;
     } catch {
       this.provider = null;
     }
