@@ -50,6 +50,10 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // D1a — fallback chain (provider/model pairs tried on transient errors).
+  const [fallbackChain, setFallbackChain] = useState<Array<{ provider: string; model: string }>>([]);
+  const [fallbackOpen, setFallbackOpen] = useState(false);
+
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
   const webInfo = WEB_PROVIDERS.find((p) => p.id === webProvider) ?? WEB_PROVIDERS[0];
 
@@ -84,6 +88,7 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
       setHasWebKey(webApiKeySet);
       setEnableDailyBriefing(s.proactive?.enableDailyBriefing ?? false);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
+      setFallbackChain((s.llm.fallbackChain ?? []).map((e) => ({ provider: e.provider, model: e.model })));
       setSettingsLoaded(true);
     })();
     return () => {
@@ -167,6 +172,7 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
               .map((s) => s.trim())
               .filter((s) => s.length > 0),
             streamSmoothing,
+            fallbackChain: fallbackChain.filter((e) => e.provider && e.model).map((e) => ({ provider: e.provider as any, model: e.model })),
           } as any,
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
@@ -396,6 +402,62 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
                 ))}
               </div>
               <p className="text-[11px] text-muted-foreground">출력 스트림을 단어/문자 단위로 부드럽게 표시합니다.</p>
+            </div>
+            <div className="space-y-2 rounded-md border">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+                onClick={() => setFallbackOpen((o) => !o)}
+              >
+                <span>장애 복구 (Fallback Chain)</span>
+                <span className="text-muted-foreground">{fallbackOpen ? "▲" : "▼"}</span>
+              </button>
+              {fallbackOpen && (
+                <div className="space-y-2 px-3 pb-3">
+                  <p className="text-[11px] text-muted-foreground">기본 모델이 5xx/429/네트워크 오류를 반환할 때 순서대로 시도할 벤더·모델 목록입니다.</p>
+                  {fallbackChain.map((entry, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <select
+                        className="flex h-8 rounded-md border border-input bg-background px-2 text-xs"
+                        value={entry.provider}
+                        onChange={(e) => {
+                          const next = [...fallbackChain];
+                          next[idx] = { ...next[idx]!, provider: e.target.value };
+                          setFallbackChain(next);
+                        }}
+                      >
+                        {VENDORS.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+                      </select>
+                      <Input
+                        className="h-8 text-xs"
+                        value={entry.model}
+                        placeholder="모델 이름"
+                        onChange={(e) => {
+                          const next = [...fallbackChain];
+                          next[idx] = { ...next[idx]!, model: e.target.value };
+                          setFallbackChain(next);
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-xs text-destructive"
+                        onClick={() => setFallbackChain((c) => c.filter((_, i) => i !== idx))}
+                      >
+                        삭제
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs"
+                    onClick={() => setFallbackChain((c) => [...c, { provider: "openai", model: "" }])}
+                  >
+                    + 추가
+                  </Button>
+                </div>
+              )}
             </div>
           </TabsContent>
 
