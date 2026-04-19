@@ -1,0 +1,92 @@
+name: UI E2E (Playwright + Electron)
+
+# Opt-in only. Run manually via workflow_dispatch or when PR branches
+# explicitly include a `ui-e2e` label. Keeps normal CI fast.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    types: [labeled]
+
+jobs:
+  ui-e2e:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'ui-e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      E2E: "1"
+      LVIS_E2E: "1"
+    steps:
+      - name: Checkout lvis-app
+        uses: actions/checkout@v4
+        with:
+          path: lvis-app
+
+      # Sibling plugin repos are required because lvis-app declares
+      # file:../lvis-plugin-* dependencies in package.json.
+      - name: Checkout lvis-plugin-pageindex
+        uses: actions/checkout@v4
+        with:
+          repository: lvis-project/lvis-plugin-pageindex
+          path: lvis-plugin-pageindex
+      - name: Checkout lvis-plugin-meeting
+        uses: actions/checkout@v4
+        with:
+          repository: lvis-project/lvis-plugin-meeting
+          path: lvis-plugin-meeting
+      - name: Checkout lvis-plugin-email
+        uses: actions/checkout@v4
+        with:
+          repository: lvis-project/lvis-plugin-email
+          path: lvis-plugin-email
+      - name: Checkout lvis-plugin-calendar
+        uses: actions/checkout@v4
+        with:
+          repository: lvis-project/lvis-plugin-calendar
+          path: lvis-plugin-calendar
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install xvfb + Electron runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            libgtk-3-0 libnss3 libasound2t64 libxss1 libxshmfence1 \
+            libgbm1 libdrm2 libxcomposite1 libxrandr2 libatk1.0-0 \
+            libatk-bridge2.0-0 libcups2 libpangocairo-1.0-0 \
+            libpango-1.0-0 libcairo2
+
+      - name: Install lvis-app deps
+        working-directory: lvis-app
+        run: npm ci
+
+      - name: Install Playwright browsers (none needed for electron, skip deps)
+        working-directory: lvis-app
+        run: npx playwright install --with-deps=false || true
+
+      - name: Build app + plugins
+        working-directory: lvis-app
+        run: npm run start:npm --dry-run || true
+        # Use explicit build step rather than start (which also launches electron).
+      - name: Build
+        working-directory: lvis-app
+        run: |
+          npm run prepare:plugins:npm
+          npm run build:npm
+
+      - name: Run Playwright UI E2E under xvfb
+        working-directory: lvis-app
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" npx playwright test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: lvis-app/playwright-report
+          if-no-files-found: ignore
