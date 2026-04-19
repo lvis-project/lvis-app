@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
@@ -247,7 +248,7 @@ export class PluginRuntime {
         });
         continue;
       }
-      const module = (await import(pathToFileURL(entryPath).href)) as {
+      const module = (await import(pathToFileURL(realpathSync(entryPath)).href)) as {
         default?: RuntimePluginFactory;
         createPlugin?: RuntimePluginFactory;
       };
