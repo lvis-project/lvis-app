@@ -10,8 +10,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          path: lvis-app
           submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: lvis-project/lvis-plugin-meeting
+          path: lvis-plugin-meeting
+      - uses: actions/checkout@v4
+        with:
+          repository: lvis-project/lvis-plugin-email
+          path: lvis-plugin-email
+      - uses: actions/checkout@v4
+        with:
+          repository: lvis-project/lvis-plugin-pageindex
+          path: lvis-plugin-pageindex
+      - uses: actions/checkout@v4
+        with:
+          repository: lvis-project/lvis-plugin-calendar
+          path: lvis-plugin-calendar
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+        working-directory: lvis-app
       - run: bun run build
+        working-directory: lvis-app
       - run: bunx vitest run
+        working-directory: lvis-app
