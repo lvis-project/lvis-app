@@ -214,15 +214,15 @@ export function registerIpcHandlers(
   // ─── Settings (벤더별 API 키) ────────────────────
   // read-only, sender guard optional
   ipcMain.handle("lvis:settings:get", () => settingsService.getAll());
-  ipcMain.handle("lvis:settings:update", (e, partial) => {
+  ipcMain.handle("lvis:settings:update", async (e, partial) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:update", e); return UNAUTHORIZED_FRAME; }
-    const result = settingsService.patch(partial);
+    const result = await settingsService.patch(partial);
     conversationLoop.refreshProvider();
     return result;
   });
-  ipcMain.handle("lvis:settings:set-api-key", (e, vendor: string, apiKey: string) => {
+  ipcMain.handle("lvis:settings:set-api-key", async (e, vendor: string, apiKey: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:set-api-key", e); return UNAUTHORIZED_FRAME; }
-    settingsService.setSecret(`llm.apiKey.${vendor}`, apiKey);
+    await settingsService.setSecret(`llm.apiKey.${vendor}`, apiKey);
     conversationLoop.refreshProvider();
     return { ok: true };
   });
@@ -231,26 +231,26 @@ export function registerIpcHandlers(
     const v = vendor ?? settingsService.get("llm").provider;
     return settingsService.getSecret(`llm.apiKey.${v}`) !== null;
   });
-  ipcMain.handle("lvis:settings:delete-api-key", (e, vendor: string) => {
+  ipcMain.handle("lvis:settings:delete-api-key", async (e, vendor: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-api-key", e); return UNAUTHORIZED_FRAME; }
-    settingsService.deleteSecret(`llm.apiKey.${vendor}`);
+    await settingsService.deleteSecret(`llm.apiKey.${vendor}`);
     conversationLoop.refreshProvider();
     return { ok: true };
   });
 
   // ─── Web Search Keys ───────────────────────────
-  ipcMain.handle("lvis:settings:set-web-api-key", (e, provider: string, apiKey: string) => {
+  ipcMain.handle("lvis:settings:set-web-api-key", async (e, provider: string, apiKey: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:set-web-api-key", e); return UNAUTHORIZED_FRAME; }
-    settingsService.setSecret(`web.apiKey.${provider}`, apiKey);
+    await settingsService.setSecret(`web.apiKey.${provider}`, apiKey);
     return { ok: true };
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:settings:has-web-api-key", (_e, provider: string) => {
     return settingsService.getSecret(`web.apiKey.${provider}`) !== null;
   });
-  ipcMain.handle("lvis:settings:delete-web-api-key", (e, provider: string) => {
+  ipcMain.handle("lvis:settings:delete-web-api-key", async (e, provider: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-web-api-key", e); return UNAUTHORIZED_FRAME; }
-    settingsService.deleteSecret(`web.apiKey.${provider}`);
+    await settingsService.deleteSecret(`web.apiKey.${provider}`);
     return { ok: true };
   });
 
@@ -318,7 +318,7 @@ export function registerIpcHandlers(
   // ─── Memory ─────────────────────────────────────
   // read-only, sender guard optional
   ipcMain.handle("lvis:memory:notes:list", () => memoryManager.listNotes());
-  ipcMain.handle("lvis:memory:notes:save", (e, title: string, content: string) => {
+  ipcMain.handle("lvis:memory:notes:save", async (e, title: string, content: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:save", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.saveNote(title, content);
   });
@@ -332,13 +332,13 @@ export function registerIpcHandlers(
   );
   // read-only, sender guard optional
   ipcMain.handle("lvis:memory:lvis-md:get", () => memoryManager.getLvisMd());
-  ipcMain.handle("lvis:memory:lvis-md:update", (e, content: string) => {
+  ipcMain.handle("lvis:memory:lvis-md:update", async (e, content: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:lvis-md:update", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.updateLvisMd(content);
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:memory:user-prefs:get", () => memoryManager.getUserPreferences());
-  ipcMain.handle("lvis:memory:user-prefs:update", (e, content: string) => {
+  ipcMain.handle("lvis:memory:user-prefs:update", async (e, content: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:user-prefs:update", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.updateUserPreferences(content);
   });
@@ -547,7 +547,7 @@ export function registerIpcHandlers(
   // accidental double-click / rapid-fire IPC abuse.
   let lastDismissAcceptedAt = 0;
   const DISMISS_DEBOUNCE_MS = 1000;
-  ipcMain.handle("lvis:proactive:dismiss-briefing", (e, feedback?: { reason?: string; details?: string }) => {
+  ipcMain.handle("lvis:proactive:dismiss-briefing", async (e, feedback?: { reason?: string; details?: string }) => {
     if (!validateSender(e)) return UNAUTHORIZED_FRAME;
     const now = Date.now();
     if (now - lastDismissAcceptedAt < DISMISS_DEBOUNCE_MS) {
@@ -555,14 +555,14 @@ export function registerIpcHandlers(
     }
     lastDismissAcceptedAt = now;
     const cur = settingsService.get("proactive") ?? { enableDailyBriefing: false };
-    settingsService.patch({
+    await settingsService.patch({
       proactive: { ...cur, lastDismissedAt: new Date(now).toISOString() },
     });
     // Sprint E §2 — persist user feedback to ~/.lvis/notes/briefing-feedback.md
     const allowed = new Set(["inaccurate", "uninteresting", "busy", "other"]);
     if (feedback?.reason && allowed.has(feedback.reason)) {
       try {
-        memoryManager.appendBriefingFeedback({
+        await memoryManager.appendBriefingFeedback({
           reason: feedback.reason as "inaccurate" | "uninteresting" | "busy" | "other",
           details: feedback.details,
         });
@@ -582,7 +582,7 @@ export function registerIpcHandlers(
   let lastSnoozeAcceptedAt = 0;
   const SNOOZE_DEBOUNCE_MS = 1000;
   const SNOOZE_MAX_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
-  ipcMain.handle("lvis:proactive:snooze-briefing", (e) => {
+  ipcMain.handle("lvis:proactive:snooze-briefing", async (e) => {
     if (!validateSender(e)) return UNAUTHORIZED_FRAME;
     const now = Date.now();
     if (now - lastSnoozeAcceptedAt < SNOOZE_DEBOUNCE_MS) {
@@ -599,7 +599,7 @@ export function registerIpcHandlers(
     }
     lastSnoozeAcceptedAt = now;
     const shifted = new Date(shiftedMs).toISOString();
-    settingsService.patch({
+    await settingsService.patch({
       proactive: { ...cur, lastDismissedAt: shifted },
     });
     return { ok: true, lastDismissedAt: shifted };
@@ -641,7 +641,7 @@ export function registerIpcHandlers(
     return { ok: true, result };
   });
 
-  ipcMain.handle("lvis:chat:fork", (e, messageIndex: number) => {
+  ipcMain.handle("lvis:chat:fork", async (e, messageIndex: number) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:fork", e); return UNAUTHORIZED_FRAME; }
     const current = conversationLoop.getHistory().getMessages() as GenericMessage[];
     let upto = current.length;
@@ -651,10 +651,10 @@ export function registerIpcHandlers(
     }
     const slice = current.slice(0, upto);
     if (current.length > 0) {
-      memoryManager.saveSession(conversationLoop.getSessionId(), current);
+      await memoryManager.saveSession(conversationLoop.getSessionId(), current);
     }
     const newId = crypto.randomUUID();
-    memoryManager.saveSession(newId, slice);
+    await memoryManager.saveSession(newId, slice);
     const loaded = conversationLoop.loadSession(newId);
     return { ok: loaded, sessionId: loaded ? newId : null };
   });
@@ -679,13 +679,13 @@ export function registerIpcHandlers(
       enableThinking: opts?.enableThinking ?? true,
       thinkingBudgetTokens: opts?.thinkingBudgetTokens ?? 20000,
     };
-    settingsService.patch({ llm: nextLlm });
+    await settingsService.patch({ llm: nextLlm });
     conversationLoop.refreshProvider();
     try {
       const result = await streamTurn(lastUser.content);
       return { ok: true, result };
     } finally {
-      settingsService.patch({ llm: prevLlm });
+      await settingsService.patch({ llm: prevLlm });
       conversationLoop.refreshProvider();
     }
   });
@@ -789,9 +789,9 @@ export function registerIpcHandlers(
   // S12 — telemetry consent prompt answer (Yes/No from renderer).
   // MUST mark telemetryPromptAnswered=true regardless of answer so the
   // prompt is never shown again. Only sets enabled=true on affirmative.
-  ipcMain.handle("lvis:telemetry:consent-answer", (e, accepted: boolean) => {
+  ipcMain.handle("lvis:telemetry:consent-answer", async (e, accepted: boolean) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:telemetry:consent-answer", e); return UNAUTHORIZED_FRAME; }
-    settingsService.patch({
+    await settingsService.patch({
       telemetry: {
         ...settingsService.get("telemetry"),
         telemetryPromptAnswered: true,

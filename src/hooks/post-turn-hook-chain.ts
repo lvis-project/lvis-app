@@ -89,7 +89,7 @@ export class PostTurnHookChain {
     // 2. 세션 영속화 (§4.5.7)
     try {
       const messagesToSave = compactedMessages ?? ctx.messages;
-      this.deps.memoryManager?.saveSession(ctx.sessionId, messagesToSave);
+      await this.deps.memoryManager?.saveSession(ctx.sessionId, messagesToSave);
     } catch (err) {
       console.warn("[post-turn] saveSession failed:", err);
     }
@@ -103,7 +103,7 @@ export class PostTurnHookChain {
           if (confirmPatterns.test(ctx.output)) {
             const title = ctx.input.slice(0, 40).replace(/\n/g, " ").trim();
             if (title.length >= 3) {
-              this.deps.memoryManager.saveNote(
+              await this.deps.memoryManager.saveNote(
                 `자동-${title}`,
                 `[사용자 요청]\n${ctx.input}\n\n[어시스턴트 응답]\n${ctx.output.slice(0, 500)}`,
               );

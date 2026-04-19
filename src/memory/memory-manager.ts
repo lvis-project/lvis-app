@@ -14,6 +14,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
+import { withFileLock } from "../lib/with-file-lock.js";
 
 export interface MemoryManagerOptions {
   /** ~/.lvis 기본, 테스트 시 override */
@@ -124,10 +125,13 @@ export class MemoryManager {
   // ─── Write API ("이거 기억해" 명령) ───────────────
 
   /** 메모 저장 — 사용자가 "기억해" 하면 notes/에 저장 */
-  saveNote(title: string, content: string): NoteEntry {
+  async saveNote(title: string, content: string): Promise<NoteEntry> {
     const filename = this.slugify(title) + ".md";
     const fullContent = `# ${title}\n\n${content}\n`;
-    writeFileSync(join(this.notesDir, filename), fullContent, "utf-8");
+    const targetPath = join(this.notesDir, filename);
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, fullContent, "utf-8");
+    });
     return { filename, title, content: fullContent };
   }
 
@@ -138,14 +142,20 @@ export class MemoryManager {
   }
 
   /** LVIS.md 업데이트 */
-  updateLvisMd(content: string): void {
-    writeFileSync(join(this.lvisDir, "LVIS.md"), content, "utf-8");
+  async updateLvisMd(content: string): Promise<void> {
+    const targetPath = join(this.lvisDir, "LVIS.md");
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, content, "utf-8");
+    });
     this.lvisMd = content;
   }
 
   /** user-preferences.md 업데이트 */
-  updateUserPreferences(content: string): void {
-    writeFileSync(join(this.lvisDir, "user-preferences.md"), content, "utf-8");
+  async updateUserPreferences(content: string): Promise<void> {
+    const targetPath = join(this.lvisDir, "user-preferences.md");
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, content, "utf-8");
+    });
     this.userPreferences = content;
   }
 
@@ -161,11 +171,11 @@ export class MemoryManager {
    * Sprint E §2 — 사용자 피드백 루프. Proactive Engine 이 최근 5건을 읽어
    * LLM 프롬프트에 "User feedback memory:" 섹션으로 주입한다.
    */
-  appendBriefingFeedback(entry: {
+  async appendBriefingFeedback(entry: {
     reason: "inaccurate" | "uninteresting" | "busy" | "other";
     details?: string;
     date?: string;
-  }): void {
+  }): Promise<void> {
     const date = entry.date ?? new Date().toISOString().slice(0, 10);
     const block =
       `---\n` +
@@ -173,17 +183,19 @@ export class MemoryManager {
       `reason: ${entry.reason}\n` +
       `details: ${(entry.details ?? "").replace(/\r?\n/g, " ").trim()}\n` +
       `---\n\n`;
-    const path = join(this.notesDir, "briefing-feedback.md");
-    if (!existsSync(path)) {
-      writeFileSync(
-        path,
-        "# 브리핑 피드백 로그\n\n> 사용자가 브리핑을 닫을 때 남긴 이유가 기록됩니다. ProactiveEngine이 최근 5건을 LLM 컨텍스트에 주입합니다.\n\n" +
-          block,
-        "utf-8",
-      );
-    } else {
-      appendFileSync(path, block, "utf-8");
-    }
+    const targetPath = join(this.notesDir, "briefing-feedback.md");
+    await withFileLock(targetPath, async () => {
+      if (!existsSync(targetPath)) {
+        writeFileSync(
+          targetPath,
+          "# 브리핑 피드백 로그\n\n> 사용자가 브리핑을 닫을 때 남긴 이유가 기록됩니다. ProactiveEngine이 최근 5건을 LLM 컨텍스트에 주입합니다.\n\n" +
+            block,
+          "utf-8",
+        );
+      } else {
+        appendFileSync(targetPath, block, "utf-8");
+      }
+    });
   }
 
   /** 최근 N건의 브리핑 피드백을 파싱해 반환 (신규가 마지막). */
@@ -208,10 +220,12 @@ export class MemoryManager {
   // ─── Session Persistence (§5.2 ~/.lvis/sessions/) ─
 
   /** 세션 저장 — JSONL 형식 (§4.5.7) */
-  saveSession(sessionId: string, messages: unknown[]): void {
-    const path = join(this.sessionsDir, `${sessionId}.jsonl`);
+  async saveSession(sessionId: string, messages: unknown[]): Promise<void> {
+    const targetPath = join(this.sessionsDir, `${sessionId}.jsonl`);
     const lines = messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
-    writeFileSync(path, lines, "utf-8");
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, lines, "utf-8");
+    });
   }
 
   /** 세션 복원 */

@@ -20,9 +20,9 @@ afterEach(() => {
 });
 
 describe("MemoryManager briefing feedback", () => {
-  it("appends entries as markdown blocks and reads back in order", () => {
-    mm.appendBriefingFeedback({ reason: "inaccurate", details: "기한이 틀림", date: "2026-04-18" });
-    mm.appendBriefingFeedback({ reason: "busy", date: "2026-04-19" });
+  it("appends entries as markdown blocks and reads back in order", async () => {
+    await mm.appendBriefingFeedback({ reason: "inaccurate", details: "기한이 틀림", date: "2026-04-18" });
+    await mm.appendBriefingFeedback({ reason: "busy", date: "2026-04-19" });
 
     const path = join(dir, "notes", "briefing-feedback.md");
     expect(existsSync(path)).toBe(true);
@@ -41,9 +41,9 @@ describe("MemoryManager briefing feedback", () => {
     expect(mm.readRecentBriefingFeedback()).toEqual([]);
   });
 
-  it("respects limit on recent entries", () => {
+  it("respects limit on recent entries", async () => {
     for (let i = 0; i < 10; i++) {
-      mm.appendBriefingFeedback({ reason: "other", details: `entry-${i}`, date: `2026-04-${10 + i}` });
+      await mm.appendBriefingFeedback({ reason: "other", details: `entry-${i}`, date: `2026-04-${10 + i}` });
     }
     const recent = mm.readRecentBriefingFeedback(3);
     expect(recent.length).toBe(3);

@@ -1,6 +1,7 @@
 import { safeStorage } from "electron";
 import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { withFileLock } from "../lib/with-file-lock.js";
 
 export type LLMVendor =
   | "claude"
@@ -249,12 +250,12 @@ export class SettingsService {
     return structuredClone(this.settings[key]);
   }
 
-  set<K extends keyof AppSettings>(key: K, value: AppSettings[K]): void {
+  async set<K extends keyof AppSettings>(key: K, value: AppSettings[K]): Promise<void> {
     this.settings[key] = value;
-    this.saveSettings();
+    await this.saveSettings();
   }
 
-  patch(partial: Partial<AppSettings>): AppSettings {
+  async patch(partial: Partial<AppSettings>): Promise<AppSettings> {
     if (partial.llm) this.settings.llm = { ...this.settings.llm, ...partial.llm };
     if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
     if (partial.webSearch) this.settings.webSearch = { ...this.settings.webSearch, ...partial.webSearch };
@@ -273,12 +274,12 @@ export class SettingsService {
     if (partial.telemetry) {
       this.settings.telemetry = { ...this.settings.telemetry, ...partial.telemetry };
     }
-    this.saveSettings();
+    await this.saveSettings();
     return this.getAll();
   }
 
   /** 비밀 값(API 키 등)을 암호화하여 저장 */
-  setSecret(key: string, value: string): void {
+  async setSecret(key: string, value: string): Promise<void> {
     const secrets = this.loadSecrets();
     if (safeStorage.isEncryptionAvailable()) {
       secrets[key] = safeStorage.encryptString(value).toString("base64");
@@ -286,7 +287,7 @@ export class SettingsService {
       // 암호화 불가 환경 — 평문 저장 (개발 환경 등)
       secrets[key] = `plain:${value}`;
     }
-    this.saveSecrets(secrets);
+    await this.saveSecrets(secrets);
   }
 
   /** 저장된 비밀 값을 복호화하여 반환 */
@@ -310,10 +311,10 @@ export class SettingsService {
     }
   }
 
-  deleteSecret(key: string): void {
+  async deleteSecret(key: string): Promise<void> {
     const secrets = this.loadSecrets();
     delete secrets[key];
-    this.saveSecrets(secrets);
+    await this.saveSecrets(secrets);
   }
 
   // Copilot review fix: 기존 hasApiKey() 는 `llm.apiKey` 단일 키만 검사했으나
@@ -368,9 +369,11 @@ export class SettingsService {
     }
   }
 
-  private saveSettings(): void {
+  private async saveSettings(): Promise<void> {
     mkdirSync(dirname(this.settingsPath), { recursive: true });
-    writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2), "utf-8");
+    await withFileLock(this.settingsPath, async () => {
+      writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2), "utf-8");
+    });
   }
 
   private loadSecrets(): Record<string, string> {
@@ -382,13 +385,15 @@ export class SettingsService {
     }
   }
 
-  private saveSecrets(secrets: Record<string, string>): void {
+  private async saveSecrets(secrets: Record<string, string>): Promise<void> {
     mkdirSync(dirname(this.secretsPath), { recursive: true });
-    // Security A4 fix: 0o600 mode (owner only) — Linux 공용 PC에서 safeStorage unavailable 시
-    // 'plain:' prefix 평문 API 키가 other/group에 노출되는 것을 차단
-    writeFileSync(this.secretsPath, JSON.stringify(secrets, null, 2), {
-      encoding: "utf-8",
-      mode: 0o600,
+    await withFileLock(this.secretsPath, async () => {
+      // Security A4 fix: 0o600 mode (owner only) — Linux 공용 PC에서 safeStorage unavailable 시
+      // 'plain:' prefix 평문 API 키가 other/group에 노출되는 것을 차단
+      writeFileSync(this.secretsPath, JSON.stringify(secrets, null, 2), {
+        encoding: "utf-8",
+        mode: 0o600,
+      });
     });
   }
 }

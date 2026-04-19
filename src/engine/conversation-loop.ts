@@ -286,7 +286,9 @@ ${briefingData}
   /** 대화 이력 초기화 (새 대화) — §4.5.7 */
   newConversation(): void {
     if (this.history.length > 0) {
-      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages()).catch((err: unknown) => {
+        console.warn("[lvis] newConversation saveSession failed:", (err as Error).message);
+      });
     }
     this.sessionId = crypto.randomUUID();
     this.history.clear();
@@ -322,7 +324,9 @@ ${briefingData}
 
     // 현재 세션 저장 후 전환
     if (this.history.length > 0) {
-      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages()).catch((err: unknown) => {
+        console.warn("[lvis] loadSession saveSession failed:", (err as Error).message);
+      });
     }
 
     this.sessionId = sessionId;
@@ -482,7 +486,7 @@ ${briefingData}
           callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
         }
       }
-      this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+      await this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
       this.auditLogger.logTurn({
         sessionId: this.sessionId,
         input,
@@ -918,7 +922,7 @@ ${briefingData}
       case "remember": {
         if (!args.trim()) { result = "사용법: /remember 기억할 내용"; break; }
         const title = args.slice(0, 40).replace(/\n/g, " ");
-        this.deps.memoryManager.saveNote(title, args);
+        await this.deps.memoryManager.saveNote(title, args);
         result = `메모 저장됨: ${title}`;
         break;
       }

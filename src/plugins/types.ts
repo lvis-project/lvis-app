@@ -208,7 +208,7 @@ export interface PluginHostApi {
     sourceRef?: string;
     priority?: "high" | "medium" | "low";
   }): void;
-  saveNote(title: string, content: string): void;
+  saveNote(title: string, content: string): Promise<void>;
   getSecret(key: string): string | null;
 
   // Microsoft Graph 공유 인증 (메일·캘린더 플러그인)
