@@ -372,6 +372,77 @@ describe("ApprovalGate", () => {
     expect(wc.send).not.toHaveBeenCalled();
   });
 
+  // ── D1: args DLP masking for UI payload ──────────
+
+  it("D1: API key in args is masked in UI payload, original preserved in caller's object", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const originalArgs = {
+      prompt: "use sk-abcdefghijklmnopqrstuvwxyz12345",
+      email: "user@example.com",
+      nested: { phone: "010-1234-5678", count: 3 },
+    };
+    const req = makeRequest({
+      id: "req-dlp-args",
+      toolName: "llm_call",
+      args: originalArgs,
+    });
+
+    gate.requestAndWait(req);
+
+    expect(wc.send).toHaveBeenCalledTimes(1);
+    const [, payload] = wc.send.mock.calls[0] as [string, ApprovalRequest];
+    const maskedArgs = payload.args as typeof originalArgs;
+
+    // UI payload is masked
+    expect(maskedArgs.prompt).toBe("use sk-****");
+    expect(maskedArgs.email).toBe("***@example.com");
+    expect(maskedArgs.nested.phone).toBe("010-****-****");
+    expect(maskedArgs.nested.count).toBe(3);
+
+    // Caller's original args object is NOT mutated — tool execution uses this
+    expect(originalArgs.prompt).toBe("use sk-abcdefghijklmnopqrstuvwxyz12345");
+    expect(originalArgs.email).toBe("user@example.com");
+    expect(originalArgs.nested.phone).toBe("010-1234-5678");
+    expect(req.args).toBe(originalArgs);
+
+    // cleanup
+    gate.resolve(req.id, { requestId: req.id, choice: "deny-once" });
+  });
+
+  it("D1: args with no sensitive data pass through (deep-equal) unchanged", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({
+      id: "req-dlp-clean",
+      args: { title: "hello", items: ["a", "b"], n: 1 },
+    });
+
+    gate.requestAndWait(req);
+    const [, payload] = wc.send.mock.calls[0] as [string, ApprovalRequest];
+    expect(payload.args).toEqual({ title: "hello", items: ["a", "b"], n: 1 });
+
+    gate.resolve(req.id, { requestId: req.id, choice: "deny-once" });
+  });
+
+  it("D1: SSN and credit card in string args are masked", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({
+      id: "req-dlp-ssn",
+      args: { memo: "주민번호 900101-1234567 카드 4111-1111-1111-1234" },
+    });
+
+    gate.requestAndWait(req);
+    const [, payload] = wc.send.mock.calls[0] as [string, ApprovalRequest];
+    const memo = (payload.args as { memo: string }).memo;
+    expect(memo).toContain("******-*******");
+    expect(memo).toContain("****-****-****-1234");
+    expect(memo).not.toContain("900101-1234567");
+
+    gate.resolve(req.id, { requestId: req.id, choice: "deny-once" });
+  });
+
   it("H3: duplicate slashes are collapsed and still blocked", async () => {
     const wc = makeMockWebContents();
     const gate = new ApprovalGate(wc as never);
