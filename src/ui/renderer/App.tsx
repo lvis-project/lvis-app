@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search } from "lucide-react";
 import {
   DEFAULT_ROLE_PRESETS,
   ROLE_PRESETS_CHANGED_EVENT,
@@ -8,9 +7,7 @@ import {
 } from "../../data/role-presets.js";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../../components/ui/command.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
@@ -22,6 +19,7 @@ import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { PluginInstallDialog } from "./dialogs/PluginInstallDialog.js";
 import { PluginUninstallDialog } from "./dialogs/PluginUninstallDialog.js";
+import { CommandPaletteDialog } from "./dialogs/CommandPaletteDialog.js";
 import { TaskView } from "./components/TaskView.js";
 import { StarredView } from "./components/StarredView.js";
 import { MainToolbar } from "./MainToolbar.js";
@@ -83,7 +81,6 @@ export function App() {
   const [installTarget, setInstallTarget] = useState<MarketplaceItem | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<MarketplaceItem | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
-  const [commandQuery, setCommandQuery] = useState("");
   const [working, setWorking] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const { briefing, dismiss: dismissBriefing, snooze: snoozeBriefing } = useBriefing(api);
@@ -395,7 +392,7 @@ export function App() {
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
       <PluginInstallDialog target={installTarget} onClose={() => setInstallTarget(null)} onConfirm={installPlugin} working={working} />
-      <Dialog open={commandOpen} onOpenChange={setCommandOpen}><DialogContent><DialogHeader><DialogTitle>Command</DialogTitle><DialogDescription>빠른 실행</DialogDescription></DialogHeader><Command><CommandInput placeholder="검색..." value={commandQuery} onValueChange={setCommandQuery} /><CommandList><CommandEmpty>결과 없음</CommandEmpty><CommandGroup heading="Actions">{commandActions.filter((a) => !commandQuery || a.label.toLowerCase().includes(commandQuery.toLowerCase())).map((a) => <CommandItem key={a.id} onSelect={() => { setCommandOpen(false); setCommandQuery(""); void a.run(); }}><Search className="mr-2 h-4 w-4" />{a.label}</CommandItem>)}</CommandGroup></CommandList></Command></DialogContent></Dialog>
+      <CommandPaletteDialog open={commandOpen} onOpenChange={setCommandOpen} actions={commandActions} />
       <PluginUninstallDialog target={uninstallTarget} onClose={() => setUninstallTarget(null)} onConfirm={uninstallPlugin} working={working} />
     </TooltipProvider>
   );
