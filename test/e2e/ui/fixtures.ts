@@ -40,6 +40,7 @@ export const test = base.extend<ElectronFixtures>({
       args: [mainEntry, `--user-data-dir=${userDataDir}`],
       env: {
         ...process.env,
+        LVIS_DEV: '1',
         LVIS_E2E: '1',
         NODE_ENV: 'test',
       },
