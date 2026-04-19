@@ -228,6 +228,17 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
+// macOS: re-create window on Dock icon click when all windows are closed.
+// Re-register the plugin event bridge for the new window (Issue 5).
+app.on("activate", () => {
+  if (mainWindow === null || mainWindow.isDestroyed()) {
+    createWindow();
+    if (mainWindow && services?.registerPluginEventBridge) {
+      services.registerPluginEventBridge(mainWindow);
+    }
+  }
+});
+
 app.on("before-quit", async () => {
   if (services) {
     await services.pluginRuntime.stopAll();

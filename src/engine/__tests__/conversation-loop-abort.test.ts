@@ -108,6 +108,44 @@ describe("ConversationLoop abort (B4)", () => {
     expect(result.stopReason).not.toBe("interrupted");
   });
 
+  it("Issue 3: error with err.name=AbortError is treated as interrupt (name check)", async () => {
+    const loop = makeLoop();
+
+    (loop as { provider: LLMProvider }).provider = {
+      vendor: "openai" as const,
+      async *streamTurn() {
+        // Simulate a provider throwing an error with name=AbortError (no signal aborted)
+        const err = new Error("The operation was aborted.");
+        err.name = "AbortError";
+        throw err;
+      },
+    };
+
+    const result = await loop.runTurn("hi");
+    // Should be treated as interrupt, not a hard error
+    expect(result.stopReason).toBe("interrupted");
+    expect(result.text).toContain("[중단됨]");
+  });
+
+  it("Issue 3: error with 'abort' substring but wrong name is NOT treated as abort", async () => {
+    const loop = makeLoop();
+
+    (loop as { provider: LLMProvider }).provider = {
+      vendor: "openai" as const,
+      async *streamTurn() {
+        // Error message contains "abort" but name is not AbortError
+        const err = new Error("Surgical abortion operation timeout");
+        err.name = "TimeoutError";
+        throw err;
+      },
+    };
+
+    let errorCalled = false;
+    // This should propagate as a real error, not an interrupt
+    await expect(loop.runTurn("hi", { onError: () => { errorCalled = true; } })).rejects.toThrow();
+    expect(errorCalled).toBe(false);
+  });
+
   it("abortCurrentTurn() aborts in-flight controller", () => {
     const loop = makeLoop();
 
