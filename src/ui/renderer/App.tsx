@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
@@ -174,6 +175,7 @@ export function App() {
 
   // ─── Render ───────────────────────────────────
   return (
+    <ErrorBoundary fallback="앱 오류가 발생했습니다">
     <TooltipProvider>
       <div className="grid h-screen grid-cols-[320px_1fr]">
         <Sidebar
@@ -238,5 +240,6 @@ export function App() {
       <PluginUninstallDialog target={uninstallTarget} onClose={() => setUninstallTarget(null)} onConfirm={uninstallPlugin} working={working} />
       <DropZoneOverlay />
     </TooltipProvider>
+    </ErrorBoundary>
   );
 }
