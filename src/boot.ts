@@ -704,7 +704,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     pluginRuntime, pluginMarketplace, taskService, taskSourceRegistry, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
-    idleScheduler, bashAstValidator, auditService, postTurnHookChain,
+    idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore,
     telemetry, pluginTelemetry, autoUpdaterStop,
     refreshPluginNotifications: () => {

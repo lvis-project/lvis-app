@@ -9,7 +9,7 @@ import { writeFile } from "node:fs/promises";
 import type { AppServices } from "./boot.js";
 import type { ApprovalDecision } from "./permissions/approval-gate.js";
 import { loadPolicy, savePolicy } from "./permissions/policy-store.js";
-import { redactForLLM } from "./audit/dlp-filter.js";
+import { redactForLLM, initDlpAudit } from "./audit/dlp-filter.js";
 import type { GenericMessage } from "./engine/llm/types.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
 import type { WebContents } from "electron";
@@ -120,6 +120,8 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:proactive:snooze-briefing",
   // Sprint 4.B — usage observability
   "lvis:usage:summary",
+  "lvis:usage:range",
+  "lvis:usage:export-csv",
   // Sprint 4.C — conversation UX
   "lvis:chat:get-history",
   "lvis:chat:edit-resend",
@@ -134,6 +136,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:audit:search",
   "lvis:audit:stats",
   "lvis:plugins:perf-stats",
+  "lvis:dlp:stats",
 ]);
 
 /**
@@ -183,6 +186,9 @@ export function registerIpcHandlers(
     starredStore,
     auditLogger,
   } = services;
+
+  // Wire DLP audit logging so redactForLLM records hits to audit JSONL.
+  initDlpAudit(auditLogger, conversationLoop.getSessionId());
 
   // ─── Settings (벤더별 API 키) ────────────────────
   ipcMain.handle("lvis:settings:get", () => settingsService.getAll());
@@ -429,6 +435,28 @@ export function registerIpcHandlers(
     return getUsageSummary(typeof days === "number" ? days : 60);
   });
 
+  ipcMain.handle("lvis:usage:range", async (_e, opts: { dateFrom: string; dateTo: string }) => {
+    const { getUsageRange } = await import("./engine/usage-stats.js");
+    return getUsageRange(opts);
+  });
+
+  ipcMain.handle("lvis:usage:export-csv", async (_e, rows: Array<Record<string, string | number>>) => {
+    const { dialog, BrowserWindow } = await import("electron");
+    const win = BrowserWindow.getFocusedWindow() ?? undefined;
+    const result = win
+      ? await dialog.showSaveDialog(win, { defaultPath: "lvis-usage.csv", filters: [{ name: "CSV", extensions: ["csv"] }] })
+      : await dialog.showSaveDialog({ defaultPath: "lvis-usage.csv", filters: [{ name: "CSV", extensions: ["csv"] }] });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    const { writeFileSync } = await import("node:fs");
+    const headers = ["date", "vendor", "model", "inputTokens", "outputTokens", "totalTokens", "cost"];
+    const lines = [
+      headers.join(","),
+      ...rows.map((r) => headers.map((h) => JSON.stringify(r[h] ?? "")).join(",")),
+    ];
+    writeFileSync(result.filePath, lines.join("\n"), "utf-8");
+    return { ok: true, filePath: result.filePath };
+  });
+
   // Sprint 2-D: user dismissal — sets lastDismissedAt, which suppresses the
   // gated ProactiveEngine.generateDailyBriefing for the following 24h.
   // Sprint 3-A (M1): debounce accepted dismisses to min 1s apart to prevent
@@ -655,6 +683,12 @@ export function registerIpcHandlers(
   });
   ipcMain.handle("lvis:audit:stats", async (_e, lastDays: number) => {
     return auditLogger.getStats(typeof lastDays === "number" ? lastDays : 7);
+  });
+
+  // ─── DLP Hit Statistics (Observability) ─────────
+  ipcMain.handle("lvis:dlp:stats", async (_e, days: number) => {
+    const { getDlpStats } = await import("./audit/dlp-stats.js");
+    return getDlpStats(typeof days === "number" ? days : 7);
   });
 
   // S12 — telemetry consent prompt answer (Yes/No from renderer).

@@ -95,7 +95,19 @@ function luhnValid(num: string): boolean {
   return sum % 10 === 0;
 }
 
-export function redactForLLM(text: string): RedactResult {
+/** Optional auditLogger injected at boot to record DLP hits. */
+let _auditLogger: { log: (e: { timestamp: string; sessionId: string; type: "dlp"; dlp: { byKind: Record<string, number>; totalRedactions: number; turnId: string } }) => void } | null = null;
+let _sessionId = "unknown";
+
+export function initDlpAudit(
+  auditLogger: typeof _auditLogger,
+  sessionId: string,
+): void {
+  _auditLogger = auditLogger;
+  _sessionId = sessionId;
+}
+
+export function redactForLLM(text: string, turnId?: string): RedactResult {
   const counts: Record<string, number> = {};
   const bump = (k: string) => (counts[k] = (counts[k] ?? 0) + 1);
 
@@ -112,6 +124,18 @@ export function redactForLLM(text: string): RedactResult {
   });
 
   const totalCount = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (totalCount > 0 && _auditLogger) {
+    _auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: _sessionId,
+      type: "dlp",
+      dlp: {
+        byKind: counts,
+        totalRedactions: totalCount,
+        turnId: turnId ?? `turn-${Date.now()}`,
+      },
+    });
+  }
   return { redacted: out, counts, totalCount };
 }
 

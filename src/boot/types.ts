@@ -20,6 +20,7 @@ import type { McpManager } from "../mcp/mcp-manager.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { AuditService } from "../main/audit-service.js";
+import type { AuditLogger } from "../audit/audit-logger.js";
 import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import type { StarredStore } from "../data/starred-store.js";
@@ -74,6 +75,7 @@ export interface AppServices {
   idleScheduler?: IdleSchedulerService;
   bashAstValidator: BashAstValidator;
   auditService: AuditService;
+  auditLogger: AuditLogger;
   postTurnHookChain: PostTurnHookChain;
   /** B1: 승인 게이트 — mainWindow 준비 후 생성 */
   approvalGate?: ApprovalGate;
