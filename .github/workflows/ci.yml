@@ -35,7 +35,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Build plugin-sdk submodule
         run: |
-          cd lvis-app/lvis-plugin-sdk
+          cd lvis-app/packages/plugin-sdk
           bun install --frozen-lockfile
           bun run build
       - run: bun install --frozen-lockfile
