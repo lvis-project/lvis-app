@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
@@ -127,6 +127,21 @@ export interface PluginRuntimeOptions {
    * When absent, signatures are not checked (backward compat).
    */
   signatureVerifier?: PluginSignatureVerifier;
+  /**
+   * Dev-only escape hatch. When `true`, managed plugins are treated as
+   * "managed + signed" for the purpose of uiCallable mutating-verb gating
+   * (§Sprint 4-B B-3) even though no signatureVerifier is wired.
+   *
+   * This reflects the operator's explicit choice to skip signature
+   * verification (see `LVIS_DEV_SKIP_SIG=1` in boot/steps/plugin-runtime.ts),
+   * which already relaxes the signature check at load time. Without this
+   * flag, managed plugins would load but their uiCallable[] entries would
+   * be wrongly rejected whenever dev mode disables the verifier — a logic
+   * mismatch between the manifest validator and the runtime signature gate.
+   *
+   * Packaged builds must never set this.
+   */
+  allowManagedUnsigned?: boolean;
   /** Optional sink for signature-related audit events. */
   auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   /**
@@ -145,6 +160,7 @@ export class PluginRuntime {
   private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly signatureVerifier?: PluginSignatureVerifier;
+  private readonly allowManagedUnsigned: boolean;
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   private readonly onDisable?: (pluginId: string) => void;
   private readonly plugins = new Map<string, LoadedPlugin>();
@@ -167,6 +183,7 @@ export class PluginRuntime {
     this.createHostApi = options.createHostApi;
     this.deploymentGuard = options.deploymentGuard;
     this.signatureVerifier = options.signatureVerifier;
+    this.allowManagedUnsigned = options.allowManagedUnsigned ?? false;
     this.auditLog = options.auditLog;
     this.onDisable = options.onDisable;
   }
@@ -973,7 +990,8 @@ export class PluginRuntime {
         // admin tooling); everything else is rejected at manifest load time
         // and audit-logged so operators see the attempt.
         const managedAndSigned =
-          parsed.deployment === "managed" && this.signatureVerifier !== undefined;
+          parsed.deployment === "managed" &&
+          (this.signatureVerifier !== undefined || this.allowManagedUnsigned);
         if (!managedAndSigned) {
           this.auditLog?.("error", "plugin_uiCallable_destructive_rejected", {
             pluginId: pid,
@@ -1094,13 +1112,25 @@ export class PluginRuntime {
     }
   }
 
+  private resolveDevLinkedPackageEntry(entry: string): string | undefined {
+    const normalized = entry.replaceAll("\\", "/");
+    const match = normalized.match(/(?:^|\/+)node_modules\/@lvis\/([^/]+)\/(.+)$/);
+    if (!match) return undefined;
+    const [, packageName, packageSubpath] = match;
+    const siblingRepoEntry = resolve(this.hostRoot, "..", `lvis-${packageName}`, packageSubpath);
+    if (!existsSync(siblingRepoEntry)) return undefined;
+    return siblingRepoEntry;
+  }
+
   private resolveEntryPath(pluginRoot: string, entry: string): string {
     // Dev mode: allow entries that traverse outside the plugin directory
     // (e.g., ../../../node_modules/@lvis/plugin-*/dist/hostPlugin.js).
     // Mirrors the signature-check bypass introduced in PR #171.
     const isDev = process.env.LVIS_DEV === "1";
     if (isDev && !isAbsolute(entry)) {
-      return resolve(pluginRoot, entry);
+      const resolved = resolve(pluginRoot, entry);
+      if (existsSync(resolved)) return resolved;
+      return this.resolveDevLinkedPackageEntry(entry) ?? resolved;
     }
     return resolvePluginEntryPath(pluginRoot, entry);
   }

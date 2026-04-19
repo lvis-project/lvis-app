@@ -184,6 +184,13 @@ export async function initPluginRuntime(
     configOverrides,
     deploymentGuard,
     signatureVerifier,
+    // §B-3 gate alignment: when skipSig disables the verifier in dev, the
+    // manifest validator would otherwise reject managed plugins' mutating
+    // uiCallable entries (meeting_start/email_auth/...) because it keys on
+    // `signatureVerifier !== undefined`. The operator already opted into
+    // "trust managed plugins unsigned" via LVIS_DEV_SKIP_SIG=1, so propagate
+    // that same decision into the manifest gate. Never true in packaged.
+    allowManagedUnsigned: skipSig,
     auditLog: (level, message, data) => {
       try {
         bootAuditLogger.log({
