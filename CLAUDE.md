@@ -19,18 +19,19 @@ src/
   plugin-ui-host.tsx          — Dynamic plugin UI mounting
 
   ui/renderer/                — Renderer composition root (Phase 1~4.6 split 완료)
-    App.tsx                   — composition root
+    App.tsx                   — composition root (<300 lines)
     ChatView.tsx · Sidebar.tsx · SettingsDialog.tsx · MainToolbar.tsx
     context/                  — ChatContext (state provider for ChatView subtree)
-    hooks/                    — 12 domain hooks (settings, chat-state, briefing,
+    hooks/                    — 14 domain hooks (settings, chat-state, briefing,
                                approval, search, context-budget, cost-estimate,
                                sessions, starred, plugin-marketplace, role-presets,
                                app-bootstrap, indexed-docs, marketplace-updates)
+                               ProactiveTriggerCoordinator — 5 signals (idle/schedule/meeting/task-deadline/post-turn)
     components/               — BriefingCard, AssistantCard, UserMessageEditor,
                                ReasoningCard, ToolApprovalDialog, ToolGroupCard,
                                ChatSearchOverlay, Sparkline, UsageDashboard,
-                               HtmlPreview, TaskView, StarredView,
-                               MarketplaceUpdateBanner
+                               HtmlPreview (partition lvis-render-html, webRequest block A5),
+                               TaskView, StarredView, MarketplaceUpdateBanner
     dialogs/                  — ApprovalDialog, PluginInstallDialog,
                                PluginUninstallDialog, CommandPaletteDialog
     tabs/                     — RolesTab, PermissionsTab, AuditTab,
