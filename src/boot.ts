@@ -476,6 +476,19 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // 오늘 일정 초기 로드 (calendar-source capability 플러그인에서 *_today 메서드 자동 탐색)
   loadCalendarToday(pluginRuntime, proactiveEngine);
 
+  // §35 — Forward meeting.transcript.updated from main-process event bus → renderer
+  const unsubscribeTranscriptUpdated = onEvent("meeting.transcript.updated", (data) => {
+    const win = mainWindow;
+    if (!win.isDestroyed()) {
+      try {
+        win.webContents.send("lvis:plugin:event", "meeting.transcript.updated", data);
+      } catch (e) {
+        console.warn("[lvis] boot: meeting.transcript.updated send failed:", (e as Error).message);
+      }
+    }
+  });
+  app.prependOnceListener("before-quit", () => { unsubscribeTranscriptUpdated(); });
+
   // manifest.notificationEvents 선언 기반 OS 알림 등록 (플러그인 무관)
   let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
 
