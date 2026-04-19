@@ -31,9 +31,11 @@ export interface ChatViewProps {
   isEntryStarred: (idx: number) => string | null;
   /** B4: abort current streaming turn */
   onAbort: () => void | Promise<void>;
+  /** D6: submit thumbs up/down feedback for an assistant message */
+  onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
 }
 
-export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort }: ChatViewProps) {
+export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback }: ChatViewProps) {
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef,
@@ -146,6 +148,7 @@ export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffor
                   onFork: () => void onFork(idx),
                   onToggleStar: () => void onToggleStar(idx),
                 }}
+                onFeedback={onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
               />
             </div>
           );
