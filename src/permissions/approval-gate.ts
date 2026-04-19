@@ -15,6 +15,31 @@ import type { WebContents } from "electron";
 import type { PolicyFile } from "./policy-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { isSensitivePath, canonicalizePathForMatch } from "./sensitive-paths.js";
+import { maskSensitiveData } from "../audit/dlp-filter.js";
+
+// ─── §D1 args DLP masking ────────────────────────────
+// Approval 모달에 전달되는 tool args 내 민감정보(API key, 이메일, 전화번호,
+// 주민등록번호, 신용카드 등)를 UI 표시용으로만 마스킹한다. 원본 args 는
+// executor 가 별도로 보유한 toolUse.input 을 그대로 사용하므로 실행 경로에는
+// 영향이 없다.
+function maskArgsForDisplay(value: unknown, detections: Set<string>): unknown {
+  if (typeof value === "string") {
+    const { masked, detections: hits } = maskSensitiveData(value);
+    for (const h of hits) detections.add(h);
+    return masked;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => maskArgsForDisplay(v, detections));
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = maskArgsForDisplay(v, detections);
+    }
+    return out;
+  }
+  return value;
+}
 
 // ─── 공개 타입 ────────────────────────────────────────
 
@@ -231,9 +256,24 @@ export class ApprovalGate {
       this.pending.set(fullReq.id, { resolve, reject, timer });
 
       // 렌더러로 요청 발송 (main→renderer 단방향)
+      // §D1: UI 표시용으로 args 의 민감정보를 마스킹. 원본 args 는 executor
+      // 내부에 남아 tool 실행에는 그대로 사용됨.
+      const dlpHits = new Set<string>();
+      const maskedReq: ApprovalRequest = {
+        ...fullReq,
+        args: maskArgsForDisplay(fullReq.args, dlpHits),
+      };
+      if (dlpHits.size > 0) {
+        this.auditLogger?.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "approval-gate",
+          type: "approval",
+          output: `[approval:args-dlp-masked] ${fullReq.id} toolName=${fullReq.toolName} detections=${[...dlpHits].join(",")}`,
+        });
+      }
       // §F2: send 실패(webContents 소멸 race) 시 pending 정리 후 deny-once
       try {
-        this.webContents.send(IPC_APPROVAL_REQUEST, fullReq);
+        this.webContents.send(IPC_APPROVAL_REQUEST, maskedReq);
       } catch (sendErr) {
         clearTimeout(timer);
         this.pending.delete(fullReq.id);
