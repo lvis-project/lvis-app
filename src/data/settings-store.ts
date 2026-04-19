@@ -47,6 +47,11 @@ export interface LLMSettings {
   stopSequences?: string[];
   /** Sprint A — client-side stream smoothing. */
   streamSmoothing?: "none" | "word" | "char";
+  /**
+   * D1a — ordered fallback chain tried in sequence when the primary vendor
+   * returns a transient error (5xx / 429 / network). Empty = no fallback.
+   */
+  fallbackChain?: Array<{ provider: LLMVendor; model: string }>;
 }
 
 export interface ChatSettings {
