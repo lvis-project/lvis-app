@@ -129,6 +129,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       viewHandlers.add(h);
       return () => viewHandlers.delete(h);
     }),
+
+    onMarketplaceUpdatesAvailable: vi.fn(() => () => {}),
   };
 
   api.starredAdd = api.addStarred;
