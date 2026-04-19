@@ -30,7 +30,10 @@
     "email_start_watcher"
   ],
   "eventSubscriptions": [
-    { "type": "email.action.needed", "hint": { "category": "email", "priority": "medium", "title": "액션 필요 이메일" } }
+    { "type": "email.new", "hint": { "category": "email", "priority": "low", "title": "새 이메일" } },
+    { "type": "email.analyzed", "hint": { "category": "email", "priority": "low", "title": "이메일 분석 완료" } },
+    { "type": "email.action.needed", "hint": { "category": "email", "priority": "medium", "title": "액션 필요 이메일" } },
+    { "type": "email.invite.detected", "hint": { "category": "email", "priority": "medium", "title": "이메일 초대 감지" } }
   ],
   "notificationEvents": [
     { "event": "email.new", "titleField": "sender", "bodyField": "subject" }
