@@ -40,6 +40,8 @@ import { useContextBudget } from "./hooks/use-context-budget.js";
 import { useCostEstimate } from "./hooks/use-cost-estimate.js";
 import { useStarred } from "./hooks/use-starred.js";
 import { useSessions } from "./hooks/use-sessions.js";
+import { useMarketplaceUpdates } from "./hooks/use-marketplace-updates.js";
+import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./components/BriefingCard.js";
@@ -81,6 +83,7 @@ export function App() {
   const [working, setWorking] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const { briefing, dismiss: dismissBriefing, snooze: snoozeBriefing } = useBriefing(api);
+  const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
 
   // Sprint B — role preset, cost preview, attached docs, language lock
@@ -310,6 +313,7 @@ export function App() {
 
         {/* Main */}
         <main className="flex min-h-0 flex-col">
+          <MarketplaceUpdateBanner updates={marketplaceUpdates} onDismiss={dismissMarketplaceUpdates} />
           <MainToolbar
             activeView={activeView}
             setActiveView={setActiveView}
