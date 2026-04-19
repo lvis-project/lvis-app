@@ -209,7 +209,19 @@ export async function installFromMarketplace(
   );
   try {
     await writeFile(tmpPath, body);
-    await rename(tmpPath, tarballPath);
+    try {
+      await rename(tmpPath, tarballPath);
+    } catch (renameErr) {
+      // Windows rename() throws EEXIST when the destination already exists
+      // (POSIX rename() silently overwrites). Fall back to rm-then-rename so
+      // upgrading an already-installed version still succeeds.
+      if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
+        await rm(tarballPath, { force: true });
+        await rename(tmpPath, tarballPath);
+      } else {
+        throw renameErr;
+      }
+    }
   } catch (err) {
     await rm(tmpPath, { force: true }).catch(() => undefined);
     throw new MarketplaceInstallerError(
