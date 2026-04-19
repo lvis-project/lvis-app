@@ -1,0 +1,149 @@
+/**
+ * UsageDashboard renderer tests — date range, session Top 5, projection, CSV export.
+ */
+import "./setup.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import React from "react";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+});
+
+const MOCK_SUMMARY = {
+  today: { inputTokens: 1000, outputTokens: 500, totalTokens: 1500, cost: 0.01 },
+  thisWeek: { inputTokens: 7000, outputTokens: 3500, totalTokens: 10500, cost: 0.07 },
+  thisMonth: { inputTokens: 30000, outputTokens: 15000, totalTokens: 45000, cost: 0.30 },
+  perVendor: [
+    { vendor: "claude", model: "*", inputTokens: 30000, outputTokens: 15000, totalTokens: 45000, cost: 0.30 },
+  ],
+  perModel: [
+    { vendor: "claude", model: "claude-sonnet-4-6", inputTokens: 30000, outputTokens: 15000, totalTokens: 45000, cost: 0.30 },
+  ],
+  trend: [
+    { date: "2026-04-17", inputTokens: 1000, outputTokens: 500, totalTokens: 1500, cost: 0.01 },
+    { date: "2026-04-18", inputTokens: 2000, outputTokens: 1000, totalTokens: 3000, cost: 0.02 },
+  ],
+  topConversations: [
+    { sessionId: "sess-abc123", turns: 5, firstInput: "안녕", inputTokens: 10000, outputTokens: 5000, totalTokens: 15000, cost: 0.10 },
+    { sessionId: "sess-def456", turns: 2, firstInput: "질문", inputTokens: 5000, outputTokens: 2500, totalTokens: 7500, cost: 0.05 },
+  ],
+  generatedAt: new Date().toISOString(),
+};
+
+function makeApi(overrides: Partial<typeof MOCK_SUMMARY> = {}) {
+  const summary = { ...MOCK_SUMMARY, ...overrides };
+  return {
+    getUsageSummary: vi.fn(async () => summary),
+    getUsageRange: vi.fn(async () => summary),
+    exportUsageCsv: vi.fn(async () => ({ ok: true, filePath: "/tmp/lvis-usage.csv" })),
+  };
+}
+
+async function renderDashboard(api = makeApi()) {
+  const { UsageDashboard } = await import("../../src/ui/renderer/components/UsageDashboard.js");
+  const result = render(<UsageDashboard api={api as any} />);
+  return { ...result, api };
+}
+
+describe("UsageDashboard", () => {
+  it("renders without crashing", async () => {
+    const { container } = await renderDashboard();
+    await waitFor(() => expect(container).toBeTruthy());
+  });
+
+  it("calls getUsageRange on mount", async () => {
+    const api = makeApi();
+    await renderDashboard(api);
+    await waitFor(() => expect(api.getUsageRange).toHaveBeenCalledTimes(1));
+  });
+
+  it("renders today/week/month cards", async () => {
+    await renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByText("오늘")).toBeTruthy();
+      expect(screen.getByText("이번 주")).toBeTruthy();
+      expect(screen.getByText("이번 달")).toBeTruthy();
+    });
+  });
+
+  it("renders vendor breakdown with claude row", async () => {
+    await renderDashboard();
+    await waitFor(() => expect(screen.getByText("claude")).toBeTruthy());
+  });
+
+  it("renders session Top 5 table", async () => {
+    await renderDashboard();
+    await waitFor(() => expect(screen.getByText("sess-abc123".slice(0, 12))).toBeTruthy());
+  });
+
+  it("renders monthly projection line", async () => {
+    await renderDashboard();
+    await waitFor(() => expect(screen.getByText(/이 속도로면 월 약/)).toBeTruthy());
+  });
+
+  it("renders preset buttons", async () => {
+    await renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "7d" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "30d" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "90d" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "전체" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "직접" })).toBeTruthy();
+    });
+  });
+
+  it("calls getUsageRange again when preset changes", async () => {
+    const api = makeApi();
+    await renderDashboard(api);
+    await waitFor(() => expect(api.getUsageRange).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "7d" }));
+    await waitFor(() => expect(api.getUsageRange).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows custom date inputs when 직접 selected", async () => {
+    await renderDashboard();
+    await waitFor(() => expect(screen.getByRole("button", { name: "직접" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "직접" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("시작일")).toBeTruthy();
+      expect(screen.getByLabelText("종료일")).toBeTruthy();
+    });
+  });
+
+  it("renders CSV export button", async () => {
+    await renderDashboard();
+    await waitFor(() => expect(screen.getByRole("button", { name: /CSV 내보내기/ })).toBeTruthy());
+  });
+
+  it("calls exportUsageCsv when CSV button clicked", async () => {
+    const api = makeApi();
+    await renderDashboard(api);
+    await waitFor(() => expect(screen.getByRole("button", { name: /CSV 내보내기/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /CSV 내보내기/ }));
+    await waitFor(() => {
+      expect(api.exportUsageCsv).toHaveBeenCalledTimes(1);
+      const rows = api.exportUsageCsv.mock.calls[0][0] as Array<Record<string, unknown>>;
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows[0]).toHaveProperty("date");
+      expect(rows[0]).toHaveProperty("cost");
+    });
+  });
+
+  it("disables CSV button when no trend data", async () => {
+    const api = makeApi({ trend: [], topConversations: [] });
+    await renderDashboard(api);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /CSV 내보내기/ })).toBeDisabled();
+    });
+  });
+
+  it("shows 데이터 없음 for empty vendor table", async () => {
+    const api = makeApi({ perVendor: [] });
+    await renderDashboard(api);
+    await waitFor(() => {
+      expect(screen.getAllByText("데이터 없음").length).toBeGreaterThan(0);
+    });
+  });
+});
