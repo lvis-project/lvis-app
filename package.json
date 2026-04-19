@@ -26,6 +26,7 @@
     "plugins:disable": "tsx scripts/plugins-cli.ts disable",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:ui-e2e": "playwright test",
     "test:electron-smoke": "node scripts/run-electron.mjs --version",
     "test:plugin-flow": "tsx scripts/test-pageindex-flow.ts",
     "test:meeting-flow": "bun run prepare:plugins && tsx scripts/test-meeting-flow.ts",
@@ -81,6 +82,8 @@
   "devDependencies": {
     "@ai-sdk/devtools": "^0.0.15",
     "@electron/rebuild": "^4.0.3",
+    "@playwright/test": "^1.48.0",
+    "playwright": "^1.48.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
