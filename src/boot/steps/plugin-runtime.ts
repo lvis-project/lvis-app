@@ -25,7 +25,7 @@ import { BUNDLED_PUBLISHER_PUBLIC_KEYS } from "../../plugins/publisher-keys.js";
 import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
 import { withMsGraphRetry } from "../../main/ms-graph-retry.js";
-import type { PluginHostApi } from "../../plugins/types.js";
+import type { PluginHostApi, PluginManifest } from "../../plugins/types.js";
 import type { KeywordEngine } from "../../core/keyword-engine.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { SettingsService } from "../../data/settings-store.js";
@@ -170,13 +170,13 @@ export async function initPluginRuntime(
   }
 
   // Capability gate helper (§B-5) — msGraph HostApi methods.
+  // Note: hasMsGraphCapability now uses the manifest passed directly to createHostApi
+  // to avoid a timing bug where getPluginManifest() returns undefined during createPlugin().
   let pluginRuntime!: PluginRuntime;
   const capabilityDeniedMsg = (pluginId: string) =>
     `[plugin:${pluginId}] capability not declared: ms-graph-consumer`;
-  const hasMsGraphCapability = (pluginId: string): boolean => {
-    const manifest = pluginRuntime?.getPluginManifest(pluginId);
-    return manifest?.capabilities?.includes("ms-graph-consumer") ?? false;
-  };
+  const hasMsGraphCapability = (manifest: PluginManifest): boolean =>
+    manifest.capabilities?.includes("ms-graph-consumer") ?? false;
 
   pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
@@ -200,7 +200,7 @@ export async function initPluginRuntime(
       toolRegistry.unregisterByPlugin(pluginId);
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
     },
-    createHostApi: (pluginId: string): PluginHostApi => ({
+    createHostApi: (pluginId: string, manifest: PluginManifest): PluginHostApi => ({
       registerKeywords: (keywords) => {
         keywordEngine.registerKeywords(
           keywords.map((k) => ({ ...k, pluginId })),
@@ -254,27 +254,27 @@ export async function initPluginRuntime(
         return settingsService.getSecret(key);
       },
       getMsGraphToken: () => {
-        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
         return msGraphService.getAccessToken();
       },
       startMsGraphAuth: async (openBrowser) => {
-        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
         await msGraphService.startInteractiveAuth(openBrowser);
       },
       isMsGraphAuthenticated: () => {
-        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
         return msGraphService.isAuthenticated();
       },
       getMsGraphAccount: () => {
-        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
         return msGraphService.getAccountName();
       },
       onMsGraphAuthChange: (handler) => {
-        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
         msGraphService.onAuthChange(handler);
       },
       withMsGraphRetry: async (fn) => {
-        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
         return withMsGraphRetry(fn, () => msGraphService.getAccessToken());
       },
       callLlm: async (prompt, opts) => {

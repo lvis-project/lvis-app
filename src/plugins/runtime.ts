@@ -115,7 +115,7 @@ export interface PluginRuntimeOptions {
   registryPath?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** 플러그인별 HostApi를 생성하는 팩토리 — boot.ts에서 주입 */
-  createHostApi?: (pluginId: string) => PluginHostApi;
+  createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
   /** Phase 1.5 §7.3: disable 시 managed 플러그인 차단 */
   deploymentGuard?: PluginDeploymentGuard;
   /**
@@ -141,7 +141,7 @@ export class PluginRuntime {
   private readonly manifestPaths: string[];
   private readonly registryPath?: string;
   private readonly configOverrides: Record<string, Record<string, unknown>>;
-  private readonly createHostApi?: (pluginId: string) => PluginHostApi;
+  private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly signatureVerifier?: PluginSignatureVerifier;
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
@@ -257,7 +257,7 @@ export class PluginRuntime {
       }
 
       // 플러그인별 스코프된 HostApi 생성
-      const hostApi = this.createHostApi?.(manifest.id) ?? createNoopHostApi();
+      const hostApi = this.createHostApi?.(manifest.id, manifest) ?? createNoopHostApi();
 
       const instance = await createPlugin({
         pluginId: manifest.id,
@@ -454,7 +454,7 @@ export class PluginRuntime {
       throw new Error(`Plugin entry does not export default/createPlugin: ${pluginId}`);
     }
 
-    const hostApi = this.createHostApi?.(pluginId) ?? createNoopHostApi();
+    const hostApi = this.createHostApi?.(pluginId, manifest) ?? createNoopHostApi();
     const instance = await createPlugin({
       pluginId,
       pluginRoot,
@@ -1077,6 +1077,13 @@ export class PluginRuntime {
   }
 
   private resolveEntryPath(pluginRoot: string, entry: string): string {
+    // Dev mode: allow entries that traverse outside the plugin directory
+    // (e.g., ../../../node_modules/@lvis/plugin-*/dist/hostPlugin.js).
+    // Mirrors the signature-check bypass introduced in PR #171.
+    const isDev = process.env.LVIS_DEV === "1";
+    if (isDev && !isAbsolute(entry)) {
+      return resolve(pluginRoot, entry);
+    }
     return resolvePluginEntryPath(pluginRoot, entry);
   }
 
