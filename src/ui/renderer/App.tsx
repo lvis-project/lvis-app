@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
-import { PluginUiHostView } from "../../plugin-ui-host.js";
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
@@ -11,16 +10,10 @@ import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { PluginInstallDialog } from "./dialogs/PluginInstallDialog.js";
 import { PluginUninstallDialog } from "./dialogs/PluginUninstallDialog.js";
 import { CommandPaletteDialog } from "./dialogs/CommandPaletteDialog.js";
-import { TaskView } from "./components/TaskView.js";
-import { StarredView } from "./components/StarredView.js";
-import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { MainToolbar } from "./MainToolbar.js";
-import { ChatView } from "./ChatView.js";
-import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
+import { MainContent } from "./MainContent.js";
 import { Sidebar } from "./Sidebar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
-import { RolesTab } from "./tabs/RolesTab.js";
-import { PermissionsTab } from "./tabs/PermissionsTab.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useBriefing } from "./hooks/use-briefing.js";
@@ -37,6 +30,8 @@ import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { useIndexedDocs } from "./hooks/use-indexed-docs.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
+import { useChatActions } from "./hooks/use-chat-actions.js";
+import { useChatContextValue } from "./hooks/use-chat-context-value.js";
 
 // Phase 1 tests import `BriefingCard` from this module; preserve the export.
 export { BriefingCard } from "./components/BriefingCard.js";
@@ -97,39 +92,15 @@ export function App() {
     handleLoadSession: sessionLoad, handleFork: sessionFork,
   } = useSessions(api);
 
-  const handleLoadSession = useCallback(
-    (sessionId: string) => sessionLoad(sessionId, streaming, applyLoadedSession),
-    [sessionLoad, streaming, applyLoadedSession],
-  );
-
-  const isEntryStarred = useCallback(
-    (entryIdx: number): string | null => starredIsEntry(entryIdx, currentSessionId, entryIndexToHistoryIndex),
-    [starredIsEntry, currentSessionId, entryIndexToHistoryIndex],
-  );
-
-  const handleFork = useCallback(async (entryIdx: number) => {
-    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-    if (histIdx === undefined) return;
-    await sessionFork(histIdx, entryIdx, truncateToEntry);
-  }, [entryIndexToHistoryIndex, sessionFork, truncateToEntry]);
-
-  const handleToggleStar = useCallback(
-    (entryIdx: number) => starredToggle(entryIdx, entries, currentSessionId, entryIndexToHistoryIndex),
-    [starredToggle, entries, currentSessionId, entryIndexToHistoryIndex],
-  );
-
-  const handleAbort = useCallback(async () => {
-    try { await api.chatAbort(); } catch { /* no-op */ }
-  }, [api]);
-
-  const handleFeedback = useCallback(async (messageIdx: number, rating: "up" | "down", reason?: string) => {
-    if (!api.submitFeedback) return;
-    try { await api.submitFeedback({ sessionId: currentSessionId, messageIndex: messageIdx, rating, reason }); } catch { /* no-op */ }
-  }, [api, currentSessionId]);
-
-  const handleExport = useCallback(async (format: "markdown" | "json") => {
-    try { await api.chatExport(format); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
-  }, [api]);
+  // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
+  const {
+    handleLoadSession, isEntryStarred, handleFork, handleToggleStar,
+    handleAbort, handleFeedback, handleExport,
+  } = useChatActions({
+    api, streaming, currentSessionId, entries, entryIndexToHistoryIndex,
+    applyLoadedSession, truncateToEntry, sessionLoad, sessionFork,
+    starredIsEntry, starredToggle,
+  });
 
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
@@ -188,10 +159,9 @@ export function App() {
   const onOpenSettings = useCallback(() => setSettingsOpen(true), []);
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
-  const chatContextValue = useMemo<ChatContextValue>(() => ({
+  const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, hasApiKey,
-    onOpenSettings,
+    question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
     briefing, onDismissBriefing: dismissBriefing, onSnoozeBriefing: snoozeBriefing,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
@@ -200,25 +170,12 @@ export function App() {
     attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
     indexedDocs, docsLoading, refreshIndexedDocs, langLock, setLangLock,
     vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
-  }), [
-    entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, hasApiKey,
-    onOpenSettings,
-    briefing, dismissBriefing, snoozeBriefing,
-    searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
-    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
-    contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
-    rolePresets, activePreset, activePresetId, setActivePresetId,
-    attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
-    indexedDocs, docsLoading, refreshIndexedDocs, langLock, setLangLock,
-    vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
-  ]);
+  });
 
   // ─── Render ───────────────────────────────────
   return (
     <TooltipProvider>
       <div className="grid h-screen grid-cols-[320px_1fr]">
-        {/* Sidebar */}
         <Sidebar
           marketStatus={marketStatus}
           marketplace={marketplace}
@@ -229,7 +186,6 @@ export function App() {
           setActiveView={setActiveView}
         />
 
-        {/* Main */}
         <main className="flex min-h-0 flex-col">
           <MarketplaceUpdateBanner updates={marketplaceUpdates} onDismiss={dismissMarketplaceUpdates} />
           <MainToolbar
@@ -252,32 +208,25 @@ export function App() {
             onOpenCommand={() => setCommandOpen(true)}
           />
 
-          {/* Content */}
-          {activeView === "memory" ? <MemorySearchPanel api={api} /> : activeView === "tasks" ? <TaskView api={api} /> : activeView === "starred" ? (
-            <StarredView
-              api={api}
-              starred={starred}
-              currentSessionId={currentSessionId}
-              refreshStarred={refreshStarred}
-              onJumpToSession={handleLoadSession}
-              onActivateHome={() => setActiveView("home")}
-            />
-          ) : activeView === "home" ? (
-            <ChatContextProvider value={chatContextValue}>
-              <ChatView
-                onAsk={handleAsk}
-                onEditSave={handleEditSave}
-                onFork={handleFork}
-                onToggleStar={handleToggleStar}
-                onRetryEffort={handleRetryEffort}
-                isEntryStarred={isEntryStarred}
-                onAbort={handleAbort}
-                onFeedback={handleFeedback}
-              />
-            </ChatContextProvider>
-          ) : (
-            <PluginUiHostView view={activePluginView ?? null} callPluginMethod={(m, p) => api.callPluginMethod(m, p)} onAskInHomeChat={async (q) => { setActiveView("home"); await handleAsk(q); }} onAddTask={(t) => api.addTask(t)} />
-          )}
+          <MainContent
+            activeView={activeView}
+            api={api}
+            starred={starred}
+            currentSessionId={currentSessionId}
+            refreshStarred={refreshStarred}
+            onActivateHome={() => setActiveView("home")}
+            onJumpToSession={handleLoadSession}
+            chatContextValue={chatContextValue}
+            onAsk={handleAsk}
+            onEditSave={handleEditSave}
+            onFork={handleFork}
+            onToggleStar={handleToggleStar}
+            onRetryEffort={handleRetryEffort}
+            isEntryStarred={isEntryStarred}
+            onAbort={handleAbort}
+            onFeedback={handleFeedback}
+            activePluginView={activePluginView ?? null}
+          />
         </main>
       </div>
 
@@ -291,4 +240,3 @@ export function App() {
     </TooltipProvider>
   );
 }
-
