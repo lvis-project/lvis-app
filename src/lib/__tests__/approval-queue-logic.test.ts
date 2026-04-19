@@ -2,7 +2,11 @@
  * Tests — approvalQueueReducer (C4 Approval Queue Logic)
  */
 import { describe, it, expect } from "vitest";
-import { approvalQueueReducer } from "../approval-queue-reducer.js";
+import {
+  approvalQueueReducer,
+  isApprovalQueueFull,
+  DEFAULT_APPROVAL_QUEUE_MAX,
+} from "../approval-queue-reducer.js";
 import type { ApprovalRequest } from "../../permissions/approval-gate.js";
 
 function makeReq(id: string): ApprovalRequest {
@@ -50,6 +54,65 @@ describe("approvalQueueReducer", () => {
     expect(state).toHaveLength(2);
     expect(state[0].id).toBe("dup");
     expect(state[1].id).toBe("dup");
+  });
+
+  it("D3: push rejected when queue is at default cap (drop-newest)", () => {
+    let state: ApprovalRequest[] = [];
+    for (let i = 0; i < DEFAULT_APPROVAL_QUEUE_MAX; i++) {
+      state = approvalQueueReducer(state, {
+        type: "push",
+        req: makeReq(`r${i}`),
+      });
+    }
+    expect(state).toHaveLength(DEFAULT_APPROVAL_QUEUE_MAX);
+    const overflow = makeReq("overflow");
+    const next = approvalQueueReducer(state, { type: "push", req: overflow });
+    expect(next).toHaveLength(DEFAULT_APPROVAL_QUEUE_MAX);
+    expect(next.find((r) => r.id === "overflow")).toBeUndefined();
+    expect(next).toBe(state);
+  });
+
+  it("D3: custom max caps queue and preserves FIFO order of accepted items", () => {
+    let state: ApprovalRequest[] = [];
+    for (const id of ["a", "b", "c", "d"]) {
+      state = approvalQueueReducer(state, {
+        type: "push",
+        req: makeReq(id),
+        max: 3,
+      });
+    }
+    expect(state.map((r) => r.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("D3: after shift below cap, push is accepted again", () => {
+    let state: ApprovalRequest[] = [];
+    for (const id of ["a", "b", "c"]) {
+      state = approvalQueueReducer(state, {
+        type: "push",
+        req: makeReq(id),
+        max: 3,
+      });
+    }
+    state = approvalQueueReducer(state, {
+      type: "push",
+      req: makeReq("d"),
+      max: 3,
+    });
+    expect(state.map((r) => r.id)).toEqual(["a", "b", "c"]);
+    state = approvalQueueReducer(state, { type: "shift" });
+    state = approvalQueueReducer(state, {
+      type: "push",
+      req: makeReq("e"),
+      max: 3,
+    });
+    expect(state.map((r) => r.id)).toEqual(["b", "c", "e"]);
+  });
+
+  it("D3: isApprovalQueueFull reflects cap state", () => {
+    const full = Array.from({ length: 3 }, (_, i) => makeReq(`r${i}`));
+    expect(isApprovalQueueFull(full, 3)).toBe(true);
+    expect(isApprovalQueueFull(full.slice(0, 2), 3)).toBe(false);
+    expect(isApprovalQueueFull([], 3)).toBe(false);
   });
 
   it("shift 반복 → 순서대로 소진", () => {
