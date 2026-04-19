@@ -24,6 +24,7 @@ import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import type { StarredStore } from "../data/starred-store.js";
 import type { TelemetryService } from "../main/telemetry.js";
+import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { TaskSourceRegistry } from "../plugins/task-source-registry.js";
 
 export type EventHandler = (data: unknown) => void;
@@ -88,6 +89,13 @@ export interface AppServices {
    * (otherwise queued events are lost on shutdown).
    */
   telemetry?: TelemetryService;
+  /**
+   * S12 — plugin lifecycle telemetry client (opt-in). Tracks
+   * plugin_install / plugin_uninstall / plugin_update / plugin_error events
+   * to POST /telemetry/events on the marketplace backend.
+   * Never active until the user answers the first-boot consent prompt.
+   */
+  pluginTelemetry?: PluginTelemetryClient;
   /**
    * Release-prep — auto-updater stop handle. Retained so shutdown can
    * clear the 4h interval deterministically instead of relying on unref().
