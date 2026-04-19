@@ -129,6 +129,8 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:chat:fork",
   "lvis:chat:retry-effort",
   "lvis:chat:export",
+  "lvis:chat:compact",
+  "lvis:chat:session-resume",
   "lvis:starred:list",
   "lvis:starred:add",
   "lvis:starred:remove",
@@ -299,6 +301,18 @@ export function registerIpcHandlers(
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:load-session", e); return UNAUTHORIZED_FRAME; }
     const loaded = conversationLoop.loadSession(sessionId);
     return { ok: loaded, sessionId: loaded ? sessionId : null };
+  });
+
+  // B1 — /compact manual command IPC
+  ipcMain.handle("lvis:chat:compact", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:compact", e); return UNAUTHORIZED_FRAME; }
+    return conversationLoop.manualCompact();
+  });
+
+  // B1 — session-resume IPC (load + state reset + auto-compact check)
+  ipcMain.handle("lvis:chat:session-resume", (e, sessionId: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:session-resume", e); return UNAUTHORIZED_FRAME; }
+    return conversationLoop.resetAndResume(sessionId);
   });
 
   // ─── Memory ─────────────────────────────────────

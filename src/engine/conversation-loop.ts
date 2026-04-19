@@ -50,6 +50,7 @@ export interface TurnResult {
   toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>;
   route: string;
   usage?: TokenUsage;
+  stopReason?: "end_turn" | "tool_use" | "interrupted";
 }
 
 export interface ConversationLoopDeps {
@@ -130,6 +131,8 @@ export class ConversationLoop {
   private provider: LLMProvider | null = null;
   private sessionId: string = crypto.randomUUID();
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
+  currentAbortController: AbortController | null = null;
   /**
    * Phase 1 Lazy Tool Scoping — 직전 턴의 active plugin 집합.
    * Keyword miss (type==="general") 시 fallback으로 재사용한다.
@@ -200,6 +203,11 @@ export class ConversationLoop {
 
   hasProvider(): boolean {
     return this.provider !== null;
+  }
+
+  /** B4: Abort the current streaming turn. No-op if no turn in flight. */
+  abortCurrentTurn(): void {
+    this.currentAbortController?.abort();
   }
 
   /** 앱 시작 시 비서 스타일 데일리 브리핑 생성 — 항목 없으면 null 반환 */
@@ -326,14 +334,91 @@ ${briefingData}
   }
 
   /**
-   * 한 턴 실행 — §4.5 Core Cycle
+   * §4.5.2 B1 — Session resume with full state reset.
+   * Unlike loadSession (raw swap), also triggers auto-compact check.
    */
-  async runTurn(input: string, callbacks?: TurnCallbacks): Promise<TurnResult> {
+  resetAndResume(sessionId: string): {
+    ok: boolean;
+    compacted: boolean;
+    compactedAt: string | null;
+    removedMessageCount: number;
+  } {
+    const loaded = this.loadSession(sessionId);
+    if (!loaded) {
+      return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
+    }
+
+    let compacted = false;
+    let removedMessageCount = 0;
+    if (this.isAutoCompactEnabled()) {
+      const llmSettings = this.deps.settingsService.get("llm");
+      if (shouldCompact(this.cumulativeUsage, getModelContextWindow(llmSettings.provider, llmSettings.model))) {
+        const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages());
+        if (cr.compacted) {
+          this.history.clear();
+          this.history.restore(compactedMsgs);
+          compacted = true;
+          removedMessageCount = cr.removedMessages;
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      compacted,
+      compactedAt: compacted ? new Date().toISOString() : null,
+      removedMessageCount,
+    };
+  }
+
+  /**
+   * §4.5.4 B1 — Manual compact trigger.
+   * Forces compactMessages on current history and returns result metadata.
+   */
+  manualCompact(): {
+    compacted: boolean;
+    compactedAt: string | null;
+    summary: string;
+    removedMessageCount: number;
+  } {
+    const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages());
+    if (cr.compacted) {
+      this.history.clear();
+      this.history.restore(compactedMsgs);
+      return {
+        compacted: true,
+        compactedAt: new Date().toISOString(),
+        summary: `${cr.removedMessages}개 메시지 요약됨, ~${cr.freedTokens} 토큰 확보`,
+        removedMessageCount: cr.removedMessages,
+      };
+    }
+    return {
+      compacted: false,
+      compactedAt: null,
+      summary: "컴팩트 불필요: 메시지 수가 충분히 적습니다.",
+      removedMessageCount: 0,
+    };
+  }
+
+  /**
+   * 한 턴 실행 — §4.5 Core Cycle
+   * @param abortSignal  B4: optional external abort signal; if omitted a fresh
+   *                     AbortController is created and stored in
+   *                     `currentAbortController` so `abortCurrentTurn()` works.
+   */
+  async runTurn(input: string, callbacks?: TurnCallbacks, abortSignal?: AbortSignal): Promise<TurnResult> {
     if (!this.provider) {
       const err = "LLM 프로바이더가 설정되지 않았습니다. 설정에서 벤더와 API 키를 확인해 주세요.";
       callbacks?.onError?.(err);
       throw new Error(err);
     }
+
+    // B4: set up abort controller for this turn
+    const ac = new AbortController();
+    this.currentAbortController = ac;
+    // if caller passes an external signal, forward it
+    abortSignal?.addEventListener("abort", () => ac.abort(), { once: true });
+    const turnSignal = ac.signal;
 
     // §4.3 Step 1-2: 분류 + 라우팅
     const classification = this.deps.keywordEngine.classify(input);
@@ -357,7 +442,9 @@ ${briefingData}
     this.deps.systemPromptBuilder.setToolScope?.(scope);
 
     const systemPrompt = this.deps.systemPromptBuilder.build();
-    const result = await this.queryLoop(systemPrompt, scope, callbacks);
+    const result = await this.queryLoop(systemPrompt, scope, callbacks, turnSignal);
+    // B4: clear controller once the turn is done (regardless of how it ended)
+    this.currentAbortController = null;
     // lastTurnScope must reflect any Option C request_plugin expansions so
     // the next turn's keyword-miss fallback keeps those plugins visible.
     this.lastTurnScope = new Set(scope.activePluginIds);
@@ -418,7 +505,8 @@ ${briefingData}
     systemPrompt: string,
     scope: ToolScope,
     callbacks?: TurnCallbacks,
-  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage }> {
+    abortSignal?: AbortSignal,
+  ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const model = llmSettings.model;
     // Phase 1.5 Option C: scope is mutable within the turn — request_plugin
@@ -496,7 +584,12 @@ ${briefingData}
           streamSmoothing: llmSettings.streamSmoothing,
           enableThinking: llmSettings.enableThinking,
           thinkingBudgetTokens: llmSettings.thinkingBudgetTokens,
+          abortSignal,
         })) {
+          // B4: check abort between events
+          if (abortSignal?.aborted) {
+            return { earlyReturn: true as const, text: textContent, interrupted: true };
+          }
           switch (event.type) {
             case "reasoning_delta":
               thoughtContent += event.text;
@@ -521,6 +614,10 @@ ${briefingData}
               }
               break;
             case "error":
+              // B4: abort-triggered errors look like normal errors from some providers; treat as interrupt
+              if (abortSignal?.aborted) {
+                return { earlyReturn: true as const, text: textContent, interrupted: true };
+              }
               // context-length 오류를 stream event로 수신한 경우 → compact + retry
               if (isContextLengthError(event.error) && !reactiveCompacted) {
                 restoreUsage();
@@ -537,6 +634,10 @@ ${briefingData}
               return { earlyReturn: true as const, text: userMsg };
           }
         }
+        // B4: final abort check after stream exhausted
+        if (abortSignal?.aborted) {
+          return { earlyReturn: true as const, text: textContent, interrupted: true };
+        }
         return { earlyReturn: false as const };
       };
 
@@ -546,6 +647,10 @@ ${briefingData}
         outputTokens: this.cumulativeUsage.outputTokens,
       };
       let streamResult = await collectStream(this.history.getMessages()).catch((err: unknown) => {
+        // B4: AbortError from provider — treat as interrupt
+        if (abortSignal?.aborted || (err instanceof Error && (err.name === "AbortError" || err.message?.includes("abort")))) {
+          return { earlyReturn: true as const, text: textContent, interrupted: true };
+        }
         if (isContextLengthError(err)) {
           // throw-path did not hit the restoreUsage inside collectStream; do it here
           this.cumulativeUsage.inputTokens = outerUsageSnapshot.inputTokens;
@@ -583,6 +688,15 @@ ${briefingData}
       }
 
       if (streamResult.earlyReturn) {
+        // B4: interrupted turn — save partial text to history so user can see what came through
+        const isInterrupted = (streamResult as { interrupted?: boolean }).interrupted === true;
+        if (isInterrupted) {
+          const partialText = streamResult.text ?? "";
+          const savedText = partialText + "\n\n[중단됨]";
+          this.history.append({ role: "assistant", content: savedText });
+          callbacks?.onTextDelta?.("\n\n[중단됨]");
+          return { text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" };
+        }
         return { text: streamResult.text, toolCalls: allToolCalls, usage: turnUsage };
       }
 

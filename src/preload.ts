@@ -35,6 +35,8 @@ const api = {
   chatRetryEffort: async (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) =>
     ipcRenderer.invoke("lvis:chat:retry-effort", opts),
   chatExport: async (format: "markdown" | "json") => ipcRenderer.invoke("lvis:chat:export", format),
+  chatCompact: async () => ipcRenderer.invoke("lvis:chat:compact"),
+  chatSessionResume: async (sessionId: string) => ipcRenderer.invoke("lvis:chat:session-resume", sessionId),
   starredList: async () => ipcRenderer.invoke("lvis:starred:list"),
   starredAdd: async (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) =>
     ipcRenderer.invoke("lvis:starred:add", entry),

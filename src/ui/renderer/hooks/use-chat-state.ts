@@ -237,6 +237,28 @@ export function useChatState(api: LvisApi) {
     setEntries((p) => p.slice(0, entryIndex + 1));
   }, []);
 
+  /**
+   * B1 — /compact manual command handler.
+   * Intercepts user messages starting with "/compact", calls IPC, then shows
+   * a system banner with the result. Returns true if intercepted.
+   */
+  const handleCompactCommand = useCallback(
+    async (input: string): Promise<boolean> => {
+      if (!input.trimStart().startsWith("/compact")) return false;
+      try {
+        const res = await api.chatCompact();
+        const banner = res.compacted
+          ? `대화 압축: ${res.removedMessageCount}개 메시지 요약됨`
+          : "컴팩트 불필요: 메시지 수가 충분히 적습니다.";
+        setEntries((p) => [...p, { kind: "system", text: banner }]);
+      } catch (err) {
+        setEntries((p) => [...p, { kind: "system", text: `압축 오류: ${(err as Error).message}` }]);
+      }
+      return true;
+    },
+    [api],
+  );
+
   return {
     entries,
     streaming,
@@ -249,6 +271,7 @@ export function useChatState(api: LvisApi) {
     handleRetryEffort,
     resetStreamAccumulators,
     setErrorWithThought,
+    handleCompactCommand,
     // intent methods
     seedBriefing,
     clearForNewChat,

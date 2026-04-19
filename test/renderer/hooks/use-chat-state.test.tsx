@@ -138,7 +138,7 @@ describe("useSessions (streaming guard)", () => {
     await act(async () => {
       await result.current.handleLoadSession("other-sess", true, setEntries);
     });
-    expect(api.chatLoadSession).not.toHaveBeenCalled();
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
     expect(setEntries).not.toHaveBeenCalled();
   });
 
@@ -149,7 +149,7 @@ describe("useSessions (streaming guard)", () => {
     await act(async () => {
       await result.current.handleLoadSession("other-sess", false, setEntries);
     });
-    expect(api.chatLoadSession).toHaveBeenCalledWith("other-sess");
+    expect(api.chatSessionResume).toHaveBeenCalledWith("other-sess");
     expect(setEntries).toHaveBeenCalled();
   });
 });

@@ -48,7 +48,7 @@ export function useSessions(api: LvisApi) {
       // keep this guard here too for programmatic callers (e.g. starred jump).
       if (streaming) return;
       try {
-        const res = await api.chatLoadSession(sessionId);
+        const res = await api.chatSessionResume(sessionId);
         if (!res?.ok) return;
         const h = await api.chatGetHistory();
         applyLoadedSession(historyToEntries(h.messages));
