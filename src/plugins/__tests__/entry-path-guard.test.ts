@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { PluginRuntime, resolvePluginEntryPath } from "../runtime.js";
 
 describe("PluginRuntime — entry path allowlist", () => {

@@ -22,6 +22,7 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import {
   classifySubscription,
@@ -32,9 +33,7 @@ import {
 // Locate installed plugin manifests
 // ─────────────────────────────────────────────────────────────────────────────
 
-const INSTALLED_DIR = resolve(
-  new URL("../../../plugins/installed", import.meta.url).pathname,
-);
+const INSTALLED_DIR = fileURLToPath(new URL("../../../plugins/installed", import.meta.url));
 
 interface PluginManifestMinimal {
   id: string;
