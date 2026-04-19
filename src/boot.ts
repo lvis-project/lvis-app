@@ -37,6 +37,7 @@ import {
   registerPluginTools,
   runManifestStartupTools,
   registerPluginNotifications,
+  registerPluginEventBridge,
 } from "./boot/plugins.js";
 import {
   registerBuiltinTools,
@@ -430,6 +431,9 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     isIdleScanActive: () => idleScheduler?.getState() === "IDLE_SCAN",
     isScheduleEnabled: () =>
       settingsService.get("proactive")?.enableDailyBriefing ?? false,
+    // Issue 3 fix: separate post-turn flag; default false.
+    isPostTurnEnabled: () =>
+      settingsService.get("proactive")?.enablePostTurnBriefing ?? false,
     getScheduleLastFiredDayKey: () => proactiveScheduleLastDay,
     setScheduleLastFiredDayKey: (key) => { proactiveScheduleLastDay = key; },
   });
@@ -449,7 +453,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       oldState: import("./main/idle-scheduler.js").IdleState,
       reason: string,
     ): void => {
-      if (newState === "IDLE_SCAN") {
+      if (newState === "IDLE_SCAN" && !proactiveCoordinator.isWithinGlobalCooldown()) {
         proactiveEngine
           .generateDailyBriefing({ idleState: "long_idle" })
           .then((r) => {
@@ -492,6 +496,10 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // manifest.notificationEvents 선언 기반 OS 알림 등록 (플러그인 무관)
   let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
+
+  // manifest.emittedEvents 선언 기반 renderer 이벤트 브릿지 (플러그인 특정 코드 없음)
+  // §1: boot.ts에 plugin ID / event literal 하드코딩 금지 — manifest-driven generic bridge.
+  let disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
 
   // §4.5 + Agent 6: PostTurnHookChain 조립 (shares bootAuditLogger from A3 wiring)
   const { postTurnHookChain } = createPostTurnHookChain({
@@ -747,6 +755,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     refreshPluginNotifications: () => {
       disposePluginNotifications();
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
+      disposePluginEventBridge();
+      disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
     },
   };
 }
