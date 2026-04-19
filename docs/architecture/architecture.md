@@ -1085,8 +1085,28 @@ Phase 3 리팩터 기준 `lvis-app/src/` 모듈 경계다. Phase 1~2의 `src/age
 
 ```
 lvis-app/src/
-├── main.ts, boot.ts, preload.ts, renderer.tsx, ipc-bridge.ts,
+├── main.ts, boot.ts, preload.ts, ipc-bridge.ts,
 │   plugin-ui-host.tsx, taskService.ts                        # 엔트리 / 브릿지
+│
+├── renderer.tsx   # minimal entry — mounts ui/renderer/App.tsx
+├── ui/renderer/   # Renderer composition root (Phase 1~4.6 split 완료)
+│   ├── App.tsx                  # composition root
+│   ├── ChatView.tsx, Sidebar.tsx, SettingsDialog.tsx, MainToolbar.tsx
+│   ├── context/                 # ChatContext (state provider for ChatView subtree)
+│   ├── hooks/                   # 12 domain hooks (settings, chat-state, briefing,
+│   │                            #  approval, search, context-budget, cost-estimate,
+│   │                            #  sessions, starred, plugin-marketplace, role-presets,
+│   │                            #  app-bootstrap, indexed-docs, marketplace-updates)
+│   ├── components/              # BriefingCard, AssistantCard, UserMessageEditor,
+│   │                            #  ReasoningCard, ToolApprovalDialog, ToolGroupCard,
+│   │                            #  ChatSearchOverlay, Sparkline, UsageDashboard,
+│   │                            #  HtmlPreview, TaskView, StarredView,
+│   │                            #  MarketplaceUpdateBanner
+│   ├── dialogs/                 # ApprovalDialog, PluginInstallDialog,
+│   │                            #  PluginUninstallDialog, CommandPaletteDialog
+│   ├── tabs/                    # RolesTab, PermissionsTab
+│   ├── utils/                   # cost-format, html-preview, history, compose
+│   └── types.ts, constants.ts, api-client.ts
 │
 ├── engine/        # 에이전트 루프 + LLM 프로바이더
 │   ├── conversation-loop.ts, conversation-history.ts, auto-compact.ts
