@@ -1,6 +1,7 @@
-import { Loader2, Star, RefreshCw, GitBranch } from "lucide-react";
+import { Loader2, Star, RefreshCw, GitBranch, ThumbsUp, ThumbsDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { highlightText } from "../utils/html-preview.js";
@@ -10,12 +11,17 @@ export function AssistantCard({
   highlightQuery,
   actions,
   isStarred,
+  onFeedback,
 }: {
   entry: Extract<ChatEntry, { kind: "assistant" }>;
   highlightQuery?: string;
   actions?: { onRetry?: () => void; onFork?: () => void; onToggleStar?: () => void };
   isStarred?: boolean;
+  onFeedback?: (rating: "up" | "down", reason?: string) => void | Promise<void>;
 }) {
+  const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
+  const [showReasonBox, setShowReasonBox] = useState(false);
+  const [reasonDraft, setReasonDraft] = useState("");
   const title = entry.streaming ? "LVIS 응답 작성 중" : "LVIS 응답";
   const highlighted = highlightText(entry.text, highlightQuery);
   // Sprint 4.B: rough token estimate for tooltip (~4 chars/token)
@@ -69,6 +75,75 @@ export function AssistantCard({
           </ReactMarkdown>
         )}
       </div>
+
+      {!entry.streaming && onFeedback ? (
+        <div className="mt-1.5 flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "up" ? "text-green-500" : "text-muted-foreground"}`}
+                onClick={() => {
+                  if (feedbackRating === "up") return;
+                  setFeedbackRating("up");
+                  setShowReasonBox(false);
+                  void onFeedback("up");
+                }}
+                aria-label="도움이 됐어요"
+              >
+                <ThumbsUp className={`h-3.5 w-3.5 ${feedbackRating === "up" ? "fill-green-500" : ""}`} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>도움이 됐어요</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className={`rounded p-0.5 hover:bg-muted transition-colors ${feedbackRating === "down" ? "text-red-500" : "text-muted-foreground"}`}
+                onClick={() => {
+                  if (feedbackRating === "down") return;
+                  setShowReasonBox(true);
+                }}
+                aria-label="개선이 필요해요"
+              >
+                <ThumbsDown className={`h-3.5 w-3.5 ${feedbackRating === "down" ? "fill-red-500" : ""}`} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>개선이 필요해요</TooltipContent>
+          </Tooltip>
+          {showReasonBox && feedbackRating !== "down" ? (
+            <div className="ml-1 flex items-center gap-1">
+              <input
+                type="text"
+                maxLength={200}
+                placeholder="이유 (선택)"
+                value={reasonDraft}
+                onChange={(e) => setReasonDraft(e.target.value)}
+                className="h-6 rounded border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring w-40"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    setFeedbackRating("down");
+                    setShowReasonBox(false);
+                    void onFeedback("down", reasonDraft.trim() || undefined);
+                  } else if (e.key === "Escape") {
+                    setShowReasonBox(false);
+                    setReasonDraft("");
+                  }
+                }}
+              />
+              <button
+                className="rounded px-1.5 py-0.5 text-xs bg-muted hover:bg-muted/80"
+                onClick={() => {
+                  setFeedbackRating("down");
+                  setShowReasonBox(false);
+                  void onFeedback("down", reasonDraft.trim() || undefined);
+                }}
+              >
+                전송
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
