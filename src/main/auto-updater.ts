@@ -10,7 +10,10 @@
  * All credentials/publish config are declared in package.json `build.publish`
  * — NEVER in code. Users supply signing certs + GH_TOKEN at release time.
  */
+import { createRequire } from "node:module";
 import type { BrowserWindow } from "electron";
+
+const _require = createRequire(import.meta.url);
 
 export interface AutoUpdaterDeps {
   mainWindow: BrowserWindow;
@@ -48,8 +51,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     try {
       updater = deps.updaterFactory
         ? deps.updaterFactory()
-        : // eslint-disable-next-line @typescript-eslint/no-var-requires
-          (require("electron-updater").autoUpdater as UpdaterLike);
+        : (_require("electron-updater").autoUpdater as UpdaterLike);
       return updater;
     } catch (err) {
       console.warn("[auto-updater] electron-updater unavailable:", (err as Error).message);
