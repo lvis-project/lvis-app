@@ -10,7 +10,7 @@
  * the bridge using the real event bus from boot/types.ts.
  */
 import { describe, it, expect } from "vitest";
-import { emitEvent, onEvent, offEvent } from "../types.js";
+import { emitEvent, onEvent } from "../types.js";
 import { classifySubscription } from "../../plugins/capabilities.js";
 import type { PluginManifest } from "../../plugins/types.js";
 
