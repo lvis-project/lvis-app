@@ -215,6 +215,65 @@ export function computeUsageSummary(
   };
 }
 
+export interface UsageRangeOptions {
+  dateFrom: string; // YYYY-MM-DD inclusive
+  dateTo: string;   // YYYY-MM-DD inclusive
+}
+
+/**
+ * Compute a usage summary filtered to an explicit date range.
+ * Reads only JSONL files whose filename date falls within the range.
+ */
+export function getUsageRange(opts: UsageRangeOptions): UsageSummary {
+  const auditDir = join(homedir(), ".lvis", "audit");
+  if (!existsSync(auditDir)) return computeUsageSummary([]);
+
+  const files = readdirSync(auditDir)
+    .filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f))
+    .filter((f) => {
+      const d = f.slice(0, 10);
+      return d >= opts.dateFrom && d <= opts.dateTo;
+    })
+    .sort();
+
+  const entries: AuditTurnEntry[] = [];
+  for (const file of files) {
+    let text: string;
+    try {
+      text = readFileSync(join(auditDir, file), "utf-8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line) as AuditTurnEntry;
+        if (entry.type === "turn") entries.push(entry);
+      } catch {
+        // skip malformed
+      }
+    }
+  }
+
+  const filtered = entries.filter((e) => {
+    const d = e.timestamp.slice(0, 10);
+    return d >= opts.dateFrom && d <= opts.dateTo;
+  });
+
+  return computeUsageSummary(filtered);
+}
+
+/**
+ * Compute avg cost per day and project a 30-day monthly estimate.
+ * Accepts a trend array directly. Returns 0 when there are no trend points.
+ */
+export function computeMonthlyProjection(trend: UsageTrendPoint[]): number {
+  if (trend.length === 0) return 0;
+  const totalCost = trend.reduce((s, p) => s + p.cost, 0);
+  const avgPerDay = totalCost / trend.length;
+  return avgPerDay * 30;
+}
+
 /** Default convenience — reads from `~/.lvis/audit` and computes a 60-day summary. */
 export function getUsageSummary(days: number = 60): UsageSummary {
   const auditDir = join(homedir(), ".lvis", "audit");
