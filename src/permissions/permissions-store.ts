@@ -1,13 +1,14 @@
 /**
  * Permissions Store — ~/.lvis/permissions.json 비동기 직렬 읽기/쓰기
  *
- * in-process async mutex 패턴: plugins/registry.ts §M1 복사.
- * 키: 파일 절대경로 → 직렬화된 Promise 체인.
- * 범위: in-process 전용 (크로스 프로세스 잠금은 Phase 3+).
+ * in-process async mutex + cross-process proper-lockfile 이중 잠금.
+ * 키: 파일 절대경로 → 직렬화된 Promise 체인 (in-process).
+ * proper-lockfile: 여러 Electron 인스턴스 동시 실행 시 race 방지 (cross-process).
  */
 import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { PermissionRule, ExecutionMode } from "./permission-manager.js";
+import { withFileLock } from "../lib/with-file-lock.js";
 
 // ─── 파일 형태 ────────────────────────────────────────
 
@@ -55,22 +56,24 @@ export async function updatePermissionsFile(
   mutator: (file: PermissionsFile) => void | Promise<void>,
 ): Promise<void> {
   await withPermissionsLock(filePath, async () => {
-    const existing = await readPermissionsFile(filePath);
-    const file: PermissionsFile = existing ?? {
-      version: 1,
-      rules: [],
-      mode: "default",
-      updatedAt: new Date().toISOString(),
-    };
-    await mutator(file);
-    file.updatedAt = new Date().toISOString();
-    await mkdir(dirname(filePath), { recursive: true });
-    // §S4: 0o600 — owner read/write only (world-readable 방지)
-    const fd = await open(filePath, "w", 0o600);
-    try {
-      await fd.writeFile(`${JSON.stringify(file, null, 2)}\n`, "utf-8");
-    } finally {
-      await fd.close();
-    }
+    await withFileLock(filePath, async () => {
+      const existing = await readPermissionsFile(filePath);
+      const file: PermissionsFile = existing ?? {
+        version: 1,
+        rules: [],
+        mode: "default",
+        updatedAt: new Date().toISOString(),
+      };
+      await mutator(file);
+      file.updatedAt = new Date().toISOString();
+      await mkdir(dirname(filePath), { recursive: true });
+      // §S4: 0o600 — owner read/write only (world-readable 방지)
+      const fd = await open(filePath, "w", 0o600);
+      try {
+        await fd.writeFile(`${JSON.stringify(file, null, 2)}\n`, "utf-8");
+      } finally {
+        await fd.close();
+      }
+    });
   });
 }
