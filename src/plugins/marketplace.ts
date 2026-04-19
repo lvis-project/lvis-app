@@ -15,6 +15,7 @@ import {
   MarketplaceInstallerError,
 } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
+import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 
@@ -92,6 +93,12 @@ export class PluginMarketplaceService {
   /** Sprint 3-B §9.6: per-plugin version cache for rollback. */
   private readonly cacheRoot: string;
   /**
+   * S9: base directory for the catalog cache. `null` disables catalog caching
+   * (used when the fetcher is the bundled mock / local-file path).
+   * `undefined` uses the default global path under `~/.lvis/marketplace-cache/`.
+   */
+  private readonly catalogCacheBase: string | null | undefined;
+  /**
    * PR#44 HIGH: per-plugin in-process mutex. Concurrent install/rollback
    * calls for the same pluginId are serialized to protect the cache
    * breadcrumb + history.json from corruption.
@@ -111,13 +118,49 @@ export class PluginMarketplaceService {
     this.marketplacePath = resolve(this.appRoot, "plugins/marketplace.json");
     this.installedDir = resolve(this.appRoot, "plugins/installed");
     this.deploymentGuard = deploymentGuard;
+    // When no external fetcher is provided we fall back to the bundled local
+    // marketplace.json mock — catalog caching makes no sense for local files.
+    const usingMockFetcher = !fetcher;
     this.fetcher = fetcher ?? new MockMarketplaceFetcher(this.marketplacePath);
     this.cacheRoot = cacheRoot ?? resolve(homedir(), ".lvis/plugins/.cache");
+    this.catalogCacheBase = usingMockFetcher ? null : undefined;
   }
 
   async list(): Promise<MarketplaceListItem[]> {
+    // Catalog cache is disabled when using MockMarketplaceFetcher (local files).
+    const cacheBase = this.catalogCacheBase;
+    const useCache = cacheBase !== null && isOfflineCacheEnabled();
+    const cacheBaseArg = typeof cacheBase === "string" ? cacheBase : undefined;
+    let catalogPlugins: PluginMarketplaceItem[] | null = null;
+
+    if (useCache) {
+      catalogPlugins = await getCachedCatalog(cacheBaseArg);
+    }
+
+    let fetchedFromNetwork = false;
+    if (!catalogPlugins) {
+      try {
+        catalogPlugins = await this.fetcher.listPlugins();
+        fetchedFromNetwork = true;
+      } catch (err) {
+        // Network failure — fall back to stale cache if available (TTL bypassed
+        // intentionally: any cached data is better than a hard failure offline).
+        const stale = useCache ? await getCachedCatalog(cacheBaseArg, { allowStale: true }) : null;
+        if (stale) {
+          console.warn("[marketplace] network fetch failed, using stale cache:", (err as Error).message);
+          catalogPlugins = stale;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (fetchedFromNetwork && useCache) {
+      await setCachedCatalog(catalogPlugins, cacheBaseArg);
+    }
+
     const [plugins, registry] = await Promise.all([
-      this.fetcher.listPlugins(),
+      Promise.resolve(catalogPlugins),
       readPluginRegistry(this.registryPath),
     ]);
     const items: MarketplaceListItem[] = [];
