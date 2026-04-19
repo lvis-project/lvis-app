@@ -208,6 +208,7 @@ export function registerIpcHandlers(
     approvalGate,
     refreshPluginNotifications,
     starredStore,
+    feedbackStore,
     auditLogger,
   } = services;
 
@@ -336,14 +337,14 @@ export function registerIpcHandlers(
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:delete", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.deleteNote(filename);
   });
-  // read-only, sender guard optional
-  ipcMain.handle("lvis:memory:notes:search", (_e, query: string) =>
-    memoryManager.searchNotes(query),
-  );
-  // read-only, sender guard optional — D5 memory search panel
-  ipcMain.handle("lvis:memory:sessions:search", (_e, query: string) =>
-    memoryManager.searchSessions(query),
-  );
+  ipcMain.handle("lvis:memory:notes:search", (e, query: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:search", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.searchNotes(query);
+  });
+  ipcMain.handle("lvis:memory:sessions:search", (e, query: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:sessions:search", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.searchSessions(query);
+  });
   // read-only, sender guard optional
   ipcMain.handle("lvis:memory:lvis-md:get", () => memoryManager.getLvisMd());
   ipcMain.handle("lvis:memory:lvis-md:update", async (e, content: string) => {
@@ -807,14 +808,16 @@ export function registerIpcHandlers(
     if (typeof sessionId !== "string" || typeof messageIndex !== "number" || (rating !== "up" && rating !== "down")) {
       return { ok: false, error: "invalid-args" };
     }
-    const input = reason
-      ? `feedback:${rating}:${sessionId}:${messageIndex}:${reason.slice(0, 200)}`
-      : `feedback:${rating}:${sessionId}:${messageIndex}`;
+    // Write free-text reason to FeedbackStore only — keeps PII out of audit log (GDPR).
+    if (feedbackStore) {
+      feedbackStore.add({ sessionId, messageIndex, rating, ...(reason !== undefined ? { reason } : {}) });
+    }
+    // Audit log: stripped line without reason — useful only for aggregate rate stats.
     auditLogger.log({
       timestamp: new Date().toISOString(),
       sessionId,
-      type: "info",
-      input,
+      type: "warn",
+      input: `feedback:${rating}:${sessionId}:${messageIndex}`,
     });
     if (rating === "up" && starredStore) {
       const existing = starredStore.list().find(
