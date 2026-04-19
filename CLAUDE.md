@@ -15,8 +15,27 @@ src/
   boot.ts                     — §4.2 Boot Sequence (service init, plugin loading)
   ipc-bridge.ts               — All IPC handlers (settings, chat, memory, plugins, tasks)
   preload.ts / preload.cjs    — Electron preload scripts
-  renderer.tsx                — React UI (chat, vendor selector, tool display)
+  renderer.tsx                — minimal entry mounting ui/renderer/App.tsx
   plugin-ui-host.tsx          — Dynamic plugin UI mounting
+
+  ui/renderer/                — Renderer composition root (Phase 1~4.6 split 완료)
+    App.tsx                   — composition root
+    ChatView.tsx · Sidebar.tsx · SettingsDialog.tsx · MainToolbar.tsx
+    context/                  — ChatContext (state provider for ChatView subtree)
+    hooks/                    — 12 domain hooks (settings, chat-state, briefing,
+                               approval, search, context-budget, cost-estimate,
+                               sessions, starred, plugin-marketplace, role-presets,
+                               app-bootstrap, indexed-docs, marketplace-updates)
+    components/               — BriefingCard, AssistantCard, UserMessageEditor,
+                               ReasoningCard, ToolApprovalDialog, ToolGroupCard,
+                               ChatSearchOverlay, Sparkline, UsageDashboard,
+                               HtmlPreview, TaskView, StarredView,
+                               MarketplaceUpdateBanner
+    dialogs/                  — ApprovalDialog, PluginInstallDialog,
+                               PluginUninstallDialog, CommandPaletteDialog
+    tabs/                     — RolesTab, PermissionsTab
+    utils/                    — cost-format, html-preview, history, compose
+    types.ts · constants.ts · api-client.ts
 
   engine/                     — Agent loop + LLM providers (was src/agent/)
     conversation-loop.ts      — §4.5 Core agentic cycle (stream + tool loop)
