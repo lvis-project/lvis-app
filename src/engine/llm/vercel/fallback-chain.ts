@@ -56,7 +56,6 @@ async function* attemptStream(
   let firstEvent = true;
   for await (const ev of provider.streamTurn(params)) {
     if (firstEvent && ev.type === "error") {
-      firstEvent = false;
       // classification "api-key" or "model" = non-retryable
       const cls = (ev as { type: "error"; classification?: string }).classification ?? "";
       if (cls === "api-key" || cls === "model") {

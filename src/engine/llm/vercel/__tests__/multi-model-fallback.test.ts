@@ -33,10 +33,10 @@ function makeProvider(vendor: string, events: StreamEvent[]): LLMProvider {
 function makeThrowingProvider(vendor: string, error: Error): LLMProvider {
   return {
     vendor: vendor as any,
-    streamTurn: async function* () {
-      throw error;
-      // unreachable — keeps TS happy
-      yield { type: "text_delta" as const, text: "" };
+    streamTurn(): AsyncIterable<StreamEvent> {
+      return (async function* (): AsyncGenerator<StreamEvent, void, unknown> {
+        throw error;
+      })();
     },
   };
 }
