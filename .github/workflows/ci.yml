@@ -54,13 +54,6 @@ jobs:
         working-directory: lvis-app
       - run: bun run build
         working-directory: lvis-app
-      - name: Set clean temp directory (Windows 8.3 path fix)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "C:\Temp" | Out-Null
-          Add-Content $env:GITHUB_ENV "TEMP=C:\Temp"
-          Add-Content $env:GITHUB_ENV "TMP=C:\Temp"
       - run: bunx vitest run
         working-directory: lvis-app
 

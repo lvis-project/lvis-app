@@ -8,7 +8,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { writeFile, mkdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { PluginUpdateDetector, isNewer, isUpdateCheckEnabled } from "../update-detector.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
@@ -20,7 +20,7 @@ function makeFetcher(plugins: PluginMarketplaceItem[]): MarketplaceFetcher {
   return {
     listPlugins: vi.fn().mockResolvedValue(plugins),
     getPluginDetail: vi.fn().mockResolvedValue(null),
-    downloadVersion: vi.fn().mockRejectedValue(new Error("not implemented")),
+    downloadVersion: vi.fn().mockRejectedValue(new Error("not implemented"))
   };
 }
 
@@ -32,7 +32,7 @@ function makeCatalogPlugin(id: string, version: string): PluginMarketplaceItem {
     packageSpec: `@lvis/${id}@${version}`,
     packageName: `@lvis/${id}`,
     tools: [],
-    version,
+    version
   };
 }
 
@@ -104,7 +104,7 @@ describe("PluginUpdateDetector", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(resolve(tmpdir(), "update-detector-"));
+    tmpDir = mkdtempSync(resolve(join(homedir(), ".lvis", "test-tmp"), "update-detector-"));
   });
 
   afterEach(() => {
@@ -149,7 +149,7 @@ describe("PluginUpdateDetector", () => {
     expect(updates[0]).toEqual({
       pluginId: "pageindex",
       installedVersion: "1.0.0",
-      latestVersion: "1.1.0",
+      latestVersion: "1.1.0"
     });
   });
 

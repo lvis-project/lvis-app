@@ -7,14 +7,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import {
   getCachedCatalog,
   getCachedTarball,
   isOfflineCacheEnabled,
   setCachedCatalog,
-  setCachedTarball,
+  setCachedTarball
 } from "../offline-cache.js";
 import type { PluginMarketplaceItem } from "../types.js";
 
@@ -25,14 +25,14 @@ function makeItem(id: string): PluginMarketplaceItem {
     description: "test",
     packageSpec: `@lvis/${id}@1.0.0`,
     packageName: `@lvis/${id}`,
-    tools: [],
+    tools: []
   };
 }
 
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(resolve(tmpdir(), "offline-cache-test-"));
+  tmpDir = mkdtempSync(resolve(join(homedir(), ".lvis", "test-tmp"), "offline-cache-test-"));
 });
 
 afterEach(() => {

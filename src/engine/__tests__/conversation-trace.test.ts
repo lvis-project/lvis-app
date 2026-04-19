@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
@@ -20,7 +20,7 @@ import {
   createTracer,
   type ConversationTracer,
   type TraceStepName,
-  type TraceEntry,
+  type TraceEntry
 } from "../../observability/conversation-trace.js";
 
 class FakeProvider implements LLMProvider {
@@ -52,10 +52,10 @@ function makeLoop(provider: LLMProvider) {
       jsonSchema: {
         type: "object",
         properties: { path: { type: "string" } },
-        required: ["path"],
+        required: ["path"]
       },
       isReadOnly: () => true,
-      execute: async () => ({ output: "src\npackage.json", isError: false }),
+      execute: async () => ({ output: "src\npackage.json", isError: false })
     }),
   );
 
@@ -64,7 +64,7 @@ function makeLoop(provider: LLMProvider) {
   const loop = new ConversationLoop(({
     settingsService: {
       get: () => ({ provider: "openai", model: "gpt-4o" }),
-      getSecret: () => "test-key",
+      getSecret: () => "test-key"
     },
     systemPromptBuilder: { build: () => "system" },
     keywordEngine,
@@ -72,8 +72,8 @@ function makeLoop(provider: LLMProvider) {
     toolRegistry,
     memoryManager: {
       saveSession: () => {},
-      listSessions: () => [],
-    },
+      listSessions: () => []
+    }
   } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
   (loop as { provider: LLMProvider | null }).provider = provider;
   return loop;
@@ -122,7 +122,7 @@ describe("ConversationTracer — §4.5 11-step", () => {
   });
 
   it("writes valid JSONL entries to the trace file when enabled", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "lvis-trace-"));
+    const dir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-trace-"));
     const sessionId = "test-session-abc";
     const tracer = createTracer(sessionId, { enabled: true, traceDir: dir });
     expect(tracer.enabled).toBe(true);

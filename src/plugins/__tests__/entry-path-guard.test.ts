@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime, resolvePluginEntryPath } from "../runtime.js";
 
@@ -17,10 +17,7 @@ describe("PluginRuntime — entry path allowlist", () => {
   let auditEntries: Array<{ level: string; message: string; data?: unknown }>;
 
   beforeEach(async () => {
-    testDir = join(
-      tmpdir(),
-      `lvis-entry-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-entry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");

@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PluginTelemetryClient } from "../telemetry/client.js";
 import { scrubPii } from "../telemetry/client.js";
 import type { TelemetrySettings } from "../data/settings-store.js";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -33,15 +33,15 @@ function makeDeps(overrides: {
 }) {
   const settings: TelemetrySettings = {
     enabled: overrides.enabled ?? true,
-    telemetryPromptAnswered: overrides.promptAnswered ?? true,
+    telemetryPromptAnswered: overrides.promptAnswered ?? true
   };
   return {
     settings: () => settings,
     marketplaceBaseUrl: () => overrides.marketplaceBaseUrl ?? "https://marketplace.lvis.local",
     installToken: () => overrides.installToken ?? null,
-    deviceUuidPath: join(tmpdir(), `lvis-test-uuid-${randomUUID()}`),
+    deviceUuidPath: join(homedir(), ".lvis", "test-tmp", `lvis-test-uuid-${randomUUID()}`),
     fetchImpl: overrides.fetchImpl,
-    flushIntervalMs: overrides.flushIntervalMs ?? 99_999,
+    flushIntervalMs: overrides.flushIntervalMs ?? 99_999
   };
 }
 
@@ -85,7 +85,7 @@ describe("PluginTelemetryClient", () => {
     client.track("plugin_error", {
       slug: "com.lge.baz",
       version: "3.0.0",
-      errorClass: "MarketplaceInstallerError",
+      errorClass: "MarketplaceInstallerError"
     });
     expect(client.queueLength).toBe(3);
     await client.flush();
@@ -199,7 +199,7 @@ describe("PluginTelemetryClient", () => {
     client.track("plugin_error", {
       slug: "com.lge.foo",
       version: "1.0.0",
-      errorClass: "NetworkError",
+      errorClass: "NetworkError"
     });
     await client.flush();
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
