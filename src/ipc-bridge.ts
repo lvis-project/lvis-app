@@ -59,6 +59,7 @@ async function runStreamedTurn(
     onError: (error) => send({ type: "error", error }),
     onCompactOccurred: ({ removedMessages, freedTokens }) =>
       send({ type: "compact_notice", removedMessages, freedTokens }),
+    onFallback: (from, to) => webContents?.send("lvis:chat:fallback", { from, to }),
   });
   send({ type: "done" });
   return result;

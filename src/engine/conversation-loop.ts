@@ -52,6 +52,7 @@ export interface TurnCallbacks {
   onTurnComplete?: (fullText: string) => void;
   onError?: (error: string) => void;
   onCompactOccurred?: (result: { removedMessages: number; freedTokens: number }) => void;
+  onFallback?: (from: string, to: string) => void;
 }
 
 export interface TurnResult {
@@ -563,6 +564,10 @@ ${briefingData}
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const model = llmSettings.model;
+    // Wire per-turn onFallback callback into FallbackProvider when available.
+    if (this.provider instanceof FallbackProvider && callbacks?.onFallback) {
+      this.provider.setCallbacks({ onFallback: callbacks.onFallback });
+    }
     // Phase 1.5 Option C: scope is mutable within the turn. Mutating the
     // caller's Set directly means the next turn's fallback sees every plugin
     // that was activated here.
@@ -900,6 +905,8 @@ ${briefingData}
         if (cr.compacted) {
           this.history.clear();
           this.history.restore(compacted);
+          void this.deps.memoryManager?.saveSession(this.sessionId, this.history.getMessages())
+            .catch((e: Error) => console.warn("[lvis] /compact saveSession:", e.message));
           result = `컴팩트 완료: ${cr.removedMessages}개 메시지 제거, ~${cr.freedTokens} 토큰 확보`;
         } else {
           result = "컴팩트 불필요: 메시지 수가 충분히 적습니다.";

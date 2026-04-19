@@ -31,6 +31,10 @@ export interface FallbackAuditLogger {
   }): void;
 }
 
+export interface FallbackCallbacks {
+  onFallback?: (from: string, to: string) => void;
+}
+
 /** Error categories that must NOT trigger fallback (config bugs → fail fast). */
 function isNonRetryable(err: unknown): boolean {
   // User cancellation — sacred, never fallback.
@@ -83,6 +87,7 @@ export type ProviderFactory = (config: ProviderConfig) => LLMProvider;
  */
 export class FallbackProvider implements LLMProvider {
   readonly vendor: LLMVendor;
+  private callbacks?: FallbackCallbacks;
   constructor(
     private readonly primary: LLMProvider,
     private readonly chain: FallbackEntry[],
@@ -93,6 +98,10 @@ export class FallbackProvider implements LLMProvider {
     this.vendor = primary.vendor;
   }
 
+  setCallbacks(callbacks: FallbackCallbacks): void {
+    this.callbacks = callbacks;
+  }
+
   streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
     return streamWithFallback(
       this.primary,
@@ -101,6 +110,7 @@ export class FallbackProvider implements LLMProvider {
       this.getApiKey,
       this.auditLogger,
       this.factory,
+      this.callbacks,
     );
   }
 }
@@ -112,6 +122,7 @@ export async function* streamWithFallback(
   getApiKey: ApiKeyGetter,
   auditLogger?: FallbackAuditLogger,
   _createProvider: ProviderFactory = defaultCreateProvider,
+  callbacks?: FallbackCallbacks,
 ): AsyncIterable<StreamEvent> {
   // Attempt 0: primary provider.
   // Attempts 1..N: lazily-constructed fallback providers (built only when needed).
@@ -150,6 +161,7 @@ export async function* streamWithFallback(
       } catch {
         // audit failure must never block the fallback path
       }
+      callbacks?.onFallback?.(label, nextLabel);
     }
   }
   throw lastErr;
