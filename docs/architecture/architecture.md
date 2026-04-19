@@ -1,8 +1,8 @@
 # LVIS Architecture Document v0.4.1 (Current)
 
-> **Version**: 0.4.1
-> **Date**: 2026-04-16
-> **Status**: Architecture Currentized Draft (대화 루프/도구 표시/자동 컴팩트 구현 기준 반영)
+> **Version**: 0.4.1 (base) · v5 덧붙이기 (2026-04-19) — Appendix D-v5 참조
+> **Date**: 2026-04-16 (base) · 2026-04-19 (v5 additive)
+> **Status**: Architecture Currentized Draft (대화 루프/도구 표시/자동 컴팩트 구현 기준 반영) · v5 = Marketplace 승인/카나리, Approval 강화, Telemetry, Contract CI, Trace Logger, File Lock, Tool Versioning 반영
 > **Authors**: LVIS Architecture Team
 > **Base Reference**: [구현 철학](../vision/philosophy.md) · [claw-code harness](https://github.com/ultraworkers/claw-code)
 
@@ -3036,6 +3036,124 @@ flowchart TB
 > _"모든 사원이 자신만의 AI 비서를 가진다."_
 > _"직원은 판단과 소통에 집중하고, 절차·탐색·정리는 Lvis·LGenie가 맡는 회사."_
 > — philosophy.md
+
+---
+
+### D-v5. v4 (Final) → v5 (2026-04-19) 변경점
+
+v5 는 v4 Final 의 설계를 그대로 유지한 상태에서, **실구현 머지 결과**를 반영한 **덧붙이기 전용** 업데이트이다. 기존 서술은 삭제하지 않으며, 신규 사항은 `§X.Y (신규 v5)` 형태로 해당 장 하위에 추가한다.
+
+| 영역 | v4 (Final) | v5 덧붙이기 |
+| --- | --- | --- |
+| §4.2 Boot Sequence | 8-step 부팅 | **§4.2.X (신규 v5)** `ensure-submodules` postinstall + dev 모드 플러그인 live-reload 워처 |
+| §4.5 Conversation Query Loop | 11-step 메시지 라이프사이클 | **§4.5.X (신규 v5)** `ConversationTracer` + `FileTracer` 11-step 계측 (K4) |
+| §5 Memory — File-based | 파일 기반 경량 구조 | **§5.X (신규 v5)** `proper-lockfile` 크로스프로세스 파일 락 + audit log rotation/retention |
+| §6.4 Tool Registry & Taxonomy | 6 카테고리 + 동적 등록 | **§6.4.X (신규 v5)** Tool meta `version` / `deprecatedSince` / `replacedBy` 필드 |
+| §7 Marketplace Hub | 플러그인 배포·업데이트 | **§7.X (신규 v5) — S13 승인 워크플로우**, **§7.Y (신규 v5) — S15 카나리 롤아웃** |
+| §8 Agent Approval | 승인이 기본 | **§8.X (신규 v5)** HMAC nonce + 큐 cap + bulk approve UI + DLP arg mask + 병렬 tool 실행 |
+| §9 Plugin System | manifest + UI slots + MCP | **§9.X (신규 v5)** manifest JSON Schema (AJV CI) + HostApi contract CI + tool/event namespace CI |
+| §12 Use Case Mapping | 7개 매핑 | **§12.X (신규 v5) — S12+FU1 Client Telemetry** (opt-in, device_uuid, PII scrubber, URL allowlist, install_token header-only) |
+| §14 Deployment & Governance | 배포·거버넌스·Feature Flag | **§14.X (신규 v5)** SDK public 분리 + plugin template repo + drift-check nightly + 태그 정책 manual |
+
+---
+
+#### §4.2.X Boot Sequence 보강 (신규 v5)
+
+v4 §4.2 의 8-step 부팅 시퀀스는 그대로 유지된다. v5 에서는 다음 두 가지 운영 보강을 덧붙인다.
+
+1. **`ensure-submodules` postinstall 훅**: 루트 `package.json`의 `postinstall` 에서 필수 플러그인 서브모듈(`lvis-plugin-meeting`, `lvis-plugin-pageindex`, `lvis-plugin-email`)의 초기화 상태를 검증하고, 누락 시 `git submodule update --init --recursive` 를 실행한다. 누락 상태로 부팅하면 플러그인 로드 단계(§4.2 Step 6)가 침묵 실패할 수 있던 문제를 부팅 이전에 차단한다.
+2. **Dev 모드 플러그인 live-reload**: 개발 환경(`NODE_ENV !== 'production'`)에서 각 플러그인 `dist/` 를 감시하여, 빌드 산출물이 변경되면 PluginManager 에 `reloadPlugin(slug)` 이벤트를 전송한다. 프로덕션 경로는 변경 없음(매니페스트 버전 변경시에만 업데이트, §9 참조).
+
+#### §4.5.X Conversation Trace Logger (K4, 신규 v5)
+
+v4 §4.5 의 11-step 쿼리 루프(`onUserMessage → ... → onTurnComplete`)는 유지된다. v5 는 각 스텝에 관측 가능성을 추가한다.
+
+- **`ConversationTracer` 인터페이스**: `startTurn(turnId)`, `stepEnter(step, meta)`, `stepExit(step, meta)`, `endTurn(turnId, outcome)`. 11 스텝 전부에 `stepEnter` / `stepExit` 호출이 계측된다.
+- **`FileTracer` 구현**: `~/.lvis/traces/{yyyy-mm-dd}/{turnId}.jsonl` 에 append-only JSONL 로 기록. 회전/보존 정책은 §5.X 와 동일.
+- **Feature flag**: `conversation.trace.enabled`. Default off. 디버깅/QA 전용이며 운영에서는 `opt-in`.
+- **PII 보호**: 기록 전 §12.X PII scrubber 를 통과시킨다.
+
+#### §5.X File-based State 동시성·보존 (신규 v5)
+
+v4 §5 의 `~/.lvis/` 파일 기반 경량 구조는 유지된다. 운영 안정성을 위해 다음을 덧붙인다.
+
+- **Cross-process file lock**: 모든 상태 파일 (`memory/*.md`, `tasks.json`, `audit.log`, `approval-queue.json`) 쓰기 경로에 `proper-lockfile` 을 적용. 두 Electron 인스턴스 또는 메인/렌더러 레이스 상황에서도 손상 방지.
+- **Audit log rotation/retention**: `~/.lvis/audit/audit-YYYY-MM-DD.log` 일 단위 회전. 기본 retention 90일. 사이즈 한계(예: 50MB) 초과 시 그 날짜 내에서 `audit-YYYY-MM-DD.N.log` 로 분할.
+- **Write contract**: 락 획득 실패 시 최대 5회, 100ms 백오프 재시도. 최종 실패는 §6.6 Observability 의 Audit sink 로 `state.write.lock_failed` 이벤트를 남긴다.
+
+#### §6.4.X Tool Versioning Meta (신규 v5)
+
+v4 §6.4 빌트인 도구 카탈로그의 ToolMeta 에 아래 필드를 추가한다. 기존 필드는 유지된다.
+
+```ts
+interface ToolMeta {
+  // ... (v4 필드 유지)
+  version: string;              // semver, e.g. "1.2.0"
+  deprecatedSince?: string;     // semver, 표기 시 Registry 경고
+  replacedBy?: string;          // 후속 도구 이름, 자동 리다이렉트 힌트
+}
+```
+
+- `deprecatedSince` 가 설정된 도구는 Tool Registry 빌드 시 경고 로그를 남기고, System Prompt 조립(§4.5.9)에서 "deprecated" 마크를 부여한다.
+- `replacedBy` 는 에이전트가 구 도구를 호출했을 때 후속 도구 안내를 Prompt에 포함하는 데 사용된다.
+- 버전 정책: 도구 스키마(arg 이름/타입) 변경은 **major bump**. 이 경우 구 도구를 한 릴리즈 이상 `deprecatedSince` 로 공존시킨 뒤 제거한다.
+
+#### §7.X Marketplace 승인 워크플로우 — S13 (신규 v5)
+
+v4 §7 의 Marketplace Hub 배포 플로우는 유지된다. v5 는 **publisher 게시 → 관리자 승인 → 카탈로그 노출** 사이에 명시적 게이트를 추가한다.
+
+- **`approval_state` 필드**: manifest 상위 상태로 `draft → pending_review → approved → rejected → withdrawn` 5-state FSM 도입.
+- **카탈로그 비공개 규칙**: `pending_review` / `rejected` / `withdrawn` 상태의 플러그인 버전은 클라이언트 카탈로그 API 응답에서 **제외**된다. 오직 `approved` 만 목록/업데이트 후보가 된다.
+- **`latest_stable_version` 잠금**: publisher 가 새 버전을 올려도 관리자가 `approved` 처리 전까지 `latest_stable_version` 포인터는 기존 승인 버전에 **잠금** 유지. 카나리(§7.Y) 와 독립적으로 동작.
+- **감사 흔적**: 승인/거절 이벤트는 Marketplace 측 audit log 와 클라이언트 사이드 §6.6 Audit sink 양쪽에 동일 `plugin.approval.{state}` 로 기록.
+
+#### §7.Y Marketplace 카나리 롤아웃 — S15 (신규 v5)
+
+승인된(§7.X) 버전이라도 전체 사원에게 동시 배포되지 않는다. v5 는 결정론적 슬롯 분배로 카나리 대상을 제한한다.
+
+- **`rollout_stage`**: `disabled | canary | ga` 3-stage.
+- **`rollout_percent`**: 0~100 정수. `canary` 단계에서만 유효.
+- **디바이스 슬롯 계산**: 각 사원 디바이스는 `slot = sha256(device_uuid || ':' || plugin_slug) % 100` 로 결정론적 슬롯을 가진다. `slot < rollout_percent` 인 디바이스만 해당 버전 업데이트 후보.
+- **Stage 전이 운영**: `canary` 는 기본 10% → 50% → 100% 단계적 증대. `ga` 전환 시 `rollout_percent` 는 100 으로 고정된다.
+- **클라이언트 동작**: 매니페스트 업데이트 폴링(§9) 은 슬롯 검증 후 대상이 아니면 현재 설치 버전을 유지한다. 이 과정은 사원에게 불투명(no UI flicker).
+
+#### §8.X Approval System — HMAC/큐/UI/DLP/병렬 (신규 v5)
+
+v4 §8 "승인이 기본" 모델을 강화한다.
+
+- **HMAC + nonce**: Approval 요청 payload 에 `nonce`(UUIDv4) + `hmac = HMAC-SHA256(server_secret, payload || nonce)` 를 부가. 재생공격·UI 스푸핑 차단. `nonce` 는 10분 TTL 의 per-user 세트에서 1회성 소비.
+- **큐 cap**: Approval Queue 최대 길이 **200**. 초과 시 신규 요청은 즉시 `rejected(reason=queue_full)` 로 drop 되고, 오래된 요청 중 `auto_expire_at` 경과 건부터 gc.
+- **Bulk approve UI**: 동일 tool + 동일 scope 요청을 그룹화하여 한 번에 승인/거절. 사원 클릭 수 감소가 목적. 그룹 단위 승인은 개별 audit record 로 전개되어 기록된다.
+- **DLP arg mask**: 승인 화면에 노출되는 인자 중 이메일·전화번호·사번·카드번호 패턴은 `****` 로 마스킹(로그는 원문 암호화 보관). §12.X PII scrubber 규칙 공유.
+- **병렬 tool 실행**: 승인이 끝난 독립 tool 호출은 v4 `StreamingToolExecutor` 경로에서 병렬 실행(기본 최대 4 동시). 종속 관계가 있는 호출은 sequential fallback.
+
+#### §9.X Plugin System — 계약 CI (신규 v5)
+
+v4 §9 의 manifest 스키마 / HostApi / 도구·이벤트 네임스페이스 규칙은 런타임 검증에 의존했다. v5 는 CI 레벨로 끌어올린다.
+
+- **Manifest JSON Schema (AJV)**: `lvis-app/schemas/plugin-manifest.schema.json` 을 단일 source of truth 로 정의. CI 에서 AJV 로 각 플러그인 `plugin.json` 을 검증. 스키마 위반 시 빌드 실패.
+- **HostApi contract CI**: 호스트가 내보내는 `HostApi` 타입 정의를 플러그인 repo 들이 `devDependency` 로 import. CI 에서 `tsc --noEmit` 으로 계약 불일치(사라진 메서드 등) 를 조기 검출.
+- **Tool namespace CI**: 도구 이름 정규식 `^[a-z][a-z0-9_]*$`, 첫 토큰은 플러그인 slug prefix. 중복/충돌은 CI 거부.
+- **Event namespace CI**: 이벤트 이름 `^[a-z][a-z0-9_.]*$`, 최상위 prefix 는 플러그인 slug 또는 `core.`. 외부 플러그인의 `core.*` 발행은 CI 거부.
+
+#### §12.X Client Telemetry — S12+FU1 (신규 v5)
+
+v4 §12 는 Use Case ↔ Architecture 매핑에 집중되어 있었다. v5 는 클라이언트 운영 가시성을 신규 추가한다.
+
+- **Opt-in**: 기본 OFF. 최초 실행 설정에서 사원이 **명시적으로 허용**해야 전송 시작. 설정은 `~/.lvis/prefs.json` 의 `telemetry.enabled` 로 저장.
+- **`device_uuid`**: 첫 실행 시 UUIDv4 1회 생성 후 고정. 사번/이메일은 포함하지 않는다.
+- **PII scrubber**: 전송 전 공통 규칙(이메일, 전화, 사번, 카드번호, 경로 내 사용자명) 으로 마스킹. §8.X DLP arg mask 와 규칙 공유.
+- **URL allowlist**: 전송 엔드포인트는 빌드 타임에 주입된 화이트리스트(예: `https://telemetry.lvis.internal`) 외에는 거부. 런타임 재지정 불가.
+- **Install token — header only**: 플러그인 / 앱 설치 토큰은 HTTP Header (`X-LVIS-Install-Token`) 로만 전송. URL query string 에 절대 포함하지 않는다 (로그 누출 방지).
+
+#### §14.X Governance 운영 보강 (신규 v5)
+
+v4 §14 배포·거버넌스 체계는 유지된다. v5 는 개발 조직 운영상의 다음을 덧붙인다.
+
+- **SDK public 분리**: `lvis-app` 내부에 있던 플러그인 SDK 타입/유틸을 별도 공개 패키지(`@lvis/plugin-sdk`) 로 분리 게시. 외부 사업부는 호스트 내부 코드에 의존하지 않고 SDK 만 사용.
+- **Plugin template repo**: `lvis-plugin-template` repo 를 제공. manifest, CI workflow(§9.X), HostApi 계약 테스트, 기본 tool/event 네임스페이스가 사전 구성됨.
+- **Drift-check nightly**: 야간 CI 가 `lvis-app` 의 HostApi 타입 / manifest 스키마와 각 플러그인 repo 의 실제 사용 간 드리프트를 점검. 결과는 대시보드 + Slack 알림.
+- **Tag policy — manual**: 버전 태그(`vX.Y.Z`) 는 자동 생성하지 않는다. 릴리즈 책임자가 수동으로 태그를 부여하며, 태그 부여는 §7.X Marketplace 승인 상태와 일치해야 한다 (태그 O → `approved` 전제).
 
 ---
 
