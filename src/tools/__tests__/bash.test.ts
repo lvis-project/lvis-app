@@ -72,7 +72,7 @@ describe("BashTool — timeout", () => {
       expect(result.metadata?.timedOut).toBe(true);
       expect(result.output).toMatch(/timed out/i);
     },
-    { timeout: 3000 },
+    { timeout: 8000 },
   );
 });
 

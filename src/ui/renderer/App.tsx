@@ -48,6 +48,7 @@ export function App() {
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     seedBriefing, clearForNewChat, appendUserEntry, applyLoadedSession, truncateToEntry,
+    fallbackToast,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -190,6 +191,11 @@ export function App() {
 
         <main className="flex min-h-0 flex-col">
           <MarketplaceUpdateBanner updates={marketplaceUpdates} onDismiss={dismissMarketplaceUpdates} />
+          {fallbackToast && (
+            <div className="bg-yellow-100 text-yellow-800 text-xs px-4 py-2 border-b border-yellow-200">
+              {fallbackToast}
+            </div>
+          )}
           <MainToolbar
             activeView={activeView}
             setActiveView={setActiveView}

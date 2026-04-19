@@ -565,8 +565,8 @@ ${briefingData}
     const llmSettings = this.deps.settingsService.get("llm");
     const model = llmSettings.model;
     // Wire per-turn onFallback callback into FallbackProvider when available.
-    if (this.provider instanceof FallbackProvider && callbacks?.onFallback) {
-      this.provider.setCallbacks({ onFallback: callbacks.onFallback });
+    if (this.provider instanceof FallbackProvider) {
+      this.provider.setCallbacks({ onFallback: callbacks?.onFallback });
     }
     // Phase 1.5 Option C: scope is mutable within the turn. Mutating the
     // caller's Set directly means the next turn's fallback sees every plugin
