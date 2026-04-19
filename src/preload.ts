@@ -48,6 +48,11 @@ const api = {
     ipcRenderer.on("lvis:chat:stream", listener);
     return () => ipcRenderer.removeListener("lvis:chat:stream", listener);
   },
+  onChatFallback: (handler: (payload: { from: string; to: string }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:chat:fallback", listener);
+    return () => ipcRenderer.removeListener("lvis:chat:fallback", listener);
+  },
 
   // ─── Memory ──────────────────────────────────────
   memoryListNotes: async () => ipcRenderer.invoke("lvis:memory:notes:list"),
