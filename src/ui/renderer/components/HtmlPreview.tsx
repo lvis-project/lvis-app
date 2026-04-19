@@ -56,7 +56,7 @@ export function HtmlPreview({
     <div className="mt-2 overflow-hidden rounded border bg-background">
       <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
         <span className="truncate">{payload.title ?? "HTML 미리보기"}</span>
-        <span className="text-[10px] opacity-60">격리된 프로세스 · 샌드박스</span>
+        <span className="text-[10px] opacity-60">격리된 프로세스 · 네트워크 차단</span>
       </div>
       {createElement("webview", {
         ref: webviewRef,

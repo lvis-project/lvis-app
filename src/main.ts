@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
+import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -235,6 +236,7 @@ app.on("before-quit", async () => {
 });
 
 app.whenReady().then(() => {
+  installHtmlPreviewPartitionBlock();
   void main().catch((error) => {
     console.error("[lvis] bootstrap failed", error);
     app.quit();
