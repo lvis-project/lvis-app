@@ -26,6 +26,7 @@ import type { ProactiveEngine } from "../core/proactive-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ToolCallMeta } from "../tools/executor.js";
+import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -131,6 +132,8 @@ export class ConversationLoop {
   private readonly auditLogger: AuditLogger;
   private provider: LLMProvider | null = null;
   private sessionId: string = crypto.randomUUID();
+  /** K4: §4.5 11-step trace — dev 모드 활성, 프로덕션 no-op */
+  private tracer: ConversationTracer = createTracer(this.sessionId);
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
   /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
@@ -306,6 +309,7 @@ ${briefingData}
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
+    this.tracer = createTracer(this.sessionId);
   }
 
   getHistory(): ConversationHistory {
@@ -314,6 +318,16 @@ ${briefingData}
 
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  /** K4: 현재 tracer 의 JSONL 파일 경로 (활성 시). 뷰어 UI 가 읽기에 사용. */
+  getTraceFilePath(): string | undefined {
+    return this.tracer.filePath;
+  }
+
+  /** K4: 테스트용 tracer 주입 — dev 모드 기본 동작을 override. */
+  setTracer(tracer: ConversationTracer): void {
+    this.tracer = tracer;
   }
 
   getCumulativeUsage(): TokenUsage {
@@ -346,6 +360,7 @@ ${briefingData}
     this.history.restore(messages as import("./llm/types.js").GenericMessage[]);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
+    this.tracer = createTracer(this.sessionId);
     return true;
   }
 
@@ -423,6 +438,8 @@ ${briefingData}
    *                     `currentAbortController` so `abortCurrentTurn()` works.
    */
   async runTurn(input: string, callbacks?: TurnCallbacks, abortSignal?: AbortSignal): Promise<TurnResult> {
+    // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
+    this.tracer.step("REQUEST_ENTRY", { inputLen: input.length });
     if (!this.provider) {
       const err = "LLM 프로바이더가 설정되지 않았습니다. 설정에서 벤더와 API 키를 확인해 주세요.";
       callbacks?.onError?.(err);
@@ -441,19 +458,28 @@ ${briefingData}
 
 
     // §4.3 Step 1-2: 분류 + 라우팅
+    // §4.5.2 step 2 — KEYWORD_CLASSIFY
     const classification = this.deps.keywordEngine.classify(input);
+    this.tracer.step("KEYWORD_CLASSIFY", { type: classification.type });
+    // §4.5.2 step 3 — ROUTE_RESOLVE
     const routeResult = this.deps.routeEngine.route(classification);
+    this.tracer.step("ROUTE_RESOLVE", { route: routeResult.route });
 
     if (routeResult.route === "command") {
       this.currentAbortController = null;
       return this.handleCommand(routeResult.command, routeResult.args, callbacks);
     }
 
+    // §4.5.2 step 4 — TURN_ORCHESTRATE
+    this.tracer.step("TURN_ORCHESTRATE", { sessionId: this.sessionId });
+
     const userContent = routeResult.route === "skill"
       ? `[스킬: ${routeResult.skillId}] ${input}`
       : input;
 
     this.history.append({ role: "user", content: userContent });
+    // §4.5.2 step 5 — HISTORY_APPEND
+    this.tracer.step("HISTORY_APPEND", { role: "user", historySize: this.history.length });
 
     // Phase 1 Lazy Tool Scoping — 이 턴에서 노출할 plugin 집합 결정.
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
@@ -463,6 +489,8 @@ ${briefingData}
     this.deps.systemPromptBuilder.setToolScope?.(scope);
 
     const systemPrompt = this.deps.systemPromptBuilder.build();
+    // §4.5.2 step 6 — PROMPT_ASSEMBLE
+    this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
     const result = await this.queryLoop(systemPrompt, scope, callbacks, turnSignal);
     // B4: clear controller once the turn is done (regardless of how it ended)
     this.currentAbortController = null;
@@ -470,6 +498,11 @@ ${briefingData}
     // the next turn's keyword-miss fallback keeps those plugins visible.
     this.lastTurnScope = new Set(scope.activePluginIds);
 
+    // §4.5.2 step 11 — POST_TURN
+    this.tracer.step("POST_TURN", {
+      toolCallCount: result.toolCalls.length,
+      stopReason: result.stopReason,
+    });
     // §4.5.5 Post-Turn Hook Chain (Agent 6: compact → saveSession → extractMemory → audit → idle-poke)
     if (this.deps.postTurnHookChain) {
       const compactedMessages = await this.deps.postTurnHookChain.run({
@@ -566,6 +599,8 @@ ${briefingData}
     let reactiveCompacted = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      // §4.5.2 step 7 — LLM_STREAM (round 단위)
+      this.tracer.step("LLM_STREAM", { round, model, toolCount: toolSchemas.length });
       // §4.5.3: 벤더 추상화 스트리밍
       let textContent = "";
       let thoughtContent = "";
@@ -735,12 +770,23 @@ ${briefingData}
         ...(preserveThinkingBlocks && roundThinkingBlocks.length > 0 && { thinkingBlocks: roundThinkingBlocks }),
         ...(pendingToolCalls.length > 0 && { toolCalls: pendingToolCalls }),
       });
+      // §4.5.2 step 8 — REASONING_ACCUMULATE (round thinking 완료)
+      if (thoughtContent.length > 0) {
+        this.tracer.step("REASONING_ACCUMULATE", { round: roundIndex, thoughtLen: thoughtContent.length });
+      }
       callbacks?.onAssistantRound?.({
         roundIndex,
         text: textContent,
         thought: thoughtContent,
         stopReason,
         hasToolCalls: pendingToolCalls.length > 0,
+      });
+      // §4.5.2 step 10 — ROUND_COMMIT
+      this.tracer.step("ROUND_COMMIT", {
+        round: roundIndex,
+        stopReason,
+        textLen: textContent.length,
+        toolCallCount: pendingToolCalls.length,
       });
       roundIndex += 1;
 
@@ -857,6 +903,12 @@ ${briefingData}
         cappedToolUses.push(tu);
       }
 
+      // §4.5.2 step 9 — TOOL_EXECUTE
+      this.tracer.step("TOOL_EXECUTE", {
+        round: roundIndex,
+        toolNames: cappedToolUses.map((tu) => tu.name),
+        capped: capBlockResults.length,
+      });
       const toolResults = await this.toolExecutor.executeAll(cappedToolUses, {
         onToolStart: callbacks?.onToolStart,
         onToolEnd: callbacks?.onToolEnd,
