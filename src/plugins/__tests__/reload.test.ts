@@ -170,9 +170,9 @@ describe("PluginRuntime.reloadPlugin", () => {
     // (RUNNER~1 → full canonical path to avoid %7E in the file:// URL)
     // is reached inside reloadPlugin(), matching the identical pattern
     // already present in load().
+    const expectedEntryPath = join(installedDir, "p-realpath", "entry.mjs");
     const calls = vi.mocked(nodeFs.realpathSync).mock.calls.map((args) => String(args[0]));
-    const entryCall = calls.find((c) => c.endsWith("entry.mjs"));
-    expect(entryCall).toBeDefined();
+    expect(calls).toContain(expectedEntryPath);
 
     // Plugin must remain functional after the reload.
     expect(runtime.listPluginIds()).toContain("p-realpath");
