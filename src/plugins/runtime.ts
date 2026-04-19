@@ -454,7 +454,15 @@ export class PluginRuntime {
     this.onDisable?.(pluginId);
 
     const entryPath = this.resolveEntryPath(pluginRoot, manifest.entry);
-    const importUrl = `${pathToFileURL(entryPath).href}?reload=${Date.now()}`;
+    // Resolve 8.3 short-names / symlinks (Windows) before constructing the file:// URL.
+    // Fall back to the raw path if realpathSync throws (entry doesn't exist yet).
+    let resolvedEntryPath: string;
+    try {
+      resolvedEntryPath = realpathSync(entryPath);
+    } catch {
+      resolvedEntryPath = entryPath;
+    }
+    const importUrl = `${pathToFileURL(resolvedEntryPath).href}?reload=${Date.now()}`;
     const module = (await import(importUrl)) as {
       default?: RuntimePluginFactory;
       createPlugin?: RuntimePluginFactory;
