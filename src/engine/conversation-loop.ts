@@ -364,6 +364,15 @@ ${briefingData}
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
 
+    // Issue 1: loadSession resets cumulativeUsage to zero, so shouldCompact()
+    // would never fire on resume. Estimate usage from loaded history instead.
+    // Approximation: sum of content char lengths / 4 (same formula as estimateTokens).
+    const estimatedInputTokens = this.history.getMessages().reduce((sum, msg) => {
+      const content = typeof msg.content === "string" ? msg.content : "";
+      return sum + Math.ceil(content.length / 4) + 1;
+    }, 0);
+    this.cumulativeUsage = { inputTokens: estimatedInputTokens, outputTokens: 0 };
+
     let compacted = false;
     let removedMessageCount = 0;
     if (this.isAutoCompactEnabled()) {
@@ -401,6 +410,12 @@ ${briefingData}
     if (cr.compacted) {
       this.history.clear();
       this.history.restore(compactedMsgs);
+      // Issue 2: persist compacted state so next resume sees the compacted history.
+      void Promise.resolve(
+        this.deps.memoryManager?.saveSession(this.sessionId, this.history.getMessages()),
+      ).catch((err: unknown) => {
+        console.warn("[lvis] manualCompact saveSession failed:", (err as Error).message);
+      });
       return {
         compacted: true,
         compactedAt: new Date().toISOString(),
@@ -672,8 +687,10 @@ ${briefingData}
         outputTokens: this.cumulativeUsage.outputTokens,
       };
       let streamResult = await collectStream(this.history.getMessages()).catch((err: unknown) => {
-        // B4: AbortError from provider — treat as interrupt
-        if (abortSignal?.aborted || (err instanceof Error && (err.name === "AbortError" || err.message?.includes("abort")))) {
+        // B4: AbortError from provider — treat as interrupt.
+        // Issue 3: check err.name === "AbortError" OR signal.aborted; do NOT use
+        // substring match on message (fragile: localized strings, "abortion", etc.).
+        if (abortSignal?.aborted || (err instanceof Error && err.name === "AbortError")) {
           return { earlyReturn: true as const, text: textContent, interrupted: true };
         }
         if (isContextLengthError(err)) {
