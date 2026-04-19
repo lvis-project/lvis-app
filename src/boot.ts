@@ -673,12 +673,33 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     });
     const DEFAULT_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+    // Track the last broadcast so renderer state stays in sync with the
+    // latest check — when a previously-available update is removed (e.g.
+    // user upgraded via CLI between checks) the renderer must learn about
+    // it instead of seeing stale update banners. Only emit when the current
+    // result set differs from the last broadcast, to keep info-level logs
+    // quiet on the steady-state "no updates" path.
+    let lastBroadcastKey = "";
     const runUpdateCheck = async () => {
       try {
         const updates = await updateDetector.checkForUpdates();
+        const key = updates
+          .map((u) => `${u.pluginId}@${u.installedVersion}->${u.latestVersion}`)
+          .sort()
+          .join("|");
+        if (key === lastBroadcastKey) {
+          // Quiet path — no state change since last check.
+          console.debug("[lvis] update-check: no change (%d)", updates.length);
+          return;
+        }
+        lastBroadcastKey = key;
+        // Always send the current snapshot (possibly empty) so the renderer
+        // can clear stale banners when updates are no longer available.
+        mainWindow?.webContents?.send("marketplace:updates-available", updates);
         if (updates.length > 0) {
-          mainWindow?.webContents?.send("marketplace:updates-available", updates);
           console.log("[lvis] update-check: %d plugin update(s) available", updates.length);
+        } else {
+          console.debug("[lvis] update-check: cleared previous updates");
         }
       } catch (err) {
         console.warn("[lvis] update-check: error:", (err as Error).message);
