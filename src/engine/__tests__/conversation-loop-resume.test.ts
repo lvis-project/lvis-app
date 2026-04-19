@@ -247,4 +247,29 @@ describe("ConversationLoop.manualCompact", () => {
     // If not compacted (threshold not met), saveSession should not be called for compact
     // (it may have been called by loadSession/resetAndResume — that's ok)
   });
+  it("Issue 37.19: /compact slash command calls saveSession with compacted messages", async () => {
+    const history = makeLongHistory(30);
+    const mem = makeMemoryManager(history);
+    const routeEngine = {
+      route: vi.fn().mockReturnValue({ route: "command", command: "compact", args: "" }),
+    } as unknown as ConversationLoopDeps["routeEngine"];
+    const keywordEngine = {
+      classify: vi.fn().mockReturnValue({ type: "command" }),
+      matchAllPluginIds: () => new Set(),
+    } as unknown as ConversationLoopDeps["keywordEngine"];
+    const fakeProvider = {
+      vendor: "openai" as const,
+      streamTurn: async function* () { /* unused — command path exits before LLM */ },
+    };
+    const loop = new ConversationLoop(makeDeps({ memoryManager: mem, routeEngine, keywordEngine }));
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+    loop.resetAndResume("test-session-id");
+    mem.saveSession = vi.fn().mockResolvedValue(undefined);
+
+    await loop.runTurn("/compact");
+
+    expect(mem.saveSession).toHaveBeenCalled();
+    const savedMsgs = (mem.saveSession as ReturnType<typeof vi.fn>).mock.calls[0]![1] as import("../llm/types.js").GenericMessage[];
+    expect(savedMsgs.length).toBeLessThan(history.length);
+  });
 });

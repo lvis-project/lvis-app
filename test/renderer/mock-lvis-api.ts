@@ -92,6 +92,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       chatStreamHandlers.add(h);
       return () => chatStreamHandlers.delete(h);
     }),
+    onChatFallback: vi.fn((_h: (payload: { from: string; to: string }) => void) => () => {}),
 
     starredList: vi.fn(async () => starred),
     listStarred: vi.fn(async () => starred),
