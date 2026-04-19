@@ -127,4 +127,30 @@ describe("approvalQueueReducer", () => {
     state = approvalQueueReducer(state, { type: "shift" });
     expect(state).toHaveLength(0);
   });
+
+  // D4 §4.5.3 — bulk clear action
+  it("clear: 여러 항목이 있는 queue → 빈 배열 반환", () => {
+    const reqs = ["p", "q", "r"].map(makeReq);
+    let state: ApprovalRequest[] = [];
+    for (const req of reqs) state = approvalQueueReducer(state, { type: "push", req });
+    expect(state).toHaveLength(3);
+
+    state = approvalQueueReducer(state, { type: "clear" });
+    expect(state).toHaveLength(0);
+  });
+
+  it("clear: 빈 queue → 빈 배열 유지", () => {
+    const state = approvalQueueReducer([], { type: "clear" });
+    expect(state).toHaveLength(0);
+  });
+
+  it("clear 후 push → 새로운 단일 항목만 남음", () => {
+    const reqs = ["m", "n"].map(makeReq);
+    let state: ApprovalRequest[] = [];
+    for (const req of reqs) state = approvalQueueReducer(state, { type: "push", req });
+    state = approvalQueueReducer(state, { type: "clear" });
+    state = approvalQueueReducer(state, { type: "push", req: makeReq("new") });
+    expect(state).toHaveLength(1);
+    expect(state[0].id).toBe("new");
+  });
 });

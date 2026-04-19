@@ -17,24 +17,39 @@ export function ToolApprovalDialog({
   request,
   pendingCount = 1,
   onDecide,
+  onDecideAll,
 }: {
   open: boolean;
   request: ApprovalRequest | null;
   pendingCount?: number;
   onDecide: (choice: ApprovalChoice, pattern?: string) => void;
+  /**
+   * D4 §4.5.3 — bulk approve/deny all pending requests at once.
+   * Only surfaces when pendingCount > 1 (parallel tool execution).
+   */
+  onDecideAll?: (choice: "allow-once" | "deny-once") => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   // 키보드 단축키
+  // D4: Shift+A / Shift+D bulk-decide all pending when there are multiple.
   useEffect(() => {
     if (!open || !request) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        onDecide("allow-once");
+        if (e.shiftKey && pendingCount > 1 && onDecideAll) {
+          onDecideAll("allow-once");
+        } else {
+          onDecide("allow-once");
+        }
       } else if (e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        onDecide("deny-once");
+        if (e.shiftKey && pendingCount > 1 && onDecideAll) {
+          onDecideAll("deny-once");
+        } else {
+          onDecide("deny-once");
+        }
       } else if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         onDecide("allow-once");
@@ -42,7 +57,7 @@ export function ToolApprovalDialog({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, request, onDecide]);
+  }, [open, request, onDecide, onDecideAll, pendingCount]);
 
   if (!request) return null;
 
@@ -51,6 +66,7 @@ export function ToolApprovalDialog({
   const argsTruncated = argsStr.length > 500 && !expanded;
   const argsDisplay = argsTruncated ? argsStr.slice(0, 500) + "\n…" : argsStr;
   const sourceBadge = request.source ? SOURCE_BADGE[request.source] ?? request.source : "알 수 없음";
+  const hasPending = pendingCount > 1;
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
@@ -74,7 +90,7 @@ export function ToolApprovalDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {title}
-            {pendingCount > 1 && (
+            {hasPending && (
               <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                 대기 중 {pendingCount - 1}개
               </span>
@@ -148,6 +164,30 @@ export function ToolApprovalDialog({
           >
             항상 거부
           </Button>
+
+          {/* D4 §4.5.3 — bulk buttons surface only when multiple tools are pending */}
+          {hasPending && onDecideAll && (
+            <>
+              <Button
+                size="sm"
+                variant="default"
+                className="border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
+                onClick={() => onDecideAll("allow-once")}
+                title={`대기 중인 ${pendingCount}개 도구 모두 허용 (단축키: Shift+A)`}
+              >
+                모두 허용 ({pendingCount})
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                onClick={() => onDecideAll("deny-once")}
+                title={`대기 중인 ${pendingCount}개 도구 모두 거부 (단축키: Shift+D)`}
+              >
+                모두 거부 ({pendingCount})
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

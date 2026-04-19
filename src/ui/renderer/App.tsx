@@ -62,7 +62,7 @@ export function App() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const { briefing, dismiss: dismissBriefing, snooze: snoozeBriefing } = useBriefing(api);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
-  const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
+  const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
 
   // Marketplace + plugin UI extensions
   const {
@@ -274,7 +274,7 @@ export function App() {
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
-      <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
+      <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
       <ApprovalQueueStatus queue={approvalQueue} />
       <PluginInstallDialog target={installTarget} onClose={() => setInstallTarget(null)} onConfirm={installPlugin} working={working} />
       <CommandPaletteDialog open={commandOpen} onOpenChange={setCommandOpen} actions={commandActions} />
