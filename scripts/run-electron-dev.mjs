@@ -86,7 +86,7 @@ function launchElectron() {
   electronProc = spawn(electronPath, [mainOutput], {
     cwd: repoRoot,
     stdio: "inherit",
-    env: (() => { const e = { ...process.env, LVIS_DEV: "1" }; delete e.ELECTRON_RUN_AS_NODE; return e; })(),
+    env: (() => { const e = { ...process.env, LVIS_DEV: "1", LVIS_DEV_SKIP_SIG: process.env.LVIS_DEV_SKIP_SIG ?? "1" }; delete e.ELECTRON_RUN_AS_NODE; return e; })(),
   });
   electronProc.on("error", (err) => {
     log("electron", `spawn failed: ${err.message}`);
