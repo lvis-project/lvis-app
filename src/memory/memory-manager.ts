@@ -115,26 +115,41 @@ export class MemoryManager {
 
   /** sessions/ 키워드 검색 — D5 메모리 검색 패널용. Cap 50. */
   searchSessions(query: string): Array<{ sessionId: string; matchedMessage: string; timestamp: string }> {
+    // Require at least 2 chars to prevent accidental full-dump via empty/trivial query.
+    if (query.trim().length < 2) return [];
     if (!existsSync(this.sessionsDir)) return [];
     const lower = query.toLowerCase();
     const results: Array<{ sessionId: string; matchedMessage: string; timestamp: string }> = [];
+    const UUID_RE = /^[0-9a-f-]{8,}$/i;
     const files = readdirSync(this.sessionsDir).filter((f) => f.endsWith(".jsonl"));
     for (const file of files) {
       if (results.length >= 50) break;
-      const sessionId = file.replace(".jsonl", "");
-      const stat = statSync(join(this.sessionsDir, file));
+      const stem = file.replace(".jsonl", "");
+      // Skip files whose stem is not UUID-shaped — prevents path-traversal info leak.
+      if (!UUID_RE.test(stem)) continue;
+      const filePath = join(this.sessionsDir, file);
+      const stat = statSync(filePath);
+      // Skip oversized files — unbounded readFileSync is a DoS vector.
+      if (stat.size > 5_000_000) continue;
       const timestamp = stat.mtime.toISOString();
       try {
-        const raw = readFileSync(join(this.sessionsDir, file), "utf-8");
+        const raw = readFileSync(filePath, "utf-8");
         const lines = raw.trim().split("\n").filter(Boolean);
         for (const line of lines) {
           if (results.length >= 50) break;
           let msg: unknown;
           try { msg = JSON.parse(line); } catch { continue; }
           const content = (msg as Record<string, unknown>)?.content;
-          if (typeof content === "string" && content.toLowerCase().includes(lower)) {
-            results.push({ sessionId, matchedMessage: content, timestamp });
-            break; // one match per session
+          if (typeof content === "string") {
+            const idx = content.toLowerCase().indexOf(lower);
+            if (idx !== -1) {
+              // Excerpt: ±100 chars centred on match, max 200 chars total.
+              const start = Math.max(0, idx - 100);
+              const end = Math.min(content.length, idx + lower.length + 100);
+              const excerpt = content.slice(start, end);
+              results.push({ sessionId: stem, matchedMessage: excerpt, timestamp });
+              break; // one match per session
+            }
           }
         }
       } catch {

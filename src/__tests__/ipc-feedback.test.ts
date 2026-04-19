@@ -24,10 +24,14 @@ const auditLog = vi.fn();
 const starredList = vi.fn(() => [] as unknown[]);
 const starredAdd = vi.fn(() => ({ id: "x", sessionId: "s1", messageIndex: 0, role: "assistant", text: "", starredAt: new Date().toISOString() }));
 
+// Mock FeedbackStore
+const feedbackAdd = vi.fn(() => ({ id: "fb1", sessionId: "s1", messageIndex: 0, rating: "down", timestamp: new Date().toISOString() }));
+
 function makeServices(overrides: Record<string, unknown> = {}) {
   return {
     auditLogger: { log: auditLog, search: vi.fn(), getStats: vi.fn() },
     starredStore: { list: starredList, add: starredAdd, remove: vi.fn(), removeBySessionAndIndex: vi.fn(), listBySession: vi.fn() },
+    feedbackStore: { add: feedbackAdd, list: vi.fn(() => []), prune: vi.fn() },
     settingsService: { getAll: vi.fn(() => ({})), get: vi.fn(() => ({})), patch: vi.fn(), getSecret: vi.fn(() => null), setSecret: vi.fn(), deleteSecret: vi.fn() },
     conversationLoop: {
       getSessionId: vi.fn(() => "sess-test"),
@@ -67,6 +71,7 @@ describe("lvis:feedback:submit", () => {
     auditLog.mockClear();
     starredList.mockClear();
     starredAdd.mockClear();
+    feedbackAdd.mockClear();
     registerIpcHandlers(makeServices() as never, () => null);
   });
 
@@ -74,39 +79,50 @@ describe("lvis:feedback:submit", () => {
     const handler = handlers.get("lvis:feedback:submit")!;
     const result = await handler(ev("https://evil.example.com"), { sessionId: "s1", messageIndex: 0, rating: "up" });
     expect(result).toMatchObject({ ok: false, error: "unauthorized-frame" });
-    expect(auditLog).not.toHaveBeenCalledWith(expect.objectContaining({ type: "info" }));
+    expect(feedbackAdd).not.toHaveBeenCalled();
   });
 
-  it("writes audit entry with correct format for thumbs-up", async () => {
+  it("writes audit entry with correct stripped format for thumbs-up (no reason)", async () => {
     const handler = handlers.get("lvis:feedback:submit")!;
     const result = await handler(null, { sessionId: "sess-42", messageIndex: 3, rating: "up" });
     expect(result).toEqual({ ok: true });
+    // Audit log must NOT contain reason text — only stripped aggregate line
     expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({
-      type: "info",
       sessionId: "sess-42",
       input: "feedback:up:sess-42:3",
     }));
+    const call = auditLog.mock.calls[0][0] as { input: string };
+    expect(call.input).not.toMatch(/:/g.source.slice(0, -1) + "{4,}"); // no extra colon-delimited field
   });
 
-  it("writes audit entry with reason for thumbs-down", async () => {
+  it("writes feedback with reason to FeedbackStore, NOT audit log input", async () => {
     const handler = handlers.get("lvis:feedback:submit")!;
     const result = await handler(null, { sessionId: "sess-42", messageIndex: 5, rating: "down", reason: "not helpful" });
     expect(result).toEqual({ ok: true });
-    expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({
-      type: "info",
+    // FeedbackStore gets the reason
+    expect(feedbackAdd).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: "sess-42",
-      input: "feedback:down:sess-42:5:not helpful",
+      messageIndex: 5,
+      rating: "down",
+      reason: "not helpful",
     }));
+    // Audit log gets stripped line — no reason text
+    expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "sess-42",
+      input: "feedback:down:sess-42:5",
+    }));
+    const auditInput: string = (auditLog.mock.calls[0][0] as { input: string }).input;
+    expect(auditInput).not.toContain("not helpful");
   });
 
-  it("truncates reason at 200 chars", async () => {
+  it("FeedbackStore receives reason without truncation (store owns retention)", async () => {
     const handler = handlers.get("lvis:feedback:submit")!;
     const longReason = "x".repeat(300);
     await handler(null, { sessionId: "s", messageIndex: 0, rating: "down", reason: longReason });
-    const logged = auditLog.mock.calls.find((c: unknown[]) => (c[0] as { type: string }).type === "info");
-    const input: string = logged?.[0].input;
-    expect(input).toContain("x".repeat(200));
-    expect(input.length).toBeLessThan("x".repeat(300).length + 50);
+    expect(feedbackAdd).toHaveBeenCalledWith(expect.objectContaining({ reason: longReason }));
+    // Audit log still has no reason
+    const auditInput: string = (auditLog.mock.calls[0][0] as { input: string }).input;
+    expect(auditInput).not.toContain("x");
   });
 
   it("auto-stars on thumbs-up when not already starred", async () => {
