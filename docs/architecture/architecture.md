@@ -1549,6 +1549,90 @@ flowchart LR
 
 ---
 
+## 6.6 Observability & Audit — 운영 가시성
+
+Observability Sprint X-D (PR #113–#116) 에서 추가된 4개의 운영 가시성 컴포넌트를 정의한다. 모두 `src/ui/renderer/` Settings 탭 체계로 노출되며, 데이터는 로컬 파일(`~/.lvis/audit/audit.ndjson`, 인메모리 stats)에서 읽는다.
+
+### 6.6.1 Audit Log Search UI (PR #113)
+
+**진입**: Settings → 감사 탭 (`AuditTab.tsx`)
+
+| 기능 | 구현 |
+| --- | --- |
+| 날짜 범위 필터 | `dateFrom` / `dateTo` ISO 문자열 → `AuditLogger.search()` |
+| 타입 필터 | `tool_call` / `permission_decision` / `bash_validation` / `compact` / `error` / `dlp` |
+| 텍스트 검색 | NDJSON 라인 스캔 — toolName · result · message 필드 포함 |
+| 결과 테이블 | 클릭 시 raw JSON 드릴다운, 페이지네이션 |
+| 상단 통계 바 | 전체 건수 · 차단 건수 · DLP 히트 수 |
+
+**IPC 채널**: `lvis:audit:search` (query params → `AuditEntry[]`) · `lvis:audit:stats` (집계 수치)
+
+**데이터 소스**: `src/audit/audit-logger.ts` — append-only NDJSON, 동기 write. §13.3 Audit Data Flow 참조.
+
+### 6.6.2 Plugin Performance Dashboard (PR #114)
+
+**진입**: Settings → 플러그인 성능 탭 (`PluginPerfTab.tsx`)
+
+인메모리 stats — 앱 재시작 시 초기화된다. 장기 추이가 필요한 경우 별도 영속화 설계 필요.
+
+| 컬럼 | 의미 |
+| --- | --- |
+| startup (ms) | 플러그인 첫 로드 소요 시간 |
+| calls | 세션 내 도구 호출 총 횟수 |
+| errors | 호출 중 예외 발생 횟수 |
+| avg (ms) | `totalDuration / calls` |
+| last call | 마지막 호출 UTC timestamp |
+| error rate | `errors / calls` — 녹색 <1% · 황색 1–5% · 적색 >5% |
+
+SVG 바 차트로 플러그인별 avg exec time 비교.
+
+**수집 위치**: `src/plugins/runtime.ts` `PluginRuntime.call()` — 호출 전후 `Date.now()` 차분.
+
+**IPC 채널**: `lvis:plugins:perf-stats` → `Record<pluginId, PluginPerfStats>`
+
+### 6.6.3 LLM Cost Monitor (PR #116)
+
+**진입**: Settings → 사용량 탭 (`UsageDashboard.tsx` — 기존 컴포넌트 확장)
+
+| 기능 | 구현 |
+| --- | --- |
+| 날짜 범위 프리셋 | 7d / 30d / 90d / all / custom |
+| 세션 breakdown | Top-5 세션 비용 테이블 |
+| 월간 추정 | `computeMonthlyProjection(usedDays, totalCost)` — 당월 남은 일수 비례 외삽 |
+| CSV 내보내기 | `lvis:usage:export-csv` IPC — 브라우저 download 트리거 |
+
+**요금 출처**: `src/engine/usage-stats.ts` 내 vendor별 단가 상수. 모델 요금 변경 시 이 파일만 업데이트한다.
+
+**IPC 채널**: `lvis:usage:range` (dateFrom · dateTo → `UsageEntry[]`) · `lvis:usage:export-csv`
+
+### 6.6.4 DLP Hit Statistics (PR #115)
+
+**진입**: Settings → 개인정보 탭 (`PrivacyTab.tsx`) — DLP 토글 + 통계 패널
+
+DLP 통계는 audit NDJSON에서 `type = "dlp"` 엔트리만 집계한다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `totalHits` | N일 내 DLP 차단 총 건수 |
+| `byKind` | 패턴 종류별 히트 수 (예: `pii`, `secret`, `credential`) |
+| `byDay` | 일별 히트 수 — sparkline 렌더링용 |
+| `topPatterns` | 상위 5개 정규식 패턴 + 히트 수 |
+
+**집계 로직**: `src/audit/dlp-stats.ts` `getDlpStats(days)` — NDJSON 스트림 순회, `days` 파라미터로 집계 기간 제어.
+
+**DLP 감사 주입**: `src/audit/dlp-filter.ts` `redactForLLM()` — 리댁션 발생 시 `auditLogger.log({ type: "dlp", ... })` 호출. `initDlpAudit(auditLogger)` 로 주입 (boot.ts).
+
+**IPC 채널**: `lvis:dlp:stats` (days → `DlpStats`)
+
+### 6.6.5 공통 설계 원칙
+
+- **로컬 우선**: 모든 통계는 `~/.lvis/` 로컬 파일 기반. 서버 전송 없음.
+- **탭 분리**: `src/ui/renderer/tabs/` 아래 각 탭이 독립 컴포넌트. `SettingsDialog.tsx`는 탭 등록만 담당.
+- **IPC 명명**: `lvis:<domain>:<action>` 패턴 (예: `lvis:audit:search`, `lvis:dlp:stats`).
+- **인메모리 stats 한계**: Plugin Perf stats는 세션 범위. 히스토리 추이가 필요하면 `~/.lvis/perf/` 영속화를 별도 스프린트에서 설계한다.
+
+---
+
 ## 7. Proactive Engine — Daily Briefing (Core)
 
 philosophy.md: _"플러그인이 아니라 코어에 가까운 기능으로 두는 것이 맞을 수 있습니다."_
