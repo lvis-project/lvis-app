@@ -20,6 +20,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { verifyEnvelope, type PublicKeyInput } from "./envelope-verifier.js";
 import type { SignatureEnvelope, VerifyResult } from "./types.js";
+import { getCachedTarball, isOfflineCacheEnabled, setCachedTarball } from "./offline-cache.js";
 
 /**
  * Minimal HTTP surface the installer needs. Lets callers inject either
@@ -67,6 +68,12 @@ export interface MarketplaceInstallerOptions {
    * means a single attempt with no retry.
    */
   maxRetries?: number;
+  /**
+   * Override the offline cache base directory. Pass `null` to disable the
+   * tarball cache entirely (useful in tests). Defaults to the global cache
+   * root under `~/.lvis/marketplace-cache/`.
+   */
+  cacheBase?: string | null;
 }
 
 export interface InstalledArtifact {
@@ -104,11 +111,37 @@ export async function installFromMarketplace(
   const nowSec = opts.nowSec ?? (() => Date.now() / 1000);
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
 
-  // 1. Download tarball with 429 backoff.
-  const { body, sha256Header } = await downloadWithRetry(opts.http, slug, version, maxRetries);
+  // 1. Check offline tarball cache; fall back to network download.
+  // Tarball cache is only active when opts.cacheBase is provided as a non-null
+  // string AND the feature flag is enabled. Callers that don't set cacheBase
+  // (including all pre-existing tests) bypass the cache entirely, preventing
+  // stale-cache interference with signature verification tests.
+  const cacheBase = typeof opts.cacheBase === "string" ? opts.cacheBase : undefined;
+  const useCache = typeof opts.cacheBase === "string" && isOfflineCacheEnabled();
+  let body: Buffer = Buffer.alloc(0);
+  let sha256Header: string | null = null;
+  let fromCache = false;
 
-  // 2. SHA-256 cross-check against server header.
-  const computedSha256 = createHash("sha256").update(body).digest("hex");
+  if (useCache) {
+    const cached = await getCachedTarball(slug, version, cacheBase);
+    if (cached) {
+      body = cached;
+      fromCache = true;
+    }
+  }
+
+  let computedSha256: string;
+  let signerKeyId = "cached";
+
+  if (!fromCache) {
+    const downloaded = await downloadWithRetry(opts.http, slug, version, maxRetries);
+    body = downloaded.body;
+    sha256Header = downloaded.sha256Header;
+  }
+
+  // 2. SHA-256 cross-check against server header (skip for cache hits where
+  //    no header was returned, but always compute the digest for sig verification).
+  computedSha256 = createHash("sha256").update(body).digest("hex");
   if (sha256Header && sha256Header.toLowerCase() !== computedSha256) {
     throw new MarketplaceInstallerError(
       "SHA256_HEADER_MISMATCH",
@@ -116,7 +149,10 @@ export async function installFromMarketplace(
     );
   }
 
-  // 3. Fetch sig envelope.
+  // 3. Fetch sig envelope — always re-fetched, even on cache hits.
+  //    A cached tarball byte sequence is trusted only when it passes the
+  //    current envelope signature; never short-circuit this step (Copilot
+  //    security flag: cache hits must not bypass envelope-verifier).
   let envelope: SignatureEnvelope;
   try {
     envelope = await opts.http.fetchSignatureEnvelope(slug, version);
@@ -154,6 +190,12 @@ export async function installFromMarketplace(
       `signature verification failed: ${result.reason ?? "unknown"}`,
     );
   }
+  signerKeyId = result.key_id ?? "unknown";
+
+  // Store verified tarball in offline cache (only after successful verification).
+  if (useCache && !fromCache) {
+    await setCachedTarball(slug, version, body, cacheBase);
+  }
 
   // 6. Persist tarball atomically: write to a temp file in the same directory
   //    then rename() into place so a crash/kill mid-write cannot leave a
@@ -181,7 +223,7 @@ export async function installFromMarketplace(
     version,
     tarballPath,
     sha256: computedSha256,
-    signerKeyId: result.key_id ?? "unknown",
+    signerKeyId,
   };
 }
 
