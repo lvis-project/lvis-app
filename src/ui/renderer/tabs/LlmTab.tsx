@@ -1,0 +1,172 @@
+import { Badge } from "../../../components/ui/badge.js";
+import { Button } from "../../../components/ui/button.js";
+import { Input } from "../../../components/ui/input.js";
+import { REASONING_EFFORT_STEPS, VENDORS, budgetToEffortIndex } from "../constants.js";
+import type { LvisApi } from "../types.js";
+
+export interface LlmTabProps {
+  api: LvisApi;
+  vendor: string;
+  setVendor: (v: string) => void;
+  baseUrl: string;
+  setBaseUrl: (v: string) => void;
+  vertexProject: string;
+  setVertexProject: (v: string) => void;
+  vertexLocation: string;
+  setVertexLocation: (v: string) => void;
+  hasKey: boolean;
+  setHasKey: (v: boolean) => void;
+  keyInput: string;
+  setKeyInput: (v: string) => void;
+  model: string;
+  setModel: (v: string) => void;
+  enableThinking: boolean;
+  setEnableThinking: (v: boolean) => void;
+  thinkingBudget: number;
+  setThinkingBudget: (v: number) => void;
+  onSaved: () => void;
+}
+
+export function LlmTab(props: LlmTabProps) {
+  const {
+    api,
+    vendor,
+    setVendor,
+    baseUrl,
+    setBaseUrl,
+    vertexProject,
+    setVertexProject,
+    vertexLocation,
+    setVertexLocation,
+    hasKey,
+    setHasKey,
+    keyInput,
+    setKeyInput,
+    model,
+    setModel,
+    enableThinking,
+    setEnableThinking,
+    thinkingBudget,
+    setThinkingBudget,
+    onSaved,
+  } = props;
+  const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
+
+  return (
+    <div className="space-y-4 pt-4">
+      <div className="space-y-2">
+        <label className="text-sm font-medium" htmlFor="vendor-select">벤더</label>
+        <select
+          id="vendor-select"
+          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          value={vendor}
+          onChange={(e) => setVendor(e.target.value)}
+        >
+          {VENDORS.map((v) => (
+            <option key={v.id} value={v.id}>{v.label}</option>
+          ))}
+        </select>
+      </div>
+      {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
+        <div className="space-y-2">
+          <label className="text-sm font-medium">
+            Endpoint (baseUrl){vendorInfo.needsBaseUrl ? " *" : " (선택)"}
+          </label>
+          <Input
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
+          />
+          {vendor === "azure-foundry" && (
+            <p className="text-[11px] text-muted-foreground">
+              Azure AI Foundry 엔드포인트 형식:
+              {" "}<code>https://{"{resource}"}.openai.azure.com/openai/deployments/{"{deployment}"}/</code>
+              {" "}— 모델 필드에는 deployment 이름을 입력합니다.
+            </p>
+          )}
+          {(vendor === "openai" || vendor === "copilot") && (
+            <p className="text-[11px] text-muted-foreground">
+              프록시 또는 커스텀 엔드포인트를 사용하는 경우에만 입력합니다.
+            </p>
+          )}
+        </div>
+      )}
+      {vendor === "vertex-ai" && (
+        <div className="space-y-2 rounded-md border p-3">
+          <p className="text-sm font-medium">Google Vertex AI</p>
+          <p className="text-[11px] text-muted-foreground">
+            서비스 계정 또는 ADC(<code>gcloud auth application-default login</code>)로 인증합니다.
+            API 키는 사용하지 않으며, <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수로 서비스 계정 JSON 경로를 지정할 수 있습니다.
+          </p>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">GCP Project ID *</label>
+            <Input
+              value={vertexProject}
+              onChange={(e) => setVertexProject(e.target.value)}
+              placeholder="my-gcp-project"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Location (region) — 선택</label>
+            <Input
+              value={vertexLocation}
+              onChange={(e) => setVertexLocation(e.target.value)}
+              placeholder="us-central1 (기본값)"
+            />
+          </div>
+        </div>
+      )}
+      {vendor !== "vertex-ai" && (
+        <div className="space-y-2">
+          <label className="text-sm font-medium">{vendorInfo.label} API 키</label>
+          <div className="flex items-center gap-2">
+            {hasKey ? <Badge variant="default" className="text-xs">설정됨</Badge> : <Badge variant="secondary" className="text-xs">미설정</Badge>}
+            {hasKey && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => void api.deleteApiKey(vendor).then(() => { setHasKey(false); onSaved(); })}>삭제</Button>}
+          </div>
+          <Input type="password" placeholder={hasKey ? "새 키로 교체" : vendorInfo.placeholder} value={keyInput} onChange={(e) => setKeyInput(e.target.value)} />
+        </div>
+      )}
+      <div className="space-y-2"><label className="text-sm font-medium">모델</label><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={vendorInfo.defaultModel} /></div>
+      <div className="space-y-2 rounded-md border p-3">
+        <label className="flex items-center justify-between text-sm font-medium">
+          <span>Extended Thinking / Reasoning</span>
+          <input type="checkbox" className="h-4 w-4" checked={enableThinking} onChange={(e) => setEnableThinking(e.target.checked)} />
+        </label>
+        <p className="text-[11px] text-muted-foreground">모델 내부 추론 과정을 스트리밍으로 표시합니다. Claude는 명시 활성화(Sonnet 4.5+/Opus 4+), OpenAI o-계열·gpt-5는 Responses API 자동, Gemini 2.0+는 모델 지원 시 자동.</p>
+        {enableThinking && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-muted-foreground">Reasoning Effort</label>
+              <span className="text-xs font-medium tabular-nums">
+                {REASONING_EFFORT_STEPS[budgetToEffortIndex(thinkingBudget)]!.label}
+                <span className="ml-2 text-muted-foreground">· {thinkingBudget.toLocaleString()} tokens</span>
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={REASONING_EFFORT_STEPS.length - 1}
+              step={1}
+              value={budgetToEffortIndex(thinkingBudget)}
+              onChange={(e) =>
+                setThinkingBudget(
+                  REASONING_EFFORT_STEPS[Number(e.target.value)]!.budget,
+                )
+              }
+              className="w-full accent-primary"
+              aria-label="Reasoning effort"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              {REASONING_EFFORT_STEPS.map((s) => (
+                <span key={s.label}>{s.label}</span>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              높을수록 더 많은 사고 토큰을 사용해 꼼꼼히 추론하지만 지연 시간과 비용이 증가합니다. 현재 이 설정은 Claude·OpenAI에 적용되며, Gemini는 모델이 지원하는 경우 추론 표시만 자동으로 동작하고 이 예산 값은 적용되지 않습니다.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
