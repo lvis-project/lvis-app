@@ -102,6 +102,13 @@ jobs:
           bun run build
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
+      - name: Install plugin dependencies
+        run: |
+          bun install --frozen-lockfile --cwd ../lvis-plugin-pageindex
+          bun install --frozen-lockfile --cwd ../lvis-plugin-meeting
+          bun install --frozen-lockfile --cwd ../lvis-plugin-email
+          bun install --frozen-lockfile --cwd ../lvis-plugin-calendar
+        working-directory: lvis-app
       - name: Build all plugins
         run: bun run prepare:plugins
         working-directory: lvis-app
