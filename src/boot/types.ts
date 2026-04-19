@@ -24,6 +24,7 @@ import type { AuditLogger } from "../audit/audit-logger.js";
 import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import type { StarredStore } from "../data/starred-store.js";
+import type { FeedbackStore } from "../data/feedback-store.js";
 import type { TelemetryService } from "../main/telemetry.js";
 import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { TaskSourceRegistry } from "../plugins/task-source-registry.js";
@@ -84,6 +85,8 @@ export interface AppServices {
   knowledgeAvailable: boolean;
   /** Sprint 4.C — starred messages persistence (~/.lvis/starred.json) */
   starredStore?: StarredStore;
+  /** D6 privacy hardening — feedback persistence separate from audit log (~/.lvis/feedback.jsonl) */
+  feedbackStore?: FeedbackStore;
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
   refreshPluginNotifications?: () => void;
   /**

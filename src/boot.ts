@@ -18,6 +18,7 @@ import { PluginDeploymentGuard } from "./plugins/deployment-guard.js";
 import { PluginSignatureVerifier } from "./plugins/signature-verifier.js";
 import { BUNDLED_PUBLISHER_PUBLIC_KEYS } from "./plugins/publisher-keys.js";
 import { StarredStore } from "./data/starred-store.js";
+import { FeedbackStore } from "./data/feedback-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
 import type { PluginHostApi } from "./plugins/types.js";
@@ -476,6 +477,19 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // 오늘 일정 초기 로드 (calendar-source capability 플러그인에서 *_today 메서드 자동 탐색)
   loadCalendarToday(pluginRuntime, proactiveEngine);
 
+  // §35 — Forward meeting.transcript.updated from main-process event bus → renderer
+  const unsubscribeTranscriptUpdated = onEvent("meeting.transcript.updated", (data) => {
+    const win = mainWindow;
+    if (!win.isDestroyed()) {
+      try {
+        win.webContents.send("lvis:plugin:event", "meeting.transcript.updated", data);
+      } catch (e) {
+        console.warn("[lvis] boot: meeting.transcript.updated send failed:", (e as Error).message);
+      }
+    }
+  });
+  app.prependOnceListener("before-quit", () => { unsubscribeTranscriptUpdated(); });
+
   // manifest.notificationEvents 선언 기반 OS 알림 등록 (플러그인 무관)
   let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
 
@@ -540,6 +554,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // Sprint 4.C — starred messages store (persisted in ~/.lvis/starred.json)
   const starredStore = new StarredStore();
+  // D6 privacy hardening — feedback store (persisted in ~/.lvis/feedback.jsonl)
+  const feedbackStore = new FeedbackStore();
 
   // Production release prep — auto-updater, crash reporter, telemetry.
   // All default-off or read user settings; no-op in dev without publish config.
@@ -726,7 +742,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
-    approvalGate, knowledgeAvailable, starredStore,
+    approvalGate, knowledgeAvailable, starredStore, feedbackStore,
     telemetry, pluginTelemetry, autoUpdaterStop,
     refreshPluginNotifications: () => {
       disposePluginNotifications();
