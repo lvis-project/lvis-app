@@ -1,0 +1,72 @@
+/**
+ * ApprovalQueueStatus — D3 renderer UI for approval queue depth.
+ *
+ * Renders a small floating badge showing the number of pending approval
+ * requests plus a compact list of waiting requests (tool name + source).
+ * Appears only when the queue has 2+ entries (the head-of-queue is already
+ * shown by ToolApprovalDialog; this surfaces what is queued BEHIND it).
+ *
+ * Order-preserving: items render in the same FIFO order as the underlying
+ * queue state, so the "next up" is the first entry shown here (index 1 in
+ * the queue; entry 0 is in the modal).
+ */
+import { Badge } from "../../../components/ui/badge.js";
+import { DEFAULT_APPROVAL_QUEUE_MAX } from "../../../lib/approval-queue-reducer.js";
+import type { ApprovalRequest } from "../types.js";
+
+export interface ApprovalQueueStatusProps {
+  queue: ApprovalRequest[];
+  max?: number;
+}
+
+export function ApprovalQueueStatus({
+  queue,
+  max = DEFAULT_APPROVAL_QUEUE_MAX,
+}: ApprovalQueueStatusProps) {
+  if (queue.length < 2) return null;
+  // Head-of-queue is shown by the modal; list the rest.
+  const waiting = queue.slice(1);
+  const isFull = queue.length >= max;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={`${queue.length} approval requests pending`}
+      data-testid="approval-queue-status"
+      className="fixed bottom-4 right-4 z-40 w-72 rounded-lg border border-border bg-background/95 p-3 shadow-lg backdrop-blur"
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-medium">Pending approvals</span>
+        <Badge
+          variant={isFull ? "default" : "secondary"}
+          className={isFull ? "bg-destructive text-destructive-foreground" : undefined}
+          data-testid="approval-queue-depth"
+        >
+          {queue.length} / {max}
+        </Badge>
+      </div>
+      {isFull ? (
+        <p className="mb-2 text-xs text-destructive">
+          Queue full — new approval requests will be rejected.
+        </p>
+      ) : null}
+      <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
+        {waiting.map((req) => (
+          <li
+            key={req.id}
+            data-testid="approval-queue-item"
+            className="flex items-center justify-between rounded border border-border/50 bg-muted/40 px-2 py-1"
+          >
+            <span className="truncate font-mono">{req.toolName}</span>
+            {req.source ? (
+              <Badge variant="outline" className="ml-2 text-[10px]">
+                {req.source}
+              </Badge>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

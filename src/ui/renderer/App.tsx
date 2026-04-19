@@ -7,6 +7,7 @@ import { PluginUiHostView } from "../../plugin-ui-host.js";
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
+import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { PluginInstallDialog } from "./dialogs/PluginInstallDialog.js";
 import { PluginUninstallDialog } from "./dialogs/PluginUninstallDialog.js";
 import { CommandPaletteDialog } from "./dialogs/CommandPaletteDialog.js";
@@ -274,6 +275,7 @@ export function App() {
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} />
+      <ApprovalQueueStatus queue={approvalQueue} />
       <PluginInstallDialog target={installTarget} onClose={() => setInstallTarget(null)} onConfirm={installPlugin} working={working} />
       <CommandPaletteDialog open={commandOpen} onOpenChange={setCommandOpen} actions={commandActions} />
       <PluginUninstallDialog target={uninstallTarget} onClose={() => setUninstallTarget(null)} onConfirm={uninstallPlugin} working={working} />
