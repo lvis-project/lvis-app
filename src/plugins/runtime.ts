@@ -406,6 +406,99 @@ export class PluginRuntime {
   }
 
   /**
+   * I2 — Plugin live-reload (dev only).
+   *
+   * Safely tears down a single loaded plugin (stop → scrub methods/disposers →
+   * fire onDisable hook so host-side state is cleaned) and re-invokes its
+   * createPlugin factory with a cache-busted `import()` URL so the fresh
+   * `dist/` bundle is picked up without restarting the Electron process.
+   */
+  async reloadPlugin(pluginId: string): Promise<void> {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) {
+      throw new Error(`Plugin not loaded: ${pluginId}`);
+    }
+    const { manifest, pluginRoot } = plugin;
+
+    try {
+      await plugin.instance.stop?.();
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] stop during reload failed:`, (err as Error).message);
+    }
+
+    for (const method of plugin.methods.keys()) {
+      this.methodMap.delete(method);
+    }
+    this.plugins.delete(pluginId);
+    const pluginDisposers = this.disposers.get(pluginId);
+    if (pluginDisposers) {
+      for (const d of pluginDisposers) {
+        try { d(); } catch (err) {
+          console.error(`[plugin:${pluginId}] disposer failed during reload:`, (err as Error).message);
+        }
+      }
+      this.disposers.delete(pluginId);
+    }
+
+    this.onDisable?.(pluginId);
+
+    const entryPath = this.resolveEntryPath(pluginRoot, manifest.entry);
+    const importUrl = `${pathToFileURL(entryPath).href}?reload=${Date.now()}`;
+    const module = (await import(importUrl)) as {
+      default?: RuntimePluginFactory;
+      createPlugin?: RuntimePluginFactory;
+    };
+    const createPlugin = module.default ?? module.createPlugin;
+    if (!createPlugin) {
+      throw new Error(`Plugin entry does not export default/createPlugin: ${pluginId}`);
+    }
+
+    const hostApi = this.createHostApi?.(pluginId) ?? createNoopHostApi();
+    const instance = await createPlugin({
+      pluginId,
+      pluginRoot,
+      hostRoot: this.hostRoot,
+      config: {
+        ...(manifest.config ?? {}),
+        ...(this.configOverrides["*"] ?? {}),
+        ...(this.configOverrides[pluginId] ?? {}),
+      },
+      log: (message, meta) => {
+        if (meta !== undefined) {
+          console.log(`[plugin:${pluginId}] ${message}`, meta);
+          return;
+        }
+        console.log(`[plugin:${pluginId}] ${message}`);
+      },
+      hostApi,
+    });
+
+    const methods = new Map<string, PluginToolHandler>();
+    for (const toolName of manifest.tools) {
+      const handler = instance.handlers[toolName];
+      if (!handler) {
+        console.warn(`[plugin:${pluginId}] missing handler '${toolName}' after reload — tool disabled`);
+        continue;
+      }
+      methods.set(toolName, handler);
+      this.methodMap.set(toolName, { pluginId, handler });
+    }
+
+    if (manifest.keywords && manifest.keywords.length > 0) {
+      hostApi.registerKeywords(manifest.keywords);
+    }
+
+    this.plugins.set(pluginId, { manifest, pluginRoot, instance, methods });
+
+    try {
+      await instance.start?.();
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] start after reload failed:`, (err as Error).message);
+      throw err;
+    }
+  }
+
+  /**
    * Disable a loaded plugin at runtime — stops the instance, removes its method
    * handlers, and marks enabled=false in registry.json.
    *
@@ -629,6 +722,23 @@ export class PluginRuntime {
    */
   getPluginInstance<T = unknown>(pluginId: string): T | undefined {
     return this.plugins.get(pluginId)?.instance as T | undefined;
+  }
+
+  /**
+   * I2 — Return the absolute directory containing a loaded plugin's entry
+   * bundle (typically `<pluginRoot>/dist`). Used by the dev watcher to
+   * fs.watch a single directory per plugin. Returns `undefined` when the
+   * plugin is not loaded or its entry is invalid.
+   */
+  getPluginEntryDir(pluginId: string): string | undefined {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) return undefined;
+    try {
+      const entryPath = this.resolveEntryPath(plugin.pluginRoot, plugin.manifest.entry);
+      return dirname(entryPath);
+    } catch {
+      return undefined;
+    }
   }
 
   listUiExtensions(): Array<{ pluginId: string; extension: PluginUiExtension; entryUrl?: string }> {
