@@ -33,7 +33,8 @@ src/
                                MarketplaceUpdateBanner
     dialogs/                  — ApprovalDialog, PluginInstallDialog,
                                PluginUninstallDialog, CommandPaletteDialog
-    tabs/                     — RolesTab, PermissionsTab
+    tabs/                     — RolesTab, PermissionsTab, AuditTab,
+                               PluginPerfTab, PrivacyTab
     utils/                    — cost-format, html-preview, history, compose
     types.ts · constants.ts · api-client.ts
 
