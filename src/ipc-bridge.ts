@@ -140,6 +140,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:audit:stats",
   "lvis:plugins:perf-stats",
   "lvis:dlp:stats",
+  "lvis:chat:abort",
 ]);
 
 /**
@@ -280,6 +281,13 @@ export function registerIpcHandlers(
       }
     }
     return runStreamedTurn(conversationLoop, effective, win?.webContents, "lvis:chat:stream");
+  });
+
+  // B4: abort current streaming turn
+  ipcMain.handle("lvis:chat:abort", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:abort", e); return UNAUTHORIZED_FRAME; }
+    conversationLoop.abortCurrentTurn();
+    return { ok: true };
   });
 
   ipcMain.handle("lvis:chat:new", (e) => {
