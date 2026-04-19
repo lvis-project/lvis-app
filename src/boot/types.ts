@@ -90,6 +90,11 @@ export interface AppServices {
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
   refreshPluginNotifications?: () => void;
   /**
+   * Issue 5: Re-register the generic plugin event bridge for a new window.
+   * Call on macOS `activate` when a new BrowserWindow is created.
+   */
+  registerPluginEventBridge?: (win: import("electron").BrowserWindow) => void;
+  /**
    * Release-prep — anonymous telemetry service. Retained here so
    * `before-quit` can run a final flush + stop() before the process exits
    * (otherwise queued events are lost on shutdown).

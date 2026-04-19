@@ -497,18 +497,102 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // 오늘 일정 초기 로드 (calendar-source capability 플러그인에서 *_today 메서드 자동 탐색)
   loadCalendarToday(pluginRuntime, proactiveEngine);
 
-  // §35 — Forward meeting.transcript.updated from main-process event bus → renderer
-  const unsubscribeTranscriptUpdated = onEvent("meeting.transcript.updated", (data) => {
-    const win = mainWindow;
-    if (!win.isDestroyed()) {
+  // §35 — Forward plugin events from main-process event bus → renderer.
+  // Issue 4: Coalescing wrapper for high-frequency transcript events.
+  //   Events matching *.transcript.updated are coalesced: rapid non-final events
+  //   are debounced (100ms), final events flush immediately. Non-transcript events
+  //   pass through unchanged. Generic — no plugin-id hardcode.
+  // Issue 5: Tie subscription lifecycle to the window (closed event) rather than
+  //   app before-quit so re-created windows (macOS activate) get a fresh bridge.
+
+  /** True if the event type is a high-frequency transcript stream event. */
+  function isTranscriptEvent(type: string): boolean {
+    return type.endsWith(".transcript.updated");
+  }
+
+  /** Build a coalescing send wrapper for a given event type + window. */
+  function makeCoalescingSend(
+    type: string,
+    getWin: () => import("electron").BrowserWindow,
+  ): (data: unknown) => void {
+    let lastData: unknown = undefined;
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const flush = (data: unknown) => {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined; }
+      const win = getWin();
+      if (win.isDestroyed()) return;
       try {
-        win.webContents.send("lvis:plugin:event", "meeting.transcript.updated", data);
+        win.webContents.send("lvis:plugin:event", type, data);
       } catch (e) {
-        console.warn("[lvis] boot: meeting.transcript.updated send failed:", (e as Error).message);
+        console.warn(`[lvis] boot: ${type} send failed:`, (e as Error).message);
+      }
+    };
+
+    return (data: unknown) => {
+      const payload = data as Record<string, unknown> | undefined;
+      const isFinal = payload?.isFinal === true;
+      if (isFinal) {
+        // Final event: flush immediately with this data (skip any pending debounce).
+        flush(data);
+        lastData = undefined;
+      } else {
+        // Non-final: store latest and schedule a 100ms coalesced flush.
+        lastData = data;
+        if (!flushTimer) {
+          flushTimer = setTimeout(() => {
+            flushTimer = undefined;
+            if (lastData !== undefined) flush(lastData);
+          }, 100);
+        }
+      }
+    };
+  }
+
+  // Collect event types declared by plugin manifests (notificationEvents + emittedEvents
+  // where available). Always include meeting.transcript.updated for back-compat.
+  function collectPluginEventTypes(): Set<string> {
+    const types = new Set<string>(["meeting.transcript.updated"]);
+    for (const { manifest } of pluginRuntime.listPluginManifests()) {
+      // manifest.emittedEvents may be present in plugin.json even if not in the TS type
+      const raw = manifest as unknown as Record<string, unknown>;
+      if (Array.isArray(raw["emittedEvents"])) {
+        for (const t of raw["emittedEvents"] as unknown[]) {
+          if (typeof t === "string" && t.trim()) types.add(t.trim());
+        }
       }
     }
-  });
-  app.prependOnceListener("before-quit", () => { unsubscribeTranscriptUpdated(); });
+    return types;
+  }
+
+  // Register the plugin event bridge for the current window.
+  // Returns an unsubscribeAll disposer. Called once on boot, and again if the
+  // window is recreated on macOS (activate event).
+  function registerPluginEventBridge(win: import("electron").BrowserWindow): () => void {
+    const unsubs: Array<() => void> = [];
+    const eventTypes = collectPluginEventTypes();
+
+    for (const type of eventTypes) {
+      const sendFn = isTranscriptEvent(type)
+        ? makeCoalescingSend(type, () => win)
+        : (data: unknown) => {
+            if (win.isDestroyed()) return;
+            try {
+              win.webContents.send("lvis:plugin:event", type, data);
+            } catch (e) {
+              console.warn(`[lvis] boot: ${type} send failed:`, (e as Error).message);
+            }
+          };
+      unsubs.push(onEvent(type, sendFn));
+    }
+
+    const unsubscribeAll = () => { for (const u of unsubs) u(); };
+    // Issue 5: tie lifecycle to window closed, not app before-quit.
+    win.once("closed", unsubscribeAll);
+    return unsubscribeAll;
+  }
+
+  registerPluginEventBridge(mainWindow);
 
   // manifest.notificationEvents 선언 기반 OS 알림 등록 (플러그인 무관)
   let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
@@ -774,5 +858,6 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       disposePluginEventBridge();
       disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
     },
+    registerPluginEventBridge,
   };
 }
