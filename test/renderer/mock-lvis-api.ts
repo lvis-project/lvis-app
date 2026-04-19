@@ -129,6 +129,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       return () => proactiveHandlers.delete(h);
     }),
 
+    submitFeedback: vi.fn(async () => ({ ok: true })),
+
     onViewActivate: vi.fn((h: (v: string) => void) => {
       viewHandlers.add(h);
       return () => viewHandlers.delete(h);
