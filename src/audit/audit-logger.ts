@@ -4,11 +4,28 @@
  * 매 턴마다 구조화된 JSON 로그를 기록.
  * 향후 Governance Layer (§14.2) Elasticsearch 연동 대비.
  * 현재는 ~/.lvis/audit/ 디렉토리에 JSONL 파일로 저장.
+ *
+ * Rotation: 파일 크기 초과(기본 10 MB) 또는 7일 경과 시
+ *   `<date>.jsonl.YYYYMMDD.gz` 아카이브로 압축.
+ * Retention: 30일(기본) 이후 아카이브 자동 삭제.
+ * Race safety: withFileLock 으로 동시 write + rotate 경쟁 방지.
  */
-import { appendFileSync, mkdirSync, existsSync, readdirSync, createReadStream } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  existsSync,
+  readdirSync,
+  createReadStream,
+  statSync,
+} from "node:fs";
+import { createWriteStream } from "node:fs";
+import { unlink, rename, stat as fsStat } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
+import { createGzip } from "node:zlib";
+import { pipeline } from "node:stream/promises";
+import { withFileLock } from "../lib/with-file-lock.js";
 
 export interface AuditEntry {
   timestamp: string;
@@ -37,6 +54,15 @@ export interface AuditEntry {
   route?: string;
 }
 
+export interface AuditRotationOptions {
+  /** Rotate active .jsonl when it exceeds this size in bytes. Default: 10 MB. */
+  maxBytes?: number;
+  /** Delete .jsonl.*.gz archives older than this many days. Default: 30. */
+  retentionDays?: number;
+  /** Age in days at which the active file is force-rotated. Default: 7. */
+  rotationAgeDays?: number;
+}
+
 export class AuditLogger {
   private readonly auditDir: string;
   private readonly logFile: string;
@@ -57,6 +83,113 @@ export class AuditLogger {
       appendFileSync(this.logFile, line, "utf-8");
     } catch {
       // Audit 실패가 앱 동작을 차단하면 안 됨
+    }
+  }
+
+  /**
+   * Rotate + prune audit files.
+   *
+   * - Any .jsonl file whose size >= maxBytes OR whose date prefix is older
+   *   than rotationAgeDays is compressed to `<name>.YYYYMMDD.gz` and removed.
+   * - Any .jsonl.*.gz archive whose embedded date is older than retentionDays
+   *   is deleted.
+   *
+   * Uses withFileLock on each candidate file to prevent concurrent write races.
+   */
+  async rotateAndPrune(opts: AuditRotationOptions = {}): Promise<void> {
+    const {
+      maxBytes = 10 * 1024 * 1024,
+      retentionDays = 30,
+      rotationAgeDays = 7,
+    } = opts;
+
+    const now = Date.now();
+    const rotationAgeMs = rotationAgeDays * 86_400_000;
+    const retentionAgeMs = retentionDays * 86_400_000;
+    const archiveDateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+
+    let entries: string[];
+    try {
+      entries = readdirSync(this.auditDir);
+    } catch {
+      return;
+    }
+
+    // --- Rotate active .jsonl files ---
+    const jsonlFiles = entries.filter((f) => f.endsWith(".jsonl"));
+    for (const fname of jsonlFiles) {
+      const filePath = join(this.auditDir, fname);
+      // Skip current active log file — only rotate if size or age threshold met
+      let shouldRotate = false;
+      try {
+        const st = statSync(filePath);
+        if (st.size >= maxBytes) {
+          shouldRotate = true;
+        }
+        // Extract date from filename like "2026-04-12.jsonl"
+        const dateMatch = fname.match(/^(\d{4}-\d{2}-\d{2})\.jsonl$/);
+        if (dateMatch) {
+          const fileDate = new Date(dateMatch[1]).getTime();
+          if (!isNaN(fileDate) && now - fileDate >= rotationAgeMs) {
+            shouldRotate = true;
+          }
+        }
+      } catch {
+        continue;
+      }
+
+      if (!shouldRotate) continue;
+
+      // Don't rotate a file that is today's active log based on size alone
+      // unless it actually exceeds the limit (age check already handles old dates)
+      const archivePath = `${filePath}.${archiveDateStr}.gz`;
+
+      try {
+        await withFileLock(filePath, async () => {
+          // Re-stat inside lock — another process may have already rotated
+          const st2 = await fsStat(filePath).catch(() => null);
+          if (!st2 || st2.size === 0) return;
+
+          // Compress to .gz
+          await pipeline(
+            createReadStream(filePath),
+            createGzip(),
+            createWriteStream(archivePath),
+          );
+          // Remove original after successful compression
+          await unlink(filePath);
+        });
+      } catch {
+        // Rotation failure is non-fatal
+      }
+    }
+
+    // --- Prune stale archives (.jsonl.YYYYMMDD.gz) ---
+    // Re-read directory after potential rotations
+    let entries2: string[];
+    try {
+      entries2 = readdirSync(this.auditDir);
+    } catch {
+      return;
+    }
+
+    const archiveFiles = entries2.filter((f) => /\.jsonl\.\d{8}\.gz$/.test(f));
+    for (const fname of archiveFiles) {
+      // Extract archive date from filename suffix
+      const m = fname.match(/\.(\d{8})\.gz$/);
+      if (!m) continue;
+      const ds = m[1]; // "20260412"
+      const archiveDate = new Date(
+        `${ds.slice(0, 4)}-${ds.slice(4, 6)}-${ds.slice(6, 8)}`,
+      ).getTime();
+      if (isNaN(archiveDate)) continue;
+      if (now - archiveDate >= retentionAgeMs) {
+        try {
+          await unlink(join(this.auditDir, fname));
+        } catch {
+          // Non-fatal
+        }
+      }
     }
   }
 

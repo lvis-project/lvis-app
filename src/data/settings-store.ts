@@ -54,6 +54,18 @@ export interface ChatSettings {
   autoCompact: boolean;
 }
 
+/**
+ * §14.2 Audit log rotation + retention settings.
+ * - auditRotationMaxBytes: rotate when file exceeds this size (default 10 MB)
+ * - auditRetentionDays: delete archives older than this many days (default 30)
+ */
+export interface AuditSettings {
+  /** Rotate active .jsonl when it exceeds this size in bytes. Default: 10_485_760 (10 MB). */
+  auditRotationMaxBytes: number;
+  /** Delete .jsonl.*.gz archives older than this many days. Default: 30. */
+  auditRetentionDays: number;
+}
+
 export interface AppSettings {
   llm: LLMSettings;
   chat: ChatSettings;
@@ -63,6 +75,7 @@ export interface AppSettings {
   privacy: PrivacySettings;
   updates: UpdateSettings;
   telemetry: TelemetrySettings;
+  audit: AuditSettings;
 }
 
 /**
@@ -195,6 +208,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     enabled: false,
     crashReportingEnabled: false,
   },
+  audit: {
+    auditRotationMaxBytes: 10 * 1024 * 1024, // 10 MB
+    auditRetentionDays: 30,
+  },
 };
 
 export class SettingsService {
@@ -273,6 +290,9 @@ export class SettingsService {
     }
     if (partial.telemetry) {
       this.settings.telemetry = { ...this.settings.telemetry, ...partial.telemetry };
+    }
+    if (partial.audit) {
+      this.settings.audit = { ...this.settings.audit, ...partial.audit };
     }
     await this.saveSettings();
     return this.getAll();
@@ -363,6 +383,7 @@ export class SettingsService {
         privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
+        audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);
