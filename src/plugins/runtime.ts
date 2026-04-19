@@ -1003,10 +1003,11 @@ export class PluginRuntime {
     // eventSubscriptions (otherwise the notification never fires). Soft
     // warn — do not fail the load.
     const subs = Array.isArray(parsed.eventSubscriptions) ? parsed.eventSubscriptions : [];
+    const subsTypes = new Set(subs.map((s) => (typeof s === "string" ? s : (s as { type: string }).type)));
     const notifEvents = Array.isArray(parsed.notificationEvents) ? parsed.notificationEvents : [];
     for (let i = 0; i < notifEvents.length; i += 1) {
       const e = notifEvents[i]?.event;
-      if (typeof e === "string" && !subs.includes(e)) {
+      if (typeof e === "string" && !subsTypes.has(e)) {
         console.warn(
           `[manifest:${pid}] notificationEvents[${i}].event '${e}' not declared in eventSubscriptions — OS notification will still fire, but plugin won't receive the event via hostApi.onEvent`,
         );

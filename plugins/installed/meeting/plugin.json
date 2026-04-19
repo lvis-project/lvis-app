@@ -18,8 +18,8 @@
     "meeting-recorder"
   ],
   "eventSubscriptions": [
-    "meeting.summary.created",
-    "meeting.ended"
+    { "type": "meeting.summary.created", "hint": { "category": "meeting", "priority": "medium", "title": "회의 요약 생성" } },
+    { "type": "meeting.ended", "hint": { "category": "meeting", "priority": "medium", "title": "회의 종료" } }
   ],
   "uiCallable": [
     "meeting_start",
