@@ -1114,7 +1114,7 @@ export class PluginRuntime {
 
   private resolveDevLinkedPackageEntry(entry: string): string | undefined {
     const normalized = entry.replaceAll("\\", "/");
-    const match = normalized.match(/(?:^|\/+)node_modules\/@lvis\/([^/]+)\/(.+)$/);
+    const match = normalized.match(/(?:^|\/+)node_modules\/@lvis\/(plugin-[^/]+)\/(.+)$/);
     if (!match) return undefined;
     const [, packageName, packageSubpath] = match;
     const siblingRepoEntry = resolve(this.hostRoot, "..", `lvis-${packageName}`, packageSubpath);
