@@ -17,6 +17,7 @@ import { ToolRegistry } from "../tools/registry.js";
 import { BashTool } from "../tools/bash.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
+import { AuditLogger } from "../audit/audit-logger.js";
 import { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
 import { MsGraphService } from "../main/ms-graph-service.js";
 
@@ -61,6 +62,20 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   const settingsService = new SettingsService({
     userDataPath: app.getPath("userData"),
   });
+
+  // §14.2 Audit log rotation + retention — boot-time check + 1h interval
+  const auditLogger = new AuditLogger();
+  const _runAuditMaintenance = () => {
+    const auditCfg = settingsService.get("audit");
+    void auditLogger.rotateAndPrune({
+      maxBytes: auditCfg.auditRotationMaxBytes,
+      retentionDays: auditCfg.auditRetentionDays,
+    }).catch((err: unknown) => {
+      console.warn("[audit] rotateAndPrune failed:", err);
+    });
+  };
+  _runAuditMaintenance();
+  setInterval(_runAuditMaintenance, 60 * 60 * 1000); // 1 hour
 
   // §4.2 Step 5: Core Engines
   const memoryManager = new MemoryManager();
