@@ -12,6 +12,7 @@ import {
   createScheduleSignal,
   createMeetingSignal,
   createTaskDeadlineSignal,
+  createPostTurnSignal,
   type UpcomingEvent,
 } from "../core/proactive-trigger-coordinator.js";
 import {
@@ -105,11 +106,14 @@ export function createProactiveTriggerCoordinator(opts: {
   getScheduleTimeKst?: () => string;
   getScheduleLastFiredDayKey: () => string | undefined;
   setScheduleLastFiredDayKey: (key: string) => void;
+  /** Post-turn signal cooldown in ms. Default 600_000 (10 min). */
+  postTurnCooldownMs?: number;
   logger?: (msg: string) => void;
 }): ProactiveTriggerCoordinator {
   const meetingShown = new Set<string>();
   const taskShown = new Set<string>();
   let cachedEvents: UpcomingEvent[] = [];
+  let postTurnLastFiredAt = 0;
 
   const calendarListMethod = findMethodByCapability(
     opts.pluginRuntime,
@@ -154,6 +158,12 @@ export function createProactiveTriggerCoordinator(opts: {
           id: t.id, title: t.title, status: t.status, dueAt: t.dueAt ?? undefined,
         })),
         getShownSet: () => taskShown,
+      }),
+      createPostTurnSignal({
+        getCooldownMs: () => opts.postTurnCooldownMs ?? 600_000,
+        getLastFiredAt: () => postTurnLastFiredAt,
+        setLastFiredAt: (ts) => { postTurnLastFiredAt = ts; },
+        isEnabled: opts.isScheduleEnabled,
       }),
     ],
   });

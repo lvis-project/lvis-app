@@ -10,6 +10,7 @@ import {
   createScheduleSignal,
   createMeetingSignal,
   createTaskDeadlineSignal,
+  createPostTurnSignal,
   type SignalResult,
 } from "../proactive-trigger-coordinator.js";
 
@@ -180,6 +181,64 @@ describe("ProactiveTriggerCoordinator", () => {
     coord.start();
     coord.notify("anything");
     expect(engine.generateDailyBriefing).not.toHaveBeenCalled();
+  });
+
+  it("post-turn signal fires briefing when enabled and cooldown elapsed", async () => {
+    const { engine, calls } = fakeEngine();
+    let lastFiredAt = 0;
+    const coord = new ProactiveTriggerCoordinator({
+      proactiveEngine: engine,
+      evaluators: [
+        createPostTurnSignal({
+          getLastFiredAt: () => lastFiredAt,
+          setLastFiredAt: (ts) => { lastFiredAt = ts; },
+          isEnabled: () => true,
+        }),
+      ],
+      disabled: () => false,
+      debounceMs: 0,
+    });
+    await coord._testEvaluate();
+    expect(engine.generateDailyBriefing).toHaveBeenCalledTimes(1);
+    expect(calls[0].triggerReason).toContain("postTurnSignal");
+  });
+
+  it("post-turn signal skipped when disabled or within cooldown", async () => {
+    const { engine } = fakeEngine();
+    let lastFiredAt = Date.now(); // just fired
+    const coord = new ProactiveTriggerCoordinator({
+      proactiveEngine: engine,
+      evaluators: [
+        createPostTurnSignal({
+          getCooldownMs: () => 600_000,
+          getLastFiredAt: () => lastFiredAt,
+          setLastFiredAt: (ts) => { lastFiredAt = ts; },
+          isEnabled: () => true,
+        }),
+      ],
+      disabled: () => false,
+      debounceMs: 0,
+    });
+    await coord._testEvaluate();
+    expect(engine.generateDailyBriefing).not.toHaveBeenCalled();
+
+    // also skipped when isEnabled returns false
+    const { engine: engine2 } = fakeEngine();
+    let lastFiredAt2 = 0;
+    const coord2 = new ProactiveTriggerCoordinator({
+      proactiveEngine: engine2,
+      evaluators: [
+        createPostTurnSignal({
+          getLastFiredAt: () => lastFiredAt2,
+          setLastFiredAt: (ts) => { lastFiredAt2 = ts; },
+          isEnabled: () => false,
+        }),
+      ],
+      disabled: () => false,
+      debounceMs: 0,
+    });
+    await coord2._testEvaluate();
+    expect(engine2.generateDailyBriefing).not.toHaveBeenCalled();
   });
 
   it("stops on first firing evaluator — no cascade", async () => {
