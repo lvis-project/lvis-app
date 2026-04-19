@@ -5,12 +5,20 @@
  * stub pluginRuntime. All scenarios run in-process — no Electron, no FS, no
  * real plugin code loaded.
  *
- * Scenario 1 — meeting.summary.created → calendar handler called
- * Scenario 2 — email.invite.detected   → calendar handler called
- * Scenario 3 — calendar.event.upcoming → meeting reactive subscription
- *              (NOT wired yet — documented skip with reason comment)
- * Scenario 4 — memory.private.secret   → event bus rejects (private namespace)
- * Scenario 5 — email.new emitted without mail-source capability → dropped
+ * Scenario 1  — meeting.summary.created → calendar handler called
+ * Scenario 2  — email.invite.detected   → calendar handler called
+ * Scenario 3  — calendar.event.upcoming → meeting reactive subscription
+ *               (NOT wired yet — documented skip with reason comment)
+ * Scenario 4  — memory.private.secret   → event bus rejects (private namespace)
+ * Scenario 5  — email.new emitted without mail-source capability → dropped
+ * Scenario 5b — email.new with mail-source capability → delivered
+ * Scenario 10 — capability gate: email plugin cannot emit meeting.* events
+ *
+ * Scenarios 6–9 and 11 removed: they tested locally-defined helpers (HTML
+ * escape, OData escape, idempotency, PATCH-vs-POST, namespace duplicates) that
+ * live in plugin repos and are already covered by calendar plugin PR #9 and
+ * phase5-event-namespace.test.ts. True cross-plugin integration lives in
+ * plugin repos' own test suites.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -186,6 +194,26 @@ describe("Sprint 4-D T4 — cross-plugin event flow (host event bus)", () => {
     // Host must log a warn explaining the drop.
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("dropped — missing capability 'mail-source'"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  // ─── Scenario 10: capability gate — meeting-recorder cannot emit meeting.* ─
+  it("Scenario 10 — plugin without meeting-recorder capability cannot emit meeting.*", () => {
+    const spy = vi.fn();
+    disposers.push(onEvent("meeting.summary.created", spy));
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Email plugin does NOT have meeting-recorder capability
+    const emailEmit = makeStubEmitEvent("email", ["mail-source"]);
+    emailEmit("meeting.summary.created", { sessionId: "fake", summary: "fake" });
+
+    // Must be dropped — missing capability
+    expect(spy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("dropped — missing capability 'meeting-recorder'"),
     );
 
     warnSpy.mockRestore();
