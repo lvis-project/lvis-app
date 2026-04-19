@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginMarketplaceService } from "../marketplace.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
@@ -21,7 +21,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
   let installedDir: string;
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `lvis-mp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-mp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     pluginsDir = join(testDir, "plugins");
     installedDir = join(pluginsDir, "installed");
     registryPath = join(pluginsDir, "registry.json");
@@ -40,7 +40,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
       description: "unit test fixture",
       packageSpec: "file:./nonexistent",
       packageName: "@lvis-test/nonexistent",
-      methods: [],
+      methods: []
     };
     if (deployment) catalogEntry.deployment = deployment;
     await writeFile(
@@ -61,7 +61,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
   function makeService(): PluginMarketplaceService {
     const guard = new PluginDeploymentGuard({
       registryPath,
-      userInstalledDir: installedDir,
+      userInstalledDir: installedDir
     });
     return new PluginMarketplaceService(testDir, guard);
   }

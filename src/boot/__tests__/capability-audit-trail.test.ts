@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
@@ -62,10 +62,7 @@ describe("M4 — capability violation audit trail", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(
-      tmpdir(),
-      `lvis-m4-audit-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-m4-audit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");

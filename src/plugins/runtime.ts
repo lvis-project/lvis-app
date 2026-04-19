@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
@@ -247,7 +248,16 @@ export class PluginRuntime {
         });
         continue;
       }
-      const module = (await import(pathToFileURL(entryPath).href)) as {
+      // Defense-in-depth: resolve any symlinks / 8.3 short-names (Windows) before
+      // constructing the file:// URL. Fall back to the original path if realpathSync
+      // fails (e.g., entry file doesn't exist yet — import() will error gracefully).
+      let resolvedEntryPath: string;
+      try {
+        resolvedEntryPath = realpathSync(entryPath);
+      } catch {
+        resolvedEntryPath = entryPath;
+      }
+      const module = (await import(pathToFileURL(resolvedEntryPath).href)) as {
         default?: RuntimePluginFactory;
         createPlugin?: RuntimePluginFactory;
       };

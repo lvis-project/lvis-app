@@ -11,7 +11,7 @@
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import {
@@ -84,7 +84,7 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `lvis-p5-ns-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-p5-ns-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");
@@ -205,7 +205,7 @@ describe("Phase 5 — capability emit gate", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `lvis-p5-emit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-p5-emit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../runtime.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
@@ -16,7 +16,7 @@ describe("PluginRuntime.disable", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `lvis-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");

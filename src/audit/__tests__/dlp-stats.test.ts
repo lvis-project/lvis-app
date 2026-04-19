@@ -38,6 +38,7 @@ const FILE_LINES: Record<string, string[]> = {
 // ── Mocks (factories must be self-contained — no outer variable refs) ───────
 vi.mock("node:fs", () => {
   const { EventEmitter: EE } = require("node:events") as typeof import("node:events");
+  const { basename } = require("node:path") as typeof import("node:path");
   const TODAY_KEY = new Date().toISOString().slice(0, 10);
   const YESTERDAY_KEY = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 
@@ -57,7 +58,7 @@ vi.mock("node:fs", () => {
     existsSync: vi.fn(() => true),
     readdirSync: vi.fn(() => Object.keys(FILE_DATA)),
     createReadStream: vi.fn((filePath: string) => {
-      const filename = (filePath as string).split("/").at(-1) ?? "";
+      const filename = basename(filePath as string);
       const lines = FILE_DATA[filename] ?? [];
       const em = new EE();
       setTimeout(() => {

@@ -1,13 +1,13 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   computeUsageSummary,
   readAuditEntries,
   computeMonthlyProjection,
   type AuditTurnEntry,
-  type UsageTrendPoint,
+  type UsageTrendPoint
 } from "../usage-stats.js";
 import { getModelPricing, computeCost } from "../llm/pricing.js";
 
@@ -18,7 +18,7 @@ function turn(partial: Partial<AuditTurnEntry>): AuditTurnEntry {
     type: "turn",
     route: "claude/claude-sonnet-4-6",
     tokenUsage: { inputTokens: 1000, outputTokens: 500 },
-    ...partial,
+    ...partial
   };
 }
 
@@ -64,7 +64,7 @@ describe("usage-stats", () => {
 
   it("respects env pricing override", () => {
     process.env.LVIS_PRICING_OVERRIDE = JSON.stringify({
-      claude: { "claude-sonnet-4-6": { inputPer1M: 100, outputPer1M: 100, contextWindow: 1_000_000 } },
+      claude: { "claude-sonnet-4-6": { inputPer1M: 100, outputPer1M: 100, contextWindow: 1_000_000 } }
     });
     try {
       const p = getModelPricing("claude", "claude-sonnet-4-6");
@@ -86,7 +86,7 @@ describe("usage-stats", () => {
   });
 
   it("reads JSONL audit files and ignores non-turn entries", () => {
-    const dir = mkdtempSync(join(tmpdir(), "usage-stats-"));
+    const dir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "usage-stats-"));
     try {
       mkdirSync(dir, { recursive: true });
       const file = join(dir, "2026-04-18.jsonl");
@@ -133,7 +133,7 @@ describe("computeMonthlyProjection", () => {
 
 describe("getUsageRange (via readAuditEntries + filter)", () => {
   it("filters entries to exact date range", () => {
-    const dir = mkdtempSync(join(tmpdir(), "usage-range-"));
+    const dir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "usage-range-"));
     try {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "2026-04-10.jsonl"),

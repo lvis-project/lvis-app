@@ -12,10 +12,10 @@ import {
   writeFileSync,
   symlinkSync,
   rmSync,
-  realpathSync,
+  realpathSync
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir, homedir } from "node:os";
+import { homedir } from "node:os";
 import { validateSandboxPath } from "../path-validator.js";
 
 describe("validateSandboxPath", () => {
@@ -26,8 +26,8 @@ describe("validateSandboxPath", () => {
   beforeEach(() => {
     // realpathSync resolves /var → /private/var on macOS so the assertions
     // later in this file match canonicalized form.
-    sandboxCwd = realpathSync(mkdtempSync(join(tmpdir(), "lvis-sandbox-")));
-    outsideDir = realpathSync(mkdtempSync(join(tmpdir(), "lvis-outside-")));
+    sandboxCwd = realpathSync(mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-sandbox-")));
+    outsideDir = realpathSync(mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-outside-")));
     cleanup.push(sandboxCwd, outsideDir);
   });
 
@@ -135,7 +135,7 @@ describe("validateSandboxPath", () => {
   it("does not allow a sibling path that shares a name prefix", () => {
     // Ensure the `/` trailing-slash guard prevents
     // `/tmp/foo/abcd/...` from matching against `/tmp/foo/abc`.
-    const parent = realpathSync(mkdtempSync(join(tmpdir(), "lvis-prefix-")));
+    const parent = realpathSync(mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-prefix-")));
     cleanup.push(parent);
     const a = join(parent, "abc");
     const ab = join(parent, "abcd");
