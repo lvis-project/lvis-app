@@ -13,11 +13,12 @@ import { session } from "electron";
 
 export function installHtmlPreviewPartitionBlock(): void {
   const ses = session.fromPartition("lvis-render-html");
+  const allowedProtocols = new Set(["data:", "blob:", "about:"]);
   ses.webRequest.onBeforeRequest((details, callback) => {
-    const url = details.url;
-    if (url.startsWith("data:") || url.startsWith("blob:") || url === "about:blank") {
-      callback({ cancel: false });
-    } else {
+    try {
+      const { protocol } = new URL(details.url);
+      callback({ cancel: !allowedProtocols.has(protocol) });
+    } catch {
       callback({ cancel: true });
     }
   });
