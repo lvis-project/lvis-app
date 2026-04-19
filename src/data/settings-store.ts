@@ -139,6 +139,20 @@ export interface MarketplaceSettings {
   realCloudBaseUrl?: string;
   /** Local dev/test only: bypass SSRF guard for loopback servers. */
   realCloudAllowPrivateNetwork?: boolean;
+  /**
+   * S8 — enable/disable plugin update detection at boot. Default true.
+   */
+  updateCheckEnabled?: boolean;
+  /**
+   * S8 — update-check interval in milliseconds. Default 6 hours (21_600_000 ms).
+   * Set to 0 to disable periodic checks (manual / on-open only).
+   */
+  updateCheckIntervalMs?: number;
+  /**
+   * S8 — when true, canary/pre-release catalog entries are included in
+   * update notifications. Default false (stable only).
+   */
+  canaryOptIn?: boolean;
 }
 
 export interface SettingsServiceOptions {

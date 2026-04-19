@@ -166,6 +166,10 @@ export interface PluginMarketplaceItem {
   packageSpec: string;
   packageName: string;
   tools: string[];
+  /** Latest stable version string (semver). Present in remote catalog; may be absent in bundled mock. */
+  version?: string;
+  /** S8 — release channel. "stable" (default) or "canary". */
+  channel?: "stable" | "canary";
   defaultConfig?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   deployment?: DeploymentMode;

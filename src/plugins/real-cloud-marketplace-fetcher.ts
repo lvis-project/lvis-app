@@ -55,6 +55,7 @@ interface ServerCatalogRow {
   publisher?: string;
   latest_stable_version?: string;
   latestStableVersion?: string;
+  channel?: string;
   /** S14: requires.capabilities[] exposed by the server catalog. */
   requires?: { capabilities?: unknown[] } | null;
 }
@@ -207,6 +208,11 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
       item.deployment = row.deployment;
     }
     if (row.publisher) item.publisher = row.publisher;
+
+    // S8: expose version and channel for update detection
+    if (version) item.version = version;
+    if (row.channel === "canary") item.channel = "canary";
+    else if (version) item.channel = "stable";
 
     // S14: map requires.capabilities[] from the catalog row
     if (row.requires && typeof row.requires === "object") {

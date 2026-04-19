@@ -125,6 +125,7 @@ export type LvisApi = {
   onProactiveBriefing: (h: (b: BriefingPayload) => void) => () => void;
   dismissBriefing: (feedback?: { reason: string; details?: string }) => Promise<{ ok: boolean; debounced?: boolean }>;
   snoozeBriefing: () => Promise<{ ok: boolean; lastDismissedAt?: string }>;
+  onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
 };
