@@ -225,9 +225,8 @@ export function useChatState(api: LvisApi) {
     thoughtRef.current = "";
   }, []);
 
-  const appendUserMessage = useCallback((content: string): ChatEntry => {
+  const appendUserMessage = useCallback((content: string): void => {
     setEntries((p) => appendUserEntry(p, content));
-    return { kind: "user", text: content };
   }, []);
 
   const applyLoadedSession = useCallback((loaded: ChatEntry[]) => {

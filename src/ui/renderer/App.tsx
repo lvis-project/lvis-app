@@ -151,7 +151,10 @@ export function App() {
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
 
-  const handleNewChat = useCallback(async () => { await api.chatNew(); clearForNewChat(); void refreshSessionId(); }, [api, refreshSessionId, clearForNewChat]);
+  const handleNewChat = useCallback(async () => {
+    if (streaming) { console.warn("new chat blocked during streaming"); return; }
+    await api.chatNew(); clearForNewChat(); void refreshSessionId();
+  }, [api, streaming, refreshSessionId, clearForNewChat]);
 
   // ─── Effects ──────────────────────────────────
   useAppBootstrap({
@@ -169,11 +172,13 @@ export function App() {
     ...pluginViews.map((i) => ({ id: `v:${toViewKey(i)}`, label: `${getPluginViewLabel(i)} 열기`, run: () => setActiveView(toViewKey(i)) })),
   ], [pluginViews, handleNewChat]);
 
+  const onOpenSettings = useCallback(() => setSettingsOpen(true), []);
+
   // ChatView context bundle — avoids drilling ~40 props through the tree.
-  const chatContextValue: ChatContextValue = {
+  const chatContextValue = useMemo<ChatContextValue>(() => ({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, hasApiKey,
-    onOpenSettings: () => setSettingsOpen(true),
+    onOpenSettings,
     briefing, onDismissBriefing: dismissBriefing, onSnoozeBriefing: snoozeBriefing,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
@@ -182,7 +187,19 @@ export function App() {
     attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
     indexedDocs, docsLoading, refreshIndexedDocs, langLock, setLangLock,
     vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
-  };
+  }), [
+    entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
+    question, setQuestion, chatEndRef, hasApiKey,
+    onOpenSettings,
+    briefing, dismissBriefing, snoozeBriefing,
+    searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
+    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
+    contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
+    rolePresets, activePreset, activePresetId, setActivePresetId,
+    attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
+    indexedDocs, docsLoading, refreshIndexedDocs, langLock, setLangLock,
+    vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
+  ]);
 
   // ─── Render ───────────────────────────────────
   return (
