@@ -11,6 +11,7 @@ import { PermissionsTab } from "./tabs/PermissionsTab.js";
 import { AuditTab } from "./tabs/AuditTab.js";
 import { UsageDashboard } from "./components/UsageDashboard.js";
 import { PluginPerfTab } from "./tabs/PluginPerfTab.js";
+import { PrivacyTab } from "./tabs/PrivacyTab.js";
 
 export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; api: LvisApi; onSaved: () => void }) {
   const [tab, setTab] = useState("llm");
@@ -475,31 +476,11 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
             </div>
           </TabsContent>
 
-          <TabsContent value="privacy" className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <div>
-                <p className="text-sm font-medium">PII 리댁트</p>
-                <p className="text-[11px] text-muted-foreground">활성화 시 LLM으로 전송 전에 이메일·전화·신용카드 등 개인정보를 [REDACTED:*]로 치환합니다. 기본값은 꺼짐.</p>
-              </div>
-              <div className="flex items-center gap-3 rounded-md border px-3 py-3">
-                <button
-                  type="button"
-                  role="checkbox"
-                  aria-checked={piiRedactEnabled}
-                  aria-labelledby="pii-redact-toggle-label"
-                  className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${piiRedactEnabled ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}
-                  onClick={() => setPiiRedactEnabled((prev) => !prev)}
-                >
-                  {piiRedactEnabled && (
-                    <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
-                  )}
-                </button>
-                <div className="space-y-0.5">
-                  <p id="pii-redact-toggle-label" className="text-sm font-medium">PII 리댁트 활성화 (기본 OFF)</p>
-                  <p className="text-[11px] text-muted-foreground">전송 직전 이메일/전화번호/주민번호/카드번호를 `[REDACTED:*]`로 치환하고, 리댁트 발생 시 응답 영역에 🔒 알림을 잠시 표시합니다. 감사 로그에도 건수가 기록됩니다.</p>
-                </div>
-              </div>
-            </div>
+          <TabsContent value="privacy">
+            <PrivacyTab
+              piiRedactEnabled={piiRedactEnabled}
+              onToggle={() => setPiiRedactEnabled((prev) => !prev)}
+            />
           </TabsContent>
 
           <TabsContent value="permissions">
