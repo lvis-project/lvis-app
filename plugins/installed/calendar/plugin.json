@@ -30,8 +30,8 @@
     "calendar_start_watcher"
   ],
   "eventSubscriptions": [
-    "meeting.ended",
-    "email.action.needed"
+    { "type": "meeting.ended", "hint": { "category": "meeting", "priority": "medium", "title": "회의 종료" } },
+    { "type": "email.action.needed", "hint": { "category": "email", "priority": "medium", "title": "액션 필요 이메일" } }
   ],
   "uiCallable": [
     "calendar_list",
