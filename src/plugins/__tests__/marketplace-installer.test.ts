@@ -11,7 +11,7 @@ import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import {resolve, join} from "node:path";
 import {
   installFromMarketplace,
   isMarketplaceDirectPreferred,

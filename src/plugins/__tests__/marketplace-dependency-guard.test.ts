@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, writeFile, rm } from "node:fs/promises";
-import { resolve } from "node:path";
+import {resolve, join} from "node:path";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { PluginMarketplaceService } from "../marketplace.js";
