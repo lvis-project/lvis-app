@@ -136,6 +136,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:starred:add",
   "lvis:starred:remove",
   "lvis:plugins:cards",
+  "lvis:feedback:submit",
   "lvis:telemetry:consent-answer",
   "lvis:audit:search",
   "lvis:audit:stats",
@@ -797,6 +798,33 @@ export function registerIpcHandlers(
   ipcMain.handle("lvis:dlp:stats", async (_e, days: number) => {
     const { getDlpStats } = await import("./audit/dlp-stats.js");
     return getDlpStats(typeof days === "number" ? days : 7);
+  });
+
+  // ─── D6 — Message feedback (thumbs up/down) ─────
+  ipcMain.handle("lvis:feedback:submit", async (e, payload: { sessionId: string; messageIndex: number; rating: "up" | "down"; reason?: string }) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:feedback:submit", e); return UNAUTHORIZED_FRAME; }
+    const { sessionId, messageIndex, rating, reason } = payload ?? {};
+    if (typeof sessionId !== "string" || typeof messageIndex !== "number" || (rating !== "up" && rating !== "down")) {
+      return { ok: false, error: "invalid-args" };
+    }
+    const input = reason
+      ? `feedback:${rating}:${sessionId}:${messageIndex}:${reason.slice(0, 200)}`
+      : `feedback:${rating}:${sessionId}:${messageIndex}`;
+    auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId,
+      type: "info",
+      input,
+    });
+    if (rating === "up" && starredStore) {
+      const existing = starredStore.list().find(
+        (s) => s.sessionId === sessionId && s.messageIndex === messageIndex,
+      );
+      if (!existing) {
+        starredStore.add({ sessionId, messageIndex, role: "assistant", text: "" });
+      }
+    }
+    return { ok: true };
   });
 
   // S12 — telemetry consent prompt answer (Yes/No from renderer).
