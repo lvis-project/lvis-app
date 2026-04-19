@@ -18,7 +18,7 @@
  * external dependencies.
  */
 import { existsSync, realpathSync } from "node:fs";
-import { resolve as pathResolve } from "node:path";
+import { resolve as pathResolve, sep } from "node:path";
 import { homedir } from "node:os";
 
 export interface SandboxValidationResult {
@@ -80,6 +80,6 @@ function expandTilde(path: string): string {
 }
 
 function isWithin(child: string, parent: string): boolean {
-  const normalizedParent = parent.endsWith("/") ? parent : parent + "/";
+  const normalizedParent = parent.endsWith(sep) ? parent : parent + sep;
   return child === parent || child.startsWith(normalizedParent);
 }
