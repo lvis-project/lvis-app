@@ -2,15 +2,12 @@
  * S14 — marketplace install preflight: MissingDependenciesError is thrown
  * when required capabilities are not met by installed plugins.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
-import {
-  PluginMarketplaceService,
-  type MarketplaceListItem,
-} from "../marketplace.js";
+import { PluginMarketplaceService } from "../marketplace.js";
 import type { PluginMarketplaceItem } from "../types.js";
 import { MissingDependenciesError } from "../types.js";
 
@@ -47,14 +44,19 @@ async function setupTestDir(
   dir: string,
   installedPlugins: Array<{ id: string; capabilities: string[] }>,
 ): Promise<string> {
-  const registryPath = resolve(dir, "registry.json");
-  const pluginsDir = resolve(dir, "plugins", "installed");
-  await mkdir(pluginsDir, { recursive: true });
+  // PluginMarketplaceService expects the registry at `<appRoot>/plugins/registry.json`
+  // (see constructor: `resolve(this.appRoot, "plugins/registry.json")`). Writing it
+  // anywhere else means the service sees an empty registry and the test's
+  // installed-manifest fixtures are invisible to the dependency resolver.
+  const pluginsRoot = resolve(dir, "plugins");
+  const registryPath = resolve(pluginsRoot, "registry.json");
+  const pluginsInstalledDir = resolve(pluginsRoot, "installed");
+  await mkdir(pluginsInstalledDir, { recursive: true });
 
   const registryEntries: Array<{ id: string; manifestPath: string; enabled: boolean }> = [];
 
   for (const p of installedPlugins) {
-    const manifestDir = resolve(pluginsDir, p.id);
+    const manifestDir = resolve(pluginsInstalledDir, p.id);
     await mkdir(manifestDir, { recursive: true });
     const manifestPath = resolve(manifestDir, "plugin.json");
     await writeFile(
@@ -68,9 +70,10 @@ async function setupTestDir(
         capabilities: p.capabilities,
       }),
     );
+    // Registry manifestPath is relative to `plugins/` (the registry's parent dir).
     registryEntries.push({
       id: p.id,
-      manifestPath: `plugins/installed/${p.id}/plugin.json`,
+      manifestPath: `installed/${p.id}/plugin.json`,
       enabled: true,
     });
   }
@@ -89,23 +92,30 @@ describe("marketplace install dependency guard (S14)", () => {
   beforeEach(async () => {
     tmpDir = resolve(tmpdir(), `lvis-test-${randomBytes(8).toString("hex")}`);
     await mkdir(tmpDir, { recursive: true });
+    // Stub runNpmInstall so tests don't spawn real npm processes (slow, flaky,
+    // requires network). We accept the npm path failing earlier or later;
+    // these tests only assert the dependency-guard branch, which fires before
+    // npm is invoked.
+    vi.spyOn(
+      PluginMarketplaceService.prototype as unknown as {
+        runNpmInstall: (spec: string) => Promise<void>;
+      },
+      "runNpmInstall",
+    ).mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(tmpDir, { recursive: true, force: true });
   });
 
   it("install succeeds when plugin has no requires", async () => {
     const item = makeItem("simple-plugin");
     const fetcher = new StubFetcher([item]);
-    const registryPath = await setupTestDir(tmpDir, []);
-    const appRoot = tmpDir;
-
-    // Write a minimal registry.json at the expected path
-    await mkdir(resolve(appRoot, "plugins"), { recursive: true });
-    await writeFile(
-      resolve(appRoot, "plugins", "registry.json"),
-      JSON.stringify({ version: 1, plugins: [] }),
-    );
+    await setupTestDir(tmpDir, []);
 
     const svc = new PluginMarketplaceService(
-      appRoot,
+      tmpDir,
       undefined,
       fetcher as unknown as import("../marketplace-fetcher.js").MarketplaceFetcher,
     );
