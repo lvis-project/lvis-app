@@ -20,12 +20,12 @@ jobs:
       MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: "Bp4Luwxz5EAAat48KhCUhpDFIgDjZ4WY3T081QvQfJs="
     steps:
       - name: Checkout lvis-app
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: lvis-app
 
       - name: Checkout lvis-marketplace
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: lvis-project/lvis-marketplace
           path: lvis-marketplace
