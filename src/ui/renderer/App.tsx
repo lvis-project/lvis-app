@@ -26,6 +26,7 @@ import { TaskView } from "./components/TaskView.js";
 import { StarredView } from "./components/StarredView.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { ChatView } from "./ChatView.js";
+import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { Sidebar } from "./Sidebar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
 import { RolesTab } from "./tabs/RolesTab.js";
@@ -299,6 +300,33 @@ export function App() {
     ...pluginViews.map((i) => ({ id: `v:${toViewKey(i)}`, label: `${getPluginViewLabel(i)} 열기`, run: () => setActiveView(toViewKey(i)) })),
   ], [pluginViews, handleNewChat]);
 
+  // Context bundle for ChatView — avoids drilling ~40 props through the tree.
+  const chatContextValue = useMemo<ChatContextValue>(() => ({
+    entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
+    question, setQuestion, chatEndRef,
+    hasApiKey, onOpenSettings: () => setSettingsOpen(true),
+    briefing, onDismissBriefing: dismissBriefing, onSnoozeBriefing: snoozeBriefing,
+    searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
+    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
+    contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
+    rolePresets, activePreset, activePresetId, setActivePresetId,
+    attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
+    indexedDocs, docsLoading, refreshIndexedDocs,
+    langLock, setLangLock,
+    vendorSupportsThinking, enableThinkingChat, toggleThinking,
+    costEstimate, costBadgeClass,
+  }), [
+    entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
+    question, hasApiKey, briefing, dismissBriefing, snoozeBriefing,
+    searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
+    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
+    contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
+    rolePresets, activePreset, activePresetId,
+    attachedDocs, docPopoverOpen, indexedDocs, docsLoading, refreshIndexedDocs,
+    langLock, vendorSupportsThinking, enableThinkingChat, toggleThinking,
+    costEstimate, costBadgeClass,
+  ]);
+
   // ─── Render ───────────────────────────────────
   return (
     <TooltipProvider>
@@ -348,62 +376,16 @@ export function App() {
               onActivateHome={() => setActiveView("home")}
             />
           ) : activeView === "home" ? (
-            <ChatView
-              entries={entries}
-              streaming={streaming}
-              editingEntryIdx={editingEntryIdx}
-              setEditingEntryIdx={setEditingEntryIdx}
-              editBusy={editBusy}
-              question={question}
-              setQuestion={setQuestion}
-              chatEndRef={chatEndRef}
-              hasApiKey={hasApiKey}
-              onOpenSettings={() => setSettingsOpen(true)}
-              briefing={briefing}
-              onDismissBriefing={dismissBriefing}
-              onSnoozeBriefing={snoozeBriefing}
-              searchOpen={searchOpen}
-              searchQuery={searchQuery}
-              searchCase={searchCase}
-              searchMatches={searchMatches}
-              searchMatchSet={searchMatchSet}
-              searchIdx={searchIdx}
-              searchHighlight={searchHighlight}
-              searchChangeQuery={searchChangeQuery}
-              searchToggleCase={searchToggleCase}
-              searchNext={searchNext}
-              searchPrev={searchPrev}
-              searchCloseOverlay={searchCloseOverlay}
-              contextOverflowPct={contextOverflowPct}
-              usedTokens={usedTokens}
-              contextBudget={contextBudget}
-              contextPercent={contextPercent}
-              contextColor={contextColor}
-              rolePresets={rolePresets}
-              activePreset={activePreset}
-              activePresetId={activePresetId}
-              setActivePresetId={setActivePresetId}
-              attachedDocs={attachedDocs}
-              setAttachedDocs={setAttachedDocs}
-              docPopoverOpen={docPopoverOpen}
-              setDocPopoverOpen={setDocPopoverOpen}
-              indexedDocs={indexedDocs}
-              docsLoading={docsLoading}
-              refreshIndexedDocs={refreshIndexedDocs}
-              langLock={langLock}
-              setLangLock={setLangLock}
-              vendorSupportsThinking={vendorSupportsThinking}
-              enableThinkingChat={enableThinkingChat}
-              toggleThinking={toggleThinking}
-              costEstimate={costEstimate}
-              costBadgeClass={costBadgeClass}
-              onAsk={handleAsk}
-              onEditSave={handleEditSave}
-              onFork={handleFork}
-              onToggleStar={handleToggleStar}
-              onRetryEffort={handleRetryEffort}
-              isEntryStarred={isEntryStarred}
-            />
+            <ChatContextProvider value={chatContextValue}>
+              <ChatView
+                onAsk={handleAsk}
+                onEditSave={handleEditSave}
+                onFork={handleFork}
+                onToggleStar={handleToggleStar}
+                onRetryEffort={handleRetryEffort}
+                isEntryStarred={isEntryStarred}
+              />
+            </ChatContextProvider>
           ) : (
             <PluginUiHostView view={activePluginView ?? null} callPluginMethod={(m, p) => api.callPluginMethod(m, p)} onAskInHomeChat={async (q) => { setActiveView("home"); await handleAsk(q); }} onAddTask={(t) => api.addTask(t)} />
           )}

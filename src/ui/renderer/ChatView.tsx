@@ -1,5 +1,4 @@
-import { useCallback, type RefObject } from "react";
-import type React from "react";
+import { useCallback } from "react";
 import { ChevronDown, Globe, KeyRound, Loader2, Paperclip, Pencil, Star, User, X as XIcon, GitBranch } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
 import { Button } from "../../components/ui/button.js";
@@ -8,9 +7,7 @@ import { Textarea } from "../../components/ui/textarea.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
-import type { RolePreset } from "../../data/role-presets.js";
-import { formatCostBadge, type EstimateBreakdown } from "../../lib/cost-estimator.js";
-import type { ChatEntry } from "../../lib/chat-stream-state.js";
+import { formatCostBadge } from "../../lib/cost-estimator.js";
 import { BriefingCard } from "./components/BriefingCard.js";
 import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
@@ -18,78 +15,14 @@ import { ReasoningCard } from "./components/ReasoningCard.js";
 import { ToolGroupCard } from "./components/ToolGroupCard.js";
 import { ChatSearchOverlay } from "./components/ChatSearchOverlay.js";
 import { highlightText } from "./utils/html-preview.js";
-import type { BriefingPayload } from "./types.js";
+import { useChatContext } from "./context/ChatContext.js";
 
+/**
+ * ChatView — consumes cross-cutting state via `useChatContext()`. Action
+ * callbacks stay as direct props so data flow for user-driven side effects
+ * remains explicit at the App level.
+ */
 export interface ChatViewProps {
-  // Chat state
-  entries: ChatEntry[];
-  streaming: boolean;
-  editingEntryIdx: number | null;
-  setEditingEntryIdx: (i: number | null) => void;
-  editBusy: boolean;
-  question: string;
-  setQuestion: (q: string) => void;
-  chatEndRef: RefObject<HTMLDivElement | null>;
-
-  // API state
-  hasApiKey: boolean | null;
-  onOpenSettings: () => void;
-
-  // Briefing
-  briefing: BriefingPayload | null;
-  onDismissBriefing: (feedback?: { reason: string; details?: string }) => void;
-  onSnoozeBriefing: () => void;
-
-  // Search
-  searchOpen: boolean;
-  searchQuery: string;
-  searchCase: boolean;
-  searchMatches: number[];
-  searchMatchSet: Set<number>;
-  searchIdx: number;
-  searchHighlight: string;
-  searchChangeQuery: (q: string) => void;
-  searchToggleCase: () => void;
-  searchNext: () => void;
-  searchPrev: () => void;
-  searchCloseOverlay: () => void;
-
-  // Context / usage
-  contextOverflowPct: number;
-  usedTokens: number;
-  contextBudget: number;
-  contextPercent: number;
-  contextColor: string;
-
-  // Role presets
-  rolePresets: RolePreset[];
-  activePreset: RolePreset | null;
-  activePresetId: string;
-  setActivePresetId: (id: string) => void;
-
-  // Attached docs / PageIndex
-  attachedDocs: Array<{ id: string; name: string }>;
-  setAttachedDocs: React.Dispatch<React.SetStateAction<Array<{ id: string; name: string }>>>;
-  docPopoverOpen: boolean;
-  setDocPopoverOpen: (v: boolean) => void;
-  indexedDocs: Array<{ id: string; name: string }>;
-  docsLoading: boolean;
-  refreshIndexedDocs: () => void | Promise<void>;
-
-  // Language lock
-  langLock: "off" | "ko" | "en";
-  setLangLock: React.Dispatch<React.SetStateAction<"off" | "ko" | "en">>;
-
-  // Thinking toggle
-  vendorSupportsThinking: boolean;
-  enableThinkingChat: boolean;
-  toggleThinking: (v: boolean) => Promise<void> | void;
-
-  // Cost
-  costEstimate: EstimateBreakdown;
-  costBadgeClass: string;
-
-  // Handlers
   onAsk: (q: string) => void | Promise<void>;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
   onFork: (idx: number) => void | Promise<void>;
@@ -98,7 +31,7 @@ export interface ChatViewProps {
   isEntryStarred: (idx: number) => string | null;
 }
 
-export function ChatView(props: ChatViewProps) {
+export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred }: ChatViewProps) {
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef,
@@ -113,8 +46,7 @@ export function ChatView(props: ChatViewProps) {
     langLock, setLangLock,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass,
-    onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred,
-  } = props;
+  } = useChatContext();
 
   const handleAskCurrent = useCallback(() => { void onAsk(question); }, [onAsk, question]);
 
