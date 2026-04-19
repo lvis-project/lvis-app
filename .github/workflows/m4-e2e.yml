@@ -1,0 +1,89 @@
+name: M4 E2E (marketplace ↔ installer)
+
+# Opt-in only. Run manually via workflow_dispatch or when PR branches
+# explicitly include an `m4-e2e` label. Keeps normal CI fast.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    types: [labeled]
+
+jobs:
+  m4-e2e:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'm4-e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PUBLISHER_KEY: lvismkt_e2epubKEY1234_abcd1234
+      MARKETPLACE_SIGNING_PRIVATE_KEY_DEV_V1: "1FZSYHgqzY3cRPqFPMEP0DR7G3qesM7eGcB2BVeYzqk="
+      MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: "Bp4Luwxz5EAAat48KhCUhpDFIgDjZ4WY3T081QvQfJs="
+    steps:
+      - name: Checkout lvis-app
+        uses: actions/checkout@v4
+        with:
+          path: lvis-app
+
+      - name: Checkout lvis-marketplace
+        uses: actions/checkout@v4
+        with:
+          repository: lvis-project/lvis-marketplace
+          path: lvis-marketplace
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install marketplace server deps (uv)
+        working-directory: lvis-marketplace/server
+        run: |
+          pip install -U pip uv
+          uv sync --frozen --all-groups || uv sync --all-groups
+
+      - name: Start marketplace server (sqlite, background)
+        working-directory: lvis-marketplace/server
+        env:
+          LVIS_MARKETPLACE_RATE_LIMIT_DISABLED: "1"
+        run: |
+          uv run uvicorn lvis_marketplace.main:create_app \
+            --factory --host 127.0.0.1 --port 8000 &
+          echo $! > /tmp/marketplace.pid
+          # Wait for readiness.
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null; then
+              echo "marketplace ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "marketplace failed to start" >&2; exit 1
+
+      - name: Seed publisher API key
+        working-directory: lvis-marketplace/server
+        run: |
+          uv run python scripts/seed_e2e_keys.py \
+            --publisher-key "$PUBLISHER_KEY"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install app deps
+        working-directory: lvis-app
+        run: npm ci
+
+      - name: Run M4 E2E test
+        working-directory: lvis-app
+        env:
+          M4_E2E: "1"
+          MARKETPLACE_URL: http://127.0.0.1:8000
+          MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
+        run: npx vitest run test/e2e/marketplace-e2e.test.ts
+
+      - name: Stop marketplace
+        if: always()
+        run: |
+          if [ -f /tmp/marketplace.pid ]; then
+            kill "$(cat /tmp/marketplace.pid)" || true
+          fi
