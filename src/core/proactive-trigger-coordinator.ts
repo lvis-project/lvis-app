@@ -252,6 +252,30 @@ export interface DeadlineTask {
  * `windowMinutes` (default 120). `shown` dedup set prevents re-fire for the
  * same task id/title within the process lifetime.
  */
+/**
+ * postTurnSignal — fires after a conversation turn when enabled and cooldown
+ * has elapsed (default 10 min). Designed to be notified via `coordinator.notify("post-turn")`.
+ * Persists lastFiredAt in-memory only (no storage).
+ */
+export function createPostTurnSignal(opts: {
+  getCooldownMs?: () => number;
+  getLastFiredAt: () => number;
+  setLastFiredAt: (ts: number) => void;
+  isEnabled: () => boolean;
+}): { name: string; evaluate: SignalEvaluator } {
+  const DEFAULT_COOLDOWN_MS = 10 * 60_000;
+  return {
+    name: "postTurnSignal",
+    evaluate: (now) => {
+      if (!opts.isEnabled()) return null;
+      const cooldown = opts.getCooldownMs?.() ?? DEFAULT_COOLDOWN_MS;
+      if (now.getTime() - opts.getLastFiredAt() < cooldown) return null;
+      opts.setLastFiredAt(now.getTime());
+      return { fire: true, reason: "post-turn" };
+    },
+  };
+}
+
 export function createTaskDeadlineSignal(opts: {
   getTasks: () => DeadlineTask[];
   windowMinutes?: number;
