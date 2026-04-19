@@ -14,9 +14,25 @@ src/
   main.ts                     — Electron entry point
   boot.ts                     — §4.2 Boot Sequence (service init, plugin loading)
   ipc-bridge.ts               — All IPC handlers (settings, chat, memory, plugins, tasks)
-  preload.ts / preload.cjs    — Electron preload scripts
-  renderer.tsx                — React UI (chat, vendor selector, tool display)
+  preload.ts                  — Electron preload script (esbuild-bundled)
+  renderer.tsx                — 13-line entry that mounts ui/renderer/App.tsx
   plugin-ui-host.tsx          — Dynamic plugin UI mounting
+
+  ui/renderer/                — Renderer composition root (Phase 1~4.6 split 완료)
+    App.tsx                   — composition root (414 lines)
+    ChatView.tsx              — main chat viewport (347)
+    Sidebar.tsx · SettingsDialog.tsx · MainToolbar.tsx
+    types.ts · constants.ts · api-client.ts
+    hooks/                    — use-settings / use-chat-state / use-briefing /
+                                use-approval / use-search / use-context-budget /
+                                use-cost-estimate / use-sessions / use-starred
+    components/               — BriefingCard · AssistantCard · UserMessageEditor ·
+                                ReasoningCard · ToolApprovalDialog · ToolGroupCard ·
+                                ChatSearchOverlay · Sparkline · UsageDashboard ·
+                                HtmlPreview · TaskView · StarredView
+    dialogs/                  — ApprovalDialog · PluginInstallDialog · PluginUninstallDialog
+    tabs/                     — RolesTab · PermissionsTab
+    utils/                    — cost-format · html-preview · history · compose
 
   engine/                     — Agent loop + LLM providers (was src/agent/)
     conversation-loop.ts      — §4.5 Core agentic cycle (stream + tool loop)

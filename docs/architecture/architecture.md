@@ -1131,8 +1131,26 @@ lvis-app/src/
 ├── plugins/       # 플러그인 런타임
 │   └── runtime.ts, registry.ts, marketplace.ts, deployment-guard.ts, types.ts
 │
-├── data/, main/, lib/, components/ui/, ui/, __tests__/
+├── ui/              # Renderer composition (Phase 1~4.6 split 완료, 2026-04-18)
+│   └── renderer/
+│       ├── App.tsx (414 lines — composition root)
+│       ├── ChatView.tsx (347) · Sidebar.tsx (53) · SettingsDialog.tsx (522) · MainToolbar.tsx (120)
+│       ├── types.ts (208) · constants.ts (85) · api-client.ts (16)
+│       ├── hooks/   # use-settings · use-chat-state · use-briefing · use-approval
+│       │            # use-search · use-context-budget · use-cost-estimate
+│       │            # use-sessions · use-starred
+│       ├── components/  # BriefingCard · AssistantCard · UserMessageEditor
+│       │                # ReasoningCard · ToolApprovalDialog · ToolGroupCard
+│       │                # ChatSearchOverlay · Sparkline · UsageDashboard
+│       │                # HtmlPreview · TaskView · StarredView
+│       ├── dialogs/     # ApprovalDialog · PluginInstallDialog · PluginUninstallDialog
+│       ├── tabs/        # RolesTab · PermissionsTab
+│       └── utils/       # cost-format · html-preview · history · compose
+│
+├── data/, main/, lib/, components/ui/, __tests__/
 ```
+
+> **엔트리 축소**: `src/renderer.tsx` 는 **13 라인**으로 줄어들어 `ui/renderer/App.tsx` 를 mount 만 한다. Phase 1~4.6 split 결과 — 상세는 `docs/references/renderer-split-retrospective.md` 참조.
 
 #### 4.6.2 Module Boundary Rules
 
