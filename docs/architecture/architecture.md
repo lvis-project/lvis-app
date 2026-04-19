@@ -1150,7 +1150,7 @@ lvis-app/src/
 ├── data/, main/, lib/, components/ui/, __tests__/
 ```
 
-> **엔트리 축소**: `src/renderer.tsx` 는 **13 라인**으로 줄어들어 `ui/renderer/App.tsx` 를 mount 만 한다. Phase 1~4.6 split 결과 — 상세는 `docs/references/renderer-split-retrospective.md` 참조.
+> **엔트리 축소**: `src/renderer.tsx` 는 최소 진입점으로 줄어들어 `ui/renderer/App.tsx` 를 mount 만 한다. Phase 1~4.6 split 결과 — 상세는 `docs/references/renderer-split-retrospective.md` 참조.
 
 #### 4.6.2 Module Boundary Rules
 

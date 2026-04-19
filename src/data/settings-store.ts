@@ -132,6 +132,11 @@ export interface MarketplaceSettings {
   realCloudBaseUrl?: string;
   /** Local dev/test only: bypass SSRF guard for loopback servers. */
   realCloudAllowPrivateNetwork?: boolean;
+  /**
+   * S8 — update-check interval in milliseconds. Default 6 hours (21_600_000 ms).
+   * Set to 0 to disable periodic checks (manual / on-open only).
+   */
+  updateCheckIntervalMs?: number;
 }
 
 export interface SettingsServiceOptions {

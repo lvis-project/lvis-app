@@ -166,6 +166,8 @@ export interface PluginMarketplaceItem {
   packageSpec: string;
   packageName: string;
   tools: string[];
+  /** Latest stable version string (semver). Present in remote catalog; may be absent in bundled mock. */
+  version?: string;
   defaultConfig?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   deployment?: DeploymentMode;

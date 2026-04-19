@@ -12,6 +12,7 @@ import { AuditLogger } from "./audit/audit-logger.js";
 import { PluginRuntime } from "./plugins/runtime.js";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
+import { PluginUpdateDetector, isUpdateCheckEnabled } from "./plugins/update-detector.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
 import { PluginDeploymentGuard } from "./plugins/deployment-guard.js";
 import { PluginSignatureVerifier } from "./plugins/signature-verifier.js";
@@ -579,6 +580,43 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     console.log("[lvis] boot: release prep wired (updater/crash/telemetry)");
   } catch (err) {
     console.warn("[lvis] boot: release prep init failed (non-fatal):", (err as Error).message);
+  }
+
+  // S8 — Plugin update detection. Runs once at boot then on a configurable
+  // interval (default 6h). Fires IPC event `marketplace:updates-available` to
+  // the renderer when newer catalog versions are found.
+  // Feature flag: LVIS_MARKETPLACE_UPDATE_CHECK (default ON).
+  let updateCheckTimer: ReturnType<typeof setInterval> | undefined;
+  if (isUpdateCheckEnabled()) {
+    const registryPath = resolve(projectRoot, "plugins/registry.json");
+    const updateDetector = new PluginUpdateDetector(registryPath, marketplaceFetcher);
+    const DEFAULT_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+    const runUpdateCheck = async () => {
+      try {
+        const updates = await updateDetector.checkForUpdates();
+        if (updates.length > 0) {
+          mainWindow?.webContents?.send("marketplace:updates-available", updates);
+          console.log("[lvis] update-check: %d plugin update(s) available", updates.length);
+        }
+      } catch (err) {
+        console.warn("[lvis] update-check: error:", (err as Error).message);
+      }
+    };
+
+    // Run once at boot (non-blocking).
+    void runUpdateCheck();
+
+    const intervalMs =
+      settingsService.get("marketplace")?.updateCheckIntervalMs ?? DEFAULT_UPDATE_INTERVAL_MS;
+    if (intervalMs > 0) {
+      updateCheckTimer = setInterval(() => void runUpdateCheck(), intervalMs);
+      updateCheckTimer.unref?.();
+    }
+
+    app.prependOnceListener("before-quit", () => {
+      if (updateCheckTimer) clearInterval(updateCheckTimer);
+    });
   }
 
   return {

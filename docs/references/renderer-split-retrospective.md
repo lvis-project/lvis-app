@@ -1,14 +1,14 @@
 # Renderer Split Retrospective — Phase 1 ~ 4.6
 
 > **Status**: ✅ Complete (2026-04-17 → 2026-04-18)
-> **Scope**: `src/renderer.tsx` 2911-line monolith → 13-line entry + composed `src/ui/renderer/` tree.
-> **Related**: architecture.md §4.6 Source Tree Layout; TODO.md §31.
+> **Scope**: `src/renderer.tsx` large monolith → minimal entry + composed `src/ui/renderer/` tree.
+> **Related**: architecture.md §4.6 Source Tree Layout; see external `../TODO.md` for task tracking (Phase 5 Renderer Split section).
 
 ---
 
 ## 1. Why the split happened
 
-Pre-split `src/renderer.tsx` had accumulated **2911 lines** covering:
+Pre-split `src/renderer.tsx` had accumulated many hundreds of lines covering:
 - Settings orchestration (7 vendors × per-key reducer state)
 - Chat stream state + tool-use transcripts + edit-resend / retry / cancel
 - Briefing card lifecycle (dismiss, snooze, settings toggle)
@@ -45,16 +45,16 @@ Risks that forced the split:
 Final tree:
 ```
 src/
-  renderer.tsx (13 lines — entry)
+  renderer.tsx          — minimal entry (mounts App)
   ui/renderer/
-    App.tsx (414)
-    ChatView.tsx (347) · Sidebar.tsx (53) · SettingsDialog.tsx (522) · MainToolbar.tsx (120)
-    types.ts (208) · constants.ts (85) · api-client.ts (16)
-    hooks/         # 9 domain hooks
-    components/    # 12 extracted components
-    dialogs/       # 3 dialogs
-    tabs/          # 2 settings tabs
-    utils/         # 4 utility modules
+    App.tsx             — composition root
+    ChatView.tsx · Sidebar.tsx · SettingsDialog.tsx · MainToolbar.tsx
+    types.ts · constants.ts · api-client.ts
+    hooks/              # 9 domain hooks
+    components/         # 12 extracted components
+    dialogs/            # 3 dialogs
+    tabs/               # 2 settings tabs
+    utils/              # 4 utility modules
 ```
 
 Safety net: **7 smoke → 38 tests** (RTL + integration coverage).
@@ -83,11 +83,11 @@ Patterns that emerged during the split and are now baseline for all renderer wor
 
 ## 4. Remaining debt (Sprint X-B candidates)
 
-- `SettingsDialog.tsx` (522) — still the largest file; break into per-tab files (LLM / Permissions / Plugins / Roles).
-- `App.tsx` (414) — composition root could shrink further if context providers are grouped.
+- `SettingsDialog.tsx` — still the largest file; break into per-tab files (LLM / Permissions / Plugins / Roles).
+- `App.tsx` — composition root could shrink further if context providers are grouped.
 - Additional hook extraction: settings orchestration across tabs, tool-stream pump, notification dispatch.
 - Renderer E2E physical click-through (Playwright-electron) — the one layer the 38-test safety net does not cover.
-- `MainToolbar.tsx` (120) + `Sidebar.tsx` (53) — small, but their prop surfaces are wide; could be narrowed via context.
+- `MainToolbar.tsx` + `Sidebar.tsx` — their prop surfaces are wide; could be narrowed via context.
 
 ---
 
@@ -99,7 +99,7 @@ Patterns that emerged during the split and are now baseline for all renderer wor
 
 3. **Architect + security review catches integration failures unit tests miss.** PR #97 / #98 architect follow-ups found the aliveRef + re-entrancy bugs; unit tests had been passing with the bugs present because they never simulated unmount-during-stream.
 
-4. **13-line entry is the goal, not a milestone.** Keeping `src/renderer.tsx` trivially small enforces that *any* future change has to land in a proper module. This is the main architectural deterrent against re-growing the monolith.
+4. **Minimal entry is the goal, not a milestone.** Keeping `src/renderer.tsx` trivially small enforces that *any* future change has to land in a proper module. This is the main architectural deterrent against re-growing the monolith.
 
 5. **Patterns must be documented to propagate.** `aliveRef` / `inFlightRef` / discriminated-union IPC were re-discovered multiple times during the split. They are now captured here so the next sprint doesn't re-derive them.
 

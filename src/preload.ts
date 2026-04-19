@@ -88,6 +88,13 @@ const api = {
     ipcRenderer.invoke("lvis:proactive:dismiss-briefing", feedback) as Promise<{ ok: boolean; debounced?: boolean }>,
   snoozeBriefing: async () => ipcRenderer.invoke("lvis:proactive:snooze-briefing") as Promise<{ ok: boolean; lastDismissedAt?: string }>,
 
+  // ─── Marketplace update notifications (S8) ───────
+  onMarketplaceUpdatesAvailable: (handler: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => {
+    const listener = (_event: unknown, updates: Parameters<typeof handler>[0]) => handler(updates);
+    ipcRenderer.on("marketplace:updates-available", listener);
+    return () => ipcRenderer.removeListener("marketplace:updates-available", listener);
+  },
+
   // ─── MCP ─────────────────────────────────────────
   mcp: {
     servers: async () => ipcRenderer.invoke("lvis:mcp:servers"),

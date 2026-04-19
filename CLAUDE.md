@@ -15,12 +15,12 @@ src/
   boot.ts                     — §4.2 Boot Sequence (service init, plugin loading)
   ipc-bridge.ts               — All IPC handlers (settings, chat, memory, plugins, tasks)
   preload.ts                  — Electron preload script (esbuild-bundled)
-  renderer.tsx                — 13-line entry that mounts ui/renderer/App.tsx
+  renderer.tsx                — minimal entry that mounts ui/renderer/App.tsx
   plugin-ui-host.tsx          — Dynamic plugin UI mounting
 
   ui/renderer/                — Renderer composition root (Phase 1~4.6 split 완료)
-    App.tsx                   — composition root (414 lines)
-    ChatView.tsx              — main chat viewport (347)
+    App.tsx                   — composition root
+    ChatView.tsx              — main chat viewport
     Sidebar.tsx · SettingsDialog.tsx · MainToolbar.tsx
     types.ts · constants.ts · api-client.ts
     hooks/                    — use-settings / use-chat-state / use-briefing /
