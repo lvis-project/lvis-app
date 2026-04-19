@@ -33,6 +33,7 @@ describe("Phase 5 — capabilities module", () => {
 
   it("classifies known public namespaces as 'public'", () => {
     expect(classifySubscription("meeting.started")).toBe("public");
+    expect(classifySubscription("meeting.transcript.updated")).toBe("public");
     expect(classifySubscription("email.new")).toBe("public");
     expect(classifySubscription("calendar.event")).toBe("public");
     expect(classifySubscription("index.scan_done")).toBe("public");
@@ -48,6 +49,7 @@ describe("Phase 5 — capabilities module", () => {
   it("maps event namespace → required capability for emit", () => {
     expect(requiredCapabilityForEmit("email.new")).toBe("mail-source");
     expect(requiredCapabilityForEmit("meeting.started")).toBe("meeting-recorder");
+    expect(requiredCapabilityForEmit("meeting.transcript.updated")).toBe("meeting-recorder");
     expect(requiredCapabilityForEmit("calendar.event")).toBe("calendar-source");
     expect(requiredCapabilityForEmit("index.scan_done")).toBe("knowledge-index");
     expect(requiredCapabilityForEmit("task.anything")).toBeUndefined();
