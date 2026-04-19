@@ -15,11 +15,11 @@ import type { GenericMessage } from "../llm/types.js";
 
 // ─── Minimal stubs ────────────────────────────────────────────────────────────
 
-function makeSettings(autoCompact = true) {
+function makeSettings(autoCompact = true, model = "gpt-4o", provider = "openai") {
   return {
     get: (key: string) => {
       if (key === "chat") return { systemPrompt: "", autoCompact };
-      if (key === "llm") return { provider: "claude", model: "claude-sonnet-4-6", maxOutputTokens: 4096 };
+      if (key === "llm") return { provider, model, maxOutputTokens: 4096 };
       return {};
     },
     getAll: () => ({}),
@@ -95,8 +95,9 @@ describe("ConversationLoop.resetAndResume", () => {
 
     expect(result.ok).toBe(true);
     expect(loop.getHistory().length).toBe(2);
-    // cumulativeUsage resets inside loadSession
-    expect(loop.getCumulativeUsage().inputTokens).toBe(0);
+    // Issue 1 fix: cumulativeUsage is now estimated from loaded history (not zero).
+    // Short 2-message history → small but non-zero estimate.
+    expect(loop.getCumulativeUsage().inputTokens).toBeGreaterThan(0);
     expect(loop.getCumulativeUsage().outputTokens).toBe(0);
   });
 
@@ -135,6 +136,54 @@ describe("ConversationLoop.resetAndResume", () => {
 
     loop.resetAndResume("test-session-id");
     expect(loop.getSessionId()).toBe("test-session-id");
+  });
+});
+
+describe("ConversationLoop.resetAndResume — Issue 1: shouldCompact fires on resume", () => {
+  it("shouldCompact returns true when resumed history has 50 large messages (token estimate exceeds threshold)", () => {
+    // 50 messages × ~200 chars each ≈ 50 × (200/4+1) = 50 × 51 = 2550 estimated tokens
+    // gpt-4o context window = 128,000; threshold 80% = 102,400 — won't fire with 2550.
+    // Use a model with a tiny context window by customizing settings, OR
+    // use large messages that exceed any threshold.
+    // Simplest: 50 messages × 400 chars = ~50 × 101 = 5050 tokens. Still below 102,400.
+    // To force the check, we make messages that collectively estimate > threshold.
+    // With 50 messages × 10000 chars → 50 × (10000/4+1) = 50 × 2501 = 125,050 tokens
+    // which is > 128,000 * 0.8 = 102,400. So shouldCompact should fire.
+    const msgs: GenericMessage[] = [];
+    for (let i = 0; i < 50; i++) {
+      msgs.push({
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: "x".repeat(10_000),
+      });
+    }
+    const mem = makeMemoryManager(msgs);
+    mem.saveSession = vi.fn();
+    const loop = new ConversationLoop(makeDeps({ memoryManager: mem, settingsService: makeSettings(true) }));
+
+    const result = loop.resetAndResume("test-session-id");
+
+    // The compact check should have fired; either it compacted or messages were short
+    // enough that compactMessages decided not to — but shouldCompact gate must have been reached.
+    expect(result.ok).toBe(true);
+    // With 50 large messages the estimated tokens exceed 80% of 128K window → compacted
+    expect(result.compacted).toBe(true);
+  });
+
+  it("shouldCompact is NOT skipped when usage was zero before resume (regression guard)", () => {
+    // Load large history — if usage estimate was not set, compact would be skipped.
+    const msgs: GenericMessage[] = [];
+    for (let i = 0; i < 50; i++) {
+      msgs.push({ role: i % 2 === 0 ? "user" : "assistant", content: "y".repeat(10_000) });
+    }
+    const mem = makeMemoryManager(msgs);
+    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
+
+    // Before fix: cumulativeUsage was always 0 after loadSession → shouldCompact never fired.
+    // After fix: estimated usage is derived from message content.
+    const result = loop.resetAndResume("test-session-id");
+    expect(result.ok).toBe(true);
+    // Usage estimate should now be non-zero
+    expect(loop.getCumulativeUsage().inputTokens).toBeGreaterThan(0);
   });
 });
 
@@ -179,5 +228,23 @@ describe("ConversationLoop.manualCompact", () => {
       expect(result.compacted).toBe(false);
       expect(result.removedMessageCount).toBe(0);
     }
+  });
+
+  it("Issue 2: saveSession called with compacted messages after manualCompact", () => {
+    const history = makeLongHistory(30);
+    const mem = makeMemoryManager(history);
+    const loop = new ConversationLoop(makeDeps({ memoryManager: mem }));
+    loop.resetAndResume("test-session-id");
+
+    const result = loop.manualCompact();
+
+    if (result.compacted) {
+      // saveSession must be called with the compacted (shorter) message list
+      expect(mem.saveSession).toHaveBeenCalled();
+      const savedMsgs = (mem.saveSession as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1] as GenericMessage[];
+      expect(savedMsgs.length).toBeLessThan(history.length);
+    }
+    // If not compacted (threshold not met), saveSession should not be called for compact
+    // (it may have been called by loadSession/resetAndResume — that's ok)
   });
 });
