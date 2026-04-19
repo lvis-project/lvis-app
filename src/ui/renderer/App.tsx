@@ -47,7 +47,7 @@ export function App() {
   const {
     entries, streaming, setStreaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
-    resetStreamAccumulators, setErrorWithThought,
+    resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     seedBriefing, clearForNewChat, appendUserEntry, applyLoadedSession, truncateToEntry,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
@@ -134,6 +134,7 @@ export function App() {
 
   const handleAsk = useCallback(async (q: string) => {
     const t = q.trim(); if (!t || streaming) return;
+    if (await handleCompactCommand(t)) return;
     if (!(await checkApiKey())) { setSettingsOpen(true); return; }
     setQuestion("");
     const outgoing = composeOutgoing(t);
@@ -146,7 +147,7 @@ export function App() {
     } catch (err) {
       setErrorWithThought(`오류: ${(err as Error).message}`);
     } finally { setStreaming(false); }
-  }, [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, setStreaming, setErrorWithThought]);
+  }, [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, setStreaming, setErrorWithThought, handleCompactCommand]);
 
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
