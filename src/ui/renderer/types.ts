@@ -52,6 +52,7 @@ export type AppSettings = {
     responseFormat?: "text" | "json";
     stopSequences?: string[];
     streamSmoothing?: "none" | "word" | "char";
+    fallbackChain?: Array<{ provider: string; model: string }>;
   };
   chat: { systemPrompt: string; autoCompact: boolean };
   webSearch: { provider: string };
