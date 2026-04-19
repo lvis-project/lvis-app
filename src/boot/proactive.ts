@@ -103,6 +103,11 @@ export function createProactiveTriggerCoordinator(opts: {
   pluginRuntime: PluginRuntime;
   isIdleScanActive: () => boolean;
   isScheduleEnabled: () => boolean;
+  /**
+   * Issue 3 fix: post-turn briefing flag separate from schedule flag.
+   * When absent, falls back to isScheduleEnabled for back-compat.
+   */
+  isPostTurnEnabled?: () => boolean;
   getScheduleTimeKst?: () => string;
   getScheduleLastFiredDayKey: () => string | undefined;
   setScheduleLastFiredDayKey: (key: string) => void;
@@ -163,7 +168,8 @@ export function createProactiveTriggerCoordinator(opts: {
         getCooldownMs: () => opts.postTurnCooldownMs ?? 600_000,
         getLastFiredAt: () => postTurnLastFiredAt,
         setLastFiredAt: (ts) => { postTurnLastFiredAt = ts; },
-        isEnabled: opts.isScheduleEnabled,
+        // Issue 3 fix: use dedicated post-turn flag; fall back to schedule flag.
+        isEnabled: opts.isPostTurnEnabled ?? opts.isScheduleEnabled,
       }),
     ],
   });

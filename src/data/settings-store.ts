@@ -139,6 +139,11 @@ export interface ProactiveSettings {
   enableDailyBriefing: boolean;
   lastBriefingAt?: string;
   lastDismissedAt?: string;
+  /**
+   * Issue 3 fix: post-turn briefing signal flag, separate from schedule flag.
+   * Default false — must be opted in explicitly.
+   */
+  enablePostTurnBriefing?: boolean;
 }
 
 export interface WebSearchSettings {

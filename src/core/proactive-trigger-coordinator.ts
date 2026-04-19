@@ -36,6 +36,7 @@ export interface CoordinatorDeps {
 
 export class ProactiveTriggerCoordinator {
   private timer: NodeJS.Timeout | null = null;
+  /** Shared across ALL signals — prevents double-briefing race (Issue 3). */
   private lastFiredAt = 0;
   private running = false;
   private readonly tickIntervalMs: number;
@@ -78,6 +79,15 @@ export class ProactiveTriggerCoordinator {
     void this.evaluateAll(`event:${event}`).catch((e: Error) =>
       this.logger(`[proactive-coordinator] notify(${event}) failed: ${e.message}`),
     );
+  }
+
+  /**
+   * Issue 3 fix: shared global cooldown check for external callers (e.g. the
+   * IDLE_SCAN composite listener in boot.ts). Returns true when a briefing has
+   * fired within `windowMs` milliseconds. Default matches coordinator debounce.
+   */
+  isWithinGlobalCooldown(windowMs = this.debounceMs): boolean {
+    return Date.now() - this.lastFiredAt < windowMs;
   }
 
   /** Test hook. */

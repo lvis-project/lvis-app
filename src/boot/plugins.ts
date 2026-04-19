@@ -161,6 +161,50 @@ export function buildManifestEventHints(
   return hints;
 }
 
+/**
+ * manifest.emittedEvents 선언 기반으로 renderer 이벤트 브릿지를 등록한다.
+ * classifySubscription("public") 판정을 통과한 이벤트만 webContents.send 로 전달.
+ * 플러그인 특정 리터럴 없음 — boot.ts에 plugin ID/event 하드코딩 금지.
+ */
+export function registerPluginEventBridge(
+  pluginRuntime: PluginRuntime,
+  mainWindow: import("electron").BrowserWindow,
+): () => void {
+  const registered: Array<{ type: string; handler: EventHandler }> = [];
+  const registeredEvents = new Set<string>();
+
+  for (const { manifest } of pluginRuntime.listPluginManifests()) {
+    for (const eventType of manifest.emittedEvents ?? []) {
+      if (registeredEvents.has(eventType)) continue;
+      const verdict = classifySubscription(eventType);
+      if (verdict === "private") {
+        console.warn(
+          `[lvis] boot: emittedEvents["${eventType}"] is private-namespace — bridge skipped`,
+        );
+        continue;
+      }
+      registeredEvents.add(eventType);
+      const handler: EventHandler = (data) => {
+        if (mainWindow.isDestroyed()) return;
+        try {
+          mainWindow.webContents.send("lvis:plugin:event", eventType, data);
+        } catch (e) {
+          console.warn(
+            `[lvis] boot: plugin-event-bridge send failed (${eventType}):`,
+            (e as Error).message,
+          );
+        }
+      };
+      onEvent(eventType, handler);
+      registered.push({ type: eventType, handler });
+    }
+  }
+
+  return () => {
+    for (const { type, handler } of registered) offEvent(type, handler);
+  };
+}
+
 /** manifest.notificationEvents 선언 기반으로 OS 알림을 등록한다. 플러그인 특정 코드 없음. */
 export function registerPluginNotifications(
   pluginRuntime: PluginRuntime,
