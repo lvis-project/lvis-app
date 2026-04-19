@@ -10,6 +10,7 @@ import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { AuditLogger } from "./audit/audit-logger.js";
 import { PluginRuntime } from "./plugins/runtime.js";
+import { startPluginDevWatcher } from "./plugins/dev-watcher.js";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { PluginUpdateDetector, isUpdateCheckEnabled } from "./plugins/update-detector.js";
@@ -347,6 +348,21 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // 플러그인 메서드를 ToolRegistry에 등록 (범용)
   registerPluginTools(pluginRuntime, toolRegistry);
+
+  // I2 — Dev-mode plugin live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
+  // After a successful reload the plugin's tools are re-registered into the
+  // canonical ToolRegistry so conversationLoop sees the fresh handler.
+  const pluginDevWatcher = startPluginDevWatcher({
+    pluginRuntime,
+    onReloaded: (pluginId) => {
+      const manifest = pluginRuntime.getPluginManifest(pluginId);
+      if (!manifest) return;
+      // onDisable already scrubbed the toolRegistry during reload; re-register.
+      registerPluginTools(pluginRuntime, toolRegistry);
+      console.log(`[lvis] plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`);
+    },
+  });
+  app.prependOnceListener("before-quit", () => { pluginDevWatcher.stop(); });
 
   // 빌트인 도구 등록 (호스트 자체 기능)
   registerBuiltinTools(memoryManager, toolRegistry, settingsService);
