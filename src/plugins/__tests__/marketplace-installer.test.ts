@@ -10,14 +10,14 @@ import { describe, expect, it, vi } from "vitest";
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join} from "node:path";
 import {
   installFromMarketplace,
   isMarketplaceDirectPreferred,
   isNpmFallbackEnabled,
   MarketplaceInstallerError,
-  type MarketplaceHttp,
+  type MarketplaceHttp
 } from "../marketplace-installer.js";
 import { verifyEnvelope } from "../envelope-verifier.js";
 import type { SignatureEnvelope } from "../types.js";
@@ -38,14 +38,14 @@ function makeEnvelope(
   const signatures = signers.map(({ key_id, privateKey }) => ({
     key_id,
     alg: "ed25519" as const,
-    sig: cryptoSign(null, tarball, privateKey).toString("base64"),
+    sig: cryptoSign(null, tarball, privateKey).toString("base64")
   }));
   return {
     version: 1,
     iat: Math.floor(Date.now() / 1000),
     artifact_sha256,
     signatures,
-    ...overrides,
+    ...overrides
   };
 }
 
@@ -78,27 +78,27 @@ function fakeHttp(
           body,
           sha256Header: computed,
           status: step.status,
-          retryAfterSeconds: step.retryAfterSeconds,
+          retryAfterSeconds: step.retryAfterSeconds
         };
       }
       return {
         body,
         sha256Header: computed,
         status: extras.status ?? 200,
-        retryAfterSeconds: extras.retryAfterSeconds,
+        retryAfterSeconds: extras.retryAfterSeconds
       };
     },
     async fetchSignatureEnvelope() {
       envelopeCalls++;
       if (extras.envelopeError) throw extras.envelopeError;
       return envelope;
-    },
+    }
   } as MarketplaceHttp & { downloadCalls: number; envelopeCalls: number };
   return http;
 }
 
 function tmpDownloadRoot(): string {
-  return mkdtempSync(resolve(tmpdir(), "s2-installer-"));
+  return mkdtempSync(join(homedir(), ".lvis", "test-tmp", "s2-installer-"));
 }
 
 describe("installFromMarketplace — happy path", () => {
@@ -112,7 +112,7 @@ describe("installFromMarketplace — happy path", () => {
       const out = await installFromMarketplace("acme-notes", "1.0.0", {
         http,
         publicKeys: { "prod-v1": pubBuf },
-        downloadRoot: root,
+        downloadRoot: root
       });
       expect(out.slug).toBe("acme-notes");
       expect(out.version).toBe("1.0.0");
@@ -140,7 +140,7 @@ describe("installFromMarketplace — integrity failures", () => {
         installFromMarketplace("x", "1.0.0", {
           http,
           publicKeys: { "prod-v1": pubBuf },
-          downloadRoot: root,
+          downloadRoot: root
         }),
       ).rejects.toMatchObject({ code: "SHA256_HEADER_MISMATCH" });
     } finally {
@@ -152,7 +152,7 @@ describe("installFromMarketplace — integrity failures", () => {
     const tarball = Buffer.from("real-body");
     const { privateKey, pubBuf } = freshEd25519();
     const envelope = makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }], {
-      artifact_sha256: "00".repeat(32),
+      artifact_sha256: "00".repeat(32)
     });
     const http = fakeHttp(tarball, envelope);
     const root = tmpDownloadRoot();
@@ -161,7 +161,7 @@ describe("installFromMarketplace — integrity failures", () => {
         installFromMarketplace("x", "1.0.0", {
           http,
           publicKeys: { "prod-v1": pubBuf },
-          downloadRoot: root,
+          downloadRoot: root
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
@@ -186,7 +186,7 @@ describe("installFromMarketplace — integrity failures", () => {
         installFromMarketplace("x", "1.0.0", {
           http,
           publicKeys: { "prod-v1": pubBuf },
-          downloadRoot: root,
+          downloadRoot: root
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
@@ -205,9 +205,9 @@ describe("installFromMarketplace — integrity failures", () => {
         {
           key_id: "prod-v1",
           alg: "ed25519",
-          sig: Buffer.alloc(64, 0xaa).toString("base64"),
+          sig: Buffer.alloc(64, 0xaa).toString("base64")
         },
-      ],
+      ]
     };
     const http = fakeHttp(tarball, envelope);
     const root = tmpDownloadRoot();
@@ -216,7 +216,7 @@ describe("installFromMarketplace — integrity failures", () => {
         installFromMarketplace("x", "1.0.0", {
           http,
           publicKeys: { "prod-v1": pubBuf },
-          downloadRoot: root,
+          downloadRoot: root
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
@@ -237,7 +237,7 @@ describe("installFromMarketplace — key rotation", () => {
       const out = await installFromMarketplace("x", "1.0.0", {
         http,
         publicKeys: { "dev-v1": dev.pubBuf, "prod-v1": prod.pubBuf },
-        downloadRoot: root,
+        downloadRoot: root
       });
       expect(out.signerKeyId).toBe("prod-v1");
     } finally {
@@ -257,7 +257,7 @@ describe("installFromMarketplace — key rotation", () => {
         installFromMarketplace("x", "1.0.0", {
           http,
           publicKeys: { "prod-v1": prod.pubBuf },
-          downloadRoot: root,
+          downloadRoot: root
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
@@ -279,7 +279,7 @@ describe("installFromMarketplace — key rotation", () => {
       const out = await installFromMarketplace("x", "1.0.0", {
         http,
         publicKeys: { "prod-v1": prod.pubBuf },
-        downloadRoot: root,
+        downloadRoot: root
       });
       expect(out.signerKeyId).toBe("prod-v1");
     } finally {
@@ -293,7 +293,7 @@ describe("installFromMarketplace — envelope guards", () => {
     const tarball = Buffer.from("skew");
     const { privateKey, pubBuf } = freshEd25519();
     const envelope = makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }], {
-      iat: Math.floor(Date.now() / 1000) + 100 * 3600,
+      iat: Math.floor(Date.now() / 1000) + 100 * 3600
     });
     const http = fakeHttp(tarball, envelope);
     const root = tmpDownloadRoot();
@@ -302,7 +302,7 @@ describe("installFromMarketplace — envelope guards", () => {
         installFromMarketplace("x", "1.0.0", {
           http,
           publicKeys: { "prod-v1": pubBuf },
-          downloadRoot: root,
+          downloadRoot: root
         }),
       ).rejects.toMatchObject({ code: "CLOCK_SKEW" });
     } finally {
@@ -321,9 +321,9 @@ describe("installFromMarketplace — envelope guards", () => {
         {
           key_id: "prod-v1",
           alg: "rsa-pss" as unknown as "ed25519",
-          sig: Buffer.alloc(64, 0).toString("base64"),
+          sig: Buffer.alloc(64, 0).toString("base64")
         },
-      ],
+      ]
     };
     const http = fakeHttp(tarball, envelope);
     const root = tmpDownloadRoot();
@@ -332,7 +332,7 @@ describe("installFromMarketplace — envelope guards", () => {
         installFromMarketplace("x", "1.0.0", {
           http,
           publicKeys: { "prod-v1": pubBuf },
-          downloadRoot: root,
+          downloadRoot: root
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
@@ -347,7 +347,7 @@ describe("installFromMarketplace — envelope guards", () => {
       version: 1,
       iat: Math.floor(Date.now() / 1000),
       artifact_sha256: createHash("sha256").update(tarball).digest("hex"),
-      signatures: [],
+      signatures: []
     };
     const http = fakeHttp(tarball, envelope);
     const root = tmpDownloadRoot();
@@ -356,7 +356,7 @@ describe("installFromMarketplace — envelope guards", () => {
         installFromMarketplace("x", "1.0.0", {
           http,
           publicKeys: { "prod-v1": pubBuf },
-          downloadRoot: root,
+          downloadRoot: root
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
@@ -368,7 +368,7 @@ describe("installFromMarketplace — envelope guards", () => {
     const tarball = Buffer.from("env-fail");
     const { pubBuf } = freshEd25519();
     const http = fakeHttp(tarball, {} as SignatureEnvelope, null, {
-      envelopeError: new Error("network unreachable"),
+      envelopeError: new Error("network unreachable")
     });
     const root = tmpDownloadRoot();
     try {
@@ -376,7 +376,7 @@ describe("installFromMarketplace — envelope guards", () => {
         installFromMarketplace("x", "1.0.0", {
           http,
           publicKeys: { "prod-v1": pubBuf },
-          downloadRoot: root,
+          downloadRoot: root
         }),
       ).rejects.toMatchObject({ code: "ENVELOPE_FETCH_FAILED" });
     } finally {
@@ -396,14 +396,14 @@ describe("installFromMarketplace — HTTP handling", () => {
         { status: 429, retryAfterSeconds: 0 },
         { status: 429, retryAfterSeconds: 0 },
         { status: 200 },
-      ],
+      ]
     });
     const root = tmpDownloadRoot();
     try {
       const promise = installFromMarketplace("x", "1.0.0", {
         http,
         publicKeys: { "prod-v1": pubBuf },
-        downloadRoot: root,
+        downloadRoot: root
       });
       await vi.runAllTimersAsync();
       const out = await promise;
@@ -420,7 +420,7 @@ describe("installFromMarketplace — HTTP handling", () => {
     const tarball = Buffer.from("5xx");
     const { pubBuf } = freshEd25519();
     const http = fakeHttp(tarball, {} as SignatureEnvelope, null, {
-      status: 503,
+      status: 503
     });
     const root = tmpDownloadRoot();
     try {
@@ -428,7 +428,7 @@ describe("installFromMarketplace — HTTP handling", () => {
         http,
         publicKeys: { "prod-v1": pubBuf },
         downloadRoot: root,
-        maxRetries: 2,
+        maxRetries: 2
       });
       const caught = promise.catch((e) => e);
       await vi.runAllTimersAsync();
@@ -445,7 +445,7 @@ describe("installFromMarketplace — HTTP handling", () => {
   it("throws CLIENT_ERROR immediately on 404 (no retry)", async () => {
     const { pubBuf } = freshEd25519();
     const http = fakeHttp(Buffer.alloc(0), {} as SignatureEnvelope, null, {
-      status: 404,
+      status: 404
     });
     const root = tmpDownloadRoot();
     try {
@@ -453,7 +453,7 @@ describe("installFromMarketplace — HTTP handling", () => {
         installFromMarketplace("x", "1.0.0", {
           http,
           publicKeys: { "prod-v1": pubBuf },
-          downloadRoot: root,
+          downloadRoot: root
         }),
       ).rejects.toMatchObject({ code: "CLIENT_ERROR" });
       expect(http.downloadCalls).toBe(1);
@@ -475,19 +475,19 @@ describe("installFromMarketplace — HTTP handling", () => {
         return {
           body: tarball,
           sha256Header: createHash("sha256").update(tarball).digest("hex"),
-          status: 200,
+          status: 200
         };
       },
       async fetchSignatureEnvelope() {
         return envelope;
-      },
+      }
     };
     const root = tmpDownloadRoot();
     try {
       const promise = installFromMarketplace("x", "1.0.0", {
         http,
         publicKeys: { "prod-v1": pubBuf },
-        downloadRoot: root,
+        downloadRoot: root
       });
       await vi.runAllTimersAsync();
       const out = await promise;

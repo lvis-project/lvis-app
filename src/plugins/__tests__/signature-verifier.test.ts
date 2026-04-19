@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { PluginSignatureVerifier } from "../signature-verifier.js";
@@ -18,7 +18,7 @@ describe("PluginSignatureVerifier", () => {
   let privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"];
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `lvis-sig-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-sig-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(testDir, { recursive: true });
     manifestPath = join(testDir, "plugin.json");
     await writeFile(
