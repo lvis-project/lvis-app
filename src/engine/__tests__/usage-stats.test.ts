@@ -5,7 +5,9 @@ import { join } from "node:path";
 import {
   computeUsageSummary,
   readAuditEntries,
+  computeMonthlyProjection,
   type AuditTurnEntry,
+  type UsageTrendPoint,
 } from "../usage-stats.js";
 import { getModelPricing, computeCost } from "../llm/pricing.js";
 
@@ -102,6 +104,53 @@ describe("usage-stats", () => {
       const read = readAuditEntries(dir, 30);
       expect(read.length).toBe(2);
       expect(read.every((e) => e.type === "turn")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("computeMonthlyProjection", () => {
+  it("returns 0 for empty trend", () => {
+    expect(computeMonthlyProjection([])).toBe(0);
+  });
+
+  it("projects avg-per-day × 30", () => {
+    const trend: UsageTrendPoint[] = [
+      { date: "2026-04-01", inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 1.0 },
+      { date: "2026-04-02", inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 3.0 },
+    ];
+    expect(computeMonthlyProjection(trend)).toBeCloseTo(60, 5);
+  });
+
+  it("projects correctly for a single day", () => {
+    const trend: UsageTrendPoint[] = [
+      { date: "2026-04-01", inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0.5 },
+    ];
+    expect(computeMonthlyProjection(trend)).toBeCloseTo(15, 5);
+  });
+});
+
+describe("getUsageRange (via readAuditEntries + filter)", () => {
+  it("filters entries to exact date range", () => {
+    const dir = mkdtempSync(join(tmpdir(), "usage-range-"));
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "2026-04-10.jsonl"),
+        JSON.stringify({ timestamp: "2026-04-10T10:00:00Z", sessionId: "s1", type: "turn", route: "claude/claude-sonnet-4-6", tokenUsage: { inputTokens: 100, outputTokens: 50 } }) + "\n", "utf-8");
+      writeFileSync(join(dir, "2026-04-15.jsonl"),
+        JSON.stringify({ timestamp: "2026-04-15T10:00:00Z", sessionId: "s1", type: "turn", route: "claude/claude-sonnet-4-6", tokenUsage: { inputTokens: 200, outputTokens: 100 } }) + "\n", "utf-8");
+      writeFileSync(join(dir, "2026-04-20.jsonl"),
+        JSON.stringify({ timestamp: "2026-04-20T10:00:00Z", sessionId: "s1", type: "turn", route: "claude/claude-sonnet-4-6", tokenUsage: { inputTokens: 400, outputTokens: 200 } }) + "\n", "utf-8");
+
+      const entries = readAuditEntries(dir, 365).filter((e) => {
+        const d = e.timestamp.slice(0, 10);
+        return d >= "2026-04-10" && d <= "2026-04-15";
+      });
+      const summary = computeUsageSummary(entries);
+      expect(summary.trend.map((t) => t.date)).toEqual(["2026-04-10", "2026-04-15"]);
+      expect(summary.trend[0].inputTokens).toBe(100);
+      expect(summary.trend[1].inputTokens).toBe(200);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
