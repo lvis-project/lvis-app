@@ -14,7 +14,7 @@ export interface SettingsOrchestrationState {
   hasKey: boolean;
   setHasKey: (v: boolean) => void;
   autoCompact: boolean;
-  setAutoCompact: (v: boolean) => void;
+  setAutoCompact: (updater: boolean | ((prev: boolean) => boolean)) => void;
   enableThinking: boolean;
   setEnableThinking: (v: boolean) => void;
   thinkingBudget: number;
@@ -39,9 +39,9 @@ export interface SettingsOrchestrationState {
   streamSmoothing: "none" | "word" | "char";
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
   fallbackChain: FallbackEntry[];
-  setFallbackChain: (v: FallbackEntry[]) => void;
+  setFallbackChain: (updater: FallbackEntry[] | ((c: FallbackEntry[]) => FallbackEntry[])) => void;
   fallbackOpen: boolean;
-  setFallbackOpen: (v: boolean) => void;
+  setFallbackOpen: (updater: boolean | ((o: boolean) => boolean)) => void;
   // Web
   webProvider: string;
   setWebProvider: (v: string) => void;
@@ -51,7 +51,7 @@ export interface SettingsOrchestrationState {
   setHasWebKey: (v: boolean) => void;
   // Proactive / Privacy
   enableDailyBriefing: boolean;
-  setEnableDailyBriefing: (v: boolean) => void;
+  setEnableDailyBriefing: (updater: boolean | ((prev: boolean) => boolean)) => void;
   piiRedactEnabled: boolean;
   setPiiRedactEnabled: (v: boolean) => void;
   // Lifecycle
