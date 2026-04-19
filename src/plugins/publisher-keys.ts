@@ -16,7 +16,11 @@
  */
 
 import { createPublicKey } from "node:crypto";
-import { MARKETPLACE_PUBLIC_KEYS } from "@lvis/plugin-sdk/keys";
+import { MARKETPLACE_PUBLIC_KEYS as RAW_MARKETPLACE_PUBLIC_KEYS } from "@lvis/plugin-sdk/keys";
+
+/** Locally-typed alias — SDK export returns `unknown` per-value; narrow once. */
+const MARKETPLACE_PUBLIC_KEYS: Record<string, string> =
+  RAW_MARKETPLACE_PUBLIC_KEYS as Record<string, string>;
 
 /**
  * Ed25519 SPKI DER prefix (12 bytes): SEQUENCE, length, SEQUENCE, OID
@@ -47,7 +51,7 @@ function rawEd25519ToPem(rawBase64: string): string {
  */
 export function getBundledPublicKeys(): Record<string, Buffer> {
   return Object.fromEntries(
-    (Object.entries(MARKETPLACE_PUBLIC_KEYS) as [string, string][]).map(([id, b64]) => {
+    Object.entries(MARKETPLACE_PUBLIC_KEYS).map(([id, b64]) => {
       const buf = Buffer.from(b64, "base64");
       if (buf.length !== 32) {
         throw new Error(
@@ -64,6 +68,5 @@ export function getBundledPublicKeys(): Record<string, Buffer> {
  * `PluginSignatureVerifier` (manifest signature path). The verifier accepts
  * a signature that matches ANY configured key — additive rotation is safe.
  */
-export const BUNDLED_PUBLISHER_PUBLIC_KEYS: string[] = (
-  Object.values(MARKETPLACE_PUBLIC_KEYS) as string[]
-).map(rawEd25519ToPem);
+export const BUNDLED_PUBLISHER_PUBLIC_KEYS: string[] =
+  Object.values(MARKETPLACE_PUBLIC_KEYS).map(rawEd25519ToPem);
