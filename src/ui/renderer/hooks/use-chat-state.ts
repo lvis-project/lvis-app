@@ -124,6 +124,22 @@ export function useChatState(api: LvisApi) {
     return () => { unsub(); };
   }, [api]);
 
+  // Fallback toast — shown briefly when the LLM provider auto-switches.
+  const [fallbackToast, setFallbackToast] = useState<string | null>(null);
+  const fallbackToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const unsub = api.onChatFallback(({ from, to }) => {
+      if (!aliveRef.current) return;
+      if (fallbackToastTimerRef.current) clearTimeout(fallbackToastTimerRef.current);
+      setFallbackToast(`⚡ ${from}→${to} 자동 전환`);
+      fallbackToastTimerRef.current = setTimeout(() => setFallbackToast(null), 4000);
+    });
+    return () => {
+      unsub();
+      if (fallbackToastTimerRef.current) clearTimeout(fallbackToastTimerRef.current);
+    };
+  }, [api]);
+
   const handleEditSave = useCallback(
     async (entryIdx: number, newText: string) => {
       const histIdx = entryIndexToHistoryIndex.get(entryIdx);
@@ -267,6 +283,7 @@ export function useChatState(api: LvisApi) {
     setEditingEntryIdx,
     editBusy,
     entryIndexToHistoryIndex,
+    fallbackToast,
     handleEditSave,
     handleRetryEffort,
     resetStreamAccumulators,
