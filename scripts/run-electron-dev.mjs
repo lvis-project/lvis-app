@@ -1,0 +1,202 @@
+#!/usr/bin/env node
+// Dev runner: watches main/preload/renderer/styles and restarts Electron on main changes.
+// Production entrypoint remains scripts/run-electron.mjs (via `bun run start`).
+//
+// Usage: node scripts/run-electron-dev.mjs [--no-plugins]
+//
+// Env:
+//   LVIS_DEV=1 (forced)
+//
+// Behavior:
+//   - tsc --watch for main (src -> dist/src)
+//   - esbuild --watch for preload (CJS)
+//   - esbuild --watch for renderer (ESM, browser)
+//   - tailwindcss --watch for styles
+//   - copies src/index.html once (and on change)
+//   - launches electron dist/src/main.js after initial build
+//   - restarts electron when dist/src/main.js changes (debounced)
+
+import { spawn } from "node:child_process";
+import { existsSync, watch, copyFileSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import electronPath from "electron";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, "..");
+const mainOutput = resolve(repoRoot, "dist/src/main.js");
+const htmlSrc = resolve(repoRoot, "src/index.html");
+const htmlOut = resolve(repoRoot, "dist/src/index.html");
+
+const argv = new Set(process.argv.slice(2));
+const skipPlugins = argv.has("--no-plugins");
+
+const children = [];
+let electronProc = null;
+let restartTimer = null;
+let shuttingDown = false;
+
+function log(tag, msg) {
+  process.stdout.write(`[dev:${tag}] ${msg}\n`);
+}
+
+function spawnWatcher(tag, cmd, args, opts = {}) {
+  const child = spawn(cmd, args, {
+    cwd: repoRoot,
+    stdio: ["ignore", "inherit", "inherit"],
+    env: { ...process.env, LVIS_DEV: "1" },
+    ...opts,
+  });
+  child.on("exit", (code) => {
+    if (!shuttingDown) log(tag, `watcher exited code=${code}`);
+  });
+  children.push(child);
+  return child;
+}
+
+function copyHtml() {
+  try {
+    mkdirSync(dirname(htmlOut), { recursive: true });
+    copyFileSync(htmlSrc, htmlOut);
+    log("html", "copied index.html");
+  } catch (err) {
+    log("html", `copy failed: ${err.message}`);
+  }
+}
+
+function launchElectron() {
+  if (electronProc) return;
+  log("electron", `launching ${mainOutput}`);
+  electronProc = spawn(electronPath, [mainOutput], {
+    cwd: repoRoot,
+    stdio: "inherit",
+    env: { ...process.env, LVIS_DEV: "1", ELECTRON_RUN_AS_NODE: undefined },
+  });
+  electronProc.on("exit", (code, signal) => {
+    log("electron", `exited code=${code} signal=${signal ?? "-"}`);
+    electronProc = null;
+    if (!shuttingDown && signal !== "SIGTERM" && signal !== "SIGKILL") {
+      // If electron exited on its own (window closed), shut down dev loop.
+      shutdown(0);
+    }
+  });
+}
+
+function scheduleRestart() {
+  if (restartTimer) clearTimeout(restartTimer);
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    if (shuttingDown) return;
+    if (electronProc) {
+      log("electron", "main changed -> restarting");
+      electronProc.once("exit", () => launchElectron());
+      electronProc.kill("SIGTERM");
+    } else {
+      launchElectron();
+    }
+  }, 400);
+}
+
+async function waitForMain(timeoutMs = 60_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (existsSync(mainOutput)) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
+
+function shutdown(code = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log("dev", "shutting down");
+  if (electronProc) {
+    try { electronProc.kill("SIGTERM"); } catch {}
+  }
+  for (const c of children) {
+    try { c.kill("SIGTERM"); } catch {}
+  }
+  setTimeout(() => process.exit(code), 200);
+}
+
+process.on("SIGINT", () => shutdown(0));
+process.on("SIGTERM", () => shutdown(0));
+
+async function main() {
+  log("dev", `LVIS_DEV=1 skipPlugins=${skipPlugins}`);
+
+  if (!skipPlugins) {
+    log("plugins", "building plugins (one-shot)");
+    const plugins = spawn("bun", ["run", "prepare:plugins"], {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env: process.env,
+    });
+    await new Promise((res) => plugins.on("exit", res));
+  }
+
+  // Initial html copy
+  copyHtml();
+  try {
+    watch(htmlSrc, { persistent: true }, () => copyHtml());
+  } catch (err) {
+    log("html", `watch failed: ${err.message}`);
+  }
+
+  // Main (tsc --watch)
+  spawnWatcher("main", "npx", ["tsc", "-p", "tsconfig.json", "--watch", "--preserveWatchOutput"]);
+
+  // Preload (esbuild --watch)
+  spawnWatcher("preload", "npx", [
+    "esbuild",
+    "src/preload.ts",
+    "--bundle",
+    "--platform=node",
+    "--format=cjs",
+    "--external:electron",
+    "--outfile=dist/src/preload.js",
+    "--watch",
+  ]);
+
+  // Renderer (esbuild --watch)
+  spawnWatcher("renderer", "npx", [
+    "esbuild",
+    "src/renderer.tsx",
+    "--bundle",
+    "--platform=browser",
+    "--format=esm",
+    "--outfile=dist/src/renderer.js",
+    "--watch",
+  ]);
+
+  // Styles (tailwind --watch)
+  spawnWatcher("styles", "npx", [
+    "tailwindcss",
+    "-i",
+    "src/styles.css",
+    "-o",
+    "dist/src/styles.css",
+    "--watch",
+  ]);
+
+  const ok = await waitForMain();
+  if (!ok) {
+    log("dev", "timed out waiting for dist/src/main.js");
+    shutdown(1);
+    return;
+  }
+
+  launchElectron();
+
+  // Watch main output for rebuilds
+  try {
+    watch(mainOutput, { persistent: true }, () => scheduleRestart());
+  } catch (err) {
+    log("main", `watch failed: ${err.message}`);
+  }
+}
+
+main().catch((err) => {
+  log("dev", `fatal: ${err?.stack ?? err}`);
+  shutdown(1);
+});
