@@ -1,0 +1,337 @@
+/**
+ * Boot §4.2 Step 3-5 — Plugin runtime + HostApi factory.
+ *
+ * Extracted from boot.ts to keep orchestration thin. This module:
+ *   • constructs the PluginDeploymentGuard + SignatureVerifier
+ *   • builds the per-plugin HostApi factory (registerKeywords / emitEvent /
+ *     onEvent / addTask / saveNote / getSecret / msGraph* / callLlm /
+ *     logEvent / onShutdown)
+ *   • creates the PluginRuntime, starts plugins, wires manifest startupTools
+ *     and the dev hot-reload watcher
+ *   • returns the runtime + late-binding refs (llmCallerRef / pluginCallLlmRef /
+ *     conversationLoopRef) that boot.ts injects once ConversationLoop exists.
+ *
+ * No plugin-specific literals here — everything is manifest-driven.
+ */
+import { resolve } from "node:path";
+import { app } from "electron";
+import type { BrowserWindow } from "electron";
+import { AuditLogger } from "../../audit/audit-logger.js";
+import { PluginRuntime } from "../../plugins/runtime.js";
+import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
+import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
+import { PluginSignatureVerifier } from "../../plugins/signature-verifier.js";
+import { BUNDLED_PUBLISHER_PUBLIC_KEYS } from "../../plugins/publisher-keys.js";
+import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
+import { withMsGraphRetry } from "../../main/ms-graph-retry.js";
+import type { PluginHostApi } from "../../plugins/types.js";
+import type { KeywordEngine } from "../../core/keyword-engine.js";
+import type { ToolRegistry } from "../../tools/registry.js";
+import type { SettingsService } from "../../data/settings-store.js";
+import type { MemoryManager } from "../../memory/memory-manager.js";
+import type { TaskService } from "../../taskService.js";
+import type { MsGraphService } from "../../main/ms-graph-service.js";
+import { emitEvent, onEvent } from "../types.js";
+import {
+  buildPluginConfigOverrides,
+  registerPluginTools,
+  runManifestStartupTools,
+} from "../plugins.js";
+
+/** Late-binding container the ConversationLoop fills in after it exists. */
+export interface LateBindingRefs {
+  llmCallerRef: {
+    fn:
+      | ((prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string>)
+      | null;
+  };
+  pluginCallLlmRef: {
+    fn:
+      | ((
+          pluginId: string,
+          prompt: string,
+          opts?: { maxTokens?: number; systemPrompt?: string },
+        ) => Promise<string>)
+      | null;
+  };
+  conversationLoopRef: {
+    fn: import("../../engine/conversation-loop.js").ConversationLoop | null;
+  };
+}
+
+export interface InitPluginRuntimeInput {
+  projectRoot: string;
+  settingsService: SettingsService;
+  memoryManager: MemoryManager;
+  keywordEngine: KeywordEngine;
+  toolRegistry: ToolRegistry;
+  taskService: TaskService;
+  msGraphService: MsGraphService;
+  pythonPath: string | undefined;
+  bootAuditLogger: AuditLogger;
+}
+
+export interface InitPluginRuntimeOutput {
+  pluginRuntime: PluginRuntime;
+  deploymentGuard: PluginDeploymentGuard;
+  taskSourceRegistry: TaskSourceRegistry;
+  lateBinding: LateBindingRefs;
+  pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }>;
+}
+
+/**
+ * §4.2 Step 3-5 — construct PluginRuntime, register the per-plugin HostApi
+ * factory, start all plugins, run manifest startupTools, register plugin
+ * tools into ToolRegistry, and wire the dev hot-reload watcher.
+ */
+export async function initPluginRuntime(
+  input: InitPluginRuntimeInput,
+): Promise<InitPluginRuntimeOutput> {
+  const {
+    projectRoot,
+    settingsService,
+    memoryManager,
+    keywordEngine,
+    toolRegistry,
+    taskService,
+    msGraphService,
+    pythonPath,
+    bootAuditLogger,
+  } = input;
+
+  // Plugin shutdown handler registry — fires on before-quit (see Sprint 1-A A3).
+  const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }> = [];
+  let pluginShutdownRan = false;
+  app.prependOnceListener("before-quit", (event) => {
+    if (pluginShutdownHandlers.length === 0 || pluginShutdownRan) return;
+    pluginShutdownRan = true;
+    const SHUTDOWN_TIMEOUT_MS = 5000;
+    event.preventDefault();
+    void (async () => {
+      await Promise.allSettled(
+        pluginShutdownHandlers.map(async ({ pluginId, handler }) => {
+          let timer: NodeJS.Timeout | undefined;
+          try {
+            await Promise.race([
+              Promise.resolve().then(() => handler()),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error("shutdown handler timeout")), SHUTDOWN_TIMEOUT_MS);
+              }),
+            ]);
+          } catch (err) {
+            console.warn(`[plugin:${pluginId}] shutdown handler error:`, (err as Error).message);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        }),
+      );
+      app.quit();
+    })();
+  });
+
+  // TaskSource 자기 등록 레지스트리
+  const taskSourceRegistry = new TaskSourceRegistry();
+
+  // 범용 configOverrides + pythonExecutable 선언형 주입
+  const configOverrides = buildPluginConfigOverrides(settingsService);
+  if (pythonPath) {
+    configOverrides["*"] = {
+      ...(configOverrides["*"] ?? {}),
+      pythonExecutable: pythonPath,
+    };
+  }
+
+  // §7.2 Plugin Deployment Guard
+  const deploymentGuard = new PluginDeploymentGuard({
+    registryPath: resolve(projectRoot, "plugins/registry.json"),
+    userInstalledDir: resolve(projectRoot, "plugins/installed"),
+  });
+
+  // Late-binding refs for ConversationLoop-dependent callers.
+  const lateBinding: LateBindingRefs = {
+    llmCallerRef: { fn: null },
+    pluginCallLlmRef: { fn: null },
+    conversationLoopRef: { fn: null },
+  };
+
+  // Sprint 4-B §B-4 — signature verifier wired end-to-end.
+  if (app.isPackaged && process.env.LVIS_DEV_SKIP_SIG) {
+    console.error("[lvis] LVIS_DEV_SKIP_SIG ignored in packaged build");
+  }
+  const skipSig = !app.isPackaged && process.env.LVIS_DEV_SKIP_SIG === "1";
+  const signatureVerifier = skipSig
+    ? undefined
+    : new PluginSignatureVerifier({
+        publisherPublicKeysPem: BUNDLED_PUBLISHER_PUBLIC_KEYS,
+      });
+  if (skipSig) {
+    console.warn("[lvis] boot: LVIS_DEV_SKIP_SIG=1 — plugin signature verification disabled (dev-only)");
+  }
+
+  // Capability gate helper (§B-5) — msGraph HostApi methods.
+  let pluginRuntime!: PluginRuntime;
+  const capabilityDeniedMsg = (pluginId: string) =>
+    `[plugin:${pluginId}] capability not declared: ms-graph-consumer`;
+  const hasMsGraphCapability = (pluginId: string): boolean => {
+    const manifest = pluginRuntime?.getPluginManifest(pluginId);
+    return manifest?.capabilities?.includes("ms-graph-consumer") ?? false;
+  };
+
+  pluginRuntime = new PluginRuntime({
+    hostRoot: projectRoot,
+    registryPath: resolve(projectRoot, "plugins/registry.json"),
+    configOverrides,
+    deploymentGuard,
+    signatureVerifier,
+    auditLog: (level, message, data) => {
+      try {
+        bootAuditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "plugin-runtime",
+          type: level === "error" ? "error" : "tool_call",
+          input: `[${level.toUpperCase()}] ${message}`,
+          output: data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
+        });
+      } catch {}
+    },
+    onDisable: (pluginId) => {
+      keywordEngine.unregisterByPlugin(pluginId);
+      toolRegistry.unregisterByPlugin(pluginId);
+      lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
+    },
+    createHostApi: (pluginId: string): PluginHostApi => ({
+      registerKeywords: (keywords) => {
+        keywordEngine.registerKeywords(
+          keywords.map((k) => ({ ...k, pluginId })),
+        );
+        console.log(`[lvis] plugin:${pluginId} registered ${keywords.length} keywords`);
+      },
+      emitEvent: (type, data) => {
+        const requiredCap = requiredCapabilityForEmit(type);
+        if (requiredCap) {
+          const manifest = pluginRuntime?.getPluginManifest(pluginId);
+          if (!manifest?.capabilities?.includes(requiredCap)) {
+            try {
+              bootAuditLogger.log({
+                timestamp: new Date().toISOString(),
+                sessionId: "plugin",
+                type: "error",
+                input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} actual=${(manifest?.capabilities ?? []).join("|")}`,
+              });
+            } catch { /* audit must not break host */ }
+            console.warn(
+              `[lvis] plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${requiredCap}'`,
+            );
+            return;
+          }
+        }
+        emitEvent(type, { pluginId, ...((data as Record<string, unknown>) ?? {}) });
+      },
+      onEvent: (type, handler) => {
+        const unsubscribe = onEvent(type, handler);
+        pluginRuntime.registerDisposer(pluginId, unsubscribe);
+        return unsubscribe;
+      },
+      addTask: (task) => {
+        const categoryId = deriveCategoryId(pluginId, task.source);
+        taskSourceRegistry.register({ id: categoryId, origin: "plugin", pluginId });
+        taskService.add({
+          title: task.title,
+          description: task.description,
+          source: categoryId,
+          sourceRef: task.sourceRef,
+          priority: task.priority ?? "medium",
+          status: "pending",
+        });
+        console.log(`[lvis] plugin:${pluginId} created task: "${task.title.slice(0, 50)}"`);
+      },
+      saveNote: async (title, content) => {
+        await memoryManager.saveNote(title, content);
+        console.log(`[lvis] plugin:${pluginId} saved note: "${title}"`);
+      },
+      getSecret: (key) => {
+        return settingsService.getSecret(key);
+      },
+      getMsGraphToken: () => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        return msGraphService.getAccessToken();
+      },
+      startMsGraphAuth: async (openBrowser) => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        await msGraphService.startInteractiveAuth(openBrowser);
+      },
+      isMsGraphAuthenticated: () => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        return msGraphService.isAuthenticated();
+      },
+      getMsGraphAccount: () => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        return msGraphService.getAccountName();
+      },
+      onMsGraphAuthChange: (handler) => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        msGraphService.onAuthChange(handler);
+      },
+      withMsGraphRetry: async (fn) => {
+        if (!hasMsGraphCapability(pluginId)) throw new Error(capabilityDeniedMsg(pluginId));
+        return withMsGraphRetry(fn, () => msGraphService.getAccessToken());
+      },
+      callLlm: async (prompt, opts) => {
+        if (lateBinding.pluginCallLlmRef.fn) {
+          return lateBinding.pluginCallLlmRef.fn(pluginId, prompt, opts);
+        }
+        if (!lateBinding.llmCallerRef.fn) throw new Error("LLM provider not ready");
+        return lateBinding.llmCallerRef.fn(prompt, opts);
+      },
+      logEvent: (level, message, data) => {
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: level === "error" ? "error" : "tool_call",
+            input: `[plugin:${pluginId}] [${level.toUpperCase()}] ${message}`,
+            output: data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
+          });
+        } catch (err) {
+          console.warn(`[plugin:${pluginId}] logEvent failed:`, (err as Error).message);
+        }
+      },
+      onShutdown: (handler) => {
+        pluginShutdownHandlers.push({ pluginId, handler });
+      },
+    }),
+  });
+
+  await pluginRuntime.startAll();
+  console.log("[lvis] boot: plugins loaded:", pluginRuntime.listToolNames());
+
+  // 선언형 startupTools 자동 실행
+  runManifestStartupTools(pluginRuntime);
+
+  // 플러그인 메서드를 ToolRegistry에 등록
+  registerPluginTools(pluginRuntime, toolRegistry);
+
+  // I2 — Dev-mode live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
+  const pluginDevWatcher = startPluginDevWatcher({
+    pluginRuntime,
+    onReloaded: (pluginId) => {
+      const manifest = pluginRuntime.getPluginManifest(pluginId);
+      if (!manifest) return;
+      registerPluginTools(pluginRuntime, toolRegistry);
+      console.log(`[lvis] plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`);
+    },
+  });
+  app.prependOnceListener("before-quit", () => { pluginDevWatcher.stop(); });
+
+  return {
+    pluginRuntime,
+    deploymentGuard,
+    taskSourceRegistry,
+    lateBinding,
+    pluginShutdownHandlers,
+  };
+}
+
+// Re-export so boot.ts's return statement can still reach BrowserWindow type.
+export type { BrowserWindow };
