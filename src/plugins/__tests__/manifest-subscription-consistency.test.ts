@@ -100,29 +100,32 @@ describe("Manifest subscription consistency guard", () => {
         ? (manifest.eventSubscriptions as unknown[])
         : [];
 
-      it("eventSubscriptions[] contains only string values", () => {
+      it("eventSubscriptions[] contains only string or {type,hint?} object values", () => {
         for (const sub of subs) {
-          expect(typeof sub).toBe("string");
+          if (typeof sub === "string") continue;
+          // Object form: must have a non-empty string 'type' field
+          expect(sub).toMatchObject({ type: expect.any(String) });
+          expect((sub as { type: string }).type.trim().length).toBeGreaterThan(0);
         }
       });
 
       it("eventSubscriptions[] entries are not in private namespaces", () => {
         for (const sub of subs) {
-          if (typeof sub !== "string") continue; // caught by previous test
-          const verdict = classifySubscription(sub);
+          const eventType = typeof sub === "string" ? sub : (sub as { type: string }).type;
+          const verdict = classifySubscription(eventType);
           expect(verdict).not.toBe(
             "private",
-            `plugin '${pluginId}' declares private subscription '${sub}' — must be removed from manifest`,
+            `plugin '${pluginId}' declares private subscription '${eventType}' — must be removed from manifest`,
           );
         }
       });
 
       it("eventSubscriptions[] entries are valid namespace strings (no empty, no dots-only)", () => {
         for (const sub of subs) {
-          if (typeof sub !== "string") continue;
-          expect(sub.trim().length).toBeGreaterThan(0);
+          const eventType = typeof sub === "string" ? sub : (sub as { type: string }).type;
+          expect(eventType.trim().length).toBeGreaterThan(0);
           // Must be dot-separated segments with at least one non-dot char.
-          expect(sub).toMatch(/^[a-zA-Z][a-zA-Z0-9._-]*$/);
+          expect(eventType).toMatch(/^[a-zA-Z][a-zA-Z0-9._-]*$/);
         }
       });
 
@@ -132,8 +135,8 @@ describe("Manifest subscription consistency guard", () => {
         // This test fails only if a private namespace slips through (already covered
         // above) — here we just assert the classification is never "private".
         for (const sub of subs) {
-          if (typeof sub !== "string") continue;
-          const verdict = classifySubscription(sub);
+          const eventType = typeof sub === "string" ? sub : (sub as { type: string }).type;
+          const verdict = classifySubscription(eventType);
           // private is the only hard failure; public and neutral are both OK.
           expect(["public", "neutral"]).toContain(verdict);
         }
@@ -141,10 +144,9 @@ describe("Manifest subscription consistency guard", () => {
 
       // Document which subscriptions are neutral (outside public allowlist)
       // so operators can track drift. Not a hard failure.
-      const neutralSubs = subs.filter(
-        (s): s is string =>
-          typeof s === "string" && classifySubscription(s) === "neutral",
-      );
+      const neutralSubs = subs
+        .map((s) => (typeof s === "string" ? s : (s as { type: string }).type))
+        .filter((eventType) => classifySubscription(eventType) === "neutral");
 
       if (neutralSubs.length > 0) {
         it(`documents neutral (outside public allowlist) subscriptions: ${neutralSubs.join(", ")}`, () => {

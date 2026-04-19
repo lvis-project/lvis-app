@@ -90,7 +90,29 @@
     },
     "eventSubscriptions": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "required": ["type"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "type": "string", "minLength": 1 },
+              "hint": {
+                "type": "object",
+                "required": ["category", "priority", "title"],
+                "additionalProperties": false,
+                "properties": {
+                  "category": { "type": "string", "enum": ["task", "note", "session", "meeting", "email", "calendar", "system"] },
+                  "priority": { "type": "string", "enum": ["high", "medium", "low"] },
+                  "title": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        ]
+      }
     },
     "startupTimeoutMs": {
       "type": "integer",
