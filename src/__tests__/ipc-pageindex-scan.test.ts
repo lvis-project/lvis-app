@@ -8,7 +8,7 @@
  *    declares the document-indexer capability.
  * 4. validateSender is called — unauthorized frames are rejected.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
 
 vi.mock("electron", () => ({
