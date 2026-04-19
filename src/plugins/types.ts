@@ -48,6 +48,12 @@ export interface PluginManifest {
    */
   uiCallable?: string[];
   /**
+   * 이 플러그인이 호스트 이벤트 버스로 emit 하는 이벤트 타입 목록.
+   * classifySubscription("public") 판정을 통과한 이벤트만 renderer로 전달된다.
+   * (host boundary §1: plugin-specific literals forbidden in boot.ts)
+   */
+  emittedEvents?: string[];
+  /**
    * OS 네이티브 알림으로 표시할 이벤트 선언.
    * titleField / bodyField 는 이벤트 데이터의 점(.) 경로.
    */

@@ -59,6 +59,14 @@ export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffor
       if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         const sel = window.getSelection();
         if (sel && sel.toString().length > 0) return; // let copy work normally
+        // B4 fix: do not intercept Ctrl+C when focus is inside an editable element —
+        // native copy must work in <input>, <textarea>, and contenteditable.
+        const target = e.target as HTMLElement;
+        const isEditable =
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable;
+        if (isEditable) return;
         e.preventDefault();
         void onAbort();
       }
