@@ -1,11 +1,11 @@
 import { Component, type ReactNode, type ErrorInfo } from "react";
 
 interface Props { children: ReactNode; fallback?: string }
-interface State { hasError: boolean; error?: Error }
+interface State { hasError: boolean }
 
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false };
-  static getDerivedStateFromError(error: Error): State { return { hasError: true, error }; }
+  static getDerivedStateFromError(_error: Error): State { return { hasError: true }; }
   componentDidCatch(error: Error, info: ErrorInfo) { console.error("[lvis] render error:", error, info); }
   render() {
     if (this.state.hasError) return (

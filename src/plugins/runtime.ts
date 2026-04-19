@@ -189,7 +189,7 @@ export class PluginRuntime {
       // Sprint 3-B §9.6 — manifest signature gate.
       // Managed plugins require a valid signature; unsigned user plugins are
       // allowed but audit-logged. Invalid signatures always drop the plugin.
-      const isDev = (process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "test") || process.env.LVIS_DEV === "1";
+      const isDev = process.env.LVIS_DEV === "1";
       if (this.signatureVerifier && !isDev) {
         const sigResult = await this.signatureVerifier.verifyManifestFile(manifestPath);
         const isManaged = manifest.deployment === "managed";

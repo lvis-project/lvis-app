@@ -33,14 +33,11 @@ jobs:
           path: lvis-plugin-calendar
           token: ${{ secrets.HOST_READ_TOKEN }}
       - uses: oven-sh/setup-bun@v2
-      - name: Stub sibling plugin packages for CI
+      - name: Build plugin-sdk submodule
         run: |
-          for pkg in meeting email pageindex calendar; do
-            dir="../lvis-plugin-$pkg"
-            mkdir -p "$dir/dist"
-            printf '{"name":"@lvis/plugin-%s","version":"0.0.0","main":"dist/hostPlugin.js"}\n' "$pkg" > "$dir/package.json"
-            touch "$dir/dist/hostPlugin.js"
-          done
+          cd lvis-app/lvis-plugin-sdk
+          bun install --frozen-lockfile
+          bun run build
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
       - run: bun run build
