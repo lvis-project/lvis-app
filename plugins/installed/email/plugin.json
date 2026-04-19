@@ -29,7 +29,9 @@
   "startupTools": [
     "email_start_watcher"
   ],
-  "eventSubscriptions": [],
+  "eventSubscriptions": [
+    { "type": "email.action.needed", "hint": { "category": "email", "priority": "medium", "title": "액션 필요 이메일" } }
+  ],
   "notificationEvents": [
     { "event": "email.new", "titleField": "sender", "bodyField": "subject" }
   ],

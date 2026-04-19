@@ -14,7 +14,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { ProactiveEngine } from "../core/proactive-engine.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
-import { categorizeEvent, classifySubscription } from "../plugins/capabilities.js";
+import { classifySubscription } from "../plugins/capabilities.js";
 import { pluginToolsForRegistration } from "../plugins/plugin-tool-adapter.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
 
@@ -87,7 +87,8 @@ export function registerManifestEventSubscriptions(
 ): void {
   const eventTypes = new Set<string>();
   for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
-    for (const eventType of manifest.eventSubscriptions ?? []) {
+    for (const entry of manifest.eventSubscriptions ?? []) {
+      const eventType = typeof entry === "string" ? entry : entry.type;
       // Phase 5 — namespace allowlist. Private namespaces (memory.private.*,
       // settings.apiKey.*, audit.*, dlp.*) are never exposed to plugins;
       // neutral namespaces pass with a warn so ops can track drift.
@@ -125,37 +126,16 @@ export function buildManifestEventHints(
 ): Record<string, import("../core/proactive-engine.js").ProactiveEventHint> {
   const hints: Record<string, import("../core/proactive-engine.js").ProactiveEventHint> = {};
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
-    for (const eventType of manifest.eventSubscriptions ?? []) {
-      const prefix = categorizeEvent(eventType);
-      if (prefix === "meeting") {
-        hints[eventType] = {
-          category: "meeting",
-          priority: "medium",
-          title: "회의 이벤트",
-        };
-        continue;
+    for (const entry of manifest.eventSubscriptions ?? []) {
+      if (typeof entry === "string") {
+        // Backward-compatible string form: neutral fallback hint
+        hints[entry] = { category: "system", priority: "low", title: entry };
+      } else {
+        // Object form: use plugin-declared hint if present, else fallback
+        hints[entry.type] = entry.hint
+          ? { category: entry.hint.category, priority: entry.hint.priority, title: entry.hint.title }
+          : { category: "system", priority: "low", title: entry.type };
       }
-      if (prefix === "email") {
-        hints[eventType] = {
-          category: "email",
-          priority: "medium",
-          title: eventType === "email.action.needed" ? "액션 필요 이메일" : "이메일 이벤트",
-        };
-        continue;
-      }
-      if (prefix === "calendar") {
-        hints[eventType] = {
-          category: "calendar",
-          priority: "low",
-          title: "일정 이벤트",
-        };
-        continue;
-      }
-      hints[eventType] = {
-        category: "system",
-        priority: "low",
-        title: eventType,
-      };
     }
   }
   return hints;
