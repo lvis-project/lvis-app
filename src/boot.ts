@@ -29,6 +29,7 @@ import { bootstrapCoreServices } from "./boot/services.js";
 import { createAutoUpdater } from "./main/auto-updater.js";
 import { startCrashReporter } from "./main/crash-reporter.js";
 import { TelemetryService } from "./main/telemetry.js";
+import { PluginTelemetryClient } from "./telemetry/client.js";
 import {
   buildPluginConfigOverrides,
   registerPluginTools,
@@ -542,6 +543,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // Production release prep — auto-updater, crash reporter, telemetry.
   // All default-off or read user settings; no-op in dev without publish config.
   let telemetry: TelemetryService | undefined;
+  let pluginTelemetry: PluginTelemetryClient | undefined;
   let autoUpdaterStop: (() => void) | undefined;
   try {
     startCrashReporter({
@@ -558,6 +560,80 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     });
     telemetry.start();
     telemetry.track("app_start");
+
+    // S12 — plugin lifecycle telemetry (opt-in).
+    // First-boot: if user has never answered the consent prompt, emit an IPC
+    // event so the renderer can show the "Help improve LVIS?" dialog.
+    // MUST check after window is ready; webContents.send is safe here because
+    // bootstrap() is called from main.ts only after BrowserWindow is visible.
+    const telemetrySettings = settingsService.get("telemetry");
+    if (!telemetrySettings.telemetryPromptAnswered) {
+      // Defer one tick so the renderer has time to attach its listener.
+      setTimeout(() => {
+        try {
+          if (!mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("lvis:telemetry:consent-prompt");
+          }
+        } catch (e) {
+          console.warn("[lvis] boot: telemetry consent prompt send failed:", (e as Error).message);
+        }
+      }, 500);
+    }
+    // S12 — PluginTelemetryClient: batched plugin lifecycle events to marketplace.
+    // D6: install_token reuses "marketplace.apiKey" secret (GitHub App token).
+    const ptClient = new PluginTelemetryClient({
+      settings: () => settingsService.get("telemetry"),
+      marketplaceBaseUrl: () => settingsService.get("marketplace").realCloudBaseUrl,
+      installToken: () => settingsService.getSecret("marketplace.apiKey"),
+      deviceUuidPath: resolve(app.getPath("userData"), ".lvis", "device-uuid"),
+    });
+    pluginTelemetry = ptClient;
+    ptClient.start();
+
+    // Wire plugin lifecycle events → telemetry.
+    // Events are emitted by ipc-bridge (install/uninstall) and pluginRuntime (error).
+    // We subscribe here rather than in ipc-bridge to keep telemetry out of the
+    // IPC layer and to ensure the client is fully constructed before listening.
+    onEvent("plugin.installed", (data) => {
+      const d = data as { pluginId?: string; version?: string } | undefined;
+      ptClient.track("plugin_install", {
+        slug: d?.pluginId ?? "unknown",
+        version: d?.version ?? "unknown",
+      });
+    });
+    onEvent("plugin.uninstalled", (data) => {
+      const d = data as { pluginId?: string; version?: string } | undefined;
+      ptClient.track("plugin_uninstall", {
+        slug: d?.pluginId ?? "unknown",
+        version: d?.version ?? "unknown",
+      });
+    });
+    onEvent("plugin.updated", (data) => {
+      const d = data as { pluginId?: string; version?: string } | undefined;
+      ptClient.track("plugin_update", {
+        slug: d?.pluginId ?? "unknown",
+        version: d?.version ?? "unknown",
+      });
+    });
+    onEvent("plugin.error", (data) => {
+      const d = data as { pluginId?: string; version?: string; errorClass?: string } | undefined;
+      ptClient.track("plugin_error", {
+        slug: d?.pluginId ?? "unknown",
+        version: d?.version ?? "unknown",
+        errorClass: d?.errorClass,
+      });
+    });
+
+    // Retain reference for shutdown flush.
+    app.prependOnceListener("before-quit", () => {
+      try {
+        ptClient.stop();
+        void ptClient.flush();
+      } catch (err) {
+        console.warn("[lvis] shutdown: plugin telemetry final flush failed:", (err as Error).message);
+      }
+    });
+
     const updater = createAutoUpdater({
       mainWindow,
       isEnabled: () => settingsService.get("updates")?.autoCheckEnabled ?? true,
@@ -587,7 +663,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore,
-    telemetry, autoUpdaterStop,
+    telemetry, pluginTelemetry, autoUpdaterStop,
     refreshPluginNotifications: () => {
       disposePluginNotifications();
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);

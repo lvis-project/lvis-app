@@ -81,6 +81,11 @@ export interface UpdateSettings {
 /**
  * Production release prep — anonymous opt-in telemetry.
  * Default OFF. Requires explicit user action to enable.
+ *
+ * S12:
+ *   - `telemetryPromptAnswered` — true once the user has dismissed the
+ *     first-boot consent prompt (regardless of Yes/No). Events are NEVER
+ *     sent before this is true.
  */
 export interface TelemetrySettings {
   enabled: boolean;
@@ -88,6 +93,8 @@ export interface TelemetrySettings {
   sentryDsn?: string;
   crashReportEndpoint?: string;
   crashReportingEnabled?: boolean;
+  /** S12: true once the user has answered the one-time opt-in prompt. */
+  telemetryPromptAnswered?: boolean;
 }
 
 /**
