@@ -128,6 +128,7 @@ export type LvisApi = {
   installMarketplacePlugin: (id: string) => Promise<unknown>;
   uninstallMarketplacePlugin: (id: string) => Promise<unknown>;
   listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
+  readPluginUiModule: (pluginId: string, viewId: string) => Promise<string>;
   callPluginMethod: (m: string, p?: unknown) => Promise<unknown>;
   listPluginCards: () => Promise<PluginCardSummary[]>;
   addTask: (t: unknown) => Promise<Task>;

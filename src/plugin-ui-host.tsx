@@ -32,9 +32,42 @@ export type PluginUiMountContext = {
 
 type PluginUiMountResult = void | (() => void);
 type PluginUiMountFn = (context: PluginUiMountContext) => PluginUiMountResult | Promise<PluginUiMountResult>;
+type LoadedPluginUiModule = {
+  moduleNamespace: unknown;
+  revoke?: () => void;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+async function loadPluginUiModule(view: PluginUiExtensionView): Promise<LoadedPluginUiModule> {
+  const entryUrl = view.entryUrl;
+  if (!entryUrl) {
+    throw new Error("UI 모듈 엔트리를 찾을 수 없습니다.");
+  }
+
+  if (!entryUrl.startsWith("file:")) {
+    return {
+      moduleNamespace: (await import(/* @vite-ignore */ entryUrl)) as unknown,
+    };
+  }
+
+  const moduleSource = await window.lvisApi.readPluginUiModule(view.pluginId, view.extension.id);
+  const blob = new Blob([`${moduleSource}\n//# sourceURL=${entryUrl}`], {
+    type: "text/javascript",
+  });
+  const moduleUrl = URL.createObjectURL(blob);
+
+  try {
+    return {
+      moduleNamespace: (await import(/* @vite-ignore */ moduleUrl)) as unknown,
+      revoke: () => URL.revokeObjectURL(moduleUrl),
+    };
+  } catch (error) {
+    URL.revokeObjectURL(moduleUrl);
+    throw error;
+  }
 }
 
 function resolvePluginMount(moduleNamespace: unknown, exportName?: string): PluginUiMountFn | null {
@@ -114,15 +147,17 @@ export function PluginUiHostView({
 
     let disposed = false;
     let cleanup: (() => void) | undefined;
+    let revokeModuleUrl: (() => void) | undefined;
     setLoading(true);
     setErrorText(null);
 
     void (async () => {
       try {
-        const moduleNamespace = (await import(/* @vite-ignore */ entryUrl)) as unknown;
+        const loadedModule = await loadPluginUiModule(view);
+        revokeModuleUrl = loadedModule.revoke;
         if (disposed) return;
 
-        const mount = resolvePluginMount(moduleNamespace, view.extension.exportName);
+        const mount = resolvePluginMount(loadedModule.moduleNamespace, view.extension.exportName);
         if (!mount) {
           throw new Error(`mount 함수를 찾을 수 없습니다 (plugin=${view.pluginId}, view=${view.extension.id})`);
         }
@@ -149,6 +184,7 @@ export function PluginUiHostView({
     return () => {
       disposed = true;
       if (cleanup) cleanup();
+      if (revokeModuleUrl) revokeModuleUrl();
       root.replaceChildren();
     };
   }, [bridge, view]);
