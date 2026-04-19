@@ -7,7 +7,7 @@
  *
  * Schema mirrors StarredStore pattern (src/data/starred-store.ts).
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -35,7 +35,12 @@ export class FeedbackStore {
   private readonly retentionDays: number;
 
   constructor(options?: FeedbackStoreOptions) {
-    this.filePath = resolve(options?.filePath ?? join(homedir(), ".lvis", "feedback.jsonl"));
+    const resolvedPath = resolve(options?.filePath ?? join(homedir(), ".lvis", "feedback.jsonl"));
+    const lvisDir = join(homedir(), ".lvis");
+    if (!resolvedPath.startsWith(lvisDir + "/") && resolvedPath !== lvisDir) {
+      throw new Error(`feedback-store: path confinement violation — ${resolvedPath} is outside ${lvisDir}`);
+    }
+    this.filePath = resolvedPath;
     this.retentionDays = options?.retentionDays ?? 90;
   }
 
@@ -49,8 +54,14 @@ export class FeedbackStore {
       ...(entry.reason !== undefined ? { reason: entry.reason } : {}),
       timestamp: entry.timestamp ?? new Date().toISOString(),
     };
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    appendFileSync(this.filePath, JSON.stringify(record) + "\n", "utf-8");
+    const dir = dirname(this.filePath);
+    mkdirSync(dir, { recursive: true });
+    // Guard against symlink attacks on the parent directory
+    const dirStat = lstatSync(dir);
+    if (dirStat.isSymbolicLink()) {
+      throw new Error(`feedback-store: symlink detected on storage directory ${dir}`);
+    }
+    appendFileSync(this.filePath, JSON.stringify(record) + "\n", { encoding: "utf-8", mode: 0o600, flag: "a" });
     return record;
   }
 
