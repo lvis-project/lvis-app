@@ -10,6 +10,7 @@ import { RolesTab } from "./tabs/RolesTab.js";
 import { PermissionsTab } from "./tabs/PermissionsTab.js";
 import { AuditTab } from "./tabs/AuditTab.js";
 import { UsageDashboard } from "./components/UsageDashboard.js";
+import { PluginPerfTab } from "./tabs/PluginPerfTab.js";
 
 export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; api: LvisApi; onSaved: () => void }) {
   const [tab, setTab] = useState("llm");
@@ -194,6 +195,7 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
             <TabsTrigger value="roles">역할</TabsTrigger>
             <TabsTrigger value="usage">사용량</TabsTrigger>
             <TabsTrigger value="audit">감사</TabsTrigger>
+            <TabsTrigger value="plugin-perf">플러그인 성능</TabsTrigger>
           </TabsList>
 
           <TabsContent value="llm" className="space-y-4 pt-4">
@@ -515,10 +517,14 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
           <TabsContent value="audit">
             <AuditTab />
           </TabsContent>
+
+          <TabsContent value="plugin-perf">
+            <PluginPerfTab api={api} />
+          </TabsContent>
         </Tabs>
         <DialogFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
-          {tab !== "permissions" && tab !== "usage" && tab !== "roles" && tab !== "audit" && (
+          {tab !== "permissions" && tab !== "usage" && tab !== "roles" && tab !== "audit" && tab !== "plugin-perf" && (
             <Button onClick={() => void save()} disabled={saving || !settingsLoaded}>{saving ? "저장 중..." : "저장"}</Button>
           )}
         </DialogFooter>

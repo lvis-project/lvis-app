@@ -98,6 +98,17 @@ export interface PluginCard {
   capabilities: string[];
 }
 
+/**
+ * Per-plugin performance statistics collected at runtime.
+ */
+export interface PluginPerfStats {
+  startupMs: number;
+  toolCallCount: number;
+  errorCount: number;
+  totalExecMs: number;
+  lastCallAt: number | null;
+}
+
 export interface PluginRuntimeOptions {
   hostRoot: string;
   manifestPaths?: string[];
@@ -137,6 +148,7 @@ export class PluginRuntime {
   private readonly onDisable?: (pluginId: string) => void;
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
+  private readonly perfStats = new Map<string, PluginPerfStats>();
   /**
    * Per-plugin disposers (e.g. event subscriptions). Invoked in order on
    * disable() so host-side state scrubbing is deterministic.
@@ -313,8 +325,15 @@ export class PluginRuntime {
       }, SLOW_THRESHOLD_MS);
 
       const startPromise = (async () => {
+        // Initialize perf stats entry before start attempt.
+        if (!this.perfStats.has(id)) {
+          this.perfStats.set(id, { startupMs: 0, toolCallCount: 0, errorCount: 0, totalExecMs: 0, lastCallAt: null });
+        }
         try {
-          if (!plugin.instance.start) return;
+          if (!plugin.instance.start) {
+            this.perfStats.get(id)!.startupMs = Date.now() - startedAt;
+            return;
+          }
           const hardTimeoutMs = plugin.manifest.startupTimeoutMs;
           if (hardTimeoutMs && hardTimeoutMs > 0) {
             // Promise.race enforces the timeout. The underlying start() is NOT
@@ -342,6 +361,9 @@ export class PluginRuntime {
           clearTimeout(slowTimer);
         }
         const elapsed = Date.now() - startedAt;
+        // Record startup duration in perf stats.
+        const stats = this.perfStats.get(id);
+        if (stats) stats.startupMs = elapsed;
         if (elapsed > SLOW_THRESHOLD_MS) {
           console.warn(`[plugin-runtime] slow plugin: ${id} finished in ${elapsed}ms`);
         }
@@ -443,7 +465,36 @@ export class PluginRuntime {
     if (!entry) {
       throw new Error(`Plugin method not found: ${method}`);
     }
-    return entry.handler(payload);
+    const { pluginId } = entry;
+    let stats = this.perfStats.get(pluginId);
+    if (!stats) {
+      stats = { startupMs: 0, toolCallCount: 0, errorCount: 0, totalExecMs: 0, lastCallAt: null };
+      this.perfStats.set(pluginId, stats);
+    }
+    stats.toolCallCount += 1;
+    stats.lastCallAt = Date.now();
+    const t0 = Date.now();
+    try {
+      return await entry.handler(payload);
+    } catch (err) {
+      stats.errorCount += 1;
+      throw err;
+    } finally {
+      stats.totalExecMs += Date.now() - t0;
+    }
+  }
+
+  /**
+   * Return a snapshot of per-plugin performance statistics.
+   * Keys are pluginIds; values contain startup time, call counts, error counts,
+   * total execution time, and last call timestamp.
+   */
+  getPerfStats(): Record<string, PluginPerfStats> {
+    const result: Record<string, PluginPerfStats> = {};
+    for (const [id, stats] of this.perfStats) {
+      result[id] = { ...stats };
+    }
+    return result;
   }
 
   /**

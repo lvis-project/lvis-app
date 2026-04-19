@@ -64,6 +64,11 @@ const api = {
   listPluginCards: async () => ipcRenderer.invoke("lvis:plugins:cards"),
   callPluginMethod: async (method: string, payload?: unknown) => ipcRenderer.invoke("lvis:plugins:call", method, payload),
 
+  // ─── Plugin Performance (Observability) ──────────
+  plugins: {
+    getPerfStats: async () => ipcRenderer.invoke("lvis:plugins:perf-stats"),
+  },
+
   // ─── Tasks ───────────────────────────────────────
   addTask: async (task: unknown) => ipcRenderer.invoke("lvis:tasks:add", task),
   queryTasks: async (filter?: unknown) => ipcRenderer.invoke("lvis:tasks:query", filter),

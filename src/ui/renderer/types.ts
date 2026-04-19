@@ -61,6 +61,15 @@ export type AppSettings = {
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
 
+// ─── Plugin Performance types (Observability) ──────
+export type PluginPerfStats = {
+  startupMs: number;
+  toolCallCount: number;
+  errorCount: number;
+  totalExecMs: number;
+  lastCallAt: number | null;
+};
+
 // ─── Usage types (Sprint 4.B) ───────────────────────
 export type UsageTotals = { inputTokens: number; outputTokens: number; totalTokens: number; cost: number };
 export type UsagePerX = UsageTotals & { vendor: string; model: string };
@@ -128,6 +137,9 @@ export type LvisApi = {
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
+  plugins: {
+    getPerfStats: () => Promise<Record<string, PluginPerfStats>>;
+  };
 };
 
 // ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─
