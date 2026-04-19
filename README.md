@@ -101,6 +101,21 @@ UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인
 | `meeting.ended` | meeting hostPlugin | calendar hostPlugin |
 
 ## 설치
+
+이 저장소는 `packages/plugin-sdk`를 git submodule (`lvis-plugin-sdk`)로 참조합니다.
+clone 시 submodule 을 함께 가져오는 것을 권장합니다:
+
+```bash
+git clone --recurse-submodules <repo-url>
+# 이미 recurse 없이 clone 한 경우:
+git submodule update --init --recursive
+```
+
+`bun install` 은 `postinstall` 단계에서 `scripts/ensure-submodules.mjs` 가드를
+실행하여 submodule 디렉터리가 비어 있으면 자동으로 `git submodule update --init
+--recursive` 를 호출합니다. 따라서 fresh clone 직후 `bun install` 이
+`@lvis/plugin-sdk/keys` 미존재로 실패하지 않습니다.
+
 ```bash
 bun install
 ```
