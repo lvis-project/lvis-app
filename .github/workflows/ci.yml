@@ -52,3 +52,72 @@ jobs:
         working-directory: lvis-app
       - run: bunx vitest run
         working-directory: lvis-app
+
+  e2e:
+    name: Playwright E2E (Electron)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: lvis-app
+          submodules: recursive
+      - name: Generate plugin read token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547  # v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: lvis-project
+          repositories: lvis-plugin-meeting,lvis-plugin-email,lvis-plugin-pageindex,lvis-plugin-calendar
+      - uses: actions/checkout@v6
+        with:
+          repository: lvis-project/lvis-plugin-meeting
+          path: lvis-plugin-meeting
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: actions/checkout@v6
+        with:
+          repository: lvis-project/lvis-plugin-email
+          path: lvis-plugin-email
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: actions/checkout@v6
+        with:
+          repository: lvis-project/lvis-plugin-pageindex
+          path: lvis-plugin-pageindex
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: actions/checkout@v6
+        with:
+          repository: lvis-project/lvis-plugin-calendar
+          path: lvis-plugin-calendar
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: oven-sh/setup-bun@v2
+      - name: Build plugin-sdk submodule
+        run: |
+          cd lvis-app/packages/plugin-sdk
+          bun install --frozen-lockfile
+          bun run build
+      - run: bun install --frozen-lockfile
+        working-directory: lvis-app
+      - name: Build all plugins
+        run: bun run prepare:plugins
+        working-directory: lvis-app
+      - name: Build app
+        run: bun run build
+        working-directory: lvis-app
+      - name: Install Playwright system deps for Electron
+        run: bunx playwright install --with-deps chromium
+        working-directory: lvis-app
+      - name: Run Playwright E2E tests
+        run: xvfb-run --auto-servernum bunx playwright test
+        working-directory: lvis-app
+        env:
+          CI: "true"
+      - name: Upload Playwright report and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            lvis-app/playwright-report/
+            lvis-app/test-results/
+          retention-days: 7
