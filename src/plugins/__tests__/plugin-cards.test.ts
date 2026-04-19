@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { PluginRuntime } from "../runtime.js";
@@ -43,7 +43,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
   let tmp: string;
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "lvis-cards-"));
+    tmp = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-cards-"));
   });
 
   afterEach(() => {

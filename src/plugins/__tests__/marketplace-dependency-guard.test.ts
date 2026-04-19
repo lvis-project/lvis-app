@@ -4,8 +4,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, writeFile, rm } from "node:fs/promises";
-import { resolve } from "node:path";
-import { tmpdir } from "node:os";
+import {resolve, join} from "node:path";
+import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { PluginMarketplaceService } from "../marketplace.js";
 import type { PluginMarketplaceItem } from "../types.js";
@@ -36,7 +36,7 @@ function makeItem(
     packageSpec: `@lvis/${id}@1.0.0`,
     packageName: `@lvis/${id}`,
     tools: [],
-    requires: requiresCaps.length > 0 ? { capabilities: requiresCaps } : undefined,
+    requires: requiresCaps.length > 0 ? { capabilities: requiresCaps } : undefined
   };
 }
 
@@ -67,14 +67,14 @@ async function setupTestDir(
         version: "1.0.0",
         entry: "dist/index.js",
         tools: [],
-        capabilities: p.capabilities,
+        capabilities: p.capabilities
       }),
     );
     // Registry manifestPath is relative to `plugins/` (the registry's parent dir).
     registryEntries.push({
       id: p.id,
       manifestPath: `installed/${p.id}/plugin.json`,
-      enabled: true,
+      enabled: true
     });
   }
 
@@ -90,7 +90,7 @@ describe("marketplace install dependency guard (S14)", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = resolve(tmpdir(), `lvis-test-${randomBytes(8).toString("hex")}`);
+    tmpDir = join(homedir(), ".lvis", "test-tmp", `lvis-test-${randomBytes(8).toString("hex")}`);
     await mkdir(tmpDir, { recursive: true });
     // Stub runNpmInstall so tests don't spawn real npm processes (slow, flaky,
     // requires network). We accept the npm path failing earlier or later;
@@ -166,7 +166,7 @@ describe("marketplace install dependency guard (S14)", () => {
         version: "1.0.0",
         entry: "dist/index.js",
         tools: [],
-        capabilities: ["cap-b"],
+        capabilities: ["cap-b"]
       }),
     );
     await mkdir(resolve(tmpDir, "plugins"), { recursive: true });
@@ -178,9 +178,9 @@ describe("marketplace install dependency guard (S14)", () => {
           {
             id: "cap-b-provider",
             manifestPath: "installed/cap-b-provider/plugin.json",
-            enabled: true,
+            enabled: true
           },
-        ],
+        ]
       }),
     );
 
@@ -214,7 +214,7 @@ describe("marketplace install dependency guard (S14)", () => {
         version: "1.0.0",
         entry: "dist/index.js",
         tools: [],
-        capabilities: ["meeting-recorder"],
+        capabilities: ["meeting-recorder"]
       }),
     );
     await mkdir(resolve(tmpDir, "plugins"), { recursive: true });
@@ -226,9 +226,9 @@ describe("marketplace install dependency guard (S14)", () => {
           {
             id: "meeting-plugin",
             manifestPath: "installed/meeting-plugin/plugin.json",
-            enabled: true,
+            enabled: true
           },
-        ],
+        ]
       }),
     );
 

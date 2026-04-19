@@ -21,7 +21,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { PluginRuntime } from "../runtime.js";
 import type { PluginSignatureVerifier } from "../signature-verifier.js";
@@ -102,7 +102,7 @@ async function writeTempPlugin(opts: {
   tools: string[];
   uiCallable: string[];
 }): Promise<string> {
-  const root = mkdtempSync(join(tmpdir(), "lvis-m1-"));
+  const root = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-m1-"));
   const manifest = {
     id: `com.lge.test-${Math.random().toString(36).slice(2, 8)}`,
     name: "M1 Test",

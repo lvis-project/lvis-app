@@ -51,15 +51,19 @@ export const test = base.extend<ElectronFixtures>({
     // Kill any leftover pageindex worker from a previous run before launching
     killPageindexWorkers();
     const app = await electron.launch({
-      args: [mainEntry, `--user-data-dir=${userDataDir}`],
+      args: [mainEntry, `--user-data-dir=${userDataDir}`, '--no-sandbox'],
       env: {
         ...process.env,
         LVIS_DEV: '1',
         LVIS_E2E: '1',
         NODE_ENV: 'test',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
       },
       timeout: 30_000,
     });
+    // Capture main-process console output to help diagnose CI crashes.
+    app.process().stdout?.on('data', (d: Buffer) => process.stdout.write(`[electron:stdout] ${d}`));
+    app.process().stderr?.on('data', (d: Buffer) => process.stdout.write(`[electron:stderr] ${d}`));
     await use(app);
     await app.close().catch(() => {});
     // Ensure child Python workers spawned by pageindex are cleaned up

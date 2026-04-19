@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginMarketplaceService } from "../marketplace.js";
 
@@ -27,7 +27,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
   let cacheRoot: string;
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `lvis-rb-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-rb-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     appRoot = testDir;
     const pluginsDir = join(appRoot, "plugins");
     registryPath = join(pluginsDir, "registry.json");
@@ -51,9 +51,9 @@ describe("PluginMarketplaceService install → update → rollback", () => {
             description: "sample",
             packageSpec: "@lvis/sample@1.0.0",
             packageName: "@lvis/sample",
-            tools: ["sample_ping"],
+            tools: ["sample_ping"]
           },
-        ],
+        ]
       }),
       "utf-8",
     );

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { createAutoUpdater, type UpdaterLike } from "../auto-updater.js";
@@ -19,8 +19,8 @@ function fakeWindow() {
     sent,
     win: {
       isDestroyed: () => false,
-      webContents: { send: (channel: string, payload: unknown) => sent.push({ channel, payload }) },
-    } as unknown as import("electron").BrowserWindow,
+      webContents: { send: (channel: string, payload: unknown) => sent.push({ channel, payload }) }
+    } as unknown as import("electron").BrowserWindow
   };
 }
 
@@ -37,7 +37,7 @@ function fakeUpdater() {
     quitAndInstall() {},
     emit(e: string, p: unknown) {
       (listeners[e] ?? []).forEach((cb) => cb(p));
-    },
+    }
   };
   return u as unknown as UpdaterLike & { emit: (e: string, p: unknown) => void; checks: number };
 }
@@ -49,7 +49,7 @@ describe("auto-updater", () => {
     const svc = createAutoUpdater({
       mainWindow: win,
       isEnabled: () => false,
-      updaterFactory: () => u,
+      updaterFactory: () => u
     });
     await svc.triggerCheck();
     expect(u.checks).toBe(0);
@@ -61,14 +61,14 @@ describe("auto-updater", () => {
     const svc = createAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
-      updaterFactory: () => u,
+      updaterFactory: () => u
     });
     await svc.triggerCheck();
     expect(u.checks).toBe(1);
     u.emit("update-available", { version: "1.2.3" });
     expect(fw.sent[0]).toMatchObject({
       channel: "lvis:update:toast",
-      payload: { kind: "info" },
+      payload: { kind: "info" }
     });
     expect((fw.sent[0].payload as { message: string }).message).toContain("1.2.3");
   });
@@ -83,7 +83,7 @@ describe("auto-updater", () => {
     const svc = createAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
-      updaterFactory: () => u,
+      updaterFactory: () => u
     });
     await expect(svc.triggerCheck()).resolves.toBeUndefined();
     warn.mockRestore();
@@ -95,7 +95,7 @@ describe("auto-updater", () => {
     const svc = createAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => false, // disabled so initial triggerCheck is a no-op
-      updaterFactory: () => u,
+      updaterFactory: () => u
     });
     svc.start();
     svc.start();
@@ -112,7 +112,7 @@ describe("auto-updater", () => {
     const svc = createAutoUpdater({
       mainWindow: fw.win,
       isEnabled: () => true,
-      updaterFactory: () => u,
+      updaterFactory: () => u
     });
     await svc.triggerCheck();
     u.emit("update-downloaded", { version: "9.9.9" });
@@ -123,7 +123,7 @@ describe("auto-updater", () => {
 
 describe("crash-reporter", () => {
   it("creates local dump dir and does not upload by default", () => {
-    const userData = mkdtempSync(join(tmpdir(), "lvis-crash-"));
+    const userData = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-crash-"));
     const started: Array<{ uploadToServer?: boolean }> = [];
     const pathsSet: string[] = [];
     const handle = startCrashReporter({
@@ -131,7 +131,7 @@ describe("crash-reporter", () => {
       telemetry: { enabled: false, crashReportingEnabled: false },
       crashReporter: { start: (opts) => started.push(opts) },
       setCrashDumpsPath: (p) => pathsSet.push(p),
-      sentryLoader: () => null,
+      sentryLoader: () => null
     });
     expect(handle.started).toBe(true);
     expect(started[0]?.uploadToServer).toBe(false);
@@ -144,30 +144,30 @@ describe("crash-reporter", () => {
   });
 
   it("enables upload when user opts in", () => {
-    const userData = mkdtempSync(join(tmpdir(), "lvis-crash-"));
+    const userData = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-crash-"));
     const started: Array<{ uploadToServer?: boolean; submitURL?: string }> = [];
     startCrashReporter({
       userDataPath: userData,
       telemetry: {
         enabled: false,
         crashReportingEnabled: true,
-        crashReportEndpoint: "https://dumps.example.com/submit",
+        crashReportEndpoint: "https://dumps.example.com/submit"
       },
       crashReporter: { start: (opts) => started.push(opts) },
-      sentryLoader: () => null,
+      sentryLoader: () => null
     });
     expect(started[0]?.uploadToServer).toBe(true);
     expect(started[0]?.submitURL).toBe("https://dumps.example.com/submit");
   });
 
   it("inits sentry only when DSN configured and loader returns module", () => {
-    const userData = mkdtempSync(join(tmpdir(), "lvis-crash-"));
+    const userData = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-crash-"));
     const dsnSeen: string[] = [];
     const handle = startCrashReporter({
       userDataPath: userData,
       telemetry: { enabled: false, sentryDsn: "https://k@sentry.example/1" },
       crashReporter: { start: () => {} },
-      sentryLoader: () => ({ init: ({ dsn }) => dsnSeen.push(dsn) }),
+      sentryLoader: () => ({ init: ({ dsn }) => dsnSeen.push(dsn) })
     });
     expect(handle.sentryActive).toBe(true);
     expect(dsnSeen[0]).toContain("sentry.example");
@@ -193,7 +193,7 @@ describe("telemetry", () => {
       settings: () => ({ enabled: true, endpoint: "https://t.example/ingest" }),
       appVersion: "9.9.9",
       fetchImpl,
-      allowlistEnv: "t.example",
+      allowlistEnv: "t.example"
     });
     svc.track("app_start");
     svc.track("chat_turn", { durMs: 1234 });
@@ -219,7 +219,7 @@ describe("telemetry", () => {
     }) as unknown as typeof fetch;
     const svc = new TelemetryService({
       settings: () => ({ enabled: true, endpoint: "" }),
-      fetchImpl,
+      fetchImpl
     });
     svc.track("app_start");
     await svc.flush();
@@ -235,7 +235,7 @@ describe("telemetry", () => {
     const svc = new TelemetryService({
       settings: () => ({ enabled: true, endpoint: "https://t.example/ingest" }),
       fetchImpl,
-      allowlistEnv: "t.example",
+      allowlistEnv: "t.example"
     });
     svc.track("app_start");
     await svc.flush();
@@ -248,7 +248,7 @@ describe("telemetry", () => {
     let enabled = true;
     const svc = new TelemetryService({
       settings: () => ({ enabled, endpoint: "https://t.example/ingest" }),
-      allowlistEnv: "t.example",
+      allowlistEnv: "t.example"
     });
     expect(svc.isActive()).toBe(true);
     enabled = false;

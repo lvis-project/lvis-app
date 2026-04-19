@@ -10,7 +10,7 @@
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { buildManifestEventHints } from "../plugins.js";
@@ -56,7 +56,7 @@ describe("buildManifestEventHints", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `lvis-hints-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-hints-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");

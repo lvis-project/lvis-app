@@ -7,14 +7,14 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadHooksConfigFromPaths, EMPTY_HOOKS_CONFIG } from "../config-loader.js";
 
 let workDir: string;
 
 beforeEach(() => {
-  workDir = mkdtempSync(join(tmpdir(), "lvis-hooks-"));
+  workDir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-hooks-"));
   mkdirSync(join(workDir, "user"));
   mkdirSync(join(workDir, "admin"));
 });
@@ -32,7 +32,7 @@ describe("loadHooksConfigFromPaths", () => {
   it("missing files return empty hook arrays", () => {
     const cfg = loadHooksConfigFromPaths({
       adminPath: join(workDir, "admin", "nope.json"),
-      userPath: join(workDir, "user", "nope.json"),
+      userPath: join(workDir, "user", "nope.json")
     });
     expect(cfg.preToolUse).toEqual([]);
     expect(cfg.postToolUse).toEqual([]);
@@ -46,7 +46,7 @@ describe("loadHooksConfigFromPaths", () => {
       preToolUse: [
         { type: "command", command: "echo u", blockOnFailure: false },
       ],
-      postToolUse: [],
+      postToolUse: []
     });
 
     const cfg = loadHooksConfigFromPaths({ adminPath: null, userPath });
@@ -63,13 +63,13 @@ describe("loadHooksConfigFromPaths", () => {
       ],
       postToolUse: [
         { type: "http", url: "http://admin.local/post", headers: {} },
-      ],
+      ]
     });
     writeJson(userPath, {
       preToolUse: [
         { type: "command", command: "echo user", blockOnFailure: false },
       ],
-      postToolUse: [],
+      postToolUse: []
     });
 
     const cfg = loadHooksConfigFromPaths({ adminPath, userPath });
@@ -96,7 +96,7 @@ describe("loadHooksConfigFromPaths", () => {
     const userPath = join(workDir, "user", "hooks.json");
     writeJson(userPath, {
       preToolUse: [{ type: "bogus", command: "x" }],
-      postToolUse: [],
+      postToolUse: []
     });
 
     const cfg = loadHooksConfigFromPaths({ adminPath: null, userPath });
