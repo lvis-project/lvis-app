@@ -10,11 +10,18 @@
 import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, isContextLengthError, getModelContextWindow } from "./auto-compact.js";
+import { shouldCompact, compactMessages, getModelContextWindow } from "./auto-compact.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
-import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage, ThinkingBlock } from "./llm/types.js";
-import { classifyProviderError } from "./llm/error-classifier.js";
+import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
+import { collectRoundStream } from "./turn/stream-collector.js";
+import {
+  handleRequestPlugin,
+  MAX_PLUGIN_EXPANSION,
+  MAX_SESSION_PLUGIN_EXPANSION,
+  REQUEST_PLUGIN_TOOL,
+} from "./turn/plugin-expansion.js";
+import { applyKnowledgeDepthCap } from "./turn/knowledge-cap.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
@@ -94,34 +101,12 @@ export interface ConversationLoopDeps {
 
 const MAX_TOOL_ROUNDS = 10;
 
-/** Phase 1.5 Option C — LLM 요청 기반 plugin 활성화 턴당 최대 횟수. */
-const MAX_PLUGIN_EXPANSION = 2;
-
-/**
- * M2: Session-wide hard cap on total `request_plugin` expansions across
- * every turn. Prevents a long-running conversation from eventually scoping
- * every plugin through repeated single-shot activations.
- */
-const MAX_SESSION_PLUGIN_EXPANSION = 6;
-
-/** Phase 1.5 Option C — 메타 툴 이름. scope filter와 무관히 항상 노출. */
-const REQUEST_PLUGIN_TOOL = "request_plugin";
-
 /** Phase 1 Lazy Tool Scoping — 매 턴 LLM에 노출할 도구 집합 정의. */
 interface ToolScope {
   activePluginIds: Set<string>;
   includeBuiltins: boolean;
   includeMcp: boolean;
 }
-
-// §11 리스크: LLM agentic 토큰 폭발 방지 — knowledge 도구 turn당 호출 횟수 hard cap
-const KNOWLEDGE_DEPTH_CAP = 3;
-const KNOWLEDGE_TOOL_NAMES = new Set([
-  "knowledge_search",
-  "document_list",
-  "document_structure",
-  "document_page_content",
-]);
 
 // ─── Loop ───────────────────────────────────────────
 
@@ -578,208 +563,86 @@ ${briefingData}
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const model = llmSettings.model;
-    // Phase 1.5 Option C: scope is mutable within the turn — request_plugin
-    // tool_use results add to scope.activePluginIds, and toolSchemas are
-    // rebuilt each round. Mutating the caller's Set directly means the
-    // next turn's fallback sees every plugin that was activated here.
-    const mutableScope = scope;
-    let pluginExpansions = 0;
-    const rebuildToolSchemas = (): ToolSchema[] => {
-      const raw = this.deps.toolRegistry.getToolSchemasForScope(mutableScope);
-      const result: ToolSchema[] = [];
-      for (const s of raw) {
-        try {
-          result.push({
-            name: s.name,
-            description: s.description,
-            // Tool.toJsonSchema() returns `unknown` (may be Zod-generated or raw
-            // plugin/MCP schema); LLM providers all expect the flat
-            // `{type: "object", properties, required?}` shape.
-            inputSchema: s.input_schema as ToolSchema["inputSchema"],
-          });
-        } catch (err) {
-          console.warn(`[lvis] rebuildToolSchemas: tool '${s.name}' schema 변환 실패, 건너뜀:`, err);
-        }
-      }
-      return result;
-    };
-    let toolSchemas: ToolSchema[] = rebuildToolSchemas();
+    // Phase 1.5 Option C: scope is mutable within the turn. Mutating the
+    // caller's Set directly means the next turn's fallback sees every plugin
+    // that was activated here.
+    let toolSchemas: ToolSchema[] = this.rebuildToolSchemas(scope);
     const allToolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }> = [];
     let turnUsage: TokenUsage | undefined;
-    // turn당 knowledge 도구 호출 횟수 카운터 (depth ≤ 3 hard cap)
+    let pluginExpansions = 0;
     let knowledgeCallCount = 0;
     let roundIndex = 0;
-    // Reactive compact recovery: context-length 오류 발생 시 1회 compact 후 재시도
-    // turn당 1회만 허용 — for 루프 밖에 선언
+    // Reactive compact recovery: turn당 1회만 허용
     let reactiveCompacted = false;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      // §4.5.2 step 7 — LLM_STREAM (round 단위)
+      // §4.5.2 step 7 — LLM_STREAM
       this.tracer.step("LLM_STREAM", { round, model, toolCount: toolSchemas.length });
-      // §4.5.3: 벤더 추상화 스트리밍
-      let textContent = "";
-      let thoughtContent = "";
-      let roundThinkingBlocks: ThinkingBlock[] = [];
-      const pendingToolCalls: ToolCallBlock[] = [];
-      let stopReason: "end_turn" | "tool_use" = "end_turn";
 
-      const collectStream = async (messages: ReturnType<typeof this.history.getMessages>) => {
-        textContent = "";
-        thoughtContent = "";
-        roundThinkingBlocks = [];
-        pendingToolCalls.length = 0;
-        stopReason = "end_turn";
-        // Snapshot cumulativeUsage so a partial stream that errors mid-flight
-        // does not double-count tokens when we retry after reactive compact.
-        const usageSnapshot = {
-          inputTokens: this.cumulativeUsage.inputTokens,
-          outputTokens: this.cumulativeUsage.outputTokens,
-        };
-        const restoreUsage = () => {
-          this.cumulativeUsage.inputTokens = usageSnapshot.inputTokens;
-          this.cumulativeUsage.outputTokens = usageSnapshot.outputTokens;
-        };
-
-        // B4: check abort before entering the stream loop
-        if (abortSignal?.aborted) {
-          return { earlyReturn: true as const, text: textContent, interrupted: true };
-        }
-        const llmSettings = this.deps.settingsService.get("llm");
-        for await (const event of this.provider!.streamTurn({
-          model,
-          systemPrompt,
-          messages,
-          tools: toolSchemas.length > 0 ? toolSchemas : undefined,
-          maxTokens: llmSettings.maxOutputTokens ?? 4096,
-          maxOutputTokens: llmSettings.maxOutputTokens,
-          temperature: llmSettings.temperature,
-          seed: llmSettings.seed,
-          responseFormat: llmSettings.responseFormat,
-          stopSequences: llmSettings.stopSequences,
-          streamSmoothing: llmSettings.streamSmoothing,
-          enableThinking: llmSettings.enableThinking,
-          thinkingBudgetTokens: llmSettings.thinkingBudgetTokens,
-          abortSignal,
-        })) {
-          // B4: check abort between events
-          if (abortSignal?.aborted) {
-            return { earlyReturn: true as const, text: textContent, interrupted: true };
-          }
-          switch (event.type) {
-            case "reasoning_delta":
-              thoughtContent += event.text;
-              callbacks?.onReasoningDelta?.(event.text);
-              break;
-            case "text_delta":
-              textContent += event.text;
-              callbacks?.onTextDelta?.(event.text);
-              break;
-            case "tool_call":
-              pendingToolCalls.push({ id: event.id, name: event.name, input: event.input });
-              break;
-            case "message_complete":
-              stopReason = event.stopReason;
-              if (event.thinkingBlocks && event.thinkingBlocks.length > 0) {
-                roundThinkingBlocks = event.thinkingBlocks;
-              }
-              if (event.usage) {
-                turnUsage = event.usage;
-                this.cumulativeUsage.inputTokens += event.usage.inputTokens;
-                this.cumulativeUsage.outputTokens += event.usage.outputTokens;
-              }
-              break;
-            case "error":
-              // B4: abort-triggered errors look like normal errors from some providers; treat as interrupt
-              if (abortSignal?.aborted) {
-                return { earlyReturn: true as const, text: textContent, interrupted: true };
-              }
-              // context-length 오류를 stream event로 수신한 경우 → compact + retry
-              if (isContextLengthError(event.error) && !reactiveCompacted) {
-                restoreUsage();
-                return { earlyReturn: false as const, streamContextError: event.error };
-              }
-              // Classify before notifying so renderer toast + history both
-              // see the same user-friendly Korean message.
-              const classified = classifyProviderError(event.error);
-              const userMsg = reactiveCompacted && isContextLengthError(event.error)
-                ? `오류: 대화 기록을 압축한 뒤에도 모델 컨텍스트 한도를 초과했습니다. 새 세션을 시작하거나 이전 첨부를 정리해 주세요 (원인: ${event.error})`
-                : `오류: ${classified.userMessage}`;
-              callbacks?.onError?.(userMsg);
-              this.history.append({ role: "assistant", content: userMsg });
-              return { earlyReturn: true as const, text: userMsg };
-          }
-        }
-        // B4: final abort check after stream exhausted
-        if (abortSignal?.aborted) {
-          return { earlyReturn: true as const, text: textContent, interrupted: true };
-        }
-        return { earlyReturn: false as const };
-      };
-
-      // Snapshot at outer scope too: catch-path throws bypass collectStream's restoreUsage.
-      const outerUsageSnapshot = {
-        inputTokens: this.cumulativeUsage.inputTokens,
-        outputTokens: this.cumulativeUsage.outputTokens,
-      };
-      let streamResult = await collectStream(this.history.getMessages()).catch((err: unknown) => {
-        // B4: AbortError from provider — treat as interrupt.
-        // Issue 3: check err.name === "AbortError" OR signal.aborted; do NOT use
-        // substring match on message (fragile: localized strings, "abortion", etc.).
-        if (abortSignal?.aborted || (err instanceof Error && err.name === "AbortError")) {
-          return { earlyReturn: true as const, text: textContent, interrupted: true };
-        }
-        if (isContextLengthError(err)) {
-          // throw-path did not hit the restoreUsage inside collectStream; do it here
-          this.cumulativeUsage.inputTokens = outerUsageSnapshot.inputTokens;
-          this.cumulativeUsage.outputTokens = outerUsageSnapshot.outputTokens;
-          return { earlyReturn: false as const, contextError: err };
-        }
-        throw err;
+      // ─── Stream 1차 시도 → context-length 에러면 reactive compact 후 재시도 ───
+      let stream = await collectRoundStream({
+        provider: this.provider!,
+        model,
+        systemPrompt,
+        messages: this.history.getMessages(),
+        toolSchemas,
+        llmSettings,
+        abortSignal,
+        onReasoningDelta: callbacks?.onReasoningDelta,
+        onTextDelta: callbacks?.onTextDelta,
+        reactiveCompacted,
       });
 
-      // context-length 오류 → compact 후 1회 재시도 (throw 경로 또는 stream event 경로)
-      const throwCtxError = !streamResult.earlyReturn && (streamResult as { contextError?: unknown }).contextError;
-      const streamCtxError = !streamResult.earlyReturn && (streamResult as { streamContextError?: string }).streamContextError;
-      if ((throwCtxError || streamCtxError) && !reactiveCompacted) {
+      if (stream.kind === "context_error" && !reactiveCompacted) {
         reactiveCompacted = true;
-        let compacted = false;
-        try {
-          const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages(), undefined, "reactive");
-          if (cr.compacted) {
-            compacted = true;
-            this.history.clear();
-            this.history.restore(compactedMsgs);
-            if (process.env.NODE_ENV !== "production") console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
-            callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
-          }
-        } catch (compactErr) {
-          console.warn("[lvis] reactive-compact: compactMessages threw, skipping retry:", compactErr);
-        }
-        if (compacted) {
-          streamResult = await collectStream(this.history.getMessages());
+        const retried = this.tryReactiveCompact(callbacks);
+        if (retried) {
+          stream = await collectRoundStream({
+            provider: this.provider!,
+            model,
+            systemPrompt,
+            messages: this.history.getMessages(),
+            toolSchemas,
+            llmSettings,
+            abortSignal,
+            onReasoningDelta: callbacks?.onReasoningDelta,
+            onTextDelta: callbacks?.onTextDelta,
+            reactiveCompacted,
+          });
         } else {
-          // compact가 아무것도 하지 않았으면 재시도해도 의미 없음 — 원래 오류 재전파
-          if (throwCtxError) throw (streamResult as { contextError?: unknown }).contextError;
-          throw new Error((streamResult as { streamContextError?: string }).streamContextError);
+          throw new Error(stream.errorMessage);
         }
       }
 
-      if (streamResult.earlyReturn) {
-        // B4: interrupted turn — save partial text to history so user can see what came through
-        const isInterrupted = (streamResult as { interrupted?: boolean }).interrupted === true;
-        if (isInterrupted) {
-          const partialText = streamResult.text ?? "";
-          const savedText = partialText + "\n\n[중단됨]";
-          this.history.append({ role: "assistant", content: savedText });
-          callbacks?.onTextDelta?.("\n\n[중단됨]");
-          return { text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" };
-        }
-        return { text: streamResult.text, toolCalls: allToolCalls, usage: turnUsage };
+      if (stream.kind === "stream_error") {
+        callbacks?.onError?.(stream.userMessage);
+        this.history.append({ role: "assistant", content: stream.userMessage });
+        return { text: stream.userMessage, toolCalls: allToolCalls, usage: turnUsage };
       }
 
-      // assistant 응답을 히스토리에 추가 — thinkingBlocks는 tool_use 체인이
-      // 이어지는 다음 요청에만 signature 그대로 포함되어야 Anthropic이 수락한다.
-      const preserveThinkingBlocks = (stopReason as string) === "tool_use" && pendingToolCalls.length > 0;
+      if (stream.kind === "interrupted") {
+        const savedText = (stream.text ?? "") + "\n\n[중단됨]";
+        this.history.append({ role: "assistant", content: savedText });
+        callbacks?.onTextDelta?.("\n\n[중단됨]");
+        return { text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" };
+      }
+
+      // stream.kind === "context_error" 이면서 reactiveCompacted=true 인 경우는 위 재시도 분기에서 이미 재할당.
+      if (stream.kind === "context_error") {
+        throw new Error(stream.errorMessage);
+      }
+
+      // stream.kind === "ok" — usage 반영 + assistant round commit
+      if (stream.usage) {
+        turnUsage = stream.usage;
+        this.cumulativeUsage.inputTokens += stream.usage.inputTokens;
+        this.cumulativeUsage.outputTokens += stream.usage.outputTokens;
+      }
+
+      const { text: textContent, thought: thoughtContent, thinkingBlocks: roundThinkingBlocks, toolCalls: pendingToolCalls, stopReason } = stream;
+
+      // thinkingBlocks는 tool_use 체인이 이어지는 다음 요청에만 signature 그대로 포함되어야 Anthropic이 수락한다.
+      const preserveThinkingBlocks = stopReason === "tool_use" && pendingToolCalls.length > 0;
       this.history.append({
         role: "assistant",
         content: textContent,
@@ -787,7 +650,8 @@ ${briefingData}
         ...(preserveThinkingBlocks && roundThinkingBlocks.length > 0 && { thinkingBlocks: roundThinkingBlocks }),
         ...(pendingToolCalls.length > 0 && { toolCalls: pendingToolCalls }),
       });
-      // §4.5.2 step 8 — REASONING_ACCUMULATE (round thinking 완료)
+
+      // §4.5.2 step 8 — REASONING_ACCUMULATE
       if (thoughtContent.length > 0) {
         this.tracer.step("REASONING_ACCUMULATE", { round: roundIndex, thoughtLen: thoughtContent.length });
       }
@@ -807,159 +671,93 @@ ${briefingData}
       });
       roundIndex += 1;
 
-      // tool_use 없으면 루프 종료
       if (pendingToolCalls.length === 0 || stopReason === "end_turn") {
         return { text: textContent, toolCalls: allToolCalls, usage: turnUsage };
       }
 
-      // §4.5.6: 도구 실행
+      // §4.5.6 tool execution — request_plugin 가로채기 + knowledge depth cap + executor 호출
       const toolUses: ToolUseBlock[] = pendingToolCalls.map((tc) => ({
         id: tc.id, name: tc.name, input: tc.input,
       }));
 
-      // Phase 1.5 Option C — request_plugin 메타 툴 가로채기.
-      // 실제 tool executor에 넘기지 않고 scope를 확장한 뒤 합성된 tool_result를
-      // 히스토리에 추가한다. 다음 round에서 rebuildToolSchemas()로 새 plugin의
-      // tool이 LLM에 노출된다. MAX_PLUGIN_EXPANSION 초과 시 에러 결과 반환.
-      const requestPluginResults: Array<{ tool_use_id: string; content: string; is_error: boolean }> = [];
-      const remainingToolUses: ToolUseBlock[] = [];
-      for (const tu of toolUses) {
-        if (tu.name !== REQUEST_PLUGIN_TOOL) {
-          remainingToolUses.push(tu);
-          continue;
-        }
-        const pluginId = (tu.input as { pluginId?: unknown })?.pluginId;
-        const availableIds = this.deps.pluginRuntime?.listPluginIds() ?? [];
-        if (typeof pluginId !== "string" || pluginId.length === 0) {
-          requestPluginResults.push({
-            tool_use_id: tu.id,
-            content: `request_plugin 오류: pluginId (string) 필수. Available: ${availableIds.join(", ") || "(none)"}`,
-            is_error: true,
-          });
-        } else if (!availableIds.includes(pluginId)) {
-          requestPluginResults.push({
-            tool_use_id: tu.id,
-            content: `알 수 없는 플러그인 ID '${pluginId}'. 사용 가능: ${availableIds.join(", ") || "(없음)"}`,
-            is_error: true,
-          });
-        } else if (pluginExpansions >= MAX_PLUGIN_EXPANSION) {
-          requestPluginResults.push({
-            tool_use_id: tu.id,
-            content: `request_plugin 한도 초과 (턴당 최대 ${MAX_PLUGIN_EXPANSION}회). '${pluginId}' 활성화 거부.`,
-            is_error: true,
-          });
-        } else if (this.sessionPluginExpansions >= MAX_SESSION_PLUGIN_EXPANSION) {
-          // M2: session-wide cap — independent of per-turn cap above.
-          console.warn(
-            `[lvis] request_plugin session cap reached (${MAX_SESSION_PLUGIN_EXPANSION}). ` +
-            `Rejecting '${pluginId}'.`,
-          );
-          requestPluginResults.push({
-            tool_use_id: tu.id,
-            content: `request_plugin 세션 한도 초과 (세션당 최대 ${MAX_SESSION_PLUGIN_EXPANSION}회). '${pluginId}' 활성화 거부.`,
-            is_error: true,
-          });
-        } else {
-          const prevToolCount = toolSchemas.length;
-          mutableScope.activePluginIds.add(pluginId);
-          pluginExpansions += 1;
-          this.sessionPluginExpansions += 1;
-          toolSchemas = rebuildToolSchemas();
-          const addedToolCount = Math.max(0, toolSchemas.length - prevToolCount);
-          requestPluginResults.push({
-            tool_use_id: tu.id,
-            content: `플러그인 '${pluginId}' 활성화됨. ${addedToolCount}개 도구 추가됨 (현재 ${toolSchemas.length}개 사용 가능).`,
-            is_error: false,
-          });
-          allToolCalls.push({
-            name: tu.name,
-            input: tu.input,
-            result: `activated:${pluginId}`,
-          });
-        }
-      }
+      const prevToolCount = toolSchemas.length;
+      const pluginOutcome = handleRequestPlugin(toolUses, {
+        turnExpansions: pluginExpansions,
+        sessionExpansions: this.sessionPluginExpansions,
+        activePluginIds: scope.activePluginIds,
+        availablePluginIds: this.deps.pluginRuntime?.listPluginIds() ?? [],
+      });
+      pluginExpansions = pluginOutcome.nextTurnExpansions;
+      this.sessionPluginExpansions = pluginOutcome.nextSessionExpansions;
 
-      // request_plugin tool_result를 히스토리에 추가 (executor 우회)
-      for (const rr of requestPluginResults) {
+      // 활성화 성공했으면 tool schema 재빌드 + 추가된 tool 수 보고
+      const rebuiltAfterPlugin = pluginOutcome.activatedPluginIds.length > 0;
+      if (rebuiltAfterPlugin) {
+        toolSchemas = this.rebuildToolSchemas(scope);
+      }
+      const addedToolCount = Math.max(0, toolSchemas.length - prevToolCount);
+      for (const rr of pluginOutcome.results) {
+        const finalContent = !rr.is_error && rebuiltAfterPlugin
+          ? `${rr.content} ${addedToolCount}개 도구 추가됨 (현재 ${toolSchemas.length}개 사용 가능).`
+          : rr.content;
         this.history.append({
           role: "tool_result",
           toolUseId: rr.tool_use_id,
           toolName: REQUEST_PLUGIN_TOOL,
-          content: rr.content,
+          content: finalContent,
           ...(rr.is_error && { isError: true }),
         });
       }
+      for (const activated of pluginOutcome.activatedPluginIds) {
+        allToolCalls.push({
+          name: REQUEST_PLUGIN_TOOL,
+          input: { pluginId: activated },
+          result: `activated:${activated}`,
+        });
+      }
 
-      // request_plugin만 있고 실제 실행할 tool이 없으면 다음 round로 진입
-      // (LLM이 새로 활성화된 plugin의 tool을 호출할 수 있도록).
-      // C9: request_plugin 전용 round는 MAX_TOOL_ROUNDS 카운트에서 제외.
-      // Copilot: 활성화에 실제로 성공한 경우에만 round를 되돌린다. 실패한
-      // request_plugin(unknown id, over-limit)만 반복되면 round 예산이 정상
-      // 소모되어야 무한 루프가 발생하지 않는다.
-      if (remainingToolUses.length === 0) {
-        const successfulActivation = requestPluginResults.some((r) => !r.is_error);
-        if (successfulActivation) round--;
+      // request_plugin만 있으면 다음 round 로 — 성공 시 round 예산 돌려받기 (C9)
+      if (pluginOutcome.remaining.length === 0) {
+        if (pluginOutcome.activatedPluginIds.length > 0) round--;
         continue;
       }
 
-      // §11 depth cap: knowledge 도구 turn당 최대 KNOWLEDGE_DEPTH_CAP 회
-      const cappedToolUses: ToolUseBlock[] = [];
-      const capBlockResults: Array<{ tool_use_id: string; content: string; is_error: boolean }> = [];
-      for (const tu of remainingToolUses) {
-        if (KNOWLEDGE_TOOL_NAMES.has(tu.name)) {
-          if (knowledgeCallCount >= KNOWLEDGE_DEPTH_CAP) {
-            capBlockResults.push({
-              tool_use_id: tu.id,
-              content: `[depth cap] ${tu.name} 도구는 turn당 최대 ${KNOWLEDGE_DEPTH_CAP}회만 호출 가능합니다.`,
-              is_error: true,
-            });
-            continue;
-          }
-          knowledgeCallCount++;
-        }
-        cappedToolUses.push(tu);
-      }
+      // §11 knowledge depth cap
+      const capResult = applyKnowledgeDepthCap(pluginOutcome.remaining, knowledgeCallCount);
+      knowledgeCallCount = capResult.nextCount;
 
       // §4.5.2 step 9 — TOOL_EXECUTE
       this.tracer.step("TOOL_EXECUTE", {
         round: roundIndex,
-        toolNames: cappedToolUses.map((tu) => tu.name),
-        capped: capBlockResults.length,
+        toolNames: capResult.allowed.map((tu) => tu.name),
+        capped: capResult.blocked.length,
       });
-      const toolResults = await this.toolExecutor.executeAll(cappedToolUses, {
+      const toolResults = await this.toolExecutor.executeAll(capResult.allowed, {
         onToolStart: callbacks?.onToolStart,
         onToolEnd: callbacks?.onToolEnd,
       }, this.sessionId);
 
-      // cap 차단된 결과를 toolResults에 병합
-      const allResults = [...toolResults, ...capBlockResults];
-
-      // 1:1 안전 접근 — toolResults가 짧을 수 있으므로 ?.content 가드
-      for (let i = 0; i < cappedToolUses.length; i++) {
+      for (let i = 0; i < capResult.allowed.length; i++) {
         allToolCalls.push({
-          name: cappedToolUses[i].name,
-          input: cappedToolUses[i].input,
+          name: capResult.allowed[i].name,
+          input: capResult.allowed[i].input,
           result: toolResults[i]?.content ?? "(missing)",
         });
       }
-      // cap 차단 결과도 audit trail에 포함 (depth cap 감사 근거 누락 방지)
-      for (const blocked of capBlockResults) {
-        const origTool = remainingToolUses.find((tu) => tu.id === blocked.tool_use_id);
+      for (const blocked of capResult.blocked) {
+        const origTool = pluginOutcome.remaining.find((tu) => tu.id === blocked.tool_use_id);
         if (origTool) {
-          allToolCalls.push({
-            name: origTool.name,
-            input: origTool.input,
-            result: blocked.content,
-          });
+          allToolCalls.push({ name: origTool.name, input: origTool.input, result: blocked.content });
         }
       }
 
-      // tool_result를 히스토리에 추가 → loop back
+      // tool_result 히스토리 append → loop back
+      const allResults = [...toolResults, ...capResult.blocked];
       for (const tr of allResults) {
         this.history.append({
           role: "tool_result",
           toolUseId: tr.tool_use_id,
-          toolName: remainingToolUses.find((tu) => tu.id === tr.tool_use_id)?.name,
+          toolName: pluginOutcome.remaining.find((tu) => tu.id === tr.tool_use_id)?.name,
           content: tr.content,
           ...(tr.is_error && { isError: true }),
         });
@@ -967,6 +765,45 @@ ${briefingData}
     }
 
     return { text: "(도구 실행 라운드 한도 초과)", toolCalls: allToolCalls, usage: turnUsage };
+  }
+
+  /** Tool registry → LLM 이 받는 ToolSchema 배열로 변환. scope 필터 반영. */
+  private rebuildToolSchemas(scope: ToolScope): ToolSchema[] {
+    const raw = this.deps.toolRegistry.getToolSchemasForScope(scope);
+    const result: ToolSchema[] = [];
+    for (const s of raw) {
+      try {
+        result.push({
+          name: s.name,
+          description: s.description,
+          inputSchema: s.input_schema as ToolSchema["inputSchema"],
+        });
+      } catch (err) {
+        console.warn(`[lvis] rebuildToolSchemas: tool '${s.name}' schema 변환 실패, 건너뜀:`, err);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Reactive compact — context-length 초과 시 history 를 압축한다.
+   * 성공했으면 true 반환 (호출자가 stream 재시도). 실패 시 false.
+   */
+  private tryReactiveCompact(callbacks?: TurnCallbacks): boolean {
+    try {
+      const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages(), undefined, "reactive");
+      if (!cr.compacted) return false;
+      this.history.clear();
+      this.history.restore(compactedMsgs);
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+      }
+      callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
+      return true;
+    } catch (compactErr) {
+      console.warn("[lvis] reactive-compact: compactMessages threw, skipping retry:", compactErr);
+      return false;
+    }
   }
 
   // ─── Private: Memory Extraction (§4.5.5 Hook 3) ───
