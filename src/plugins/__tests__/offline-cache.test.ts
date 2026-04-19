@@ -32,7 +32,7 @@ function makeItem(id: string): PluginMarketplaceItem {
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(resolve(join(homedir(), ".lvis", "test-tmp"), "offline-cache-test-"));
+  tmpDir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "offline-cache-test-"));
 });
 
 afterEach(() => {

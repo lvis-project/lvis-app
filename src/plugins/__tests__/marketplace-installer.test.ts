@@ -11,7 +11,7 @@ import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import {resolve, join} from "node:path";
+import { join} from "node:path";
 import {
   installFromMarketplace,
   isMarketplaceDirectPreferred,
@@ -98,7 +98,7 @@ function fakeHttp(
 }
 
 function tmpDownloadRoot(): string {
-  return mkdtempSync(resolve(join(homedir(), ".lvis", "test-tmp"), "s2-installer-"));
+  return mkdtempSync(join(homedir(), ".lvis", "test-tmp", "s2-installer-"));
 }
 
 describe("installFromMarketplace — happy path", () => {

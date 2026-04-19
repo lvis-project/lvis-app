@@ -239,7 +239,7 @@ describe("PythonRuntimeBootstrapper", () => {
             expect(pythonPath).toContain("Scripts");
             expect(pythonPath).toContain("python.exe");
           } else {
-            expect(pythonPath.replace(/\\\\/g, "/")).toContain("bin/python");
+            expect(pythonPath.replace(/\\/g, "/")).toContain("bin/python");
           }
         } finally {
           Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });

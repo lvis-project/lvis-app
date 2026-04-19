@@ -90,7 +90,7 @@ describe("marketplace install dependency guard (S14)", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = resolve(join(homedir(), ".lvis", "test-tmp"), `lvis-test-${randomBytes(8).toString("hex")}`);
+    tmpDir = join(homedir(), ".lvis", "test-tmp", `lvis-test-${randomBytes(8).toString("hex")}`);
     await mkdir(tmpDir, { recursive: true });
     // Stub runNpmInstall so tests don't spawn real npm processes (slow, flaky,
     // requires network). We accept the npm path failing earlier or later;

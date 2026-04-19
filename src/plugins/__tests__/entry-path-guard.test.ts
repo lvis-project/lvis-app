@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
+import { join } from "node:path";
 import { PluginRuntime, resolvePluginEntryPath } from "../runtime.js";
 
 describe("PluginRuntime — entry path allowlist", () => {
@@ -147,55 +147,51 @@ describe("PluginRuntime — entry path allowlist", () => {
  * the Windows fix preserves.
  */
 describe("resolvePluginEntryPath — direct", () => {
+  // Platform-neutral root: homedir() always returns a long-path canonical form
+  // on all OSes, avoiding POSIX/Windows separator divergence.
+  const root = join(homedir(), ".lvis", "test-tmp", "plugins", "sample");
+
   it("accepts a relative entry inside the plugin dir", () => {
-    const root = "/tmp/plugins/sample";
     expect(() => resolvePluginEntryPath(root, "entry.mjs")).not.toThrow();
-    expect(resolvePluginEntryPath(root, "entry.mjs")).toBe("/tmp/plugins/sample/entry.mjs");
+    expect(resolvePluginEntryPath(root, "entry.mjs")).toBe(join(root, "entry.mjs"));
   });
 
   it("accepts a nested relative entry", () => {
-    const root = "/tmp/plugins/sample";
-    expect(resolvePluginEntryPath(root, "dist/entry.mjs")).toBe(
-      "/tmp/plugins/sample/dist/entry.mjs",
+    expect(resolvePluginEntryPath(root, join("dist", "entry.mjs"))).toBe(
+      join(root, "dist", "entry.mjs"),
     );
   });
 
   it("rejects traversal via ..", () => {
-    expect(() => resolvePluginEntryPath("/tmp/plugins/sample", "../other/entry.mjs")).toThrow(
+    expect(() => resolvePluginEntryPath(root, "../other/entry.mjs")).toThrow(
       /outside plugin directory/,
     );
   });
 
-  it("rejects absolute POSIX paths", () => {
-    expect(() => resolvePluginEntryPath("/tmp/plugins/sample", "/etc/passwd")).toThrow(
-      /absolute/,
-    );
+  it("rejects absolute POSIX paths (non-Windows only)", () => {
+    if (process.platform !== "win32") {
+      expect(() => resolvePluginEntryPath(root, "/etc/passwd")).toThrow(/absolute/);
+    }
   });
 
-  it("rejects absolute Windows paths (drive-letter rooted)", () => {
-    // `path.isAbsolute('C:\\...')` is true only on win32, but a leading drive
-    // letter should never appear in a sandboxed relative entry regardless of
-    // OS. Node's resolver treats it as relative on POSIX, which still lands
-    // the resolved path *inside* the plugin dir as a literal `C:/…` segment
-    // — acceptable. The real Windows-sep concern is the traversal test below.
-    const root = "/tmp/plugins/sample";
-    // literal "C:\\" as a relative entry on POSIX becomes a child dir; not
-    // considered traversal. Assert it does NOT throw (behaviour == previous).
-    expect(() => resolvePluginEntryPath(root, "C:\\entry.mjs")).not.toThrow();
+  it("rejects/accepts absolute Windows drive-letter paths per OS", () => {
+    if (process.platform === "win32") {
+      // On Windows C:\entry.mjs is a true absolute path — guard must throw.
+      expect(() => resolvePluginEntryPath(root, "C:\\entry.mjs")).toThrow(/absolute/);
+    } else {
+      // On POSIX C:\... is a relative literal string — resolves inside root.
+      expect(() => resolvePluginEntryPath(root, "C:\\entry.mjs")).not.toThrow();
+    }
   });
 
-  it("accepts entry when root path uses trailing separator", () => {
-    // This is the scenario the old `pluginRootResolved + "/"` hardcode
-    // was trying to cover. With path.relative() it is unconditional.
-    const root = "/tmp/plugins/sample/";
-    expect(() => resolvePluginEntryPath(root, "entry.mjs")).not.toThrow();
+  it("accepts entry when root path uses trailing path separator", () => {
+    const rootTrailing = root + (process.platform === "win32" ? "\\" : "/");
+    expect(() => resolvePluginEntryPath(rootTrailing, "entry.mjs")).not.toThrow();
   });
 
   it("rejects traversal even when entry starts with a sibling name prefix", () => {
     // Guards against the classic `pluginRootResolved` string-prefix bug:
-    // "/root/plugin-foo" should NOT accept a resolve() result of
-    // "/root/plugin-foobar/evil.js". path.relative() catches this.
-    const root = "/tmp/plugins/sample";
+    // "/root/plugin-foo" should NOT accept "/root/plugin-foobar/evil.js".
     expect(() => resolvePluginEntryPath(root, "../sample-evil/entry.mjs")).toThrow(
       /outside plugin directory/,
     );

@@ -104,7 +104,7 @@ describe("PluginUpdateDetector", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(resolve(join(homedir(), ".lvis", "test-tmp"), "update-detector-"));
+    tmpDir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "update-detector-"));
   });
 
   afterEach(() => {
