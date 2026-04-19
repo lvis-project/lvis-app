@@ -161,11 +161,19 @@ export type ApprovalRequest = {
   target?: { filePath?: string };
   isReadOnly?: boolean;
   mode?: "default" | "plan" | "full_auto";
+  /** §D2: nonce issued by the main process; renderer echoes verbatim. */
+  nonce?: string;
+  /** §D2: HMAC over (id, nonce, toolName, args) — echoed verbatim. */
+  hmac?: string;
 };
 export type ApprovalDecision = {
   requestId: string;
   choice: ApprovalChoice;
   rememberPattern?: string;
+  /** §D2: echoed nonce from the matching ApprovalRequest. */
+  nonce?: string;
+  /** §D2: echoed HMAC from the matching ApprovalRequest. */
+  hmac?: string;
 };
 
 export type LvisApprovalApi = {

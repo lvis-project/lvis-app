@@ -62,6 +62,12 @@ export function useApproval() {
             requestId: current.id,
             choice,
             rememberPattern: pattern,
+            // §D2: echo nonce + HMAC verbatim so the main process can verify
+            // this response was bound to the original request (confused-
+            // deputy defense). Stale or cross-wired responses fail the check
+            // and are forcibly downgraded to deny-once.
+            nonce: current.nonce,
+            hmac: current.hmac,
           });
         }
       } catch (err) {
