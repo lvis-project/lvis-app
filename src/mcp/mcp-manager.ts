@@ -12,7 +12,7 @@
  *
  * 설정 위치: ~/.lvis/mcp-servers.json
  */
-import { copyFile, readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
@@ -318,8 +318,6 @@ export class McpManager {
     const dir = dirname(this.configPath);
     await mkdir(dir, { recursive: true });
     const tmpPath = `${this.configPath}.tmp`;
-    const bakPath = `${this.configPath}.bak`;
-    let backupCreated = false;
     try {
       await writeFile(tmpPath, JSON.stringify({ servers: configs }, null, 2), {
         encoding: "utf-8",
@@ -330,23 +328,12 @@ export class McpManager {
       } catch (renameErr) {
         // Windows rename() may throw EEXIST when the destination already exists.
         // Under the cross-process config lock it is safe to follow the repo's
-        // rm-then-rename retry pattern, but we still preserve a sibling .bak so
-        // an unexpected retry failure can restore the last good config.
+        // rm-then-rename retry pattern without creating extra secret-bearing copies.
         if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
           if (existsSync(this.configPath)) {
-            await rm(bakPath, { force: true });
-            await copyFile(this.configPath, bakPath);
-            backupCreated = true;
             await rm(this.configPath, { force: true });
           }
-          try {
-            await rename(tmpPath, this.configPath);
-          } catch (retryErr) {
-            if (backupCreated) {
-              await copyFile(bakPath, this.configPath).catch(() => undefined);
-            }
-            throw retryErr;
-          }
+          await rename(tmpPath, this.configPath);
         } else {
           throw renameErr;
         }
@@ -354,10 +341,6 @@ export class McpManager {
     } catch (e) {
       await rm(tmpPath, { force: true }).catch(() => undefined);
       throw e;
-    } finally {
-      if (backupCreated && existsSync(this.configPath)) {
-        await rm(bakPath, { force: true }).catch(() => undefined);
-      }
     }
   }
 

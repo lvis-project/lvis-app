@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
@@ -109,6 +109,20 @@ function parseKeyValueLines(input: string, delimiter: ":" | "="): Record<string,
 }
 
 export function McpTab() {
+  const formIdPrefix = useId();
+  const formIds = {
+    id: `${formIdPrefix}-server-id`,
+    transport: `${formIdPrefix}-transport`,
+    auth: `${formIdPrefix}-auth`,
+    apiKey: `${formIdPrefix}-api-key`,
+    command: `${formIdPrefix}-command`,
+    args: `${formIdPrefix}-args`,
+    env: `${formIdPrefix}-env`,
+    url: `${formIdPrefix}-url`,
+    allowPrivateNetworks: `${formIdPrefix}-allow-private`,
+    headers: `${formIdPrefix}-headers`,
+  };
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -397,8 +411,11 @@ export function McpTab() {
             <div className="grid grid-cols-2 gap-3">
               {/* ID */}
               <div className="space-y-1">
-                <label className="text-xs">서버 ID *</label>
+                <label htmlFor={formIds.id} className="text-xs">
+                  서버 ID *
+                </label>
                 <Input
+                  id={formIds.id}
                   className="h-7 text-xs"
                   placeholder="my-mcp-server"
                   value={form.id}
@@ -408,8 +425,11 @@ export function McpTab() {
 
               {/* Transport */}
               <div className="space-y-1">
-                <label className="text-xs">Transport *</label>
+                <label htmlFor={formIds.transport} className="text-xs">
+                  Transport *
+                </label>
                 <select
+                  id={formIds.transport}
                   className="h-7 w-full rounded-md border bg-background px-2 text-xs"
                   value={form.transport}
                   onChange={(e) =>
@@ -424,8 +444,11 @@ export function McpTab() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-xs">Auth</label>
+                <label htmlFor={formIds.auth} className="text-xs">
+                  Auth
+                </label>
                 <select
+                  id={formIds.auth}
                   className="h-7 w-full rounded-md border bg-background px-2 text-xs"
                   value={form.auth}
                   onChange={(e) =>
@@ -438,8 +461,11 @@ export function McpTab() {
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-xs">API Key (write-only)</label>
+                <label htmlFor={formIds.apiKey} className="text-xs">
+                  API Key (write-only)
+                </label>
                 <Input
+                  id={formIds.apiKey}
                   type="password"
                   className="h-7 text-xs font-mono"
                   placeholder="sk-..."
@@ -452,8 +478,11 @@ export function McpTab() {
             {form.transport === "stdio" ? (
               <>
                 <div className="space-y-1">
-                  <label className="text-xs">Command *</label>
+                  <label htmlFor={formIds.command} className="text-xs">
+                    Command *
+                  </label>
                   <Input
+                    id={formIds.command}
                     className="h-7 text-xs font-mono"
                     placeholder="uvx my-mcp-server"
                     value={form.command}
@@ -464,8 +493,11 @@ export function McpTab() {
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs">Args (추가 인자)</label>
+                  <label htmlFor={formIds.args} className="text-xs">
+                    Args (추가 인자)
+                  </label>
                   <Input
+                    id={formIds.args}
                     className="h-7 text-xs font-mono"
                     placeholder="--port 3000 --profile 'team alpha'"
                     value={form.args}
@@ -473,8 +505,11 @@ export function McpTab() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs">Env (KEY=value, write-only)</label>
+                  <label htmlFor={formIds.env} className="text-xs">
+                    Env (KEY=value, write-only)
+                  </label>
                   <Textarea
+                    id={formIds.env}
                     className="min-h-[88px] text-xs font-mono"
                     placeholder={"OPENAI_API_KEY=...\nMCP_PROFILE=team-alpha"}
                     value={form.env}
@@ -485,8 +520,11 @@ export function McpTab() {
             ) : (
               <>
                 <div className="space-y-1">
-                  <label className="text-xs">URL *</label>
+                  <label htmlFor={formIds.url} className="text-xs">
+                    URL *
+                  </label>
                   <Input
+                    id={formIds.url}
                     className="h-7 text-xs font-mono"
                     placeholder="https://example.com/mcp"
                     value={form.url}
@@ -495,7 +533,7 @@ export function McpTab() {
                 </div>
                 <div className="flex items-center gap-2">
                   <input
-                    id="mcp-allow-private"
+                    id={formIds.allowPrivateNetworks}
                     type="checkbox"
                     checked={form.allowPrivateNetworks}
                     onChange={(e) =>
@@ -503,13 +541,16 @@ export function McpTab() {
                     }
                     className="h-3.5 w-3.5"
                   />
-                  <label htmlFor="mcp-allow-private" className="text-xs">
+                  <label htmlFor={formIds.allowPrivateNetworks} className="text-xs">
                     사설 네트워크 허용 (localhost/사내망)
                   </label>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs">Headers (HEADER: value, write-only)</label>
+                  <label htmlFor={formIds.headers} className="text-xs">
+                    Headers (HEADER: value, write-only)
+                  </label>
                   <Textarea
+                    id={formIds.headers}
                     className="min-h-[88px] text-xs font-mono"
                     placeholder={"Authorization: Bearer ...\nX-Team: alpha"}
                     value={form.headers}
