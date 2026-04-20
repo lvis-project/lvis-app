@@ -20,6 +20,11 @@
       "id": "calendar",
       "manifestPath": "installed/calendar/plugin.json",
       "enabled": true
+    },
+    {
+      "id": "lge-api",
+      "manifestPath": "installed/lge-api/plugin.json",
+      "enabled": true
     }
   ]
 }
