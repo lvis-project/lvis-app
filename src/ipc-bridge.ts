@@ -407,6 +407,24 @@ export function registerIpcHandlers(
     }
 
     const entryPath = fileURLToPath(view.entryUrl);
+
+    // Dev mode: listUiExtensions() already validated the entry via
+    // resolveEntryPath() which permits ../../../ traversal for npm file:-linked
+    // packages.  realpathSync would resolve through the link to the source
+    // repo directory, making the prefix-based confinement check fail.
+    // Trust the already-validated path and read directly.
+    const isDev = process.env.LVIS_DEV === "1";
+    if (isDev) {
+      let target: string;
+      try {
+        target = realpathSync(entryPath);
+      } catch {
+        throw new Error(`Plugin UI entry path could not be resolved (plugin=${pluginId}).`);
+      }
+      return readFile(target, "utf-8");
+    }
+
+    // Production: strict path confinement — entry must reside inside pluginRoot.
     const rawPluginRoot = pluginRuntime.getPluginRoot(pluginId);
     if (!rawPluginRoot) {
       throw new Error(`Plugin root not found (plugin=${pluginId}).`);
