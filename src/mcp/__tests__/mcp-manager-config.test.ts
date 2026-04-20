@@ -3,7 +3,7 @@
  *
  * Uses tmp directory to avoid touching real ~/.lvis/mcp-servers.json.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
@@ -63,6 +63,10 @@ beforeEach(async () => {
   if (!existsSync(testDir)) {
     await mkdir(testDir, { recursive: true });
   }
+});
+
+afterAll(async () => {
+  await rm(testDir, { recursive: true, force: true });
 });
 
 describe("McpManager — getConfigs()", () => {

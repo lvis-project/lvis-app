@@ -92,7 +92,7 @@ export function McpTab() {
         showBanner("success", `${id} 연결이 해제되었습니다.`);
         void fetchAll();
       } catch (e) {
-        showBanner("error", (e as Error).message);
+        showBanner("error", e instanceof Error ? e.message : String(e));
       }
     },
     [fetchAll, showBanner],
@@ -106,7 +106,7 @@ export function McpTab() {
         showBanner("success", `${id} 서버가 제거되었습니다.`);
         void fetchAll();
       } catch (e) {
-        showBanner("error", (e as Error).message);
+        showBanner("error", e instanceof Error ? e.message : String(e));
       }
     },
     [fetchAll, showBanner],
@@ -149,7 +149,7 @@ export function McpTab() {
       showBanner("success", `${config.id} 서버가 추가되었습니다.`);
       void fetchAll();
     } catch (e) {
-      showBanner("error", (e as Error).message);
+      showBanner("error", e instanceof Error ? e.message : String(e));
     } finally {
       setFormBusy(false);
     }

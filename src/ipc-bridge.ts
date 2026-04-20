@@ -458,7 +458,8 @@ export function registerIpcHandlers(
   });
 
   // ─── MCP ──────────────────────────────────────
-  // read-only, sender guard optional
+  // lvis:mcp:servers returns only status/tool metadata — no raw secrets.
+  // validateSender omitted intentionally (read-only topology data, low sensitivity).
   ipcMain.handle("lvis:mcp:servers", () => services.mcpManager.listServers());
   ipcMain.handle("lvis:mcp:kill", (e, serverId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:kill", e); return UNAUTHORIZED_FRAME; }

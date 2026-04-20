@@ -26,6 +26,17 @@ const DEFAULT_CONFIG_PATH = join(homedir(), ".lvis", "mcp-servers.json");
 export class McpManager {
   private readonly clients = new Map<string, McpClient>();
   private readonly configPath: string;
+  /** Serialises all config read-modify-write ops to prevent TOCTOU races */
+  private configOpLock: Promise<void> = Promise.resolve();
+
+  private withConfigLock<T>(fn: () => Promise<T>): Promise<T> {
+    const op = this.configOpLock.then(fn);
+    this.configOpLock = op.then(
+      () => undefined,
+      () => undefined,
+    );
+    return op;
+  }
 
   constructor(
     private readonly governance: McpGovernance,
@@ -165,9 +176,27 @@ export class McpManager {
 
   /**
    * 설정 파일에 서버 추가 + 연결 시도.
-   * 이미 동일 id가 있으면 에러.
+   * 이미 동일 id가 있으면 에러. write-lock으로 동시 추가 시 TOCTOU 방지.
    */
   async addConfig(config: McpServerConfig): Promise<void> {
+    // Runtime payload validation (IPC cast is type-only, disappears at runtime)
+    if (!config?.id || typeof config.id !== "string") {
+      throw new Error("[mcp-manager] 유효하지 않은 서버 id");
+    }
+    const validTransports = ["stdio", "http", "sse", "websocket"] as const;
+    if (!validTransports.includes(config.transport as (typeof validTransports)[number])) {
+      throw new Error(`[mcp-manager] 유효하지 않은 transport: ${String(config.transport)}`);
+    }
+    if (config.transport === "stdio" && !(config as { command?: string }).command?.trim()) {
+      throw new Error("[mcp-manager] stdio 서버는 command 필드가 필요합니다.");
+    }
+    if (
+      (config.transport === "http" || config.transport === "sse" || config.transport === "websocket") &&
+      !(config as { url?: string }).url?.trim()
+    ) {
+      throw new Error("[mcp-manager] http/sse/websocket 서버는 url 필드가 필요합니다.");
+    }
+
     // Normalize id: trim whitespace, reject empty
     const normalizedId = config.id.trim();
     if (!normalizedId) {
@@ -175,37 +204,41 @@ export class McpManager {
     }
     const normalizedConfig = { ...config, id: normalizedId } as McpServerConfig;
 
-    const existing = await this.loadFromConfig();
-    if (existing.some((s) => s.id === normalizedId)) {
-      throw new Error(`[mcp-manager] 서버 id '${normalizedId}'가 이미 존재합니다.`);
-    }
-    const updated = [...existing, normalizedConfig];
-    await this.saveConfigs(updated);
-    // 연결 시도 (실패해도 config 저장은 유지)
-    try {
-      await this.connectServer(normalizedConfig);
-    } catch (err) {
-      console.warn(`[mcp-manager] 서버 추가 후 연결 실패 (${normalizedId}):`, err);
-    }
+    return this.withConfigLock(async () => {
+      const existing = await this.loadFromConfig();
+      if (existing.some((s) => s.id === normalizedId)) {
+        throw new Error(`[mcp-manager] 서버 id '${normalizedId}'가 이미 존재합니다.`);
+      }
+      const updated = [...existing, normalizedConfig];
+      await this.saveConfigs(updated);
+      // 연결 시도 (실패해도 config 저장은 유지)
+      try {
+        await this.connectServer(normalizedConfig);
+      } catch (err) {
+        console.warn(`[mcp-manager] 서버 추가 후 연결 실패 (${normalizedId}):`, err);
+      }
+    });
   }
 
   /**
    * 설정 파일에서 서버 제거 + 연결 해제.
-   * 존재하지 않아도 에러 없이 처리.
+   * 존재하지 않아도 에러 없이 처리. write-lock으로 동시 제거 시 TOCTOU 방지.
    */
   async removeConfig(serverId: string): Promise<void> {
-    const existing = await this.loadFromConfig();
-    const updated = existing.filter((s) => s.id !== serverId);
-    await this.saveConfigs(updated);
-    // 연결 해제 (이미 끊겨있으면 무시)
-    const client = this.clients.get(serverId);
-    if (client) {
-      await client.disconnect().catch((e) =>
-        console.warn(`[mcp-manager] removeConfig disconnect 실패 (${serverId}):`, e),
-      );
-      this.clients.delete(serverId);
-    }
-    this.toolRegistry.unregisterByMcp(serverId);
+    return this.withConfigLock(async () => {
+      const existing = await this.loadFromConfig();
+      const updated = existing.filter((s) => s.id !== serverId);
+      await this.saveConfigs(updated);
+      // 연결 해제 (이미 끊겨있으면 무시)
+      const client = this.clients.get(serverId);
+      if (client) {
+        await client.disconnect().catch((e) =>
+          console.warn(`[mcp-manager] removeConfig disconnect 실패 (${serverId}):`, e),
+        );
+        this.clients.delete(serverId);
+      }
+      this.toolRegistry.unregisterByMcp(serverId);
+    });
   }
 
   /** configPath 에 서버 목록을 원자적으로 저장 (temp file → rename) */
