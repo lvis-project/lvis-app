@@ -43,9 +43,15 @@ export interface OpenAuthWindowOptions {
   /** 창 타이틀. 기본 "Login". */
   windowTitle?: string;
   /**
-   * Electron session partition. `persist:` prefix가 붙으면 영구 세션.
-   * 서로 다른 포털 간 쿠키 격리를 원하면 플러그인별로 다른 partition 지정.
-   * 기본 undefined — default session 공유.
+   * Electron session partition. `persist:` prefix 가 붙으면 디스크 영속,
+   * 없으면 in-memory.
+   *
+   * **기본값은 undefined 가 아니라 호출마다 새로운 in-memory partition**
+   * (`ephemeral-auth-<random>`) — default session 공유하지 않는다.
+   * 쿠키/세션 storage 를 재사용하려면 **같은 partition 을 명시적으로** 전달해야 한다.
+   *
+   * (Plugin host 는 추가로 `persist:plugin-auth:${encodeURIComponent(pluginId)}[:<sub>]`
+   * 네임스페이스 밖의 값을 거부한다 — plugin-runtime 참고.)
    */
   persistPartition?: string;
 }
@@ -256,6 +262,12 @@ export async function openAuthWindow(
     // Fast-fail on navigation errors so we don't wait the full timeout for
     // DNS / TLS / proxy / offline / renderer-crash scenarios. isMainFrame
     // filters out third-party asset failures that shouldn't abort login.
+    //
+    // `ERR_ABORTED` (-3) 은 SSO redirect chain 중 이전 load 가 취소되며
+    // 흔히 발생하는 benign 실패다. 이걸로 즉시 reject 하면 정상적인 POST→302
+    // redirect 에서 로그인 플로우가 도중에 끊긴다. 대신 현재 URL 이 이미
+    // completion pattern 에 도달했는지 한 번 더 확인하고, 아니면 무시한다.
+    const ERR_ABORTED = -3;
     const failReject = (errorCode: number, errorDesc: string, validatedUrl: string) =>
       finish(() => {
         clearTimeout(timer);
@@ -267,18 +279,32 @@ export async function openAuthWindow(
         if (!authWindow.isDestroyed()) authWindow.close();
       });
 
+    const handleNavigationFailure = (
+      errorCode: number,
+      errorDescription: string,
+      validatedURL: string,
+      isMainFrame: boolean,
+    ) => {
+      if (!isMainFrame) return;
+      if (errorCode === ERR_ABORTED) {
+        // benign: redirect / page-transition cancel. 완료 조건 충족했는지
+        // 재검사하고 (쿠키 수집이 가능하면 그쪽으로 resolve), 아니면 그냥 흘림.
+        void checkAndCollect();
+        return;
+      }
+      failReject(errorCode, errorDescription, validatedURL);
+    };
+
     authWindow.webContents.on(
       "did-fail-load",
       (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
-        if (!isMainFrame) return;
-        failReject(errorCode, errorDescription, validatedURL);
+        handleNavigationFailure(errorCode, errorDescription, validatedURL, isMainFrame);
       },
     );
     authWindow.webContents.on(
       "did-fail-provisional-load",
       (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
-        if (!isMainFrame) return;
-        failReject(errorCode, errorDescription, validatedURL);
+        handleNavigationFailure(errorCode, errorDescription, validatedURL, isMainFrame);
       },
     );
     authWindow.webContents.on("render-process-gone", (_e, details) => {
