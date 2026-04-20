@@ -9,7 +9,7 @@
       "packageName": "@lvis/plugin-pageindex",
       "deployment": "managed",
       "publisher": "LG Electronics IT",
-      "methods": [
+      "tools": [
         "index_scan",
         "index_documents",
         "chat_preview"
@@ -38,7 +38,7 @@
       "packageName": "@lvis/plugin-meeting",
       "deployment": "managed",
       "publisher": "LG Electronics IT",
-      "methods": [
+      "tools": [
         "meeting_start",
         "meeting_push_chunk",
         "meeting_stop",
@@ -68,7 +68,7 @@
       "packageName": "@lvis/plugin-email",
       "deployment": "managed",
       "publisher": "LG Electronics IT",
-      "methods": [
+      "tools": [
         "email_status",
         "email_auth",
         "email_list",
@@ -96,7 +96,7 @@
       "packageName": "@lvis/plugin-calendar",
       "deployment": "managed",
       "publisher": "LG Electronics IT",
-      "methods": [
+      "tools": [
         "calendar_status",
         "calendar_auth",
         "calendar_list",
