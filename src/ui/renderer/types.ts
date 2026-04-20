@@ -3,6 +3,10 @@
 
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { StreamEvent } from "../../lib/chat-stream-state.js";
+import type { McpServerConfig, McpServerState } from "../../mcp/types.js";
+
+// Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
+export type { McpServerConfig, McpServerState };
 
 export type MarketplaceItem = {
   id: string;
@@ -216,6 +220,14 @@ export type LvisPolicyApi = {
   set: (patch: unknown) => Promise<{ ok: boolean; policy?: unknown; error?: string; message?: string }>;
 };
 
+export type LvisMcpApi = {
+  servers: () => Promise<McpServerState[]>;
+  kill: (id: string) => Promise<void>;
+  getConfigs: () => Promise<McpServerConfig[]>;
+  addConfig: (config: McpServerConfig) => Promise<void>;
+  removeConfig: (id: string) => Promise<void>;
+};
+
 export type ExecMode = "default" | "strict" | "auto";
 
 export type RenderHtmlPayload = {
@@ -233,6 +245,7 @@ declare global {
       permission: LvisPermissionApi;
       approval: LvisApprovalApi;
       policy: LvisPolicyApi;
+      mcp: LvisMcpApi;
     };
   }
 }

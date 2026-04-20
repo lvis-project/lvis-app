@@ -107,6 +107,9 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:plugins:call",
   "lvis:mcp:servers",
   "lvis:mcp:kill",
+  "lvis:mcp:config:get",
+  "lvis:mcp:config:add",
+  "lvis:mcp:config:remove",
   "lvis:permission:get-mode",
   "lvis:permission:set-mode",
   "lvis:permission:list-rules",
@@ -460,6 +463,15 @@ export function registerIpcHandlers(
   ipcMain.handle("lvis:mcp:kill", (e, serverId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:kill", e); return UNAUTHORIZED_FRAME; }
     return services.mcpManager.killSwitch(serverId);
+  });
+  ipcMain.handle("lvis:mcp:config:get", () => services.mcpManager.getConfigs());
+  ipcMain.handle("lvis:mcp:config:add", async (e, config: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:add", e); return UNAUTHORIZED_FRAME; }
+    return services.mcpManager.addConfig(config as import("./mcp/types.js").McpServerConfig);
+  });
+  ipcMain.handle("lvis:mcp:config:remove", async (e, serverId: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:remove", e); return UNAUTHORIZED_FRAME; }
+    return services.mcpManager.removeConfig(serverId);
   });
 
   // ─── Permission Prompt (§6.3 Layer 3) ─────────

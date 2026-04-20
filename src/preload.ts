@@ -129,6 +129,9 @@ const api = {
   mcp: {
     servers: async () => ipcRenderer.invoke("lvis:mcp:servers"),
     kill: async (id: string) => ipcRenderer.invoke("lvis:mcp:kill", id),
+    getConfigs: async () => ipcRenderer.invoke("lvis:mcp:config:get"),
+    addConfig: async (config: unknown) => ipcRenderer.invoke("lvis:mcp:config:add", config),
+    removeConfig: async (id: string) => ipcRenderer.invoke("lvis:mcp:config:remove", id),
   },
 
   // ─── Permission ───────────────────────────────────
@@ -203,4 +206,5 @@ contextBridge.exposeInMainWorld("lvis", {
   permission: api.permission,
   approval: api.approval,
   policy: api.policy,
+  mcp: api.mcp,
 });

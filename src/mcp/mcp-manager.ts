@@ -6,10 +6,13 @@
  * - connectAll(): 승인된 서버 일괄 연결
  * - disconnectAll(): 전체 종료
  * - killSwitch(serverId): 즉시 연결 해제 + 도구 제거 (§10.1)
+ * - getConfigs(): 저장된 서버 설정 목록 반환
+ * - addConfig(config): 설정 파일에 서버 추가 + 연결 시도
+ * - removeConfig(id): 설정 파일에서 서버 제거 + 연결 해제
  *
  * 설정 위치: ~/.lvis/mcp-servers.json
  */
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -144,6 +147,60 @@ export class McpManager {
   /** 특정 서버 상태 조회 */
   getServerState(serverId: string): McpServerState | undefined {
     return this.clients.get(serverId)?.getState();
+  }
+
+  // ─── Config Mutation ────────────────────────────────
+
+  /** 설정 파일의 현재 서버 목록 반환 */
+  async getConfigs(): Promise<McpServerConfig[]> {
+    return this.loadFromConfig();
+  }
+
+  /**
+   * 설정 파일에 서버 추가 + 연결 시도.
+   * 이미 동일 id가 있으면 에러.
+   */
+  async addConfig(config: McpServerConfig): Promise<void> {
+    const existing = await this.loadFromConfig();
+    if (existing.some((s) => s.id === config.id)) {
+      throw new Error(`[mcp-manager] 서버 id '${config.id}'가 이미 존재합니다.`);
+    }
+    const updated = [...existing, config];
+    await this.saveConfigs(updated);
+    // 연결 시도 (실패해도 config 저장은 유지)
+    try {
+      await this.connectServer(config);
+    } catch (err) {
+      console.warn(`[mcp-manager] 서버 추가 후 연결 실패 (${config.id}):`, err);
+    }
+  }
+
+  /**
+   * 설정 파일에서 서버 제거 + 연결 해제.
+   * 존재하지 않아도 에러 없이 처리.
+   */
+  async removeConfig(serverId: string): Promise<void> {
+    const existing = await this.loadFromConfig();
+    const updated = existing.filter((s) => s.id !== serverId);
+    await this.saveConfigs(updated);
+    // 연결 해제 (이미 끊겨있으면 무시)
+    const client = this.clients.get(serverId);
+    if (client) {
+      await client.disconnect().catch((e) =>
+        console.warn(`[mcp-manager] removeConfig disconnect 실패 (${serverId}):`, e),
+      );
+      this.clients.delete(serverId);
+    }
+    this.toolRegistry.unregisterByMcp(serverId);
+  }
+
+  /** ~/.lvis/mcp-servers.json 에 서버 목록 저장 */
+  private async saveConfigs(configs: McpServerConfig[]): Promise<void> {
+    const dir = join(homedir(), ".lvis");
+    if (!existsSync(dir)) {
+      await mkdir(dir, { recursive: true });
+    }
+    await writeFile(this.configPath, JSON.stringify({ servers: configs }, null, 2), "utf-8");
   }
 
   /** 특정 서버의 도구 호출 — ToolExecutor에서 사용 */
