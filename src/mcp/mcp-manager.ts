@@ -12,9 +12,9 @@
  *
  * 설정 위치: ~/.lvis/mcp-servers.json
  */
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import type { McpServerConfig, McpServerState } from "./types.js";
 import { McpGovernance } from "./mcp-governance.js";
@@ -151,9 +151,16 @@ export class McpManager {
 
   // ─── Config Mutation ────────────────────────────────
 
-  /** 설정 파일의 현재 서버 목록 반환 */
+  /** 설정 파일의 현재 서버 목록 반환 (apiKey / headers 제거된 안전 뷰) */
   async getConfigs(): Promise<McpServerConfig[]> {
-    return this.loadFromConfig();
+    const configs = await this.loadFromConfig();
+    // Strip secrets before returning to renderer — apiKey and headers must not cross IPC boundary
+    return configs.map((c) => {
+      const safe = { ...c } as McpServerConfig & { apiKey?: string; headers?: Record<string, string> };
+      delete safe.apiKey;
+      delete safe.headers;
+      return safe as McpServerConfig;
+    });
   }
 
   /**
@@ -161,17 +168,24 @@ export class McpManager {
    * 이미 동일 id가 있으면 에러.
    */
   async addConfig(config: McpServerConfig): Promise<void> {
-    const existing = await this.loadFromConfig();
-    if (existing.some((s) => s.id === config.id)) {
-      throw new Error(`[mcp-manager] 서버 id '${config.id}'가 이미 존재합니다.`);
+    // Normalize id: trim whitespace, reject empty
+    const normalizedId = config.id.trim();
+    if (!normalizedId) {
+      throw new Error("[mcp-manager] 서버 id가 비어있거나 공백만 포함할 수 없습니다.");
     }
-    const updated = [...existing, config];
+    const normalizedConfig = { ...config, id: normalizedId } as McpServerConfig;
+
+    const existing = await this.loadFromConfig();
+    if (existing.some((s) => s.id === normalizedId)) {
+      throw new Error(`[mcp-manager] 서버 id '${normalizedId}'가 이미 존재합니다.`);
+    }
+    const updated = [...existing, normalizedConfig];
     await this.saveConfigs(updated);
     // 연결 시도 (실패해도 config 저장은 유지)
     try {
-      await this.connectServer(config);
+      await this.connectServer(normalizedConfig);
     } catch (err) {
-      console.warn(`[mcp-manager] 서버 추가 후 연결 실패 (${config.id}):`, err);
+      console.warn(`[mcp-manager] 서버 추가 후 연결 실패 (${normalizedId}):`, err);
     }
   }
 
@@ -194,13 +208,13 @@ export class McpManager {
     this.toolRegistry.unregisterByMcp(serverId);
   }
 
-  /** ~/.lvis/mcp-servers.json 에 서버 목록 저장 */
+  /** configPath 에 서버 목록을 원자적으로 저장 (temp file → rename) */
   private async saveConfigs(configs: McpServerConfig[]): Promise<void> {
-    const dir = join(homedir(), ".lvis");
-    if (!existsSync(dir)) {
-      await mkdir(dir, { recursive: true });
-    }
-    await writeFile(this.configPath, JSON.stringify({ servers: configs }, null, 2), "utf-8");
+    const dir = dirname(this.configPath);
+    await mkdir(dir, { recursive: true });
+    const tmpPath = `${this.configPath}.tmp`;
+    await writeFile(tmpPath, JSON.stringify({ servers: configs }, null, 2), "utf-8");
+    await rename(tmpPath, this.configPath);
   }
 
   /** 특정 서버의 도구 호출 — ToolExecutor에서 사용 */

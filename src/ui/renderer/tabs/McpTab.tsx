@@ -47,6 +47,13 @@ export function McpTab() {
     bannerTimerRef.current = setTimeout(() => setBanner(null), 5000);
   }, []);
 
+  // 언마운트 시 타이머 정리 — 언마운트 후 setBanner 호출 방지
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    };
+  }, []);
+
   // ── Section A: 연결 상태 목록 ─────────────────────
   const [states, setStates] = useState<McpServerState[]>([]);
   // ── Section B: 설정 파일 목록 ─────────────────────

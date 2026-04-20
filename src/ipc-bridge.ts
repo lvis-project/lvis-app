@@ -464,7 +464,10 @@ export function registerIpcHandlers(
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:kill", e); return UNAUTHORIZED_FRAME; }
     return services.mcpManager.killSwitch(serverId);
   });
-  ipcMain.handle("lvis:mcp:config:get", () => services.mcpManager.getConfigs());
+  ipcMain.handle("lvis:mcp:config:get", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:get", e); return UNAUTHORIZED_FRAME; }
+    return services.mcpManager.getConfigs();
+  });
   ipcMain.handle("lvis:mcp:config:add", async (e, config: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:add", e); return UNAUTHORIZED_FRAME; }
     return services.mcpManager.addConfig(config as import("./mcp/types.js").McpServerConfig);
