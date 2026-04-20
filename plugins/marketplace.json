@@ -132,7 +132,7 @@
       "packageName": "@lvis/plugin-lge-api",
       "deployment": "managed",
       "publisher": "LG Electronics IT",
-      "methods": [
+      "tools": [
         "lge_login",
         "lge_status",
         "lge_facility_list"
