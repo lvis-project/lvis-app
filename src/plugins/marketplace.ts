@@ -543,6 +543,11 @@ export class PluginMarketplaceService {
     await mkdir(pluginDir, { recursive: true });
     const manifestFile = resolve(pluginDir, "plugin.json");
     const entryAbsPath = resolve(this.appRoot, "node_modules", plugin.packageName, "dist/hostPlugin.js");
+    // H2 defence-in-depth: verify resolved path stays under node_modules
+    const nmRoot = resolve(this.appRoot, "node_modules");
+    if (!entryAbsPath.startsWith(nmRoot + "/") && !entryAbsPath.startsWith(nmRoot + "\\")) {
+      throw new Error(`plugin "${plugin.id}" package path escapes node_modules`);
+    }
     const entryRelPath = relative(pluginDir, entryAbsPath).split("\\").join("/");
     const resolvedUi = (plugin.ui ?? []).map((extension) => this.resolveUiExtension(plugin, pluginDir, extension));
     const manifest: Record<string, unknown> = {
@@ -573,6 +578,11 @@ export class PluginMarketplaceService {
     const entrySource = extension.entry ?? extension.page;
     if (!entrySource) return extension;
     const entryAbsPath = resolve(this.appRoot, "node_modules", plugin.packageName, entrySource);
+    // H2 defence-in-depth: verify resolved path stays under node_modules
+    const nmRoot = resolve(this.appRoot, "node_modules");
+    if (!entryAbsPath.startsWith(nmRoot + "/") && !entryAbsPath.startsWith(nmRoot + "\\")) {
+      throw new Error(`plugin "${plugin.id}" UI entry path escapes node_modules`);
+    }
     const entryRelPath = relative(pluginDir, entryAbsPath).split("\\").join("/");
     return {
       ...extension,
@@ -641,8 +651,18 @@ export class PluginMarketplaceService {
     return manifests;
   }
   private async runNpmInstall(packageSpec: string): Promise<void> {
+    // M4 defence-in-depth: refuse unpinned package specs to prevent unintended
+    // installs of "latest" from the public npm registry. The version portion
+    // (after the last '@') must start with a digit, '^', or '~'.
+    const lastAt = packageSpec.lastIndexOf("@");
+    const versionPart = lastAt > 0 ? packageSpec.slice(lastAt + 1) : "";
+    if (!versionPart || !/^[\d^~]/.test(versionPart)) {
+      throw new Error(
+        `refusing unpinned npm install for "${packageSpec}" — version must be pinned`,
+      );
+    }
     await new Promise<void>((resolvePromise, rejectPromise) => {
-      const child = spawn("npm", ["install", "--prefix", this.appRoot, packageSpec], {
+      const child = spawn("npm", ["install", "--prefix", this.appRoot, "--", packageSpec], {
         stdio: "pipe",
         shell: false,
         cwd: this.appRoot,
@@ -672,7 +692,7 @@ export class PluginMarketplaceService {
 
   private async runNpmUninstall(packageName: string): Promise<void> {
     await new Promise<void>((resolvePromise, rejectPromise) => {
-      const child = spawn("npm", ["uninstall", "--prefix", this.appRoot, packageName], {
+      const child = spawn("npm", ["uninstall", "--prefix", this.appRoot, "--", packageName], {
         stdio: "pipe",
         shell: false,
         cwd: this.appRoot,
