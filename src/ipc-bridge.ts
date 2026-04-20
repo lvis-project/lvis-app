@@ -5,7 +5,10 @@
  * main.ts에서 인라인으로 30개 핸들러를 두지 않고 여기에 집중.
  */
 import { dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
-import { writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AppServices } from "./boot.js";
 import type { ApprovalDecision } from "./permissions/approval-gate.js";
 import { loadPolicy, savePolicy } from "./permissions/policy-store.js";
@@ -100,6 +103,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:plugins:install",
   "lvis:plugins:uninstall",
   "lvis:plugins:ui:list",
+  "lvis:plugins:ui:read-module",
   "lvis:plugins:call",
   "lvis:mcp:servers",
   "lvis:mcp:kill",
@@ -380,6 +384,45 @@ export function registerIpcHandlers(
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:ui:list", () => pluginRuntime.listUiExtensions());
+  ipcMain.handle("lvis:plugins:ui:read-module", async (e, payload?: { pluginId?: string; viewId?: string }) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugins:ui:read-module", e);
+      throw new Error("Unauthorized renderer frame for lvis:plugins:ui:read-module");
+    }
+
+    const pluginId = payload?.pluginId?.trim();
+    const viewId = payload?.viewId?.trim();
+    if (!pluginId || !viewId) {
+      throw new Error("pluginId and viewId are required to load a plugin UI module.");
+    }
+
+    const view = pluginRuntime
+      .listUiExtensions()
+      .find((item) => item.pluginId === pluginId && item.extension.id === viewId);
+    if (!view?.entryUrl) {
+      throw new Error(`Plugin UI entry not found (plugin=${pluginId}, view=${viewId}).`);
+    }
+    if (!view.entryUrl.startsWith("file:")) {
+      throw new Error(`Plugin UI entry is not file-backed (plugin=${pluginId}, view=${viewId}).`);
+    }
+
+    const entryPath = fileURLToPath(view.entryUrl);
+    const pluginRoot = pluginRuntime.getPluginEntryDir(pluginId);
+    if (!pluginRoot) {
+      throw new Error(`Plugin entry dir not found (plugin=${pluginId}).`);
+    }
+    let realEntryPath: string;
+    try {
+      realEntryPath = realpathSync(entryPath);
+    } catch {
+      throw new Error(`Plugin UI entry path could not be resolved (plugin=${pluginId}).`);
+    }
+    const rootWithSep = pluginRoot.endsWith(path.sep) ? pluginRoot : pluginRoot + path.sep;
+    if (realEntryPath !== pluginRoot && !realEntryPath.startsWith(rootWithSep)) {
+      throw new Error(`Plugin UI entry path escapes plugin directory (plugin=${pluginId}).`);
+    }
+    return readFile(realEntryPath, "utf-8");
+  });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
   // read-only, sender guard optional
