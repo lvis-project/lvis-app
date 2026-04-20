@@ -34,9 +34,13 @@
     { "type": "email.action.needed", "hint": { "category": "email", "priority": "medium", "title": "액션 필요 이메일" } }
   ],
   "uiCallable": [
+    "calendar_status",
+    "calendar_auth",
     "calendar_list",
     "calendar_today",
     "calendar_get",
+    "calendar_delete",
+    "calendar_open_url",
     "calendar_start_watcher",
     "calendar_stop_watcher",
     "calendar_detect_patterns"
