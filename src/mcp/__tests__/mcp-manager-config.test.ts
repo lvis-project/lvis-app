@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readFile, writeFile, mkdir, rm, rename } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm, rename, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
 vi.mock("node:fs/promises", async () => {
@@ -74,15 +74,8 @@ beforeEach(async () => {
   const actualFsPromises =
     await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
   vi.mocked(rename).mockImplementation(actualFsPromises.rename);
-  if (!existsSync(testDir)) {
-    await mkdir(testDir, { recursive: true });
-  }
-  await Promise.all([
-    rm(testConfigPath, { force: true }),
-    rm(`${testConfigPath}.bak`, { force: true }),
-    rm(`${testConfigPath}.tmp`, { force: true }),
-    rm(`${testConfigPath}.guard`, { force: true }),
-  ]);
+  await rm(testDir, { recursive: true, force: true });
+  await mkdir(testDir, { recursive: true });
 });
 
 afterAll(async () => {
@@ -206,11 +199,18 @@ describe("McpManager — addConfig()", () => {
     await writeFile(testConfigPath, JSON.stringify({ servers: existingServers }), "utf-8");
 
     let firstRename = true;
+    let firstTmpPath: string | undefined;
     const actualFsPromises =
       await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
     vi.mocked(rename).mockImplementation(async (oldPath, newPath) => {
-      if (firstRename && oldPath === `${testConfigPath}.tmp` && newPath === testConfigPath) {
+      if (
+        firstRename &&
+        oldPath.startsWith(`${testConfigPath}.`) &&
+        oldPath.endsWith(".tmp") &&
+        newPath === testConfigPath
+      ) {
         firstRename = false;
+        firstTmpPath = oldPath;
         const err = new Error("dest exists") as NodeJS.ErrnoException;
         err.code = "EEXIST";
         throw err;
@@ -226,6 +226,10 @@ describe("McpManager — addConfig()", () => {
     const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
     expect(raw.servers.map((server) => server.id)).toEqual(["existing-srv", "new-srv"]);
     expect(existsSync(`${testConfigPath}.bak`)).toBe(false);
+    expect(firstTmpPath).toBeDefined();
+    expect(firstTmpPath).not.toBe(`${testConfigPath}.tmp`);
+    const dirEntries = await readdir(testDir);
+    expect(dirEntries.filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
   });
 
   it("rejects governance-invalid config before save", async () => {

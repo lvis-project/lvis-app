@@ -12,6 +12,7 @@
  *
  * 설정 위치: ~/.lvis/mcp-servers.json
  */
+import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -317,7 +318,7 @@ export class McpManager {
   private async saveConfigs(configs: McpServerConfig[]): Promise<void> {
     const dir = dirname(this.configPath);
     await mkdir(dir, { recursive: true });
-    const tmpPath = `${this.configPath}.tmp`;
+    const tmpPath = `${this.configPath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
     try {
       await writeFile(tmpPath, JSON.stringify({ servers: configs }, null, 2), {
         encoding: "utf-8",
