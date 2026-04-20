@@ -23,7 +23,7 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: lvis-project
-          repositories: lvis-plugin-meeting,lvis-plugin-email,lvis-plugin-pageindex,lvis-plugin-calendar
+          repositories: lvis-plugin-meeting,lvis-plugin-email,lvis-plugin-pageindex,lvis-plugin-calendar,lvis-plugin-lge-api
       - uses: actions/checkout@v6
         with:
           repository: lvis-project/lvis-plugin-meeting
@@ -43,6 +43,11 @@ jobs:
         with:
           repository: lvis-project/lvis-plugin-calendar
           path: lvis-plugin-calendar
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: actions/checkout@v6
+        with:
+          repository: lvis-project/lvis-plugin-lge-api
+          path: lvis-plugin-lge-api
           token: ${{ steps.app-token.outputs.token }}
       - uses: oven-sh/setup-bun@v2
       - name: Build plugin-sdk submodule
