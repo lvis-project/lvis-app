@@ -1,7 +1,12 @@
 /**
- * Sprint 4-B unit tests — AJV wiring (B-1), uiCallable cross-field + destructive
- * guard (B-3), capability gate (B-5 — tested via manifest field), and rate-limit
- * (B-7 — tested in sprint4b-rate-limit.test.ts).
+ * Sprint 4-B unit tests — AJV wiring (B-1), uiCallable subset-of-tools[]
+ * validation (B-3), capability gate (B-5 — tested via manifest field), and
+ * rate-limit (B-7 — tested in sprint4b-rate-limit.test.ts).
+ *
+ * NOTE: The legacy suffix-based "destructive verb" gate has been removed.
+ * uiCallable validation is now purely structural: every entry must be a
+ * string declared in tools[]. Security relies on code review + marketplace
+ * approval + signature verification — not on naming patterns.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -99,25 +104,17 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
     expect(errors.some((e) => /not declared in tools/.test(e))).toBe(true);
   });
 
-  it("B-3: destructive uiCallable tool rejected for user plugin", async () => {
+  it("B-3: any suffix in uiCallable accepted when tool is in tools[]", async () => {
     await writePlugin("p_destructive", {
       uiCallable: ["p_destructive_delete"],
       deployment: "user",
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
-    const origErr = console.error;
-    const errors: string[] = [];
-    console.error = (msg: string) => errors.push(String(msg));
-    try {
-      await runtime.load();
-    } finally {
-      console.error = origErr;
-    }
-    expect(runtime.listPluginIds()).toHaveLength(0);
-    expect(errors.some((e) => /non-read-verb|destructive|uiCallable/.test(e))).toBe(true);
+    await runtime.load();
+    expect(runtime.listPluginIds()).toContain("p_destructive");
   });
 
-  it("B-3: non-destructive uiCallable tool is permitted", async () => {
+  it("B-3: read-like uiCallable tool is permitted", async () => {
     await writePlugin("p_ok", { tools: ["p_ok_get", "p_ok_delete"], uiCallable: ["p_ok_get"], deployment: "user" });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
     await runtime.load();
