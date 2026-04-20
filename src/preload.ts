@@ -1,4 +1,5 @@
 import electron from "electron";
+import type { McpServerConfig } from "./mcp/types.js";
 
 const { contextBridge, ipcRenderer } = electron;
 
@@ -130,7 +131,7 @@ const api = {
     servers: async () => ipcRenderer.invoke("lvis:mcp:servers"),
     kill: async (id: string) => ipcRenderer.invoke("lvis:mcp:kill", id),
     getConfigs: async () => ipcRenderer.invoke("lvis:mcp:config:get"),
-    addConfig: async (config: unknown) => ipcRenderer.invoke("lvis:mcp:config:add", config),
+    addConfig: async (config: McpServerConfig) => ipcRenderer.invoke("lvis:mcp:config:add", config),
     removeConfig: async (id: string) => ipcRenderer.invoke("lvis:mcp:config:remove", id),
   },
 

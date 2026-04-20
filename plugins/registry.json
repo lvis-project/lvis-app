@@ -24,7 +24,7 @@
     {
       "id": "lge-api",
       "manifestPath": "installed/lge-api/plugin.json",
-      "enabled": true
+      "enabled": false
     }
   ]
 }

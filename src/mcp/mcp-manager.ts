@@ -22,12 +22,14 @@ import { McpClient } from "./mcp-client.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { PermissionManager } from "../permissions/permission-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import { withFileLock } from "../lib/with-file-lock.js";
 
 const DEFAULT_CONFIG_PATH = join(homedir(), ".lvis", "mcp-servers.json");
 
 export class McpManager {
   private readonly clients = new Map<string, McpClient>();
   private readonly configPath: string;
+  private readonly configLockPath: string;
   /** Serialises all config read-modify-write ops to prevent TOCTOU races */
   private configOpLock: Promise<void> = Promise.resolve();
 
@@ -40,6 +42,12 @@ export class McpManager {
     return op;
   }
 
+  private withConfigFileLock<T>(fn: () => Promise<T>): Promise<T> {
+    // Use a stable sibling sentinel instead of touching configPath before lock acquisition.
+    // This avoids recreating configPath during the Windows .bak swap window.
+    return withFileLock(this.configLockPath, fn);
+  }
+
   constructor(
     private readonly governance: McpGovernance,
     private readonly toolRegistry: ToolRegistry,
@@ -48,27 +56,45 @@ export class McpManager {
     private readonly auditLogger?: AuditLogger,
   ) {
     this.configPath = configPath ?? DEFAULT_CONFIG_PATH;
+    this.configLockPath = `${this.configPath}.guard`;
   }
 
   // ─── Config Loading ─────────────────────────────────
 
   /** MCP 서버 설정 파일에서 설정 로드 */
   async loadFromConfig(): Promise<McpServerConfig[]> {
-    if (!existsSync(this.configPath)) {
+    return this.withConfigFileLock(() => this.loadFromConfigUnlocked());
+  }
+
+  private async loadFromConfigUnlocked(): Promise<McpServerConfig[]> {
+    const bakPath = `${this.configPath}.bak`;
+    const candidatePaths = existsSync(this.configPath)
+      ? [this.configPath]
+      : existsSync(bakPath)
+        ? [bakPath]
+        : [];
+
+    if (candidatePaths.length === 0) {
       console.log("[mcp-manager] MCP 서버 설정 파일 없음:", this.configPath);
       return [];
     }
 
-    try {
-      const raw = await readFile(this.configPath, "utf-8");
-      const parsed = JSON.parse(raw) as { servers?: McpServerConfig[] };
-      const servers = parsed.servers ?? [];
-      console.log(`[mcp-manager] ${servers.length}개 MCP 서버 설정 로드`);
-      return servers;
-    } catch (err) {
-      console.error("[mcp-manager] 설정 파일 파싱 실패:", err);
-      return [];
+    for (const path of candidatePaths) {
+      try {
+        const raw = await readFile(path, "utf-8");
+        if (!raw.trim()) {
+          return [];
+        }
+        const parsed = JSON.parse(raw) as { servers?: McpServerConfig[] };
+        const servers = parsed.servers ?? [];
+        console.log(`[mcp-manager] ${servers.length}개 MCP 서버 설정 로드`);
+        return servers;
+      } catch (err) {
+        console.error("[mcp-manager] 설정 파일 파싱 실패:", err);
+      }
     }
+
+    return [];
   }
 
   // ─── Connection Management ──────────────────────────
@@ -249,18 +275,20 @@ export class McpManager {
     const normalizedConfig = { ...config, id: normalizedId } as McpServerConfig;
 
     return this.withConfigLock(async () => {
-      const validation = this.governance.validateServer(normalizedConfig);
-      if (!validation.valid) {
-        throw new Error(
-          `[mcp-manager] 거버넌스 검증 실패 (Layer ${validation.layer}): ${validation.reason}`,
-        );
-      }
-      const existing = await this.loadFromConfig();
-      if (existing.some((s) => s.id === normalizedId)) {
-        throw new Error(`[mcp-manager] 서버 id '${normalizedId}'가 이미 존재합니다.`);
-      }
-      const updated = [...existing, normalizedConfig];
-      await this.saveConfigs(updated);
+      await this.withConfigFileLock(async () => {
+        const validation = this.governance.validateServer(normalizedConfig);
+        if (!validation.valid) {
+          throw new Error(
+            `[mcp-manager] 거버넌스 검증 실패 (Layer ${validation.layer}): ${validation.reason}`,
+          );
+        }
+        const existing = await this.loadFromConfigUnlocked();
+        if (existing.some((s) => s.id === normalizedId)) {
+          throw new Error(`[mcp-manager] 서버 id '${normalizedId}'가 이미 존재합니다.`);
+        }
+        const updated = [...existing, normalizedConfig];
+        await this.saveConfigs(updated);
+      });
       // 연결 시도 (실패해도 config 저장은 유지)
       try {
         await this.connectServer(normalizedConfig);
@@ -279,9 +307,11 @@ export class McpManager {
    */
   async removeConfig(serverId: string): Promise<void> {
     return this.withConfigLock(async () => {
-      const existing = await this.loadFromConfig();
-      const updated = existing.filter((s) => s.id !== serverId);
-      await this.saveConfigs(updated);
+      await this.withConfigFileLock(async () => {
+        const existing = await this.loadFromConfigUnlocked();
+        const updated = existing.filter((s) => s.id !== serverId);
+        await this.saveConfigs(updated);
+      });
       // 연결 해제 (이미 끊겨있으면 무시)
       const client = this.clients.get(serverId);
       if (client) {
@@ -311,6 +341,7 @@ export class McpManager {
         // Windows: rename() throws EEXIST when destination already exists (unlike POSIX which overwrites).
         // Use backup-swap to avoid data loss: preserve live config as .bak before replacing.
         if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
+          await unlink(bakPath).catch(() => {});  // remove stale backup before swap
           await rename(this.configPath, bakPath);   // preserve live config
           try {
             await rename(tmpPath, this.configPath); // place new config
