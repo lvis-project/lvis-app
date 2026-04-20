@@ -209,15 +209,22 @@ export async function openAuthWindow(
   // Top-level navigation 프로토콜 제한 — http/https 만 허용. 외부 포털이
   // redirect / 사용자 클릭으로 `file:`, `data:`, custom scheme 으로 이동해
   // 로컬 파일 노출이나 스킴 핸들러 악용을 트리거하는 것을 차단.
-  authWindow.webContents.on("will-navigate", (event, targetUrl) => {
+  //
+  // `will-navigate` 는 주로 사용자/script 기반 top-level navigation 을 잡고,
+  // 서버측 302 redirect 는 `will-redirect` 로 온다. 양쪽에 같은 가드를 건다.
+  const isHttpUrl = (targetUrl: string): boolean => {
     try {
-      const protocol = new URL(targetUrl).protocol;
-      if (protocol !== "http:" && protocol !== "https:") {
-        event.preventDefault();
-      }
+      const p = new URL(targetUrl).protocol;
+      return p === "http:" || p === "https:";
     } catch {
-      event.preventDefault();
+      return false;
     }
+  };
+  authWindow.webContents.on("will-navigate", (event, targetUrl) => {
+    if (!isHttpUrl(targetUrl)) event.preventDefault();
+  });
+  authWindow.webContents.on("will-redirect", (event, targetUrl) => {
+    if (!isHttpUrl(targetUrl)) event.preventDefault();
   });
 
   return new Promise<AuthCookie[]>((resolve, reject) => {
