@@ -100,6 +100,8 @@ describe("McpManager — getConfigs()", () => {
         id: "stdio-srv",
         transport: "stdio" as const,
         command: "npx tool",
+        apiKey: "stdio-api-secret",
+        args: ["--token=abc123", "--verbose"],
         env: { SECRET_TOKEN: "abc123", PATH: "/usr/bin" },
       },
     ];
@@ -107,8 +109,12 @@ describe("McpManager — getConfigs()", () => {
     const mgr = await makeManager();
     const result = await mgr.getConfigs();
     expect(result).toHaveLength(2);
+    // http server: apiKey and headers stripped
     expect(result[0]).not.toHaveProperty("apiKey");
     expect(result[0]).not.toHaveProperty("headers");
+    // stdio server: apiKey, args, and env stripped (all can embed secrets)
+    expect(result[1]).not.toHaveProperty("apiKey");
+    expect(result[1]).not.toHaveProperty("args");
     expect(result[1]).not.toHaveProperty("env");
     expect(result[0].id).toBe("http-srv");
     expect(result[1].id).toBe("stdio-srv");

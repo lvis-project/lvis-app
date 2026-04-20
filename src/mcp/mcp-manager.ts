@@ -162,15 +162,25 @@ export class McpManager {
 
   // ─── Config Mutation ────────────────────────────────
 
-  /** 설정 파일의 현재 서버 목록 반환 (apiKey / headers / env 제거된 안전 뷰) */
+  /** 설정 파일의 현재 서버 목록 반환 (apiKey / headers / env / args 제거된 안전 뷰) */
   async getConfigs(): Promise<McpServerConfig[]> {
     const configs = await this.loadFromConfig();
-    // Strip secrets before returning to renderer — apiKey, headers, and env must not cross IPC boundary
+    // Strip secrets before returning to renderer — none of these must cross the IPC boundary:
+    // - apiKey: shared secret on all transport types
+    // - headers: may contain Authorization: Bearer tokens (http/sse/websocket)
+    // - env: may contain SECRET_TOKEN=... (stdio)
+    // - args: may contain --api-key=secret or ["--token", "value"] (stdio)
     return configs.map((c) => {
-      const safe = { ...c } as McpServerConfig & { apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> };
+      const safe = { ...c } as McpServerConfig & {
+        apiKey?: string;
+        headers?: Record<string, string>;
+        env?: Record<string, string>;
+        args?: string[];
+      };
       delete safe.apiKey;
       delete safe.headers;
       delete safe.env;
+      delete safe.args;
       return safe as McpServerConfig;
     });
   }
@@ -247,15 +257,24 @@ export class McpManager {
     const dir = dirname(this.configPath);
     await mkdir(dir, { recursive: true });
     const tmpPath = `${this.configPath}.tmp`;
+    const bakPath = `${this.configPath}.bak`;
     try {
       await writeFile(tmpPath, JSON.stringify({ servers: configs }, null, 2), "utf-8");
       try {
         await rename(tmpPath, this.configPath);
       } catch (renameErr) {
-        // Windows: rename() throws EEXIST when destination already exists (unlike POSIX which overwrites)
+        // Windows: rename() throws EEXIST when destination already exists (unlike POSIX which overwrites).
+        // Use backup-swap to avoid data loss: preserve live config as .bak before replacing.
         if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
-          await unlink(this.configPath);
-          await rename(tmpPath, this.configPath);
+          await rename(this.configPath, bakPath);   // preserve live config
+          try {
+            await rename(tmpPath, this.configPath); // place new config
+            await unlink(bakPath).catch(() => {});  // best-effort cleanup of backup
+          } catch (retryErr) {
+            // Restore backup — original config is still safe
+            await rename(bakPath, this.configPath).catch(() => {});
+            throw retryErr;
+          }
         } else {
           throw renameErr;
         }
