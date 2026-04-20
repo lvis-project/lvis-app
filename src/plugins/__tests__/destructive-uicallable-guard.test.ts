@@ -1,22 +1,21 @@
 /**
- * Regression guard: ensure no installed plugin manifest exposes a destructive
- * tool name via `uiCallable[]`. uiCallable tools bypass the chat approval gate,
- * so anything matching the destructive blocklist below would allow the renderer
- * to trigger an irreversible action (delete, remove, send, destroy, erase,
- * purge, reply, create, update) without user confirmation.
+ * uiCallable security model — subset + runtime scope enforcement.
  *
- * Context:
- *  - PR #57 claimed to remove `email_reply`, `calendar_delete`,
- *    `calendar_create`, `calendar_update` from uiCallable — but audit on
- *    2026-04-18 showed `email_reply` and `calendar_delete` still present.
- *  - This test exists so that regression never happens silently again.
+ * The runtime no longer blocks verbs by suffix. Instead:
+ *   1. uiCallable ⊆ tools[] is enforced at manifest load time. Any entry not
+ *      declared in tools[] fails the load.
+ *   2. callFromUi() re-checks the method is declared in that plugin's
+ *      uiCallable at invocation time (defense in depth against stale maps).
  *
- * Pre-GA hardening (M1): the runtime gate flipped from blocklist to
- * allowlist. Read-like verbs (_get/_list/_search/_read/_show/_query/_preview/
- * _count/_status/_find/_describe/_inspect) may be uiCallable on user
- * plugins; everything else requires deployment=managed + signatureVerifier
- * present. We now assert both directions: (a) newly-blocked verbs fail on
- * user plugins, (b) they pass on managed+signed plugins.
+ * Security properties come from:
+ *   - code review of the plugin source,
+ *   - marketplace approval before publish,
+ *   - signature verification at load (PluginSignatureVerifier),
+ * NOT from naming conventions. Any suffix (_delete, _remove, _send, _reply,
+ * _create, _update, …) is permitted regardless of deployment type. The
+ * plugin developer is responsible for destructive-action confirmation UX in
+ * their own renderer surface — see `index_remove_folder` which ships this way
+ * today (note: `email_reply` is in tools[] only, not uiCallable[]).
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -26,11 +25,9 @@ import { fileURLToPath } from "node:url";
 import { PluginRuntime } from "../runtime.js";
 import type { PluginSignatureVerifier } from "../signature-verifier.js";
 
-const DESTRUCTIVE_SUFFIX = /_(delete|remove|send|destroy|erase|purge|reply|create|update)$/i;
-
 // ESM compatibility: `__dirname` is not defined under NodeNext/ESM. Derive it
 // from `import.meta.url` so this suite runs under both vitest's CJS shim and
-// a future pure-ESM runner. (Audit finding: CRITICAL+.)
+// a future pure-ESM runner.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -52,60 +49,15 @@ function listInstalledManifests(): Array<{ id: string; path: string; manifest: R
   return manifests;
 }
 
-describe("destructive uiCallable guard (installed manifests)", () => {
-  const manifests = listInstalledManifests();
-
-  it("discovers at least one installed manifest", () => {
-    expect(manifests.length).toBeGreaterThan(0);
-  });
-
-  for (const { id, path, manifest } of manifests) {
-    it(`[${id}] uiCallable does not expose destructive tool names`, () => {
-      const uiCallable = Array.isArray(manifest.uiCallable) ? (manifest.uiCallable as unknown[]) : [];
-      const offenders = uiCallable.filter(
-        (name): name is string => typeof name === "string" && DESTRUCTIVE_SUFFIX.test(name),
-      );
-      expect(
-        offenders,
-        `manifest ${path} exposes destructive tool(s) via uiCallable: ${offenders.join(", ")}`,
-      ).toEqual([]);
-    });
-  }
-});
-
-/**
- * M1 inverted allowlist — the runtime now rejects any uiCallable entry that
- * does not end in a read-like verb unless the plugin is managed + signed.
- * These unit tests exercise the new verbs (drop/wipe/reset/revoke/clear/
- * archive/truncate/disable/uninstall/publish/write/update/set/overwrite)
- * in both directions.
- */
-const NEWLY_BLOCKED_VERBS = [
-  "thing_drop",
-  "thing_wipe",
-  "thing_reset",
-  "thing_revoke",
-  "thing_clear",
-  "thing_archive",
-  "thing_truncate",
-  "thing_disable",
-  "thing_uninstall",
-  "thing_publish",
-  "thing_write",
-  "thing_update",
-  "thing_set",
-  "thing_overwrite",
-];
-
 async function writeTempPlugin(opts: {
   deployment: "managed" | "user";
   tools: string[];
   uiCallable: string[];
 }): Promise<string> {
-  const root = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-m1-"));
+  const root = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-uicallable-"));
   const manifest = {
     id: `com.lge.test-${Math.random().toString(36).slice(2, 8)}`,
-    name: "M1 Test",
+    name: "uiCallable Test",
     version: "1.0.0",
     entry: "dist/index.js",
     tools: opts.tools,
@@ -116,34 +68,81 @@ async function writeTempPlugin(opts: {
   return join(root, "plugin.json");
 }
 
-// Mock signature verifier that treats every manifest as valid — we only want
-// to prove the "managed + verifier present" branch takes effect; the actual
-// crypto check is exercised elsewhere.
+// Mock signature verifier used as runtime test scaffolding. This suite
+// validates manifest parsing/subset checks and does not itself exercise the
+// signature-verification path (that requires `load()`).
 const mockVerifier = {
   verifyManifestFile: async () => ({ valid: true, sha256: "x" }),
 } as unknown as PluginSignatureVerifier;
 
-describe("M1 uiCallable allowlist (runtime enforcement)", () => {
-  it("read-like verbs are allowed on user plugins", async () => {
+// Previously rejected on user plugins; must now be accepted on every
+// deployment type so plugin authors can own their confirmation UX.
+const PREVIOUSLY_BLOCKED_VERBS = [
+  "thing_delete",
+  "thing_remove",
+  "thing_send",
+  "thing_destroy",
+  "thing_erase",
+  "thing_purge",
+  "thing_reply",
+  "thing_create",
+  "thing_update",
+  "thing_drop",
+  "thing_wipe",
+  "thing_reset",
+  "thing_revoke",
+  "thing_clear",
+  "thing_archive",
+  "thing_truncate",
+];
+
+describe("uiCallable subset validation", () => {
+  it("rejects manifest whose uiCallable entry is not in tools[]", async () => {
     const manifestPath = await writeTempPlugin({
       deployment: "user",
-      tools: ["foo_get", "foo_list", "foo_search", "foo_read", "foo_show", "foo_query",
-              "foo_preview", "foo_count", "foo_status", "foo_find", "foo_describe", "foo_inspect"],
-      uiCallable: ["foo_get", "foo_list", "foo_search", "foo_read", "foo_show", "foo_query",
-                   "foo_preview", "foo_count", "foo_status", "foo_find", "foo_describe", "foo_inspect"],
+      tools: ["foo_get"],
+      uiCallable: ["foo_get", "foo_missing"],
     });
     const rt = new PluginRuntime({
       hostRoot: resolve(__dirname, "..", "..", ".."),
       manifestPaths: [manifestPath],
     });
-    // readManifest is private; exercise it via the public resolveManifestPaths
-    // path by invoking the internal method reflectively.
+    const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
+    await expect(parse(manifestPath)).rejects.toThrow(/uiCallable\[1\].*not declared in tools/);
+  });
+
+  it("rejects non-string uiCallable entries", async () => {
+    const manifestPath = await writeTempPlugin({
+      deployment: "user",
+      tools: ["foo_get"],
+      uiCallable: [123 as unknown as string],
+    });
+    const rt = new PluginRuntime({
+      hostRoot: resolve(__dirname, "..", "..", ".."),
+      manifestPaths: [manifestPath],
+    });
+    const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
+    await expect(parse(manifestPath)).rejects.toThrow(/uiCallable/);
+  });
+
+  it("accepts when every uiCallable entry is declared in tools[]", async () => {
+    const manifestPath = await writeTempPlugin({
+      deployment: "user",
+      tools: ["foo_get", "foo_list"],
+      uiCallable: ["foo_get", "foo_list"],
+    });
+    const rt = new PluginRuntime({
+      hostRoot: resolve(__dirname, "..", "..", ".."),
+      manifestPaths: [manifestPath],
+    });
     const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
     await expect(parse(manifestPath)).resolves.toBeDefined();
   });
+});
 
-  for (const verb of NEWLY_BLOCKED_VERBS) {
-    it(`[user] rejects uiCallable '${verb}' without managed+signed`, async () => {
+describe("uiCallable accepts any suffix regardless of deployment type", () => {
+  for (const verb of PREVIOUSLY_BLOCKED_VERBS) {
+    it(`[user] accepts '${verb}' when it is in tools[]`, async () => {
       const manifestPath = await writeTempPlugin({
         deployment: "user",
         tools: [verb],
@@ -154,10 +153,10 @@ describe("M1 uiCallable allowlist (runtime enforcement)", () => {
         manifestPaths: [manifestPath],
       });
       const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
-      await expect(parse(manifestPath)).rejects.toThrow(/uiCallable/);
+      await expect(parse(manifestPath)).resolves.toBeDefined();
     });
 
-    it(`[managed+signed] accepts uiCallable '${verb}'`, async () => {
+    it(`[managed] accepts '${verb}' when it is in tools[]`, async () => {
       const manifestPath = await writeTempPlugin({
         deployment: "managed",
         tools: [verb],
@@ -170,6 +169,66 @@ describe("M1 uiCallable allowlist (runtime enforcement)", () => {
       });
       const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
       await expect(parse(manifestPath)).resolves.toBeDefined();
+    });
+  }
+});
+
+describe("callFromUi scope enforcement", () => {
+  it("throws when method is unknown", async () => {
+    const rt = new PluginRuntime({
+      hostRoot: resolve(__dirname, "..", "..", ".."),
+      manifestPaths: [],
+    });
+    await expect(rt.callFromUi("nonexistent_method")).rejects.toThrow(/not found/);
+  });
+
+  it("throws when method is declared in tools[] but missing from uiCallable[]", async () => {
+    // Build a runtime with a hand-crafted plugin map so we can exercise
+    // callFromUi without spinning up a real plugin entry file.
+    const rt = new PluginRuntime({
+      hostRoot: resolve(__dirname, "..", "..", ".."),
+      manifestPaths: [],
+    });
+    const internals = rt as unknown as {
+      plugins: Map<string, { manifest: { uiCallable: string[] } }>;
+      methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
+    };
+    internals.plugins.set("test.plugin", {
+      manifest: { uiCallable: ["foo_get"] },
+    } as unknown as never);
+    internals.methodMap.set("foo_delete", {
+      pluginId: "test.plugin",
+      handler: async () => "should-never-run",
+    });
+    internals.methodMap.set("foo_get", {
+      pluginId: "test.plugin",
+      handler: async () => "ok",
+    });
+
+    await expect(rt.callFromUi("foo_delete")).rejects.toThrow(/not UI-callable/);
+    await expect(rt.callFromUi("foo_get")).resolves.toBe("ok");
+  });
+});
+
+describe("installed manifests: uiCallable ⊂ tools", () => {
+  const manifests = listInstalledManifests();
+
+  it("discovers at least one installed manifest", () => {
+    expect(manifests.length).toBeGreaterThan(0);
+  });
+
+  for (const { id, path, manifest } of manifests) {
+    it(`[${id}] every uiCallable entry is declared in tools[]`, () => {
+      const uiCallable = Array.isArray(manifest.uiCallable) ? (manifest.uiCallable as unknown[]) : [];
+      const tools = Array.isArray(manifest.tools) ? (manifest.tools as unknown[]) : [];
+      const toolSet = new Set(tools.filter((t): t is string => typeof t === "string"));
+      const offenders = uiCallable.filter(
+        (name): name is string => typeof name === "string" && !toolSet.has(name),
+      );
+      expect(
+        offenders,
+        `manifest ${path} exposes uiCallable entries not in tools[]: ${offenders.join(", ")}`,
+      ).toEqual([]);
     });
   }
 });

@@ -1996,7 +1996,7 @@ graph TB
 | `name`, `version`, `entry`, `description` | string | 메타데이터. `description` ≤ 280자, `version` anchored semver. |
 | `tools` | **`string[]` (flat 이름 배열, snake_case 강제)** | LLM 에 노출되는 tool name. `^[a-zA-Z_][a-zA-Z0-9_]*$` — 도트·하이픈 금지. 호스트는 이 배열을 그대로 Tool Registry 에 등록한다 (런타임 변환 없음). |
 | `toolSchemas` | **`Record<string, { description, inputSchema, $schema? }>` (map form)** | LLM 파라미터 추론용 JSON Schema draft-07. `description` minLength 10, `inputSchema.type` const `"object"` 필수. 런타임 payload 재검증은 수행하지 않는다. |
-| `uiCallable` | `string[]` (subset of `tools[]`) | Renderer `lvis:plugins:call` IPC 허용 allowlist. destructive verb suffix (`_(delete\|remove\|send\|destroy\|erase\|purge)$/i`) 는 managed+signed 예외 외 차단. |
+| `uiCallable` | `string[]` (subset of `tools[]`) | Renderer `lvis:plugins:call` IPC 허용 allowlist. 구조적 `⊂ tools[]` 제약만 런타임에서 강제되며, 도구 이름 접미사에 의한 차단은 없다. 파괴적 동작의 사용자 확인 UX 는 플러그인이 자체 UI 로 구현하고, 보안은 코드 리뷰·마켓플레이스 심사·서명 검증으로 보장한다. |
 | `capabilities` | **closed enum** (`src/plugins/capabilities.ts`) | `ms-graph-consumer` (MS Graph HostApi 게이트), `mail-source` / `calendar-source` / `meeting-recorder` / `knowledge-index` (emit namespace 게이트) — 이상 5종 **enforced**. `background-watcher`, `worker-client` — advisory. |
 | `deployment` | `"managed" \| "user"` | managed 는 ed25519 서명 필수 (fail-closed); user 는 warn-on-missing. |
 | `startupTimeoutMs` | integer (1~60000) | `Promise.race` 기반 start() 하드 타임아웃. 초과 시 fail-soft drop. |
@@ -2011,7 +2011,7 @@ graph TB
 
 **서명 검증 (Sprint 3-B §9.6):** managed 플러그인은 `plugin.json.sig` (ed25519, base64) 필수. 서명 도구: `scripts/sign-manifest.mjs`. 검증: `src/plugins/signature-verifier.ts` + `src/plugins/publisher-keys.ts`.
 
-**검증 플로우:** JSON.parse → AJV (`schemas/plugin.schema.json`) → cross-field (tool-name regex, `startupTools ⊂ tools`, `uiCallable ⊂ tools`, destructive-verb guard, `startupTimeoutMs > 0`) → ed25519 signature → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.4.
+**검증 플로우:** JSON.parse → AJV (`schemas/plugin.schema.json`) → cross-field (tool-name regex, `startupTools ⊂ tools`, `uiCallable ⊂ tools`, `startupTimeoutMs > 0`) → ed25519 signature → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.4.
 
 규칙:
 - top-level `"type": "object"` 필수 (OpenAI / Claude / Gemini 공통 요구사항)
