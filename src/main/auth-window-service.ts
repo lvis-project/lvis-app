@@ -11,6 +11,7 @@
  *  - 완료 조건(URL 패턴)과 쿠키 호스트 화이트리스트는 플러그인이 호출 시 전달 —
  *    호스트는 LGE-specific 정보를 알지 못한다 (§1 원칙 "NO plugin-specific code in host").
  */
+import { randomBytes } from "node:crypto";
 import { BrowserWindow, type Cookie, type Session } from "electron";
 
 export interface AuthCookie {
@@ -145,12 +146,36 @@ export async function openAuthWindow(
   if (!url || !/^https?:\/\//i.test(url)) {
     throw new Error(`openAuthWindow: invalid url "${url}"`);
   }
-  if (!Array.isArray(completionUrlPatterns) || completionUrlPatterns.length === 0) {
-    throw new Error("openAuthWindow: completionUrlPatterns must be a non-empty array");
+
+  // 문자열 배열의 빈/공백 엔트리를 drop. 빈 문자열 한 개라도 남으면
+  // `isCompletionUrl` 의 substring 매칭이 항상 true 가 되어 인증 흐름이
+  // 즉시 "완료" 로 오판되고 쿠키가 조기 수집된다.
+  const normalizedCompletionPatterns = (
+    Array.isArray(completionUrlPatterns) ? completionUrlPatterns : []
+  )
+    .filter((p): p is string => typeof p === "string")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (normalizedCompletionPatterns.length === 0) {
+    throw new Error("openAuthWindow: completionUrlPatterns must be a non-empty array of non-blank strings");
   }
-  if (!Array.isArray(cookieHosts) || cookieHosts.length === 0) {
-    throw new Error("openAuthWindow: cookieHosts must be a non-empty array");
+
+  const normalizedCookieHosts = (Array.isArray(cookieHosts) ? cookieHosts : [])
+    .filter((h): h is string => typeof h === "string")
+    .map((h) => h.trim())
+    .filter((h) => h.length > 0);
+  if (normalizedCookieHosts.length === 0) {
+    throw new Error("openAuthWindow: cookieHosts must be a non-empty array of non-blank strings");
   }
+
+  // `persistPartition` 미지정 시 Electron 의 default session 을 쓰지 않고
+  // 호출마다 새 in-memory partition 을 만들어 격리한다. 플러그인 런타임
+  // 레이어에서 이미 per-plugin 기본값을 주입하지만, 서비스가 직접 호출되는
+  // 다른 경로(host 내부 auth flow 등) 에도 안전한 기본값을 보장한다.
+  const effectivePartition =
+    persistPartition && persistPartition.length > 0
+      ? persistPartition
+      : `ephemeral-auth-${randomBytes(8).toString("hex")}`;
 
   // Hardened webPreferences — 외부 포털을 Chromium 에 띄우는 창이므로
   // renderer ↔ Node 경계를 완전히 차단해 RCE 표면을 좁힌다. 원격지 페이지에
@@ -167,13 +192,27 @@ export async function openAuthWindow(
       nodeIntegrationInSubFrames: false,
       webviewTag: false,
       sandbox: true,
-      ...(persistPartition ? { partition: persistPartition } : {}),
+      partition: effectivePartition,
     },
   });
 
   // Popup / window.open 차단 — 포털이 새 창을 열어 쿠키를 다른 origin 에
   // 심거나 사용자를 임의 사이트로 튕기는 경로 제거.
   authWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+
+  // Top-level navigation 프로토콜 제한 — http/https 만 허용. 외부 포털이
+  // redirect / 사용자 클릭으로 `file:`, `data:`, custom scheme 으로 이동해
+  // 로컬 파일 노출이나 스킴 핸들러 악용을 트리거하는 것을 차단.
+  authWindow.webContents.on("will-navigate", (event, targetUrl) => {
+    try {
+      const protocol = new URL(targetUrl).protocol;
+      if (protocol !== "http:" && protocol !== "https:") {
+        event.preventDefault();
+      }
+    } catch {
+      event.preventDefault();
+    }
+  });
 
   return new Promise<AuthCookie[]>((resolve, reject) => {
     let settled = false;
@@ -193,10 +232,10 @@ export async function openAuthWindow(
     const checkAndCollect = async () => {
       if (settled) return;
       const currentUrl = authWindow.webContents.getURL();
-      if (!isCompletionUrl(currentUrl, completionUrlPatterns)) return;
+      if (!isCompletionUrl(currentUrl, normalizedCompletionPatterns)) return;
       try {
         const allCookies = await (authWindow.webContents.session as Session).cookies.get({});
-        const filtered = filterCookiesByHost(allCookies, cookieHosts);
+        const filtered = filterCookiesByHost(allCookies, normalizedCookieHosts);
         finish(() => {
           clearTimeout(timer);
           resolve(filtered);

@@ -118,4 +118,12 @@ describe("isCompletionUrl", () => {
     // hash 도 제외
     expect(isCompletionUrl("https://sso.lge.com/login#newep.lge.com", ["newep.lge.com"])).toBe(false);
   });
+
+  it("빈 문자열 패턴은 service 가 trim+filter 후 거부 — 하지만 isCompletionUrl 단독 호출 시 조기 true 위험", () => {
+    // isCompletionUrl 자체는 방어적이지 않음 — 빈 문자열이 있으면 모든 URL 매칭.
+    // (따라서 openAuthWindow 가 호출 전에 normalize 하는 것이 핵심 방어선.)
+    expect(isCompletionUrl("https://anywhere.example.com", [""])).toBe(true);
+    // normalize 후 빈 배열이 되면 false.
+    expect(isCompletionUrl("https://anywhere.example.com", [])).toBe(false);
+  });
 });

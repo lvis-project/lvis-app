@@ -279,9 +279,11 @@ export interface PluginHostApi {
    * 선언 필수.
    *
    * **Session partition:** `persistPartition` 미지정 시 호스트가 plugin 별
-   * 비영속 partition (`plugin-auth:${pluginId}`) 을 주입한다. 디스크 영속
-   * + 타 플러그인과의 쿠키 공유를 원하면 명시적으로 `persist:...` 접두사의
-   * partition 을 전달한다.
+   * 비영속 partition (`plugin-auth:${encodeURIComponent(pluginId)}`) 을 주입한다.
+   * 플러그인이 영속 partition 을 요청하려면 자기 네임스페이스 안에서만 가능 —
+   * `persist:plugin-auth:${encodeURIComponent(pluginId)}` 또는 그 하위 suffix
+   * (`persist:plugin-auth:${encodeURIComponent(pluginId)}:<sub>`) 만 허용된다.
+   * 다른 값은 runtime 에서 거부된다 (cross-plugin 쿠키 탈취 방지).
    *
    * §6.1 "3+ 플러그인 규칙" 예외 #2 (보안·감사 통제 필요)로 정당화 — 외부 포털 쿠키
    * 수집은 민감 자산 취급이므로 단일 플러그인 사용처여도 HostApi에서 제공한다.

@@ -356,13 +356,37 @@ export async function initPluginRuntime(
         // 쓰면 (a) 여러 BrowserWindow 간 쿠키가 공유되어 타 플러그인이
         // 수집한 세션을 그대로 볼 수 있고 (b) 디스크에 영속화된다. 둘 다
         // openAuthWindow 의 "호스트는 세션을 보관하지 않는다" 원칙 위반.
-        // 플러그인이 명시적으로 persist:... 를 지정한 경우에만 영속/공유 허용.
-        const effectiveOpts = opts.persistPartition
+        //
+        // 플러그인이 명시적으로 지정한 persistPartition 은 반드시 자기
+        // 네임스페이스(`persist:plugin-auth:<pluginId>` 또는 그 하위 `:<sub>`)
+        // 여야 한다. 그렇지 않으면 plugin A 가 `plugin-auth:pluginB` 를 지정해
+        // plugin B 의 쿠키를 읽어가는 cross-plugin exfiltration 경로가 열린다.
+        const encodedId = encodeURIComponent(pluginId);
+        const defaultPartition = `plugin-auth:${encodedId}`;
+        const allowedPersistBase = `persist:${defaultPartition}`;
+        const requested = opts.persistPartition;
+        if (
+          requested !== undefined &&
+          requested !== allowedPersistBase &&
+          !requested.startsWith(`${allowedPersistBase}:`)
+        ) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input:
+                `[plugin:${pluginId}] open_auth_window_invalid_partition ` +
+                `persistPartition=${requested} allowed=${allowedPersistBase}[:<sub>]`,
+            });
+          } catch { /* audit must not break host */ }
+          throw new Error(
+            `[plugin:${pluginId}] openAuthWindow: persistPartition must be '${allowedPersistBase}' or '${allowedPersistBase}:<sub>'`,
+          );
+        }
+        const effectiveOpts = requested
           ? opts
-          : {
-              ...opts,
-              persistPartition: `plugin-auth:${encodeURIComponent(pluginId)}`,
-            };
+          : { ...opts, persistPartition: defaultPartition };
         return openAuthWindowService(mainWindow, effectiveOpts);
       },
     }),
