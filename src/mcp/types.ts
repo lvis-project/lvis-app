@@ -63,7 +63,14 @@ export interface McpServerApproval {
   toolNamePrefix: string;
 
   // ─── Layer 4: 런타임 권한 ──────────────────────
-  /** 이 서버의 도구에 적용할 권한 모드 */
+  /**
+   * 이 서버의 도구에 적용할 권한 모드.
+   *
+   * NOTE:
+   * - `strict` / `auto` are currently consumed as per-tool PermissionManager
+   *   overrides after MCP tool registration.
+   * - `default` falls back to the normal source/trust-based permission flow.
+   */
   toolPermissionMode: "default" | "strict" | "auto";
 
   // ─── Layer 2: 연결 제한 ────────────────────────

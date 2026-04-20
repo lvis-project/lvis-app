@@ -17,6 +17,8 @@ const mockGetState = vi.fn().mockReturnValue({
   status: "connected" as const,
   registeredTools: [],
 });
+const mockAuditLog = vi.fn();
+const mockValidateServer = vi.fn(() => ({ valid: true as const }));
 
 vi.mock("../mcp-client.js", () => ({
   McpClient: class {
@@ -28,7 +30,9 @@ vi.mock("../mcp-client.js", () => ({
 
 // ─── Mock McpGovernance — allow everything ────────────────────────
 vi.mock("../mcp-governance.js", () => ({
-  McpGovernance: class {},
+  McpGovernance: class {
+    validateServer = mockValidateServer;
+  },
 }));
 
 // ─── Mock ToolRegistry ────────────────────────────────────────────
@@ -52,6 +56,8 @@ async function makeManager() {
     new (McpGovernance as new () => InstanceType<typeof McpGovernance>)(),
     new (ToolRegistry as new () => InstanceType<typeof ToolRegistry>)(),
     testConfigPath,
+    undefined,
+    { log: mockAuditLog } as never,
   );
 }
 
@@ -126,12 +132,13 @@ describe("McpManager — addConfig()", () => {
     const mgr = await makeManager();
     const config: McpServerConfig = { id: "new-srv", transport: "stdio", command: "npx tool" };
 
-    await mgr.addConfig(config);
+    await expect(mgr.addConfig(config)).resolves.toEqual({ connected: true });
 
     const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
     expect(raw.servers).toHaveLength(1);
     expect(raw.servers[0].id).toBe("new-srv");
     expect(mockConnect).toHaveBeenCalledOnce();
+    expect(mockAuditLog).toHaveBeenCalledWith(expect.objectContaining({ type: "mcp_connect" }));
   });
 
   it("throws if server id already exists", async () => {
@@ -144,6 +151,34 @@ describe("McpManager — addConfig()", () => {
     await expect(
       mgr.addConfig({ id: "dup", transport: "stdio", command: "cmd" }),
     ).rejects.toThrow("이미 존재");
+  });
+
+  it("returns warning when connection fails after save", async () => {
+    mockConnect.mockRejectedValueOnce(new Error("connect boom"));
+    const mgr = await makeManager();
+
+    await expect(
+      mgr.addConfig({ id: "warn-srv", transport: "stdio", command: "npx tool" }),
+    ).resolves.toEqual({ connected: false, warning: "connect boom" });
+
+    const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
+    expect(raw.servers.map((server) => server.id)).toContain("warn-srv");
+  });
+
+  it("rejects governance-invalid config before save", async () => {
+    mockValidateServer.mockReturnValueOnce({
+      valid: false as const,
+      layer: 0,
+      reason: "revoked",
+    });
+    const mgr = await makeManager();
+
+    await expect(
+      mgr.addConfig({ id: "blocked", transport: "stdio", command: "npx tool" }),
+    ).rejects.toThrow("거버넌스 검증 실패");
+
+    expect(existsSync(testConfigPath)).toBe(false);
+    expect(mockConnect).not.toHaveBeenCalled();
   });
 });
 
@@ -173,5 +208,15 @@ describe("McpManager — removeConfig()", () => {
     const mgr = await makeManager();
     // Should not throw
     await expect(mgr.removeConfig("ghost")).resolves.toBeUndefined();
+  });
+
+  it("emits kill-switch audit when a connected server is terminated", async () => {
+    const mgr = await makeManager();
+    const server = { id: "audit-srv", transport: "stdio", command: "cmd" } as const;
+
+    await mgr.connectServer(server);
+    await mgr.killSwitch(server.id);
+
+    expect(mockAuditLog).toHaveBeenCalledWith(expect.objectContaining({ type: "kill_switch" }));
   });
 });

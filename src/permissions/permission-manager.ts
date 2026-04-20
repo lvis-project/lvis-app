@@ -15,7 +15,7 @@
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { ToolSource, TrustLevel } from "../tools/types.js";
+import type { DenyRule, ToolSource, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 
@@ -43,6 +43,8 @@ export class PermissionManager {
   private readonly alwaysAllowed = new Set<string>();
   /** Trust 수준 오버라이드 (관리자 설정) */
   private readonly trustOverrides = new Map<string, TrustLevel>();
+  /** MCP approval.toolPermissionMode 등 per-tool 실행 모드 override */
+  private readonly toolModeOverrides = new Map<string, ExecutionMode>();
   /** 영구 규칙 저장 경로 (~/.lvis/permissions.json) */
   private readonly permissionsFilePath: string;
 
@@ -67,6 +69,24 @@ export class PermissionManager {
 
   setTrustOverride(toolName: string, trust: TrustLevel): void {
     this.trustOverrides.set(toolName, trust);
+  }
+
+  setToolModeOverride(toolName: string, mode: ExecutionMode): void {
+    if (mode === "default") {
+      this.toolModeOverrides.delete(toolName);
+      return;
+    }
+    this.toolModeOverrides.set(toolName, mode);
+  }
+
+  clearToolModeOverride(toolName: string): void {
+    this.toolModeOverrides.delete(toolName);
+  }
+
+  getVisibilityDenyRules(): DenyRule[] {
+    return this.rules
+      .filter((rule) => rule.action === "deny" && !rule.source)
+      .map((rule) => ({ pattern: rule.pattern }));
   }
 
   // ─── 영구 규칙 관리 (B1) ─────────────────────────
@@ -205,18 +225,27 @@ export class PermissionManager {
       }
     }
 
+    const toolModeOverride = this.toolModeOverrides.get(toolName);
+    if (toolModeOverride === "strict") {
+      return { decision: "ask", reason: "MCP 서버 strict 모드", layer: 2 };
+    }
+
     // 2. Allow rules
     for (const rule of this.rules) {
       if (rule.action !== "allow") continue;
       if (rule.source && rule.source !== source) continue;
       if (matchGlob(rule.pattern, toolName)) {
-        return { decision: "allow", reason: `allow 규칙: ${rule.pattern}`, layer: 2 };
+        return { decision: "allow", reason: `allow 규칙: ${rule.pattern}`, layer: 3 };
       }
+    }
+
+    if (toolModeOverride === "auto" && this.mode !== "strict") {
+      return { decision: "allow", reason: "MCP 서버 auto 모드", layer: 4 };
     }
 
     // 3. Always-allowed (사용자 이전 승인)
     if (this.alwaysAllowed.has(toolName)) {
-      return { decision: "allow", reason: "사용자 영구 승인", layer: 3 };
+      return { decision: "allow", reason: "사용자 영구 승인", layer: 5 };
     }
 
     // 4. Trust-based 기본 정책 (§4.1)

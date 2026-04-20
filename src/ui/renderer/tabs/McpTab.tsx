@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
+import { Textarea } from "../../../components/ui/textarea.js";
 import type { McpServerConfig, McpServerState } from "../types.js";
 
 // ─── Helper types re-exported from renderer/types.ts ─
@@ -32,8 +33,80 @@ const EMPTY_FORM = {
   command: "",
   args: "",
   url: "",
+  auth: "none" as "none" | "sso" | "api-key",
+  apiKey: "",
+  headers: "",
+  env: "",
   allowPrivateNetworks: false,
 };
+
+function parseCliWords(input: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaping = false;
+
+  for (const char of input.trim()) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (escaping || quote) {
+    throw new Error("인용부호 또는 이스케이프가 닫히지 않았습니다.");
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function parseKeyValueLines(input: string, delimiter: ":" | "="): Record<string, string> | undefined {
+  const lines = input
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) return undefined;
+
+  return Object.fromEntries(
+    lines.map((line) => {
+      const index = line.indexOf(delimiter);
+      if (index <= 0) {
+        throw new Error(
+          delimiter === ":"
+            ? "Headers는 한 줄에 HEADER: value 형식이어야 합니다."
+            : "Env는 한 줄에 KEY=value 형식이어야 합니다.",
+        );
+      }
+      return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
+    }),
+  );
+}
 
 export function McpTab() {
   const [loading, setLoading] = useState(true);
@@ -125,28 +198,55 @@ export function McpTab() {
     }
 
     let config: McpServerConfig;
-    if (form.transport === "stdio") {
-      config = {
+    try {
+      const shared = {
         id: form.id.trim(),
-        transport: "stdio",
-        command: form.command.trim(),
-        args: form.args.trim() ? form.args.trim().split(/\s+/) : undefined,
+        ...(form.auth !== "none" ? { auth: form.auth } : {}),
+        ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
       };
-    } else {
-      config = {
-        id: form.id.trim(),
-        transport: "http",
-        url: form.url.trim(),
-        allowPrivateNetworks: form.allowPrivateNetworks,
-      };
+
+      if (form.transport === "stdio") {
+        const [command, ...inlineArgs] = parseCliWords(form.command);
+        if (!command) {
+          showBanner("error", "stdio 실행 파일을 입력하세요.");
+          return;
+        }
+        const extraArgs = form.args.trim() ? parseCliWords(form.args) : [];
+        const args = [...inlineArgs, ...extraArgs];
+        const env = parseKeyValueLines(form.env, "=");
+        config = {
+          ...shared,
+          transport: "stdio",
+          command,
+          ...(args.length > 0 ? { args } : {}),
+          ...(env ? { env } : {}),
+        };
+      } else {
+        const headers = parseKeyValueLines(form.headers, ":");
+        config = {
+          ...shared,
+          transport: "http",
+          url: form.url.trim(),
+          allowPrivateNetworks: form.allowPrivateNetworks,
+          ...(headers ? { headers } : {}),
+        };
+      }
+    } catch (e) {
+      showBanner("error", e instanceof Error ? e.message : String(e));
+      return;
     }
 
     setFormBusy(true);
     try {
-      await window.lvis.mcp.addConfig(config);
+      const result = await window.lvis.mcp.addConfig(config);
       setForm(EMPTY_FORM);
       setShowForm(false);
-      showBanner("success", `${config.id} 서버가 추가되었습니다.`);
+      showBanner(
+        result.connected ? "success" : "error",
+        result.connected
+          ? `${config.id} 서버가 추가되고 연결되었습니다.`
+          : `${config.id} 서버 설정은 저장되었지만 연결 실패: ${result.warning ?? "원인 불명"}`,
+      );
       void fetchAll();
     } catch (e) {
       showBanner("error", e instanceof Error ? e.message : String(e));
@@ -226,6 +326,11 @@ export function McpTab() {
                             {cfg.transport}
                           </Badge>
                         )}
+                        {cfg?.auth && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                            auth:{cfg.auth}
+                          </Badge>
+                        )}
                       </div>
                       {st?.registeredTools.length ? (
                         <p className="mt-1 text-[11px] text-muted-foreground">
@@ -238,6 +343,16 @@ export function McpTab() {
                       {st?.connectedAt && (
                         <p className="mt-0.5 text-[10px] text-muted-foreground">
                           연결: {new Date(st.connectedAt).toLocaleString()}
+                        </p>
+                      )}
+                      {cfg?.transport === "stdio" && cfg.command && (
+                        <p className="mt-0.5 text-[10px] text-muted-foreground font-mono truncate">
+                          실행: {cfg.command}
+                        </p>
+                      )}
+                      {cfg?.transport === "http" && cfg.url && (
+                        <p className="mt-0.5 text-[10px] text-muted-foreground font-mono truncate">
+                          URL: {cfg.url}
                         </p>
                       )}
                     </div>
@@ -304,6 +419,33 @@ export function McpTab() {
               </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs">Auth</label>
+                <select
+                  className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+                  value={form.auth}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, auth: e.target.value as typeof EMPTY_FORM.auth }))
+                  }
+                >
+                  <option value="none">없음</option>
+                  <option value="sso">SSO</option>
+                  <option value="api-key">API Key</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs">API Key (write-only)</label>
+                <Input
+                  type="password"
+                  className="h-7 text-xs font-mono"
+                  placeholder="sk-..."
+                  value={form.apiKey}
+                  onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
+                />
+              </div>
+            </div>
+
             {form.transport === "stdio" ? (
               <>
                 <div className="space-y-1">
@@ -314,14 +456,26 @@ export function McpTab() {
                     value={form.command}
                     onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
                   />
+                  <p className="text-[10px] text-muted-foreground">
+                    실행 파일만 입력하거나 전체 명령줄을 입력해도 자동 분리됩니다.
+                  </p>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs">Args (공백 구분)</label>
+                  <label className="text-xs">Args (추가 인자)</label>
                   <Input
                     className="h-7 text-xs font-mono"
-                    placeholder="--verbose --port 3000"
+                    placeholder="--port 3000 --profile 'team alpha'"
                     value={form.args}
                     onChange={(e) => setForm((f) => ({ ...f, args: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs">Env (KEY=value, write-only)</label>
+                  <Textarea
+                    className="min-h-[88px] text-xs font-mono"
+                    placeholder={"OPENAI_API_KEY=...\nMCP_PROFILE=team-alpha"}
+                    value={form.env}
+                    onChange={(e) => setForm((f) => ({ ...f, env: e.target.value }))}
                   />
                 </div>
               </>
@@ -350,8 +504,21 @@ export function McpTab() {
                     사설 네트워크 허용 (localhost/사내망)
                   </label>
                 </div>
+                <div className="space-y-1">
+                  <label className="text-xs">Headers (HEADER: value, write-only)</label>
+                  <Textarea
+                    className="min-h-[88px] text-xs font-mono"
+                    placeholder={"Authorization: Bearer ...\nX-Team: alpha"}
+                    value={form.headers}
+                    onChange={(e) => setForm((f) => ({ ...f, headers: e.target.value }))}
+                  />
+                </div>
               </>
             )}
+
+            <p className="text-[10px] text-muted-foreground">
+              비밀값(API key / headers / env / args)은 저장 후 다시 표시되지 않습니다.
+            </p>
 
             <div className="flex justify-end gap-2">
               <Button

@@ -224,7 +224,7 @@ export type LvisMcpApi = {
   servers: () => Promise<McpServerState[]>;
   kill: (id: string) => Promise<void>;
   getConfigs: () => Promise<McpServerConfig[]>;
-  addConfig: (config: McpServerConfig) => Promise<void>;
+  addConfig: (config: McpServerConfig) => Promise<{ connected: boolean; warning?: string }>;
   removeConfig: (id: string) => Promise<void>;
 };
 

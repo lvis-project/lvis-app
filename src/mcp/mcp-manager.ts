@@ -20,6 +20,8 @@ import type { McpServerConfig, McpServerState } from "./types.js";
 import { McpGovernance } from "./mcp-governance.js";
 import { McpClient } from "./mcp-client.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import type { PermissionManager } from "../permissions/permission-manager.js";
+import type { AuditLogger } from "../audit/audit-logger.js";
 
 const DEFAULT_CONFIG_PATH = join(homedir(), ".lvis", "mcp-servers.json");
 
@@ -42,6 +44,8 @@ export class McpManager {
     private readonly governance: McpGovernance,
     private readonly toolRegistry: ToolRegistry,
     configPath?: string,
+    private readonly permissionManager?: PermissionManager,
+    private readonly auditLogger?: AuditLogger,
   ) {
     this.configPath = configPath ?? DEFAULT_CONFIG_PATH;
   }
@@ -107,9 +111,35 @@ export class McpManager {
       this.clients.delete(config.id);
     }
 
-    const client = new McpClient(config, this.governance, this.toolRegistry);
+    const client = new McpClient(
+      config,
+      this.governance,
+      this.toolRegistry,
+      this.permissionManager,
+    );
     this.clients.set(config.id, client);
-    await client.connect();
+    try {
+      await client.connect();
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-manager",
+        type: "mcp_connect",
+        input: JSON.stringify({ serverId: config.id, transport: config.transport }),
+        output: JSON.stringify({
+          status: client.getState().status,
+          registeredTools: client.getState().registeredTools,
+        }),
+      });
+    } catch (err) {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "mcp-manager",
+        type: "mcp_connect",
+        input: JSON.stringify({ serverId: config.id, transport: config.transport }),
+        output: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   }
 
   /** 모든 서버 연결 해제 */
@@ -144,6 +174,12 @@ export class McpManager {
 
     // 안전장치: ToolRegistry에서도 직접 제거 (중복 호출이지만 확실히 정리)
     this.toolRegistry.unregisterByMcp(serverId);
+    this.auditLogger?.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "mcp-manager",
+      type: "kill_switch",
+      input: JSON.stringify({ serverId }),
+    });
 
     console.warn(`[mcp-manager] Kill Switch 완료: ${serverId} — 모든 도구 해제됨`);
   }
@@ -189,23 +225,20 @@ export class McpManager {
    * 설정 파일에 서버 추가 + 연결 시도.
    * 이미 동일 id가 있으면 에러. write-lock으로 동시 추가 시 TOCTOU 방지.
    */
-  async addConfig(config: McpServerConfig): Promise<void> {
+  async addConfig(config: McpServerConfig): Promise<{ connected: boolean; warning?: string }> {
     // Runtime payload validation (IPC cast is type-only, disappears at runtime)
     if (!config?.id || typeof config.id !== "string") {
       throw new Error("[mcp-manager] 유효하지 않은 서버 id");
     }
-    const validTransports = ["stdio", "http", "sse", "websocket"] as const;
+    const validTransports = ["stdio", "http"] as const;
     if (!validTransports.includes(config.transport as (typeof validTransports)[number])) {
       throw new Error(`[mcp-manager] 유효하지 않은 transport: ${String(config.transport)}`);
     }
     if (config.transport === "stdio" && !(config as { command?: string }).command?.trim()) {
       throw new Error("[mcp-manager] stdio 서버는 command 필드가 필요합니다.");
     }
-    if (
-      (config.transport === "http" || config.transport === "sse" || config.transport === "websocket") &&
-      !(config as { url?: string }).url?.trim()
-    ) {
-      throw new Error("[mcp-manager] http/sse/websocket 서버는 url 필드가 필요합니다.");
+    if (config.transport === "http" && !(config as { url?: string }).url?.trim()) {
+      throw new Error("[mcp-manager] http 서버는 url 필드가 필요합니다.");
     }
 
     // Normalize id: trim whitespace, reject empty
@@ -216,6 +249,12 @@ export class McpManager {
     const normalizedConfig = { ...config, id: normalizedId } as McpServerConfig;
 
     return this.withConfigLock(async () => {
+      const validation = this.governance.validateServer(normalizedConfig);
+      if (!validation.valid) {
+        throw new Error(
+          `[mcp-manager] 거버넌스 검증 실패 (Layer ${validation.layer}): ${validation.reason}`,
+        );
+      }
       const existing = await this.loadFromConfig();
       if (existing.some((s) => s.id === normalizedId)) {
         throw new Error(`[mcp-manager] 서버 id '${normalizedId}'가 이미 존재합니다.`);
@@ -225,8 +264,11 @@ export class McpManager {
       // 연결 시도 (실패해도 config 저장은 유지)
       try {
         await this.connectServer(normalizedConfig);
+        return { connected: true };
       } catch (err) {
+        const warning = err instanceof Error ? err.message : String(err);
         console.warn(`[mcp-manager] 서버 추가 후 연결 실패 (${normalizedId}):`, err);
+        return { connected: false, warning };
       }
     });
   }
@@ -259,7 +301,10 @@ export class McpManager {
     const tmpPath = `${this.configPath}.tmp`;
     const bakPath = `${this.configPath}.bak`;
     try {
-      await writeFile(tmpPath, JSON.stringify({ servers: configs }, null, 2), "utf-8");
+      await writeFile(tmpPath, JSON.stringify({ servers: configs }, null, 2), {
+        encoding: "utf-8",
+        mode: 0o600,
+      });
       try {
         await rename(tmpPath, this.configPath);
       } catch (renameErr) {

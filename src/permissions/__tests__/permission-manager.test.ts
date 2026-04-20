@@ -87,6 +87,7 @@ describe("PermissionManager (B1 persistence)", () => {
     expect(result.decision).toBe("deny");
 
     expect(mockStore.rules).toContainEqual({ pattern: "dangerous_tool", action: "deny" });
+    expect(pm.getVisibilityDenyRules()).toEqual([{ pattern: "dangerous_tool" }]);
   });
 
   // ── loadRulesFromFile ────────────────────────────
@@ -166,5 +167,24 @@ describe("PermissionManager (B1 persistence)", () => {
     await pm.setModePersist("auto");
     expect(pm.getMode()).toBe("auto");
     expect(mockStore.mode).toBe("auto");
+  });
+
+  it("strict MCP tool override forces ask regardless of global auto mode", async () => {
+    await pm.setModePersist("auto");
+    pm.setToolModeOverride("mcp_server__write_note", "strict");
+
+    const result = pm.checkDetailed("mcp_server__write_note", "mcp", "write");
+
+    expect(result.decision).toBe("ask");
+    expect(result.reason).toBe("MCP 서버 strict 모드");
+  });
+
+  it("auto MCP tool override allows execution unless global mode is strict", () => {
+    pm.setToolModeOverride("mcp_server__fetch", "auto");
+
+    const result = pm.checkDetailed("mcp_server__fetch", "mcp", "dangerous");
+
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toBe("MCP 서버 auto 모드");
   });
 });

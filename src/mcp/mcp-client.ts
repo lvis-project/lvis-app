@@ -37,6 +37,7 @@ import type {
 import type { McpGovernance } from "./mcp-governance.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { mcpToolToTool } from "./mcp-tool-adapter.js";
+import type { PermissionManager } from "../permissions/permission-manager.js";
 import {
   NetworkGuardError,
   ensurePublicHttpUrl,
@@ -144,6 +145,7 @@ export class McpClient {
     private readonly config: McpServerConfig,
     private readonly governance: McpGovernance,
     private readonly toolRegistry: ToolRegistry,
+    private readonly permissionManager?: PermissionManager,
   ) {
     this.state = {
       id: config.id,
@@ -244,6 +246,7 @@ export class McpClient {
   async disconnect(): Promise<void> {
     this.stopHealthCheck();
     this.rejectAllPending("서버 연결 해제");
+    this.clearRegisteredToolOverrides();
 
     // ToolRegistry에서 도구 제거
     this.toolRegistry.unregisterByMcp(this.config.id);
@@ -304,6 +307,20 @@ export class McpClient {
       const transport = this.transport;
       if (!transport || !transport.isAlive()) {
         reject(new Error(`[mcp-client] transport가 활성 상태가 아닙니다.`));
+        return;
+      }
+
+      const maxConcurrentRequests = this.governance.getApproval(this.config.id)?.maxConcurrentRequests;
+      if (
+        typeof maxConcurrentRequests === "number"
+        && maxConcurrentRequests > 0
+        && this.pendingRequests.size >= maxConcurrentRequests
+      ) {
+        reject(
+          new Error(
+            `[mcp-client] 동시 요청 제한 초과 (${maxConcurrentRequests}): ${method}`,
+          ),
+        );
         return;
       }
 
@@ -375,6 +392,7 @@ export class McpClient {
     this.state.status = "error";
     this.state.lastError = reason;
     this.rejectAllPending(reason);
+    this.clearRegisteredToolOverrides();
     this.toolRegistry.unregisterByMcp(this.config.id);
     this.state.registeredTools = [];
     this.stopHealthCheck();
@@ -424,6 +442,7 @@ export class McpClient {
 
   private registerTools(tools: McpToolSchema[]): void {
     const serverId = this.config.id;
+    const toolPermissionMode = this.governance.getApproval(serverId)?.toolPermissionMode ?? "default";
 
     for (const tool of tools) {
       const namespacedName = this.governance.applyToolNamespace(serverId, tool.name);
@@ -433,6 +452,13 @@ export class McpClient {
         ),
       );
       this.state.registeredTools.push(namespacedName);
+      this.permissionManager?.setToolModeOverride(namespacedName, toolPermissionMode);
+    }
+  }
+
+  private clearRegisteredToolOverrides(): void {
+    for (const toolName of this.state.registeredTools) {
+      this.permissionManager?.clearToolModeOverride(toolName);
     }
   }
 
@@ -801,9 +827,7 @@ class HttpTransport implements McpTransport {
       this.inflight.delete(controller);
       const body = await response.text().catch(() => "");
       // Scrub obvious secret material before surfacing server error bodies.
-      throw new Error(
-        `http transport HTTP ${response.status}: ${scrubSecrets(body).slice(0, 200)}`,
-      );
+      throw new Error(`http transport HTTP ${response.status}: ${scrubSecrets(body)}`);
     }
 
     const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
@@ -934,14 +958,28 @@ function hasAuthorization(headers: Record<string, string>): boolean {
 }
 
 /**
- * Strip obvious secret material (bearer tokens, `authorization: ...` values)
- * from a string before it's logged or surfaced in an error message. Best-effort
- * — the goal is to avoid leaking tokens in MCP server HTTP error bodies.
+ * Strip likely secret material from error bodies before surfacing them in logs
+ * or UI. This is best-effort redaction, but it should catch the common cases we
+ * might reflect from MCP HTTP responses: bearer tokens, API keys in headers,
+ * query params, and JSON payloads.
  */
 function scrubSecrets(text: string): string {
   return text
     .replace(/[Bb]earer\s+[A-Za-z0-9._\-~+/=]+/g, "Bearer [redacted]")
-    .replace(/authorization\s*:\s*[^\s\r\n]+/gi, "authorization: [redacted]");
+    .replace(
+      /((?:authorization|x-api-key|x-auth-token)\s*:\s*)[^\s\r\n]+/gi,
+      "$1[redacted]",
+    )
+    .replace(
+      /([?&](?:api[_-]?key|token|access[_-]?token|refresh[_-]?token))=([^&\s]+)/gi,
+      "$1=[redacted]",
+    )
+    .replace(
+      /(["'](?:api[_-]?key|token|access[_-]?token|refresh[_-]?token|authorization|x-api-key|x-auth-token)["']\s*:\s*["'])[^"']+(["'])/gi,
+      "$1[redacted]$2",
+    )
+    .replace(/\b(?:sk|pk|rk|proj|test|live)-[A-Za-z0-9_-]{8,}\b/g, "[redacted-token]")
+    .slice(0, 120);
 }
 
 function indexOfAny(haystack: string, needles: string[]): number {

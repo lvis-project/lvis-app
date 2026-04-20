@@ -458,9 +458,10 @@ export function registerIpcHandlers(
   });
 
   // ─── MCP ──────────────────────────────────────
-  // lvis:mcp:servers returns only status/tool metadata — no raw secrets.
-  // validateSender omitted intentionally (read-only topology data, low sensitivity).
-  ipcMain.handle("lvis:mcp:servers", () => services.mcpManager.listServers());
+  ipcMain.handle("lvis:mcp:servers", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:servers", e); return UNAUTHORIZED_FRAME; }
+    return services.mcpManager.listServers();
+  });
   ipcMain.handle("lvis:mcp:kill", (e, serverId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:kill", e); return UNAUTHORIZED_FRAME; }
     return services.mcpManager.killSwitch(serverId);
@@ -524,6 +525,7 @@ export function registerIpcHandlers(
       } else {
         await pm.addAlwaysDeniedPersist(normalized);
       }
+      services.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
       return { ok: true, rule: { pattern: normalized, action } };
     } catch (err) {
       return { ok: false, error: "add-failed", message: (err as Error).message };
@@ -535,6 +537,7 @@ export function registerIpcHandlers(
     if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
     try {
       await pm.removeRule(pattern, action);
+      services.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
       return { ok: true };
     } catch (err) {
       return { ok: false, error: "remove-failed", message: (err as Error).message };
@@ -942,4 +945,3 @@ export function registerIpcHandlers(
     }
   });
 }
-
