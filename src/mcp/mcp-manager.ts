@@ -12,7 +12,7 @@
  *
  * 설정 위치: ~/.lvis/mcp-servers.json
  */
-import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
@@ -162,14 +162,15 @@ export class McpManager {
 
   // ─── Config Mutation ────────────────────────────────
 
-  /** 설정 파일의 현재 서버 목록 반환 (apiKey / headers 제거된 안전 뷰) */
+  /** 설정 파일의 현재 서버 목록 반환 (apiKey / headers / env 제거된 안전 뷰) */
   async getConfigs(): Promise<McpServerConfig[]> {
     const configs = await this.loadFromConfig();
-    // Strip secrets before returning to renderer — apiKey and headers must not cross IPC boundary
+    // Strip secrets before returning to renderer — apiKey, headers, and env must not cross IPC boundary
     return configs.map((c) => {
-      const safe = { ...c } as McpServerConfig & { apiKey?: string; headers?: Record<string, string> };
+      const safe = { ...c } as McpServerConfig & { apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> };
       delete safe.apiKey;
       delete safe.headers;
+      delete safe.env;
       return safe as McpServerConfig;
     });
   }
@@ -246,8 +247,24 @@ export class McpManager {
     const dir = dirname(this.configPath);
     await mkdir(dir, { recursive: true });
     const tmpPath = `${this.configPath}.tmp`;
-    await writeFile(tmpPath, JSON.stringify({ servers: configs }, null, 2), "utf-8");
-    await rename(tmpPath, this.configPath);
+    try {
+      await writeFile(tmpPath, JSON.stringify({ servers: configs }, null, 2), "utf-8");
+      try {
+        await rename(tmpPath, this.configPath);
+      } catch (renameErr) {
+        // Windows: rename() throws EEXIST when destination already exists (unlike POSIX which overwrites)
+        if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
+          await unlink(this.configPath);
+          await rename(tmpPath, this.configPath);
+        } else {
+          throw renameErr;
+        }
+      }
+    } catch (e) {
+      // Best-effort cleanup of stale .tmp on any failure
+      try { await unlink(tmpPath); } catch { /* ignore */ }
+      throw e;
+    }
   }
 
   /** 특정 서버의 도구 호출 — ToolExecutor에서 사용 */

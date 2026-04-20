@@ -86,6 +86,33 @@ describe("McpManager — getConfigs()", () => {
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("srv-a");
   });
+
+  it("strips secret-bearing fields (apiKey, headers, env) before returning to renderer", async () => {
+    const servers = [
+      {
+        id: "http-srv",
+        transport: "http" as const,
+        url: "https://example.com/mcp",
+        apiKey: "super-secret",
+        headers: { Authorization: "Bearer token" },
+      },
+      {
+        id: "stdio-srv",
+        transport: "stdio" as const,
+        command: "npx tool",
+        env: { SECRET_TOKEN: "abc123", PATH: "/usr/bin" },
+      },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+    const mgr = await makeManager();
+    const result = await mgr.getConfigs();
+    expect(result).toHaveLength(2);
+    expect(result[0]).not.toHaveProperty("apiKey");
+    expect(result[0]).not.toHaveProperty("headers");
+    expect(result[1]).not.toHaveProperty("env");
+    expect(result[0].id).toBe("http-srv");
+    expect(result[1].id).toBe("stdio-srv");
+  });
 });
 
 describe("McpManager — addConfig()", () => {
