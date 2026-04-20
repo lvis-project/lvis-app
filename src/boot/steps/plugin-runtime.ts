@@ -70,6 +70,11 @@ export interface InitPluginRuntimeInput {
   msGraphService: MsGraphService;
   pythonPath: string | undefined;
   bootAuditLogger: AuditLogger;
+  mainWindow: BrowserWindow;
+  openAuthWindowService: (
+    parent: BrowserWindow,
+    opts: Parameters<PluginHostApi["openAuthWindow"]>[0],
+  ) => ReturnType<PluginHostApi["openAuthWindow"]>;
 }
 
 export interface InitPluginRuntimeOutput {
@@ -98,6 +103,8 @@ export async function initPluginRuntime(
     msGraphService,
     pythonPath,
     bootAuditLogger,
+    mainWindow,
+    openAuthWindowService,
   } = input;
 
   // Plugin shutdown handler registry — fires on before-quit (see Sprint 1-A A3).
@@ -299,6 +306,88 @@ export async function initPluginRuntime(
       },
       onShutdown: (handler) => {
         pluginShutdownHandlers.push({ pluginId, handler });
+      },
+      // ─── 외부 포털 interactive 인증 (쿠키 수집) ───────────────────
+      // `external-auth-consumer` capability 로 게이팅 — 쿠키는 민감 자산이므로
+      // 선언적 opt-in 없이는 호출 거부. 거부/허용 모두 AuditLogger 에 남긴다.
+      //
+      // 로그에는 origin + path 만 기록 — SAML/OAuth URL 에 담기는 민감 query
+      // (SAMLRequest, code, state, session id 등) 은 유출 방지 위해 제외.
+      openAuthWindow: async (opts) => {
+        const safeUrlForLog = (() => {
+          try {
+            const parsed = new URL(opts.url);
+            return `${parsed.origin}${parsed.pathname}`;
+          } catch {
+            return "[invalid-url]";
+          }
+        })();
+        const cookieHostCount = Array.isArray(opts.cookieHosts) ? opts.cookieHosts.length : 0;
+
+        if (!manifest.capabilities?.includes("external-auth-consumer")) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] open_auth_window_capability_denied url=${safeUrlForLog} missingCapability=external-auth-consumer`,
+            });
+          } catch { /* audit must not break host */ }
+          throw new Error(
+            `[plugin:${pluginId}] capability not declared: external-auth-consumer`,
+          );
+        }
+
+        console.log(
+          `[lvis] plugin:${pluginId} openAuthWindow url=${safeUrlForLog} cookieHostCount=${cookieHostCount}`,
+        );
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "tool_call",
+            input:
+              `[plugin:${pluginId}] openAuthWindow ` +
+              `url=${safeUrlForLog} cookieHostCount=${cookieHostCount}`,
+          });
+        } catch { /* audit must not break host */ }
+
+        // 기본값은 plugin 별 비영속 partition. Electron 의 default session 을
+        // 쓰면 (a) 여러 BrowserWindow 간 쿠키가 공유되어 타 플러그인이
+        // 수집한 세션을 그대로 볼 수 있고 (b) 디스크에 영속화된다. 둘 다
+        // openAuthWindow 의 "호스트는 세션을 보관하지 않는다" 원칙 위반.
+        //
+        // 플러그인이 명시적으로 지정한 persistPartition 은 반드시 자기
+        // 네임스페이스(`persist:plugin-auth:<pluginId>` 또는 그 하위 `:<sub>`)
+        // 여야 한다. 그렇지 않으면 plugin A 가 `plugin-auth:pluginB` 를 지정해
+        // plugin B 의 쿠키를 읽어가는 cross-plugin exfiltration 경로가 열린다.
+        const encodedId = encodeURIComponent(pluginId);
+        const defaultPartition = `plugin-auth:${encodedId}`;
+        const allowedPersistBase = `persist:${defaultPartition}`;
+        const requested = opts.persistPartition;
+        if (
+          requested !== undefined &&
+          requested !== allowedPersistBase &&
+          !requested.startsWith(`${allowedPersistBase}:`)
+        ) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input:
+                `[plugin:${pluginId}] open_auth_window_invalid_partition ` +
+                `persistPartition=${requested} allowed=${allowedPersistBase}[:<sub>]`,
+            });
+          } catch { /* audit must not break host */ }
+          throw new Error(
+            `[plugin:${pluginId}] openAuthWindow: persistPartition must be '${allowedPersistBase}' or '${allowedPersistBase}:<sub>'`,
+          );
+        }
+        const effectiveOpts = requested
+          ? opts
+          : { ...opts, persistPartition: defaultPartition };
+        return openAuthWindowService(mainWindow, effectiveOpts);
       },
     }),
   });

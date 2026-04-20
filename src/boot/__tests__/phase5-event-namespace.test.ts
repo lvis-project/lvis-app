@@ -59,12 +59,14 @@ describe("Phase 5 — capabilities module", () => {
   it("KNOWN_CAPABILITIES contains all documented entries", () => {
     for (const cap of [
       "ms-graph-consumer",
+      "external-auth-consumer",
       "mail-source",
       "calendar-source",
       "meeting-recorder",
       "knowledge-index",
       "background-watcher",
       "worker-client",
+      "document-indexer",
     ]) {
       expect(KNOWN_CAPABILITIES.has(cap)).toBe(true);
     }

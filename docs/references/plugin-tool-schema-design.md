@@ -209,6 +209,7 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직
 | 값 | 강제/자문 | 역할 |
 |----|-----------|------|
 | `ms-graph-consumer` | **enforced** | HostApi MS Graph 메서드 (`getMsGraphToken`, `startMsGraphAuth`, `isMsGraphAuthenticated`, `getMsGraphAccount`, `onMsGraphAuthChange`) 호출 필수. 미선언 플러그인이 호출 시 throw. |
+| `external-auth-consumer` | **enforced** | `openAuthWindow` 호출 필수. 실 Chromium 창을 띄워 외부 포털 세션 쿠키를 수집하는 민감 operation — 선언적 opt-in 없이는 거부. |
 | `mail-source` | **enforced** | `email.*` 이벤트 emit 게이트. 미선언 시 emit 이 드롭되고 warn. |
 | `calendar-source` | **enforced** | `calendar.*` emit 게이트. |
 | `meeting-recorder` | **enforced** | `meeting.*` emit 게이트. |
@@ -399,6 +400,7 @@ top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구�
 | `getMsGraphAccount()` ([ms-graph-consumer]) | 현재 로그인 계정 이메일 조회 | — |
 | `onMsGraphAuthChange(handler)` ([ms-graph-consumer]) | 인증 상태 변화 감지 (logout 처리 등) | — |
 | `callLlm(prompt, options?)` | 호스트 LLM 으로 단발 텍스트 생성 (선제성 본문·분류·요약) | 대화 히스토리·streaming·tool_use 필요 시 (플러그인이 직접 SDK 사용) |
+| `openAuthWindow(options)` ([external-auth-consumer] 필요) | 외부 포털 interactive 로그인 창을 띄우고 지정 도메인 쿠키 수집 (Selenium/webdriver 대체) | OAuth-style localhost callback이 되는 표준 플로우 (→ MS Graph 패턴 사용) |
 | `logEvent(level, message, data?)` | 호스트 감사 로그에 플러그인 이벤트 기록 | 디버그 전용 고빈도 로깅 (성능) |
 | `onShutdown(handler)` | 앱 종료 전 정리 작업 (DB flush, 파일 저장 등) | 긴 비동기 작업 (5s 제한) |
 
@@ -421,6 +423,33 @@ const suggestion = await hostApi.callLlm(
   - **maxTokens clamp**: 요청 값이 양의 정수가 아니면 무시, 그 외에는 `Math.min(raw, 4096)` 로 clamp.
   - **전건 감사 로그**: 호출 성공·실패 모두 `sessionId: "plugin"`, `type: "tool_call"` 로 기록 (`[plugin:<id>] callLlm promptLen=<n> maxTokens=<n>`).
 - Surface 는 의도적으로 좁게 유지: streaming·tool_choice·thinking 등 vendor 편차 큰 기능은 제외. §6.3 참조.
+
+### openAuthWindow 상세
+
+```typescript
+// 플러그인이 사내 포털 쿠키를 수집하는 예
+const cookies = await hostApi.openAuthWindow({
+  url: "http://portal.example.com/",
+  completionUrlPatterns: ["portal.example.com/portal/main", "portal.example.com"],
+  cookieHosts: ["sso.portal.example.com", "portal.example.com", "portal.example.com"],
+  timeoutMs: 300_000,
+  windowTitle: "사내 포털 로그인",
+});
+
+// 반환된 쿠키로 직접 HTTP 요청
+const jar = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+const res = await fetch("https://portal.example.com/api/...", { headers: { Cookie: jar } });
+```
+
+- Electron 내장 Chromium `BrowserWindow` + `session.cookies` API 사용 — **Selenium/webdriver 의존 제거**.
+- 사용자가 창 안에서 SSO 로그인 수행 → `completionUrlPatterns` 중 하나와 매칭되는 URL로 navigate되면 쿠키 수집 후 창 자동 close.
+- `cookieHosts`는 **도메인 suffix 매칭** (선행 점 정규화) — `evil-example.com`이 `portal.example.com`에 매칭되지 않도록 엄격 비교.
+- 타임아웃(기본 5분), 사용자 창 수동 close, `loadURL` 실패 모두 reject.
+- `persistPartition`(예: `persist:ep-auth`)을 지정하면 영구 세션 격리 — 여러 포털 간 쿠키 교차 방지.
+- **Capability gate**: `manifest.capabilities[]` 에 `external-auth-consumer` 선언 필수. 미선언 시 호출은 `throw` 되고 AuditLogger 에 `open_auth_window_capability_denied` 레코드가 남는다.
+- 허용된 호출도 AuditLogger 에 기록되어 어떤 플러그인이 어떤 포털에 대해 쿠키를 수집했는지 추적 가능.
+- 로그/감사에는 **URL 의 origin + path 만** 기록 — SAML/OAuth 응답 URL 에 담기는 `SAMLRequest` / `code` / `state` / 세션 토큰은 민감 자산이므로 query/hash 를 제외한다.
+- **§6.1 "3+ 플러그인 규칙" 예외 #2 (보안·감사 통제 필요)**로 정당화. 외부 포털 쿠키 수집은 민감 자산 취급이므로 단일 플러그인 사용처여도 HostApi에서 제공한다.
 
 ### logEvent 상세
 
