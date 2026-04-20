@@ -118,21 +118,6 @@ export interface PluginRuntimeOptions {
    * When absent, signatures are not checked (backward compat).
    */
   signatureVerifier?: PluginSignatureVerifier;
-  /**
-   * Dev-only escape hatch. When `true`, managed plugins are treated as
-   * "managed + signed" for the purpose of uiCallable mutating-verb gating
-   * (§Sprint 4-B B-3) even though no signatureVerifier is wired.
-   *
-   * This reflects the operator's explicit choice to skip signature
-   * verification (see `LVIS_DEV_SKIP_SIG=1` in boot/steps/plugin-runtime.ts),
-   * which already relaxes the signature check at load time. Without this
-   * flag, managed plugins would load but their uiCallable[] entries would
-   * be wrongly rejected whenever dev mode disables the verifier — a logic
-   * mismatch between the manifest validator and the runtime signature gate.
-   *
-   * Packaged builds must never set this.
-   */
-  allowManagedUnsigned?: boolean;
   /** Optional sink for signature-related audit events. */
   auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   /**
@@ -151,7 +136,6 @@ export class PluginRuntime {
   private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly signatureVerifier?: PluginSignatureVerifier;
-  private readonly allowManagedUnsigned: boolean;
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   private readonly onDisable?: (pluginId: string) => void;
   private readonly plugins = new Map<string, LoadedPlugin>();
@@ -174,7 +158,6 @@ export class PluginRuntime {
     this.createHostApi = options.createHostApi;
     this.deploymentGuard = options.deploymentGuard;
     this.signatureVerifier = options.signatureVerifier;
-    this.allowManagedUnsigned = options.allowManagedUnsigned ?? false;
     this.auditLog = options.auditLog;
     this.onDisable = options.onDisable;
   }

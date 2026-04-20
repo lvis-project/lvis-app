@@ -14,10 +14,9 @@
  *   - Destructive-action confirmation is the plugin developer's
  *     responsibility inside their own UI (see email_reply precedent).
  *
- * The `allowManagedUnsigned` constructor option still exists (it
- * affects the signature-verifier branch) but it has NO EFFECT on
- * uiCallable validation. The `plugin_uiCallable_destructive_rejected`
- * audit event is no longer emitted.
+ * The `allowManagedUnsigned` option still exists in the constructor
+ * signature but has NO EFFECT on uiCallable validation. The
+ * `plugin_uiCallable_destructive_rejected` audit event is no longer emitted.
  *
  * These tests pin that new contract:
  *   1. managed + `_delete` in uiCallable + no verifier → LOADS.

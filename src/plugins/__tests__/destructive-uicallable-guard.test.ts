@@ -14,8 +14,8 @@
  * NOT from naming conventions. Any suffix (_delete, _remove, _send, _reply,
  * _create, _update, …) is permitted regardless of deployment type. The
  * plugin developer is responsible for destructive-action confirmation UX in
- * their own renderer surface — see `email_reply` and `index_remove_folder`
- * which both ship this way today.
+ * their own renderer surface — see `index_remove_folder` which ships this way
+ * today (note: `email_reply` is in tools[] only, not uiCallable[]).
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -68,8 +68,9 @@ async function writeTempPlugin(opts: {
   return join(root, "plugin.json");
 }
 
-// Mock signature verifier — proves the managed+signed branch is reachable,
-// without exercising real crypto (covered elsewhere).
+// Mock signature verifier used as runtime test scaffolding. This suite
+// validates manifest parsing/subset checks and does not itself exercise the
+// signature-verification path (that requires `load()`).
 const mockVerifier = {
   verifyManifestFile: async () => ({ valid: true, sha256: "x" }),
 } as unknown as PluginSignatureVerifier;
