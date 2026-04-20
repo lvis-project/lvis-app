@@ -7,8 +7,8 @@
   "main": "dist/src/main.js",
   "scripts": {
     "postinstall": "node scripts/ensure-submodules.mjs && electron-rebuild && node scripts/fetch-uv.mjs",
-    "prepare:plugins": "bun run --cwd ../lvis-plugin-pageindex build && bun run --cwd ../lvis-plugin-meeting build && bun run --cwd ../lvis-plugin-email build && bun run --cwd ../lvis-plugin-calendar build",
-    "prepare:plugins:npm": "npm run --prefix ../lvis-plugin-pageindex build && npm run --prefix ../lvis-plugin-meeting build && npm run --prefix ../lvis-plugin-email build && npm run --prefix ../lvis-plugin-calendar build",
+    "prepare:plugins": "bun run --cwd ../lvis-plugin-pageindex build && bun run --cwd ../lvis-plugin-meeting build && bun run --cwd ../lvis-plugin-email build && bun run --cwd ../lvis-plugin-calendar build && bun run --cwd ../lvis-plugin-lge-api build",
+    "prepare:plugins:npm": "npm run --prefix ../lvis-plugin-pageindex build && npm run --prefix ../lvis-plugin-meeting build && npm run --prefix ../lvis-plugin-email build && npm run --prefix ../lvis-plugin-calendar build && npm run --prefix ../lvis-plugin-lge-api build",
     "build:main": "tsc -p tsconfig.json",
     "build:renderer": "esbuild src/renderer.tsx --bundle --platform=browser --format=esm --outfile=dist/src/renderer.js",
     "build:styles": "tailwindcss -i src/styles.css -o dist/src/styles.css --minify",
@@ -50,6 +50,7 @@
     "@azure/msal-node": "^5.1.2",
     "@lvis/plugin-calendar": "file:../lvis-plugin-calendar",
     "@lvis/plugin-email": "file:../lvis-plugin-email",
+    "@lvis/plugin-lge-api": "file:../lvis-plugin-lge-api",
     "@lvis/plugin-meeting": "file:../lvis-plugin-meeting",
     "@lvis/plugin-pageindex": "file:../lvis-plugin-pageindex",
     "@lvis/plugin-sdk": "file:./packages/plugin-sdk",

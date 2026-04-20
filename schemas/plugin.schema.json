@@ -75,12 +75,14 @@
         "type": "string",
         "enum": [
           "ms-graph-consumer",
+          "external-auth-consumer",
           "mail-source",
           "calendar-source",
           "meeting-recorder",
           "knowledge-index",
           "background-watcher",
-          "worker-client"
+          "worker-client",
+          "document-indexer"
         ]
       }
     },
