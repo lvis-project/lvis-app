@@ -38,6 +38,7 @@ export interface CapabilityPolicy {
 /** Closed set of capability strings accepted in manifest.capabilities[]. */
 export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   "ms-graph-consumer",
+  "external-auth-consumer",
   "mail-source",
   "calendar-source",
   "meeting-recorder",
@@ -66,6 +67,15 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
         "onMsGraphAuthChange",
         "withMsGraphRetry",
       ],
+    },
+  ],
+  [
+    "external-auth-consumer",
+    {
+      description:
+        "Required to open interactive login BrowserWindows and harvest cookies via openAuthWindow. Gated because this spawns a real Chromium window and exposes session cookies to the plugin.",
+      enforcement: "enforced",
+      gates: ["openAuthWindow"],
     },
   ],
   [
