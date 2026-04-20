@@ -154,8 +154,11 @@ export function PluginUiHostView({
     void (async () => {
       try {
         const loadedModule = await loadPluginUiModule(view);
+        if (disposed) {
+          loadedModule.revoke?.();
+          return;
+        }
         revokeModuleUrl = loadedModule.revoke;
-        if (disposed) return;
 
         const mount = resolvePluginMount(loadedModule.moduleNamespace, view.extension.exportName);
         if (!mount) {

@@ -5,7 +5,9 @@
  * main.ts에서 인라인으로 30개 핸들러를 두지 않고 여기에 집중.
  */
 import { dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
+import { realpathSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppServices } from "./boot.js";
 import type { ApprovalDecision } from "./permissions/approval-gate.js";
@@ -405,7 +407,21 @@ export function registerIpcHandlers(
     }
 
     const entryPath = fileURLToPath(view.entryUrl);
-    return readFile(entryPath, "utf-8");
+    const pluginRoot = pluginRuntime.getPluginEntryDir(pluginId);
+    if (!pluginRoot) {
+      throw new Error(`Plugin entry dir not found (plugin=${pluginId}).`);
+    }
+    let realEntryPath: string;
+    try {
+      realEntryPath = realpathSync(entryPath);
+    } catch {
+      throw new Error(`Plugin UI entry path could not be resolved (plugin=${pluginId}).`);
+    }
+    const rootWithSep = pluginRoot.endsWith(path.sep) ? pluginRoot : pluginRoot + path.sep;
+    if (realEntryPath !== pluginRoot && !realEntryPath.startsWith(rootWithSep)) {
+      throw new Error(`Plugin UI entry path escapes plugin directory (plugin=${pluginId}).`);
+    }
+    return readFile(realEntryPath, "utf-8");
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
