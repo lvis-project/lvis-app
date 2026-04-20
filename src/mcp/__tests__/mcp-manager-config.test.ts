@@ -271,10 +271,25 @@ describe("McpManager — removeConfig()", () => {
   });
 
   it("is idempotent when server not in config", async () => {
-    await writeFile(testConfigPath, JSON.stringify({ servers: [] }), "utf-8");
     const mgr = await makeManager();
-    // Should not throw
+
     await expect(mgr.removeConfig("ghost")).resolves.toBeUndefined();
+    expect(existsSync(testConfigPath)).toBe(false);
+    expect(vi.mocked(rename)).not.toHaveBeenCalled();
+  });
+
+  it("does not rewrite config when removed server id is absent", async () => {
+    const servers: McpServerConfig[] = [
+      { id: "keep", transport: "stdio", command: "cmd" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers }), "utf-8");
+
+    const mgr = await makeManager();
+    await expect(mgr.removeConfig("ghost")).resolves.toBeUndefined();
+
+    const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
+    expect(raw.servers).toEqual(servers);
+    expect(vi.mocked(rename)).not.toHaveBeenCalled();
   });
 
   it("emits kill-switch audit when a connected server is terminated", async () => {

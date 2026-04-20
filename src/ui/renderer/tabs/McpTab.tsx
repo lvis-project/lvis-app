@@ -40,20 +40,30 @@ const EMPTY_FORM = {
   allowPrivateNetworks: false,
 };
 
-function parseCliWords(input: string): string[] {
+export function parseCliWords(input: string): string[] {
   const tokens: string[] = [];
   let current = "";
   let quote: "'" | '"' | null = null;
   let escaping = false;
+  const trimmed = input.trim();
 
-  for (const char of input.trim()) {
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const char = trimmed[i];
+    const nextChar = trimmed[i + 1];
     if (escaping) {
       current += char;
       escaping = false;
       continue;
     }
     if (char === "\\") {
-      escaping = true;
+      const shouldEscape =
+        nextChar !== undefined &&
+        (/\s/.test(nextChar) || nextChar === "'" || nextChar === '"' || nextChar === "\\");
+      if (shouldEscape) {
+        escaping = true;
+        continue;
+      }
+      current += char;
       continue;
     }
     if (quote) {
@@ -83,6 +93,22 @@ function parseCliWords(input: string): string[] {
   }
   if (current) tokens.push(current);
   return tokens;
+}
+
+const WINDOWS_EXECUTABLE_PATTERN =
+  /^((?:[A-Za-z]:\\|\\\\)[^"'<>|?*]*?\.(?:exe|cmd|bat|com|ps1|py|js|mjs|cjs))(?=\s|$)\s*(.*)$/i;
+
+export function splitCommandLine(input: string): string[] {
+  const trimmed = input.trim();
+  if (!trimmed) return [];
+
+  const winMatch = trimmed.match(WINDOWS_EXECUTABLE_PATTERN);
+  if (winMatch) {
+    const [, command, rest] = winMatch;
+    return [command, ...parseCliWords(rest)];
+  }
+
+  return parseCliWords(trimmed);
 }
 
 function parseKeyValueLines(input: string, delimiter: ":" | "="): Record<string, string> | undefined {
@@ -223,7 +249,7 @@ export function McpTab() {
       };
 
       if (form.transport === "stdio") {
-        const [command, ...inlineArgs] = parseCliWords(form.command);
+        const [command, ...inlineArgs] = splitCommandLine(form.command);
         if (!command) {
           showBanner("error", "stdio 실행 파일을 입력하세요.");
           return;

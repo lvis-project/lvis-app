@@ -298,8 +298,14 @@ export class McpManager {
   async removeConfig(serverId: string): Promise<void> {
     return this.withConfigLock(async () => {
       await this.withConfigFileLock(async () => {
+        if (!existsSync(this.configPath)) {
+          return;
+        }
         const existing = await this.loadFromConfigUnlocked();
         const updated = existing.filter((s) => s.id !== serverId);
+        if (updated.length === existing.length) {
+          return;
+        }
         await this.saveConfigs(updated);
       });
       // 연결 해제 (이미 끊겨있으면 무시)
