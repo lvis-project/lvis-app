@@ -67,15 +67,6 @@ export function resolvePluginEntryPath(pluginRoot: string, entry: string): strin
   return resolved;
 }
 
-export const UI_CALLABLE_SAFE_VERBS = /_(get|list|search|read|show|query|preview|count|status|find|describe|inspect)$/i;
-export const DESTRUCTIVE_TOOL_PATTERNS: RegExp[] = [
-  /_(delete|remove|send|destroy|erase|purge)$/i,
-];
-
-function isUiSafeVerb(name: string): boolean {
-  return UI_CALLABLE_SAFE_VERBS.test(name);
-}
-
 type LoadedPlugin = {
   manifest: PluginManifest;
   pluginRoot: string;
@@ -127,21 +118,6 @@ export interface PluginRuntimeOptions {
    * When absent, signatures are not checked (backward compat).
    */
   signatureVerifier?: PluginSignatureVerifier;
-  /**
-   * Dev-only escape hatch. When `true`, managed plugins are treated as
-   * "managed + signed" for the purpose of uiCallable mutating-verb gating
-   * (§Sprint 4-B B-3) even though no signatureVerifier is wired.
-   *
-   * This reflects the operator's explicit choice to skip signature
-   * verification (see `LVIS_DEV_SKIP_SIG=1` in boot/steps/plugin-runtime.ts),
-   * which already relaxes the signature check at load time. Without this
-   * flag, managed plugins would load but their uiCallable[] entries would
-   * be wrongly rejected whenever dev mode disables the verifier — a logic
-   * mismatch between the manifest validator and the runtime signature gate.
-   *
-   * Packaged builds must never set this.
-   */
-  allowManagedUnsigned?: boolean;
   /** Optional sink for signature-related audit events. */
   auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   /**
@@ -160,7 +136,6 @@ export class PluginRuntime {
   private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly signatureVerifier?: PluginSignatureVerifier;
-  private readonly allowManagedUnsigned: boolean;
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   private readonly onDisable?: (pluginId: string) => void;
   private readonly plugins = new Map<string, LoadedPlugin>();
@@ -183,7 +158,6 @@ export class PluginRuntime {
     this.createHostApi = options.createHostApi;
     this.deploymentGuard = options.deploymentGuard;
     this.signatureVerifier = options.signatureVerifier;
-    this.allowManagedUnsigned = options.allowManagedUnsigned ?? false;
     this.auditLog = options.auditLog;
     this.onDisable = options.onDisable;
   }
@@ -962,11 +936,12 @@ export class PluginRuntime {
       }
     }
 
-    // Sprint 4-B §B-3 — uiCallable ⊂ tools + destructive-pattern guard.
-    // uiCallable is the renderer IPC allowlist (lvis:plugins:call); anything
-    // not in manifest.tools is unreachable anyway. Destructive verbs
-    // (delete/remove/send/destroy/erase/purge) are rejected unless the plugin
-    // is managed AND signed — users cannot bypass approval gates via UI.
+    // Sprint 4-B §B-3 — uiCallable ⊂ tools validation.
+    // uiCallable is the renderer IPC allowlist (lvis:plugins:call); every
+    // entry must be a string declared in manifest.tools[]. Security relies on
+    // code review + marketplace approval + signature verification — NOT on
+    // naming patterns. Destructive-action confirmation is the plugin
+    // developer's responsibility in their own UI (see email_reply precedent).
     const uiCallable = Array.isArray(parsed.uiCallable) ? parsed.uiCallable : [];
     for (let i = 0; i < uiCallable.length; i += 1) {
       const method = uiCallable[i];
@@ -983,27 +958,6 @@ export class PluginRuntime {
           `entry '${method}' is not declared in tools[]`,
           `add "${method}" to tools[] or remove it from uiCallable[]`,
         );
-      }
-      if (!isUiSafeVerb(method)) {
-        // M1 inverted gate — only read-like verbs may be uiCallable on user
-        // plugins. Managed + signed plugins may expose mutating verbs (e.g.
-        // admin tooling); everything else is rejected at manifest load time
-        // and audit-logged so operators see the attempt.
-        const managedAndSigned =
-          parsed.deployment === "managed" &&
-          (this.signatureVerifier !== undefined || this.allowManagedUnsigned);
-        if (!managedAndSigned) {
-          this.auditLog?.("error", "plugin_uiCallable_destructive_rejected", {
-            pluginId: pid,
-            method,
-            deployment: parsed.deployment ?? "user",
-          });
-          fail(
-            `uiCallable[${i}]`,
-            `non-read-verb tool '${method}' cannot be exposed via uiCallable (managed+signed plugins only; allowed suffixes: _get|_list|_search|_read|_show|_query|_preview|_count|_status|_find|_describe|_inspect)`,
-            `route '${method}' through ConversationLoop (permission+approval) instead`,
-          );
-        }
       }
     }
 

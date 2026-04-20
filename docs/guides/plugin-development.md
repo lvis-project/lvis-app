@@ -493,11 +493,13 @@ LVIS 플러그인에는 **세 개의 독립 네임스페이스**가 있습니다
 
 `manifest.uiCallable[]` 은 렌더러 UI 가 `lvis:plugins:call` IPC 로 **직접** 호출할 수 있는 tool name 의 allowlist 입니다. 여기 없는 도구는 ConversationLoop 경로(permission / scope / expansion cap / ApprovalGate)를 반드시 거쳐야 합니다.
 
-### 강제 규칙 (Sprint 4-B §B-3)
+### 강제 규칙
 
-1. **`uiCallable ⊂ tools`** — 목록에 없는 이름이 섞이면 매니페스트 로드 실패.
-2. **파괴적 동사 접미사 차단**. 다음 정규식(`/_(delete|remove|send|destroy|erase|purge)$/i`) 과 일치하는 이름은 `deployment: "managed"` **AND** 서명 검증이 걸린 런타임일 때만 허용. user 플러그인이 이를 `uiCallable` 에 넣으면 매니페스트 로드 거부 + AuditLogger 에 `plugin_uiCallable_destructive_rejected` 기록.
-3. 일반 사용자 플러그인은 파괴적 동사 도구를 ConversationLoop 경로로만 노출하세요. 확인 UX 는 PermissionManager / ApprovalGate 가 강제합니다.
+1. **`uiCallable ⊂ tools`** — 목록에 없는 이름이 섞이면 매니페스트 로드 실패. 이 구조적 제약만 런타임에서 강제됩니다.
+2. **도구 이름 제한 없음** — 접미사(`_delete`, `_send` 등)로 `uiCallable` 등록을 막지 않습니다. 어떤 도구든 플러그인의 판단에 따라 렌더러에서 직접 호출되도록 노출할 수 있습니다.
+3. **파괴적 동작을 uiCallable로 노출하는 플러그인은 자체 UI에서 확인 다이얼로그를 구현해야 합니다** (예: "정말 삭제하시겠습니까?"). 호스트는 이를 강제하지 않으며, 코드 리뷰·마켓플레이스 심사 단계에서 검증합니다.
+4. AI(ConversationLoop)가 개시한 도구 호출은 별개로 `ApprovalGate` / `PermissionManager` 의 확인 UX 를 거칩니다 — uiCallable 정책과 무관하게 그대로 유지됩니다.
+5. 실제 위험 작업(파일시스템 민감 경로, 샌드박스 탈출 등)은 호스트의 `sensitive-paths.ts` · 샌드박스 계층에서 차단합니다. 이름 패턴이 아닌 작업의 실체로 막습니다.
 
 ### 예: Meeting 플러그인
 
@@ -747,7 +749,7 @@ Meeting / Email / Calendar / PageIndex 의 실제 플러그인 소스는 모두 
   - [ ] `description` 1줄 요약 (LLM 카탈로그 품질)
   - [ ] `tools[]` 언더스코어 패턴, `^[a-zA-Z_][a-zA-Z0-9_]*$`
   - [ ] 필요 시 `capabilities`, `ms-graph-consumer` 등
-  - [ ] `uiCallable ⊂ tools`, 파괴적 동사 제외
+  - [ ] `uiCallable ⊂ tools` (파괴적 도구라도 등록 가능 — 플러그인 자체 확인 UX 필수)
   - [ ] `startupTimeoutMs` (start 가 느릴 수 있다면)
   - [ ] `toolSchemas` description ≥ 10자
 - [ ] **hostPlugin.ts**
