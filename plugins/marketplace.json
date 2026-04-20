@@ -15,7 +15,9 @@
         "chat_preview"
       ],
       "defaultConfig": {
-        "scanFolders": ["fixtures"],
+        "scanFolders": [
+          "fixtures"
+        ],
         "workspace": ".pageindex-workspace"
       },
       "ui": [
@@ -58,8 +60,7 @@
           "entry": "dist/ui/meeting-control.js"
         }
       ]
-    }
-    ,
+    },
     {
       "id": "email",
       "name": "LVIS Email",
@@ -122,7 +123,33 @@
           "entry": "dist/ui/calendar-control.js"
         }
       ]
+    },
+    {
+      "id": "lge-api",
+      "name": "LVIS EP",
+      "description": "EP 사내 포털 SSO 로그인 + 시설 예약 조회 + Tool 시험대",
+      "packageSpec": "file:../lvis-plugin-lge-api",
+      "packageName": "@lvis/plugin-lge-api",
+      "deployment": "managed",
+      "publisher": "LG Electronics IT",
+      "methods": [
+        "lge_login",
+        "lge_status",
+        "lge_facility_list"
+      ],
+      "defaultConfig": {},
+      "ui": [
+        {
+          "id": "lge-control",
+          "slot": "sidebar",
+          "kind": "embedded-module",
+          "displayName": "EP",
+          "title": "EP",
+          "description": "EP 로그인 + 시설 예약 조회 + Tool 시험대.",
+          "entry": "dist/ui/lge-control.js",
+          "exportName": "mount"
+        }
+      ]
     }
   ]
 }
-

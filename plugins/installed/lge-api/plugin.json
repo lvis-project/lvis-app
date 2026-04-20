@@ -1,0 +1,92 @@
+{
+  "id": "lge-api",
+  "name": "LVIS EP",
+  "version": "0.1.0",
+  "deployment": "managed",
+  "publisher": "LG Electronics IT",
+  "entry": "../../../node_modules/@lvis/plugin-lge-api/dist/hostPlugin.js",
+  "tools": [
+    "lge_login",
+    "lge_status",
+    "lge_facility_list"
+  ],
+  "capabilities": [
+    "external-auth-consumer"
+  ],
+  "uiCallable": [
+    "lge_login",
+    "lge_status",
+    "lge_facility_list"
+  ],
+  "startupTools": [],
+  "eventSubscriptions": [],
+  "notificationEvents": [],
+  "ui": [
+    {
+      "id": "lge-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "EP",
+      "title": "EP",
+      "description": "EP 로그인 + 시설 예약 조회 + Tool 시험대.",
+      "entry": "../../../node_modules/@lvis/plugin-lge-api/dist/ui/lge-control.js",
+      "exportName": "mount"
+    }
+  ],
+  "keywords": [
+    {
+      "keyword": "시설예약",
+      "skillId": "lge_facility_list"
+    },
+    {
+      "keyword": "회의실예약",
+      "skillId": "lge_facility_list"
+    },
+    {
+      "keyword": "LGE포털",
+      "skillId": "lge_status"
+    }
+  ],
+  "toolSchemas": {
+    "lge_login": {
+      "description": "EP(space.lge.com) SSO 로그인 창을 띄워 세션 쿠키를 수집합니다. 호스트가 Electron BrowserWindow 로 사용자 interactive 로그인을 수행하고, 완료 시 *.lge.com 쿠키를 플러그인 메모리에 저장합니다. 성공 시 { authenticated: true, cookieCount, expiresAt? }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 60000,
+            "maximum": 1800000,
+            "description": "로그인 타임아웃 밀리초 (기본 300000 = 5분)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "lge_status": {
+      "description": "현재 EP 세션 유효 여부를 반환합니다. 인자 없음. 성공 시 { authenticated, cookieCount, lastLoginAt? }를 반환합니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "lge_facility_list": {
+      "description": "space.lge.com 회의실 예약 현황 + 회의실 마스터 목록을 조회합니다. lge_login 으로 세션 획득 필요. 성공 시 { listSchedule: 예약 배열, facilityList: 회의실 배열 }를 반환합니다. 세션이 만료되면 AuthenticationExpiredError 를 throw — lge_login 재호출 필요.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "locationCode": {
+            "type": "string",
+            "description": "사업장 코드 (기본 'LGEKR'). 필요 시 다른 코드로 조회."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "config": {}
+}
