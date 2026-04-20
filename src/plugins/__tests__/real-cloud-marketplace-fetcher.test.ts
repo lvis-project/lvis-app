@@ -324,3 +324,127 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
     expect(p.version).toBeUndefined();
   });
 });
+
+describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
+  beforeEach(() => {
+    mockedFetchPublic.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("rejects slug with path traversal characters", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([{ id: "x", slug: "../../etc/passwd", name: "Evil" }]),
+    );
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    await expect(fetcher.listPlugins()).rejects.toThrow(/unsafe packageName/);
+  });
+
+  it("rejects slug that starts with dash (npm flag injection)", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([{ id: "x", slug: "--registry=https://evil.example", name: "Evil" }]),
+    );
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    await expect(fetcher.listPlugins()).rejects.toThrow(/unsafe packageName/);
+  });
+
+  it("rejects slug with file: protocol prefix", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([{ id: "x", slug: "file:/tmp/evil.tgz", name: "Evil" }]),
+    );
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    await expect(fetcher.listPlugins()).rejects.toThrow(/unsafe packageName/);
+  });
+
+  it("rejects slug with git+https: protocol", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([{ id: "x", slug: "git+https://evil/x.git", name: "Evil" }]),
+    );
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    await expect(fetcher.listPlugins()).rejects.toThrow(/unsafe packageName/);
+  });
+
+  it("rejects non-primitive id (object stringifies to [object Object])", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([{ id: { evil: true }, name: "Evil" }]),
+    );
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    await expect(fetcher.listPlugins()).rejects.toThrow(/missing id\/name/);
+  });
+
+  it("rejects array id", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([{ id: [1, 2, 3], name: "Evil" }]),
+    );
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    await expect(fetcher.listPlugins()).rejects.toThrow(/missing id\/name/);
+  });
+
+  it("rejects id with path separator", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([{ id: "../../../etc", name: "Evil", slug: "safe-slug" }]),
+    );
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
+  });
+
+  it("rejects unsafe numeric id (NaN)", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([{ id: NaN, name: "Evil" }]),
+    );
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    // NaN is not finite → id becomes undefined → throws missing id
+    await expect(fetcher.listPlugins()).rejects.toThrow(/missing id\/name/);
+  });
+
+  it("accepts valid scoped package name", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([{
+        id: "acme-notes",
+        name: "Notes",
+        package_name: "@acme/notes",
+        packageSpec: "@acme/notes@1.0.0",
+      }]),
+    );
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const plugins = await fetcher.listPlugins();
+    expect(plugins[0].packageName).toBe("@acme/notes");
+  });
+
+  it("accepts valid unscoped package name", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse([{
+        id: "simple-plugin",
+        name: "Simple",
+        slug: "simple-plugin",
+        latest_stable_version: "1.0.0",
+      }]),
+    );
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const plugins = await fetcher.listPlugins();
+    expect(plugins[0].packageName).toBe("simple-plugin");
+    expect(plugins[0].packageSpec).toBe("simple-plugin@1.0.0");
+  });
+});

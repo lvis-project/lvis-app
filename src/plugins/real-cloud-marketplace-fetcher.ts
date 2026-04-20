@@ -24,6 +24,20 @@ import {
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PluginMarketplaceItem, PluginUiExtension, RequiresSpec } from "./types.js";
 
+/**
+ * Allowlist for npm package identifiers. Matches scoped (@scope/name) and
+ * unscoped (name) package names. Rejects path traversal, CLI flags,
+ * git/file protocol prefixes, and null bytes.
+ */
+const SAFE_PACKAGE_NAME_RE =
+  /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+
+/**
+ * Allowlist for plugin IDs. Must start with alphanumeric, may contain
+ * dots, dashes, underscores. Max 128 chars. No path separators.
+ */
+const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
 export interface RealCloudMarketplaceConfig {
   baseUrl: string;
   apiKey?: string;
@@ -165,16 +179,41 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
 
   private mapItem(row: ServerCatalogRow): PluginMarketplaceItem {
     const idRaw = row.id ?? row.slug;
-    const id = idRaw != null ? String(idRaw) : undefined;
+    let id: string | undefined;
+    if (typeof idRaw === "string") {
+      id = idRaw;
+    } else if (
+      typeof idRaw === "number" &&
+      Number.isFinite(idRaw) &&
+      Number.isSafeInteger(idRaw)
+    ) {
+      id = String(idRaw);
+    }
     const name = row.name ?? row.display_name ?? row.displayName ?? id;
     if (!id || !name) {
       throw new Error("marketplace row missing id/name");
     }
 
+    // M3: enforce strict id format — id is used as a filesystem directory name.
+    if (!SAFE_ID_RE.test(id)) {
+      throw new Error(`marketplace row has invalid id format: "${id}"`);
+    }
+
     // packageName: use explicit field if present, otherwise fall back to slug
     // (the lvis-marketplace server identifies artifacts by slug, not npm package name)
-    const packageName =
+    // H1/H2: validate against strict allowlist to prevent npm argument injection
+    // and path traversal via slug-derived node_modules resolution.
+    const packageNameCandidate =
       row.package_name ?? row.packageName ?? row.slug ?? id;
+    if (
+      !SAFE_PACKAGE_NAME_RE.test(packageNameCandidate) ||
+      packageNameCandidate.startsWith("-")
+    ) {
+      throw new Error(
+        `marketplace row "${id}" has unsafe packageName: "${packageNameCandidate}"`,
+      );
+    }
+    const packageName = packageNameCandidate;
 
     // packageSpec: prefer explicit; otherwise build from packageName + version
     const version =
