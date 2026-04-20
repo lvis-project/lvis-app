@@ -108,14 +108,28 @@ export async function openAuthWindow(
     throw new Error("openAuthWindow: cookieHosts must be a non-empty array");
   }
 
+  // Hardened webPreferences — 외부 포털을 Chromium 에 띄우는 창이므로
+  // renderer ↔ Node 경계를 완전히 차단해 RCE 표면을 좁힌다. 원격지 페이지에
+  // Node API / 다른 BrowserWindow 생성 권한이 없어야 한다.
   const authWindow = new BrowserWindow({
     parent,
     modal: false,
     width: 1024,
     height: 768,
     title: windowTitle,
-    webPreferences: persistPartition ? { partition: persistPartition } : {},
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      nodeIntegrationInSubFrames: false,
+      webviewTag: false,
+      sandbox: true,
+      ...(persistPartition ? { partition: persistPartition } : {}),
+    },
   });
+
+  // Popup / window.open 차단 — 포털이 새 창을 열어 쿠키를 다른 origin 에
+  // 심거나 사용자를 임의 사이트로 튕기는 경로 제거.
+  authWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   return new Promise<AuthCookie[]>((resolve, reject) => {
     let settled = false;

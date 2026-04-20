@@ -309,20 +309,46 @@ export async function initPluginRuntime(
       },
       // ─── 외부 포털 interactive 인증 (쿠키 수집) ───────────────────
       // `external-auth-consumer` capability 로 게이팅 — 쿠키는 민감 자산이므로
-      // 선언적 opt-in 없이는 호출 거부. 사용 흔적은 AuditLogger 에 남긴다.
+      // 선언적 opt-in 없이는 호출 거부. 거부/허용 모두 AuditLogger 에 남긴다.
+      //
+      // 로그에는 origin + path 만 기록 — SAML/OAuth URL 에 담기는 민감 query
+      // (SAMLRequest, code, state, session id 등) 은 유출 방지 위해 제외.
       openAuthWindow: async (opts) => {
+        const safeUrlForLog = (() => {
+          try {
+            const parsed = new URL(opts.url);
+            return `${parsed.origin}${parsed.pathname}`;
+          } catch {
+            return "[invalid-url]";
+          }
+        })();
+        const cookieHostCount = Array.isArray(opts.cookieHosts) ? opts.cookieHosts.length : 0;
+
         if (!manifest.capabilities?.includes("external-auth-consumer")) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] open_auth_window_capability_denied url=${safeUrlForLog} missingCapability=external-auth-consumer`,
+            });
+          } catch { /* audit must not break host */ }
           throw new Error(
             `[plugin:${pluginId}] capability not declared: external-auth-consumer`,
           );
         }
-        console.log(`[lvis] plugin:${pluginId} openAuthWindow url=${opts.url}`);
+
+        console.log(
+          `[lvis] plugin:${pluginId} openAuthWindow url=${safeUrlForLog} cookieHostCount=${cookieHostCount}`,
+        );
         try {
           bootAuditLogger.log({
             timestamp: new Date().toISOString(),
             sessionId: "plugin",
             type: "tool_call",
-            input: `[plugin:${pluginId}] openAuthWindow url=${opts.url} cookieHosts=${opts.cookieHosts.join("|")}`,
+            input:
+              `[plugin:${pluginId}] openAuthWindow ` +
+              `url=${safeUrlForLog} cookieHostCount=${cookieHostCount}`,
           });
         } catch { /* audit must not break host */ }
         return openAuthWindowService(mainWindow, opts);

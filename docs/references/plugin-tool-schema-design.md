@@ -446,8 +446,9 @@ const res = await fetch("https://newep.lge.com/api/...", { headers: { Cookie: ja
 - `cookieHosts`는 **도메인 suffix 매칭** (선행 점 정규화) — `evil-lge.com`이 `lge.com`에 매칭되지 않도록 엄격 비교.
 - 타임아웃(기본 5분), 사용자 창 수동 close, `loadURL` 실패 모두 reject.
 - `persistPartition`(예: `persist:lge-auth`)을 지정하면 영구 세션 격리 — 여러 포털 간 쿠키 교차 방지.
-- **Capability gate**: `manifest.capabilities[]` 에 `external-auth-consumer` 선언 필수. 미선언 시 호출이 `throw` 되고 감사로그에 capability_denied 기록.
-- 호출 자체도 AuditLogger 에 기록되어 어떤 플러그인이 어떤 URL 에 대해 쿠키를 수집했는지 추적 가능.
+- **Capability gate**: `manifest.capabilities[]` 에 `external-auth-consumer` 선언 필수. 미선언 시 호출은 `throw` 되고 AuditLogger 에 `open_auth_window_capability_denied` 레코드가 남는다.
+- 허용된 호출도 AuditLogger 에 기록되어 어떤 플러그인이 어떤 포털에 대해 쿠키를 수집했는지 추적 가능.
+- 로그/감사에는 **URL 의 origin + path 만** 기록 — SAML/OAuth 응답 URL 에 담기는 `SAMLRequest` / `code` / `state` / 세션 토큰은 민감 자산이므로 query/hash 를 제외한다.
 - **§6.1 "3+ 플러그인 규칙" 예외 #2 (보안·감사 통제 필요)**로 정당화. 외부 포털 쿠키 수집은 민감 자산 취급이므로 단일 플러그인 사용처여도 HostApi에서 제공한다.
 
 ### logEvent 상세
