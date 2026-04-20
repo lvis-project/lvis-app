@@ -97,6 +97,27 @@ export function parseCliWords(input: string): string[] {
 const WINDOWS_EXECUTABLE_PATTERN =
   /^((?:[A-Za-z]:\\|\\\\)[^"'<>|?*]*?\.(?:exe|cmd|bat|com|ps1|py|js|mjs|cjs))(?=\s|$)\s*(.*)$/i;
 
+/**
+ * Validates that the auth/apiKey combination is coherent.
+ * - "api-key" auth requires a non-empty API key.
+ * - "none" auth rejects any API key value (it would be silently dropped by
+ *   the config builder and confuse the user into thinking it was saved).
+ *
+ * Returns a user-facing error string, or null when the combination is valid.
+ */
+export function validateAuthApiKey(
+  auth: "none" | "sso" | "api-key",
+  apiKey: string,
+): string | null {
+  if (auth === "api-key" && !apiKey.trim()) {
+    return "API Key 인증 방식은 API Key를 입력해야 합니다.";
+  }
+  if (auth === "none" && apiKey.trim()) {
+    return "인증 방식이 '없음'일 때 API Key를 입력할 수 없습니다.";
+  }
+  return null;
+}
+
 export function splitCommandLine(input: string): string[] {
   const trimmed = input.trim();
   if (!trimmed) return [];
@@ -239,12 +260,17 @@ export function McpTab() {
       return;
     }
 
+    // Validate auth / apiKey combination before building the config payload.
+    const authError = validateAuthApiKey(form.auth, form.apiKey);
+    if (authError) { showBanner("error", authError); return; }
+
     let config: McpServerConfig;
     try {
       const shared = {
         id: form.id.trim(),
         ...(form.auth !== "none" ? { auth: form.auth } : {}),
-        ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+        // Only persist apiKey when the auth mode actually uses it.
+        ...(form.auth === "api-key" ? { apiKey: form.apiKey.trim() } : {}),
       };
 
       if (form.transport === "stdio") {

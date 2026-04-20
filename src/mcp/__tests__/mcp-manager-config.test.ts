@@ -301,4 +301,46 @@ describe("McpManager — removeConfig()", () => {
 
     expect(mockAuditLog).toHaveBeenCalledWith(expect.objectContaining({ type: "kill_switch" }));
   });
+
+  it("removes a server that exists only in the legacy .bak and writes a new primary config", async () => {
+    // Primary config absent — only the legacy .bak file exists.
+    const bakServers: McpServerConfig[] = [
+      { id: "bak-only-a", transport: "http", url: "https://example.com/mcp" },
+      { id: "bak-only-b", transport: "stdio", command: "cmd" },
+    ];
+    await writeFile(`${testConfigPath}.bak`, JSON.stringify({ servers: bakServers }), "utf-8");
+
+    const mgr = await makeManager();
+    expect(existsSync(testConfigPath)).toBe(false); // primary not present
+
+    await mgr.removeConfig("bak-only-a");
+
+    // A new primary config must have been written (bak is read-only — never modified).
+    expect(existsSync(testConfigPath)).toBe(true);
+    const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as {
+      servers: McpServerConfig[];
+    };
+    expect(raw.servers).toHaveLength(1);
+    expect(raw.servers[0].id).toBe("bak-only-b");
+
+    // The .bak file must remain untouched (read-only legacy fallback).
+    const bak = JSON.parse(
+      await readFile(`${testConfigPath}.bak`, "utf-8"),
+    ) as { servers: McpServerConfig[] };
+    expect(bak.servers).toHaveLength(2);
+  });
+
+  it("is idempotent when removing a server absent from bak-only config", async () => {
+    const bakServers: McpServerConfig[] = [
+      { id: "bak-keep", transport: "stdio", command: "cmd" },
+    ];
+    await writeFile(`${testConfigPath}.bak`, JSON.stringify({ servers: bakServers }), "utf-8");
+
+    const mgr = await makeManager();
+    await expect(mgr.removeConfig("ghost")).resolves.toBeUndefined();
+
+    // No primary file should be created when the target id was not found.
+    expect(existsSync(testConfigPath)).toBe(false);
+    expect(vi.mocked(rename)).not.toHaveBeenCalled();
+  });
 });

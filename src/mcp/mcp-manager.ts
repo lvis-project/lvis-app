@@ -296,16 +296,21 @@ export class McpManager {
   /**
    * 설정 파일에서 서버 제거 + 연결 해제.
    * 존재하지 않아도 에러 없이 처리. write-lock으로 동시 제거 시 TOCTOU 방지.
+   *
+   * NOTE: loadFromConfigUnlocked() may surface servers from a legacy .bak file
+   * even when the primary config is absent.  We therefore reason about the
+   * *effective* server list rather than short-circuiting on existsSync(), so
+   * that bak-only servers are also correctly removed: a new primary config is
+   * written without the removed server, which takes precedence over the .bak on
+   * the next load.
    */
   async removeConfig(serverId: string): Promise<void> {
     return this.withConfigLock(async () => {
       await this.withConfigFileLock(async () => {
-        if (!existsSync(this.configPath)) {
-          return;
-        }
         const existing = await this.loadFromConfigUnlocked();
         const updated = existing.filter((s) => s.id !== serverId);
         if (updated.length === existing.length) {
+          // Server not present in the effective config — nothing to persist.
           return;
         }
         await this.saveConfigs(updated);
