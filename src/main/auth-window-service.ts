@@ -49,18 +49,30 @@ export interface OpenAuthWindowOptions {
   persistPartition?: string;
 }
 
+/** 호스트 문자열 정규화 — 선행 점/공백/대소문자 차이 흡수. 빈 문자열은 drop. */
+function normalizeHost(raw: string): string {
+  const trimmed = raw.trim().toLowerCase();
+  return trimmed.startsWith(".") ? trimmed.slice(1) : trimmed;
+}
+
 /**
  * 쿠키 배열에서 허용된 호스트만 필터링 + AuthCookie로 직렬화.
- * 순수 함수로 뽑아 단위 테스트 가능.
+ * `allowedHosts` 도 쿠키 domain 과 동일 방식으로 정규화하여
+ * ".lge.com" vs "lge.com" 같은 표기 차이로 매칭이 실패하지 않게 한다.
  */
 export function filterCookiesByHost(cookies: Cookie[], allowedHosts: string[]): AuthCookie[] {
-  if (allowedHosts.length === 0) return [];
+  const normalizedAllowed = allowedHosts
+    .map(normalizeHost)
+    .filter((h) => h.length > 0);
+  if (normalizedAllowed.length === 0) return [];
   return cookies
     .filter((c) => {
       if (!c.domain) return false;
       // Electron 쿠키 domain은 선행 점(".example.com") 포함일 수 있음 — 정규화 후 비교.
-      const normalized = c.domain.startsWith(".") ? c.domain.slice(1) : c.domain;
-      return allowedHosts.some((host) => normalized === host || normalized.endsWith(`.${host}`));
+      const normalized = normalizeHost(c.domain);
+      return normalizedAllowed.some(
+        (host) => normalized === host || normalized.endsWith(`.${host}`),
+      );
     })
     .map((c) => ({
       name: c.name,
@@ -74,11 +86,28 @@ export function filterCookiesByHost(cookies: Cookie[], allowedHosts: string[]): 
 }
 
 /**
- * URL이 완료 패턴 중 하나를 포함하면 true. SSO 중간 URL을 걸러내도록
- * 호출자가 `completionUrlPatterns` 에 구체적인 목적지를 넘긴다는 가정.
+ * URL 의 `origin + pathname` 이 완료 패턴 중 하나를 포함하면 true.
+ * query/hash 는 **제외** 한다 — IdP 가 RelayState / continue / returnTo
+ * 같은 파라미터에 목적지 URL 을 담아 보내 IdP 도메인에 있는 상태에서
+ * 거짓 양성으로 "완료" 판정되는 것을 막는다.
  */
 export function isCompletionUrl(url: string, patterns: string[]): boolean {
-  return patterns.some((p) => url.includes(p));
+  const target = extractCompletionTarget(url);
+  return patterns.some((p) => target.includes(p));
+}
+
+function extractCompletionTarget(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    // URL 생성자가 실패하면 query/hash 직접 제거.
+    const q = url.indexOf("?");
+    const h = url.indexOf("#");
+    const cut =
+      q === -1 ? h : h === -1 ? q : Math.min(q, h);
+    return cut === -1 ? url : url.slice(0, cut);
+  }
 }
 
 /**
@@ -93,10 +122,25 @@ export async function openAuthWindow(
     url,
     completionUrlPatterns,
     cookieHosts,
-    timeoutMs = 5 * 60 * 1000,
     windowTitle = "Login",
     persistPartition,
   } = options;
+
+  // timeoutMs 검증 — NaN / Infinity / 음수 / 과도하게 긴 값 모두 거부.
+  // 기본 5분, 최대 30분 (manifest schema 와 동일한 상한).
+  const DEFAULT_TIMEOUT_MS = 5 * 60_000;
+  const MAX_TIMEOUT_MS = 30 * 60_000;
+  const MIN_TIMEOUT_MS = 1_000;
+  let timeoutMs = DEFAULT_TIMEOUT_MS;
+  if (options.timeoutMs !== undefined) {
+    const t = options.timeoutMs;
+    if (!Number.isFinite(t) || t < MIN_TIMEOUT_MS || t > MAX_TIMEOUT_MS) {
+      throw new Error(
+        `openAuthWindow: timeoutMs must be a finite number between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS}`,
+      );
+    }
+    timeoutMs = Math.floor(t);
+  }
 
   if (!url || !/^https?:\/\//i.test(url)) {
     throw new Error(`openAuthWindow: invalid url "${url}"`);

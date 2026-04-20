@@ -61,6 +61,13 @@ describe("filterCookiesByHost", () => {
     expect(filterCookiesByHost(cookies, [])).toHaveLength(0);
   });
 
+  it("allowedHosts의 선행 점·공백·대소문자를 정규화해 비교한다", () => {
+    const cookies = [cookie({ name: "n", domain: "space.lge.com" })];
+    // ".LGE.com" (선행 점 + 대문자) + " space.lge.com " (공백 포함) 모두 매칭되어야 함
+    expect(filterCookiesByHost(cookies, [".LGE.com"])).toHaveLength(1);
+    expect(filterCookiesByHost(cookies, [" space.lge.com "])).toHaveLength(1);
+  });
+
   it("AuthCookie 직렬화: name/value/domain/path/secure/httpOnly/expirationDate", () => {
     const cookies = [cookie({
       name: "n", value: "v", domain: ".lge.com", path: "/p",
@@ -85,5 +92,16 @@ describe("isCompletionUrl", () => {
 
   it("빈 패턴 배열은 항상 false", () => {
     expect(isCompletionUrl("https://newep.lge.com", [])).toBe(false);
+  });
+
+  it("query/hash 는 매칭 대상에서 제외 — IdP RelayState spoofing 방지", () => {
+    // IdP 가 아직 sso.lge.com 에 있는데 RelayState 에 newep.lge.com 을 담고 있는 경우.
+    const idpUrlWithRelay =
+      "https://sso.lge.com/saml/callback?RelayState=https%3A%2F%2Fnewep.lge.com%2F";
+    expect(isCompletionUrl(idpUrlWithRelay, ["newep.lge.com"])).toBe(false);
+    // 진짜로 newep.lge.com 으로 navigate 된 경우는 true
+    expect(isCompletionUrl("https://newep.lge.com/portal?foo=bar", ["newep.lge.com"])).toBe(true);
+    // hash 도 제외
+    expect(isCompletionUrl("https://sso.lge.com/login#newep.lge.com", ["newep.lge.com"])).toBe(false);
   });
 });
