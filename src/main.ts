@@ -4,7 +4,7 @@
  * 슬림 엔트리. 모든 로직은 boot.ts와 ipc-bridge.ts로 위임.
  * §4.1 Client Architecture 준수.
  */
-import { Menu, app, BrowserWindow, shell, type MenuItemConstructorOptions } from "electron";
+import { Menu, app, BrowserWindow, shell, dialog, type MenuItemConstructorOptions } from "electron";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import * as https from "node:https";
@@ -57,6 +57,53 @@ await injectCorporateCa();
 
 let mainWindow: BrowserWindow | null = null;
 let services: AppServices | null = null;
+let pendingLvisUri: string | null = null;
+
+const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+
+function parseLvisInstallUri(url: string): { slug: string } | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "lvis:") return null;
+    if (parsed.hostname !== "install") return null;
+    if (parsed.search || parsed.hash) return null;
+    const slug = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+    if (!slug || !SLUG_RE.test(slug)) return null;
+    return { slug };
+  } catch {
+    return null;
+  }
+}
+
+async function handleLvisUri(url: string) {
+  const params = parseLvisInstallUri(url);
+  if (!params) return;
+  if (!services) {
+    pendingLvisUri = url;
+    return;
+  }
+  mainWindow?.focus();
+  const win = mainWindow;
+  if (win) {
+    const { response } = await dialog.showMessageBox(win, {
+      type: "question",
+      buttons: ["설치", "취소"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `플러그인 '${params.slug}'을(를) 설치하시겠습니까?`,
+      detail: "외부 링크로부터 요청된 설치입니다.",
+    });
+    if (response !== 0) return;
+  }
+  void services.pluginMarketplace
+    .install(params.slug)
+    .then(() => {
+      mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: true });
+    })
+    .catch((err: Error) => {
+      mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: false, error: err.message });
+    });
+}
 
 function activateView(viewKey: string) {
   mainWindow?.webContents.send("lvis:view:activate", { viewKey });
@@ -198,6 +245,12 @@ async function main() {
   // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
   services = await bootstrap(projectRoot, mainWindow!);
 
+  // Process any lvis:// URI that arrived before services were ready
+  if (pendingLvisUri) {
+    void handleLvisUri(pendingLvisUri);
+    pendingLvisUri = null;
+  }
+
   // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
   registerIpcHandlers(services, () => mainWindow);
 
@@ -218,6 +271,30 @@ async function main() {
 // (a click on <a href="…"> would bypass the injected meta CSP by moving to a
 // new document). Deny every non-data navigation and new-window attempt on
 // any webview webContents as soon as it's created.
+// lvis:// custom URI scheme — register before app ready
+app.setAsDefaultProtocolClient("lvis");
+
+// macOS: URI delivered via open-url event (register before whenReady to avoid missing cold-start)
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  void handleLvisUri(url);
+});
+
+// Windows/Linux: URI delivered as argv of second instance
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    const url = argv.find((arg) => arg.startsWith("lvis://"));
+    if (url) void handleLvisUri(url);
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "webview") return;
   contents.on("will-navigate", (navEvent, url) => {
