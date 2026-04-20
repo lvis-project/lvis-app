@@ -20,6 +20,11 @@
       "id": "calendar",
       "manifestPath": "installed/calendar/plugin.json",
       "enabled": true
+    },
+    {
+      "id": "ep-api",
+      "manifestPath": "installed/ep-api/plugin.json",
+      "enabled": true
     }
   ]
 }
