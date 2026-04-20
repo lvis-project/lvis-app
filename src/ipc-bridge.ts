@@ -407,10 +407,11 @@ export function registerIpcHandlers(
     }
 
     const entryPath = fileURLToPath(view.entryUrl);
-    const pluginRoot = pluginRuntime.getPluginEntryDir(pluginId);
-    if (!pluginRoot) {
-      throw new Error(`Plugin entry dir not found (plugin=${pluginId}).`);
+    const rawPluginRoot = pluginRuntime.getPluginRoot(pluginId);
+    if (!rawPluginRoot) {
+      throw new Error(`Plugin root not found (plugin=${pluginId}).`);
     }
+    const pluginRoot = realpathSync(rawPluginRoot);
     let realEntryPath: string;
     try {
       realEntryPath = realpathSync(entryPath);
