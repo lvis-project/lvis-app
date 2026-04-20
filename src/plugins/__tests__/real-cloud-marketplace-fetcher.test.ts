@@ -108,17 +108,22 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
     expect(headers["authorization"]).toBeUndefined();
   });
 
-  it("listPlugins() accepts {plugins: [...]} wrapper shape", async () => {
+  it("listPlugins() accepts {plugins: [...]} wrapper shape (actual server shape)", async () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse({
         plugins: [
           {
+            id: 1,
             slug: "mp-a",
             display_name: "Plugin A",
             description: "d",
-            package_name: "@x/a",
+            category: "other",
+            download_count: 0,
+            organization_allowed: false,
             latest_stable_version: "0.1.0",
-            methods: [],
+            deployment: "managed",
+            created_at: "2026-01-01T00:00:00",
+            updated_at: "2026-01-01T00:00:00",
           },
         ],
       }),
@@ -129,10 +134,10 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
     });
     const plugins = await fetcher.listPlugins();
     expect(plugins).toHaveLength(1);
-    expect(plugins[0].id).toBe("mp-a");
+    expect(plugins[0].id).toBe("1");
     expect(plugins[0].name).toBe("Plugin A");
-    // packageSpec synthesized from packageName + version
-    expect(plugins[0].packageSpec).toBe("@x/a@0.1.0");
+    // packageSpec synthesized from slug@version (no package_name in server response)
+    expect(plugins[0].packageSpec).toBe("mp-a@0.1.0");
   });
 
   it("getPluginDetail() returns null on 404", async () => {
@@ -227,5 +232,95 @@ describe("RealCloudMarketplaceFetcher (private-network path)", () => {
     expect(fakeFetch).toHaveBeenCalledOnce();
     const [url] = fakeFetch.mock.calls[0];
     expect(url).toBe("http://127.0.0.1:8080/api/v1/catalog");
+  });
+});
+
+describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  /** Actual PluginSummary shape returned by lvis-marketplace server. */
+  const serverPlugin = {
+    id: 1,
+    slug: "lvis-plugin-meeting",
+    display_name: "LVIS Meeting",
+    description: "Meeting recording, STT, and summary plugin.",
+    category: "other",
+    download_count: 0,
+    organization_allowed: false,
+    latest_stable_version: "0.1.0",
+    deployment: "managed",
+    created_at: "2026-01-01T00:00:00",
+    updated_at: "2026-01-01T00:00:00",
+  };
+
+  it("listPlugins() correctly maps slug→id, display_name→name, synthesizes packageSpec from slug@version", async () => {
+    const fakeFetch = vi.fn().mockResolvedValue(jsonResponse([serverPlugin]));
+    global.fetch = fakeFetch as unknown as typeof global.fetch;
+
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "http://127.0.0.1:8000",
+      allowPrivateNetwork: true,
+    });
+    const plugins = await fetcher.listPlugins();
+
+    expect(plugins).toHaveLength(1);
+    const p = plugins[0];
+    // id comes from numeric DB id stringified (row.id takes priority over slug)
+    expect(p.id).toBe("1");
+    expect(p.name).toBe("LVIS Meeting");
+    expect(p.description).toBe("Meeting recording, STT, and summary plugin.");
+    // packageName falls back to slug when package_name is absent
+    expect(p.packageName).toBe("lvis-plugin-meeting");
+    // packageSpec synthesized as slug@version
+    expect(p.packageSpec).toBe("lvis-plugin-meeting@0.1.0");
+    // tools defaults to [] when methods is absent
+    expect(p.tools).toEqual([]);
+    expect(p.deployment).toBe("managed");
+    expect(p.version).toBe("0.1.0");
+    expect(p.channel).toBe("stable");
+  });
+
+  it("downloadVersion() returns zipBuffer + sha256 with actual server shape", async () => {
+    const payload = new TextEncoder().encode("PK\u0003\u0004fake-zip");
+    const expectedSha = createHash("sha256").update(Buffer.from(payload)).digest("hex");
+
+    const fakeFetch = vi.fn().mockResolvedValue(bytesResponse(payload));
+    global.fetch = fakeFetch as unknown as typeof global.fetch;
+
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "http://127.0.0.1:8000",
+      allowPrivateNetwork: true,
+    });
+    const result = await fetcher.downloadVersion("lvis-plugin-meeting", "0.1.0");
+
+    expect(Buffer.isBuffer(result.zipBuffer)).toBe(true);
+    expect(result.sha256).toBe(expectedSha);
+    const [url] = fakeFetch.mock.calls[0];
+    expect(url).toBe(
+      "http://127.0.0.1:8000/api/v1/plugins/lvis-plugin-meeting/versions/0.1.0/download",
+    );
+  });
+
+  it("missing latest_stable_version (null) → packageSpec falls back to slug only", async () => {
+    const pluginWithoutVersion = { ...serverPlugin, latest_stable_version: null };
+    const fakeFetch = vi.fn().mockResolvedValue(jsonResponse([pluginWithoutVersion]));
+    global.fetch = fakeFetch as unknown as typeof global.fetch;
+
+    const fetcher = new RealCloudMarketplaceFetcher({
+      baseUrl: "http://127.0.0.1:8000",
+      allowPrivateNetwork: true,
+    });
+    const plugins = await fetcher.listPlugins();
+
+    expect(plugins).toHaveLength(1);
+    const p = plugins[0];
+    // No version → packageSpec is just the slug
+    expect(p.packageSpec).toBe("lvis-plugin-meeting");
+    expect(p.version).toBeUndefined();
   });
 });
