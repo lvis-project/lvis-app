@@ -49,6 +49,7 @@ vi.mock("node:child_process", () => ({
 import { McpClient } from "../mcp-client.js";
 import { McpGovernance } from "../mcp-governance.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import { PermissionManager } from "../../permissions/permission-manager.js";
 import type {
   McpGovernancePolicy,
   McpHttpServerConfig,
@@ -540,6 +541,86 @@ describe("HttpTransport — NetworkGuard", () => {
     await expect(client.connect()).rejects.toThrow(/allowPrivateNetworks/);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(client.getState().status).toBe("error");
+  });
+
+  it("rolls back partially registered tools and overrides when registration throws", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+
+    const fetchMock = vi.fn(
+      async (_url: string, init?: RequestInit): Promise<Response> => {
+        const method = readRpcMethod(init);
+        const id = readRpcId(init) ?? 0;
+        switch (method) {
+          case "initialize":
+            return jsonRpcResponse(id, {
+              protocolVersion: "2024-11-05",
+              capabilities: { tools: {} },
+              serverInfo: { name: "rollback-mcp", version: "1.0.0" },
+            });
+          case "notifications/initialized":
+            return new Response(null, { status: 202 });
+          case "tools/list":
+            return jsonRpcResponse(id, {
+              tools: [
+                {
+                  name: "first",
+                  description: "First tool",
+                  inputSchema: { type: "object", properties: {}, required: [] },
+                },
+                {
+                  name: "second",
+                  description: "Second tool",
+                  inputSchema: { type: "object", properties: {}, required: [] },
+                },
+              ],
+            });
+          default:
+            return new Response("unexpected", { status: 500 });
+        }
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const gov = governanceWithPolicy(
+      buildPolicy([
+        httpApproval("rollback", "https://rollback.example.com/mcp", {
+          toolPermissionMode: "strict",
+        }),
+      ]),
+    );
+    const registry = new ToolRegistry();
+    const permissionManager = new PermissionManager("/nonexistent/permissions.json");
+    const actualRegister = registry.register.bind(registry);
+    let registerCalls = 0;
+    vi.spyOn(registry, "register").mockImplementation((tool) => {
+      registerCalls += 1;
+      if (registerCalls === 2) {
+        throw new Error("simulated registration race");
+      }
+      return actualRegister(tool);
+    });
+
+    const client = new McpClient(
+      {
+        id: "rollback",
+        transport: "http",
+        url: "https://rollback.example.com/mcp",
+      },
+      gov,
+      registry,
+      permissionManager,
+    );
+
+    await expect(client.connect()).rejects.toThrow("simulated registration race");
+    expect(client.getState().registeredTools).toEqual([]);
+    expect(registry.listAll()).toEqual([]);
+    expect(
+      (
+        permissionManager as unknown as {
+          toolModeOverrides: Map<string, "default" | "strict" | "auto">;
+        }
+      ).toolModeOverrides.size,
+    ).toBe(0);
   });
 });
 

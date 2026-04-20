@@ -28,7 +28,6 @@ const STATUS_LABEL: Record<McpServerState["status"], string> = {
 
 const EMPTY_FORM = {
   id: "",
-  name: "",
   transport: "stdio" as Transport,
   command: "",
   args: "",

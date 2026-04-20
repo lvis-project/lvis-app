@@ -443,16 +443,29 @@ export class McpClient {
   private registerTools(tools: McpToolSchema[]): void {
     const serverId = this.config.id;
     const toolPermissionMode = this.governance.getApproval(serverId)?.toolPermissionMode ?? "default";
+    const newlyRegistered: string[] = [];
 
-    for (const tool of tools) {
-      const namespacedName = this.governance.applyToolNamespace(serverId, tool.name);
-      this.toolRegistry.register(
-        mcpToolToTool(serverId, namespacedName, tool, (toolName, args) =>
-          this.callTool(toolName, args),
-        ),
+    try {
+      for (const tool of tools) {
+        const namespacedName = this.governance.applyToolNamespace(serverId, tool.name);
+        this.toolRegistry.register(
+          mcpToolToTool(serverId, namespacedName, tool, (toolName, args) =>
+            this.callTool(toolName, args),
+          ),
+        );
+        this.state.registeredTools.push(namespacedName);
+        newlyRegistered.push(namespacedName);
+        this.permissionManager?.setToolModeOverride(namespacedName, toolPermissionMode);
+      }
+    } catch (err) {
+      for (const toolName of newlyRegistered) {
+        this.permissionManager?.clearToolModeOverride(toolName);
+      }
+      this.toolRegistry.unregisterByMcp(serverId);
+      this.state.registeredTools = this.state.registeredTools.filter(
+        (toolName) => !newlyRegistered.includes(toolName),
       );
-      this.state.registeredTools.push(namespacedName);
-      this.permissionManager?.setToolModeOverride(namespacedName, toolPermissionMode);
+      throw err;
     }
   }
 
