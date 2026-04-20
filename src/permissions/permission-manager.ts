@@ -6,12 +6,13 @@
  * - Deny-by-default: MCP 도구는 strict 모드 강제
  * - 감사 로그 연동을 위한 판정 사유 추적
  *
- * 판정 우선순위 (§4.1):
- * 1. Governance deny 규칙 (불변)
- * 2. 관리자 명시 deny 규칙
- * 3. 관리자 명시 allow 규칙
- * 4. 사용자 "항상 허용" 규칙
- * 5. Trust-based 기본 정책
+ * 판정 우선순위 (§4.1 + MCP per-tool override):
+ * 1. deny 규칙
+ * 2. MCP strict override
+ * 3. allow 규칙
+ * 4. MCP auto override
+ * 5. 사용자 "항상 허용" 규칙
+ * 6. Trust-based 기본 정책
  */
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -96,7 +97,7 @@ export class PermissionManager {
    * 인메모리 + permissions.json 동시 업데이트.
    */
   async addAlwaysAllowedPersist(pattern: string): Promise<void> {
-    // 인메모리: alwaysAllowed Set (checkDetailed layer 3)
+    // 인메모리: alwaysAllowed Set (checkDetailed layer 5)
     this.alwaysAllowed.add(pattern);
     // 영구: rules 배열에 allow 규칙 추가 (중복 방지)
     await updatePermissionsFile(this.permissionsFilePath, (file) => {
@@ -230,7 +231,7 @@ export class PermissionManager {
       return { decision: "ask", reason: "MCP 서버 strict 모드", layer: 2 };
     }
 
-    // 2. Allow rules
+    // 3. Allow rules
     for (const rule of this.rules) {
       if (rule.action !== "allow") continue;
       if (rule.source && rule.source !== source) continue;
@@ -243,12 +244,12 @@ export class PermissionManager {
       return { decision: "allow", reason: "MCP 서버 auto 모드", layer: 4 };
     }
 
-    // 3. Always-allowed (사용자 이전 승인)
+    // 5. Always-allowed (사용자 이전 승인)
     if (this.alwaysAllowed.has(toolName)) {
       return { decision: "allow", reason: "사용자 영구 승인", layer: 5 };
     }
 
-    // 4. Trust-based 기본 정책 (§4.1)
+    // 6. Trust-based 기본 정책 (§4.1)
     return this.trustBasedDecision(toolName, trust, category);
   }
 
@@ -279,14 +280,14 @@ export class PermissionManager {
     // auto 모드: HIGH/MEDIUM 허용, LOW(MCP)는 여전히 ask 강제 (H1 fix)
     if (this.mode === "auto") {
       if (trust === "low") {
-        return { decision: "ask", reason: "MCP 도구는 auto 모드에서도 승인 필요 (trust: low)", layer: 4 };
+        return { decision: "ask", reason: "MCP 도구는 auto 모드에서도 승인 필요 (trust: low)", layer: 6 };
       }
-      return { decision: "allow", reason: `auto 모드 (trust: ${trust})`, layer: 4 };
+      return { decision: "allow", reason: `auto 모드 (trust: ${trust})`, layer: 6 };
     }
 
     // strict 모드: 모든 것 ask
     if (this.mode === "strict") {
-      return { decision: "ask", reason: `strict 모드 (trust: ${trust})`, layer: 4 };
+      return { decision: "ask", reason: `strict 모드 (trust: ${trust})`, layer: 6 };
     }
 
     // default 모드: trust + category 기반
@@ -294,21 +295,21 @@ export class PermissionManager {
 
     // LOW trust (MCP): 항상 ask
     if (trust === "low") {
-      return { decision: "ask", reason: `MCP 도구 strict 강제 (trust: low)`, layer: 4 };
+      return { decision: "ask", reason: `MCP 도구 strict 강제 (trust: low)`, layer: 6 };
     }
 
     // dangerous: 항상 ask
     if (resolvedCategory === "dangerous") {
-      return { decision: "ask", reason: `위험 도구 (category: dangerous)`, layer: 4 };
+      return { decision: "ask", reason: `위험 도구 (category: dangerous)`, layer: 6 };
     }
 
     // read: 허용
     if (resolvedCategory === "read") {
-      return { decision: "allow", reason: `조회 도구 (trust: ${trust}, category: read)`, layer: 4 };
+      return { decision: "allow", reason: `조회 도구 (trust: ${trust}, category: read)`, layer: 6 };
     }
 
     // write (MEDIUM/HIGH): ask
-    return { decision: "ask", reason: `상태 변경 도구 (trust: ${trust}, category: write)`, layer: 4 };
+    return { decision: "ask", reason: `상태 변경 도구 (trust: ${trust}, category: write)`, layer: 6 };
   }
 }
 

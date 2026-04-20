@@ -3,10 +3,10 @@
 
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { StreamEvent } from "../../lib/chat-stream-state.js";
-import type { McpServerConfig, McpServerState } from "../../mcp/types.js";
+import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
-export type { McpServerConfig, McpServerState };
+export type { McpServerConfig, McpServerConfigDto, McpServerState };
 
 export type MarketplaceItem = {
   id: string;
@@ -223,7 +223,8 @@ export type LvisPolicyApi = {
 export type LvisMcpApi = {
   servers: () => Promise<McpServerState[]>;
   kill: (id: string) => Promise<void>;
-  getConfigs: () => Promise<McpServerConfig[]>;
+  getConfigs: () => Promise<McpServerConfigDto[]>;
+  getConfigPath: () => Promise<string>;
   addConfig: (config: McpServerConfig) => Promise<{ connected: boolean; warning?: string }>;
   removeConfig: (id: string) => Promise<void>;
 };

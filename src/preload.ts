@@ -131,6 +131,7 @@ const api = {
     servers: async () => ipcRenderer.invoke("lvis:mcp:servers"),
     kill: async (id: string) => ipcRenderer.invoke("lvis:mcp:kill", id),
     getConfigs: async () => ipcRenderer.invoke("lvis:mcp:config:get"),
+    getConfigPath: async () => ipcRenderer.invoke("lvis:mcp:config:path"),
     addConfig: async (config: McpServerConfig) => ipcRenderer.invoke("lvis:mcp:config:add", config),
     removeConfig: async (id: string) => ipcRenderer.invoke("lvis:mcp:config:remove", id),
   },

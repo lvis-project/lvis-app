@@ -63,6 +63,7 @@ describe("PermissionManager (B1 persistence)", () => {
     const result = pm.checkDetailed("my_tool", "builtin", "write");
     expect(result.decision).toBe("allow");
     expect(result.reason).toBe("사용자 영구 승인");
+    expect(result.layer).toBe(5);
 
     // 영구: store에 rule이 추가됐는지
     expect(mockStore.rules).toContainEqual({ pattern: "my_tool", action: "allow" });
@@ -85,6 +86,7 @@ describe("PermissionManager (B1 persistence)", () => {
 
     const result = pm.checkDetailed("dangerous_tool", "builtin", "write");
     expect(result.decision).toBe("deny");
+    expect(result.layer).toBe(1);
 
     expect(mockStore.rules).toContainEqual({ pattern: "dangerous_tool", action: "deny" });
     expect(pm.getVisibilityDenyRules()).toEqual([{ pattern: "dangerous_tool" }]);
@@ -101,6 +103,7 @@ describe("PermissionManager (B1 persistence)", () => {
 
     const result = fresh.checkDetailed("pre_allowed_tool", "builtin", "write");
     expect(result.decision).toBe("allow");
+    expect(result.layer).toBe(3);
   });
 
   it("loadRulesFromFile is a no-op when file does not exist", async () => {
@@ -151,6 +154,7 @@ describe("PermissionManager (B1 persistence)", () => {
     // 인메모리에서도 제거됐는지 — write category이므로 ask여야 함
     const result = pm.checkDetailed("removable_tool", "builtin", "write");
     expect(result.decision).toBe("ask");
+    expect(result.layer).toBe(6);
   });
 
   // ── listPersistedRules ───────────────────────────
@@ -177,6 +181,7 @@ describe("PermissionManager (B1 persistence)", () => {
 
     expect(result.decision).toBe("ask");
     expect(result.reason).toBe("MCP 서버 strict 모드");
+    expect(result.layer).toBe(2);
   });
 
   it("auto MCP tool override allows execution unless global mode is strict", () => {
@@ -186,5 +191,13 @@ describe("PermissionManager (B1 persistence)", () => {
 
     expect(result.decision).toBe("allow");
     expect(result.reason).toBe("MCP 서버 auto 모드");
+    expect(result.layer).toBe(4);
+  });
+
+  it("trust-based fallback uses a unique terminal layer number", () => {
+    const result = pm.checkDetailed("builtin_read_tool", "builtin", "read");
+
+    expect(result.decision).toBe("allow");
+    expect(result.layer).toBe(6);
   });
 });

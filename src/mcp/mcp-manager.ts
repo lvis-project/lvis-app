@@ -6,17 +6,17 @@
  * - connectAll(): 승인된 서버 일괄 연결
  * - disconnectAll(): 전체 종료
  * - killSwitch(serverId): 즉시 연결 해제 + 도구 제거 (§10.1)
- * - getConfigs(): 저장된 서버 설정 목록 반환
+ * - getConfigs(): 저장된 서버 설정 목록 반환 (renderer-safe DTO)
  * - addConfig(config): 설정 파일에 서버 추가 + 연결 시도
  * - removeConfig(id): 설정 파일에서 서버 제거 + 연결 해제
  *
  * 설정 위치: ~/.lvis/mcp-servers.json
  */
-import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
+import { copyFile, readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
-import type { McpServerConfig, McpServerState } from "./types.js";
+import type { McpServerConfig, McpServerConfigDto, McpServerState } from "./types.js";
 import { McpGovernance } from "./mcp-governance.js";
 import { McpClient } from "./mcp-client.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -68,11 +68,9 @@ export class McpManager {
 
   private async loadFromConfigUnlocked(): Promise<McpServerConfig[]> {
     const bakPath = `${this.configPath}.bak`;
-    const candidatePaths = existsSync(this.configPath)
-      ? [this.configPath]
-      : existsSync(bakPath)
-        ? [bakPath]
-        : [];
+    const candidatePaths = [this.configPath, bakPath].filter(
+      (candidate, index) => existsSync(candidate) && (index === 0 || candidate !== this.configPath),
+    );
 
     if (candidatePaths.length === 0) {
       console.log("[mcp-manager] MCP 서버 설정 파일 없음:", this.configPath);
@@ -83,7 +81,11 @@ export class McpManager {
       try {
         const raw = await readFile(path, "utf-8");
         if (!raw.trim()) {
-          return [];
+          if (path === candidatePaths[candidatePaths.length - 1]) {
+            return [];
+          }
+          console.warn(`[mcp-manager] 빈 설정 파일 감지, 다음 후보로 폴백: ${path}`);
+          continue;
         }
         const parsed = JSON.parse(raw) as { servers?: McpServerConfig[] };
         const servers = parsed.servers ?? [];
@@ -224,27 +226,14 @@ export class McpManager {
 
   // ─── Config Mutation ────────────────────────────────
 
-  /** 설정 파일의 현재 서버 목록 반환 (apiKey / headers / env / args 제거된 안전 뷰) */
-  async getConfigs(): Promise<McpServerConfig[]> {
+  /** 설정 파일의 현재 서버 목록 반환 (renderer-safe DTO) */
+  async getConfigs(): Promise<McpServerConfigDto[]> {
     const configs = await this.loadFromConfig();
-    // Strip secrets before returning to renderer — none of these must cross the IPC boundary:
-    // - apiKey: shared secret on all transport types
-    // - headers: may contain Authorization: Bearer tokens (http/sse/websocket)
-    // - env: may contain SECRET_TOKEN=... (stdio)
-    // - args: may contain --api-key=secret or ["--token", "value"] (stdio)
-    return configs.map((c) => {
-      const safe = { ...c } as McpServerConfig & {
-        apiKey?: string;
-        headers?: Record<string, string>;
-        env?: Record<string, string>;
-        args?: string[];
-      };
-      delete safe.apiKey;
-      delete safe.headers;
-      delete safe.env;
-      delete safe.args;
-      return safe as McpServerConfig;
-    });
+    return configs.map((config) => this.toConfigDto(config));
+  }
+
+  getConfigPath(): string {
+    return this.configPath;
   }
 
   /**
@@ -330,6 +319,7 @@ export class McpManager {
     await mkdir(dir, { recursive: true });
     const tmpPath = `${this.configPath}.tmp`;
     const bakPath = `${this.configPath}.bak`;
+    let backupCreated = false;
     try {
       await writeFile(tmpPath, JSON.stringify({ servers: configs }, null, 2), {
         encoding: "utf-8",
@@ -338,17 +328,23 @@ export class McpManager {
       try {
         await rename(tmpPath, this.configPath);
       } catch (renameErr) {
-        // Windows: rename() throws EEXIST when destination already exists (unlike POSIX which overwrites).
-        // Use backup-swap to avoid data loss: preserve live config as .bak before replacing.
+        // Windows rename() may throw EEXIST when the destination already exists.
+        // Under the cross-process config lock it is safe to follow the repo's
+        // rm-then-rename retry pattern, but we still preserve a sibling .bak so
+        // an unexpected retry failure can restore the last good config.
         if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
-          await unlink(bakPath).catch(() => {});  // remove stale backup before swap
-          await rename(this.configPath, bakPath);   // preserve live config
+          if (existsSync(this.configPath)) {
+            await rm(bakPath, { force: true });
+            await copyFile(this.configPath, bakPath);
+            backupCreated = true;
+            await rm(this.configPath, { force: true });
+          }
           try {
-            await rename(tmpPath, this.configPath); // place new config
-            await unlink(bakPath).catch(() => {});  // best-effort cleanup of backup
+            await rename(tmpPath, this.configPath);
           } catch (retryErr) {
-            // Restore backup — original config is still safe
-            await rename(bakPath, this.configPath).catch(() => {});
+            if (backupCreated) {
+              await copyFile(bakPath, this.configPath).catch(() => undefined);
+            }
             throw retryErr;
           }
         } else {
@@ -356,10 +352,23 @@ export class McpManager {
         }
       }
     } catch (e) {
-      // Best-effort cleanup of stale .tmp on any failure
-      try { await unlink(tmpPath); } catch { /* ignore */ }
+      await rm(tmpPath, { force: true }).catch(() => undefined);
       throw e;
+    } finally {
+      if (backupCreated && existsSync(this.configPath)) {
+        await rm(bakPath, { force: true }).catch(() => undefined);
+      }
     }
+  }
+
+  private toConfigDto(config: McpServerConfig): McpServerConfigDto {
+    // Secrets remain write-only across IPC:
+    // - apiKey: shared secret
+    // - headers: may contain bearer/session tokens
+    // - env: may contain injected credentials
+    // - args: may embed secrets on stdio command lines
+    const { apiKey: _apiKey, headers: _headers, env: _env, args: _args, ...safe } = config;
+    return safe as McpServerConfigDto;
   }
 
   /** 특정 서버의 도구 호출 — ToolExecutor에서 사용 */

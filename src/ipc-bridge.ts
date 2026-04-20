@@ -108,6 +108,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:mcp:servers",
   "lvis:mcp:kill",
   "lvis:mcp:config:get",
+  "lvis:mcp:config:path",
   "lvis:mcp:config:add",
   "lvis:mcp:config:remove",
   "lvis:permission:get-mode",
@@ -469,6 +470,10 @@ export function registerIpcHandlers(
   ipcMain.handle("lvis:mcp:config:get", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:get", e); return UNAUTHORIZED_FRAME; }
     return services.mcpManager.getConfigs();
+  });
+  ipcMain.handle("lvis:mcp:config:path", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:path", e); return UNAUTHORIZED_FRAME; }
+    return services.mcpManager.getConfigPath();
   });
   ipcMain.handle("lvis:mcp:config:add", async (e, config: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:add", e); return UNAUTHORIZED_FRAME; }

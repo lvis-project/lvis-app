@@ -63,12 +63,15 @@ async function makeManager() {
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  if (existsSync(testConfigPath)) {
-    await rm(testConfigPath);
-  }
   if (!existsSync(testDir)) {
     await mkdir(testDir, { recursive: true });
   }
+  await Promise.all([
+    rm(testConfigPath, { force: true }),
+    rm(`${testConfigPath}.bak`, { force: true }),
+    rm(`${testConfigPath}.tmp`, { force: true }),
+    rm(`${testConfigPath}.guard`, { force: true }),
+  ]);
 });
 
 afterAll(async () => {
@@ -124,6 +127,26 @@ describe("McpManager — getConfigs()", () => {
     expect(result[1]).not.toHaveProperty("env");
     expect(result[0].id).toBe("http-srv");
     expect(result[1].id).toBe("stdio-srv");
+  });
+
+  it("falls back to .bak when the main config file exists but is corrupt", async () => {
+    const backupServers: McpServerConfig[] = [
+      { id: "backup-srv", transport: "http", url: "https://example.com/mcp" },
+    ];
+    await writeFile(testConfigPath, "{not-json", "utf-8");
+    await writeFile(`${testConfigPath}.bak`, JSON.stringify({ servers: backupServers }), "utf-8");
+
+    const mgr = await makeManager();
+    const result = await mgr.getConfigs();
+
+    expect(result).toEqual([
+      { id: "backup-srv", transport: "http", url: "https://example.com/mcp" },
+    ]);
+  });
+
+  it("returns the resolved config path for renderer empty-state messaging", async () => {
+    const mgr = await makeManager();
+    expect(mgr.getConfigPath()).toBe(testConfigPath);
   });
 });
 

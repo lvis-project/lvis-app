@@ -5,7 +5,7 @@ import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { Textarea } from "../../../components/ui/textarea.js";
-import type { McpServerConfig, McpServerState } from "../types.js";
+import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../types.js";
 
 // ─── Helper types re-exported from renderer/types.ts ─
 // McpServerConfig / McpServerState 는 window.lvis.mcp 의 반환 타입
@@ -130,7 +130,8 @@ export function McpTab() {
   // ── Section A: 연결 상태 목록 ─────────────────────
   const [states, setStates] = useState<McpServerState[]>([]);
   // ── Section B: 설정 파일 목록 ─────────────────────
-  const [configs, setConfigs] = useState<McpServerConfig[]>([]);
+  const [configs, setConfigs] = useState<McpServerConfigDto[]>([]);
+  const [configPath, setConfigPath] = useState("");
   // ── Section C: 서버 추가 폼 ───────────────────────
   const [form, setForm] = useState(EMPTY_FORM);
   const [formBusy, setFormBusy] = useState(false);
@@ -140,12 +141,14 @@ export function McpTab() {
     setLoading(true);
     setError(null);
     try {
-      const [statesRes, configsRes] = await Promise.all([
+      const [statesRes, configsRes, configPathRes] = await Promise.all([
         window.lvis.mcp.servers(),
         window.lvis.mcp.getConfigs(),
+        window.lvis.mcp.getConfigPath(),
       ]);
       setStates(statesRes);
       setConfigs(configsRes);
+      setConfigPath(configPathRes);
     } catch (e) {
       setError((e as Error).message ?? "데이터를 불러오지 못했습니다.");
     } finally {
@@ -302,7 +305,7 @@ export function McpTab() {
           등록된 MCP 서버가 없습니다.
           <br />
           <span className="text-xs">
-            설정 파일: <code>~/.lvis/mcp-servers.json</code>
+            설정 파일: <code>{configPath}</code>
           </span>
         </div>
       ) : (

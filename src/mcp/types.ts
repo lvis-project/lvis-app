@@ -201,6 +201,19 @@ export type McpServerConfig =
   | McpHttpServerConfig
   | McpLegacyRemoteServerConfig;
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/**
+ * Renderer-safe config DTO.
+ *
+ * Secret-bearing fields remain write-only in the main process and never cross
+ * the IPC boundary back to the renderer.
+ */
+export type McpServerConfigDto = DistributiveOmit<
+  McpServerConfig,
+  "apiKey" | "headers" | "env" | "args"
+>;
+
 export interface McpToolSchema {
   name: string;
   description: string;
