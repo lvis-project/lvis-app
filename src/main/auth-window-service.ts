@@ -214,6 +214,42 @@ export async function openAuthWindow(
     authWindow.webContents.on("did-navigate", () => { void checkAndCollect(); });
     authWindow.webContents.on("did-navigate-in-page", () => { void checkAndCollect(); });
 
+    // Fast-fail on navigation errors so we don't wait the full timeout for
+    // DNS / TLS / proxy / offline / renderer-crash scenarios. isMainFrame
+    // filters out third-party asset failures that shouldn't abort login.
+    const failReject = (errorCode: number, errorDesc: string, validatedUrl: string) =>
+      finish(() => {
+        clearTimeout(timer);
+        reject(
+          new Error(
+            `openAuthWindow: navigation failed (${errorCode} ${errorDesc}) url=${validatedUrl}`,
+          ),
+        );
+        if (!authWindow.isDestroyed()) authWindow.close();
+      });
+
+    authWindow.webContents.on(
+      "did-fail-load",
+      (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (!isMainFrame) return;
+        failReject(errorCode, errorDescription, validatedURL);
+      },
+    );
+    authWindow.webContents.on(
+      "did-fail-provisional-load",
+      (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (!isMainFrame) return;
+        failReject(errorCode, errorDescription, validatedURL);
+      },
+    );
+    authWindow.webContents.on("render-process-gone", (_e, details) => {
+      finish(() => {
+        clearTimeout(timer);
+        reject(new Error(`openAuthWindow: render process gone (${details.reason})`));
+        if (!authWindow.isDestroyed()) authWindow.close();
+      });
+    });
+
     authWindow.on("closed", () => {
       finish(() => {
         clearTimeout(timer);

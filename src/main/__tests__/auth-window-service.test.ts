@@ -1,7 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Cookie } from "electron";
 
-import { filterCookiesByHost, isCompletionUrl } from "../auth-window-service.js";
+// auth-window-service imports `electron` at module load time. Vitest's default
+// node environment can't resolve it, so stub the module to just the shapes
+// the service references. The test only exercises pure helpers —
+// BrowserWindow / Session are never constructed.
+vi.mock("electron", () => ({
+  BrowserWindow: vi.fn(),
+  shell: { openExternal: vi.fn() },
+  session: {},
+  app: {},
+  ipcMain: {},
+}));
+
+const { filterCookiesByHost, isCompletionUrl } = await import(
+  "../auth-window-service.js"
+);
 
 function cookie(overrides: Partial<Cookie>): Cookie {
   return {

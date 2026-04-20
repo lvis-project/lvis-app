@@ -351,7 +351,19 @@ export async function initPluginRuntime(
               `url=${safeUrlForLog} cookieHostCount=${cookieHostCount}`,
           });
         } catch { /* audit must not break host */ }
-        return openAuthWindowService(mainWindow, opts);
+
+        // 기본값은 plugin 별 비영속 partition. Electron 의 default session 을
+        // 쓰면 (a) 여러 BrowserWindow 간 쿠키가 공유되어 타 플러그인이
+        // 수집한 세션을 그대로 볼 수 있고 (b) 디스크에 영속화된다. 둘 다
+        // openAuthWindow 의 "호스트는 세션을 보관하지 않는다" 원칙 위반.
+        // 플러그인이 명시적으로 persist:... 를 지정한 경우에만 영속/공유 허용.
+        const effectiveOpts = opts.persistPartition
+          ? opts
+          : {
+              ...opts,
+              persistPartition: `plugin-auth:${encodeURIComponent(pluginId)}`,
+            };
+        return openAuthWindowService(mainWindow, effectiveOpts);
       },
     }),
   });

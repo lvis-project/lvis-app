@@ -270,6 +270,19 @@ export interface PluginHostApi {
    * Selenium/webdriver 없이 Electron 내장 Chromium을 사용한다.
    * 반환된 쿠키는 플러그인이 직접 HTTP 요청에 싣는다 — 호스트가 세션을 보관하지 않는다.
    *
+   * **완료 URL 매칭 규칙:** 호스트는 현재 URL 의 `origin + pathname` 에 대해서만
+   * `completionUrlPatterns` substring 매칭을 수행한다. query / hash 는 제외되므로
+   * IdP 가 `RelayState=.../newep.lge.com/` 같은 파라미터로 목적지를 담아 와도
+   * IdP 도메인에 있는 동안에는 "완료" 로 오인하지 않는다.
+   *
+   * **Capability gate:** `manifest.capabilities[]` 에 `external-auth-consumer`
+   * 선언 필수.
+   *
+   * **Session partition:** `persistPartition` 미지정 시 호스트가 plugin 별
+   * 비영속 partition (`plugin-auth:${pluginId}`) 을 주입한다. 디스크 영속
+   * + 타 플러그인과의 쿠키 공유를 원하면 명시적으로 `persist:...` 접두사의
+   * partition 을 전달한다.
+   *
    * §6.1 "3+ 플러그인 규칙" 예외 #2 (보안·감사 통제 필요)로 정당화 — 외부 포털 쿠키
    * 수집은 민감 자산 취급이므로 단일 플러그인 사용처여도 HostApi에서 제공한다.
    */
