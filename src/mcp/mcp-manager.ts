@@ -45,7 +45,7 @@ export class McpManager {
 
   private withConfigFileLock<T>(fn: () => Promise<T>): Promise<T> {
     // Use a stable sibling sentinel instead of touching configPath before lock acquisition.
-    // This avoids recreating configPath during the Windows .bak swap window.
+    // This avoids interfering with Windows temp-file + rename replacement of configPath.
     return withFileLock(this.configLockPath, fn);
   }
 
@@ -69,6 +69,8 @@ export class McpManager {
 
   private async loadFromConfigUnlocked(): Promise<McpServerConfig[]> {
     const bakPath = `${this.configPath}.bak`;
+    // Keep read-only fallback for legacy/operator-provided recovery files.
+    // saveConfigs() no longer creates new .bak files because they can retain secrets.
     const candidatePaths = [this.configPath, bakPath].filter(
       (candidate, index) => existsSync(candidate) && (index === 0 || candidate !== this.configPath),
     );

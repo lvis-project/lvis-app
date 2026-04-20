@@ -133,7 +133,7 @@ describe("McpManager — getConfigs()", () => {
     expect(result[1].id).toBe("stdio-srv");
   });
 
-  it("falls back to .bak when the main config file exists but is corrupt", async () => {
+  it("falls back to a legacy .bak when the main config file exists but is corrupt", async () => {
     const backupServers: McpServerConfig[] = [
       { id: "backup-srv", transport: "http", url: "https://example.com/mcp" },
     ];

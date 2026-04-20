@@ -15,6 +15,7 @@ import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
+import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -285,8 +286,12 @@ const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
+  const coldStartUri = findLvisProtocolUri(process.argv);
+  if (coldStartUri) {
+    pendingLvisUri = coldStartUri;
+  }
   app.on("second-instance", (_event, argv) => {
-    const url = argv.find((arg) => arg.startsWith("lvis://"));
+    const url = findLvisProtocolUri(argv);
     if (url) void handleLvisUri(url);
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
