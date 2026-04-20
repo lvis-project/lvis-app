@@ -407,18 +407,19 @@ export function registerIpcHandlers(
     }
 
     const entryPath = fileURLToPath(view.entryUrl);
-    const pluginRoot = pluginRuntime.getPluginEntryDir(pluginId);
-    if (!pluginRoot) {
-      throw new Error(`Plugin entry dir not found (plugin=${pluginId}).`);
+    const rawPluginRoot = pluginRuntime.getPluginRoot(pluginId);
+    if (!rawPluginRoot) {
+      throw new Error(`Plugin root not found (plugin=${pluginId}).`);
     }
-    let realEntryPath: string;
-    try {
-      realEntryPath = realpathSync(entryPath);
-    } catch {
-      throw new Error(`Plugin UI entry path could not be resolved (plugin=${pluginId}).`);
-    }
-    const rootWithSep = pluginRoot.endsWith(path.sep) ? pluginRoot : pluginRoot + path.sep;
-    if (realEntryPath !== pluginRoot && !realEntryPath.startsWith(rootWithSep)) {
+    const [realEntryPath, realPluginRoot] = (() => {
+      try {
+        return [realpathSync(entryPath), realpathSync(rawPluginRoot)] as const;
+      } catch {
+        throw new Error(`Plugin UI entry path could not be resolved (plugin=${pluginId}).`);
+      }
+    })();
+    const rootWithSep = realPluginRoot.endsWith(path.sep) ? realPluginRoot : realPluginRoot + path.sep;
+    if (realEntryPath !== realPluginRoot && !realEntryPath.startsWith(rootWithSep)) {
       throw new Error(`Plugin UI entry path escapes plugin directory (plugin=${pluginId}).`);
     }
     return readFile(realEntryPath, "utf-8");
