@@ -751,6 +751,10 @@ export class PluginRuntime {
     }
   }
 
+  getPluginRoot(pluginId: string): string | undefined {
+    return this.plugins.get(pluginId)?.pluginRoot;
+  }
+
   listUiExtensions(): Array<{ pluginId: string; extension: PluginUiExtension; entryUrl?: string }> {
     const result: Array<{ pluginId: string; extension: PluginUiExtension; entryUrl?: string }> = [];
     for (const [pluginId, plugin] of this.plugins) {
