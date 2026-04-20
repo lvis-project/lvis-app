@@ -37,7 +37,7 @@ export interface RealCloudMarketplaceConfig {
 
 /** Loose shape for a catalog row returned by the server. */
 interface ServerCatalogRow {
-  id?: string;
+  id?: string | number;
   slug?: string;
   name?: string;
   display_name?: string;
@@ -48,12 +48,13 @@ interface ServerCatalogRow {
   package_name?: string;
   packageName?: string;
   methods?: unknown;
+  category?: string;
   default_config?: Record<string, unknown>;
   defaultConfig?: Record<string, unknown>;
   ui?: unknown;
   deployment?: string;
   publisher?: string;
-  latest_stable_version?: string;
+  latest_stable_version?: string | null;
   latestStableVersion?: string;
   channel?: string;
   /** S14: requires.capabilities[] exposed by the server catalog. */
@@ -163,20 +164,21 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
   }
 
   private mapItem(row: ServerCatalogRow): PluginMarketplaceItem {
-    const id = row.id ?? row.slug;
+    const idRaw = row.id ?? row.slug;
+    const id = idRaw != null ? String(idRaw) : undefined;
     const name = row.name ?? row.display_name ?? row.displayName ?? id;
     if (!id || !name) {
       throw new Error("marketplace row missing id/name");
     }
 
-    const packageName = row.package_name ?? row.packageName;
-    if (!packageName) {
-      throw new Error(`marketplace row "${id}" missing packageName`);
-    }
+    // packageName: use explicit field if present, otherwise fall back to slug
+    // (the lvis-marketplace server identifies artifacts by slug, not npm package name)
+    const packageName =
+      row.package_name ?? row.packageName ?? row.slug ?? id;
 
     // packageSpec: prefer explicit; otherwise build from packageName + version
     const version =
-      row.latest_stable_version ?? row.latestStableVersion ?? undefined;
+      (row.latest_stable_version ?? row.latestStableVersion) ?? undefined;
     const packageSpec =
       row.package_spec ??
       row.packageSpec ??
