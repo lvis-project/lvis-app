@@ -14,12 +14,20 @@
  *   1. Initializes empty submodules via `git submodule update --init --recursive`
  *   2. For each submodule that has a `package.json` and no `dist/` yet, runs
  *      `npm install --no-audit --no-fund && npm run build`
+ *   3. Syncs the freshly built `dist/` into `node_modules/<pkg-name>/dist/` if
+ *      a real-directory copy already exists there. On Windows with
+ *      `--install-links=true`, npm snapshots the submodule source (empty dist)
+ *      into node_modules before this script runs, so the runtime import
+ *      `@lvis/plugin-sdk/keys` resolves to a stale copy without step 3.
+ *      On macOS without `--install-links`, node_modules/@lvis/plugin-sdk is a
+ *      symlink — we detect that and skip (the symlink sees fresh dist for
+ *      free).
  *
  * Safe to run multiple times: no-ops when dist already exists and submodules
  * are populated. Not a git checkout (tarball install) → exits 0.
  */
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,12 +87,16 @@ if (empty.length > 0) {
 // Fresh clones (even with --recurse-submodules) ship source only; the host's
 // runtime import of `@lvis/plugin-sdk/keys` needs the compiled JS. Idempotent:
 // if `dist/` already exists we trust it (users can `npm run clean` to force).
+const built = [];
 for (const p of paths) {
   const full = join(repoRoot, p);
   const pkgJson = join(full, "package.json");
   const distDir = join(full, "dist");
   if (!existsSync(pkgJson)) continue;
-  if (existsSync(distDir)) continue;
+  if (existsSync(distDir)) {
+    built.push(p);
+    continue;
+  }
 
   console.log(`[ensure-submodules] building submodule: ${p}`);
   try {
@@ -96,10 +108,58 @@ for (const p of paths) {
       cwd: full,
       stdio: "inherit",
     });
+    built.push(p);
   } catch (err) {
     console.error(
       `[ensure-submodules] failed to build submodule ${p}. Please run manually:\n` +
         `  cd ${p} && npm install && npm run build`,
+    );
+    process.exit(1);
+  }
+}
+
+// Step 3: on Windows (--install-links=true) the submodule was copied into
+// node_modules BEFORE this script built its dist. Detect a real-directory
+// copy and sync dist/ into it. Skip symlinks (macOS default) — the symlink
+// already sees the freshly built dist.
+for (const p of paths) {
+  const full = join(repoRoot, p);
+  const pkgJson = join(full, "package.json");
+  const submoduleDist = join(full, "dist");
+  if (!existsSync(pkgJson)) continue;
+  if (!existsSync(submoduleDist)) continue;
+
+  // Read package name — the node_modules path uses `name`, not the submodule
+  // directory basename (e.g. `packages/plugin-sdk` → `@lvis/plugin-sdk`).
+  let name;
+  try {
+    const pkg = JSON.parse(readFileSync(pkgJson, "utf8"));
+    name = typeof pkg.name === "string" ? pkg.name : null;
+  } catch {
+    continue;
+  }
+  if (!name) continue;
+
+  const hostPkgDir = join(repoRoot, "node_modules", ...name.split("/"));
+  if (!existsSync(hostPkgDir)) continue;
+
+  // Skip if it's a symlink — the link already points at the live submodule
+  // source, so the freshly built dist/ is visible without copy.
+  try {
+    const st = lstatSync(hostPkgDir);
+    if (st.isSymbolicLink()) continue;
+  } catch {
+    continue;
+  }
+
+  const hostDist = join(hostPkgDir, "dist");
+  console.log(`[ensure-submodules] syncing ${p}/dist → node_modules/${name}/dist`);
+  try {
+    rmSync(hostDist, { recursive: true, force: true });
+    cpSync(submoduleDist, hostDist, { recursive: true });
+  } catch (err) {
+    console.error(
+      `[ensure-submodules] failed to sync ${name}: ${(err instanceof Error ? err.message : String(err))}`,
     );
     process.exit(1);
   }
