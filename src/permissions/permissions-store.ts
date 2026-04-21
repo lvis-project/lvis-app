@@ -40,11 +40,13 @@ async function withPermissionsLock<T>(
 export async function readPermissionsFile(filePath: string): Promise<PermissionsFile | null> {
   try {
     const raw = await readFile(filePath, "utf-8");
+    if (!raw.trim()) return null;
     const parsed = JSON.parse(raw) as PermissionsFile;
     if (parsed.version !== 1 || !Array.isArray(parsed.rules)) return null;
     return parsed;
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (err instanceof SyntaxError) return null;
     throw err;
   }
 }
