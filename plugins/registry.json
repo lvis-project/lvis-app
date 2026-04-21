@@ -2,6 +2,11 @@
   "version": 1,
   "plugins": [
     {
+      "id": "calendar",
+      "manifestPath": "/Users/example/.lvis/plugins/calendar/plugin.json",
+      "enabled": true
+    },
+    {
       "id": "email",
       "manifestPath": "/Users/example/.lvis/plugins/email/plugin.json",
       "enabled": true
@@ -19,6 +24,11 @@
     {
       "id": "pageindex",
       "manifestPath": "/Users/example/.lvis/plugins/pageindex/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "hello-world",
+      "manifestPath": "/Users/example/.lvis/plugins/hello-world/plugin.json",
       "enabled": true
     }
   ]
