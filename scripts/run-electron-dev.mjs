@@ -25,19 +25,23 @@ import electronPath from "electron";
 // Windows corp PC runtime flags — see scripts/run-electron.mjs for rationale.
 const WINDOWS_SAFE_ELECTRON_FLAGS = [
   "--disable-gpu",
+  "--disable-software-rasterizer",
   "--disable-gpu-compositing",
-  "--disable-gpu-sandbox",
-  "--in-process-gpu",
-  "--use-angle=swiftshader",
   "--no-sandbox",
 ];
 
 function applyWindowsSafeFlags(args) {
-  if (process.platform !== "win32") return args;
-  if (process.env.LVIS_KEEP_GPU === "1") return args;
   const next = [...args];
-  for (const flag of WINDOWS_SAFE_ELECTRON_FLAGS) {
-    if (!next.includes(flag)) next.push(flag);
+  if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
+    for (const flag of WINDOWS_SAFE_ELECTRON_FLAGS) {
+      if (!next.includes(flag)) next.push(flag);
+    }
+  }
+  if (process.env.LVIS_EXTRA_ELECTRON_FLAGS) {
+    const extra = process.env.LVIS_EXTRA_ELECTRON_FLAGS.split(/\s+/).filter(Boolean);
+    for (const flag of extra) {
+      if (!next.includes(flag)) next.push(flag);
+    }
   }
   return next;
 }
