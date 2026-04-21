@@ -211,6 +211,7 @@ contextBridge.exposeInMainWorld("lvis", {
   mcp: api.mcp,
   plugins: {
     cards: () => ipcRenderer.invoke("lvis:plugins:cards"),
+    uninstallMarketplacePlugin: (id: string) => ipcRenderer.invoke("lvis:plugins:uninstall", id),
   },
   pluginConfig: {
     get: (pluginId: string) => ipcRenderer.invoke("lvis:plugins:config:get", pluginId),
