@@ -401,10 +401,18 @@ export class VercelUnifiedProvider implements LLMProvider {
             "(e.g. https://{resource}.openai.azure.com/openai/deployments/{deployment}/)",
         );
       }
+      // Normalize user-supplied URL: strip any trailing /chat/completions path and
+      // extract api-version query param so the SDK can append the path cleanly.
+      // Users sometimes copy the full endpoint URL including path + query string.
+      const parsedUrl = new URL(this.baseUrl);
+      const apiVersion = parsedUrl.searchParams.get("api-version") ?? undefined;
+      parsedUrl.search = "";
+      const cleanBaseUrl = parsedUrl.toString().replace(/\/chat\/completions\/?$/, "/");
       const azure = createOpenAICompatible({
         name: "azure-foundry",
-        baseURL: this.baseUrl,
+        baseURL: cleanBaseUrl,
         apiKey: this.apiKey,
+        ...(apiVersion ? { queryParams: { "api-version": apiVersion } } : {}),
         ...(this.customFetch ? { fetch: this.customFetch } : {}),
       });
       return azure(modelId);
