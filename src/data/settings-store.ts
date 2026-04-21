@@ -401,11 +401,22 @@ export class SettingsService {
         llm.provider = DEFAULT_SETTINGS.llm.provider;
         llm.model = DEFAULT_SETTINGS.llm.model;
       }
+      // Migrate legacy marketplace.backend="mock" to "real-cloud" — the mock
+      // fetcher is now test-only and cannot serve binary downloads. Old installs
+      // carrying the "mock" default would otherwise fail every install attempt
+      // with "MockMarketplaceFetcher does not support downloadVersion()".
+      const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
+      if (marketplaceParsed.backend === "mock") {
+        marketplaceParsed.backend = "real-cloud";
+        if (!marketplaceParsed.realCloudBaseUrl) marketplaceParsed.realCloudBaseUrl = "http://localhost:8000";
+        if (marketplaceParsed.realCloudAllowPrivateNetwork === undefined) marketplaceParsed.realCloudAllowPrivateNetwork = true;
+      }
+
       return {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
-        marketplace: { ...DEFAULT_SETTINGS.marketplace, ...parsed.marketplace },
+        marketplace: { ...DEFAULT_SETTINGS.marketplace, ...marketplaceParsed },
         proactive: { ...DEFAULT_SETTINGS.proactive, ...parsed.proactive },
         privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
