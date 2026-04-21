@@ -9,6 +9,7 @@
  * Set to "0" or "false" to disable the check entirely.
  */
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, dirname } from "node:path";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { readPluginRegistry } from "./registry.js";
@@ -94,12 +95,17 @@ export class PluginUpdateDetector {
     const abs = isAbsolute(manifestPath)
       ? manifestPath
       : resolve(registryDir, manifestPath);
-    // Path-escape defense: resolved manifest must live beneath the registry
-    // directory. A crafted registry entry like "../../etc/passwd" would
-    // otherwise leak filesystem reads into arbitrary locations.
-    const rel = relative(registryDir, abs);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
-      console.warn("[update-detector] manifestPath escapes registry dir, skipping:", manifestPath);
+    // Path-escape defense: resolved manifest must live beneath either the
+    // registry directory (bundled plugins) or the per-user install dir
+    // `~/.lvis/plugins/` (dynamic installs). Anything else — e.g. a crafted
+    // registry entry like "../../etc/passwd" — is rejected.
+    const relFromRegistry = relative(registryDir, abs);
+    const userInstalledDir = resolve(homedir(), ".lvis/plugins");
+    const relFromUserDir = relative(userInstalledDir, abs);
+    const underRegistry = !relFromRegistry.startsWith("..") && !isAbsolute(relFromRegistry);
+    const underUserDir = !relFromUserDir.startsWith("..") && !isAbsolute(relFromUserDir);
+    if (!underRegistry && !underUserDir) {
+      console.warn("[update-detector] manifestPath escapes allowed roots, skipping:", manifestPath);
       return null;
     }
     try {

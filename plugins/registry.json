@@ -1,1 +1,30 @@
-{ "version": 1, "plugins": [] }
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "calendar",
+      "manifestPath": "/Users/example/.lvis/plugins/calendar/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "email",
+      "manifestPath": "/Users/example/.lvis/plugins/email/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "ep-api",
+      "manifestPath": "/Users/example/.lvis/plugins/ep-api/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "meeting",
+      "manifestPath": "/Users/example/.lvis/plugins/meeting/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "pageindex",
+      "manifestPath": "/Users/example/.lvis/plugins/pageindex/plugin.json",
+      "enabled": true
+    }
+  ]
+}
