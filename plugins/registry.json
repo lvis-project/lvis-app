@@ -24,7 +24,7 @@
     {
       "id": "ep-api",
       "manifestPath": "installed/ep-api/plugin.json",
-      "enabled": false
+      "enabled": true
     }
   ]
 }
