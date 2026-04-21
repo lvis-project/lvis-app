@@ -1,1 +1,25 @@
-{ "version": 1, "plugins": [] }
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "email",
+      "manifestPath": "/Users/ken/.lvis/plugins/email/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "lge-api",
+      "manifestPath": "/Users/ken/.lvis/plugins/lge-api/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "meeting",
+      "manifestPath": "/Users/ken/.lvis/plugins/meeting/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "pageindex",
+      "manifestPath": "/Users/ken/.lvis/plugins/pageindex/plugin.json",
+      "enabled": true
+    }
+  ]
+}
