@@ -30,6 +30,7 @@
     "src/**/*.stories.ts",
     "src/**/*.stories.tsx",
     "src/preload.ts",
-    "src/preload.cjs.ts"
+    "src/preload.cjs.ts",
+    "src/renderer.tsx"
   ]
 }
