@@ -51,17 +51,19 @@ if (process.platform === "win32" && env.LVIS_KEEP_GPU !== "1") {
 // Windows: launch Electron through a cmd.exe wrapper so `chcp 65001` and
 // Electron share the SAME console. A separate `execSync("chcp")` runs in a
 // detached subprocess — the code-page change never reaches Electron's
-// console. Wrapping in `cmd /d /c "chcp 65001>nul & electron …"` binds both
-// calls to one cmd session, so Korean/emoji stdout renders as UTF-8 end to
-// end (cmd.exe → Node → Electron → user's terminal).
+// console. We use `shell: true` (which invokes `cmd.exe /d /s /c "<cmd>"` on
+// Windows) so cmd's `/s` flag preserves our inner quoting around electron.exe
+// path; passing cmd.exe + /c manually without /s triggers cmd's legacy
+// quote-stripping rule and produces "electron.exe 는 실행할 수 있는 프로그램…
+// 아닙니다".
 if (process.platform === "win32") {
   const quote = (s) => `"${String(s).replace(/"/g, '""')}"`;
   const electronCmd = [electronPath, ...args].map(quote).join(" ");
-  const result = spawnSync(
-    "cmd.exe",
-    ["/d", "/c", `chcp 65001>nul & ${electronCmd}`],
-    { env, stdio: "inherit" },
-  );
+  const result = spawnSync(`chcp 65001>nul & ${electronCmd}`, [], {
+    env,
+    stdio: "inherit",
+    shell: true,
+  });
   process.exit(result.status ?? 1);
 }
 

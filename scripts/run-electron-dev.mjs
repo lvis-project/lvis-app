@@ -126,15 +126,17 @@ function launchElectron() {
     return e;
   })();
   if (process.platform === "win32") {
-    // Wrap in cmd.exe /c so `chcp 65001` binds to Electron's console (see
-    // scripts/run-electron.mjs). Avoids cp949 mojibake on Korean locale.
+    // Wrap in cmd.exe /s /c (via shell: true) so `chcp 65001` binds to
+    // Electron's console AND cmd preserves quoting around electron.exe path.
+    // See scripts/run-electron.mjs for the detailed rationale.
     const quote = (s) => `"${String(s).replace(/"/g, '""')}"`;
     const electronCmd = [electronPath, ...electronArgs].map(quote).join(" ");
-    electronProc = spawn(
-      "cmd.exe",
-      ["/d", "/c", `chcp 65001>nul & ${electronCmd}`],
-      { cwd: repoRoot, stdio: "inherit", env },
-    );
+    electronProc = spawn(`chcp 65001>nul & ${electronCmd}`, [], {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env,
+      shell: true,
+    });
   } else {
     electronProc = spawn(electronPath, electronArgs, {
       cwd: repoRoot,
