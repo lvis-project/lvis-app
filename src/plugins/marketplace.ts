@@ -221,7 +221,10 @@ export class PluginMarketplaceService {
 
     const dlVersion = plugin.version ?? "latest";
     const manifestPath = await this.installArtifact(plugin, dlVersion);
-    await this.cacheVersionFromManifest(pluginId, manifestPath);
+    const manifestAbsPath = isAbsolute(manifestPath)
+      ? manifestPath
+      : resolve(dirname(this.registryPath), manifestPath);
+    await this.cacheVersionFromManifest(pluginId, manifestAbsPath);
 
     // §M1 F-round: atomic read-modify-write under registry lock.
     await updatePluginRegistry(this.registryPath, (registry) => {
