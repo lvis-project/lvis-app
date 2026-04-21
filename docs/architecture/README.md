@@ -90,7 +90,7 @@ LVIS 프로젝트의 **시스템 구조 및 기술 설계** 문서입니다.
 | Client | Electron + React, Rust (NAPI-RS), SQLite + FTS5 |
 | Indexing | PageIndex (LLM 트리 인덱싱), Doc Parser (PDF·DOCX·PPTX·XLSX·Image) |
 | Server | Lgenie (사내 LLM), Agent Hub (Go/Rust + PostgreSQL + NATS), Marketplace |
-| Protocol | SSE Streaming, gRPC/REST, MCP (stdio/SSE/WebSocket) |
+| Protocol | SSE Streaming, gRPC/REST, MCP (stdio/http; SSE/WebSocket reserved) |
 | Governance | SSO/LDAP, OPA Policy Engine, AES-256 + TLS 1.3, Feature Flag Service |
 
 ---
