@@ -88,6 +88,14 @@ export interface PluginCard {
   tools: string[];
   /** Capability tags declared in manifest.capabilities. */
   capabilities: string[];
+  /** tool name → description from manifest.toolSchemas */
+  toolDescriptions?: Record<string, string>;
+  /** true when manifest.deployment === "managed" */
+  isManaged?: boolean;
+  /** Runtime load status — always "loaded" for plugins in the active map */
+  loadStatus: "loaded" | "failed" | "disabled";
+  version?: string;
+  publisher?: string;
 }
 
 /**
@@ -683,6 +691,15 @@ export class PluginRuntime {
           description = `Plugin: ${manifest.name}`;
         }
       }
+      // Build toolDescriptions map from manifest.toolSchemas
+      const toolDescriptions: Record<string, string> = {};
+      if (manifest.toolSchemas) {
+        for (const toolName of filteredTools) {
+          const desc = manifest.toolSchemas[toolName]?.description;
+          if (desc) toolDescriptions[toolName] = desc;
+        }
+      }
+
       cards.push({
         id: pluginId,
         name: manifest.name,
@@ -690,6 +707,11 @@ export class PluginRuntime {
         sampleTools,
         tools: filteredTools,
         capabilities: manifest.capabilities ?? [],
+        toolDescriptions: Object.keys(toolDescriptions).length > 0 ? toolDescriptions : undefined,
+        isManaged: manifest.deployment === "managed",
+        loadStatus: "loaded",
+        version: manifest.version,
+        publisher: manifest.publisher,
       });
     }
     return cards;

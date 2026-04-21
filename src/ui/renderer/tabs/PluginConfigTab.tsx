@@ -180,9 +180,20 @@ export function PluginConfigTab() {
                       selectedId === p.id ? "bg-accent font-semibold" : ""
                     }`}
                   >
-                    <div className="truncate">{p.name}</div>
-                    <div className="truncate font-mono text-[10px] text-muted-foreground">
-                      {p.id}
+                    <div className="flex items-center gap-1 truncate">
+                      {p.isManaged && <span title="관리자 설치 플러그인">🔒</span>}
+                      <span className="truncate">{p.name}</span>
+                    </div>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      {p.loadStatus === "loaded" && (
+                        <span className="inline-block rounded-full bg-green-100 px-1.5 py-px text-[9px] font-medium text-green-700">로드됨</span>
+                      )}
+                      {p.loadStatus === "failed" && (
+                        <span className="inline-block rounded-full bg-red-100 px-1.5 py-px text-[9px] font-medium text-red-700">실패</span>
+                      )}
+                      {p.loadStatus === "disabled" && (
+                        <span className="inline-block rounded-full bg-gray-100 px-1.5 py-px text-[9px] font-medium text-gray-600">비활성</span>
+                      )}
                     </div>
                   </button>
                 ))}
@@ -190,27 +201,72 @@ export function PluginConfigTab() {
             </ScrollArea>
           </div>
 
-          {/* Right: key-value editor */}
+          {/* Right: detail + key-value editor */}
           <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3">
             {selectedPlugin ? (
               <>
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-semibold">{selectedPlugin.name}</h3>
-                    <p className="font-mono text-[10px] text-muted-foreground">
-                      {selectedPlugin.id}
-                    </p>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <h3 className="text-sm font-semibold">{selectedPlugin.name}</h3>
+                      {selectedPlugin.isManaged && (
+                        <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-px text-[9px] font-medium text-blue-700">🔒 관리형</span>
+                      )}
+                      {selectedPlugin.loadStatus && (
+                        selectedPlugin.loadStatus === "loaded" ? (
+                          <span className="inline-block rounded-full bg-green-100 px-1.5 py-px text-[9px] font-medium text-green-700">로드됨</span>
+                        ) : selectedPlugin.loadStatus === "failed" ? (
+                          <span className="inline-block rounded-full bg-red-100 px-1.5 py-px text-[9px] font-medium text-red-700">실패</span>
+                        ) : (
+                          <span className="inline-block rounded-full bg-gray-100 px-1.5 py-px text-[9px] font-medium text-gray-600">비활성</span>
+                        )
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      {selectedPlugin.version && (
+                        <span className="text-[10px] text-muted-foreground">v{selectedPlugin.version}</span>
+                      )}
+                      {selectedPlugin.publisher && (
+                        <span className="text-[10px] text-muted-foreground">· {selectedPlugin.publisher}</span>
+                      )}
+                    </div>
+                    <p className="font-mono text-[10px] text-muted-foreground">{selectedPlugin.id}</p>
+                    {selectedPlugin.description && (
+                      <p className="mt-1 text-xs text-muted-foreground">{selectedPlugin.description}</p>
+                    )}
                   </div>
                   <Button
                     size="sm"
                     variant="destructive"
                     className="h-7 text-xs px-2 shrink-0"
                     onClick={() => void handleUninstall()}
-                    disabled={saving}
+                    disabled={saving || selectedPlugin.isManaged}
+                    title={selectedPlugin.isManaged ? "관리자가 설치한 플러그인은 제거할 수 없습니다" : undefined}
                   >
                     제거
                   </Button>
                 </div>
+
+                {/* Tools section */}
+                {selectedPlugin.tools.length > 0 && (
+                  <>
+                    <Separator />
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">제공 툴</p>
+                      <div className="space-y-0.5 max-h-24 overflow-y-auto">
+                        {selectedPlugin.tools.map((tool) => {
+                          const desc = selectedPlugin.toolDescriptions?.[tool];
+                          return (
+                            <div key={tool} className="flex flex-col">
+                              <span className="font-mono text-[10px] font-medium">{tool}</span>
+                              {desc && <span className="text-[10px] text-muted-foreground">{desc}</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
                 <Separator />
 
                 <ScrollArea className="flex-1 min-h-0">

@@ -39,6 +39,11 @@ export type PluginCardSummary = {
   sampleTools: string[];
   capabilities: string[];
   tools: string[];
+  toolDescriptions?: Record<string, string>;
+  isManaged?: boolean;
+  loadStatus?: "loaded" | "failed" | "disabled";
+  version?: string;
+  publisher?: string;
 };
 
 export type AppSettings = {
