@@ -291,8 +291,17 @@ async function main() {
 // (a click on <a href="…"> would bypass the injected meta CSP by moving to a
 // new document). Deny every non-data navigation and new-window attempt on
 // any webview webContents as soon as it's created.
-// lvis:// custom URI scheme — register before app ready
-app.setAsDefaultProtocolClient("lvis");
+// lvis:// custom URI scheme — register before app ready.
+// In dev mode (unpackaged) on Windows, Electron requires explicit execPath + args
+// so the OS can locate the app correctly when launching from a protocol URI.
+const _protocolRegistered = app.isPackaged
+  ? app.setAsDefaultProtocolClient("lvis")
+  : app.setAsDefaultProtocolClient("lvis", process.execPath, [
+      resolve(typeof process.argv[1] === "string" ? process.argv[1] : "."),
+    ]);
+if (!_protocolRegistered) {
+  console.warn("[main] setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment");
+}
 
 // macOS: URI delivered via open-url event (register before whenReady to avoid missing cold-start)
 app.on("open-url", (event, url) => {

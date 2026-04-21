@@ -354,7 +354,12 @@ export class McpManager {
             await rm(oldPath, { force: true }).catch(() => undefined);
           } catch (retryErr) {
             if (existsSync(oldPath)) {
-              await rename(oldPath, this.configPath).catch(() => undefined);
+              await rename(oldPath, this.configPath).catch((restoreErr) => {
+                console.error(
+                  `[mcp-manager] saveConfigs: recovery rename failed — stale backup at ${oldPath}`,
+                  restoreErr,
+                );
+              });
             }
             throw retryErr;
           }
