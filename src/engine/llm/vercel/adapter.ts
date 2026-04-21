@@ -401,11 +401,49 @@ export class VercelUnifiedProvider implements LLMProvider {
             "(e.g. https://{resource}.openai.azure.com/openai/deployments/{deployment}/)",
         );
       }
+      // Normalize user-supplied URL: strip any trailing /chat/completions path and
+      // extract api-version query param so the SDK can append the path cleanly.
+      // Users sometimes copy the full endpoint URL including path + query string.
+      const parsedUrl = new URL(this.baseUrl);
+      const apiVersion = parsedUrl.searchParams.get("api-version") ?? undefined;
+      parsedUrl.search = "";
+      const cleanBaseUrl = parsedUrl.toString().replace(/\/chat\/completions\/?$/, "/");
+      // gpt-5.x family requires max_completion_tokens instead of max_tokens.
+      // Intercept the request body to swap the field name transparently.
+      const isGpt5Model = /gpt-5/i.test(modelId);
+      const baseFetch = this.customFetch ?? fetch;
+      const azureFetch: typeof fetch = isGpt5Model
+        ? async (input, init) => {
+            if (init?.body) {
+              if (typeof init.body === "string") {
+                try {
+                  const body = JSON.parse(init.body) as Record<string, unknown>;
+                  if ("max_tokens" in body) {
+                    body.max_completion_tokens = body.max_tokens;
+                    delete body.max_tokens;
+                    init = { ...init, body: JSON.stringify(body) };
+                  }
+                } catch {
+                  // leave body unchanged if JSON parse fails
+                }
+              } else {
+                // Non-string body (ReadableStream/Uint8Array) cannot be rewritten;
+                // max_tokens may still be present and cause a 400.
+                console.warn(
+                  "[azure-foundry] gpt-5.x fetch body is not a string — " +
+                    "max_tokens→max_completion_tokens swap skipped",
+                );
+              }
+            }
+            return baseFetch(input, init);
+          }
+        : baseFetch;
       const azure = createOpenAICompatible({
         name: "azure-foundry",
-        baseURL: this.baseUrl,
+        baseURL: cleanBaseUrl,
         apiKey: this.apiKey,
-        ...(this.customFetch ? { fetch: this.customFetch } : {}),
+        ...(apiVersion ? { queryParams: { "api-version": apiVersion } } : {}),
+        fetch: azureFetch,
       });
       return azure(modelId);
     }

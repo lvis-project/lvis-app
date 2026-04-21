@@ -4,7 +4,7 @@
  * 슬림 엔트리. 모든 로직은 boot.ts와 ipc-bridge.ts로 위임.
  * §4.1 Client Architecture 준수.
  */
-import { Menu, app, BrowserWindow, shell, type MenuItemConstructorOptions } from "electron";
+import { Menu, app, BrowserWindow, shell, dialog, type MenuItemConstructorOptions } from "electron";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import * as https from "node:https";
@@ -15,6 +15,7 @@ import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
+import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -57,6 +58,75 @@ await injectCorporateCa();
 
 let mainWindow: BrowserWindow | null = null;
 let services: AppServices | null = null;
+let pendingLvisUri: string | null = null;
+
+const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+
+function parseLvisInstallUri(url: string): { slug: string } | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "lvis:") return null;
+    if (parsed.hostname !== "install") return null;
+    if (parsed.search || parsed.hash) return null;
+    const slug = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+    if (!slug || !SLUG_RE.test(slug)) return null;
+    return { slug };
+  } catch {
+    return null;
+  }
+}
+
+async function handleLvisUri(url: string) {
+  const params = parseLvisInstallUri(url);
+  if (!params) return;
+  if (!services) {
+    pendingLvisUri = url;
+    return;
+  }
+  // macOS: app stays running after all windows closed. If the deep link arrives
+  // with no window, re-open one so the confirmation dialog has a parent and the
+  // user actually sees the install prompt (rather than it silently no-op'ing).
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    try {
+      if (mainWindow) await (mainWindow as BrowserWindow).loadFile(resolve(__dirname, "index.html"));
+    } catch (err) {
+      console.error("[lvis] failed to load index.html for lvis:// URI", err);
+    }
+  }
+  mainWindow?.focus();
+  const win = mainWindow;
+  if (!win) {
+    // createWindow() failed or was destroyed — abort rather than install silently.
+    console.warn("[lvis] handleLvisUri: no window available, aborting install");
+    return;
+  }
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question",
+    buttons: ["설치", "취소"],
+    defaultId: 1,
+    cancelId: 1,
+    message: `플러그인 '${params.slug}'을(를) 설치하시겠습니까?`,
+    detail: "외부 링크로부터 요청된 설치입니다.",
+  });
+  if (response !== 0) return;
+  void services.pluginMarketplace
+    .install(params.slug)
+    .then(async () => {
+      // Mirror the post-install steps from the lvis:plugins:install IPC handler
+      // so deep-link installs behave identically to in-app installs.
+      try {
+        await services!.pluginRuntime.restartAll();
+        services!.refreshPluginNotifications?.();
+      } catch (err) {
+        console.error("[lvis] post-install steps failed for lvis:// install", err);
+      }
+      mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: true });
+    })
+    .catch((err: Error) => {
+      mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: false, error: err.message });
+    });
+}
 
 function activateView(viewKey: string) {
   mainWindow?.webContents.send("lvis:view:activate", { viewKey });
@@ -211,6 +281,14 @@ async function main() {
       console.error("[lvis] failed to load index.html", err);
     }
   }
+
+  // Process any lvis:// URI that arrived before services were ready.
+  // Deferred until after loadFile so IPC handlers are registered and the
+  // renderer's lvis:plugins:install-result listener is active.
+  if (pendingLvisUri) {
+    void handleLvisUri(pendingLvisUri);
+    pendingLvisUri = null;
+  }
 }
 
 // render_html tool webview hardening — the <webview> element carries LLM
@@ -218,6 +296,43 @@ async function main() {
 // (a click on <a href="…"> would bypass the injected meta CSP by moving to a
 // new document). Deny every non-data navigation and new-window attempt on
 // any webview webContents as soon as it's created.
+// lvis:// custom URI scheme — register before app ready.
+// In dev mode (unpackaged) on Windows, Electron requires explicit execPath + args
+// so the OS can locate the app correctly when launching from a protocol URI.
+const _protocolRegistered = app.isPackaged
+  ? app.setAsDefaultProtocolClient("lvis")
+  : app.setAsDefaultProtocolClient("lvis", process.execPath, [
+      resolve(typeof process.argv[1] === "string" ? process.argv[1] : "."),
+    ]);
+if (!_protocolRegistered) {
+  console.warn("[main] setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment");
+}
+
+// macOS: URI delivered via open-url event (register before whenReady to avoid missing cold-start)
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  void handleLvisUri(url);
+});
+
+// Windows/Linux: URI delivered as argv of second instance
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  const coldStartUri = findLvisProtocolUri(process.argv);
+  if (coldStartUri) {
+    pendingLvisUri = coldStartUri;
+  }
+  app.on("second-instance", (_event, argv) => {
+    const url = findLvisProtocolUri(argv);
+    if (url) void handleLvisUri(url);
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "webview") return;
   contents.on("will-navigate", (navEvent, url) => {

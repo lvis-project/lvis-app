@@ -72,19 +72,24 @@ export class McpGovernance {
   }
 
   /** 정책 주기적 갱신 시작 (IT admin이 정책 업데이트 시 반영) */
-  startPolicyRefresh(): void {
+  startPolicyRefresh(onRevoked?: (revokedIds: string[]) => void | Promise<void>): void {
     if (this.refreshTimer) return;
     const interval = this.policy.globalRules.policyRefreshIntervalMs;
     this.refreshTimer = setInterval(() => {
+      const previous = this.policy;
       const updated = this.loadPolicy();
-      // 취소된 서버 감지
+      const prevStatusById = new Map(previous.servers.map((server) => [server.id, server.status]));
       const revokedIds = updated.servers
         .filter((s) => s.status === "revoked")
+        .filter((s) => prevStatusById.get(s.id) !== "revoked")
         .map((s) => s.id);
+      this.policy = updated;
       if (revokedIds.length > 0) {
         console.warn(`[mcp-governance] 취소된 서버 감지: ${revokedIds.join(", ")}`);
+        Promise.resolve(onRevoked?.(revokedIds)).catch((err) => {
+          console.error("[mcp-governance] revoke callback 실패:", err);
+        });
       }
-      this.policy = updated;
     }, interval);
   }
 

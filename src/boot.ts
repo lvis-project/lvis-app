@@ -171,6 +171,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // §6.3: PermissionManager (Layer 2-3).
   const permissionManager = await createPermissionManager();
+  toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
   // §7: Proactive Engine.
   const proactiveEngine = createProactiveEngine({
@@ -252,7 +253,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // §9.5: MCP Server 연결.
   const mcpGovernance = new McpGovernance();
-  const mcpManager = new McpManager(mcpGovernance, toolRegistry);
+  const mcpManager = new McpManager(mcpGovernance, toolRegistry, undefined, permissionManager, bootAuditLogger);
   try {
     const configs = await mcpManager.loadFromConfig();
     if (configs.length > 0) {
@@ -262,7 +263,13 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   } catch (err) {
     console.warn("[lvis] boot: MCP initialization failed (non-fatal):", (err as Error).message);
   }
-  mcpGovernance.startPolicyRefresh();
+  mcpGovernance.startPolicyRefresh((revokedIds) => {
+    for (const serverId of revokedIds) {
+      void mcpManager.killSwitch(serverId).catch((err) => {
+        console.error("[lvis] boot: revoked MCP server kill failed:", serverId, (err as Error).message);
+      });
+    }
+  });
 
   console.log("[lvis] boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
 
