@@ -158,9 +158,29 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     deploymentGuard,
     marketplaceFetcher,
   );
+
+  // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
+  // from the marketplace on boot (VS Code-style), not bundled in app source.
+  // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
+  try {
+    const ensureResult = await pluginMarketplace.ensureManagedInstalled();
+    if (ensureResult.installed.length > 0) {
+      console.log(
+        `[lvis] boot: managed plugin bootstrap installed ${ensureResult.installed.length}: ${ensureResult.installed.join(", ")}`,
+      );
+      await pluginRuntime.restartAll();
+    }
+    if (ensureResult.failed.length > 0) {
+      console.warn(
+        `[lvis] boot: managed plugin bootstrap failed ${ensureResult.failed.length}:`,
+        ensureResult.failed,
+      );
+    }
+  } catch (err) {
+    console.warn(`[lvis] boot: ensureManagedInstalled error:`, (err as Error).message);
+  }
+
   // wireUpdateCheck needs a concrete fetcher for update detection.
-  // In mock mode, create a dedicated MockMarketplaceFetcher (caching is
-  // irrelevant for update checks — they always want fresh data).
   const updateCheckFetcher: MarketplaceFetcher | undefined = marketplaceFetcher;
 
   // §4.5.9: SystemPromptBuilder.
