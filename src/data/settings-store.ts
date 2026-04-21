@@ -205,7 +205,9 @@ const DEFAULT_SETTINGS: AppSettings = {
     provider: "duckduckgo",
   },
   marketplace: {
-    backend: "mock",
+    backend: "real-cloud",
+    realCloudBaseUrl: "http://localhost:8000",
+    realCloudAllowPrivateNetwork: true,
   },
   proactive: {
     enableDailyBriefing: false,

@@ -41,7 +41,7 @@
 import { resolve } from "node:path";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
-import { MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
+import { PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
 import { StarredStore } from "./data/starred-store.js";
@@ -161,8 +161,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // wireUpdateCheck needs a concrete fetcher for update detection.
   // In mock mode, create a dedicated MockMarketplaceFetcher (caching is
   // irrelevant for update checks — they always want fresh data).
-  const updateCheckFetcher: MarketplaceFetcher =
-    marketplaceFetcher ?? new MockMarketplaceFetcher(resolve(projectRoot, "plugins/marketplace.json"));
+  const updateCheckFetcher: MarketplaceFetcher | undefined = marketplaceFetcher;
 
   // §4.5.9: SystemPromptBuilder.
   const systemPromptBuilder = createSystemPromptBuilder({
@@ -283,12 +282,14 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     settingsService,
     bootAuditLogger,
   });
-  wireUpdateCheck({
-    projectRoot,
-    mainWindow,
-    settingsService,
-    marketplaceFetcher: updateCheckFetcher,
-  });
+  if (updateCheckFetcher) {
+    wireUpdateCheck({
+      projectRoot,
+      mainWindow,
+      settingsService,
+      marketplaceFetcher: updateCheckFetcher,
+    });
+  }
 
   // void unused imports avoidance — app reference retained for type imports.
   void app;
