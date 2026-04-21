@@ -1,7 +1,0 @@
-{
-  "name": "@lvis/plugin-hello-world",
-  "version": "0.1.0",
-  "description": "Dev-only sample plugin for install flow testing",
-  "type": "module",
-  "main": "dist/hostPlugin.js"
-}
