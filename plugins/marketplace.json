@@ -161,7 +161,7 @@
       "slug": "hello-world",
       "name": "Hello World",
       "description": "개발용 샘플 플러그인 — hello_world 도구 테스트",
-      "packageSpec": "file:plugins/installed/hello-world",
+      "packageSpec": "file:packages/hello-world",
       "packageName": "@lvis/plugin-hello-world",
       "deployment": "free",
       "publisher": "LVIS Dev",
