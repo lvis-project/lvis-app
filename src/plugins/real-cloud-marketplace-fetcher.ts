@@ -178,7 +178,10 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
   }
 
   private mapItem(row: ServerCatalogRow): PluginMarketplaceItem {
-    const idRaw = row.id ?? row.slug;
+    // Prefer human-readable slug as the client-side id. The server's numeric
+    // primary key is meaningless to the app and breaks install("hello-world")
+    // lookups (which use slugs from lvis:// URIs and the web marketplace).
+    const idRaw = row.slug ?? row.id;
     let id: string | undefined;
     if (typeof idRaw === "string") {
       id = idRaw;
@@ -233,6 +236,7 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
 
     const item: PluginMarketplaceItem = {
       id,
+      slug: typeof row.slug === "string" ? row.slug : undefined,
       name,
       description: row.description ?? "",
       packageSpec,
