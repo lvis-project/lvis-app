@@ -4,6 +4,7 @@
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { StreamEvent } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
+import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -151,6 +152,7 @@ export type LvisApi = {
   dismissBriefing: (feedback?: { reason: string; details?: string }) => Promise<{ ok: boolean; debounced?: boolean }>;
   snoozeBriefing: () => Promise<{ ok: boolean; lastDismissedAt?: string }>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
+  onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
   getUsageRange: (opts: { dateFrom: string; dateTo: string }) => Promise<UsageSummaryShape>;
@@ -226,8 +228,14 @@ export type LvisPolicyApi = {
 };
 
 export type LvisPluginConfigApi = {
-  get: (pluginId: string) => Promise<Record<string, unknown>>;
-  set: (pluginId: string, config: Record<string, unknown>) => Promise<void>;
+  get: (pluginId: string) => Promise<
+    | { ok: true; config: PluginConfigRecord }
+    | { ok: false; error: string; message?: string }
+  >;
+  set: (pluginId: string, config: Record<string, unknown>) => Promise<
+    | { ok: true; config: PluginConfigRecord }
+    | { ok: false; error: string; message?: string }
+  >;
 };
 
 export type LvisPluginsApi = {

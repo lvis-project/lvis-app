@@ -3,6 +3,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
+import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/plugin-config.js";
 import type { PluginCardSummary } from "../types.js";
 
 type KV = { key: string; value: string };
@@ -17,7 +18,7 @@ function configToEntries(config: Record<string, unknown>): KV[] {
 function entriesToConfig(entries: KV[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const { key, value } of entries) {
-    const k = key.trim();
+    const k = sanitizePluginConfigKey(key.trim());
     if (!k) continue;
     // Try to parse JSON values (numbers, booleans, objects); fall back to string.
     try {
@@ -26,7 +27,7 @@ function entriesToConfig(entries: KV[]): Record<string, unknown> {
       out[k] = value;
     }
   }
-  return out;
+  return sanitizePluginConfig(out);
 }
 
 export function PluginConfigTab() {
@@ -82,9 +83,14 @@ export function PluginConfigTab() {
     let cancelled = false;
     (async () => {
       try {
-        const config = await window.lvis.pluginConfig.get(selectedId);
+        const result = await window.lvis.pluginConfig.get(selectedId);
         if (cancelled) return;
-        setEntries(configToEntries(config));
+        if (!result.ok) {
+          setEntries([]);
+          showBanner("error", result.message ?? "설정 로드 실패");
+          return;
+        }
+        setEntries(configToEntries(result.config));
       } catch (e) {
         if (!cancelled) showBanner("error", (e as Error).message ?? "설정 로드 실패");
       }
@@ -93,9 +99,11 @@ export function PluginConfigTab() {
   }, [selectedId, showBanner]);
 
   const handleAddEntry = useCallback(() => {
-    const k = newKey.trim();
-    if (!k) {
-      showBanner("error", "키를 입력하세요.");
+    let k: string;
+    try {
+      k = sanitizePluginConfigKey(newKey.trim());
+    } catch (e) {
+      showBanner("error", (e as Error).message);
       return;
     }
     if (entries.some((e) => e.key === k)) {
@@ -120,7 +128,12 @@ export function PluginConfigTab() {
     setSaving(true);
     try {
       const config = entriesToConfig(entries);
-      await window.lvis.pluginConfig.set(selectedId, config);
+      const result = await window.lvis.pluginConfig.set(selectedId, config);
+      if (!result.ok) {
+        showBanner("error", result.message ?? "저장 실패");
+        return;
+      }
+      setEntries(configToEntries(result.config));
       showBanner("success", "설정이 저장되었습니다.");
     } catch (e) {
       showBanner("error", (e as Error).message ?? "저장 실패");
