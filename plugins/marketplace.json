@@ -151,5 +151,16 @@
         }
       ]
     }
+  ,
+    {
+      "id": "hello-world",
+      "name": "Hello World",
+      "description": "개발용 샘플 플러그인 — hello_world 도구 테스트",
+      "packageSpec": "file:plugins/installed/hello-world",
+      "deployment": "managed",
+      "publisher": "LVIS Dev",
+      "tools": ["hello_world"],
+      "devOnly": true
+    }
   ]
 }

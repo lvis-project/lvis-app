@@ -1,0 +1,26 @@
+{
+  "id": "hello-world",
+  "name": "Hello World",
+  "version": "0.1.0",
+  "deployment": "managed",
+  "publisher": "LVIS Dev",
+  "entry": "dist/hostPlugin.js",
+  "description": "개발용 샘플 플러그인 — hello_world 도구 테스트",
+  "tools": ["hello_world"],
+  "toolSchemas": {
+    "hello_world": {
+      "description": "인사말을 반환하는 테스트 도구",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "인사할 이름" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "permissions": [],
+  "keywords": [
+    { "keyword": "안녕", "skillId": "hello_world" }
+  ]
+}
