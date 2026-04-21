@@ -8,13 +8,7 @@ import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
-import {
-  installFromMarketplace,
-  isMarketplaceDirectPreferred,
-  isNpmFallbackEnabled,
-  MarketplaceInstallerError,
-} from "./marketplace-installer.js";
-import { getBundledPublicKeys } from "./publisher-keys.js";
+import AdmZip from "adm-zip";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
@@ -220,48 +214,31 @@ export class PluginMarketplaceService {
     // before it gets overwritten so rollbackPlugin() can restore it.
     await this.cacheCurrentVersion(pluginId);
 
-    // AP-1 FU Task B: marketplace-direct path (feature-flag gated).
-    // When LVIS_MARKETPLACE_PREFER_DIRECT=1, attempt the signed binary
-    // delivery path before falling back to npm.
-    if (isMarketplaceDirectPreferred()) {
-      // Derive version from packageSpec (e.g. "@lvis/foo@1.2.3" → "1.2.3").
-      const versionMatch = plugin.packageSpec.match(/@([^@]+)$/);
-      const version = versionMatch ? versionMatch[1] : "latest";
-      // Adapt MarketplaceFetcher → MarketplaceHttp interface.
-      const http = {
-        downloadArtifact: async (slug: string, ver: string) => {
-          const { zipBuffer, sha256 } = await this.fetcher.downloadVersion(slug, ver);
-          return { body: zipBuffer, sha256Header: sha256, status: 200 };
-        },
-        fetchSignatureEnvelope: async (_slug: string, _ver: string) => {
-          throw new MarketplaceInstallerError(
-            "ENVELOPE_FETCH_NOT_SUPPORTED",
-            "current fetcher does not support fetchSignatureEnvelope",
-          );
-        },
+    // VS Code-style: download zip from marketplace API and extract directly.
+    // No npm registry lookup — the zip is self-contained.
+    const dlVersion = plugin.version ?? "latest";
+    const { zipBuffer } = await this.fetcher.downloadVersion(plugin.slug ?? plugin.id, dlVersion);
+    const pluginDir = resolve(this.installedDir, plugin.id);
+    await mkdir(pluginDir, { recursive: true });
+    new AdmZip(zipBuffer).extractAllTo(pluginDir, true /* overwrite */);
+
+    // Use plugin.json bundled in the zip; fall back to generating from catalog metadata.
+    const manifestFile = resolve(pluginDir, "plugin.json");
+    let zipHasManifest = false;
+    try { await readFile(manifestFile, "utf-8"); zipHasManifest = true; } catch { /* not in zip */ }
+    if (!zipHasManifest) {
+      const m: Record<string, unknown> = {
+        id: plugin.id, name: plugin.name, version: dlVersion,
+        entry: "./dist/hostPlugin.js",
+        tools: plugin.tools, config: plugin.defaultConfig ?? {},
+        packageName: plugin.packageName,
       };
-      try {
-        await installFromMarketplace(pluginId, version, {
-          http,
-          publicKeys: getBundledPublicKeys(),
-        });
-        // Continue to post-flight registry update below.
-      } catch (err) {
-        if (!isNpmFallbackEnabled()) throw err;
-        this.log?.(
-          `marketplace-direct failed (${err instanceof MarketplaceInstallerError ? err.code : "unknown"}), falling back to npm`,
-          err,
-        );
-        // Fall through to npm path.
-        await this.runNpmInstall(plugin.packageSpec);
-      }
-    } else {
-      await this.runNpmInstall(plugin.packageSpec);
+      if (plugin.deployment) m.deployment = plugin.deployment;
+      if (plugin.publisher) m.publisher = plugin.publisher;
+      await writeFile(manifestFile, `${JSON.stringify(m, null, 2)}\n`);
     }
-    const manifestPath = await this.writeInstalledManifest(plugin);
-    // Cache the freshly-installed version too so rollback targets don't
-    // include the version we just promoted to "current".
-    await this.cacheVersionFromManifest(pluginId, resolve(dirname(this.registryPath), manifestPath));
+    const manifestPath = manifestFile; // absolute path (outside appRoot — no relative conversion needed)
+    await this.cacheVersionFromManifest(pluginId, manifestPath);
 
     // §M1 F-round: atomic read-modify-write under registry lock.
     await updatePluginRegistry(this.registryPath, (registry) => {
