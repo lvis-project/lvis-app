@@ -209,4 +209,11 @@ contextBridge.exposeInMainWorld("lvis", {
   approval: api.approval,
   policy: api.policy,
   mcp: api.mcp,
+  plugins: {
+    cards: () => ipcRenderer.invoke("lvis:plugins:cards"),
+  },
+  pluginConfig: {
+    get: (pluginId: string) => ipcRenderer.invoke("lvis:plugins:config:get", pluginId),
+    set: (pluginId: string, config: Record<string, unknown>) => ipcRenderer.invoke("lvis:plugins:config:set", pluginId, config),
+  },
 });
