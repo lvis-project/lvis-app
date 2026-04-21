@@ -1,8 +1,18 @@
+import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdmZip from "adm-zip";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+
+const mockedPublisherKeys = vi.hoisted(() => ({
+  getBundledPublicKeys: vi.fn(),
+}));
+
+vi.mock("../publisher-keys.js", () => ({
+  getBundledPublicKeys: mockedPublisherKeys.getBundledPublicKeys,
+}));
+
 import { PluginMarketplaceService } from "../marketplace.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
@@ -15,6 +25,30 @@ function makePluginZip(manifest: Record<string, unknown>): Buffer {
     Buffer.from("export default async function createPlugin() { return { handlers: {} }; }\n", "utf-8"),
   );
   return zip.toBuffer();
+}
+
+function freshEd25519() {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const rawPub = publicKey.export({ format: "jwk" }) as { x: string };
+  return {
+    privateKey,
+    publicKey: Buffer.from(rawPub.x, "base64url"),
+  };
+}
+
+function makeEnvelope(body: Buffer, privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"]) {
+  return {
+    version: 1 as const,
+    iat: Math.floor(Date.now() / 1000),
+    artifact_sha256: createHash("sha256").update(body).digest("hex"),
+    signatures: [
+      {
+        key_id: "test-v1",
+        alg: "ed25519" as const,
+        sig: cryptoSign(null, body, privateKey).toString("base64"),
+      },
+    ],
+  };
 }
 
 describe("PluginMarketplaceService install()", () => {
@@ -37,6 +71,7 @@ describe("PluginMarketplaceService install()", () => {
     cacheRoot = join(appRoot, ".cache");
     await mkdir(installedDir, { recursive: true });
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
+    mockedPublisherKeys.getBundledPublicKeys.mockReset();
   });
 
   afterEach(async () => {
@@ -65,6 +100,10 @@ describe("PluginMarketplaceService install()", () => {
   }
 
   it("downloads and extracts a marketplace zip without using npm", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
     const plugin: PluginMarketplaceItem = {
       id: "test-plugin",
       slug: "test-plugin",
@@ -75,20 +114,31 @@ describe("PluginMarketplaceService install()", () => {
       packageName: "@lvis/test-plugin",
       tools: ["ping"],
     };
-    const downloadVersion = vi.fn(async () => ({
-      zipBuffer: makePluginZip({
-        id: plugin.id,
-        name: plugin.name,
-        version: plugin.version,
-        entry: "./dist/hostPlugin.js",
-        tools: plugin.tools,
-      }),
-      sha256: "deadbeef",
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    const downloadVersion = vi.fn(async () => {
+      throw new Error("downloadVersion should not be called for signed installs");
+    });
+    const downloadArtifact = vi.fn(async () => ({
+      body: zipBuffer,
+      sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+      status: 200,
     }));
-    const fetcher: MarketplaceFetcher = {
+    const fetchSignatureEnvelope = vi.fn(async () => makeEnvelope(zipBuffer, signingKey.privateKey));
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: typeof downloadArtifact;
+      fetchSignatureEnvelope: typeof fetchSignatureEnvelope;
+    } = {
       listPlugins: async () => [plugin],
       getPluginDetail: async () => plugin,
       downloadVersion,
+      downloadArtifact,
+      fetchSignatureEnvelope,
     };
 
     const { service, npmInstallMock } = makeService(fetcher);
@@ -97,7 +147,9 @@ describe("PluginMarketplaceService install()", () => {
       installed: true,
     });
 
-    expect(downloadVersion).toHaveBeenCalledWith("test-plugin", "1.2.3");
+    expect(downloadArtifact).toHaveBeenCalledWith("test-plugin", "1.2.3");
+    expect(fetchSignatureEnvelope).toHaveBeenCalledWith("test-plugin", "1.2.3");
+    expect(downloadVersion).not.toHaveBeenCalled();
     expect(npmInstallMock).not.toHaveBeenCalled();
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
@@ -108,6 +160,130 @@ describe("PluginMarketplaceService install()", () => {
     ) as { version: string; entry: string };
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
+  });
+
+  it("rejects zip-slip entries from signed marketplace artifacts", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "slip-plugin",
+      slug: "slip-plugin",
+      name: "Slip Plugin",
+      description: "Bad zip payload",
+      version: "1.0.0",
+      packageSpec: "@lvis/slip-plugin@1.0.0",
+      packageName: "@lvis/slip-plugin",
+      tools: [],
+    };
+    const zip = new AdmZip();
+    zip.addFile("C:/escape.txt", Buffer.from("owned", "utf-8"));
+    const zipBuffer = zip.toBuffer();
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: (slug: string, version: string) => Promise<{
+        body: Buffer;
+        sha256Header: string | null;
+        status: number;
+      }>;
+      fetchSignatureEnvelope: (slug: string, version: string) => Promise<ReturnType<typeof makeEnvelope>>;
+    } = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: vi.fn(async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      }),
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+    };
+
+    const { service } = makeService(fetcher);
+    await expect(service.install("slip-plugin")).rejects.toThrow(/absolute drive path|escapes install root/i);
+  });
+
+  it("replaces the old install directory on upgrade so stale files do not survive", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "upgrade-plugin",
+      slug: "upgrade-plugin",
+      name: "Upgrade Plugin",
+      description: "Upgrade test plugin",
+      version: "1.0.0",
+      packageSpec: "@lvis/upgrade-plugin@1.0.0",
+      packageName: "@lvis/upgrade-plugin",
+      tools: [],
+    };
+    const v1 = new AdmZip();
+    v1.addFile("plugin.json", Buffer.from(JSON.stringify({
+      id: plugin.id,
+      name: plugin.name,
+      version: "1.0.0",
+      entry: "./dist/hostPlugin.js",
+      tools: [],
+    }), "utf-8"));
+    v1.addFile("dist/hostPlugin.js", Buffer.from("export default {};\n", "utf-8"));
+    v1.addFile("dist/stale.txt", Buffer.from("stale\n", "utf-8"));
+    const v1Buffer = v1.toBuffer();
+
+    const v2 = new AdmZip();
+    v2.addFile("plugin.json", Buffer.from(JSON.stringify({
+      id: plugin.id,
+      name: plugin.name,
+      version: "1.1.0",
+      entry: "./dist/hostPlugin.js",
+      tools: [],
+    }), "utf-8"));
+    v2.addFile("dist/hostPlugin.js", Buffer.from("export default { upgraded: true };\n", "utf-8"));
+    const v2Buffer = v2.toBuffer();
+
+    const downloadArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({
+        body: v1Buffer,
+        sha256Header: createHash("sha256").update(v1Buffer).digest("hex"),
+        status: 200,
+      })
+      .mockResolvedValueOnce({
+        body: v2Buffer,
+        sha256Header: createHash("sha256").update(v2Buffer).digest("hex"),
+        status: 200,
+      });
+    const fetchSignatureEnvelope = vi
+      .fn()
+      .mockResolvedValueOnce(makeEnvelope(v1Buffer, signingKey.privateKey))
+      .mockResolvedValueOnce(makeEnvelope(v2Buffer, signingKey.privateKey));
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: typeof downloadArtifact;
+      fetchSignatureEnvelope: typeof fetchSignatureEnvelope;
+    } = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: vi.fn(async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      }),
+      downloadArtifact,
+      fetchSignatureEnvelope,
+    };
+
+    const { service } = makeService(fetcher);
+    await service.install("upgrade-plugin");
+    plugin.version = "1.1.0";
+    plugin.packageSpec = "@lvis/upgrade-plugin@1.1.0";
+    await service.install("upgrade-plugin");
+
+    const staleFile = join(installedDir, "upgrade-plugin", "dist", "stale.txt");
+    const manifest = JSON.parse(
+      await readFile(join(installedDir, "upgrade-plugin", "plugin.json"), "utf-8"),
+    ) as { version: string };
+    await expect(readFile(staleFile, "utf-8")).rejects.toThrow();
+    expect(manifest.version).toBe("1.1.0");
   });
 
   it("uses the local file install path for file: package specs", async () => {
@@ -159,6 +335,10 @@ describe("PluginMarketplaceService install()", () => {
   });
 
   it("surfaces zip extraction errors instead of silently falling back", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
     const plugin: PluginMarketplaceItem = {
       id: "broken-plugin",
       slug: "broken-plugin",
@@ -169,13 +349,26 @@ describe("PluginMarketplaceService install()", () => {
       packageName: "@lvis/broken-plugin",
       tools: [],
     };
-    const fetcher: MarketplaceFetcher = {
+    const body = Buffer.from("not-a-zip");
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: (slug: string, version: string) => Promise<{
+        body: Buffer;
+        sha256Header: string | null;
+        status: number;
+      }>;
+      fetchSignatureEnvelope: (slug: string, version: string) => Promise<ReturnType<typeof makeEnvelope>>;
+    } = {
       listPlugins: async () => [plugin],
       getPluginDetail: async () => plugin,
-      downloadVersion: async () => ({
-        zipBuffer: Buffer.from("not-a-zip"),
-        sha256: "badzip",
+      downloadVersion: vi.fn(async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
       }),
+      downloadArtifact: async () => ({
+        body,
+        sha256Header: createHash("sha256").update(body).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(body, signingKey.privateKey),
     };
 
     const { service, npmInstallMock } = makeService(fetcher);

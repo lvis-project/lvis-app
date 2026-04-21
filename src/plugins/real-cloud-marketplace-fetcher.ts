@@ -21,8 +21,14 @@ import {
   fetchPublicHttpResponse,
   NetworkGuardError,
 } from "../core/network-guard.js";
+import type { MarketplaceHttp } from "./marketplace-installer.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
-import type { PluginMarketplaceItem, PluginUiExtension, RequiresSpec } from "./types.js";
+import type {
+  PluginMarketplaceItem,
+  PluginUiExtension,
+  RequiresSpec,
+  SignatureEnvelope,
+} from "./types.js";
 
 /**
  * Allowlist for npm package identifiers. Matches scoped (@scope/name) and
@@ -75,7 +81,7 @@ interface ServerCatalogRow {
   requires?: { capabilities?: unknown[] } | null;
 }
 
-export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
+export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp {
   constructor(private readonly config: RealCloudMarketplaceConfig) {}
 
   async listPlugins(): Promise<PluginMarketplaceItem[]> {
@@ -103,22 +109,62 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
     slug: string,
     version: string,
   ): Promise<{ zipBuffer: Buffer; sha256: string }> {
-    const res = await this.request(
-      "GET",
-      `/api/v1/plugins/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/download`,
-    );
-    const arrayBuffer = await res.arrayBuffer();
-    const zipBuffer = Buffer.from(arrayBuffer);
+    const res = await this.downloadArtifact(slug, version);
+    if (res.status >= 400) {
+      throw new Error(`marketplace ${res.status}: download failed`);
+    }
+    const zipBuffer = res.body;
     const sha256 = createHash("sha256").update(zipBuffer).digest("hex");
     return { zipBuffer, sha256 };
   }
 
+  async downloadArtifact(
+    slug: string,
+    version: string,
+  ): Promise<{
+    body: Buffer;
+    sha256Header: string | null;
+    status: number;
+    retryAfterSeconds?: number;
+  }> {
+    const res = await this.request(
+      "GET",
+      `/api/v1/plugins/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/download`,
+      { accept: "application/octet-stream" },
+      { allowNonOk: true },
+    );
+    const arrayBuffer = await res.arrayBuffer();
+    const retryAfter = parseRetryAfterSeconds(res.headers?.get?.("retry-after") ?? null);
+    return {
+      body: Buffer.from(arrayBuffer),
+      sha256Header: res.headers?.get?.("x-plugin-sha256") ?? null,
+      status: res.status,
+      retryAfterSeconds: retryAfter ?? undefined,
+    };
+  }
+
+  async fetchSignatureEnvelope(slug: string, version: string): Promise<SignatureEnvelope> {
+    const res = await this.request(
+      "GET",
+      `/api/v1/plugins/${encodeURIComponent(slug)}/versions/${encodeURIComponent(version)}/download.sig`,
+    );
+    return (await res.json()) as SignatureEnvelope;
+  }
+
   // ─── Internals ────────────────────────────────────────────────
 
-  private async request(method: string, path: string): Promise<Response> {
+  private async request(
+    method: string,
+    path: string,
+    extraHeaders: Record<string, string> = {},
+    options: { allowNonOk?: boolean } = {},
+  ): Promise<Response> {
     const base = this.config.baseUrl.replace(/\/$/, "");
     const url = `${base}${path}`;
-    const headers: Record<string, string> = { accept: "application/json" };
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      ...extraHeaders,
+    };
     if (this.config.apiKey) {
       headers["authorization"] = `Bearer ${this.config.apiKey}`;
     }
@@ -135,7 +181,7 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
           headers,
           signal: controller.signal,
         });
-        if (!res.ok) {
+        if (!options.allowNonOk && !res.ok) {
           throw new Error(`marketplace ${res.status}: ${res.statusText}`);
         }
         return res;
@@ -150,7 +196,7 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
         headers,
         timeoutMs,
       });
-      if (!res.ok) {
+      if (!options.allowNonOk && !res.ok) {
         throw new Error(`marketplace ${res.status}: ${res.statusText}`);
       }
       return res;
@@ -276,4 +322,15 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
 
     return item;
   }
+}
+
+function parseRetryAfterSeconds(value: string | null): number | null {
+  if (!value) return null;
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber) && asNumber >= 0) {
+    return asNumber;
+  }
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return null;
+  return Math.max(0, Math.ceil((at - Date.now()) / 1000));
 }

@@ -190,6 +190,12 @@ export interface SettingsServiceOptions {
   userDataPath: string;
 }
 
+const LEGACY_INSECURE_MARKETPLACE_DEFAULT = {
+  backend: "real-cloud" as const,
+  realCloudBaseUrl: "http://localhost:8000",
+  realCloudAllowPrivateNetwork: true,
+};
+
 const DEFAULT_SETTINGS: AppSettings = {
   llm: {
     provider: "claude",
@@ -210,9 +216,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     provider: "duckduckgo",
   },
   marketplace: {
-    backend: "real-cloud",
-    realCloudBaseUrl: "http://localhost:8000",
-    realCloudAllowPrivateNetwork: true,
+    backend: "mock",
+    realCloudAllowPrivateNetwork: false,
   },
   proactive: {
     enableDailyBriefing: false,
@@ -418,15 +423,28 @@ export class SettingsService {
         llm.provider = DEFAULT_SETTINGS.llm.provider;
         llm.model = DEFAULT_SETTINGS.llm.model;
       }
-      // Migrate legacy marketplace.backend="mock" to "real-cloud" — the mock
-      // fetcher is now test-only and cannot serve binary downloads. Old installs
-      // carrying the "mock" default would otherwise fail every install attempt
-      // with "MockMarketplaceFetcher does not support downloadVersion()".
       const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
-      if (marketplaceParsed.backend === "mock") {
-        marketplaceParsed.backend = "real-cloud";
-        if (!marketplaceParsed.realCloudBaseUrl) marketplaceParsed.realCloudBaseUrl = "http://localhost:8000";
-        if (marketplaceParsed.realCloudAllowPrivateNetwork === undefined) marketplaceParsed.realCloudAllowPrivateNetwork = true;
+      // Security hardening: an earlier default/migration auto-enabled a
+      // loopback marketplace (`http://localhost:8000`) with the private-network
+      // SSRF bypass set to true. Treat that exact tuple as an accidental legacy
+      // default, not an explicit user choice, and fall back to the safe mock
+      // backend instead. Real cloud deployments must now be configured
+      // intentionally.
+      if (
+        marketplaceParsed.backend === LEGACY_INSECURE_MARKETPLACE_DEFAULT.backend &&
+        marketplaceParsed.realCloudBaseUrl === LEGACY_INSECURE_MARKETPLACE_DEFAULT.realCloudBaseUrl &&
+        marketplaceParsed.realCloudAllowPrivateNetwork ===
+          LEGACY_INSECURE_MARKETPLACE_DEFAULT.realCloudAllowPrivateNetwork
+      ) {
+        marketplaceParsed.backend = DEFAULT_SETTINGS.marketplace.backend;
+        delete marketplaceParsed.realCloudBaseUrl;
+        marketplaceParsed.realCloudAllowPrivateNetwork =
+          DEFAULT_SETTINGS.marketplace.realCloudAllowPrivateNetwork;
+      } else if (
+        marketplaceParsed.backend === "real-cloud" &&
+        marketplaceParsed.realCloudAllowPrivateNetwork === undefined
+      ) {
+        marketplaceParsed.realCloudAllowPrivateNetwork = false;
       }
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
 
