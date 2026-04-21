@@ -154,6 +154,8 @@ export class PluginRuntime {
    * disable() so host-side state scrubbing is deterministic.
    */
   private readonly disposers = new Map<string, Array<() => void>>();
+  /** Plugins whose import/load failed — surfaced to Settings UI as status="failed". */
+  private readonly failedPluginIds = new Set<string>();
   private loaded = false;
   /** Sprint 4-B §B-1 — lazily-compiled AJV validator for plugin.schema.json. */
   private manifestValidator: ValidateFunction | null = null;
@@ -256,13 +258,30 @@ export class PluginRuntime {
       } catch {
         resolvedEntryPath = entryPath;
       }
-      const module = (await import(pathToFileURL(resolvedEntryPath).href)) as {
-        default?: RuntimePluginFactory;
-        createPlugin?: RuntimePluginFactory;
-      };
+      let module: { default?: RuntimePluginFactory; createPlugin?: RuntimePluginFactory };
+      try {
+        module = (await import(pathToFileURL(resolvedEntryPath).href)) as {
+          default?: RuntimePluginFactory;
+          createPlugin?: RuntimePluginFactory;
+        };
+      } catch (err) {
+        // Fail-soft: per-plugin import failures (missing deps, syntax errors,
+        // electron-only imports, etc.) must NOT crash boot. The plugin is
+        // dropped + marked failed so the Settings UI can surface the reason,
+        // while other plugins continue loading.
+        console.error(`[plugin-runtime] ${manifest.id} import failed:`, (err as Error).message);
+        this.auditLog?.("error", "plugin_import_failed", {
+          pluginId: manifest.id,
+          reason: (err as Error).message,
+        });
+        this.failedPluginIds.add(manifest.id);
+        continue;
+      }
       const createPlugin = module.default ?? module.createPlugin;
       if (!createPlugin) {
-        throw new Error(`Plugin entry does not export default/createPlugin: ${manifest.id}`);
+        console.error(`[plugin-runtime] ${manifest.id} entry does not export default/createPlugin — skipped`);
+        this.failedPluginIds.add(manifest.id);
+        continue;
       }
 
       // 플러그인별 스코프된 HostApi 생성
