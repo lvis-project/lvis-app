@@ -25,3 +25,4 @@ storybook-static/
 # Dynamically installed plugins (runtime-only, not committed)
 packages/hello-world/
 
+.claude/worktrees/
