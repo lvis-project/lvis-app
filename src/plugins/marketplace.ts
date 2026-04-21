@@ -1,4 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -218,31 +219,8 @@ export class PluginMarketplaceService {
     // before it gets overwritten so rollbackPlugin() can restore it.
     await this.cacheCurrentVersion(pluginId);
 
-    // VS Code-style: download zip from marketplace API and extract directly.
-    // No npm registry lookup — the zip is self-contained.
     const dlVersion = plugin.version ?? "latest";
-    const { zipBuffer } = await this.fetcher.downloadVersion(plugin.slug ?? plugin.id, dlVersion);
-    const pluginDir = resolve(this.installedDir, plugin.id);
-    await mkdir(pluginDir, { recursive: true });
-    new AdmZip(zipBuffer).extractAllTo(pluginDir, true /* overwrite */);
-
-    // Use plugin.json bundled in the zip; fall back to generating from catalog metadata.
-    const manifestFile = resolve(pluginDir, "plugin.json");
-    let zipHasManifest = false;
-    try { await readFile(manifestFile, "utf-8"); zipHasManifest = true; } catch { /* not in zip */ }
-    if (!zipHasManifest) {
-      // Only include fields allowed by schemas/plugin.schema.json (additionalProperties: false).
-      const safeVersion = /^\d+\.\d+\.\d+/.test(dlVersion) ? dlVersion : "0.0.0";
-      const m: Record<string, unknown> = {
-        id: plugin.id, name: plugin.name, version: safeVersion,
-        entry: "./dist/hostPlugin.js",
-        tools: plugin.tools, config: plugin.defaultConfig ?? {},
-      };
-      if (plugin.deployment === "managed" || plugin.deployment === "user") m.deployment = plugin.deployment;
-      if (plugin.publisher) m.publisher = plugin.publisher;
-      await writeFile(manifestFile, `${JSON.stringify(m, null, 2)}\n`);
-    }
-    const manifestPath = manifestFile; // absolute path (outside appRoot — no relative conversion needed)
+    const manifestPath = await this.installArtifact(plugin, dlVersion);
     await this.cacheVersionFromManifest(pluginId, manifestPath);
 
     // §M1 F-round: atomic read-modify-write under registry lock.
@@ -288,7 +266,7 @@ export class PluginMarketplaceService {
       version: 1,
       plugins: [],
     }));
-    const installedIds = new Set(registry.plugins.map((p) => p.id));
+    const installedIds = await this.resolveInstalledIds(registry.plugins);
     for (const plugin of managed) {
       if (installedIds.has(plugin.id)) continue;
       try {
@@ -573,11 +551,7 @@ export class PluginMarketplaceService {
     await mkdir(pluginDir, { recursive: true });
     const manifestFile = resolve(pluginDir, "plugin.json");
     const entryAbsPath = resolve(this.appRoot, "node_modules", plugin.packageName, "dist/hostPlugin.js");
-    // H2 defence-in-depth: verify resolved path stays under node_modules
-    const nmRoot = resolve(this.appRoot, "node_modules");
-    if (!entryAbsPath.startsWith(nmRoot + "/") && !entryAbsPath.startsWith(nmRoot + "\\")) {
-      throw new Error(`plugin "${plugin.id}" package path escapes node_modules`);
-    }
+    this.assertPathWithinNodeModules(plugin.id, entryAbsPath, "package");
     const entryRelPath = relative(pluginDir, entryAbsPath).split("\\").join("/");
     const resolvedUi = (plugin.ui ?? []).map((extension) => this.resolveUiExtension(plugin, pluginDir, extension));
     const manifest: Record<string, unknown> = {
@@ -613,11 +587,7 @@ export class PluginMarketplaceService {
     const entrySource = extension.entry ?? extension.page;
     if (!entrySource) return extension;
     const entryAbsPath = resolve(this.appRoot, "node_modules", plugin.packageName, entrySource);
-    // H2 defence-in-depth: verify resolved path stays under node_modules
-    const nmRoot = resolve(this.appRoot, "node_modules");
-    if (!entryAbsPath.startsWith(nmRoot + "/") && !entryAbsPath.startsWith(nmRoot + "\\")) {
-      throw new Error(`plugin "${plugin.id}" UI entry path escapes node_modules`);
-    }
+    this.assertPathWithinNodeModules(plugin.id, entryAbsPath, "UI entry");
     const entryRelPath = relative(pluginDir, entryAbsPath).split("\\").join("/");
     return {
       ...extension,
@@ -625,7 +595,6 @@ export class PluginMarketplaceService {
       page: extension.page ? entryRelPath : undefined,
     };
   }
-
 
   private async resolvePackageName(pluginId: string, manifestPath: string): Promise<string | undefined> {
     const plugins = await this.fetcher.listPlugins().catch(() => [] as PluginMarketplaceItem[]);
@@ -685,7 +654,142 @@ export class PluginMarketplaceService {
     }
     return manifests;
   }
+
+  private async installArtifact(
+    plugin: PluginMarketplaceItem,
+    version: string,
+  ): Promise<string> {
+    if (plugin.packageSpec.startsWith("file:") || this.fetcher instanceof MockMarketplaceFetcher) {
+      const packageSpec = this.resolveLocalPackageSpec(plugin.packageSpec);
+      await this.runNpmInstall(packageSpec);
+      return this.writeInstalledManifest(plugin, version);
+    }
+
+    const { zipBuffer } = await this.fetcher.downloadVersion(plugin.slug ?? plugin.id, version);
+    const pluginDir = resolve(this.installedDir, plugin.id);
+    await mkdir(pluginDir, { recursive: true });
+    new AdmZip(zipBuffer).extractAllTo(pluginDir, true);
+
+    const manifestFile = resolve(pluginDir, "plugin.json");
+    let zipHasManifest = false;
+    try {
+      await readFile(manifestFile, "utf-8");
+      zipHasManifest = true;
+    } catch {
+      // not in zip
+    }
+    if (!zipHasManifest) {
+      const safeVersion = /^\d+\.\d+\.\d+/.test(version) ? version : "0.0.0";
+      const manifest: Record<string, unknown> = {
+        id: plugin.id,
+        name: plugin.name,
+        version: safeVersion,
+        entry: "./dist/hostPlugin.js",
+        tools: plugin.tools,
+        config: plugin.defaultConfig ?? {},
+      };
+      if (plugin.deployment === "managed" || plugin.deployment === "user") {
+        manifest.deployment = plugin.deployment;
+      }
+      if (plugin.publisher) {
+        manifest.publisher = plugin.publisher;
+      }
+      await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+    }
+    return manifestFile;
+  }
+
+  private async resolveInstalledIds(
+    entries: Array<{ id: string; manifestPath: string }>,
+  ): Promise<Set<string>> {
+    const installedIds = new Set<string>();
+    for (const entry of entries) {
+      const manifestPath = isAbsolute(entry.manifestPath)
+        ? entry.manifestPath
+        : resolve(dirname(this.registryPath), entry.manifestPath);
+      try {
+        await readFile(manifestPath, "utf-8");
+        installedIds.add(entry.id);
+      } catch {
+        console.warn(
+          `[marketplace] stale registry entry ignored during managed bootstrap: ${entry.id}`,
+        );
+      }
+    }
+    return installedIds;
+  }
+
+  private resolveLocalPackageSpec(packageSpec: string): string {
+    if (!packageSpec.startsWith("file:")) {
+      return packageSpec;
+    }
+    const target = packageSpec.slice("file:".length).trim();
+    if (!target) {
+      throw new Error("local plugin packageSpec is empty");
+    }
+    const workspaceRoot = resolve(this.appRoot, "..");
+    const resolvedTarget = isAbsolute(target)
+      ? target
+      : resolve(this.appRoot, target);
+    if (!existsSync(resolvedTarget)) {
+      throw new Error(`local plugin package not found: ${packageSpec}`);
+    }
+    const realWorkspaceRoot = realpathSync(workspaceRoot);
+    const realTarget = realpathSync(resolvedTarget);
+    if (!this.isWithin(realWorkspaceRoot, realTarget)) {
+      throw new Error(`local plugin package escapes workspace root: ${packageSpec}`);
+    }
+    return `file:${realTarget}`;
+  }
+
+  private assertPathWithinNodeModules(
+    pluginId: string,
+    targetPath: string,
+    label: string,
+  ): void {
+    const nodeModulesRoot = resolve(this.appRoot, "node_modules");
+    const realNodeModulesRoot = existsSync(nodeModulesRoot)
+      ? realpathSync(nodeModulesRoot)
+      : nodeModulesRoot;
+    const resolvedTarget = existsSync(targetPath)
+      ? realpathSync(targetPath)
+      : targetPath;
+    if (!this.isWithin(realNodeModulesRoot, resolvedTarget)) {
+      throw new Error(`plugin "${pluginId}" ${label} path escapes node_modules`);
+    }
+  }
+
   private async runNpmInstall(packageSpec: string): Promise<void> {
+    if (packageSpec.startsWith("file:")) {
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        const child = spawn("npm", ["install", "--prefix", this.appRoot, "--", packageSpec], {
+          stdio: "pipe",
+          shell: false,
+          cwd: this.appRoot,
+        });
+        let stderr = "";
+        child.stdout.on("data", (chunk) => {
+          process.stdout.write(chunk);
+        });
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk.toString("utf-8");
+          process.stderr.write(chunk);
+        });
+        const timeout = setTimeout(() => {
+          child.kill("SIGTERM");
+          rejectPromise(new Error(`npm install timeout for ${packageSpec}`));
+        }, 60_000);
+        child.on("exit", (code) => {
+          clearTimeout(timeout);
+          if (code === 0) {
+            resolvePromise();
+            return;
+          }
+          rejectPromise(new Error(stderr || `npm install failed (${code})`));
+        });
+      });
+      return;
+    }
     // M4 defence-in-depth: refuse unpinned package specs to prevent unintended
     // installs of "latest" from the public npm registry. The version portion
     // (after the last '@') must start with a digit, '^', or '~'.
@@ -755,4 +859,3 @@ export class PluginMarketplaceService {
     });
   }
 }
-

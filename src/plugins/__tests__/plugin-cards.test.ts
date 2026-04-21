@@ -39,6 +39,14 @@ function writePlugin(root: string, id: string, opts: {
   return join(dir, "plugin.json");
 }
 
+function writeRegistry(root: string, entries: Array<{ id: string; manifestPath: string; enabled?: boolean }>) {
+  const registryDir = join(root, "plugins");
+  mkdirSync(registryDir, { recursive: true });
+  const registryPath = join(registryDir, "registry.json");
+  writeFileSync(registryPath, JSON.stringify({ version: 1, plugins: entries }));
+  return registryPath;
+}
+
 describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
   let tmp: string;
 
@@ -104,5 +112,38 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     const cards = runtime.listPluginCards(fakeRegistry);
     expect(cards[0].sampleTools).toEqual(["filtered_a", "filtered_c"]);
     expect(cards[0].sampleTools).not.toContain("filtered_b");
+  });
+
+  it("surfaces disabled and failed plugin loadStatus values from registry-backed runtime", async () => {
+    const disabledManifest = writePlugin(tmp, "com.lge.disabled", {
+      name: "Disabled",
+      tools: ["disabled_read"],
+    });
+    const failedDir = join(tmp, "com.lge.failed");
+    mkdirSync(failedDir, { recursive: true });
+    writeFileSync(join(failedDir, "plugin.json"), JSON.stringify({
+      id: "com.lge.failed",
+      name: "Failed",
+      version: "1.0.0",
+      entry: "index.mjs",
+      tools: ["failed_read"],
+    }));
+    writeFileSync(
+      join(failedDir, "index.mjs"),
+      `throw new Error("boom"); export default () => ({ handlers: { failed_read: async () => ({ ok: true }) } });`,
+    );
+    const registryPath = writeRegistry(tmp, [
+      { id: "com.lge.disabled", manifestPath: disabledManifest, enabled: false },
+      { id: "com.lge.failed", manifestPath: join(failedDir, "plugin.json"), enabled: true },
+    ]);
+
+    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath });
+    await runtime.load();
+
+    const cards = runtime.listPluginCards().sort((a, b) => a.id.localeCompare(b.id));
+    expect(cards).toEqual([
+      expect.objectContaining({ id: "com.lge.disabled", loadStatus: "disabled" }),
+      expect.objectContaining({ id: "com.lge.failed", loadStatus: "failed" }),
+    ]);
   });
 });
