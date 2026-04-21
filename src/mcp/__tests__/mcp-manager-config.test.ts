@@ -192,6 +192,17 @@ describe("McpManager — addConfig()", () => {
     expect(raw.servers.map((server) => server.id)).toContain("warn-srv");
   });
 
+  it("cleans up failed clients after connectServer throws", async () => {
+    mockConnect.mockRejectedValueOnce(new Error("connect boom"));
+    const mgr = await makeManager();
+
+    await expect(
+      mgr.addConfig({ id: "warn-srv", transport: "stdio", command: "npx tool" }),
+    ).resolves.toEqual({ connected: false, warning: "connect boom" });
+
+    expect(mgr.listServers()).toEqual([]);
+  });
+
   it("does not create a new .bak when Windows rename hits EEXIST during save", async () => {
     const existingServers: McpServerConfig[] = [
       { id: "existing-srv", transport: "stdio", command: "cmd" },
@@ -230,6 +241,44 @@ describe("McpManager — addConfig()", () => {
     expect(firstTmpPath).not.toBe(`${testConfigPath}.tmp`);
     const dirEntries = await readdir(testDir);
     expect(dirEntries.filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("restores the previous config if the Windows EEXIST retry rename also fails", async () => {
+    const existingServers: McpServerConfig[] = [
+      { id: "existing-srv", transport: "stdio", command: "cmd" },
+    ];
+    await writeFile(testConfigPath, JSON.stringify({ servers: existingServers }), "utf-8");
+
+    let tmpToConfigAttempts = 0;
+    const actualFsPromises =
+      await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    vi.mocked(rename).mockImplementation(async (oldPath, newPath) => {
+      if (oldPath.startsWith(`${testConfigPath}.`) && oldPath.endsWith(".tmp") && newPath === testConfigPath) {
+        tmpToConfigAttempts += 1;
+        if (tmpToConfigAttempts === 1) {
+          const err = new Error("dest exists") as NodeJS.ErrnoException;
+          err.code = "EEXIST";
+          throw err;
+        }
+        if (tmpToConfigAttempts === 2) {
+          const err = new Error("access denied") as NodeJS.ErrnoException;
+          err.code = "EACCES";
+          throw err;
+        }
+      }
+      return actualFsPromises.rename(oldPath, newPath);
+    });
+
+    const mgr = await makeManager();
+    await expect(
+      mgr.addConfig({ id: "new-srv", transport: "stdio", command: "npx tool" }),
+    ).rejects.toThrow("access denied");
+
+    const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
+    expect(raw.servers).toEqual(existingServers);
+    const dirEntries = await readdir(testDir);
+    expect(dirEntries.filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
+    expect(dirEntries.filter((entry) => entry.endsWith(".old"))).toEqual([]);
   });
 
   it("rejects governance-invalid config before save", async () => {

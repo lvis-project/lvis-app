@@ -31,9 +31,9 @@ describe("validateAuthApiKey", () => {
     expect(validateAuthApiKey("api-key", "  sk-abc  ")).toBeNull();
   });
 
-  it("returns null for sso with or without a key (sso does not use apiKey)", () => {
-    expect(validateAuthApiKey("sso", "")).toBeNull();
-    expect(validateAuthApiKey("sso", "some-key")).toBeNull();
+  it("returns an error for sso until runtime support is implemented", () => {
+    expect(validateAuthApiKey("sso", "")).toMatch(/SSO/);
+    expect(validateAuthApiKey("sso", "some-key")).toMatch(/SSO/);
   });
 
   it("returns an error when api-key auth is missing the key", () => {

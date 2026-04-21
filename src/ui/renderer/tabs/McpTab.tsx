@@ -109,6 +109,9 @@ export function validateAuthApiKey(
   auth: "none" | "sso" | "api-key",
   apiKey: string,
 ): string | null {
+  if (auth === "sso") {
+    return "SSO 인증은 아직 지원되지 않습니다.";
+  }
   if (auth === "api-key" && !apiKey.trim()) {
     return "API Key 인증 방식은 API Key를 입력해야 합니다.";
   }
@@ -196,6 +199,8 @@ export function McpTab() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [formBusy, setFormBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const removingIdRef = useRef<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -237,12 +242,18 @@ export function McpTab() {
   // 서버 제거
   const handleRemove = useCallback(
     async (id: string) => {
+      if (removingIdRef.current) return;
+      removingIdRef.current = id;
+      setRemovingId(id);
       try {
         await window.lvis.mcp.removeConfig(id);
+        await fetchAll();
         showBanner("success", `${id} 서버가 제거되었습니다.`);
-        void fetchAll();
       } catch (e) {
         showBanner("error", e instanceof Error ? e.message : String(e));
+      } finally {
+        removingIdRef.current = null;
+        setRemovingId(null);
       }
     },
     [fetchAll, showBanner],
@@ -439,6 +450,7 @@ export function McpTab() {
                         variant="outline"
                         size="sm"
                         className="h-6 text-xs px-2 text-red-600 border-red-300"
+                        disabled={loading || removingId !== null}
                         onClick={() => void handleRemove(id)}
                       >
                         제거

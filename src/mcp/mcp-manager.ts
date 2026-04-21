@@ -162,6 +162,7 @@ export class McpManager {
         }),
       });
     } catch (err) {
+      this.clients.delete(config.id);
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
         sessionId: "mcp-manager",
@@ -341,13 +342,22 @@ export class McpManager {
         await rename(tmpPath, this.configPath);
       } catch (renameErr) {
         // Windows rename() may throw EEXIST when the destination already exists.
-        // Under the cross-process config lock it is safe to follow the repo's
-        // rm-then-rename retry pattern without creating extra secret-bearing copies.
+        // Preserve the old file until the new one is successfully promoted so a
+        // failed retry cannot delete both copies at once.
         if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
+          const oldPath = `${this.configPath}.${process.pid}.${randomBytes(4).toString("hex")}.old`;
           if (existsSync(this.configPath)) {
-            await rm(this.configPath, { force: true });
+            await rename(this.configPath, oldPath);
           }
-          await rename(tmpPath, this.configPath);
+          try {
+            await rename(tmpPath, this.configPath);
+            await rm(oldPath, { force: true }).catch(() => undefined);
+          } catch (retryErr) {
+            if (existsSync(oldPath)) {
+              await rename(oldPath, this.configPath).catch(() => undefined);
+            }
+            throw retryErr;
+          }
         } else {
           throw renameErr;
         }
