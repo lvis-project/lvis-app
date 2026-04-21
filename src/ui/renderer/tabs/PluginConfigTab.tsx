@@ -131,6 +131,22 @@ export function PluginConfigTab() {
 
   const selectedPlugin = plugins.find((p) => p.id === selectedId);
 
+  const handleUninstall = useCallback(async () => {
+    if (!selectedId || !selectedPlugin) return;
+    if (!window.confirm(`"${selectedPlugin.name}" 플러그인을 제거하시겠습니까?`)) return;
+    setSaving(true);
+    try {
+      await window.lvis.plugins.uninstallMarketplacePlugin(selectedId);
+      setPlugins((prev) => prev.filter((p) => p.id !== selectedId));
+      setSelectedId(null);
+      showBanner("success", `${selectedPlugin.name} 제거 완료`);
+    } catch (e) {
+      showBanner("error", (e as Error).message ?? "제거 실패");
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedId, selectedPlugin, showBanner]);
+
   return (
     <div className="flex flex-col h-full gap-3">
       {banner && (
@@ -178,11 +194,22 @@ export function PluginConfigTab() {
           <div className="flex-1 min-w-0 flex flex-col gap-2 rounded-md border bg-card p-3">
             {selectedPlugin ? (
               <>
-                <div>
-                  <h3 className="text-sm font-semibold">{selectedPlugin.name}</h3>
-                  <p className="font-mono text-[10px] text-muted-foreground">
-                    {selectedPlugin.id}
-                  </p>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold">{selectedPlugin.name}</h3>
+                    <p className="font-mono text-[10px] text-muted-foreground">
+                      {selectedPlugin.id}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="h-7 text-xs px-2 shrink-0"
+                    onClick={() => void handleUninstall()}
+                    disabled={saving}
+                  >
+                    제거
+                  </Button>
                 </div>
                 <Separator />
 

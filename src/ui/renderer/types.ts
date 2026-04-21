@@ -227,6 +227,7 @@ export type LvisPluginConfigApi = {
 
 export type LvisPluginsApi = {
   cards: () => Promise<PluginCardSummary[]>;
+  uninstallMarketplacePlugin: (id: string) => Promise<unknown>;
 };
 
 export type LvisMcpApi = {
