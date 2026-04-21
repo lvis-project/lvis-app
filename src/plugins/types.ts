@@ -184,6 +184,8 @@ export class MissingDependenciesError extends Error {
 
 export interface PluginMarketplaceItem {
   id: string;
+  /** Web marketplace slug — used when installing via lvis:// URI from the web catalog. */
+  slug?: string;
   name: string;
   description: string;
   packageSpec: string;
