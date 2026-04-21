@@ -251,7 +251,16 @@ async function atomicWrite(dest: string, data: string | Buffer): Promise<void> {
   const tmp = `${dest}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   try {
     await writeFile(tmp, data);
-    await rename(tmp, dest);
+    try {
+      await rename(tmp, dest);
+    } catch (renameErr) {
+      if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
+        await rm(dest, { force: true });
+        await rename(tmp, dest);
+      } else {
+        throw renameErr;
+      }
+    }
   } catch (err) {
     await rm(tmp, { force: true }).catch(() => undefined);
     throw err;

@@ -96,17 +96,20 @@ async function handleLvisUri(url: string) {
   }
   mainWindow?.focus();
   const win = mainWindow;
-  if (win) {
-    const { response } = await dialog.showMessageBox(win, {
-      type: "question",
-      buttons: ["설치", "취소"],
-      defaultId: 1,
-      cancelId: 1,
-      message: `플러그인 '${params.slug}'을(를) 설치하시겠습니까?`,
-      detail: "외부 링크로부터 요청된 설치입니다.",
-    });
-    if (response !== 0) return;
+  if (!win) {
+    // createWindow() failed or was destroyed — abort rather than install silently.
+    console.warn("[lvis] handleLvisUri: no window available, aborting install");
+    return;
   }
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question",
+    buttons: ["설치", "취소"],
+    defaultId: 1,
+    cancelId: 1,
+    message: `플러그인 '${params.slug}'을(를) 설치하시겠습니까?`,
+    detail: "외부 링크로부터 요청된 설치입니다.",
+  });
+  if (response !== 0) return;
   void services.pluginMarketplace
     .install(params.slug)
     .then(async () => {
