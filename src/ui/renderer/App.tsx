@@ -145,6 +145,22 @@ export function App() {
   });
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
 
+  // Refresh plugin views + marketplace catalog when a lvis:// deep-link
+  // install completes in the main process, so new sidebar tabs appear
+  // (and uninstalled ones disappear) without requiring an app restart.
+  useEffect(() => {
+    const anyApi = window.lvis as unknown as {
+      onPluginInstallResult?: (h: (p: { slug: string; success: boolean; error?: string }) => void) => () => void;
+    };
+    if (typeof anyApi.onPluginInstallResult !== "function") return;
+    const unsubscribe = anyApi.onPluginInstallResult(({ success }) => {
+      if (!success) return;
+      void refreshViews();
+      void refreshMarketplace();
+    });
+    return unsubscribe;
+  }, [refreshViews, refreshMarketplace]);
+
   const commandActions = useMemo(() => [
     { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
     { id: "tasks", label: "태스크 보기", run: () => setActiveView("tasks") },

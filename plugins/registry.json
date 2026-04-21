@@ -2,6 +2,11 @@
   "version": 1,
   "plugins": [
     {
+      "id": "calendar",
+      "manifestPath": "/Users/ken/.lvis/plugins/calendar/plugin.json",
+      "enabled": true
+    },
+    {
       "id": "email",
       "manifestPath": "/Users/ken/.lvis/plugins/email/plugin.json",
       "enabled": true
@@ -19,6 +24,11 @@
     {
       "id": "pageindex",
       "manifestPath": "/Users/ken/.lvis/plugins/pageindex/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "hello-world",
+      "manifestPath": "/Users/ken/.lvis/plugins/hello-world/plugin.json",
       "enabled": true
     }
   ]
