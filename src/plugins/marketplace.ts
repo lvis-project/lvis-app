@@ -116,7 +116,7 @@ export class PluginMarketplaceService {
     this.appRoot = resolve(appRoot);
     this.registryPath = resolve(this.appRoot, "plugins/registry.json");
     this.marketplacePath = resolve(this.appRoot, "plugins/marketplace.json");
-    this.installedDir = resolve(this.appRoot, "plugins/installed");
+    this.installedDir = resolve(homedir(), ".lvis/plugins");
     this.deploymentGuard = deploymentGuard;
     // When no external fetcher is provided we fall back to the bundled local
     // marketplace.json mock — catalog caching makes no sense for local files.
@@ -566,8 +566,13 @@ export class PluginMarketplaceService {
     if (plugin.deployment) manifest.deployment = plugin.deployment;
     if (plugin.publisher) manifest.publisher = plugin.publisher;
     await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
-    const registryRelativePath = relative(dirname(this.registryPath), manifestFile).split("\\").join("/");
-    return registryRelativePath;
+    // Use absolute path when installedDir is outside appRoot (e.g. ~/.lvis/plugins/)
+    // so the registry entry remains valid regardless of where registry.json lives.
+    const isOutsideApp = !manifestFile.startsWith(this.appRoot);
+    const registryPath = isOutsideApp
+      ? manifestFile
+      : relative(dirname(this.registryPath), manifestFile).split("\\").join("/");
+    return registryPath;
   }
 
   private resolveUiExtension(

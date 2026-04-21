@@ -13,6 +13,7 @@
  *
  * No plugin-specific literals here — everything is manifest-driven.
  */
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
@@ -152,7 +153,7 @@ export async function initPluginRuntime(
   // §7.2 Plugin Deployment Guard
   const deploymentGuard = new PluginDeploymentGuard({
     registryPath: resolve(projectRoot, "plugins/registry.json"),
-    userInstalledDir: resolve(projectRoot, "plugins/installed"),
+    userInstalledDir: resolve(homedir(), ".lvis/plugins"),
   });
 
   // Late-binding refs for ConversationLoop-dependent callers.
