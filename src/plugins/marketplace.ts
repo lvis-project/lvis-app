@@ -185,7 +185,10 @@ export class PluginMarketplaceService {
     }
   }
 
-  async install(pluginId: string): Promise<{ pluginId: string; installed: true }> {
+  async install(
+    pluginId: string,
+    actor: "user" | "it-admin" = "user",
+  ): Promise<{ pluginId: string; installed: true }> {
     const plugins = await this.fetcher.listPlugins();
     const plugin = plugins.find((x) => x.id === pluginId || x.slug === pluginId);
     if (!plugin) {
@@ -193,9 +196,10 @@ export class PluginMarketplaceService {
     }
 
     // §7.2 canInstall — managed 카탈로그 항목은 user actor 차단 (defense-in-depth).
-    // UI 잠금은 이미 disabled지만 IPC 경유 직접 호출도 봉쇄.
+    // Boot-time force-install uses actor="it-admin" to bypass this guard for
+    // mandatory enterprise plugins (see ensureManagedInstalled).
     if (this.deploymentGuard) {
-      const guardResult = await this.deploymentGuard.canInstall(pluginId, "user", plugin.deployment);
+      const guardResult = await this.deploymentGuard.canInstall(pluginId, actor, plugin.deployment);
       if (!guardResult.allowed) {
         throw new Error(guardResult.reason ?? `Plugin install denied: ${pluginId}`);
       }
@@ -252,6 +256,51 @@ export class PluginMarketplaceService {
       }
     });
     return { pluginId: plugin.id, installed: true };
+  }
+
+  /**
+   * Boot-time managed plugin bootstrap. Queries the marketplace catalog for
+   * every `deployment === "managed"` plugin and force-installs any that are
+   * missing from the local registry. Runs as actor="it-admin" so the deployment
+   * guard permits the install.
+   *
+   * Failure modes are intentionally graceful — marketplace unreachable or a
+   * single plugin failing to install must NOT brick boot. Errors are logged
+   * and the app continues without the failed plugins.
+   */
+  async ensureManagedInstalled(): Promise<{
+    installed: string[];
+    failed: Array<{ id: string; error: string }>;
+  }> {
+    const result = { installed: [] as string[], failed: [] as Array<{ id: string; error: string }> };
+    let plugins: PluginMarketplaceItem[];
+    try {
+      plugins = await this.fetcher.listPlugins();
+    } catch (err) {
+      console.warn(
+        `[marketplace] ensureManagedInstalled: catalog unreachable — skipping: ${(err as Error).message}`,
+      );
+      return result;
+    }
+    const managed = plugins.filter((p) => p.deployment === "managed");
+    if (managed.length === 0) return result;
+    const registry = await readPluginRegistry(this.registryPath).catch(() => ({
+      version: 1,
+      plugins: [],
+    }));
+    const installedIds = new Set(registry.plugins.map((p) => p.id));
+    for (const plugin of managed) {
+      if (installedIds.has(plugin.id)) continue;
+      try {
+        await this.install(plugin.id, "it-admin");
+        result.installed.push(plugin.id);
+      } catch (err) {
+        const msg = (err as Error).message;
+        result.failed.push({ id: plugin.id, error: msg });
+        console.warn(`[marketplace] managed plugin '${plugin.id}' install failed: ${msg}`);
+      }
+    }
+    return result;
   }
 
   async uninstall(pluginId: string): Promise<{ pluginId: string; uninstalled: true }> {
