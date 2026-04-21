@@ -324,16 +324,23 @@ export class PluginMarketplaceService {
       const manifestPath = isAbsolute(target.manifestPath)
         ? target.manifestPath
         : resolve(dirname(this.registryPath), target.manifestPath);
-      const packageName = await this.resolvePackageName(pluginId, manifestPath);
-      const shouldUninstallPackage =
-        packageName && !(await this.isPackageUsedByRemainingPlugins(packageName, remainingEntries.map((entry) => entry.id)));
+      const installedManifestDir = dirname(manifestPath);
+      const isZipInstalled = this.isWithin(this.installedDir, installedManifestDir);
 
-      if (shouldUninstallPackage && packageName) {
-        await this.runNpmUninstall(packageName);
+      // npm-path legacy only applies to node_modules-resolved installs. Zip
+      // extractions under ~/.lvis/plugins/ are self-contained directories —
+      // running `npm uninstall` on them is meaningless and errors with "Plugin
+      // not found" because the package was never registered via npm.
+      if (!isZipInstalled) {
+        const packageName = await this.resolvePackageName(pluginId, manifestPath);
+        const shouldUninstallPackage =
+          packageName && !(await this.isPackageUsedByRemainingPlugins(packageName, remainingEntries.map((entry) => entry.id)));
+        if (shouldUninstallPackage && packageName) {
+          await this.runNpmUninstall(packageName);
+        }
       }
 
-      const installedManifestDir = dirname(manifestPath);
-      if (this.isWithin(this.installedDir, installedManifestDir)) {
+      if (isZipInstalled) {
         await rm(installedManifestDir, { recursive: true, force: true });
       }
 
