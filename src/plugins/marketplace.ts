@@ -197,7 +197,7 @@ export class PluginMarketplaceService {
 
   async install(pluginId: string): Promise<{ pluginId: string; installed: true }> {
     const plugins = await this.fetcher.listPlugins();
-    const plugin = plugins.find((x) => x.id === pluginId);
+    const plugin = plugins.find((x) => x.id === pluginId || x.slug === pluginId);
     if (!plugin) {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
     }

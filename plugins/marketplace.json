@@ -3,6 +3,7 @@
   "plugins": [
     {
       "id": "pageindex",
+      "slug": "page-indexer",
       "name": "LVIS PageIndex",
       "description": "로컬 문서를 인덱싱하고 질의 미리보기를 제공하는 검색 플러그인",
       "packageSpec": "file:../lvis-plugin-pageindex",
@@ -34,6 +35,7 @@
     },
     {
       "id": "meeting",
+      "slug": "meeting-recorder",
       "name": "LVIS Meeting",
       "description": "회의 STT/요약 파이프라인을 제공하는 미팅 플러그인",
       "packageSpec": "file:../lvis-plugin-meeting",
@@ -63,6 +65,7 @@
     },
     {
       "id": "email",
+      "slug": "email-assistant",
       "name": "LVIS Email",
       "description": "Outlook 메일을 읽고 LVIS가 답장·할 일·일정을 제안하는 이메일 플러그인",
       "packageSpec": "file:../lvis-plugin-email",
@@ -91,6 +94,7 @@
     },
     {
       "id": "calendar",
+      "slug": "calendar-briefing",
       "name": "LVIS Calendar",
       "description": "Outlook 일정을 읽고 쓰며 미팅 시작 전 알림을 제공하는 캘린더 플러그인",
       "packageSpec": "file:../lvis-plugin-calendar",
@@ -154,6 +158,7 @@
   ,
     {
       "id": "hello-world",
+      "slug": "hello-world",
       "name": "Hello World",
       "description": "개발용 샘플 플러그인 — hello_world 도구 테스트",
       "packageSpec": "file:plugins/installed/hello-world",
