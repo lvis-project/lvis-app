@@ -71,9 +71,10 @@ export class McpManager {
     const bakPath = `${this.configPath}.bak`;
     // Keep read-only fallback for legacy/operator-provided recovery files.
     // saveConfigs() no longer creates new .bak files because they can retain secrets.
-    const candidatePaths = [this.configPath, bakPath].filter(
-      (candidate, index) => existsSync(candidate) && (index === 0 || candidate !== this.configPath),
-    );
+    const candidatePaths = [
+      ...(existsSync(this.configPath) ? [this.configPath] : []),
+      ...(existsSync(bakPath) ? [bakPath] : []),
+    ];
 
     if (candidatePaths.length === 0) {
       console.log("[mcp-manager] MCP 서버 설정 파일 없음:", this.configPath);
