@@ -227,13 +227,14 @@ export class PluginMarketplaceService {
     let zipHasManifest = false;
     try { await readFile(manifestFile, "utf-8"); zipHasManifest = true; } catch { /* not in zip */ }
     if (!zipHasManifest) {
+      // Only include fields allowed by schemas/plugin.schema.json (additionalProperties: false).
+      const safeVersion = /^\d+\.\d+\.\d+/.test(dlVersion) ? dlVersion : "0.0.0";
       const m: Record<string, unknown> = {
-        id: plugin.id, name: plugin.name, version: dlVersion,
+        id: plugin.id, name: plugin.name, version: safeVersion,
         entry: "./dist/hostPlugin.js",
         tools: plugin.tools, config: plugin.defaultConfig ?? {},
-        packageName: plugin.packageName,
       };
-      if (plugin.deployment) m.deployment = plugin.deployment;
+      if (plugin.deployment === "managed" || plugin.deployment === "user") m.deployment = plugin.deployment;
       if (plugin.publisher) m.publisher = plugin.publisher;
       await writeFile(manifestFile, `${JSON.stringify(m, null, 2)}\n`);
     }
