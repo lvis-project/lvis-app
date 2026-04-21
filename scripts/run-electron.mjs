@@ -1,4 +1,4 @@
-import { execSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import electronPath from "electron";
 
 const args = process.argv.slice(2);
@@ -48,16 +48,21 @@ if (process.platform === "win32" && env.LVIS_KEEP_GPU !== "1") {
   }
 }
 
-// Windows: flip the console to UTF-8 (code page 65001) so Korean/emoji log
-// output renders instead of garbage. `chcp` only affects the parent console,
-// but Electron inherits stdio from us, so child stdout/stderr writes hit a
-// UTF-8 console too. Non-fatal if it fails (e.g. redirected stdout).
+// Windows: launch Electron through a cmd.exe wrapper so `chcp 65001` and
+// Electron share the SAME console. A separate `execSync("chcp")` runs in a
+// detached subprocess — the code-page change never reaches Electron's
+// console. Wrapping in `cmd /d /c "chcp 65001>nul & electron …"` binds both
+// calls to one cmd session, so Korean/emoji stdout renders as UTF-8 end to
+// end (cmd.exe → Node → Electron → user's terminal).
 if (process.platform === "win32") {
-  try {
-    execSync("chcp 65001", { stdio: "ignore", windowsHide: true });
-  } catch {
-    /* non-interactive console — ignore */
-  }
+  const quote = (s) => `"${String(s).replace(/"/g, '""')}"`;
+  const electronCmd = [electronPath, ...args].map(quote).join(" ");
+  const result = spawnSync(
+    "cmd.exe",
+    ["/d", "/c", `chcp 65001>nul & ${electronCmd}`],
+    { env, stdio: "inherit" },
+  );
+  process.exit(result.status ?? 1);
 }
 
 const result = spawnSync(electronPath, args, {

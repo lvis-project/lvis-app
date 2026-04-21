@@ -16,7 +16,7 @@
 //   - launches electron dist/src/main.js after initial build
 //   - restarts electron when dist/src/main.js changes (debounced)
 
-import { execSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, watch, copyFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,13 +50,9 @@ function applyUtf8Env(env) {
   return env;
 }
 
-if (process.platform === "win32") {
-  try {
-    execSync("chcp 65001", { stdio: "ignore", windowsHide: true });
-  } catch {
-    /* non-interactive console — ignore */
-  }
-}
+// Dev mode wraps the Electron launch via cmd.exe /c "chcp 65001 & electron …"
+// in launchElectron() below so the code-page change shares Electron's console.
+// See scripts/run-electron.mjs for the detailed rationale.
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
@@ -120,19 +116,32 @@ function launchElectron() {
   if (electronProc) return;
   const electronArgs = applyWindowsSafeFlags([mainOutput]);
   log("electron", `launching ${mainOutput}`);
-  electronProc = spawn(electronPath, electronArgs, {
-    cwd: repoRoot,
-    stdio: "inherit",
-    env: (() => {
-      const e = applyUtf8Env({
-        ...process.env,
-        LVIS_DEV: "1",
-        LVIS_DEV_SKIP_SIG: process.env.LVIS_DEV_SKIP_SIG ?? "1",
-      });
-      delete e.ELECTRON_RUN_AS_NODE;
-      return e;
-    })(),
-  });
+  const env = (() => {
+    const e = applyUtf8Env({
+      ...process.env,
+      LVIS_DEV: "1",
+      LVIS_DEV_SKIP_SIG: process.env.LVIS_DEV_SKIP_SIG ?? "1",
+    });
+    delete e.ELECTRON_RUN_AS_NODE;
+    return e;
+  })();
+  if (process.platform === "win32") {
+    // Wrap in cmd.exe /c so `chcp 65001` binds to Electron's console (see
+    // scripts/run-electron.mjs). Avoids cp949 mojibake on Korean locale.
+    const quote = (s) => `"${String(s).replace(/"/g, '""')}"`;
+    const electronCmd = [electronPath, ...electronArgs].map(quote).join(" ");
+    electronProc = spawn(
+      "cmd.exe",
+      ["/d", "/c", `chcp 65001>nul & ${electronCmd}`],
+      { cwd: repoRoot, stdio: "inherit", env },
+    );
+  } else {
+    electronProc = spawn(electronPath, electronArgs, {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env,
+    });
+  }
   electronProc.on("error", (err) => {
     log("electron", `spawn failed: ${err.message}`);
     electronProc = null;
