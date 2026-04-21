@@ -2,6 +2,11 @@ import { safeStorage } from "electron";
 import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
+import {
+  sanitizePluginConfig,
+  sanitizePluginConfigPluginId,
+  type PluginConfigRecord,
+} from "../shared/plugin-config.js";
 
 export type LLMVendor =
   | "claude"
@@ -82,7 +87,7 @@ export interface AppSettings {
   telemetry: TelemetrySettings;
   audit: AuditSettings;
   /** 플러그인별 설정값 — pluginId → key/value 맵 */
-  pluginConfigs: Record<string, Record<string, unknown>>;
+  pluginConfigs: Record<string, PluginConfigRecord>;
 }
 
 /**
@@ -310,19 +315,31 @@ export class SettingsService {
       this.settings.audit = { ...this.settings.audit, ...partial.audit };
     }
     if (partial.pluginConfigs) {
-      this.settings.pluginConfigs = { ...this.settings.pluginConfigs, ...partial.pluginConfigs };
+      const sanitized: Record<string, PluginConfigRecord> = {};
+      for (const [pluginId, config] of Object.entries(partial.pluginConfigs)) {
+        const safePluginId = sanitizePluginConfigPluginId(pluginId);
+        sanitized[safePluginId] = sanitizePluginConfig(config);
+      }
+      this.settings.pluginConfigs = { ...this.settings.pluginConfigs, ...sanitized };
     }
     await this.saveSettings();
     return this.getAll();
   }
 
-  getPluginConfig(pluginId: string): Record<string, unknown> {
-    return structuredClone(this.settings.pluginConfigs[pluginId] ?? {});
+  getPluginConfig(pluginId: string): PluginConfigRecord {
+    const safePluginId = sanitizePluginConfigPluginId(pluginId);
+    return structuredClone(this.settings.pluginConfigs[safePluginId] ?? {});
   }
 
-  async setPluginConfig(pluginId: string, config: Record<string, unknown>): Promise<void> {
-    this.settings.pluginConfigs = { ...this.settings.pluginConfigs, [pluginId]: config };
+  async setPluginConfig(pluginId: string, config: unknown): Promise<PluginConfigRecord> {
+    const safePluginId = sanitizePluginConfigPluginId(pluginId);
+    const sanitizedConfig = sanitizePluginConfig(config);
+    this.settings.pluginConfigs = {
+      ...this.settings.pluginConfigs,
+      [safePluginId]: sanitizedConfig,
+    };
     await this.saveSettings();
+    return structuredClone(sanitizedConfig);
   }
 
   /** 비밀 값(API 키 등)을 암호화하여 저장 */
@@ -411,6 +428,7 @@ export class SettingsService {
         if (!marketplaceParsed.realCloudBaseUrl) marketplaceParsed.realCloudBaseUrl = "http://localhost:8000";
         if (marketplaceParsed.realCloudAllowPrivateNetwork === undefined) marketplaceParsed.realCloudAllowPrivateNetwork = true;
       }
+      const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
 
       return {
         llm,
@@ -422,7 +440,7 @@ export class SettingsService {
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
-        pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...parsed.pluginConfigs },
+        pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);
@@ -456,4 +474,23 @@ export class SettingsService {
       });
     });
   }
+}
+
+function sanitizeStoredPluginConfigs(input: unknown): Record<string, PluginConfigRecord> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return {};
+  }
+  const out: Record<string, PluginConfigRecord> = {};
+  for (const [pluginId, config] of Object.entries(input)) {
+    try {
+      const safePluginId = sanitizePluginConfigPluginId(pluginId);
+      out[safePluginId] = sanitizePluginConfig(config);
+    } catch (err) {
+      console.warn(
+        "[settings] dropping invalid stored plugin config:",
+        (err as Error).message,
+      );
+    }
+  }
+  return out;
 }

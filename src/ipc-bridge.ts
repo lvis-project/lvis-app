@@ -207,6 +207,13 @@ function auditUnauthorized(
   });
 }
 
+function pluginConfigError(
+  error: string,
+  message: string,
+): { ok: false; error: string; message: string } {
+  return { ok: false, error, message };
+}
+
 export function registerIpcHandlers(
   services: AppServices,
   getMainWindow: () => BrowserWindow | null,
@@ -450,12 +457,34 @@ export function registerIpcHandlers(
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
-  // read-only, sender guard optional
-  ipcMain.handle("lvis:plugins:config:get", (_e, pluginId: string) =>
-    settingsService.getPluginConfig(pluginId));
+  ipcMain.handle("lvis:plugins:config:get", (e, pluginId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugins:config:get", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    try {
+      return { ok: true as const, config: settingsService.getPluginConfig(pluginId) };
+    } catch (err) {
+      return pluginConfigError(
+        "invalid-plugin-config-request",
+        (err as Error).message,
+      );
+    }
+  });
   ipcMain.handle("lvis:plugins:config:set", async (e, pluginId: string, config: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:config:set", e); return UNAUTHORIZED_FRAME; }
-    await settingsService.setPluginConfig(pluginId, config as Record<string, unknown>);
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugins:config:set", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    try {
+      const savedConfig = await settingsService.setPluginConfig(pluginId, config);
+      return { ok: true as const, config: savedConfig };
+    } catch (err) {
+      return pluginConfigError(
+        "invalid-plugin-config-payload",
+        (err as Error).message,
+      );
+    }
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:perf-stats", () => pluginRuntime.getPerfStats());

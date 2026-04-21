@@ -149,17 +149,14 @@ export function App() {
   // install completes in the main process, so new sidebar tabs appear
   // (and uninstalled ones disappear) without requiring an app restart.
   useEffect(() => {
-    const anyApi = window.lvis as unknown as {
-      onPluginInstallResult?: (h: (p: { slug: string; success: boolean; error?: string }) => void) => () => void;
-    };
-    if (typeof anyApi.onPluginInstallResult !== "function") return;
-    const unsubscribe = anyApi.onPluginInstallResult(({ success }) => {
+    if (typeof api.onPluginInstallResult !== "function") return;
+    const unsubscribe = api.onPluginInstallResult(({ success }) => {
       if (!success) return;
       void refreshViews();
       void refreshMarketplace();
     });
     return unsubscribe;
-  }, [refreshViews, refreshMarketplace]);
+  }, [api, refreshViews, refreshMarketplace]);
 
   const commandActions = useMemo(() => [
     { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
