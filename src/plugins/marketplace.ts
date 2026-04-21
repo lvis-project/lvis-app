@@ -32,13 +32,9 @@ export interface MarketplaceListItem extends PluginMarketplaceItem {
 }
 
 /**
- * Default fetcher that reads the bundled `plugins/marketplace.json`
- * catalog file. Preserves the pre-M4 behavior — install/uninstall and
- * existing tests continue to work unchanged.
- *
- * Note: download/detail operations are not supported by this fetcher
- * because the local catalog does not carry version binaries; callers
- * that need those must use {@link RealCloudMarketplaceFetcher}.
+ * @internal Test-only fetcher. Reads a local JSON catalog file.
+ * Production code must use {@link RealCloudMarketplaceFetcher} instead.
+ * Note: downloadVersion() is not supported.
  */
 export class MockMarketplaceFetcher implements MarketplaceFetcher {
   constructor(private readonly marketplacePath: string) {}
