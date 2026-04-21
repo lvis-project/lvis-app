@@ -16,11 +16,47 @@
 //   - launches electron dist/src/main.js after initial build
 //   - restarts electron when dist/src/main.js changes (debounced)
 
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { existsSync, watch, copyFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import electronPath from "electron";
+
+// Windows corp PC runtime flags — see scripts/run-electron.mjs for rationale.
+const WINDOWS_SAFE_ELECTRON_FLAGS = [
+  "--disable-gpu",
+  "--disable-gpu-compositing",
+  "--disable-gpu-sandbox",
+  "--in-process-gpu",
+  "--use-angle=swiftshader",
+  "--no-sandbox",
+];
+
+function applyWindowsSafeFlags(args) {
+  if (process.platform !== "win32") return args;
+  if (process.env.LVIS_KEEP_GPU === "1") return args;
+  const next = [...args];
+  for (const flag of WINDOWS_SAFE_ELECTRON_FLAGS) {
+    if (!next.includes(flag)) next.push(flag);
+  }
+  return next;
+}
+
+function applyUtf8Env(env) {
+  if (!env.PYTHONIOENCODING) env.PYTHONIOENCODING = "utf-8";
+  if (!env.PYTHONUTF8) env.PYTHONUTF8 = "1";
+  if (!env.LANG) env.LANG = "en_US.UTF-8";
+  if (!env.LC_ALL) env.LC_ALL = "en_US.UTF-8";
+  return env;
+}
+
+if (process.platform === "win32") {
+  try {
+    execSync("chcp 65001", { stdio: "ignore", windowsHide: true });
+  } catch {
+    /* non-interactive console — ignore */
+  }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
@@ -82,11 +118,20 @@ function copyHtml() {
 
 function launchElectron() {
   if (electronProc) return;
+  const electronArgs = applyWindowsSafeFlags([mainOutput]);
   log("electron", `launching ${mainOutput}`);
-  electronProc = spawn(electronPath, [mainOutput], {
+  electronProc = spawn(electronPath, electronArgs, {
     cwd: repoRoot,
     stdio: "inherit",
-    env: (() => { const e = { ...process.env, LVIS_DEV: "1", LVIS_DEV_SKIP_SIG: process.env.LVIS_DEV_SKIP_SIG ?? "1" }; delete e.ELECTRON_RUN_AS_NODE; return e; })(),
+    env: (() => {
+      const e = applyUtf8Env({
+        ...process.env,
+        LVIS_DEV: "1",
+        LVIS_DEV_SKIP_SIG: process.env.LVIS_DEV_SKIP_SIG ?? "1",
+      });
+      delete e.ELECTRON_RUN_AS_NODE;
+      return e;
+    })(),
   });
   electronProc.on("error", (err) => {
     log("electron", `spawn failed: ${err.message}`);
