@@ -178,6 +178,10 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher {
   }
 
   private mapItem(row: ServerCatalogRow): PluginMarketplaceItem {
+    if (typeof row.id === "string" && !SAFE_ID_RE.test(row.id)) {
+      throw new Error(`marketplace row has invalid id format: "${row.id}"`);
+    }
+
     // Prefer human-readable slug as the client-side id. The server's numeric
     // primary key is meaningless to the app and breaks install("hello-world")
     // lookups (which use slugs from lvis:// URIs and the web marketplace).

@@ -9,15 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 
 // Mock must be declared BEFORE the import under test so vi.mock hoists correctly.
-vi.mock("../../core/network-guard.js", async () => {
-  const actual = await vi.importActual<typeof import("../../core/network-guard.js")>(
-    "../../core/network-guard.js",
-  );
-  return {
-    ...actual,
-    fetchPublicHttpResponse: vi.fn(),
-  };
-});
+vi.mock("../../core/network-guard.js", () => ({
+  fetchPublicHttpResponse: vi.fn(),
+  NetworkGuardError: class NetworkGuardError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "NetworkGuardError";
+    }
+  },
+}));
 
 import { fetchPublicHttpResponse, NetworkGuardError } from "../../core/network-guard.js";
 import { RealCloudMarketplaceFetcher } from "../real-cloud-marketplace-fetcher.js";
@@ -134,7 +134,7 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
     });
     const plugins = await fetcher.listPlugins();
     expect(plugins).toHaveLength(1);
-    expect(plugins[0].id).toBe("1");
+    expect(plugins[0].id).toBe("mp-a");
     expect(plugins[0].name).toBe("Plugin A");
     // packageSpec synthesized from slug@version (no package_name in server response)
     expect(plugins[0].packageSpec).toBe("mp-a@0.1.0");
@@ -258,7 +258,7 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
     updated_at: "2026-01-01T00:00:00",
   };
 
-  it("listPlugins() correctly maps slug→id, display_name→name, synthesizes packageSpec from slug@version", async () => {
+  it("listPlugins() uses slug as the client id, display_name as name, and slug@version for packageSpec", async () => {
     const fakeFetch = vi.fn().mockResolvedValue(jsonResponse([serverPlugin]));
     global.fetch = fakeFetch as unknown as typeof global.fetch;
 
@@ -270,8 +270,8 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
 
     expect(plugins).toHaveLength(1);
     const p = plugins[0];
-    // id comes from numeric DB id stringified (row.id takes priority over slug)
-    expect(p.id).toBe("1");
+    // Slug is the stable client-facing identifier used by install/deeplink flows.
+    expect(p.id).toBe("lvis-plugin-meeting");
     expect(p.name).toBe("LVIS Meeting");
     expect(p.description).toBe("Meeting recording, STT, and summary plugin.");
     // packageName falls back to slug when package_name is absent
@@ -341,7 +341,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     const fetcher = new RealCloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
     });
-    await expect(fetcher.listPlugins()).rejects.toThrow(/unsafe packageName/);
+    await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
   });
 
   it("rejects slug that starts with dash (npm flag injection)", async () => {
@@ -351,7 +351,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     const fetcher = new RealCloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
     });
-    await expect(fetcher.listPlugins()).rejects.toThrow(/unsafe packageName/);
+    await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
   });
 
   it("rejects slug with file: protocol prefix", async () => {
@@ -361,7 +361,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     const fetcher = new RealCloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
     });
-    await expect(fetcher.listPlugins()).rejects.toThrow(/unsafe packageName/);
+    await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
   });
 
   it("rejects slug with git+https: protocol", async () => {
@@ -371,7 +371,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     const fetcher = new RealCloudMarketplaceFetcher({
       baseUrl: "https://marketplace.example.com",
     });
-    await expect(fetcher.listPlugins()).rejects.toThrow(/unsafe packageName/);
+    await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
   });
 
   it("rejects non-primitive id (object stringifies to [object Object])", async () => {
