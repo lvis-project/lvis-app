@@ -83,6 +83,17 @@ async function handleLvisUri(url: string) {
     pendingLvisUri = url;
     return;
   }
+  // macOS: app stays running after all windows closed. If the deep link arrives
+  // with no window, re-open one so the confirmation dialog has a parent and the
+  // user actually sees the install prompt (rather than it silently no-op'ing).
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    try {
+      if (mainWindow) await (mainWindow as BrowserWindow).loadFile(resolve(__dirname, "index.html"));
+    } catch (err) {
+      console.error("[lvis] failed to load index.html for lvis:// URI", err);
+    }
+  }
   mainWindow?.focus();
   const win = mainWindow;
   if (win) {
@@ -98,7 +109,15 @@ async function handleLvisUri(url: string) {
   }
   void services.pluginMarketplace
     .install(params.slug)
-    .then(() => {
+    .then(async () => {
+      // Mirror the post-install steps from the lvis:plugins:install IPC handler
+      // so deep-link installs behave identically to in-app installs.
+      try {
+        await services!.pluginRuntime.restartAll();
+        services!.refreshPluginNotifications?.();
+      } catch (err) {
+        console.error("[lvis] post-install steps failed for lvis:// install", err);
+      }
       mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: true });
     })
     .catch((err: Error) => {
