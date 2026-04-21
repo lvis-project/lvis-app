@@ -220,6 +220,15 @@ export type LvisPolicyApi = {
   set: (patch: unknown) => Promise<{ ok: boolean; policy?: unknown; error?: string; message?: string }>;
 };
 
+export type LvisPluginConfigApi = {
+  get: (pluginId: string) => Promise<Record<string, unknown>>;
+  set: (pluginId: string, config: Record<string, unknown>) => Promise<void>;
+};
+
+export type LvisPluginsApi = {
+  cards: () => Promise<PluginCardSummary[]>;
+};
+
 export type LvisMcpApi = {
   servers: () => Promise<McpServerState[]>;
   kill: (id: string) => Promise<void>;
@@ -247,6 +256,8 @@ declare global {
       approval: LvisApprovalApi;
       policy: LvisPolicyApi;
       mcp: LvisMcpApi;
+      plugins: LvisPluginsApi;
+      pluginConfig: LvisPluginConfigApi;
     };
   }
 }

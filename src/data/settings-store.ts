@@ -81,6 +81,8 @@ export interface AppSettings {
   updates: UpdateSettings;
   telemetry: TelemetrySettings;
   audit: AuditSettings;
+  /** 플러그인별 설정값 — pluginId → key/value 맵 */
+  pluginConfigs: Record<string, Record<string, unknown>>;
 }
 
 /**
@@ -222,6 +224,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     auditRotationMaxBytes: 10 * 1024 * 1024, // 10 MB
     auditRetentionDays: 30,
   },
+  pluginConfigs: {},
 };
 
 export class SettingsService {
@@ -304,8 +307,20 @@ export class SettingsService {
     if (partial.audit) {
       this.settings.audit = { ...this.settings.audit, ...partial.audit };
     }
+    if (partial.pluginConfigs) {
+      this.settings.pluginConfigs = { ...this.settings.pluginConfigs, ...partial.pluginConfigs };
+    }
     await this.saveSettings();
     return this.getAll();
+  }
+
+  getPluginConfig(pluginId: string): Record<string, unknown> {
+    return structuredClone(this.settings.pluginConfigs[pluginId] ?? {});
+  }
+
+  async setPluginConfig(pluginId: string, config: Record<string, unknown>): Promise<void> {
+    this.settings.pluginConfigs = { ...this.settings.pluginConfigs, [pluginId]: config };
+    await this.saveSettings();
   }
 
   /** 비밀 값(API 키 등)을 암호화하여 저장 */
@@ -394,6 +409,7 @@ export class SettingsService {
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
+        pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...parsed.pluginConfigs },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);

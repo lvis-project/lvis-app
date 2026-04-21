@@ -146,6 +146,8 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:starred:add",
   "lvis:starred:remove",
   "lvis:plugins:cards",
+  "lvis:plugins:config:get",
+  "lvis:plugins:config:set",
   "lvis:feedback:submit",
   "lvis:telemetry:consent-answer",
   "lvis:audit:search",
@@ -448,6 +450,13 @@ export function registerIpcHandlers(
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
+  // read-only, sender guard optional
+  ipcMain.handle("lvis:plugins:config:get", (_e, pluginId: string) =>
+    settingsService.getPluginConfig(pluginId));
+  ipcMain.handle("lvis:plugins:config:set", async (e, pluginId: string, config: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:config:set", e); return UNAUTHORIZED_FRAME; }
+    await settingsService.setPluginConfig(pluginId, config as Record<string, unknown>);
+  });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:perf-stats", () => pluginRuntime.getPerfStats());
   // H2: renderer-originated plugin calls go through callFromUi() which enforces
