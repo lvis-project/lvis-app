@@ -256,6 +256,7 @@ async function atomicWrite(dest: string, data: string | Buffer): Promise<void> {
     } catch (renameErr) {
       if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
         await rm(dest, { force: true });
+        // If this rename also fails, the outer catch cleans up tmp.
         await rename(tmp, dest);
       } else {
         throw renameErr;

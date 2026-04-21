@@ -414,16 +414,25 @@ export class VercelUnifiedProvider implements LLMProvider {
       const baseFetch = this.customFetch ?? fetch;
       const azureFetch: typeof fetch = isGpt5Model
         ? async (input, init) => {
-            if (init?.body && typeof init.body === "string") {
-              try {
-                const body = JSON.parse(init.body) as Record<string, unknown>;
-                if ("max_tokens" in body) {
-                  body.max_completion_tokens = body.max_tokens;
-                  delete body.max_tokens;
-                  init = { ...init, body: JSON.stringify(body) };
+            if (init?.body) {
+              if (typeof init.body === "string") {
+                try {
+                  const body = JSON.parse(init.body) as Record<string, unknown>;
+                  if ("max_tokens" in body) {
+                    body.max_completion_tokens = body.max_tokens;
+                    delete body.max_tokens;
+                    init = { ...init, body: JSON.stringify(body) };
+                  }
+                } catch {
+                  // leave body unchanged if JSON parse fails
                 }
-              } catch {
-                // leave body unchanged if parse fails
+              } else {
+                // Non-string body (ReadableStream/Uint8Array) cannot be rewritten;
+                // max_tokens may still be present and cause a 400.
+                console.warn(
+                  "[azure-foundry] gpt-5.x fetch body is not a string — " +
+                    "max_tokens→max_completion_tokens swap skipped",
+                );
               }
             }
             return baseFetch(input, init);

@@ -268,12 +268,6 @@ async function main() {
   // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
   services = await bootstrap(projectRoot, mainWindow!);
 
-  // Process any lvis:// URI that arrived before services were ready
-  if (pendingLvisUri) {
-    void handleLvisUri(pendingLvisUri);
-    pendingLvisUri = null;
-  }
-
   // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
   registerIpcHandlers(services, () => mainWindow);
 
@@ -286,6 +280,14 @@ async function main() {
     } catch (err) {
       console.error("[lvis] failed to load index.html", err);
     }
+  }
+
+  // Process any lvis:// URI that arrived before services were ready.
+  // Deferred until after loadFile so IPC handlers are registered and the
+  // renderer's lvis:plugins:install-result listener is active.
+  if (pendingLvisUri) {
+    void handleLvisUri(pendingLvisUri);
+    pendingLvisUri = null;
   }
 }
 

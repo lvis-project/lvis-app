@@ -345,10 +345,30 @@ export class McpManager {
         // Preserve the old file until the new one is successfully promoted so a
         // failed retry cannot delete both copies at once.
         if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
-          // Windows: rm dest then rename — aligns with atomic-write pattern used
-          // elsewhere in the repo and avoids leaving secret-bearing .old files.
-          await rm(this.configPath, { force: true });
-          await rename(tmpPath, this.configPath);
+          // Windows: move existing config to a unique .old path before promoting
+          // the new file so the original is preserved if the retry rename fails.
+          const bakPath = `${this.configPath}.${process.pid}.${randomBytes(4).toString("hex")}.old`;
+          if (existsSync(this.configPath)) {
+            await rename(this.configPath, bakPath);
+          }
+          try {
+            await rename(tmpPath, this.configPath);
+            // Promote succeeded — erase the backup so secrets don't linger.
+            await rm(bakPath, { force: true }).catch((cleanupErr) => {
+              console.warn(`[mcp-manager] saveConfigs: backup cleanup failed — ${bakPath}`, cleanupErr);
+            });
+          } catch (retryErr) {
+            // Restore original config from backup.
+            if (existsSync(bakPath)) {
+              await rename(bakPath, this.configPath).catch((restoreErr) => {
+                console.error(
+                  `[mcp-manager] saveConfigs: restore failed — stale backup at ${bakPath}`,
+                  restoreErr,
+                );
+              });
+            }
+            throw retryErr;
+          }
         } else {
           throw renameErr;
         }
