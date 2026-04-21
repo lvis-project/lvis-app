@@ -14,6 +14,7 @@ import { AdvancedTab } from "./tabs/AdvancedTab.js";
 import { ChatTab } from "./tabs/ChatTab.js";
 import { WebTab } from "./tabs/WebTab.js";
 import { ProactiveTab } from "./tabs/ProactiveTab.js";
+import { McpTab } from "./tabs/McpTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 
 export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; api: LvisApi; onSaved: () => void }) {
@@ -37,6 +38,7 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
             <TabsTrigger value="usage">사용량</TabsTrigger>
             <TabsTrigger value="audit">감사</TabsTrigger>
             <TabsTrigger value="plugin-perf">플러그인 성능</TabsTrigger>
+            <TabsTrigger value="mcp">MCP 서버</TabsTrigger>
           </TabsList>
 
           <TabsContent value="llm">
@@ -121,10 +123,11 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
           <TabsContent value="usage"><UsageDashboard api={api} /></TabsContent>
           <TabsContent value="audit"><AuditTab /></TabsContent>
           <TabsContent value="plugin-perf"><PluginPerfTab api={api} /></TabsContent>
+          <TabsContent value="mcp"><McpTab /></TabsContent>
         </Tabs>
         <DialogFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
-          {tab !== "permissions" && tab !== "usage" && tab !== "roles" && tab !== "audit" && tab !== "plugin-perf" && (
+          {tab !== "permissions" && tab !== "usage" && tab !== "roles" && tab !== "audit" && tab !== "plugin-perf" && tab !== "mcp" && (
             <Button onClick={() => void s.save(tab)} disabled={s.saving || !s.settingsLoaded}>{s.saving ? "저장 중..." : "저장"}</Button>
           )}
         </DialogFooter>

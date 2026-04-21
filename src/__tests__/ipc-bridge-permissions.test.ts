@@ -38,6 +38,7 @@ function makeMockPM() {
     addAlwaysAllowedPersist: vi.fn(),
     addAlwaysDeniedPersist: vi.fn(),
     removeRule: vi.fn(),
+    getVisibilityDenyRules: vi.fn(() => [{ pattern: "dangerous_*" }]),
   };
 }
 
@@ -74,6 +75,8 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
     conversationLoop: makeMockLoop(pm) as any,
     approvalGate: gate as any,
     mcpManager: { listServers: vi.fn(() => []), killSwitch: vi.fn() } as any,
+    toolRegistry: { setDenyRules: vi.fn() } as any,
+    auditLogger: { log: vi.fn() } as any,
     idleScheduler: undefined,
     bashAstValidator: {} as any,
     auditService: {} as any,
@@ -100,6 +103,12 @@ function invoke(channel: string, ...args: unknown[]): unknown {
   return fn(null, ...args);
 }
 
+function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): unknown {
+  const fn = handlers.get(channel);
+  if (!fn) throw new Error(`No handler registered for: ${channel}`);
+  return fn(event, ...args);
+}
+
 // ─── Tests ───────────────────────────────────────────
 
 describe("lvis:permission:add-rule", () => {
@@ -117,6 +126,20 @@ describe("lvis:permission:add-rule", () => {
     expect(pm.addAlwaysDeniedPersist).toHaveBeenCalledWith("dangerous_*");
     expect(pm.addAlwaysAllowedPersist).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
+  });
+
+  it("syncs visibility deny rules into ToolRegistry after add", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    registerIpcHandlers(services, () => null);
+
+    await invoke("lvis:permission:add-rule", "dangerous_*", "deny");
+
+    expect(pm.getVisibilityDenyRules).toHaveBeenCalled();
+    expect(services.toolRegistry.setDenyRules).toHaveBeenCalledWith([{ pattern: "dangerous_*" }]);
   });
 
   it("no permissionManager → returns { ok: false }", async () => {
@@ -146,6 +169,20 @@ describe("lvis:permission:remove-rule", () => {
     await invoke("lvis:permission:remove-rule", "mcp_*", "deny");
     expect(pm.removeRule).toHaveBeenCalledWith("mcp_*", "deny");
   });
+
+  it("syncs visibility deny rules into ToolRegistry after remove", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    registerIpcHandlers(services, () => null);
+
+    await invoke("lvis:permission:remove-rule", "mcp_*", "deny");
+
+    expect(pm.getVisibilityDenyRules).toHaveBeenCalled();
+    expect(services.toolRegistry.setDenyRules).toHaveBeenCalledWith([{ pattern: "dangerous_*" }]);
+  });
 });
 
 describe("lvis:policy:get", () => {
@@ -156,6 +193,19 @@ describe("lvis:policy:get", () => {
     const result = await invoke("lvis:policy:get");
     expect(result).toEqual(fakePolicy);
     expect(mockLoadPolicy).toHaveBeenCalled();
+  });
+});
+
+describe("lvis:mcp:servers", () => {
+  it("rejects unauthorized sender frames", async () => {
+    await setupHandlers();
+
+    const result = await invokeWithEvent(
+      "lvis:mcp:servers",
+      { senderFrame: { url: "https://evil.example.com/" } },
+    );
+
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
   });
 });
 
@@ -278,4 +328,3 @@ describe("lvis:policy:set — F8 validation", () => {
     expect(mockSavePolicy).not.toHaveBeenCalled();
   });
 });
-

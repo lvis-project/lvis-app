@@ -107,6 +107,10 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:plugins:call",
   "lvis:mcp:servers",
   "lvis:mcp:kill",
+  "lvis:mcp:config:get",
+  "lvis:mcp:config:path",
+  "lvis:mcp:config:add",
+  "lvis:mcp:config:remove",
   "lvis:permission:get-mode",
   "lvis:permission:set-mode",
   "lvis:permission:list-rules",
@@ -455,11 +459,29 @@ export function registerIpcHandlers(
   });
 
   // ─── MCP ──────────────────────────────────────
-  // read-only, sender guard optional
-  ipcMain.handle("lvis:mcp:servers", () => services.mcpManager.listServers());
+  ipcMain.handle("lvis:mcp:servers", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:servers", e); return UNAUTHORIZED_FRAME; }
+    return services.mcpManager.listServers();
+  });
   ipcMain.handle("lvis:mcp:kill", (e, serverId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:kill", e); return UNAUTHORIZED_FRAME; }
     return services.mcpManager.killSwitch(serverId);
+  });
+  ipcMain.handle("lvis:mcp:config:get", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:get", e); return UNAUTHORIZED_FRAME; }
+    return services.mcpManager.getConfigs();
+  });
+  ipcMain.handle("lvis:mcp:config:path", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:path", e); return UNAUTHORIZED_FRAME; }
+    return services.mcpManager.getConfigPath();
+  });
+  ipcMain.handle("lvis:mcp:config:add", async (e, config: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:add", e); return UNAUTHORIZED_FRAME; }
+    return services.mcpManager.addConfig(config as import("./mcp/types.js").McpServerConfig);
+  });
+  ipcMain.handle("lvis:mcp:config:remove", async (e, serverId: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:config:remove", e); return UNAUTHORIZED_FRAME; }
+    return services.mcpManager.removeConfig(serverId);
   });
 
   // ─── Permission Prompt (§6.3 Layer 3) ─────────
@@ -508,6 +530,7 @@ export function registerIpcHandlers(
       } else {
         await pm.addAlwaysDeniedPersist(normalized);
       }
+      services.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
       return { ok: true, rule: { pattern: normalized, action } };
     } catch (err) {
       return { ok: false, error: "add-failed", message: (err as Error).message };
@@ -519,6 +542,7 @@ export function registerIpcHandlers(
     if (!pm) return { ok: false, error: "no-permission-manager", message: "권한 매니저가 초기화되지 않았습니다." };
     try {
       await pm.removeRule(pattern, action);
+      services.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
       return { ok: true };
     } catch (err) {
       return { ok: false, error: "remove-failed", message: (err as Error).message };
@@ -926,4 +950,3 @@ export function registerIpcHandlers(
     }
   });
 }
-
