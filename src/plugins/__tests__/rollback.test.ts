@@ -64,8 +64,18 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     vi.restoreAllMocks();
   });
 
-  it("rollback restores the prior installed version", async () => {
+  function makeService(): TestableService {
     const svc = new TestableService(appRoot, undefined, undefined, cacheRoot);
+    (
+      svc as unknown as {
+        installedDir: string;
+      }
+    ).installedDir = join(appRoot, "plugins", "installed");
+    return svc;
+  }
+
+  it("rollback restores the prior installed version", async () => {
+    const svc = makeService();
 
     // First install pins v1.0.0.
     await svc.installPlugin("com.lge.sample", "1.0.0");
@@ -97,14 +107,14 @@ describe("PluginMarketplaceService install → update → rollback", () => {
   });
 
   it("rollback without a prior cached version throws", async () => {
-    const svc = new TestableService(appRoot, undefined, undefined, cacheRoot);
+    const svc = makeService();
     await svc.installPlugin("com.lge.sample", "1.0.0");
 
     await expect(svc.rollbackPlugin("com.lge.sample")).rejects.toThrow(/No prior version/);
   });
 
   it("rollback fails for unknown plugin", async () => {
-    const svc = new TestableService(appRoot, undefined, undefined, cacheRoot);
+    const svc = makeService();
     await expect(svc.rollbackPlugin("no.such.plugin")).rejects.toThrow(/No prior version/);
   });
 });
