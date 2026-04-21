@@ -8,6 +8,7 @@
  * Feature flag: LVIS_MARKETPLACE_UPDATE_CHECK (default ON).
  * Set to "0" or "false" to disable the check entirely.
  */
+import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, dirname } from "node:path";
@@ -91,19 +92,19 @@ export class PluginUpdateDetector {
   }
 
   private async readInstalledVersion(manifestPath: string): Promise<string | null> {
-    const registryDir = dirname(this.registryPath);
-    const abs = isAbsolute(manifestPath)
-      ? manifestPath
-      : resolve(registryDir, manifestPath);
+    const registryDir = canonicalizeExistingPath(dirname(this.registryPath));
+    const abs = canonicalizeExistingPath(
+      isAbsolute(manifestPath)
+        ? manifestPath
+        : resolve(dirname(this.registryPath), manifestPath),
+    );
     // Path-escape defense: resolved manifest must live beneath either the
     // registry directory (bundled plugins) or the per-user install dir
     // `~/.lvis/plugins/` (dynamic installs). Anything else — e.g. a crafted
     // registry entry like "../../etc/passwd" — is rejected.
-    const relFromRegistry = relative(registryDir, abs);
-    const userInstalledDir = resolve(homedir(), ".lvis/plugins");
-    const relFromUserDir = relative(userInstalledDir, abs);
-    const underRegistry = !relFromRegistry.startsWith("..") && !isAbsolute(relFromRegistry);
-    const underUserDir = !relFromUserDir.startsWith("..") && !isAbsolute(relFromUserDir);
+    const userInstalledDir = canonicalizeExistingPath(resolve(homedir(), ".lvis/plugins"));
+    const underRegistry = isWithin(registryDir, abs);
+    const underUserDir = isWithin(userInstalledDir, abs);
     if (!underRegistry && !underUserDir) {
       console.warn("[update-detector] manifestPath escapes allowed roots, skipping:", manifestPath);
       return null;
@@ -116,6 +117,16 @@ export class PluginUpdateDetector {
       return null;
     }
   }
+}
+
+function canonicalizeExistingPath(path: string): string {
+  const absolute = resolve(path);
+  return existsSync(absolute) ? realpathSync(absolute) : absolute;
+}
+
+function isWithin(basePath: string, targetPath: string): boolean {
+  const rel = relative(basePath, targetPath);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 /**

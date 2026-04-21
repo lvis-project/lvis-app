@@ -1,7 +1,8 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
@@ -11,6 +12,8 @@ import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
 import AdmZip from "adm-zip";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
+import { installFromMarketplace, type MarketplaceHttp } from "./marketplace-installer.js";
+import { getBundledPublicKeys } from "./publisher-keys.js";
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 
@@ -18,6 +21,8 @@ type MarketplaceCatalog = {
   version: number;
   plugins: PluginMarketplaceItem[];
 };
+
+type VerifiedMarketplaceFetcher = MarketplaceFetcher & MarketplaceHttp;
 
 export interface MarketplaceListItem extends PluginMarketplaceItem {
   installed: boolean;
@@ -575,7 +580,7 @@ export class PluginMarketplaceService {
     await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
     // Use absolute path when installedDir is outside appRoot (e.g. ~/.lvis/plugins/)
     // so the registry entry remains valid regardless of where registry.json lives.
-    const isOutsideApp = !manifestFile.startsWith(this.appRoot);
+    const isOutsideApp = !this.isPathWithinAppRoot(manifestFile);
     const registryPath = isOutsideApp
       ? manifestFile
       : relative(dirname(this.registryPath), manifestFile).split("\\").join("/");
@@ -668,10 +673,9 @@ export class PluginMarketplaceService {
       return this.writeInstalledManifest(plugin, version);
     }
 
-    const { zipBuffer } = await this.fetcher.downloadVersion(plugin.slug ?? plugin.id, version);
     const pluginDir = resolve(this.installedDir, plugin.id);
-    await mkdir(pluginDir, { recursive: true });
-    new AdmZip(zipBuffer).extractAllTo(pluginDir, true);
+    const zipBuffer = await this.downloadVerifiedMarketplaceZip(plugin, version);
+    await this.extractMarketplaceZip(plugin.id, zipBuffer, pluginDir);
 
     const manifestFile = resolve(pluginDir, "plugin.json");
     let zipHasManifest = false;
@@ -700,6 +704,65 @@ export class PluginMarketplaceService {
       await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
     }
     return manifestFile;
+  }
+
+  private async downloadVerifiedMarketplaceZip(
+    plugin: PluginMarketplaceItem,
+    version: string,
+  ): Promise<Buffer> {
+    const slug = plugin.slug ?? plugin.id;
+    if (!isVerifiedMarketplaceFetcher(this.fetcher)) {
+      throw new Error(
+        `remote marketplace fetcher for "${plugin.id}" does not support signed artifact verification`,
+      );
+    }
+    const verified = await installFromMarketplace(slug, version, {
+      http: this.fetcher,
+      publicKeys: getBundledPublicKeys(),
+      downloadRoot: resolve(this.cacheRoot, "verified-downloads"),
+      cacheBase: null,
+    });
+    return readFile(verified.tarballPath);
+  }
+
+  private async extractMarketplaceZip(
+    pluginId: string,
+    zipBuffer: Buffer,
+    pluginDir: string,
+  ): Promise<void> {
+    const stageDir = resolve(this.installedDir, `.${pluginId}.stage-${randomUUID()}`);
+    await rm(stageDir, { recursive: true, force: true });
+    await mkdir(stageDir, { recursive: true });
+
+    try {
+      let zip: AdmZip;
+      try {
+        zip = new AdmZip(zipBuffer);
+      } catch (err) {
+        throw new Error(`invalid zip format for plugin "${pluginId}": ${(err as Error).message}`);
+      }
+
+      for (const entry of zip.getEntries()) {
+        const safeEntryPath = sanitizeZipEntryPath(pluginId, entry.entryName);
+        if (!safeEntryPath) continue;
+        const targetPath = resolve(stageDir, safeEntryPath);
+        if (!this.isWithin(stageDir, targetPath)) {
+          throw new Error(`plugin "${pluginId}" zip entry escapes install root: ${entry.entryName}`);
+        }
+        if (entry.isDirectory) {
+          await mkdir(targetPath, { recursive: true });
+          continue;
+        }
+        await mkdir(dirname(targetPath), { recursive: true });
+        await writeFile(targetPath, entry.getData());
+      }
+
+      await rm(pluginDir, { recursive: true, force: true });
+      await rename(stageDir, pluginDir);
+    } catch (err) {
+      await rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
+      throw err;
+    }
   }
 
   private async resolveInstalledIds(
@@ -760,6 +823,16 @@ export class PluginMarketplaceService {
     if (!this.isWithin(realNodeModulesRoot, resolvedTarget)) {
       throw new Error(`plugin "${pluginId}" ${label} path escapes node_modules`);
     }
+  }
+
+  private isPathWithinAppRoot(targetPath: string): boolean {
+    const realAppRoot = existsSync(this.appRoot)
+      ? realpathSync(this.appRoot)
+      : this.appRoot;
+    const resolvedTarget = existsSync(targetPath)
+      ? realpathSync(targetPath)
+      : targetPath;
+    return this.isWithin(realAppRoot, resolvedTarget);
   }
 
   private async runNpmInstall(packageSpec: string): Promise<void> {
@@ -861,4 +934,28 @@ export class PluginMarketplaceService {
       });
     });
   }
+}
+
+function isVerifiedMarketplaceFetcher(fetcher: MarketplaceFetcher): fetcher is VerifiedMarketplaceFetcher {
+  return (
+    typeof (fetcher as Partial<VerifiedMarketplaceFetcher>).downloadArtifact === "function" &&
+    typeof (fetcher as Partial<VerifiedMarketplaceFetcher>).fetchSignatureEnvelope === "function"
+  );
+}
+
+function sanitizeZipEntryPath(pluginId: string, entryName: string): string | null {
+  const normalized = entryName.split("\\").join("/").replace(/^\/+/, "");
+  if (!normalized || normalized === ".") return null;
+  if (normalized.includes("\u0000")) {
+    throw new Error(`plugin "${pluginId}" zip entry contains NUL byte`);
+  }
+  if (/^[A-Za-z]:/.test(normalized)) {
+    throw new Error(`plugin "${pluginId}" zip entry uses absolute drive path: ${entryName}`);
+  }
+  const collapsed = posix.normalize(normalized);
+  if (!collapsed || collapsed === ".") return null;
+  if (collapsed === ".." || collapsed.startsWith("../")) {
+    throw new Error(`plugin "${pluginId}" zip entry escapes install root: ${entryName}`);
+  }
+  return collapsed.endsWith("/") ? collapsed.slice(0, -1) : collapsed;
 }
