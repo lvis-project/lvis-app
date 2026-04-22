@@ -8,8 +8,6 @@ import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
-import { PluginInstallDialog } from "./dialogs/PluginInstallDialog.js";
-import { PluginUninstallDialog } from "./dialogs/PluginUninstallDialog.js";
 import { CommandPaletteDialog } from "./dialogs/CommandPaletteDialog.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { MainContent } from "./MainContent.js";
@@ -65,12 +63,9 @@ export function App() {
 
   // Marketplace + plugin UI extensions
   const {
-    marketplace, pluginViews, marketStatus, working,
-    refreshViews, refreshMarketplace, installPlugin, uninstallPlugin,
+    pluginViews,
+    refreshViews, refreshMarketplace,
   } = usePluginMarketplace(api);
-  type MarketplaceItem = (typeof marketplace)[number];
-  const [installTarget, setInstallTarget] = useState<MarketplaceItem | null>(null);
-  const [uninstallTarget, setUninstallTarget] = useState<MarketplaceItem | null>(null);
 
   // Sprint B — role preset, cost preview, attached docs, language lock
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets();
@@ -150,6 +145,19 @@ export function App() {
   });
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
 
+  // Refresh plugin views + marketplace catalog when a lvis:// deep-link
+  // install completes in the main process, so new sidebar tabs appear
+  // (and uninstalled ones disappear) without requiring an app restart.
+  useEffect(() => {
+    if (typeof api.onPluginInstallResult !== "function") return;
+    const unsubscribe = api.onPluginInstallResult(({ success }) => {
+      if (!success) return;
+      void refreshViews();
+      void refreshMarketplace();
+    });
+    return unsubscribe;
+  }, [api, refreshViews, refreshMarketplace]);
+
   const commandActions = useMemo(() => [
     { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
     { id: "tasks", label: "태스크 보기", run: () => setActiveView("tasks") },
@@ -178,18 +186,13 @@ export function App() {
   return (
     <ErrorBoundary fallback="앱 오류가 발생했습니다">
     <TooltipProvider>
-      <div className="grid h-screen grid-cols-[320px_1fr]">
+      <div className="flex h-screen">
         <Sidebar
-          marketStatus={marketStatus}
-          marketplace={marketplace}
           pluginViews={pluginViews}
-          working={working}
-          setInstallTarget={setInstallTarget}
-          setUninstallTarget={setUninstallTarget}
           setActiveView={setActiveView}
         />
 
-        <main className="flex min-h-0 flex-col">
+        <main className="flex min-h-0 flex-col flex-1">
           <MarketplaceUpdateBanner updates={marketplaceUpdates} onDismiss={dismissMarketplaceUpdates} />
           {fallbackToast && (
             <div className="bg-yellow-100 text-yellow-800 text-xs px-4 py-2 border-b border-yellow-200">
@@ -241,9 +244,7 @@ export function App() {
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
       <ApprovalQueueStatus queue={approvalQueue} />
-      <PluginInstallDialog target={installTarget} onClose={() => setInstallTarget(null)} onConfirm={installPlugin} working={working} />
       <CommandPaletteDialog open={commandOpen} onOpenChange={setCommandOpen} actions={commandActions} />
-      <PluginUninstallDialog target={uninstallTarget} onClose={() => setUninstallTarget(null)} onConfirm={uninstallPlugin} working={working} />
       <DropZoneOverlay />
     </TooltipProvider>
     </ErrorBoundary>

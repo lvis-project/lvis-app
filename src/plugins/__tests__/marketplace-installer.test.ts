@@ -11,8 +11,9 @@ import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join} from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import {
+  buildVerifiedTarballPaths,
   installFromMarketplace,
   isMarketplaceDirectPreferred,
   isNpmFallbackEnabled,
@@ -121,6 +122,70 @@ describe("installFromMarketplace — happy path", () => {
       expect(existsSync(out.tarballPath)).toBe(true);
       const persisted = await readFile(out.tarballPath);
       expect(persisted.equals(tarball)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installFromMarketplace — path hardening", () => {
+  it.each([
+    "../escape",
+    "nested/path",
+    "../../verified-downloads/pwn",
+    "./../still-bad",
+  ])("keeps final and temp paths inside the verified download directory for %s", (version) => {
+    const root = tmpDownloadRoot();
+    try {
+      const { pluginDir, tarballPath, tmpPath } = buildVerifiedTarballPaths(
+        root,
+        "acme-notes",
+        version,
+        "fixedtmp",
+      );
+      expect(dirname(tarballPath)).toBe(pluginDir);
+      expect(dirname(tmpPath)).toBe(pluginDir);
+      expect(relative(pluginDir, tarballPath).startsWith("..")).toBe(false);
+      expect(relative(pluginDir, tmpPath).startsWith("..")).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("persists malicious versions under the verified download directory", async () => {
+    const tarball = Buffer.from("fake-tarball-bytes-v1");
+    const { privateKey, pubBuf } = freshEd25519();
+    const envelope = makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]);
+    const http = fakeHttp(tarball, envelope);
+    const root = tmpDownloadRoot();
+    const version = "../escape/outside";
+    try {
+      const out = await installFromMarketplace("acme-notes", version, {
+        http,
+        publicKeys: { "prod-v1": pubBuf },
+        downloadRoot: root
+      });
+      const pluginDir = resolve(root, "acme-notes");
+      expect(dirname(out.tarballPath)).toBe(pluginDir);
+      expect(relative(pluginDir, out.tarballPath).startsWith("..")).toBe(false);
+      expect(existsSync(out.tarballPath)).toBe(true);
+      expect(out.version).toBe(version);
+      const persisted = await readFile(out.tarballPath);
+      expect(persisted.equals(tarball)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects slugs that escape the verified download directory", () => {
+    const root = tmpDownloadRoot();
+    const escapingSlug = join("..", "outside");
+    try {
+      expect(() => buildVerifiedTarballPaths(root, escapingSlug, "1.0.0", "fixedtmp")).toThrow(
+        expect.objectContaining({
+          code: "WRITE_FAILED",
+        }),
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
