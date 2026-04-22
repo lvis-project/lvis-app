@@ -1,25 +1,25 @@
 /**
- * Sprint 3-A-2 — ProactiveTriggerCoordinator unit tests.
+ * Sprint 3-A-2 — RoutineTriggerCoordinator unit tests.
  * Each signal has dedicated coverage; coordinator-level debounce + disabled
  * kill switch validated.
  */
 import { describe, it, expect, vi } from "vitest";
 import {
-  ProactiveTriggerCoordinator,
+  RoutineTriggerCoordinator,
   createIdleSignal,
   createScheduleSignal,
   createMeetingSignal,
   createTaskDeadlineSignal,
   createPostTurnSignal,
   type SignalResult,
-} from "../proactive-trigger-coordinator.js";
+} from "../routine-trigger-coordinator.js";
 
 function fakeEngine() {
   const calls: Array<{ idleState?: string; triggerReason?: string }> = [];
   return {
     calls,
     engine: {
-      // cast via unknown to sidestep the full ProactiveEngine surface
+      // cast via unknown to sidestep the full RoutineEngine surface
       generateDailyBriefing: vi.fn(async (opts: any) => {
         calls.push({ idleState: opts?.idleState, triggerReason: opts?.triggerReason });
         return { status: "generated", briefing: { generatedAt: "", items: [] } };
@@ -127,11 +127,11 @@ describe("taskDeadlineSignal", () => {
   });
 });
 
-describe("ProactiveTriggerCoordinator", () => {
+describe("RoutineTriggerCoordinator", () => {
   it("calls engine.generateDailyBriefing with idleState=triggered for non-idle signals", async () => {
     const { engine, calls } = fakeEngine();
-    const coord = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine,
+    const coord = new RoutineTriggerCoordinator({
+      routineEngine: engine,
       evaluators: [{ name: "scheduleSignal", evaluate: () => ({ fire: true, reason: "schedule:08:30" }) }],
       disabled: () => false,
     });
@@ -143,8 +143,8 @@ describe("ProactiveTriggerCoordinator", () => {
 
   it("maps idleSignal → idleState=long_idle", async () => {
     const { engine, calls } = fakeEngine();
-    const coord = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine,
+    const coord = new RoutineTriggerCoordinator({
+      routineEngine: engine,
       evaluators: [{ name: "idleSignal", evaluate: () => ({ fire: true, reason: "long_idle" }) }],
       disabled: () => false,
     });
@@ -155,8 +155,8 @@ describe("ProactiveTriggerCoordinator", () => {
   it("debounces within 30min window", async () => {
     const { engine } = fakeEngine();
     let clock = new Date("2026-04-18T09:00:00Z");
-    const coord = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine,
+    const coord = new RoutineTriggerCoordinator({
+      routineEngine: engine,
       evaluators: [{ name: "scheduleSignal", evaluate: () => ({ fire: true, reason: "x" }) }],
       disabled: () => false,
       now: () => clock,
@@ -173,8 +173,8 @@ describe("ProactiveTriggerCoordinator", () => {
 
   it("kill-switch disabled() blocks start()", () => {
     const { engine } = fakeEngine();
-    const coord = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine,
+    const coord = new RoutineTriggerCoordinator({
+      routineEngine: engine,
       evaluators: [],
       disabled: () => true,
     });
@@ -186,8 +186,8 @@ describe("ProactiveTriggerCoordinator", () => {
   it("post-turn signal fires briefing when enabled and cooldown elapsed", async () => {
     const { engine, calls } = fakeEngine();
     let lastFiredAt = 0;
-    const coord = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine,
+    const coord = new RoutineTriggerCoordinator({
+      routineEngine: engine,
       evaluators: [
         createPostTurnSignal({
           getLastFiredAt: () => lastFiredAt,
@@ -206,8 +206,8 @@ describe("ProactiveTriggerCoordinator", () => {
   it("post-turn signal skipped when disabled or within cooldown", async () => {
     const { engine } = fakeEngine();
     let lastFiredAt = Date.now(); // just fired
-    const coord = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine,
+    const coord = new RoutineTriggerCoordinator({
+      routineEngine: engine,
       evaluators: [
         createPostTurnSignal({
           getCooldownMs: () => 600_000,
@@ -225,8 +225,8 @@ describe("ProactiveTriggerCoordinator", () => {
     // also skipped when isEnabled returns false
     const { engine: engine2 } = fakeEngine();
     let lastFiredAt2 = 0;
-    const coord2 = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine2,
+    const coord2 = new RoutineTriggerCoordinator({
+      routineEngine: engine2,
       evaluators: [
         createPostTurnSignal({
           getLastFiredAt: () => lastFiredAt2,
@@ -244,8 +244,8 @@ describe("ProactiveTriggerCoordinator", () => {
   it("stops on first firing evaluator — no cascade", async () => {
     const { engine } = fakeEngine();
     const second = vi.fn(() => ({ fire: true, reason: "second" }));
-    const coord = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine,
+    const coord = new RoutineTriggerCoordinator({
+      routineEngine: engine,
       evaluators: [
         { name: "first", evaluate: () => ({ fire: true, reason: "first" }) },
         { name: "second", evaluate: second },

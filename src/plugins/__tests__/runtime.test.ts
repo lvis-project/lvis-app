@@ -30,6 +30,13 @@ describe("PluginRuntime.disable", () => {
   async function writeFakePlugin(
     id: string,
     deployment?: "managed" | "user",
+    options?: {
+      capabilities?: string[];
+      requires?: string[];
+      startBody?: string;
+      stopBody?: string;
+      factoryBody?: string;
+    },
   ): Promise<string> {
     const pluginDir = join(installedDir, id);
     await mkdir(pluginDir, { recursive: true });
@@ -41,12 +48,13 @@ describe("PluginRuntime.disable", () => {
     await writeFile(
       entryPath,
       `export default async function createPlugin(ctx) {
+  ${options?.factoryBody ?? ""}
   return {
     handlers: {
       "${methodName}": async () => "hi-${id}",
     },
-    start: async () => {},
-    stop: async () => {},
+    start: async () => { ${options?.startBody ?? ""} },
+    stop: async () => { ${options?.stopBody ?? ""} },
   };
 }
 `,
@@ -61,6 +69,8 @@ describe("PluginRuntime.disable", () => {
       tools: [methodName],
     };
     if (deployment) manifest.deployment = deployment;
+    if (options?.capabilities) manifest.capabilities = options.capabilities;
+    if (options?.requires) manifest.requires = { capabilities: options.requires };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return manifestPath;
@@ -77,12 +87,17 @@ describe("PluginRuntime.disable", () => {
     );
   }
 
-  function makeRuntime(): PluginRuntime {
+  function makeRuntime(options?: {
+    createHostApi?: ConstructorParameters<typeof PluginRuntime>[0]["createHostApi"];
+    onDisable?: ConstructorParameters<typeof PluginRuntime>[0]["onDisable"];
+  }): PluginRuntime {
     const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
     return new PluginRuntime({
       hostRoot: testDir,
       registryPath,
       deploymentGuard: guard,
+      createHostApi: options?.createHostApi,
+      onDisable: options?.onDisable,
     });
   }
 
@@ -111,7 +126,7 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
 
-    await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Managed plugin/);
+    await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Protected plugin|Managed plugin/);
 
     expect(runtime.listPluginIds()).toContain("p-managed");
     expect(runtime.listToolNames()).toContain("p_managed_hello");
@@ -205,6 +220,187 @@ describe("PluginRuntime.disable", () => {
     expect(runtime.listPluginIds()).not.toContain("bad-plugin");
     expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad\.method'|schema validation failed/));
     errSpy.mockRestore();
+  });
+
+  it("loads bundled manifestPaths alongside registry plugins", async () => {
+    const bundledDir = join(testDir, "bundled-plugin");
+    await mkdir(bundledDir, { recursive: true });
+    const bundledEntry = join(bundledDir, "entry.mjs");
+    const bundledManifestPath = join(bundledDir, "plugin.json");
+    await writeFile(
+      bundledEntry,
+      `export default async function createPlugin() {
+  return { handlers: { "bundled_ping": async () => "bundled" } };
+}
+`,
+      "utf-8",
+    );
+    await writeFile(
+      bundledManifestPath,
+      JSON.stringify({
+        id: "bundled-plugin",
+        name: "Bundled Plugin",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: ["bundled_ping"],
+        deployment: "bundled",
+      }),
+      "utf-8",
+    );
+
+    const registryManifestPath = await writeFakePlugin("registry-plugin");
+    await writeRegistry([{ id: "registry-plugin", manifestPath: registryManifestPath, enabled: true }]);
+
+    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      manifestPaths: [bundledManifestPath],
+      registryPath,
+      deploymentGuard: guard,
+    });
+
+    await runtime.load();
+
+    expect(runtime.listPluginIds()).toEqual(
+      expect.arrayContaining(["bundled-plugin", "registry-plugin"]),
+    );
+    expect(runtime.listToolNames()).toEqual(
+      expect.arrayContaining(["bundled_ping", "registry_plugin_hello"]),
+    );
+  });
+
+  it("rejects plugins whose required capabilities are missing at runtime load", async () => {
+    const dependentManifestPath = await writeFakePlugin(
+      "needs-calendar",
+      undefined,
+      { requires: ["calendar-source"] },
+    );
+    await writeRegistry([{ id: "needs-calendar", manifestPath: dependentManifestPath, enabled: true }]);
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    expect(runtime.listPluginIds()).not.toContain("needs-calendar");
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("needs-calendar rejected — missing required capabilities: calendar-source"),
+    );
+  });
+
+  it("loads plugins when required capabilities are provided by another enabled plugin", async () => {
+    const providerManifestPath = await writeFakePlugin(
+      "calendar-provider",
+      undefined,
+      { capabilities: ["calendar-source"] },
+    );
+    const dependentManifestPath = await writeFakePlugin(
+      "needs-calendar",
+      undefined,
+      { requires: ["calendar-source"] },
+    );
+    await writeRegistry([
+      { id: "calendar-provider", manifestPath: providerManifestPath, enabled: true },
+      { id: "needs-calendar", manifestPath: dependentManifestPath, enabled: true },
+    ]);
+
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    expect(runtime.listPluginIds()).toEqual(
+      expect.arrayContaining(["calendar-provider", "needs-calendar"]),
+    );
+  });
+
+  it("drops dependents after provider start failure removes the required capability", async () => {
+    const providerManifestPath = await writeFakePlugin(
+      "calendar-provider",
+      undefined,
+      {
+        capabilities: ["calendar-source"],
+        startBody: 'throw new Error("provider start failed");',
+      },
+    );
+    const dependentManifestPath = await writeFakePlugin(
+      "needs-calendar",
+      undefined,
+      { requires: ["calendar-source"] },
+    );
+    await writeRegistry([
+      { id: "calendar-provider", manifestPath: providerManifestPath, enabled: true },
+      { id: "needs-calendar", manifestPath: dependentManifestPath, enabled: true },
+    ]);
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runtime = makeRuntime();
+    await runtime.startAll();
+
+    expect(runtime.listPluginIds()).not.toContain("calendar-provider");
+    expect(runtime.listPluginIds()).not.toContain("needs-calendar");
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[plugin:calendar-provider] start failed (non-fatal): provider start failed"),
+    );
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[plugin-runtime] needs-calendar rejected — missing required capabilities: calendar-source"),
+    );
+  });
+
+  it("dependency-pruned plugins run stop, disposer cleanup, and onDisable", async () => {
+    const stopMarker = join(testDir, "needs-calendar.stopped");
+    const onDisable = vi.fn();
+
+    const providerManifestPath = await writeFakePlugin(
+      "calendar-provider",
+      undefined,
+      {
+        capabilities: ["calendar-source"],
+        startBody: 'throw new Error("provider start failed");',
+      },
+    );
+    const dependentManifestPath = await writeFakePlugin(
+      "needs-calendar",
+      undefined,
+      {
+        requires: ["calendar-source"],
+        factoryBody: 'ctx.hostApi.onEvent("email.action.needed", () => {});',
+        stopBody: `await import("node:fs/promises").then((fs) => fs.writeFile(${JSON.stringify(stopMarker)}, "stopped", "utf-8"));`,
+      },
+    );
+    await writeRegistry([
+      { id: "calendar-provider", manifestPath: providerManifestPath, enabled: true },
+      { id: "needs-calendar", manifestPath: dependentManifestPath, enabled: true },
+    ]);
+
+    const runtime = makeRuntime({
+      createHostApi: () => ({
+        registerKeywords: () => {},
+        emitEvent: () => {},
+        onEvent: () => () => {},
+        getCalendarSnapshot: async () => [],
+        addTask: () => {},
+        saveNote: async () => {},
+        getSecret: () => null,
+        getMsGraphToken: async () => null,
+        startMsGraphAuth: async () => {},
+        isMsGraphAuthenticated: () => false,
+        getMsGraphAccount: () => null,
+        onMsGraphAuthChange: () => {},
+        withMsGraphRetry: async () => {
+          throw new Error("not used");
+        },
+        callLlm: async () => "",
+        logEvent: () => {},
+        onShutdown: () => {},
+        openAuthWindow: async () => {
+          throw new Error("not used");
+        },
+      }),
+      onDisable,
+    });
+
+    await runtime.startAll();
+
+    await expect(readFile(stopMarker, "utf-8")).resolves.toBe("stopped");
+    expect(onDisable).toHaveBeenCalledWith("needs-calendar");
   });
 
   it("plugin with method name starting with digit is dropped fail-soft", async () => {

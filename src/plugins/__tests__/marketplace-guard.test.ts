@@ -33,7 +33,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
-  async function writeCatalog(deployment?: "managed" | "user") {
+  async function writeCatalog(deployment?: "bundled" | "managed" | "user") {
     const catalogEntry: Record<string, unknown> = {
       id: "mp-test",
       name: "Marketplace Test",
@@ -108,5 +108,14 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
 
     const items = await service.list();
     expect(items[0].isManaged).toBe(false);
+  });
+
+  it("list() exposes isManaged=true for bundled catalog entries", async () => {
+    await writeCatalog("bundled");
+    await writeEmptyRegistry();
+    const service = makeService();
+
+    const items = await service.list();
+    expect(items[0].isManaged).toBe(true);
   });
 });

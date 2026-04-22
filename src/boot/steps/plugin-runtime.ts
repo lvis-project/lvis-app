@@ -6,14 +6,16 @@
  *   • builds the per-plugin HostApi factory (registerKeywords / emitEvent /
  *     onEvent / addTask / saveNote / getSecret / msGraph* / callLlm /
  *     logEvent / onShutdown)
- *   • creates the PluginRuntime, starts plugins, wires manifest startupTools
- *     and the dev hot-reload watcher
+ *   • creates the PluginRuntime, loads manifests, and exposes a starter that
+ *     boot.ts calls after generic event subscribers are registered
+ *   • wires manifest startupTools and the dev hot-reload watcher after start
  *   • returns the runtime + late-binding refs (llmCallerRef / pluginCallLlmRef /
  *     conversationLoopRef) that boot.ts injects once ConversationLoop exists.
  *
  * No plugin-specific literals here — everything is manifest-driven.
  */
 import { homedir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
@@ -84,12 +86,47 @@ export interface InitPluginRuntimeOutput {
   taskSourceRegistry: TaskSourceRegistry;
   lateBinding: LateBindingRefs;
   pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }>;
+  startLoadedPlugins: () => Promise<void>;
+}
+
+type CalendarSnapshotEvent = Awaited<ReturnType<PluginHostApi["getCalendarSnapshot"]>>[number];
+
+function isCalendarSnapshotEvent(value: unknown): value is CalendarSnapshotEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Record<string, unknown>;
+  return (
+    typeof event.subject === "string" &&
+    typeof event.start === "string" &&
+    typeof event.end === "string" &&
+    (event.isAllDay === undefined || typeof event.isAllDay === "boolean") &&
+    (event.location === undefined || typeof event.location === "string") &&
+    (event.isOnlineMeeting === undefined || typeof event.isOnlineMeeting === "boolean")
+  );
+}
+
+export async function resolveBundledManifestPaths(projectRoot: string): Promise<string[]> {
+  const marketplacePath = resolve(projectRoot, "plugins/marketplace.json");
+  try {
+    const raw = await readFile(marketplacePath, "utf-8");
+    const parsed = JSON.parse(raw) as { plugins?: Array<{ deployment?: string; packageSpec?: string }> };
+    const manifests: string[] = [];
+    for (const plugin of parsed.plugins ?? []) {
+      if (plugin.deployment !== "bundled") continue;
+      if (typeof plugin.packageSpec !== "string" || !plugin.packageSpec.startsWith("file:")) continue;
+      const packageDir = resolve(projectRoot, plugin.packageSpec.slice("file:".length));
+      manifests.push(resolve(packageDir, "plugin.json"));
+    }
+    return manifests;
+  } catch (err) {
+    console.warn(`[lvis] boot: bundled manifest discovery failed:`, (err as Error).message);
+    return [];
+  }
 }
 
 /**
  * §4.2 Step 3-5 — construct PluginRuntime, register the per-plugin HostApi
- * factory, start all plugins, run manifest startupTools, register plugin
- * tools into ToolRegistry, and wire the dev hot-reload watcher.
+ * factory, eagerly load manifests, and return a starter so boot.ts can start
+ * plugins only after generic RoutineEngine subscriptions exist.
  */
 export async function initPluginRuntime(
   input: InitPluginRuntimeInput,
@@ -185,9 +222,11 @@ export async function initPluginRuntime(
     `[plugin:${pluginId}] capability not declared: ms-graph-consumer`;
   const hasMsGraphCapability = (manifest: PluginManifest): boolean =>
     manifest.capabilities?.includes("ms-graph-consumer") ?? false;
+  const bundledManifestPaths = await resolveBundledManifestPaths(projectRoot);
 
   pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
+    manifestPaths: bundledManifestPaths,
     registryPath: resolve(projectRoot, "plugins/registry.json"),
     configOverrides,
     deploymentGuard,
@@ -216,6 +255,20 @@ export async function initPluginRuntime(
         console.log(`[lvis] plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
+        if (manifest.emittedEvents?.length && !manifest.emittedEvents.includes(type)) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] plugin_emit_undeclared_event eventType=${type} declared=${manifest.emittedEvents.join("|")}`,
+            });
+          } catch { /* audit must not break host */ }
+          console.warn(
+            `[lvis] plugin:${pluginId} emitEvent('${type}') dropped — not declared in emittedEvents`,
+          );
+          return;
+        }
         const requiredCap = requiredCapabilityForEmit(type);
         if (requiredCap) {
           const manifest = pluginRuntime?.getPluginManifest(pluginId);
@@ -240,6 +293,27 @@ export async function initPluginRuntime(
         const unsubscribe = onEvent(type, handler);
         pluginRuntime.registerDisposer(pluginId, unsubscribe);
         return unsubscribe;
+      },
+      getCalendarSnapshot: async (options) => {
+        const providerId = pluginRuntime.findPluginIdByCapability("calendar-source");
+        if (!providerId) {
+          throw new Error("No plugin provides capability: calendar-source");
+        }
+        const providerManifest = pluginRuntime.getPluginManifest(providerId);
+        if (!providerManifest) {
+          throw new Error("Calendar provider manifest missing");
+        }
+        const days = options?.days ?? 1;
+        const toolName = days > 1 ? "calendar_list" : "calendar_today";
+        if (!providerManifest.tools.includes(toolName)) {
+          throw new Error(`No calendar snapshot tool available for days=${days}`);
+        }
+        const payload = days > 1 ? { days } : {};
+        const result = await pluginRuntime.call(toolName, payload);
+        if (!Array.isArray(result) || !result.every(isCalendarSnapshotEvent)) {
+          throw new Error(`Calendar snapshot provider returned invalid payload for ${toolName}`);
+        }
+        return result;
       },
       addTask: (task) => {
         const categoryId = deriveCategoryId(pluginId, task.source);
@@ -393,26 +467,35 @@ export async function initPluginRuntime(
     }),
   });
 
-  await pluginRuntime.startAll();
-  console.log("[lvis] boot: plugins loaded:", pluginRuntime.listToolNames());
+  await pluginRuntime.load();
 
-  // 선언형 startupTools 자동 실행
-  runManifestStartupTools(pluginRuntime);
+  let pluginsStarted = false;
+  let pluginDevWatcher:
+    | ReturnType<typeof startPluginDevWatcher>
+    | undefined;
+  const startLoadedPlugins = async (): Promise<void> => {
+    if (pluginsStarted) return;
+    pluginsStarted = true;
 
-  // 플러그인 메서드를 ToolRegistry에 등록
-  registerPluginTools(pluginRuntime, toolRegistry);
+    await pluginRuntime.startAll();
+    console.log("[lvis] boot: plugins loaded:", pluginRuntime.listToolNames());
 
-  // I2 — Dev-mode live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
-  const pluginDevWatcher = startPluginDevWatcher({
-    pluginRuntime,
-    onReloaded: (pluginId) => {
-      const manifest = pluginRuntime.getPluginManifest(pluginId);
-      if (!manifest) return;
-      registerPluginTools(pluginRuntime, toolRegistry);
-      console.log(`[lvis] plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`);
-    },
-  });
-  app.prependOnceListener("before-quit", () => { pluginDevWatcher.stop(); });
+    runManifestStartupTools(pluginRuntime);
+    registerPluginTools(pluginRuntime, toolRegistry);
+
+    pluginDevWatcher = startPluginDevWatcher({
+      pluginRuntime,
+      onReloaded: (pluginId) => {
+        const manifest = pluginRuntime.getPluginManifest(pluginId);
+        if (!manifest) return;
+        registerPluginTools(pluginRuntime, toolRegistry);
+        console.log(`[lvis] plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`);
+      },
+    });
+    app.prependOnceListener("before-quit", () => {
+      pluginDevWatcher?.stop();
+    });
+  };
 
   return {
     pluginRuntime,
@@ -420,6 +503,7 @@ export async function initPluginRuntime(
     taskSourceRegistry,
     lateBinding,
     pluginShutdownHandlers,
+    startLoadedPlugins,
   };
 }
 

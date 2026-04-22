@@ -1,5 +1,5 @@
 /**
- * Sprint 2-D — IdleScheduler ↔ ProactiveEngine trigger wiring test.
+ * Sprint 2-D — IdleScheduler ↔ RoutineEngine trigger wiring test.
  *
  * Verifies that when the host wires
  *   idleScheduler.setStateChangeListener(newState =>
@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { IdleSchedulerService, type WorkerClientLite } from "../idle-scheduler.js";
-import { ProactiveEngine } from "../../core/proactive-engine.js";
+import { RoutineEngine } from "../../core/routine-engine.js";
 
 function makeNoopWorker(): WorkerClientLite {
   return {
@@ -24,7 +24,7 @@ describe("Sprint 2-D: idle IDLE_SCAN transition triggers daily briefing", () => 
   it("invokes generateDailyBriefing once when entering IDLE_SCAN (flag=on)", async () => {
     const callLlm = vi.fn().mockResolvedValue("테스트 브리핑 요약");
     const setLastBriefingDate = vi.fn();
-    const engine = new ProactiveEngine({
+    const engine = new RoutineEngine({
       getTaskSummary: () => [
         { title: "테스트 태스크", priority: "high", status: "pending", source: "test" },
       ],
@@ -67,7 +67,7 @@ describe("Sprint 2-D: idle IDLE_SCAN transition triggers daily briefing", () => 
 
   it("does not invoke generateDailyBriefing on non-IDLE_SCAN transitions", async () => {
     const callLlm = vi.fn().mockResolvedValue("x");
-    const engine = new ProactiveEngine({
+    const engine = new RoutineEngine({
       getTaskSummary: () => [
         { title: "t", priority: "high", status: "pending", source: "test" },
       ],

@@ -27,7 +27,7 @@ type VerifiedMarketplaceFetcher = MarketplaceFetcher & MarketplaceHttp;
 export interface MarketplaceListItem extends PluginMarketplaceItem {
   installed: boolean;
   enabled: boolean;
-  /** Phase 1.5 §9.6: true if protected (managed) — used by UI to show lock icon */
+   /** True if user uninstall/disable is blocked (managed or bundled). */
   isManaged: boolean;
 }
 
@@ -177,7 +177,7 @@ export class PluginMarketplaceService {
     catalogItem: PluginMarketplaceItem,
     installedManifestPath?: string,
   ): Promise<boolean> {
-    if (catalogItem.deployment === "managed") return true;
+    if (catalogItem.deployment === "managed" || catalogItem.deployment === "bundled") return true;
     if (!installedManifestPath) return false;
     const abs = isAbsolute(installedManifestPath)
       ? installedManifestPath
@@ -185,7 +185,7 @@ export class PluginMarketplaceService {
     try {
       const raw = await readFile(abs, "utf-8");
       const parsed = JSON.parse(raw) as { deployment?: string };
-      return parsed.deployment === "managed";
+      return parsed.deployment === "managed" || parsed.deployment === "bundled";
     } catch {
       return false;
     }
@@ -695,7 +695,7 @@ export class PluginMarketplaceService {
         tools: plugin.tools,
         config: plugin.defaultConfig ?? {},
       };
-      if (plugin.deployment === "managed" || plugin.deployment === "user") {
+      if (plugin.deployment === "bundled" || plugin.deployment === "managed" || plugin.deployment === "user") {
         manifest.deployment = plugin.deployment;
       }
       if (plugin.publisher) {

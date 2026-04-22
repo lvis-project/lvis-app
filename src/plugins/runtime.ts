@@ -20,6 +20,7 @@ import type {
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
 import type { PluginSignatureVerifier } from "./signature-verifier.js";
+import { resolveDependencies } from "./dependency-resolver.js";
 
 /**
  * M1 — uiCallable safety: inverted model.
@@ -96,7 +97,7 @@ export interface PluginCard {
   capabilities: string[];
   /** tool name → description from manifest.toolSchemas */
   toolDescriptions?: Record<string, string>;
-  /** true when manifest.deployment === "managed" */
+  /** true when manifest.deployment blocks user uninstall/disable (managed or bundled) */
   isManaged?: boolean;
   /** Runtime load status derived from loaded/failed/disabled runtime state. */
   loadStatus: "loaded" | "failed" | "disabled";
@@ -184,6 +185,11 @@ export class PluginRuntime {
   async load(): Promise<void> {
     if (this.loaded) return;
     const loadPlan = await this.resolveManifestLoadPlan();
+    const resolvedPlans: Array<ManifestLoadPlan & {
+      manifest: PluginManifest;
+      pluginRoot: string;
+    }> = [];
+
     for (const plan of loadPlan) {
       const manifestPath = plan.manifestPath;
       let manifest: PluginManifest;
@@ -211,7 +217,32 @@ export class PluginRuntime {
       }
       this.disabledPluginIds.delete(manifest.id);
       this.failedPluginIds.delete(manifest.id);
-      const pluginRoot = dirname(manifestPath);
+      resolvedPlans.push({
+        ...plan,
+        manifest,
+        pluginRoot: dirname(manifestPath),
+      });
+    }
+
+    const enabledManifests = resolvedPlans.map((plan) => plan.manifest);
+
+    for (const plan of resolvedPlans) {
+      const { manifest, pluginRoot, manifestPath } = plan;
+
+      if (manifest.requires && manifest.requires.capabilities.length > 0) {
+        const dependencyPool = enabledManifests.filter((candidate) => candidate.id !== manifest.id);
+        const result = resolveDependencies(manifest.requires.capabilities, dependencyPool);
+        if (!result.ok) {
+          const reason = `missing required capabilities: ${result.missing.join(", ")}`;
+          console.error(`[plugin-runtime] ${manifest.id} rejected — ${reason}`);
+          this.auditLog?.("error", "plugin_missing_dependencies", {
+            pluginId: manifest.id,
+            missing: result.missing,
+          });
+          this.markFailed(manifest.id);
+          continue;
+        }
+      }
 
       // Sprint 3-B §9.6 — manifest signature gate.
       // Managed plugins require a valid signature; unsigned user plugins are
@@ -219,7 +250,7 @@ export class PluginRuntime {
       const skipSignatureVerification = process.env.LVIS_DEV_SKIP_SIG === "1";
       if (this.signatureVerifier && !skipSignatureVerification) {
         const sigResult = await this.signatureVerifier.verifyManifestFile(manifestPath);
-        const isManaged = manifest.deployment === "managed";
+        const isManaged = manifest.deployment === "managed" || manifest.deployment === "bundled";
         if (!sigResult.valid) {
           if (isManaged) {
             console.error(
@@ -365,6 +396,7 @@ export class PluginRuntime {
       this.failedPluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
     }
+    await this.dropPluginsWithMissingRuntimeDependencies();
     this.loaded = true;
   }
 
@@ -445,12 +477,13 @@ export class PluginRuntime {
       console.error(`[plugin:${id}] start failed (non-fatal): ${reason}`);
       const plugin = this.plugins.get(id);
       if (!plugin) continue;
-      this.markFailed(id);
-      for (const method of plugin.methods.keys()) {
-        this.methodMap.delete(method);
-      }
-      this.plugins.delete(id);
+      await this.detachPlugin(id, {
+        mark: "failed",
+        stopErrorLabel: "stop during failed-start cleanup failed",
+        disposerErrorLabel: "disposer failed during failed-start cleanup",
+      });
     }
+    await this.dropPluginsWithMissingRuntimeDependencies();
   }
 
   async stopAll(): Promise<void> {
@@ -460,7 +493,13 @@ export class PluginRuntime {
   }
 
   async restartAll(): Promise<void> {
-    await this.stopAll();
+    for (const pluginId of [...this.plugins.keys()]) {
+      await this.detachPlugin(pluginId, {
+        mark: "none",
+        stopErrorLabel: "stop during restart cleanup failed",
+        disposerErrorLabel: "disposer failed during restart cleanup",
+      });
+    }
     this.resetLoadedState();
     await this.startAll();
   }
@@ -809,6 +848,80 @@ export class PluginRuntime {
     }
   }
 
+  private async dropPluginsWithMissingRuntimeDependencies(): Promise<void> {
+    let removed = true;
+    while (removed) {
+      removed = false;
+      const loadedManifests = [...this.plugins.values()].map((plugin) => plugin.manifest);
+      for (const [pluginId, plugin] of [...this.plugins.entries()]) {
+        const required = plugin.manifest.requires?.capabilities ?? [];
+        if (required.length === 0) continue;
+        const dependencyPool = loadedManifests.filter((manifest) => manifest.id !== pluginId);
+        const result = resolveDependencies(required, dependencyPool);
+        if (result.ok) continue;
+        console.error(
+          `[plugin-runtime] ${pluginId} rejected — missing required capabilities: ${result.missing.join(", ")}`,
+        );
+        this.auditLog?.("error", "plugin_missing_dependencies", {
+          pluginId,
+          missing: result.missing,
+        });
+        await this.detachPlugin(pluginId, {
+          mark: "failed",
+          stopErrorLabel: "stop during dependency-prune cleanup failed",
+          disposerErrorLabel: "disposer failed during dependency-prune cleanup",
+        });
+        removed = true;
+      }
+    }
+  }
+
+  private async detachPlugin(
+    pluginId: string,
+    opts: {
+      mark?: "failed" | "disabled" | "none";
+      stopErrorLabel: string;
+      disposerErrorLabel: string;
+    },
+  ): Promise<LoadedPlugin | undefined> {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) return undefined;
+
+    try {
+      await plugin.instance.stop?.();
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] ${opts.stopErrorLabel}:`, (err as Error).message);
+    }
+
+    for (const method of plugin.methods.keys()) {
+      this.methodMap.delete(method);
+    }
+    this.plugins.delete(pluginId);
+
+    const pluginDisposers = this.disposers.get(pluginId);
+    if (pluginDisposers) {
+      for (const d of pluginDisposers) {
+        try {
+          d();
+        } catch (err) {
+          console.error(`[plugin:${pluginId}] ${opts.disposerErrorLabel}:`, (err as Error).message);
+        }
+      }
+      this.disposers.delete(pluginId);
+    }
+
+    if (opts.mark === "disabled") {
+      this.disabledPluginIds.add(pluginId);
+      this.failedPluginIds.delete(pluginId);
+    } else if (opts.mark === "failed") {
+      this.markFailed(pluginId);
+      this.disabledPluginIds.delete(pluginId);
+    }
+
+    this.onDisable?.(pluginId);
+    return plugin;
+  }
+
   getPluginRoot(pluginId: string): string | undefined {
     return this.plugins.get(pluginId)?.pluginRoot;
   }
@@ -972,17 +1085,17 @@ export class PluginRuntime {
       }
     }
 
-    // Sprint 4-A — surface any remaining testMode flag in a managed plugin
+    // Sprint 4-A — surface any remaining testMode flag in a protected plugin
     // manifest. testMode may legitimately appear in dev/fixture builds but
-    // should NEVER ship inside a managed-deployment install.
+    // should NEVER ship inside a protected deployment install.
     if (
-      parsed.deployment === "managed" &&
+      (parsed.deployment === "managed" || parsed.deployment === "bundled") &&
       parsed.config &&
       typeof parsed.config === "object" &&
       (parsed.config as Record<string, unknown>).testMode === true
     ) {
       console.warn(
-        `[plugin-runtime] managed plugin '${pid}' has config.testMode=true (${path}). ` +
+        `[plugin-runtime] protected plugin '${pid}' has config.testMode=true (${path}). ` +
         `testMode is a development flag and must not ship in production installs — please remove it from the installed manifest.`,
       );
     }
@@ -1152,23 +1265,25 @@ export class PluginRuntime {
   }
 
   private async resolveManifestLoadPlan(): Promise<ManifestLoadPlan[]> {
-    if (this.manifestPaths.length > 0) {
-      return this.manifestPaths.map((manifestPath) => ({
-        manifestPath,
-        enabled: true,
-      }));
-    }
+    const plans: ManifestLoadPlan[] = this.manifestPaths.map((manifestPath) => ({
+      manifestPath,
+      enabled: true,
+    }));
     if (!this.registryPath) {
+      if (plans.length > 0) return plans;
       throw new Error("Either manifestPaths or registryPath must be provided.");
     }
     const registry = await readPluginRegistry(this.registryPath);
-    return registry.plugins.map((entry) => ({
-      pluginIdHint: entry.id,
-      manifestPath: isAbsolute(entry.manifestPath)
-        ? entry.manifestPath
-        : resolve(dirname(this.registryPath!), entry.manifestPath),
-      enabled: entry.enabled !== false,
-    }));
+    plans.push(
+      ...registry.plugins.map((entry) => ({
+        pluginIdHint: entry.id,
+        manifestPath: isAbsolute(entry.manifestPath)
+          ? entry.manifestPath
+          : resolve(dirname(this.registryPath!), entry.manifestPath),
+        enabled: entry.enabled !== false,
+      })),
+    );
+    return plans;
   }
 
   private resetLoadedState(): void {
@@ -1245,7 +1360,7 @@ export class PluginRuntime {
       tools: filteredTools,
       capabilities: manifest.capabilities ?? [],
       toolDescriptions: Object.keys(toolDescriptions).length > 0 ? toolDescriptions : undefined,
-      isManaged: manifest.deployment === "managed",
+      isManaged: manifest.deployment === "managed" || manifest.deployment === "bundled",
       loadStatus,
       version: manifest.version,
       publisher: manifest.publisher,
@@ -1259,6 +1374,9 @@ function createNoopHostApi(): PluginHostApi {
     registerKeywords: () => {},
     emitEvent: () => {},
     onEvent: () => () => {},
+    getCalendarSnapshot: async () => {
+      throw new Error("Calendar snapshot not available in noop context");
+    },
     addTask: () => {},
     saveNote: async () => {},
     getSecret: () => null,

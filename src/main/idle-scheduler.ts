@@ -122,7 +122,7 @@ export interface IdleSchedulerOptions {
 /**
  * Sprint 2-D: state transition listener signature. Fires after every state
  * change with (newState, oldState, reason). boot.ts wires this to trigger
- * ProactiveEngine.generateDailyBriefing() when entering IDLE_SCAN.
+ * RoutineEngine.generateDailyBriefing() when entering IDLE_SCAN.
  */
 export type IdleStateChangeListener = (
   newState: IdleState,
@@ -410,7 +410,7 @@ export class IdleSchedulerService {
     this.state = newState;
     this.logger(`[idle-scheduler] ${old} → ${newState} (${reason})`);
 
-    // Sprint 2-D: notify listener (boot.ts wires ProactiveEngine briefing
+    // Sprint 2-D: notify listener (boot.ts wires RoutineEngine briefing
     // trigger here). Swallow listener errors — scheduler must never throw.
     if (this.stateChangeListener) {
       try {

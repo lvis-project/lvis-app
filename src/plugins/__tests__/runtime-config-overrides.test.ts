@@ -24,12 +24,17 @@ describe("PluginRuntime config overrides", () => {
   it("applies updated plugin config overrides after restartAll", async () => {
     const pluginDir = join(installedDir, "config-plugin");
     await mkdir(pluginDir, { recursive: true });
+    const stopMarker = join(testDir, "config-plugin.stopped");
+    const disabled: string[] = [];
     await writeFile(
       join(pluginDir, "entry.mjs"),
       `export default async function createPlugin(ctx) {
   return {
     handlers: {
       "config_echo": async () => ctx.config.apiKey ?? "missing",
+    },
+    async stop() {
+      await import("node:fs/promises").then((fs) => fs.writeFile(${JSON.stringify(stopMarker)}, "stopped", "utf-8"));
     },
   };
 }
@@ -63,6 +68,7 @@ describe("PluginRuntime config overrides", () => {
       configOverrides: {
         "config-plugin": { apiKey: "before" },
       },
+      onDisable: (pluginId) => disabled.push(pluginId),
     });
 
     await runtime.load();
@@ -71,6 +77,8 @@ describe("PluginRuntime config overrides", () => {
     runtime.setConfigOverride("config-plugin", { apiKey: "after" });
     await runtime.restartAll();
 
+    await expect(import("node:fs/promises").then((fs) => fs.readFile(stopMarker, "utf-8"))).resolves.toBe("stopped");
+    expect(disabled).toEqual(["config-plugin"]);
     await expect(runtime.call("config_echo")).resolves.toBe("after");
   });
 });

@@ -3,7 +3,7 @@
  *
  * - buildPluginConfigOverrides: 범용 API key 주입
  * - registerPluginTools / runManifestStartupTools: manifest-driven wiring
- * - registerManifestEventSubscriptions / buildManifestEventHints: proactive hints
+ * - registerManifestEventSubscriptions: normalized routine event wiring
  * - registerPluginNotifications: OS 알림 (manifest.notificationEvents)
  * - findMethodByCapability: capability → tool 이름 resolver
  */
@@ -12,11 +12,21 @@ import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SettingsService } from "../data/settings-store.js";
-import type { ProactiveEngine } from "../core/proactive-engine.js";
+import type { RoutineEngine } from "../core/routine-engine.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { classifySubscription } from "../plugins/capabilities.js";
 import { pluginToolsForRegistration } from "../plugins/plugin-tool-adapter.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
+
+const CORE_ROUTINE_EVENT_TYPES = [
+  "routine.item.created",
+  "routine.signal.upcoming",
+  "routine.signal.action-needed",
+  "routine.snapshot.calendar",
+  "routine.snapshot.calendar.invalidated",
+  "routine.snapshot.mail",
+  "routine.snapshot.mail.invalidated",
+] as const;
 
 /** 현재 LLM 벤더의 API 키를 모든 플러그인에 범용으로 전달 */
 export function buildPluginConfigOverrides(settings: SettingsService): Record<string, Record<string, unknown>> {
@@ -87,64 +97,14 @@ export function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
 }
 
 export function registerManifestEventSubscriptions(
-  pluginRuntime: PluginRuntime,
-  proactiveEngine: ProactiveEngine,
-  auditLogger?: Pick<AuditLogger, "log">,
+  _pluginRuntime: PluginRuntime,
+  routineEngine: RoutineEngine,
+  _auditLogger?: Pick<AuditLogger, "log">,
 ): void {
-  const eventTypes = new Set<string>();
-  for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
-    for (const entry of manifest.eventSubscriptions ?? []) {
-      const eventType = typeof entry === "string" ? entry : entry.type;
-      // Phase 5 — namespace allowlist. Private namespaces (memory.private.*,
-      // settings.apiKey.*, audit.*, dlp.*) are never exposed to plugins;
-      // neutral namespaces pass with a warn so ops can track drift.
-      const verdict = classifySubscription(eventType);
-      if (verdict === "private") {
-        // M4: audit-log unauthorized private namespace subscription attempts.
-        try {
-          auditLogger?.log({
-            timestamp: new Date().toISOString(),
-            sessionId: "plugin",
-            type: "error",
-            input: `[plugin:${pluginId}] plugin_subscription_private_denied eventType=${eventType}`,
-          });
-        } catch { /* audit must not break host */ }
-        console.warn(
-          `[lvis] plugin:${pluginId} eventSubscriptions['${eventType}'] dropped — private namespace`,
-        );
-        continue;
-      }
-      if (verdict === "neutral") {
-        console.warn(
-          `[lvis] plugin:${pluginId} eventSubscriptions['${eventType}'] — outside public allowlist (allowed with warn)`,
-        );
-      }
-      eventTypes.add(eventType);
-    }
-  }
+  const eventTypes = new Set<string>(CORE_ROUTINE_EVENT_TYPES);
   for (const eventType of eventTypes) {
-    onEvent(eventType, (data) => proactiveEngine.collectEvent(eventType, data));
+    onEvent(eventType, (data) => routineEngine.collectEvent(eventType, data));
   }
-}
-
-export function buildManifestEventHints(
-  pluginRuntime: PluginRuntime,
-): Record<string, import("../core/proactive-engine.js").ProactiveEventHint> {
-  const hints: Record<string, import("../core/proactive-engine.js").ProactiveEventHint> = {};
-  for (const { manifest } of pluginRuntime.listPluginManifests()) {
-    for (const entry of manifest.eventSubscriptions ?? []) {
-      if (typeof entry === "string") {
-        // Backward-compatible string form: neutral fallback hint
-        hints[entry] = { category: "system", priority: "low", title: entry };
-      } else {
-        // Object form: use plugin-declared hint if present, else fallback
-        hints[entry.type] = entry.hint
-          ? { category: entry.hint.category, priority: entry.hint.priority, title: entry.hint.title }
-          : { category: "system", priority: "low", title: entry.type };
-      }
-    }
-  }
-  return hints;
 }
 
 /**

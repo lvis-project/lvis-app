@@ -3,9 +3,11 @@
  *
  * - **managed**: 회사(LGE IT)가 원격으로 배포/업데이트/삭제 제어.
  *   사용자는 UI에서 제거·비활성화 불가 (PluginDeploymentGuard가 차단).
+ * - **bundled**: 앱에 기본 포함된 번들 플러그인.
+ *   사용자 제거·비활성화 불가, app-shipped lifecycle을 따른다.
  * - **user**: 사용자가 자율적으로 설치. 회사 정책(userInstallPolicy)에 따라 제어.
  */
-export type DeploymentMode = "managed" | "user";
+export type DeploymentMode = "bundled" | "managed" | "user";
 
 export interface PluginManifest {
   /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.lge.meeting-recorder`. */
@@ -42,9 +44,8 @@ export interface PluginManifest {
   startupTools?: string[];
   /**
    * 플러그인이 구독하는 이벤트 타입 목록.
-   * 두 가지 형태를 모두 지원한다:
-   *   - 구형 호환: `string[]` — 호스트가 중립 fallback hint를 적용.
-   *   - 신형: `{ type: string; hint?: ProactiveEventHintSpec }[]` — 플러그인이 hint 메타데이터를 직접 선언.
+   * 코어는 normalized `routine.*` 이벤트만 직접 수집하며,
+   * 다른 도메인 이벤트는 번들/도메인 플러그인 레이어에서 처리한다.
    */
   eventSubscriptions?: Array<string | { type: string; hint?: { category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system"; priority: "high" | "medium" | "low"; title: string } }>;
   /**
@@ -70,6 +71,8 @@ export interface PluginManifest {
   }>;
   deployment?: DeploymentMode;
   publisher?: string;
+  /** S14: dependency capabilities this plugin requires at runtime. */
+  requires?: RequiresSpec;
   /**
    * Sprint 1-A A1 — optional hard startup timeout (ms, positive integer).
    * When declared, PluginRuntime enforces a `Promise.race`-based timeout on
@@ -215,6 +218,15 @@ export interface PluginHostApi {
    * (and PluginRuntime.onDisable) can clean up handlers deterministically.
    */
   onEvent(eventType: string, handler: (data: unknown) => void): () => void;
+  /** Read-only calendar snapshot helper for bundled routine orchestration. */
+  getCalendarSnapshot(options?: { days?: number }): Promise<Array<{
+    subject: string;
+    start: string;
+    end: string;
+    isAllDay?: boolean;
+    location?: string;
+    isOnlineMeeting?: boolean;
+  }>>;
   addTask(task: {
     title: string;
     description?: string;

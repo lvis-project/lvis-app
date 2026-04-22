@@ -19,9 +19,9 @@
  *                                                 hook-runner,
  *                                                 conversation-loop,
  *                                                 callLlm builders.
- *   Step 6          src/boot/proactive.ts         proactive engine +
+ *   Step 6          src/boot/routine.ts           RoutineEngine runtime +
  *                                                 calendar loaders.
- *   Step 6          src/boot/steps/proactive-coordinator — trigger coordinator
+ *   Step 6          src/boot/steps/routine-coordinator — trigger coordinator
  *                                                 + idle-scheduler composite.
  *   Step 4          src/boot/tools.ts             builtin tools +
  *                                                 request_plugin meta-tool +
@@ -59,10 +59,8 @@ import {
   wireKnowledgeAndIdleScheduler,
 } from "./boot/tools.js";
 import {
-  createProactiveEngine,
-  loadCalendarToday,
-  loadWeeklyCalendarIfMonday,
-} from "./boot/proactive.js";
+  createRoutineEngine,
+} from "./boot/routine.js";
 import {
   createSystemPromptBuilder,
   createPermissionManager,
@@ -75,7 +73,7 @@ import {
 } from "./boot/conversation.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
-import { wireProactiveCoordinator } from "./boot/steps/proactive-coordinator.js";
+import { wireRoutineCoordinator } from "./boot/steps/routine-coordinator.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { resolveManagedPluginBootstrap } from "./boot/managed-marketplace.js";
 
@@ -109,6 +107,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     deploymentGuard,
     taskSourceRegistry,
     lateBinding,
+    startLoadedPlugins,
   } = await initPluginRuntime({
     projectRoot,
     settingsService,
@@ -201,8 +200,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
-  // §7: Proactive Engine.
-  const proactiveEngine = createProactiveEngine({
+  // §7: RoutineEngine runtime.
+  const routineEngine = createRoutineEngine({
     taskService,
     memoryManager,
     pluginRuntime,
@@ -221,22 +220,22 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     auditLogger: bootAuditLogger,
   });
 
-  // Sprint 3-A-2: ProactiveTriggerCoordinator + idle-scheduler composite.
-  wireProactiveCoordinator({
-    proactiveEngine,
+  // Register renderer-side plugin event surfaces before plugin startup so
+  // startup-emitted routine snapshots are visible at the app boundary too.
+  let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
+  let disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
+
+  await startLoadedPlugins();
+
+  // Sprint 3-A-2: RoutineTriggerCoordinator + idle-scheduler composite.
+  wireRoutineCoordinator({
+    routineEngine,
     taskService,
     pluginRuntime,
     settingsService,
     idleScheduler,
     mainWindow,
   });
-
-  // 오늘 일정 초기 로드.
-  loadCalendarToday(pluginRuntime, proactiveEngine);
-
-  // §4.2 Step 7: manifest-driven IPC bridges.
-  let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
-  let disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
 
   // §4.5 + Agent 6: PostTurnHookChain.
   const { postTurnHookChain } = createPostTurnHookChain({
@@ -261,7 +260,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     toolRegistry,
     memoryManager,
     permissionManager,
-    proactiveEngine,
+    routineEngine,
     idleScheduler,
     postTurnHookChain,
     bashAstValidator,
@@ -275,9 +274,6 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   lateBinding.llmCallerRef.fn = createCallLlm(conversationLoop);
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
   console.log("[lvis] boot: plugin callLlm ready (rate-limited)");
-
-  // Feature 4: 월요일 주간 일정 캐시 로드 (KST 기준).
-  loadWeeklyCalendarIfMonday(pluginRuntime, proactiveEngine);
 
   // §9.5: MCP Server 연결.
   const mcpGovernance = new McpGovernance();
@@ -326,7 +322,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   return {
     pluginRuntime, pluginMarketplace, taskService, taskSourceRegistry, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
-    systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
+    systemPromptBuilder, conversationLoop, routineEngine, proactiveEngine: routineEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,
     telemetry, pluginTelemetry, autoUpdaterStop,

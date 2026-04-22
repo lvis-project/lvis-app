@@ -26,7 +26,7 @@ src/
                                approval, search, context-budget, cost-estimate,
                                sessions, starred, plugin-marketplace, role-presets,
                                app-bootstrap, indexed-docs, marketplace-updates)
-                               ProactiveTriggerCoordinator — 5 signals (idle/schedule/meeting/task-deadline/post-turn)
+                               RoutineTriggerCoordinator — 5 signals (idle/schedule/meeting/task-deadline/post-turn)
     components/               — BriefingCard, AssistantCard, UserMessageEditor,
                                ReasoningCard, ToolApprovalDialog, ToolGroupCard,
                                ChatSearchOverlay, Sparkline, UsageDashboard,
@@ -79,7 +79,7 @@ src/
     keyword-engine.ts         — §6.1 Input classification
     route-engine.ts           — §6.2 Routing resolution
     tool-registry.ts          — §6.4 Unified tool registry (deprecated by tools/base.ts eventually)
-    proactive-engine.ts       — §7 Proactive briefing
+    routine-engine.ts         — §7 Routine briefing
 
   mcp/                        — Model Context Protocol client (unchanged)
 

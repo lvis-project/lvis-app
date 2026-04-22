@@ -130,6 +130,24 @@ describe("PluginDeploymentGuard", () => {
     expect(result.reason).toMatch(/deployment="managed"/);
   });
 
+  it("rejects bundled plugin inside installedDir via manifest deployment field", async () => {
+    const userDir = join(installedDir, "p-bundled-inside");
+    await mkdir(userDir, { recursive: true });
+    const manifestPath = join(userDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ id: "p-bundled-inside", deployment: "bundled" }),
+      "utf-8",
+    );
+    await writeRegistry([{ id: "p-bundled-inside", manifestPath }]);
+
+    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const result = await guard.canUninstall("p-bundled-inside", "user");
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/deployment="bundled"/);
+  });
+
   it("allows user plugin inside installedDir with explicit deployment: user", async () => {
     const userDir = join(installedDir, "p-user-explicit");
     await mkdir(userDir, { recursive: true });
@@ -176,6 +194,13 @@ describe("PluginDeploymentGuard", () => {
     const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
     const result = await guard.canInstall("p-user", "user", "user");
     expect(result.allowed).toBe(true);
+  });
+
+  it("canInstall: rejects user installing a bundled catalog item", async () => {
+    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const result = await guard.canInstall("p-bundled", "user", "bundled");
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/installed by user/);
   });
 
   it("canInstall: allows user installing when deployment field is absent (backward compat)", async () => {

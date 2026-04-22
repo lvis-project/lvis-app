@@ -39,6 +39,10 @@ export interface DeploymentGuardOptions {
   userInstalledDir: string;
 }
 
+function isProtectedDeployment(deployment?: string): boolean {
+  return deployment === "managed" || deployment === "bundled";
+}
+
 export class PluginDeploymentGuard {
   private readonly registryPath: string;
   private readonly userInstalledDir: string;
@@ -71,10 +75,10 @@ export class PluginDeploymentGuard {
     }
 
     const manifest = await this.readManifestSafe(manifestAbs);
-    if (manifest?.deployment === "managed") {
+    if (isProtectedDeployment(manifest?.deployment)) {
       return {
         allowed: false,
-        reason: `Managed plugin cannot be uninstalled by user: ${pluginId} (deployment="managed")`,
+        reason: `Protected plugin cannot be uninstalled by user: ${pluginId} (deployment="${manifest?.deployment}")`,
       };
     }
 
@@ -102,10 +106,10 @@ export class PluginDeploymentGuard {
     if (actor === "it-admin") {
       return { allowed: true };
     }
-    if (catalogDeployment === "managed") {
+    if (isProtectedDeployment(catalogDeployment)) {
       return {
         allowed: false,
-        reason: `Managed plugin cannot be installed by user: ${pluginId}`,
+        reason: `Protected plugin cannot be installed by user: ${pluginId}`,
       };
     }
     return { allowed: true };

@@ -299,7 +299,7 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
       item.defaultConfig = defaultConfig;
     }
     if (ui) item.ui = ui;
-    if (row.deployment === "managed" || row.deployment === "user") {
+    if (row.deployment === "bundled" || row.deployment === "managed" || row.deployment === "user") {
       item.deployment = row.deployment;
     }
     if (row.publisher) item.publisher = row.publisher;

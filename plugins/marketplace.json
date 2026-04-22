@@ -2,6 +2,22 @@
   "version": 1,
   "plugins": [
     {
+      "id": "work-proactive",
+      "slug": "work-proactive",
+      "name": "LVIS Work Proactive",
+      "description": "이메일/미팅 신호를 RoutineEngine용 routine.* 이벤트로 번역하는 번들 오케스트레이션 플러그인",
+      "packageSpec": "file:../lvis-plugin-work-proactive",
+      "packageName": "@lvis/plugin-work-proactive",
+      "deployment": "bundled",
+      "publisher": "LG Electronics IT",
+      "requires": {
+        "capabilities": [
+          "calendar-source"
+        ]
+      },
+      "tools": []
+    },
+    {
       "id": "pageindex",
       "slug": "page-indexer",
       "name": "LVIS PageIndex",
