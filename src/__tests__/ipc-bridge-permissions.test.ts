@@ -67,7 +67,14 @@ function makeMockGate() {
 
 function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) {
   return {
-    pluginRuntime: { call: vi.fn(), listToolNames: vi.fn(() => []), listPluginIds: vi.fn(() => []), restartAll: vi.fn(), listUiExtensions: vi.fn(() => []) } as any,
+    pluginRuntime: {
+      call: vi.fn(),
+      listToolNames: vi.fn(() => []),
+      listPluginIds: vi.fn(() => []),
+      restartAll: vi.fn(),
+      setConfigOverride: vi.fn(),
+      listUiExtensions: vi.fn(() => []),
+    } as any,
     pluginMarketplace: { list: vi.fn(), install: vi.fn(), uninstall: vi.fn() } as any,
     taskService: { add: vi.fn(), update: vi.fn(), get: vi.fn(), delete: vi.fn(), query: vi.fn(), getPendingByPriority: vi.fn(() => []), getOverdue: vi.fn(() => []), getDueToday: vi.fn(() => []) } as any,
     settingsService: {
@@ -250,6 +257,25 @@ describe("lvis:plugins:config:*", () => {
       error: "unauthorized-frame",
       message: "권한이 없는 프레임입니다.",
     });
+  });
+
+  it("restarts the plugin runtime after a successful plugin-config save", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    registerIpcHandlers(services, () => null);
+
+    const result = await invoke("lvis:plugins:config:set", "meeting", { apiKey: "secret" }) as {
+      ok: boolean;
+      config: unknown;
+    };
+
+    expect(result).toEqual({ ok: true, config: { apiKey: "secret" } });
+    expect(services.settingsService.setPluginConfig).toHaveBeenCalledWith("meeting", { apiKey: "secret" });
+    expect(services.pluginRuntime.setConfigOverride).toHaveBeenCalledWith("meeting", { apiKey: "secret" });
+    expect(services.pluginRuntime.restartAll).toHaveBeenCalledOnce();
   });
 });
 

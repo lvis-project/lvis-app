@@ -146,7 +146,7 @@ export class PluginRuntime {
   private readonly hostRoot: string;
   private readonly manifestPaths: string[];
   private readonly registryPath?: string;
-  private readonly configOverrides: Record<string, Record<string, unknown>>;
+  private configOverrides: Record<string, Record<string, unknown>>;
   private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly signatureVerifier?: PluginSignatureVerifier;
@@ -463,6 +463,14 @@ export class PluginRuntime {
     await this.stopAll();
     this.resetLoadedState();
     await this.startAll();
+  }
+
+  setConfigOverride(pluginId: string, config: Record<string, unknown>): void {
+    if (Object.keys(config).length === 0) {
+      delete this.configOverrides[pluginId];
+      return;
+    }
+    this.configOverrides[pluginId] = { ...config };
   }
 
   /**
