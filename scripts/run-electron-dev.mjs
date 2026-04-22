@@ -22,6 +22,42 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import electronPath from "electron";
 
+// Windows corp PC runtime flags — see scripts/run-electron.mjs for rationale.
+const WINDOWS_SAFE_ELECTRON_FLAGS = [
+  "--disable-gpu",
+  "--disable-software-rasterizer",
+  "--disable-gpu-compositing",
+  "--no-sandbox",
+];
+
+function applyWindowsSafeFlags(args) {
+  const next = [...args];
+  if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
+    for (const flag of WINDOWS_SAFE_ELECTRON_FLAGS) {
+      if (!next.includes(flag)) next.push(flag);
+    }
+  }
+  if (process.env.LVIS_EXTRA_ELECTRON_FLAGS) {
+    const extra = process.env.LVIS_EXTRA_ELECTRON_FLAGS.split(/\s+/).filter(Boolean);
+    for (const flag of extra) {
+      if (!next.includes(flag)) next.push(flag);
+    }
+  }
+  return next;
+}
+
+function applyUtf8Env(env) {
+  if (!env.PYTHONIOENCODING) env.PYTHONIOENCODING = "utf-8";
+  if (!env.PYTHONUTF8) env.PYTHONUTF8 = "1";
+  if (!env.LANG) env.LANG = "en_US.UTF-8";
+  if (!env.LC_ALL) env.LC_ALL = "en_US.UTF-8";
+  return env;
+}
+
+// Dev mode wraps the Electron launch via cmd.exe /c "chcp 65001 & electron …"
+// in launchElectron() below so the code-page change shares Electron's console.
+// See scripts/run-electron.mjs for the detailed rationale.
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 const binDir = resolve(repoRoot, "node_modules/.bin");
@@ -82,12 +118,36 @@ function copyHtml() {
 
 function launchElectron() {
   if (electronProc) return;
+  const electronArgs = applyWindowsSafeFlags([mainOutput]);
   log("electron", `launching ${mainOutput}`);
-  electronProc = spawn(electronPath, [mainOutput], {
-    cwd: repoRoot,
-    stdio: "inherit",
-    env: (() => { const e = { ...process.env, LVIS_DEV: "1", LVIS_DEV_SKIP_SIG: process.env.LVIS_DEV_SKIP_SIG ?? "1" }; delete e.ELECTRON_RUN_AS_NODE; return e; })(),
-  });
+  const env = (() => {
+    const e = applyUtf8Env({
+      ...process.env,
+      LVIS_DEV: "1",
+      LVIS_DEV_SKIP_SIG: process.env.LVIS_DEV_SKIP_SIG ?? "1",
+    });
+    delete e.ELECTRON_RUN_AS_NODE;
+    return e;
+  })();
+  if (process.platform === "win32") {
+    // Wrap in cmd.exe /s /c (via shell: true) so `chcp 65001` binds to
+    // Electron's console AND cmd preserves quoting around electron.exe path.
+    // See scripts/run-electron.mjs for the detailed rationale.
+    const quote = (s) => `"${String(s).replace(/"/g, '""')}"`;
+    const electronCmd = [electronPath, ...electronArgs].map(quote).join(" ");
+    electronProc = spawn(`chcp 65001>nul & ${electronCmd}`, [], {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env,
+      shell: true,
+    });
+  } else {
+    electronProc = spawn(electronPath, electronArgs, {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env,
+    });
+  }
   electronProc.on("error", (err) => {
     log("electron", `spawn failed: ${err.message}`);
     electronProc = null;
