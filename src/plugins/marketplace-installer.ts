@@ -123,6 +123,7 @@ export function buildVerifiedTarballPaths(
   tmpSuffix = randomBytes(6).toString("hex"),
 ): { pluginDir: string; tarballPath: string; tmpPath: string } {
   const pluginDir = resolve(downloadRoot, slug);
+  assertWithinDir(downloadRoot, pluginDir);
   const safeVersion = encodeMarketplaceVersionForFilename(version);
   const tarballPath = resolve(pluginDir, `${safeVersion}.tar.gz`);
   const tmpPath = resolve(pluginDir, `.${safeVersion}.tar.gz.${tmpSuffix}.tmp`);
