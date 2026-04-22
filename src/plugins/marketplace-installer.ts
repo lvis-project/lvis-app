@@ -17,7 +17,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { verifyEnvelope, type PublicKeyInput } from "./envelope-verifier.js";
 import type { SignatureEnvelope, VerifyResult } from "./types.js";
 import { getCachedTarball, isOfflineCacheEnabled, setCachedTarball } from "./offline-cache.js";
@@ -95,6 +95,41 @@ export class MarketplaceInstallerError extends Error {
 
 const DEFAULT_MAX_SKEW_SEC = 72 * 3600;
 const DEFAULT_MAX_RETRIES = 3;
+
+/**
+ * Encodes an untrusted marketplace version into a flat filename component.
+ * Using a byte-preserving hex encoding avoids path separators and traversal
+ * segments while keeping the mapping deterministic and collision-free.
+ */
+export function encodeMarketplaceVersionForFilename(version: string): string {
+  const encoded = Buffer.from(version, "utf8").toString("hex");
+  return encoded.length > 0 ? encoded : "empty";
+}
+
+function assertWithinDir(dir: string, filePath: string): void {
+  const rel = relative(dir, filePath);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new MarketplaceInstallerError(
+      "WRITE_FAILED",
+      `refusing to write outside verified download root: ${filePath}`,
+    );
+  }
+}
+
+export function buildVerifiedTarballPaths(
+  downloadRoot: string,
+  slug: string,
+  version: string,
+  tmpSuffix = randomBytes(6).toString("hex"),
+): { pluginDir: string; tarballPath: string; tmpPath: string } {
+  const pluginDir = resolve(downloadRoot, slug);
+  const safeVersion = encodeMarketplaceVersionForFilename(version);
+  const tarballPath = resolve(pluginDir, `${safeVersion}.tar.gz`);
+  const tmpPath = resolve(pluginDir, `.${safeVersion}.tar.gz.${tmpSuffix}.tmp`);
+  assertWithinDir(pluginDir, tarballPath);
+  assertWithinDir(pluginDir, tmpPath);
+  return { pluginDir, tarballPath, tmpPath };
+}
 
 /**
  * Download → verify → stage a plugin tarball. Does NOT register the plugin
@@ -199,14 +234,13 @@ export async function installFromMarketplace(
 
   // 6. Persist tarball atomically: write to a temp file in the same directory
   //    then rename() into place so a crash/kill mid-write cannot leave a
-  //    partial/corrupt `${version}.tar.gz` that looks "installed".
-  const pluginDir = resolve(downloadRoot, slug);
-  await mkdir(pluginDir, { recursive: true });
-  const tarballPath = resolve(pluginDir, `${version}.tar.gz`);
-  const tmpPath = resolve(
-    pluginDir,
-    `.${version}.tar.gz.${randomBytes(6).toString("hex")}.tmp`,
+  //    partial/corrupt verified tarball that looks "installed".
+  const { pluginDir, tarballPath, tmpPath } = buildVerifiedTarballPaths(
+    downloadRoot,
+    slug,
+    version,
   );
+  await mkdir(pluginDir, { recursive: true });
   try {
     await writeFile(tmpPath, body);
     try {
