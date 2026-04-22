@@ -8,7 +8,9 @@
  * Feature flag: LVIS_MARKETPLACE_UPDATE_CHECK (default ON).
  * Set to "0" or "false" to disable the check entirely.
  */
+import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, dirname } from "node:path";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { readPluginRegistry } from "./registry.js";
@@ -90,16 +92,21 @@ export class PluginUpdateDetector {
   }
 
   private async readInstalledVersion(manifestPath: string): Promise<string | null> {
-    const registryDir = dirname(this.registryPath);
-    const abs = isAbsolute(manifestPath)
-      ? manifestPath
-      : resolve(registryDir, manifestPath);
-    // Path-escape defense: resolved manifest must live beneath the registry
-    // directory. A crafted registry entry like "../../etc/passwd" would
-    // otherwise leak filesystem reads into arbitrary locations.
-    const rel = relative(registryDir, abs);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
-      console.warn("[update-detector] manifestPath escapes registry dir, skipping:", manifestPath);
+    const registryDir = canonicalizeExistingPath(dirname(this.registryPath));
+    const abs = canonicalizeExistingPath(
+      isAbsolute(manifestPath)
+        ? manifestPath
+        : resolve(dirname(this.registryPath), manifestPath),
+    );
+    // Path-escape defense: resolved manifest must live beneath either the
+    // registry directory (bundled plugins) or the per-user install dir
+    // `~/.lvis/plugins/` (dynamic installs). Anything else — e.g. a crafted
+    // registry entry like "../../etc/passwd" — is rejected.
+    const userInstalledDir = canonicalizeExistingPath(resolve(homedir(), ".lvis/plugins"));
+    const underRegistry = isWithin(registryDir, abs);
+    const underUserDir = isWithin(userInstalledDir, abs);
+    if (!underRegistry && !underUserDir) {
+      console.warn("[update-detector] manifestPath escapes allowed roots, skipping:", manifestPath);
       return null;
     }
     try {
@@ -110,6 +117,16 @@ export class PluginUpdateDetector {
       return null;
     }
   }
+}
+
+function canonicalizeExistingPath(path: string): string {
+  const absolute = resolve(path);
+  return existsSync(absolute) ? realpathSync(absolute) : absolute;
+}
+
+function isWithin(basePath: string, targetPath: string): boolean {
+  const rel = relative(basePath, targetPath);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 /**

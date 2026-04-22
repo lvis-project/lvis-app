@@ -5,7 +5,7 @@
   "description": "Validates plugin.json manifest files for LVIS plugins (§9)",
   "type": "object",
   "required": ["id", "name", "version", "entry", "tools"],
-  "additionalProperties": false,
+  "additionalProperties": true,
   "properties": {
     "id": {
       "type": "string",

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import {resolve, join} from "node:path";
 import { PluginUpdateDetector, isNewer, isUpdateCheckEnabled } from "../update-detector.js";
@@ -233,5 +233,36 @@ describe("PluginUpdateDetector", () => {
 
     expect(updates).toHaveLength(1);
     expect(updates[0].latestVersion).toBe("2.0.0");
+  });
+
+  it("rejects manifests that escape allowed roots through a symlink", async () => {
+    const outsideDir = resolve(tmpDir, "..", `outside-${Date.now()}`);
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(
+      resolve(outsideDir, "plugin.json"),
+      JSON.stringify({ id: "pageindex", version: "1.0.0", name: "pageindex", entry: "dist/index.js", tools: [] }),
+      "utf-8",
+    );
+
+    const installedDir = resolve(tmpDir, "installed");
+    await mkdir(installedDir, { recursive: true });
+    await symlink(outsideDir, resolve(installedDir, "pageindex"), "dir");
+
+    const registryPath = resolve(tmpDir, "registry.json");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "pageindex", manifestPath: "installed/pageindex/plugin.json" }],
+      }),
+      "utf-8",
+    );
+
+    const detector = new PluginUpdateDetector(
+      registryPath,
+      makeFetcher([makeCatalogPlugin("pageindex", "1.1.0")]),
+    );
+
+    await expect(detector.checkForUpdates()).resolves.toEqual([]);
   });
 });

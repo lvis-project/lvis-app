@@ -12,10 +12,11 @@
  *   2. A Windows-style path with backslashes is normalized to forward
  *      slashes before the regex match (so dev on Windows works).
  *   3. Non-plugin packages (e.g. `@lvis/some-other-package`) do NOT
- *      trigger sibling resolution, so load fails when the relative
- *      entry has no file.
+ *      trigger sibling resolution, so the plugin remains unloaded when
+ *      the relative entry has no file.
  *   4. When the sibling-repo checkout is missing, the resolver returns
- *      undefined and load fails (does not silently import a stale path).
+ *      undefined and the plugin remains unloaded (does not silently import
+ *      a stale path).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -121,7 +122,7 @@ describe("PluginRuntime — resolveDevLinkedPackageEntry (via resolveEntryPath)"
     expect(runtime.listPluginIds()).toContain("p_dev_win");
   });
 
-  it("returns undefined for non-@lvis/plugin-* packages (load fails)", async () => {
+  it("returns undefined for non-@lvis/plugin-* packages and leaves the plugin unloaded", async () => {
     // Pattern requires `plugin-` prefix; `@lvis/some-other-package` does
     // NOT match, so resolveDevLinkedPackageEntry returns undefined and
     // the fallback `resolved` path points at a non-existent file.
@@ -131,11 +132,11 @@ describe("PluginRuntime — resolveDevLinkedPackageEntry (via resolveEntryPath)"
     );
 
     const runtime = makeRuntime();
-    await expect(runtime.load()).rejects.toThrow();
+    await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("p_dev_nomatch");
   });
 
-  it("returns undefined when the sibling-repo checkout is missing (load fails)", async () => {
+  it("returns undefined when the sibling-repo checkout is missing and leaves the plugin unloaded", async () => {
     // Pattern matches, but no `testDir/lvis-plugin-meeting/...` tree
     // exists, so existsSync(siblingRepoEntry) is false → undefined.
     await writeManifestAndRegistry(
@@ -144,7 +145,7 @@ describe("PluginRuntime — resolveDevLinkedPackageEntry (via resolveEntryPath)"
     );
 
     const runtime = makeRuntime();
-    await expect(runtime.load()).rejects.toThrow();
+    await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("p_dev_missing");
   });
 });

@@ -40,6 +40,12 @@ export function buildPluginConfigOverrides(settings: SettingsService): Record<st
     };
   }
 
+  // Merge per-plugin configs from settings
+  const pluginConfigs = settings.get("pluginConfigs");
+  for (const [pluginId, config] of Object.entries(pluginConfigs)) {
+    overrides[pluginId] = { ...(overrides[pluginId] ?? {}), ...config };
+  }
+
   return overrides;
 }
 

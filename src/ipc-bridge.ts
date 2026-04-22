@@ -146,6 +146,8 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:starred:add",
   "lvis:starred:remove",
   "lvis:plugins:cards",
+  "lvis:plugins:config:get",
+  "lvis:plugins:config:set",
   "lvis:feedback:submit",
   "lvis:telemetry:consent-answer",
   "lvis:audit:search",
@@ -203,6 +205,13 @@ function auditUnauthorized(
     type: "warn",
     input: JSON.stringify({ channel, frameUrl: event?.senderFrame?.url ?? "" }),
   });
+}
+
+function pluginConfigError(
+  error: string,
+  message: string,
+): { ok: false; error: string; message: string } {
+  return { ok: false, error, message };
 }
 
 export function registerIpcHandlers(
@@ -448,6 +457,37 @@ export function registerIpcHandlers(
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
+  ipcMain.handle("lvis:plugins:config:get", (e, pluginId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugins:config:get", e);
+      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
+    }
+    try {
+      return { ok: true as const, config: settingsService.getPluginConfig(pluginId) };
+    } catch (err) {
+      return pluginConfigError(
+        "invalid-plugin-config-request",
+        (err as Error).message,
+      );
+    }
+  });
+  ipcMain.handle("lvis:plugins:config:set", async (e, pluginId: string, config: unknown) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugins:config:set", e);
+      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
+    }
+    try {
+      const savedConfig = await settingsService.setPluginConfig(pluginId, config);
+      pluginRuntime.setConfigOverride(pluginId, savedConfig);
+      await pluginRuntime.restartAll();
+      return { ok: true as const, config: savedConfig };
+    } catch (err) {
+      return pluginConfigError(
+        "plugin-config-save-failed",
+        (err as Error).message,
+      );
+    }
+  });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:perf-stats", () => pluginRuntime.getPerfStats());
   // H2: renderer-originated plugin calls go through callFromUi() which enforces

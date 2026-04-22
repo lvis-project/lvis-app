@@ -2,6 +2,11 @@ import { safeStorage } from "electron";
 import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
+import {
+  sanitizePluginConfig,
+  sanitizePluginConfigPluginId,
+  type PluginConfigRecord,
+} from "../shared/plugin-config.js";
 
 export type LLMVendor =
   | "claude"
@@ -81,6 +86,8 @@ export interface AppSettings {
   updates: UpdateSettings;
   telemetry: TelemetrySettings;
   audit: AuditSettings;
+  /** 플러그인별 설정값 — pluginId → key/value 맵 */
+  pluginConfigs: Record<string, PluginConfigRecord>;
 }
 
 /**
@@ -183,6 +190,12 @@ export interface SettingsServiceOptions {
   userDataPath: string;
 }
 
+const LEGACY_INSECURE_MARKETPLACE_DEFAULT = {
+  backend: "real-cloud" as const,
+  realCloudBaseUrl: "http://localhost:8000",
+  realCloudAllowPrivateNetwork: true,
+};
+
 const DEFAULT_SETTINGS: AppSettings = {
   llm: {
     provider: "claude",
@@ -204,6 +217,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   marketplace: {
     backend: "mock",
+    realCloudAllowPrivateNetwork: false,
   },
   proactive: {
     enableDailyBriefing: false,
@@ -222,6 +236,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     auditRotationMaxBytes: 10 * 1024 * 1024, // 10 MB
     auditRetentionDays: 30,
   },
+  pluginConfigs: {},
 };
 
 export class SettingsService {
@@ -304,8 +319,32 @@ export class SettingsService {
     if (partial.audit) {
       this.settings.audit = { ...this.settings.audit, ...partial.audit };
     }
+    if (partial.pluginConfigs) {
+      const sanitized: Record<string, PluginConfigRecord> = {};
+      for (const [pluginId, config] of Object.entries(partial.pluginConfigs)) {
+        const safePluginId = sanitizePluginConfigPluginId(pluginId);
+        sanitized[safePluginId] = sanitizePluginConfig(config);
+      }
+      this.settings.pluginConfigs = { ...this.settings.pluginConfigs, ...sanitized };
+    }
     await this.saveSettings();
     return this.getAll();
+  }
+
+  getPluginConfig(pluginId: string): PluginConfigRecord {
+    const safePluginId = sanitizePluginConfigPluginId(pluginId);
+    return structuredClone(this.settings.pluginConfigs[safePluginId] ?? {});
+  }
+
+  async setPluginConfig(pluginId: string, config: unknown): Promise<PluginConfigRecord> {
+    const safePluginId = sanitizePluginConfigPluginId(pluginId);
+    const sanitizedConfig = sanitizePluginConfig(config);
+    this.settings.pluginConfigs = {
+      ...this.settings.pluginConfigs,
+      [safePluginId]: sanitizedConfig,
+    };
+    await this.saveSettings();
+    return structuredClone(sanitizedConfig);
   }
 
   /** 비밀 값(API 키 등)을 암호화하여 저장 */
@@ -384,16 +423,42 @@ export class SettingsService {
         llm.provider = DEFAULT_SETTINGS.llm.provider;
         llm.model = DEFAULT_SETTINGS.llm.model;
       }
+      const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
+      // Security hardening: an earlier default/migration auto-enabled a
+      // loopback marketplace (`http://localhost:8000`) with the private-network
+      // SSRF bypass set to true. Treat that exact tuple as an accidental legacy
+      // default, not an explicit user choice, and fall back to the safe mock
+      // backend instead. Real cloud deployments must now be configured
+      // intentionally.
+      if (
+        marketplaceParsed.backend === LEGACY_INSECURE_MARKETPLACE_DEFAULT.backend &&
+        marketplaceParsed.realCloudBaseUrl === LEGACY_INSECURE_MARKETPLACE_DEFAULT.realCloudBaseUrl &&
+        marketplaceParsed.realCloudAllowPrivateNetwork ===
+          LEGACY_INSECURE_MARKETPLACE_DEFAULT.realCloudAllowPrivateNetwork
+      ) {
+        marketplaceParsed.backend = DEFAULT_SETTINGS.marketplace.backend;
+        delete marketplaceParsed.realCloudBaseUrl;
+        marketplaceParsed.realCloudAllowPrivateNetwork =
+          DEFAULT_SETTINGS.marketplace.realCloudAllowPrivateNetwork;
+      } else if (
+        marketplaceParsed.backend === "real-cloud" &&
+        marketplaceParsed.realCloudAllowPrivateNetwork === undefined
+      ) {
+        marketplaceParsed.realCloudAllowPrivateNetwork = false;
+      }
+      const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
+
       return {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
-        marketplace: { ...DEFAULT_SETTINGS.marketplace, ...parsed.marketplace },
+        marketplace: { ...DEFAULT_SETTINGS.marketplace, ...marketplaceParsed },
         proactive: { ...DEFAULT_SETTINGS.proactive, ...parsed.proactive },
         privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
+        pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);
@@ -427,4 +492,23 @@ export class SettingsService {
       });
     });
   }
+}
+
+function sanitizeStoredPluginConfigs(input: unknown): Record<string, PluginConfigRecord> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return {};
+  }
+  const out: Record<string, PluginConfigRecord> = {};
+  for (const [pluginId, config] of Object.entries(input)) {
+    try {
+      const safePluginId = sanitizePluginConfigPluginId(pluginId);
+      out[safePluginId] = sanitizePluginConfig(config);
+    } catch (err) {
+      console.warn(
+        "[settings] dropping invalid stored plugin config:",
+        (err as Error).message,
+      );
+    }
+  }
+  return out;
 }
