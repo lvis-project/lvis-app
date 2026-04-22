@@ -460,7 +460,7 @@ export function registerIpcHandlers(
   ipcMain.handle("lvis:plugins:config:get", (e, pluginId: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:plugins:config:get", e);
-      return UNAUTHORIZED_FRAME;
+      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
     }
     try {
       return { ok: true as const, config: settingsService.getPluginConfig(pluginId) };
@@ -474,7 +474,7 @@ export function registerIpcHandlers(
   ipcMain.handle("lvis:plugins:config:set", async (e, pluginId: string, config: unknown) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:plugins:config:set", e);
-      return UNAUTHORIZED_FRAME;
+      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
     }
     try {
       const savedConfig = await settingsService.setPluginConfig(pluginId, config);
