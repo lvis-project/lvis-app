@@ -48,6 +48,13 @@ describe("Sidebar", () => {
     fireEvent.click(getByText("Test Plugin"));
     expect(setActiveView).toHaveBeenCalled();
   });
+
+  it("shows the starred badge count", () => {
+    const { getByText } = render(
+      <Sidebar activeView="home" pluginViews={[]} setActiveView={vi.fn()} starredCount={3} />,
+    );
+    expect(getByText("(3)")).toBeTruthy();
+  });
 });
 
 afterEach(() => {
