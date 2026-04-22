@@ -478,10 +478,12 @@ export function registerIpcHandlers(
     }
     try {
       const savedConfig = await settingsService.setPluginConfig(pluginId, config);
+      pluginRuntime.setConfigOverride(pluginId, savedConfig);
+      await pluginRuntime.restartAll();
       return { ok: true as const, config: savedConfig };
     } catch (err) {
       return pluginConfigError(
-        "invalid-plugin-config-payload",
+        "plugin-config-save-failed",
         (err as Error).message,
       );
     }
