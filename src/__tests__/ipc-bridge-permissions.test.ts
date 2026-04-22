@@ -70,7 +70,16 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
     pluginRuntime: { call: vi.fn(), listToolNames: vi.fn(() => []), listPluginIds: vi.fn(() => []), restartAll: vi.fn(), listUiExtensions: vi.fn(() => []) } as any,
     pluginMarketplace: { list: vi.fn(), install: vi.fn(), uninstall: vi.fn() } as any,
     taskService: { add: vi.fn(), update: vi.fn(), get: vi.fn(), delete: vi.fn(), query: vi.fn(), getPendingByPriority: vi.fn(() => []), getOverdue: vi.fn(() => []), getDueToday: vi.fn(() => []) } as any,
-    settingsService: { getAll: vi.fn(), patch: vi.fn(), get: vi.fn(() => ({ provider: "openai" })), getSecret: vi.fn(), setSecret: vi.fn(), deleteSecret: vi.fn() } as any,
+    settingsService: {
+      getAll: vi.fn(),
+      patch: vi.fn(),
+      get: vi.fn(() => ({ provider: "openai" })),
+      getSecret: vi.fn(),
+      setSecret: vi.fn(),
+      deleteSecret: vi.fn(),
+      getPluginConfig: vi.fn(() => ({})),
+      setPluginConfig: vi.fn(async (_pluginId: string, config: unknown) => config),
+    } as any,
     memoryManager: { listNotes: vi.fn(() => []), saveNote: vi.fn(), deleteNote: vi.fn(), searchNotes: vi.fn(() => []), getLvisMd: vi.fn(), updateLvisMd: vi.fn(), getUserPreferences: vi.fn(), updateUserPreferences: vi.fn() } as any,
     conversationLoop: makeMockLoop(pm) as any,
     approvalGate: gate as any,
@@ -206,6 +215,41 @@ describe("lvis:mcp:servers", () => {
     );
 
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+  });
+});
+
+describe("lvis:plugins:config:*", () => {
+  it("returns an explicit message for unauthorized plugin-config reads", async () => {
+    await setupHandlers();
+
+    const result = await invokeWithEvent(
+      "lvis:plugins:config:get",
+      { senderFrame: { url: "https://evil.example.com/" } },
+      "meeting",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "unauthorized-frame",
+      message: "권한이 없는 프레임입니다.",
+    });
+  });
+
+  it("returns an explicit message for unauthorized plugin-config writes", async () => {
+    await setupHandlers();
+
+    const result = await invokeWithEvent(
+      "lvis:plugins:config:set",
+      { senderFrame: { url: "https://evil.example.com/" } },
+      "meeting",
+      { apiKey: "secret" },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "unauthorized-frame",
+      message: "권한이 없는 프레임입니다.",
+    });
   });
 });
 
