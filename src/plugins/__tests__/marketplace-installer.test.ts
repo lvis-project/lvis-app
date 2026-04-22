@@ -176,6 +176,20 @@ describe("installFromMarketplace — path hardening", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("rejects slugs that escape the verified download directory", () => {
+    const root = tmpDownloadRoot();
+    const escapingSlug = join("..", "outside");
+    try {
+      expect(() => buildVerifiedTarballPaths(root, escapingSlug, "1.0.0", "fixedtmp")).toThrow(
+        expect.objectContaining({
+          code: "WRITE_FAILED",
+        }),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("installFromMarketplace — integrity failures", () => {

@@ -7,6 +7,14 @@ type PluginActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
   | { ok: false; error: string; message?: string };
 
+function invalidPluginActionResult(): PluginActionResult {
+  return {
+    ok: false,
+    error: "invalid-result",
+    message: "플러그인 작업 결과가 올바르지 않습니다.",
+  };
+}
+
 function normalizePluginActionResult(result: unknown): PluginActionResult {
   if (result && typeof result === "object" && "ok" in result && result.ok === false) {
     return result as PluginActionResult;
@@ -15,14 +23,20 @@ function normalizePluginActionResult(result: unknown): PluginActionResult {
   const payload = result && typeof result === "object"
     ? result as { pluginId?: unknown; installed?: unknown; uninstalled?: unknown; version?: unknown }
     : {};
+  const pluginId = typeof payload.pluginId === "string" ? payload.pluginId.trim() : "";
+  const installed = payload.installed === true;
+  const uninstalled = payload.uninstalled === true;
+  if (!pluginId || (!installed && !uninstalled)) {
+    return invalidPluginActionResult();
+  }
   const normalized: PluginActionResult = {
     ok: true,
-    pluginId: typeof payload.pluginId === "string" ? payload.pluginId : "",
+    pluginId,
   };
-  if (payload.installed === true) {
+  if (installed) {
     normalized.installed = true;
   }
-  if (payload.uninstalled === true) {
+  if (uninstalled) {
     normalized.uninstalled = true;
   }
   if (typeof payload.version === "string") {
