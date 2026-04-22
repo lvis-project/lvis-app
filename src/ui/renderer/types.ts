@@ -103,6 +103,10 @@ export type BriefingPayload = {
   summary?: string;
 };
 
+export type PluginMarketplaceActionResult =
+  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
+  | { ok: false; error: string; message?: string };
+
 export type LvisApi = {
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<AppSettings>;
@@ -135,8 +139,8 @@ export type LvisApi = {
   memorySaveNote: (t: string, c: string) => Promise<unknown>;
   memoryDeleteNote: (f: string) => Promise<void>;
   listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
-  installMarketplacePlugin: (id: string) => Promise<unknown>;
-  uninstallMarketplacePlugin: (id: string) => Promise<unknown>;
+  installMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
+  uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
   listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
   readPluginUiModule: (pluginId: string, viewId: string) => Promise<string>;
   callPluginMethod: (m: string, p?: unknown) => Promise<unknown>;
@@ -240,7 +244,7 @@ export type LvisPluginConfigApi = {
 
 export type LvisPluginsApi = {
   cards: () => Promise<PluginCardSummary[]>;
-  uninstallMarketplacePlugin: (id: string) => Promise<unknown>;
+  uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
 };
 
 export type LvisMcpApi = {

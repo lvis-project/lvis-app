@@ -205,6 +205,102 @@ describe("PluginMarketplaceService install()", () => {
     await expect(service.install("slip-plugin")).rejects.toThrow(/absolute drive path|escapes install root/i);
   });
 
+  it("rejects signed marketplace artifacts whose manifest id does not match the catalog item", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "catalog-plugin",
+      slug: "catalog-plugin",
+      name: "Catalog Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/catalog-plugin@1.2.3",
+      packageName: "@lvis/catalog-plugin",
+      tools: ["ping"],
+    };
+    const zipBuffer = makePluginZip({
+      id: "other-plugin",
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: (slug: string, version: string) => Promise<{
+        body: Buffer;
+        sha256Header: string | null;
+        status: number;
+      }>;
+      fetchSignatureEnvelope: (slug: string, version: string) => Promise<ReturnType<typeof makeEnvelope>>;
+    } = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: vi.fn(async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      }),
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+    };
+
+    const { service } = makeService(fetcher);
+    await expect(service.install("catalog-plugin")).rejects.toThrow(/manifest id mismatch/i);
+    await expect(readFile(join(installedDir, "catalog-plugin", "plugin.json"), "utf-8")).rejects.toThrow();
+  });
+
+  it("rejects signed marketplace artifacts whose manifest version does not match the catalog version", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "versioned-plugin",
+      slug: "versioned-plugin",
+      name: "Versioned Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/versioned-plugin@1.2.3",
+      packageName: "@lvis/versioned-plugin",
+      tools: ["ping"],
+    };
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: "9.9.9",
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: (slug: string, version: string) => Promise<{
+        body: Buffer;
+        sha256Header: string | null;
+        status: number;
+      }>;
+      fetchSignatureEnvelope: (slug: string, version: string) => Promise<ReturnType<typeof makeEnvelope>>;
+    } = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: vi.fn(async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      }),
+      downloadArtifact: async () => ({
+        body: zipBuffer,
+        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+        status: 200,
+      }),
+      fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
+    };
+
+    const { service } = makeService(fetcher);
+    await expect(service.install("versioned-plugin")).rejects.toThrow(/manifest version mismatch/i);
+    await expect(readFile(join(installedDir, "versioned-plugin", "plugin.json"), "utf-8")).rejects.toThrow();
+  });
+
   it("replaces the old install directory on upgrade so stale files do not survive", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({

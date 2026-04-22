@@ -702,8 +702,41 @@ export class PluginMarketplaceService {
         manifest.publisher = plugin.publisher;
       }
       await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+    } else {
+      await this.assertInstalledManifestMatchesCatalog(plugin, version, manifestFile, pluginDir);
     }
     return manifestFile;
+  }
+
+  private async assertInstalledManifestMatchesCatalog(
+    plugin: PluginMarketplaceItem,
+    version: string,
+    manifestFile: string,
+    pluginDir: string,
+  ): Promise<void> {
+    try {
+      const raw = await readFile(manifestFile, "utf-8");
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error(`plugin "${plugin.id}" manifest must be a JSON object`);
+      }
+
+      const manifest = parsed as Partial<PluginManifest> & Record<string, unknown>;
+      if (manifest.id !== plugin.id) {
+        throw new Error(
+          `plugin "${plugin.id}" artifact manifest id mismatch: expected "${plugin.id}", got "${String(manifest.id ?? "")}"`,
+        );
+      }
+
+      if (/^\d+\.\d+\.\d+/.test(version) && manifest.version !== version) {
+        throw new Error(
+          `plugin "${plugin.id}" artifact manifest version mismatch: expected "${version}", got "${String(manifest.version ?? "")}"`,
+        );
+      }
+    } catch (err) {
+      await rm(pluginDir, { recursive: true, force: true });
+      throw err;
+    }
   }
 
   private async downloadVerifiedMarketplaceZip(
