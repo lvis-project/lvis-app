@@ -32,7 +32,10 @@ export function usePluginMarketplace(api: LvisApi) {
   const installPlugin = useCallback(async (id: string) => {
     setWorking(true);
     try {
-      await api.installMarketplacePlugin(id);
+      const result = await api.installMarketplacePlugin(id);
+      if (!result.ok) {
+        throw new Error(result.message ?? result.error);
+      }
       await refreshMarketplace();
       await refreshViews();
       setMarketStatus(`설치 완료: ${id}`);
@@ -46,7 +49,10 @@ export function usePluginMarketplace(api: LvisApi) {
   const uninstallPlugin = useCallback(async (id: string) => {
     setWorking(true);
     try {
-      await api.uninstallMarketplacePlugin(id);
+      const result = await api.uninstallMarketplacePlugin(id);
+      if (!result.ok) {
+        throw new Error(result.message ?? result.error);
+      }
       await refreshMarketplace();
       await refreshViews();
       setMarketStatus(`제거 완료: ${id}`);

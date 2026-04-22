@@ -149,7 +149,11 @@ export function PluginConfigTab() {
     if (!window.confirm(`"${selectedPlugin.name}" 플러그인을 제거하시겠습니까?`)) return;
     setSaving(true);
     try {
-      await window.lvis.plugins.uninstallMarketplacePlugin(selectedId);
+      const result = await window.lvis.plugins.uninstallMarketplacePlugin(selectedId);
+      if (!result.ok) {
+        showBanner("error", result.message ?? "제거 실패");
+        return;
+      }
       setPlugins((prev) => prev.filter((p) => p.id !== selectedId));
       setSelectedId(null);
       showBanner("success", `${selectedPlugin.name} 제거 완료`);

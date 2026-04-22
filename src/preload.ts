@@ -3,6 +3,34 @@ import type { McpServerConfig } from "./mcp/types.js";
 
 const { contextBridge, ipcRenderer } = electron;
 
+type PluginActionResult =
+  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
+  | { ok: false; error: string; message?: string };
+
+function normalizePluginActionResult(result: unknown): PluginActionResult {
+  if (result && typeof result === "object" && "ok" in result && result.ok === false) {
+    return result as PluginActionResult;
+  }
+
+  const payload = result && typeof result === "object"
+    ? result as { pluginId?: unknown; installed?: unknown; uninstalled?: unknown; version?: unknown }
+    : {};
+  const normalized: PluginActionResult = {
+    ok: true,
+    pluginId: typeof payload.pluginId === "string" ? payload.pluginId : "",
+  };
+  if (payload.installed === true) {
+    normalized.installed = true;
+  }
+  if (payload.uninstalled === true) {
+    normalized.uninstalled = true;
+  }
+  if (typeof payload.version === "string") {
+    normalized.version = payload.version;
+  }
+  return normalized;
+}
+
 const api = {
   // ─── Settings ────────────────────────────────────
   getSettings: async () => ipcRenderer.invoke("lvis:settings:get"),
@@ -68,8 +96,10 @@ const api = {
 
   // ─── Plugins ─────────────────────────────────────
   listMarketplacePlugins: async () => ipcRenderer.invoke("lvis:plugins:marketplace:list"),
-  installMarketplacePlugin: async (pluginId: string) => ipcRenderer.invoke("lvis:plugins:install", pluginId),
-  uninstallMarketplacePlugin: async (pluginId: string) => ipcRenderer.invoke("lvis:plugins:uninstall", pluginId),
+  installMarketplacePlugin: async (pluginId: string) =>
+    normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:install", pluginId)),
+  uninstallMarketplacePlugin: async (pluginId: string) =>
+    normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:uninstall", pluginId)),
   listPluginUiExtensions: async () => ipcRenderer.invoke("lvis:plugins:ui:list"),
   readPluginUiModule: async (pluginId: string, viewId: string) =>
     ipcRenderer.invoke("lvis:plugins:ui:read-module", { pluginId, viewId }) as Promise<string>,
@@ -222,7 +252,8 @@ contextBridge.exposeInMainWorld("lvis", {
   mcp: api.mcp,
   plugins: {
     cards: () => ipcRenderer.invoke("lvis:plugins:cards"),
-    uninstallMarketplacePlugin: (id: string) => ipcRenderer.invoke("lvis:plugins:uninstall", id),
+    uninstallMarketplacePlugin: async (id: string) =>
+      normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:uninstall", id)),
   },
   pluginConfig: {
     get: (pluginId: string) => ipcRenderer.invoke("lvis:plugins:config:get", pluginId),
