@@ -86,21 +86,29 @@ function extractMacos(): string | null {
 }
 
 function extractWindows(): string | null {
-  // TODO Phase 3: Windows 구현
-  // win-ca npm pkg: https://github.com/ukoloff/win-ca
-  // 또는: `certutil -exportPFX` + pfx2pem 변환
-  console.warn("[corp-ca] Windows CA extraction not yet implemented (Phase 3 이월)");
+  // Windows runtime extraction is Phase 3 (win-ca pkg or certutil pfx export).
+  // Until then, the OS still presents installed CAs to Chromium via the system
+  // trust store, so TLS usually works without injection; skip silently unless
+  // the user wants diagnostics (LVIS_CORP_CA_DEBUG=1).
+  if (process.env.LVIS_CORP_CA_DEBUG === "1") {
+    console.log("[corp-ca] Windows runtime extraction skipped (Phase 3 pending)");
+  }
   return null;
 }
 
 function extractLinux(): string | null {
-  // TODO Phase 3: Linux 구현
-  // /etc/ssl/certs/LGERootCA.pem 또는 update-ca-trust 경로 탐색
-  console.warn("[corp-ca] Linux CA extraction not yet implemented (Phase 3 이월)");
+  // Linux runtime extraction is Phase 3 (scan /etc/ssl/certs or
+  // update-ca-trust). Silent by default — OS trust store still applies.
+  if (process.env.LVIS_CORP_CA_DEBUG === "1") {
+    console.log("[corp-ca] Linux runtime extraction skipped (Phase 3 pending)");
+  }
   return null;
 }
 
 function extractByPlatform(): string | null {
+  if (process.env.LVIS_SKIP_CORP_CA === "1") {
+    return null;
+  }
   switch (process.platform) {
     case "darwin":
       return extractMacos();

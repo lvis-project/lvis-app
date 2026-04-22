@@ -1,4 +1,30 @@
 {
   "version": 1,
-  "plugins": []
+  "plugins": [
+    {
+      "id": "pageindex",
+      "manifestPath": "installed/pageindex/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "meeting",
+      "manifestPath": "installed/meeting/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "email",
+      "manifestPath": "installed/email/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "calendar",
+      "manifestPath": "installed/calendar/plugin.json",
+      "enabled": true
+    },
+    {
+      "id": "lge-api",
+      "manifestPath": "installed/lge-api/plugin.json",
+      "enabled": true
+    }
+  ]
 }
