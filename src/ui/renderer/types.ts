@@ -4,6 +4,7 @@
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { StreamEvent } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
+import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
@@ -39,6 +40,11 @@ export type PluginCardSummary = {
   sampleTools: string[];
   capabilities: string[];
   tools: string[];
+  toolDescriptions?: Record<string, string>;
+  isManaged?: boolean;
+  loadStatus?: "loaded" | "failed" | "disabled";
+  version?: string;
+  publisher?: string;
 };
 
 export type AppSettings = {
@@ -97,6 +103,10 @@ export type BriefingPayload = {
   summary?: string;
 };
 
+export type PluginMarketplaceActionResult =
+  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
+  | { ok: false; error: string; message?: string };
+
 export type LvisApi = {
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<AppSettings>;
@@ -129,8 +139,8 @@ export type LvisApi = {
   memorySaveNote: (t: string, c: string) => Promise<unknown>;
   memoryDeleteNote: (f: string) => Promise<void>;
   listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
-  installMarketplacePlugin: (id: string) => Promise<unknown>;
-  uninstallMarketplacePlugin: (id: string) => Promise<unknown>;
+  installMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
+  uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
   listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
   readPluginUiModule: (pluginId: string, viewId: string) => Promise<string>;
   callPluginMethod: (m: string, p?: unknown) => Promise<unknown>;
@@ -146,6 +156,7 @@ export type LvisApi = {
   dismissBriefing: (feedback?: { reason: string; details?: string }) => Promise<{ ok: boolean; debounced?: boolean }>;
   snoozeBriefing: () => Promise<{ ok: boolean; lastDismissedAt?: string }>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
+  onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
   getUsageRange: (opts: { dateFrom: string; dateTo: string }) => Promise<UsageSummaryShape>;
@@ -220,6 +231,22 @@ export type LvisPolicyApi = {
   set: (patch: unknown) => Promise<{ ok: boolean; policy?: unknown; error?: string; message?: string }>;
 };
 
+export type LvisPluginConfigApi = {
+  get: (pluginId: string) => Promise<
+    | { ok: true; config: PluginConfigRecord }
+    | { ok: false; error: string; message?: string }
+  >;
+  set: (pluginId: string, config: Record<string, unknown>) => Promise<
+    | { ok: true; config: PluginConfigRecord }
+    | { ok: false; error: string; message?: string }
+  >;
+};
+
+export type LvisPluginsApi = {
+  cards: () => Promise<PluginCardSummary[]>;
+  uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
+};
+
 export type LvisMcpApi = {
   servers: () => Promise<McpServerState[]>;
   kill: (id: string) => Promise<void>;
@@ -247,6 +274,8 @@ declare global {
       approval: LvisApprovalApi;
       policy: LvisPolicyApi;
       mcp: LvisMcpApi;
+      plugins: LvisPluginsApi;
+      pluginConfig: LvisPluginConfigApi;
     };
   }
 }

@@ -17,7 +17,7 @@ import type {
   RuntimePlugin,
   RuntimePluginFactory,
 } from "./types.js";
-import { readPluginRegistry, resolveManifestPathsFromRegistry, updatePluginRegistry } from "./registry.js";
+import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
 import type { PluginSignatureVerifier } from "./signature-verifier.js";
 
@@ -74,6 +74,12 @@ type LoadedPlugin = {
   methods: Map<string, PluginToolHandler>;
 };
 
+type ManifestLoadPlan = {
+  pluginIdHint?: string;
+  manifestPath: string;
+  enabled: boolean;
+};
+
 /**
  * Phase 1.5 Option C — 비활성 plugin 카탈로그 카드.
  * SystemPromptBuilder가 "사용 가능한 플러그인 (비활성)" 섹션 렌더링,
@@ -88,6 +94,14 @@ export interface PluginCard {
   tools: string[];
   /** Capability tags declared in manifest.capabilities. */
   capabilities: string[];
+  /** tool name → description from manifest.toolSchemas */
+  toolDescriptions?: Record<string, string>;
+  /** true when manifest.deployment === "managed" */
+  isManaged?: boolean;
+  /** Runtime load status derived from loaded/failed/disabled runtime state. */
+  loadStatus: "loaded" | "failed" | "disabled";
+  version?: string;
+  publisher?: string;
 }
 
 /**
@@ -132,7 +146,7 @@ export class PluginRuntime {
   private readonly hostRoot: string;
   private readonly manifestPaths: string[];
   private readonly registryPath?: string;
-  private readonly configOverrides: Record<string, Record<string, unknown>>;
+  private configOverrides: Record<string, Record<string, unknown>>;
   private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly signatureVerifier?: PluginSignatureVerifier;
@@ -146,6 +160,11 @@ export class PluginRuntime {
    * disable() so host-side state scrubbing is deterministic.
    */
   private readonly disposers = new Map<string, Array<() => void>>();
+  private readonly knownPluginManifests = new Map<string, PluginManifest>();
+  /** Plugins whose import/load failed — surfaced to Settings UI as status="failed". */
+  private readonly failedPluginIds = new Set<string>();
+  private readonly failedPluginStubs = new Map<string, { name: string; description: string }>();
+  private readonly disabledPluginIds = new Set<string>();
   private loaded = false;
   /** Sprint 4-B §B-1 — lazily-compiled AJV validator for plugin.schema.json. */
   private manifestValidator: ValidateFunction | null = null;
@@ -164,8 +183,9 @@ export class PluginRuntime {
 
   async load(): Promise<void> {
     if (this.loaded) return;
-    const manifestPaths = await this.resolveManifestPaths();
-    for (const manifestPath of manifestPaths) {
+    const loadPlan = await this.resolveManifestLoadPlan();
+    for (const plan of loadPlan) {
+      const manifestPath = plan.manifestPath;
       let manifest: PluginManifest;
       try {
         manifest = await this.readManifest(manifestPath);
@@ -174,8 +194,23 @@ export class PluginRuntime {
         // plugins keep loading. Error message already contains pluginId,
         // field path, reason, and an example.
         console.error(`[plugin-runtime] ${(err as Error).message}`);
+        if (plan.enabled && plan.pluginIdHint) {
+          this.markFailed(plan.pluginIdHint, {
+            name: plan.pluginIdHint,
+            description: "Plugin manifest could not be loaded.",
+          });
+        }
         continue;
       }
+      this.knownPluginManifests.set(manifest.id, manifest);
+      this.failedPluginStubs.delete(manifest.id);
+      if (!plan.enabled) {
+        this.disabledPluginIds.add(manifest.id);
+        this.failedPluginIds.delete(manifest.id);
+        continue;
+      }
+      this.disabledPluginIds.delete(manifest.id);
+      this.failedPluginIds.delete(manifest.id);
       const pluginRoot = dirname(manifestPath);
 
       // Sprint 3-B §9.6 — manifest signature gate.
@@ -195,6 +230,7 @@ export class PluginRuntime {
               reason: sigResult.reason,
               sha256: sigResult.sha256,
             });
+            this.markFailed(manifest.id);
             continue;
           }
           if (sigResult.reason === "signature file missing") {
@@ -214,6 +250,7 @@ export class PluginRuntime {
               reason: sigResult.reason,
               sha256: sigResult.sha256,
             });
+            this.markFailed(manifest.id);
             continue;
           }
         } else {
@@ -237,6 +274,7 @@ export class PluginRuntime {
           entry: manifest.entry,
           reason,
         });
+        this.markFailed(manifest.id);
         continue;
       }
       // Defense-in-depth: resolve any symlinks / 8.3 short-names (Windows) before
@@ -248,13 +286,30 @@ export class PluginRuntime {
       } catch {
         resolvedEntryPath = entryPath;
       }
-      const module = (await import(pathToFileURL(resolvedEntryPath).href)) as {
-        default?: RuntimePluginFactory;
-        createPlugin?: RuntimePluginFactory;
-      };
+      let module: { default?: RuntimePluginFactory; createPlugin?: RuntimePluginFactory };
+      try {
+        module = (await import(pathToFileURL(resolvedEntryPath).href)) as {
+          default?: RuntimePluginFactory;
+          createPlugin?: RuntimePluginFactory;
+        };
+      } catch (err) {
+        // Fail-soft: per-plugin import failures (missing deps, syntax errors,
+        // electron-only imports, etc.) must NOT crash boot. The plugin is
+        // dropped + marked failed so the Settings UI can surface the reason,
+        // while other plugins continue loading.
+        console.error(`[plugin-runtime] ${manifest.id} import failed:`, (err as Error).message);
+        this.auditLog?.("error", "plugin_import_failed", {
+          pluginId: manifest.id,
+          reason: (err as Error).message,
+        });
+        this.markFailed(manifest.id);
+        continue;
+      }
       const createPlugin = module.default ?? module.createPlugin;
       if (!createPlugin) {
-        throw new Error(`Plugin entry does not export default/createPlugin: ${manifest.id}`);
+        console.error(`[plugin-runtime] ${manifest.id} entry does not export default/createPlugin — skipped`);
+        this.markFailed(manifest.id);
+        continue;
       }
 
       // 플러그인별 스코프된 HostApi 생성
@@ -307,6 +362,8 @@ export class PluginRuntime {
         instance,
         methods,
       });
+      this.failedPluginIds.delete(manifest.id);
+      this.disabledPluginIds.delete(manifest.id);
     }
     this.loaded = true;
   }
@@ -388,6 +445,7 @@ export class PluginRuntime {
       console.error(`[plugin:${id}] start failed (non-fatal): ${reason}`);
       const plugin = this.plugins.get(id);
       if (!plugin) continue;
+      this.markFailed(id);
       for (const method of plugin.methods.keys()) {
         this.methodMap.delete(method);
       }
@@ -405,6 +463,14 @@ export class PluginRuntime {
     await this.stopAll();
     this.resetLoadedState();
     await this.startAll();
+  }
+
+  setConfigOverride(pluginId: string, config: Record<string, unknown>): void {
+    if (Object.keys(config).length === 0) {
+      delete this.configOverrides[pluginId];
+      return;
+    }
+    this.configOverrides[pluginId] = { ...config };
   }
 
   /**
@@ -548,6 +614,8 @@ export class PluginRuntime {
       }
       this.disposers.delete(pluginId);
     }
+    this.disabledPluginIds.add(pluginId);
+    this.failedPluginIds.delete(pluginId);
 
     if (this.registryPath) {
       // §M1 F-round: atomic update under registry lock.
@@ -658,41 +726,31 @@ export class PluginRuntime {
     const visibleNames = toolRegistry
       ? new Set(toolRegistry.getVisibleTools().map((t) => t.name))
       : null;
-    const cards: PluginCard[] = [];
-    for (const [pluginId, plugin] of this.plugins) {
-      const manifest = plugin.manifest;
-      const allTools = manifest.tools ?? [];
-      const filteredTools = visibleNames
-        ? allTools.filter((t) => visibleNames.has(t))
-        : allTools;
-      const sampleTools = filteredTools.slice(0, 3);
-      // C11: manifest.description 우선, 없으면 toolSchemas 요약, 최후 fallback.
-      let description: string;
-      if (manifest.description) {
-        description = manifest.description;
-      } else {
-        const schemas = manifest.toolSchemas;
-        if (schemas) {
-          const parts: string[] = [];
-          for (const toolName of sampleTools) {
-            const desc = schemas[toolName]?.description;
-            if (desc) parts.push(desc);
-          }
-          description = parts.length > 0 ? parts.join(" / ") : `Plugin: ${manifest.name}`;
-        } else {
-          description = `Plugin: ${manifest.name}`;
-        }
-      }
-      cards.push({
+    const cards = new Map<string, PluginCard>();
+    for (const [pluginId, manifest] of this.knownPluginManifests) {
+      const loadStatus = this.plugins.has(pluginId)
+        ? "loaded"
+        : this.failedPluginIds.has(pluginId)
+          ? "failed"
+          : this.disabledPluginIds.has(pluginId)
+            ? "disabled"
+            : null;
+      if (!loadStatus) continue;
+      cards.set(pluginId, this.buildPluginCard(pluginId, manifest, loadStatus, visibleNames));
+    }
+    for (const [pluginId, stub] of this.failedPluginStubs) {
+      if (cards.has(pluginId)) continue;
+      cards.set(pluginId, {
         id: pluginId,
-        name: manifest.name,
-        description,
-        sampleTools,
-        tools: filteredTools,
-        capabilities: manifest.capabilities ?? [],
+        name: stub.name,
+        description: stub.description,
+        sampleTools: [],
+        tools: [],
+        capabilities: [],
+        loadStatus: "failed",
       });
     }
-    return cards;
+    return [...cards.values()];
   }
 
   listPluginManifests(): Array<{ pluginId: string; manifest: PluginManifest }> {
@@ -1093,16 +1151,24 @@ export class PluginRuntime {
     return resolvePluginEntryPath(pluginRoot, entry);
   }
 
-  private async resolveManifestPaths(): Promise<string[]> {
+  private async resolveManifestLoadPlan(): Promise<ManifestLoadPlan[]> {
     if (this.manifestPaths.length > 0) {
-      return this.manifestPaths;
+      return this.manifestPaths.map((manifestPath) => ({
+        manifestPath,
+        enabled: true,
+      }));
     }
     if (!this.registryPath) {
       throw new Error("Either manifestPaths or registryPath must be provided.");
     }
     const registry = await readPluginRegistry(this.registryPath);
-    const resolved = resolveManifestPathsFromRegistry(this.registryPath, registry.plugins);
-    return resolved;
+    return registry.plugins.map((entry) => ({
+      pluginIdHint: entry.id,
+      manifestPath: isAbsolute(entry.manifestPath)
+        ? entry.manifestPath
+        : resolve(dirname(this.registryPath!), entry.manifestPath),
+      enabled: entry.enabled !== false,
+    }));
   }
 
   private resetLoadedState(): void {
@@ -1115,11 +1181,75 @@ export class PluginRuntime {
       }
     }
     this.disposers.clear();
+    this.knownPluginManifests.clear();
     this.plugins.clear();
     this.methodMap.clear();
+    this.failedPluginIds.clear();
+    this.failedPluginStubs.clear();
+    this.disabledPluginIds.clear();
     this.loaded = false;
     // Note: 호스트의 keywordEngine/toolRegistry는 boot.ts의 createHostApi에서
     // pluginId 기반으로 정리됨 (restartAll → 새로 load 시 재등록)
+  }
+
+  private markFailed(
+    pluginId: string,
+    stub?: { name: string; description: string },
+  ): void {
+    this.failedPluginIds.add(pluginId);
+    this.disabledPluginIds.delete(pluginId);
+    if (stub) {
+      this.failedPluginStubs.set(pluginId, stub);
+    }
+  }
+
+  private buildPluginCard(
+    pluginId: string,
+    manifest: PluginManifest,
+    loadStatus: PluginCard["loadStatus"],
+    visibleNames: Set<string> | null,
+  ): PluginCard {
+    const allTools = manifest.tools ?? [];
+    const filteredTools = visibleNames
+      ? allTools.filter((t) => visibleNames.has(t))
+      : allTools;
+    const sampleTools = filteredTools.slice(0, 3);
+    let description: string;
+    if (manifest.description) {
+      description = manifest.description;
+    } else {
+      const schemas = manifest.toolSchemas;
+      if (schemas) {
+        const parts: string[] = [];
+        for (const toolName of sampleTools) {
+          const desc = schemas[toolName]?.description;
+          if (desc) parts.push(desc);
+        }
+        description = parts.length > 0 ? parts.join(" / ") : `Plugin: ${manifest.name}`;
+      } else {
+        description = `Plugin: ${manifest.name}`;
+      }
+    }
+    const toolDescriptions: Record<string, string> = {};
+    if (manifest.toolSchemas) {
+      for (const toolName of filteredTools) {
+        const desc = manifest.toolSchemas[toolName]?.description;
+        if (desc) toolDescriptions[toolName] = desc;
+      }
+    }
+    return {
+      id: pluginId,
+      name: manifest.name,
+      description,
+      sampleTools,
+      tools: filteredTools,
+      capabilities: manifest.capabilities ?? [],
+      toolDescriptions: Object.keys(toolDescriptions).length > 0 ? toolDescriptions : undefined,
+      isManaged: manifest.deployment === "managed",
+      loadStatus,
+      version: manifest.version,
+      publisher: manifest.publisher,
+    };
   }
 }
 
