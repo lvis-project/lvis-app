@@ -77,6 +77,7 @@ import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireProactiveCoordinator } from "./boot/steps/proactive-coordinator.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
+import { resolveManagedPluginBootstrap } from "./boot/managed-marketplace.js";
 
 export type { AppServices } from "./boot/types.js";
 
@@ -162,22 +163,30 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
   // from the marketplace on boot (VS Code-style), not bundled in app source.
   // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
-  try {
-    const ensureResult = await pluginMarketplace.ensureManagedInstalled();
-    if (ensureResult.installed.length > 0) {
-      console.log(
-        `[lvis] boot: managed plugin bootstrap installed ${ensureResult.installed.length}: ${ensureResult.installed.join(", ")}`,
-      );
-      await pluginRuntime.restartAll();
+  const managedBootstrap = resolveManagedPluginBootstrap({
+    marketplace: marketplaceSettings,
+    isPackaged: app.isPackaged,
+  });
+  if (managedBootstrap.enabled) {
+    try {
+      const ensureResult = await pluginMarketplace.ensureManagedInstalled();
+      if (ensureResult.installed.length > 0) {
+        console.log(
+          `[lvis] boot: managed plugin bootstrap installed ${ensureResult.installed.length}: ${ensureResult.installed.join(", ")}`,
+        );
+        await pluginRuntime.restartAll();
+      }
+      if (ensureResult.failed.length > 0) {
+        console.warn(
+          `[lvis] boot: managed plugin bootstrap failed ${ensureResult.failed.length}:`,
+          ensureResult.failed,
+        );
+      }
+    } catch (err) {
+      console.warn(`[lvis] boot: ensureManagedInstalled error:`, (err as Error).message);
     }
-    if (ensureResult.failed.length > 0) {
-      console.warn(
-        `[lvis] boot: managed plugin bootstrap failed ${ensureResult.failed.length}:`,
-        ensureResult.failed,
-      );
-    }
-  } catch (err) {
-    console.warn(`[lvis] boot: ensureManagedInstalled error:`, (err as Error).message);
+  } else {
+    console.warn(`[lvis] boot: managed plugin bootstrap skipped: ${managedBootstrap.reason}`);
   }
 
   // wireUpdateCheck needs a concrete fetcher for update detection.
