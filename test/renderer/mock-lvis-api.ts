@@ -78,6 +78,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
 
     chatHasProvider: vi.fn(async () => hasProvider),
     chatSend: vi.fn(async () => ({ ok: true })),
+    chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
     chatSessions: vi.fn(async () => ({ current: currentSession, sessions })),
     chatLoadSession: vi.fn(async (id: string) => ({ ok: true, sessionId: id })),
@@ -182,6 +183,10 @@ export function makeMockLvisNamespace() {
           source: "defaults",
         })),
         set: vi.fn(async () => ({ ok: true })),
+      },
+      env: {
+        isDev: false,
+        enableDevConsole: false,
       },
     },
     emitApproval: (r: unknown) => approvalHandlers.forEach((h) => h(r)),

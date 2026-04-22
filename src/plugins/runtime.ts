@@ -216,8 +216,8 @@ export class PluginRuntime {
       // Sprint 3-B §9.6 — manifest signature gate.
       // Managed plugins require a valid signature; unsigned user plugins are
       // allowed but audit-logged. Invalid signatures always drop the plugin.
-      const isDev = process.env.LVIS_DEV === "1";
-      if (this.signatureVerifier && !isDev) {
+      const skipSignatureVerification = process.env.LVIS_DEV_SKIP_SIG === "1";
+      if (this.signatureVerifier && !skipSignatureVerification) {
         const sigResult = await this.signatureVerifier.verifyManifestFile(manifestPath);
         const isManaged = manifest.deployment === "managed";
         if (!sigResult.valid) {
@@ -1142,7 +1142,7 @@ export class PluginRuntime {
     // Dev mode: allow entries that traverse outside the plugin directory
     // (e.g., ../../../node_modules/@lvis/plugin-*/dist/hostPlugin.js).
     // Mirrors the signature-check bypass introduced in PR #171.
-    const isDev = process.env.LVIS_DEV === "1";
+    const isDev = process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1";
     if (isDev && !isAbsolute(entry)) {
       const resolved = resolve(pluginRoot, entry);
       if (existsSync(resolved)) return resolved;

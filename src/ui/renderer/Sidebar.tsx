@@ -3,20 +3,43 @@ import { getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginUiExtension } from "./types.js";
 
 export interface SidebarProps {
+  activeView: string;
   pluginViews: PluginUiExtension[];
   setActiveView: (key: string) => void;
+  starredCount: number;
 }
 
 export function Sidebar(props: SidebarProps) {
-  const { pluginViews, setActiveView } = props;
-  if (pluginViews.length === 0) return null;
+  const { activeView, pluginViews, setActiveView, starredCount } = props;
+  const navItems = [
+    { key: "home", label: "홈" },
+    { key: "tasks", label: "태스크" },
+    { key: "starred", label: "즐겨찾기", badge: starredCount > 0 ? `(${starredCount})` : null },
+    { key: "memory", label: "메모리" },
+    ...pluginViews.map((view) => ({
+      key: toViewKey(view),
+      label: getPluginViewLabel(view),
+    })),
+  ];
+
   return (
-    <aside className="border-r bg-background p-4 space-y-1">
-      {pluginViews.map((v) => (
-        <Button key={toViewKey(v)} variant="ghost" className="w-full justify-start" onClick={() => setActiveView(toViewKey(v))}>
-          {getPluginViewLabel(v)}
-        </Button>
-      ))}
+    <aside className="flex w-28 shrink-0 flex-col border-r bg-background px-3 py-4">
+      <div className="mb-4 px-2 text-xs font-semibold tracking-wide text-muted-foreground">
+        메뉴
+      </div>
+      <div className="space-y-1">
+        {navItems.map((item) => (
+          <Button
+            key={item.key}
+            variant={activeView === item.key ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2 px-3"
+            onClick={() => setActiveView(item.key)}
+          >
+            <span>{item.label}</span>
+            {item.badge ? <span className="text-[10px] text-muted-foreground">{item.badge}</span> : null}
+          </Button>
+        ))}
+      </div>
     </aside>
   );
 }

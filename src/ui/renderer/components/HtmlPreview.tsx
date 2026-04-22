@@ -1,21 +1,28 @@
 import { createElement, useEffect, useMemo, useRef } from "react";
 import type { RenderHtmlPayload } from "../types.js";
 
-// Fix 4 (PR #97) — Injected CSP blocks network loads + inline scripts.
-// `img-src data:` keeps embedded images, `style-src 'unsafe-inline'` keeps
-// LLM-authored inline styles functional. Scripts are blocked (default-src 'none').
-// TODO: also wire main-process `webRequest.onBeforeRequest` partition block
-// on the `lvis-render-html` partition for defense-in-depth.
-const CSP_META =
-  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:;">';
+function buildCspMeta(allowScripts: boolean): string {
+  const directives = [
+    "default-src 'none'",
+    allowScripts ? "script-src 'unsafe-inline' 'unsafe-eval'" : "",
+    "style-src 'unsafe-inline' data:",
+    "img-src data:",
+    "font-src data:",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].filter(Boolean).join("; ");
+  return `<meta http-equiv="Content-Security-Policy" content="${directives}">`;
+}
 
-function wrapWithCsp(html: string): string {
+function wrapWithCsp(html: string, allowScripts: boolean): string {
+  const cspMeta = buildCspMeta(allowScripts);
   // If the document already declares a <head>, inject right after it; otherwise
   // wrap the body in a minimal shell so the CSP meta is always the first thing.
   if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (m) => `${m}${CSP_META}`);
+    return html.replace(/<head[^>]*>/i, (m) => `${m}${cspMeta}`);
   }
-  return `<!doctype html><html><head>${CSP_META}</head><body>${html}</body></html>`;
+  return `<!doctype html><html><head>${cspMeta}</head><body>${html}</body></html>`;
 }
 
 export function HtmlPreview({
@@ -32,8 +39,8 @@ export function HtmlPreview({
 }) {
   const webviewRef = useRef<HTMLElement | null>(null);
   const dataUrl = useMemo(
-    () => `data:text/html;charset=utf-8,${encodeURIComponent(wrapWithCsp(payload.html))}`,
-    [payload.html],
+    () => `data:text/html;charset=utf-8,${encodeURIComponent(wrapWithCsp(payload.html, allowScripts))}`,
+    [payload.html, allowScripts],
   );
 
   // <webview> isn't part of React's intrinsic element table; attach
@@ -56,7 +63,9 @@ export function HtmlPreview({
     <div className="mt-2 overflow-hidden rounded border bg-background">
       <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
         <span className="truncate">{payload.title ?? "HTML 미리보기"}</span>
-        <span className="text-[10px] opacity-60">격리된 프로세스 · 네트워크 차단</span>
+        <span className="text-[10px] opacity-60">
+          격리된 프로세스 · 네트워크 차단 · JS {allowScripts ? "허용" : "차단"}
+        </span>
       </div>
       {createElement("webview", {
         ref: webviewRef,

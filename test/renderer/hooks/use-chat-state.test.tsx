@@ -76,6 +76,64 @@ describe("useChatState", () => {
     errSpy.mockRestore();
   });
 
+  it("guidance_reset reopens the latest assistant entry instead of appending a new one", async () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+
+    act(() => {
+      emitChatStream({ type: "text_delta", text: "hello", streamId: 1 });
+      emitChatStream({ type: "assistant_round", text: "hello", streamId: 1 });
+      emitChatStream({ type: "done", streamId: 1 });
+      emitChatStream({ type: "guidance_reset", streamId: 2 });
+    });
+
+    await waitFor(() => {
+      const assistants = result.current.entries.filter((e) => e.kind === "assistant") as Array<{ text: string; streaming?: boolean }>;
+      expect(assistants).toHaveLength(1);
+      expect(assistants[0].text).toBe("hello");
+      expect(assistants[0].streaming).toBe(true);
+    });
+
+    act(() => {
+      emitChatStream({ type: "text_delta", text: " world", streamId: 2 });
+    });
+
+    await waitFor(() => {
+      const assistants = result.current.entries.filter((e) => e.kind === "assistant") as Array<{ text: string; streaming?: boolean }>;
+      expect(assistants).toHaveLength(1);
+      expect(assistants[0].text).toBe("hello world");
+      expect(assistants[0].streaming).toBe(true);
+    });
+  });
+
+  it("ignores stale stream events after guidance_reset switches to a new stream id", async () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+
+    act(() => {
+      emitChatStream({ type: "text_delta", text: "hello", streamId: 1 });
+      emitChatStream({ type: "assistant_round", text: "hello", streamId: 1 });
+      emitChatStream({ type: "done", streamId: 1 });
+      emitChatStream({ type: "guidance_reset", streamId: 2 });
+    });
+
+    await waitFor(() => {
+      const assistant = result.current.entries.findLast((e) => e.kind === "assistant") as { text: string; streaming?: boolean };
+      expect(assistant.text).toBe("hello");
+      expect(assistant.streaming).toBe(true);
+    });
+
+    act(() => {
+      emitChatStream({ type: "text_delta", text: " stale", streamId: 1 });
+      emitChatStream({ type: "text_delta", text: " world", streamId: 2 });
+    });
+
+    await waitFor(() => {
+      const assistant = result.current.entries.findLast((e) => e.kind === "assistant") as { text: string };
+      expect(assistant.text).toBe("hello world");
+    });
+  });
+
   it("double-mount does not result in a double subscription on the same instance", () => {
     const { api } = makeMockLvisApi();
     const { rerender } = renderHook(() => useChatState(api as unknown as LvisApi));

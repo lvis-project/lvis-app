@@ -128,3 +128,44 @@ describe("MemoryManager.searchSessions", () => {
     expect(results.length).toBe(50);
   });
 });
+
+describe("MemoryManager.listSessionEntries", () => {
+  it("returns recent sessions with inspectable excerpts", async () => {
+    const sessionId = "eeeeeeee-ffff-0000-1111-222222222222";
+    await mm.saveSession(sessionId, [
+      { role: "user", content: "first message" },
+      { role: "assistant", content: "latest answer preview" },
+    ]);
+
+    const results = mm.listSessionEntries();
+    expect(results.length).toBe(1);
+    expect(results[0].sessionId).toBe(sessionId);
+    expect(results[0].matchedMessage).toContain("latest answer preview");
+  });
+
+  it("skips malformed session lines instead of crashing", async () => {
+    const { appendFileSync } = await import("node:fs");
+    const sessionId = "ffffffff-0000-1111-2222-333333333333";
+    await mm.saveSession(sessionId, [
+      { role: "assistant", content: "valid message" },
+    ]);
+    appendFileSync(join(dir, "sessions", `${sessionId}.jsonl`), "{not-json}\n", "utf-8");
+
+    const loaded = mm.loadSession(sessionId);
+    expect(Array.isArray(loaded)).toBe(true);
+    expect((loaded ?? []).length).toBe(1);
+
+    const sessions = mm.listSessions();
+    expect(sessions[0].preview).toContain("valid message");
+  });
+
+  it("uses a fallback preview for oversized session files", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const sessionId = "99999999-aaaa-bbbb-cccc-444444444444";
+    writeFileSync(join(dir, "sessions", `${sessionId}.jsonl`), "x".repeat(5_000_001), "utf-8");
+
+    const sessions = mm.listSessions();
+    expect(sessions[0].id).toBe(sessionId);
+    expect(sessions[0].preview).toContain("미리보기를 생략");
+  });
+});

@@ -92,8 +92,6 @@ describe("Star flow (Phase 3 regression net)", () => {
   });
 
   it("starred tab in sidebar exposes the saved entries", async () => {
-    // Radix Tabs ignores synthetic click; drive via userEvent which simulates
-    // the pointerdown/click sequence the component listens for.
     const userEvent = (await import("@testing-library/user-event")).default;
     const user = userEvent.setup();
     const starred = [
@@ -111,13 +109,14 @@ describe("Star flow (Phase 3 regression net)", () => {
       starred,
     });
     await waitFor(() => expect(api.starredList).toHaveBeenCalled());
-    // Click the radix Tabs trigger for the "starred" value.
-    const tab = await waitFor(() => {
-      const el = container.querySelector('button[role="tab"][id*="starred"]');
-      if (!el) throw new Error("starred tab trigger not found");
+    const starredButton = await waitFor(() => {
+      const el = Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes("즐겨찾기"),
+      );
+      if (!el) throw new Error("starred sidebar button not found");
       return el as HTMLButtonElement;
     });
-    await user.click(tab);
+    await user.click(starredButton);
     await waitFor(() => {
       expect(container.textContent).toContain("remembered answer");
     });
