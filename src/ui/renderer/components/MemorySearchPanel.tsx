@@ -68,7 +68,7 @@ export function MemorySearchPanel({ api }: MemorySearchPanelProps) {
     <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
       <CardHeader className="pb-4">
         <CardTitle>메모리</CardTitle>
-        <CardDescription>저장된 노트와 세션을 검색하거나 전체 목록으로 확인합니다.</CardDescription>
+        <CardDescription>저장된 메모와 세션을 검색하거나 전체 목록으로 확인합니다.</CardDescription>
       </CardHeader>
       <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
         <Input
@@ -81,7 +81,7 @@ export function MemorySearchPanel({ api }: MemorySearchPanelProps) {
         <Tabs defaultValue="notes" className="flex min-h-0 min-w-0 flex-1 flex-col">
           <TabsList className="w-full">
             <TabsTrigger value="notes" className="flex-1">
-              노트{noteResults.length > 0 ? ` (${noteResults.length})` : ""}
+              메모{noteResults.length > 0 ? ` (${noteResults.length})` : ""}
             </TabsTrigger>
             <TabsTrigger value="sessions" className="flex-1">
               세션{sessionResults.length > 0 ? ` (${sessionResults.length})` : ""}
@@ -93,7 +93,7 @@ export function MemorySearchPanel({ api }: MemorySearchPanelProps) {
                 <p className="px-3 py-4 text-xs text-muted-foreground">검색 중…</p>
               ) : noteResults.length === 0 ? (
                 <p className="px-3 py-4 text-xs text-muted-foreground">
-                  {query === "" ? "저장된 노트가 없습니다" : "결과 없음"}
+                  {query === "" ? "저장된 메모가 없습니다" : "결과 없음"}
                 </p>
               ) : (
                 noteResults.map((n) => <NoteRow key={n.title + n.updatedAt} note={n} />)
