@@ -21,6 +21,7 @@ import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { AuditService } from "../main/audit-service.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import type { MsGraphService } from "../main/ms-graph-service.js";
 import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
 import type { StarredStore } from "../data/starred-store.js";
@@ -78,6 +79,11 @@ export interface AppServices {
   auditService: AuditService;
   /** A3 — structured audit logger (JSONL, ~/.lvis/audit/) */
   auditLogger: AuditLogger;
+  /**
+   * Microsoft Graph 공유 인증 (email / calendar 플러그인 공용).
+   * Dual-environment: external / corporate 택1. 현재 active env 의 토큰만 노출.
+   */
+  msGraphService: MsGraphService;
   postTurnHookChain: PostTurnHookChain;
   /** B1: 승인 게이트 — mainWindow 준비 후 생성 */
   approvalGate?: ApprovalGate;
