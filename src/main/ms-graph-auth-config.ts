@@ -47,19 +47,14 @@ export interface MsGraphEnvironmentConfig {
 }
 
 /**
- * 모든 MS Graph 사용처가 공유하는 스코프.
+ * 기본 로그인은 환경 선택 + 계정 확인이 목적이므로 최소 동의 스코프만 요청한다.
  *
- * 이 PR 은 "dual-environment 스위처" 의 scope 만 담당하므로 scope 목록은
- * 기존 `MS_GRAPH_SCOPES` 와 동일하게 유지한다. 추가 권한 (Mail.ReadWrite,
- * Contacts.ReadWrite, Calendars.ReadWrite.Shared, Tasks.ReadWrite,
- * OnlineMeetings.ReadWrite, Presence.Read 등) 은 해당 플러그인 활성화 시점에
- * incremental consent 로 별도 요청하거나 separate PR 에서 확장.
+ * 메일/캘린더 등 추가 권한은 실제 플러그인 기능 진입 시점에 incremental consent
+ * 로 별도 요청하도록 분리한다. 이렇게 하면 corporate tenant 에서 불필요한
+ * 관리자 동의 friction 을 줄이고, external 기본 로그인도 더 가볍게 유지할 수 있다.
  */
 export const DEFAULT_MS_GRAPH_SCOPES: string[] = [
-  "Mail.Read",
-  "Mail.Send",
   "User.Read",
-  "Calendars.ReadWrite",
   "offline_access",
 ];
 

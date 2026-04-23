@@ -19,6 +19,8 @@ describe("ms-graph-auth-config", () => {
     expect(cfg.authority).toBe("https://login.microsoftonline.com/common");
     expect(cfg.scopes).toContain("User.Read");
     expect(cfg.scopes).toContain("offline_access");
+    expect(cfg.scopes).not.toContain("Mail.Send");
+    expect(cfg.scopes).not.toContain("Calendars.ReadWrite");
     expect(isEnvironmentConfigured("external")).toBe(true);
   });
 
