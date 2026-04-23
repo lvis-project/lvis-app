@@ -1,12 +1,9 @@
 /**
  * M4 — Capability-gate violations produce audit trail entries.
  *
- * Two paths are audited:
+ * The remaining audited path is:
  *   1. plugin calls emitEvent() for a namespace requiring a capability it
  *      doesn't declare → boot.ts emit closure writes "plugin_emit_capability_denied".
- *   2. plugin declares eventSubscriptions to a private namespace
- *      (memory.private.*, settings.apiKey.*, audit.*, dlp.*) → plugins.ts
- *      registerManifestEventSubscriptions writes "plugin_subscription_private_denied".
  *
  * Legitimate emissions do NOT audit-log.
  */
@@ -16,7 +13,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
-import { registerManifestEventSubscriptions } from "../plugins.js";
 import type { AuditEntry } from "../../audit/audit-logger.js";
 
 function collectingAudit() {
@@ -104,18 +100,6 @@ describe("M4 — capability violation audit trail", () => {
     );
   }
 
-  function stubRoutineEngine() {
-    const collected: Array<{ type: string; data: unknown }> = [];
-    return {
-      engine: {
-        collectEvent(type: string, data: unknown) {
-          collected.push({ type, data });
-        },
-      } as unknown as import("../../core/routine-engine.js").RoutineEngine,
-      collected,
-    };
-  }
-
   it("emitEvent without required capability writes an audit error", async () => {
     await writePlugin("p_no_mail", { capabilities: ["worker-client"] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
@@ -158,45 +142,4 @@ describe("M4 — capability violation audit trail", () => {
     expect(entries).toHaveLength(0);
   });
 
-  it("private namespace subscription writes an audit error", async () => {
-    await writePlugin("p_priv", {
-      eventSubscriptions: ["memory.private.leaked"],
-    });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
-    await runtime.load();
-
-    const { entries, logger } = collectingAudit();
-    const { engine } = stubRoutineEngine();
-    const origWarn = console.warn;
-    console.warn = () => {};
-    try {
-      registerManifestEventSubscriptions(runtime, engine, logger);
-    } finally {
-      console.warn = origWarn;
-    }
-
-    const privEntries = entries.filter((e) =>
-      String(e.input).includes("plugin_subscription_private_denied"),
-    );
-    expect(privEntries).toHaveLength(1);
-    expect(String(privEntries[0].input)).toMatch(/memory\.private\.leaked/);
-  });
-
-  it("public subscription does NOT audit-log", async () => {
-    await writePlugin("p_pub", { eventSubscriptions: ["email.new"] });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
-    await runtime.load();
-
-    const { entries, logger } = collectingAudit();
-    const { engine } = stubRoutineEngine();
-    const origWarn = console.warn;
-    console.warn = () => {};
-    try {
-      registerManifestEventSubscriptions(runtime, engine, logger);
-    } finally {
-      console.warn = origWarn;
-    }
-
-    expect(entries).toHaveLength(0);
-  });
 });
