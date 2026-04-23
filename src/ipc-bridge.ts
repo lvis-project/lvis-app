@@ -22,6 +22,7 @@ import {
   MS_GRAPH_ENVIRONMENTS,
   MS_GRAPH_ENVIRONMENT_CONFIGS,
   isEnvironmentConfigured,
+  type MsGraphEnvironment,
 } from "./main/ms-graph-auth-config.js";
 
 /**
@@ -291,7 +292,10 @@ export function registerIpcHandlers(
   // ─── Microsoft Graph — dual-environment login ──────
   // 모든 상태 조회는 read-only 라 sender guard 선택.
   // 환경 전환 / sign-in / sign-out 은 side-effect 가 있어 sender guard + audit 전부 수행.
-  ipcMain.handle("lvis:ms-graph:get-state", () => {
+  ipcMain.handle("lvis:ms-graph:get-state", (e) => {
+    // get-state 는 read-only 지만 account (UPN/이메일) 을 노출하므로
+    // sender guard 를 걸어 untrusted frame 의 identity leak 을 차단한다.
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:ms-graph:get-state", e); return UNAUTHORIZED_FRAME; }
     const environments = MS_GRAPH_ENVIRONMENTS.map((env) => ({
       id: env,
       label: MS_GRAPH_ENVIRONMENT_CONFIGS[env].label,
@@ -303,7 +307,12 @@ export function registerIpcHandlers(
 
   ipcMain.handle("lvis:ms-graph:switch-environment", async (e, envInput: unknown) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:ms-graph:switch-environment", e); return UNAUTHORIZED_FRAME; }
-    const env = envInput === "corporate" ? "corporate" : "external";
+    // 허용된 env id 만 수용 — typo/alien value 를 silent 하게 external 로
+    // 떨어뜨리지 않고 명시적으로 거부해 호출자가 잘못을 인지하게 한다.
+    if (envInput !== "external" && envInput !== "corporate") {
+      return { ok: false, error: `invalid environment: ${String(envInput)}` };
+    }
+    const env: MsGraphEnvironment = envInput;
     await msGraphService.switchEnvironment(env);
     // 사용자 선택을 settings 에 영속화 → 다음 부팅 시 자동 복구.
     await settingsService.patch({ msGraph: { environment: env } });
