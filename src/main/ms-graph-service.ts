@@ -310,13 +310,18 @@ export class MsGraphService {
       .acquireTokenInteractive({
         scopes: startScopes,
         openBrowser,
-        successTemplate: `
-          <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0b1222;color:#e2e8f0">
+        // Windows 에서 local OAuth callback 페이지가 `<meta charset>` 선언 없으면
+        // 브라우저가 system default 인코딩 (Korean Windows = cp949) 으로 해석해
+        // UTF-8 한글이 mojibake (� 깨짐) 로 뜬다. charset + lang 을 명시해 차단.
+        successTemplate: `<!doctype html>
+          <html lang="ko"><head><meta charset="utf-8" /><title>Login</title></head>
+          <body style="font-family:sans-serif;text-align:center;padding:60px;background:#0b1222;color:#e2e8f0">
             <h2 style="color:#60a5fa">인증 완료! (${startLabel})</h2>
             <p>이 창을 닫고 앱으로 돌아가세요.</p>
           </body></html>`,
-        errorTemplate: `
-          <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0b1222;color:#e2e8f0">
+        errorTemplate: `<!doctype html>
+          <html lang="ko"><head><meta charset="utf-8" /><title>Login</title></head>
+          <body style="font-family:sans-serif;text-align:center;padding:60px;background:#0b1222;color:#e2e8f0">
             <h2 style="color:#f87171">인증 실패</h2>
             <p>다시 시도해주세요.</p>
           </body></html>`,
