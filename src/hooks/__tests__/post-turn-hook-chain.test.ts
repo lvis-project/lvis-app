@@ -128,4 +128,37 @@ describe("PostTurnHookChain", () => {
     expect(strippedCount).toBeGreaterThan(0);
     expect(saveSession).toHaveBeenCalledWith("session-micro", result);
   });
+
+  it("auto-extracts user memory into saveMemory when the user asks to remember something", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const saveSession = vi.fn();
+    const saveMemory = vi.fn().mockResolvedValue({
+      filename: "auto-memory.md",
+      title: "자동-이거 기억해줘",
+      content: "# 자동-이거 기억해줘\n\n...",
+    });
+    const saveNote = vi.fn();
+    const memoryManager = { saveSession, saveMemory, saveNote } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return { provider: "openai", model: "gpt-4o" };
+        return { systemPrompt: "", autoCompact: false };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({ memoryManager, settingsService });
+
+    await chain.run({
+      sessionId: "session-memory",
+      messages: createMessages(),
+      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+      input: "이거 기억해줘",
+      output: "네, 기억하겠습니다.",
+      toolCalls: [],
+      route: "chat",
+    });
+
+    expect(saveMemory).toHaveBeenCalledOnce();
+    expect(saveNote).not.toHaveBeenCalled();
+  });
 });

@@ -134,8 +134,9 @@ export type LvisApi = {
   msGraphSignOut: () => Promise<{ ok: boolean; state?: unknown }>;
   chatHasProvider: () => Promise<boolean>;
   chatSend: (input: string) => Promise<unknown>;
+  chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
-  chatSessions: () => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string }> }>;
+  chatSessions: () => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string }> }>;
   chatLoadSession: (sessionId: string) => Promise<{ ok: boolean; sessionId: string | null }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
@@ -151,9 +152,16 @@ export type LvisApi = {
   starredList: () => Promise<Array<{ id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string }>>;
   starredAdd: (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => Promise<{ ok: boolean; entry?: { id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string } }>;
   starredRemove: (opts: { id?: string; sessionId?: string; messageIndex?: number }) => Promise<{ ok: boolean }>;
-  memoryListNotes: () => Promise<Array<{ filename: string; title: string; content: string }>>;
+  memoryListNotes: () => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string }>>;
   memorySaveNote: (t: string, c: string) => Promise<unknown>;
   memoryDeleteNote: (f: string) => Promise<void>;
+  memorySearchNotes: (q: string) => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string }>>;
+  memoryListEntries: () => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string }>>;
+  memorySaveEntry: (t: string, c: string) => Promise<unknown>;
+  memoryDeleteEntry: (f: string) => Promise<void>;
+  memorySearchEntries: (q: string) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string }>>;
+  memoryListSessions: () => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
+  memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
   listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
   installMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
@@ -211,7 +219,7 @@ export type ApprovalDecision = {
   hmac?: string;
 };
 
-export type LvisApprovalApi = {
+  export type LvisApprovalApi = {
   onRequest: (cb: (req: ApprovalRequest) => void) => () => void;
   respond: (decision: ApprovalDecision) => Promise<unknown>;
 };
@@ -292,6 +300,10 @@ declare global {
       mcp: LvisMcpApi;
       plugins: LvisPluginsApi;
       pluginConfig: LvisPluginConfigApi;
+      env: {
+        isDev: boolean;
+        enableDevConsole: boolean;
+      };
     };
   }
 }

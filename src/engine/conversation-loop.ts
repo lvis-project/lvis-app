@@ -29,7 +29,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { AuditLogger } from "../audit/audit-logger.js";
-import type { ProactiveEngine } from "../core/proactive-engine.js";
+import type { ProactiveEngine as RoutineEngine } from "../core/proactive-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ToolCallMeta } from "../tools/executor.js";
@@ -71,7 +71,9 @@ export interface ConversationLoopDeps {
   toolRegistry: ToolRegistry;
   memoryManager: MemoryManager;
   permissionManager?: import("../permissions/permission-manager.js").PermissionManager;
-  proactiveEngine?: ProactiveEngine;
+  routineEngine?: RoutineEngine;
+  /** @deprecated compatibility alias for older callers. */
+  proactiveEngine?: RoutineEngine;
   /** Agent 5: turn 완료 시 idle scheduler에 대화 신호 전송 (§6.1) */
   idleScheduler?: IdleSchedulerService;
   /** Agent 6: post-turn hook chain (compact → saveSession → extractMemory → audit → idle-poke) */
@@ -213,7 +215,7 @@ export class ConversationLoop {
 
   /** 앱 시작 시 비서 스타일 데일리 브리핑 생성 — 항목 없으면 null 반환 */
   async generateBriefing(): Promise<string | null> {
-    const engine = this.deps.proactiveEngine;
+    const engine = this.deps.routineEngine ?? this.deps.proactiveEngine;
     if (!engine || !this.provider) return null;
 
     const now = new Date();
@@ -325,8 +327,8 @@ ${briefingData}
   }
 
   /** 세션 목록 조회 — §4.5.7 */
-  listSessions(): Array<{ id: string; modifiedAt: Date }> {
-    return this.deps.memoryManager.listSessions();
+  listSessions(limit?: number): Array<{ id: string; modifiedAt: Date; title: string; preview: string }> {
+    return this.deps.memoryManager.listSessions(limit);
   }
 
   /** 기존 세션 복원 — §4.5.7 */
@@ -854,19 +856,26 @@ ${briefingData}
       case "remember": {
         if (!args.trim()) { result = "사용법: /remember 기억할 내용"; break; }
         const title = args.slice(0, 40).replace(/\n/g, " ");
-        await this.deps.memoryManager.saveNote(title, args);
+        await this.deps.memoryManager.saveMemory(title, args);
         result = `메모 저장됨: ${title}`;
+        break;
+      }
+      case "memory": {
+        const memories = this.deps.memoryManager.listMemoryEntries();
+        result = memories.length === 0
+          ? "저장된 메모 없음."
+          : memories.map((n) => `- ${n.title} (${n.filename})`).join("\n");
         break;
       }
       case "notes": {
         const notes = this.deps.memoryManager.listNotes();
         result = notes.length === 0
-          ? "저장된 메모 없음."
+          ? "저장된 노트 없음."
           : notes.map((n) => `- ${n.title} (${n.filename})`).join("\n");
         break;
       }
       case "sessions": {
-        const sessions = this.listSessions();
+        const sessions = this.listSessions(10);
         if (sessions.length === 0) { result = "저장된 세션 없음."; break; }
         const current = this.sessionId;
         result = sessions.slice(0, 10).map((s) => {
@@ -891,8 +900,8 @@ ${briefingData}
         break;
       }
       case "briefing": {
-        const engine = this.deps.proactiveEngine;
-        if (!engine) { result = "Proactive Engine이 초기화되지 않았습니다."; break; }
+        const engine = this.deps.routineEngine ?? this.deps.proactiveEngine;
+        if (!engine) { result = "RoutineEngine이 초기화되지 않았습니다."; break; }
         const briefing = engine.generateTextBriefing();
         result = `📋 LVIS 데일리 브리핑 (${new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })})\n\n${briefing.summary}`;
         break;
@@ -926,13 +935,14 @@ ${briefingData}
 /compact — 대화 이력 압축
 /briefing — 데일리 브리핑
 /remember <내용> — 메모 저장
-/notes — 메모 목록
+/memory — 사용자 메모 목록
+/notes — 노트 목록
 /vendor — 현재 벤더/토큰 정보
 /tools — 등록된 도구 목록
 /help — 이 도움말`;
         break;
       default:
-        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /briefing, /remember, /notes, /vendor, /tools, /help`;
+        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /briefing, /remember, /memory, /notes, /vendor, /tools, /help`;
     }
 
     callbacks?.onTextDelta?.(result);

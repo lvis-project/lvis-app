@@ -6,6 +6,7 @@ import { historyToEntries } from "../utils/history.js";
 export interface SessionSummary {
   id: string;
   modifiedAt: string;
+  title: string;
 }
 
 /**

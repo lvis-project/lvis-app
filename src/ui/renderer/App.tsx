@@ -24,6 +24,7 @@ import { useStarred } from "./hooks/use-starred.js";
 import { useSessions } from "./hooks/use-sessions.js";
 import { useMarketplaceUpdates } from "./hooks/use-marketplace-updates.js";
 import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
+import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { DropZoneOverlay } from "./components/DropZoneOverlay.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { useIndexedDocs } from "./hooks/use-indexed-docs.js";
@@ -42,7 +43,7 @@ export function App() {
 
   // Chat state + stream lifecycle (useChatState is the sole owner of entries).
   const {
-    entries, streaming, setStreaming, editingEntryIdx, setEditingEntryIdx, editBusy,
+    entries, streaming, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     seedBriefing, clearForNewChat, appendUserEntry, applyLoadedSession, truncateToEntry,
@@ -50,13 +51,13 @@ export function App() {
   } = useChatState(api);
   const [question, setQuestion] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const turnRequestRef = useRef(0);
 
   // App state
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandOpen, setCommandOpen] = useState(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
   const { briefing, dismiss: dismissBriefing, snooze: snoozeBriefing } = useBriefing(api);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
@@ -83,7 +84,14 @@ export function App() {
     toggleOverlay: searchToggleOverlay, closeOverlay: searchCloseOverlay,
     nextMatch: searchNext, prevMatch: searchPrev,
   } = useSearch(entries);
-  const { starred, refreshStarred, isEntryStarred: starredIsEntry, handleToggleStar: starredToggle } = useStarred(api);
+  const {
+    starred,
+    refreshStarred,
+    isEntryStarred: starredIsEntry,
+    handleToggleStar: starredToggle,
+    isSessionStarred,
+    handleToggleSessionStar,
+  } = useStarred(api);
   const {
     currentSessionId, sessions, refreshSessionId, refreshSessions,
     handleLoadSession: sessionLoad, handleFork: sessionFork,
@@ -112,22 +120,31 @@ export function App() {
     [activePreset, attachedDocs, langLock],
   );
 
-  const handleAsk = useCallback(async (q: string) => {
-    const t = q.trim(); if (!t || streaming) return;
-    if (await handleCompactCommand(t)) return;
+  const handleAsk = useCallback(async (q: string, mode: "default" | "guidance" = "default") => {
+    const t = q.trim();
+    if (!t) return;
+    if (mode === "default" && streaming) return;
+    if (mode === "default" && await handleCompactCommand(t)) return;
     if (!(await checkApiKey())) { setSettingsOpen(true); return; }
+    const requestId = ++turnRequestRef.current;
+    const streamingRequestId = beginStreamingRequest();
     setQuestion("");
     const outgoing = composeOutgoing(t);
-    appendUserEntry(t);
+    appendUserEntry(mode === "guidance" ? `↳ ${t}` : t);
     resetStreamAccumulators();
-    setStreaming(true);
     try {
-      await api.chatSend(outgoing);
+      if (mode === "guidance") {
+        await api.chatGuide(outgoing);
+      } else {
+        await api.chatSend(outgoing);
+      }
       // Final state set by stream events + done
     } catch (err) {
       setErrorWithThought(`오류: ${(err as Error).message}`);
-    } finally { setStreaming(false); }
-  }, [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, setStreaming, setErrorWithThought, handleCompactCommand]);
+    } finally {
+      if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
+    }
+  }, [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest, setErrorWithThought, handleCompactCommand]);
 
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
@@ -186,13 +203,15 @@ export function App() {
   return (
     <ErrorBoundary fallback="앱 오류가 발생했습니다">
     <TooltipProvider>
-      <div className="flex h-screen">
-        <Sidebar
-          pluginViews={pluginViews}
-          setActiveView={setActiveView}
-        />
+        <div className="flex h-screen overflow-hidden">
+          <Sidebar
+            activeView={activeView}
+            pluginViews={pluginViews}
+            setActiveView={setActiveView}
+            starredCount={starred.length}
+          />
 
-        <main className="flex min-h-0 flex-col flex-1">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <MarketplaceUpdateBanner updates={marketplaceUpdates} onDismiss={dismissMarketplaceUpdates} />
           {fallbackToast && (
             <div className="bg-yellow-100 text-yellow-800 text-xs px-4 py-2 border-b border-yellow-200">
@@ -200,19 +219,20 @@ export function App() {
             </div>
           )}
           <MainToolbar
-            activeView={activeView}
-            setActiveView={setActiveView}
-            pluginViews={pluginViews}
-            starredCount={starred.length}
             streaming={streaming}
             hasApiKey={hasApiKey}
             sessions={sessions}
             currentSessionId={currentSessionId}
-            sheetOpen={sheetOpen}
-            setSheetOpen={setSheetOpen}
+            isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
             onNewChat={() => void handleNewChat()}
             onRefreshSessions={refreshSessions}
+            onRefreshStarred={refreshStarred}
             onLoadSession={handleLoadSession}
+            onToggleCurrentSessionStar={() => currentSessionId
+              ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
+              : Promise.resolve()}
+            onToggleSessionStar={handleToggleSessionStar}
+            isSessionStarred={(sessionId) => Boolean(isSessionStarred(sessionId))}
             onExport={handleExport}
             onSearchToggle={searchToggleOverlay}
             onOpenSettings={() => setSettingsOpen(true)}
@@ -228,7 +248,8 @@ export function App() {
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSession}
             chatContextValue={chatContextValue}
-            onAsk={handleAsk}
+            onAsk={(q) => handleAsk(q, "default")}
+            onGuide={(q) => handleAsk(q, "guidance")}
             onEditSave={handleEditSave}
             onFork={handleFork}
             onToggleStar={handleToggleStar}
@@ -246,6 +267,7 @@ export function App() {
       <ApprovalQueueStatus queue={approvalQueue} />
       <CommandPaletteDialog open={commandOpen} onOpenChange={setCommandOpen} actions={commandActions} />
       <DropZoneOverlay />
+      <DevConsoleToggle />
     </TooltipProvider>
     </ErrorBoundary>
   );
