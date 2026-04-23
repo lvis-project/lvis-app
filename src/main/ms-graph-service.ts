@@ -214,8 +214,13 @@ export class MsGraphService {
 
   /** MSAL refresh token 으로 조용히 갱신 시도 */
   private async silentRefresh(): Promise<string | null> {
+    // Sprint 4-E T2 race guard: PCA + scopes + epoch 를 같이 스냅샷 해서
+    // account 조회 / acquireTokenSilent await 중 switchEnvironment 가 들어와도
+    // 옛 env 의 config 로 끝까지 밀고간다. env 바뀌면 결과 폐기 (cross-env
+    // scope mismatch 와 token 오염 둘 다 차단).
     const startEpoch = this.envEpoch;
     const startPca = this.pca;
+    const startScopes = this.config.scopes;
     const cache = startPca.getTokenCache();
     let account;
     try {
@@ -234,7 +239,7 @@ export class MsGraphService {
 
     try {
       const result = await startPca.acquireTokenSilent({
-        scopes: this.config.scopes,
+        scopes: startScopes,
         account,
       });
       if (!result || !result.accessToken || !result.expiresOn) {
@@ -295,12 +300,15 @@ export class MsGraphService {
     }
     if (this.authInProgress) return this.authInProgress;
 
+    // Same race-guard snapshot pattern as silentRefresh — PCA + scopes +
+    // epoch + label 함께 고정. env 바뀌면 완료 콜백이 결과 폐기.
     const startEpoch = this.envEpoch;
     const startPca = this.pca;
+    const startScopes = this.config.scopes;
     const startLabel = this.config.label;
     this.authInProgress = startPca
       .acquireTokenInteractive({
-        scopes: this.config.scopes,
+        scopes: startScopes,
         openBrowser,
         successTemplate: `
           <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0b1222;color:#e2e8f0">
