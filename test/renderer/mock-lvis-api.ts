@@ -104,6 +104,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     memorySaveNote: vi.fn(async () => ({ ok: true })),
     memoryDeleteNote: vi.fn(async () => undefined),
     memorySearchNotes: vi.fn(async () => []),
+    memoryListSessions: vi.fn(async () => []),
     memorySearchSessions: vi.fn(async () => []),
 
     listMarketplacePlugins: vi.fn(async () => marketplace),

@@ -4,7 +4,7 @@ import type { RenderHtmlPayload } from "../types.js";
 function buildCspMeta(allowScripts: boolean): string {
   const directives = [
     "default-src 'none'",
-    allowScripts ? "script-src 'unsafe-inline' 'unsafe-eval'" : "",
+    allowScripts ? "script-src 'unsafe-inline'" : "",
     "style-src 'unsafe-inline' data:",
     "img-src data:",
     "font-src data:",
