@@ -289,8 +289,8 @@ export function registerIpcHandlers(
   });
 
   // ─── Microsoft Graph — dual-environment login ──────
-  // 모든 상태 조회는 read-only 라 sender guard 선택. 전환/로그인/로그아웃은
-  // side-effect 가 있어 sender guard + audit.
+  // 모든 상태 조회는 read-only 라 sender guard 선택.
+  // 환경 전환 / sign-in / sign-out 은 side-effect 가 있어 sender guard + audit 전부 수행.
   ipcMain.handle("lvis:ms-graph:get-state", () => {
     const environments = MS_GRAPH_ENVIRONMENTS.map((env) => ({
       id: env,
@@ -318,19 +318,42 @@ export function registerIpcHandlers(
 
   ipcMain.handle("lvis:ms-graph:sign-in", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:ms-graph:sign-in", e); return UNAUTHORIZED_FRAME; }
+    const envAtStart = msGraphService.getEnvironment();
     try {
       await msGraphService.startInteractiveAuth(async (url: string) => {
         await shell.openExternal(url);
       });
-      return { ok: true, state: msGraphService.getState() };
+      const state = msGraphService.getState();
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "host",
+        type: "info",
+        output: `ms-graph sign-in: env=${envAtStart} account=${state.account ?? "?"} success=${state.isAuthenticated}`,
+      });
+      return { ok: true, state };
     } catch (err) {
-      return { ok: false, error: (err as Error).message };
+      const msg = (err as Error).message;
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "host",
+        type: "warn",
+        output: `ms-graph sign-in failed: env=${envAtStart} error=${msg}`,
+      });
+      return { ok: false, error: msg };
     }
   });
 
   ipcMain.handle("lvis:ms-graph:sign-out", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:ms-graph:sign-out", e); return UNAUTHORIZED_FRAME; }
+    const envAtStart = msGraphService.getEnvironment();
+    const accountAtStart = msGraphService.getAccountName();
     await msGraphService.signOut();
+    auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "host",
+      type: "info",
+      output: `ms-graph sign-out: env=${envAtStart} account=${accountAtStart ?? "?"}`,
+    });
     return { ok: true, state: msGraphService.getState() };
   });
 
