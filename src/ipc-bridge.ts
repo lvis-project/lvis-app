@@ -333,6 +333,19 @@ export function registerIpcHandlers(
         await shell.openExternal(url);
       });
       const state = msGraphService.getState();
+      if (!state.isAuthenticated) {
+        const error =
+          state.environment !== envAtStart
+            ? "environment-switched-during-sign-in"
+            : "sign-in-did-not-complete";
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "host",
+          type: "warn",
+          output: `ms-graph sign-in failed: env=${envAtStart} error=${error}`,
+        });
+        return { ok: false, error, state };
+      }
       auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: "host",
@@ -1022,7 +1035,12 @@ export function registerIpcHandlers(
   ipcMain.handle("lvis:feedback:submit", async (e, payload: { sessionId: string; messageIndex: number; rating: "up" | "down"; reason?: string }) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:feedback:submit", e); return UNAUTHORIZED_FRAME; }
     const { sessionId, messageIndex, rating, reason } = payload ?? {};
-    if (typeof sessionId !== "string" || typeof messageIndex !== "number" || (rating !== "up" && rating !== "down")) {
+    if (
+      typeof sessionId !== "string" ||
+      typeof messageIndex !== "number" ||
+      messageIndex < 0 ||
+      (rating !== "up" && rating !== "down")
+    ) {
       return { ok: false, error: "invalid-args" };
     }
     // Write free-text reason to FeedbackStore only — keeps PII out of audit log (GDPR).
