@@ -81,4 +81,62 @@ describe("PluginRuntime config overrides", () => {
     expect(disabled).toEqual(["config-plugin"]);
     await expect(runtime.call("config_echo")).resolves.toBe("after");
   });
+
+  it("fires onDisable for loaded plugins before restartAll re-registers them", async () => {
+    const pluginDir = join(installedDir, "cleanup-plugin");
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return {
+    handlers: {
+      "cleanup_echo": async () => "ok",
+    },
+    stop: async () => {},
+  };
+}
+`,
+      "utf-8",
+    );
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "cleanup-plugin",
+        name: "Cleanup Plugin",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: ["cleanup_echo"],
+        keywords: [{ keyword: "cleanup", skillId: "cleanup_echo" }],
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "cleanup-plugin", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    const events: string[] = [];
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      onDisable: (pluginId) => events.push(`disable:${pluginId}`),
+      createHostApi: (pluginId) => ({
+        registerKeywords: () => {
+          events.push(`register:${pluginId}`);
+        },
+      }),
+    });
+
+    await runtime.load();
+    events.length = 0;
+    await runtime.restartAll();
+
+    expect(events).toEqual(["disable:cleanup-plugin", "register:cleanup-plugin"]);
+    await expect(runtime.call("cleanup_echo")).resolves.toBe("ok");
+  });
 });

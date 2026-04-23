@@ -137,11 +137,17 @@ export type LvisApi = {
   starredAdd: (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => Promise<{ ok: boolean; entry?: { id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string } }>;
   starredRemove: (opts: { id?: string; sessionId?: string; messageIndex?: number }) => Promise<{ ok: boolean }>;
   memoryListNotes: () => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string }>>;
-  memorySearchNotes: (query: string) => Promise<Array<{ title: string; excerpt: string; updatedAt?: string }>>;
-  memoryListSessions: () => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
-  memorySearchSessions: (query: string) => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
+
+
   memorySaveNote: (t: string, c: string) => Promise<unknown>;
   memoryDeleteNote: (f: string) => Promise<void>;
+  memorySearchNotes: (q: string) => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string }>>;
+  memoryListEntries: () => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string }>>;
+  memorySaveEntry: (t: string, c: string) => Promise<unknown>;
+  memoryDeleteEntry: (f: string) => Promise<void>;
+  memorySearchEntries: (q: string) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string }>>;
+  memoryListSessions: () => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
+  memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
   listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
   installMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;

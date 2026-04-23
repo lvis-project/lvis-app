@@ -493,12 +493,14 @@ export class PluginRuntime {
   }
 
   async restartAll(): Promise<void> {
+
     for (const pluginId of [...this.plugins.keys()]) {
       await this.detachPlugin(pluginId, {
         mark: "none",
         stopErrorLabel: "stop during restart cleanup failed",
         disposerErrorLabel: "disposer failed during restart cleanup",
       });
+
     }
     this.resetLoadedState();
     await this.startAll();

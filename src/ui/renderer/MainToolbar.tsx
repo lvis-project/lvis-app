@@ -49,7 +49,9 @@ export function MainToolbar({
             <Button
               variant="outline"
               size="sm"
-              title={streaming ? "응답 생성 중에도 기록은 확인할 수 있습니다" : "대화 기록 불러오기"}
+
+              title={streaming ? "응답 생성 중에도 기록은 확인할 수 있지만 세션 전환은 잠시 막습니다" : "대화 기록 불러오기"}
+
             ><History className="mr-1 h-4 w-4" />기록</Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="max-h-[480px] w-[300px] overflow-y-auto">
@@ -64,6 +66,9 @@ export function MainToolbar({
                 return (
                   <DropdownMenuItem
                     key={s.id}
+
+                    disabled={streaming && !isCurrent}
+
                     onClick={() => {
                       if (!isCurrent) void onLoadSession(s.id);
                     }}

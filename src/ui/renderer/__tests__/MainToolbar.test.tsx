@@ -1,6 +1,8 @@
 import "../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+
+import { fireEvent, render, waitFor } from "@testing-library/react";
+
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { MainToolbar } from "../MainToolbar.js";
 
@@ -72,6 +74,51 @@ describe("MainToolbar", () => {
     const { getByText } = renderWithProvider(defaultProps({ onToggleCurrentSessionStar }));
     fireEvent.click(getByText("세션"));
     expect(onToggleCurrentSessionStar).toHaveBeenCalledTimes(1);
+
+  });
+
+  it("keeps history trigger enabled while streaming", () => {
+    const { getByText } = renderWithProvider(defaultProps({ streaming: true }));
+    expect(getByText("기록")).not.toBeDisabled();
+  });
+
+  it("does not load the current session from history", async () => {
+    const onLoadSession = vi.fn();
+    const { getByText, queryByText } = renderWithProvider(defaultProps({
+      currentSessionId: "sess-1",
+      sessions: [
+        { id: "sess-1", modifiedAt: new Date().toISOString(), title: "현재 세션" },
+      ],
+      onLoadSession,
+    }));
+
+    fireEvent.pointerDown(getByText("기록"));
+
+    await waitFor(() => expect(queryByText("현재 세션")).toBeTruthy());
+    fireEvent.click(getByText("현재 세션"));
+    expect(onLoadSession).not.toHaveBeenCalled();
+  });
+
+  it("starring a history session does not also load it", async () => {
+    const onLoadSession = vi.fn();
+    const onToggleSessionStar = vi.fn();
+    const { getByText, getByTitle } = renderWithProvider(defaultProps({
+      currentSessionId: "sess-current",
+      sessions: [
+        { id: "sess-other", modifiedAt: new Date().toISOString(), title: "다른 세션" },
+      ],
+      onLoadSession,
+      onToggleSessionStar,
+    }));
+
+    fireEvent.pointerDown(getByText("기록"));
+
+    await waitFor(() => expect(getByText("다른 세션")).toBeTruthy());
+    fireEvent.click(getByTitle("세션 즐겨찾기"));
+
+    expect(onToggleSessionStar).toHaveBeenCalledWith("sess-other", "다른 세션");
+    expect(onLoadSession).not.toHaveBeenCalled();
+
   });
 });
 

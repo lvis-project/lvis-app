@@ -47,8 +47,8 @@ export function createRoutineEngine(opts: {
     })),
     getRecentNotes: () => memoryManager.listNotes().slice(0, 5),
     getRecentSessions: () => memoryManager.listSessions().slice(0, 5),
-    // Sprint 3-A: user voice tone hint — note titles only (deterministic).
-    getRecentMemoryExcerpts: () => memoryManager.listNotes().slice(0, 3).map((n) => n.title),
+    // Sprint 3-A: user voice tone hint — memory entry titles only (deterministic).
+    getRecentMemoryExcerpts: () => memoryManager.listMemoryEntries().slice(0, 3).map((n) => n.title),
     isDailyBriefingEnabled,
     callLlm,
     getLastBriefingDate,

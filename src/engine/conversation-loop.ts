@@ -856,14 +856,21 @@ ${briefingData}
       case "remember": {
         if (!args.trim()) { result = "사용법: /remember 기억할 내용"; break; }
         const title = args.slice(0, 40).replace(/\n/g, " ");
-        await this.deps.memoryManager.saveNote(title, args);
+        await this.deps.memoryManager.saveMemory(title, args);
         result = `메모 저장됨: ${title}`;
+        break;
+      }
+      case "memory": {
+        const memories = this.deps.memoryManager.listMemoryEntries();
+        result = memories.length === 0
+          ? "저장된 메모 없음."
+          : memories.map((n) => `- ${n.title} (${n.filename})`).join("\n");
         break;
       }
       case "notes": {
         const notes = this.deps.memoryManager.listNotes();
         result = notes.length === 0
-          ? "저장된 메모 없음."
+          ? "저장된 노트 없음."
           : notes.map((n) => `- ${n.title} (${n.filename})`).join("\n");
         break;
       }
@@ -928,13 +935,14 @@ ${briefingData}
 /compact — 대화 이력 압축
 /briefing — 데일리 브리핑
 /remember <내용> — 메모 저장
-/notes — 메모 목록
+/memory — 사용자 메모 목록
+/notes — 노트 목록
 /vendor — 현재 벤더/토큰 정보
 /tools — 등록된 도구 목록
 /help — 이 도움말`;
         break;
       default:
-        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /briefing, /remember, /notes, /vendor, /tools, /help`;
+        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /briefing, /remember, /memory, /notes, /vendor, /tools, /help`;
     }
 
     callbacks?.onTextDelta?.(result);

@@ -7,7 +7,9 @@
  *   사용자 제거·비활성화 불가, app-shipped lifecycle을 따른다.
  * - **user**: 사용자가 자율적으로 설치. 회사 정책(userInstallPolicy)에 따라 제어.
  */
+
 export type DeploymentMode = "bundled" | "managed" | "user";
+
 
 export interface PluginManifest {
   /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.lge.meeting-recorder`. */

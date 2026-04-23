@@ -23,20 +23,24 @@ export function Sidebar(props: SidebarProps) {
   ];
 
   return (
-    <aside className="flex w-28 shrink-0 flex-col border-r bg-background px-3 py-4">
+
+    <aside className="flex min-h-0 w-32 shrink-0 flex-col border-r bg-background px-3 py-4">
       <div className="mb-4 px-2 text-xs font-semibold tracking-wide text-muted-foreground">
         메뉴
       </div>
-      <div className="space-y-1">
+      <div className="flex-1 space-y-1 overflow-y-auto pr-1">
+
         {navItems.map((item) => (
           <Button
             key={item.key}
             variant={activeView === item.key ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2 px-3"
+
+            className="w-full min-w-0 justify-start gap-2 px-3"
             onClick={() => setActiveView(item.key)}
           >
-            <span>{item.label}</span>
-            {item.badge ? <span className="text-[10px] text-muted-foreground">{item.badge}</span> : null}
+            <span className="truncate">{item.label}</span>
+            {item.badge ? <span className="shrink-0 text-[10px] text-muted-foreground">{item.badge}</span> : null}
+
           </Button>
         ))}
       </div>

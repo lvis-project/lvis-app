@@ -16,12 +16,12 @@ function ensureWindowsUserDataDir(argsList, envVars, profileName) {
   return argsList;
 }
 
-// Unpackaged dev runs: bypass plugin signature verification for locally-built
-// managed plugins AND allow plugin manifest `entry` paths to traverse into
-// ../../../node_modules/@lvis/... (which normally would be rejected by the
-// plugin-root confinement check). Both switches reflect the same intent —
-// "this is a developer workstation running against sibling-linked plugin
-// repos" — and are gated off in packaged builds (app.isPackaged === true).
+// `bun run start` is still an unpackaged local run: it builds sibling plugins,
+// then launches Electron against registry manifests under plugins/installed/*
+// whose entries resolve into ../../../node_modules/@lvis/... and are unsigned.
+// Keep those local compatibility relaxations here so normal local runs keep
+// loading managed plugins, while dev-only UX (watchers, LVIS_DEV, dev console)
+// remains exclusive to scripts/run-electron-dev.mjs.
 if (!env.LVIS_DEV_SKIP_SIG) {
   env.LVIS_DEV_SKIP_SIG = "1";
 }
