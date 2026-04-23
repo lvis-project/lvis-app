@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Wrench } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
+import { Button } from "../../../components/ui/button.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
 import type { RenderHtmlPayload } from "../types.js";
@@ -9,6 +10,7 @@ import { HtmlPreview } from "./HtmlPreview.js";
 export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_group" }> }) {
   const [open, setOpen] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
   const doneCount = group.tools.filter((t) => t.status !== "running").length;
   const hasError = group.tools.some((t) => t.status === "error");
   const groupStatus = group.status === "running"
@@ -30,6 +32,10 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
     .filter((t) => t.name === "render_html" && t.status === "done")
     .map((t) => ({ toolUseId: t.toolUseId, payload: parseRenderHtmlResult(t.result) }))
     .filter((p): p is { toolUseId: string; payload: RenderHtmlPayload } => p.payload !== null);
+
+  function previewNeedsJavaScript(payload: RenderHtmlPayload): boolean {
+    return /<script\b|on[a-z]+\s*=|javascript:/i.test(payload.html);
+  }
 
   return (
     <div className="max-w-[85%] rounded-md border border-dashed text-xs text-muted-foreground">
@@ -103,7 +109,32 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
       {htmlPreviews.length > 0 && (
         <div className="border-t px-3 py-2">
           {htmlPreviews.map((p) => (
-            <HtmlPreview key={p.toolUseId} payload={p.payload} allowScripts={true} />
+            <div key={p.toolUseId} className="space-y-2">
+              {previewNeedsJavaScript(p.payload) && (
+                <div className="flex items-center justify-between gap-3 rounded border border-dashed px-3 py-2 text-[11px] text-muted-foreground">
+                  <span>이 HTML은 JavaScript가 필요할 수 있습니다. 실행을 허용할까요?</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={scriptAllowed.has(p.toolUseId) ? "secondary" : "outline"}
+                    onClick={() => {
+                      setScriptAllowed((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(p.toolUseId)) next.delete(p.toolUseId);
+                        else next.add(p.toolUseId);
+                        return next;
+                      });
+                    }}
+                  >
+                    {scriptAllowed.has(p.toolUseId) ? "JavaScript 차단" : "JavaScript 허용"}
+                  </Button>
+                </div>
+              )}
+              <HtmlPreview
+                payload={p.payload}
+                allowScripts={scriptAllowed.has(p.toolUseId)}
+              />
+            </div>
           ))}
         </div>
       )}
