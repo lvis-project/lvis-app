@@ -7,16 +7,20 @@ import { DevConsoleToggle } from "../DevConsoleToggle.js";
 const init = vi.fn();
 const show = vi.fn();
 const hide = vi.fn();
+const hideEntryBtn = vi.fn();
+const get = vi.fn((name?: string) => (name === "entryBtn" ? { hide: hideEntryBtn } : undefined));
 
 vi.mock("eruda", () => ({
-  default: { init, show, hide },
+  default: { init, get, show, hide },
 }));
 
 describe("DevConsoleToggle", () => {
   beforeEach(() => {
     init.mockClear();
+    get.mockClear();
     show.mockClear();
     hide.mockClear();
+    hideEntryBtn.mockClear();
     window.lvis = {
       ...(window.lvis ?? {}),
       env: { isDev: true, enableDevConsole: true },
@@ -40,6 +44,8 @@ describe("DevConsoleToggle", () => {
 
     await waitFor(() => {
       expect(init).toHaveBeenCalledTimes(1);
+      expect(get).toHaveBeenCalledWith("entryBtn");
+      expect(hideEntryBtn).toHaveBeenCalledTimes(1);
       expect(show).toHaveBeenCalledTimes(1);
     });
 

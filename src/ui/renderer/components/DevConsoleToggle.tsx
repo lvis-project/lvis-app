@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button.js";
 
 type ErudaApi = {
   init: (options?: unknown) => void;
+  get?: (name?: string) => { hide?: () => void } | undefined;
   show?: () => void;
   hide?: () => void;
 };
@@ -26,6 +27,7 @@ export function DevConsoleToggle() {
             autoScale: true,
             useShadowDom: true,
           });
+          eruda.get?.("entryBtn")?.hide?.();
           eruda.hide?.();
           erudaBooted = true;
         }
