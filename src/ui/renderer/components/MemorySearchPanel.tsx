@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Input } from "../../../components/ui/input.js";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../../components/ui/tabs.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { useMemorySearch, type NoteResult, type SessionResult } from "../hooks/use-memory-search.js";
 import type { LvisApi } from "../types.js";
 
@@ -24,9 +25,11 @@ function NoteRow({ note }: { note: NoteResult }) {
       className="w-full text-left px-3 py-2 rounded hover:bg-muted/50 transition-colors border-b border-border/50 last:border-0"
       onClick={() => setExpanded((v) => !v)}
     >
-      <div className="flex justify-between items-baseline gap-2">
-        <span className="text-sm font-medium truncate">{note.title}</span>
-        <span className="text-[10px] text-muted-foreground shrink-0">{relativeTime(note.updatedAt)}</span>
+      <div className="flex min-w-0 items-baseline justify-between gap-2">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{note.title}</span>
+        {note.updatedAt ? (
+          <span className="text-[10px] text-muted-foreground shrink-0">{relativeTime(note.updatedAt)}</span>
+        ) : null}
       </div>
       <p className={`text-xs text-muted-foreground mt-0.5 ${expanded ? "whitespace-pre-wrap break-words" : "truncate"}`}>
         {note.excerpt}
@@ -43,8 +46,8 @@ function SessionRow({ session }: { session: SessionResult }) {
       className="w-full text-left px-3 py-2 rounded hover:bg-muted/50 transition-colors border-b border-border/50 last:border-0"
       onClick={() => setExpanded((v) => !v)}
     >
-      <div className="flex justify-between items-baseline gap-2">
-        <span className="font-mono text-[10px] text-muted-foreground">{session.sessionId.slice(0, 8)}</span>
+      <div className="flex min-w-0 items-baseline justify-between gap-2">
+        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">{session.sessionId.slice(0, 8)}</span>
         <span className="text-[10px] text-muted-foreground shrink-0">{relativeTime(session.timestamp)}</span>
       </div>
       <p className={`text-xs text-muted-foreground mt-0.5 ${expanded ? "whitespace-pre-wrap break-words" : "truncate"}`}>
@@ -62,50 +65,56 @@ export function MemorySearchPanel({ api }: MemorySearchPanelProps) {
   const { query, setQuery, noteResults, sessionResults, loading } = useMemorySearch(api);
 
   return (
-    <div className="flex flex-col h-full gap-3 p-3">
-      <Input
-        placeholder="메모리 검색…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        className="text-sm"
-        aria-label="메모리 검색"
-      />
-      <Tabs defaultValue="notes" className="flex flex-col flex-1 min-h-0">
-        <TabsList className="w-full">
-          <TabsTrigger value="notes" className="flex-1">
-            메모{noteResults.length > 0 ? ` (${noteResults.length})` : ""}
-          </TabsTrigger>
-          <TabsTrigger value="sessions" className="flex-1">
-            세션{sessionResults.length > 0 ? ` (${sessionResults.length})` : ""}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="notes" className="flex-1 min-h-0 mt-2">
-          <ScrollArea className="h-full">
-            {loading ? (
-              <p className="text-xs text-muted-foreground px-3 py-4">검색 중…</p>
-            ) : query === "" ? (
-              <p className="text-xs text-muted-foreground px-3 py-4">검색어를 입력하세요</p>
-            ) : noteResults.length === 0 ? (
-              <p className="text-xs text-muted-foreground px-3 py-4">결과 없음</p>
-            ) : (
-              noteResults.map((n) => <NoteRow key={n.title + n.updatedAt} note={n} />)
-            )}
-          </ScrollArea>
-        </TabsContent>
-        <TabsContent value="sessions" className="flex-1 min-h-0 mt-2">
-          <ScrollArea className="h-full">
-            {loading ? (
-              <p className="text-xs text-muted-foreground px-3 py-4">검색 중…</p>
-            ) : query === "" ? (
-              <p className="text-xs text-muted-foreground px-3 py-4">검색어를 입력하세요</p>
-            ) : sessionResults.length === 0 ? (
-              <p className="text-xs text-muted-foreground px-3 py-4">결과 없음</p>
-            ) : (
-              sessionResults.map((s) => <SessionRow key={s.sessionId + s.timestamp} session={s} />)
-            )}
-          </ScrollArea>
-        </TabsContent>
-      </Tabs>
-    </div>
+    <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
+      <CardHeader className="pb-4">
+        <CardTitle>메모리</CardTitle>
+        <CardDescription>저장된 메모와 세션을 검색하거나 전체 목록으로 확인합니다.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+        <Input
+          placeholder="메모리 검색… (비워두면 전체 목록)"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="text-sm"
+          aria-label="메모리 검색"
+        />
+        <Tabs defaultValue="notes" className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <TabsList className="w-full">
+            <TabsTrigger value="notes" className="flex-1">
+              메모{noteResults.length > 0 ? ` (${noteResults.length})` : ""}
+            </TabsTrigger>
+            <TabsTrigger value="sessions" className="flex-1">
+              세션{sessionResults.length > 0 ? ` (${sessionResults.length})` : ""}
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="notes" className="mt-2 flex-1 min-h-0 overflow-hidden">
+            <ScrollArea className="h-full pr-2">
+              {loading ? (
+                <p className="px-3 py-4 text-xs text-muted-foreground">검색 중…</p>
+              ) : noteResults.length === 0 ? (
+                <p className="px-3 py-4 text-xs text-muted-foreground">
+                  {query === "" ? "저장된 메모가 없습니다" : "결과 없음"}
+                </p>
+              ) : (
+                noteResults.map((n) => <NoteRow key={n.title + n.updatedAt} note={n} />)
+              )}
+            </ScrollArea>
+          </TabsContent>
+          <TabsContent value="sessions" className="mt-2 flex-1 min-h-0 overflow-hidden">
+            <ScrollArea className="h-full pr-2">
+              {loading ? (
+                <p className="px-3 py-4 text-xs text-muted-foreground">검색 중…</p>
+              ) : sessionResults.length === 0 ? (
+                <p className="px-3 py-4 text-xs text-muted-foreground">
+                  {query === "" ? "저장된 세션이 없습니다" : "결과 없음"}
+                </p>
+              ) : (
+                sessionResults.map((s) => <SessionRow key={s.sessionId + s.timestamp} session={s} />)
+              )}
+            </ScrollArea>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
   );
 }

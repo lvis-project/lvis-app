@@ -29,6 +29,19 @@ export interface NoteEntry {
   updatedAt?: string;
 }
 
+export interface SessionSearchEntry {
+  sessionId: string;
+  matchedMessage: string;
+  timestamp: string;
+}
+
+export interface SessionListEntry {
+  id: string;
+  modifiedAt: Date;
+  title: string;
+  preview: string;
+}
+
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
 
 const DEFAULT_LVIS_MD = `# LVIS 컨텍스트
@@ -58,6 +71,8 @@ const DEFAULT_USER_PREFS = `# 사용자 선호
 
 (자주 사용하는 플러그인, 도구, 명령어 등)
 `;
+
+const MAX_SESSION_FILE_BYTES = 5_000_000;
 
 export class MemoryManager {
   private readonly lvisDir: string;
@@ -115,12 +130,12 @@ export class MemoryManager {
   }
 
   /** sessions/ 키워드 검색 — D5 메모리 검색 패널용. Cap 50. */
-  searchSessions(query: string): Array<{ sessionId: string; matchedMessage: string; timestamp: string }> {
+  searchSessions(query: string): SessionSearchEntry[] {
     // Require at least 2 chars to prevent accidental full-dump via empty/trivial query.
     if (query.trim().length < 2) return [];
     if (!existsSync(this.sessionsDir)) return [];
     const lower = query.toLowerCase();
-    const results: Array<{ sessionId: string; matchedMessage: string; timestamp: string }> = [];
+    const results: SessionSearchEntry[] = [];
     const UUID_RE = /^[0-9a-f-]{8,}$/i;
     const files = readdirSync(this.sessionsDir).filter((f) => f.endsWith(".jsonl"));
     for (const file of files) {
@@ -131,7 +146,7 @@ export class MemoryManager {
       const filePath = join(this.sessionsDir, file);
       const stat = statSync(filePath);
       // Skip oversized files — unbounded readFileSync is a DoS vector.
-      if (stat.size > 5_000_000) continue;
+        if (stat.size > MAX_SESSION_FILE_BYTES) continue;
       const timestamp = stat.mtime.toISOString();
       try {
         const raw = readFileSync(filePath, "utf-8");
@@ -163,6 +178,19 @@ export class MemoryManager {
   /** memory/ 전체를 하나의 문자열로 — SystemPromptBuilder에서 사용 */
   getMemoryContext(): string {
     return this.buildMarkdownContext(this.listMemoryEntries());
+  }
+
+  /** notes/ 전체를 하나의 문자열로 — 보조 노트 조회용 */
+  /** sessions/ 최근 목록 — 검색 전에도 항목을 확인할 수 있도록 최근 세션을 노출한다. */
+  listSessionEntries(limit = 50): SessionSearchEntry[] {
+    const UUID_RE = /^[0-9a-f-]{8,}$/i;
+    return this.listSessions(limit)
+      .filter((session) => UUID_RE.test(session.id))
+      .map((session) => ({
+        sessionId: session.id,
+        matchedMessage: session.preview,
+        timestamp: session.modifiedAt.toISOString(),
+      }));
   }
 
   /** notes/ 전체를 하나의 문자열로 — 보조 노트 조회용 */
@@ -234,7 +262,7 @@ export class MemoryManager {
 
   /**
    * 브리핑 dismiss 이유를 briefing-feedback.md 에 append.
-   * Sprint E §2 — 사용자 피드백 루프. Proactive Engine 이 최근 5건을 읽어
+   * Sprint E §2 — 사용자 피드백 루프. RoutineEngine이 최근 5건을 읽어
    * LLM 프롬프트에 "User feedback memory:" 섹션으로 주입한다.
    */
   async appendBriefingFeedback(entry: {
@@ -254,7 +282,7 @@ export class MemoryManager {
       if (!existsSync(targetPath)) {
         writeFileSync(
           targetPath,
-          "# 브리핑 피드백 로그\n\n> 사용자가 브리핑을 닫을 때 남긴 이유가 기록됩니다. ProactiveEngine이 최근 5건을 LLM 컨텍스트에 주입합니다.\n\n" +
+          "# 브리핑 피드백 로그\n\n> 사용자가 브리핑을 닫을 때 남긴 이유가 기록됩니다. RoutineEngine이 최근 5건을 LLM 컨텍스트에 주입합니다.\n\n" +
             block,
           "utf-8",
         );
@@ -299,19 +327,46 @@ export class MemoryManager {
     const path = join(this.sessionsDir, `${sessionId}.jsonl`);
     if (!existsSync(path)) return null;
     const lines = readFileSync(path, "utf-8").trim().split("\n");
-    return lines.filter(Boolean).map((line) => JSON.parse(line));
+    const messages: unknown[] = [];
+    for (const line of lines.filter(Boolean)) {
+      try {
+        messages.push(JSON.parse(line));
+      } catch {
+        console.warn("[memory] skipping malformed session line", { sessionId });
+      }
+    }
+    return messages;
   }
 
   /** 세션 목록 */
-  listSessions(): Array<{ id: string; modifiedAt: Date }> {
+  listSessions(limit = Number.POSITIVE_INFINITY): SessionListEntry[] {
     if (!existsSync(this.sessionsDir)) return [];
     return readdirSync(this.sessionsDir)
       .filter((f) => f.endsWith(".jsonl"))
       .map((f) => {
         const stat = statSync(join(this.sessionsDir, f));
-        return { id: f.replace(".jsonl", ""), modifiedAt: stat.mtime };
+        return {
+          id: f.replace(".jsonl", ""),
+          modifiedAt: stat.mtime,
+          size: stat.size,
+        };
       })
-      .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
+      .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime())
+      .slice(0, Number.isFinite(limit) ? Math.max(0, limit) : undefined)
+      .map((session) => {
+        const summary = session.size > MAX_SESSION_FILE_BYTES
+          ? {
+              title: `세션 ${session.id.slice(0, 8)}`,
+              preview: "(대화가 커서 미리보기를 생략했습니다)",
+            }
+          : this.readSessionSummary(session.id);
+        return {
+          id: session.id,
+          modifiedAt: session.modifiedAt,
+          title: summary.title,
+          preview: summary.preview,
+        };
+      });
   }
 
   /** 세션 삭제 */
@@ -398,6 +453,32 @@ export class MemoryManager {
 
   private stripInternalMarkers(content: string): string {
     return content.replace(/^<!--\s*lvis:kind=memory\s*-->\r?\n?/, "");
+  }
+
+  private readSessionSummary(sessionId: string): { title: string; preview: string } {
+    const messages = this.loadSession(sessionId);
+    if (!Array.isArray(messages)) {
+      return {
+        title: `세션 ${sessionId.slice(0, 8)}`,
+        preview: "(내용 없음)",
+      };
+    }
+
+    let lastUser = "";
+    let lastContent = "";
+    for (const message of messages) {
+      const role = (message as Record<string, unknown>)?.role;
+      const content = (message as Record<string, unknown>)?.content;
+      if (typeof content !== "string" || content.trim().length === 0) continue;
+      const normalized = content.replace(/\s+/g, " ").trim();
+      lastContent = normalized;
+      if (role === "user") lastUser = normalized;
+    }
+
+    return {
+      title: (lastUser || lastContent || `세션 ${sessionId.slice(0, 8)}`).slice(0, 80),
+      preview: (lastContent || lastUser || "(내용 없음)").slice(0, 200),
+    };
   }
 
   private slugify(title: string): string {

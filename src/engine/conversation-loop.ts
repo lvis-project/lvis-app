@@ -29,7 +29,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { AuditLogger } from "../audit/audit-logger.js";
-import type { ProactiveEngine } from "../core/proactive-engine.js";
+import type { ProactiveEngine as RoutineEngine } from "../core/proactive-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ToolCallMeta } from "../tools/executor.js";
@@ -71,7 +71,9 @@ export interface ConversationLoopDeps {
   toolRegistry: ToolRegistry;
   memoryManager: MemoryManager;
   permissionManager?: import("../permissions/permission-manager.js").PermissionManager;
-  proactiveEngine?: ProactiveEngine;
+  routineEngine?: RoutineEngine;
+  /** @deprecated compatibility alias for older callers. */
+  proactiveEngine?: RoutineEngine;
   /** Agent 5: turn 완료 시 idle scheduler에 대화 신호 전송 (§6.1) */
   idleScheduler?: IdleSchedulerService;
   /** Agent 6: post-turn hook chain (compact → saveSession → extractMemory → audit → idle-poke) */
@@ -213,7 +215,7 @@ export class ConversationLoop {
 
   /** 앱 시작 시 비서 스타일 데일리 브리핑 생성 — 항목 없으면 null 반환 */
   async generateBriefing(): Promise<string | null> {
-    const engine = this.deps.proactiveEngine;
+    const engine = this.deps.routineEngine ?? this.deps.proactiveEngine;
     if (!engine || !this.provider) return null;
 
     const now = new Date();
@@ -325,8 +327,8 @@ ${briefingData}
   }
 
   /** 세션 목록 조회 — §4.5.7 */
-  listSessions(): Array<{ id: string; modifiedAt: Date }> {
-    return this.deps.memoryManager.listSessions();
+  listSessions(limit?: number): Array<{ id: string; modifiedAt: Date; title: string; preview: string }> {
+    return this.deps.memoryManager.listSessions(limit);
   }
 
   /** 기존 세션 복원 — §4.5.7 */
@@ -873,7 +875,7 @@ ${briefingData}
         break;
       }
       case "sessions": {
-        const sessions = this.listSessions();
+        const sessions = this.listSessions(10);
         if (sessions.length === 0) { result = "저장된 세션 없음."; break; }
         const current = this.sessionId;
         result = sessions.slice(0, 10).map((s) => {
@@ -898,8 +900,8 @@ ${briefingData}
         break;
       }
       case "briefing": {
-        const engine = this.deps.proactiveEngine;
-        if (!engine) { result = "Proactive Engine이 초기화되지 않았습니다."; break; }
+        const engine = this.deps.routineEngine ?? this.deps.proactiveEngine;
+        if (!engine) { result = "RoutineEngine이 초기화되지 않았습니다."; break; }
         const briefing = engine.generateTextBriefing();
         result = `📋 LVIS 데일리 브리핑 (${new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })})\n\n${briefing.summary}`;
         break;
