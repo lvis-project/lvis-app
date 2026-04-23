@@ -335,6 +335,9 @@ export class SettingsService {
     if (partial.audit) {
       this.settings.audit = { ...this.settings.audit, ...partial.audit };
     }
+    if (partial.msGraph) {
+      this.settings.msGraph = { ...this.settings.msGraph, ...partial.msGraph };
+    }
     if (partial.pluginConfigs) {
       const sanitized: Record<string, PluginConfigRecord> = {};
       for (const [pluginId, config] of Object.entries(partial.pluginConfigs)) {
