@@ -25,9 +25,12 @@ const {
   mockAcquireTokenSilent,
   mockGetAccountByUsername,
   mockGetAllAccounts,
+  mockRemoveAccount,
   mockReadFile,
   mockWriteFile,
   mockMkdir,
+  mockRename,
+  mockExistsSync,
 } = vi.hoisted(() => {
   return {
     mockSafeStorage: {
@@ -39,9 +42,12 @@ const {
     mockAcquireTokenSilent: vi.fn(),
     mockGetAccountByUsername: vi.fn(),
     mockGetAllAccounts: vi.fn(),
+    mockRemoveAccount: vi.fn(async () => undefined),
     mockReadFile: vi.fn(),
     mockWriteFile: vi.fn(),
     mockMkdir: vi.fn(async () => undefined),
+    mockRename: vi.fn(async () => undefined),
+    mockExistsSync: vi.fn(() => false),
   };
 });
 
@@ -59,6 +65,7 @@ vi.mock("@azure/msal-node", () => {
       return {
         getAccountByUsername: mockGetAccountByUsername,
         getAllAccounts: mockGetAllAccounts,
+        removeAccount: mockRemoveAccount,
       };
     }
   }
@@ -70,6 +77,12 @@ vi.mock("node:fs/promises", () => ({
   readFile: (...args: unknown[]) => mockReadFile(...args),
   writeFile: (...args: unknown[]) => mockWriteFile(...args),
   mkdir: (...args: unknown[]) => mockMkdir(...args),
+  rename: (...args: unknown[]) => mockRename(...args),
+}));
+
+// ─── Mock node:fs (existsSync for legacy token migration) ────────────────────
+vi.mock("node:fs", () => ({
+  existsSync: (...args: unknown[]) => mockExistsSync(...args),
 }));
 
 // ─── Import SUT (after mocks) ─────────────────────────────────────────────────
@@ -412,6 +425,141 @@ describe("MsGraphService", () => {
 
       expect(token).toBe("fresh-token");
       expect(mockAcquireTokenSilent).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── dual-environment switch / sign-out / legacy migration ──────────────────
+  describe("dual-environment (switchEnvironment / signOut / legacy migration)", () => {
+    it("legacy migration: external init with ms-graph-token.json present but -external missing → renames", async () => {
+      // loadSavedToken checks existsSync(tokenPath) then existsSync(legacyPath).
+      // Simulate: new file missing, legacy present.
+      mockExistsSync.mockImplementation((p: string) =>
+        p.endsWith("ms-graph-token.json"),
+      );
+      mockReadFile.mockResolvedValue(makeSavedJson());
+
+      const svc = new MsGraphService("/tmp/test-userData", "external");
+      await svc.loadSavedToken();
+
+      expect(mockRename).toHaveBeenCalledTimes(1);
+      const [fromPath, toPath] = (mockRename.mock.calls[0] ?? []) as [string, string];
+      expect(fromPath).toMatch(/ms-graph-token\.json$/);
+      expect(toPath).toMatch(/ms-graph-token-external\.json$/);
+      expect(svc.isAuthenticated()).toBe(true);
+    });
+
+    it("legacy migration: corporate env does NOT migrate legacy file", async () => {
+      mockExistsSync.mockImplementation((p: string) =>
+        p.endsWith("ms-graph-token.json"),
+      );
+      mockReadFile.mockRejectedValue(
+        Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+      );
+
+      const svc = new MsGraphService("/tmp/test-userData", "corporate");
+      await svc.loadSavedToken();
+
+      expect(mockRename).not.toHaveBeenCalled();
+    });
+
+    it("switchEnvironment: resets in-memory state + reloads new env token + notifies", async () => {
+      // Start in external with loaded token
+      mockReadFile.mockResolvedValue(makeSavedJson({ account: "ext@example.com" }));
+      const svc = new MsGraphService("/tmp/test-userData", "external");
+      await svc.loadSavedToken();
+      expect(svc.getEnvironment()).toBe("external");
+      expect(svc.isAuthenticated()).toBe(true);
+
+      const changeSpy = vi.fn();
+      svc.onAuthChange(changeSpy);
+
+      // Switch to corporate — file for corporate env does not exist
+      mockReadFile.mockRejectedValueOnce(
+        Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+      );
+      mockExistsSync.mockReturnValue(false);
+      await svc.switchEnvironment("corporate");
+
+      expect(svc.getEnvironment()).toBe("corporate");
+      expect(svc.isAuthenticated()).toBe(false);
+      expect(svc.getAccountName()).toBeNull();
+      expect(changeSpy).toHaveBeenCalled();
+    });
+
+    it("switchEnvironment: same env is no-op", async () => {
+      mockReadFile.mockResolvedValue(makeSavedJson());
+      const svc = new MsGraphService("/tmp/test-userData", "external");
+      await svc.loadSavedToken();
+      const changeSpy = vi.fn();
+      svc.onAuthChange(changeSpy);
+
+      await svc.switchEnvironment("external");
+
+      expect(changeSpy).not.toHaveBeenCalled();
+      expect(svc.isAuthenticated()).toBe(true);
+    });
+
+    it("signOut: clears in-memory state + removes MSAL accounts + notifies", async () => {
+      mockReadFile.mockResolvedValue(makeSavedJson());
+      mockGetAllAccounts.mockResolvedValue([{ username: "user@example.com" }]);
+      const svc = new MsGraphService("/tmp/test-userData", "external");
+      await svc.loadSavedToken();
+      expect(svc.isAuthenticated()).toBe(true);
+
+      const changeSpy = vi.fn();
+      svc.onAuthChange(changeSpy);
+      await svc.signOut();
+
+      expect(svc.isAuthenticated()).toBe(false);
+      expect(svc.getAccountName()).toBeNull();
+      expect(mockRemoveAccount).toHaveBeenCalledTimes(1);
+      expect(changeSpy).toHaveBeenCalled();
+    });
+
+    it("race guard: switchEnvironment mid-refresh discards stale token (does not persist)", async () => {
+      // Start: external with account present
+      mockReadFile.mockResolvedValue(makeSavedJson({ accessToken: "plain:expired" }));
+      mockGetAllAccounts.mockResolvedValue([{ username: "user@example.com" }]);
+      const svc = new MsGraphService("/tmp/test-userData", "external");
+      await svc.loadSavedToken();
+      // Force invalidation by pretending loaded token is expired via direct getAccessToken trigger
+      (svc as unknown as { tokenExpiry: Date }).tokenExpiry = new Date(Date.now() - 1);
+
+      // Craft acquireTokenSilent to resolve AFTER switchEnvironment runs
+      let resolveSilent: (v: unknown) => void = () => {};
+      mockAcquireTokenSilent.mockImplementation(
+        () =>
+          new Promise((res) => {
+            resolveSilent = res;
+          }),
+      );
+
+      const refreshPromise = svc.getAccessToken();
+
+      // Switch env while silent is in-flight
+      mockReadFile.mockRejectedValueOnce(
+        Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+      );
+      mockExistsSync.mockReturnValue(false);
+      await svc.switchEnvironment("corporate");
+
+      // Now resolve the stale silent refresh with a token
+      resolveSilent({
+        accessToken: "stale-external-token",
+        expiresOn: new Date(Date.now() + 60_000),
+        account: { username: "user@example.com" },
+      });
+      const result = await refreshPromise;
+
+      // Stale token must be discarded, not persisted
+      expect(result).toBeNull();
+      expect(svc.isAuthenticated()).toBe(false);
+      // writeFile must not have been called post-switch (no persist from stale path)
+      const postSwitchWrites = mockWriteFile.mock.calls.filter((call) => {
+        const path = call[0] as string;
+        return path.endsWith("ms-graph-token-corporate.json");
+      });
+      expect(postSwitchWrites.length).toBe(0);
     });
   });
 });

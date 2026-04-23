@@ -49,19 +49,29 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // §4.2 Step 0.5: Governance Services (Agent 6)
   const bashAstValidator = new BashAstValidator({ mode: "deny" });
 
-  // Microsoft Graph 공유 인증 서비스 (이메일·캘린더 플러그인 공용)
-  const msGraphService = new MsGraphService(app.getPath("userData"));
-  await msGraphService.loadSavedToken();
-  if (msGraphService.isAuthenticated()) {
-    console.log("[lvis] boot: ms-graph token loaded —", msGraphService.getAccountName());
-  }
   const auditService = new AuditService();
   await auditService.start();
 
-  // §4.2 Step 1: Config
+  // §4.2 Step 1: Config — MsGraphService 가 이 설정(msGraph.environment) 을 읽으므로 먼저 init.
   const settingsService = new SettingsService({
     userDataPath: app.getPath("userData"),
   });
+
+  // Microsoft Graph 공유 인증 서비스 (이메일·캘린더 플러그인 공용).
+  // 환경(external / corporate) 는 settings 에서 택1 — ms-graph-auth-config.ts 참조.
+  const msGraphEnv = settingsService.get("msGraph")?.environment ?? "external";
+  const msGraphService = new MsGraphService(
+    app.getPath("userData"),
+    msGraphEnv,
+  );
+  await msGraphService.loadSavedToken();
+  if (msGraphService.isAuthenticated()) {
+    console.log(
+      `[lvis] boot: ms-graph token loaded [${msGraphEnv}] — ${msGraphService.getAccountName()}`,
+    );
+  } else {
+    console.log(`[lvis] boot: ms-graph env=${msGraphEnv}, unauthenticated`);
+  }
 
   // §14.2 Audit log rotation + retention — boot-time check + 1h interval
   const auditLogger = new AuditLogger();
