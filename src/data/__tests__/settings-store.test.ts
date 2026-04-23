@@ -83,3 +83,28 @@ describe("SettingsService marketplace defaults", () => {
     });
   });
 });
+
+describe("SettingsService msGraph patching", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    mkdirSync(join(homedir(), ".lvis", "test-tmp"), { recursive: true });
+    userDataPath = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "settings-store-msgraph-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("patch() persists msGraph environment changes across restart", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({ msGraph: { environment: "corporate" } });
+    expect(service.get("msGraph")).toEqual({ environment: "corporate" });
+
+    const reloaded = new SettingsService({ userDataPath });
+    expect(reloaded.get("msGraph")).toEqual({ environment: "corporate" });
+  });
+});
