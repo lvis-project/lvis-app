@@ -5,7 +5,7 @@
  *   사용자는 UI에서 제거·비활성화 불가 (PluginDeploymentGuard가 차단).
  * - **user**: 사용자가 자율적으로 설치. 회사 정책(userInstallPolicy)에 따라 제어.
  */
-export type DeploymentMode = "managed" | "user";
+export type DeploymentMode = "managed" | "bundled" | "user";
 
 export interface PluginManifest {
   /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.lge.meeting-recorder`. */
