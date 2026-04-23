@@ -1,32 +1,19 @@
 import { useEffect, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
+import type { LvisApi } from "../types.js";
 
 type Environment = "external" | "corporate";
 
-interface EnvironmentInfo {
-  id: Environment;
-  label: string;
-  description: string;
-  configured: boolean;
-}
+/**
+ * 다른 tab 들과 동일한 패턴 — 전체 LvisApi 를 import 해서 실제 쓰는 method 만
+ * `Pick` 으로 좁힌다. preload IPC surface 가 확장돼도 이 타입 자동 추종.
+ */
+type MsGraphApi = Pick<
+  LvisApi,
+  "msGraphGetState" | "msGraphSwitchEnvironment" | "msGraphSignIn" | "msGraphSignOut"
+>;
 
-interface MsGraphState {
-  environment: Environment;
-  isAuthenticated: boolean;
-  account: string | null;
-  configured: boolean;
-  label: string;
-  environments: EnvironmentInfo[];
-}
-
-interface Api {
-  msGraphGetState: () => Promise<MsGraphState>;
-  msGraphSwitchEnvironment: (
-    env: Environment,
-  ) => Promise<{ ok: boolean; state?: unknown }>;
-  msGraphSignIn: () => Promise<{ ok: boolean; error?: string; state?: unknown }>;
-  msGraphSignOut: () => Promise<{ ok: boolean; state?: unknown }>;
-}
+type MsGraphState = Awaited<ReturnType<MsGraphApi["msGraphGetState"]>>;
 
 /**
  * Microsoft Graph 로그인 환경 택1 + 현재 계정 관리.
@@ -36,7 +23,7 @@ interface Api {
  *
  * 미구성 환경(`__FILL_IN__` placeholder 남아있는 경우) 는 선택 불가 + 안내 노출.
  */
-export function MsGraphTab({ api }: { api: Api }) {
+export function MsGraphTab({ api }: { api: MsGraphApi }) {
   const [state, setState] = useState<MsGraphState | null>(null);
   const [busy, setBusy] = useState<null | "switch" | "sign-in" | "sign-out">(
     null,
