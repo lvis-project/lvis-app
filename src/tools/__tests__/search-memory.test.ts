@@ -7,6 +7,7 @@ import {
   scoreNotes,
   tokenize,
   createSearchMemoryTool,
+  memoryManagerNotesAdapter,
   type SearchMemoryNote,
 } from "../search-memory.js";
 
@@ -121,5 +122,28 @@ describe("createSearchMemoryTool", () => {
     });
     const res = await tool.execute({ query: "x" }, { cwd: "/tmp", metadata: {} } as never);
     expect(res.isError).toBe(true);
+  });
+});
+
+describe("memoryManagerNotesAdapter", () => {
+  it("preserves updatedAt from memory entries", () => {
+    const getNotes = memoryManagerNotesAdapter({
+      listMemoryEntries: () => [
+        {
+          filename: "m1.md",
+          title: "메모",
+          content: "# 메모\n\n본문",
+          updatedAt: "2026-04-20T00:00:00Z",
+        },
+      ],
+    } as unknown as import("../../memory/memory-manager.js").MemoryManager);
+
+    expect(getNotes()).toEqual([
+      {
+        title: "메모",
+        content: "# 메모\n\n본문",
+        updatedAt: "2026-04-20T00:00:00Z",
+      },
+    ]);
   });
 });

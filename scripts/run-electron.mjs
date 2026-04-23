@@ -1,21 +1,35 @@
 import { spawnSync } from "node:child_process";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import electronPath from "electron";
 
 const args = process.argv.slice(2);
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 
-// Unpackaged dev runs: bypass plugin signature verification for locally-built
-// managed plugins AND allow plugin manifest `entry` paths to traverse into
-// ../../../node_modules/@lvis/... (which normally would be rejected by the
-// plugin-root confinement check). Both switches reflect the same intent —
-// "this is a developer workstation running against sibling-linked plugin
-// repos" — and are gated off in packaged builds (app.isPackaged === true).
+function ensureWindowsUserDataDir(argsList, envVars, profileName) {
+  if (process.platform !== "win32") return argsList;
+  if (argsList.some((arg) => arg.startsWith("--user-data-dir="))) return argsList;
+  const appDataRoot = envVars.APPDATA || resolve(homedir(), "AppData", "Roaming");
+  const userDataDir = envVars.LVIS_USER_DATA_DIR || resolve(appDataRoot, profileName);
+  argsList.push(`--user-data-dir=${userDataDir}`);
+  return argsList;
+}
+
+// `bun run start` is still an unpackaged local run: it builds sibling plugins,
+// then launches Electron against registry manifests under plugins/installed/*
+// whose entries resolve into ../../../node_modules/@lvis/... and are unsigned.
+// Keep those local compatibility relaxations here so normal local runs keep
+// loading managed plugins, while dev-only UX (watchers, LVIS_DEV, dev console)
+// remains exclusive to scripts/run-electron-dev.mjs.
 if (!env.LVIS_DEV_SKIP_SIG) {
   env.LVIS_DEV_SKIP_SIG = "1";
 }
-if (!env.LVIS_DEV) {
-  env.LVIS_DEV = "1";
+if (!env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY) {
+  env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY = "1";
+}
+if (!env.LVIS_ENABLE_DEV_CONSOLE) {
+  env.LVIS_ENABLE_DEV_CONSOLE = "0";
 }
 
 // Force UTF-8 across every subprocess spoken to by Electron's bundled Node.
@@ -57,6 +71,7 @@ if (env.LVIS_EXTRA_ELECTRON_FLAGS) {
     if (!args.includes(flag)) args.push(flag);
   }
 }
+ensureWindowsUserDataDir(args, env, "Electron-LVIS-Run");
 
 // Windows: launch Electron through a cmd.exe wrapper so `chcp 65001` and
 // Electron share the SAME console. A separate `execSync("chcp")` runs in a

@@ -91,6 +91,7 @@ const api = {
   // ─── Chat (ConversationLoop) ─────────────────────
   chatHasProvider: async () => ipcRenderer.invoke("lvis:chat:has-provider") as Promise<boolean>,
   chatSend: async (input: string) => ipcRenderer.invoke("lvis:chat:send", input),
+  chatGuide: async (input: string) => ipcRenderer.invoke("lvis:chat:guide", input),
   chatNew: async () => ipcRenderer.invoke("lvis:chat:new"),
   chatSessions: async () =>
     ipcRenderer.invoke("lvis:chat:sessions") as Promise<{
@@ -134,6 +135,11 @@ const api = {
   memorySaveNote: async (title: string, content: string) => ipcRenderer.invoke("lvis:memory:notes:save", title, content),
   memoryDeleteNote: async (filename: string) => ipcRenderer.invoke("lvis:memory:notes:delete", filename),
   memorySearchNotes: async (query: string) => ipcRenderer.invoke("lvis:memory:notes:search", query),
+  memoryListEntries: async () => ipcRenderer.invoke("lvis:memory:entries:list"),
+  memorySaveEntry: async (title: string, content: string) => ipcRenderer.invoke("lvis:memory:entries:save", title, content),
+  memoryDeleteEntry: async (filename: string) => ipcRenderer.invoke("lvis:memory:entries:delete", filename),
+  memorySearchEntries: async (query: string) => ipcRenderer.invoke("lvis:memory:entries:search", query),
+  memoryListSessions: async () => ipcRenderer.invoke("lvis:memory:sessions:list"),
   memorySearchSessions: async (query: string) => ipcRenderer.invoke("lvis:memory:sessions:search", query),
   memoryGetLvisMd: async () => ipcRenderer.invoke("lvis:memory:lvis-md:get") as Promise<string>,
   memoryUpdateLvisMd: async (content: string) => ipcRenderer.invoke("lvis:memory:lvis-md:update", content),
@@ -304,5 +310,9 @@ contextBridge.exposeInMainWorld("lvis", {
   pluginConfig: {
     get: (pluginId: string) => ipcRenderer.invoke("lvis:plugins:config:get", pluginId),
     set: (pluginId: string, config: Record<string, unknown>) => ipcRenderer.invoke("lvis:plugins:config:set", pluginId, config),
+  },
+  env: {
+    isDev: process.env.LVIS_DEV === "1",
+    enableDevConsole: process.env.LVIS_ENABLE_DEV_CONSOLE === "1",
   },
 });

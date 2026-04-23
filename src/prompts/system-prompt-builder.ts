@@ -203,10 +203,10 @@ export class SystemPromptBuilder {
       refresh: "on-change",
       build: () => {
         const prefs = memoryManager.getUserPreferences();
-        const notes = memoryManager.getNotesContext();
+        const notes = memoryManager.getMemoryContext();
         const parts: string[] = [];
         if (prefs) parts.push(`<user-preferences>\n${prefs}\n</user-preferences>`);
-        if (notes) parts.push(`<user-notes>\n${notes}\n</user-notes>`);
+        if (notes) parts.push(`<user-memory>\n${notes}\n</user-memory>`);
         
         // 인덱싱된 문서 요약 정보 추가 (ConversationLoop에서 주입)
         if (this.indexedDocsContext) {
@@ -264,7 +264,7 @@ const ROLE_DEFINITION = `당신은 LVIS — 사원 개인을 위한 초지능형
 - 사용자의 질문을 받으면 즉시 답변하지 않고, 먼저 '지식의 출처'를 자문하세요.
 - 정보 탐색 우선순위:
   1. **로컬 지식 베이스 (Index):** 사내 가이드라인, 프로젝트 기술 문서 등 구조화된 데이터 (index_documents, chat_preview 활용)
-  2. **사용자 메모 (Memory):** 사용자 개인의 선호도, 과거의 특정 기록, 명시적으로 저장한 노트 (memory_list_notes 활용)
+  2. **사용자 메모 (Memory):** 사용자 개인의 선호도, 과거의 특정 기록, 명시적으로 저장한 메모 (memory_list, memory_search, search_memory 활용)
   3. **웹 검색 (Web):** 최신 뉴스, 일반 상식, 외부 기술 트렌드 (web_search, web_fetch 활용)
 - 각 출처에서 얻은 정보를 논리적으로 연결하여 결론을 도출하세요.
 
@@ -275,7 +275,7 @@ const ROLE_DEFINITION = `당신은 LVIS — 사원 개인을 위한 초지능형
 
 ## 기억 및 지식
 - <lvis-context>에 조직 맥락이 있습니다.
-- <user-notes>에 사용자가 수동으로 기록한 메모 목록이 포함될 수 있습니다.
+- <user-memory>에 사용자가 수동으로 기록한 메모 목록이 포함될 수 있습니다.
 - 사외 지식 탐색을 위해 web_search 도구를 적극 활용하세요.`;
 
 const TOOL_USE_STRATEGY = `## 도구 사용 전략
@@ -296,7 +296,7 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
   - 결과가 서로 연쇄된다면 순차로 전환하세요. 확실하지 않으면 순차가 기본입니다.
 
 ### 추가 원칙
-- 이미 대화 내용, <lvis-context>, <user-notes> 에 답이 있으면 도구를 호출하지 마세요.
+- 이미 대화 내용, <lvis-context>, <user-memory> 에 답이 있으면 도구를 호출하지 마세요.
 - 도구가 실패하면 입력을 조정해 재시도하되, 동일 입력으로 2회 이상 반복하지 마세요.
 - 같은 질문에 여러 번 호출해야 한다는 판단이 들면, 지금까지 모은 정보로 잠정 답을 먼저 정리하고 추가 조사 필요 여부를 다시 판단하세요.
 - 최종 답변에는 어떤 도구/자료를 근거로 결론에 도달했는지 간단히 밝히세요.`;
