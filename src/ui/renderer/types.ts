@@ -116,6 +116,22 @@ export type LvisApi = {
   setWebApiKey: (provider: string, k: string) => Promise<{ ok: true }>;
   hasWebApiKey: (provider: string) => Promise<boolean>;
   deleteWebApiKey: (provider: string) => Promise<{ ok: true }>;
+  msGraphGetState: () => Promise<{
+    environment: "external" | "corporate";
+    isAuthenticated: boolean;
+    account: string | null;
+    configured: boolean;
+    label: string;
+    environments: Array<{
+      id: "external" | "corporate";
+      label: string;
+      description: string;
+      configured: boolean;
+    }>;
+  }>;
+  msGraphSwitchEnvironment: (env: "external" | "corporate") => Promise<{ ok: boolean; state?: unknown }>;
+  msGraphSignIn: () => Promise<{ ok: boolean; error?: string; state?: unknown }>;
+  msGraphSignOut: () => Promise<{ ok: boolean; state?: unknown }>;
   chatHasProvider: () => Promise<boolean>;
   chatSend: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
