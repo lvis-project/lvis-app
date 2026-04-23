@@ -15,7 +15,8 @@
 
 import { safeStorage } from "electron";
 import { PublicClientApplication } from "@azure/msal-node";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import {
   DEFAULT_MS_GRAPH_ENVIRONMENT,
@@ -69,6 +70,13 @@ export class MsGraphService {
   private pendingSilentRefresh: Promise<string | null> | null = null;
   private changeHandlers: AuthChangeHandler[] = [];
   private authExpiredHandlers: AuthChangeHandler[] = [];
+  /**
+   * Sprint 4-E T2 race-guard: switchEnvironment() 이 호출될 때마다 +1.
+   * silentRefresh / startInteractiveAuth 시작 시점에 스냅샷을 찍고, 결과
+   * 콜백에서 epoch 가 바뀌어 있으면 persist 를 건너뛴다 — A env 에서 시작한
+   * 토큰이 B env 파일에 기록되는 cross-env 오염을 막는다.
+   */
+  private envEpoch = 0;
 
   constructor(
     lvisRoot: string,
@@ -111,8 +119,10 @@ export class MsGraphService {
       `[ms-graph] environment switch: ${this.environment} → ${target}`,
     );
 
-    // 진행 중 silent refresh / interactive auth 가 있어도 state 만 교체 —
-    // 이전 PCA 의 in-flight promise 는 자연 소멸 (참조 끊어짐).
+    // Race guard — envEpoch 증가시키면 진행 중인 silentRefresh/auth 콜백이
+    // 완료 시점에 `startEpoch !== this.envEpoch` 로 자기가 stale 임을 감지하고
+    // persistToken 을 skip 한다 (아래 silentRefresh / startInteractiveAuth 참조).
+    this.envEpoch += 1;
     this.environment = target;
     this.config = getEnvironmentConfig(target);
     this.tokenPath = tokenPathFor(this.lvisRoot, target);
@@ -127,8 +137,32 @@ export class MsGraphService {
     this.notifyChange();
   }
 
-  /** 앱 시작 시 저장된 토큰 로드 (현재 active 환경에 한함) */
+  /**
+   * 앱 시작 시 저장된 토큰 로드 (현재 active 환경에 한함).
+   *
+   * Legacy migration: 환경 분리 이전 버전에서 `ms-graph-token.json` 이
+   * 존재하고 external 환경이면서 새 파일(`ms-graph-token-external.json`)이
+   * 아직 없다면, 기존 파일을 external 파일로 rename 해 재로그인 회귀를 막는다.
+   */
   async loadSavedToken(): Promise<void> {
+    if (
+      this.environment === "external" &&
+      !existsSync(this.tokenPath) &&
+      existsSync(legacyTokenPath(this.lvisRoot))
+    ) {
+      try {
+        await rename(legacyTokenPath(this.lvisRoot), this.tokenPath);
+        console.log(
+          `[ms-graph] legacy 토큰 파일 migration: ${legacyTokenPath(this.lvisRoot)} → ${this.tokenPath}`,
+        );
+      } catch (err) {
+        console.warn(
+          "[ms-graph] legacy 토큰 migration 실패 (non-fatal):",
+          (err as Error).message,
+        );
+      }
+    }
+
     try {
       const raw = await readFile(this.tokenPath, "utf-8");
       const saved = JSON.parse(raw) as SavedToken;
@@ -180,7 +214,9 @@ export class MsGraphService {
 
   /** MSAL refresh token 으로 조용히 갱신 시도 */
   private async silentRefresh(): Promise<string | null> {
-    const cache = this.pca.getTokenCache();
+    const startEpoch = this.envEpoch;
+    const startPca = this.pca;
+    const cache = startPca.getTokenCache();
     let account;
     try {
       const all = await cache.getAllAccounts();
@@ -197,11 +233,18 @@ export class MsGraphService {
     }
 
     try {
-      const result = await this.pca.acquireTokenSilent({
+      const result = await startPca.acquireTokenSilent({
         scopes: this.config.scopes,
         account,
       });
       if (!result || !result.accessToken || !result.expiresOn) {
+        return null;
+      }
+      // Race guard — env 가 바뀌었으면 결과 폐기 (cross-env persist 방지).
+      if (startEpoch !== this.envEpoch) {
+        console.warn(
+          "[ms-graph] silent refresh 결과 폐기: env 전환 감지 (stale token)",
+        );
         return null;
       }
       const accountId =
@@ -252,13 +295,16 @@ export class MsGraphService {
     }
     if (this.authInProgress) return this.authInProgress;
 
-    this.authInProgress = this.pca
+    const startEpoch = this.envEpoch;
+    const startPca = this.pca;
+    const startLabel = this.config.label;
+    this.authInProgress = startPca
       .acquireTokenInteractive({
         scopes: this.config.scopes,
         openBrowser,
         successTemplate: `
           <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0b1222;color:#e2e8f0">
-            <h2 style="color:#60a5fa">인증 완료! (${this.config.label})</h2>
+            <h2 style="color:#60a5fa">인증 완료! (${startLabel})</h2>
             <p>이 창을 닫고 앱으로 돌아가세요.</p>
           </body></html>`,
         errorTemplate: `
@@ -271,6 +317,13 @@ export class MsGraphService {
         if (!result) return;
         if (!result.expiresOn) {
           throw new Error("Interactive authentication did not return a token expiry.");
+        }
+        // Race guard — auth 진행 중 env 가 전환됐으면 결과 폐기.
+        if (startEpoch !== this.envEpoch) {
+          console.warn(
+            "[ms-graph] interactive auth 결과 폐기: env 전환 감지 (stale token)",
+          );
+          return;
         }
         const account = result.account?.username ?? result.account?.name ?? "Unknown";
         await this.persistToken(result.accessToken, result.expiresOn, account);
