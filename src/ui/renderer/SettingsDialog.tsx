@@ -16,6 +16,7 @@ import { WebTab } from "./tabs/WebTab.js";
 import { ProactiveTab } from "./tabs/ProactiveTab.js";
 import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
+import { MsGraphTab } from "./tabs/MsGraphTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 
 export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; api: LvisApi; onSaved: () => void }) {
@@ -41,6 +42,7 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
             <TabsTrigger value="plugin-perf">플러그인 성능</TabsTrigger>
             <TabsTrigger value="mcp">MCP 서버</TabsTrigger>
             <TabsTrigger value="plugin-config">플러그인 설정</TabsTrigger>
+            <TabsTrigger value="ms-graph">Microsoft 계정</TabsTrigger>
           </TabsList>
 
           <TabsContent value="llm">
@@ -127,6 +129,7 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
           <TabsContent value="plugin-perf"><PluginPerfTab api={api} /></TabsContent>
           <TabsContent value="mcp"><McpTab /></TabsContent>
           <TabsContent value="plugin-config"><PluginConfigTab /></TabsContent>
+          <TabsContent value="ms-graph"><MsGraphTab api={api} /></TabsContent>
         </Tabs>
         <DialogFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>

@@ -4,7 +4,7 @@
  * 모든 IPC 핸들러를 등록하는 모듈.
  * main.ts에서 인라인으로 30개 핸들러를 두지 않고 여기에 집중.
  */
-import { dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
+import { dialog, ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { realpathSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -18,6 +18,11 @@ import type { GenericMessage } from "./engine/llm/types.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
 import type { WebContents } from "electron";
 import { findMethodByCapability } from "./boot/plugins.js";
+import {
+  MS_GRAPH_ENVIRONMENTS,
+  MS_GRAPH_ENVIRONMENT_CONFIGS,
+  isEnvironmentConfigured,
+} from "./main/ms-graph-auth-config.js";
 
 /**
  * Convert the UI's "user-assistant-only ordinal" to the real index into
@@ -85,6 +90,10 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:settings:set-web-api-key",
   "lvis:settings:has-web-api-key",
   "lvis:settings:delete-web-api-key",
+  "lvis:ms-graph:get-state",
+  "lvis:ms-graph:switch-environment",
+  "lvis:ms-graph:sign-in",
+  "lvis:ms-graph:sign-out",
   "lvis:chat:has-provider",
   "lvis:chat:send",
   "lvis:chat:new",
@@ -230,6 +239,7 @@ export function registerIpcHandlers(
     starredStore,
     feedbackStore,
     auditLogger,
+    msGraphService,
   } = services;
 
   // Wire DLP audit logging so redactForLLM records hits to audit JSONL.
@@ -276,6 +286,52 @@ export function registerIpcHandlers(
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:delete-web-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`web.apiKey.${provider}`);
     return { ok: true };
+  });
+
+  // ─── Microsoft Graph — dual-environment login ──────
+  // 모든 상태 조회는 read-only 라 sender guard 선택. 전환/로그인/로그아웃은
+  // side-effect 가 있어 sender guard + audit.
+  ipcMain.handle("lvis:ms-graph:get-state", () => {
+    const environments = MS_GRAPH_ENVIRONMENTS.map((env) => ({
+      id: env,
+      label: MS_GRAPH_ENVIRONMENT_CONFIGS[env].label,
+      description: MS_GRAPH_ENVIRONMENT_CONFIGS[env].description,
+      configured: isEnvironmentConfigured(env),
+    }));
+    return { ...msGraphService.getState(), environments };
+  });
+
+  ipcMain.handle("lvis:ms-graph:switch-environment", async (e, envInput: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:ms-graph:switch-environment", e); return UNAUTHORIZED_FRAME; }
+    const env = envInput === "corporate" ? "corporate" : "external";
+    await msGraphService.switchEnvironment(env);
+    // 사용자 선택을 settings 에 영속화 → 다음 부팅 시 자동 복구.
+    await settingsService.patch({ msGraph: { environment: env } });
+    auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "host",
+      type: "info",
+      output: `ms-graph environment switched: ${env}`,
+    });
+    return { ok: true, state: msGraphService.getState() };
+  });
+
+  ipcMain.handle("lvis:ms-graph:sign-in", async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:ms-graph:sign-in", e); return UNAUTHORIZED_FRAME; }
+    try {
+      await msGraphService.startInteractiveAuth(async (url: string) => {
+        await shell.openExternal(url);
+      });
+      return { ok: true, state: msGraphService.getState() };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("lvis:ms-graph:sign-out", async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:ms-graph:sign-out", e); return UNAUTHORIZED_FRAME; }
+    await msGraphService.signOut();
+    return { ok: true, state: msGraphService.getState() };
   });
 
   // ─── Chat (ConversationLoop) ────────────────────
