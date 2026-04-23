@@ -86,8 +86,21 @@ export interface AppSettings {
   updates: UpdateSettings;
   telemetry: TelemetrySettings;
   audit: AuditSettings;
+  msGraph: MsGraphSettings;
   /** 플러그인별 설정값 — pluginId → key/value 맵 */
   pluginConfigs: Record<string, PluginConfigRecord>;
+}
+
+/**
+ * MsGraph 환경 선택 — LVIS 는 2개 app registration (external / corporate) 을
+ * 지원하며 사용자가 로그인 시점에 어느 환경을 쓸지 택1한다.
+ *
+ * 기본값 `external` — 대부분 개발자/외부 사용자 경로 유지.
+ * 사내망 배포 시 `corporate` 로 기본값을 덮어쓰는 installer 정책 고려 가능.
+ */
+export interface MsGraphSettings {
+  /** "external" | "corporate" — ms-graph-auth-config.ts 참조 */
+  environment: "external" | "corporate";
 }
 
 /**
@@ -236,6 +249,9 @@ const DEFAULT_SETTINGS: AppSettings = {
     auditRotationMaxBytes: 10 * 1024 * 1024, // 10 MB
     auditRetentionDays: 30,
   },
+  msGraph: {
+    environment: "external",
+  },
   pluginConfigs: {},
 };
 
@@ -318,6 +334,9 @@ export class SettingsService {
     }
     if (partial.audit) {
       this.settings.audit = { ...this.settings.audit, ...partial.audit };
+    }
+    if (partial.msGraph) {
+      this.settings.msGraph = { ...this.settings.msGraph, ...partial.msGraph };
     }
     if (partial.pluginConfigs) {
       const sanitized: Record<string, PluginConfigRecord> = {};
@@ -458,6 +477,7 @@ export class SettingsService {
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
+        msGraph: { ...DEFAULT_SETTINGS.msGraph, ...parsed.msGraph },
         pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
       };
     } catch {
