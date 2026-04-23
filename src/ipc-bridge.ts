@@ -94,6 +94,10 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:memory:notes:save",
   "lvis:memory:notes:delete",
   "lvis:memory:notes:search",
+  "lvis:memory:entries:list",
+  "lvis:memory:entries:save",
+  "lvis:memory:entries:delete",
+  "lvis:memory:entries:search",
   "lvis:memory:sessions:search",
   "lvis:memory:lvis-md:get",
   "lvis:memory:lvis-md:update",
@@ -359,7 +363,26 @@ export function registerIpcHandlers(
   });
   ipcMain.handle("lvis:memory:notes:search", (e, query: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:search", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.searchNotes(query);
+    return memoryManager.searchNotesEntries(query);
+  });
+  ipcMain.handle("lvis:memory:entries:list", () => memoryManager.listMemoryEntries());
+  ipcMain.handle("lvis:memory:entries:save", async (e, title: string, content: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:save", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.saveMemory(title, content);
+  });
+  ipcMain.handle("lvis:memory:entries:delete", (e, filename: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:delete", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.deleteMemory(filename);
+  });
+  ipcMain.handle("lvis:memory:entries:search", (e, query: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:search", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.searchMemoryEntries(query).map((note) => ({
+      filename: note.filename,
+      title: note.title,
+      content: note.content,
+      excerpt: note.content.replace(/^#\s+.+\n+/m, "").trim(),
+      updatedAt: note.updatedAt ?? new Date().toISOString(),
+    }));
   });
   ipcMain.handle("lvis:memory:sessions:search", (e, query: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:sessions:search", e); return UNAUTHORIZED_FRAME; }

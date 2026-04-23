@@ -39,8 +39,8 @@ export function useMemorySearch(api: LvisApi) {
       setLoading(true);
       try {
         const [notes, sessions] = await Promise.all([
-          (api as unknown as Record<string, (q: string) => Promise<NoteResult[]>>).memorySearchNotes(query),
-          (api as unknown as Record<string, (q: string) => Promise<SessionResult[]>>).memorySearchSessions(query),
+          api.memorySearchEntries(query),
+          api.memorySearchSessions(query),
         ]);
         if (!aliveRef.current) return;
         setNoteResults(notes ?? []);

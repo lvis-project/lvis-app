@@ -73,7 +73,7 @@ export function MemorySearchPanel({ api }: MemorySearchPanelProps) {
       <Tabs defaultValue="notes" className="flex flex-col flex-1 min-h-0">
         <TabsList className="w-full">
           <TabsTrigger value="notes" className="flex-1">
-            노트{noteResults.length > 0 ? ` (${noteResults.length})` : ""}
+            메모{noteResults.length > 0 ? ` (${noteResults.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="sessions" className="flex-1">
             세션{sessionResults.length > 0 ? ` (${sessionResults.length})` : ""}
