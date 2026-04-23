@@ -41,7 +41,8 @@ describe("Star flow (Phase 3 regression net)", () => {
     };
     expect(arg?.role).toBe("user");
     expect(arg?.text).toBe("star me");
-    expect(typeof arg?.messageIndex).toBe("number");
+    expect(arg?.sessionId).toBe("sess-star");
+    expect(arg?.messageIndex).toBe(0);
   });
 
   it("starring then unstarring calls starredRemove", async () => {
@@ -71,6 +72,11 @@ describe("Star flow (Phase 3 regression net)", () => {
       api.starredList.mockResolvedValue([addedEntry]);
       return { ok: true, entry };
     });
+    api.removeStarred.mockImplementationOnce(async (opts: unknown) => {
+      expect(opts).toEqual({ id: "s-new" });
+      api.starredList.mockResolvedValue([]);
+      return { ok: true };
+    });
 
     await act(async () => {
       fireEvent.click(starBtn);
@@ -88,12 +94,21 @@ describe("Star flow (Phase 3 regression net)", () => {
     await act(async () => {
       fireEvent.click(starBtn2);
     });
-    await waitFor(() => expect(api.removeStarred).toHaveBeenCalled());
+    await waitFor(() => expect(api.removeStarred).toHaveBeenCalledWith({ id: "s-new" }));
+    await waitFor(() => expect(api.starredList.mock.calls.length).toBeGreaterThan(2));
+
+    const starBtn3 = await waitFor(() => {
+      const btn = container.querySelector('button[title="즐겨찾기"]');
+      if (!btn) throw new Error("star button not found");
+      return btn as HTMLButtonElement;
+    });
+    await act(async () => {
+      fireEvent.click(starBtn3);
+    });
+    await waitFor(() => expect(api.addStarred).toHaveBeenCalledTimes(2));
   });
 
   it("starred tab in sidebar exposes the saved entries", async () => {
-    // Radix Tabs ignores synthetic click; drive via userEvent which simulates
-    // the pointerdown/click sequence the component listens for.
     const userEvent = (await import("@testing-library/user-event")).default;
     const user = userEvent.setup();
     const starred = [
@@ -111,17 +126,62 @@ describe("Star flow (Phase 3 regression net)", () => {
       starred,
     });
     await waitFor(() => expect(api.starredList).toHaveBeenCalled());
-    // Click the radix Tabs trigger for the "starred" value.
-    const tab = await waitFor(() => {
-      const el = container.querySelector('button[role="tab"][id*="starred"]');
-      if (!el) throw new Error("starred tab trigger not found");
+    const starredButton = await waitFor(() => {
+      const el = Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes("즐겨찾기"),
+      );
+      if (!el) throw new Error("starred sidebar button not found");
       return el as HTMLButtonElement;
     });
-    await user.click(tab);
+    await user.click(starredButton);
     await waitFor(() => {
       expect(container.textContent).toContain("remembered answer");
     });
   });
+
+  it("clicking a starred item from the current session returns home without reloading history", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    const starred = [
+      {
+        id: "s-42",
+        sessionId: "sess-star",
+        messageIndex: 0,
+        role: "assistant",
+        text: "remembered answer",
+        starredAt: new Date().toISOString(),
+      },
+    ];
+    const { container, api } = await renderApp({
+      currentSession: "sess-star",
+      starred,
+    });
+    await waitFor(() => expect(api.starredList).toHaveBeenCalled());
+    const starredButton = await waitFor(() => {
+      const el = Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes("즐겨찾기"),
+      );
+      if (!el) throw new Error("starred sidebar button not found");
+      return el as HTMLButtonElement;
+    });
+    await user.click(starredButton);
+
+    const entryButton = await waitFor(() => {
+      const el = Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes("remembered answer"),
+      );
+      if (!el) throw new Error("starred item button not found");
+      return el as HTMLButtonElement;
+    });
+    await user.click(entryButton);
+
+    expect(api.chatSessionResume).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다.");
+      expect(container.textContent).not.toContain("remembered answer");
+    });
+  });
+
 });
 
 afterEach(() => {

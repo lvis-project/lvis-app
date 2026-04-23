@@ -31,7 +31,15 @@ if (process.platform === "linux" && process.env.WSL_DISTRO_NAME) {
     app.commandLine.appendSwitch("ozone-platform-hint", "x11");
   }
 }
-// app.disableHardwareAcceleration();
+// §GPU: Prevent the Chromium GPU utility process from spawning on Windows corp/VDI
+// machines where restricted drivers produce repeated ContextResult::kFatalFailure
+// errors that eventually kill the renderer process (GPU-lost IPC → render-process-gone).
+// Must be called before app.whenReady(). The launch-script --disable-gpu flags only
+// stop renderer compositing; only disableHardwareAcceleration() stops the GPU process.
+// Mirror the same guard as scripts/run-electron.mjs: opt-out with LVIS_KEEP_GPU=1.
+if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
+  app.disableHardwareAcceleration();
+}
 
 // §17 C1: 사내망 Corporate CA 런타임 주입 — corp-ca-loader 사용 (정식 대응 완료).
 // Phase 1.5의 dev-only TLS bypass 완전 제거. Chromium은 OS keystore 자동 신뢰.
@@ -59,6 +67,9 @@ await injectCorporateCa();
 let mainWindow: BrowserWindow | null = null;
 let services: AppServices | null = null;
 let pendingLvisUri: string | null = null;
+let lastRendererReloadAt = 0;
+let rendererReloadReady = false;
+let pendingRendererReload = false;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
@@ -160,10 +171,21 @@ function refreshApplicationMenu() {
           { label: app.name, submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }] },
           createViewMenu(),
           { label: "편집", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }] },
-          { label: "보기", submenu: [{ role: "reload" }, { role: "toggleDevTools" }] },
+          { label: "보기", submenu: [{ role: "reload" }] },
         ]
       : [createViewMenu()];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+async function loadMainInterface(win: BrowserWindow, reason: string) {
+  if (win.isDestroyed()) return;
+  try {
+    await win.loadFile(resolve(__dirname, "index.html"));
+    pendingRendererReload = false;
+    console.log("[lvis] main interface loaded", { reason });
+  } catch (err) {
+    console.error("[lvis] failed to load index.html", { reason, err });
+  }
 }
 
 /**
@@ -206,11 +228,9 @@ function createWindow() {
   });
 
   const win = mainWindow;
-  // Skip DevTools in E2E mode — the DevTools DOM (role="tablist" etc.) leaks
-  // into the Playwright page context and breaks selector-based assertions.
-  if (process.env.LVIS_E2E !== "1") {
-    win.webContents.openDevTools();
-  }
+  // Development debugging is provided by an in-app floating console toggle in
+  // the renderer. Avoid docking Chromium DevTools into the main window because
+  // it distorts the runtime viewport and causes misleading layout regressions.
 
   win.once("ready-to-show", () => {
     console.log("[lvis] window ready-to-show");
@@ -222,6 +242,24 @@ function createWindow() {
   });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("[lvis] window failed to load", { code, desc, url });
+  });
+  // Recovery: if the renderer crashes (e.g. GPU-lost after GPU utility failure),
+  // reload index.html. IPC handlers are registered on the main-process side and
+  // survive a renderer restart — the reloaded renderer reconnects automatically.
+  win.webContents.on("render-process-gone", (_e, details) => {
+    console.error("[lvis] main window renderer process gone", details);
+    if (!rendererReloadReady) {
+      pendingRendererReload = true;
+      console.warn("[lvis] renderer reload deferred until bootstrap + IPC registration complete");
+      return;
+    }
+    const now = Date.now();
+    if (!win.isDestroyed() && now - lastRendererReloadAt > 3000) {
+      lastRendererReloadAt = now;
+      void loadMainInterface(win, "render-process-gone");
+    } else if (!win.isDestroyed()) {
+      console.warn("[lvis] render-process-gone reload suppressed to avoid crash loop");
+    }
   });
 
   // 외부 URL → 시스템 브라우저로 리다이렉트 (앱 내 탐색 방지)
@@ -272,14 +310,11 @@ async function main() {
   registerIpcHandlers(services, () => mainWindow);
 
   refreshApplicationMenu();
+  rendererReloadReady = true;
 
   // 실 UI 로드 — 이 시점부터 렌더러의 IPC 호출이 항상 handler와 매칭됨
   if (mainWindow) {
-    try {
-      await mainWindow.loadFile(resolve(__dirname, "index.html"));
-    } catch (err) {
-      console.error("[lvis] failed to load index.html", err);
-    }
+    await loadMainInterface(mainWindow, pendingRendererReload ? "bootstrap-recovery" : "bootstrap-complete");
   }
 
   // Process any lvis:// URI that arrived before services were ready.
@@ -341,6 +376,16 @@ app.on("web-contents-created", (_event, contents) => {
     }
   });
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
+});
+
+app.on("child-process-gone", (_event, details) => {
+  console.error("[lvis] child process gone", {
+    type: details.type,
+    reason: details.reason,
+    exitCode: details.exitCode,
+    serviceName: details.serviceName ?? "",
+    name: details.name ?? "",
+  });
 });
 
 app.on("window-all-closed", () => {

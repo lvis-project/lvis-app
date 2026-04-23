@@ -34,6 +34,14 @@ export function useStarred(api: LvisApi) {
     return map;
   }, [starred]);
 
+  const sessionStarredIndex = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of starred) {
+      if (s.messageIndex === -1) map.set(s.sessionId, s.id);
+    }
+    return map;
+  }, [starred]);
+
   const isEntryStarred = useCallback(
     (entryIdx: number, currentSessionId: string, entryIndexToHistoryIndex: Map<number, number>): string | null => {
       const histIdx = entryIndexToHistoryIndex.get(entryIdx);
@@ -75,5 +83,39 @@ export function useStarred(api: LvisApi) {
     [api, isEntryStarred, refreshStarred],
   );
 
-  return { starred, refreshStarred, isEntryStarred, handleToggleStar };
+  const isSessionStarred = useCallback(
+    (sessionId: string): string | null => sessionStarredIndex.get(sessionId) ?? null,
+    [sessionStarredIndex],
+  );
+
+  const handleToggleSessionStar = useCallback(
+    async (sessionId: string, title?: string) => {
+      const existingId = sessionStarredIndex.get(sessionId);
+      try {
+        if (existingId) {
+          await api.starredRemove({ id: existingId });
+        } else {
+          await api.starredAdd({
+            sessionId,
+            messageIndex: -1,
+            role: "session",
+            text: title?.trim() || `세션 즐겨찾기 · #${sessionId.slice(0, 8)}`,
+          });
+        }
+        await refreshStarred();
+      } catch (err) {
+        console.warn("[useStarred] session toggle failed", err);
+      }
+    },
+    [api, refreshStarred, sessionStarredIndex],
+  );
+
+  return {
+    starred,
+    refreshStarred,
+    isEntryStarred,
+    handleToggleStar,
+    isSessionStarred,
+    handleToggleSessionStar,
+  };
 }
