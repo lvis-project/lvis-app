@@ -60,11 +60,13 @@ export const DEFAULT_MS_GRAPH_SCOPES: string[] = [
 
 // Corporate (LG Electronics) — LVIS Desktop Assistant app registration.
 // AppName:     LVIS Desktop Assistant
+// Object ID:   bd6709a5-b33c-4986-a5f5-f9734d0b8817
 // Client ID:   6c03089a-96c8-4515-bc01-4fd7a0936cea
-// Directory:   5096cde4-642a-45c0-8094-d0c2dec10be3 (LG Electronics tenant)
-// 수령일:      2026-04-23, IT 담당자 제공.
+// Directory:   5069cde4-642a-45c0-8094-d0c2dec10be3 (LG Electronics tenant)
+// 수령일:      2026-04-23, IT 담당자 제공 + Azure Portal Overview 재검증.
+//             (초기 값 `5096cde4-...` 는 4-5번째 자리 오타로 AADSTS90002 발생.)
 const CORP_CLIENT_ID = "6c03089a-96c8-4515-bc01-4fd7a0936cea";
-const CORP_TENANT_ID = "5096cde4-642a-45c0-8094-d0c2dec10be3";
+const CORP_TENANT_ID = "5069cde4-642a-45c0-8094-d0c2dec10be3";
 
 export const MS_GRAPH_ENVIRONMENT_CONFIGS: Record<
   MsGraphEnvironment,
