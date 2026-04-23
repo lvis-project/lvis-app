@@ -19,36 +19,84 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("MemoryManager.searchNotes", () => {
+describe("MemoryManager.searchMemoryEntries", () => {
   it("returns empty array for empty query", async () => {
-    await mm.saveNote("프로젝트 목표", "분기 매출 달성");
-    const results = mm.searchNotes("");
+    await mm.saveMemory("프로젝트 목표", "분기 매출 달성");
+    const results = mm.searchMemoryEntries("");
     // empty query matches all — cap 50
     expect(results.length).toBeGreaterThanOrEqual(1);
   });
 
   it("matches title substring (case-insensitive)", async () => {
-    await mm.saveNote("Meeting Notes", "weekly sync discussion");
-    await mm.saveNote("장보기 목록", "사과 바나나");
-    const results = mm.searchNotes("meeting");
+    await mm.saveMemory("Meeting Notes", "weekly sync discussion");
+    await mm.saveMemory("장보기 목록", "사과 바나나");
+    const results = mm.searchMemoryEntries("meeting");
     expect(results.length).toBe(1);
     expect(results[0].title).toBe("Meeting Notes");
   });
 
   it("matches body substring", async () => {
-    await mm.saveNote("기타 메모", "quarterly review 내용 정리");
-    await mm.saveNote("다른 메모", "무관한 내용");
-    const results = mm.searchNotes("quarterly");
+    await mm.saveMemory("기타 메모", "quarterly review 내용 정리");
+    await mm.saveMemory("다른 메모", "무관한 내용");
+    const results = mm.searchMemoryEntries("quarterly");
     expect(results.length).toBe(1);
     expect(results[0].title).toBe("기타 메모");
   });
 
   it("caps results at 50", async () => {
     for (let i = 0; i < 60; i++) {
-      await mm.saveNote(`메모 ${i}`, "공통 키워드 hello");
+      await mm.saveMemory(`메모 ${i}`, "공통 키워드 hello");
     }
-    const results = mm.searchNotes("hello");
+    const results = mm.searchMemoryEntries("hello");
     expect(results.length).toBe(50);
+  });
+
+  it("keeps generic notes out of memory search results", async () => {
+    await mm.saveMemory("개인 메모", "이번 주 우선순위");
+    await mm.saveNote("미팅-a1b2c3d4-주간회의", "# 주간회의\n> 세션: a1b2c3d4\n\n이번 주 우선순위");
+
+    const results = mm.searchMemoryEntries("우선순위");
+
+    expect(results).toHaveLength(1);
+    expect(results[0].title).toBe("개인 메모");
+  });
+});
+
+describe("MemoryManager migration", () => {
+  it("moves only explicitly marked legacy memories into memory/", async () => {
+    const { writeFileSync, existsSync } = await import("node:fs");
+    writeFileSync(join(dir, "notes", "legacy-memory.md"), "<!-- lvis:kind=memory -->\n# 레거시 메모\n\n개인 설정", "utf-8");
+    writeFileSync(join(dir, "notes", "plugin-note.md"), "# 플러그인 노트\n\n자동 생성 기록", "utf-8");
+
+    const migrated = new MemoryManager({ lvisDir: dir });
+
+    expect(migrated.listMemoryEntries().map((entry) => entry.title)).toContain("레거시 메모");
+    expect(existsSync(join(dir, "memory", "legacy-memory.md"))).toBe(true);
+    expect(existsSync(join(dir, "notes", "legacy-memory.md"))).toBe(true);
+    expect(migrated.listNotes().map((entry) => entry.filename)).not.toContain("legacy-memory.md");
+    expect(existsSync(join(dir, "notes", "plugin-note.md"))).toBe(true);
+  });
+
+  it("keeps unmarked notes in notes/", async () => {
+    const { writeFileSync, existsSync } = await import("node:fs");
+    writeFileSync(join(dir, "notes", "general-note.md"), "# 일반 회의\n> 세션: abc123\n\n본문", "utf-8");
+
+    const migrated = new MemoryManager({ lvisDir: dir });
+
+    expect(existsSync(join(dir, "notes", "general-note.md"))).toBe(true);
+    expect(migrated.listMemoryEntries().map((entry) => entry.filename)).not.toContain("general-note.md");
+  });
+
+  it("does not overwrite an existing memory target during migration", async () => {
+    const { writeFileSync, readFileSync } = await import("node:fs");
+    writeFileSync(join(dir, "notes", "legacy-memory.md"), "<!-- lvis:kind=memory -->\n# 레거시 메모\n\n노트 원본", "utf-8");
+    writeFileSync(join(dir, "memory", "legacy-memory.md"), "<!-- lvis:kind=memory -->\n# 레거시 메모\n\n기존 메모", "utf-8");
+
+    const migrated = new MemoryManager({ lvisDir: dir });
+
+    expect(readFileSync(join(dir, "memory", "legacy-memory.md"), "utf-8")).toContain("기존 메모");
+    expect(readFileSync(join(dir, "notes", "legacy-memory.md"), "utf-8")).toContain("노트 원본");
+    expect(migrated.listMemoryEntries().find((entry) => entry.filename === "legacy-memory.md")?.content).toContain("기존 메모");
   });
 });
 
