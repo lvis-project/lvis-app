@@ -365,7 +365,10 @@ export function registerIpcHandlers(
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:search", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.searchNotesEntries(query);
   });
-  ipcMain.handle("lvis:memory:entries:list", () => memoryManager.listMemoryEntries());
+  ipcMain.handle("lvis:memory:entries:list", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:list", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.listMemoryEntries();
+  });
   ipcMain.handle("lvis:memory:entries:save", async (e, title: string, content: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:save", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.saveMemory(title, content);
@@ -380,7 +383,7 @@ export function registerIpcHandlers(
       filename: note.filename,
       title: note.title,
       content: note.content,
-      excerpt: note.content.replace(/^#\s+.+\n+/m, "").trim(),
+      excerpt: note.content.replace(/^#\s+.+(?:\r?\n)+/, "").trim(),
       updatedAt: note.updatedAt ?? new Date().toISOString(),
     }));
   });

@@ -280,6 +280,17 @@ describe("lvis:memory:notes:*", () => {
 });
 
 describe("lvis:memory:entries:*", () => {
+  it("memory list rejects unauthorized frames", async () => {
+    await setupHandlers();
+
+    const result = await invokeWithEvent(
+      "lvis:memory:entries:list",
+      { senderFrame: { url: "https://evil.example.com/" } },
+    );
+
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+  });
+
   it("memory search returns renderer-safe shape", async () => {
     const pm = makeMockPM();
     handlers.clear();
@@ -305,6 +316,27 @@ describe("lvis:memory:entries:*", () => {
       excerpt: "This is the body.",
       updatedAt: "2026-04-20T00:00:00Z",
     });
+  });
+
+  it("memory search strips only a leading heading from excerpt", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    services.memoryManager.searchMemoryEntries.mockReturnValue([
+      {
+        filename: "manual-memory.md",
+        title: "Manual Memory",
+        content: "첫 문단\n# 중간 제목\n본문",
+        updatedAt: "2026-04-20T00:00:00Z",
+      },
+    ]);
+    registerIpcHandlers(services, () => null);
+
+    const result = await invoke("lvis:memory:entries:search", "본문") as Array<Record<string, unknown>>;
+
+    expect(result[0]?.excerpt).toBe("첫 문단\n# 중간 제목\n본문");
   });
 
   it("memory delete targets deleteMemory", async () => {
