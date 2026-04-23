@@ -89,7 +89,7 @@ export class RoutineTriggerCoordinator {
    * fired within `windowMs` milliseconds. Default matches coordinator debounce.
    */
   isWithinGlobalCooldown(windowMs = this.debounceMs): boolean {
-    return Date.now() - this.lastFiredAt < windowMs;
+    return this.now().getTime() - this.lastFiredAt < windowMs;
   }
 
   /** Test hook. */

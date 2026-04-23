@@ -5,22 +5,23 @@ import { join, resolve } from "node:path";
 import { resolveBundledManifestPaths } from "../plugin-runtime.js";
 
 describe("resolveBundledManifestPaths", () => {
-  let testDir: string;
+  let sandboxDir: string;
 
   afterEach(async () => {
-    if (testDir) {
-      await rm(testDir, { recursive: true, force: true });
+    if (sandboxDir) {
+      await rm(sandboxDir, { recursive: true, force: true });
     }
   });
 
   it("resolves bundled file packageSpec relative to project root", async () => {
-    testDir = join(
+    sandboxDir = join(
       homedir(),
       ".lvis",
       "test-tmp",
       `lvis-bundled-paths-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
-    const pluginDir = join(testDir, "..", "lvis-plugin-work-proactive");
+    const testDir = join(sandboxDir, "lvis-app");
+    const pluginDir = join(sandboxDir, "lvis-plugin-work-proactive");
     const pluginsDir = join(testDir, "plugins");
     await mkdir(pluginDir, { recursive: true });
     await mkdir(pluginsDir, { recursive: true });
