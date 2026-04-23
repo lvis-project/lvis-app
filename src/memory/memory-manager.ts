@@ -4,7 +4,8 @@
  * ~/.lvis/ 파일 기반 메모리 시스템.
  * - LVIS.md: 프로젝트·조직 컨텍스트 (관리자 배포 가능)
  * - user-preferences.md: 사용자 개인 선호
- * - notes/: 사용자 축적 메모 ("이거 기억해")
+ * - memory/: 사용자 축적 메모 ("이거 기억해")
+ * - notes/: 플러그인/시스템이 남기는 일반 노트 및 보조 기록
  *
  * 설계 원칙 (§5.1):
  * - 단순함 우선: 별도 기억 엔진·승격·만료 로직 없음
@@ -41,6 +42,8 @@ export interface SessionListEntry {
   preview: string;
 }
 
+const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
+
 const DEFAULT_LVIS_MD = `# LVIS 컨텍스트
 
 > 이 파일은 LVIS 에이전트에게 프로젝트·조직·팀 컨텍스트를 전달합니다.
@@ -73,6 +76,7 @@ const MAX_SESSION_FILE_BYTES = 5_000_000;
 
 export class MemoryManager {
   private readonly lvisDir: string;
+  private readonly memoryDir: string;
   private readonly notesDir: string;
   private readonly sessionsDir: string;
 
@@ -82,9 +86,11 @@ export class MemoryManager {
 
   constructor(options?: MemoryManagerOptions) {
     this.lvisDir = resolve(options?.lvisDir ?? join(homedir(), ".lvis"));
+    this.memoryDir = join(this.lvisDir, "memory");
     this.notesDir = join(this.lvisDir, "notes");
     this.sessionsDir = join(this.lvisDir, "sessions");
     this.ensureStructure();
+    this.migrateLegacyMemoryNotes();
   }
 
   /** 부팅 시 호출 — 영속 기억을 메모리에 로드 */
@@ -103,37 +109,24 @@ export class MemoryManager {
     return this.userPreferences;
   }
 
-  /** notes/ 전체 목록 반환 */
-  listNotes(): NoteEntry[] {
-    if (!existsSync(this.notesDir)) return [];
-    return readdirSync(this.notesDir)
-      .filter((f) => f.endsWith(".md"))
-      .map((filename) => {
-        const path = join(this.notesDir, filename);
-        const stat = statSync(path);
-        return { filename, updatedAt: stat.mtime.toISOString() };
-      })
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      .map((filename) => {
-        const content = readFileSync(join(this.notesDir, filename.filename), "utf-8");
-        const titleMatch = content.match(/^#\s+(.+)/m);
-        return {
-          filename: filename.filename,
-          title: titleMatch?.[1] ?? filename.filename.replace(".md", ""),
-          content,
-          updatedAt: filename.updatedAt,
-        };
-      });
+  /** memory/ 전체 목록 반환 */
+  listMemoryEntries(): NoteEntry[] {
+    return this.readMarkdownEntries(this.memoryDir);
   }
 
-  /** notes/ 키워드 검색 — Agent Loop에서 on-demand 참조 (§5 참조 방식). Cap 50. */
-  searchNotes(query: string): NoteEntry[] {
-    const lower = query.toLowerCase();
-    return this.listNotes().filter(
-      (note) =>
-        note.title.toLowerCase().includes(lower) ||
-        note.content.toLowerCase().includes(lower),
-    ).slice(0, 50);
+  /** memory/ 키워드 검색 — Agent Loop에서 on-demand 참조 (§5 참조 방식). Cap 50. */
+  searchMemoryEntries(query: string): NoteEntry[] {
+    return this.searchEntries(this.listMemoryEntries(), query);
+  }
+
+  /** notes/ 전체 목록 반환 — 플러그인/시스템 노트용. */
+  listNotes(): NoteEntry[] {
+    return this.readMarkdownEntries(this.notesDir, { excludeMarkedMemory: true });
+  }
+
+  /** notes/ 키워드 검색 — 플러그인/시스템 노트 조회용. */
+  searchNotesEntries(query: string): NoteEntry[] {
+    return this.searchEntries(this.listNotes(), query);
   }
 
   /** sessions/ 키워드 검색 — D5 메모리 검색 패널용. Cap 50. */
@@ -182,6 +175,12 @@ export class MemoryManager {
     return results;
   }
 
+  /** memory/ 전체를 하나의 문자열로 — SystemPromptBuilder에서 사용 */
+  getMemoryContext(): string {
+    return this.buildMarkdownContext(this.listMemoryEntries());
+  }
+
+  /** notes/ 전체를 하나의 문자열로 — 보조 노트 조회용 */
   /** sessions/ 최근 목록 — 검색 전에도 항목을 확인할 수 있도록 최근 세션을 노출한다. */
   listSessionEntries(limit = 50): SessionSearchEntry[] {
     const UUID_RE = /^[0-9a-f-]{8,}$/i;
@@ -194,18 +193,32 @@ export class MemoryManager {
       }));
   }
 
-  /** notes/ 전체를 하나의 문자열로 — SystemPromptBuilder에서 사용 */
+  /** notes/ 전체를 하나의 문자열로 — 보조 노트 조회용 */
   getNotesContext(): string {
-    const notes = this.listNotes();
-    if (notes.length === 0) return "";
-    return notes
-      .map((n) => `### ${n.title}\n${n.content}`)
-      .join("\n\n---\n\n");
+    return this.buildMarkdownContext(this.listNotes());
   }
 
   // ─── Write API ("이거 기억해" 명령) ───────────────
 
-  /** 메모 저장 — 사용자가 "기억해" 하면 notes/에 저장 */
+  /** 메모 저장 — 사용자가 "기억해" 하면 memory/에 저장 */
+  async saveMemory(title: string, content: string): Promise<NoteEntry> {
+    const filename = this.slugify(title) + ".md";
+    const visibleContent = `# ${title}\n\n${content}\n`;
+    const storedContent = `${MEMORY_MARKER}\n${visibleContent}`;
+    const targetPath = join(this.memoryDir, filename);
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, storedContent, "utf-8");
+    });
+    return { filename, title, content: visibleContent, updatedAt: new Date().toISOString() };
+  }
+
+  /** 메모 삭제 */
+  deleteMemory(filename: string): void {
+    const path = join(this.memoryDir, filename);
+    if (existsSync(path)) unlinkSync(path);
+  }
+
+  /** 일반 note 저장 — 플러그인/시스템 보조 기록용 */
   async saveNote(title: string, content: string): Promise<NoteEntry> {
     const filename = this.slugify(title) + ".md";
     const fullContent = `# ${title}\n\n${content}\n`;
@@ -216,7 +229,7 @@ export class MemoryManager {
     return { filename, title, content: fullContent, updatedAt: new Date().toISOString() };
   }
 
-  /** 메모 삭제 */
+  /** 일반 note 삭제 */
   deleteNote(filename: string): void {
     const path = join(this.notesDir, filename);
     if (existsSync(path)) unlinkSync(path);
@@ -363,6 +376,7 @@ export class MemoryManager {
   }
 
   private ensureStructure(): void {
+    mkdirSync(this.memoryDir, { recursive: true });
     mkdirSync(this.notesDir, { recursive: true });
     mkdirSync(this.sessionsDir, { recursive: true });
 
@@ -381,6 +395,64 @@ export class MemoryManager {
     const path = join(this.lvisDir, name);
     if (!existsSync(path)) return "";
     return readFileSync(path, "utf-8");
+  }
+
+  private buildMarkdownContext(entries: NoteEntry[]): string {
+    if (entries.length === 0) return "";
+    return entries
+      .map((n) => `### ${n.title}\n${n.content}`)
+      .join("\n\n---\n\n");
+  }
+
+  private readMarkdownEntries(dir: string, options?: { excludeMarkedMemory?: boolean }): NoteEntry[] {
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => f.endsWith(".md"))
+      .flatMap((filename) => {
+        const path = join(dir, filename);
+        const stat = statSync(path);
+        const rawContent = readFileSync(path, "utf-8");
+        if (options?.excludeMarkedMemory && this.hasMemoryMarker(rawContent)) return [];
+        const content = this.stripInternalMarkers(rawContent);
+        const titleMatch = content.match(/^#\s+(.+)/m);
+        return [{
+          filename,
+          title: titleMatch?.[1] ?? filename.replace(".md", ""),
+          content,
+          updatedAt: stat.mtime.toISOString(),
+        }];
+      })
+      .sort((a, b) => new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime());
+  }
+
+  private migrateLegacyMemoryNotes(): void {
+    if (!existsSync(this.notesDir)) return;
+    const filenames = readdirSync(this.notesDir).filter((f) => f.endsWith(".md"));
+    for (const filename of filenames) {
+      const sourcePath = join(this.notesDir, filename);
+      const targetPath = join(this.memoryDir, filename);
+      if (existsSync(targetPath)) continue;
+      const content = readFileSync(sourcePath, "utf-8");
+      if (!this.hasMemoryMarker(content)) continue;
+      writeFileSync(targetPath, content, "utf-8");
+    }
+  }
+
+  private searchEntries(entries: NoteEntry[], query: string): NoteEntry[] {
+    const lower = query.toLowerCase();
+    return entries.filter(
+      (note) =>
+        note.title.toLowerCase().includes(lower) ||
+        note.content.toLowerCase().includes(lower),
+    ).slice(0, 50);
+  }
+
+  private hasMemoryMarker(content: string): boolean {
+    return content.startsWith(`${MEMORY_MARKER}\n`) || content === MEMORY_MARKER;
+  }
+
+  private stripInternalMarkers(content: string): string {
+    return content.replace(/^<!--\s*lvis:kind=memory\s*-->\r?\n?/, "");
   }
 
   private readSessionSummary(sessionId: string): { title: string; preview: string } {

@@ -49,4 +49,14 @@ describe("MemoryManager briefing feedback", () => {
     expect(recent.length).toBe(3);
     expect(recent[2].details).toBe("entry-9");
   });
+
+  it("keeps briefing-feedback.md in notes/ after re-instantiation", async () => {
+    await mm.appendBriefingFeedback({ reason: "busy", details: "later" });
+
+    const reloaded = new MemoryManager({ lvisDir: dir });
+
+    expect(existsSync(join(dir, "notes", "briefing-feedback.md"))).toBe(true);
+    expect(existsSync(join(dir, "memory", "briefing-feedback.md"))).toBe(false);
+    expect(reloaded.readRecentBriefingFeedback()).toHaveLength(1);
+  });
 });
