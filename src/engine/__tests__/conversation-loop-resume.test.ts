@@ -38,10 +38,14 @@ function makeMemoryManager(storedMessages: GenericMessage[] | null = null) {
     listSessions: () => Object.keys(sessions).map((id) => ({ id, modifiedAt: new Date() })),
     loadSession: (id: string) => sessions[id] ?? null,
     saveSession: vi.fn((id: string, msgs: GenericMessage[]) => { sessions[id] = msgs; }),
+    listMemoryEntries: () => [],
+    saveMemory: vi.fn(),
+    deleteMemory: vi.fn(),
+    searchMemoryEntries: vi.fn(),
     listNotes: () => [],
     saveNote: vi.fn(),
     deleteNote: vi.fn(),
-    searchNotes: vi.fn(),
+    getMemoryContext: vi.fn(),
     getLvisMd: vi.fn(),
     updateLvisMd: vi.fn(),
     getUserPreferences: vi.fn(),
@@ -271,5 +275,67 @@ describe("ConversationLoop.manualCompact", () => {
     expect(mem.saveSession).toHaveBeenCalled();
     const savedMsgs = (mem.saveSession as ReturnType<typeof vi.fn>).mock.calls[0]![1] as import("../llm/types.js").GenericMessage[];
     expect(savedMsgs.length).toBeLessThan(history.length);
+  });
+});
+
+describe("ConversationLoop command routing", () => {
+  it("/notes lists notes only", async () => {
+    const listNotes = vi.fn(() => [{ title: "플러그인 노트", filename: "plugin-note.md", content: "# 플러그인 노트" }]);
+    const listMemoryEntries = vi.fn(() => [{ title: "사용자 메모", filename: "memory-note.md", content: "# 사용자 메모" }]);
+    const mem = {
+      ...makeMemoryManager(),
+      listNotes,
+      listMemoryEntries,
+    } as unknown as ConversationLoopDeps["memoryManager"];
+    const routeEngine = {
+      route: vi.fn().mockReturnValue({ route: "command", command: "notes", args: "" }),
+    } as unknown as ConversationLoopDeps["routeEngine"];
+    const keywordEngine = {
+      classify: vi.fn().mockReturnValue({ type: "command" }),
+      matchAllPluginIds: () => new Set(),
+    } as unknown as ConversationLoopDeps["keywordEngine"];
+    const fakeProvider = {
+      vendor: "openai" as const,
+      streamTurn: async function* () { /* unused */ },
+    };
+    const loop = new ConversationLoop(makeDeps({ memoryManager: mem, routeEngine, keywordEngine }));
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+
+    const result = await loop.runTurn("/notes");
+
+    expect(result.text).toContain("플러그인 노트");
+    expect(result.text).not.toContain("사용자 메모");
+    expect(listNotes).toHaveBeenCalledOnce();
+    expect(listMemoryEntries).not.toHaveBeenCalled();
+  });
+
+  it("/memory lists memory entries only", async () => {
+    const listNotes = vi.fn(() => [{ title: "플러그인 노트", filename: "plugin-note.md", content: "# 플러그인 노트" }]);
+    const listMemoryEntries = vi.fn(() => [{ title: "사용자 메모", filename: "memory-note.md", content: "# 사용자 메모" }]);
+    const mem = {
+      ...makeMemoryManager(),
+      listNotes,
+      listMemoryEntries,
+    } as unknown as ConversationLoopDeps["memoryManager"];
+    const routeEngine = {
+      route: vi.fn().mockReturnValue({ route: "command", command: "memory", args: "" }),
+    } as unknown as ConversationLoopDeps["routeEngine"];
+    const keywordEngine = {
+      classify: vi.fn().mockReturnValue({ type: "command" }),
+      matchAllPluginIds: () => new Set(),
+    } as unknown as ConversationLoopDeps["keywordEngine"];
+    const fakeProvider = {
+      vendor: "openai" as const,
+      streamTurn: async function* () { /* unused */ },
+    };
+    const loop = new ConversationLoop(makeDeps({ memoryManager: mem, routeEngine, keywordEngine }));
+    (loop as unknown as { provider: typeof fakeProvider }).provider = fakeProvider;
+
+    const result = await loop.runTurn("/memory");
+
+    expect(result.text).toContain("사용자 메모");
+    expect(result.text).not.toContain("플러그인 노트");
+    expect(listMemoryEntries).toHaveBeenCalledOnce();
+    expect(listNotes).not.toHaveBeenCalled();
   });
 });

@@ -21,7 +21,7 @@ function makeBuilder(cards: Array<{
     memoryManager: {
       getLvisMd: () => "",
       getUserPreferences: () => "",
-      getNotesContext: () => "",
+      getMemoryContext: () => "",
     } as never,
     toolRegistry: new ToolRegistry(),
     getPluginCards: () => cards,

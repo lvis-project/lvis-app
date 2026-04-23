@@ -13,8 +13,10 @@ describe("web_fetch SSRF guard", () => {
   function makeWebFetchTool() {
     const registry = new ToolRegistry();
     const memoryStub = {
+      saveMemory: async () => {},
+      searchMemoryEntries: () => [],
+      listMemoryEntries: () => [],
       saveNote: async () => {},
-      searchNotes: () => [],
       listNotes: () => [],
     } as unknown as Parameters<typeof registerBuiltinTools>[0];
     const settingsStub = {

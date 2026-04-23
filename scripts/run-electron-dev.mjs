@@ -16,8 +16,9 @@
 //   - launches electron dist/src/main.js after initial build
 //   - restarts electron when dist/src/main.js changes (debounced)
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, watch, copyFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import electronPath from "electron";
@@ -46,12 +47,34 @@ function applyWindowsSafeFlags(args) {
   return next;
 }
 
+function ensureWindowsUserDataDir(args, env, profileName) {
+  if (process.platform !== "win32") return args;
+  if (args.some((arg) => arg.startsWith("--user-data-dir="))) return args;
+  const appDataRoot = env.APPDATA || resolve(homedir(), "AppData", "Roaming");
+  const userDataDir = env.LVIS_USER_DATA_DIR || resolve(appDataRoot, profileName);
+  args.push(`--user-data-dir=${userDataDir}`);
+  return args;
+}
+
 function applyUtf8Env(env) {
   if (!env.PYTHONIOENCODING) env.PYTHONIOENCODING = "utf-8";
   if (!env.PYTHONUTF8) env.PYTHONUTF8 = "1";
   if (!env.LANG) env.LANG = "en_US.UTF-8";
   if (!env.LC_ALL) env.LC_ALL = "en_US.UTF-8";
   return env;
+}
+
+function parseMsEnv(name, fallbackMs) {
+  const raw = process.env[name];
+  if (!raw) return fallbackMs;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallbackMs;
+  return parsed;
+}
+
+function sleep(ms) {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Dev mode wraps the Electron launch via cmd.exe /c "chcp 65001 & electron …"
@@ -67,14 +90,57 @@ const htmlOut = resolve(repoRoot, "dist/src/index.html");
 
 const argv = new Set(process.argv.slice(2));
 const skipPlugins = argv.has("--no-plugins");
+const RESTART_DELAY_MS = parseMsEnv("LVIS_DEV_RESTART_DELAY_MS", 2500);
+const RESTART_FORCE_KILL_MS = parseMsEnv("LVIS_DEV_RESTART_FORCE_KILL_MS", 3000);
 
 const children = [];
 let electronProc = null;
 let restartTimer = null;
 let shuttingDown = false;
+let restartInFlight = false;
 
 function log(tag, msg) {
   process.stdout.write(`[dev:${tag}] ${msg}\n`);
+}
+
+function forceKillProcessTree(pid) {
+  if (!pid) return;
+  if (process.platform === "win32") {
+    try {
+      spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {}
+    return;
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {}
+}
+
+async function stopElectronForRestart() {
+  const proc = electronProc;
+  if (!proc) return;
+  const pid = proc.pid;
+  await new Promise((resolve) => {
+    let finished = false;
+    let killTimer = null;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      if (killTimer) clearTimeout(killTimer);
+      resolve();
+    };
+    proc.once("exit", done);
+    killTimer = setTimeout(() => {
+      log("electron", `restart timeout -> force killing process tree (pid=${pid ?? "unknown"})`);
+      forceKillProcessTree(pid);
+    }, RESTART_FORCE_KILL_MS);
+    try {
+      proc.kill("SIGTERM");
+    } catch {
+      done();
+    }
+  });
+  await sleep(RESTART_DELAY_MS);
 }
 
 function resolveLocalBin(name) {
@@ -118,17 +184,20 @@ function copyHtml() {
 
 function launchElectron() {
   if (electronProc) return;
-  const electronArgs = applyWindowsSafeFlags([mainOutput]);
-  log("electron", `launching ${mainOutput}`);
-  const env = (() => {
+  const launchEnv = (() => {
     const e = applyUtf8Env({
       ...process.env,
       LVIS_DEV: "1",
+      LVIS_ALLOW_LINKED_PLUGIN_ENTRY: process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY ?? "1",
+      LVIS_ENABLE_DEV_CONSOLE: process.env.LVIS_ENABLE_DEV_CONSOLE ?? "1",
       LVIS_DEV_SKIP_SIG: process.env.LVIS_DEV_SKIP_SIG ?? "1",
     });
     delete e.ELECTRON_RUN_AS_NODE;
     return e;
   })();
+  const electronArgs = ensureWindowsUserDataDir(applyWindowsSafeFlags([mainOutput]), launchEnv, "Electron-LVIS-Dev");
+  log("electron", `launching ${mainOutput}`);
+  const env = launchEnv;
   if (process.platform === "win32") {
     // Wrap in cmd.exe /s /c (via shell: true) so `chcp 65001` binds to
     // Electron's console AND cmd preserves quoting around electron.exe path.
@@ -156,7 +225,7 @@ function launchElectron() {
   electronProc.on("exit", (code, signal) => {
     log("electron", `exited code=${code} signal=${signal ?? "-"}`);
     electronProc = null;
-    if (!shuttingDown && signal !== "SIGTERM" && signal !== "SIGKILL") {
+    if (!shuttingDown && !restartInFlight && signal !== "SIGTERM" && signal !== "SIGKILL") {
       // If electron exited on its own (window closed), shut down dev loop.
       shutdown(0);
     }
@@ -166,15 +235,22 @@ function launchElectron() {
 function scheduleRestart() {
   if (restartTimer) clearTimeout(restartTimer);
   restartTimer = setTimeout(() => {
-    restartTimer = null;
-    if (shuttingDown) return;
-    if (electronProc) {
-      log("electron", "main changed -> restarting");
-      electronProc.once("exit", () => launchElectron());
-      electronProc.kill("SIGTERM");
-    } else {
-      launchElectron();
-    }
+    void (async () => {
+      restartTimer = null;
+      if (shuttingDown || restartInFlight) return;
+      restartInFlight = true;
+      try {
+        if (electronProc) {
+          log("electron", `main changed -> restarting (grace=${RESTART_DELAY_MS}ms)`);
+          await stopElectronForRestart();
+        } else {
+          await sleep(RESTART_DELAY_MS);
+        }
+        if (!shuttingDown) launchElectron();
+      } finally {
+        restartInFlight = false;
+      }
+    })();
   }, 400);
 }
 
@@ -190,6 +266,11 @@ async function waitForMain(timeoutMs = 60_000) {
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
+  restartInFlight = false;
   log("dev", "shutting down");
   if (electronProc) {
     try { electronProc.kill("SIGTERM"); } catch {}

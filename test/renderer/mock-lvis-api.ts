@@ -78,6 +78,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
 
     chatHasProvider: vi.fn(async () => hasProvider),
     chatSend: vi.fn(async () => ({ ok: true })),
+    chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
     chatSessions: vi.fn(async () => ({ current: currentSession, sessions })),
     chatLoadSession: vi.fn(async (id: string) => ({ ok: true, sessionId: id })),
@@ -103,6 +104,11 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     memorySaveNote: vi.fn(async () => ({ ok: true })),
     memoryDeleteNote: vi.fn(async () => undefined),
     memorySearchNotes: vi.fn(async () => []),
+    memoryListEntries: vi.fn(async () => []),
+    memorySaveEntry: vi.fn(async () => ({ ok: true })),
+    memoryDeleteEntry: vi.fn(async () => undefined),
+    memorySearchEntries: vi.fn(async () => []),
+    memoryListSessions: vi.fn(async () => []),
     memorySearchSessions: vi.fn(async () => []),
 
     listMarketplacePlugins: vi.fn(async () => marketplace),
@@ -182,6 +188,10 @@ export function makeMockLvisNamespace() {
           source: "defaults",
         })),
         set: vi.fn(async () => ({ ok: true })),
+      },
+      env: {
+        isDev: false,
+        enableDevConsole: false,
       },
     },
     emitApproval: (r: unknown) => approvalHandlers.forEach((h) => h(r)),
