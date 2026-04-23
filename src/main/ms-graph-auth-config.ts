@@ -49,21 +49,18 @@ export interface MsGraphEnvironmentConfig {
 /**
  * 모든 MS Graph 사용처가 공유하는 스코프.
  *
- * 사내 IT 승인 범위(Tier 1+) 에 맞춰 필요 최소. 추가 확장 (Tasks.ReadWrite,
+ * 이 PR 은 "dual-environment 스위처" 의 scope 만 담당하므로 scope 목록은
+ * 기존 `MS_GRAPH_SCOPES` 와 동일하게 유지한다. 추가 권한 (Mail.ReadWrite,
+ * Contacts.ReadWrite, Calendars.ReadWrite.Shared, Tasks.ReadWrite,
  * OnlineMeetings.ReadWrite, Presence.Read 등) 은 해당 플러그인 활성화 시점에
- * 별도 incremental consent 로 요청하는 것을 권장 — 이 배열은 default 세트.
+ * incremental consent 로 별도 요청하거나 separate PR 에서 확장.
  */
 export const DEFAULT_MS_GRAPH_SCOPES: string[] = [
-  "openid",
-  "profile",
-  "email",
-  "offline_access",
-  "User.Read",
-  "Mail.ReadWrite",
+  "Mail.Read",
   "Mail.Send",
+  "User.Read",
   "Calendars.ReadWrite",
-  "Calendars.ReadWrite.Shared",
-  "Contacts.ReadWrite",
+  "offline_access",
 ];
 
 // Corporate (LG Electronics) — LVIS Desktop Assistant app registration.
