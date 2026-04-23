@@ -56,6 +56,38 @@ const api = {
   hasWebApiKey: async (provider: string) => ipcRenderer.invoke("lvis:settings:has-web-api-key", provider) as Promise<boolean>,
   deleteWebApiKey: async (provider: string) => ipcRenderer.invoke("lvis:settings:delete-web-api-key", provider),
 
+  // ─── Microsoft Graph — dual-environment login ────
+  msGraphGetState: async () =>
+    ipcRenderer.invoke("lvis:ms-graph:get-state") as Promise<{
+      environment: "external" | "corporate";
+      isAuthenticated: boolean;
+      account: string | null;
+      configured: boolean;
+      label: string;
+      environments: Array<{
+        id: "external" | "corporate";
+        label: string;
+        description: string;
+        configured: boolean;
+      }>;
+    }>,
+  msGraphSwitchEnvironment: async (env: "external" | "corporate") =>
+    ipcRenderer.invoke("lvis:ms-graph:switch-environment", env) as Promise<{
+      ok: boolean;
+      state?: unknown;
+    }>,
+  msGraphSignIn: async () =>
+    ipcRenderer.invoke("lvis:ms-graph:sign-in") as Promise<{
+      ok: boolean;
+      error?: string;
+      state?: unknown;
+    }>,
+  msGraphSignOut: async () =>
+    ipcRenderer.invoke("lvis:ms-graph:sign-out") as Promise<{
+      ok: boolean;
+      state?: unknown;
+    }>,
+
   // ─── Chat (ConversationLoop) ─────────────────────
   chatHasProvider: async () => ipcRenderer.invoke("lvis:chat:has-provider") as Promise<boolean>,
   chatSend: async (input: string) => ipcRenderer.invoke("lvis:chat:send", input),
