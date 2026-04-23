@@ -22,16 +22,19 @@ function makeView(label = "Test Plugin", pluginId = "com.test.plugin"): PluginUi
 }
 
 describe("Sidebar", () => {
-  it("renders null with no plugin views", () => {
-    const { container } = render(
-      <Sidebar pluginViews={[]} setActiveView={vi.fn()} />,
+  it("renders built-in navigation even with no plugin views", () => {
+    const { getByText } = render(
+      <Sidebar activeView="home" pluginViews={[]} setActiveView={vi.fn()} starredCount={0} />,
     );
-    expect(container.firstChild).toBeNull();
+    expect(getByText("홈")).toBeTruthy();
+    expect(getByText("태스크")).toBeTruthy();
+    expect(getByText("즐겨찾기")).toBeTruthy();
+    expect(getByText("메모리")).toBeTruthy();
   });
 
   it("renders plugin view label", () => {
     const { getByText } = render(
-      <Sidebar pluginViews={[makeView("Meeting Recorder")]} setActiveView={vi.fn()} />,
+      <Sidebar activeView="home" pluginViews={[makeView("Meeting Recorder")]} setActiveView={vi.fn()} starredCount={0} />,
     );
     expect(getByText("Meeting Recorder")).toBeTruthy();
   });
@@ -40,10 +43,17 @@ describe("Sidebar", () => {
     const view = makeView();
     const setActiveView = vi.fn();
     const { getByText } = render(
-      <Sidebar pluginViews={[view]} setActiveView={setActiveView} />,
+      <Sidebar activeView="home" pluginViews={[view]} setActiveView={setActiveView} starredCount={0} />,
     );
     fireEvent.click(getByText("Test Plugin"));
     expect(setActiveView).toHaveBeenCalled();
+  });
+
+  it("shows the starred badge count", () => {
+    const { getByText } = render(
+      <Sidebar activeView="home" pluginViews={[]} setActiveView={vi.fn()} starredCount={3} />,
+    );
+    expect(getByText("(3)")).toBeTruthy();
   });
 });
 

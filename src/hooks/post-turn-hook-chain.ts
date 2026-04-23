@@ -96,7 +96,7 @@ export class PostTurnHookChain {
       console.warn("[post-turn] saveSession failed:", err);
     }
 
-    // 3. Memory Extraction — "기억해" 패턴 감지 시 notes/ 자동 저장
+    // 3. Memory Extraction — "기억해" 패턴 감지 시 memory/ 자동 저장
     try {
       if (this.deps.memoryManager) {
         const memoryPatterns = /기억해|기억하|잊지\s*마|remember|don't forget|메모해/i;
@@ -105,7 +105,7 @@ export class PostTurnHookChain {
           if (confirmPatterns.test(ctx.output)) {
             const title = ctx.input.slice(0, 40).replace(/\n/g, " ").trim();
             if (title.length >= 3) {
-              await this.deps.memoryManager.saveNote(
+              await this.deps.memoryManager.saveMemory(
                 `자동-${title}`,
                 `[사용자 요청]\n${ctx.input}\n\n[어시스턴트 응답]\n${ctx.output.slice(0, 500)}`,
               );

@@ -24,6 +24,7 @@ import { useChatContext } from "./context/ChatContext.js";
  */
 export interface ChatViewProps {
   onAsk: (q: string) => void | Promise<void>;
+  onGuide: (q: string) => void | Promise<void>;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
   onFork: (idx: number) => void | Promise<void>;
   onToggleStar: (idx: number) => void | Promise<void>;
@@ -35,7 +36,7 @@ export interface ChatViewProps {
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
 }
 
-export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback }: ChatViewProps) {
+export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback }: ChatViewProps) {
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef,
@@ -277,14 +278,14 @@ export function ChatView({ onAsk, onEditSave, onFork, onToggleStar, onRetryEffor
         <div className="grid grid-cols-[1fr_auto] gap-2">
           <Textarea value={question} onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => {
-              if (e.nativeEvent.isComposing) return;
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void onAsk(question);
-              }
-            }}
-            placeholder={hasApiKey === false ? "API 키를 먼저 설정해 주세요..." : "질문 입력 (Enter 전송 / Shift+Enter 줄바꿈) · /command 사용 가능"}
-            className="min-h-[76px]" disabled={streaming} />
+               if (e.nativeEvent.isComposing) return;
+               if (e.key === "Enter" && !e.shiftKey) {
+                 e.preventDefault();
+                 void (streaming ? onGuide(question) : onAsk(question));
+               }
+             }}
+            placeholder={hasApiKey === false ? "API 키를 먼저 설정해 주세요..." : streaming ? "응답 방향 지시 입력 (Enter 힌트 전송 / Shift+Enter 줄바꿈)" : "질문 입력 (Enter 전송 / Shift+Enter 줄바꿈) · /command 사용 가능"}
+            className="min-h-[76px]" />
           <div className="flex flex-col items-stretch gap-1">
             {streaming
               ? <Button variant="destructive" onClick={() => void onAbort()} title="스트리밍 중단 (Ctrl/Cmd+C)"><Square className="h-4 w-4 mr-1" />중단</Button>

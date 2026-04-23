@@ -1,8 +1,8 @@
 /**
  * search_memory — Sprint E agentic memory search tool.
  *
- * LLM이 과거 notes/에서 현재 질의와 관련된 메모를 찾을 수 있도록 노출되는
- * builtin 도구. MemoryManager.listNotes() 의 (title, content, updatedAt)
+ * LLM이 과거 memory/에서 현재 질의와 관련된 메모를 찾을 수 있도록 노출되는
+ * builtin 도구. MemoryManager.listMemoryEntries() 의 (title, content, updatedAt)
  * 를 BM25-lite 로 스코어링하여 top-K 결과를 반환한다.
  *
  * 반환 shape: [{ title, snippet (≤200자), updatedAt, score }]
@@ -30,8 +30,8 @@ export interface SearchMemoryResult {
 
 export interface SearchMemoryDeps {
   /**
-   * Notes 소스 provider. 테스트 시 fixture를, 프로덕션에서는
-   * MemoryManager.listNotes() 어댑터를 전달한다.
+   * Memory 소스 provider. 테스트 시 fixture를, 프로덕션에서는
+   * MemoryManager.listMemoryEntries() 어댑터를 전달한다.
    */
   getNotes: () => SearchMemoryNote[];
   defaultTopK?: number;
@@ -147,7 +147,7 @@ export function createSearchMemoryTool(deps: SearchMemoryDeps): Tool {
   return createDynamicTool({
     name: "search_memory",
     description:
-      "과거 사용자 메모(notes/)에서 현재 질의와 관련된 항목을 BM25-lite 로 검색합니다. " +
+      "과거 사용자 메모(memory/)에서 현재 질의와 관련된 항목을 BM25-lite 로 검색합니다. " +
       "키 기반 단순 검색(memory_search) 대비 의미적 관련성을 랭킹에 반영합니다. " +
       "결과는 [{ title, snippet(≤200자), updatedAt, score }] 형식.",
     source: "builtin",
@@ -199,15 +199,15 @@ export function createSearchMemoryTool(deps: SearchMemoryDeps): Tool {
 }
 
 /**
- * MemoryManager → SearchMemoryNote 어댑터. listNotes() 은 updatedAt 이
- * 없으므로 file mtime 을 메모리에 주입하지 않고 그대로 전달한다 (향후 확장).
+ * MemoryManager → SearchMemoryNote 어댑터.
  */
 export function memoryManagerNotesAdapter(
   memoryManager: MemoryManager,
 ): () => SearchMemoryNote[] {
   return () =>
-    memoryManager.listNotes().map((n) => ({
+    memoryManager.listMemoryEntries().map((n) => ({
       title: n.title,
       content: n.content,
+      updatedAt: n.updatedAt,
     }));
 }
