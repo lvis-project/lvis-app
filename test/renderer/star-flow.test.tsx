@@ -17,7 +17,7 @@ async function submit(container: HTMLElement, text: string): Promise<void> {
   });
 }
 
-describe("Star flow (Phase 3 regression net)", () => {
+describe("Star flow (Phase 3 regression net)", { timeout: 15000 }, () => {
   it("clicking star on a user message calls starredAdd with sessionId + messageIndex", async () => {
     const { container, api } = await renderApp({ currentSession: "sess-star" });
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());

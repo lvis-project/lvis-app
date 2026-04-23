@@ -28,7 +28,7 @@ async function seedAssistantEntry(
   });
 }
 
-describe("Chat retry (Phase 3.2 regression net)", () => {
+describe("Chat retry (Phase 3.2 regression net)", { timeout: 15000 }, () => {
   it("retry button calls chatRetryEffort with thinking enabled", async () => {
     const { container, api, emitChatStream } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());

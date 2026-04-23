@@ -12,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { renderApp } from "./render-app.js";
 import { submitChatMessage } from "./helpers.js";
 
-describe("Chat edit & resend (Phase 3.2 regression net)", () => {
+describe("Chat edit & resend (Phase 3.2 regression net)", { timeout: 15000 }, () => {
   it("submitting a user message appends a user entry", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());

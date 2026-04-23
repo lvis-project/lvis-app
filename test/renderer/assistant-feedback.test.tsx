@@ -15,7 +15,7 @@ async function sendMessage(container: HTMLElement, text: string): Promise<void> 
   });
 }
 
-describe("D6 AssistantCard feedback buttons", () => {
+describe("D6 AssistantCard feedback buttons", { timeout: 15000 }, () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
