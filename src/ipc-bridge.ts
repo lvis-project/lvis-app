@@ -48,11 +48,19 @@ async function runStreamedTurn(
   input: string,
   webContents: WebContents | undefined,
   channel: string,
+  streamId: number,
+  options?: {
+    shouldSuppressInterruptedTail?: () => boolean;
+    clearInterruptedTailSuppression?: () => void;
+  },
 ): Promise<unknown> {
-  const send = (payload: unknown) => webContents?.send(channel, payload);
+  const send = (payload: unknown) => webContents?.send(channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
   const result = await conversationLoop.runTurn(input, {
     onReasoningDelta: (text) => send({ type: "reasoning_delta", text }),
-    onTextDelta: (text) => send({ type: "text_delta", text }),
+    onTextDelta: (text) => {
+      if (options?.shouldSuppressInterruptedTail?.() && text === "\n\n[중단됨]") return;
+      send({ type: "text_delta", text });
+    },
     onAssistantRound: ({ roundIndex, text, thought, stopReason, hasToolCalls }) =>
       send({ type: "assistant_round", roundIndex, text, thought, stopReason, hasToolCalls }),
     onToolStart: (name, toolInput, meta) =>
@@ -64,9 +72,20 @@ async function runStreamedTurn(
       send({ type: "compact_notice", removedMessages, freedTokens }),
     onFallback: (from, to) => webContents?.send("lvis:chat:fallback", { from, to }),
   });
+  if (
+    options?.shouldSuppressInterruptedTail?.() &&
+    (result as ConversationTurnResult).stopReason === "interrupted"
+  ) {
+    options.clearInterruptedTailSuppression?.();
+    return result;
+  }
   send({ type: "done" });
   return result;
 }
+
+type ConversationTurnResult = {
+  stopReason?: "end_turn" | "tool_use" | "interrupted";
+};
 
 /**
  * All IPC channels reserved by the host. Plugin manifests must not declare
@@ -87,6 +106,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:settings:delete-web-api-key",
   "lvis:chat:has-provider",
   "lvis:chat:send",
+  "lvis:chat:guide",
   "lvis:chat:new",
   "lvis:chat:sessions",
   "lvis:chat:load-session",
@@ -94,6 +114,7 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:memory:notes:save",
   "lvis:memory:notes:delete",
   "lvis:memory:notes:search",
+  "lvis:memory:sessions:list",
   "lvis:memory:sessions:search",
   "lvis:memory:lvis-md:get",
   "lvis:memory:lvis-md:update",
@@ -282,17 +303,31 @@ export function registerIpcHandlers(
   // read-only, sender guard optional
   ipcMain.handle("lvis:chat:has-provider", () => conversationLoop.hasProvider());
 
-  ipcMain.handle("lvis:chat:send", async (e, input: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:send", e); return UNAUTHORIZED_FRAME; }
-    const win = getMainWindow();
-    // Sprint E §3 — privacy.piiRedactEnabled: user draft 를 LLM 으로 보내기 전 PII 리댁트.
+  let activeStreamTurn: Promise<unknown> | null = null;
+  let suppressInterruptedTail = false;
+  let nextStreamId = 0;
+  const trackStreamTurn = (factory: () => Promise<unknown>) => {
+    const turnPromise = factory().finally(() => {
+      if (activeStreamTurn === turnPromise) activeStreamTurn = null;
+    });
+    activeStreamTurn = turnPromise;
+    return turnPromise;
+  };
+  const streamTurnOptions = {
+    shouldSuppressInterruptedTail: () => suppressInterruptedTail,
+    clearInterruptedTailSuppression: () => {
+      suppressInterruptedTail = false;
+    },
+  };
+  const allocateStreamId = () => ++nextStreamId;
+  const sanitizeOutgoingInput = (input: string, webContents: WebContents | undefined) => {
     let effective = input;
     const privacy = settingsService.get("privacy");
     if (privacy?.piiRedactEnabled && typeof input === "string") {
       const r = redactForLLM(input);
       if (r.totalCount > 0) {
         effective = r.redacted;
-        win?.webContents?.send("lvis:chat:stream", {
+        webContents?.send("lvis:chat:stream", {
           type: "redact_notice",
           count: r.totalCount,
           byKind: r.counts,
@@ -303,7 +338,40 @@ export function registerIpcHandlers(
         );
       }
     }
-    return runStreamedTurn(conversationLoop, effective, win?.webContents, "lvis:chat:stream");
+    return effective;
+  };
+  const buildGuidancePrompt = (input: string) => `현재 진행 중이던 응답에 대한 추가 방향 지시입니다.
+새 주제로 전환하지 말고, 바로 직전 답변의 흐름을 유지한 채 아래 지시를 우선 반영해서 이어서 답변하세요.
+
+[추가 방향 지시]
+${input}`;
+
+  ipcMain.handle("lvis:chat:send", async (e, input: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:send", e); return UNAUTHORIZED_FRAME; }
+    const win = getMainWindow();
+    const effective = sanitizeOutgoingInput(input, win?.webContents);
+    const streamId = allocateStreamId();
+    return trackStreamTurn(() => runStreamedTurn(conversationLoop, effective, win?.webContents, "lvis:chat:stream", streamId, streamTurnOptions));
+  });
+
+  ipcMain.handle("lvis:chat:guide", async (e, input: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:guide", e); return UNAUTHORIZED_FRAME; }
+    if (typeof input !== "string" || input.trim().length === 0) return { ok: false, error: "empty-text" };
+    const win = getMainWindow();
+    const streamId = allocateStreamId();
+    win?.webContents.send("lvis:chat:stream", { type: "guidance_reset", streamId });
+    suppressInterruptedTail = true;
+    conversationLoop.abortCurrentTurn();
+    if (activeStreamTurn) {
+      try {
+        await activeStreamTurn;
+      } catch {
+        // Keep guidance flow alive even if the interrupted turn rejects in future.
+      }
+    }
+    suppressInterruptedTail = false;
+    const effective = sanitizeOutgoingInput(buildGuidancePrompt(input), win?.webContents);
+    return trackStreamTurn(() => runStreamedTurn(conversationLoop, effective, win?.webContents, "lvis:chat:stream", streamId, streamTurnOptions));
   });
 
   // B4: abort current streaming turn
@@ -322,9 +390,10 @@ export function registerIpcHandlers(
   // read-only, sender guard optional
   ipcMain.handle("lvis:chat:sessions", () => ({
     current: conversationLoop.getSessionId(),
-    sessions: conversationLoop.listSessions().slice(0, 20).map((s) => ({
+    sessions: conversationLoop.listSessions(20).map((s) => ({
       id: s.id,
       modifiedAt: s.modifiedAt.toISOString(),
+      title: s.title,
     })),
   }));
 
@@ -361,6 +430,7 @@ export function registerIpcHandlers(
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:search", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.searchNotes(query);
   });
+  ipcMain.handle("lvis:memory:sessions:list", () => memoryManager.listSessionEntries());
   ipcMain.handle("lvis:memory:sessions:search", (e, query: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:sessions:search", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.searchSessions(query);
@@ -426,8 +496,8 @@ export function registerIpcHandlers(
     // packages.  realpathSync would resolve through the link to the source
     // repo directory, making the prefix-based confinement check fail.
     // Trust the already-validated path and read directly.
-    const isDev = process.env.LVIS_DEV === "1";
-    if (isDev) {
+    const isDevLinkedEntry = process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1";
+    if (isDevLinkedEntry) {
       let target: string;
       try {
         target = realpathSync(entryPath);
@@ -686,7 +756,7 @@ export function registerIpcHandlers(
   });
 
   // Sprint 2-D: user dismissal — sets lastDismissedAt, which suppresses the
-  // gated ProactiveEngine.generateDailyBriefing for the following 24h.
+  // gated RoutineEngine.generateDailyBriefing for the following 24h.
   // Sprint 3-A (M1): debounce accepted dismisses to min 1s apart to prevent
   // accidental double-click / rapid-fire IPC abuse.
   let lastDismissAcceptedAt = 0;
@@ -752,7 +822,8 @@ export function registerIpcHandlers(
   // ─── Sprint 4.C: Conversation UX ─────────────────────
   const streamTurn = async (input: string) => {
     const win = getMainWindow();
-    return runStreamedTurn(conversationLoop, input, win?.webContents, "lvis:chat:stream");
+    const streamId = allocateStreamId();
+    return trackStreamTurn(() => runStreamedTurn(conversationLoop, input, win?.webContents, "lvis:chat:stream", streamId, streamTurnOptions));
   };
 
   // read-only, sender guard optional
@@ -892,7 +963,7 @@ export function registerIpcHandlers(
   ipcMain.handle("lvis:starred:add", (e, entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:starred:add", e); return UNAUTHORIZED_FRAME; }
     if (!starredStore) return { ok: false, error: "no-starred-store" };
-    if (typeof entry?.messageIndex !== "number" || entry.messageIndex < 0) return { ok: false, error: "invalid-index" };
+    if (typeof entry?.messageIndex !== "number" || entry.messageIndex < -1) return { ok: false, error: "invalid-index" };
     if (typeof entry?.text !== "string") return { ok: false, error: "invalid-text" };
     const sessionId = entry.sessionId ?? conversationLoop.getSessionId();
     // NB: messageIndex here is the UI's user-assistant ordinal. Starred

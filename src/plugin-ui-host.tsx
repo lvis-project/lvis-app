@@ -193,20 +193,22 @@ export function PluginUiHostView({
   }, [bridge, view]);
 
   return (
-    <div className="flex min-h-0 flex-1 p-4">
-      <Card className="flex min-h-0 w-full flex-col">
-        <CardHeader>
-          <CardTitle>{view ? getPluginViewLabel(view) : "플러그인 UI"}</CardTitle>
-          <CardDescription>{view?.extension.description ?? "플러그인 화면을 로딩합니다."}</CardDescription>
-        </CardHeader>
-        <CardContent className="min-h-0 flex-1">
-          <div className="h-full min-h-[360px] w-full rounded-md border bg-card">
-            {loading ? <div className="px-3 py-2 text-xs text-muted-foreground">로딩 중...</div> : null}
-            {errorText ? <div className="px-3 py-2 text-xs text-destructive">{errorText}</div> : null}
-            <div ref={mountRootRef} className="h-full overflow-auto p-3" />
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
+      <CardHeader>
+        <CardTitle>{view ? getPluginViewLabel(view) : "플러그인 UI"}</CardTitle>
+        <CardDescription>{view?.extension.description ?? "플러그인 화면을 로딩합니다."}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex min-h-0 flex-1 flex-col">
+        <div className="relative h-full w-full overflow-hidden rounded-md border bg-card">
+          {loading ? (
+            <div className="absolute inset-x-0 top-0 z-10 px-3 py-2 text-xs text-muted-foreground">
+              로딩 중...
+            </div>
+          ) : null}
+          {errorText ? <div className="px-3 py-2 text-xs text-destructive">{errorText}</div> : null}
+          <div ref={mountRootRef} className="h-full overflow-auto p-3" />
+        </div>
+      </CardContent>
+    </Card>
   );
 }

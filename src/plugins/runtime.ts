@@ -96,7 +96,7 @@ export interface PluginCard {
   capabilities: string[];
   /** tool name → description from manifest.toolSchemas */
   toolDescriptions?: Record<string, string>;
-  /** true when manifest.deployment === "managed" */
+  /** true when manifest.deployment blocks user uninstall/disable (managed or bundled) */
   isManaged?: boolean;
   /** Runtime load status derived from loaded/failed/disabled runtime state. */
   loadStatus: "loaded" | "failed" | "disabled";
@@ -216,10 +216,10 @@ export class PluginRuntime {
       // Sprint 3-B §9.6 — manifest signature gate.
       // Managed plugins require a valid signature; unsigned user plugins are
       // allowed but audit-logged. Invalid signatures always drop the plugin.
-      const isDev = process.env.LVIS_DEV === "1";
-      if (this.signatureVerifier && !isDev) {
+      const skipSignatureVerification = process.env.LVIS_DEV_SKIP_SIG === "1";
+      if (this.signatureVerifier && !skipSignatureVerification) {
         const sigResult = await this.signatureVerifier.verifyManifestFile(manifestPath);
-        const isManaged = manifest.deployment === "managed";
+        const isManaged = manifest.deployment === "managed" || manifest.deployment === "bundled";
         if (!sigResult.valid) {
           if (isManaged) {
             console.error(
@@ -460,7 +460,11 @@ export class PluginRuntime {
   }
 
   async restartAll(): Promise<void> {
+    const loadedPluginIds = [...this.plugins.keys()];
     await this.stopAll();
+    for (const pluginId of loadedPluginIds) {
+      this.onDisable?.(pluginId);
+    }
     this.resetLoadedState();
     await this.startAll();
   }
@@ -972,17 +976,17 @@ export class PluginRuntime {
       }
     }
 
-    // Sprint 4-A — surface any remaining testMode flag in a managed plugin
+    // Sprint 4-A — surface any remaining testMode flag in a protected plugin
     // manifest. testMode may legitimately appear in dev/fixture builds but
-    // should NEVER ship inside a managed-deployment install.
+    // should NEVER ship inside a protected deployment install.
     if (
-      parsed.deployment === "managed" &&
+      (parsed.deployment === "managed" || parsed.deployment === "bundled") &&
       parsed.config &&
       typeof parsed.config === "object" &&
       (parsed.config as Record<string, unknown>).testMode === true
     ) {
       console.warn(
-        `[plugin-runtime] managed plugin '${pid}' has config.testMode=true (${path}). ` +
+        `[plugin-runtime] protected plugin '${pid}' has config.testMode=true (${path}). ` +
         `testMode is a development flag and must not ship in production installs — please remove it from the installed manifest.`,
       );
     }
@@ -1142,7 +1146,7 @@ export class PluginRuntime {
     // Dev mode: allow entries that traverse outside the plugin directory
     // (e.g., ../../../node_modules/@lvis/plugin-*/dist/hostPlugin.js).
     // Mirrors the signature-check bypass introduced in PR #171.
-    const isDev = process.env.LVIS_DEV === "1";
+    const isDev = process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1";
     if (isDev && !isAbsolute(entry)) {
       const resolved = resolve(pluginRoot, entry);
       if (existsSync(resolved)) return resolved;
@@ -1152,23 +1156,25 @@ export class PluginRuntime {
   }
 
   private async resolveManifestLoadPlan(): Promise<ManifestLoadPlan[]> {
-    if (this.manifestPaths.length > 0) {
-      return this.manifestPaths.map((manifestPath) => ({
-        manifestPath,
-        enabled: true,
-      }));
-    }
+    const plans: ManifestLoadPlan[] = this.manifestPaths.map((manifestPath) => ({
+      manifestPath,
+      enabled: true,
+    }));
     if (!this.registryPath) {
+      if (plans.length > 0) return plans;
       throw new Error("Either manifestPaths or registryPath must be provided.");
     }
     const registry = await readPluginRegistry(this.registryPath);
-    return registry.plugins.map((entry) => ({
-      pluginIdHint: entry.id,
-      manifestPath: isAbsolute(entry.manifestPath)
-        ? entry.manifestPath
-        : resolve(dirname(this.registryPath!), entry.manifestPath),
-      enabled: entry.enabled !== false,
-    }));
+    plans.push(
+      ...registry.plugins.map((entry) => ({
+        pluginIdHint: entry.id,
+        manifestPath: isAbsolute(entry.manifestPath)
+          ? entry.manifestPath
+          : resolve(dirname(this.registryPath!), entry.manifestPath),
+        enabled: entry.enabled !== false,
+      })),
+    );
+    return plans;
   }
 
   private resetLoadedState(): void {
@@ -1245,7 +1251,7 @@ export class PluginRuntime {
       tools: filteredTools,
       capabilities: manifest.capabilities ?? [],
       toolDescriptions: Object.keys(toolDescriptions).length > 0 ? toolDescriptions : undefined,
-      isManaged: manifest.deployment === "managed",
+      isManaged: manifest.deployment === "managed" || manifest.deployment === "bundled",
       loadStatus,
       version: manifest.version,
       publisher: manifest.publisher,
