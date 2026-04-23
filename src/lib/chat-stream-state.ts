@@ -1,5 +1,6 @@
 export type StreamEvent = {
   type: string;
+  streamId?: number;
   text?: string;
   thought?: string;
   name?: string;
@@ -183,6 +184,30 @@ export function finalizeStreamingAssistant(
     streaming: false,
   });
   return next;
+}
+
+export function reopenLastAssistant(
+  entries: ChatEntry[],
+): { entries: ChatEntry[]; text: string } {
+  const next = [...entries];
+  const assistantIdx = findLastIdx(
+    next,
+    (entry): entry is Extract<ChatEntry, { kind: "assistant" }> =>
+      entry.kind === "assistant",
+  );
+  if (assistantIdx < 0) {
+    return { entries, text: "" };
+  }
+  const assistant = next[assistantIdx] as AssistantEntry;
+  next.splice(assistantIdx, 1);
+  next.push({
+    ...assistant,
+    streaming: true,
+  });
+  return {
+    entries: next,
+    text: assistant.text,
+  };
 }
 
 export function setAssistantError(entries: ChatEntry[], message: string, fallbackThought: string = ""): ChatEntry[] {
