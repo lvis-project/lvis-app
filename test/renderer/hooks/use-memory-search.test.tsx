@@ -24,7 +24,7 @@ describe("useMemorySearch", () => {
     act(() => { result.current.setQuery("abc"); });
 
     // IPC not called yet (debounce still pending)
-    expect(api.memorySearchNotes).not.toHaveBeenCalled();
+    expect(api.memorySearchEntries).not.toHaveBeenCalled();
 
     // Advance past debounce and flush promises
     await act(async () => {
@@ -32,15 +32,15 @@ describe("useMemorySearch", () => {
       await Promise.resolve();
     });
 
-    expect(api.memorySearchNotes).toHaveBeenCalledTimes(1);
-    expect(api.memorySearchNotes).toHaveBeenCalledWith("abc");
+    expect(api.memorySearchEntries).toHaveBeenCalledTimes(1);
+    expect(api.memorySearchEntries).toHaveBeenCalledWith("abc");
   });
 
   it("aliveRef: does not throw after unmount when promise resolves late", async () => {
     vi.useFakeTimers();
     const { api } = makeMockLvisApi();
     let resolveNotes!: (v: unknown[]) => void;
-    api.memorySearchNotes = vi.fn(
+    api.memorySearchEntries = vi.fn(
       () => new Promise((res) => { resolveNotes = res as (v: unknown[]) => void; }),
     );
     api.memorySearchSessions = vi.fn(async () => []);

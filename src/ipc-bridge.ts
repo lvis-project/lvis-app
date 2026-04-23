@@ -114,6 +114,10 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:memory:notes:save",
   "lvis:memory:notes:delete",
   "lvis:memory:notes:search",
+  "lvis:memory:entries:list",
+  "lvis:memory:entries:save",
+  "lvis:memory:entries:delete",
+  "lvis:memory:entries:search",
   "lvis:memory:sessions:list",
   "lvis:memory:sessions:search",
   "lvis:memory:lvis-md:get",
@@ -428,7 +432,29 @@ ${input}`;
   });
   ipcMain.handle("lvis:memory:notes:search", (e, query: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:search", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.searchNotes(query);
+    return memoryManager.searchNotesEntries(query);
+  });
+  ipcMain.handle("lvis:memory:entries:list", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:list", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.listMemoryEntries();
+  });
+  ipcMain.handle("lvis:memory:entries:save", async (e, title: string, content: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:save", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.saveMemory(title, content);
+  });
+  ipcMain.handle("lvis:memory:entries:delete", (e, filename: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:delete", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.deleteMemory(filename);
+  });
+  ipcMain.handle("lvis:memory:entries:search", (e, query: string) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:search", e); return UNAUTHORIZED_FRAME; }
+    return memoryManager.searchMemoryEntries(query).map((note) => ({
+      filename: note.filename,
+      title: note.title,
+      content: note.content,
+      excerpt: note.content.replace(/^#\s+.+(?:\r?\n)+/, "").trim(),
+      updatedAt: note.updatedAt ?? new Date().toISOString(),
+    }));
   });
   ipcMain.handle("lvis:memory:sessions:list", () => memoryManager.listSessionEntries());
   ipcMain.handle("lvis:memory:sessions:search", (e, query: string) => {

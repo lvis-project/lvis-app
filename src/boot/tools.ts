@@ -176,7 +176,7 @@ export function registerBuiltinTools(
   const builtins: Tool[] = [
     createDynamicTool({
       name: "memory_save",
-      description: "사용자가 기억해달라고 한 내용을 notes/에 저장합니다.",
+      description: "사용자가 기억해달라고 한 내용을 memory/에 저장합니다.",
       source: "builtin",
       category: "write",
       jsonSchema: {
@@ -189,7 +189,7 @@ export function registerBuiltinTools(
       },
       execute: async (rawInput) => {
         const args = (rawInput ?? {}) as Record<string, unknown>;
-        const note = await memoryManager.saveNote(
+        const note = await memoryManager.saveMemory(
           args.title as string,
           args.content as string,
         );
@@ -201,7 +201,7 @@ export function registerBuiltinTools(
     }),
     createDynamicTool({
       name: "memory_search",
-      description: "사용자의 notes/ 메모를 키워드로 검색합니다.",
+      description: "사용자의 memory/ 메모를 키워드로 검색합니다.",
       source: "builtin",
       category: "read",
       isReadOnly: () => true,
@@ -213,7 +213,7 @@ export function registerBuiltinTools(
       execute: async (rawInput) => {
         const args = (rawInput ?? {}) as Record<string, unknown>;
         const results = memoryManager
-          .searchNotes(args.query as string)
+          .searchMemoryEntries(args.query as string)
           .map((n) => ({ title: n.title, filename: n.filename }));
         return { output: JSON.stringify(results), isError: false };
       },
@@ -230,7 +230,7 @@ export function registerBuiltinTools(
       jsonSchema: { type: "object", properties: {} },
       execute: async () => {
         const notes = memoryManager
-          .listNotes()
+          .listMemoryEntries()
           .map((n) => ({ title: n.title, filename: n.filename }));
         return { output: JSON.stringify(notes), isError: false };
       },

@@ -87,7 +87,7 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
       getPluginConfig: vi.fn(() => ({})),
       setPluginConfig: vi.fn(async (_pluginId: string, config: unknown) => config),
     } as any,
-    memoryManager: { listNotes: vi.fn(() => []), saveNote: vi.fn(), deleteNote: vi.fn(), searchNotes: vi.fn(() => []), getLvisMd: vi.fn(), updateLvisMd: vi.fn(), getUserPreferences: vi.fn(), updateUserPreferences: vi.fn() } as any,
+    memoryManager: { listMemoryEntries: vi.fn(() => []), saveMemory: vi.fn(), deleteMemory: vi.fn(), searchMemoryEntries: vi.fn(() => []), listNotes: vi.fn(() => []), searchNotesEntries: vi.fn(() => []), saveNote: vi.fn(), deleteNote: vi.fn(), getMemoryContext: vi.fn(() => ""), getLvisMd: vi.fn(), updateLvisMd: vi.fn(), getUserPreferences: vi.fn(), updateUserPreferences: vi.fn() } as any,
     conversationLoop: makeMockLoop(pm) as any,
     approvalGate: gate as any,
     mcpManager: { listServers: vi.fn(() => []), killSwitch: vi.fn() } as any,
@@ -219,6 +219,147 @@ describe("lvis:mcp:servers", () => {
     const result = await invokeWithEvent(
       "lvis:mcp:servers",
       { senderFrame: { url: "https://evil.example.com/" } },
+    );
+
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+  });
+});
+
+describe("lvis:memory:notes:*", () => {
+  it("notes search preserves note entry shape", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    services.memoryManager.searchNotesEntries.mockReturnValue([
+      {
+        filename: "my-note.md",
+        title: "My Note",
+        content: "# My Note\n\nThis is the body.",
+        updatedAt: "2026-04-20T00:00:00Z",
+      },
+    ]);
+    registerIpcHandlers(services, () => null);
+
+    const result = await invoke("lvis:memory:notes:search", "body") as Array<Record<string, unknown>>;
+
+    expect(result[0]).toMatchObject({
+      filename: "my-note.md",
+      title: "My Note",
+      content: "# My Note\n\nThis is the body.",
+      updatedAt: "2026-04-20T00:00:00Z",
+    });
+  });
+
+  it("notes delete targets deleteNote", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    registerIpcHandlers(services, () => null);
+
+    await invoke("lvis:memory:notes:delete", "my-note.md");
+
+    expect(services.memoryManager.deleteNote).toHaveBeenCalledWith("my-note.md");
+    expect(services.memoryManager.deleteMemory).not.toHaveBeenCalled();
+  });
+
+  it("memory search rejects unauthorized frames", async () => {
+    await setupHandlers();
+
+    const result = await invokeWithEvent(
+      "lvis:memory:notes:search",
+      { senderFrame: { url: "https://evil.example.com/" } },
+      "query",
+    );
+
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+  });
+});
+
+describe("lvis:memory:entries:*", () => {
+  it("memory list rejects unauthorized frames", async () => {
+    await setupHandlers();
+
+    const result = await invokeWithEvent(
+      "lvis:memory:entries:list",
+      { senderFrame: { url: "https://evil.example.com/" } },
+    );
+
+    expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
+  });
+
+  it("memory search returns renderer-safe shape", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    services.memoryManager.searchMemoryEntries.mockReturnValue([
+      {
+        filename: "my-memory.md",
+        title: "My Memory",
+        content: "# My Memory\n\nThis is the body.",
+        updatedAt: "2026-04-20T00:00:00Z",
+      },
+    ]);
+    registerIpcHandlers(services, () => null);
+
+    const result = await invoke("lvis:memory:entries:search", "body") as Array<Record<string, unknown>>;
+
+    expect(result[0]).toMatchObject({
+      filename: "my-memory.md",
+      title: "My Memory",
+      content: "# My Memory\n\nThis is the body.",
+      excerpt: "This is the body.",
+      updatedAt: "2026-04-20T00:00:00Z",
+    });
+  });
+
+  it("memory search strips only a leading heading from excerpt", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    services.memoryManager.searchMemoryEntries.mockReturnValue([
+      {
+        filename: "manual-memory.md",
+        title: "Manual Memory",
+        content: "첫 문단\n# 중간 제목\n본문",
+        updatedAt: "2026-04-20T00:00:00Z",
+      },
+    ]);
+    registerIpcHandlers(services, () => null);
+
+    const result = await invoke("lvis:memory:entries:search", "본문") as Array<Record<string, unknown>>;
+
+    expect(result[0]?.excerpt).toBe("첫 문단\n# 중간 제목\n본문");
+  });
+
+  it("memory delete targets deleteMemory", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    registerIpcHandlers(services, () => null);
+
+    await invoke("lvis:memory:entries:delete", "my-memory.md");
+
+    expect(services.memoryManager.deleteMemory).toHaveBeenCalledWith("my-memory.md");
+    expect(services.memoryManager.deleteNote).not.toHaveBeenCalled();
+  });
+
+  it("memory search rejects unauthorized frames", async () => {
+    await setupHandlers();
+
+    const result = await invokeWithEvent(
+      "lvis:memory:entries:search",
+      { senderFrame: { url: "https://evil.example.com/" } },
+      "query",
     );
 
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
