@@ -51,6 +51,7 @@
     "@azure/msal-node": "^5.1.2",
     "@lvis/plugin-calendar": "file:../lvis-plugin-calendar",
     "@lvis/plugin-email": "file:../lvis-plugin-email",
+    "@lvis/plugin-lge-api": "file:../lvis-plugin-lge-api",
     "@lvis/plugin-meeting": "file:../lvis-plugin-meeting",
     "@lvis/plugin-pageindex": "file:../lvis-plugin-pageindex",
     "@lvis/plugin-sdk": "file:./packages/plugin-sdk",
