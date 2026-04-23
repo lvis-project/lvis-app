@@ -310,20 +310,35 @@ export class MsGraphService {
       .acquireTokenInteractive({
         scopes: startScopes,
         openBrowser,
-        // Windows 에서 local OAuth callback 페이지가 `<meta charset>` 선언 없으면
-        // 브라우저가 system default 인코딩 (Korean Windows = cp949) 으로 해석해
-        // UTF-8 한글이 mojibake (� 깨짐) 로 뜬다. charset + lang 을 명시해 차단.
+        // MSAL 의 LoopbackClient 는 `res.end(template)` 만 호출하고 `Content-Type`
+        // 헤더를 설정하지 않는다. 그 결과 브라우저가 HTML 인지 plain text 인지
+        // 판단 못 해 `<meta charset="utf-8">` 선언을 무시 → Korean Windows 에서
+        // UTF-8 한글이 cp949 로 해석되어 mojibake 발생.
+        //
+        // 두 가지 방어를 동시에 적용:
+        //   1) ASCII-only 영문 + escape된 한글 numeric entity 로 작성해
+        //      **소스 바이트를 전부 ASCII 로** 만든다 → 어떤 인코딩으로도 동일 렌더.
+        //   2) `<meta charset>` 과 `<meta http-equiv="Content-Type">` 둘 다 둬
+        //      브라우저 sniff 가 실패해도 회복 경로 확보.
         successTemplate: `<!doctype html>
-          <html lang="ko"><head><meta charset="utf-8" /><title>Login</title></head>
+          <html lang="ko"><head>
+            <meta charset="utf-8" />
+            <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+            <title>Login</title>
+          </head>
           <body style="font-family:sans-serif;text-align:center;padding:60px;background:#0b1222;color:#e2e8f0">
-            <h2 style="color:#60a5fa">인증 완료! (${startLabel})</h2>
-            <p>이 창을 닫고 앱으로 돌아가세요.</p>
+            <h2 style="color:#60a5fa">Login Complete (${startLabel})</h2>
+            <p>&#xC774; &#xCC3D;&#xC744; &#xB2EB;&#xACE0; &#xC571;&#xC73C;&#xB85C; &#xB3CC;&#xC544;&#xAC00;&#xC138;&#xC694;. (You may close this window.)</p>
           </body></html>`,
         errorTemplate: `<!doctype html>
-          <html lang="ko"><head><meta charset="utf-8" /><title>Login</title></head>
+          <html lang="ko"><head>
+            <meta charset="utf-8" />
+            <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+            <title>Login</title>
+          </head>
           <body style="font-family:sans-serif;text-align:center;padding:60px;background:#0b1222;color:#e2e8f0">
-            <h2 style="color:#f87171">인증 실패</h2>
-            <p>다시 시도해주세요.</p>
+            <h2 style="color:#f87171">Login Failed</h2>
+            <p>&#xB2E4;&#xC2DC; &#xC2DC;&#xB3C4;&#xD574;&#xC8FC;&#xC138;&#xC694;. (Please try again.)</p>
           </body></html>`,
       })
       .then(async (result) => {
