@@ -67,7 +67,7 @@ describe("PluginRuntime.disable", () => {
   }
 
   async function writeRegistry(
-    entries: Array<{ id: string; manifestPath: string; enabled?: boolean }>,
+    entries: Array<{ id: string; manifestPath: string; enabled?: boolean; approvedPluginAccess?: unknown }>,
   ): Promise<void> {
     await mkdir(join(testDir, "plugins"), { recursive: true });
     await writeFile(
@@ -532,7 +532,18 @@ describe("PluginRuntime.disable", () => {
     const emailManifestPath = await writePlugin("email", "email_ping");
     const meetingManifestPath = await writePlugin("meeting", "meeting_ping");
     await writeRegistry([
-      { id: "work-proactive", manifestPath: workManifestPath, enabled: true },
+      {
+        id: "work-proactive",
+        manifestPath: workManifestPath,
+        enabled: true,
+        approvedPluginAccess: {
+          plugins: [
+            { pluginId: "calendar", tools: ["calendar_today"] },
+            { pluginId: "email", events: ["email.action.needed"] },
+            { pluginId: "meeting", events: ["meeting.summary.created", "meeting.ended"] },
+          ],
+        },
+      },
       { id: "calendar", manifestPath: calendarManifestPath, enabled: true },
       { id: "email", manifestPath: emailManifestPath, enabled: true },
       { id: "meeting", manifestPath: meetingManifestPath, enabled: true },
@@ -606,7 +617,14 @@ describe("PluginRuntime.disable", () => {
     );
 
     await writeRegistry([
-      { id: "calendar", manifestPath: calendarManifestPath, enabled: true },
+      {
+        id: "calendar",
+        manifestPath: calendarManifestPath,
+        enabled: true,
+        approvedPluginAccess: {
+          plugins: [{ pluginId: "email", events: ["email.analyzed"] }],
+        },
+      },
       { id: "email", manifestPath: emailManifestPath, enabled: true },
     ]);
 

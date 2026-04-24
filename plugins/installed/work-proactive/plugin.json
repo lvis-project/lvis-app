@@ -1,0 +1,60 @@
+{
+  "id": "work-proactive",
+  "name": "LVIS Work Proactive",
+  "version": "0.1.0",
+  "installPolicy": "user",
+  "deployment": "user",
+  "deliveryMode": "bundle",
+  "bundleDependencies": [
+    { "pluginId": "calendar", "required": true },
+    { "pluginId": "email", "required": true },
+    { "pluginId": "meeting", "required": true }
+  ],
+  "pluginAccess": {
+    "plugins": [
+      {
+        "pluginId": "calendar",
+        "tools": ["calendar_today"]
+      },
+      {
+        "pluginId": "email",
+        "events": ["email.action.needed"]
+      },
+      {
+        "pluginId": "meeting",
+        "events": ["meeting.summary.created", "meeting.ended"]
+      }
+    ]
+  },
+  "publisher": "LG Electronics IT",
+  "entry": "../../../node_modules/@lvis/plugin-work-proactive/dist/hostPlugin.js",
+  "description": "메일/캘린더/미팅 컨텍스트를 수집하고 데일리 브리핑을 생성하는 proactive 플러그인",
+  "tools": [
+    "work_proactive_generate_daily_briefing"
+  ],
+  "requires": {
+    "capabilities": [
+      "calendar-source"
+    ]
+  },
+  "eventSubscriptions": [
+    "email.action.needed",
+    "meeting.summary.created",
+    "meeting.ended"
+  ],
+  "emittedEvents": [],
+  "toolSchemas": {
+    "work_proactive_generate_daily_briefing": {
+      "description": "오늘 메일/캘린더/미팅 맥락을 바탕으로 데일리 브리핑을 생성하고 lvis:routine:completed 이벤트로 전달합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "trigger": { "type": "string" },
+          "nowIso": { "type": "string" },
+          "prompt": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

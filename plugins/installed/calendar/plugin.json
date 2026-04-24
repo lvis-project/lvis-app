@@ -30,8 +30,28 @@
     "calendar_start_watcher"
   ],
   "eventSubscriptions": [
-    { "type": "meeting.ended", "hint": { "category": "meeting", "priority": "medium", "title": "회의 종료" } },
-    { "type": "email.action.needed", "hint": { "category": "email", "priority": "medium", "title": "액션 필요 이메일" } }
+    { "type": "email.analyzed", "hint": { "category": "email", "priority": "low", "title": "이메일 분석 완료" } },
+    { "type": "meeting.summary.created", "hint": { "category": "meeting", "priority": "medium", "title": "회의 요약 생성" } },
+    { "type": "email.invite.detected", "hint": { "category": "email", "priority": "medium", "title": "이메일 초대 감지" } }
+  ],
+  "pluginAccess": {
+    "plugins": [
+      {
+        "pluginId": "email",
+        "events": ["email.analyzed", "email.invite.detected"]
+      },
+      {
+        "pluginId": "meeting",
+        "events": ["meeting.summary.created"]
+      }
+    ]
+  },
+  "eventPublishes": [
+    "calendar.link.created",
+    "calendar.link.failed",
+    "calendar.link.pending",
+    "calendar.from_email.suggested",
+    "calendar.pattern.detected"
   ],
   "uiCallable": [
     "calendar_status",

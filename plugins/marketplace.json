@@ -40,7 +40,8 @@
       "description": "회의 STT/요약 파이프라인을 제공하는 미팅 플러그인",
       "packageSpec": "file:../lvis-plugin-meeting",
       "packageName": "@lvis/plugin-meeting",
-      "deployment": "managed",
+      "installPolicy": "user",
+      "deployment": "user",
       "publisher": "LG Electronics IT",
       "tools": [
         "meeting_start",
@@ -70,7 +71,8 @@
       "description": "Outlook 메일을 읽고 LVIS가 답장·할 일·일정을 제안하는 이메일 플러그인",
       "packageSpec": "file:../lvis-plugin-email",
       "packageName": "@lvis/plugin-email",
-      "deployment": "managed",
+      "installPolicy": "user",
+      "deployment": "user",
       "publisher": "LG Electronics IT",
       "tools": [
         "email_status",
@@ -99,7 +101,8 @@
       "description": "Outlook 일정을 읽고 쓰며 미팅 시작 전 알림을 제공하는 캘린더 플러그인",
       "packageSpec": "file:../lvis-plugin-calendar",
       "packageName": "@lvis/plugin-calendar",
-      "deployment": "managed",
+      "installPolicy": "user",
+      "deployment": "user",
       "publisher": "LG Electronics IT",
       "tools": [
         "calendar_status",
@@ -115,6 +118,18 @@
         "calendar_open_url",
         "calendar_detect_patterns"
       ],
+      "pluginAccess": {
+        "plugins": [
+          {
+            "pluginId": "email",
+            "events": ["email.analyzed", "email.invite.detected"]
+          },
+          {
+            "pluginId": "meeting",
+            "events": ["meeting.summary.created"]
+          }
+        ]
+      },
       "defaultConfig": {},
       "ui": [
         {
@@ -162,81 +177,48 @@
       "description": "Routine이 호출하는 메일/캘린더/미팅 번들 proactive 플러그인",
       "packageSpec": "file:../lvis-plugin-work-proactive",
       "packageName": "@lvis/plugin-work-proactive",
-      "deployment": "managed",
-      "deliveryMode": "bundled",
+      "installPolicy": "user",
+      "deployment": "user",
+      "deliveryMode": "bundle",
       "bundleDependencies": [
-        "calendar",
-        "email",
-        "meeting"
+        { "pluginId": "calendar", "required": true },
+        { "pluginId": "email", "required": true },
+        { "pluginId": "meeting", "required": true }
       ],
+      "pluginAccess": {
+        "plugins": [
+          {
+            "pluginId": "calendar",
+            "tools": ["calendar_today"]
+          },
+          {
+            "pluginId": "email",
+            "events": ["email.action.needed"]
+          },
+          {
+            "pluginId": "meeting",
+            "events": ["meeting.summary.created", "meeting.ended"]
+          }
+        ]
+      },
       "requires": {
         "capabilities": [
           "calendar-source"
         ]
       },
       "publisher": "LG Electronics IT",
-      "capabilities": [
-        "routine-provider"
-      ],
-      "routineTools": {
-        "wakeupBriefing": "work_proactive_generate_wakeup_briefing",
-        "shutdownSummary": "work_proactive_generate_shutdown_summary",
-        "heartbeat": "work_proactive_run_heartbeat"
-      },
       "tools": [
-        "work_proactive_generate_wakeup_briefing",
-        "work_proactive_generate_shutdown_summary",
-        "work_proactive_run_heartbeat"
+        "work_proactive_generate_daily_briefing"
       ],
       "toolSchemas": {
-        "work_proactive_generate_wakeup_briefing": {
-          "description": "오늘 메일/캘린더/미팅 맥락을 바탕으로 아침 브리핑을 생성합니다.",
+        "work_proactive_generate_daily_briefing": {
+          "description": "오늘 메일/캘린더/미팅 맥락을 바탕으로 데일리 브리핑을 생성하고 lvis:routine:completed 이벤트로 전달합니다.",
           "inputSchema": {
             "type": "object",
             "properties": {
               "trigger": { "type": "string" },
               "nowIso": { "type": "string" },
-              "routinePrompt": { "type": "string" }
-            },
-            "additionalProperties": false
-          }
-        },
-        "work_proactive_generate_shutdown_summary": {
-          "description": "오늘 메일/캘린더/미팅 작업을 바탕으로 종료 요약을 생성합니다.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "trigger": { "type": "string" },
-              "nowIso": { "type": "string" },
-              "routinePrompt": { "type": "string" }
-            },
-            "additionalProperties": false
-          }
-        },
-        "work_proactive_run_heartbeat": {
-          "description": "Routine heartbeat에 맞춰 proactive 내부 캐시를 갱신합니다.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "trigger": { "type": "string" },
-              "nowIso": { "type": "string" },
-              "heartbeatId": { "type": "string" },
-              "heartbeatAgentId": {
-                "type": "string",
-                "enum": ["monitor", "briefing", "follow-up"]
-              },
-              "heartbeatPrompt": { "type": "string" },
-              "heartbeatSchedule": {
-                "type": "object",
-                "properties": {
-                  "minute": { "type": "string" },
-                  "hour": { "type": "string" },
-                  "dayOfMonth": { "type": "string" },
-                  "month": { "type": "string" },
-                  "dayOfWeek": { "type": "string" }
-                },
-                "additionalProperties": false
-              }
+              "prompt": { "type": "string" }
             },
             "additionalProperties": false
           }
