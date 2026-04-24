@@ -1,7 +1,7 @@
 /**
  * Phase 3.3 safety net — daily briefing card lifecycle.
  *
- * onProactiveBriefing delivery, dismiss IPC, snooze IPC.
+ * onRoutineBriefing delivery, dismiss IPC, snooze IPC.
  */
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -17,10 +17,10 @@ function makeBriefing() {
 }
 
 describe("Briefing flow (Phase 3.3 regression net)", () => {
-  it("onProactiveBriefing renders the BriefingCard", async () => {
-    const { container, emitProactive } = await renderApp();
+  it("onRoutineBriefing renders the BriefingCard", async () => {
+    const { container, emitRoutineBriefing } = await renderApp();
     await act(async () => {
-      emitProactive(makeBriefing());
+      emitRoutineBriefing(makeBriefing());
     });
     await waitFor(() => {
       expect(container.querySelector('[data-testid="briefing-card"]')).toBeTruthy();
@@ -28,10 +28,42 @@ describe("Briefing flow (Phase 3.3 regression net)", () => {
     });
   });
 
-  it("clicking dismiss calls dismissBriefing and removes the card", async () => {
-    const { container, api, emitProactive } = await renderApp();
+  it("replays the latest briefing on mount when one was already generated", async () => {
+    const briefing = makeBriefing();
+    const { container } = await renderApp({ latestRoutineBriefing: briefing });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="briefing-card"]')).toBeTruthy();
+      expect(container.textContent).toContain("daily summary");
+    });
+  });
+
+  it("does not let a delayed replay overwrite a newer live briefing", async () => {
+    let resolveLatest: ((value: unknown) => void) | null = null;
+    const stale = { ...makeBriefing(), summary: "stale summary" };
+    const fresh = { ...makeBriefing(), summary: "fresh summary" };
+    const { container, emitRoutineBriefing } = await renderApp({
+      latestRoutineBriefing: new Promise((resolve) => {
+        resolveLatest = resolve;
+      }),
+    });
+
     await act(async () => {
-      emitProactive(makeBriefing());
+      emitRoutineBriefing(fresh);
+    });
+    await act(async () => {
+      resolveLatest?.(stale);
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("fresh summary");
+      expect(container.textContent).not.toContain("stale summary");
+    });
+  });
+
+  it("clicking dismiss calls dismissBriefing and removes the card", async () => {
+    const { container, api, emitRoutineBriefing } = await renderApp();
+    await act(async () => {
+      emitRoutineBriefing(makeBriefing());
     });
     const card = await waitFor(() => {
       const el = container.querySelector('[data-testid="briefing-card"]');
@@ -64,9 +96,9 @@ describe("Briefing flow (Phase 3.3 regression net)", () => {
   });
 
   it("clicking snooze calls snoozeBriefing and removes the card", async () => {
-    const { container, api, emitProactive } = await renderApp();
+    const { container, api, emitRoutineBriefing } = await renderApp();
     await act(async () => {
-      emitProactive(makeBriefing());
+      emitRoutineBriefing(makeBriefing());
     });
     const card = await waitFor(() => {
       const el = container.querySelector('[data-testid="briefing-card"]');

@@ -16,6 +16,7 @@ import { registerIpcHandlers } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
+import { persistShutdownSummary } from "./routines/briefing-delivery.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -70,6 +71,8 @@ let pendingLvisUri: string | null = null;
 let lastRendererReloadAt = 0;
 let rendererReloadReady = false;
 let pendingRendererReload = false;
+let appShutdownStarted = false;
+let appShutdownCompleted = false;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
@@ -403,11 +406,29 @@ app.on("activate", () => {
   }
 });
 
-app.on("before-quit", async () => {
-  if (services) {
-    await services.pluginRuntime.stopAll();
-    services.taskService.close();
+app.on("before-quit", (event) => {
+  if (!services || appShutdownCompleted) return;
+  if (appShutdownStarted) {
+    event.preventDefault();
+    return;
   }
+  appShutdownStarted = true;
+  event.preventDefault();
+  void (async () => {
+    try {
+      if (services.settingsService.get("routine")?.enableShutdownSummary ?? true) {
+        const shutdownSummary = await services.routineEngine?.runShutdownRoutine();
+        if (shutdownSummary) {
+          await persistShutdownSummary(services.memoryManager, shutdownSummary);
+        }
+      }
+      await services.shutdown?.();
+      await services.pluginRuntime.stopAll();
+    } finally {
+      appShutdownCompleted = true;
+      app.quit();
+    }
+  })();
 });
 
 app.whenReady().then(() => {

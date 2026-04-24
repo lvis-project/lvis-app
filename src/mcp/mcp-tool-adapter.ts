@@ -10,7 +10,7 @@
  * place instead of being inlined at every call site.
  */
 import { createDynamicTool, type Tool } from "../tools/base.js";
-import type { McpToolSchema } from "./types.js";
+import type { McpToolSchema, McpUiPayload } from "./types.js";
 
 /**
  * Convert one MCP-discovered tool schema into a {@link Tool} ready
@@ -24,13 +24,15 @@ import type { McpToolSchema } from "./types.js";
  * @param schema           The raw tool schema from `tools/list`.
  * @param callTool         Callback that invokes `tools/call` with
  *                         the original (un-namespaced) tool name.
- *                         Returns the rendered text response.
+ *                         Returns the rendered text response and an optional
+ *                         {@link McpUiPayload} when the server declares a UI
+ *                         extension via `_meta.ui` (MCP Apps spec §3.2).
  */
 export function mcpToolToTool(
   serverId: string,
   namespacedName: string,
   schema: McpToolSchema,
-  callTool: (name: string, args: Record<string, unknown>) => Promise<string>,
+  callTool: (name: string, args: Record<string, unknown>) => Promise<{ text: string; uiPayload?: McpUiPayload }>,
 ): Tool {
   return createDynamicTool({
     name: namespacedName,
@@ -45,8 +47,12 @@ export function mcpToolToTool(
     execute: async (rawInput) => {
       const args = (rawInput ?? {}) as Record<string, unknown>;
       try {
-        const text = await callTool(schema.name, args);
-        return { output: text, isError: false };
+        const { text, uiPayload } = await callTool(schema.name, args);
+        return {
+          output: text,
+          isError: false,
+          ...(uiPayload && { metadata: { uiPayload } }),
+        };
       } catch (err) {
         return {
           output: err instanceof Error ? err.message : String(err),

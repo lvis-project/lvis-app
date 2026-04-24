@@ -104,14 +104,14 @@ describe("M4 — capability violation audit trail", () => {
     );
   }
 
-  function stubProactiveEngine() {
+  function stubEventCollector() {
     const collected: Array<{ type: string; data: unknown }> = [];
     return {
       engine: {
         collectEvent(type: string, data: unknown) {
           collected.push({ type, data });
         },
-      } as unknown as import("../../core/proactive-engine.js").ProactiveEngine,
+      },
       collected,
     };
   }
@@ -166,7 +166,7 @@ describe("M4 — capability violation audit trail", () => {
     await runtime.load();
 
     const { entries, logger } = collectingAudit();
-    const { engine } = stubProactiveEngine();
+    const { engine } = stubEventCollector();
     const origWarn = console.warn;
     console.warn = () => {};
     try {
@@ -188,7 +188,7 @@ describe("M4 — capability violation audit trail", () => {
     await runtime.load();
 
     const { entries, logger } = collectingAudit();
-    const { engine } = stubProactiveEngine();
+    const { engine } = stubEventCollector();
     const origWarn = console.warn;
     console.warn = () => {};
     try {

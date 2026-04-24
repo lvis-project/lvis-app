@@ -29,7 +29,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { AuditLogger } from "../audit/audit-logger.js";
-import type { ProactiveEngine as RoutineEngine } from "../core/proactive-engine.js";
+import type { RoutineEngine } from "../core/routine-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ToolCallMeta } from "../tools/executor.js";
@@ -41,7 +41,7 @@ export interface TurnCallbacks {
   onReasoningDelta?: (text: string) => void;
   onTextDelta?: (text: string) => void;
   onToolStart?: (name: string, input: Record<string, unknown>, meta: ToolCallMeta) => void;
-  onToolEnd?: (name: string, result: string, isError: boolean, meta: ToolCallMeta) => void;
+  onToolEnd?: (name: string, result: string, isError: boolean, meta: ToolCallMeta, uiPayload?: import("../mcp/types.js").McpUiPayload) => void;
   onAssistantRound?: (round: {
     roundIndex: number;
     text: string;
@@ -72,8 +72,6 @@ export interface ConversationLoopDeps {
   memoryManager: MemoryManager;
   permissionManager?: import("../permissions/permission-manager.js").PermissionManager;
   routineEngine?: RoutineEngine;
-  /** @deprecated compatibility alias for older callers. */
-  proactiveEngine?: RoutineEngine;
   /** Agent 5: turn 완료 시 idle scheduler에 대화 신호 전송 (§6.1) */
   idleScheduler?: IdleSchedulerService;
   /** Agent 6: post-turn hook chain (compact → saveSession → extractMemory → audit → idle-poke) */
@@ -120,6 +118,7 @@ export class ConversationLoop {
   private readonly auditLogger: AuditLogger;
   private provider: LLMProvider | null = null;
   private sessionId: string = crypto.randomUUID();
+  private sessionRoutineId: string | null = null;
   /** K4: §4.5 11-step trace — dev 모드 활성, 프로덕션 no-op */
   private tracer: ConversationTracer = createTracer(this.sessionId);
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
@@ -213,49 +212,6 @@ export class ConversationLoop {
     return this.provider !== null;
   }
 
-  /** 앱 시작 시 비서 스타일 데일리 브리핑 생성 — 항목 없으면 null 반환 */
-  async generateBriefing(): Promise<string | null> {
-    const engine = this.deps.routineEngine ?? this.deps.proactiveEngine;
-    if (!engine || !this.provider) return null;
-
-    const now = new Date();
-    const items = engine.collectBriefingItems(now);
-    if (items.length === 0) return null;
-
-    const briefingData = engine.getBriefingPromptData(items, now);
-    const today = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul", weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
-
-    const prompt = `당신은 LVIS, 사용자의 AI 비서입니다. 아침 브리핑을 보고합니다.
-오늘 날짜: ${today}
-
-${briefingData}
-
-위 데이터를 바탕으로 비서가 상사에게 보고하듯 자연스럽고 간결하게 브리핑해주세요.
-- 2~5문장 내외로 핵심만
-- 긴급/중요 항목은 먼저
-- 친근하지만 프로페셔널한 말투
-- 마크다운 없이 자연스러운 대화체
-- "안녕하세요" 인사로 시작`;
-
-    let text = "";
-    try {
-      for await (const ev of this.provider.streamTurn({
-        systemPrompt: "당신은 LVIS, 사용자의 AI 비서입니다.",
-        messages: [{ role: "user", content: prompt }],
-        tools: [],
-        model: this.deps.settingsService.get("llm").model,
-        maxTokens: 400,
-      })) {
-        if (ev.type === "text_delta" && ev.text) text += ev.text;
-        if (ev.type === "message_complete") break;
-      }
-    } catch {
-      return null;
-    }
-
-    return text.trim() || null;
-  }
-
   /**
    * 플러그인 callLlm용 범용 텍스트 생성.
    * 독립적인 단발 LLM 호출 — 대화 히스토리와 무관.
@@ -294,6 +250,7 @@ ${briefingData}
       });
     }
     this.sessionId = crypto.randomUUID();
+    this.sessionRoutineId = null;
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
@@ -306,6 +263,10 @@ ${briefingData}
 
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  getSessionRoutineId(): string | null {
+    return this.sessionRoutineId;
   }
 
   /** K4: 현재 tracer 의 JSONL 파일 경로 (활성 시). 뷰어 UI 가 읽기에 사용. */
@@ -331,6 +292,10 @@ ${briefingData}
     return this.deps.memoryManager.listSessions(limit);
   }
 
+  listRoutineSessions(routineId: string, limit?: number): Array<{ id: string; modifiedAt: Date; title: string; preview: string }> {
+    return this.deps.memoryManager.listSessionsByRoutine(routineId, limit);
+  }
+
   /** 기존 세션 복원 — §4.5.7 */
   loadSession(sessionId: string): boolean {
     const messages = this.deps.memoryManager.loadSession(sessionId);
@@ -344,12 +309,21 @@ ${briefingData}
     }
 
     this.sessionId = sessionId;
+    this.sessionRoutineId = this.deps.memoryManager.loadSessionMetadata(sessionId)?.routineId ?? null;
     this.history.clear();
     this.history.restore(messages as import("./llm/types.js").GenericMessage[]);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionPluginExpansions = 0;
     this.tracer = createTracer(this.sessionId);
     return true;
+  }
+
+  async startRoutineConversation(routineId: string, routineTitle: string): Promise<string> {
+    this.newConversation();
+    this.sessionRoutineId = routineId;
+    await this.deps.memoryManager.saveSession(this.sessionId, []);
+    await this.deps.memoryManager.saveSessionMetadata(this.sessionId, { routineId, routineTitle });
+    return this.sessionId;
   }
 
   /**
@@ -900,9 +874,9 @@ ${briefingData}
         break;
       }
       case "briefing": {
-        const engine = this.deps.routineEngine ?? this.deps.proactiveEngine;
+        const engine = this.deps.routineEngine;
         if (!engine) { result = "RoutineEngine이 초기화되지 않았습니다."; break; }
-        const briefing = engine.generateTextBriefing();
+        const briefing = await engine.generateTextBriefing();
         result = `📋 LVIS 데일리 브리핑 (${new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })})\n\n${briefing.summary}`;
         break;
       }

@@ -3,7 +3,7 @@
  *
  * - buildPluginConfigOverrides: 범용 API key 주입
  * - registerPluginTools / runManifestStartupTools: manifest-driven wiring
- * - registerManifestEventSubscriptions / buildManifestEventHints: proactive hints
+ * - registerManifestEventSubscriptions / buildManifestEventHints: event hint helpers
  * - registerPluginNotifications: OS 알림 (manifest.notificationEvents)
  * - findMethodByCapability: capability → tool 이름 resolver
  */
@@ -12,11 +12,20 @@ import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SettingsService } from "../data/settings-store.js";
-import type { ProactiveEngine } from "../core/proactive-engine.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { classifySubscription } from "../plugins/capabilities.js";
 import { pluginToolsForRegistration } from "../plugins/plugin-tool-adapter.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
+
+export interface EventCollector {
+  collectEvent(type: string, data?: unknown): void;
+}
+
+export interface EventHint {
+  category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
+  priority: "high" | "medium" | "low";
+  title: string;
+}
 
 /** 현재 LLM 벤더의 API 키를 모든 플러그인에 범용으로 전달 */
 export function buildPluginConfigOverrides(settings: SettingsService): Record<string, Record<string, unknown>> {
@@ -88,7 +97,7 @@ export function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
 
 export function registerManifestEventSubscriptions(
   pluginRuntime: PluginRuntime,
-  proactiveEngine: ProactiveEngine,
+  eventCollector: EventCollector,
   auditLogger?: Pick<AuditLogger, "log">,
 ): void {
   const eventTypes = new Set<string>();
@@ -123,14 +132,14 @@ export function registerManifestEventSubscriptions(
     }
   }
   for (const eventType of eventTypes) {
-    onEvent(eventType, (data) => proactiveEngine.collectEvent(eventType, data));
+    onEvent(eventType, (data) => eventCollector.collectEvent(eventType, data));
   }
 }
 
 export function buildManifestEventHints(
   pluginRuntime: PluginRuntime,
-): Record<string, import("../core/proactive-engine.js").ProactiveEventHint> {
-  const hints: Record<string, import("../core/proactive-engine.js").ProactiveEventHint> = {};
+): Record<string, EventHint> {
+  const hints: Record<string, EventHint> = {};
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
     for (const entry of manifest.eventSubscriptions ?? []) {
       if (typeof entry === "string") {

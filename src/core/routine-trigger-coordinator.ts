@@ -1,5 +1,5 @@
 /**
- * Sprint 3-A-2 — Proactive Trigger Coordinator (§7 condition-based heartbeat).
+ * Sprint 3-A-2 — Routine Trigger Coordinator (§7 condition-based heartbeat).
  *
  * Evaluates multiple signals (idle, schedule, calendar meeting, task deadline)
  * on a 60s tick + explicit event pokes, and fires `generateDailyBriefing` when
@@ -8,20 +8,23 @@
  *
  * Plugin-id hardcoding is forbidden — calendar lookup uses
  * `findMethodByCapability("calendar-source", ...)`. Kill-switch:
- * `DISABLE_PROACTIVE_COORDINATOR=1`.
+ * `DISABLE_ROUTINE_COORDINATOR=1`.
  */
 
-import type { ProactiveEngine } from "./proactive-engine.js";
+import type { Briefing, RoutineEngine } from "./routine-engine.js";
 
 export interface SignalResult {
   fire: boolean;
   reason: string;
 }
 
-export type SignalEvaluator = (now: Date) => SignalResult | null | Promise<SignalResult | null>;
+export type SignalEvaluator = (
+  now: Date,
+  source?: string,
+) => SignalResult | null | Promise<SignalResult | null>;
 
 export interface CoordinatorDeps {
-  proactiveEngine: ProactiveEngine;
+  routineEngine: RoutineEngine;
   evaluators: Array<{ name: string; evaluate: SignalEvaluator }>;
   /** default 60_000 */
   tickIntervalMs?: number;
@@ -30,11 +33,12 @@ export interface CoordinatorDeps {
   /** test override */
   now?: () => Date;
   logger?: (msg: string) => void;
-  /** test override (default: process.env.DISABLE_PROACTIVE_COORDINATOR === "1") */
+  onBriefingGenerated?: (briefing: Briefing) => void | Promise<void>;
+  /** test override (default: DISABLE_ROUTINE_COORDINATOR or legacy DISABLE_PROACTIVE_COORDINATOR). */
   disabled?: () => boolean;
 }
 
-export class ProactiveTriggerCoordinator {
+export class RoutineTriggerCoordinator {
   private timer: NodeJS.Timeout | null = null;
   /** Shared across ALL signals — prevents double-briefing race (Issue 3). */
   private lastFiredAt = 0;
@@ -43,6 +47,7 @@ export class ProactiveTriggerCoordinator {
   private readonly debounceMs: number;
   private readonly now: () => Date;
   private readonly logger: (msg: string) => void;
+  private readonly onBriefingGenerated?: (briefing: Briefing) => void | Promise<void>;
   private readonly disabled: () => boolean;
 
   constructor(private readonly deps: CoordinatorDeps) {
@@ -50,20 +55,23 @@ export class ProactiveTriggerCoordinator {
     this.debounceMs = deps.debounceMs ?? 30 * 60_000;
     this.now = deps.now ?? (() => new Date());
     this.logger = deps.logger ?? ((m) => console.log(m));
-    this.disabled = deps.disabled ?? (() => process.env.DISABLE_PROACTIVE_COORDINATOR === "1");
+    this.onBriefingGenerated = deps.onBriefingGenerated;
+    this.disabled = deps.disabled ?? (() =>
+      process.env.DISABLE_ROUTINE_COORDINATOR === "1" || process.env.DISABLE_PROACTIVE_COORDINATOR === "1");
   }
 
   start(): void {
     if (this.timer) return;
     if (this.disabled()) {
-      this.logger("[proactive-coordinator] disabled via DISABLE_PROACTIVE_COORDINATOR");
+      this.logger("[routine-coordinator] disabled via DISABLE_ROUTINE_COORDINATOR");
       return;
     }
     this.timer = setInterval(() => {
       void this.evaluateAll("tick").catch((e: Error) =>
-        this.logger(`[proactive-coordinator] tick failed: ${e.message}`),
+        this.logger(`[routine-coordinator] tick failed: ${e.message}`),
       );
     }, this.tickIntervalMs);
+    this.timer.unref?.();
   }
 
   stop(): void {
@@ -77,7 +85,7 @@ export class ProactiveTriggerCoordinator {
   notify(event: string): void {
     if (this.disabled()) return;
     void this.evaluateAll(`event:${event}`).catch((e: Error) =>
-      this.logger(`[proactive-coordinator] notify(${event}) failed: ${e.message}`),
+      this.logger(`[routine-coordinator] notify(${event}) failed: ${e.message}`),
     );
   }
 
@@ -108,28 +116,35 @@ export class ProactiveTriggerCoordinator {
       for (const { name, evaluate } of this.deps.evaluators) {
         let result: SignalResult | null;
         try {
-          result = await evaluate(nowDate);
+          result = await evaluate(nowDate, source);
         } catch (e) {
-          this.logger(`[proactive-coordinator] ${name} threw: ${(e as Error).message}`);
+          this.logger(`[routine-coordinator] ${name} threw: ${(e as Error).message}`);
           continue;
         }
         if (result && result.fire) {
           this.lastFiredAt = nowDate.getTime();
-          this.logger(`[proactive-coordinator] fire via ${name} (${result.reason}, src=${source})`);
+          this.logger(`[routine-coordinator] fire via ${name} (${result.reason}, src=${source})`);
           const idleState = name === "idleSignal" ? "long_idle" : "triggered";
           try {
-            const r = await this.deps.proactiveEngine.generateDailyBriefing({
+            const r = await this.deps.routineEngine.generateDailyBriefing({
               idleState,
               triggerReason: `${name}:${result.reason}`,
               now: nowDate,
             });
             this.logger(
               r.status === "generated"
-                ? `[proactive-coordinator] briefing generated (${name})`
-                : `[proactive-coordinator] briefing skipped (${r.reason})`,
+                ? `[routine-coordinator] briefing generated (${name})`
+                : `[routine-coordinator] briefing skipped (${r.reason})`,
             );
+            if (r.status === "generated") {
+              try {
+                await this.onBriefingGenerated?.(r.briefing);
+              } catch (e) {
+                this.logger(`[routine-coordinator] onBriefingGenerated failed: ${(e as Error).message}`);
+              }
+            }
           } catch (e) {
-            this.logger(`[proactive-coordinator] generate failed: ${(e as Error).message}`);
+            this.logger(`[routine-coordinator] generate failed: ${(e as Error).message}`);
           }
           return result;
         }
@@ -145,7 +160,7 @@ export class ProactiveTriggerCoordinator {
 
 /**
  * idleSignal — fires when caller reports IdleScheduler is in IDLE_SCAN.
- * Back-compat path: the existing boot wiring invokes ProactiveEngine directly
+ * Back-compat path: the existing boot wiring invokes RoutineEngine directly
  * from IdleScheduler.setStateChangeListener. This evaluator mirrors that path
  * so coordinator-only deployments still get idle briefings.
  */
@@ -164,29 +179,23 @@ export function createIdleSignal(
  * repeat fires within the same local day.
  */
 export function createScheduleSignal(opts: {
-  hhmmKst?: string;
+  getHhmmKst?: () => string | undefined;
   isEnabled: () => boolean;
   getLastFiredDayKey: () => string | undefined;
   setLastFiredDayKey: (key: string) => void;
 }): { name: string; evaluate: SignalEvaluator } {
-  const hhmm = opts.hhmmKst ?? "08:30";
-  const [targetH, targetM] = hhmm.split(":").map((x) => Number.parseInt(x, 10));
-  // PR#44 Copilot: validate parseInt — reject NaN and out-of-range values so a
-  // malformed config string doesn't silently turn into fires at t=NaN (which
-  // would compare false-ish and hide the misconfiguration).
   const isValidHm = (h: number, m: number): boolean =>
     Number.isFinite(h) && Number.isFinite(m) && h >= 0 && h <= 23 && m >= 0 && m <= 59;
-  if (!isValidHm(targetH, targetM)) {
-    console.warn(`[proactive-coordinator] invalid hhmmKst "${hhmm}" — scheduleSignal disabled`);
-    return {
-      name: "scheduleSignal",
-      evaluate: () => null,
-    };
-  }
   return {
     name: "scheduleSignal",
     evaluate: (now) => {
       if (!opts.isEnabled()) return null;
+      const hhmm = opts.getHhmmKst?.() ?? "08:30";
+      const [targetH, targetM] = hhmm.split(":").map((x) => Number.parseInt(x, 10));
+      if (!isValidHm(targetH, targetM)) {
+        console.warn(`[routine-coordinator] invalid hhmmKst "${hhmm}" — scheduleSignal disabled`);
+        return null;
+      }
       const fmt = new Intl.DateTimeFormat("en-GB", {
         timeZone: "Asia/Seoul",
         hour: "2-digit",
@@ -195,7 +204,7 @@ export function createScheduleSignal(opts: {
       }).format(now);
       const [curH, curM] = fmt.split(":").map((x) => Number.parseInt(x, 10));
       if (!isValidHm(curH, curM)) {
-        console.warn(`[proactive-coordinator] Intl DateTimeFormat produced invalid hh:mm "${fmt}"`);
+        console.warn(`[routine-coordinator] Intl DateTimeFormat produced invalid hh:mm "${fmt}"`);
         return null;
       }
       const curMinutes = curH * 60 + curM;
@@ -276,8 +285,9 @@ export function createPostTurnSignal(opts: {
   const DEFAULT_COOLDOWN_MS = 10 * 60_000;
   return {
     name: "postTurnSignal",
-    evaluate: (now) => {
+    evaluate: (now, source) => {
       if (!opts.isEnabled()) return null;
+      if (source !== "event:post-turn") return null;
       const cooldown = opts.getCooldownMs?.() ?? DEFAULT_COOLDOWN_MS;
       if (now.getTime() - opts.getLastFiredAt() < cooldown) return null;
       opts.setLastFiredAt(now.getTime());

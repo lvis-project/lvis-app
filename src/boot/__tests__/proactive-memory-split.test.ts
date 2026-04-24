@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { createProactiveEngine } from "../proactive.js";
+import { createRoutineEngine } from "../routine.js";
 
-describe("createProactiveEngine memory split wiring", () => {
+describe("createRoutineEngine memory split wiring", () => {
   it("reads recent notes from notes/ and voice hints from memory entries", () => {
     const listNotes = vi.fn(() => [
       { title: "회의 요약", filename: "meeting.md", content: "# 회의 요약" },
@@ -9,7 +9,7 @@ describe("createProactiveEngine memory split wiring", () => {
     const listMemoryEntries = vi.fn(() => [
       { title: "사용자 톤 메모", filename: "memory.md", content: "# 사용자 톤 메모" },
     ]);
-    const engine = createProactiveEngine({
+    const engine = createRoutineEngine({
       taskService: { getPendingByPriority: () => [] } as never,
       memoryManager: {
         listNotes,

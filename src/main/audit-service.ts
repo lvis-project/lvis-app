@@ -44,6 +44,7 @@ export class AuditService {
     this.writeLoop = setInterval(() => {
       void this._flush();
     }, 1000);
+    this.writeLoop.unref?.();
   }
 
   async stop(): Promise<void> {

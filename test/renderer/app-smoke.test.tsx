@@ -29,10 +29,10 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(true).toBe(true);
   });
 
-  it("BriefingCard appears when onProactiveBriefing fires", async () => {
-    const { container, emitProactive } = await renderApp();
+  it("BriefingCard appears when onRoutineBriefing fires", async () => {
+    const { container, emitRoutineBriefing } = await renderApp();
     await act(async () => {
-      emitProactive({
+      emitRoutineBriefing({
         generatedAt: new Date().toISOString(),
         items: [{ category: "info", priority: "low", title: "Test briefing" }],
         summary: "smoke summary",

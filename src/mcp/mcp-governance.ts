@@ -91,6 +91,7 @@ export class McpGovernance {
         });
       }
     }, interval);
+    this.refreshTimer.unref?.();
   }
 
   stopPolicyRefresh(): void {

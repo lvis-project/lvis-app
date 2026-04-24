@@ -131,8 +131,8 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
     );
   }
 
-  function stubProactiveEngine(): {
-    engine: import("../../core/proactive-engine.js").ProactiveEngine;
+  function stubEventCollector(): {
+    engine: { collectEvent(type: string, data: unknown): void };
     collected: Array<{ type: string; data: unknown }>;
   } {
     const collected: Array<{ type: string; data: unknown }> = [];
@@ -140,7 +140,7 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
       collectEvent(type: string, data: unknown) {
         collected.push({ type, data });
       },
-    } as unknown as import("../../core/proactive-engine.js").ProactiveEngine;
+    };
     return { engine, collected };
   }
 
@@ -153,7 +153,7 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
     const orig = console.warn;
     console.warn = (msg: string) => warns.push(String(msg));
     try {
-      const { engine } = stubProactiveEngine();
+      const { engine } = stubEventCollector();
       registerManifestEventSubscriptions(runtime, engine);
     } finally {
       console.warn = orig;
@@ -172,7 +172,7 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
     const orig = console.warn;
     console.warn = (msg: string) => warns.push(String(msg));
     try {
-      const { engine } = stubProactiveEngine();
+      const { engine } = stubEventCollector();
       registerManifestEventSubscriptions(runtime, engine);
     } finally {
       console.warn = orig;
@@ -190,7 +190,7 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
     const orig = console.warn;
     console.warn = (msg: string) => warns.push(String(msg));
     try {
-      const { engine } = stubProactiveEngine();
+      const { engine } = stubEventCollector();
       registerManifestEventSubscriptions(runtime, engine);
     } finally {
       console.warn = orig;

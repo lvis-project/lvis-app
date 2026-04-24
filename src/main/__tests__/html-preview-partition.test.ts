@@ -8,15 +8,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 const mockOnBeforeRequest = vi.fn();
+const mockOnBeforeRequestMcp = vi.fn();
 const mockSession = {
   webRequest: {
     onBeforeRequest: mockOnBeforeRequest,
   },
 };
+const mockMcpSession = {
+  webRequest: {
+    onBeforeRequest: mockOnBeforeRequestMcp,
+  },
+};
 
 vi.mock("electron", () => ({
   session: {
-    fromPartition: vi.fn(() => mockSession),
+    fromPartition: vi.fn((partition: string) =>
+      partition === "lvis-mcp-app" ? mockMcpSession : mockSession),
   },
 }));
 
@@ -36,6 +43,18 @@ function invokeHandler(url: string): { cancel: boolean } {
   return result;
 }
 
+function invokeMcpHandler(url: string): { cancel: boolean } {
+  const handler = mockOnBeforeRequestMcp.mock.calls[0][0] as (
+    details: { url: string },
+    callback: (result: { cancel: boolean }) => void,
+  ) => void;
+  let result!: { cancel: boolean };
+  handler({ url }, (r) => {
+    result = r;
+  });
+  return result;
+}
+
 describe("installHtmlPreviewPartitionBlock", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -44,10 +63,12 @@ describe("installHtmlPreviewPartitionBlock", () => {
 
   it("calls session.fromPartition with the correct partition name", () => {
     expect(vi.mocked(session.fromPartition)).toHaveBeenCalledWith("lvis-render-html");
+    expect(vi.mocked(session.fromPartition)).toHaveBeenCalledWith("lvis-mcp-app");
   });
 
   it("registers a webRequest.onBeforeRequest handler", () => {
     expect(mockOnBeforeRequest).toHaveBeenCalledOnce();
+    expect(mockOnBeforeRequestMcp).toHaveBeenCalledOnce();
     expect(mockOnBeforeRequest.mock.calls[0][0]).toBeTypeOf("function");
   });
 
@@ -69,6 +90,11 @@ describe("installHtmlPreviewPartitionBlock", () => {
 
   it("blocks https URLs", () => {
     expect(invokeHandler("https://attacker.example/exfil")).toEqual({ cancel: true });
+  });
+
+  it("allows CDN https URLs only for MCP apps", () => {
+    expect(invokeHandler("https://cdn.jsdelivr.net/npm/vue")).toEqual({ cancel: true });
+    expect(invokeMcpHandler("https://cdn.jsdelivr.net/npm/vue")).toEqual({ cancel: false });
   });
 
   it("blocks file URLs", () => {

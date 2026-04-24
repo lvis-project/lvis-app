@@ -20,6 +20,7 @@ import type {
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
 import type { PluginSignatureVerifier } from "./signature-verifier.js";
+import { resolveDependencies } from "./dependency-resolver.js";
 
 /**
  * M1 — uiCallable safety: inverted model.
@@ -96,7 +97,7 @@ export interface PluginCard {
   capabilities: string[];
   /** tool name → description from manifest.toolSchemas */
   toolDescriptions?: Record<string, string>;
-  /** true when manifest.deployment blocks user uninstall/disable (managed or bundled) */
+  /** true when the plugin is protected from ordinary user uninstall/disable */
   isManaged?: boolean;
   /** Runtime load status derived from loaded/failed/disabled runtime state. */
   loadStatus: "loaded" | "failed" | "disabled";
@@ -184,6 +185,7 @@ export class PluginRuntime {
   async load(): Promise<void> {
     if (this.loaded) return;
     const loadPlan = await this.resolveManifestLoadPlan();
+    const enabledManifestSnapshots = await this.readEnabledManifestSnapshots(loadPlan);
     for (const plan of loadPlan) {
       const manifestPath = plan.manifestPath;
       let manifest: PluginManifest;
@@ -211,6 +213,26 @@ export class PluginRuntime {
       }
       this.disabledPluginIds.delete(manifest.id);
       this.failedPluginIds.delete(manifest.id);
+      const requiredCapabilities = manifest.requires?.capabilities ?? [];
+      if (requiredCapabilities.length > 0) {
+        const availableManifests = [...enabledManifestSnapshots.entries()]
+          .filter(([pluginId]) => pluginId !== manifest.id)
+          .map(([, candidate]) => candidate);
+        const dependencyResult = resolveDependencies(requiredCapabilities, availableManifests);
+        if (!dependencyResult.ok) {
+          const reason = `missing required capabilities: ${dependencyResult.missing.join(", ")}`;
+          console.error(`[plugin-runtime] ${manifest.id} rejected — ${reason}`);
+          this.auditLog?.("error", "plugin_dependency_missing", {
+            pluginId: manifest.id,
+            missing: dependencyResult.missing,
+          });
+          this.markFailed(manifest.id, {
+            name: manifest.name,
+            description: `Missing capabilities: ${dependencyResult.missing.join(", ")}`,
+          });
+          continue;
+        }
+      }
       const pluginRoot = dirname(manifestPath);
 
       // Sprint 3-B §9.6 — manifest signature gate.
@@ -219,7 +241,7 @@ export class PluginRuntime {
       const skipSignatureVerification = process.env.LVIS_DEV_SKIP_SIG === "1";
       if (this.signatureVerifier && !skipSignatureVerification) {
         const sigResult = await this.signatureVerifier.verifyManifestFile(manifestPath);
-        const isManaged = manifest.deployment === "managed" || manifest.deployment === "bundled";
+        const isManaged = manifest.deployment === "managed" || manifest.deliveryMode === "bundled";
         if (!sigResult.valid) {
           if (isManaged) {
             console.error(
@@ -980,7 +1002,7 @@ export class PluginRuntime {
     // manifest. testMode may legitimately appear in dev/fixture builds but
     // should NEVER ship inside a protected deployment install.
     if (
-      (parsed.deployment === "managed" || parsed.deployment === "bundled") &&
+      (parsed.deployment === "managed" || parsed.deliveryMode === "bundled") &&
       parsed.config &&
       typeof parsed.config === "object" &&
       (parsed.config as Record<string, unknown>).testMode === true
@@ -1209,6 +1231,22 @@ export class PluginRuntime {
     }
   }
 
+  private async readEnabledManifestSnapshots(
+    loadPlan: Array<{ pluginIdHint?: string; manifestPath: string; enabled: boolean }>,
+  ): Promise<Map<string, PluginManifest>> {
+    const snapshots = new Map<string, PluginManifest>();
+    for (const plan of loadPlan) {
+      if (!plan.enabled) continue;
+      try {
+        const manifest = await this.readManifest(plan.manifestPath);
+        snapshots.set(manifest.id, manifest);
+      } catch {
+        continue;
+      }
+    }
+    return snapshots;
+  }
+
   private buildPluginCard(
     pluginId: string,
     manifest: PluginManifest,
@@ -1251,7 +1289,7 @@ export class PluginRuntime {
       tools: filteredTools,
       capabilities: manifest.capabilities ?? [],
       toolDescriptions: Object.keys(toolDescriptions).length > 0 ? toolDescriptions : undefined,
-      isManaged: manifest.deployment === "managed" || manifest.deployment === "bundled",
+      isManaged: manifest.deployment === "managed" || manifest.deliveryMode === "bundled",
       loadStatus,
       version: manifest.version,
       publisher: manifest.publisher,
@@ -1273,6 +1311,9 @@ function createNoopHostApi(): PluginHostApi {
     isMsGraphAuthenticated: () => false,
     getMsGraphAccount: () => null,
     onMsGraphAuthChange: () => {},
+    callTool: async () => {
+      throw new Error("Plugin tool invocation not available in noop context");
+    },
     withMsGraphRetry: async () => {
       throw new Error("MS Graph not available in noop context");
     },

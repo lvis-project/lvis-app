@@ -21,13 +21,13 @@ export type RenderAppReturn = {
   unmount: RenderResult["unmount"];
   api: MockLvisApi;
   emitChatStream: (ev: unknown) => void;
-  emitProactive: (b: unknown) => void;
+  emitRoutineBriefing: (b: unknown) => void;
   emitViewActivate: (v: string) => void;
   emitApproval: (r: unknown) => void;
 };
 
 export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppReturn> {
-  const { api, emitChatStream, emitProactive, emitViewActivate } = makeMockLvisApi(opts);
+  const { api, emitChatStream, emitRoutineBriefing, emitViewActivate } = makeMockLvisApi(opts);
   const { ns, emitApproval } = makeMockLvisNamespace();
 
   vi.stubGlobal("lvisApi", api);
@@ -44,7 +44,7 @@ export async function renderApp(opts: RenderAppOpts = {}): Promise<RenderAppRetu
     unmount: result.unmount,
     api,
     emitChatStream,
-    emitProactive,
+    emitRoutineBriefing,
     emitViewActivate,
     emitApproval,
   };

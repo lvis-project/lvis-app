@@ -85,7 +85,8 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
     });
   };
   _runAuditMaintenance();
-  setInterval(_runAuditMaintenance, 60 * 60 * 1000); // 1 hour
+  const auditMaintenanceTimer = setInterval(_runAuditMaintenance, 60 * 60 * 1000); // 1 hour
+  auditMaintenanceTimer.unref?.();
 
   // §4.2 Step 5: Core Engines
   const memoryManager = new MemoryManager();

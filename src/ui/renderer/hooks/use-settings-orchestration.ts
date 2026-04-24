@@ -124,7 +124,7 @@ export function useSettingsOrchestration(
       const webApiKeySet = await api.hasWebApiKey(s.webSearch.provider);
       if (cancelled) return;
       setHasWebKey(webApiKeySet);
-      setEnableDailyBriefing(s.proactive?.enableDailyBriefing ?? false);
+      setEnableDailyBriefing(s.routine?.enableDailyBriefing ?? false);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
       setFallbackChain((s.llm.fallbackChain ?? []).map((e) => ({ provider: e.provider, model: e.model })));
       setSettingsLoaded(true);
@@ -200,7 +200,7 @@ export function useSettingsOrchestration(
           } as any,
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
-          proactive: { enableDailyBriefing } as any,
+          routine: { enableDailyBriefing } as any,
           privacy: { piiRedactEnabled },
         } as any);
       }

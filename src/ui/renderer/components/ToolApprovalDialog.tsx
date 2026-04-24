@@ -119,7 +119,7 @@ export function ToolApprovalDialog({
           {/* 인자 미리보기 */}
           <div>
             <p className="mb-1 text-xs font-medium text-muted-foreground">인자</p>
-            <pre className="max-h-40 overflow-auto rounded border bg-muted/50 p-2 text-[11px]">
+            <pre className="max-h-40 overflow-auto rounded border bg-muted/50 p-2 text-[11px] whitespace-pre-wrap break-all">
               {argsDisplay}
             </pre>
             {argsStr.length > 500 && (
