@@ -2,10 +2,12 @@
  * McpAppView — MCP Apps spec §3 sandboxed UI renderer.
  *
  * Renders a `ui://` resource from an MCP server inside an Electron <webview>
- * (same sandboxing strategy as HtmlPreview — partition `lvis-render-html`,
- * no nodeIntegration, contextIsolation=yes).
+ * (same sandboxing baseline as HtmlPreview, but in the dedicated
+ * `lvis-mcp-app` partition with no nodeIntegration and contextIsolation=yes).
  *
- * AppBridge (§3.4): the webview ↔ host channel uses postMessage JSON-RPC 2.0.
+ * AppBridge (§3.4): the webview ↔ host channel uses JSON-RPC 2.0 over the
+ * embedder window message channel, with host responses injected back into the
+ * guest via `webview.executeJavaScript()`.
  * Currently supported methods:
  *   - `mcp/ping` → `{ pong: true }`
  *   - `mcp/getContext` → `{ serverId, resourceUri, title }`
@@ -15,6 +17,16 @@
 import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import type { McpUiPayload } from "../../../mcp/types.js";
 import { Loader2, AlertCircle } from "lucide-react";
+
+type BridgeMessage = { jsonrpc?: string; id?: number; method?: string; params?: unknown };
+type BridgeEventSource = MessageEventSource | null | undefined;
+type BridgeWebview = EventTarget & {
+  setAttribute(name: string, value: string): void;
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
+  executeJavaScript?: (code: string) => Promise<unknown>;
+  contentWindow?: BridgeEventSource;
+};
 
 // ─── CSP helper ─────────────────────────────────────
 // MCP App 렌더러는 외부 CDN(jsdelivr, unpkg, cdnjs 등)에서
@@ -48,7 +60,8 @@ function wrapWithCsp(html: string): string {
 /**
  * Minimal AppBridge script injected into the MCP App's webview page.
  * Provides `window.McpBridge.request(method, params)` → Promise.
- * Host-side handler responds via `ipc-message` event.
+ * Host-side handler responds by executing `window.postMessage(...)` inside the
+ * guest page so the bridge can resolve the pending request Promise.
  */
 function buildBridgeScript(payload: McpUiPayload): string {
   const ctx = JSON.stringify({ serverId: payload.serverId, resourceUri: payload.resourceUri, title: payload.title ?? "" });
@@ -88,6 +101,65 @@ function injectBridge(html: string, payload: McpUiPayload): string {
   return `<!doctype html><html><head>${bridgeScript}</head><body>${html}</body></html>`;
 }
 
+export function createMcpAppBridge(payload: McpUiPayload, el: BridgeWebview) {
+  const sendBridgeResponse = (message: unknown) => {
+    const json = JSON.stringify(message);
+    void el.executeJavaScript?.(`window.postMessage(${json}, "*");`).catch(() => undefined);
+  };
+
+  const handleBridgeMessage = (msg: BridgeMessage) => {
+    if (!msg?.id || !msg?.method) return;
+
+    let result: unknown;
+    switch (msg.method) {
+      case "mcp/ping":
+        result = { pong: true };
+        break;
+      case "mcp/getContext":
+        result = { serverId: payload.serverId, resourceUri: payload.resourceUri, title: payload.title ?? "" };
+        break;
+      default:
+        sendBridgeResponse({
+          jsonrpc: "2.0",
+          id: msg.id,
+          error: { code: -32601, message: "Method not found" },
+        });
+        return;
+    }
+
+    sendBridgeResponse({ jsonrpc: "2.0", id: msg.id, result });
+  };
+
+  const handleWindowMessage = (event: MessageEvent) => {
+    const guestWindow = el.contentWindow;
+    if (!guestWindow || event.source !== guestWindow) return;
+    handleBridgeMessage(event.data as BridgeMessage);
+  };
+
+  const handleIpcMessage = (ev: Event) => {
+    const event = ev as CustomEvent & { channel?: string; args?: unknown[] };
+    if (event.channel !== "mcp-bridge") return;
+    handleBridgeMessage(event.args?.[0] as BridgeMessage);
+  };
+
+  const attach = () => {
+    window.addEventListener("message", handleWindowMessage);
+    el.addEventListener("ipc-message", handleIpcMessage);
+  };
+
+  const detach = () => {
+    window.removeEventListener("message", handleWindowMessage);
+    el.removeEventListener("ipc-message", handleIpcMessage);
+  };
+
+  return {
+    attach,
+    detach,
+    handleWindowMessage,
+    handleIpcMessage,
+  };
+}
+
 // ─── Component ───────────────────────────────────────
 
 export function McpAppView({ payload }: { payload: McpUiPayload }) {
@@ -119,7 +191,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
 
   // Wire up the webview sandbox attributes
   useEffect(() => {
-    const el = webviewRef.current;
+    const el = webviewRef.current as BridgeWebview | null;
     if (!el) return;
     el.setAttribute("partition", "lvis-mcp-app");
     el.setAttribute("allowpopups", "false");
@@ -129,33 +201,11 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
     );
     el.setAttribute("disablewebsecurity", "false");
 
-    // AppBridge: handle postMessage JSON-RPC from the webview
-    const handleIpcMessage = (ev: Event) => {
-      const event = ev as CustomEvent & { channel?: string; args?: unknown[] };
-      if (event.channel !== "mcp-bridge") return;
-      const msg = event.args?.[0] as { jsonrpc?: string; id?: number; method?: string; params?: unknown };
-      if (!msg?.id || !msg?.method) return;
-
-      let result: unknown;
-      switch (msg.method) {
-        case "mcp/ping":
-          result = { pong: true };
-          break;
-        case "mcp/getContext":
-          result = { serverId: payload.serverId, resourceUri: payload.resourceUri, title: payload.title ?? "" };
-          break;
-        default:
-          (el as unknown as { send: (ch: string, ...args: unknown[]) => void })
-            .send?.("mcp-bridge", { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "Method not found" } });
-          return;
-      }
-
-      (el as unknown as { send: (ch: string, ...args: unknown[]) => void })
-        .send?.("mcp-bridge", { jsonrpc: "2.0", id: msg.id, result });
+    const bridge = createMcpAppBridge(payload, el);
+    bridge.attach();
+    return () => {
+      bridge.detach();
     };
-
-    el.addEventListener("ipc-message", handleIpcMessage);
-    return () => el.removeEventListener("ipc-message", handleIpcMessage);
   }, [payload]);
 
   const dataUrl = useMemo(
@@ -170,7 +220,7 @@ export function McpAppView({ payload }: { payload: McpUiPayload }) {
       <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
         <span className="truncate">{payload.title ?? "MCP App"}</span>
         <span className="text-[10px] opacity-60">
-          MCP · 격리된 프로세스 · 네트워크 차단
+          MCP · 격리된 프로세스 · 제한된 네트워크
         </span>
       </div>
       {error ? (

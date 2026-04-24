@@ -110,6 +110,7 @@ const MCP_PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const HANDSHAKE_TIMEOUT_MS = 10_000; // initialize / tools/list 핸드셰이크용
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
+const MAX_BUFFERED_RESPONSES = 128;
 
 // ─── Transport Strategy ──────────────────────────────
 
@@ -434,7 +435,7 @@ export class McpClient {
     if (!pending) {
       // Race condition: 응답이 pendingRequests 등록 전에 도착한 경우 큐에 보관
       // (서버가 두 응답을 한 chunk로 보낼 때 발생)
-      this.bufferedResponses.set(response.id, response);
+      this.bufferBufferedResponse(response);
       return;
     }
 
@@ -479,6 +480,19 @@ export class McpClient {
       pending.reject(new Error(`[mcp-client] ${reason}`));
     }
     this.pendingRequests.clear();
+    this.bufferedResponses.clear();
+  }
+
+  private bufferBufferedResponse(response: JsonRpcResponse): void {
+    if (this.bufferedResponses.has(response.id)) {
+      this.bufferedResponses.delete(response.id);
+    }
+    this.bufferedResponses.set(response.id, response);
+    while (this.bufferedResponses.size > MAX_BUFFERED_RESPONSES) {
+      const oldest = this.bufferedResponses.keys().next().value;
+      if (oldest === undefined) break;
+      this.bufferedResponses.delete(oldest);
+    }
   }
 
   /**
