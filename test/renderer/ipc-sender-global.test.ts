@@ -43,10 +43,6 @@ const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
   "lvis:chat:retry-effort": "tier2",
   "lvis:chat:export": "tier2",
   // Memory
-  "lvis:memory:notes:list": "tier3",
-  "lvis:memory:notes:save": "tier1",
-  "lvis:memory:notes:delete": "tier1",
-  "lvis:memory:notes:search": "tier3",
   "lvis:memory:lvis-md:get": "tier3",
   "lvis:memory:lvis-md:update": "tier1",
   "lvis:memory:user-prefs:get": "tier3",

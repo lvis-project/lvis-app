@@ -8,7 +8,7 @@ import { Textarea } from "../../../components/ui/textarea.js";
 import type { LvisApi, RoutineRecord } from "../types.js";
 import {
   DEFAULT_SHUTDOWN_PROMPT,
-  DEFAULT_WAKEUP_PROMPT,
+  DEFAULT_DAILY_BRIEFING_PROMPT,
   HEARTBEAT_AGENT_OPTIONS,
   MAX_HEARTBEAT_ENTRIES,
   createDefaultHeartbeatEntry,
@@ -150,7 +150,7 @@ export function RoutinePanel({
   const defaultContextPromptFor = useCallback((routineId: string) => {
     switch (routineId) {
       case "daily-briefing":
-        return DEFAULT_WAKEUP_PROMPT;
+        return DEFAULT_DAILY_BRIEFING_PROMPT;
       case "shutdown-summary":
         return DEFAULT_SHUTDOWN_PROMPT;
       default:

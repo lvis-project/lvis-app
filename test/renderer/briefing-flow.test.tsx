@@ -71,23 +71,13 @@ describe("Briefing flow (Phase 3.3 regression net)", () => {
       return el;
     });
 
-    // Click the 닫기 button, pick the "건너뛰고 닫기" option to bypass reason picker.
+    // Click the 닫기 button to dismiss the briefing.
     const closeBtn = Array.from(card.querySelectorAll("button")).find(
       (b) => b.textContent?.trim() === "닫기",
     ) as HTMLButtonElement | undefined;
     expect(closeBtn).toBeTruthy();
     await act(async () => {
       fireEvent.click(closeBtn!);
-    });
-    const skipBtn = await waitFor(() => {
-      const btn = Array.from(container.querySelectorAll("button")).find(
-        (b) => b.textContent?.includes("건너뛰고 닫기"),
-      );
-      if (!btn) throw new Error("skip-close not found");
-      return btn as HTMLButtonElement;
-    });
-    await act(async () => {
-      fireEvent.click(skipBtn);
     });
     await waitFor(() => expect(api.dismissBriefing).toHaveBeenCalled());
     await waitFor(() => {

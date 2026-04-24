@@ -39,15 +39,21 @@ export interface ShutdownSummary {
   summary: string;
 }
 
+export interface MemoryManagerLike {
+  listMemoryEntries(): Array<{ title: string; filename: string; content?: string }>;
+}
+
 export interface RoutineEngineDeps {
   pluginRuntime: PluginRuntime;
+  memoryManager?: MemoryManagerLike;
+  taskService?: { getPendingByPriority?: () => unknown[] };
   isDailyBriefingEnabled?: () => boolean;
   getLastBriefingDate?: () => string | undefined;
   setLastBriefingDate?: (dateKst: string) => void;
   getLastDismissedAt?: () => string | undefined;
-  getWakeupPrompt?: () => string | undefined;
+  getDailyBriefingPrompt?: () => string | undefined;
   getShutdownPrompt?: () => string | undefined;
-  wakeupBriefingTool?: string;
+  dailyBriefingTool?: string;
   shutdownSummaryTool?: string;
   heartbeatTool?: string;
 }
@@ -86,8 +92,8 @@ export class RoutineEngine {
     return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(now);
   }
 
-  private get wakeupBriefingTool(): string | undefined {
-    return this.deps.wakeupBriefingTool;
+  private get dailyBriefingTool(): string | undefined {
+    return this.deps.dailyBriefingTool;
   }
 
   private get shutdownSummaryTool(): string | undefined {
@@ -124,16 +130,16 @@ export class RoutineEngine {
         }
       }
 
-      if (!this.wakeupBriefingTool) {
+      if (!this.dailyBriefingTool) {
         return { status: "skipped", reason: "provider_unavailable" };
       }
 
       let raw: unknown;
       try {
-        raw = await this.deps.pluginRuntime.call(this.wakeupBriefingTool, {
+        raw = await this.deps.pluginRuntime.call(this.dailyBriefingTool, {
           trigger: options.triggerReason ?? "routine",
           nowIso: now.toISOString(),
-          routinePrompt: this.deps.getWakeupPrompt?.(),
+          routinePrompt: this.deps.getDailyBriefingPrompt?.(),
         });
       } catch {
         return { status: "skipped", reason: "provider_unavailable" };
@@ -154,7 +160,7 @@ export class RoutineEngine {
 
   async generateTextBriefing(): Promise<Briefing> {
     const now = new Date();
-    if (!this.wakeupBriefingTool) {
+    if (!this.dailyBriefingTool) {
       return {
         generatedAt: now.toISOString(),
         items: [],
@@ -162,7 +168,7 @@ export class RoutineEngine {
       };
     }
     try {
-      const raw = await this.deps.pluginRuntime.call(this.wakeupBriefingTool, {
+      const raw = await this.deps.pluginRuntime.call(this.dailyBriefingTool, {
         trigger: "manual",
         nowIso: now.toISOString(),
       });
@@ -177,13 +183,23 @@ export class RoutineEngine {
     };
   }
 
-  /** @deprecated compatibility shim for older routine call sites. */
-  collectBriefingItems(): BriefingItem[] {
-    return [];
+  /** Collects briefing items from memory entries and other sources. */
+  collectBriefingItems(_now?: Date): BriefingItem[] {
+    const items: BriefingItem[] = [];
+    const entries = this.deps.memoryManager?.listMemoryEntries() ?? [];
+    for (const entry of entries) {
+      items.push({
+        category: "note",
+        priority: "medium",
+        title: entry.title,
+        detail: entry.content,
+      });
+    }
+    return items;
   }
 
-  /** @deprecated compatibility shim for older routine call sites. */
-  getBriefingPromptData(items?: BriefingItem[]): string {
+  /** Renders briefing items into a prompt string. */
+  getBriefingPromptData(items?: BriefingItem[], _now?: Date): string {
     if (!items || items.length === 0) return "";
     return items
       .map((item) => `[${item.priority}] ${item.category}: ${item.title}${item.detail ? ` (${item.detail})` : ""}`)

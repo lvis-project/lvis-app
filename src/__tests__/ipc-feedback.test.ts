@@ -51,7 +51,7 @@ function makeServices(overrides: Record<string, unknown> = {}) {
     pluginRuntime: { listUiExtensions: vi.fn(() => []), listPluginCards: vi.fn(() => []), callFromUi: vi.fn(), restartAll: vi.fn(), getPerfStats: vi.fn(() => ({})) },
     pluginMarketplace: { list: vi.fn(() => []), install: vi.fn(), uninstall: vi.fn() },
     taskService: { add: vi.fn(), update: vi.fn(), get: vi.fn(), delete: vi.fn(), query: vi.fn(() => []), getPendingByPriority: vi.fn(() => []), getOverdue: vi.fn(() => []), getDueToday: vi.fn(() => []) },
-    memoryManager: { listMemoryEntries: vi.fn(() => []), saveMemory: vi.fn(), deleteMemory: vi.fn(), searchMemoryEntries: vi.fn(() => []), listNotes: vi.fn(() => []), saveNote: vi.fn(), deleteNote: vi.fn(), searchNotes: vi.fn(() => []), getMemoryContext: vi.fn(() => ""), getLvisMd: vi.fn(() => ""), updateLvisMd: vi.fn(), getUserPreferences: vi.fn(() => ""), updateUserPreferences: vi.fn(), appendBriefingFeedback: vi.fn(), saveSession: vi.fn() },
+    memoryManager: { listMemoryEntries: vi.fn(() => []), saveMemory: vi.fn(), deleteMemory: vi.fn(), searchMemoryEntries: vi.fn(() => []), getMemoryContext: vi.fn(() => ""), getLvisMd: vi.fn(() => ""), updateLvisMd: vi.fn(), getUserPreferences: vi.fn(() => ""), updateUserPreferences: vi.fn(), saveSession: vi.fn() },
     msGraphService: {
       getEnvironment: vi.fn(() => "external"),
       getState: vi.fn(() => ({

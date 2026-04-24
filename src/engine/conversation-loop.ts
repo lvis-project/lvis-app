@@ -841,13 +841,6 @@ export class ConversationLoop {
           : memories.map((n) => `- ${n.title} (${n.filename})`).join("\n");
         break;
       }
-      case "notes": {
-        const notes = this.deps.memoryManager.listNotes();
-        result = notes.length === 0
-          ? "저장된 노트 없음."
-          : notes.map((n) => `- ${n.title} (${n.filename})`).join("\n");
-        break;
-      }
       case "sessions": {
         const sessions = this.listSessions(10);
         if (sessions.length === 0) { result = "저장된 세션 없음."; break; }
@@ -910,13 +903,12 @@ export class ConversationLoop {
 /briefing — 데일리 브리핑
 /remember <내용> — 메모 저장
 /memory — 사용자 메모 목록
-/notes — 노트 목록
 /vendor — 현재 벤더/토큰 정보
 /tools — 등록된 도구 목록
 /help — 이 도움말`;
         break;
       default:
-        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /briefing, /remember, /memory, /notes, /vendor, /tools, /help`;
+        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /briefing, /remember, /memory, /vendor, /tools, /help`;
     }
 
     callbacks?.onTextDelta?.(result);

@@ -48,7 +48,7 @@ export const DEFAULT_HEARTBEAT_SCHEDULE: HeartbeatSchedule = {
 };
 
 export const DEFAULT_HEARTBEAT_AGENT_ID: HeartbeatAgentId = "monitor";
-export const DEFAULT_WAKEUP_PROMPT =
+export const DEFAULT_DAILY_BRIEFING_PROMPT =
   "오늘 반드시 챙겨야 할 업무 맥락, 긴급 메일, 임박한 일정, 회의 후속조치를 우선순위 중심으로 간결하게 정리하세요.";
 export const DEFAULT_SHUTDOWN_PROMPT =
   "오늘 마무리 시점에서 남은 후속 작업, 중요한 결정, 내일 이어서 볼 포인트를 중심으로 정리하세요.";

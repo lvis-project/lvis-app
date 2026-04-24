@@ -4,7 +4,7 @@
  * Extracted from boot.ts to keep orchestration thin. This module:
  *   • constructs the PluginDeploymentGuard + SignatureVerifier
  *   • builds the per-plugin HostApi factory (registerKeywords / emitEvent /
- *     onEvent / addTask / saveNote / getSecret / msGraph* / callLlm /
+ *     onEvent / addTask / getSecret / msGraph* / callLlm /
  *     logEvent / onShutdown)
  *   • creates the PluginRuntime, starts plugins, wires manifest startupTools
  *     and the dev hot-reload watcher
@@ -253,10 +253,6 @@ export async function initPluginRuntime(
           status: "pending",
         });
         console.log(`[lvis] plugin:${pluginId} created task: "${task.title.slice(0, 50)}"`);
-      },
-      saveNote: async (title, content) => {
-        await memoryManager.saveNote(title, content);
-        console.log(`[lvis] plugin:${pluginId} saved note: "${title}"`);
       },
       getSecret: (key) => {
         return settingsService.getSecret(key);

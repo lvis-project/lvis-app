@@ -11,7 +11,7 @@ function makeEngine(overrides: Partial<ConstructorParameters<typeof RoutineEngin
     getLastBriefingDate: () => undefined,
     setLastBriefingDate: vi.fn(),
     getLastDismissedAt: () => undefined,
-    wakeupBriefingTool: "work_proactive_generate_wakeup_briefing",
+    dailyBriefingTool: "work_proactive_generate_wakeup_briefing",
     ...overrides,
   };
   return { engine: new RoutineEngine(deps), pluginRuntime, deps };

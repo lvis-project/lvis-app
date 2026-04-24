@@ -341,7 +341,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             capabilities: ["work-proactive-provider"],
             requires: { capabilities: ["calendar-source"] },
             routineTools: {
-              wakeupBriefing: "work_proactive_generate_wakeup_briefing",
+              dailyBriefing: "work_proactive_generate_wakeup_briefing",
             },
             toolSchemas: {
               work_proactive_generate_wakeup_briefing: {
@@ -387,7 +387,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(manifest.requires).toEqual({ capabilities: ["calendar-source"] });
     expect(manifest.capabilities).toEqual(["work-proactive-provider"]);
     expect(manifest.routineTools).toEqual({
-      wakeupBriefing: "work_proactive_generate_wakeup_briefing",
+      dailyBriefing: "work_proactive_generate_wakeup_briefing",
     });
     expect(manifest.toolSchemas?.work_proactive_generate_wakeup_briefing?.description).toBe(
       "Generate wakeup briefing",

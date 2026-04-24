@@ -1304,7 +1304,6 @@ function createNoopHostApi(): PluginHostApi {
     emitEvent: () => {},
     onEvent: () => () => {},
     addTask: () => {},
-    saveNote: async () => {},
     getSecret: () => null,
     getMsGraphToken: async () => null,
     startMsGraphAuth: async () => {},

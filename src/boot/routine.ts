@@ -32,25 +32,27 @@ export function createRoutineEngine(opts: {
   getLastBriefingDate?: () => string | undefined;
   setLastBriefingDate?: (dateKst: string) => void;
   getLastDismissedAt?: () => string | undefined;
-  getWakeupPrompt?: () => string | undefined;
+  getDailyBriefingPrompt?: () => string | undefined;
   getShutdownPrompt?: () => string | undefined;
   auditLogger?: unknown;
 }): RoutineEngine {
   const {
     pluginRuntime,
     isDailyBriefingEnabled,
-    getLastBriefingDate, setLastBriefingDate, getLastDismissedAt, getWakeupPrompt, getShutdownPrompt,
+    getLastBriefingDate, setLastBriefingDate, getLastDismissedAt, getDailyBriefingPrompt, getShutdownPrompt,
   } = opts;
   const routineTools = resolveRoutineTools(pluginRuntime);
   return new RoutineEngine({
     pluginRuntime,
+    memoryManager: opts.memoryManager,
+    taskService: opts.taskService,
     isDailyBriefingEnabled,
       getLastBriefingDate,
       setLastBriefingDate,
       getLastDismissedAt,
-      getWakeupPrompt,
+      getDailyBriefingPrompt,
       getShutdownPrompt,
-      wakeupBriefingTool: routineTools.wakeupBriefing,
+      dailyBriefingTool: routineTools.dailyBriefing,
     shutdownSummaryTool: routineTools.shutdownSummary,
     heartbeatTool: routineTools.heartbeat,
   });

@@ -27,7 +27,7 @@ import {
 import { REGISTERED_ROUTINES, getRegisteredRoutine } from "./routines/registry.js";
 import {
   DEFAULT_SHUTDOWN_PROMPT,
-  DEFAULT_WAKEUP_PROMPT,
+  DEFAULT_DAILY_BRIEFING_PROMPT,
   MAX_HEARTBEAT_ENTRIES,
   heartbeatScheduleToCron,
   isValidHeartbeatEntries,
@@ -154,10 +154,6 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:chat:new",
   "lvis:chat:sessions",
   "lvis:chat:load-session",
-  "lvis:memory:notes:list",
-  "lvis:memory:notes:save",
-  "lvis:memory:notes:delete",
-  "lvis:memory:notes:search",
   "lvis:memory:entries:list",
   "lvis:memory:entries:save",
   "lvis:memory:entries:delete",
@@ -555,7 +551,7 @@ ${input}`;
         enabled: isRoutineEnabled(routine, routineSettings),
         scheduleTimeKst: routine.id === "daily-briefing" ? routineSettings.scheduleTimeKst ?? "08:30" : undefined,
         contextPrompt: routine.id === "daily-briefing"
-          ? routineSettings.wakeupPrompt ?? DEFAULT_WAKEUP_PROMPT
+          ? routineSettings.dailyBriefingPrompt ?? DEFAULT_DAILY_BRIEFING_PROMPT
           : routine.id === "shutdown-summary"
             ? routineSettings.shutdownPrompt ?? DEFAULT_SHUTDOWN_PROMPT
             : undefined,
@@ -583,7 +579,7 @@ ${input}`;
       if (typeof patch.postTurnEnabled === "boolean") next.enablePostTurnBriefing = patch.postTurnEnabled;
       if (typeof patch.scheduleTimeKst === "string") next.scheduleTimeKst = patch.scheduleTimeKst;
       if (typeof patch.contextPrompt === "string") {
-        next.wakeupPrompt = patch.contextPrompt.trim() || DEFAULT_WAKEUP_PROMPT;
+        next.dailyBriefingPrompt = patch.contextPrompt.trim() || DEFAULT_DAILY_BRIEFING_PROMPT;
       }
     } else if (routineId === "heartbeat") {
       if (typeof patch.enabled === "boolean") next.enableHeartbeat = patch.enabled;
@@ -667,19 +663,6 @@ ${input}`;
 
   // ─── Memory ─────────────────────────────────────
   // read-only, sender guard optional
-  ipcMain.handle("lvis:memory:notes:list", () => memoryManager.listNotes());
-  ipcMain.handle("lvis:memory:notes:save", async (e, title: string, content: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:save", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.saveNote(title, content);
-  });
-  ipcMain.handle("lvis:memory:notes:delete", (e, filename: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:delete", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.deleteNote(filename);
-  });
-  ipcMain.handle("lvis:memory:notes:search", (e, query: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:search", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.searchNotesEntries(query);
-  });
   ipcMain.handle("lvis:memory:entries:list", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:list", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.listMemoryEntries();
@@ -1033,7 +1016,7 @@ ${input}`;
   // accidental double-click / rapid-fire IPC abuse.
   let lastDismissAcceptedAt = 0;
   const DISMISS_DEBOUNCE_MS = 1000;
-  ipcMain.handle("lvis:routine:dismiss-briefing", async (e, feedback?: { reason?: string; details?: string }) => {
+  ipcMain.handle("lvis:routine:dismiss-briefing", async (e) => {
     if (!validateSender(e)) return UNAUTHORIZED_FRAME;
     const now = Date.now();
     if (now - lastDismissAcceptedAt < DISMISS_DEBOUNCE_MS) {
@@ -1045,18 +1028,6 @@ ${input}`;
       routine: { ...cur, lastDismissedAt: new Date(now).toISOString() },
     });
     clearLatestRoutineBriefing();
-    // Sprint E §2 — persist user feedback to ~/.lvis/notes/briefing-feedback.md
-    const allowed = new Set(["inaccurate", "uninteresting", "busy", "other"]);
-    if (feedback?.reason && allowed.has(feedback.reason)) {
-      try {
-        await memoryManager.appendBriefingFeedback({
-          reason: feedback.reason as "inaccurate" | "uninteresting" | "busy" | "other",
-          details: feedback.details,
-        });
-      } catch (err) {
-        console.warn("[lvis] briefing feedback persist failed:", (err as Error).message);
-      }
-    }
     return { ok: true };
   });
 

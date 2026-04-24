@@ -10,7 +10,7 @@ import {
 import {
   createDefaultHeartbeatEntry,
   DEFAULT_SHUTDOWN_PROMPT,
-  DEFAULT_WAKEUP_PROMPT,
+  DEFAULT_DAILY_BRIEFING_PROMPT,
   normalizeHeartbeatEntries,
   type HeartbeatEntry,
 } from "../routines/schedule.js";
@@ -167,7 +167,7 @@ export interface RoutineSettings {
   lastBriefingAt?: string;
   lastDismissedAt?: string;
   scheduleTimeKst?: string;
-  wakeupPrompt?: string;
+  dailyBriefingPrompt?: string;
   enableHeartbeat?: boolean;
   heartbeatEntries?: HeartbeatEntry[];
   /** @deprecated legacy single-heartbeat setting kept only for migration. */
@@ -250,7 +250,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   routine: {
     enableDailyBriefing: false,
     scheduleTimeKst: "08:30",
-    wakeupPrompt: DEFAULT_WAKEUP_PROMPT,
+    dailyBriefingPrompt: DEFAULT_DAILY_BRIEFING_PROMPT,
     enableHeartbeat: true,
     heartbeatEntries: [createDefaultHeartbeatEntry(0)],
     enableShutdownSummary: true,
@@ -491,9 +491,9 @@ export class SettingsService {
       const normalizedRoutine = {
         ...DEFAULT_SETTINGS.routine,
         ...legacyRoutine,
-        wakeupPrompt: typeof legacyRoutine?.wakeupPrompt === "string" && legacyRoutine.wakeupPrompt.trim().length > 0
-          ? legacyRoutine.wakeupPrompt.trim()
-          : DEFAULT_WAKEUP_PROMPT,
+        dailyBriefingPrompt: typeof legacyRoutine?.dailyBriefingPrompt === "string" && legacyRoutine.dailyBriefingPrompt.trim().length > 0
+          ? legacyRoutine.dailyBriefingPrompt.trim()
+          : DEFAULT_DAILY_BRIEFING_PROMPT,
         heartbeatEntries: normalizeHeartbeatEntries(
           legacyRoutine?.heartbeatEntries,
           legacyRoutine?.heartbeatSchedule,

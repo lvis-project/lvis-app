@@ -21,7 +21,7 @@ export interface BundleDependencySpec {
 }
 
 export interface RoutineToolBindings {
-  wakeupBriefing?: string;
+  dailyBriefing?: string;
   shutdownSummary?: string;
   heartbeat?: string;
 }
@@ -50,7 +50,7 @@ export interface PluginManifest {
    * - `meeting-recorder` — 실시간 음성 캡처 및 STT (meeting)
    * - `mail-source` — 이메일 소스 연결 (email)
    * - `calendar-source` — 캘린더 소스 연결 (calendar)
-   * - `routine-provider` — host Routine runtime이 호출하는 wakeup/shutdown/heartbeat tool 제공
+   * - `routine-provider` — host Routine runtime이 호출하는 dailyBriefing/shutdown/heartbeat tool 제공
    * - `background-watcher` — `startupTools` 로 백그라운드 폴러/감시자 기동 (email, calendar)
    * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼 (pageindex)
    * - `knowledge-index` — 문서 인덱스/검색 기능 제공 (pageindex)
@@ -260,7 +260,6 @@ export interface PluginHostApi {
     sourceRef?: string;
     priority?: "high" | "medium" | "low";
   }): void;
-  saveNote(title: string, content: string): Promise<void>;
   getSecret(key: string): string | null;
 
   // Microsoft Graph 공유 인증 (메일·캘린더 플러그인)

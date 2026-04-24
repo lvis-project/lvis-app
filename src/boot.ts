@@ -209,7 +209,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       settingsService.patch({ routine: { ...cur, lastBriefingAt: dateKst } });
     },
     getLastDismissedAt: () => settingsService.get("routine")?.lastDismissedAt,
-    getWakeupPrompt: () => settingsService.get("routine")?.wakeupPrompt,
+    getDailyBriefingPrompt: () => settingsService.get("routine")?.dailyBriefingPrompt,
     getShutdownPrompt: () => settingsService.get("routine")?.shutdownPrompt,
   });
 
