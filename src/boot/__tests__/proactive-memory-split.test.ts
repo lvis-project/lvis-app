@@ -22,10 +22,10 @@ describe("createRoutineEngine", () => {
     expect(typeof engine.runRoutine).toBe("function");
   });
 
-  it("runRoutine calls loop.run with the prePrompt", async () => {
+  it("runRoutine calls loop.runTurn with the prePrompt", async () => {
     const mockLoop = {
-      run: vi.fn(async (prompt: string) => prompt + " 처리됨"),
-      getLastAssistantMessage: vi.fn(async () => ""),
+      runTurn: vi.fn(async (prompt: string) => prompt + " 처리됨"),
+      getLastAssistantMessage: vi.fn(async () => "오늘 업무 맥락 정리 처리됨"),
       dispose: vi.fn(),
     };
 
@@ -39,7 +39,7 @@ describe("createRoutineEngine", () => {
       prePrompt: "오늘 업무 맥락 정리",
     });
 
-    expect(mockLoop.run).toHaveBeenCalledWith("오늘 업무 맥락 정리");
+    expect(mockLoop.runTurn).toHaveBeenCalledWith("오늘 업무 맥락 정리");
     expect(result.routineId).toBe("wakeup");
     expect(result.trigger).toBe("wakeup");
   });
