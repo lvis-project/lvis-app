@@ -124,7 +124,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   });
 
   // §4.2 Step 4: builtin tools + request_plugin meta tool.
-  registerBuiltinTools(memoryManager, toolRegistry, settingsService);
+  registerBuiltinTools(memoryManager, toolRegistry, settingsService, taskService);
   registerRequestPluginMetaTool(toolRegistry);
 
   // §4.4 HybridRetriever + Knowledge Tools DI, §6.1 IdleSchedulerService.
