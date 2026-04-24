@@ -237,6 +237,85 @@ describe("task tools", () => {
     expect(titles).toEqual(["과거"]);
   });
 
+  it("task_add: YYYY-MM-DD interpreted as KST end-of-day (no timezone off-by-one)", async () => {
+    const { json } = await call(toolByName(tools, "task_add"), {
+      title: "KST end-of-day",
+      dueAt: "2026-04-30",
+    });
+    const iso = (json as { dueAt: string }).dueAt;
+    // 2026-04-30T23:59:59+09:00 == 2026-04-30T14:59:59Z
+    expect(iso).toBe("2026-04-30T14:59:59.000Z");
+  });
+
+  it("task_add: full ISO input kept as-is (no KST re-interpretation)", async () => {
+    const { json } = await call(toolByName(tools, "task_add"), {
+      title: "ISO 원본",
+      dueAt: "2026-04-30T18:00:00Z",
+    });
+    expect((json as { dueAt: string }).dueAt).toBe("2026-04-30T18:00:00.000Z");
+  });
+
+  it("task_update: dueAt=null clears existing due date", async () => {
+    const created = await call(toolByName(tools, "task_add"), {
+      title: "마감 제거 테스트",
+      dueAt: "2026-05-01",
+    });
+    const id = (created.json as { id: string }).id;
+    expect((created.json as { dueAt?: string }).dueAt).toBeTruthy();
+
+    const updated = await call(toolByName(tools, "task_update"), {
+      id,
+      dueAt: null,
+    });
+    expect(updated.isError).toBe(false);
+    expect((updated.json as { dueAt?: string }).dueAt).toBeUndefined();
+  });
+
+  it("task_update: dueAt='' also clears", async () => {
+    const created = await call(toolByName(tools, "task_add"), {
+      title: "빈 문자열 clear",
+      dueAt: "2026-05-01",
+    });
+    const id = (created.json as { id: string }).id;
+    const updated = await call(toolByName(tools, "task_update"), {
+      id,
+      dueAt: "",
+    });
+    expect(updated.isError).toBe(false);
+    expect((updated.json as { dueAt?: string }).dueAt).toBeUndefined();
+  });
+
+  it("task_update: omitted dueAt keeps previous value (not cleared)", async () => {
+    const created = await call(toolByName(tools, "task_add"), {
+      title: "유지 확인",
+      dueAt: "2026-05-01",
+    });
+    const id = (created.json as { id: string }).id;
+    const originalDue = (created.json as { dueAt: string }).dueAt;
+
+    const updated = await call(toolByName(tools, "task_update"), {
+      id,
+      title: "제목만 수정",
+    });
+    expect(updated.isError).toBe(false);
+    expect((updated.json as { dueAt: string }).dueAt).toBe(originalDue);
+  });
+
+  it("task_list: rejects non-numeric limit (falls back to default 100)", async () => {
+    // Seed 3 tasks
+    await call(toolByName(tools, "task_add"), { title: "A" });
+    await call(toolByName(tools, "task_add"), { title: "B" });
+    await call(toolByName(tools, "task_add"), { title: "C" });
+
+    // String "2" must NOT be coerced → default 100 → returns all 3
+    const r1 = await call(toolByName(tools, "task_list"), { limit: "2" });
+    expect((r1.json as { items: unknown[] }).items).toHaveLength(3);
+
+    // Float 1.8 → floor → 1
+    const r2 = await call(toolByName(tools, "task_list"), { limit: 1.8 });
+    expect((r2.json as { items: unknown[] }).items).toHaveLength(1);
+  });
+
   it("task_delete: removes task, subsequent update returns not-found", async () => {
     const created = await call(toolByName(tools, "task_add"), { title: "제거" });
     const id = (created.json as { id: string }).id;

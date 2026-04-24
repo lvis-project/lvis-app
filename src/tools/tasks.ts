@@ -19,14 +19,45 @@ import type {
 const PRIORITY_VALUES: TaskPriority[] = ["high", "medium", "low"];
 const STATUS_VALUES: TaskStatus[] = ["pending", "done", "snoozed"];
 
+/**
+ * `YYYY-MM-DD` 입력은 사용자 시각 (KST) 의 **당일 23:59:59** 로 해석한다.
+ * `new Date("2026-04-30")` 는 UTC 자정 = KST 09:00 으로 파싱되어 "오늘 마감"
+ * 경계가 밀린다. 데드라인 시맨틱상 "4/30 까지" = "4/30 하루가 끝날 때까지"
+ * 가 가장 자연스러우므로 KST 의 end-of-day 로 고정. full ISO 입력은 이미
+ * timezone 정보가 있으므로 그대로 사용.
+ */
+const KST_OFFSET = "+09:00";
+const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
 function asIsoOrUndef(value: unknown): string | undefined {
-  if (value === undefined || value === null || value === "") return undefined;
   if (typeof value !== "string") return undefined;
-  // Accept either YYYY-MM-DD or full ISO. Normalize to ISO at service boundary
-  // so the stored timestamp is sortable / comparable.
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return undefined;
-  return parsed.toISOString();
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (DATE_ONLY_RE.test(trimmed)) {
+    const parsed = new Date(`${trimmed}T23:59:59${KST_OFFSET}`);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  }
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+/**
+ * `task_update` 의 `dueAt` 필드가 JSON 으로 받을 수 있는 clear 신호.
+ * - omitted (key 없음) → 변경 없음
+ * - `null` 또는 `""` → dueAt 지우기
+ * - valid date/ISO → set
+ */
+type DueAtIntent =
+  | { kind: "unchanged" }
+  | { kind: "clear" }
+  | { kind: "set"; iso: string };
+
+function parseDueAtIntent(raw: unknown, hasKey: boolean): DueAtIntent {
+  if (!hasKey) return { kind: "unchanged" };
+  if (raw === null) return { kind: "clear" };
+  if (typeof raw === "string" && raw.trim() === "") return { kind: "clear" };
+  const iso = asIsoOrUndef(raw);
+  return iso ? { kind: "set", iso } : { kind: "unchanged" };
 }
 
 function asPriority(value: unknown): TaskPriority | undefined {
@@ -77,7 +108,7 @@ export function createTaskTools(taskService: TaskService): Tool[] {
           dueAt: {
             type: "string",
             description:
-              "마감일 (ISO 8601 또는 YYYY-MM-DD). 예: '2026-04-30T18:00:00Z' 또는 '2026-04-30'.",
+              "마감일. ISO 8601 (예: '2026-04-30T18:00:00Z') 또는 YYYY-MM-DD (KST 기준 당일 end-of-day 23:59:59+09:00 로 해석).",
           },
           source: {
             type: "string",
@@ -131,8 +162,13 @@ export function createTaskTools(taskService: TaskService): Tool[] {
           },
           priority: { type: "string", enum: PRIORITY_VALUES },
           dueAt: {
-            type: "string",
-            description: "ISO 8601 또는 YYYY-MM-DD. 비우려면 null 이 아닌 undefined.",
+            description:
+              "마감일 설정/변경: ISO 8601 또는 YYYY-MM-DD (KST 기준 당일 end-of-day). " +
+              "마감일 제거: null 또는 빈 문자열 전달. 필드 생략 시 기존 값 유지.",
+            oneOf: [
+              { type: "string" },
+              { type: "null" },
+            ],
           },
         },
       },
@@ -154,10 +190,14 @@ export function createTaskTools(taskService: TaskService): Tool[] {
         if (status) patch.status = status;
         const priority = asPriority(a.priority);
         if (priority) patch.priority = priority;
-        if (a.dueAt !== undefined) {
-          const iso = asIsoOrUndef(a.dueAt);
-          if (iso) patch.dueAt = iso;
-        }
+
+        const dueIntent = parseDueAtIntent(
+          a.dueAt,
+          Object.prototype.hasOwnProperty.call(a, "dueAt"),
+        );
+        if (dueIntent.kind === "clear") patch.dueAt = undefined;
+        else if (dueIntent.kind === "set") patch.dueAt = dueIntent.iso;
+
         if (Object.keys(patch).length === 0) {
           return err("no updatable fields provided");
         }
@@ -245,9 +285,12 @@ export function createTaskTools(taskService: TaskService): Tool[] {
         const dueAfter = asIsoOrUndef(a.dueAfter);
         if (dueAfter) filter.dueAfter = dueAfter;
 
-        const limit = Number.isFinite(Number(a.limit))
-          ? Math.max(1, Math.min(500, Number(a.limit)))
-          : 100;
+        // Schema 선언은 integer — 런타임도 엄격하게 number 만 수용 + floor +
+        // clamp. string/float 은 schema 위반으로 간주해 default 로 떨어뜨림.
+        const limit =
+          typeof a.limit === "number" && Number.isFinite(a.limit)
+            ? Math.max(1, Math.min(500, Math.floor(a.limit)))
+            : 100;
         const items = taskService.query(filter).slice(0, limit);
         return ok({ count: items.length, items });
       },
