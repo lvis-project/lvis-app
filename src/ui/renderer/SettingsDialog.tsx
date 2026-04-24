@@ -25,15 +25,15 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader><DialogTitle>설정</DialogTitle><DialogDescription>앱 환경, 채팅 동작, 검색 엔진, 권한 정책을 설정합니다.</DialogDescription></DialogHeader>
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 [&>*]:!grow-0 [&>*]:!shrink-0 [&>*]:!basis-auto">
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 [&>*]:!grow-0 [&>*]:!shrink-0 [&>*]:!basis-auto overflow-x-auto">
             <TabsTrigger value="llm">지능 (LLM)</TabsTrigger>
             <TabsTrigger value="advanced">고급</TabsTrigger>
             <TabsTrigger value="chat">채팅</TabsTrigger>
             <TabsTrigger value="web">검색 (Web)</TabsTrigger>
-            <TabsTrigger value="proactive">브리핑</TabsTrigger>
+            <TabsTrigger value="routine">브리핑</TabsTrigger>
             <TabsTrigger value="privacy">프라이버시</TabsTrigger>
             <TabsTrigger value="permissions">권한</TabsTrigger>
             <TabsTrigger value="roles">역할</TabsTrigger>
@@ -108,7 +108,7 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
             />
           </TabsContent>
 
-          <TabsContent value="proactive">
+          <TabsContent value="routine">
             <ProactiveTab
               enableDailyBriefing={s.enableDailyBriefing}
               setEnableDailyBriefing={s.setEnableDailyBriefing}

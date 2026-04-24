@@ -46,7 +46,7 @@ export function App() {
     entries, streaming, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
-    seedBriefing, clearForNewChat, appendUserEntry, applyLoadedSession, truncateToEntry,
+    clearForNewChat, appendUserEntry, applyLoadedSession, truncateToEntry,
     fallbackToast,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
@@ -154,10 +154,19 @@ export function App() {
     await api.chatNew(); clearForNewChat(); void refreshSessionId();
   }, [api, streaming, refreshSessionId, clearForNewChat]);
 
+  const handleStartRoutineSession = useCallback(async (routineId: string) => {
+    const result = await api.startRoutineSession(routineId);
+    if (!result.ok || !result.sessionId) return;
+    await sessionLoad(result.sessionId, streaming, applyLoadedSession);
+    setActiveView("home");
+    await refreshSessionId();
+    await refreshSessions();
+  }, [api, sessionLoad, streaming, applyLoadedSession, refreshSessionId, refreshSessions]);
+
   // ─── Effects ──────────────────────────────────
   useAppBootstrap({
     api, refreshMarketplace, refreshViews, checkApiKey,
-    seedBriefing, setActiveView,
+    setActiveView,
     openCommandPalette: () => setCommandOpen(true),
   });
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
@@ -178,6 +187,7 @@ export function App() {
   const commandActions = useMemo(() => [
     { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
     { id: "tasks", label: "태스크 보기", run: () => setActiveView("tasks") },
+    { id: "routines", label: "루틴 보기", run: () => setActiveView("routines") },
     { id: "settings", label: "설정 열기", run: () => setSettingsOpen(true) },
     { id: "new-chat", label: "새 대화 시작", run: () => void handleNewChat() },
     ...pluginViews.map((i) => ({ id: `v:${toViewKey(i)}`, label: `${getPluginViewLabel(i)} 열기`, run: () => setActiveView(toViewKey(i)) })),
@@ -247,6 +257,7 @@ export function App() {
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSession}
+            onStartRoutineSession={handleStartRoutineSession}
             chatContextValue={chatContextValue}
             onAsk={(q) => handleAsk(q, "default")}
             onGuide={(q) => handleAsk(q, "guidance")}

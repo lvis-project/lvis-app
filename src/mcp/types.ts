@@ -237,3 +237,38 @@ export interface McpServerState {
 export type ValidationResult =
   | { valid: true }
   | { valid: false; reason: string; layer: number };
+
+// ─── MCP Apps UI Payload (MCP Apps spec 2026-01-26) ─
+
+/**
+ * Slot in which the MCP App should be rendered.
+ * - `"chat"` : inline in the chat message flow (below the tool card)
+ * - `"sidebar"` : docked to the sidebar panel
+ * - `"tool-result"` : embedded inside the ToolGroupCard result row
+ */
+export type McpUiSlot = "chat" | "sidebar" | "tool-result";
+
+/**
+ * Payload produced by an MCP tool that declares a UI extension.
+ *
+ * MCP Apps spec §3.2 — a tool response may carry `_meta.ui` to request
+ * that the host render an interactive micro-app alongside the text reply.
+ * The host fetches the resource at `resourceUri` (a `ui://` scheme URL
+ * resolved against the connected MCP server) and renders it in a sandboxed
+ * webview / iframe using the `AppBridge` postMessage JSON-RPC channel.
+ */
+export interface McpUiPayload {
+  /** MCP server that owns this UI resource. */
+  serverId: string;
+  /**
+   * `ui://` URI pointing to the HTML resource on the MCP server.
+   * The main process resolves this via `resources/read` to fetch the HTML.
+   */
+  resourceUri: string;
+  /** Preferred render slot — defaults to `"chat"` when omitted. */
+  slot?: McpUiSlot;
+  /** Preferred height in pixels — defaults to 300 when omitted. */
+  height?: number;
+  /** Human-readable title shown in the webview title bar. */
+  title?: string;
+}

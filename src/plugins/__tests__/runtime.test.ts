@@ -363,4 +363,78 @@ describe("PluginRuntime.disable", () => {
     const manifest = runtime.getPluginManifest("meta-plugin");
     expect(manifest?.startupTools).toEqual(["meta_ping"]);
   });
+
+  it("drops plugins whose required capabilities are not provided by enabled manifests", async () => {
+    const providerDir = join(installedDir, "cap-provider");
+    await mkdir(providerDir, { recursive: true });
+    await writeFile(
+      join(providerDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return {
+    handlers: {
+      "cap_provider_ping": async () => "pong",
+    },
+  };
+}
+`,
+      "utf-8",
+    );
+    const providerManifestPath = join(providerDir, "plugin.json");
+    await writeFile(
+      providerManifestPath,
+      JSON.stringify({
+        id: "cap-provider",
+        name: "cap-provider",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: ["cap_provider_ping"],
+        capabilities: ["calendar-source"],
+      }),
+      "utf-8",
+    );
+
+    const consumerDir = join(installedDir, "needs-calendar");
+    await mkdir(consumerDir, { recursive: true });
+    await writeFile(
+      join(consumerDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return {
+    handlers: {
+      "needs_calendar_ping": async () => "pong",
+    },
+  };
+}
+`,
+      "utf-8",
+    );
+    const consumerManifestPath = join(consumerDir, "plugin.json");
+    await writeFile(
+      consumerManifestPath,
+      JSON.stringify({
+        id: "needs-calendar",
+        name: "needs-calendar",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: ["needs_calendar_ping"],
+        requires: { capabilities: ["calendar-source", "mail-source"] },
+      }),
+      "utf-8",
+    );
+
+    await writeRegistry([
+      { id: "cap-provider", manifestPath: providerManifestPath, enabled: true },
+      { id: "needs-calendar", manifestPath: consumerManifestPath, enabled: true },
+    ]);
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    expect(runtime.listPluginIds()).toContain("cap-provider");
+    expect(runtime.listPluginIds()).not.toContain("needs-calendar");
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/needs-calendar rejected .*mail-source/),
+    );
+    errSpy.mockRestore();
+  });
 });
