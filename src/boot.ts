@@ -67,6 +67,7 @@ import {
   createApprovalGate,
   createHookRunner,
   createConversationLoop,
+  createRoutineConversationLoop,
   createCallLlm,
   createCallLlmForPlugin,
 } from "./boot/conversation.js";
@@ -199,14 +200,22 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
-  // §7: Routine Engine — ConversationLoop를 lazy factory로 주입 (순환 의존 방지).
-  // conversationLoop는 아래에서 생성되므로 ref를 통해 늦게 바인딩한다.
-  const conversationLoopRef: { current: ConversationLoop | null } = { current: null };
+  // §7: Routine Engine — 루틴마다 독립된 ConversationLoop를 생성하는 factory를 주입.
+  // interactive 채팅의 ConversationLoop 인스턴스를 공유하면 세션 히스토리 오염 및
+  // concurrent IPC 채팅 턴과의 race condition이 발생한다. factory는 stateless deps만
+  // 캡처하므로 순환 의존 없이 즉시 바인딩할 수 있다.
+  const routineLoopDeps = {
+    settingsService,
+    systemPromptBuilder,
+    keywordEngine,
+    routeEngine,
+    toolRegistry,
+    memoryManager,
+    permissionManager,
+    pluginRuntime,
+  };
   const routineEngine = createRoutineEngine({
-    createConversationLoop: () => {
-      if (!conversationLoopRef.current) throw new Error("ConversationLoop not yet initialized");
-      return conversationLoopRef.current;
-    },
+    createConversationLoop: () => createRoutineConversationLoop(routineLoopDeps),
   });
 
   // Sprint 3-A-2: RoutineTriggerCoordinator + idle-scheduler composite.
@@ -258,7 +267,6 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // Late-binding 주입 — ConversationLoop 생성 직후.
   lateBinding.conversationLoopRef.fn = conversationLoop;
-  conversationLoopRef.current = conversationLoop; // §7: routineEngine lazy binding
   lateBinding.llmCallerRef.fn = createCallLlm(conversationLoop);
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
   console.log("[lvis] boot: plugin callLlm ready (rate-limited)");
