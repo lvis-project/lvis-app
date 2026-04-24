@@ -4,6 +4,7 @@
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { StreamEvent } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
+import type { HeartbeatAgentId, HeartbeatEntry, HeartbeatSchedule } from "../../routines/schedule.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
@@ -66,7 +67,18 @@ export type AppSettings = {
   };
   chat: { systemPrompt: string; autoCompact: boolean };
   webSearch: { provider: string };
-  proactive?: { enableDailyBriefing: boolean; lastBriefingAt?: string; lastDismissedAt?: string };
+  routine?: {
+    enableDailyBriefing: boolean;
+    lastBriefingAt?: string;
+    lastDismissedAt?: string;
+    scheduleTimeKst?: string;
+    wakeupPrompt?: string;
+    enableHeartbeat?: boolean;
+    heartbeatEntries?: HeartbeatEntry[];
+    enableShutdownSummary?: boolean;
+    shutdownPrompt?: string;
+    enablePostTurnBriefing?: boolean;
+  };
   privacy?: { piiRedactEnabled: boolean };
 };
 
@@ -101,6 +113,26 @@ export type BriefingPayload = {
   generatedAt: string;
   items: Array<{ category: string; priority: string; title: string; detail?: string }>;
   summary?: string;
+};
+
+export type RoutineSessionSummary = {
+  id: string;
+  modifiedAt: string;
+  title: string;
+};
+
+export type RoutineRecord = {
+  id: string;
+  title: string;
+  description: string;
+  trigger: "wakeup" | "heartbeat" | "shutdown";
+  enabled: boolean;
+  scheduleTimeKst?: string;
+  contextPrompt?: string;
+  heartbeatEntries?: Array<HeartbeatEntry & { cron: string }>;
+  postTurnEnabled?: boolean;
+  sessionCount: number;
+  sessions: RoutineSessionSummary[];
 };
 
 export type PluginMarketplaceActionResult =
@@ -175,8 +207,27 @@ export type LvisApi = {
   deleteTask: (id: string) => Promise<void>;
   getTodayTasks: () => Promise<Task[]>;
   getOverdueTasks: () => Promise<Task[]>;
-  getBriefing: () => Promise<string | null>;
-  onProactiveBriefing: (h: (b: BriefingPayload) => void) => () => void;
+  listRoutines: () => Promise<RoutineRecord[]>;
+  updateRoutine: (
+    routineId: string,
+    patch: {
+      enabled?: boolean;
+      scheduleTimeKst?: string;
+      contextPrompt?: string;
+      postTurnEnabled?: boolean;
+      heartbeatEntries?: Array<{
+        id: string;
+        enabled: boolean;
+        agentId: HeartbeatAgentId;
+        schedule: HeartbeatSchedule;
+        prompt: string;
+      }>;
+    },
+  ) => Promise<{ ok: boolean; error?: string }>;
+  startRoutineSession: (routineId: string) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
+  getLatestRoutineBriefing: () => Promise<BriefingPayload | null>;
+  resetDailyBriefingDev: () => Promise<{ ok: boolean; generated?: boolean; reason?: string; error?: string }>;
+  onRoutineBriefing: (h: (b: BriefingPayload) => void) => () => void;
   dismissBriefing: (feedback?: { reason: string; details?: string }) => Promise<{ ok: boolean; debounced?: boolean }>;
   snoozeBriefing: () => Promise<{ ok: boolean; lastDismissedAt?: string }>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
@@ -278,6 +329,8 @@ export type LvisMcpApi = {
   getConfigPath: () => Promise<string>;
   addConfig: (config: McpServerConfig) => Promise<{ connected: boolean; warning?: string }>;
   removeConfig: (id: string) => Promise<void>;
+  /** MCP Apps spec §3.3 — fetch a ui:// resource from the MCP server. */
+  readUiResource: (serverId: string, uri: string) => Promise<string>;
 };
 
 export type ExecMode = "default" | "strict" | "auto";

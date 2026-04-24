@@ -1,11 +1,30 @@
 /**
  * Plugin Deployment Mode — §9.6
  *
- * - **managed**: 회사(LGE IT)가 원격으로 배포/업데이트/삭제 제어.
+ * - **managed**: 회사(LGE IT)가 배포/업데이트/삭제 정책을 통제.
  *   사용자는 UI에서 제거·비활성화 불가 (PluginDeploymentGuard가 차단).
  * - **user**: 사용자가 자율적으로 설치. 회사 정책(userInstallPolicy)에 따라 제어.
  */
-export type DeploymentMode = "managed" | "bundled" | "user";
+export type DeploymentMode = "managed" | "user";
+
+/**
+ * Delivery mode — how a plugin is presented/distributed.
+ *
+ * - **marketplace**: 일반 마켓플레이스 다운로드형 플러그인
+ * - **bundled**: 마켓플레이스에 게시되지만 앱 기본 번들 세트에도 속하는 플러그인
+ */
+export type PluginDeliveryMode = "marketplace" | "bundled";
+
+export interface BundleDependencySpec {
+  pluginId: string;
+  versionRange?: string;
+}
+
+export interface RoutineToolBindings {
+  wakeupBriefing?: string;
+  shutdownSummary?: string;
+  heartbeat?: string;
+}
 
 export interface PluginManifest {
   /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.lge.meeting-recorder`. */
@@ -31,6 +50,7 @@ export interface PluginManifest {
    * - `meeting-recorder` — 실시간 음성 캡처 및 STT (meeting)
    * - `mail-source` — 이메일 소스 연결 (email)
    * - `calendar-source` — 캘린더 소스 연결 (calendar)
+   * - `routine-provider` — host Routine runtime이 호출하는 wakeup/shutdown/heartbeat tool 제공
    * - `background-watcher` — `startupTools` 로 백그라운드 폴러/감시자 기동 (email, calendar)
    * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼 (pageindex)
    * - `knowledge-index` — 문서 인덱스/검색 기능 제공 (pageindex)
@@ -39,6 +59,7 @@ export interface PluginManifest {
    *   `onMsGraphAuthChange`) 사용. §9.4a 참고. (email, calendar)
    */
   capabilities?: string[];
+  routineTools?: RoutineToolBindings;
   startupTools?: string[];
   /**
    * 플러그인이 구독하는 이벤트 타입 목록.
@@ -69,6 +90,9 @@ export interface PluginManifest {
     bodyField?: string;
   }>;
   deployment?: DeploymentMode;
+  deliveryMode?: PluginDeliveryMode;
+  bundleDependencies?: Array<string | BundleDependencySpec>;
+  requires?: RequiresSpec;
   publisher?: string;
   /**
    * Sprint 1-A A1 — optional hard startup timeout (ms, positive integer).
@@ -197,8 +221,22 @@ export interface PluginMarketplaceItem {
   channel?: "stable" | "canary";
   defaultConfig?: Record<string, unknown>;
   ui?: PluginUiExtension[];
+  capabilities?: string[];
+  routineTools?: RoutineToolBindings;
+  startupTools?: string[];
+  keywords?: Array<{ keyword: string; skillId: string }>;
+  uiCallable?: string[];
+  emittedEvents?: string[];
+  notificationEvents?: Array<{
+    event: string;
+    titleField?: string;
+    bodyField?: string;
+  }>;
   deployment?: DeploymentMode;
+  deliveryMode?: PluginDeliveryMode;
+  bundleDependencies?: Array<string | BundleDependencySpec>;
   publisher?: string;
+  toolSchemas?: PluginManifest["toolSchemas"];
   /** S14: dependency capabilities this plugin requires. */
   requires?: RequiresSpec;
 }
@@ -231,6 +269,7 @@ export interface PluginHostApi {
   isMsGraphAuthenticated(): boolean;
   getMsGraphAccount(): string | null;
   onMsGraphAuthChange(handler: () => void): void;
+  callTool<T = unknown>(toolName: string, payload?: unknown): Promise<T>;
 
   /**
    * Sprint 4-D T1: 한 번만 401 재시도를 수행하는 Graph API 호출 래퍼.

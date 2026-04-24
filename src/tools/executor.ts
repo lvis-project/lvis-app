@@ -96,11 +96,13 @@ export interface ToolResult {
   tool_use_id: string;
   content: string;
   is_error?: boolean;
+  /** MCP Apps spec §3.2 — optional UI payload from MCP tool response. */
+  uiPayload?: import("../mcp/types.js").McpUiPayload;
 }
 
 export interface ToolExecutorCallbacks {
   onToolStart?: (name: string, input: Record<string, unknown>, meta: ToolCallMeta) => void;
-  onToolEnd?: (name: string, result: string, isError: boolean, meta: ToolCallMeta) => void;
+  onToolEnd?: (name: string, result: string, isError: boolean, meta: ToolCallMeta, uiPayload?: import("../mcp/types.js").McpUiPayload) => void;
 }
 
 // ─── Rate Limiter (tool-governance.md §9) ──────────
@@ -355,6 +357,7 @@ export class ToolExecutor {
     // ── Step 6: Execute ─────────────────────────────
     let content: string;
     let isError = false;
+    let uiPayload: import("../mcp/types.js").McpUiPayload | undefined;
 
     const executionContext: ToolExecutionContext = {
       cwd: process.cwd(),
@@ -365,6 +368,10 @@ export class ToolExecutor {
       const result = await tool.execute(finalInput, executionContext);
       content = result.output;
       isError = result.isError;
+      // MCP Apps §3.2 — propagate uiPayload from tool metadata
+      if (result.metadata?.uiPayload) {
+        uiPayload = result.metadata.uiPayload as import("../mcp/types.js").McpUiPayload;
+      }
     } catch (err) {
       content = err instanceof Error ? err.message : "알 수 없는 도구 실행 오류";
       isError = true;
@@ -407,10 +414,10 @@ export class ToolExecutor {
     }
 
     // ── Step 8: Audit + Result (항상 실행) ──────────
-    callbacks?.onToolEnd?.(toolUse.name, content, isError, meta);
+    callbacks?.onToolEnd?.(toolUse.name, content, isError, meta, uiPayload);
     this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, content, isError, startTime, permissionResult, rateResult.remaining);
 
-    return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }) };
+    return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }), ...(uiPayload && { uiPayload }) };
   }
 
   // ─── Audit (불변 — 항상 실행) ────────────────────

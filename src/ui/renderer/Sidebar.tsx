@@ -14,6 +14,7 @@ export function Sidebar(props: SidebarProps) {
   const navItems = [
     { key: "home", label: "홈" },
     { key: "tasks", label: "태스크" },
+    { key: "routines", label: "루틴" },
     { key: "starred", label: "즐겨찾기", badge: starredCount > 0 ? `(${starredCount})` : null },
     { key: "memory", label: "메모리" },
     ...pluginViews.map((view) => ({

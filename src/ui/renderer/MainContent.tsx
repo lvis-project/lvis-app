@@ -4,6 +4,7 @@ import type { getApi } from "./api-client.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { ChatView } from "./ChatView.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
+import { RoutinePanel } from "./components/RoutinePanel.js";
 import { StarredView } from "./components/StarredView.js";
 import { TaskView } from "./components/TaskView.js";
 
@@ -21,6 +22,7 @@ export interface MainContentProps {
   // navigation
   onActivateHome: () => void;
   onJumpToSession: (sessionId: string) => void;
+  onStartRoutineSession: (routineId: string) => Promise<void>;
   // chat
   chatContextValue: ChatContextValue;
   onAsk: (q: string) => Promise<void>;
@@ -77,6 +79,19 @@ export function MainContent(props: MainContentProps): ReactNode {
           refreshStarred={props.refreshStarred}
           onJumpToSession={props.onJumpToSession}
           onActivateHome={props.onActivateHome}
+        />
+      </MainPaneShell>
+    );
+  }
+
+  if (activeView === "routines") {
+    return (
+      <MainPaneShell>
+        <RoutinePanel
+          api={api}
+          onActivateHome={props.onActivateHome}
+          onJumpToSession={props.onJumpToSession}
+          onStartRoutineSession={props.onStartRoutineSession}
         />
       </MainPaneShell>
     );

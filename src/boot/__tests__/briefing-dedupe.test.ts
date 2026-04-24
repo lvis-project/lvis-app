@@ -8,11 +8,11 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import {
-  ProactiveTriggerCoordinator,
+  RoutineTriggerCoordinator,
   createIdleSignal,
   createPostTurnSignal,
-} from "../../core/proactive-trigger-coordinator.js";
-import type { ProactiveEngine } from "../../core/proactive-engine.js";
+} from "../../core/routine-trigger-coordinator.js";
+import type { RoutineEngine } from "../../core/routine-engine.js";
 
 function makeMockEngine(status: "generated" | "skipped" = "generated") {
   const calls: unknown[] = [];
@@ -24,11 +24,11 @@ function makeMockEngine(status: "generated" | "skipped" = "generated") {
         : { status: "skipped", reason: "already-generated" };
     }),
     _calls: calls,
-  } as unknown as ProactiveEngine & { _calls: unknown[] };
+  } as unknown as RoutineEngine & { _calls: unknown[] };
   return engine;
 }
 
-describe("ProactiveTriggerCoordinator — global cooldown (Issue 3)", () => {
+describe("RoutineTriggerCoordinator — global cooldown (Issue 3)", () => {
   it("IDLE_SCAN fires briefing; post-turn 1 min later is suppressed by global cooldown", async () => {
     let nowMs = Date.now();
     let isIdle = false;
@@ -36,8 +36,8 @@ describe("ProactiveTriggerCoordinator — global cooldown (Issue 3)", () => {
 
     const engine = makeMockEngine("generated");
 
-    const coordinator = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine,
+    const coordinator = new RoutineTriggerCoordinator({
+      routineEngine: engine,
       disabled: () => false,
       debounceMs: 10 * 60_000, // 10 min
       tickIntervalMs: 999_999, // disable auto-tick
@@ -73,8 +73,8 @@ describe("ProactiveTriggerCoordinator — global cooldown (Issue 3)", () => {
     let isIdle = true;
     const engine = makeMockEngine("generated");
 
-    const coordinator = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine,
+    const coordinator = new RoutineTriggerCoordinator({
+      routineEngine: engine,
       disabled: () => false,
       debounceMs: 10 * 60_000,
       tickIntervalMs: 999_999,
@@ -92,8 +92,8 @@ describe("ProactiveTriggerCoordinator — global cooldown (Issue 3)", () => {
 
   it("isWithinGlobalCooldown returns false when no briefing has fired", () => {
     const engine = makeMockEngine("skipped");
-    const coordinator = new ProactiveTriggerCoordinator({
-      proactiveEngine: engine,
+    const coordinator = new RoutineTriggerCoordinator({
+      routineEngine: engine,
       disabled: () => false,
       debounceMs: 10 * 60_000,
       tickIntervalMs: 999_999,

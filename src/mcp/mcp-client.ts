@@ -33,6 +33,7 @@ import type {
   McpServerState,
   McpStdioServerConfig,
   McpToolSchema,
+  McpUiPayload,
 } from "./types.js";
 import type { McpGovernance } from "./mcp-governance.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -91,12 +92,23 @@ interface McpToolsListResult {
 interface McpToolCallResult {
   content: Array<{ type: string; text?: string; [key: string]: unknown }>;
   isError?: boolean;
+  /** MCP Apps spec §3.2 — optional UI extension metadata. */
+  _meta?: {
+    ui?: {
+      resourceUri?: string;
+      slot?: string;
+      height?: number;
+      title?: string;
+    };
+    [key: string]: unknown;
+  };
 }
 
 // ─── Constants ────────────────────────────────────────
 
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const HANDSHAKE_TIMEOUT_MS = 10_000; // initialize / tools/list 핸드셰이크용
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 
 // ─── Transport Strategy ──────────────────────────────
@@ -136,6 +148,8 @@ interface PendingRequest {
 export class McpClient {
   private nextRequestId = 1;
   private readonly pendingRequests = new Map<number, PendingRequest>();
+  /** 응답이 pending 등록 전에 도착한 경우를 위한 버퍼 (race condition 대응) */
+  private readonly bufferedResponses = new Map<number, JsonRpcResponse>();
   private healthTimer: NodeJS.Timeout | null = null;
   private transport: McpTransport | null = null;
 
@@ -192,7 +206,7 @@ export class McpClient {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: {},
         clientInfo: { name: "lvis-app", version: "0.1.0" },
-      });
+      }, HANDSHAKE_TIMEOUT_MS);
 
       console.log(
         `[mcp-client] ${this.config.id} 초기화 완료:`,
@@ -204,7 +218,7 @@ export class McpClient {
       await this.sendNotification("notifications/initialized", {});
 
       // 도구 목록 요청
-      const toolsResult = await this.sendRequest<McpToolsListResult>("tools/list", {});
+      const toolsResult = await this.sendRequest<McpToolsListResult>("tools/list", {}, HANDSHAKE_TIMEOUT_MS);
       const tools = toolsResult.tools ?? [];
 
       // Layer 3: 도구 등록 검증
@@ -263,7 +277,7 @@ export class McpClient {
   // ─── Tool Execution ─────────────────────────────────
 
   /** MCP 도구 호출 — ToolExecutor에서 사용 */
-  async callTool(name: string, args: Record<string, unknown>): Promise<string> {
+  async callTool(name: string, args: Record<string, unknown>): Promise<{ text: string; uiPayload?: McpUiPayload }> {
     if (this.state.status !== "connected" || !this.transport?.isAlive()) {
       throw new Error(`[mcp-client] 서버 '${this.config.id}'가 연결되지 않았습니다.`);
     }
@@ -286,9 +300,24 @@ export class McpClient {
         throw new Error(errorText);
       }
 
-      return result.content
+      const text = result.content
         .map((c) => c.text ?? JSON.stringify(c))
         .join("\n");
+
+      // MCP Apps spec §3.2 — detect UI extension in _meta.ui
+      const uiMeta = result._meta?.ui;
+      let uiPayload: McpUiPayload | undefined;
+      if (uiMeta?.resourceUri) {
+        uiPayload = {
+          serverId: this.config.id,
+          resourceUri: uiMeta.resourceUri,
+          slot: (uiMeta.slot as McpUiPayload["slot"]) ?? "chat",
+          height: uiMeta.height,
+          title: uiMeta.title,
+        };
+      }
+
+      return { text, uiPayload };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(`[mcp-client] 도구 호출 실패 (${this.config.id}/${name}): ${message}`);
@@ -298,6 +327,29 @@ export class McpClient {
   /** 서버 상태 조회 */
   getState(): McpServerState {
     return { ...this.state };
+  }
+
+  // ─── Resource Read (MCP Apps §3.3) ─────────────────
+
+  /**
+   * Fetch a `ui://` resource from the MCP server via `resources/read`.
+   * Returns the text content of the first text blob in the response.
+   */
+  async readResource(uri: string): Promise<string> {
+    if (this.state.status !== "connected" || !this.transport?.isAlive()) {
+      throw new Error(`[mcp-client] 서버 '${this.config.id}'가 연결되지 않았습니다.`);
+    }
+
+    interface McpResourceReadResult {
+      contents: Array<{ type?: string; text?: string; blob?: string; uri?: string; mimeType?: string }>;
+    }
+
+    const result = await this.sendRequest<McpResourceReadResult>("resources/read", { uri });
+    const textPart = result.contents.find((c) => c.text !== undefined);
+    if (!textPart?.text) {
+      throw new Error(`[mcp-client] resources/read '${uri}': 텍스트 콘텐츠 없음`);
+    }
+    return textPart.text;
   }
 
   // ─── JSON-RPC Transport ─────────────────────────────
@@ -340,6 +392,14 @@ export class McpClient {
         method,
       });
 
+      // Race condition 대응: 이미 버퍼에 응답이 도착해 있으면 즉시 처리
+      const buffered = this.bufferedResponses.get(id);
+      if (buffered) {
+        this.bufferedResponses.delete(id);
+        this.handleResponse(buffered);
+        return;
+      }
+
       const request: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
       transport.send(request).catch((err: Error) => {
         // send 실패 → pending 정리 후 reject
@@ -367,12 +427,16 @@ export class McpClient {
 
   private handleResponse(response: JsonRpcResponse): void {
     if (response.id === undefined || response.id === null) {
-      // 서버 발 notification — 현재는 무시
       return;
     }
 
     const pending = this.pendingRequests.get(response.id);
-    if (!pending) return;
+    if (!pending) {
+      // Race condition: 응답이 pendingRequests 등록 전에 도착한 경우 큐에 보관
+      // (서버가 두 응답을 한 chunk로 보낼 때 발생)
+      this.bufferedResponses.set(response.id, response);
+      return;
+    }
 
     this.pendingRequests.delete(response.id);
     clearTimeout(pending.timer);
@@ -520,7 +584,7 @@ export class McpClient {
 class StdioTransport implements McpTransport {
   readonly kind = "stdio" as const;
   private process: ChildProcess | null = null;
-  private inputBuffer = "";
+  private inputBuffer = Buffer.alloc(0);
   private messageHandler: ((msg: JsonRpcResponse) => void) | null = null;
   private closeHandler: ((reason: string) => void) | null = null;
   private closedExternally = false;
@@ -542,10 +606,14 @@ class StdioTransport implements McpTransport {
 
     this.process = spawn(this.config.command, this.config.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
+      // Windows: 콘솔 창 생성 방지 (창이 뜨면 stdout 파이프 동작이 달라짐)
+      windowsHide: true,
       env: {
         // C2 fix: 최소 환경변수만 허용 — API 키 유출 방지 (Least Privilege)
         PATH: process.env.PATH,
-        HOME: process.env.HOME,
+        HOME: process.env.HOME ?? process.env.USERPROFILE, // Windows 호환
+        USERPROFILE: process.env.USERPROFILE,
+        APPDATA: process.env.APPDATA,
         LANG: process.env.LANG,
         NODE_ENV: process.env.NODE_ENV,
         ...this.config.env, // 관리자 승인 환경변수만
@@ -630,17 +698,20 @@ class StdioTransport implements McpTransport {
   }
 
   private handleStdout(chunk: Buffer): void {
-    this.inputBuffer += chunk.toString("utf-8");
+    this.inputBuffer = Buffer.concat([this.inputBuffer, chunk]);
     this.parseMessages();
   }
 
   private parseMessages(): void {
     // Content-Length 기반 메시지 파싱 (LSP/MCP 표준)
+    // inputBuffer를 Buffer로 유지해 UTF-8 다중바이트 문자 포함 시에도
+    // Content-Length(바이트 단위)와 정확히 일치하게 처리한다.
     while (true) {
-      const headerEnd = this.inputBuffer.indexOf("\r\n\r\n");
+      // \r\n\r\n 구분자를 바이트 레벨에서 찾기
+      const headerEnd = indexOfCrLfCrLf(this.inputBuffer);
       if (headerEnd === -1) break;
 
-      const headerBlock = this.inputBuffer.slice(0, headerEnd);
+      const headerBlock = this.inputBuffer.slice(0, headerEnd).toString("ascii");
       const contentLengthMatch = headerBlock.match(/Content-Length:\s*(\d+)/i);
       if (!contentLengthMatch) {
         // 잘못된 헤더 — 건너뛰기
@@ -657,7 +728,7 @@ class StdioTransport implements McpTransport {
         break;
       }
 
-      const messageStr = this.inputBuffer.slice(messageStart, messageEnd);
+      const messageStr = this.inputBuffer.slice(messageStart, messageEnd).toString("utf-8");
       this.inputBuffer = this.inputBuffer.slice(messageEnd);
 
       try {
@@ -1003,4 +1074,20 @@ function indexOfAny(haystack: string, needles: string[]): number {
     if (earliest === -1 || idx < earliest) earliest = idx;
   }
   return earliest;
+}
+
+/**
+ * Find the byte offset of the first `\r\n\r\n` sequence in a Buffer.
+ * Returns -1 if not found. Used by StdioTransport.parseMessages() to
+ * correctly handle Content-Length framing when the JSON body contains
+ * multi-byte UTF-8 characters (Korean, CJK, etc.) — the Content-Length
+ * header value is in bytes, not JS string characters.
+ */
+function indexOfCrLfCrLf(buf: Buffer): number {
+  for (let i = 0; i <= buf.length - 4; i++) {
+    if (buf[i] === 0x0d && buf[i + 1] === 0x0a && buf[i + 2] === 0x0d && buf[i + 3] === 0x0a) {
+      return i;
+    }
+  }
+  return -1;
 }

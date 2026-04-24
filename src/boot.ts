@@ -19,9 +19,9 @@
  *                                                 hook-runner,
  *                                                 conversation-loop,
  *                                                 callLlm builders.
- *   Step 6          src/boot/proactive.ts         proactive engine +
+ *   Step 6          src/boot/routine.ts           routine runtime +
  *                                                 calendar loaders.
- *   Step 6          src/boot/steps/proactive-coordinator — trigger coordinator
+ *   Step 6          src/boot/steps/routine-coordinator — trigger coordinator
  *                                                 + idle-scheduler composite.
  *   Step 4          src/boot/tools.ts             builtin tools +
  *                                                 request_plugin meta-tool +
@@ -38,7 +38,6 @@
  * No plugin-specific code lives here — all plugins register themselves via the
  * HostApi manufactured in `steps/plugin-runtime.ts`.
  */
-import { resolve } from "node:path";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { PluginMarketplaceService } from "./plugins/marketplace.js";
@@ -59,10 +58,8 @@ import {
   wireKnowledgeAndIdleScheduler,
 } from "./boot/tools.js";
 import {
-  createProactiveEngine,
-  loadCalendarToday,
-  loadWeeklyCalendarIfMonday,
-} from "./boot/proactive.js";
+  createRoutineEngine,
+} from "./boot/routine.js";
 import {
   createSystemPromptBuilder,
   createPermissionManager,
@@ -75,7 +72,7 @@ import {
 } from "./boot/conversation.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
-import { wireProactiveCoordinator } from "./boot/steps/proactive-coordinator.js";
+import { wireRoutineCoordinator } from "./boot/steps/routine-coordinator.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { resolveManagedPluginBootstrap } from "./boot/managed-marketplace.js";
 
@@ -201,38 +198,31 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
-  // §7: Proactive Engine.
-  const proactiveEngine = createProactiveEngine({
-    taskService,
-    memoryManager,
+  // §7: Routine Engine.
+  const routineEngine = createRoutineEngine({
     pluginRuntime,
     isDailyBriefingEnabled: () =>
-      settingsService.get("proactive")?.enableDailyBriefing ?? false,
-    callLlm: async (prompt, opts) => {
-      if (!lateBinding.llmCallerRef.fn) throw new Error("LLM provider not ready");
-      return lateBinding.llmCallerRef.fn(prompt, opts);
-    },
-    getLastBriefingDate: () => settingsService.get("proactive")?.lastBriefingAt,
+      settingsService.get("routine")?.enableDailyBriefing ?? false,
+    getLastBriefingDate: () => settingsService.get("routine")?.lastBriefingAt,
     setLastBriefingDate: (dateKst) => {
-      const cur = settingsService.get("proactive") ?? { enableDailyBriefing: false };
-      settingsService.patch({ proactive: { ...cur, lastBriefingAt: dateKst } });
+      const cur = settingsService.get("routine") ?? { enableDailyBriefing: false };
+      settingsService.patch({ routine: { ...cur, lastBriefingAt: dateKst } });
     },
-    getLastDismissedAt: () => settingsService.get("proactive")?.lastDismissedAt,
-    auditLogger: bootAuditLogger,
+    getLastDismissedAt: () => settingsService.get("routine")?.lastDismissedAt,
+    getWakeupPrompt: () => settingsService.get("routine")?.wakeupPrompt,
+    getShutdownPrompt: () => settingsService.get("routine")?.shutdownPrompt,
   });
 
-  // Sprint 3-A-2: ProactiveTriggerCoordinator + idle-scheduler composite.
-  wireProactiveCoordinator({
-    proactiveEngine,
+  // Sprint 3-A-2: RoutineTriggerCoordinator + idle-scheduler composite.
+  const routineCoordinator = wireRoutineCoordinator({
+    routineEngine,
     taskService,
     pluginRuntime,
     settingsService,
+    memoryManager,
     idleScheduler,
     mainWindow,
   });
-
-  // 오늘 일정 초기 로드.
-  loadCalendarToday(pluginRuntime, proactiveEngine);
 
   // §4.2 Step 7: manifest-driven IPC bridges.
   let disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
@@ -243,6 +233,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     memoryManager,
     idleScheduler,
     settingsService,
+    routineCoordinator,
     auditLogger: bootAuditLogger,
   });
 
@@ -261,7 +252,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     toolRegistry,
     memoryManager,
     permissionManager,
-    proactiveEngine,
+    routineEngine,
     idleScheduler,
     postTurnHookChain,
     bashAstValidator,
@@ -275,9 +266,6 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   lateBinding.llmCallerRef.fn = createCallLlm(conversationLoop);
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
   console.log("[lvis] boot: plugin callLlm ready (rate-limited)");
-
-  // Feature 4: 월요일 주간 일정 캐시 로드 (KST 기준).
-  loadWeeklyCalendarIfMonday(pluginRuntime, proactiveEngine);
 
   // §9.5: MCP Server 연결.
   const mcpGovernance = new McpGovernance();
@@ -322,11 +310,12 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // void unused imports avoidance — app reference retained for type imports.
   void app;
+  let shutdownPromise: Promise<void> | null = null;
 
   return {
     pluginRuntime, pluginMarketplace, taskService, taskSourceRegistry, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
-    systemPromptBuilder, conversationLoop, proactiveEngine, mcpManager,
+    systemPromptBuilder, conversationLoop, routineEngine, mcpManager,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, msGraphService, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,
     telemetry, pluginTelemetry, autoUpdaterStop,
@@ -337,5 +326,22 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
       disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow);
     },
     registerPluginEventBridge: (win) => registerPluginEventBridge(pluginRuntime, win),
+    shutdown: () => {
+      if (shutdownPromise) return shutdownPromise;
+      shutdownPromise = (async () => {
+        disposePluginNotifications();
+        disposePluginEventBridge();
+        routineCoordinator.dispose();
+        autoUpdaterStop?.();
+        telemetry?.stop();
+        pluginTelemetry?.stop();
+        idleScheduler?.stop();
+        mcpGovernance.stopPolicyRefresh();
+        await mcpManager.disconnectAll();
+        await auditService.stop();
+        taskService.close();
+      })();
+      return shutdownPromise;
+    },
   };
 }

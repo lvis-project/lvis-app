@@ -195,6 +195,18 @@ export class PluginMarketplaceService {
     pluginId: string,
     actor: "user" | "it-admin" = "user",
   ): Promise<{ pluginId: string; installed: true }> {
+    return this.installWithBundleDependencies(pluginId, actor, new Set<string>());
+  }
+
+  private async installWithBundleDependencies(
+    pluginId: string,
+    actor: "user" | "it-admin",
+    seen: Set<string>,
+  ): Promise<{ pluginId: string; installed: true }> {
+    if (seen.has(pluginId)) {
+      return { pluginId, installed: true };
+    }
+    seen.add(pluginId);
     const plugins = await this.fetcher.listPlugins();
     const plugin = plugins.find((x) => x.id === pluginId || x.slug === pluginId);
     if (!plugin) {
@@ -217,6 +229,13 @@ export class PluginMarketplaceService {
       const result = resolveDependencies(plugin.requires.capabilities, installedManifests);
       if (!result.ok) {
         throw new MissingDependenciesError(result.missing);
+      }
+    }
+
+    if (actor === "it-admin") {
+      for (const dependency of plugin.bundleDependencies ?? []) {
+        const dependencyId = typeof dependency === "string" ? dependency : dependency.pluginId;
+        await this.installWithBundleDependencies(dependencyId, actor, seen);
       }
     }
 
@@ -562,21 +581,11 @@ export class PluginMarketplaceService {
     this.assertPathWithinNodeModules(plugin.id, entryAbsPath, "package");
     const entryRelPath = relative(pluginDir, entryAbsPath).split("\\").join("/");
     const resolvedUi = (plugin.ui ?? []).map((extension) => this.resolveUiExtension(plugin, pluginDir, extension));
-    const manifest: Record<string, unknown> = {
-      id: plugin.id,
-      name: plugin.name,
+    const manifest = this.buildInstalledManifest(plugin, {
       version: version ?? "1.0.0",
       entry: entryRelPath,
-      tools: plugin.tools,
-      config: plugin.defaultConfig ?? {},
       ui: resolvedUi,
-      // §3-B rollback: persist the npm package name into the installed manifest
-      // so rollbackPlugin() can reinstall cached versions without consulting
-      // the live marketplace catalog.
-      packageName: plugin.packageName,
-    };
-    if (plugin.deployment) manifest.deployment = plugin.deployment;
-    if (plugin.publisher) manifest.publisher = plugin.publisher;
+    });
     await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
     // Use absolute path when installedDir is outside appRoot (e.g. ~/.lvis/plugins/)
     // so the registry entry remains valid regardless of where registry.json lives.
@@ -687,25 +696,53 @@ export class PluginMarketplaceService {
     }
     if (!zipHasManifest) {
       const safeVersion = /^\d+\.\d+\.\d+/.test(version) ? version : "0.0.0";
-      const manifest: Record<string, unknown> = {
-        id: plugin.id,
-        name: plugin.name,
+      const manifest = this.buildInstalledManifest(plugin, {
         version: safeVersion,
         entry: "./dist/hostPlugin.js",
-        tools: plugin.tools,
-        config: plugin.defaultConfig ?? {},
-      };
-      if (plugin.deployment === "managed" || plugin.deployment === "user") {
-        manifest.deployment = plugin.deployment;
-      }
-      if (plugin.publisher) {
-        manifest.publisher = plugin.publisher;
-      }
+      });
       await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
     } else {
       await this.assertInstalledManifestMatchesCatalog(plugin, version, manifestFile, pluginDir);
     }
     return manifestFile;
+  }
+
+  private buildInstalledManifest(
+    plugin: PluginMarketplaceItem,
+    options: {
+      version: string;
+      entry: string;
+      ui?: PluginUiExtension[];
+    },
+  ): Record<string, unknown> {
+    const manifest: Record<string, unknown> = {
+      id: plugin.id,
+      name: plugin.name,
+      version: options.version,
+      entry: options.entry,
+      tools: plugin.tools,
+      config: plugin.defaultConfig ?? {},
+      // §3-B rollback: persist the npm package name into the installed manifest
+      // so rollbackPlugin() can reinstall cached versions without consulting
+      // the live marketplace catalog.
+      packageName: plugin.packageName,
+    };
+    if (plugin.description) manifest.description = plugin.description;
+    if (options.ui && options.ui.length > 0) manifest.ui = options.ui;
+    if (plugin.capabilities && plugin.capabilities.length > 0) manifest.capabilities = plugin.capabilities;
+    if (plugin.routineTools) manifest.routineTools = plugin.routineTools;
+    if (plugin.startupTools && plugin.startupTools.length > 0) manifest.startupTools = plugin.startupTools;
+    if (plugin.keywords && plugin.keywords.length > 0) manifest.keywords = plugin.keywords;
+    if (plugin.uiCallable && plugin.uiCallable.length > 0) manifest.uiCallable = plugin.uiCallable;
+    if (plugin.emittedEvents && plugin.emittedEvents.length > 0) manifest.emittedEvents = plugin.emittedEvents;
+    if (plugin.notificationEvents && plugin.notificationEvents.length > 0) manifest.notificationEvents = plugin.notificationEvents;
+    if (plugin.toolSchemas && Object.keys(plugin.toolSchemas).length > 0) manifest.toolSchemas = plugin.toolSchemas;
+    if (plugin.deployment) manifest.deployment = plugin.deployment;
+    if (plugin.deliveryMode) manifest.deliveryMode = plugin.deliveryMode;
+    if (plugin.bundleDependencies && plugin.bundleDependencies.length > 0) manifest.bundleDependencies = plugin.bundleDependencies;
+    if (plugin.requires && plugin.requires.capabilities.length > 0) manifest.requires = plugin.requires;
+    if (plugin.publisher) manifest.publisher = plugin.publisher;
+    return manifest;
   }
 
   private async assertInstalledManifestMatchesCatalog(

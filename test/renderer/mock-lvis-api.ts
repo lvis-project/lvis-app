@@ -22,13 +22,14 @@ type ApiOverrides = {
   pluginCards?: unknown[];
   marketplace?: unknown[];
   pluginUiExtensions?: unknown[];
+  latestRoutineBriefing?: unknown;
 };
 
 const DEFAULT_SETTINGS = {
   llm: { provider: "openai", model: "gpt-4o-mini" },
   chat: { systemPrompt: "", autoCompact: true },
   webSearch: { provider: "none" },
-  proactive: { enableDailyBriefing: false },
+  routine: { enableDailyBriefing: false },
   privacy: { piiRedactEnabled: false },
 };
 
@@ -46,7 +47,7 @@ const DEFAULT_USAGE = {
 export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   api: MockLvisApi;
   emitChatStream: (ev: unknown) => void;
-  emitProactive: (b: unknown) => void;
+  emitRoutineBriefing: (b: unknown) => void;
   emitViewActivate: (v: string) => void;
 } {
   const settings = overrides.settings ?? DEFAULT_SETTINGS;
@@ -61,9 +62,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const pluginCards = overrides.pluginCards ?? [];
   const marketplace = overrides.marketplace ?? [];
   const pluginUiExtensions = overrides.pluginUiExtensions ?? [];
+  const latestRoutineBriefing = overrides.latestRoutineBriefing ?? null;
 
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
-  const proactiveHandlers = new Set<(b: unknown) => void>();
+  const routineBriefingHandlers = new Set<(b: unknown) => void>();
   const viewHandlers = new Set<(v: string) => void>();
 
   const api: MockLvisApi = {
@@ -127,13 +129,14 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     getTasks: vi.fn(async () => tasks),
     getRecentNotes: vi.fn(async () => []),
 
-    getBriefing: vi.fn(async () => null),
     getUsageSummary: vi.fn(async () => usage),
+    getLatestRoutineBriefing: vi.fn(async () => latestRoutineBriefing),
     dismissBriefing: vi.fn(async () => ({ ok: true })),
     snoozeBriefing: vi.fn(async () => ({ ok: true })),
-    onProactiveBriefing: vi.fn((h: (b: unknown) => void) => {
-      proactiveHandlers.add(h);
-      return () => proactiveHandlers.delete(h);
+    resetDailyBriefingDev: vi.fn(async () => ({ ok: true, generated: true })),
+    onRoutineBriefing: vi.fn((h: (b: unknown) => void) => {
+      routineBriefingHandlers.add(h);
+      return () => routineBriefingHandlers.delete(h);
     }),
 
     submitFeedback: vi.fn(async () => ({ ok: true })),
@@ -156,7 +159,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   return {
     api,
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
-    emitProactive: (b) => proactiveHandlers.forEach((h) => h(b)),
+    emitRoutineBriefing: (b) => routineBriefingHandlers.forEach((h) => h(b)),
     emitViewActivate: (v) => viewHandlers.forEach((h) => h(v)),
   };
 }
