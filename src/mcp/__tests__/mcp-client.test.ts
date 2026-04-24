@@ -294,7 +294,7 @@ describe("HttpTransport — happy path", () => {
     expect(client.getState().registeredTools).toEqual(["mcp_hr_query"]);
 
     const out = await client.callTool("query", { q: "hello" });
-    expect(out).toBe("result-ok");
+    expect(out).toEqual({ text: "result-ok", uiPayload: undefined });
 
     await client.disconnect();
 
@@ -389,7 +389,10 @@ describe("HttpTransport — happy path", () => {
     );
 
     resolveFirstCall?.();
-    await expect(firstCall).resolves.toBe("result-1");
+    await expect(firstCall).resolves.toEqual({
+      text: "result-1",
+      uiPayload: undefined,
+    });
     await client.disconnect();
   });
 
@@ -808,8 +811,8 @@ describe("StdioTransport — regression", () => {
     expect(client.getState().status).toBe("connected");
     expect(client.getState().registeredTools).toEqual(["mcp_fs_read"]);
 
-    const text = await client.callTool("read", { path: "/tmp/a.txt" });
-    expect(text).toBe("file-contents");
+    const result = await client.callTool("read", { path: "/tmp/a.txt" });
+    expect(result).toEqual({ text: "file-contents", uiPayload: undefined });
 
     await client.disconnect();
     expect(client.getState().status).toBe("disconnected");
@@ -1144,5 +1147,37 @@ describe("HttpTransport — timeout path", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("McpClient buffered response safety", () => {
+  it("caps unmatched buffered responses to a bounded size", () => {
+    const gov = governanceWithPolicy(
+      buildPolicy([httpApproval("buffered", "https://buffered.example.com/mcp")]),
+    );
+    const client = new McpClient(
+      {
+        id: "buffered",
+        transport: "http",
+        url: "https://buffered.example.com/mcp",
+      },
+      gov,
+      new ToolRegistry(),
+    );
+
+    for (let id = 1; id <= 256; id += 1) {
+      (client as unknown as {
+        handleResponse: (response: { jsonrpc: "2.0"; id: number; result: unknown }) => void;
+      }).handleResponse({
+        jsonrpc: "2.0",
+        id,
+        result: { ok: true },
+      });
+    }
+
+    const buffered = (client as unknown as { bufferedResponses: Map<number, unknown> }).bufferedResponses;
+    expect(buffered.size).toBeLessThanOrEqual(128);
+    expect(buffered.has(1)).toBe(false);
+    expect(buffered.has(256)).toBe(true);
   });
 });

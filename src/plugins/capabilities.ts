@@ -41,6 +41,7 @@ export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   "external-auth-consumer",
   "mail-source",
   "calendar-source",
+  "routine-provider",
   "meeting-recorder",
   "knowledge-index",
   "background-watcher",
@@ -92,6 +93,15 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
       description: "Required to emit host events under the calendar.* namespace.",
       enforcement: "enforced",
       gates: ["event:calendar.*"],
+    },
+  ],
+  [
+    "routine-provider",
+    {
+      description:
+        "Advisory — signals the plugin provides routine execution tools (wakeup briefing, shutdown summary, heartbeat) consumable by the host Routine runtime.",
+      enforcement: "advisory",
+      gates: [],
     },
   ],
   [
@@ -181,7 +191,7 @@ export const PLUGIN_PRIVATE_NAMESPACES: ReadonlySet<string> = new Set([
 /**
  * Categorize an event type by its namespace prefix.
  * Returns the prefix when it is a known public namespace, otherwise "other".
- * Single source of truth — replaces ad-hoc prefix splits in proactive-engine
+ * Single source of truth — replaces ad-hoc prefix splits in older host wiring
  * and boot/plugins.
  */
 export function categorizeEvent(eventType: string): string {

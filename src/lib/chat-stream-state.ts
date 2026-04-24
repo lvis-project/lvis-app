@@ -16,6 +16,14 @@ export type StreamEvent = {
   hasToolCalls?: boolean;
   removedMessages?: number;
   freedTokens?: number;
+  /** MCP Apps spec §3.2 — optional UI payload emitted with tool_end events. */
+  uiPayload?: {
+    serverId: string;
+    resourceUri: string;
+    slot?: "chat" | "sidebar" | "tool-result";
+    height?: number;
+    title?: string;
+  };
 };
 
 export type ToolEntryItem = {
@@ -25,6 +33,14 @@ export type ToolEntryItem = {
   status: "running" | "done" | "error";
   input?: Record<string, unknown>;
   result?: string;
+  /** MCP Apps spec §3.2 — optional UI payload from MCP tool response. */
+  uiPayload?: {
+    serverId: string;
+    resourceUri: string;
+    slot?: "chat" | "sidebar" | "tool-result";
+    height?: number;
+    title?: string;
+  };
 };
 
 export type ChatEntry =
@@ -297,6 +313,7 @@ export function applyToolEnd(
     toolUseId: string;
     result?: string;
     isError?: boolean;
+    uiPayload?: ToolEntryItem["uiPayload"];
   },
 ): ChatEntry[] {
   const next = [...entries];
@@ -316,6 +333,7 @@ export function applyToolEnd(
           ...tool,
           status: (payload.isError ? "error" : "done") as "done" | "error",
           result: payload.result,
+          ...(payload.uiPayload && { uiPayload: payload.uiPayload }),
         }
       : tool,
   );

@@ -4,7 +4,7 @@ import type { BriefingPayload, LvisApi } from "../types.js";
 /**
  * Phase 3.3 — briefing state hook.
  *
- * Owns: proactive briefing payload state, the onProactiveBriefing IPC
+ * Owns: routine briefing payload state, the onRoutineBriefing IPC
  * subscription, and the dismiss / snooze callbacks. Mirrors the prior
  * behavior in App (renderer.tsx) including debounce-respecting result
  * handling (hide only on ok:true) and warn-on-failure.
@@ -17,8 +17,14 @@ export function useBriefing(api: LvisApi) {
 
   useEffect(() => {
     aliveRef.current = true;
-    const unsubscribe = api.onProactiveBriefing((b) => {
+    const unsubscribe = api.onRoutineBriefing((b) => {
       if (aliveRef.current) setBriefing(b);
+    });
+    void api.getLatestRoutineBriefing().then((latest) => {
+      if (!aliveRef.current || !latest) return;
+      setBriefing((current) => current ?? latest);
+    }).catch((e: Error) => {
+      console.warn("[lvis] getLatestRoutineBriefing failed:", e.message);
     });
     return () => {
       aliveRef.current = false;

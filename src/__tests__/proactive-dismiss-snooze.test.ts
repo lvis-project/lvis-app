@@ -7,14 +7,14 @@
  */
 import { describe, it, expect } from "vitest";
 
-type Proactive = { enableDailyBriefing: boolean; lastDismissedAt?: string; lastBriefingAt?: string };
+type RoutineState = { enableDailyBriefing: boolean; lastDismissedAt?: string; lastBriefingAt?: string };
 
-function makeStore(initial: Proactive = { enableDailyBriefing: true }) {
-  let cur: Proactive = { ...initial };
+function makeStore(initial: RoutineState = { enableDailyBriefing: true }) {
+  let cur: RoutineState = { ...initial };
   return {
     get: () => ({ ...cur }),
-    patch: (p: { proactive: Proactive }) => {
-      cur = { ...cur, ...p.proactive };
+    patch: (p: { routine: RoutineState }) => {
+      cur = { ...cur, ...p.routine };
     },
   };
 }
@@ -29,7 +29,7 @@ function makeDismissHandler(store: ReturnType<typeof makeStore>) {
     lastDismissAcceptedAt = nowMs;
     const cur = store.get();
     store.patch({
-      proactive: { ...cur, lastDismissedAt: new Date(nowMs).toISOString() },
+      routine: { ...cur, lastDismissedAt: new Date(nowMs).toISOString() },
     });
     return { ok: true };
   };
@@ -53,7 +53,7 @@ function makeSnoozeHandler(store: ReturnType<typeof makeStore>) {
     }
     lastSnoozeAcceptedAt = nowMs;
     const shifted = new Date(shiftedMs).toISOString();
-    store.patch({ proactive: { ...cur, lastDismissedAt: shifted } });
+    store.patch({ routine: { ...cur, lastDismissedAt: shifted } });
     return { ok: true, lastDismissedAt: shifted } as const;
   };
 }
