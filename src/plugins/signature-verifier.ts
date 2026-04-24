@@ -36,10 +36,7 @@ export class PluginSignatureVerifier {
   private readonly keys: KeyObject[];
 
   constructor(options: SignatureVerifierOptions) {
-    if (!options.publisherPublicKeysPem || options.publisherPublicKeysPem.length === 0) {
-      throw new Error("PluginSignatureVerifier requires at least one publisher public key");
-    }
-    this.keys = options.publisherPublicKeysPem.map((pem) => createPublicKey(pem));
+    this.keys = (options.publisherPublicKeysPem ?? []).map((pem) => createPublicKey(pem));
   }
 
   /**
@@ -50,6 +47,10 @@ export class PluginSignatureVerifier {
   async verifyManifestFile(manifestPath: string): Promise<SignatureVerificationResult> {
     const manifestBytes = await readFile(manifestPath);
     const sha256 = createHash("sha256").update(manifestBytes).digest("hex");
+
+    if (this.keys.length === 0) {
+      return { valid: false, sha256, reason: "no publisher public keys configured" };
+    }
 
     let sigRaw: Buffer;
     try {

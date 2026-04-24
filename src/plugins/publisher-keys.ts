@@ -16,11 +16,19 @@
  */
 
 import { createPublicKey } from "node:crypto";
-import { MARKETPLACE_PUBLIC_KEYS as RAW_MARKETPLACE_PUBLIC_KEYS } from "@lvis/plugin-sdk/keys";
+import {
+  MARKETPLACE_PUBLIC_KEYS as RAW_MARKETPLACE_PUBLIC_KEYS,
+  MARKETPLACE_TEST_KEY_IDS,
+} from "@lvis/plugin-sdk/keys";
 
-/** Locally-typed alias — SDK export returns `unknown` per-value; narrow once. */
-const MARKETPLACE_PUBLIC_KEYS: Record<string, string> =
-  RAW_MARKETPLACE_PUBLIC_KEYS as Record<string, string>;
+const TEST_KEY_ID_SET = new Set<string>(MARKETPLACE_TEST_KEY_IDS as readonly string[]);
+const includeTestKeys = process.env.LVIS_ALLOW_TEST_MARKETPLACE_KEYS === "1" || process.env.LVIS_DEV === "1";
+
+const MARKETPLACE_PUBLIC_KEYS = Object.fromEntries(
+  Object.entries(RAW_MARKETPLACE_PUBLIC_KEYS as Record<string, string>).filter(([keyId]) => (
+    includeTestKeys || !TEST_KEY_ID_SET.has(keyId)
+  )),
+) as Record<string, string>;
 
 /**
  * Ed25519 SPKI DER prefix (12 bytes): SEQUENCE, length, SEQUENCE, OID
