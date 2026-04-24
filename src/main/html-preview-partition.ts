@@ -26,6 +26,21 @@ const CDN_ALLOWLIST = new Set([
   "fonts.gstatic.com",
 ]);
 
+function installStrictInlineOnly(ses: Electron.Session): void {
+  ses.webRequest.onBeforeRequest((details, callback) => {
+    try {
+      const url = new URL(details.url);
+      if (url.protocol === "data:" || url.protocol === "blob:" || url.protocol === "about:") {
+        callback({ cancel: false });
+        return;
+      }
+      callback({ cancel: true });
+    } catch {
+      callback({ cancel: true });
+    }
+  });
+}
+
 function installCdnAllowlist(ses: Electron.Session): void {
   ses.webRequest.onBeforeRequest((details, callback) => {
     try {
@@ -46,9 +61,9 @@ function installCdnAllowlist(ses: Electron.Session): void {
 }
 
 export function installHtmlPreviewPartitionBlock(): void {
-  // ── 1. LLM-authored HTML: same CDN allowlist as MCP Apps ──
-  installCdnAllowlist(session.fromPartition("lvis-render-html"));
+  // ── 1. LLM-authored HTML: strict inline-only partition ──
+  installStrictInlineOnly(session.fromPartition("lvis-render-html"));
 
-  // ── 2. MCP App HTML: same CDN allowlist ───────────────────
+  // ── 2. MCP App HTML: trusted plugin UI with limited CDN allowlist ──
   installCdnAllowlist(session.fromPartition("lvis-mcp-app"));
 }

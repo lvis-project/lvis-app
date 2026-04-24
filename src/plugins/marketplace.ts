@@ -223,19 +223,21 @@ export class PluginMarketplaceService {
       }
     }
 
-    // S14: dependency preflight — reject install if required capabilities are not met
+    if (actor === "it-admin") {
+      for (const dependency of plugin.bundleDependencies ?? []) {
+        const dependencyId = typeof dependency === "string" ? dependency : dependency.pluginId;
+        await this.installWithBundleDependencies(dependencyId, actor, seen);
+      }
+    }
+
+    // S14: dependency preflight — evaluate after any managed bundle dependencies
+    // have been auto-installed so bundled providers can satisfy their own
+    // requires.capabilities through the companion plugins they bring along.
     if (plugin.requires && plugin.requires.capabilities.length > 0) {
       const installedManifests = await this.loadInstalledManifests();
       const result = resolveDependencies(plugin.requires.capabilities, installedManifests);
       if (!result.ok) {
         throw new MissingDependenciesError(result.missing);
-      }
-    }
-
-    if (actor === "it-admin") {
-      for (const dependency of plugin.bundleDependencies ?? []) {
-        const dependencyId = typeof dependency === "string" ? dependency : dependency.pluginId;
-        await this.installWithBundleDependencies(dependencyId, actor, seen);
       }
     }
 

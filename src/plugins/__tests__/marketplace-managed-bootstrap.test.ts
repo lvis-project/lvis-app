@@ -147,6 +147,70 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(cacheSpy).toHaveBeenCalledTimes(4);
   });
 
+  it("satisfies bundled root capability requirements via auto-installed bundle dependencies", async () => {
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "calendar",
+            name: "Calendar",
+            description: "fixture",
+            packageSpec: "file:../lvis-plugin-calendar",
+            packageName: "@lvis/plugin-calendar",
+            tools: [],
+            deployment: "managed",
+            capabilities: ["calendar-source"],
+          },
+          {
+            id: "work-proactive",
+            name: "Work Proactive",
+            description: "fixture",
+            packageSpec: "file:../lvis-plugin-work-proactive",
+            packageName: "@lvis/plugin-work-proactive",
+            tools: [],
+            deployment: "managed",
+            deliveryMode: "bundled",
+            bundleDependencies: ["calendar"],
+            requires: { capabilities: ["calendar-source"] },
+          },
+        ],
+      }),
+      "utf-8",
+    );
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
+
+    const service = new PluginMarketplaceService(testDir);
+    vi
+      .spyOn(service as unknown as { installArtifact: (...args: unknown[]) => Promise<string> }, "installArtifact")
+      .mockImplementation(async (plugin: unknown) => {
+        const item = plugin as { id: string };
+        const manifestPath = join(testDir, "plugins", "installed", item.id, "plugin.json");
+        await mkdir(join(testDir, "plugins", "installed", item.id), { recursive: true });
+        await writeFile(
+          manifestPath,
+          JSON.stringify({
+            id: item.id,
+            name: item.id,
+            version: "1.0.0",
+            entry: "dist/index.js",
+            tools: [],
+            capabilities: item.id === "calendar" ? ["calendar-source"] : [],
+          }),
+          "utf-8",
+        );
+        return manifestPath;
+      });
+    vi
+      .spyOn(service as unknown as { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> }, "cacheVersionFromManifest")
+      .mockResolvedValue();
+    await expect(service.install("work-proactive", "it-admin")).resolves.toEqual({
+      pluginId: "work-proactive",
+      installed: true,
+    });
+  });
+
   it("lets a user install a bundled marketplace root plugin", async () => {
     await writeFile(
       marketplacePath,

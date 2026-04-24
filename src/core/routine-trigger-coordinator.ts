@@ -18,7 +18,10 @@ export interface SignalResult {
   reason: string;
 }
 
-export type SignalEvaluator = (now: Date) => SignalResult | null | Promise<SignalResult | null>;
+export type SignalEvaluator = (
+  now: Date,
+  source?: string,
+) => SignalResult | null | Promise<SignalResult | null>;
 
 export interface CoordinatorDeps {
   routineEngine: RoutineEngine;
@@ -113,7 +116,7 @@ export class RoutineTriggerCoordinator {
       for (const { name, evaluate } of this.deps.evaluators) {
         let result: SignalResult | null;
         try {
-          result = await evaluate(nowDate);
+          result = await evaluate(nowDate, source);
         } catch (e) {
           this.logger(`[routine-coordinator] ${name} threw: ${(e as Error).message}`);
           continue;
@@ -282,8 +285,9 @@ export function createPostTurnSignal(opts: {
   const DEFAULT_COOLDOWN_MS = 10 * 60_000;
   return {
     name: "postTurnSignal",
-    evaluate: (now) => {
+    evaluate: (now, source) => {
       if (!opts.isEnabled()) return null;
+      if (source !== "event:post-turn") return null;
       const cooldown = opts.getCooldownMs?.() ?? DEFAULT_COOLDOWN_MS;
       if (now.getTime() - opts.getLastFiredAt() < cooldown) return null;
       opts.setLastFiredAt(now.getTime());

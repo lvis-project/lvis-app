@@ -37,6 +37,29 @@ describe("Briefing flow (Phase 3.3 regression net)", () => {
     });
   });
 
+  it("does not let a delayed replay overwrite a newer live briefing", async () => {
+    let resolveLatest: ((value: unknown) => void) | null = null;
+    const stale = { ...makeBriefing(), summary: "stale summary" };
+    const fresh = { ...makeBriefing(), summary: "fresh summary" };
+    const { container, emitRoutineBriefing } = await renderApp({
+      latestRoutineBriefing: new Promise((resolve) => {
+        resolveLatest = resolve;
+      }),
+    });
+
+    await act(async () => {
+      emitRoutineBriefing(fresh);
+    });
+    await act(async () => {
+      resolveLatest?.(stale);
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("fresh summary");
+      expect(container.textContent).not.toContain("stale summary");
+    });
+  });
+
   it("clicking dismiss calls dismissBriefing and removes the card", async () => {
     const { container, api, emitRoutineBriefing } = await renderApp();
     await act(async () => {

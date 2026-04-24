@@ -317,7 +317,7 @@ describe("RoutineTriggerCoordinator", () => {
     expect(engine.generateDailyBriefing).not.toHaveBeenCalled();
   });
 
-  it("post-turn signal fires briefing when enabled and cooldown elapsed", async () => {
+  it("post-turn signal fires briefing only for explicit post-turn notifications", async () => {
     const { engine, calls } = fakeEngine();
     let lastFiredAt = 0;
     const coord = new RoutineTriggerCoordinator({
@@ -332,7 +332,9 @@ describe("RoutineTriggerCoordinator", () => {
       disabled: () => false,
       debounceMs: 0,
     });
-    await coord._testEvaluate();
+    await coord._testEvaluate("tick");
+    expect(engine.generateDailyBriefing).not.toHaveBeenCalled();
+    await coord._testEvaluate("event:post-turn");
     expect(engine.generateDailyBriefing).toHaveBeenCalledTimes(1);
     expect(calls[0].triggerReason).toContain("postTurnSignal");
   });
