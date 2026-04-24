@@ -76,11 +76,12 @@
         "enum": [
           "ms-graph-consumer",
           "external-auth-consumer",
-          "mail-source",
-          "calendar-source",
-          "meeting-recorder",
-          "knowledge-index",
-          "background-watcher",
+           "mail-source",
+           "calendar-source",
+           "routine-provider",
+           "meeting-recorder",
+           "knowledge-index",
+           "background-watcher",
           "worker-client",
           "document-indexer"
         ]
@@ -145,6 +146,24 @@
       }
     },
     "deployment": { "enum": ["managed", "user"] },
+    "deliveryMode": { "enum": ["marketplace", "bundled"] },
+    "bundleDependencies": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "required": ["pluginId"],
+            "additionalProperties": false,
+            "properties": {
+              "pluginId": { "type": "string", "minLength": 1 },
+              "versionRange": { "type": "string", "minLength": 1 }
+            }
+          }
+        ]
+      }
+    },
     "publisher": { "type": "string" },
     "toolSchemas": {
       "type": "object",

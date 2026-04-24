@@ -40,6 +40,13 @@ export interface SessionListEntry {
   modifiedAt: Date;
   title: string;
   preview: string;
+  routineId?: string;
+  routineTitle?: string;
+}
+
+export interface SessionMetadata {
+  routineId?: string;
+  routineTitle?: string;
 }
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
@@ -338,6 +345,28 @@ export class MemoryManager {
     return messages;
   }
 
+  async saveSessionMetadata(sessionId: string, metadata: SessionMetadata): Promise<void> {
+    const targetPath = join(this.sessionsDir, `${sessionId}.meta.json`);
+    await withFileLock(targetPath, async () => {
+      writeFileSync(targetPath, JSON.stringify(metadata, null, 2), "utf-8");
+    });
+  }
+
+  loadSessionMetadata(sessionId: string): SessionMetadata | null {
+    const path = join(this.sessionsDir, `${sessionId}.meta.json`);
+    if (!existsSync(path)) return null;
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf-8")) as SessionMetadata;
+      if (!parsed || typeof parsed !== "object") return null;
+      return {
+        routineId: typeof parsed.routineId === "string" ? parsed.routineId : undefined,
+        routineTitle: typeof parsed.routineTitle === "string" ? parsed.routineTitle : undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   /** 세션 목록 */
   listSessions(limit = Number.POSITIVE_INFINITY): SessionListEntry[] {
     if (!existsSync(this.sessionsDir)) return [];
@@ -354,19 +383,30 @@ export class MemoryManager {
       .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime())
       .slice(0, Number.isFinite(limit) ? Math.max(0, limit) : undefined)
       .map((session) => {
+        const metadata = this.loadSessionMetadata(session.id);
         const summary = session.size > MAX_SESSION_FILE_BYTES
           ? {
-              title: `세션 ${session.id.slice(0, 8)}`,
+              title: metadata?.routineTitle
+                ? `${metadata.routineTitle} 대화`
+                : `세션 ${session.id.slice(0, 8)}`,
               preview: "(대화가 커서 미리보기를 생략했습니다)",
             }
           : this.readSessionSummary(session.id);
         return {
           id: session.id,
           modifiedAt: session.modifiedAt,
-          title: summary.title,
+          title: summary.title || metadata?.routineTitle || `세션 ${session.id.slice(0, 8)}`,
           preview: summary.preview,
+          routineId: metadata?.routineId,
+          routineTitle: metadata?.routineTitle,
         };
       });
+  }
+
+  listSessionsByRoutine(routineId: string, limit = Number.POSITIVE_INFINITY): SessionListEntry[] {
+    return this.listSessions()
+      .filter((session) => session.routineId === routineId)
+      .slice(0, Number.isFinite(limit) ? Math.max(0, limit) : undefined);
   }
 
   /** 세션 삭제 */

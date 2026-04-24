@@ -122,8 +122,8 @@ export function useChatState(api: LvisApi) {
         const { groupId, toolUseId, displayOrder = 0, name, input } = ev;
         setEntries((p) => applyToolStart(p, { groupId, toolUseId, displayOrder, name, input }));
       } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, result, isError } = ev;
-        setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError }));
+        const { groupId, toolUseId, result, isError, uiPayload } = ev;
+        setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload }));
       } else if (ev.type === "error") {
         setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current));
         streamRef.current = "";

@@ -6,6 +6,7 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
 import type { RenderHtmlPayload } from "../types.js";
 import { HtmlPreview } from "./HtmlPreview.js";
+import { McpAppView } from "./McpAppView.js";
 
 export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_group" }> }) {
   const [open, setOpen] = useState(false);
@@ -32,6 +33,11 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
     .filter((t) => t.name === "render_html" && t.status === "done")
     .map((t) => ({ toolUseId: t.toolUseId, payload: parseRenderHtmlResult(t.result) }))
     .filter((p): p is { toolUseId: string; payload: RenderHtmlPayload } => p.payload !== null);
+
+  // MCP Apps §3.2 — collect tools that carry a uiPayload
+  const mcpAppPreviews = tools.filter(
+    (t) => t.status === "done" && t.uiPayload != null,
+  );
 
   function previewNeedsJavaScript(payload: RenderHtmlPayload): boolean {
     return /<script\b|on[a-z]+\s*=|javascript:/i.test(payload.html);
@@ -135,6 +141,13 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
                 allowScripts={scriptAllowed.has(p.toolUseId)}
               />
             </div>
+          ))}
+        </div>
+      )}
+      {mcpAppPreviews.length > 0 && (
+        <div className="border-t px-3 py-2 space-y-2">
+          {mcpAppPreviews.map((t) => (
+            t.uiPayload && <McpAppView key={t.toolUseId} payload={t.uiPayload} />
           ))}
         </div>
       )}

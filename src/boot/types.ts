@@ -15,7 +15,7 @@ import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { ConversationLoop } from "../engine/conversation-loop.js";
-import type { ProactiveEngine } from "../core/proactive-engine.js";
+import type { RoutineEngine } from "../core/routine-engine.js";
 import type { McpManager } from "../mcp/mcp-manager.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { BashAstValidator } from "../main/bash-ast-validator.js";
@@ -72,7 +72,7 @@ export interface AppServices {
   toolRegistry: ToolRegistry;
   systemPromptBuilder: SystemPromptBuilder;
   conversationLoop: ConversationLoop;
-  proactiveEngine: ProactiveEngine;
+  routineEngine?: RoutineEngine;
   mcpManager: McpManager;
   idleScheduler?: IdleSchedulerService;
   bashAstValidator: BashAstValidator;
@@ -118,4 +118,6 @@ export interface AppServices {
    * clear the 4h interval deterministically instead of relying on unref().
    */
   autoUpdaterStop?: () => void;
+  /** Central app shutdown hook for timers, background services, and transports. */
+  shutdown?: () => Promise<void>;
 }

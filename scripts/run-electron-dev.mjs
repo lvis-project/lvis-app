@@ -98,6 +98,7 @@ let electronProc = null;
 let restartTimer = null;
 let shuttingDown = false;
 let restartInFlight = false;
+let shutdownPromise = null;
 
 function log(tag, msg) {
   process.stdout.write(`[dev:${tag}] ${msg}\n`);
@@ -182,6 +183,34 @@ function copyHtml() {
   }
 }
 
+async function stopChildProcess(proc, { forceTree = false } = {}) {
+  if (!proc?.pid) return;
+  if (forceTree && process.platform === "win32") {
+    forceKillProcessTree(proc.pid);
+    return;
+  }
+  await new Promise((resolve) => {
+    let doneCalled = false;
+    let killTimer = null;
+    const done = () => {
+      if (doneCalled) return;
+      doneCalled = true;
+      if (killTimer) clearTimeout(killTimer);
+      resolve();
+    };
+    proc.once("exit", done);
+    killTimer = setTimeout(() => {
+      forceKillProcessTree(proc.pid);
+      done();
+    }, RESTART_FORCE_KILL_MS);
+    try {
+      proc.kill("SIGTERM");
+    } catch {
+      done();
+    }
+  });
+}
+
 function launchElectron() {
   if (electronProc) return;
   const launchEnv = (() => {
@@ -199,16 +228,11 @@ function launchElectron() {
   log("electron", `launching ${mainOutput}`);
   const env = launchEnv;
   if (process.platform === "win32") {
-    // Wrap in cmd.exe /s /c (via shell: true) so `chcp 65001` binds to
-    // Electron's console AND cmd preserves quoting around electron.exe path.
-    // See scripts/run-electron.mjs for the detailed rationale.
-    const quote = (s) => `"${String(s).replace(/"/g, '""')}"`;
-    const electronCmd = [electronPath, ...electronArgs].map(quote).join(" ");
-    electronProc = spawn(`chcp 65001>nul & ${electronCmd}`, [], {
+    electronProc = spawn(electronPath, electronArgs, {
       cwd: repoRoot,
       stdio: "inherit",
       env,
-      shell: true,
+      windowsHide: false,
     });
   } else {
     electronProc = spawn(electronPath, electronArgs, {
@@ -264,7 +288,7 @@ async function waitForMain(timeoutMs = 60_000) {
 }
 
 function shutdown(code = 0) {
-  if (shuttingDown) return;
+  if (shutdownPromise) return shutdownPromise;
   shuttingDown = true;
   if (restartTimer) {
     clearTimeout(restartTimer);
@@ -272,17 +296,31 @@ function shutdown(code = 0) {
   }
   restartInFlight = false;
   log("dev", "shutting down");
-  if (electronProc) {
-    try { electronProc.kill("SIGTERM"); } catch {}
-  }
-  for (const c of children) {
-    try { c.kill("SIGTERM"); } catch {}
-  }
-  setTimeout(() => process.exit(code), 200);
+  const activeElectron = electronProc;
+  const activeChildren = children.splice(0, children.length);
+  electronProc = null;
+  shutdownPromise = (async () => {
+    await Promise.allSettled([
+      ...(activeElectron ? [stopChildProcess(activeElectron)] : []),
+      ...activeChildren.map((child) => stopChildProcess(child, { forceTree: process.platform === "win32" })),
+    ]);
+    process.exit(code);
+  })();
+  return shutdownPromise;
 }
 
-process.on("SIGINT", () => shutdown(0));
-process.on("SIGTERM", () => shutdown(0));
+process.on("SIGINT", () => {
+  void shutdown(0);
+});
+process.on("SIGTERM", () => {
+  void shutdown(0);
+});
+process.on("exit", () => {
+  if (electronProc?.pid) forceKillProcessTree(electronProc.pid);
+  for (const child of children) {
+    if (child?.pid) forceKillProcessTree(child.pid);
+  }
+});
 
 async function main() {
   log("dev", `LVIS_DEV=1 skipPlugins=${skipPlugins}`);
@@ -296,7 +334,7 @@ async function main() {
     });
     plugins.on("error", (err) => {
       log("plugins", `spawn failed: ${err.message}`);
-      shutdown(1);
+      void shutdown(1);
     });
     await new Promise((res) => plugins.on("exit", res));
   }
@@ -345,7 +383,7 @@ async function main() {
   const ok = await waitForMain();
   if (!ok) {
     log("dev", "timed out waiting for dist/src/main.js");
-    shutdown(1);
+    await shutdown(1);
     return;
   }
 
@@ -361,5 +399,5 @@ async function main() {
 
 main().catch((err) => {
   log("dev", `fatal: ${err?.stack ?? err}`);
-  shutdown(1);
+  void shutdown(1);
 });
