@@ -17,7 +17,7 @@ import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
-import type { McpServerConfig, McpServerConfigDto, McpServerState } from "./types.js";
+import type { McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload } from "./types.js";
 import { McpGovernance } from "./mcp-governance.js";
 import { McpClient } from "./mcp-client.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -92,7 +92,13 @@ export class McpManager {
           continue;
         }
         const parsed = JSON.parse(raw) as { servers?: McpServerConfig[] };
-        const servers = parsed.servers ?? [];
+        const servers = (parsed.servers ?? []).map((s) => {
+          // transport 필드 누락 시 command 유무로 기본값 보정
+          if (!s.transport) {
+            (s as Record<string, unknown>).transport = (s as Record<string, unknown>).command ? "stdio" : "http";
+          }
+          return s;
+        });
         console.log(`[mcp-manager] ${servers.length}개 MCP 서버 설정 로드`);
         return servers;
       } catch (err) {
@@ -105,20 +111,25 @@ export class McpManager {
 
   // ─── Connection Management ──────────────────────────
 
-  /** 설정된 모든 승인 서버에 연결 */
+  /** 설정된 모든 승인 서버에 연결 (병렬) */
   async connectAll(): Promise<{ connected: string[]; failed: Array<{ id: string; error: string }> }> {
     const configs = await this.loadFromConfig();
+
+    const results = await Promise.allSettled(
+      configs.map((config) => this.connectServer(config).then(() => config.id)),
+    );
+
     const connected: string[] = [];
     const failed: Array<{ id: string; error: string }> = [];
 
-    for (const config of configs) {
-      try {
-        await this.connectServer(config);
-        connected.push(config.id);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        failed.push({ id: config.id, error: message });
-        console.warn(`[mcp-manager] 서버 연결 실패 (${config.id}):`, message);
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result.status === "fulfilled") {
+        connected.push(result.value);
+      } else {
+        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        failed.push({ id: configs[i].id, error: message });
+        console.warn(`[mcp-manager] 서버 연결 실패 (${configs[i].id}):`, message);
       }
     }
 
@@ -227,6 +238,20 @@ export class McpManager {
   /** 특정 서버 상태 조회 */
   getServerState(serverId: string): McpServerState | undefined {
     return this.clients.get(serverId)?.getState();
+  }
+
+  // ─── MCP Apps UI Resource ────────────────────────────
+
+  /**
+   * Fetch a `ui://` resource from the given MCP server.
+   * Delegates to {@link McpClient.readResource}.
+   */
+  async readUiResource(serverId: string, uri: string): Promise<string> {
+    const client = this.clients.get(serverId);
+    if (!client) {
+      throw new Error(`[mcp-manager] 서버 '${serverId}'를 찾을 수 없습니다.`);
+    }
+    return client.readResource(uri);
   }
 
   // ─── Config Mutation ────────────────────────────────
@@ -391,7 +416,7 @@ export class McpManager {
   }
 
   /** 특정 서버의 도구 호출 — ToolExecutor에서 사용 */
-  async callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<string> {
+  async callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<{ text: string; uiPayload?: McpUiPayload }> {
     const client = this.clients.get(serverId);
     if (!client) {
       throw new Error(`[mcp-manager] 서버 '${serverId}'가 존재하지 않습니다.`);

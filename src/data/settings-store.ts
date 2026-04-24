@@ -7,6 +7,13 @@ import {
   sanitizePluginConfigPluginId,
   type PluginConfigRecord,
 } from "../shared/plugin-config.js";
+import {
+  createDefaultHeartbeatEntry,
+  DEFAULT_SHUTDOWN_PROMPT,
+  DEFAULT_WAKEUP_PROMPT,
+  normalizeHeartbeatEntries,
+  type HeartbeatEntry,
+} from "../routines/schedule.js";
 
 export type LLMVendor =
   | "claude"
@@ -81,7 +88,7 @@ export interface AppSettings {
   chat: ChatSettings;
   webSearch: WebSearchSettings;
   marketplace: MarketplaceSettings;
-  proactive: ProactiveSettings;
+  routine: RoutineSettings;
   privacy: PrivacySettings;
   updates: UpdateSettings;
   telemetry: TelemetrySettings;
@@ -146,7 +153,7 @@ export interface PrivacySettings {
 }
 
 /**
- * §7 Proactive Engine — Daily Briefing feature flag.
+ * §7 Routine Engine — Daily Briefing feature flag.
  * §14.4 feature-flag pattern: default OFF to prevent noise.
  *
  * - `enableDailyBriefing`  — master switch for LLM-synthesized daily briefing
@@ -155,10 +162,18 @@ export interface PrivacySettings {
  * - `lastDismissedAt`      — ISO timestamp of last user dismissal; suppresses
  *                            re-trigger for 24h.
  */
-export interface ProactiveSettings {
+export interface RoutineSettings {
   enableDailyBriefing: boolean;
   lastBriefingAt?: string;
   lastDismissedAt?: string;
+  scheduleTimeKst?: string;
+  wakeupPrompt?: string;
+  enableHeartbeat?: boolean;
+  heartbeatEntries?: HeartbeatEntry[];
+  /** @deprecated legacy single-heartbeat setting kept only for migration. */
+  heartbeatSchedule?: never;
+  enableShutdownSummary?: boolean;
+  shutdownPrompt?: string;
   /**
    * Issue 3 fix: post-turn briefing signal flag, separate from schedule flag.
    * Default false — must be opted in explicitly.
@@ -232,8 +247,14 @@ const DEFAULT_SETTINGS: AppSettings = {
     backend: "mock",
     realCloudAllowPrivateNetwork: false,
   },
-  proactive: {
+  routine: {
     enableDailyBriefing: false,
+    scheduleTimeKst: "08:30",
+    wakeupPrompt: DEFAULT_WAKEUP_PROMPT,
+    enableHeartbeat: true,
+    heartbeatEntries: [createDefaultHeartbeatEntry(0)],
+    enableShutdownSummary: true,
+    shutdownPrompt: DEFAULT_SHUTDOWN_PROMPT,
   },
   privacy: {
     piiRedactEnabled: false,
@@ -320,8 +341,8 @@ export class SettingsService {
     if (partial.marketplace) {
       this.settings.marketplace = { ...this.settings.marketplace, ...partial.marketplace };
     }
-    if (partial.proactive) {
-      this.settings.proactive = { ...this.settings.proactive, ...partial.proactive };
+    if (partial.routine) {
+      this.settings.routine = { ...this.settings.routine, ...partial.routine };
     }
     if (partial.privacy) {
       this.settings.privacy = { ...this.settings.privacy, ...partial.privacy };
@@ -466,13 +487,28 @@ export class SettingsService {
         marketplaceParsed.realCloudAllowPrivateNetwork = false;
       }
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
+      const legacyRoutine = parsed.routine ?? parsed.proactive;
+      const normalizedRoutine = {
+        ...DEFAULT_SETTINGS.routine,
+        ...legacyRoutine,
+        wakeupPrompt: typeof legacyRoutine?.wakeupPrompt === "string" && legacyRoutine.wakeupPrompt.trim().length > 0
+          ? legacyRoutine.wakeupPrompt.trim()
+          : DEFAULT_WAKEUP_PROMPT,
+        heartbeatEntries: normalizeHeartbeatEntries(
+          legacyRoutine?.heartbeatEntries,
+          legacyRoutine?.heartbeatSchedule,
+        ),
+        shutdownPrompt: typeof legacyRoutine?.shutdownPrompt === "string" && legacyRoutine.shutdownPrompt.trim().length > 0
+          ? legacyRoutine.shutdownPrompt.trim()
+          : DEFAULT_SHUTDOWN_PROMPT,
+      };
 
       return {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
         marketplace: { ...DEFAULT_SETTINGS.marketplace, ...marketplaceParsed },
-        proactive: { ...DEFAULT_SETTINGS.proactive, ...parsed.proactive },
+        routine: normalizedRoutine,
         privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },

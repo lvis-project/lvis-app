@@ -8,7 +8,7 @@ import type { MemoryManager } from "../memory/memory-manager.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type { ProactiveEngine } from "../core/proactive-engine.js";
+import type { RoutineEngine } from "../core/routine-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
@@ -65,6 +65,7 @@ export function createPostTurnHookChain(opts: {
   memoryManager: MemoryManager;
   idleScheduler?: IdleSchedulerService;
   settingsService: SettingsService;
+  routineCoordinator?: { notify(event: string): void };
   /**
    * Sprint 1-A A3 — shared AuditLogger. When provided, PostTurnHookChain
    * reuses the same instance as HostApi.logEvent so plugin + host audit
@@ -79,6 +80,7 @@ export function createPostTurnHookChain(opts: {
     auditLogger,
     idleScheduler: opts.idleScheduler,
     settingsService: opts.settingsService,
+    routineCoordinator: opts.routineCoordinator,
   });
   return { postTurnHookChain, auditLogger };
 }
@@ -127,7 +129,7 @@ export interface ConversationDeps {
   toolRegistry: ToolRegistry;
   memoryManager: MemoryManager;
   permissionManager: PermissionManager;
-  proactiveEngine: ProactiveEngine;
+  routineEngine: RoutineEngine;
   idleScheduler?: IdleSchedulerService;
   postTurnHookChain: PostTurnHookChain;
   bashAstValidator: BashAstValidator;
@@ -146,7 +148,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     toolRegistry: deps.toolRegistry,
     memoryManager: deps.memoryManager,
     permissionManager: deps.permissionManager,
-    proactiveEngine: deps.proactiveEngine,
+    routineEngine: deps.routineEngine,
     idleScheduler: deps.idleScheduler,
     postTurnHookChain: deps.postTurnHookChain,
     bashAstValidator: deps.bashAstValidator,
@@ -225,7 +227,7 @@ export function createCallLlmForPlugin(
 }
 
 /**
- * Back-compat entry point for non-plugin callers (e.g. ProactiveEngine) that
+ * Back-compat entry point for non-plugin callers (e.g. RoutineEngine) that
  * don't carry a pluginId. These are not rate-limited.
  */
 export function createCallLlm(

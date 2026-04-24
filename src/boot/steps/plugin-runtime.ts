@@ -281,6 +281,9 @@ export async function initPluginRuntime(
         if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
         msGraphService.onAuthChange(handler);
       },
+      callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> => {
+        return pluginRuntime.call(toolName, payload) as Promise<T>;
+      },
       withMsGraphRetry: async (fn) => {
         if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
         return withMsGraphRetry(fn, () => msGraphService.getAccessToken());
