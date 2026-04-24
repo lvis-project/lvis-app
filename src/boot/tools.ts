@@ -11,10 +11,12 @@ import type { MemoryManager } from "../memory/memory-manager.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { AuditService } from "../main/audit-service.js";
+import type { TaskService } from "../taskService.js";
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import { createKnowledgeSearchTools } from "../tools/knowledge-search.js";
 import { createSearchMemoryTool, memoryManagerNotesAdapter } from "../tools/search-memory.js";
 import { createRenderHtmlTool } from "../tools/render-html.js";
+import { createTaskTools } from "../tools/tasks.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, type WorkerClientLite } from "../main/idle-scheduler.js";
@@ -172,8 +174,12 @@ export function registerBuiltinTools(
   memoryManager: MemoryManager,
   toolRegistry: ToolRegistry,
   settingsService: SettingsService,
+  taskService?: TaskService,
 ): void {
   const builtins: Tool[] = [
+    // Task management tools — available only when TaskService is provided
+    // (always true in prod boot; tests may skip by omitting the arg).
+    ...(taskService ? createTaskTools(taskService) : []),
     createDynamicTool({
       name: "memory_save",
       description: "사용자가 기억해달라고 한 내용을 memory/에 저장합니다.",
