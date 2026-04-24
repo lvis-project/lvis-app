@@ -70,6 +70,7 @@ import {
   createCallLlm,
   createCallLlmForPlugin,
 } from "./boot/conversation.js";
+import type { ConversationLoop } from "./engine/conversation-loop.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireRoutineCoordinator } from "./boot/steps/routine-coordinator.js";
@@ -198,19 +199,14 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
-  // §7: Routine Engine.
+  // §7: Routine Engine — ConversationLoop를 lazy factory로 주입 (순환 의존 방지).
+  // conversationLoop는 아래에서 생성되므로 ref를 통해 늦게 바인딩한다.
+  const conversationLoopRef: { current: ConversationLoop | null } = { current: null };
   const routineEngine = createRoutineEngine({
-    pluginRuntime,
-    isDailyBriefingEnabled: () =>
-      settingsService.get("routine")?.enableDailyBriefing ?? false,
-    getLastBriefingDate: () => settingsService.get("routine")?.lastBriefingAt,
-    setLastBriefingDate: (dateKst) => {
-      const cur = settingsService.get("routine") ?? { enableDailyBriefing: false };
-      settingsService.patch({ routine: { ...cur, lastBriefingAt: dateKst } });
+    createConversationLoop: () => {
+      if (!conversationLoopRef.current) throw new Error("ConversationLoop not yet initialized");
+      return conversationLoopRef.current;
     },
-    getLastDismissedAt: () => settingsService.get("routine")?.lastDismissedAt,
-    getDailyBriefingPrompt: () => settingsService.get("routine")?.dailyBriefingPrompt,
-    getShutdownPrompt: () => settingsService.get("routine")?.shutdownPrompt,
   });
 
   // Sprint 3-A-2: RoutineTriggerCoordinator + idle-scheduler composite.
@@ -219,7 +215,6 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     taskService,
     pluginRuntime,
     settingsService,
-    memoryManager,
     idleScheduler,
     mainWindow,
   });
@@ -263,6 +258,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
 
   // Late-binding 주입 — ConversationLoop 생성 직후.
   lateBinding.conversationLoopRef.fn = conversationLoop;
+  conversationLoopRef.current = conversationLoop; // §7: routineEngine lazy binding
   lateBinding.llmCallerRef.fn = createCallLlm(conversationLoop);
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
   console.log("[lvis] boot: plugin callLlm ready (rate-limited)");

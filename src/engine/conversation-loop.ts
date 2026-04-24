@@ -867,10 +867,7 @@ export class ConversationLoop {
         break;
       }
       case "briefing": {
-        const engine = this.deps.routineEngine;
-        if (!engine) { result = "RoutineEngine이 초기화되지 않았습니다."; break; }
-        const briefing = await engine.generateTextBriefing();
-        result = `📋 LVIS 데일리 브리핑 (${new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })})\n\n${briefing.summary}`;
+        result = "브리핑 명령은 더 이상 지원되지 않습니다. 루틴 패널을 사용하세요.";
         break;
       }
       case "vendor":
@@ -900,7 +897,6 @@ export class ConversationLoop {
 /sessions — 저장된 세션 목록
 /load <ID> — 세션 복원
 /compact — 대화 이력 압축
-/briefing — 데일리 브리핑
 /remember <내용> — 메모 저장
 /memory — 사용자 메모 목록
 /vendor — 현재 벤더/토큰 정보
@@ -908,7 +904,7 @@ export class ConversationLoop {
 /help — 이 도움말`;
         break;
       default:
-        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /briefing, /remember, /memory, /vendor, /tools, /help`;
+        result = `알 수 없는 명령어: /${command}\n사용 가능: /new, /sessions, /load, /compact, /remember, /memory, /vendor, /tools, /help`;
     }
 
     callbacks?.onTextDelta?.(result);

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { readPluginRegistry } from "./registry.js";
-import type { DeploymentMode } from "./types.js";
+import type { DeploymentMode, InstallPolicy } from "./types.js";
 
 /**
  * Plugin Deployment Guard — §9.6 / plugin-deployment-model.md §7.2-§7.3
@@ -27,6 +27,16 @@ export type Actor = "user" | "it-admin";
 export interface GuardResult {
   allowed: boolean;
   reason?: string;
+}
+
+function normalizeInstallPolicy(value: {
+  installPolicy?: InstallPolicy;
+  deployment?: DeploymentMode;
+} | null | undefined): InstallPolicy {
+  if (value?.installPolicy === "admin" || value?.deployment === "managed") {
+    return "admin";
+  }
+  return "user";
 }
 
 export interface DeploymentGuardOptions {
@@ -71,10 +81,10 @@ export class PluginDeploymentGuard {
     }
 
     const manifest = await this.readManifestSafe(manifestAbs);
-    if (manifest?.deployment === "managed") {
+    if (normalizeInstallPolicy(manifest) === "admin") {
       return {
         allowed: false,
-        reason: `Managed plugin cannot be uninstalled by user: ${pluginId} (deployment="managed")`,
+        reason: `Admin plugin cannot be uninstalled by user: ${pluginId} (installPolicy="admin")`,
       };
     }
 
@@ -98,23 +108,24 @@ export class PluginDeploymentGuard {
     pluginId: string,
     actor: Actor,
     catalogDeployment?: DeploymentMode,
+    installPolicy?: InstallPolicy,
   ): Promise<GuardResult> {
     if (actor === "it-admin") {
       return { allowed: true };
     }
-    if (catalogDeployment === "managed") {
+    if (normalizeInstallPolicy({ installPolicy, deployment: catalogDeployment }) === "admin") {
       return {
         allowed: false,
-        reason: `Managed plugin cannot be installed by user: ${pluginId}`,
+        reason: `Admin plugin cannot be installed by user: ${pluginId}`,
       };
     }
     return { allowed: true };
   }
 
-  private async readManifestSafe(path: string): Promise<{ deployment?: string } | null> {
+  private async readManifestSafe(path: string): Promise<{ installPolicy?: InstallPolicy; deployment?: DeploymentMode } | null> {
     try {
       const raw = await readFile(path, "utf-8");
-      return JSON.parse(raw) as { deployment?: string };
+      return JSON.parse(raw) as { installPolicy?: InstallPolicy; deployment?: DeploymentMode };
     } catch (err) {
       // Corrupted / missing manifest. Path check alone may have already
       // decided, so we don't throw — but surface for forensics.

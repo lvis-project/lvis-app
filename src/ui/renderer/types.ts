@@ -4,7 +4,7 @@
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { StreamEvent } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
-import type { HeartbeatAgentId, HeartbeatEntry, HeartbeatSchedule } from "../../routines/schedule.js";
+import type { ScheduleAgentId, ScheduleRoutineEntry, ScheduleRoutineSchedule } from "../../routines/schedule.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
@@ -68,16 +68,15 @@ export type AppSettings = {
   chat: { systemPrompt: string; autoCompact: boolean };
   webSearch: { provider: string };
   routine?: {
-    enableDailyBriefing: boolean;
-    lastBriefingAt?: string;
+    enableWakeupRoutine: boolean;
+    lastWakeupRoutineAt?: string;
     lastDismissedAt?: string;
     scheduleTimeKst?: string;
-    wakeupPrompt?: string;
-    enableHeartbeat?: boolean;
-    heartbeatEntries?: HeartbeatEntry[];
-    enableShutdownSummary?: boolean;
+    wakeupRoutinePrompt?: string;
+    enableScheduleRoutine?: boolean;
+    scheduleEntries?: ScheduleRoutineEntry[];
+    enableShutdownRoutine?: boolean;
     shutdownPrompt?: string;
-    enablePostTurnBriefing?: boolean;
   };
   privacy?: { piiRedactEnabled: boolean };
 };
@@ -109,12 +108,6 @@ export type UsageSummaryShape = {
   generatedAt: string;
 };
 
-export type BriefingPayload = {
-  generatedAt: string;
-  items: Array<{ category: string; priority: string; title: string; detail?: string }>;
-  summary?: string;
-};
-
 export type RoutineSessionSummary = {
   id: string;
   modifiedAt: string;
@@ -125,12 +118,11 @@ export type RoutineRecord = {
   id: string;
   title: string;
   description: string;
-  trigger: "wakeup" | "heartbeat" | "shutdown";
+  trigger: "wakeup" | "schedule" | "shutdown";
   enabled: boolean;
   scheduleTimeKst?: string;
   contextPrompt?: string;
-  heartbeatEntries?: Array<HeartbeatEntry & { cron: string }>;
-  postTurnEnabled?: boolean;
+  scheduleEntries?: Array<ScheduleRoutineEntry & { cron: string }>;
   sessionCount: number;
   sessions: RoutineSessionSummary[];
 };
@@ -191,8 +183,6 @@ export type LvisApi = {
   memoryListSessions: () => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
   memorySearchSessions: (q: string) => Promise<Array<{ sessionId: string; matchedMessage: string; timestamp: string }>>;
   listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
-  installMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
-  uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
   listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
   readPluginUiModule: (pluginId: string, viewId: string) => Promise<string>;
   callPluginMethod: (m: string, p?: unknown) => Promise<unknown>;
@@ -210,22 +200,19 @@ export type LvisApi = {
       enabled?: boolean;
       scheduleTimeKst?: string;
       contextPrompt?: string;
-      postTurnEnabled?: boolean;
-      heartbeatEntries?: Array<{
+      scheduleEntries?: Array<{
         id: string;
         enabled: boolean;
-        agentId: HeartbeatAgentId;
-        schedule: HeartbeatSchedule;
+        agentId: ScheduleAgentId;
+        schedule: ScheduleRoutineSchedule;
         prompt: string;
       }>;
     },
   ) => Promise<{ ok: boolean; error?: string }>;
   startRoutineSession: (routineId: string) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
-  getLatestRoutineBriefing: () => Promise<BriefingPayload | null>;
-  resetDailyBriefingDev: () => Promise<{ ok: boolean; generated?: boolean; reason?: string; error?: string }>;
-  onRoutineBriefing: (h: (b: BriefingPayload) => void) => () => void;
-  dismissBriefing: (feedback?: { reason: string; details?: string }) => Promise<{ ok: boolean; debounced?: boolean }>;
-  snoozeBriefing: () => Promise<{ ok: boolean; lastDismissedAt?: string }>;
+  getLatestRoutineResult: () => Promise<{ routineId: string; trigger: string; summary: string; generatedAt: string } | null>;
+  triggerWakeupRoutineDev: () => Promise<{ ok: boolean; summary?: string; error?: string }>;
+  onRoutineCompleted: (h: (result: { routineId: string; trigger: string; summary: string; generatedAt: string }) => void) => () => void;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onViewActivate: (h: (k: string) => void) => () => void;
@@ -315,7 +302,15 @@ export type LvisPluginConfigApi = {
 
 export type LvisPluginsApi = {
   cards: () => Promise<PluginCardSummary[]>;
+};
+
+export type LvisHostMarketplaceApi = {
+  installMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
   uninstallMarketplacePlugin: (id: string) => Promise<PluginMarketplaceActionResult>;
+};
+
+export type LvisHostApi = {
+  takePluginMarketplaceApi: () => LvisHostMarketplaceApi | null;
 };
 
 export type LvisMcpApi = {
@@ -342,6 +337,7 @@ export type RenderHtmlPayload = {
 declare global {
   interface Window {
     lvisApi: LvisApi;
+    lvisHost: LvisHostApi;
     lvis: {
       permission: LvisPermissionApi;
       approval: LvisApprovalApi;

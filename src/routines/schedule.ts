@@ -1,4 +1,4 @@
-export interface HeartbeatSchedule {
+export interface ScheduleRoutineSchedule {
   minute: string;
   hour: string;
   dayOfMonth: string;
@@ -6,7 +6,7 @@ export interface HeartbeatSchedule {
   dayOfWeek: string;
 }
 
-export const HEARTBEAT_AGENT_OPTIONS = [
+export const SCHEDULE_AGENT_OPTIONS = [
   {
     id: "monitor",
     label: "Monitor",
@@ -14,10 +14,10 @@ export const HEARTBEAT_AGENT_OPTIONS = [
     defaultPrompt: "현재 proactive 컨텍스트를 조용히 갱신하고, 중요한 변화가 있더라도 과도한 요약은 하지 마세요.",
   },
   {
-    id: "briefing",
-    label: "Briefing",
-    description: "짧은 업무 pulse 브리핑을 생성합니다.",
-    defaultPrompt: "현재 시점의 업무 pulse를 2~4문장 한국어로 요약하세요. 긴급 항목을 먼저, 불필요한 수식 없이 간결하게 작성하세요.",
+    id: "pulse",
+    label: "Pulse",
+    description: "짧은 상태 pulse 요약을 생성합니다.",
+    defaultPrompt: "현재 컨텍스트 기반 pulse를 2~4줄로 한국어로 작성하세요. 핵심 그림만 제공, 불필요한 인사말 없이 간결하게 작성하세요.",
   },
   {
     id: "follow-up",
@@ -27,19 +27,19 @@ export const HEARTBEAT_AGENT_OPTIONS = [
   },
 ] as const;
 
-export type HeartbeatAgentId = typeof HEARTBEAT_AGENT_OPTIONS[number]["id"];
+export type ScheduleAgentId = typeof SCHEDULE_AGENT_OPTIONS[number]["id"];
 
-export interface HeartbeatEntry {
+export interface ScheduleRoutineEntry {
   id: string;
   enabled: boolean;
-  agentId: HeartbeatAgentId;
-  schedule: HeartbeatSchedule;
+  agentId: ScheduleAgentId;
+  schedule: ScheduleRoutineSchedule;
   prompt: string;
 }
 
-export const MAX_HEARTBEAT_ENTRIES = 5;
+export const MAX_SCHEDULE_ENTRIES = 5;
 
-export const DEFAULT_HEARTBEAT_SCHEDULE: HeartbeatSchedule = {
+export const DEFAULT_SCHEDULE: ScheduleRoutineSchedule = {
   minute: "*/15",
   hour: "*",
   dayOfMonth: "*",
@@ -47,11 +47,29 @@ export const DEFAULT_HEARTBEAT_SCHEDULE: HeartbeatSchedule = {
   dayOfWeek: "*",
 };
 
-export const DEFAULT_HEARTBEAT_AGENT_ID: HeartbeatAgentId = "monitor";
-export const DEFAULT_DAILY_BRIEFING_PROMPT =
+export const DEFAULT_SCHEDULE_AGENT_ID: ScheduleAgentId = "monitor";
+export const DEFAULT_WAKEUP_ROUTINE_PROMPT =
   "오늘 반드시 챙겨야 할 업무 맥락, 긴급 메일, 임박한 일정, 회의 후속조치를 우선순위 중심으로 간결하게 정리하세요.";
 export const DEFAULT_SHUTDOWN_PROMPT =
   "오늘 마무리 시점에서 남은 후속 작업, 중요한 결정, 내일 이어서 볼 포인트를 중심으로 정리하세요.";
+
+// ─── Backward-compat aliases (legacy HeartbeatEntry consumers) ───────────────
+/** @deprecated Use ScheduleRoutineSchedule */
+export type HeartbeatSchedule = ScheduleRoutineSchedule;
+/** @deprecated Use ScheduleAgentId */
+export type HeartbeatAgentId = ScheduleAgentId;
+/** @deprecated Use ScheduleRoutineEntry */
+export type HeartbeatEntry = ScheduleRoutineEntry;
+/** @deprecated Use DEFAULT_SCHEDULE */
+export const DEFAULT_HEARTBEAT_SCHEDULE = DEFAULT_SCHEDULE;
+/** @deprecated Use DEFAULT_SCHEDULE_AGENT_ID */
+export const DEFAULT_HEARTBEAT_AGENT_ID = DEFAULT_SCHEDULE_AGENT_ID;
+/** @deprecated Use MAX_SCHEDULE_ENTRIES */
+export const MAX_HEARTBEAT_ENTRIES = MAX_SCHEDULE_ENTRIES;
+/** @deprecated Use DEFAULT_WAKEUP_ROUTINE_PROMPT */
+export const DEFAULT_DAILY_BRIEFING_PROMPT = DEFAULT_WAKEUP_ROUTINE_PROMPT;
+/** @deprecated Use SCHEDULE_AGENT_OPTIONS */
+export const HEARTBEAT_AGENT_OPTIONS = SCHEDULE_AGENT_OPTIONS;
 
 type CronFieldSpec = {
   min: number;
@@ -59,7 +77,7 @@ type CronFieldSpec = {
   normalize?: (value: number) => number;
 };
 
-const CRON_FIELD_SPECS: Record<keyof HeartbeatSchedule, CronFieldSpec> = {
+const CRON_FIELD_SPECS: Record<keyof ScheduleRoutineSchedule, CronFieldSpec> = {
   minute: { min: 0, max: 59 },
   hour: { min: 0, max: 23 },
   dayOfMonth: { min: 1, max: 31 },
@@ -134,9 +152,9 @@ function validateCronField(fieldValue: string, spec: CronFieldSpec): boolean {
   });
 }
 
-export function normalizeHeartbeatSchedule(
-  value: Partial<HeartbeatSchedule> | null | undefined,
-): HeartbeatSchedule {
+export function normalizeSchedule(
+  value: Partial<ScheduleRoutineSchedule> | null | undefined,
+): ScheduleRoutineSchedule {
   return {
     minute: normalizeCronField(value?.minute, "minute"),
     hour: normalizeCronField(value?.hour, "hour"),
@@ -146,19 +164,19 @@ export function normalizeHeartbeatSchedule(
   };
 }
 
-export function isValidHeartbeatSchedule(
-  value: Partial<HeartbeatSchedule> | null | undefined,
+export function isValidSchedule(
+  value: Partial<ScheduleRoutineSchedule> | null | undefined,
 ): boolean {
-  const schedule = normalizeHeartbeatSchedule(value);
-  return (Object.keys(schedule) as Array<keyof HeartbeatSchedule>).every((field) =>
+  const schedule = normalizeSchedule(value);
+  return (Object.keys(schedule) as Array<keyof ScheduleRoutineSchedule>).every((field) =>
     validateCronField(schedule[field], CRON_FIELD_SPECS[field]),
   );
 }
 
-export function heartbeatScheduleToCron(
-  value: Partial<HeartbeatSchedule> | null | undefined,
+export function scheduleToCron(
+  value: Partial<ScheduleRoutineSchedule> | null | undefined,
 ): string {
-  const schedule = normalizeHeartbeatSchedule(value);
+  const schedule = normalizeSchedule(value);
   return [
     schedule.minute,
     schedule.hour,
@@ -168,88 +186,105 @@ export function heartbeatScheduleToCron(
   ].join(" ");
 }
 
-export function isHeartbeatAgentId(value: unknown): value is HeartbeatAgentId {
-  return HEARTBEAT_AGENT_OPTIONS.some((option) => option.id === value);
+export function isScheduleAgentId(value: unknown): value is ScheduleAgentId {
+  return SCHEDULE_AGENT_OPTIONS.some((option) => option.id === value);
 }
 
-export function getHeartbeatAgentOption(agentId: HeartbeatAgentId) {
-  return HEARTBEAT_AGENT_OPTIONS.find((option) => option.id === agentId) ?? HEARTBEAT_AGENT_OPTIONS[0];
+export function getScheduleAgentOption(agentId: ScheduleAgentId) {
+  return SCHEDULE_AGENT_OPTIONS.find((option) => option.id === agentId) ?? SCHEDULE_AGENT_OPTIONS[0];
 }
 
-export function getDefaultHeartbeatPrompt(agentId: HeartbeatAgentId): string {
-  return getHeartbeatAgentOption(agentId).defaultPrompt;
+export function getDefaultSchedulePrompt(agentId: ScheduleAgentId): string {
+  return getScheduleAgentOption(agentId).defaultPrompt;
 }
 
-export function normalizeHeartbeatAgentId(value: unknown): HeartbeatAgentId {
-  return isHeartbeatAgentId(value) ? value : DEFAULT_HEARTBEAT_AGENT_ID;
+export function normalizeScheduleAgentId(value: unknown): ScheduleAgentId {
+  return isScheduleAgentId(value) ? value : DEFAULT_SCHEDULE_AGENT_ID;
 }
 
-export function createHeartbeatEntryId(seed?: number): string {
+export function createScheduleEntryId(seed?: number): string {
   if (typeof seed === "number" && Number.isFinite(seed) && seed >= 0) {
-    return `heartbeat-${seed + 1}`;
+    return `schedule-${seed + 1}`;
   }
-  return `heartbeat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function createDefaultHeartbeatEntry(seed = 0): HeartbeatEntry {
+export function createDefaultScheduleEntry(seed = 0): ScheduleRoutineEntry {
   return {
-    id: createHeartbeatEntryId(seed),
+    id: createScheduleEntryId(seed),
     enabled: true,
-    agentId: DEFAULT_HEARTBEAT_AGENT_ID,
-    schedule: { ...DEFAULT_HEARTBEAT_SCHEDULE },
-    prompt: getDefaultHeartbeatPrompt(DEFAULT_HEARTBEAT_AGENT_ID),
+    agentId: DEFAULT_SCHEDULE_AGENT_ID,
+    schedule: { ...DEFAULT_SCHEDULE },
+    prompt: getDefaultSchedulePrompt(DEFAULT_SCHEDULE_AGENT_ID),
   };
 }
 
-export function normalizeHeartbeatEntry(
-  value: Partial<HeartbeatEntry> | null | undefined,
+export function normalizeScheduleEntry(
+  value: Partial<ScheduleRoutineEntry> | null | undefined,
   seed = 0,
-): HeartbeatEntry {
+): ScheduleRoutineEntry {
   const record = value && typeof value === "object" ? value : {};
   const id = typeof record.id === "string" && record.id.trim().length > 0
     ? record.id.trim()
-    : createHeartbeatEntryId(seed);
-  const agentId = normalizeHeartbeatAgentId(record.agentId);
+    : createScheduleEntryId(seed);
+  const agentId = normalizeScheduleAgentId(record.agentId);
   const prompt = typeof record.prompt === "string" && record.prompt.trim().length > 0
     ? record.prompt.trim()
-    : getDefaultHeartbeatPrompt(agentId);
+    : getDefaultSchedulePrompt(agentId);
   return {
     id,
     enabled: typeof record.enabled === "boolean" ? record.enabled : true,
     agentId,
-    schedule: normalizeHeartbeatSchedule(record.schedule),
+    schedule: normalizeSchedule(record.schedule),
     prompt,
   };
 }
 
-export function normalizeHeartbeatEntries(
-  value: unknown,
-  legacySchedule?: Partial<HeartbeatSchedule> | null,
-): HeartbeatEntry[] {
+export function normalizeScheduleEntries(value: unknown): ScheduleRoutineEntry[] {
   if (Array.isArray(value) && value.length > 0) {
-    return value.slice(0, MAX_HEARTBEAT_ENTRIES).map((entry, index) =>
-      normalizeHeartbeatEntry(entry as Partial<HeartbeatEntry>, index)
+    return value.slice(0, MAX_SCHEDULE_ENTRIES).map((entry, index) =>
+      normalizeScheduleEntry(entry as Partial<ScheduleRoutineEntry>, index)
     );
   }
-  if (legacySchedule) {
-    return [{
-      ...createDefaultHeartbeatEntry(0),
-      schedule: normalizeHeartbeatSchedule(legacySchedule),
-    }];
-  }
-  return [createDefaultHeartbeatEntry(0)];
+  return [createDefaultScheduleEntry(0)];
 }
 
-export function isValidHeartbeatEntries(value: unknown): value is HeartbeatEntry[] {
-  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_HEARTBEAT_ENTRIES) return false;
+export function isValidScheduleEntries(value: unknown): value is ScheduleRoutineEntry[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_SCHEDULE_ENTRIES) return false;
   const ids = new Set<string>();
   return value.every((entry, index) => {
-    const normalized = normalizeHeartbeatEntry(entry as Partial<HeartbeatEntry>, index);
+    const normalized = normalizeScheduleEntry(entry as Partial<ScheduleRoutineEntry>, index);
     if (ids.has(normalized.id)) return false;
     ids.add(normalized.id);
-    return isValidHeartbeatSchedule(normalized.schedule) && normalized.prompt.trim().length > 0;
+    return isValidSchedule(normalized.schedule) && normalized.prompt.trim().length > 0;
   });
 }
+
+// ─── Backward-compat function aliases ────────────────────────────────────────
+/** @deprecated Use normalizeSchedule */
+export const normalizeHeartbeatSchedule = normalizeSchedule;
+/** @deprecated Use isValidSchedule */
+export const isValidHeartbeatSchedule = isValidSchedule;
+/** @deprecated Use scheduleToCron */
+export const heartbeatScheduleToCron = scheduleToCron;
+/** @deprecated Use isScheduleAgentId */
+export const isHeartbeatAgentId = isScheduleAgentId;
+/** @deprecated Use getScheduleAgentOption */
+export const getHeartbeatAgentOption = getScheduleAgentOption;
+/** @deprecated Use getDefaultSchedulePrompt */
+export const getDefaultHeartbeatPrompt = getDefaultSchedulePrompt;
+/** @deprecated Use normalizeScheduleAgentId */
+export const normalizeHeartbeatAgentId = normalizeScheduleAgentId;
+/** @deprecated Use createScheduleEntryId */
+export const createHeartbeatEntryId = createScheduleEntryId;
+/** @deprecated Use createDefaultScheduleEntry */
+export const createDefaultHeartbeatEntry = createDefaultScheduleEntry;
+/** @deprecated Use normalizeScheduleEntry */
+export const normalizeHeartbeatEntry = normalizeScheduleEntry;
+/** @deprecated Use normalizeScheduleEntries */
+export const normalizeHeartbeatEntries = (value: unknown, _legacySchedule?: unknown) => normalizeScheduleEntries(value);
+/** @deprecated Use isValidScheduleEntries */
+export const isValidHeartbeatEntries = isValidScheduleEntries;
 
 function getKstParts(now: Date): Record<string, number> {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -287,12 +322,12 @@ export function getKstMinuteKey(now: Date): string {
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}T${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
 }
 
-export function matchesHeartbeatSchedule(
-  value: Partial<HeartbeatSchedule> | null | undefined,
+export function matchesSchedule(
+  value: Partial<ScheduleRoutineSchedule> | null | undefined,
   now: Date,
 ): boolean {
-  const schedule = normalizeHeartbeatSchedule(value);
-  if (!isValidHeartbeatSchedule(schedule)) return false;
+  const schedule = normalizeSchedule(value);
+  if (!isValidSchedule(schedule)) return false;
   const current = getKstParts(now);
   return (
     schedule.minute.split(",").some((token) => matchCronToken(token, current.minute, CRON_FIELD_SPECS.minute)) &&
@@ -302,3 +337,6 @@ export function matchesHeartbeatSchedule(
     schedule.dayOfWeek.split(",").some((token) => matchCronToken(token, current.dayOfWeek, CRON_FIELD_SPECS.dayOfWeek))
   );
 }
+
+/** @deprecated Use matchesSchedule */
+export const matchesHeartbeatSchedule = matchesSchedule;

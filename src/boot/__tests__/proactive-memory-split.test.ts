@@ -1,28 +1,46 @@
+/**
+ * createRoutineEngine — unit test.
+ *
+ * Verifies the factory wires a RoutineEngine that delegates to a
+ * ConversationLoop created by the provided factory.
+ */
 import { describe, it, expect, vi } from "vitest";
 import { createRoutineEngine } from "../routine.js";
 
-describe("createRoutineEngine memory split wiring", () => {
-  it("reads recent memory entries and voice hints from memory entries", () => {
-    const listMemoryEntries = vi.fn(() => [
-      { title: "사용자 톤 메모", filename: "memory.md", content: "# 사용자 톤 메모" },
-    ]);
+describe("createRoutineEngine", () => {
+  it("createRoutineEngine returns a RoutineEngine with runRoutine", () => {
+    const mockLoop = {
+      run: vi.fn(async () => "요약 완료"),
+      getLastAssistantMessage: vi.fn(async () => "요약 완료"),
+      dispose: vi.fn(),
+    };
+
     const engine = createRoutineEngine({
-      taskService: { getPendingByPriority: () => [] } as never,
-      memoryManager: {
-        listMemoryEntries,
-        listSessions: () => [],
-      } as never,
-      pluginRuntime: {
-        listPluginManifests: () => [],
-        findPluginIdByCapability: () => undefined,
-        getPluginManifest: () => undefined,
-      } as never,
+      createConversationLoop: () => mockLoop as any,
     });
 
-    const items = engine.collectBriefingItems(new Date("2026-04-20T09:00:00Z"));
-    const prompt = engine.getBriefingPromptData(items, new Date("2026-04-20T09:00:00Z"));
+    expect(typeof engine.runRoutine).toBe("function");
+  });
 
-    expect(listMemoryEntries).toHaveBeenCalled();
-    expect(prompt).toContain("사용자 톤 메모");
+  it("runRoutine calls loop.run with the prePrompt", async () => {
+    const mockLoop = {
+      run: vi.fn(async (prompt: string) => prompt + " 처리됨"),
+      getLastAssistantMessage: vi.fn(async () => ""),
+      dispose: vi.fn(),
+    };
+
+    const engine = createRoutineEngine({
+      createConversationLoop: () => mockLoop as any,
+    });
+
+    const result = await engine.runRoutine({
+      id: "wakeup",
+      trigger: "wakeup",
+      prePrompt: "오늘 업무 맥락 정리",
+    });
+
+    expect(mockLoop.run).toHaveBeenCalledWith("오늘 업무 맥락 정리");
+    expect(result.routineId).toBe("wakeup");
+    expect(result.trigger).toBe("wakeup");
   });
 });

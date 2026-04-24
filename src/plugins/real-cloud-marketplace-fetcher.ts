@@ -72,11 +72,15 @@ interface ServerCatalogRow {
   default_config?: Record<string, unknown>;
   defaultConfig?: Record<string, unknown>;
   ui?: unknown;
+  install_policy?: string;
+  installPolicy?: string;
   deployment?: string;
   delivery_mode?: string;
   deliveryMode?: string;
   bundle_dependencies?: unknown;
   bundleDependencies?: unknown;
+  plugin_access?: unknown;
+  pluginAccess?: unknown;
   publisher?: string;
   latest_stable_version?: string | null;
   latestStableVersion?: string;
@@ -303,23 +307,27 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
       item.defaultConfig = defaultConfig;
     }
     if (ui) item.ui = ui;
-    if (row.deployment === "managed") {
+    const installPolicy = row.install_policy ?? row.installPolicy;
+    if (installPolicy === "admin" || row.deployment === "managed") {
+      item.installPolicy = "admin";
       item.deployment = "managed";
-    } else if (row.deployment === "user" || row.deployment === "free") {
+    } else if (installPolicy === "user" || row.deployment === "user" || row.deployment === "free") {
+      item.installPolicy = "user";
       item.deployment = "user";
     }
     const deliveryMode = row.delivery_mode ?? row.deliveryMode;
-    if (deliveryMode === "marketplace" || deliveryMode === "bundled") {
-      item.deliveryMode = deliveryMode;
+    if (deliveryMode === "marketplace" || deliveryMode === "bundle" || deliveryMode === "bundled") {
+      item.deliveryMode = deliveryMode === "bundled" ? "bundle" : deliveryMode;
     }
     const bundleDependenciesRaw = row.bundle_dependencies ?? row.bundleDependencies;
     if (Array.isArray(bundleDependenciesRaw)) {
-      item.bundleDependencies = bundleDependenciesRaw.filter((dep): dep is string | { pluginId: string; versionRange?: string } => {
+      item.bundleDependencies = bundleDependenciesRaw.filter((dep): dep is string | { pluginId: string; versionRange?: string; required?: boolean } => {
         if (typeof dep === "string") return dep.trim().length > 0;
         if (!dep || typeof dep !== "object" || Array.isArray(dep)) return false;
         const candidate = dep as Record<string, unknown>;
         return typeof candidate.pluginId === "string" && candidate.pluginId.trim().length > 0
-          && (candidate.versionRange === undefined || typeof candidate.versionRange === "string");
+          && (candidate.versionRange === undefined || typeof candidate.versionRange === "string")
+          && (candidate.required === undefined || typeof candidate.required === "boolean");
       });
     }
     if (row.publisher) item.publisher = row.publisher;

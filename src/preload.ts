@@ -1,6 +1,6 @@
 import electron from "electron";
 import type { McpServerConfig } from "./mcp/types.js";
-import type { HeartbeatAgentId, HeartbeatSchedule } from "./routines/schedule.js";
+import type { ScheduleAgentId, ScheduleRoutineSchedule } from "./routines/schedule.js";
 
 const { contextBridge, ipcRenderer } = electron;
 
@@ -145,10 +145,6 @@ const api = {
 
   // ─── Plugins ─────────────────────────────────────
   listMarketplacePlugins: async () => ipcRenderer.invoke("lvis:plugins:marketplace:list"),
-  installMarketplacePlugin: async (pluginId: string) =>
-    normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:install", pluginId)),
-  uninstallMarketplacePlugin: async (pluginId: string) =>
-    normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:uninstall", pluginId)),
   listPluginUiExtensions: async () => ipcRenderer.invoke("lvis:plugins:ui:list"),
   readPluginUiModule: async (pluginId: string, viewId: string) =>
     ipcRenderer.invoke("lvis:plugins:ui:read-module", { pluginId, viewId }) as Promise<string>,
@@ -175,41 +171,38 @@ const api = {
       enabled?: boolean;
       scheduleTimeKst?: string;
       contextPrompt?: string;
-      postTurnEnabled?: boolean;
-      heartbeatEntries?: Array<{
+      scheduleEntries?: Array<{
         id: string;
         enabled: boolean;
-        agentId: HeartbeatAgentId;
-        schedule: HeartbeatSchedule;
+        agentId: ScheduleAgentId;
+        schedule: ScheduleRoutineSchedule;
         prompt: string;
       }>;
     },
   ) => ipcRenderer.invoke("lvis:routines:update", routineId, patch),
   startRoutineSession: async (routineId: string) =>
     ipcRenderer.invoke("lvis:routines:start-session", routineId) as Promise<{ ok: boolean; sessionId?: string; error?: string }>,
-  getLatestRoutineBriefing: async () =>
-    ipcRenderer.invoke("lvis:routine:get-latest-briefing") as Promise<{
+  getLatestRoutineResult: async () =>
+    ipcRenderer.invoke("lvis:routine:get-latest-result") as Promise<{
+      routineId: string;
+      trigger: string;
+      summary: string;
       generatedAt: string;
-      items: Array<{ category: string; priority: string; title: string; detail?: string }>;
-      summary?: string;
     } | null>,
-  resetDailyBriefingDev: async () =>
-    ipcRenderer.invoke("lvis:routines:dev-reset-daily-briefing") as Promise<{ ok: boolean; generated?: boolean; reason?: string; error?: string }>,
+  triggerWakeupRoutineDev: async () =>
+    ipcRenderer.invoke("lvis:routines:dev-trigger-wakeup") as Promise<{ ok: boolean; summary?: string; error?: string }>,
 
   // ─── Usage Observability (Sprint 4.B) ────────────
   getUsageSummary: async (days?: number) => ipcRenderer.invoke("lvis:usage:summary", days),
   getUsageRange: async (opts: { dateFrom: string; dateTo: string }) => ipcRenderer.invoke("lvis:usage:range", opts),
   exportUsageCsv: async (rows: Array<Record<string, string | number>>) => ipcRenderer.invoke("lvis:usage:export-csv", rows),
 
-  // ─── Routine briefing (Sprint 3-A: briefing card + snooze/dismiss) ───
-  onRoutineBriefing: (handler: (briefing: { generatedAt: string; items: Array<{ category: string; priority: string; title: string; detail?: string }>; summary?: string }) => void) => {
+  // ─── Routine completed event (신규: RoutineResult 전달) ──────────────────
+  onRoutineCompleted: (handler: (result: { routineId: string; trigger: string; summary: string; generatedAt: string }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
-    ipcRenderer.on("lvis:routine:briefing", listener);
-    return () => ipcRenderer.removeListener("lvis:routine:briefing", listener);
+    ipcRenderer.on("lvis:routine:completed", listener);
+    return () => ipcRenderer.removeListener("lvis:routine:completed", listener);
   },
-  dismissBriefing: async () =>
-    ipcRenderer.invoke("lvis:routine:dismiss-briefing") as Promise<{ ok: boolean; debounced?: boolean }>,
-  snoozeBriefing: async () => ipcRenderer.invoke("lvis:routine:snooze-briefing") as Promise<{ ok: boolean; lastDismissedAt?: string }>,
 
   // ─── Marketplace update notifications (S8) ───────
   onMarketplaceUpdatesAvailable: (handler: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => {
@@ -318,6 +311,20 @@ const api = {
 
 contextBridge.exposeInMainWorld("lvisApi", api);
 
+let hostMarketplaceApiClaimed = false;
+contextBridge.exposeInMainWorld("lvisHost", {
+  takePluginMarketplaceApi: () => {
+    if (hostMarketplaceApiClaimed) return null;
+    hostMarketplaceApiClaimed = true;
+    return {
+      installMarketplacePlugin: async (pluginId: string) =>
+        normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:install", pluginId)),
+      uninstallMarketplacePlugin: async (pluginId: string) =>
+        normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:uninstall", pluginId)),
+    };
+  },
+});
+
 // ─── lvis 네임스페이스 (B1: Approval Gate + Permission) ──
 // renderer에서 window.lvis.approval / window.lvis.permission으로 접근
 contextBridge.exposeInMainWorld("lvis", {
@@ -327,8 +334,6 @@ contextBridge.exposeInMainWorld("lvis", {
   mcp: api.mcp,
   plugins: {
     cards: () => ipcRenderer.invoke("lvis:plugins:cards"),
-    uninstallMarketplacePlugin: async (id: string) =>
-      normalizePluginActionResult(await ipcRenderer.invoke("lvis:plugins:uninstall", id)),
   },
   pluginConfig: {
     get: (pluginId: string) => ipcRenderer.invoke("lvis:plugins:config:get", pluginId),

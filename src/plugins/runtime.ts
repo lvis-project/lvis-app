@@ -10,6 +10,7 @@ import * as AjvModule from "ajv";
 import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import type {
+  InstallPolicy,
   PluginManifest,
   PluginToolHandler,
   PluginUiExtension,
@@ -80,6 +81,22 @@ type ManifestLoadPlan = {
   manifestPath: string;
   enabled: boolean;
 };
+
+function normalizeInstallPolicy(
+  source: Partial<Pick<PluginManifest, "installPolicy" | "deployment">> | undefined,
+): InstallPolicy {
+  if (source?.installPolicy === "admin" || source?.deployment === "managed") {
+    return "admin";
+  }
+  return "user";
+}
+
+function normalizeDeliveryMode(
+  value: PluginManifest["deliveryMode"] | "bundled" | undefined,
+): PluginManifest["deliveryMode"] | undefined {
+  if (value === "bundled") return "bundle";
+  return value;
+}
 
 /**
  * Phase 1.5 Option C — 비활성 plugin 카탈로그 카드.
@@ -162,6 +179,7 @@ export class PluginRuntime {
    */
   private readonly disposers = new Map<string, Array<() => void>>();
   private readonly knownPluginManifests = new Map<string, PluginManifest>();
+  private readonly knownToolOwners = new Map<string, string>();
   /** Plugins whose import/load failed — surfaced to Settings UI as status="failed". */
   private readonly failedPluginIds = new Set<string>();
   private readonly failedPluginStubs = new Map<string, { name: string; description: string }>();
@@ -186,6 +204,12 @@ export class PluginRuntime {
     if (this.loaded) return;
     const loadPlan = await this.resolveManifestLoadPlan();
     const enabledManifestSnapshots = await this.readEnabledManifestSnapshots(loadPlan);
+    for (const [pluginId, manifest] of enabledManifestSnapshots) {
+      this.knownPluginManifests.set(pluginId, manifest);
+      for (const toolName of manifest.tools ?? []) {
+        this.knownToolOwners.set(toolName, pluginId);
+      }
+    }
     for (const plan of loadPlan) {
       const manifestPath = plan.manifestPath;
       let manifest: PluginManifest;
@@ -241,7 +265,7 @@ export class PluginRuntime {
       const skipSignatureVerification = process.env.LVIS_DEV_SKIP_SIG === "1";
       if (this.signatureVerifier && !skipSignatureVerification) {
         const sigResult = await this.signatureVerifier.verifyManifestFile(manifestPath);
-        const isManaged = manifest.deployment === "managed" || manifest.deliveryMode === "bundled";
+        const isManaged = normalizeInstallPolicy(manifest) === "admin";
         if (!sigResult.valid) {
           if (isManaged) {
             console.error(
@@ -681,6 +705,55 @@ export class PluginRuntime {
     }
   }
 
+  resolveToolOwner(method: string): string | undefined {
+    return this.methodMap.get(method)?.pluginId ?? this.knownToolOwners.get(method);
+  }
+
+  assertPluginToolAccess(callerPluginId: string, method: string): void {
+    const targetPluginId = this.resolveToolOwner(method);
+    if (!targetPluginId || targetPluginId === callerPluginId) return;
+    const manifest = this.getPluginManifest(callerPluginId);
+    const rule = manifest?.pluginAccess?.plugins.find((entry) => entry.pluginId === targetPluginId);
+    if (rule?.tools?.includes(method)) return;
+    this.auditLog?.("error", "plugin_tool_access_denied", {
+      callerPluginId,
+      targetPluginId,
+      method,
+    });
+    throw new Error(
+      `Plugin '${callerPluginId}' is not allowed to call tool '${method}' on plugin '${targetPluginId}'`,
+    );
+  }
+
+  assertPluginEventAccess(callerPluginId: string, eventType: string): void {
+    const targetPluginId = this.inferEventOwner(eventType);
+    if (!targetPluginId || targetPluginId === callerPluginId) return;
+    const manifest = this.getPluginManifest(callerPluginId);
+    const rule = manifest?.pluginAccess?.plugins.find((entry) => entry.pluginId === targetPluginId);
+    if (rule?.events?.includes(eventType)) return;
+    this.auditLog?.("error", "plugin_event_access_denied", {
+      callerPluginId,
+      targetPluginId,
+      eventType,
+    });
+    throw new Error(
+      `Plugin '${callerPluginId}' is not allowed to subscribe to event '${eventType}' from plugin '${targetPluginId}'`,
+    );
+  }
+
+  assertPluginEventEmitAccess(callerPluginId: string, eventType: string): void {
+    const ownerPluginId = this.inferEventOwner(eventType);
+    if (!ownerPluginId || ownerPluginId === callerPluginId) return;
+    this.auditLog?.("error", "plugin_event_emit_denied", {
+      callerPluginId,
+      ownerPluginId,
+      eventType,
+    });
+    throw new Error(
+      `Plugin '${callerPluginId}' is not allowed to emit event '${eventType}' owned by plugin '${ownerPluginId}'`,
+    );
+  }
+
   /**
    * Return a snapshot of per-plugin performance statistics.
    * Keys are pluginIds; values contain startup time, call counts, error counts,
@@ -738,7 +811,7 @@ export class PluginRuntime {
   }
 
   getPluginManifest(pluginId: string): PluginManifest | undefined {
-    return this.plugins.get(pluginId)?.manifest;
+    return this.plugins.get(pluginId)?.manifest ?? this.knownPluginManifests.get(pluginId);
   }
 
   /**
@@ -884,6 +957,10 @@ export class PluginRuntime {
         `Example: {"id":"com.lge.sample","name":"Sample","version":"1.0.0","entry":"dist/index.js","tools":["sample_ping"]}`,
       );
     }
+    parsed.installPolicy = normalizeInstallPolicy(parsed);
+    parsed.deliveryMode = normalizeDeliveryMode(
+      parsed.deliveryMode as PluginManifest["deliveryMode"] | "bundled" | undefined,
+    );
     const pid = typeof parsed?.id === "string" && parsed.id.length > 0 ? parsed.id : "<unknown>";
     const fail = (fieldPath: string, reason: string, example: string): never => {
       throw new Error(
@@ -1002,7 +1079,7 @@ export class PluginRuntime {
     // manifest. testMode may legitimately appear in dev/fixture builds but
     // should NEVER ship inside a protected deployment install.
     if (
-      (parsed.deployment === "managed" || parsed.deliveryMode === "bundled") &&
+      normalizeInstallPolicy(parsed) === "admin" &&
       parsed.config &&
       typeof parsed.config === "object" &&
       (parsed.config as Record<string, unknown>).testMode === true
@@ -1210,6 +1287,7 @@ export class PluginRuntime {
     }
     this.disposers.clear();
     this.knownPluginManifests.clear();
+    this.knownToolOwners.clear();
     this.plugins.clear();
     this.methodMap.clear();
     this.failedPluginIds.clear();
@@ -1289,11 +1367,20 @@ export class PluginRuntime {
       tools: filteredTools,
       capabilities: manifest.capabilities ?? [],
       toolDescriptions: Object.keys(toolDescriptions).length > 0 ? toolDescriptions : undefined,
-      isManaged: manifest.deployment === "managed" || manifest.deliveryMode === "bundled",
+      isManaged: normalizeInstallPolicy(manifest) === "admin",
       loadStatus,
       version: manifest.version,
       publisher: manifest.publisher,
     };
+  }
+
+  private inferEventOwner(eventType: string): string | undefined {
+    const prefix = eventType.split(".")[0];
+    if (!prefix) return undefined;
+    if (this.plugins.has(prefix) || this.knownPluginManifests.has(prefix)) {
+      return prefix;
+    }
+    return undefined;
   }
 }
 

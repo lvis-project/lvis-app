@@ -145,8 +145,9 @@
         }
       }
     },
+    "installPolicy": { "enum": ["admin", "user"] },
     "deployment": { "enum": ["managed", "user"] },
-    "deliveryMode": { "enum": ["marketplace", "bundled"] },
+    "deliveryMode": { "enum": ["marketplace", "bundle", "bundled"] },
     "bundleDependencies": {
       "type": "array",
       "items": {
@@ -158,11 +159,61 @@
             "additionalProperties": false,
             "properties": {
               "pluginId": { "type": "string", "minLength": 1 },
-              "versionRange": { "type": "string", "minLength": 1 }
+              "versionRange": { "type": "string", "minLength": 1 },
+              "required": { "type": "boolean" }
             }
           }
         ]
       }
+    },
+    "pluginAccess": {
+      "type": "object",
+      "required": ["plugins"],
+      "additionalProperties": false,
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["pluginId"],
+            "additionalProperties": false,
+            "properties": {
+              "pluginId": { "type": "string", "minLength": 1 },
+              "tools": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true
+              },
+              "events": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "routineTools": {
+      "type": "object",
+      "description": "Tool name bindings for routine lifecycle hooks",
+      "properties": {
+        "wakeupBriefing": { "type": "string" },
+        "shutdownSummary": { "type": "string" },
+        "heartbeat": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "requires": {
+      "type": "object",
+      "description": "Runtime prerequisites declared by the plugin",
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
     },
     "publisher": { "type": "string" },
     "toolSchemas": {
