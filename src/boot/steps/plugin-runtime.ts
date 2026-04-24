@@ -234,7 +234,7 @@ export async function initPluginRuntime(
             return;
           }
         }
-        pluginRuntime?.assertPluginEventEmitAccess(pluginId, type);
+        pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
         emitEvent(type, { ...((data as Record<string, unknown>) ?? {}), pluginId });
       },
       onEvent: (type, handler) => {

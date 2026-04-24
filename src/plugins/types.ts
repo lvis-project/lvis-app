@@ -160,6 +160,7 @@ export interface PluginRegistryEntry {
   enabled?: boolean;
   installedBy?: InstallPolicy;
   bundleRefs?: string[];
+  approvedPluginAccess?: PluginAccessSpec;
 }
 
 export interface PluginRegistry {

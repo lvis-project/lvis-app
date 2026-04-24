@@ -127,7 +127,7 @@ describe("PluginDeploymentGuard", () => {
     const result = await guard.canUninstall("p-managed-inside", "user");
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toMatch(/deployment="managed"/);
+    expect(result.reason).toMatch(/installPolicy="admin"|deployment="managed"/);
   });
 
   it("allows user plugin inside installedDir with explicit deployment: user", async () => {

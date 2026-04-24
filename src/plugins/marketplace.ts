@@ -63,7 +63,12 @@ type InstallOperationState = {
   installedPluginIds: string[];
   touchedEntries: Map<
     string,
-    { enabled: boolean | undefined; bundleRefs: string[] | undefined; installedBy: "admin" | "user" | undefined }
+    {
+      enabled: boolean | undefined;
+      bundleRefs: string[] | undefined;
+      installedBy: "admin" | "user" | undefined;
+      approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"];
+    }
   >;
 };
 
@@ -301,8 +306,21 @@ export class PluginMarketplaceService {
 
     const existingEntry = await this.getInstalledRegistryEntry(plugin.id);
     if (existingEntry) {
-      await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, state);
-      return { pluginId: plugin.id, installed: true };
+      // If the requested version matches the currently-installed version (or
+      // neither specifies a concrete semver version) treat this as a no-op so
+      // repeated installs of the same release are idempotent.  When the catalog
+      // advertises a DIFFERENT version we fall through to re-install so that an
+      // "install" call can act as an in-place upgrade and stale files from the
+      // old release do not survive.
+      const installedVersion = await this.getInstalledVersion(plugin.id);
+      const isSameVersion =
+        !plugin.version ||
+        !installedVersion ||
+        plugin.version === installedVersion;
+      if (isSameVersion) {
+        await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
+        return { pluginId: plugin.id, installed: true };
+      }
     }
 
     // S14: dependency preflight — evaluate after any managed bundle dependencies
@@ -335,6 +353,7 @@ export class PluginMarketplaceService {
         existing.enabled = true;
         existing.installedBy = actor === "it-admin" ? "admin" : "user";
         existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, activeBundleRootId, plugin.id);
+        existing.approvedPluginAccess = plugin.pluginAccess;
       } else {
         registry.plugins.push({
           id: plugin.id,
@@ -342,6 +361,7 @@ export class PluginMarketplaceService {
           enabled: true,
           installedBy: actor === "it-admin" ? "admin" : "user",
           bundleRefs: this.mergeBundleRefs([], activeBundleRootId, plugin.id),
+          approvedPluginAccess: plugin.pluginAccess,
         });
       }
     });
@@ -483,6 +503,7 @@ export class PluginMarketplaceService {
           existing.manifestPath = manifestPath;
           existing.enabled = true;
           existing.installedBy = "user";
+          existing.approvedPluginAccess = plugin.pluginAccess;
         } else {
           registry.plugins.push({
             id: plugin.id,
@@ -490,6 +511,7 @@ export class PluginMarketplaceService {
             enabled: true,
             installedBy: "user",
             bundleRefs: [],
+            approvedPluginAccess: plugin.pluginAccess,
           });
         }
       });
@@ -731,6 +753,24 @@ export class PluginMarketplaceService {
     }
   }
 
+  /** Returns the version string from the currently-installed manifest, or null. */
+  private async getInstalledVersion(pluginId: string): Promise<string | null> {
+    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
+    if (!registry) return null;
+    const entry = registry.plugins.find((c) => c.id === pluginId);
+    if (!entry) return null;
+    const manifestPath = isAbsolute(entry.manifestPath)
+      ? entry.manifestPath
+      : resolve(dirname(this.registryPath), entry.manifestPath);
+    try {
+      const raw = await readFile(manifestPath, "utf-8");
+      const parsed = JSON.parse(raw) as { version?: unknown };
+      return typeof parsed.version === "string" ? parsed.version : null;
+    } catch {
+      return null;
+    }
+  }
+
   private mergeBundleRefs(
     bundleRefs: string[] | undefined,
     bundleRootId: string | null,
@@ -746,6 +786,7 @@ export class PluginMarketplaceService {
     pluginId: string,
     bundleRootId: string | null,
     actor: "user" | "it-admin",
+    approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"],
     state?: InstallOperationState,
   ): Promise<void> {
     await updatePluginRegistry(this.registryPath, (registry) => {
@@ -756,11 +797,13 @@ export class PluginMarketplaceService {
           enabled: entry.enabled,
           bundleRefs: entry.bundleRefs ? [...entry.bundleRefs] : undefined,
           installedBy: entry.installedBy,
+          approvedPluginAccess: entry.approvedPluginAccess,
         });
       }
       entry.enabled = true;
       entry.installedBy = actor === "it-admin" ? "admin" : entry.installedBy ?? "user";
       entry.bundleRefs = this.mergeBundleRefs(entry.bundleRefs, bundleRootId, pluginId);
+      entry.approvedPluginAccess = approvedPluginAccess;
     });
   }
 
@@ -785,6 +828,7 @@ export class PluginMarketplaceService {
         entry.enabled = snapshot.enabled;
         entry.bundleRefs = snapshot.bundleRefs;
         entry.installedBy = snapshot.installedBy;
+        entry.approvedPluginAccess = snapshot.approvedPluginAccess;
       }
       await writePluginRegistry(this.registryPath, registry);
     });
@@ -997,6 +1041,28 @@ export class PluginMarketplaceService {
           `plugin "${plugin.id}" artifact manifest pluginAccess does not match the catalog-approved grant`,
         );
       }
+
+      const expectedDeliveryMode = normalizeDeliveryMode(
+        plugin.deliveryMode as PluginMarketplaceItem["deliveryMode"] | "bundled" | undefined,
+      ) ?? "marketplace";
+      const actualDeliveryMode = normalizeDeliveryMode(
+        manifest.deliveryMode as PluginManifest["deliveryMode"] | "bundled" | undefined,
+      ) ?? "marketplace";
+      if (actualDeliveryMode !== expectedDeliveryMode) {
+        throw new Error(
+          `plugin "${plugin.id}" artifact manifest deliveryMode mismatch: expected "${expectedDeliveryMode}", got "${String(actualDeliveryMode)}"`,
+        );
+      }
+
+      const expectedBundleDependencies = normalizeBundleDependencies(plugin);
+      const actualBundleDependencies = normalizeBundleDependencies(
+        manifest as Pick<PluginManifest, "bundleDependencies">,
+      );
+      if (JSON.stringify(actualBundleDependencies) !== JSON.stringify(expectedBundleDependencies)) {
+        throw new Error(
+          `plugin "${plugin.id}" artifact manifest bundleDependencies does not match the catalog-approved bundle members`,
+        );
+      }
     } catch (err) {
       await rm(pluginDir, { recursive: true, force: true });
       throw err;
@@ -1054,8 +1120,33 @@ export class PluginMarketplaceService {
         await writeFile(targetPath, entry.getData());
       }
 
-      await rm(pluginDir, { recursive: true, force: true });
-      await rename(stageDir, pluginDir);
+      // Atomically swap stageDir → pluginDir.  On Windows, rename() refuses to
+      // overwrite a non-empty directory, so we first rename the existing
+      // pluginDir to a temporary name (which is always safe on the same volume)
+      // and then rename stageDir into place.  Only after both renames succeed do
+      // we remove the old directory, ensuring the live pluginDir is never in a
+      // half-removed state if the process is killed between operations.
+      const oldDir = resolve(this.installedDir, `.${pluginId}.old-${randomUUID()}`);
+      let hadOldDir = false;
+      try {
+        await rename(pluginDir, oldDir);
+        hadOldDir = true;
+      } catch {
+        // pluginDir did not exist yet (first install) — nothing to move aside.
+      }
+      try {
+        await rename(stageDir, pluginDir);
+      } catch (renameErr) {
+        // Restore the old directory if the swap failed so we don't leave the
+        // plugin in a broken state.
+        if (hadOldDir) {
+          await rename(oldDir, pluginDir).catch(() => undefined);
+        }
+        throw renameErr;
+      }
+      if (hadOldDir) {
+        await rm(oldDir, { recursive: true, force: true }).catch(() => undefined);
+      }
     } catch (err) {
       await rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
       throw err;

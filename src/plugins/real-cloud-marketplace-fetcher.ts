@@ -330,6 +330,30 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
           && (candidate.required === undefined || typeof candidate.required === "boolean");
       });
     }
+    const pluginAccessRaw = row.plugin_access ?? row.pluginAccess;
+    if (pluginAccessRaw && typeof pluginAccessRaw === "object" && !Array.isArray(pluginAccessRaw)) {
+      const candidate = pluginAccessRaw as { plugins?: unknown };
+      if (Array.isArray(candidate.plugins)) {
+        item.pluginAccess = {
+          plugins: candidate.plugins.flatMap((entry) => {
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+            const record = entry as Record<string, unknown>;
+            if (typeof record.pluginId !== "string" || record.pluginId.trim().length === 0) return [];
+            const tools = Array.isArray(record.tools)
+              ? record.tools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
+              : undefined;
+            const events = Array.isArray(record.events)
+              ? record.events.filter((event): event is string => typeof event === "string" && event.trim().length > 0)
+              : undefined;
+            return [{
+              pluginId: record.pluginId,
+              tools,
+              events,
+            }];
+          }),
+        };
+      }
+    }
     if (row.publisher) item.publisher = row.publisher;
 
     // S8: expose version and channel for update detection
