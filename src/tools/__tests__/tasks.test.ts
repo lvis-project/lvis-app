@@ -38,6 +38,8 @@ function makeService(): TaskService {
       store.delete(id);
     },
     query(filter: TaskFilter): Task[] {
+      // Real TaskService uses inclusive `<=` / `>=` (see taskService.ts:137,141) —
+      // mirror that so tool behavior at day boundaries matches production.
       let items = [...store.values()];
       if (filter.status) {
         const set = Array.isArray(filter.status)
@@ -47,8 +49,8 @@ function makeService(): TaskService {
       }
       if (filter.priority) items = items.filter((t) => t.priority === filter.priority);
       if (filter.source) items = items.filter((t) => t.source === filter.source);
-      if (filter.dueBefore) items = items.filter((t) => t.dueAt && t.dueAt < filter.dueBefore!);
-      if (filter.dueAfter) items = items.filter((t) => t.dueAt && t.dueAt > filter.dueAfter!);
+      if (filter.dueBefore) items = items.filter((t) => !!t.dueAt && t.dueAt <= filter.dueBefore!);
+      if (filter.dueAfter) items = items.filter((t) => !!t.dueAt && t.dueAt >= filter.dueAfter!);
       return items;
     },
     getPendingByPriority(): Task[] {
@@ -57,13 +59,24 @@ function makeService(): TaskService {
     getOverdue(): Task[] {
       const nowIso = now();
       return [...store.values()].filter(
-        (t) => t.status === "pending" && t.dueAt && t.dueAt < nowIso,
+        (t) => t.status === "pending" && !!t.dueAt && t.dueAt < nowIso,
       );
     },
     getDueToday(): Task[] {
-      const today = new Date().toISOString().slice(0, 10);
+      // Mirror real TaskService.getDueToday (taskService.ts:180-195):
+      // host-local setHours(0,0,0,0) .. setHours(23,59,59,999), inclusive.
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setHours(23, 59, 59, 999);
+      const startIso = start.toISOString();
+      const endIso = end.toISOString();
       return [...store.values()].filter(
-        (t) => t.status === "pending" && t.dueAt?.startsWith(today),
+        (t) =>
+          t.status === "pending" &&
+          !!t.dueAt &&
+          t.dueAt >= startIso &&
+          t.dueAt <= endIso,
       );
     },
   };
@@ -314,6 +327,76 @@ describe("task tools", () => {
     // Float 1.8 → floor → 1
     const r2 = await call(toolByName(tools, "task_list"), { limit: 1.8 });
     expect((r2.json as { items: unknown[] }).items).toHaveLength(1);
+  });
+
+  it("task_update: invalid dueAt string returns explicit error (not silent ignore)", async () => {
+    const created = await call(toolByName(tools, "task_add"), {
+      title: "원본",
+      dueAt: "2026-05-01",
+    });
+    const id = (created.json as { id: string }).id;
+    const originalDue = (created.json as { dueAt: string }).dueAt;
+
+    const updated = await call(toolByName(tools, "task_update"), {
+      id,
+      dueAt: "not-a-date",
+    });
+    expect(updated.isError).toBe(true);
+    expect((updated.json as { error: string }).error).toMatch(/invalid dueAt/);
+
+    // 기존 dueAt 은 건드리지 않음
+    const list = await call(toolByName(tools, "task_list"), {});
+    const item = (list.json as { items: Array<{ id: string; dueAt: string }> })
+      .items.find((i) => i.id === id)!;
+    expect(item.dueAt).toBe(originalDue);
+  });
+
+  it("task_list: source filter trims whitespace", async () => {
+    await call(toolByName(tools, "task_add"), { title: "A", source: "chat" });
+    await call(toolByName(tools, "task_add"), { title: "B", source: "email" });
+
+    const r = await call(toolByName(tools, "task_list"), { source: "  chat  " });
+    const titles = (r.json as { items: Array<{ title: string }> }).items.map(
+      (i) => i.title,
+    );
+    expect(titles).toEqual(["A"]);
+  });
+
+  it("task_list: source='' (whitespace only) ignores filter entirely", async () => {
+    await call(toolByName(tools, "task_add"), { title: "A", source: "chat" });
+    await call(toolByName(tools, "task_add"), { title: "B", source: "email" });
+
+    const r = await call(toolByName(tools, "task_list"), { source: "   " });
+    expect(
+      (r.json as { items: unknown[] }).items,
+    ).toHaveLength(2);
+  });
+
+  it("task_today: uses explicit KST day range (not host local)", async () => {
+    // Today's KST date
+    const nowKst = new Date(Date.now() + 9 * 60 * 60_000);
+    const y = nowKst.getUTCFullYear();
+    const m = String(nowKst.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(nowKst.getUTCDate()).padStart(2, "0");
+    const todayKstDate = `${y}-${m}-${d}`;
+
+    // Task due at KST 18:00 today — must appear
+    await call(toolByName(tools, "task_add"), {
+      title: "오늘 오후",
+      dueAt: new Date(`${todayKstDate}T18:00:00+09:00`).toISOString(),
+    });
+    // Task due yesterday KST 23:59 — must NOT appear (no matter host local time)
+    const yesterdayKst = new Date(
+      new Date(`${todayKstDate}T00:00:00+09:00`).getTime() - 60_000,
+    ).toISOString();
+    await call(toolByName(tools, "task_add"), { title: "어제", dueAt: yesterdayKst });
+
+    const { json } = await call(toolByName(tools, "task_today"), {});
+    const titles = (json as { items: Array<{ title: string }> }).items.map(
+      (i) => i.title,
+    );
+    expect(titles).toContain("오늘 오후");
+    expect(titles).not.toContain("어제");
   });
 
   it("task_delete: removes task, subsequent update returns not-found", async () => {

@@ -191,12 +191,18 @@ export function createTaskTools(taskService: TaskService): Tool[] {
         const priority = asPriority(a.priority);
         if (priority) patch.priority = priority;
 
-        const dueIntent = parseDueAtIntent(
-          a.dueAt,
-          Object.prototype.hasOwnProperty.call(a, "dueAt"),
-        );
+        const hasDueAt = Object.prototype.hasOwnProperty.call(a, "dueAt");
+        const dueIntent = parseDueAtIntent(a.dueAt, hasDueAt);
         if (dueIntent.kind === "clear") patch.dueAt = undefined;
         else if (dueIntent.kind === "set") patch.dueAt = dueIntent.iso;
+        else if (hasDueAt) {
+          // `dueAt` 가 key 로 존재하는데 clear 신호도, parseable 도 아니면
+          // 잘못된 값. 조용히 무시하면 "no updatable fields" 오해 유발 →
+          // 명시 에러로 LLM 이 즉시 재시도/재확인 가능하게.
+          return err(
+            `invalid dueAt: expected ISO 8601, YYYY-MM-DD, null, or empty string`,
+          );
+        }
 
         if (Object.keys(patch).length === 0) {
           return err("no updatable fields provided");
@@ -251,9 +257,17 @@ export function createTaskTools(taskService: TaskService): Tool[] {
             description: "단일 status 또는 배열. 예: 'pending' 또는 ['pending','snoozed'].",
           },
           priority: { type: "string", enum: PRIORITY_VALUES },
-          source: { type: "string", description: "source 라벨로 필터 (예: 'chat', 'email')." },
-          dueBefore: { type: "string", description: "ISO. 이 시각 이전 dueAt 만." },
-          dueAfter: { type: "string", description: "ISO. 이 시각 이후 dueAt 만." },
+          source: { type: "string", description: "source 라벨로 필터 (예: 'chat', 'email'). 좌우 공백은 자동 trim." },
+          dueBefore: {
+            type: "string",
+            description:
+              "이 시각 이전(≤) dueAt 만. ISO 8601 또는 YYYY-MM-DD (KST 당일 end-of-day 23:59:59+09:00).",
+          },
+          dueAfter: {
+            type: "string",
+            description:
+              "이 시각 이후(≥) dueAt 만. ISO 8601 또는 YYYY-MM-DD (KST 당일 end-of-day).",
+          },
           limit: {
             type: "integer",
             minimum: 1,
@@ -277,8 +291,9 @@ export function createTaskTools(taskService: TaskService): Tool[] {
         }
         const priority = asPriority(a.priority);
         if (priority) filter.priority = priority;
-        if (typeof a.source === "string" && a.source.length > 0) {
-          filter.source = a.source;
+        if (typeof a.source === "string") {
+          const source = a.source.trim();
+          if (source.length > 0) filter.source = source;
         }
         const dueBefore = asIsoOrUndef(a.dueBefore);
         if (dueBefore) filter.dueBefore = dueBefore;
@@ -299,13 +314,30 @@ export function createTaskTools(taskService: TaskService): Tool[] {
     createDynamicTool({
       name: "task_today",
       description:
-        "오늘(KST 기준) 마감인 미완료 Task 목록을 돌려줍니다. 아침 브리핑·'오늘 할 일' 질문에 사용.",
+        "오늘 (KST 기준) 마감인 미완료 Task 목록을 돌려줍니다. 아침 브리핑·'오늘 할 일' 질문에 사용. " +
+        "TaskService.getDueToday 가 host local timezone 을 쓰는 이슈가 있어, 이 tool 은 " +
+        "KST 일간 경계를 명시적으로 계산해 query(dueAfter/dueBefore) 로 필터합니다.",
       source: "builtin",
       category: "read",
       isReadOnly: () => true,
       jsonSchema: { type: "object", properties: {} },
       execute: async () => {
-        const items = taskService.getDueToday();
+        // UTC 기준 시각을 KST 로 shift → 해당 "일자" 구함 → 그 일자의
+        // 00:00:00+09:00 과 23:59:59.999+09:00 을 ISO 로 환산해 필터.
+        // host timezone 과 무관하게 KST 기준으로 일관된 결과.
+        const nowKst = new Date(Date.now() + 9 * 60 * 60_000);
+        const y = nowKst.getUTCFullYear();
+        const m = String(nowKst.getUTCMonth() + 1).padStart(2, "0");
+        const d = String(nowKst.getUTCDate()).padStart(2, "0");
+        const dueAfter = new Date(`${y}-${m}-${d}T00:00:00+09:00`).toISOString();
+        const dueBefore = new Date(
+          `${y}-${m}-${d}T23:59:59.999+09:00`,
+        ).toISOString();
+        const items = taskService.query({
+          status: "pending",
+          dueAfter,
+          dueBefore,
+        });
         return ok({ count: items.length, items });
       },
     }),
