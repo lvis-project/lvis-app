@@ -61,7 +61,11 @@ interface PluginManifest {
   // ── 문서/메타 ──
   description?: string;    // LLM 카탈로그·UI에 표시되는 1줄 요약 (≤280자)
   publisher?: string;      // 퍼블리셔 식별자 (예: "LG Electronics IT")
-  deployment?: "managed" | "user";  // 배포 유형 (§서명 참고)
+  installPolicy?: "admin" | "user"; // 설치 정책. 배포 경로는 marketplace 단일 경로.
+  dependencies?: Array<string | { pluginId: string; versionRange?: string; required?: boolean }>;
+  pluginAccess?: {
+    plugins: Array<{ pluginId: string; tools?: string[]; events?: string[] }>;
+  };
 
   // ── 런타임/정책 ──
   config?: Record<string, unknown>;  // 기본 설정값
@@ -104,7 +108,7 @@ interface PluginManifest {
   "id": "meeting",
   "name": "LVIS Meeting",
   "version": "1.0.0",
-  "deployment": "managed",
+  "installPolicy": "admin",
   "publisher": "LG Electronics IT",
   "startupTimeoutMs": 5000,
   "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
@@ -190,9 +194,13 @@ interface PluginManifest {
 - **독립 메커니즘** — `eventSubscriptions` 와 자동 연결되지 않음. 알림을 받으려면 같은 이벤트를 `eventSubscriptions` 에도 넣는 것이 안전.
 - 여러 플러그인이 같은 `event` 를 선언하면 첫 번째만 등록되고 이후는 경고 후 무시.
 
-#### deployment / publisher
+#### installPolicy / dependencies / pluginAccess / publisher
 
-- `managed` 플러그인은 ed25519 서명 필수. 자세히는 [서명 및 배포](#서명-및-배포-ed25519).
+- `installPolicy: "admin"` 플러그인은 관리자 정책 설치 대상이며 publish/승인 게이트를 통과해야 합니다.
+- `installPolicy` 미지정은 `"user"`로 처리됩니다.
+- `dependencies` 는 함께 설치/고려해야 하는 플러그인 관계이며 delivery mode가 아닙니다.
+- `pluginAccess` 는 다른 플러그인의 tool/event 접근을 명시적으로 승인하는 grant입니다.
+- 배포 경로는 marketplace 단일 경로이며 `deployment`, `deliveryMode`, `bundled`, `bundleDependencies`는 공개 매니페스트 필드로 사용하지 않습니다.
 
 ### 역참조 방지 체크리스트
 
@@ -564,11 +572,11 @@ OS 네이티브 알림으로 승격할 이벤트를 선언합니다.
 
 Sprint 4-B §B-4 — `PluginSignatureVerifier` 가 로드 시점에 매니페스트 서명을 확인합니다.
 
-### deployment 정책
+### installPolicy 정책
 
-| `deployment` | 서명 없음 | 서명 무효 | 서명 유효 |
+| `installPolicy` | 서명 없음 | 서명 무효 | 서명 유효 |
 |--------------|-----------|-----------|-----------|
-| `"managed"` | **로드 거부** + audit `plugin_signature_rejected` | **로드 거부** | 로드 + audit `plugin_signature_verified` |
+| `"admin"` | **로드 거부** + audit `plugin_signature_rejected` | **로드 거부** | 로드 + audit `plugin_signature_verified` |
 | `"user"` (또는 미지정) | 경고 로그 + audit `plugin_signature_missing` + 로드 | **로드 거부** + audit | 로드 + audit |
 
 ### 검증 메커니즘
@@ -758,7 +766,7 @@ Meeting / Email / Calendar / PageIndex 의 실제 플러그인 소스는 모두 
   - [ ] `stop()` 에서 파이프라인 flush (또는 `onShutdown` 훅)
   - [ ] Electron IPC 직접 사용 금지
 - [ ] **서명 / 배포**
-  - [ ] `deployment: "managed"` 면 `plugin.json.sig` 함께 배포
+  - [ ] `installPolicy: "admin"` 면 `plugin.json.sig` 함께 배포
   - [ ] dev 에서는 `LVIS_DEV_SKIP_SIG=1` 허용 (프로덕션 금지)
 - [ ] **테스트**
   - [ ] HostApi 모킹 시 `callLlm` / `logEvent` / `onShutdown` 포함

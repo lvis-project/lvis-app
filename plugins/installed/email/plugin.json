@@ -2,7 +2,7 @@
   "id": "email",
   "name": "LVIS Email",
   "version": "0.1.0",
-  "deployment": "managed",
+  "installPolicy": "user",
   "publisher": "LG Electronics IT",
   "startupTimeoutMs": 3000,
   "entry": "../../../node_modules/@lvis/plugin-email/dist/hostPlugin.js",
@@ -30,13 +30,45 @@
     "email_start_watcher"
   ],
   "eventSubscriptions": [
-    { "type": "email.new", "hint": { "category": "email", "priority": "low", "title": "새 이메일" } },
-    { "type": "email.analyzed", "hint": { "category": "email", "priority": "low", "title": "이메일 분석 완료" } },
-    { "type": "email.action.needed", "hint": { "category": "email", "priority": "medium", "title": "액션 필요 이메일" } },
-    { "type": "email.invite.detected", "hint": { "category": "email", "priority": "medium", "title": "이메일 초대 감지" } }
+    {
+      "type": "email.new",
+      "hint": {
+        "category": "email",
+        "priority": "low",
+        "title": "새 이메일"
+      }
+    },
+    {
+      "type": "email.analyzed",
+      "hint": {
+        "category": "email",
+        "priority": "low",
+        "title": "이메일 분석 완료"
+      }
+    },
+    {
+      "type": "email.action.needed",
+      "hint": {
+        "category": "email",
+        "priority": "medium",
+        "title": "액션 필요 이메일"
+      }
+    },
+    {
+      "type": "email.invite.detected",
+      "hint": {
+        "category": "email",
+        "priority": "medium",
+        "title": "이메일 초대 감지"
+      }
+    }
   ],
   "notificationEvents": [
-    { "event": "email.new", "titleField": "sender", "bodyField": "subject" }
+    {
+      "event": "email.new",
+      "titleField": "sender",
+      "bodyField": "subject"
+    }
   ],
   "uiCallable": [
     "email_status",
@@ -92,7 +124,9 @@
             "description": "조회할 이메일의 Microsoft Graph 메시지 ID"
           }
         },
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "additionalProperties": false
       }
     },
@@ -107,7 +141,9 @@
             "description": "분석할 이메일의 Microsoft Graph 메시지 ID"
           }
         },
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "additionalProperties": false
       }
     },
@@ -134,7 +170,10 @@
             "description": "수신자 이메일 주소 (기록용, 선택 사항)"
           }
         },
-        "required": ["id", "body"],
+        "required": [
+          "id",
+          "body"
+        ],
         "additionalProperties": false
       }
     },
@@ -158,7 +197,9 @@
             "description": "조회할 원본 이메일의 Microsoft Graph 메시지 ID"
           }
         },
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "additionalProperties": false
       }
     },
@@ -224,7 +265,11 @@
             "description": "장소 (선택)"
           }
         },
-        "required": ["title", "start", "end"],
+        "required": [
+          "title",
+          "start",
+          "end"
+        ],
         "additionalProperties": false
       }
     }

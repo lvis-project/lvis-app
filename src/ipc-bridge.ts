@@ -27,17 +27,16 @@ import {
 import { REGISTERED_ROUTINES, getRegisteredRoutine } from "./routines/registry.js";
 import {
   DEFAULT_SHUTDOWN_PROMPT,
-  DEFAULT_WAKEUP_PROMPT,
-  MAX_HEARTBEAT_ENTRIES,
-  heartbeatScheduleToCron,
-  isValidHeartbeatEntries,
-  normalizeHeartbeatEntries,
+  DEFAULT_WAKEUP_ROUTINE_PROMPT,
+  MAX_SCHEDULE_ENTRIES,
+  scheduleToCron,
+  isValidScheduleEntries,
+  normalizeScheduleEntries,
 } from "./routines/schedule.js";
 import {
-  clearLatestRoutineBriefing,
-  deliverRoutineBriefing,
-  getLatestRoutineBriefing,
-} from "./routines/briefing-delivery.js";
+  clearLatestRoutineResult,
+  getLatestRoutineResult,
+} from "./routines/routine-delivery.js";
 
 /**
  * Convert the UI's "user-assistant-only ordinal" to the real index into
@@ -61,18 +60,18 @@ function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number):
 function isRoutineEnabled(
   routine: { id: string },
   settings: {
-    enableDailyBriefing?: boolean;
-    enableHeartbeat?: boolean;
-    enableShutdownSummary?: boolean;
+    enableWakeupRoutine?: boolean;
+    enableScheduleRoutine?: boolean;
+    enableShutdownRoutine?: boolean;
   } | null | undefined,
 ): boolean {
   switch (routine.id) {
-    case "daily-briefing":
-      return settings?.enableDailyBriefing ?? false;
-    case "heartbeat":
-      return settings?.enableHeartbeat ?? true;
-    case "shutdown-summary":
-      return settings?.enableShutdownSummary ?? true;
+    case "wakeup":
+      return settings?.enableWakeupRoutine ?? false;
+    case "schedule":
+      return settings?.enableScheduleRoutine ?? true;
+    case "shutdown":
+      return settings?.enableShutdownRoutine ?? true;
     default:
       return false;
   }
@@ -154,10 +153,6 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:chat:new",
   "lvis:chat:sessions",
   "lvis:chat:load-session",
-  "lvis:memory:notes:list",
-  "lvis:memory:notes:save",
-  "lvis:memory:notes:delete",
-  "lvis:memory:notes:search",
   "lvis:memory:entries:list",
   "lvis:memory:entries:save",
   "lvis:memory:entries:delete",
@@ -197,10 +192,8 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:tasks:pending",
   "lvis:tasks:overdue",
   "lvis:tasks:today",
-  "lvis:routine:dismiss-briefing",
-  "lvis:routine:snooze-briefing",
-  "lvis:routine:get-latest-briefing",
-  "lvis:routines:dev-reset-daily-briefing",
+  "lvis:routine:get-latest-result",
+  "lvis:routines:dev-trigger-wakeup",
   // Sprint 4.B — usage observability
   "lvis:usage:summary",
   "lvis:usage:range",
@@ -553,19 +546,18 @@ ${input}`;
         description: routine.description,
         trigger: routine.trigger,
         enabled: isRoutineEnabled(routine, routineSettings),
-        scheduleTimeKst: routine.id === "daily-briefing" ? routineSettings.scheduleTimeKst ?? "08:30" : undefined,
-        contextPrompt: routine.id === "daily-briefing"
-          ? routineSettings.wakeupPrompt ?? DEFAULT_WAKEUP_PROMPT
-          : routine.id === "shutdown-summary"
-            ? routineSettings.shutdownPrompt ?? DEFAULT_SHUTDOWN_PROMPT
+        scheduleTimeKst: routine.id === "wakeup" ? routineSettings?.scheduleTimeKst ?? "08:30" : undefined,
+        contextPrompt: routine.id === "wakeup"
+          ? routineSettings?.wakeupRoutinePrompt ?? DEFAULT_WAKEUP_ROUTINE_PROMPT
+          : routine.id === "shutdown"
+            ? routineSettings?.shutdownPrompt ?? DEFAULT_SHUTDOWN_PROMPT
             : undefined,
-        heartbeatEntries: routine.id === "heartbeat"
-          ? normalizeHeartbeatEntries(routineSettings.heartbeatEntries).map((entry) => ({
+        scheduleEntries: routine.id === "schedule"
+          ? normalizeScheduleEntries(routineSettings?.scheduleEntries).map((entry) => ({
             ...entry,
-            cron: heartbeatScheduleToCron(entry.schedule),
+            cron: scheduleToCron(entry.schedule),
           }))
           : undefined,
-        postTurnEnabled: routine.id === "daily-briefing" ? routineSettings.enablePostTurnBriefing ?? false : undefined,
         sessionCount: sessions.length,
         sessions,
       };
@@ -576,28 +568,27 @@ ${input}`;
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:update", e); return UNAUTHORIZED_FRAME; }
     const routine = getRegisteredRoutine(routineId);
     if (!routine) return { ok: false, error: "routine-not-found" };
-    const current = settingsService.get("routine") ?? { enableDailyBriefing: false };
+    const current = settingsService.get("routine") ?? { enableWakeupRoutine: false };
     const next = { ...current };
-    if (routineId === "daily-briefing") {
-      if (typeof patch.enabled === "boolean") next.enableDailyBriefing = patch.enabled;
-      if (typeof patch.postTurnEnabled === "boolean") next.enablePostTurnBriefing = patch.postTurnEnabled;
+    if (routineId === "wakeup") {
+      if (typeof patch.enabled === "boolean") next.enableWakeupRoutine = patch.enabled;
       if (typeof patch.scheduleTimeKst === "string") next.scheduleTimeKst = patch.scheduleTimeKst;
       if (typeof patch.contextPrompt === "string") {
-        next.wakeupPrompt = patch.contextPrompt.trim() || DEFAULT_WAKEUP_PROMPT;
+        next.wakeupRoutinePrompt = patch.contextPrompt.trim() || DEFAULT_WAKEUP_ROUTINE_PROMPT;
       }
-    } else if (routineId === "heartbeat") {
-      if (typeof patch.enabled === "boolean") next.enableHeartbeat = patch.enabled;
-      if ("heartbeatEntries" in patch) {
-        const rawEntries = (patch as { heartbeatEntries?: unknown }).heartbeatEntries;
-        if (Array.isArray(rawEntries) && rawEntries.length > MAX_HEARTBEAT_ENTRIES) {
-          return { ok: false, error: "too-many-heartbeats" };
+    } else if (routineId === "schedule") {
+      if (typeof patch.enabled === "boolean") next.enableScheduleRoutine = patch.enabled;
+      if ("scheduleEntries" in patch) {
+        const rawEntries = (patch as { scheduleEntries?: unknown }).scheduleEntries;
+        if (Array.isArray(rawEntries) && rawEntries.length > MAX_SCHEDULE_ENTRIES) {
+          return { ok: false, error: "too-many-schedule-entries" };
         }
-        const entries = normalizeHeartbeatEntries(rawEntries);
-        if (!isValidHeartbeatEntries(entries)) return { ok: false, error: "invalid-heartbeat-entries" };
-        next.heartbeatEntries = entries;
+        const entries = normalizeScheduleEntries(rawEntries);
+        if (!isValidScheduleEntries(entries)) return { ok: false, error: "invalid-schedule-entries" };
+        next.scheduleEntries = entries;
       }
-    } else if (routineId === "shutdown-summary") {
-      if (typeof patch.enabled === "boolean") next.enableShutdownSummary = patch.enabled;
+    } else if (routineId === "shutdown") {
+      if (typeof patch.enabled === "boolean") next.enableShutdownRoutine = patch.enabled;
       if (typeof patch.contextPrompt === "string") {
         next.shutdownPrompt = patch.contextPrompt.trim() || DEFAULT_SHUTDOWN_PROMPT;
       }
@@ -614,37 +605,32 @@ ${input}`;
     return { ok: true, sessionId };
   });
 
-  ipcMain.handle("lvis:routine:get-latest-briefing", () => getLatestRoutineBriefing());
+  ipcMain.handle("lvis:routine:get-latest-result", () => getLatestRoutineResult());
 
-  ipcMain.handle("lvis:routines:dev-reset-daily-briefing", async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-reset-daily-briefing", e); return UNAUTHORIZED_FRAME; }
+  ipcMain.handle("lvis:routines:dev-trigger-wakeup", async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-wakeup", e); return UNAUTHORIZED_FRAME; }
     const isDev = process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1";
     if (!isDev) return { ok: false, error: "dev-only" };
     if (!routineEngine) return { ok: false, error: "routine-engine-unavailable" };
 
-    const current = settingsService.get("routine") ?? { enableDailyBriefing: false };
+    const current = settingsService.get("routine") ?? { enableWakeupRoutine: false };
     await settingsService.patch({
       routine: {
         ...current,
-        lastBriefingAt: undefined,
-        lastDismissedAt: undefined,
+        lastWakeupRoutineAt: undefined,
       },
     });
 
-    const result = await routineEngine.generateDailyBriefing({
-      idleState: "triggered",
-      triggerReason: "dev-reset",
-    });
-    if (result.status !== "generated") {
-      return { ok: true, generated: false, reason: result.reason };
-    }
-
+    const wakeupRoutine = getRegisteredRoutine("wakeup");
+    if (!wakeupRoutine) return { ok: false, error: "wakeup-routine-not-found" };
     try {
-      await deliverRoutineBriefing(getMainWindow(), memoryManager, result.briefing);
+      const result = await routineEngine.runRoutine(wakeupRoutine);
+      const { deliverRoutineResult } = await import("./routines/routine-delivery.js");
+      await deliverRoutineResult(getMainWindow(), result);
+      return { ok: true, summary: result.summary };
     } catch (error) {
       return { ok: false, error: (error as Error).message };
     }
-    return { ok: true, generated: true };
   });
 
   ipcMain.handle("lvis:chat:load-session", (e, sessionId: string) => {
@@ -667,19 +653,6 @@ ${input}`;
 
   // ─── Memory ─────────────────────────────────────
   // read-only, sender guard optional
-  ipcMain.handle("lvis:memory:notes:list", () => memoryManager.listNotes());
-  ipcMain.handle("lvis:memory:notes:save", async (e, title: string, content: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:save", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.saveNote(title, content);
-  });
-  ipcMain.handle("lvis:memory:notes:delete", (e, filename: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:delete", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.deleteNote(filename);
-  });
-  ipcMain.handle("lvis:memory:notes:search", (e, query: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:notes:search", e); return UNAUTHORIZED_FRAME; }
-    return memoryManager.searchNotesEntries(query);
-  });
   ipcMain.handle("lvis:memory:entries:list", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:memory:entries:list", e); return UNAUTHORIZED_FRAME; }
     return memoryManager.listMemoryEntries();
@@ -1025,72 +998,6 @@ ${input}`;
     ];
     writeFileSync(result.filePath, lines.join("\n"), "utf-8");
     return { ok: true, filePath: result.filePath };
-  });
-
-  // Sprint 2-D: user dismissal — sets lastDismissedAt, which suppresses the
-  // gated RoutineEngine.generateDailyBriefing for the following 24h.
-  // Sprint 3-A (M1): debounce accepted dismisses to min 1s apart to prevent
-  // accidental double-click / rapid-fire IPC abuse.
-  let lastDismissAcceptedAt = 0;
-  const DISMISS_DEBOUNCE_MS = 1000;
-  ipcMain.handle("lvis:routine:dismiss-briefing", async (e, feedback?: { reason?: string; details?: string }) => {
-    if (!validateSender(e)) return UNAUTHORIZED_FRAME;
-    const now = Date.now();
-    if (now - lastDismissAcceptedAt < DISMISS_DEBOUNCE_MS) {
-      return { ok: false, debounced: true };
-    }
-    lastDismissAcceptedAt = now;
-    const cur = settingsService.get("routine") ?? { enableDailyBriefing: false };
-    await settingsService.patch({
-      routine: { ...cur, lastDismissedAt: new Date(now).toISOString() },
-    });
-    clearLatestRoutineBriefing();
-    // Sprint E §2 — persist user feedback to ~/.lvis/notes/briefing-feedback.md
-    const allowed = new Set(["inaccurate", "uninteresting", "busy", "other"]);
-    if (feedback?.reason && allowed.has(feedback.reason)) {
-      try {
-        await memoryManager.appendBriefingFeedback({
-          reason: feedback.reason as "inaccurate" | "uninteresting" | "busy" | "other",
-          details: feedback.details,
-        });
-      } catch (err) {
-        console.warn("[lvis] briefing feedback persist failed:", (err as Error).message);
-      }
-    }
-    return { ok: true };
-  });
-
-  // Sprint 3-A: snooze 1h — shifts lastDismissedAt forward by 1h from its
-  // current value (or from now when unset). Reuses the same 24h suppression
-  // gate; snoozing effectively re-arms the window further into the future.
-  // PR#44 HIGH: apply same 1s debounce as dismiss (prevents renderer loop
-  // abuse) and clamp the shifted value to `now + 7 days` so repeated snoozes
-  // cannot push lastDismissedAt arbitrarily far into the future.
-  let lastSnoozeAcceptedAt = 0;
-  const SNOOZE_DEBOUNCE_MS = 1000;
-  const SNOOZE_MAX_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
-  ipcMain.handle("lvis:routine:snooze-briefing", async (e) => {
-    if (!validateSender(e)) return UNAUTHORIZED_FRAME;
-    const now = Date.now();
-    if (now - lastSnoozeAcceptedAt < SNOOZE_DEBOUNCE_MS) {
-      return { ok: false, debounced: true };
-    }
-    const cur = settingsService.get("routine") ?? { enableDailyBriefing: false };
-    const baseMs = cur.lastDismissedAt
-      ? new Date(cur.lastDismissedAt).getTime()
-      : now;
-    const effectiveBase = Number.isFinite(baseMs) ? baseMs : now;
-    const shiftedMs = effectiveBase + 60 * 60 * 1000;
-    if (shiftedMs > now + SNOOZE_MAX_AHEAD_MS) {
-      return { ok: false, error: "snooze horizon exceeded (7d)" };
-    }
-    lastSnoozeAcceptedAt = now;
-    const shifted = new Date(shiftedMs).toISOString();
-    await settingsService.patch({
-      routine: { ...cur, lastDismissedAt: shifted },
-    });
-    clearLatestRoutineBriefing();
-    return { ok: true, lastDismissedAt: shifted };
   });
 
   // ─── Sprint 4.C: Conversation UX ─────────────────────

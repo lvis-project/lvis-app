@@ -32,7 +32,7 @@ describe("Sprint 4-B — signature enforcement", () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
-  async function writePlugin(id: string, deployment: "managed" | "user", signed: boolean): Promise<void> {
+  async function writePlugin(id: string, installPolicy: "admin" | "user", signed: boolean): Promise<void> {
     const pluginDir = join(installedDir, id);
     await mkdir(pluginDir, { recursive: true });
     await writeFile(
@@ -47,7 +47,7 @@ describe("Sprint 4-B — signature enforcement", () => {
       version: "1.0.0",
       entry: "entry.mjs",
       tools: [`sigenf_ping`],
-      deployment,
+      installPolicy,
     };
     const bytes = Buffer.from(JSON.stringify(manifest), "utf-8");
     await writeFile(manifestPath, bytes);
@@ -64,7 +64,7 @@ describe("Sprint 4-B — signature enforcement", () => {
   }
 
   it("fail-closed: managed plugin without signature is dropped", async () => {
-    await writePlugin("com.lge.managed", "managed", false);
+    await writePlugin("com.lge.managed", "admin", false);
     const verifier = new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] });
     const runtime = new PluginRuntime({
       hostRoot: testDir,
@@ -76,7 +76,7 @@ describe("Sprint 4-B — signature enforcement", () => {
   });
 
   it("managed plugin with valid signature loads", async () => {
-    await writePlugin("com.lge.managed-signed", "managed", true);
+    await writePlugin("com.lge.managed-signed", "admin", true);
     const verifier = new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] });
     const runtime = new PluginRuntime({
       hostRoot: testDir,

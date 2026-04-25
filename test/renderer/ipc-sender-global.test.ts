@@ -43,10 +43,6 @@ const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
   "lvis:chat:retry-effort": "tier2",
   "lvis:chat:export": "tier2",
   // Memory
-  "lvis:memory:notes:list": "tier3",
-  "lvis:memory:notes:save": "tier1",
-  "lvis:memory:notes:delete": "tier1",
-  "lvis:memory:notes:search": "tier3",
   "lvis:memory:lvis-md:get": "tier3",
   "lvis:memory:lvis-md:update": "tier1",
   "lvis:memory:user-prefs:get": "tier3",
@@ -82,11 +78,9 @@ const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
   "lvis:tasks:pending": "tier3",
   "lvis:tasks:overdue": "tier3",
   "lvis:tasks:today": "tier3",
-  // Routine briefing
-  "lvis:routine:dismiss-briefing": "tier1",
-  "lvis:routine:snooze-briefing": "tier1",
-  "lvis:routine:get-latest-briefing": "tier3",
-  "lvis:routines:dev-reset-daily-briefing": "tier1",
+  // Routine
+  "lvis:routine:get-latest-result": "tier3",
+  "lvis:routines:dev-trigger-wakeup": "tier1",
   // Usage / observability
   "lvis:usage:summary": "tier3",
   // Conversation UX extras
