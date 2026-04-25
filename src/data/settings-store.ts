@@ -169,6 +169,12 @@ export interface RoutineSettings {
   shutdownPrompt?: string;
   enableScheduleRoutine?: boolean;
   scheduleEntries?: ScheduleRoutineEntry[];
+  /**
+   * Long-idle threshold (ms) used by RoutineIdleSignaler to filter out short
+   * lock/unlock cycles. Default 10 min. Distinct from indexer's short 60s
+   * idle threshold (IdleSchedulerService.idleThresholdSec).
+   */
+  routineIdleThresholdMs?: number;
 }
 
 export interface WebSearchSettings {
@@ -245,6 +251,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     shutdownPrompt: DEFAULT_SHUTDOWN_PROMPT,
     enableScheduleRoutine: true,
     scheduleEntries: [createDefaultScheduleEntry(0)],
+    routineIdleThresholdMs: 10 * 60_000,
   },
   privacy: {
     piiRedactEnabled: false,
@@ -478,6 +485,13 @@ export class SettingsService {
       }
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
       const routine = parsed.routine;
+      const ROUTINE_IDLE_THRESHOLD_MIN_MS = 60_000;        // 1 min floor (debug/test)
+      const ROUTINE_IDLE_THRESHOLD_MAX_MS = 60 * 60_000;   // 1 hour ceiling
+      const ROUTINE_IDLE_THRESHOLD_DEFAULT_MS = 10 * 60_000;
+      const rawIdleThreshold = routine?.routineIdleThresholdMs;
+      const idleThresholdMs = typeof rawIdleThreshold === "number" && Number.isFinite(rawIdleThreshold)
+        ? Math.max(ROUTINE_IDLE_THRESHOLD_MIN_MS, Math.min(rawIdleThreshold, ROUTINE_IDLE_THRESHOLD_MAX_MS))
+        : ROUTINE_IDLE_THRESHOLD_DEFAULT_MS;
       const normalizedRoutine: RoutineSettings = {
         ...DEFAULT_SETTINGS.routine,
         ...routine,
@@ -492,6 +506,7 @@ export class SettingsService {
         lastWakeupRoutineAt: routine?.lastWakeupRoutineAt,
         enableShutdownRoutine: routine?.enableShutdownRoutine ?? true,
         enableScheduleRoutine: routine?.enableScheduleRoutine ?? true,
+        routineIdleThresholdMs: idleThresholdMs,
       };
 
       return {

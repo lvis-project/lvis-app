@@ -4,7 +4,7 @@
  * 모든 IPC 핸들러를 등록하는 모듈.
  * main.ts에서 인라인으로 30개 핸들러를 두지 않고 여기에 집중.
  */
-import { dialog, ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
+import { app, dialog, ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { realpathSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -24,7 +24,11 @@ import {
   isEnvironmentConfigured,
   type MsGraphEnvironment,
 } from "./main/ms-graph-auth-config.js";
-import { REGISTERED_ROUTINES, getRegisteredRoutine } from "./routines/registry.js";
+import {
+  REGISTERED_ROUTINES,
+  buildRoutineForTrigger,
+  getRegisteredRoutine,
+} from "./routines/registry.js";
 import {
   DEFAULT_SHUTDOWN_PROMPT,
   DEFAULT_WAKEUP_ROUTINE_PROMPT,
@@ -194,6 +198,8 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:tasks:today",
   "lvis:routine:get-latest-result",
   "lvis:routines:dev-trigger-wakeup",
+  "lvis:routines:dev-trigger-schedule",
+  "lvis:routines:dev-trigger-shutdown",
   // Sprint 4.B — usage observability
   "lvis:usage:summary",
   "lvis:usage:range",
@@ -607,31 +613,72 @@ ${input}`;
 
   ipcMain.handle("lvis:routine:get-latest-result", () => getLatestRoutineResult());
 
-  ipcMain.handle("lvis:routines:dev-trigger-wakeup", async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-wakeup", e); return UNAUTHORIZED_FRAME; }
-    const isDev = process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1";
+  /**
+   * Dev-only manual trigger for any of the 3 routine types. Builds the
+   * routine using the current settings (so prePrompt mirrors what would
+   * fire from natural triggers — idle exit / cron entry / app quit).
+   */
+  const devTriggerHandler = async (e: IpcMainInvokeEvent, routineId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, `lvis:routines:dev-trigger-${routineId}`, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    // Reject unknown routineId early — limits the audit channel surface and
+    // gives the caller a stable error code to discriminate vs. dev-gate fail.
+    if (!getRegisteredRoutine(routineId)) {
+      return { ok: false, error: "routine-not-found" };
+    }
+    // Combine `!app.isPackaged` with the env gate so a packaged production
+    // binary launched with LVIS_DEV=1 in its environment cannot manually
+    // trigger routines (env vars are user-controllable on every desktop OS).
+    const isDev = !app.isPackaged && (
+      process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1"
+    );
     if (!isDev) return { ok: false, error: "dev-only" };
     if (!routineEngine) return { ok: false, error: "routine-engine-unavailable" };
 
-    const current = settingsService.get("routine") ?? { enableWakeupRoutine: false };
-    await settingsService.patch({
-      routine: {
-        ...current,
-        lastWakeupRoutineAt: undefined,
-      },
-    });
+    const built = buildRoutineForTrigger(routineId, settingsService.get("routine"));
+    if (!built.ok) return { ok: false, error: built.error };
 
-    const wakeupRoutine = getRegisteredRoutine("wakeup");
-    if (!wakeupRoutine) return { ok: false, error: "wakeup-routine-not-found" };
+    if (routineId === "wakeup") {
+      const current = settingsService.get("routine") ?? { enableWakeupRoutine: false };
+      await settingsService.patch({
+        routine: { ...current, lastWakeupRoutineAt: undefined },
+      });
+    }
+
+    const { deliverRoutineResult, notifyRoutineStarted, notifyRoutineFailed } =
+      await import("./routines/routine-delivery.js");
+    auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "dev-trigger",
+      type: "info",
+      input: `dev-trigger ${routineId}`,
+    });
+    // started/completed routineId MUST match so useRoutineRunning Map can
+    // delete the right key on completion. For schedule dev-trigger,
+    // built.routine.id = the picked entry's id (e.g. "schedule-2"), and the
+    // engine result's routineId mirrors that. Using the user-facing trigger
+    // type (e.g. "schedule") for started would leave a zombie spinner.
+    const trackedId = built.routine.id;
+    const startedPayload = { routineId: trackedId, trigger: built.routine.trigger, startedAt: new Date().toISOString() };
+    notifyRoutineStarted(getMainWindow(), startedPayload);
     try {
-      const result = await routineEngine.runRoutine(wakeupRoutine);
-      const { deliverRoutineResult } = await import("./routines/routine-delivery.js");
+      const result = await routineEngine.runRoutine(built.routine);
       await deliverRoutineResult(getMainWindow(), result);
       return { ok: true, summary: result.summary };
     } catch (error) {
-      return { ok: false, error: (error as Error).message };
+      const message = error instanceof Error ? error.message : String(error);
+      // Pair every started with a completed so the renderer's running
+      // indicator clears even on failure (zombie spinner regression).
+      notifyRoutineFailed(getMainWindow(), { routineId: trackedId, trigger: built.routine.trigger }, message);
+      return { ok: false, error: message };
     }
-  });
+  };
+
+  ipcMain.handle("lvis:routines:dev-trigger-wakeup", (e) => { if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-wakeup", e); return UNAUTHORIZED_FRAME; } return devTriggerHandler(e, "wakeup"); });
+  ipcMain.handle("lvis:routines:dev-trigger-schedule", (e) => { if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-schedule", e); return UNAUTHORIZED_FRAME; } return devTriggerHandler(e, "schedule"); });
+  ipcMain.handle("lvis:routines:dev-trigger-shutdown", (e) => { if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-shutdown", e); return UNAUTHORIZED_FRAME; } return devTriggerHandler(e, "shutdown"); });
 
   ipcMain.handle("lvis:chat:load-session", (e, sessionId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:load-session", e); return UNAUTHORIZED_FRAME; }

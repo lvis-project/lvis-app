@@ -6,6 +6,7 @@ import { RoutineEngine } from "../routine-engine.js";
 
 function makeLoop(opts: { text?: string; throws?: boolean } = {}) {
   return {
+    getSessionId: vi.fn(() => "test-session-id"),
     runTurn: vi.fn(async () => {
       if (opts.throws) throw new Error("loop crashed");
       return { text: opts.text ?? "루틴 완료 메시지", toolCalls: [], route: "llm" };
@@ -45,7 +46,11 @@ describe("RoutineEngine.runRoutine", () => {
   });
 
   it("uses empty string summary when runTurn returns no text", async () => {
-    const loop = { runTurn: vi.fn(async () => ({ text: "", toolCalls: [], route: "llm" })), dispose: vi.fn() };
+    const loop = {
+      getSessionId: vi.fn(() => "test-session-id"),
+      runTurn: vi.fn(async () => ({ text: "", toolCalls: [], route: "llm" })),
+      dispose: vi.fn(),
+    };
     const engine = new RoutineEngine({ createConversationLoop: () => loop as any });
 
     const result = await engine.runRoutine({ id: "schedule", trigger: "schedule" });

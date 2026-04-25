@@ -24,6 +24,7 @@ describe("createRoutineEngine", () => {
 
   it("runRoutine calls loop.runTurn with the prePrompt", async () => {
     const mockLoop = {
+      getSessionId: vi.fn(() => "test-session-id"),
       runTurn: vi.fn(async (prompt: string) => prompt + " 처리됨"),
       getLastAssistantMessage: vi.fn(async () => "오늘 업무 맥락 정리 처리됨"),
       dispose: vi.fn(),

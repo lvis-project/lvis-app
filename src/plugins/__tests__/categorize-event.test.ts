@@ -23,10 +23,6 @@ describe("categorizeEvent", () => {
     expect(categorizeEvent("task.created")).toBe("task");
   });
 
-  it("categorizes briefing events", () => {
-    expect(categorizeEvent("briefing.generated")).toBe("briefing");
-  });
-
   it("returns 'other' for unknown namespaces", () => {
     expect(categorizeEvent("unknown.event")).toBe("other");
     expect(categorizeEvent("system.boot")).toBe("other");

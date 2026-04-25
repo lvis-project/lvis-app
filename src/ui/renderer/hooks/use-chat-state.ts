@@ -20,7 +20,7 @@ import type { LvisApi } from "../types.js";
  * stream subscription (finalize/tool/error/redact/compact/done), edit state,
  * and edit/retry handlers.
  *
- * Exposes intent methods (seedBriefing / clearForNewChat / appendUserEntry /
+ * Exposes intent methods (seedRoutineEntries / clearForNewChat / appendUserEntry /
  * applyLoadedSession / truncateToEntry) instead of raw `setEntries` so that
  * App-level orchestration cannot mutate entry shape directly.
  */
@@ -288,7 +288,7 @@ export function useChatState(api: LvisApi) {
   }, []);
 
   // ── Intent methods (replace raw setEntries) ──
-  const seedBriefing = useCallback((seeded: ChatEntry[]) => {
+  const seedRoutineEntries = useCallback((seeded: ChatEntry[]) => {
     setEntries(seeded);
   }, []);
 
@@ -351,7 +351,7 @@ export function useChatState(api: LvisApi) {
     setErrorWithThought,
     handleCompactCommand,
     // intent methods
-    seedBriefing,
+    seedRoutineEntries,
     clearForNewChat,
     appendUserEntry: appendUserMessage,
     applyLoadedSession,

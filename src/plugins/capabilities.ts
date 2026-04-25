@@ -173,7 +173,6 @@ export const PUBLIC_EVENT_NAMESPACES: ReadonlySet<string> = new Set([
   "email",
   "index",
   "task",
-  "briefing",
 ]);
 
 /**
