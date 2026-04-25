@@ -65,7 +65,7 @@ export interface PluginManifest {
    * 플러그인이 구독하는 이벤트 타입 목록.
    * 두 가지 형태를 모두 지원한다:
    *   - 구형 호환: `string[]` — 호스트가 중립 fallback hint를 적용.
-   *   - 신형: `{ type: string; hint?: ProactiveEventHintSpec }[]` — 플러그인이 hint 메타데이터를 직접 선언.
+   *   - 신형: `{ type: string; hint?: EventSubscriptionHint }[]` — 플러그인이 hint 메타데이터를 직접 선언.
    */
   eventSubscriptions?: string[] | EventSubscription[];
   /**

@@ -49,7 +49,7 @@ export interface SettingsOrchestrationState {
   setWebKeyInput: (v: string) => void;
   hasWebKey: boolean;
   setHasWebKey: (v: boolean) => void;
-  // Proactive / Privacy
+  // Routine / Privacy
   enableWakeupRoutine: boolean;
   setEnableWakeupRoutine: (updater: boolean | ((prev: boolean) => boolean)) => void;
   piiRedactEnabled: boolean;
