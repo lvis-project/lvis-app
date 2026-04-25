@@ -100,15 +100,24 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           </Card>
         </div>
       )}
+      {/* 루틴 진행/결과 floating overlay — 채팅 스크롤 영역과 독립.
+          입력창은 가리지 않도록 상단 고정. pointer-events-none 컨테이너 +
+          컨텐츠만 pointer-events-auto 로 채팅 스크롤 입력 차단 방지. */}
+      {(runningRoutines.size > 0 || routineResult) && (
+        <div className="pointer-events-none absolute left-0 right-0 top-2 z-20 flex flex-col items-center gap-2 px-4">
+          <div className="pointer-events-auto w-full max-w-2xl space-y-2">
+            <RoutineRunningIndicator runningRoutines={runningRoutines} />
+            {routineResult && (
+              <RoutineCard
+                result={routineResult}
+                onDismiss={onDismissRoutineResult}
+                onSnooze={onSnoozeRoutineResult}
+              />
+            )}
+          </div>
+        </div>
+      )}
       <ScrollArea className="h-full p-4"><div className="space-y-3">
-        <RoutineRunningIndicator runningRoutines={runningRoutines} />
-        {routineResult && (
-          <RoutineCard
-            result={routineResult}
-            onDismiss={onDismissRoutineResult}
-            onSnooze={onSnoozeRoutineResult}
-          />
-        )}
         {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {entries.map((entry, idx) => {
           const isMatch = searchMatchSet.has(idx);
