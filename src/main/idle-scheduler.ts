@@ -41,6 +41,7 @@
  */
 
 import * as os from "node:os";
+import { clearIntervalSafe, clearTimeoutSafe } from "../lib/clear-timer.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -82,6 +83,10 @@ export interface WorkerClientLite {
 /**
  * powerMonitor 인터페이스 — Electron electron.powerMonitor를 주입하거나
  * 테스트에서 FakePowerMonitor를 주입할 수 있도록 분리.
+ *
+ * `removeListener` / `off` are declared optional so callers can detach a single
+ * handler without resorting to ad-hoc `as unknown as` probes; tests that don't
+ * implement these can omit them safely.
  */
 export interface PowerMonitorLike {
   /** systemIdleTime (초) */
@@ -89,9 +94,23 @@ export interface PowerMonitorLike {
   /** 배터리 전원 상태 */
   onBatteryPower?: boolean;
   /** 이벤트 구독 */
-  on(event: string, handler: (...args: any[]) => void): unknown;
+  on(event: string, handler: (...args: unknown[]) => void): unknown;
+  /** 단일 핸들러 해제 (Node EventEmitter 호환). */
+  removeListener?(event: string, handler: (...args: unknown[]) => void): unknown;
+  /** 단일 핸들러 해제 (newer EventEmitter API alias). */
+  off?(event: string, handler: (...args: unknown[]) => void): unknown;
   /** 이벤트 해제 */
   removeAllListeners(event?: string): unknown;
+}
+
+/**
+ * Boundary adapter — narrows Electron's strongly-typed `powerMonitor` (whose
+ * `on` signature constrains event names to a closed union) to the wider
+ * `PowerMonitorLike` shape used internally. Centralising the cast here keeps
+ * call sites off `as unknown as` and documents the boundary.
+ */
+export function adaptPowerMonitor(pm: unknown): PowerMonitorLike {
+  return pm as PowerMonitorLike;
 }
 
 export interface IdleSchedulerOptions {
@@ -143,7 +162,7 @@ export class IdleSchedulerService {
   private prevCpuTimes: ReturnType<typeof os.cpus> = [];
   private processing = false;
   private powerSubscribed = false;
-  private readonly listeners: Array<{ event: string; handler: (...args: any[]) => void }> = [];
+  private readonly listeners: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
   private stateChangeListener: IdleStateChangeListener | null = null;
 
   // 파라미터 (기본값 확정)
@@ -203,7 +222,8 @@ export class IdleSchedulerService {
       this.subscribeListener(pm, "on-battery", () => this._reevaluate("on-battery"));
       // thermal-state-change는 macOS only — try/catch
       try {
-        this.subscribeListener(pm, "thermal-state-change", (thermalState: string) => {
+        this.subscribeListener(pm, "thermal-state-change", (...args: unknown[]) => {
+          const thermalState = args[0];
           if (thermalState === "critical" || thermalState === "serious") {
             this._transition("PAUSED", `thermal-${thermalState}`);
           }
@@ -219,24 +239,16 @@ export class IdleSchedulerService {
   }
 
   stop(): void {
-    if (this.tickTimer) {
-      clearInterval(this.tickTimer);
-      this.tickTimer = null;
-    }
-    if (this.resumeTimer) {
-      clearTimeout(this.resumeTimer);
-      this.resumeTimer = null;
-    }
+    this.tickTimer = clearIntervalSafe(this.tickTimer);
+    this.resumeTimer = clearTimeoutSafe(this.resumeTimer);
     const pm = this.opts.powerMonitor;
     if (pm && this.powerSubscribed) {
       // 구독한 리스너만 제거하여 공유 powerMonitor에 영향 최소화
       for (const { event, handler } of this.listeners) {
-        const anyPm = pm as unknown as {
-          removeListener?: (e: string, h: (...args: any[]) => void) => void;
-        };
-        if (typeof anyPm.removeListener === "function") {
+        const detach = pm.removeListener ?? pm.off;
+        if (typeof detach === "function") {
           try {
-            anyPm.removeListener(event, handler);
+            detach.call(pm, event, handler);
           } catch {
             /* ignore */
           }
@@ -341,7 +353,7 @@ export class IdleSchedulerService {
   private subscribeListener(
     pm: PowerMonitorLike,
     event: string,
-    handler: (...args: any[]) => void,
+    handler: (...args: unknown[]) => void,
   ): void {
     pm.on(event, handler);
     this.listeners.push({ event, handler });
@@ -422,7 +434,7 @@ export class IdleSchedulerService {
     }
 
     if (newState === "RESUME_DELAY") {
-      if (this.resumeTimer) clearTimeout(this.resumeTimer);
+      this.resumeTimer = clearTimeoutSafe(this.resumeTimer);
       this.resumeTimer = setTimeout(() => {
         this.resumeTimer = null;
         this._transition("RUNNING", "resume-delay-end");

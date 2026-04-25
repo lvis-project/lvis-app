@@ -1,6 +1,7 @@
 import type { Routine, RoutineTriggerType } from "../core/routine-engine.js";
 import type { RoutineSettings } from "../data/settings-store.js";
 import {
+  clampRoutinePrompt,
   DEFAULT_SHUTDOWN_PROMPT,
   DEFAULT_WAKEUP_ROUTINE_PROMPT,
   normalizeScheduleEntries,
@@ -69,7 +70,7 @@ export function buildRoutineForTrigger(
   if (meta.id === "wakeup") {
     const configured = settings?.wakeupRoutinePrompt;
     const prePrompt = typeof configured === "string" && configured.trim().length > 0
-      ? configured.trim()
+      ? clampRoutinePrompt(configured.trim())
       : DEFAULT_WAKEUP_ROUTINE_PROMPT;
     return { ok: true, routine: { id: meta.id, trigger: meta.trigger, prePrompt, title: meta.title } };
   }
@@ -77,12 +78,12 @@ export function buildRoutineForTrigger(
   if (meta.id === "shutdown") {
     const configured = settings?.shutdownPrompt;
     const prePrompt = typeof configured === "string" && configured.trim().length > 0
-      ? configured.trim()
+      ? clampRoutinePrompt(configured.trim())
       : DEFAULT_SHUTDOWN_PROMPT;
     return { ok: true, routine: { id: meta.id, trigger: meta.trigger, prePrompt, title: meta.title } };
   }
 
-  // schedule — pick first enabled entry's prompt
+  // schedule — pick first enabled entry's prompt (already clamped via normalizeScheduleEntries)
   const entries = normalizeScheduleEntries(settings?.scheduleEntries);
   const active = entries.find((e) => e.enabled);
   if (!active) return { ok: false, error: "schedule-no-active-entry" };

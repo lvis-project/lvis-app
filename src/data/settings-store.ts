@@ -8,6 +8,7 @@ import {
   type PluginConfigRecord,
 } from "../shared/plugin-config.js";
 import {
+  clampRoutinePrompt,
   createDefaultScheduleEntry,
   DEFAULT_SHUTDOWN_PROMPT,
   DEFAULT_WAKEUP_ROUTINE_PROMPT,
@@ -496,11 +497,11 @@ export class SettingsService {
         ...DEFAULT_SETTINGS.routine,
         ...routine,
         wakeupRoutinePrompt: typeof routine?.wakeupRoutinePrompt === "string" && routine.wakeupRoutinePrompt.trim().length > 0
-          ? routine.wakeupRoutinePrompt.trim()
+          ? clampRoutinePrompt(routine.wakeupRoutinePrompt.trim())
           : DEFAULT_WAKEUP_ROUTINE_PROMPT,
         scheduleEntries: normalizeScheduleEntries(routine?.scheduleEntries),
         shutdownPrompt: typeof routine?.shutdownPrompt === "string" && routine.shutdownPrompt.trim().length > 0
-          ? routine.shutdownPrompt.trim()
+          ? clampRoutinePrompt(routine.shutdownPrompt.trim())
           : DEFAULT_SHUTDOWN_PROMPT,
         enableWakeupRoutine: routine?.enableWakeupRoutine ?? false,
         lastWakeupRoutineAt: routine?.lastWakeupRoutineAt,

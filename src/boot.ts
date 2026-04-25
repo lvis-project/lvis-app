@@ -40,7 +40,7 @@
  */
 import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
-import type { PowerMonitorLike } from "./main/idle-scheduler.js";
+import { adaptPowerMonitor } from "./main/idle-scheduler.js";
 import { PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
@@ -226,7 +226,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     taskService,
     pluginRuntime,
     settingsService,
-    powerMonitor: powerMonitor as unknown as PowerMonitorLike,
+    powerMonitor: adaptPowerMonitor(powerMonitor),
     mainWindow,
   });
 
