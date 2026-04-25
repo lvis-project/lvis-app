@@ -100,25 +100,22 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           </Card>
         </div>
       )}
-      {/* 루틴 진행/결과 floating overlay — 채팅 스크롤 영역과 독립.
-          입력창은 가리지 않도록 상단 고정. pointer-events-none 컨테이너 +
-          컨텐츠만 pointer-events-auto 로 채팅 스크롤 입력 차단 방지.
-          긴 브리핑 콘텐츠가 화면을 침범하지 않도록 max-h + overflow-y-auto
-          로 카드 내부 스크롤. */}
+      {/* 루틴 floating overlay — 단일 슬롯에 진행 중 / 결과 중 하나만 표시.
+          진행 중이면 RoutineRunningIndicator, 아니면 직전 결과 RoutineCard.
+          긴 브리핑은 카드 내부에서 스크롤 (max-h-[60vh] + overflow-y-auto). */}
       {(runningRoutines.size > 0 || routineResult) && (
         <div className="pointer-events-none absolute left-0 right-0 top-2 z-20 flex justify-center px-4">
-          <div className="pointer-events-auto flex w-full max-w-2xl max-h-[60vh] flex-col gap-2 overflow-hidden">
-            <RoutineRunningIndicator runningRoutines={runningRoutines} />
-            {routineResult && (
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <RoutineCard
-                  key={`${routineResult.routineId}::${routineResult.generatedAt}`}
-                  result={routineResult}
-                  onDismiss={onDismissRoutineResult}
-                  onSnooze={onSnoozeRoutineResult}
-                />
-              </div>
-            )}
+          <div className="pointer-events-auto flex w-full max-w-2xl max-h-[60vh] flex-col overflow-hidden">
+            {runningRoutines.size > 0 ? (
+              <RoutineRunningIndicator runningRoutines={runningRoutines} />
+            ) : routineResult ? (
+              <RoutineCard
+                key={`${routineResult.routineId}::${routineResult.generatedAt}`}
+                result={routineResult}
+                onDismiss={onDismissRoutineResult}
+                onSnooze={onSnoozeRoutineResult}
+              />
+            ) : null}
           </div>
         </div>
       )}
