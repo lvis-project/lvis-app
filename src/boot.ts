@@ -38,8 +38,9 @@
  * No plugin-specific code lives here — all plugins register themselves via the
  * HostApi manufactured in `steps/plugin-runtime.ts`.
  */
-import { app } from "electron";
+import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
+import type { PowerMonitorLike } from "./main/idle-scheduler.js";
 import { PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
@@ -216,15 +217,16 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   };
   const routineEngine = createRoutineEngine({
     createConversationLoop: () => createRoutineConversationLoop(routineLoopDeps),
+    memoryManager,
   });
 
-  // Sprint 3-A-2: RoutineTriggerCoordinator + idle-scheduler composite.
+  // §7 Routine wiring — schedule cron timer + RoutineIdleSignaler (idle entry/exit).
   const routineCoordinator = wireRoutineCoordinator({
     routineEngine,
     taskService,
     pluginRuntime,
     settingsService,
-    idleScheduler,
+    powerMonitor: powerMonitor as unknown as PowerMonitorLike,
     mainWindow,
   });
 
@@ -237,7 +239,6 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     memoryManager,
     idleScheduler,
     settingsService,
-    routineCoordinator,
     auditLogger: bootAuditLogger,
   });
 

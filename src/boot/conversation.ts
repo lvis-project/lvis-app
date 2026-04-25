@@ -65,7 +65,6 @@ export function createPostTurnHookChain(opts: {
   memoryManager: MemoryManager;
   idleScheduler?: IdleSchedulerService;
   settingsService: SettingsService;
-  routineCoordinator?: { notify(event: string): void };
   /**
    * Sprint 1-A A3 — shared AuditLogger. When provided, PostTurnHookChain
    * reuses the same instance as HostApi.logEvent so plugin + host audit
@@ -80,7 +79,6 @@ export function createPostTurnHookChain(opts: {
     auditLogger,
     idleScheduler: opts.idleScheduler,
     settingsService: opts.settingsService,
-    routineCoordinator: opts.routineCoordinator,
   });
   return { postTurnHookChain, auditLogger };
 }

@@ -866,10 +866,6 @@ export class ConversationLoop {
           : `세션 로드 실패: ${match.id}`;
         break;
       }
-      case "briefing": {
-        result = "브리핑 명령은 더 이상 지원되지 않습니다. 루틴 패널을 사용하세요.";
-        break;
-      }
       case "vendor":
         result = `현재 벤더: ${this.getVendor()}\n세션: ${this.sessionId.slice(0, 8)}…\n누적 토큰: 입력 ${this.cumulativeUsage.inputTokens}, 출력 ${this.cumulativeUsage.outputTokens}`;
         break;

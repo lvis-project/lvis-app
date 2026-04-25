@@ -414,18 +414,51 @@ app.on("before-quit", (event) => {
   }
   appShutdownStarted = true;
   event.preventDefault();
+  // Capture services in a local so TypeScript narrowing survives the async
+  // closure boundary, and so a future window-closed handler that nulls
+  // `services` mid-shutdown cannot NPE us on the next member access.
+  const svc = services;
   void (async () => {
     try {
-      if (services.settingsService.get("routine")?.enableShutdownRoutine ?? true) {
-        const { getRegisteredRoutine } = await import("./routines/registry.js");
-        const shutdownRoutine = getRegisteredRoutine("shutdown");
-        if (shutdownRoutine && services.routineEngine) {
-          const result = await services.routineEngine.runRoutine(shutdownRoutine);
-          await deliverRoutineResult(null, result);
+      const routineSettings = svc.settingsService.get("routine");
+      if ((routineSettings?.enableShutdownRoutine ?? true) && svc.routineEngine) {
+        // Isolate the routine call so a throw here doesn't skip the
+        // services.shutdown() / pluginRuntime.stopAll() teardown below
+        // (those persist state and must run on every quit path).
+        try {
+          const { buildRoutineForTrigger } = await import("./routines/registry.js");
+          const { notifyRoutineStarted, notifyRoutineFailed } = await import("./routines/routine-delivery.js");
+          const built = buildRoutineForTrigger("shutdown", routineSettings);
+          if (built.ok) {
+            notifyRoutineStarted(mainWindow, { routineId: "shutdown", trigger: "shutdown", startedAt: new Date().toISOString() });
+            try {
+              // Bound the LLM call so a hung provider can't block app.quit()
+              // indefinitely. 15s is generous for a single-turn summary;
+              // beyond that we surface as failure and continue teardown.
+              const SHUTDOWN_ROUTINE_TIMEOUT_MS = 15_000;
+              const routineEngine = svc.routineEngine;
+              const result = await Promise.race([
+                routineEngine.runRoutine(built.routine),
+                new Promise<never>((_, reject) =>
+                  setTimeout(
+                    () => reject(new Error(`shutdown routine timed out after ${SHUTDOWN_ROUTINE_TIMEOUT_MS}ms`)),
+                    SHUTDOWN_ROUTINE_TIMEOUT_MS,
+                  ),
+                ),
+              ]);
+              await deliverRoutineResult(mainWindow, result);
+            } catch (e) {
+              const message = e instanceof Error ? e.message : String(e);
+              console.warn("[lvis] before-quit: shutdown routine failed:", message);
+              notifyRoutineFailed(mainWindow, { routineId: "shutdown", trigger: "shutdown" }, message);
+            }
+          }
+        } catch (e) {
+          console.warn("[lvis] before-quit: shutdown routine setup failed:", e instanceof Error ? e.message : String(e));
         }
       }
-      await services.shutdown?.();
-      await services.pluginRuntime.stopAll();
+      await svc.shutdown?.();
+      await svc.pluginRuntime.stopAll();
     } finally {
       appShutdownCompleted = true;
       app.quit();
