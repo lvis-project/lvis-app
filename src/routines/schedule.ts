@@ -39,6 +39,21 @@ export interface ScheduleRoutineEntry {
 
 export const MAX_SCHEDULE_ENTRIES = 5;
 
+/**
+ * Hard cap on routine prompt length (chars). Routine prompts feed directly
+ * into the subagent system prompt — without a cap, accidentally pasting
+ * book-length text balloons the LLM context budget and per-run cost. 2 KB is
+ * comfortably above any realistic instruction (default prompts run ~80 chars)
+ * while still bounding worst-case spend.
+ */
+export const MAX_ROUTINE_PROMPT_LENGTH = 2000;
+
+export function clampRoutinePrompt(value: string): string {
+  return value.length > MAX_ROUTINE_PROMPT_LENGTH
+    ? value.slice(0, MAX_ROUTINE_PROMPT_LENGTH)
+    : value;
+}
+
 export const DEFAULT_SCHEDULE: ScheduleRoutineSchedule = {
   minute: "*/15",
   hour: "*",
@@ -211,7 +226,7 @@ export function normalizeScheduleEntry(
     : createScheduleEntryId(seed);
   const agentId = normalizeScheduleAgentId(record.agentId);
   const prompt = typeof record.prompt === "string" && record.prompt.trim().length > 0
-    ? record.prompt.trim()
+    ? clampRoutinePrompt(record.prompt.trim())
     : getDefaultSchedulePrompt(agentId);
   return {
     id,

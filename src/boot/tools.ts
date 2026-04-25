@@ -19,7 +19,7 @@ import { createRenderHtmlTool } from "../tools/render-html.js";
 import { createTaskTools } from "../tools/tasks.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
-import { IdleSchedulerService, type WorkerClientLite } from "../main/idle-scheduler.js";
+import { IdleSchedulerService, adaptPowerMonitor, type WorkerClientLite } from "../main/idle-scheduler.js";
 import { fetchPublicHttpResponse } from "../core/network-guard.js";
 
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
@@ -125,7 +125,7 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
         const { powerMonitor } = await import("electron");
         idleScheduler = new IdleSchedulerService({
           workerClient: idleWorkerAdapter,
-          powerMonitor: powerMonitor as unknown as import("../main/idle-scheduler.js").PowerMonitorLike,
+          powerMonitor: adaptPowerMonitor(powerMonitor),
         });
         idleScheduler.start();
         // folderIndexer에 stub 주입 (Agent 4의 setIdleScheduler 경로)
