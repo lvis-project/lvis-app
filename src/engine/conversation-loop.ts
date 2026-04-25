@@ -413,14 +413,19 @@ export class ConversationLoop {
    *
    * This is the host-side entry behind `hostApi.triggerConversation()`. It
    * delegates to {@link runTurn} (so the templated prompt flows through the
-   * usual classify→route→loop pipeline), but tags the audit chain with the
-   * trigger's `source` and `visibility` so the source-aware permission model
-   * (§6.3) can scope policies to `proactive:*` origins.
+   * usual classify→route→loop pipeline), but:
+   *   1. tags the audit chain with the trigger's `source` and `visibility`
+   *      so source-aware permission (§6.3) can scope policies to
+   *      `proactive:*` origins;
+   *   2. sets the origin source on the SystemPromptBuilder so the LLM
+   *      receives the Proactive Origin Guidance section — a soft "second
+   *      guess this suggestion before acting" gate that complements §8
+   *      ApprovalGate for destructive ops.
    *
-   * P0 limitation (Copilot review #1): `context` is currently audit-only —
-   * the system-prompt / tool pipeline does not receive it. Plugins that need
-   * tools to act on an ID must embed it in `spec.prompt` itself. P2 will
-   * plumb `context` into per-turn metadata.
+   * P0 limitation: `context` is currently audit-only — the system-prompt /
+   * tool pipeline does not receive it. Plugins that need tools to act on an
+   * ID must embed it in `spec.prompt` itself. P2 will plumb `context` into
+   * per-turn metadata.
    *
    * The host enforces capability + source/dedupe in `createHostApi`; this
    * method assumes those checks already passed.
@@ -455,7 +460,16 @@ export class ConversationLoop {
         `[trigger] source=${spec.source} visibility=${spec.visibility} priority=${spec.priority}` +
         contextSuffix,
     });
-    return this.runTurn(spec.prompt, callbacks, abortSignal);
+
+    // Soft LLM-side validation gate — set origin source so SystemPromptBuilder
+    // emits the Proactive Origin Guidance section. Cleared in finally so a
+    // subsequent user-initiated runTurn never sees stale `proactive:*` flag.
+    this.deps.systemPromptBuilder.setOriginSource?.(spec.source);
+    try {
+      return await this.runTurn(spec.prompt, callbacks, abortSignal);
+    } finally {
+      this.deps.systemPromptBuilder.setOriginSource?.(null);
+    }
   }
 
   /**

@@ -21,7 +21,11 @@ class FakeProvider implements LLMProvider {
   }
 }
 
-function makeLoop(turns: StreamEvent[][]) {
+interface OriginSourceLog {
+  calls: Array<string | null>;
+}
+
+function makeLoop(turns: StreamEvent[][], originLog?: OriginSourceLog) {
   const toolRegistry = new ToolRegistry();
   const keywordEngine = new KeywordEngine();
   const routeEngine = new RouteEngine({ toolRegistry });
@@ -30,7 +34,12 @@ function makeLoop(turns: StreamEvent[][]) {
       get: () => ({ provider: "openai", model: "gpt-4o" }),
       getSecret: () => "test-key",
     },
-    systemPromptBuilder: { build: () => "system" },
+    systemPromptBuilder: {
+      build: () => "system",
+      setOriginSource: (source: string | null) => {
+        originLog?.calls.push(source);
+      },
+    },
     keywordEngine,
     routeEngine,
     toolRegistry,
@@ -89,5 +98,48 @@ describe("ConversationLoop.runTriggerTurn", () => {
     // turn still runs end-to-end; this test pins the no-special-case contract
     // so a future P2 change is intentional.
     expect(result.text).toBe("ok");
+  });
+
+  it("sets origin source on system-prompt-builder and clears it after the turn", async () => {
+    const originLog: OriginSourceLog = { calls: [] };
+    const loop = makeLoop(
+      [
+        [
+          { type: "text_delta", text: "done" },
+          { type: "message_complete", stopReason: "end_turn" },
+        ],
+      ],
+      originLog,
+    );
+
+    await loop.runTriggerTurn({
+      prompt: "x",
+      source: "proactive:meeting-detection",
+      visibility: "summary-only",
+      priority: "normal",
+    });
+
+    expect(originLog.calls).toEqual(["proactive:meeting-detection", null]);
+  });
+
+  it("clears origin source even when the delegated runTurn rejects (no leakage to next turn)", async () => {
+    const originLog: OriginSourceLog = { calls: [] };
+    const loop = makeLoop([], originLog);
+    // Force the underlying turn to reject by clearing the provider — runTurn
+    // throws "LLM 프로바이더가 설정되지 않았습니다." before any streaming.
+    (loop as { provider: unknown }).provider = null;
+
+    await expect(
+      loop.runTriggerTurn({
+        prompt: "x",
+        source: "proactive:meeting-detection",
+        visibility: "summary-only",
+        priority: "normal",
+      }),
+    ).rejects.toBeDefined();
+
+    // Origin must still be cleared so the next user-initiated turn does not
+    // accidentally inherit the proactive guidance section.
+    expect(originLog.calls).toEqual(["proactive:meeting-detection", null]);
   });
 });
