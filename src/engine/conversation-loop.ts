@@ -409,12 +409,71 @@ export class ConversationLoop {
   }
 
   /**
+   * Proactive Brain — start a turn from a brain-plugin observation.
+   *
+   * This is the host-side entry behind `hostApi.triggerConversation()`. It
+   * delegates to {@link runTurn} (so the templated prompt flows through the
+   * usual classify→route→loop pipeline), but:
+   *   1. tags the audit chain with the trigger's `source` and `visibility`
+   *      so source-aware permission (§6.3) can scope policies to
+   *      `proactive:*` origins;
+   *   2. sets the origin source on the SystemPromptBuilder so the LLM
+   *      receives the Proactive Origin Guidance section — a soft "second
+   *      guess this suggestion before acting" gate that complements §8
+   *      ApprovalGate for destructive ops.
+   *
+   * P0 limitation: `context` is currently audit-only — the system-prompt /
+   * tool pipeline does not receive it. Plugins that need tools to act on an
+   * ID must embed it in `spec.prompt` itself. P2 will plumb `context` into
+   * per-turn metadata.
+   *
+   * The host enforces capability + source/dedupe in `createHostApi`; this
+   * method assumes those checks already passed.
+   */
+  async runTriggerTurn(
+    spec: {
+      prompt: string;
+      source: string;
+      visibility: "silent" | "summary-only" | "user-visible";
+      priority: "low" | "normal" | "high";
+      context?: Record<string, unknown>;
+    },
+    callbacks?: TurnCallbacks,
+    abortSignal?: AbortSignal,
+  ): Promise<TurnResult> {
+    // Audit row for the trigger entry lives in `evaluateTriggerSpec`
+    // (plugin-runtime). Soft LLM-side validation gate: `runTurn` accepts
+    // `originSource` as an option so the set/clear lifecycle on the
+    // SystemPromptBuilder runs synchronously around `build()`, not across
+    // an `await`. This avoids a singleton-state race when triggers overlap.
+    //
+    // TODO: thread `originSource` into ToolExecutor → PermissionManager →
+    // ApprovalGate so per-source policies (e.g. "always confirm
+    // `proactive:*` calendar writes") can fire. Currently the source
+    // reaches only the system prompt; permission/approval still see
+    // `source: "plugin"`. See `docs/references/conversation-trigger.md`
+    // deferred table.
+    return this.runTurn(spec.prompt, callbacks, abortSignal, {
+      originSource: spec.source,
+    });
+  }
+
+  /**
    * 한 턴 실행 — §4.5 Core Cycle
    * @param abortSignal  B4: optional external abort signal; if omitted a fresh
    *                     AbortController is created and stored in
    *                     `currentAbortController` so `abortCurrentTurn()` works.
+   * @param options      P0 Brain: `originSource` enables the Proactive Origin
+   *                     Guidance prompt section for this single turn. Set/
+   *                     cleared synchronously around `build()` so concurrent
+   *                     turns do not corrupt one another's guidance state.
    */
-  async runTurn(input: string, callbacks?: TurnCallbacks, abortSignal?: AbortSignal): Promise<TurnResult> {
+  async runTurn(
+    input: string,
+    callbacks?: TurnCallbacks,
+    abortSignal?: AbortSignal,
+    options?: { originSource?: string | null },
+  ): Promise<TurnResult> {
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
     this.tracer.step("REQUEST_ENTRY", { inputLen: input.length });
     if (!this.provider) {
@@ -464,8 +523,16 @@ export class ConversationLoop {
     const scope = this.resolveToolScope(input);
     // Guard: test mocks may stub SystemPromptBuilder without this method.
     this.deps.systemPromptBuilder.setToolScope?.(scope);
+    // Brain origin: set + clear synchronously around build() so concurrent
+    // turns do not see each other's flag. SystemPromptBuilder has a single
+    // `originSource` slot; if we straddled an await we'd race.
+    this.deps.systemPromptBuilder.setOriginSource?.(options?.originSource ?? null);
 
     const systemPrompt = this.deps.systemPromptBuilder.build();
+    // Clear immediately so any nested or follow-up build() inside the same
+    // tick (or a concurrent runTurn that starts during the upcoming await)
+    // sees a clean slate.
+    this.deps.systemPromptBuilder.setOriginSource?.(null);
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
     this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
     const result = await this.queryLoop(systemPrompt, scope, callbacks, turnSignal);
