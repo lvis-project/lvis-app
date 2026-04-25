@@ -1455,10 +1455,5 @@ function createNoopHostApi(): PluginHostApi {
     logEvent: () => {},
     onShutdown: () => {},
     openAuthWindow: async () => { throw new Error("openAuthWindow not available in noop context"); },
-    triggerConversation: async (spec) => ({
-      accepted: false,
-      reason: "loop_unavailable",
-      source: typeof spec?.source === "string" ? spec.source : "",
-    }),
   };
 }

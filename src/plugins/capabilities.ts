@@ -47,7 +47,6 @@ export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   "background-watcher",
   "worker-client",
   "document-indexer",
-  "conversation-trigger",
 ]);
 
 /**
@@ -146,15 +145,6 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
         "Advisory — signals the plugin can accept on-demand file paths for indexing via pageindex_scan. Used by host capability resolver for drag & drop IPC routing.",
       enforcement: "advisory",
       gates: [],
-    },
-  ],
-  [
-    "conversation-trigger",
-    {
-      description:
-        "Required to call hostApi.triggerConversation(). Lets a (read-only) brain plugin start a host ConversationLoop turn from observed signals — the differentiating 'proactive assistant' surface. Reserved for plugins curated as proactive brains; granting it to general plugins lets them inject prompts users did not type.",
-      enforcement: "enforced",
-      gates: ["triggerConversation"],
     },
   ],
 ]);
