@@ -67,9 +67,11 @@ import {
   createApprovalGate,
   createHookRunner,
   createConversationLoop,
+  createRoutineConversationLoop,
   createCallLlm,
   createCallLlmForPlugin,
 } from "./boot/conversation.js";
+import type { ConversationLoop } from "./engine/conversation-loop.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireRoutineCoordinator } from "./boot/steps/routine-coordinator.js";
@@ -137,7 +139,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // network backend with catalog caching enabled.
   // For "mock" mode, pass no fetcher — PluginMarketplaceService creates its
   // own internal MockMarketplaceFetcher and disables catalog caching so that
-  // the bundled plugins/marketplace.json is always read fresh (no stale
+  // the local plugins/marketplace.json is always read fresh (no stale
   // ~/.lvis/marketplace-cache/ data can shadow local changes).
   let marketplaceFetcher: MarketplaceFetcher | undefined;
   if (
@@ -158,7 +160,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   );
 
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
-  // from the marketplace on boot (VS Code-style), not bundled in app source.
+  // from the marketplace on boot (VS Code-style), not packaged in app source.
   // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
   const managedBootstrap = resolveManagedPluginBootstrap({
     marketplace: marketplaceSettings,
@@ -198,19 +200,22 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   const permissionManager = await createPermissionManager();
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
 
-  // §7: Routine Engine.
-  const routineEngine = createRoutineEngine({
+  // §7: Routine Engine — 루틴마다 독립된 ConversationLoop를 생성하는 factory를 주입.
+  // interactive 채팅의 ConversationLoop 인스턴스를 공유하면 세션 히스토리 오염 및
+  // concurrent IPC 채팅 턴과의 race condition이 발생한다. factory는 stateless deps만
+  // 캡처하므로 순환 의존 없이 즉시 바인딩할 수 있다.
+  const routineLoopDeps = {
+    settingsService,
+    systemPromptBuilder,
+    keywordEngine,
+    routeEngine,
+    toolRegistry,
+    memoryManager,
+    permissionManager,
     pluginRuntime,
-    isDailyBriefingEnabled: () =>
-      settingsService.get("routine")?.enableDailyBriefing ?? false,
-    getLastBriefingDate: () => settingsService.get("routine")?.lastBriefingAt,
-    setLastBriefingDate: (dateKst) => {
-      const cur = settingsService.get("routine") ?? { enableDailyBriefing: false };
-      settingsService.patch({ routine: { ...cur, lastBriefingAt: dateKst } });
-    },
-    getLastDismissedAt: () => settingsService.get("routine")?.lastDismissedAt,
-    getWakeupPrompt: () => settingsService.get("routine")?.wakeupPrompt,
-    getShutdownPrompt: () => settingsService.get("routine")?.shutdownPrompt,
+  };
+  const routineEngine = createRoutineEngine({
+    createConversationLoop: () => createRoutineConversationLoop(routineLoopDeps),
   });
 
   // Sprint 3-A-2: RoutineTriggerCoordinator + idle-scheduler composite.
@@ -219,7 +224,6 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     taskService,
     pluginRuntime,
     settingsService,
-    memoryManager,
     idleScheduler,
     mainWindow,
   });

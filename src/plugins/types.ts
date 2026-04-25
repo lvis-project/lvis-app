@@ -1,30 +1,32 @@
-/**
- * Plugin Deployment Mode — §9.6
- *
- * - **managed**: 회사(LGE IT)가 배포/업데이트/삭제 정책을 통제.
- *   사용자는 UI에서 제거·비활성화 불가 (PluginDeploymentGuard가 차단).
- * - **user**: 사용자가 자율적으로 설치. 회사 정책(userInstallPolicy)에 따라 제어.
- */
-export type DeploymentMode = "managed" | "user";
+export type InstallPolicy = "admin" | "user";
 
-/**
- * Delivery mode — how a plugin is presented/distributed.
- *
- * - **marketplace**: 일반 마켓플레이스 다운로드형 플러그인
- * - **bundled**: 마켓플레이스에 게시되지만 앱 기본 번들 세트에도 속하는 플러그인
- */
-export type PluginDeliveryMode = "marketplace" | "bundled";
-
-export interface BundleDependencySpec {
+export interface DependencySpec {
   pluginId: string;
   versionRange?: string;
+  required?: boolean;
 }
 
-export interface RoutineToolBindings {
-  wakeupBriefing?: string;
-  shutdownSummary?: string;
-  heartbeat?: string;
+export interface PluginAccessTarget {
+  pluginId: string;
+  tools?: string[];
+  events?: string[];
 }
+
+export interface PluginAccessSpec {
+  plugins: PluginAccessTarget[];
+}
+
+export interface EventSubscriptionHint {
+  category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
+  priority: "high" | "medium" | "low";
+  title: string;
+}
+
+export interface EventSubscription {
+  type: string;
+  hint?: EventSubscriptionHint;
+}
+
 
 export interface PluginManifest {
   /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.lge.meeting-recorder`. */
@@ -50,7 +52,6 @@ export interface PluginManifest {
    * - `meeting-recorder` — 실시간 음성 캡처 및 STT (meeting)
    * - `mail-source` — 이메일 소스 연결 (email)
    * - `calendar-source` — 캘린더 소스 연결 (calendar)
-   * - `routine-provider` — host Routine runtime이 호출하는 wakeup/shutdown/heartbeat tool 제공
    * - `background-watcher` — `startupTools` 로 백그라운드 폴러/감시자 기동 (email, calendar)
    * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼 (pageindex)
    * - `knowledge-index` — 문서 인덱스/검색 기능 제공 (pageindex)
@@ -59,7 +60,6 @@ export interface PluginManifest {
    *   `onMsGraphAuthChange`) 사용. §9.4a 참고. (email, calendar)
    */
   capabilities?: string[];
-  routineTools?: RoutineToolBindings;
   startupTools?: string[];
   /**
    * 플러그인이 구독하는 이벤트 타입 목록.
@@ -67,7 +67,7 @@ export interface PluginManifest {
    *   - 구형 호환: `string[]` — 호스트가 중립 fallback hint를 적용.
    *   - 신형: `{ type: string; hint?: ProactiveEventHintSpec }[]` — 플러그인이 hint 메타데이터를 직접 선언.
    */
-  eventSubscriptions?: Array<string | { type: string; hint?: { category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system"; priority: "high" | "medium" | "low"; title: string } }>;
+  eventSubscriptions?: string[] | EventSubscription[];
   /**
    * H2: UI가 ipcRenderer 를 통해 직접 호출할 수 있는 plugin method 의 allowlist.
    * 이 배열에 없는 method 는 `lvis:plugins:call` IPC 를 통해 호출할 수 없다.
@@ -79,6 +79,7 @@ export interface PluginManifest {
    * classifySubscription("public") 판정을 통과한 이벤트만 renderer로 전달된다.
    * (host boundary §1: plugin-specific literals forbidden in boot.ts)
    */
+  eventPublishes?: string[];
   emittedEvents?: string[];
   /**
    * OS 네이티브 알림으로 표시할 이벤트 선언.
@@ -89,9 +90,9 @@ export interface PluginManifest {
     titleField?: string;
     bodyField?: string;
   }>;
-  deployment?: DeploymentMode;
-  deliveryMode?: PluginDeliveryMode;
-  bundleDependencies?: Array<string | BundleDependencySpec>;
+  installPolicy?: InstallPolicy;
+  dependencies?: Array<string | DependencySpec>;
+  pluginAccess?: PluginAccessSpec;
   requires?: RequiresSpec;
   publisher?: string;
   /**
@@ -151,6 +152,9 @@ export interface PluginRegistryEntry {
   id: string;
   manifestPath: string;
   enabled?: boolean;
+  installedBy?: InstallPolicy;
+  bundleRefs?: string[];
+  approvedPluginAccess?: PluginAccessSpec;
 }
 
 export interface PluginRegistry {
@@ -215,26 +219,26 @@ export interface PluginMarketplaceItem {
   packageSpec: string;
   packageName: string;
   tools: string[];
-  /** Latest stable version string (semver). Present in remote catalog; may be absent in bundled mock. */
+  /** Latest stable version string (semver). Present in remote catalog; may be absent in local mock. */
   version?: string;
   /** S8 — release channel. "stable" (default) or "canary". */
   channel?: "stable" | "canary";
   defaultConfig?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   capabilities?: string[];
-  routineTools?: RoutineToolBindings;
-  startupTools?: string[];
   keywords?: Array<{ keyword: string; skillId: string }>;
+  startupTools?: string[];
   uiCallable?: string[];
+  eventPublishes?: string[];
   emittedEvents?: string[];
   notificationEvents?: Array<{
     event: string;
     titleField?: string;
     bodyField?: string;
   }>;
-  deployment?: DeploymentMode;
-  deliveryMode?: PluginDeliveryMode;
-  bundleDependencies?: Array<string | BundleDependencySpec>;
+  installPolicy?: InstallPolicy;
+  dependencies?: Array<string | DependencySpec>;
+  pluginAccess?: PluginAccessSpec;
   publisher?: string;
   toolSchemas?: PluginManifest["toolSchemas"];
   /** S14: dependency capabilities this plugin requires. */
@@ -260,7 +264,6 @@ export interface PluginHostApi {
     sourceRef?: string;
     priority?: "high" | "medium" | "low";
   }): void;
-  saveNote(title: string, content: string): Promise<void>;
   getSecret(key: string): string | null;
 
   // Microsoft Graph 공유 인증 (메일·캘린더 플러그인)

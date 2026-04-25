@@ -72,11 +72,11 @@ interface ServerCatalogRow {
   default_config?: Record<string, unknown>;
   defaultConfig?: Record<string, unknown>;
   ui?: unknown;
-  deployment?: string;
-  delivery_mode?: string;
-  deliveryMode?: string;
-  bundle_dependencies?: unknown;
-  bundleDependencies?: unknown;
+  install_policy?: string;
+  installPolicy?: string;
+  dependencies?: unknown;
+  plugin_access?: unknown;
+  pluginAccess?: unknown;
   publisher?: string;
   latest_stable_version?: string | null;
   latestStableVersion?: string;
@@ -303,24 +303,46 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
       item.defaultConfig = defaultConfig;
     }
     if (ui) item.ui = ui;
-    if (row.deployment === "managed") {
-      item.deployment = "managed";
-    } else if (row.deployment === "user" || row.deployment === "free") {
-      item.deployment = "user";
+    const installPolicy = row.install_policy ?? row.installPolicy;
+    if (installPolicy === "admin") {
+      item.installPolicy = "admin";
+    } else if (installPolicy === "user") {
+      item.installPolicy = "user";
     }
-    const deliveryMode = row.delivery_mode ?? row.deliveryMode;
-    if (deliveryMode === "marketplace" || deliveryMode === "bundled") {
-      item.deliveryMode = deliveryMode;
-    }
-    const bundleDependenciesRaw = row.bundle_dependencies ?? row.bundleDependencies;
-    if (Array.isArray(bundleDependenciesRaw)) {
-      item.bundleDependencies = bundleDependenciesRaw.filter((dep): dep is string | { pluginId: string; versionRange?: string } => {
+    const dependenciesRaw = row.dependencies;
+    if (Array.isArray(dependenciesRaw)) {
+      item.dependencies = dependenciesRaw.filter((dep): dep is string | { pluginId: string; versionRange?: string; required?: boolean } => {
         if (typeof dep === "string") return dep.trim().length > 0;
         if (!dep || typeof dep !== "object" || Array.isArray(dep)) return false;
         const candidate = dep as Record<string, unknown>;
         return typeof candidate.pluginId === "string" && candidate.pluginId.trim().length > 0
-          && (candidate.versionRange === undefined || typeof candidate.versionRange === "string");
+          && (candidate.versionRange === undefined || typeof candidate.versionRange === "string")
+          && (candidate.required === undefined || typeof candidate.required === "boolean");
       });
+    }
+    const pluginAccessRaw = row.plugin_access ?? row.pluginAccess;
+    if (pluginAccessRaw && typeof pluginAccessRaw === "object" && !Array.isArray(pluginAccessRaw)) {
+      const candidate = pluginAccessRaw as { plugins?: unknown };
+      if (Array.isArray(candidate.plugins)) {
+        item.pluginAccess = {
+          plugins: candidate.plugins.flatMap((entry) => {
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+            const record = entry as Record<string, unknown>;
+            if (typeof record.pluginId !== "string" || record.pluginId.trim().length === 0) return [];
+            const tools = Array.isArray(record.tools)
+              ? record.tools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
+              : undefined;
+            const events = Array.isArray(record.events)
+              ? record.events.filter((event): event is string => typeof event === "string" && event.trim().length > 0)
+              : undefined;
+            return [{
+              pluginId: record.pluginId,
+              tools,
+              events,
+            }];
+          }),
+        };
+      }
     }
     if (row.publisher) item.publisher = row.publisher;
 

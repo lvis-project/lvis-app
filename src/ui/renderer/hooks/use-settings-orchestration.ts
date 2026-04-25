@@ -50,8 +50,8 @@ export interface SettingsOrchestrationState {
   hasWebKey: boolean;
   setHasWebKey: (v: boolean) => void;
   // Proactive / Privacy
-  enableDailyBriefing: boolean;
-  setEnableDailyBriefing: (updater: boolean | ((prev: boolean) => boolean)) => void;
+  enableWakeupRoutine: boolean;
+  setEnableWakeupRoutine: (updater: boolean | ((prev: boolean) => boolean)) => void;
   piiRedactEnabled: boolean;
   setPiiRedactEnabled: (v: boolean) => void;
   // Lifecycle
@@ -89,7 +89,7 @@ export function useSettingsOrchestration(
   const [webProvider, setWebProvider] = useState("duckduckgo");
   const [webKeyInput, setWebKeyInput] = useState("");
   const [hasWebKey, setHasWebKey] = useState(false);
-  const [enableDailyBriefing, setEnableDailyBriefing] = useState(false);
+  const [enableWakeupRoutine, setEnableWakeupRoutine] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -124,7 +124,7 @@ export function useSettingsOrchestration(
       const webApiKeySet = await api.hasWebApiKey(s.webSearch.provider);
       if (cancelled) return;
       setHasWebKey(webApiKeySet);
-      setEnableDailyBriefing(s.routine?.enableDailyBriefing ?? false);
+      setEnableWakeupRoutine(s.routine?.enableWakeupRoutine ?? false);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
       setFallbackChain((s.llm.fallbackChain ?? []).map((e) => ({ provider: e.provider, model: e.model })));
       setSettingsLoaded(true);
@@ -200,7 +200,7 @@ export function useSettingsOrchestration(
           } as any,
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
-          routine: { enableDailyBriefing } as any,
+          routine: { enableWakeupRoutine } as any,
           privacy: { piiRedactEnabled },
         } as any);
       }
@@ -231,7 +231,7 @@ export function useSettingsOrchestration(
     webProvider, setWebProvider,
     webKeyInput, setWebKeyInput,
     hasWebKey, setHasWebKey,
-    enableDailyBriefing, setEnableDailyBriefing,
+    enableWakeupRoutine, setEnableWakeupRoutine,
     piiRedactEnabled, setPiiRedactEnabled,
     settingsLoaded,
     saving,
