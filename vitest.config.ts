@@ -16,6 +16,7 @@ export default defineConfig({
       ["test/renderer/**", "jsdom"],
       ["src/ui/__tests__/**", "jsdom"],
       ["src/ui/renderer/__tests__/**", "jsdom"],
+      ["src/ui/renderer/**/__tests__/**", "jsdom"],
     ],
     include: [
       "src/**/__tests__/**/*.{test,spec}.{ts,tsx}",
