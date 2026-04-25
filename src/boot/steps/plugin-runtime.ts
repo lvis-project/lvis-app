@@ -26,7 +26,11 @@ import { BUNDLED_PUBLISHER_PUBLIC_KEYS } from "../../plugins/publisher-keys.js";
 import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
 import { withMsGraphRetry } from "../../main/ms-graph-retry.js";
-import type { PluginHostApi, PluginManifest } from "../../plugins/types.js";
+import type {
+  ConversationTriggerSpec,
+  PluginHostApi,
+  PluginManifest,
+} from "../../plugins/types.js";
 import type { KeywordEngine } from "../../core/keyword-engine.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { SettingsService } from "../../data/settings-store.js";
@@ -65,13 +69,64 @@ export class TriggerConversationDedupe {
     return true;
   }
   record(pluginId: string, dedupeKey: string): void {
-    this.seen.set(this.key(pluginId, dedupeKey), Date.now());
+    // True LRU: delete-then-set refreshes Map insertion order so a frequently
+    // re-recorded key won't be evicted as "oldest" when capping. Map#set on
+    // an existing key would otherwise leave the original insertion position.
+    const key = this.key(pluginId, dedupeKey);
+    if (this.seen.has(key)) this.seen.delete(key);
+    this.seen.set(key, Date.now());
     if (this.seen.size > 256) {
-      // Cap unbounded growth; drop the oldest. Cheap for the small N expected.
+      // Cap unbounded growth; drop the oldest recorded key. Cheap for the
+      // small N expected.
       const oldestKey = this.seen.keys().next().value;
       if (oldestKey !== undefined) this.seen.delete(oldestKey);
     }
   }
+}
+
+const ALLOWED_VISIBILITIES: ReadonlySet<"silent" | "summary-only" | "user-visible"> = new Set([
+  "silent",
+  "summary-only",
+  "user-visible",
+] as const);
+const ALLOWED_PRIORITIES: ReadonlySet<"low" | "normal" | "high"> = new Set([
+  "low",
+  "normal",
+  "high",
+] as const);
+/** Bound dedupeKey length so a malicious / buggy plugin cannot bloat audit logs. */
+const MAX_DEDUPE_KEY_LEN = 128;
+
+/**
+ * Normalize plugin-supplied trigger fields to known/safe values BEFORE they
+ * flow into audit logs or downstream pipelines. Unknown enum values fall
+ * back to defaults. Non-string dedupeKey is dropped.
+ */
+export function normalizeTriggerSpecFields(spec: ConversationTriggerSpec): {
+  visibility: "silent" | "summary-only" | "user-visible";
+  priority: "low" | "normal" | "high";
+  dedupeKey: string | undefined;
+} {
+  const visibility = ALLOWED_VISIBILITIES.has(
+    spec.visibility as "silent" | "summary-only" | "user-visible",
+  )
+    ? (spec.visibility as "silent" | "summary-only" | "user-visible")
+    : "summary-only";
+  const priority = ALLOWED_PRIORITIES.has(
+    spec.priority as "low" | "normal" | "high",
+  )
+    ? (spec.priority as "low" | "normal" | "high")
+    : "normal";
+  let dedupeKey: string | undefined;
+  if (typeof spec.dedupeKey === "string") {
+    const trimmed = spec.dedupeKey.trim();
+    if (trimmed.length > 0) {
+      dedupeKey = trimmed.length > MAX_DEDUPE_KEY_LEN
+        ? trimmed.slice(0, MAX_DEDUPE_KEY_LEN)
+        : trimmed;
+    }
+  }
+  return { visibility, priority, dedupeKey };
 }
 
 const triggerConversationDedupe = new TriggerConversationDedupe();
@@ -433,10 +488,13 @@ export async function initPluginRuntime(
       // P0 minimum-viable: capability + source/dedupe gates only.
       // visibility / priority are passed through to ConversationLoop for
       // audit; UI behaviour for "silent" / "user-visible" is deferred (P2).
-      triggerConversation: async (spec) => {
+      triggerConversation: async (spec: ConversationTriggerSpec) => {
         const source = typeof spec?.source === "string" ? spec.source : "";
-        const visibility = spec?.visibility ?? "summary-only";
-        const priority = spec?.priority ?? "normal";
+        // Normalize plugin-supplied enum-ish fields BEFORE they flow into
+        // audit / downstream pipelines (Copilot review #3) so a buggy or
+        // malicious plugin cannot inject unknown values like
+        // visibility="loud" or dedupeKey={} into logs.
+        const { visibility, priority, dedupeKey } = normalizeTriggerSpecFields(spec ?? ({} as ConversationTriggerSpec));
         const auditDeny = (reasonInput: string) => {
           try {
             bootAuditLogger.log({
@@ -460,8 +518,8 @@ export async function initPluginRuntime(
           auditDeny(`reason=invalid_source source=${source} (empty prompt)`);
           return { accepted: false, reason: "invalid_source", source };
         }
-        if (spec.dedupeKey && triggerConversationDedupe.has(pluginId, spec.dedupeKey)) {
-          auditDeny(`reason=duplicate dedupeKey=${spec.dedupeKey}`);
+        if (dedupeKey && triggerConversationDedupe.has(pluginId, dedupeKey)) {
+          auditDeny(`reason=duplicate dedupeKey=${dedupeKey}`);
           return { accepted: false, reason: "duplicate", source };
         }
 
@@ -471,7 +529,7 @@ export async function initPluginRuntime(
           return { accepted: false, reason: "loop_unavailable", source };
         }
 
-        if (spec.dedupeKey) triggerConversationDedupe.record(pluginId, spec.dedupeKey);
+        if (dedupeKey) triggerConversationDedupe.record(pluginId, dedupeKey);
 
         try {
           bootAuditLogger.log({
@@ -481,14 +539,21 @@ export async function initPluginRuntime(
             input:
               `[plugin:${pluginId}] trigger_conversation source=${source} ` +
               `visibility=${visibility} priority=${priority}` +
-              (spec.dedupeKey ? ` dedupeKey=${spec.dedupeKey}` : ""),
+              (dedupeKey ? ` dedupeKey=${dedupeKey}` : ""),
           });
         } catch { /* audit must not break host */ }
 
         // Fire-and-forget — proactive should not block waiting for the loop.
         // Errors inside runTriggerTurn are surfaced via the loop's own audit.
+        // Pass only normalized fields + caller's prompt + (optional) context.
         void loop
-          .runTriggerTurn({ ...spec, source, visibility, priority })
+          .runTriggerTurn({
+            prompt: spec.prompt,
+            source,
+            visibility,
+            priority,
+            ...(spec.context ? { context: spec.context } : {}),
+          })
           .catch((err: unknown) => {
             try {
               bootAuditLogger.log({

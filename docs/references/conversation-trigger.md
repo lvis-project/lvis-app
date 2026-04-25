@@ -38,9 +38,10 @@ interface ConversationTriggerResult {
 
 | 규칙 | 이유 |
 |------|------|
-| `prompt` 는 **templated 메시지만**. raw 제3자 컨텐츠 (메일 본문 / 첨부 / 외부 페이로드) 를 절대 그대로 inject 하지 말 것. ID 만 `context` 에 담고 본문은 ConversationLoop 가 tool 로 다시 fetch | Prompt injection — 호스트는 본문 검증 못함. raw inject = jailbreak |
+| `prompt` 는 **templated 메시지만**. raw 제3자 컨텐츠 (메일 본문 / 첨부 / 외부 페이로드) 를 절대 그대로 inject 하지 말 것. **P0 한정**: tool 이 ID 로 후속 fetch 하려면 그 ID 를 `prompt` 에 직접 embed 해야 함 — `context` 는 현재 audit-only (P2 에서 per-turn metadata 로 plumbing 예정) | Prompt injection — 호스트는 본문 검증 못함. raw inject = jailbreak |
 | `source` 는 반드시 `proactive:` 로 시작 | 소스-aware permission (§6.3) 정책 분리 |
 | `dedupeKey` 는 같은 관찰이 반복 emit 될 수 있으면 (예: 동일 mailId 의 event 재방출) 항상 설정 | 사용자 짜증 / 토큰 폭주 |
+| `visibility` / `priority` / `dedupeKey` — host 가 normalize 함 (`visibility="loud"` → `"summary-only"` 로 fallback, non-string `dedupeKey` → 무시, 128자 초과 truncate) | 잘못된 값이 audit 에 흘러들지 않게 |
 | `triggerConversation()` 호출 자체에 await 의미 없음 (host fire-and-forget) | brain 이 ConversationLoop 결과까지 기다리면 다음 신호 처리 차단 |
 
 ## Host gate — 거부 케이스
