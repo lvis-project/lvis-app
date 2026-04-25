@@ -41,7 +41,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-meeting",
             packageName: "@lvis/plugin-meeting",
             tools: [],
-            deployment: "managed",
+            installPolicy: "admin",
           },
         ],
       }),
@@ -87,7 +87,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-calendar",
             packageName: "@lvis/plugin-calendar",
             tools: [],
-            deployment: "managed",
+            installPolicy: "admin",
           },
           {
             id: "email",
@@ -96,7 +96,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-email",
             packageName: "@lvis/plugin-email",
             tools: [],
-            deployment: "managed",
+            installPolicy: "admin",
           },
           {
             id: "meeting",
@@ -105,7 +105,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-meeting",
             packageName: "@lvis/plugin-meeting",
             tools: [],
-            deployment: "managed",
+            installPolicy: "admin",
           },
           {
             id: "work-proactive",
@@ -115,8 +115,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-work-proactive",
             tools: [],
             installPolicy: "user",
-            deployment: "user",
-            deliveryMode: "bundle",
             bundleDependencies: ["calendar", "email", "meeting"],
           },
         ],
@@ -161,7 +159,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-calendar",
             packageName: "@lvis/plugin-calendar",
             tools: [],
-            deployment: "managed",
+            installPolicy: "admin",
             capabilities: ["calendar-source"],
           },
           {
@@ -172,8 +170,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-work-proactive",
             tools: [],
             installPolicy: "user",
-            deployment: "user",
-            deliveryMode: "bundle",
             bundleDependencies: ["calendar"],
             requires: { capabilities: ["calendar-source"] },
           },
@@ -227,7 +223,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-calendar",
             tools: [],
             installPolicy: "user",
-            deployment: "user",
             capabilities: ["calendar-source"],
           },
           {
@@ -238,7 +233,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-email",
             tools: [],
             installPolicy: "user",
-            deployment: "user",
           },
           {
             id: "meeting",
@@ -248,7 +242,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-meeting",
             tools: [],
             installPolicy: "user",
-            deployment: "user",
           },
           {
             id: "work-proactive",
@@ -258,8 +251,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-work-proactive",
             tools: [],
             installPolicy: "user",
-            deployment: "user",
-            deliveryMode: "bundle",
             bundleDependencies: ["calendar", "email", "meeting"],
           },
         ],
@@ -323,7 +314,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-calendar",
             tools: [],
             installPolicy: "user",
-            deployment: "user",
             capabilities: ["calendar-source"],
           },
           {
@@ -334,7 +324,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-email",
             tools: [],
             installPolicy: "user",
-            deployment: "user",
           },
           {
             id: "meeting",
@@ -344,7 +333,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-meeting",
             tools: [],
             installPolicy: "user",
-            deployment: "user",
           },
           {
             id: "work-proactive",
@@ -354,8 +342,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-work-proactive",
             tools: ["work_proactive_generate_wakeup_briefing"],
             installPolicy: "user",
-            deployment: "user",
-            deliveryMode: "bundle",
             bundleDependencies: [
               { pluginId: "calendar", required: true },
               { pluginId: "email", required: true },
@@ -410,7 +396,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(manifestPath).toBeTruthy();
     const manifest = JSON.parse(await readFile(manifestPath!, "utf-8"));
     expect(manifest.installPolicy).toBe("user");
-    expect(manifest.deliveryMode).toBe("bundle");
     expect(manifest.bundleDependencies).toEqual([
       { pluginId: "calendar", required: true },
       { pluginId: "email", required: true },
@@ -443,7 +428,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: `file:${homedir()}`,
             packageName: "@lvis/escape",
             tools: [],
-            deployment: "user",
           },
         ],
       }),
@@ -495,7 +479,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         {
           id: "user-plugin",
           installPolicy: "user",
-          deployment: "user",
           pluginAccess: undefined,
         },
         "1.0.0",

@@ -3,7 +3,6 @@
   "name": "LVIS Calendar",
   "version": "0.1.0",
   "installPolicy": "user",
-  "deployment": "user",
   "publisher": "LG Electronics IT",
   "startupTimeoutMs": 3000,
   "entry": "../../../node_modules/@lvis/plugin-calendar/dist/hostPlugin.js",
@@ -31,19 +30,45 @@
     "calendar_start_watcher"
   ],
   "eventSubscriptions": [
-    { "type": "email.analyzed", "hint": { "category": "email", "priority": "low", "title": "이메일 분석 완료" } },
-    { "type": "meeting.summary.created", "hint": { "category": "meeting", "priority": "medium", "title": "회의 요약 생성" } },
-    { "type": "email.invite.detected", "hint": { "category": "email", "priority": "medium", "title": "이메일 초대 감지" } }
+    {
+      "type": "email.analyzed",
+      "hint": {
+        "category": "email",
+        "priority": "low",
+        "title": "이메일 분석 완료"
+      }
+    },
+    {
+      "type": "meeting.summary.created",
+      "hint": {
+        "category": "meeting",
+        "priority": "medium",
+        "title": "회의 요약 생성"
+      }
+    },
+    {
+      "type": "email.invite.detected",
+      "hint": {
+        "category": "email",
+        "priority": "medium",
+        "title": "이메일 초대 감지"
+      }
+    }
   ],
   "pluginAccess": {
     "plugins": [
       {
         "pluginId": "email",
-        "events": ["email.analyzed", "email.invite.detected"]
+        "events": [
+          "email.analyzed",
+          "email.invite.detected"
+        ]
       },
       {
         "pluginId": "meeting",
-        "events": ["meeting.summary.created"]
+        "events": [
+          "meeting.summary.created"
+        ]
       }
     ]
   },
@@ -127,7 +152,9 @@
             "description": "조회할 일정의 Microsoft Graph 이벤트 ID"
           }
         },
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "additionalProperties": false
       }
     },
@@ -165,11 +192,17 @@
           },
           "attendees": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "참석자 이메일 주소 목록 (선택)"
           }
         },
-        "required": ["title", "start", "end"],
+        "required": [
+          "title",
+          "start",
+          "end"
+        ],
         "additionalProperties": false
       }
     },
@@ -210,7 +243,9 @@
             "description": "IANA 시간대 (선택)"
           }
         },
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "additionalProperties": false
       }
     },
@@ -225,7 +260,9 @@
             "description": "삭제할 일정의 Microsoft Graph 이벤트 ID"
           }
         },
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "additionalProperties": false
       }
     },
@@ -265,7 +302,9 @@
             "description": "열 URL (https 스킴만 허용)"
           }
         },
-        "required": ["url"],
+        "required": [
+          "url"
+        ],
         "additionalProperties": false
       }
     },

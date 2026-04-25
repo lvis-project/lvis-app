@@ -146,8 +146,6 @@
       }
     },
     "installPolicy": { "enum": ["admin", "user"] },
-    "deployment": { "enum": ["managed", "user"] },
-    "deliveryMode": { "enum": ["marketplace", "bundle"] },
     "bundleDependencies": {
       "type": "array",
       "items": {

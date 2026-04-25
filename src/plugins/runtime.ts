@@ -86,18 +86,12 @@ type ManifestLoadPlan = {
 };
 
 function normalizeInstallPolicy(
-  source: Partial<Pick<PluginManifest, "installPolicy" | "deployment">> | undefined,
+  source: Partial<Pick<PluginManifest, "installPolicy">> | undefined,
 ): InstallPolicy {
-  if (source?.installPolicy === "admin" || source?.deployment === "managed") {
+  if (source?.installPolicy === "admin") {
     return "admin";
   }
   return "user";
-}
-
-function normalizeDeliveryMode(
-  value: PluginManifest["deliveryMode"] | undefined,
-): PluginManifest["deliveryMode"] | undefined {
-  return value;
 }
 
 function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
@@ -985,9 +979,6 @@ export class PluginRuntime {
       );
     }
     parsed.installPolicy = normalizeInstallPolicy(parsed);
-    parsed.deliveryMode = normalizeDeliveryMode(
-      parsed.deliveryMode as PluginManifest["deliveryMode"] | undefined,
-    );
     const pid = typeof parsed?.id === "string" && parsed.id.length > 0 ? parsed.id : "<unknown>";
     const fail = (fieldPath: string, reason: string, example: string): never => {
       throw new Error(

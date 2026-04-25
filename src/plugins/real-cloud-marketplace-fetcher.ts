@@ -74,9 +74,6 @@ interface ServerCatalogRow {
   ui?: unknown;
   install_policy?: string;
   installPolicy?: string;
-  deployment?: string;
-  delivery_mode?: string;
-  deliveryMode?: string;
   bundle_dependencies?: unknown;
   bundleDependencies?: unknown;
   plugin_access?: unknown;
@@ -308,16 +305,10 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
     }
     if (ui) item.ui = ui;
     const installPolicy = row.install_policy ?? row.installPolicy;
-    if (installPolicy === "admin" || row.deployment === "managed") {
+    if (installPolicy === "admin") {
       item.installPolicy = "admin";
-      item.deployment = "managed";
-    } else if (installPolicy === "user" || row.deployment === "user" || row.deployment === "free") {
+    } else if (installPolicy === "user") {
       item.installPolicy = "user";
-      item.deployment = "user";
-    }
-    const deliveryMode = row.delivery_mode ?? row.deliveryMode;
-    if (deliveryMode === "marketplace" || deliveryMode === "bundle") {
-      item.deliveryMode = deliveryMode;
     }
     const bundleDependenciesRaw = row.bundle_dependencies ?? row.bundleDependencies;
     if (Array.isArray(bundleDependenciesRaw)) {

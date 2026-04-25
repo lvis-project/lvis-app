@@ -3,26 +3,40 @@
   "name": "LVIS Work Proactive",
   "version": "0.1.0",
   "installPolicy": "user",
-  "deployment": "user",
-  "deliveryMode": "bundle",
   "bundleDependencies": [
-    { "pluginId": "calendar", "required": true },
-    { "pluginId": "email", "required": true },
-    { "pluginId": "meeting", "required": true }
+    {
+      "pluginId": "calendar",
+      "required": true
+    },
+    {
+      "pluginId": "email",
+      "required": true
+    },
+    {
+      "pluginId": "meeting",
+      "required": true
+    }
   ],
   "pluginAccess": {
     "plugins": [
       {
         "pluginId": "calendar",
-        "tools": ["calendar_today"]
+        "tools": [
+          "calendar_today"
+        ]
       },
       {
         "pluginId": "email",
-        "events": ["email.action.needed"]
+        "events": [
+          "email.action.needed"
+        ]
       },
       {
         "pluginId": "meeting",
-        "events": ["meeting.summary.created", "meeting.ended"]
+        "events": [
+          "meeting.summary.created",
+          "meeting.ended"
+        ]
       }
     ]
   },
@@ -49,9 +63,15 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "trigger": { "type": "string" },
-          "nowIso": { "type": "string" },
-          "prompt": { "type": "string" }
+          "trigger": {
+            "type": "string"
+          },
+          "nowIso": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       }

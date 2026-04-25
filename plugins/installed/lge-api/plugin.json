@@ -2,7 +2,6 @@
   "id": "lge-api",
   "name": "LVIS EP",
   "version": "0.1.0",
-  "deployment": "managed",
   "publisher": "LG Electronics IT",
   "description": "EP(LGE 사내 포털) SSO 로그인 · 회의실 예약 조회",
   "entry": "../../../node_modules/@lvis/plugin-lge-api/dist/hostPlugin.js",

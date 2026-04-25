@@ -20,18 +20,11 @@ export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 
 function normalizeInstallPolicy(source: {
   installPolicy?: InstallPolicy;
-  deployment?: "managed" | "user";
 }): InstallPolicy {
-  if (source.installPolicy === "admin" || source.deployment === "managed") {
+  if (source.installPolicy === "admin") {
     return "admin";
   }
   return "user";
-}
-
-function normalizeDeliveryMode(
-  deliveryMode: PluginMarketplaceItem["deliveryMode"] | undefined,
-): PluginMarketplaceItem["deliveryMode"] | undefined {
-  return deliveryMode;
 }
 
 function normalizeBundleDependencies(
@@ -233,7 +226,7 @@ export class PluginMarketplaceService {
       : resolve(dirname(this.registryPath), installedManifestPath);
     try {
       const raw = await readFile(abs, "utf-8");
-      const parsed = JSON.parse(raw) as { installPolicy?: InstallPolicy; deployment?: "managed" | "user" };
+      const parsed = JSON.parse(raw) as { installPolicy?: InstallPolicy };
       return normalizeInstallPolicy(parsed) === "admin";
     } catch {
       return false;
@@ -273,14 +266,13 @@ export class PluginMarketplaceService {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
     }
 
-    // §7.2 canInstall — managed 카탈로그 항목은 user actor 차단 (defense-in-depth).
+    // §7.2 canInstall — admin-policy catalog entries block user actor installs.
     // Boot-time force-install uses actor="it-admin" to bypass this guard for
     // mandatory enterprise plugins (see ensureManagedInstalled).
     if (this.deploymentGuard) {
       const guardResult = await this.deploymentGuard.canInstall(
         pluginId,
         actor,
-        plugin.deployment,
         plugin.installPolicy,
       );
       if (!guardResult.allowed) {
@@ -289,7 +281,7 @@ export class PluginMarketplaceService {
     }
 
     const activeBundleRootId =
-      bundleRootId ?? (normalizeDeliveryMode(plugin.deliveryMode as PluginMarketplaceItem["deliveryMode"] | undefined) === "bundle"
+      bundleRootId ?? (normalizeBundleDependencies(plugin).length > 0
         ? plugin.id
         : null);
 
@@ -476,7 +468,6 @@ export class PluginMarketplaceService {
         const guardResult = await this.deploymentGuard.canInstall(
           pluginId,
           "user",
-          plugin.deployment,
           plugin.installPolicy,
         );
         if (!guardResult.allowed) {
@@ -979,11 +970,6 @@ export class PluginMarketplaceService {
     if (plugin.notificationEvents && plugin.notificationEvents.length > 0) manifest.notificationEvents = plugin.notificationEvents;
     if (plugin.toolSchemas && Object.keys(plugin.toolSchemas).length > 0) manifest.toolSchemas = plugin.toolSchemas;
     if (plugin.installPolicy) manifest.installPolicy = plugin.installPolicy;
-    if (plugin.deployment) manifest.deployment = plugin.deployment;
-    const normalizedDeliveryMode = normalizeDeliveryMode(
-      plugin.deliveryMode as PluginMarketplaceItem["deliveryMode"] | undefined,
-    );
-    if (normalizedDeliveryMode) manifest.deliveryMode = normalizedDeliveryMode;
     if (plugin.bundleDependencies && plugin.bundleDependencies.length > 0) manifest.bundleDependencies = plugin.bundleDependencies;
     if (plugin.pluginAccess) manifest.pluginAccess = plugin.pluginAccess;
     if (plugin.requires && plugin.requires.capabilities.length > 0) manifest.requires = plugin.requires;
@@ -1025,31 +1011,11 @@ export class PluginMarketplaceService {
         );
       }
 
-      const expectedDeployment = plugin.deployment ?? "user";
-      const actualDeployment = manifest.deployment ?? "user";
-      if (actualDeployment !== expectedDeployment) {
-        throw new Error(
-          `plugin "${plugin.id}" artifact manifest deployment mismatch: expected "${expectedDeployment}", got "${String(actualDeployment)}"`,
-        );
-      }
-
       const expectedPluginAccess = plugin.pluginAccess ?? undefined;
       const actualPluginAccess = manifest.pluginAccess ?? undefined;
       if (JSON.stringify(actualPluginAccess) !== JSON.stringify(expectedPluginAccess)) {
         throw new Error(
           `plugin "${plugin.id}" artifact manifest pluginAccess does not match the catalog-approved grant`,
-        );
-      }
-
-      const expectedDeliveryMode = normalizeDeliveryMode(
-        plugin.deliveryMode as PluginMarketplaceItem["deliveryMode"] | undefined,
-      ) ?? "marketplace";
-      const actualDeliveryMode = normalizeDeliveryMode(
-        manifest.deliveryMode as PluginManifest["deliveryMode"] | undefined,
-      ) ?? "marketplace";
-      if (actualDeliveryMode !== expectedDeliveryMode) {
-        throw new Error(
-          `plugin "${plugin.id}" artifact manifest deliveryMode mismatch: expected "${expectedDeliveryMode}", got "${String(actualDeliveryMode)}"`,
         );
       }
 

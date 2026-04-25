@@ -1,20 +1,4 @@
-/**
- * Plugin Deployment Mode — §9.6
- *
- * - **managed**: 회사(LGE IT)가 배포/업데이트/삭제 정책을 통제.
- *   사용자는 UI에서 제거·비활성화 불가 (PluginDeploymentGuard가 차단).
- * - **user**: 사용자가 자율적으로 설치. 회사 정책(userInstallPolicy)에 따라 제어.
- */
-export type DeploymentMode = "managed" | "user";
 export type InstallPolicy = "admin" | "user";
-
-/**
- * Delivery mode — how a plugin is presented/distributed.
- *
- * - **marketplace**: 일반 마켓플레이스 다운로드형 플러그인
- * - **bundle**: 여러 관련 플러그인을 함께 설치하는 마켓플레이스 패키지
- */
-export type PluginDeliveryMode = "marketplace" | "bundle";
 
 export interface BundleDependencySpec {
   pluginId: string;
@@ -107,8 +91,6 @@ export interface PluginManifest {
     bodyField?: string;
   }>;
   installPolicy?: InstallPolicy;
-  deployment?: DeploymentMode;
-  deliveryMode?: PluginDeliveryMode;
   bundleDependencies?: Array<string | BundleDependencySpec>;
   pluginAccess?: PluginAccessSpec;
   requires?: RequiresSpec;
@@ -255,8 +237,6 @@ export interface PluginMarketplaceItem {
     bodyField?: string;
   }>;
   installPolicy?: InstallPolicy;
-  deployment?: DeploymentMode;
-  deliveryMode?: PluginDeliveryMode;
   bundleDependencies?: Array<string | BundleDependencySpec>;
   pluginAccess?: PluginAccessSpec;
   publisher?: string;

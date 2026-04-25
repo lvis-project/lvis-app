@@ -8,7 +8,7 @@
       "description": "로컬 문서를 인덱싱하고 질의 미리보기를 제공하는 검색 플러그인",
       "packageSpec": "file:../lvis-plugin-pageindex",
       "packageName": "@lvis/plugin-pageindex",
-      "deployment": "managed",
+      "installPolicy": "admin",
       "publisher": "LG Electronics IT",
       "tools": [
         "index_scan",
@@ -41,7 +41,6 @@
       "packageSpec": "file:../lvis-plugin-meeting",
       "packageName": "@lvis/plugin-meeting",
       "installPolicy": "user",
-      "deployment": "user",
       "publisher": "LG Electronics IT",
       "tools": [
         "meeting_start",
@@ -72,7 +71,6 @@
       "packageSpec": "file:../lvis-plugin-email",
       "packageName": "@lvis/plugin-email",
       "installPolicy": "user",
-      "deployment": "user",
       "publisher": "LG Electronics IT",
       "tools": [
         "email_status",
@@ -102,7 +100,6 @@
       "packageSpec": "file:../lvis-plugin-calendar",
       "packageName": "@lvis/plugin-calendar",
       "installPolicy": "user",
-      "deployment": "user",
       "publisher": "LG Electronics IT",
       "tools": [
         "calendar_status",
@@ -122,11 +119,16 @@
         "plugins": [
           {
             "pluginId": "email",
-            "events": ["email.analyzed", "email.invite.detected"]
+            "events": [
+              "email.analyzed",
+              "email.invite.detected"
+            ]
           },
           {
             "pluginId": "meeting",
-            "events": ["meeting.summary.created"]
+            "events": [
+              "meeting.summary.created"
+            ]
           }
         ]
       },
@@ -149,7 +151,7 @@
       "description": "EP 사내 포털 SSO 로그인 + 시설 예약 조회 + Tool 시험대",
       "packageSpec": "file:../lvis-plugin-lge-api",
       "packageName": "@lvis/plugin-lge-api",
-      "deployment": "managed",
+      "installPolicy": "admin",
       "publisher": "LG Electronics IT",
       "tools": [
         "lge_login",
@@ -178,26 +180,40 @@
       "packageSpec": "file:../lvis-plugin-work-proactive",
       "packageName": "@lvis/plugin-work-proactive",
       "installPolicy": "user",
-      "deployment": "user",
-      "deliveryMode": "bundle",
       "bundleDependencies": [
-        { "pluginId": "calendar", "required": true },
-        { "pluginId": "email", "required": true },
-        { "pluginId": "meeting", "required": true }
+        {
+          "pluginId": "calendar",
+          "required": true
+        },
+        {
+          "pluginId": "email",
+          "required": true
+        },
+        {
+          "pluginId": "meeting",
+          "required": true
+        }
       ],
       "pluginAccess": {
         "plugins": [
           {
             "pluginId": "calendar",
-            "tools": ["calendar_today"]
+            "tools": [
+              "calendar_today"
+            ]
           },
           {
             "pluginId": "email",
-            "events": ["email.action.needed"]
+            "events": [
+              "email.action.needed"
+            ]
           },
           {
             "pluginId": "meeting",
-            "events": ["meeting.summary.created", "meeting.ended"]
+            "events": [
+              "meeting.summary.created",
+              "meeting.ended"
+            ]
           }
         ]
       },
@@ -216,9 +232,15 @@
           "inputSchema": {
             "type": "object",
             "properties": {
-              "trigger": { "type": "string" },
-              "nowIso": { "type": "string" },
-              "prompt": { "type": "string" }
+              "trigger": {
+                "type": "string"
+              },
+              "nowIso": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }

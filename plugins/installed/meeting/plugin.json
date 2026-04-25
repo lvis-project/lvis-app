@@ -3,7 +3,6 @@
   "name": "LVIS Meeting",
   "version": "1.0.0",
   "installPolicy": "user",
-  "deployment": "user",
   "publisher": "LG Electronics IT",
   "startupTimeoutMs": 5000,
   "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
@@ -19,8 +18,22 @@
     "meeting-recorder"
   ],
   "eventSubscriptions": [
-    { "type": "meeting.summary.created", "hint": { "category": "meeting", "priority": "medium", "title": "회의 요약 생성" } },
-    { "type": "meeting.ended", "hint": { "category": "meeting", "priority": "medium", "title": "회의 종료" } }
+    {
+      "type": "meeting.summary.created",
+      "hint": {
+        "category": "meeting",
+        "priority": "medium",
+        "title": "회의 요약 생성"
+      }
+    },
+    {
+      "type": "meeting.ended",
+      "hint": {
+        "category": "meeting",
+        "priority": "medium",
+        "title": "회의 종료"
+      }
+    }
   ],
   "uiCallable": [
     "meeting_start",
