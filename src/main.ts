@@ -418,16 +418,26 @@ app.on("before-quit", (event) => {
     try {
       const routineSettings = services.settingsService.get("routine");
       if ((routineSettings?.enableShutdownRoutine ?? true) && services.routineEngine) {
-        const { buildRoutineForTrigger } = await import("./routines/registry.js");
-        const { notifyRoutineStarted } = await import("./routines/routine-delivery.js");
-        const built = buildRoutineForTrigger("shutdown", routineSettings);
-        if (built.ok) {
-          // Pass the live window so started/completed pair on the renderer's
-          // useRoutineRunning hook. The renderer is about to close but during
-          // the brief window the spinner reflects actual state.
-          notifyRoutineStarted(mainWindow, { routineId: "shutdown", trigger: "shutdown", startedAt: new Date().toISOString() });
-          const result = await services.routineEngine.runRoutine(built.routine);
-          await deliverRoutineResult(mainWindow, result);
+        // Isolate the routine call so a throw here doesn't skip the
+        // services.shutdown() / pluginRuntime.stopAll() teardown below
+        // (those persist state and must run on every quit path).
+        try {
+          const { buildRoutineForTrigger } = await import("./routines/registry.js");
+          const { notifyRoutineStarted, notifyRoutineFailed } = await import("./routines/routine-delivery.js");
+          const built = buildRoutineForTrigger("shutdown", routineSettings);
+          if (built.ok) {
+            notifyRoutineStarted(mainWindow, { routineId: "shutdown", trigger: "shutdown", startedAt: new Date().toISOString() });
+            try {
+              const result = await services.routineEngine.runRoutine(built.routine);
+              await deliverRoutineResult(mainWindow, result);
+            } catch (e) {
+              const message = e instanceof Error ? e.message : String(e);
+              console.warn("[lvis] before-quit: shutdown routine failed:", message);
+              notifyRoutineFailed(mainWindow, { routineId: "shutdown", trigger: "shutdown" }, message);
+            }
+          }
+        } catch (e) {
+          console.warn("[lvis] before-quit: shutdown routine setup failed:", e instanceof Error ? e.message : String(e));
         }
       }
       await services.shutdown?.();
