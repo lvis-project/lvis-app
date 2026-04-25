@@ -348,6 +348,73 @@ export interface PluginHostApi {
     httpOnly?: boolean;
     expirationDate?: number;
   }>>;
+
+  /**
+   * Proactive Brain — start a host ConversationLoop turn from a plugin-observed
+   * signal. Unlike chat which is user-initiated, this lets a (read-only)
+   * "brain" plugin make LVIS speak first when an event warrants action
+   * (e.g., a meeting-request mail arrives).
+   *
+   * Capability gate: `conversation-trigger`. The plugin's manifest must
+   * declare it; otherwise the call throws.
+   *
+   * Safety contract — caller MUST follow:
+   * - `prompt` is a templated message, NOT raw third-party content (mail body,
+   *   attachment text, etc.). The host has no way to validate this; injecting
+   *   raw bodies makes prompt-injection trivial. Pass IDs in `context` and let
+   *   the loop fetch raw content via tools.
+   * - `source` MUST start with `proactive:` to keep the source-aware
+   *   permission model (§6.3) able to enforce per-origin policies.
+   * - `dedupeKey` should be set when the same observation can fire multiple
+   *   times (e.g., the same mail re-emitting events) — host will reject the
+   *   second call within a short window.
+   */
+  triggerConversation(spec: ConversationTriggerSpec): Promise<ConversationTriggerResult>;
+}
+
+/**
+ * Spec for `hostApi.triggerConversation()`. Passed by a brain plugin when it
+ * decides a signal warrants starting a conversation.
+ */
+export interface ConversationTriggerSpec {
+  /** Templated message — NEVER raw third-party content. See safety contract. */
+  prompt: string;
+  /** Origin tag, must start with `proactive:` (e.g. `proactive:meeting-detection`). */
+  source: string;
+  /** Side-channel metadata for the loop (IDs, references — not for prompt). */
+  context?: Record<string, unknown>;
+  /**
+   * UI behaviour:
+   * - `silent`         — run without surfacing to the user; only audit + result tools.
+   * - `summary-only`   — show one-line completion notice (default).
+   * - `user-visible`   — surface as if the user opened a turn, modal-style.
+   */
+  visibility?: "silent" | "summary-only" | "user-visible";
+  /** Routing hint for queueing when multiple triggers compete. */
+  priority?: "low" | "normal" | "high";
+  /** Suppress duplicate triggers for the same observation (window enforced by host). */
+  dedupeKey?: string;
+}
+
+export interface ConversationTriggerResult {
+  /** Whether the trigger was accepted for execution. */
+  accepted: boolean;
+  /**
+   * When `accepted=false`, why:
+   *   `capability_denied` — plugin lacks `conversation-trigger`.
+   *   `invalid_source`    — `source` does not start with `proactive:`.
+   *   `duplicate`         — `dedupeKey` matched a recent trigger.
+   *   `loop_unavailable`  — ConversationLoop not yet bound (boot ordering).
+   *   `disabled`          — feature toggle off (future, currently unused).
+   */
+  reason?:
+    | "capability_denied"
+    | "invalid_source"
+    | "duplicate"
+    | "loop_unavailable"
+    | "disabled";
+  /** Echoed back so callers can correlate logs across plugin/host. */
+  source: string;
 }
 
 /**

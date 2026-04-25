@@ -40,6 +40,42 @@ import {
   runManifestStartupTools,
 } from "../plugins.js";
 
+/**
+ * In-memory dedupe for `hostApi.triggerConversation()`. A brain plugin can set
+ * `dedupeKey` on a trigger spec to suppress repeats from the same observation
+ * (e.g., the same mail re-emitting events). Keyed per pluginId so two plugins
+ * cannot collide. TTL is intentionally short — long-term suppression should
+ * live in the plugin, not the host.
+ */
+export const TRIGGER_CONVERSATION_DEDUPE_TTL_MS = 5 * 60 * 1000;
+
+export class TriggerConversationDedupe {
+  private readonly seen = new Map<string, number>();
+  private key(pluginId: string, dedupeKey: string): string {
+    return `${pluginId}::${dedupeKey}`;
+  }
+  has(pluginId: string, dedupeKey: string): boolean {
+    const key = this.key(pluginId, dedupeKey);
+    const seenAt = this.seen.get(key);
+    if (seenAt === undefined) return false;
+    if (Date.now() - seenAt > TRIGGER_CONVERSATION_DEDUPE_TTL_MS) {
+      this.seen.delete(key);
+      return false;
+    }
+    return true;
+  }
+  record(pluginId: string, dedupeKey: string): void {
+    this.seen.set(this.key(pluginId, dedupeKey), Date.now());
+    if (this.seen.size > 256) {
+      // Cap unbounded growth; drop the oldest. Cheap for the small N expected.
+      const oldestKey = this.seen.keys().next().value;
+      if (oldestKey !== undefined) this.seen.delete(oldestKey);
+    }
+  }
+}
+
+const triggerConversationDedupe = new TriggerConversationDedupe();
+
 /** Late-binding container the ConversationLoop fills in after it exists. */
 export interface LateBindingRefs {
   llmCallerRef: {
@@ -391,6 +427,82 @@ export async function initPluginRuntime(
           ? opts
           : { ...opts, persistPartition: defaultPartition };
         return openAuthWindowService(mainWindow, effectiveOpts);
+      },
+
+      // ─── Proactive Brain — hostApi.triggerConversation() ───────────────
+      // P0 minimum-viable: capability + source/dedupe gates only.
+      // visibility / priority are passed through to ConversationLoop for
+      // audit; UI behaviour for "silent" / "user-visible" is deferred (P2).
+      triggerConversation: async (spec) => {
+        const source = typeof spec?.source === "string" ? spec.source : "";
+        const visibility = spec?.visibility ?? "summary-only";
+        const priority = spec?.priority ?? "normal";
+        const auditDeny = (reasonInput: string) => {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] trigger_conversation_denied ${reasonInput}`,
+            });
+          } catch { /* audit must not break host */ }
+        };
+
+        if (!manifest.capabilities?.includes("conversation-trigger")) {
+          auditDeny("reason=capability_denied");
+          return { accepted: false, reason: "capability_denied", source };
+        }
+        if (!source.startsWith("proactive:")) {
+          auditDeny(`reason=invalid_source source=${source || "<empty>"}`);
+          return { accepted: false, reason: "invalid_source", source };
+        }
+        if (typeof spec?.prompt !== "string" || spec.prompt.trim().length === 0) {
+          auditDeny(`reason=invalid_source source=${source} (empty prompt)`);
+          return { accepted: false, reason: "invalid_source", source };
+        }
+        if (spec.dedupeKey && triggerConversationDedupe.has(pluginId, spec.dedupeKey)) {
+          auditDeny(`reason=duplicate dedupeKey=${spec.dedupeKey}`);
+          return { accepted: false, reason: "duplicate", source };
+        }
+
+        const loop = lateBinding.conversationLoopRef.fn;
+        if (!loop) {
+          auditDeny("reason=loop_unavailable");
+          return { accepted: false, reason: "loop_unavailable", source };
+        }
+
+        if (spec.dedupeKey) triggerConversationDedupe.record(pluginId, spec.dedupeKey);
+
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "tool_call",
+            input:
+              `[plugin:${pluginId}] trigger_conversation source=${source} ` +
+              `visibility=${visibility} priority=${priority}` +
+              (spec.dedupeKey ? ` dedupeKey=${spec.dedupeKey}` : ""),
+          });
+        } catch { /* audit must not break host */ }
+
+        // Fire-and-forget — proactive should not block waiting for the loop.
+        // Errors inside runTriggerTurn are surfaced via the loop's own audit.
+        void loop
+          .runTriggerTurn({ ...spec, source, visibility, priority })
+          .catch((err: unknown) => {
+            try {
+              bootAuditLogger.log({
+                timestamp: new Date().toISOString(),
+                sessionId: "plugin",
+                type: "error",
+                input:
+                  `[plugin:${pluginId}] trigger_conversation_runtime_error ` +
+                  `source=${source} message=${(err as Error).message}`,
+              });
+            } catch { /* audit must not break host */ }
+          });
+
+        return { accepted: true, source };
       },
     }),
   });
