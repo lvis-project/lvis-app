@@ -49,7 +49,12 @@ export interface RoutineIdleSignalerDeps {
   powerMonitor: PowerMonitorLike;
   /** Long-idle threshold getter. Read at decision time so settings changes apply live. */
   getLongIdleThresholdMs: () => number;
-  /** Polling interval in ms for getSystemIdleTime check. Default 30_000. */
+  /**
+   * Polling interval in ms for getSystemIdleTime check. Defaults vary by
+   * platform: Linux uses 10_000 (X11 lock events are inconsistent across
+   * desktop environments — GNOME emits reliably but i3/KDE often miss, so
+   * we lean harder on idle-time polling). darwin/win32 use 30_000.
+   */
   pollIntervalMs?: number;
   /** Per-event cooldown to suppress flapping. Default 60_000 (1 min). */
   perEventCooldownMs?: number;
@@ -63,6 +68,8 @@ export interface RoutineIdleSignalerDeps {
   logger?: (msg: string) => void;
   /** Kill switch override. Default reads DISABLE_ROUTINE_IDLE_SIGNALER env var. */
   disabled?: () => boolean;
+  /** Test override for process.platform. */
+  platform?: NodeJS.Platform;
 }
 
 /** Internal presence state. */
@@ -87,6 +94,13 @@ export class RoutineIdleSignaler {
   private subscribed = false;
   private readonly powerListeners: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
 
+  private static detach(pm: PowerMonitorLike, event: string, handler: (...args: unknown[]) => void): boolean {
+    const fn = pm.off ?? pm.removeListener;
+    if (typeof fn !== "function") return false;
+    fn.call(pm, event, handler);
+    return true;
+  }
+
   private readonly pollIntervalMs: number;
   private readonly perEventCooldownMs: number;
   private readonly now: () => number;
@@ -96,7 +110,9 @@ export class RoutineIdleSignaler {
   private readonly disabled: () => boolean;
 
   constructor(private readonly deps: RoutineIdleSignalerDeps) {
-    this.pollIntervalMs = deps.pollIntervalMs ?? 30_000;
+    const platform = deps.platform ?? process.platform;
+    const defaultPollMs = platform === "linux" ? 10_000 : 30_000;
+    this.pollIntervalMs = deps.pollIntervalMs ?? defaultPollMs;
     this.perEventCooldownMs = deps.perEventCooldownMs ?? 60_000;
     this.now = deps.now ?? (() => Date.now());
     this.setIntervalImpl =
@@ -156,10 +172,7 @@ export class RoutineIdleSignaler {
       // shared Electron powerMonitor instance.
       const pm = this.deps.powerMonitor;
       for (const { event, handler } of this.powerListeners) {
-        const off = (pm as { off?: (e: string, h: (...a: unknown[]) => void) => void }).off;
-        if (typeof off === "function") {
-          off.call(pm, event, handler);
-        }
+        RoutineIdleSignaler.detach(pm, event, handler);
       }
       this.powerListeners.length = 0;
       this.subscribed = false;
