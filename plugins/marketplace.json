@@ -176,11 +176,11 @@
       "id": "work-proactive",
       "slug": "work-proactive",
       "name": "LVIS Work Proactive",
-      "description": "Routine이 호출하는 메일/캘린더/미팅 번들 proactive 플러그인",
+      "description": "Routine이 호출하는 메일/캘린더/미팅 dependency 기반 proactive 플러그인",
       "packageSpec": "file:../lvis-plugin-work-proactive",
       "packageName": "@lvis/plugin-work-proactive",
       "installPolicy": "user",
-      "bundleDependencies": [
+      "dependencies": [
         {
           "pluginId": "calendar",
           "required": true

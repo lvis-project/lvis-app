@@ -27,11 +27,11 @@ function normalizeInstallPolicy(source: {
   return "user";
 }
 
-function normalizeBundleDependencies(
-  plugin: Pick<PluginMarketplaceItem, "bundleDependencies">,
+function normalizeDependencies(
+  plugin: Pick<PluginMarketplaceItem, "dependencies">,
 ): Array<{ pluginId: string; versionRange?: string; required: boolean }> {
   const result: Array<{ pluginId: string; versionRange?: string; required: boolean }> = [];
-  for (const dependency of plugin.bundleDependencies ?? []) {
+  for (const dependency of plugin.dependencies ?? []) {
     if (typeof dependency === "string") {
       result.push({ pluginId: dependency, required: true });
       continue;
@@ -242,14 +242,14 @@ export class PluginMarketplaceService {
       touchedEntries: new Map(),
     };
     try {
-      return await this.installWithBundleDependencies(pluginId, actor, new Set<string>(), null, state);
+      return await this.installWithDependencies(pluginId, actor, new Set<string>(), null, state);
     } catch (error) {
       await this.rollbackInstallOperation(state);
       throw error;
     }
   }
 
-  private async installWithBundleDependencies(
+  private async installWithDependencies(
     pluginId: string,
     actor: "user" | "it-admin",
     seen: Set<string>,
@@ -281,12 +281,12 @@ export class PluginMarketplaceService {
     }
 
     const activeBundleRootId =
-      bundleRootId ?? (normalizeBundleDependencies(plugin).length > 0
+      bundleRootId ?? (normalizeDependencies(plugin).length > 0
         ? plugin.id
         : null);
 
-    for (const dependency of normalizeBundleDependencies(plugin)) {
-      await this.installWithBundleDependencies(
+    for (const dependency of normalizeDependencies(plugin)) {
+      await this.installWithDependencies(
         dependency.pluginId,
         actor,
         seen,
@@ -314,9 +314,8 @@ export class PluginMarketplaceService {
       }
     }
 
-    // S14: dependency preflight — evaluate after any managed bundle dependencies
-    // have been auto-installed so bundle providers can satisfy their own
-    // requires.capabilities through the companion plugins they bring along.
+    // S14: dependency preflight — evaluate after declared dependencies have
+    // been auto-installed so providers can satisfy their own requires.capabilities.
     if (plugin.requires && plugin.requires.capabilities.length > 0) {
       const installedManifests = await this.loadInstalledManifests();
       const result = resolveDependencies(plugin.requires.capabilities, installedManifests);
@@ -363,7 +362,7 @@ export class PluginMarketplaceService {
   /**
    * Boot-time admin plugin bootstrap. Queries the marketplace catalog for
    * every admin-policy plugin and force-installs any that are
-   * missing from the local registry. Runs as actor="it-admin" so the deployment
+    * missing from the local registry. Runs as actor="it-admin" so the install-policy
    * guard permits the install.
    *
    * Failure modes are intentionally graceful — marketplace unreachable or a
@@ -477,10 +476,7 @@ export class PluginMarketplaceService {
 
       await this.cacheCurrentVersion(pluginId);
 
-      // Override packageSpec to pin the requested version. Preserve registry semantics.
-      const pinnedSpec = buildPinnedSpec(plugin.packageName, version);
-      await this.runNpmInstall(pinnedSpec);
-      const manifestPath = await this.writeInstalledManifest(plugin, version);
+      const manifestPath = await this.installArtifact(plugin, version);
       await this.cacheVersionFromManifest(pluginId, resolve(dirname(this.registryPath), manifestPath));
       // PR#44 HIGH: record install in per-plugin history.json (replaces the
       // mtime-based rollback target selection, which is unreliable across
@@ -970,7 +966,7 @@ export class PluginMarketplaceService {
     if (plugin.notificationEvents && plugin.notificationEvents.length > 0) manifest.notificationEvents = plugin.notificationEvents;
     if (plugin.toolSchemas && Object.keys(plugin.toolSchemas).length > 0) manifest.toolSchemas = plugin.toolSchemas;
     if (plugin.installPolicy) manifest.installPolicy = plugin.installPolicy;
-    if (plugin.bundleDependencies && plugin.bundleDependencies.length > 0) manifest.bundleDependencies = plugin.bundleDependencies;
+    if (plugin.dependencies && plugin.dependencies.length > 0) manifest.dependencies = plugin.dependencies;
     if (plugin.pluginAccess) manifest.pluginAccess = plugin.pluginAccess;
     if (plugin.requires && plugin.requires.capabilities.length > 0) manifest.requires = plugin.requires;
     if (plugin.publisher) manifest.publisher = plugin.publisher;
@@ -1019,13 +1015,13 @@ export class PluginMarketplaceService {
         );
       }
 
-      const expectedBundleDependencies = normalizeBundleDependencies(plugin);
-      const actualBundleDependencies = normalizeBundleDependencies(
-        manifest as Pick<PluginManifest, "bundleDependencies">,
+      const expectedDependencies = normalizeDependencies(plugin);
+      const actualDependencies = normalizeDependencies(
+        manifest as Pick<PluginManifest, "dependencies">,
       );
-      if (JSON.stringify(actualBundleDependencies) !== JSON.stringify(expectedBundleDependencies)) {
+      if (JSON.stringify(actualDependencies) !== JSON.stringify(expectedDependencies)) {
         throw new Error(
-          `plugin "${plugin.id}" artifact manifest bundleDependencies does not match the catalog-approved bundle members`,
+          `plugin "${plugin.id}" artifact manifest dependencies do not match the catalog-approved dependencies`,
         );
       }
     } catch (err) {

@@ -74,8 +74,7 @@ interface ServerCatalogRow {
   ui?: unknown;
   install_policy?: string;
   installPolicy?: string;
-  bundle_dependencies?: unknown;
-  bundleDependencies?: unknown;
+  dependencies?: unknown;
   plugin_access?: unknown;
   pluginAccess?: unknown;
   publisher?: string;
@@ -310,9 +309,9 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
     } else if (installPolicy === "user") {
       item.installPolicy = "user";
     }
-    const bundleDependenciesRaw = row.bundle_dependencies ?? row.bundleDependencies;
-    if (Array.isArray(bundleDependenciesRaw)) {
-      item.bundleDependencies = bundleDependenciesRaw.filter((dep): dep is string | { pluginId: string; versionRange?: string; required?: boolean } => {
+    const dependenciesRaw = row.dependencies;
+    if (Array.isArray(dependenciesRaw)) {
+      item.dependencies = dependenciesRaw.filter((dep): dep is string | { pluginId: string; versionRange?: string; required?: boolean } => {
         if (typeof dep === "string") return dep.trim().length > 0;
         if (!dep || typeof dep !== "object" || Array.isArray(dep)) return false;
         const candidate = dep as Record<string, unknown>;

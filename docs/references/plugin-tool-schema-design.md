@@ -83,7 +83,11 @@ interface PluginManifest {
     titleField?: string;
     bodyField?: string;
   }>;
-  deployment?: "managed" | "user";
+  installPolicy?: "admin" | "user";
+  dependencies?: Array<string | { pluginId: string; versionRange?: string; required?: boolean }>;
+  pluginAccess?: {
+    plugins: Array<{ pluginId: string; tools?: string[]; events?: string[] }>;
+  };
   publisher?: string;
   /**
    * plugin start() 하드 타임아웃 (ms). `Promise.race` 기반, 초과 시 호스트가
@@ -112,7 +116,9 @@ interface PluginManifest {
 | `notificationEvents[]` | `registerPluginNotifications()` — OS 알림 자동 등록 | boot |
 | `uiCallable[]` | `PluginRuntime.callFromUi()` allowlist | renderer IPC 호출 |
 | `capabilities[]` | HostApi MS Graph 게이트 + `emitEvent` namespace 게이트 | 런타임 전반 |
-| `deployment` | DeploymentGuard + signature gate policy | install + uninstall + load |
+| `installPolicy` | Install-policy guard + signature gate policy | install + uninstall + load |
+| `dependencies` | Marketplace dependency resolver | install |
+| `pluginAccess` | Cross-plugin tool/event access gate | runtime |
 | `publisher` | 감사 로그 · 마켓플레이스 카드 | install + 표시 |
 
 **plugin.json 전체 예시 (meeting 플러그인):**
@@ -156,7 +162,7 @@ interface PluginManifest {
     { "keyword": "회의록", "skillId": "meeting" },
     { "keyword": "녹음", "skillId": "meeting" }
   ],
-  "deployment": "managed",
+  "installPolicy": "admin",
   "publisher": "LG Electronics DX Platform Team"
 }
 ```
@@ -679,7 +685,7 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
   "description": "입력을 대문자로 변환하는 샘플 플러그인.",
   "entry": "dist/index.js",
   "tools": ["my_action"],
-  "deployment": "user"
+  "installPolicy": "user"
 }
 ```
 

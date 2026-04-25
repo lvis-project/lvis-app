@@ -3,7 +3,7 @@
   "name": "LVIS Work Proactive",
   "version": "0.1.0",
   "installPolicy": "user",
-  "bundleDependencies": [
+  "dependencies": [
     {
       "pluginId": "calendar",
       "required": true

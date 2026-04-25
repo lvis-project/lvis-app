@@ -115,7 +115,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-work-proactive",
             tools: [],
             installPolicy: "user",
-            bundleDependencies: ["calendar", "email", "meeting"],
+            dependencies: ["calendar", "email", "meeting"],
           },
         ],
       }),
@@ -146,7 +146,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(cacheSpy).toHaveBeenCalledTimes(4);
   });
 
-  it("satisfies bundle root capability requirements via auto-installed bundle dependencies", async () => {
+  it("satisfies dependency root capability requirements via auto-installed dependencies", async () => {
     await writeFile(
       marketplacePath,
       JSON.stringify({
@@ -170,7 +170,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-work-proactive",
             tools: [],
             installPolicy: "user",
-            bundleDependencies: ["calendar"],
+            dependencies: ["calendar"],
             requires: { capabilities: ["calendar-source"] },
           },
         ],
@@ -251,7 +251,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-work-proactive",
             tools: [],
             installPolicy: "user",
-            bundleDependencies: ["calendar", "email", "meeting"],
+            dependencies: ["calendar", "email", "meeting"],
           },
         ],
       }),
@@ -342,7 +342,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageName: "@lvis/plugin-work-proactive",
             tools: ["work_proactive_generate_wakeup_briefing"],
             installPolicy: "user",
-            bundleDependencies: [
+            dependencies: [
               { pluginId: "calendar", required: true },
               { pluginId: "email", required: true },
               { pluginId: "meeting", required: true },
@@ -396,7 +396,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(manifestPath).toBeTruthy();
     const manifest = JSON.parse(await readFile(manifestPath!, "utf-8"));
     expect(manifest.installPolicy).toBe("user");
-    expect(manifest.bundleDependencies).toEqual([
+    expect(manifest.dependencies).toEqual([
       { pluginId: "calendar", required: true },
       { pluginId: "email", required: true },
       { pluginId: "meeting", required: true },
@@ -469,7 +469,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
           plugin: {
             id: string;
             installPolicy: "user";
-            deployment: "user";
+            pluginAccess?: unknown;
           },
           version: string,
           manifestFile: string,
@@ -488,7 +488,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     ).rejects.toThrow(/pluginAccess does not match the catalog-approved grant/i);
   });
 
-  it("restores registry state during bundle rollback cleanup", async () => {
+  it("restores registry state during dependency rollback cleanup", async () => {
     const calendarDir = join(testDir, "plugins", "installed", "calendar");
     const emailDir = join(testDir, "plugins", "installed", "email");
     await mkdir(calendarDir, { recursive: true });

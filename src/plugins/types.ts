@@ -1,6 +1,6 @@
 export type InstallPolicy = "admin" | "user";
 
-export interface BundleDependencySpec {
+export interface DependencySpec {
   pluginId: string;
   versionRange?: string;
   required?: boolean;
@@ -91,7 +91,7 @@ export interface PluginManifest {
     bodyField?: string;
   }>;
   installPolicy?: InstallPolicy;
-  bundleDependencies?: Array<string | BundleDependencySpec>;
+  dependencies?: Array<string | DependencySpec>;
   pluginAccess?: PluginAccessSpec;
   requires?: RequiresSpec;
   publisher?: string;
@@ -237,7 +237,7 @@ export interface PluginMarketplaceItem {
     bodyField?: string;
   }>;
   installPolicy?: InstallPolicy;
-  bundleDependencies?: Array<string | BundleDependencySpec>;
+  dependencies?: Array<string | DependencySpec>;
   pluginAccess?: PluginAccessSpec;
   publisher?: string;
   toolSchemas?: PluginManifest["toolSchemas"];

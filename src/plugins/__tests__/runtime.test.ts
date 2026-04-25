@@ -29,7 +29,7 @@ describe("PluginRuntime.disable", () => {
 
   async function writeFakePlugin(
     id: string,
-    deployment?: "managed" | "user",
+    installPolicy?: "admin" | "user",
   ): Promise<string> {
     const pluginDir = join(installedDir, id);
     await mkdir(pluginDir, { recursive: true });
@@ -60,7 +60,7 @@ describe("PluginRuntime.disable", () => {
       entry: "entry.mjs",
       tools: [methodName],
     };
-    if (deployment) manifest.deployment = deployment;
+    if (installPolicy) manifest.installPolicy = installPolicy;
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return manifestPath;
@@ -106,7 +106,7 @@ describe("PluginRuntime.disable", () => {
   });
 
   it("disable rejects managed plugin with guard error and leaves state unchanged", async () => {
-    const manifestPath = await writeFakePlugin("p-managed", "managed");
+    const manifestPath = await writeFakePlugin("p-managed", "admin");
     await writeRegistry([{ id: "p-managed", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.load();
@@ -123,7 +123,7 @@ describe("PluginRuntime.disable", () => {
   });
 
   it("disable allows it-admin actor to disable a managed plugin", async () => {
-    const manifestPath = await writeFakePlugin("p-managed", "managed");
+    const manifestPath = await writeFakePlugin("p-managed", "admin");
     await writeRegistry([{ id: "p-managed", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.load();
