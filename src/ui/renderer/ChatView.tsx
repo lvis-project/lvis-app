@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/too
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
 import { RoutineCard } from "./components/RoutineCard.js";
+import { RoutineRunningIndicator } from "./components/RoutineRunningIndicator.js";
 import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
@@ -41,7 +42,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef,
     hasApiKey, onOpenSettings,
-    routineResult, onDismissRoutineResult, onSnoozeRoutineResult,
+    routineResult, onDismissRoutineResult, onSnoozeRoutineResult, runningRoutines,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
@@ -99,14 +100,26 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           </Card>
         </div>
       )}
+      {/* 루틴 floating overlay — 단일 슬롯에 진행 중 / 결과 중 하나만 표시.
+          진행 중이면 RoutineRunningIndicator, 아니면 직전 결과 RoutineCard.
+          긴 브리핑은 카드 내부에서 스크롤 (max-h-[60vh] + overflow-y-auto). */}
+      {(runningRoutines.size > 0 || routineResult) && (
+        <div className="pointer-events-none absolute left-0 right-0 top-2 z-20 flex justify-center px-4">
+          <div className="pointer-events-auto flex w-full max-w-2xl max-h-[60vh] flex-col overflow-hidden">
+            {runningRoutines.size > 0 ? (
+              <RoutineRunningIndicator runningRoutines={runningRoutines} />
+            ) : routineResult ? (
+              <RoutineCard
+                key={`${routineResult.routineId}::${routineResult.generatedAt}`}
+                result={routineResult}
+                onDismiss={onDismissRoutineResult}
+                onSnooze={onSnoozeRoutineResult}
+              />
+            ) : null}
+          </div>
+        </div>
+      )}
       <ScrollArea className="h-full p-4"><div className="space-y-3">
-        {routineResult && (
-          <RoutineCard
-            result={routineResult}
-            onDismiss={onDismissRoutineResult}
-            onSnooze={onSnoozeRoutineResult}
-          />
-        )}
         {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {entries.map((entry, idx) => {
           const isMatch = searchMatchSet.has(idx);

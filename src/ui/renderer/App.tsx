@@ -16,6 +16,7 @@ import { SettingsDialog } from "./SettingsDialog.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useRoutineResult } from "./hooks/use-routine-result.js";
+import { useRoutineRunning } from "./hooks/use-routine-running.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
 import { useContextBudget } from "./hooks/use-context-budget.js";
@@ -59,6 +60,7 @@ export function App() {
   const [activeView, setActiveView] = useState("home");
   const [commandOpen, setCommandOpen] = useState(false);
   const { routineResult, dismiss: dismissRoutineResult, snooze: snoozeRoutineResult } = useRoutineResult(api);
+  const { runningRoutines } = useRoutineRunning(api);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
 
@@ -199,7 +201,7 @@ export function App() {
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
-    routineResult, onDismissRoutineResult: dismissRoutineResult, onSnoozeRoutineResult: snoozeRoutineResult,
+    routineResult, onDismissRoutineResult: dismissRoutineResult, onSnoozeRoutineResult: snoozeRoutineResult, runningRoutines,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
