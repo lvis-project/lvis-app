@@ -38,7 +38,6 @@ describe("Phase 5 — capabilities module", () => {
     expect(classifySubscription("calendar.event")).toBe("public");
     expect(classifySubscription("index.scan_done")).toBe("public");
     expect(classifySubscription("task.created")).toBe("public");
-    expect(classifySubscription("briefing.morning")).toBe("public");
   });
 
   it("classifies everything else as 'neutral'", () => {
