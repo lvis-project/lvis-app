@@ -83,8 +83,7 @@
            "knowledge-index",
            "background-watcher",
           "worker-client",
-          "document-indexer",
-          "conversation-trigger"
+          "document-indexer"
         ]
       }
     },
