@@ -53,10 +53,14 @@ export class RoutineEngine {
     }
 
     // Tag session metadata so RoutinePanel.listSessionsByRoutine surfaces it.
+    // Use `trigger` (the REGISTERED routine type: "wakeup"|"schedule"|"shutdown")
+    // rather than `id` — for schedule routines, `id` is the per-entry id
+    // (e.g., "heartbeat-1") which would never match the registered "schedule"
+    // bucket queried by RoutinePanel.
     if (this.deps.memoryManager) {
       try {
         await this.deps.memoryManager.saveSessionMetadata(sessionId, {
-          routineId: routine.id,
+          routineId: routine.trigger,
           routineTitle: routine.title,
         });
       } catch (err) {
