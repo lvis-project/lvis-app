@@ -193,16 +193,6 @@
         }
       }
     },
-    "routineTools": {
-      "type": "object",
-      "description": "Tool name bindings for routine lifecycle hooks",
-      "properties": {
-        "wakeupBriefing": { "type": "string" },
-        "shutdownSummary": { "type": "string" },
-        "heartbeat": { "type": "string" }
-      },
-      "additionalProperties": false
-    },
     "requires": {
       "type": "object",
       "description": "Runtime prerequisites declared by the plugin",
