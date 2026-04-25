@@ -32,6 +32,17 @@ export interface PluginAccessSpec {
   plugins: PluginAccessTarget[];
 }
 
+export interface EventSubscriptionHint {
+  category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
+  priority: "high" | "medium" | "low";
+  title: string;
+}
+
+export interface EventSubscription {
+  type: string;
+  hint?: EventSubscriptionHint;
+}
+
 
 export interface PluginManifest {
   /** 플러그인 고유 식별자. 도트(`.`) 형식 권장: `com.lge.meeting-recorder`. */
@@ -72,7 +83,7 @@ export interface PluginManifest {
    *   - 구형 호환: `string[]` — 호스트가 중립 fallback hint를 적용.
    *   - 신형: `{ type: string; hint?: ProactiveEventHintSpec }[]` — 플러그인이 hint 메타데이터를 직접 선언.
    */
-  eventSubscriptions?: Array<string | { type: string; hint?: { category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system"; priority: "high" | "medium" | "low"; title: string } }>;
+  eventSubscriptions?: string[] | EventSubscription[];
   /**
    * H2: UI가 ipcRenderer 를 통해 직접 호출할 수 있는 plugin method 의 allowlist.
    * 이 배열에 없는 method 는 `lvis:plugins:call` IPC 를 통해 호출할 수 없다.
@@ -84,6 +95,7 @@ export interface PluginManifest {
    * classifySubscription("public") 판정을 통과한 이벤트만 renderer로 전달된다.
    * (host boundary §1: plugin-specific literals forbidden in boot.ts)
    */
+  eventPublishes?: string[];
   emittedEvents?: string[];
   /**
    * OS 네이티브 알림으로 표시할 이벤트 선언.
@@ -235,6 +247,7 @@ export interface PluginMarketplaceItem {
   keywords?: Array<{ keyword: string; skillId: string }>;
   startupTools?: string[];
   uiCallable?: string[];
+  eventPublishes?: string[];
   emittedEvents?: string[];
   notificationEvents?: Array<{
     event: string;
