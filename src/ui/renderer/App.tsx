@@ -59,7 +59,15 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandOpen, setCommandOpen] = useState(false);
-  const { routineResult, dismiss: dismissRoutineResult, snooze: snoozeRoutineResult } = useRoutineResult(api);
+  const {
+    routineResult,
+    routineQueueIndex,
+    routineQueueTotal,
+    dismiss: dismissRoutineResult,
+    snooze: snoozeRoutineResult,
+    goPrev: prevRoutineResult,
+    goNext: nextRoutineResult,
+  } = useRoutineResult(api);
   const { runningRoutines } = useRoutineRunning(api);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
@@ -201,7 +209,10 @@ export function App() {
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
-    routineResult, onDismissRoutineResult: dismissRoutineResult, onSnoozeRoutineResult: snoozeRoutineResult, runningRoutines,
+    routineResult, routineQueueIndex, routineQueueTotal,
+    onDismissRoutineResult: dismissRoutineResult, onSnoozeRoutineResult: snoozeRoutineResult,
+    onPrevRoutineResult: prevRoutineResult, onNextRoutineResult: nextRoutineResult,
+    runningRoutines,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
