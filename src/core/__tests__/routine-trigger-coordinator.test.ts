@@ -128,6 +128,7 @@ describe("RoutineTriggerCoordinator", () => {
     const completed: unknown[] = [];
     const coord = new RoutineTriggerCoordinator({
       routineEngine: engine,
+      getWakeupPrompt: () => "test wakeup prompt",
       onRoutineCompleted: (r) => { completed.push(r); },
       evaluators: [createIdleSignal(() => true)],
       tickIntervalMs: 999999,
@@ -140,10 +141,34 @@ describe("RoutineTriggerCoordinator", () => {
     expect(completed.length).toBe(1);
   });
 
+  it("sources the wakeup prePrompt from getWakeupPrompt at fire time", async () => {
+    const { engine } = fakeEngine();
+    let nextPrompt = "first prompt";
+    const coord = new RoutineTriggerCoordinator({
+      routineEngine: engine,
+      getWakeupPrompt: () => nextPrompt,
+      evaluators: [createIdleSignal(() => true)],
+      tickIntervalMs: 999999,
+      debounceMs: 0,
+    });
+
+    await coord._testEvaluate("tick");
+    expect(engine.runRoutine).toHaveBeenLastCalledWith(
+      expect.objectContaining({ prePrompt: "first prompt" }),
+    );
+
+    nextPrompt = "second prompt";
+    await coord._testEvaluate("tick");
+    expect(engine.runRoutine).toHaveBeenLastCalledWith(
+      expect.objectContaining({ prePrompt: "second prompt" }),
+    );
+  });
+
   it("debounces within the cooldown window", async () => {
     const { engine } = fakeEngine();
     const coord = new RoutineTriggerCoordinator({
       routineEngine: engine,
+      getWakeupPrompt: () => "test wakeup prompt",
       evaluators: [createIdleSignal(() => true)],
       tickIntervalMs: 999999,
       debounceMs: 30 * 60_000,
@@ -160,6 +185,7 @@ describe("RoutineTriggerCoordinator", () => {
     let lastFiredAt = 0;
     const coord = new RoutineTriggerCoordinator({
       routineEngine: engine,
+      getWakeupPrompt: () => "test wakeup prompt",
       evaluators: [
         createPostTurnSignal({
           isEnabled: () => true,
@@ -183,6 +209,7 @@ describe("RoutineTriggerCoordinator", () => {
     const { engine } = fakeEngine();
     const coord = new RoutineTriggerCoordinator({
       routineEngine: engine,
+      getWakeupPrompt: () => "test wakeup prompt",
       evaluators: [createIdleSignal(() => true)],
       tickIntervalMs: 999999,
       debounceMs: 30 * 60_000,

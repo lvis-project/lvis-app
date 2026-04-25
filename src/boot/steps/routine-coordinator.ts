@@ -9,6 +9,7 @@ import type { RoutineEngine, RoutineResult } from "../../core/routine-engine.js"
 import type { IdleSchedulerService, IdleState } from "../../main/idle-scheduler.js";
 import { createRoutineTriggerCoordinator } from "../routine.js";
 import {
+  DEFAULT_WAKEUP_ROUTINE_PROMPT,
   getKstMinuteKey,
   matchesSchedule,
   normalizeScheduleEntries,
@@ -42,6 +43,17 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
     });
   };
 
+  // Resolve wakeup prePrompt at fire time so the user's settings change takes
+  // effect on the next run without a restart. Falls back to the registry
+  // default when the setting is absent or empty.
+  const resolveWakeupPrompt = (): string => {
+    const configured = settingsService.get("routine")?.wakeupRoutinePrompt;
+    if (typeof configured === "string" && configured.trim().length > 0) {
+      return configured.trim();
+    }
+    return DEFAULT_WAKEUP_ROUTINE_PROMPT;
+  };
+
   const routineCoordinator = createRoutineTriggerCoordinator({
     routineEngine,
     taskService,
@@ -51,6 +63,7 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
       settingsService.get("routine")?.enableWakeupRoutine ?? false,
     getScheduleTimeKst: () =>
       settingsService.get("routine")?.scheduleTimeKst ?? "08:30",
+    getWakeupPrompt: resolveWakeupPrompt,
     onRoutineCompleted,
     getScheduleLastFiredDayKey: () => wakeupScheduleLastDay,
     setScheduleLastFiredDayKey: (key) => { wakeupScheduleLastDay = key; },
@@ -94,7 +107,11 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
     const existing = idleScheduler;
     const composite = (newState: IdleState, _oldState: IdleState, _reason: string): void => {
       if (newState === "IDLE_SCAN" && !routineCoordinator.isWithinGlobalCooldown()) {
-        const wakeupRoutine = { id: "wakeup", trigger: "wakeup" as const, prePrompt: "오늘 업무 맥락을 정리해줘." };
+        const wakeupRoutine = {
+          id: "wakeup",
+          trigger: "wakeup" as const,
+          prePrompt: resolveWakeupPrompt(),
+        };
         void routineEngine
           .runRoutine(wakeupRoutine)
           .then((result) => onRoutineCompleted(result))

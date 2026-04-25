@@ -416,11 +416,20 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   void (async () => {
     try {
-      if (services.settingsService.get("routine")?.enableShutdownRoutine ?? true) {
+      const routineSettings = services.settingsService.get("routine");
+      if (routineSettings?.enableShutdownRoutine ?? true) {
         const { getRegisteredRoutine } = await import("./routines/registry.js");
+        const { DEFAULT_SHUTDOWN_PROMPT } = await import("./routines/schedule.js");
         const shutdownRoutine = getRegisteredRoutine("shutdown");
         if (shutdownRoutine && services.routineEngine) {
-          const result = await services.routineEngine.runRoutine(shutdownRoutine);
+          const configured = routineSettings?.shutdownPrompt;
+          const prePrompt = typeof configured === "string" && configured.trim().length > 0
+            ? configured.trim()
+            : DEFAULT_SHUTDOWN_PROMPT;
+          const result = await services.routineEngine.runRoutine({
+            ...shutdownRoutine,
+            prePrompt,
+          });
           await deliverRoutineResult(null, result);
         }
       }

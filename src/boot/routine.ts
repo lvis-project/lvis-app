@@ -37,6 +37,8 @@ export function createRoutineTriggerCoordinator(opts: {
   getScheduleTimeKst?: () => string;
   getScheduleLastFiredDayKey: () => string | undefined;
   setScheduleLastFiredDayKey: (key: string) => void;
+  /** Wakeup routine prePrompt provider — see RoutineTriggerCoordinator deps. */
+  getWakeupPrompt: () => string;
   postTurnCooldownMs?: number;
   logger?: (msg: string) => void;
   onRoutineCompleted?: RoutineCompletedCallback;
@@ -63,6 +65,7 @@ export function createRoutineTriggerCoordinator(opts: {
 
   const coordinator = new RoutineTriggerCoordinator({
     routineEngine: opts.routineEngine,
+    getWakeupPrompt: opts.getWakeupPrompt,
     logger: opts.logger,
     onRoutineCompleted: opts.onRoutineCompleted,
     evaluators: [

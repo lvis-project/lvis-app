@@ -30,6 +30,7 @@ describe("RoutineTriggerCoordinator — global cooldown", () => {
     let lastFiredAt = 0;
     const coord = new RoutineTriggerCoordinator({
       routineEngine: engine as any,
+      getWakeupPrompt: () => "test wakeup prompt",
       evaluators: [
         createIdleSignal(() => true),
         createPostTurnSignal({
@@ -56,6 +57,7 @@ describe("RoutineTriggerCoordinator — global cooldown", () => {
     const engine = makeMockEngine();
     const coord = new RoutineTriggerCoordinator({
       routineEngine: engine as any,
+      getWakeupPrompt: () => "test wakeup prompt",
       evaluators: [],
       tickIntervalMs: 999999,
       debounceMs: 10 * 60_000,

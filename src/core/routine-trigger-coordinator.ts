@@ -25,6 +25,14 @@ export type SignalEvaluator = (
 export interface CoordinatorDeps {
   routineEngine: RoutineEngine;
   evaluators: Array<{ name: string; evaluate: SignalEvaluator }>;
+  /**
+   * Wakeup routine prePrompt provider — read at fire time so the routine
+   * subagent receives the user-configured `wakeupRoutinePrompt` instead of a
+   * stale hardcoded string. Returns the resolved prompt (already merged with
+   * defaults). Required so routine LLM has enough hint to autonomously
+   * request_plugin email/calendar/meeting tools.
+   */
+  getWakeupPrompt: () => string;
   /** default 60_000 */
   tickIntervalMs?: number;
   /** default 30 * 60_000 */
@@ -115,7 +123,7 @@ export class RoutineTriggerCoordinator {
           const wakeupRoutine: Routine = {
             id: "wakeup",
             trigger: "wakeup",
-            prePrompt: "오늘 업무 맥락을 정리해줘.",
+            prePrompt: this.deps.getWakeupPrompt(),
           };
           try {
             const routineResult = await this.deps.routineEngine.runRoutine(wakeupRoutine);
