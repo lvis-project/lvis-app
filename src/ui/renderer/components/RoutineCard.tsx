@@ -32,8 +32,11 @@ export function RoutineCard({
   const triggerLabel = TRIGGER_LABEL[result.trigger] ?? result.trigger;
 
   return (
-    <Card data-testid="routine-card" className="border-primary/40 bg-primary/5">
-      <CardHeader className="pb-2">
+    <Card
+      data-testid="routine-card"
+      className="flex h-full flex-col border-primary/40 bg-primary/5 shadow-lg backdrop-blur"
+    >
+      <CardHeader className="shrink-0 pb-2">
         <div className="flex items-start justify-between gap-2">
           <div>
             <CardTitle className="text-sm">{triggerLabel}</CardTitle>
@@ -45,7 +48,7 @@ export function RoutineCard({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="pt-0">
+      <CardContent className="min-h-0 flex-1 overflow-y-auto pt-0">
         {result.summary ? (
           <div className="prose prose-sm prose-invert max-w-none break-words text-foreground">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown>

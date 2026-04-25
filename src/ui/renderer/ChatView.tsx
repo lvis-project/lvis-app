@@ -102,18 +102,22 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
       )}
       {/* 루틴 진행/결과 floating overlay — 채팅 스크롤 영역과 독립.
           입력창은 가리지 않도록 상단 고정. pointer-events-none 컨테이너 +
-          컨텐츠만 pointer-events-auto 로 채팅 스크롤 입력 차단 방지. */}
+          컨텐츠만 pointer-events-auto 로 채팅 스크롤 입력 차단 방지.
+          긴 브리핑 콘텐츠가 화면을 침범하지 않도록 max-h + overflow-y-auto
+          로 카드 내부 스크롤. */}
       {(runningRoutines.size > 0 || routineResult) && (
-        <div className="pointer-events-none absolute left-0 right-0 top-2 z-20 flex flex-col items-center gap-2 px-4">
-          <div className="pointer-events-auto w-full max-w-2xl space-y-2">
+        <div className="pointer-events-none absolute left-0 right-0 top-2 z-20 flex justify-center px-4">
+          <div className="pointer-events-auto flex w-full max-w-2xl max-h-[60vh] flex-col gap-2 overflow-hidden">
             <RoutineRunningIndicator runningRoutines={runningRoutines} />
             {routineResult && (
-              <RoutineCard
-                key={`${routineResult.routineId}::${routineResult.generatedAt}`}
-                result={routineResult}
-                onDismiss={onDismissRoutineResult}
-                onSnooze={onSnoozeRoutineResult}
-              />
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <RoutineCard
+                  key={`${routineResult.routineId}::${routineResult.generatedAt}`}
+                  result={routineResult}
+                  onDismiss={onDismissRoutineResult}
+                  onSnooze={onSnoozeRoutineResult}
+                />
+              </div>
             )}
           </div>
         </div>
