@@ -85,7 +85,11 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
     });
   });
 
-  it("clicking snooze removes the card", async () => {
+  it("snooze trigger button is rendered with the new label", async () => {
+    // The dropdown menu pop-open + item-click flow is exercised at the hook
+    // level (src/ui/renderer/hooks/__tests__/use-routine-result.test.ts) where
+    // we can drive timers without Radix portal/pointer-event friction.
+    // Here we only assert that the trigger exists with the redesigned label.
     const { container, emitRoutineCompleted } = await renderApp();
     await act(async () => {
       emitRoutineCompleted(makeRoutineResult());
@@ -95,15 +99,41 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
       if (!el) throw new Error("card not rendered");
       return el;
     });
-    const snoozeBtn = Array.from(card.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("1시간 뒤 다시"),
-    ) as HTMLButtonElement | undefined;
-    expect(snoozeBtn).toBeTruthy();
+    const trigger = card.querySelector('[data-testid="routine-card-snooze-trigger"]');
+    expect(trigger).toBeTruthy();
+    expect(trigger?.textContent).toContain("나중에 다시");
+  });
+
+  it("stacks results with distinct routineIds and shows the index indicator", async () => {
+    const { container, emitRoutineCompleted } = await renderApp();
     await act(async () => {
-      fireEvent.click(snoozeBtn!);
+      emitRoutineCompleted({ ...makeRoutineResult(), routineId: "wakeup", summary: "morning" });
+    });
+    await act(async () => {
+      emitRoutineCompleted({ ...makeRoutineResult(), routineId: "schedule-1", trigger: "schedule", summary: "midday" });
+    });
+
+    await waitFor(() => {
+      const indicator = container.querySelector('[data-testid="routine-card-indicator"]');
+      expect(indicator?.textContent).toBe("2/2");
+      expect(container.textContent).toContain("midday");
+    });
+  });
+
+  it("in-place updates a card when the same routineId arrives again", async () => {
+    const { container, emitRoutineCompleted } = await renderApp();
+    await act(async () => {
+      emitRoutineCompleted({ ...makeRoutineResult(), summary: "v1" });
+    });
+    await waitFor(() => expect(container.textContent).toContain("v1"));
+    await act(async () => {
+      emitRoutineCompleted({ ...makeRoutineResult(), summary: "v2" });
     });
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="routine-card"]')).toBeFalsy();
+      expect(container.textContent).toContain("v2");
+      expect(container.textContent).not.toContain("v1");
+      // Single card → no indicator rendered.
+      expect(container.querySelector('[data-testid="routine-card-indicator"]')).toBeFalsy();
     });
   });
 });

@@ -42,7 +42,9 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef,
     hasApiKey, onOpenSettings,
-    routineResult, onDismissRoutineResult, onSnoozeRoutineResult, runningRoutines,
+    routineResult, routineQueueIndex, routineQueueTotal,
+    onDismissRoutineResult, onSnoozeRoutineResult,
+    onPrevRoutineResult, onNextRoutineResult, runningRoutines,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
@@ -114,6 +116,10 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                 result={routineResult}
                 onDismiss={onDismissRoutineResult}
                 onSnooze={onSnoozeRoutineResult}
+                index={routineQueueIndex}
+                total={routineQueueTotal}
+                onPrev={onPrevRoutineResult}
+                onNext={onNextRoutineResult}
               />
             ) : null}
           </div>
