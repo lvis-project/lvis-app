@@ -416,11 +416,12 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   void (async () => {
     try {
-      if (services.settingsService.get("routine")?.enableShutdownRoutine ?? true) {
-        const { getRegisteredRoutine } = await import("./routines/registry.js");
-        const shutdownRoutine = getRegisteredRoutine("shutdown");
-        if (shutdownRoutine && services.routineEngine) {
-          const result = await services.routineEngine.runRoutine(shutdownRoutine);
+      const routineSettings = services.settingsService.get("routine");
+      if ((routineSettings?.enableShutdownRoutine ?? true) && services.routineEngine) {
+        const { buildRoutineForTrigger } = await import("./routines/registry.js");
+        const built = buildRoutineForTrigger("shutdown", routineSettings);
+        if (built.ok) {
+          const result = await services.routineEngine.runRoutine(built.routine);
           await deliverRoutineResult(null, result);
         }
       }

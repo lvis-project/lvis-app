@@ -1,4 +1,10 @@
-import type { RoutineTriggerType } from "../core/routine-engine.js";
+import type { Routine, RoutineTriggerType } from "../core/routine-engine.js";
+import type { RoutineSettings } from "../data/settings-store.js";
+import {
+  DEFAULT_SHUTDOWN_PROMPT,
+  DEFAULT_WAKEUP_ROUTINE_PROMPT,
+  normalizeScheduleEntries,
+} from "./schedule.js";
 
 export type RegisteredRoutine = {
   id: RoutineTriggerType;
@@ -11,6 +17,11 @@ export type RegisteredRoutine = {
     scheduleEntries?: boolean;
   };
 };
+
+export type BuildRoutineFailure = "routine-not-found" | "schedule-no-active-entry";
+export type BuildRoutineResult =
+  | { ok: true; routine: Routine }
+  | { ok: false; error: BuildRoutineFailure };
 
 export const REGISTERED_ROUTINES: RegisteredRoutine[] = [
   {
@@ -38,4 +49,45 @@ export const REGISTERED_ROUTINES: RegisteredRoutine[] = [
 
 export function getRegisteredRoutine(routineId: string): RegisteredRoutine | undefined {
   return REGISTERED_ROUTINES.find((routine) => routine.id === routineId);
+}
+
+/**
+ * Build a fully-formed `Routine` (with prePrompt) from registry metadata +
+ * user settings. Used by dev-trigger IPCs and shutdown handler so all
+ * manually-fired routines pick up the current settings prompt rather than
+ * hardcoded text or undefined.
+ *
+ * Schedule routines pick the first enabled entry; if none, returns failure.
+ */
+export function buildRoutineForTrigger(
+  routineId: string,
+  settings: RoutineSettings | undefined,
+): BuildRoutineResult {
+  const meta = getRegisteredRoutine(routineId);
+  if (!meta) return { ok: false, error: "routine-not-found" };
+
+  if (meta.id === "wakeup") {
+    const configured = settings?.wakeupRoutinePrompt;
+    const prePrompt = typeof configured === "string" && configured.trim().length > 0
+      ? configured.trim()
+      : DEFAULT_WAKEUP_ROUTINE_PROMPT;
+    return { ok: true, routine: { id: meta.id, trigger: meta.trigger, prePrompt } };
+  }
+
+  if (meta.id === "shutdown") {
+    const configured = settings?.shutdownPrompt;
+    const prePrompt = typeof configured === "string" && configured.trim().length > 0
+      ? configured.trim()
+      : DEFAULT_SHUTDOWN_PROMPT;
+    return { ok: true, routine: { id: meta.id, trigger: meta.trigger, prePrompt } };
+  }
+
+  // schedule — pick first enabled entry's prompt
+  const entries = normalizeScheduleEntries(settings?.scheduleEntries);
+  const active = entries.find((e) => e.enabled);
+  if (!active) return { ok: false, error: "schedule-no-active-entry" };
+  return {
+    ok: true,
+    routine: { id: active.id, trigger: meta.trigger, prePrompt: active.prompt },
+  };
 }

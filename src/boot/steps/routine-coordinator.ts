@@ -1,39 +1,76 @@
 /**
  * Boot §4.2 Step 6 — Routine coordinator wiring.
+ *
+ * Wires three independent routine triggers:
+ *   1. Schedule cron entries (settingsService.routine.scheduleEntries) →
+ *      polled every 60s; matching entry fires `schedule` routine with the
+ *      entry's prompt.
+ *   2. Long-idle entry (sustained user-idle ≥ routineIdleThresholdMs) →
+ *      fires `shutdown` routine. Models "user just walked away".
+ *   3. Long-idle exit (user returns after ≥ threshold idle) →
+ *      fires `wakeup` routine. Models "user just arrived back" (출근 / 점심 후
+ *      자리 복귀 등).
+ *
+ * (Note) The historical IDLE_SCAN composite listener and the polling
+ *  `RoutineTriggerCoordinator` (with idleSignal/scheduleSignal/postTurnSignal)
+ *  are intentionally removed — IDLE_SCAN entry semantically means "user just
+ *  left", which is opposite of what wakeup needs, and postTurnSignal mapped
+ *  every chat turn end to wakeup which conflicted with intent.
  */
 import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import type { TaskService } from "../../taskService.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { RoutineEngine, RoutineResult } from "../../core/routine-engine.js";
-import type { IdleSchedulerService, IdleState } from "../../main/idle-scheduler.js";
-import { createRoutineTriggerCoordinator } from "../routine.js";
+import type { PowerMonitorLike } from "../../main/idle-scheduler.js";
 import {
+  DEFAULT_SHUTDOWN_PROMPT,
+  DEFAULT_WAKEUP_ROUTINE_PROMPT,
   getKstMinuteKey,
   matchesSchedule,
   normalizeScheduleEntries,
 } from "../../routines/schedule.js";
 import { deliverRoutineResult } from "../../routines/routine-delivery.js";
 import { REGISTERED_ROUTINES } from "../../routines/registry.js";
+import { RoutineIdleSignaler } from "../../routines/idle-signaler.js";
 
 export interface WireRoutineCoordinatorInput {
   routineEngine: RoutineEngine;
   taskService: TaskService;
   pluginRuntime: PluginRuntime;
   settingsService: SettingsService;
-  idleScheduler: IdleSchedulerService | undefined;
+  /** Electron powerMonitor (or test fake). Optional — Linux/test envs may pass undefined. */
+  powerMonitor?: PowerMonitorLike;
   mainWindow: BrowserWindow;
 }
 
 export interface WiredRoutineCoordinator {
-  notify(event: string): void;
+  /** Force-evaluate cron schedule entries immediately (used by IPC dev trigger). */
+  evaluateSchedulesNow(): void;
   dispose(): void;
 }
 
-export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): WiredRoutineCoordinator {
-  const { routineEngine, taskService, pluginRuntime, settingsService, idleScheduler, mainWindow } = input;
+const DEFAULT_ROUTINE_IDLE_THRESHOLD_MS = 10 * 60_000;
 
-  let wakeupScheduleLastDay: string | undefined;
+function resolveWakeupPrompt(settingsService: SettingsService): string {
+  const configured = settingsService.get("routine")?.wakeupRoutinePrompt;
+  if (typeof configured === "string" && configured.trim().length > 0) {
+    return configured.trim();
+  }
+  return DEFAULT_WAKEUP_ROUTINE_PROMPT;
+}
+
+function resolveShutdownPrompt(settingsService: SettingsService): string {
+  const configured = settingsService.get("routine")?.shutdownPrompt;
+  if (typeof configured === "string" && configured.trim().length > 0) {
+    return configured.trim();
+  }
+  return DEFAULT_SHUTDOWN_PROMPT;
+}
+
+export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): WiredRoutineCoordinator {
+  const { routineEngine, settingsService, powerMonitor, mainWindow } = input;
+
   const scheduleLastMinuteKeyByEntry = new Map<string, string>();
 
   const onRoutineCompleted = async (result: RoutineResult): Promise<void> => {
@@ -42,23 +79,8 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
     });
   };
 
-  const routineCoordinator = createRoutineTriggerCoordinator({
-    routineEngine,
-    taskService,
-    pluginRuntime,
-    isIdleScanActive: () => idleScheduler?.getState() === "IDLE_SCAN",
-    isScheduleEnabled: () =>
-      settingsService.get("routine")?.enableWakeupRoutine ?? false,
-    getScheduleTimeKst: () =>
-      settingsService.get("routine")?.scheduleTimeKst ?? "08:30",
-    onRoutineCompleted,
-    getScheduleLastFiredDayKey: () => wakeupScheduleLastDay,
-    setScheduleLastFiredDayKey: (key) => { wakeupScheduleLastDay = key; },
-  });
-  routineCoordinator.start();
-
-  // schedule 루틴: cron 기반 주기 실행
-  const maybeRunScheduleRoutines = () => {
+  // ─── Trigger 1: schedule cron entries ──────────────────────────────────────
+  const evaluateSchedulesNow = (): void => {
     const routineSettings = settingsService.get("routine");
     if (!(routineSettings?.enableScheduleRoutine ?? true)) return;
     const now = new Date();
@@ -84,39 +106,60 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
     }
   };
 
-  const scheduleTimer = setInterval(maybeRunScheduleRoutines, 60_000);
+  const scheduleTimer = setInterval(evaluateSchedulesNow, 60_000);
   scheduleTimer.unref?.();
-  maybeRunScheduleRoutines();
+  evaluateSchedulesNow();
 
-  let compositeListenerInstalled = false;
+  // ─── Trigger 2/3: long-idle entry (shutdown) / exit (wakeup) ───────────────
+  let idleSignaler: RoutineIdleSignaler | null = null;
+  if (powerMonitor) {
+    idleSignaler = new RoutineIdleSignaler({
+      powerMonitor,
+      getLongIdleThresholdMs: () =>
+        settingsService.get("routine")?.routineIdleThresholdMs ?? DEFAULT_ROUTINE_IDLE_THRESHOLD_MS,
+    });
 
-  if (idleScheduler) {
-    const existing = idleScheduler;
-    const composite = (newState: IdleState, _oldState: IdleState, _reason: string): void => {
-      if (newState === "IDLE_SCAN" && !routineCoordinator.isWithinGlobalCooldown()) {
-        const wakeupRoutine = { id: "wakeup", trigger: "wakeup" as const, prePrompt: "오늘 업무 맥락을 정리해줘." };
+    idleSignaler.on((event) => {
+      const routineSettings = settingsService.get("routine");
+      if (event === "idle-long-exit") {
+        if (!(routineSettings?.enableWakeupRoutine ?? false)) return;
         void routineEngine
-          .runRoutine(wakeupRoutine)
+          .runRoutine({
+            id: "wakeup",
+            trigger: "wakeup",
+            prePrompt: resolveWakeupPrompt(settingsService),
+          })
           .then((result) => onRoutineCompleted(result))
           .catch((e: Error) =>
             console.warn("[lvis] boot: wakeup routine failed:", e.message),
           );
-        maybeRunScheduleRoutines();
+      } else if (event === "idle-long-entry") {
+        if (!(routineSettings?.enableShutdownRoutine ?? true)) return;
+        void routineEngine
+          .runRoutine({
+            id: "shutdown",
+            trigger: "shutdown",
+            prePrompt: resolveShutdownPrompt(settingsService),
+          })
+          .then((result) => onRoutineCompleted(result))
+          .catch((e: Error) =>
+            console.warn("[lvis] boot: idle-shutdown routine failed:", e.message),
+          );
       }
-      if (newState === "IDLE_SCAN") routineCoordinator.notify("idle-scan");
-    };
-    existing.setStateChangeListener(composite);
-    compositeListenerInstalled = true;
+    });
+
+    idleSignaler.start();
+  } else {
+    console.warn(
+      "[lvis] boot: powerMonitor unavailable — RoutineIdleSignaler disabled (wakeup/shutdown by-idle won't fire)",
+    );
   }
 
   return {
-    notify: (event: string) => routineCoordinator.notify(event),
+    evaluateSchedulesNow,
     dispose: () => {
       clearInterval(scheduleTimer);
-      if (compositeListenerInstalled) {
-        idleScheduler?.setStateChangeListener(null);
-      }
-      routineCoordinator.stop();
+      idleSignaler?.stop();
     },
   };
 }

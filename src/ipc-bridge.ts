@@ -24,7 +24,11 @@ import {
   isEnvironmentConfigured,
   type MsGraphEnvironment,
 } from "./main/ms-graph-auth-config.js";
-import { REGISTERED_ROUTINES, getRegisteredRoutine } from "./routines/registry.js";
+import {
+  REGISTERED_ROUTINES,
+  buildRoutineForTrigger,
+  getRegisteredRoutine,
+} from "./routines/registry.js";
 import {
   DEFAULT_SHUTDOWN_PROMPT,
   DEFAULT_WAKEUP_ROUTINE_PROMPT,
@@ -607,31 +611,43 @@ ${input}`;
 
   ipcMain.handle("lvis:routine:get-latest-result", () => getLatestRoutineResult());
 
-  ipcMain.handle("lvis:routines:dev-trigger-wakeup", async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-wakeup", e); return UNAUTHORIZED_FRAME; }
+  /**
+   * Dev-only manual trigger for any of the 3 routine types. Builds the
+   * routine using the current settings (so prePrompt mirrors what would
+   * fire from natural triggers — idle exit / cron entry / app quit).
+   */
+  const devTriggerHandler = async (e: IpcMainInvokeEvent, routineId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, `lvis:routines:dev-trigger-${routineId}`, e);
+      return UNAUTHORIZED_FRAME;
+    }
     const isDev = process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1";
     if (!isDev) return { ok: false, error: "dev-only" };
     if (!routineEngine) return { ok: false, error: "routine-engine-unavailable" };
 
-    const current = settingsService.get("routine") ?? { enableWakeupRoutine: false };
-    await settingsService.patch({
-      routine: {
-        ...current,
-        lastWakeupRoutineAt: undefined,
-      },
-    });
+    const built = buildRoutineForTrigger(routineId, settingsService.get("routine"));
+    if (!built.ok) return { ok: false, error: built.error };
 
-    const wakeupRoutine = getRegisteredRoutine("wakeup");
-    if (!wakeupRoutine) return { ok: false, error: "wakeup-routine-not-found" };
+    if (routineId === "wakeup") {
+      const current = settingsService.get("routine") ?? { enableWakeupRoutine: false };
+      await settingsService.patch({
+        routine: { ...current, lastWakeupRoutineAt: undefined },
+      });
+    }
+
     try {
-      const result = await routineEngine.runRoutine(wakeupRoutine);
+      const result = await routineEngine.runRoutine(built.routine);
       const { deliverRoutineResult } = await import("./routines/routine-delivery.js");
       await deliverRoutineResult(getMainWindow(), result);
       return { ok: true, summary: result.summary };
     } catch (error) {
       return { ok: false, error: (error as Error).message };
     }
-  });
+  };
+
+  ipcMain.handle("lvis:routines:dev-trigger-wakeup", (e) => devTriggerHandler(e, "wakeup"));
+  ipcMain.handle("lvis:routines:dev-trigger-schedule", (e) => devTriggerHandler(e, "schedule"));
+  ipcMain.handle("lvis:routines:dev-trigger-shutdown", (e) => devTriggerHandler(e, "shutdown"));
 
   ipcMain.handle("lvis:chat:load-session", (e, sessionId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:load-session", e); return UNAUTHORIZED_FRAME; }
