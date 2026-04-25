@@ -30,7 +30,7 @@ import {
   matchesSchedule,
   normalizeScheduleEntries,
 } from "../../routines/schedule.js";
-import { deliverRoutineResult } from "../../routines/routine-delivery.js";
+import { deliverRoutineResult, notifyRoutineStarted } from "../../routines/routine-delivery.js";
 import { REGISTERED_ROUTINES } from "../../routines/registry.js";
 import { RoutineIdleSignaler } from "../../routines/idle-signaler.js";
 
@@ -97,6 +97,7 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
       if (scheduleLastMinuteKeyByEntry.get(entry.id) === minuteKey) continue;
       if (!matchesSchedule(entry.schedule, now)) continue;
       scheduleLastMinuteKeyByEntry.set(entry.id, minuteKey);
+      notifyRoutineStarted(mainWindow, { routineId: entry.id, trigger: "schedule", startedAt: new Date().toISOString() });
       void routineEngine
         .runRoutine({ id: entry.id, trigger: "schedule", prePrompt: entry.prompt })
         .then((result) => onRoutineCompleted(result))
@@ -123,6 +124,7 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
       const routineSettings = settingsService.get("routine");
       if (event === "idle-long-exit") {
         if (!(routineSettings?.enableWakeupRoutine ?? false)) return;
+        notifyRoutineStarted(mainWindow, { routineId: "wakeup", trigger: "wakeup", startedAt: new Date().toISOString() });
         void routineEngine
           .runRoutine({
             id: "wakeup",
@@ -135,6 +137,7 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
           );
       } else if (event === "idle-long-entry") {
         if (!(routineSettings?.enableShutdownRoutine ?? true)) return;
+        notifyRoutineStarted(mainWindow, { routineId: "shutdown", trigger: "shutdown", startedAt: new Date().toISOString() });
         void routineEngine
           .runRoutine({
             id: "shutdown",

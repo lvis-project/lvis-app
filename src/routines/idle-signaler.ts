@@ -120,6 +120,18 @@ export class RoutineIdleSignaler {
     this.subscribePm(pm, "resume", () => this.onResume());
     this.subscribed = true;
 
+    // Cold-start seeding — if the user is already idle when the app boots
+    // (laptop just opened, returning to desk after morning commute), seed
+    // presence as "idle-long" so the very first active observation (tick or
+    // unlock) emits idle-long-exit → wakeup. Without this seeding, presence
+    // would stay "active" and the first wakeup brief on arrival is missed.
+    const initialIdleSec = this.safeGetSystemIdleTime();
+    if (initialIdleSec * 1000 >= this.deps.getLongIdleThresholdMs()) {
+      this.presence = "idle-long";
+      this.idleStartedAt = this.now() - initialIdleSec * 1000;
+      this.logger(`[routine-idle-signaler] cold-start as idle-long (idle=${Math.round(initialIdleSec)}s)`);
+    }
+
     const handle = this.setIntervalImpl(() => {
       try {
         this.tick();
@@ -173,20 +185,30 @@ export class RoutineIdleSignaler {
       pm.on(event, handler);
       this.powerListeners.push({ event, handler });
     } catch (e) {
-      // Linux Electron may not support all events. Non-fatal — tick polling
-      // still gives us coverage via getSystemIdleTime().
+      // Some Electron builds (older Linux distros) may throw on unknown event
+      // names; tick polling still covers presence via getSystemIdleTime().
       this.logger(`[routine-idle-signaler] pm.on('${event}') unavailable: ${(e as Error).message}`);
     }
   }
 
+  private safeGetSystemIdleTime(): number {
+    try {
+      return this.deps.powerMonitor.getSystemIdleTime();
+    } catch {
+      return 0;
+    }
+  }
+
   private onLock(): void {
-    this.lockedAt = this.now();
-    // A lock event is itself a strong "user left" signal; promote to idle-long
-    // immediately if we are not already there. Threshold filtering is applied
-    // on the *exit* path so a brief lock-unlock cycle does not fire wakeup,
-    // but the entry event is meaningful as "shutdown trigger" only when the
-    // user stays away — so we still gate entry by threshold via tick logic.
-    // The tick will pick this up using getSystemIdleTime.
+    // Preserve the *first* lock timestamp — OS may fire lock-screen multiple
+    // times during a single user-away window (e.g., monitor wake then re-lock,
+    // or session re-lock from screensaver). Resetting `lockedAt` on each fire
+    // would falsely shorten the idle window measured at unlock and miss the
+    // wakeup emission. Threshold gating happens at unlock, so accumulating
+    // duration is what matters.
+    if (this.lockedAt == null) {
+      this.lockedAt = this.now();
+    }
   }
 
   private onUnlock(): void {
@@ -195,13 +217,23 @@ export class RoutineIdleSignaler {
     if (lockedAt == null) return;
     const idleMs = this.now() - lockedAt;
     if (idleMs >= this.deps.getLongIdleThresholdMs()) {
+      // Force presence to idle-long if not already (tick may not have run
+      // before the unlock arrived). Without this guard, transition("active")
+      // is a no-op when presence is still "active" and wakeup is missed on
+      // the most common scenario: lock → away ≥ threshold → unlock.
+      if (this.presence !== "idle-long") {
+        this.presence = "idle-long";
+        this.idleStartedAt = lockedAt;
+      }
       this.transition("active", `unlock-after-${Math.round(idleMs / 1000)}s`);
     }
   }
 
   private onSuspend(): void {
-    this.suspendedAt = this.now();
-    // Treat as lock — tick will eventually elevate to idle-long.
+    // Same rationale as onLock — keep first suspend timestamp.
+    if (this.suspendedAt == null) {
+      this.suspendedAt = this.now();
+    }
   }
 
   private onResume(): void {
@@ -210,6 +242,10 @@ export class RoutineIdleSignaler {
     if (suspendedAt == null) return;
     const idleMs = this.now() - suspendedAt;
     if (idleMs >= this.deps.getLongIdleThresholdMs()) {
+      if (this.presence !== "idle-long") {
+        this.presence = "idle-long";
+        this.idleStartedAt = suspendedAt;
+      }
       this.transition("active", `resume-after-${Math.round(idleMs / 1000)}s`);
     }
   }

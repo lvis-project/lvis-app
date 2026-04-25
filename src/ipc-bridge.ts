@@ -4,7 +4,7 @@
  * 모든 IPC 핸들러를 등록하는 모듈.
  * main.ts에서 인라인으로 30개 핸들러를 두지 않고 여기에 집중.
  */
-import { dialog, ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
+import { app, dialog, ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { realpathSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -198,6 +198,8 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:tasks:today",
   "lvis:routine:get-latest-result",
   "lvis:routines:dev-trigger-wakeup",
+  "lvis:routines:dev-trigger-schedule",
+  "lvis:routines:dev-trigger-shutdown",
   // Sprint 4.B — usage observability
   "lvis:usage:summary",
   "lvis:usage:range",
@@ -621,7 +623,17 @@ ${input}`;
       auditUnauthorized(auditLogger, `lvis:routines:dev-trigger-${routineId}`, e);
       return UNAUTHORIZED_FRAME;
     }
-    const isDev = process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1";
+    // Reject unknown routineId early — limits the audit channel surface and
+    // gives the caller a stable error code to discriminate vs. dev-gate fail.
+    if (!getRegisteredRoutine(routineId)) {
+      return { ok: false, error: "routine-not-found" };
+    }
+    // Combine `!app.isPackaged` with the env gate so a packaged production
+    // binary launched with LVIS_DEV=1 in its environment cannot manually
+    // trigger routines (env vars are user-controllable on every desktop OS).
+    const isDev = !app.isPackaged && (
+      process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1"
+    );
     if (!isDev) return { ok: false, error: "dev-only" };
     if (!routineEngine) return { ok: false, error: "routine-engine-unavailable" };
 
@@ -636,18 +648,26 @@ ${input}`;
     }
 
     try {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "dev-trigger",
+        type: "info",
+        input: `dev-trigger ${routineId}`,
+      });
+      const { deliverRoutineResult, notifyRoutineStarted } = await import("./routines/routine-delivery.js");
+      notifyRoutineStarted(getMainWindow(), { routineId, trigger: routineId, startedAt: new Date().toISOString() });
       const result = await routineEngine.runRoutine(built.routine);
-      const { deliverRoutineResult } = await import("./routines/routine-delivery.js");
       await deliverRoutineResult(getMainWindow(), result);
       return { ok: true, summary: result.summary };
     } catch (error) {
-      return { ok: false, error: (error as Error).message };
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message };
     }
   };
 
-  ipcMain.handle("lvis:routines:dev-trigger-wakeup", (e) => devTriggerHandler(e, "wakeup"));
-  ipcMain.handle("lvis:routines:dev-trigger-schedule", (e) => devTriggerHandler(e, "schedule"));
-  ipcMain.handle("lvis:routines:dev-trigger-shutdown", (e) => devTriggerHandler(e, "shutdown"));
+  ipcMain.handle("lvis:routines:dev-trigger-wakeup", (e) => { if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-wakeup", e); return UNAUTHORIZED_FRAME; } return devTriggerHandler(e, "wakeup"); });
+  ipcMain.handle("lvis:routines:dev-trigger-schedule", (e) => { if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-schedule", e); return UNAUTHORIZED_FRAME; } return devTriggerHandler(e, "schedule"); });
+  ipcMain.handle("lvis:routines:dev-trigger-shutdown", (e) => { if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:routines:dev-trigger-shutdown", e); return UNAUTHORIZED_FRAME; } return devTriggerHandler(e, "shutdown"); });
 
   ipcMain.handle("lvis:chat:load-session", (e, sessionId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:load-session", e); return UNAUTHORIZED_FRAME; }

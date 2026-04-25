@@ -191,6 +191,17 @@ const api = {
     } | null>,
   triggerWakeupRoutineDev: async () =>
     ipcRenderer.invoke("lvis:routines:dev-trigger-wakeup") as Promise<{ ok: boolean; summary?: string; error?: string }>,
+  triggerScheduleRoutineDev: async () =>
+    ipcRenderer.invoke("lvis:routines:dev-trigger-schedule") as Promise<{ ok: boolean; summary?: string; error?: string }>,
+  triggerShutdownRoutineDev: async () =>
+    ipcRenderer.invoke("lvis:routines:dev-trigger-shutdown") as Promise<{ ok: boolean; summary?: string; error?: string }>,
+
+  // ─── Routine started event ────────────────────────────────────────────────
+  onRoutineStarted: (handler: (payload: { routineId: string; trigger: string; startedAt: string }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:routine:started", listener);
+    return () => ipcRenderer.removeListener("lvis:routine:started", listener);
+  },
 
   // ─── Usage Observability (Sprint 4.B) ────────────
   getUsageSummary: async (days?: number) => ipcRenderer.invoke("lvis:usage:summary", days),

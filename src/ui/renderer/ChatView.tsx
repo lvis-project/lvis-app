@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/too
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
 import { RoutineCard } from "./components/RoutineCard.js";
+import { RoutineRunningIndicator } from "./components/RoutineRunningIndicator.js";
 import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
@@ -41,7 +42,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef,
     hasApiKey, onOpenSettings,
-    routineResult, onDismissRoutineResult, onSnoozeRoutineResult,
+    routineResult, onDismissRoutineResult, onSnoozeRoutineResult, runningRoutines,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
@@ -100,6 +101,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
         </div>
       )}
       <ScrollArea className="h-full p-4"><div className="space-y-3">
+        <RoutineRunningIndicator runningRoutines={runningRoutines} />
         {routineResult && (
           <RoutineCard
             result={routineResult}

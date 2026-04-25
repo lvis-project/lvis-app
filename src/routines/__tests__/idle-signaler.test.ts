@@ -99,6 +99,36 @@ describe("RoutineIdleSignaler — lock/unlock", () => {
     expect(exitEvents.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("lock then unlock after threshold WITHOUT prior tick still emits idle-long-exit", () => {
+    // Regression: previously, if the polling tick had not yet observed long
+    // idle when the unlock event arrived, transition("active",...) was a
+    // no-op (presence still "active") and wakeup was missed. The most common
+    // real-world scenario (lock → away ≥ threshold → unlock) MUST emit.
+    const h = makeHarness({ thresholdMs: 10 * 60_000, cooldownMs: 0 });
+    h.pm.fire("lock-screen");
+    h.advance(11 * 60_000);
+    // No tick called — go straight to unlock.
+    h.pm.fire("unlock-screen");
+
+    const exit = h.events.find((e) => e.event === "idle-long-exit");
+    expect(exit).toBeTruthy();
+    expect(exit?.reason).toMatch(/^unlock-after-/);
+  });
+
+  it("multiple lock-screen events preserve the first lockedAt timestamp", () => {
+    // OS may fire lock-screen multiple times during a single user-away window
+    // (e.g., session re-lock from screensaver, multi-monitor wake). Resetting
+    // lockedAt would shorten the measured idle window and miss wakeup.
+    const h = makeHarness({ thresholdMs: 10 * 60_000, cooldownMs: 0 });
+    h.pm.fire("lock-screen");
+    h.advance(8 * 60_000);
+    h.pm.fire("lock-screen"); // 2nd lock 8 min in — should NOT reset lockedAt
+    h.advance(4 * 60_000); // total elapsed: 12 min
+    h.pm.fire("unlock-screen");
+
+    expect(h.events.find((e) => e.event === "idle-long-exit")).toBeTruthy();
+  });
+
   it("lock then quick unlock below threshold does NOT emit exit", () => {
     const h = makeHarness({ thresholdMs: 10 * 60_000 });
     h.pm.fire("lock-screen");
@@ -206,6 +236,60 @@ describe("RoutineIdleSignaler — threshold live read", () => {
     threshold = 5 * 60_000;
     signaler._testTick();
     expect(events.find((e) => e.event === "idle-long-entry")).toBeTruthy();
+  });
+});
+
+describe("RoutineIdleSignaler — cold-start seeding", () => {
+  it("boots as idle-long when system idle already exceeds threshold (출근 cold-boot)", () => {
+    // Scenario: user arrives at desk, opens laptop / starts the app. The OS
+    // reports systemIdleTime well above threshold. Previously this stayed
+    // "active" forever and the morning brief was never delivered.
+    const pm = new FakePowerMonitor();
+    pm.systemIdleSec = 15 * 60; // 15 min already idle when boot
+    const events: Array<{ event: IdleSignalEvent; reason: string }> = [];
+    let clock = 1_000_000;
+    const signaler = new RoutineIdleSignaler({
+      powerMonitor: pm,
+      getLongIdleThresholdMs: () => 10 * 60_000,
+      perEventCooldownMs: 0,
+      pollIntervalMs: 30_000,
+      now: () => clock,
+      setIntervalImpl: () => 1,
+      clearIntervalImpl: () => {},
+      logger: () => {},
+    });
+    signaler.on((e, r) => events.push({ event: e, reason: r }));
+    signaler.start();
+
+    // First user activity (idleSec drops) → exit should fire
+    pm.systemIdleSec = 3;
+    signaler._testTick();
+
+    const exit = events.find((e) => e.event === "idle-long-exit");
+    expect(exit).toBeTruthy();
+  });
+
+  it("boots as active when system idle is below threshold (no spurious entry/exit)", () => {
+    const pm = new FakePowerMonitor();
+    pm.systemIdleSec = 5; // 5s — well below 10 min threshold
+    const events: Array<{ event: IdleSignalEvent; reason: string }> = [];
+    let clock = 1_000_000;
+    const signaler = new RoutineIdleSignaler({
+      powerMonitor: pm,
+      getLongIdleThresholdMs: () => 10 * 60_000,
+      perEventCooldownMs: 0,
+      pollIntervalMs: 30_000,
+      now: () => clock,
+      setIntervalImpl: () => 1,
+      clearIntervalImpl: () => {},
+      logger: () => {},
+    });
+    signaler.on((e, r) => events.push({ event: e, reason: r }));
+    signaler.start();
+
+    // First tick — still active, should NOT emit exit
+    signaler._testTick();
+    expect(events.length).toBe(0);
   });
 });
 

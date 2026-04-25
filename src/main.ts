@@ -419,8 +419,10 @@ app.on("before-quit", (event) => {
       const routineSettings = services.settingsService.get("routine");
       if ((routineSettings?.enableShutdownRoutine ?? true) && services.routineEngine) {
         const { buildRoutineForTrigger } = await import("./routines/registry.js");
+        const { notifyRoutineStarted } = await import("./routines/routine-delivery.js");
         const built = buildRoutineForTrigger("shutdown", routineSettings);
         if (built.ok) {
+          notifyRoutineStarted(mainWindow, { routineId: "shutdown", trigger: "shutdown", startedAt: new Date().toISOString() });
           const result = await services.routineEngine.runRoutine(built.routine);
           await deliverRoutineResult(null, result);
         }

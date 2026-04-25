@@ -55,6 +55,31 @@ describe("buildRoutineForTrigger", () => {
     if (fallback.ok) expect(fallback.routine.prePrompt).toBe(DEFAULT_SHUTDOWN_PROMPT);
   });
 
+  it("shutdown falls back when configured prompt is whitespace", () => {
+    const built = buildRoutineForTrigger("shutdown", {
+      enableWakeupRoutine: false,
+      shutdownPrompt: "   \n\t  ",
+    });
+    expect(built.ok).toBe(true);
+    if (built.ok) expect(built.routine.prePrompt).toBe(DEFAULT_SHUTDOWN_PROMPT);
+  });
+
+  it("schedule with undefined scheduleEntries falls back to default entry from normalizer", () => {
+    // normalizeScheduleEntries returns [createDefaultScheduleEntry(0)] when
+    // input is undefined; that entry has enabled=true so build succeeds.
+    const built = buildRoutineForTrigger("schedule", {
+      enableWakeupRoutine: false,
+      enableScheduleRoutine: true,
+      scheduleEntries: undefined,
+    });
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.routine.trigger).toBe("schedule");
+      expect(typeof built.routine.prePrompt).toBe("string");
+      expect((built.routine.prePrompt ?? "").length).toBeGreaterThan(0);
+    }
+  });
+
   it("schedule picks the first enabled entry's prompt", () => {
     const built = buildRoutineForTrigger("schedule", {
       enableWakeupRoutine: false,
