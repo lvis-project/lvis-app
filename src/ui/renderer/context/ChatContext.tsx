@@ -38,6 +38,9 @@ export interface ChatContextValue {
   onDismissRoutineResult: () => void;
   onSnoozeRoutineResult: () => void;
 
+  // Routine running (spinner)
+  runningRoutines: Map<string, { routineId: string; trigger: string; startedAt: string }>;
+
   // Search
   searchOpen: boolean;
   searchQuery: string;

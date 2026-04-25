@@ -37,8 +37,6 @@ export interface PostTurnHookChainDeps {
   auditLogger?: AuditLogger;
   idleScheduler?: IdleSchedulerService;
   settingsService?: SettingsService;
-  /** Optional: routine coordinator to poke after each turn (§7 post-turn signal). */
-  routineCoordinator?: { notify(event: string): void };
 }
 
 export class PostTurnHookChain {
@@ -137,13 +135,6 @@ export class PostTurnHookChain {
       this.deps.idleScheduler?.signalConversation();
     } catch (err) {
       console.warn("[post-turn] idle poke failed:", err);
-    }
-
-    // 6. Routine coordinator post-turn poke (§7 B5 post-turn signal)
-    try {
-      this.deps.routineCoordinator?.notify("post-turn");
-    } catch (err) {
-      console.warn("[post-turn] routine poke failed:", err);
     }
 
     return compactedMessages;

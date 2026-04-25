@@ -30,8 +30,8 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
   });
 
   it("replays the latest result on mount when one was already generated", async () => {
-    const briefing = makeRoutineResult();
-    const { container } = await renderApp({ latestRoutineResult: briefing });
+    const routineResult = makeRoutineResult();
+    const { container } = await renderApp({ latestRoutineResult: routineResult });
     await waitFor(() => {
       expect(container.querySelector('[data-testid="routine-card"]')).toBeTruthy();
       expect(container.textContent).toContain("daily summary");

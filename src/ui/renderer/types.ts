@@ -212,6 +212,9 @@ export type LvisApi = {
   startRoutineSession: (routineId: string) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
   getLatestRoutineResult: () => Promise<{ routineId: string; trigger: string; summary: string; generatedAt: string } | null>;
   triggerWakeupRoutineDev: () => Promise<{ ok: boolean; summary?: string; error?: string }>;
+  triggerScheduleRoutineDev: () => Promise<{ ok: boolean; summary?: string; error?: string }>;
+  triggerShutdownRoutineDev: () => Promise<{ ok: boolean; summary?: string; error?: string }>;
+  onRoutineStarted: (h: (payload: { routineId: string; trigger: string; startedAt: string }) => void) => () => void;
   onRoutineCompleted: (h: (result: { routineId: string; trigger: string; summary: string; generatedAt: string }) => void) => () => void;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;

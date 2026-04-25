@@ -132,6 +132,9 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     getUsageSummary: vi.fn(async () => usage),
     getLatestRoutineResult: vi.fn(async () => latestRoutineResult),
     triggerWakeupRoutineDev: vi.fn(async () => ({ ok: true, summary: "dev trigger" })),
+    triggerScheduleRoutineDev: vi.fn(async () => ({ ok: true, summary: "dev trigger schedule" })),
+    triggerShutdownRoutineDev: vi.fn(async () => ({ ok: true, summary: "dev trigger shutdown" })),
+    onRoutineStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
     onRoutineCompleted: vi.fn((h: (r: unknown) => void) => {
       routineCompletedHandlers.add(h);
       return () => routineCompletedHandlers.delete(h);
