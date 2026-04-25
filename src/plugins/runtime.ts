@@ -95,9 +95,8 @@ function normalizeInstallPolicy(
 }
 
 function normalizeDeliveryMode(
-  value: PluginManifest["deliveryMode"] | "bundled" | undefined,
+  value: PluginManifest["deliveryMode"] | undefined,
 ): PluginManifest["deliveryMode"] | undefined {
-  if (value === "bundled") return "bundle";
   return value;
 }
 
@@ -987,7 +986,7 @@ export class PluginRuntime {
     }
     parsed.installPolicy = normalizeInstallPolicy(parsed);
     parsed.deliveryMode = normalizeDeliveryMode(
-      parsed.deliveryMode as PluginManifest["deliveryMode"] | "bundled" | undefined,
+      parsed.deliveryMode as PluginManifest["deliveryMode"] | undefined,
     );
     const pid = typeof parsed?.id === "string" && parsed.id.length > 0 ? parsed.id : "<unknown>";
     const fail = (fieldPath: string, reason: string, example: string): never => {

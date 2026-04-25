@@ -2,7 +2,7 @@
  * Marketplace Fetcher — §9.5 M4
  *
  * Abstracts the source of marketplace catalog data so the host can swap
- * between a bundled JSON catalog (legacy/default) and a remote REST
+ * between a local JSON catalog (legacy/default) and a remote REST
  * service (lvis-marketplace).
  *
  * Implementations:

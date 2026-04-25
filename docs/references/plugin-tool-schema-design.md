@@ -615,7 +615,7 @@ HostApi 에 새 메서드를 추가하려면:
 | Manifest JSON Schema | `schemas/plugin.schema.json` |
 | Capability taxonomy | `src/plugins/capabilities.ts` |
 | Signature verifier | `src/plugins/signature-verifier.ts` |
-| Publisher keys (bundled) | `src/plugins/publisher-keys.ts` |
+| Publisher keys (embedded) | `src/plugins/publisher-keys.ts` |
 | Deployment 가드 | `src/plugins/deployment-guard.ts` |
 | callLlm rate-limit | `src/boot/conversation.ts` (`createCallLlmForPlugin`) |
 | 등록 진입점 | `src/boot.ts` |

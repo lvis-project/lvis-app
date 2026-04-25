@@ -32,7 +32,7 @@ describe("PluginDeploymentGuard", () => {
   }
 
   it("rejects user uninstalling a managed plugin (outside installedDir)", async () => {
-    const managedRoot = join(testDir, "bundled");
+    const managedRoot = join(testDir, "bundle-root");
     await mkdir(join(managedRoot, "p-managed"), { recursive: true });
     const pluginManifest = join(managedRoot, "p-managed", "plugin.json");
     await writeFile(pluginManifest, "{}", "utf-8");
@@ -59,7 +59,7 @@ describe("PluginDeploymentGuard", () => {
   });
 
   it("always allows it-admin actor (trust boundary bypass)", async () => {
-    const managedRoot = join(testDir, "bundled");
+    const managedRoot = join(testDir, "bundle-root");
     await mkdir(join(managedRoot, "p-managed"), { recursive: true });
     const pluginManifest = join(managedRoot, "p-managed", "plugin.json");
     await writeFile(pluginManifest, "{}", "utf-8");
@@ -191,7 +191,7 @@ describe("PluginDeploymentGuard", () => {
   });
 
   it("canDisable mirrors canUninstall semantics", async () => {
-    const managedRoot = join(testDir, "bundled");
+    const managedRoot = join(testDir, "bundle-root");
     await mkdir(join(managedRoot, "p-managed"), { recursive: true });
     const pluginManifest = join(managedRoot, "p-managed", "plugin.json");
     await writeFile(pluginManifest, "{}", "utf-8");

@@ -1,5 +1,5 @@
 /**
- * Bundled publisher public keys for plugin manifest signature verification.
+ * Embedded publisher public keys for plugin manifest signature verification.
  *
  * AP-1 follow-up: this module now consumes `MARKETPLACE_PUBLIC_KEYS` from
  * `@lvis/plugin-sdk/keys` (v1.0.1) — the single source of truth for trusted
@@ -52,7 +52,7 @@ function rawEd25519ToPem(rawBase64: string): string {
 }
 
 /**
- * Bundled publisher keys as raw 32-byte Buffers, keyed by `key_id`. Exposed
+ * Embedded publisher keys as raw 32-byte Buffers, keyed by `key_id`. Exposed
  * for the marketplace artifact installer (consumes raw ed25519 keys for
  * envelope signature verification — see AP-1 FU installFromMarketplace wire
  * once S2 lands).
@@ -63,7 +63,7 @@ export function getBundledPublicKeys(): Record<string, Buffer> {
       const buf = Buffer.from(b64, "base64");
       if (buf.length !== 32) {
         throw new Error(
-          `Invalid bundled ed25519 public key for key_id="${id}": expected 32 raw bytes, got ${buf.length}`,
+          `Invalid embedded ed25519 public key for key_id="${id}": expected 32 raw bytes, got ${buf.length}`,
         );
       }
       return [id, buf];
@@ -72,7 +72,7 @@ export function getBundledPublicKeys(): Record<string, Buffer> {
 }
 
 /**
- * Host-bundled publisher public keys in PEM SPKI form. Consumed by
+ * Host-embedded publisher public keys in PEM SPKI form. Consumed by
  * `PluginSignatureVerifier` (manifest signature path). The verifier accepts
  * a signature that matches ANY configured key — additive rotation is safe.
  */

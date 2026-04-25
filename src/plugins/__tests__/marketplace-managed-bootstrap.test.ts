@@ -74,7 +74,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.failed).toEqual([]);
   });
 
-  it("installs bundled companion plugins before the bundled root plugin", async () => {
+  it("installs bundle companion plugins before the bundle root plugin", async () => {
     await writeFile(
       marketplacePath,
       JSON.stringify({
@@ -148,7 +148,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(cacheSpy).toHaveBeenCalledTimes(4);
   });
 
-  it("satisfies bundled root capability requirements via auto-installed bundle dependencies", async () => {
+  it("satisfies bundle root capability requirements via auto-installed bundle dependencies", async () => {
     await writeFile(
       marketplacePath,
       JSON.stringify({
@@ -213,7 +213,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     });
   });
 
-  it("lets a user install a bundled marketplace root plugin", async () => {
+  it("lets a user install a bundle marketplace root plugin", async () => {
     await writeFile(
       marketplacePath,
       JSON.stringify({

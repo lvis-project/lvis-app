@@ -316,8 +316,8 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
       item.deployment = "user";
     }
     const deliveryMode = row.delivery_mode ?? row.deliveryMode;
-    if (deliveryMode === "marketplace" || deliveryMode === "bundle" || deliveryMode === "bundled") {
-      item.deliveryMode = deliveryMode === "bundled" ? "bundle" : deliveryMode;
+    if (deliveryMode === "marketplace" || deliveryMode === "bundle") {
+      item.deliveryMode = deliveryMode;
     }
     const bundleDependenciesRaw = row.bundle_dependencies ?? row.bundleDependencies;
     if (Array.isArray(bundleDependenciesRaw)) {

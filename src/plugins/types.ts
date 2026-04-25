@@ -12,7 +12,7 @@ export type InstallPolicy = "admin" | "user";
  * Delivery mode — how a plugin is presented/distributed.
  *
  * - **marketplace**: 일반 마켓플레이스 다운로드형 플러그인
- * - **bundled**: 마켓플레이스에 게시되지만 앱 기본 번들 세트에도 속하는 플러그인
+ * - **bundle**: 여러 관련 플러그인을 함께 설치하는 마켓플레이스 패키지
  */
 export type PluginDeliveryMode = "marketplace" | "bundle";
 
@@ -237,7 +237,7 @@ export interface PluginMarketplaceItem {
   packageSpec: string;
   packageName: string;
   tools: string[];
-  /** Latest stable version string (semver). Present in remote catalog; may be absent in bundled mock. */
+  /** Latest stable version string (semver). Present in remote catalog; may be absent in local mock. */
   version?: string;
   /** S8 — release channel. "stable" (default) or "canary". */
   channel?: "stable" | "canary";

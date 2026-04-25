@@ -29,9 +29,8 @@ function normalizeInstallPolicy(source: {
 }
 
 function normalizeDeliveryMode(
-  deliveryMode: PluginMarketplaceItem["deliveryMode"] | "bundled" | undefined,
+  deliveryMode: PluginMarketplaceItem["deliveryMode"] | undefined,
 ): PluginMarketplaceItem["deliveryMode"] | undefined {
-  if (deliveryMode === "bundled") return "bundle";
   return deliveryMode;
 }
 
@@ -140,7 +139,7 @@ export class PluginMarketplaceService {
   private readonly cacheRoot: string;
   /**
    * S9: base directory for the catalog cache. `null` disables catalog caching
-   * (used when the fetcher is the bundled mock / local-file path).
+   * (used when the fetcher is the local mock / local-file path).
    * `undefined` uses the default global path under `~/.lvis/marketplace-cache/`.
    */
   private readonly catalogCacheBase: string | null | undefined;
@@ -164,7 +163,7 @@ export class PluginMarketplaceService {
     this.marketplacePath = resolve(this.appRoot, "plugins/marketplace.json");
     this.installedDir = resolve(homedir(), ".lvis/plugins");
     this.deploymentGuard = deploymentGuard;
-    // When no external fetcher is provided we fall back to the bundled local
+    // When no external fetcher is provided we fall back to the local
     // marketplace.json mock — catalog caching makes no sense for local files.
     const usingMockFetcher = !fetcher;
     this.fetcher = fetcher ?? new MockMarketplaceFetcher(this.marketplacePath);
@@ -290,7 +289,7 @@ export class PluginMarketplaceService {
     }
 
     const activeBundleRootId =
-      bundleRootId ?? (normalizeDeliveryMode(plugin.deliveryMode as PluginMarketplaceItem["deliveryMode"] | "bundled" | undefined) === "bundle"
+      bundleRootId ?? (normalizeDeliveryMode(plugin.deliveryMode as PluginMarketplaceItem["deliveryMode"] | undefined) === "bundle"
         ? plugin.id
         : null);
 
@@ -324,7 +323,7 @@ export class PluginMarketplaceService {
     }
 
     // S14: dependency preflight — evaluate after any managed bundle dependencies
-    // have been auto-installed so bundled providers can satisfy their own
+    // have been auto-installed so bundle providers can satisfy their own
     // requires.capabilities through the companion plugins they bring along.
     if (plugin.requires && plugin.requires.capabilities.length > 0) {
       const installedManifests = await this.loadInstalledManifests();
@@ -982,7 +981,7 @@ export class PluginMarketplaceService {
     if (plugin.installPolicy) manifest.installPolicy = plugin.installPolicy;
     if (plugin.deployment) manifest.deployment = plugin.deployment;
     const normalizedDeliveryMode = normalizeDeliveryMode(
-      plugin.deliveryMode as PluginMarketplaceItem["deliveryMode"] | "bundled" | undefined,
+      plugin.deliveryMode as PluginMarketplaceItem["deliveryMode"] | undefined,
     );
     if (normalizedDeliveryMode) manifest.deliveryMode = normalizedDeliveryMode;
     if (plugin.bundleDependencies && plugin.bundleDependencies.length > 0) manifest.bundleDependencies = plugin.bundleDependencies;
@@ -1043,10 +1042,10 @@ export class PluginMarketplaceService {
       }
 
       const expectedDeliveryMode = normalizeDeliveryMode(
-        plugin.deliveryMode as PluginMarketplaceItem["deliveryMode"] | "bundled" | undefined,
+        plugin.deliveryMode as PluginMarketplaceItem["deliveryMode"] | undefined,
       ) ?? "marketplace";
       const actualDeliveryMode = normalizeDeliveryMode(
-        manifest.deliveryMode as PluginManifest["deliveryMode"] | "bundled" | undefined,
+        manifest.deliveryMode as PluginManifest["deliveryMode"] | undefined,
       ) ?? "marketplace";
       if (actualDeliveryMode !== expectedDeliveryMode) {
         throw new Error(

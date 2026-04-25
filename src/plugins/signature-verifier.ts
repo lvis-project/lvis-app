@@ -14,7 +14,7 @@ import { readFile } from "node:fs/promises";
  *     the raw 64-byte ed25519 signature (binary) or the same bytes base64-
  *     encoded. We accept both to ease operator tooling.
  *   - Public key: a PEM-encoded ed25519 SPKI key supplied by the host (either
- *     bundled or cached under ~/.lvis/keys/).
+ *     embedded or cached under ~/.lvis/keys/).
  *
  * The SHA256 digest is computed alongside the verify() call purely so callers
  * can log/audit a stable content hash; `crypto.verify()` for ed25519 ignores

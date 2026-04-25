@@ -178,7 +178,7 @@ export interface WebSearchSettings {
 /**
  * §9.5 M4: plugin marketplace backend selection.
  *
- * - `"mock"`         — default; reads the bundled `plugins/marketplace.json`.
+ * - `"mock"`         — default; reads the local `plugins/marketplace.json`.
  * - `"real-cloud"`   — talks to lvis-marketplace REST server at
  *                      `realCloudBaseUrl`. Bearer auth via
  *                      `settings.marketplace.apiKey` secret.

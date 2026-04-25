@@ -12,11 +12,11 @@ one or more **ed25519 signing keypairs**:
 
 - **Private key** — lives only in the LGE IT secrets vault and is injected
   into CI as `LVIS_PUBLISHER_SIGNING_KEY` at release time.
-- **Public key** — bundled into the host at
+- **Public key** — embedded into the host at
   `src/plugins/publisher-keys.ts` (`BUNDLED_PUBLISHER_PUBLIC_KEYS`).
 
 The host's `PluginSignatureVerifier` accepts a signature if it matches **any**
-bundled public key, which is what makes rotation possible without breaking
+embedded public key, which is what makes rotation possible without breaking
 already-signed plugins.
 
 ## 2. Key generation
@@ -62,7 +62,7 @@ Per-plugin repo (meeting / pageindex / email / calendar):
 Host-side (this repo):
 
 - `scripts/sign-manifest.mjs` is the reference signer for any host-owned
-  manifests (e.g. re-signing bundled fixtures).
+  manifests (e.g. re-signing packaged fixtures).
 - `scripts/sign-manifest.mjs --check <manifest>` verifies a signature against
   `LVIS_PUBLISHER_PUBLIC_KEY`, useful as a CI gate.
 
@@ -171,5 +171,5 @@ Rotation SLA: **full rotation within 24h** of confirmed compromise.
 - `docs/architecture/architecture.md` §14.2 — signing / governance
 - `docs/architecture/plugin-deployment-model.md`
 - `src/plugins/signature-verifier.ts` — host verify implementation (accepts base64 `.sig`)
-- `src/plugins/publisher-keys.ts` — bundled public keys
+- `src/plugins/publisher-keys.ts` — embedded public keys
 - `scripts/sign-manifest.mjs` / `scripts/keygen-publisher.mjs` — tooling

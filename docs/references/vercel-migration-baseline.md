@@ -8,7 +8,7 @@ Captured on branch `feat/vercel-ai-sdk-p0`.
 | Snapshot | `dist/` total | Notes |
 |---|---|---|
 | Pre-deps (main @ 8ba8db8) | 3.0M | `bun run build` on main before adding `ai` / `@ai-sdk/*` |
-| Post-deps (P0 stubs, flag=none) | 1.2M | After installing deps + P0 stubs. Delta is negative because the build is not deterministic across runs (renderer bundle chunking differs); the Vercel packages are NOT yet imported by any bundled entry point, so this number reflects bundler-level noise rather than real impact. Real delta lands at P1. |
+| Post-deps (P0 stubs, flag=none) | 1.2M | After installing deps + P0 stubs. Delta is negative because the build is not deterministic across runs (renderer bundle chunking differs); the Vercel packages are NOT yet imported by any packaged entry point, so this number reflects bundler-level noise rather than real impact. Real delta lands at P1. |
 
 The Vercel packages live in `node_modules` and are only imported from
 `src/engine/llm/vercel/*`. Because the feature flag defaults to `"none"` and

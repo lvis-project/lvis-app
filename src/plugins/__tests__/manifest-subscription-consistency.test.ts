@@ -13,7 +13,7 @@
  *
  * What this test intentionally does NOT check:
  *  - Whether the plugin's hostPlugin.ts actually wires a handler for each
- *    subscription (would require introspecting bundled plugin code, out of
+ *    subscription (would require introspecting plugin package code, out of
  *    scope for host-side tests per T4 constraints).
  *  - Whether the manifest's `capabilities[]` covers the emit-side of the
  *    subscribed namespace (subscriptions are receive-side, no capability needed

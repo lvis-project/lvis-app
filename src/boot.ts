@@ -139,7 +139,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   // network backend with catalog caching enabled.
   // For "mock" mode, pass no fetcher — PluginMarketplaceService creates its
   // own internal MockMarketplaceFetcher and disables catalog caching so that
-  // the bundled plugins/marketplace.json is always read fresh (no stale
+  // the local plugins/marketplace.json is always read fresh (no stale
   // ~/.lvis/marketplace-cache/ data can shadow local changes).
   let marketplaceFetcher: MarketplaceFetcher | undefined;
   if (
@@ -160,7 +160,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   );
 
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
-  // from the marketplace on boot (VS Code-style), not bundled in app source.
+  // from the marketplace on boot (VS Code-style), not packaged in app source.
   // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
   const managedBootstrap = resolveManagedPluginBootstrap({
     marketplace: marketplaceSettings,
