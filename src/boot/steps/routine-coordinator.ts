@@ -24,14 +24,12 @@ import type { SettingsService } from "../../data/settings-store.js";
 import type { RoutineEngine, RoutineResult } from "../../core/routine-engine.js";
 import type { PowerMonitorLike } from "../../main/idle-scheduler.js";
 import {
-  DEFAULT_SHUTDOWN_PROMPT,
-  DEFAULT_WAKEUP_ROUTINE_PROMPT,
   getKstMinuteKey,
   matchesSchedule,
   normalizeScheduleEntries,
 } from "../../routines/schedule.js";
-import { deliverRoutineResult, notifyRoutineStarted } from "../../routines/routine-delivery.js";
-import { REGISTERED_ROUTINES } from "../../routines/registry.js";
+import { deliverRoutineResult, notifyRoutineStarted, notifyRoutineFailed } from "../../routines/routine-delivery.js";
+import { REGISTERED_ROUTINES, buildRoutineForTrigger } from "../../routines/registry.js";
 import { RoutineIdleSignaler } from "../../routines/idle-signaler.js";
 
 export interface WireRoutineCoordinatorInput {
@@ -51,22 +49,6 @@ export interface WiredRoutineCoordinator {
 }
 
 const DEFAULT_ROUTINE_IDLE_THRESHOLD_MS = 10 * 60_000;
-
-function resolveWakeupPrompt(settingsService: SettingsService): string {
-  const configured = settingsService.get("routine")?.wakeupRoutinePrompt;
-  if (typeof configured === "string" && configured.trim().length > 0) {
-    return configured.trim();
-  }
-  return DEFAULT_WAKEUP_ROUTINE_PROMPT;
-}
-
-function resolveShutdownPrompt(settingsService: SettingsService): string {
-  const configured = settingsService.get("routine")?.shutdownPrompt;
-  if (typeof configured === "string" && configured.trim().length > 0) {
-    return configured.trim();
-  }
-  return DEFAULT_SHUTDOWN_PROMPT;
-}
 
 export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): WiredRoutineCoordinator {
   const { routineEngine, settingsService, powerMonitor, mainWindow } = input;
@@ -101,9 +83,10 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
       void routineEngine
         .runRoutine({ id: entry.id, trigger: "schedule", prePrompt: entry.prompt })
         .then((result) => onRoutineCompleted(result))
-        .catch((e: Error) =>
-          console.warn("[lvis] boot: schedule routine failed:", e.message),
-        );
+        .catch((e: Error) => {
+          console.warn("[lvis] boot: schedule routine failed:", e.message);
+          notifyRoutineFailed(mainWindow, { routineId: entry.id, trigger: "schedule" }, e.message);
+        });
     }
   };
 
@@ -124,30 +107,28 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
       const routineSettings = settingsService.get("routine");
       if (event === "idle-long-exit") {
         if (!(routineSettings?.enableWakeupRoutine ?? false)) return;
+        const built = buildRoutineForTrigger("wakeup", routineSettings);
+        if (!built.ok) return;
         notifyRoutineStarted(mainWindow, { routineId: "wakeup", trigger: "wakeup", startedAt: new Date().toISOString() });
         void routineEngine
-          .runRoutine({
-            id: "wakeup",
-            trigger: "wakeup",
-            prePrompt: resolveWakeupPrompt(settingsService),
-          })
+          .runRoutine(built.routine)
           .then((result) => onRoutineCompleted(result))
-          .catch((e: Error) =>
-            console.warn("[lvis] boot: wakeup routine failed:", e.message),
-          );
+          .catch((e: Error) => {
+            console.warn("[lvis] boot: wakeup routine failed:", e.message);
+            notifyRoutineFailed(mainWindow, { routineId: "wakeup", trigger: "wakeup" }, e.message);
+          });
       } else if (event === "idle-long-entry") {
         if (!(routineSettings?.enableShutdownRoutine ?? true)) return;
+        const built = buildRoutineForTrigger("shutdown", routineSettings);
+        if (!built.ok) return;
         notifyRoutineStarted(mainWindow, { routineId: "shutdown", trigger: "shutdown", startedAt: new Date().toISOString() });
         void routineEngine
-          .runRoutine({
-            id: "shutdown",
-            trigger: "shutdown",
-            prePrompt: resolveShutdownPrompt(settingsService),
-          })
+          .runRoutine(built.routine)
           .then((result) => onRoutineCompleted(result))
-          .catch((e: Error) =>
-            console.warn("[lvis] boot: idle-shutdown routine failed:", e.message),
-          );
+          .catch((e: Error) => {
+            console.warn("[lvis] boot: idle-shutdown routine failed:", e.message);
+            notifyRoutineFailed(mainWindow, { routineId: "shutdown", trigger: "shutdown" }, e.message);
+          });
       }
     });
 

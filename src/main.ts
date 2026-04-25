@@ -422,9 +422,12 @@ app.on("before-quit", (event) => {
         const { notifyRoutineStarted } = await import("./routines/routine-delivery.js");
         const built = buildRoutineForTrigger("shutdown", routineSettings);
         if (built.ok) {
+          // Pass the live window so started/completed pair on the renderer's
+          // useRoutineRunning hook. The renderer is about to close but during
+          // the brief window the spinner reflects actual state.
           notifyRoutineStarted(mainWindow, { routineId: "shutdown", trigger: "shutdown", startedAt: new Date().toISOString() });
           const result = await services.routineEngine.runRoutine(built.routine);
-          await deliverRoutineResult(null, result);
+          await deliverRoutineResult(mainWindow, result);
         }
       }
       await services.shutdown?.();

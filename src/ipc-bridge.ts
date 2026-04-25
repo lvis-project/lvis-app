@@ -647,20 +647,25 @@ ${input}`;
       });
     }
 
+    const { deliverRoutineResult, notifyRoutineStarted, notifyRoutineFailed } =
+      await import("./routines/routine-delivery.js");
+    auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "dev-trigger",
+      type: "info",
+      input: `dev-trigger ${routineId}`,
+    });
+    const startedPayload = { routineId, trigger: routineId, startedAt: new Date().toISOString() };
+    notifyRoutineStarted(getMainWindow(), startedPayload);
     try {
-      auditLogger.log({
-        timestamp: new Date().toISOString(),
-        sessionId: "dev-trigger",
-        type: "info",
-        input: `dev-trigger ${routineId}`,
-      });
-      const { deliverRoutineResult, notifyRoutineStarted } = await import("./routines/routine-delivery.js");
-      notifyRoutineStarted(getMainWindow(), { routineId, trigger: routineId, startedAt: new Date().toISOString() });
       const result = await routineEngine.runRoutine(built.routine);
       await deliverRoutineResult(getMainWindow(), result);
       return { ok: true, summary: result.summary };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // Pair every started with a completed so the renderer's running
+      // indicator clears even on failure (zombie spinner regression).
+      notifyRoutineFailed(getMainWindow(), { routineId, trigger: routineId }, message);
       return { ok: false, error: message };
     }
   };
