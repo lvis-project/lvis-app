@@ -441,39 +441,18 @@ export class ConversationLoop {
     callbacks?: TurnCallbacks,
     abortSignal?: AbortSignal,
   ): Promise<TurnResult> {
-    let contextSuffix = "";
-    if (spec.context) {
-      // Audit only the KEYS — values may carry mail bodies / API keys / PII
-      // if a plugin author misuses the field, and the audit log is persisted
-      // unredacted. This was PR #215 review (H2): JSON-serializing the full
-      // context could pin third-party content on disk.
-      const keys = Object.keys(spec.context);
-      contextSuffix = keys.length > 0 ? ` contextKeys=${keys.join(",")}` : "";
-    }
-    this.auditLogger.log({
-      timestamp: new Date().toISOString(),
-      sessionId: this.sessionId,
-      type: "tool_call",
-      input:
-        `[trigger] source=${spec.source} visibility=${spec.visibility} priority=${spec.priority}` +
-        contextSuffix,
-    });
-
-    // Soft LLM-side validation gate — `runTurn` now accepts originSource as
-    // an option so the set/clear lifecycle happens *synchronously* around
-    // `systemPromptBuilder.build()` (same micro-task). Eliminates the
-    // singleton-state race surfaced in PR #215 review (B2): two overlapping
-    // runTriggerTurn calls used to race on the SystemPromptBuilder instance
-    // flag because the previous design straddled an `await runTurn`.
+    // Audit row for the trigger entry lives in `evaluateTriggerSpec`
+    // (plugin-runtime). Soft LLM-side validation gate: `runTurn` accepts
+    // `originSource` as an option so the set/clear lifecycle on the
+    // SystemPromptBuilder runs synchronously around `build()`, not across
+    // an `await`. This avoids a singleton-state race when triggers overlap.
     //
-    // P1 TODO (PR #215 review B3): `spec.source` (e.g.
-    // `proactive:meeting-detection`) currently reaches *only* the system
-    // prompt. The §6.3 source-aware permission system + §8 ApprovalGate
-    // still see `source: "plugin"` for any tool call inside this turn.
-    // Plumbing path: thread `originSource` into the per-turn ToolExecutor
-    // context → PermissionManager.check / ApprovalGate.requestApproval →
-    // permission policy can scope on `proactive:*`. Tracked as a P1 item
-    // in `docs/references/conversation-trigger.md` deferred table.
+    // TODO: thread `originSource` into ToolExecutor → PermissionManager →
+    // ApprovalGate so per-source policies (e.g. "always confirm
+    // `proactive:*` calendar writes") can fire. Currently the source
+    // reaches only the system prompt; permission/approval still see
+    // `source: "plugin"`. See `docs/references/conversation-trigger.md`
+    // deferred table.
     return this.runTurn(spec.prompt, callbacks, abortSignal, {
       originSource: spec.source,
     });

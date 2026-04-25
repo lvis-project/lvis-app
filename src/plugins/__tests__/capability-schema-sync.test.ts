@@ -6,9 +6,6 @@
  * When they drift, a plugin manifest declaring a runtime-known capability
  * is rejected at schema validation (step 2 of §2.4) BEFORE the runtime
  * gate ever runs — i.e., the feature looks broken with no useful error.
- *
- * Copilot review on PR #215 caught `conversation-trigger` missing from
- * the schema enum; this test prevents the next regression.
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";

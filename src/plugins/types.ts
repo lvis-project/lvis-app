@@ -386,13 +386,12 @@ export interface ConversationTriggerSpec {
   /**
    * Side-channel metadata (IDs, references) recorded with the trigger.
    *
-   * **P0 limitation (Copilot review #1):** the host currently records
-   * `context` only into the audit chain — the ConversationLoop pipeline
-   * (system-prompt builder, tools, history) does NOT receive it. Plugins
-   * that need the LLM/tools to act on an ID (e.g., `emailId`) MUST embed
-   * the ID in `prompt` itself so it survives the trip into the loop.
-   * Future P2 will wire `context` into per-turn metadata — this field is
-   * kept now to lock the surface so adding plumbing later is non-breaking.
+   * **Current limitation:** the host records `context` only into the
+   * audit chain — the ConversationLoop pipeline (system-prompt builder,
+   * tools, history) does NOT receive it. Plugins that need the LLM/tools
+   * to act on an ID (e.g., `emailId`) MUST embed the ID in `prompt`
+   * itself so it survives the trip into the loop. The field is kept on
+   * the spec so future plumbing is non-breaking.
    */
   context?: Record<string, unknown>;
   /**

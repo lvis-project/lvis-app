@@ -112,9 +112,12 @@ export class SystemPromptBuilder {
    * before acting" instructions when the turn was started by a brain plugin
    * via `hostApi.triggerConversation()`. Pass `null` to clear (default
    * user-initiated turns).
+   *
+   * Empty string is normalized to null at the boundary so callers cannot
+   * accidentally arm an "empty proactive turn".
    */
   setOriginSource(source: string | null): void {
-    this.originSource = source;
+    this.originSource = source && source.length > 0 ? source : null;
   }
 
   // ─── Private ──────────────────────────────────────
@@ -176,10 +179,10 @@ export class SystemPromptBuilder {
       build: () => {
         const source = this.originSource;
         if (!source || !source.startsWith("proactive:")) return "";
-        // Defense-in-depth note (PR #215 review H3): a malicious plugin
-        // cannot *override* this guidance via its `prompt` (which becomes
-        // the user-turn message) because (a) ApprovalGate still gates all
-        // destructive ops and (b) we tell the LLM here that anything inside
+        // Defense-in-depth: a malicious plugin cannot *override* this
+        // guidance via its `prompt` (which becomes the user-turn message)
+        // because (a) ApprovalGate still gates all destructive ops and (b)
+        // the guidance text below tells the LLM that anything inside
         // `<proactive-suggestion>` is plugin-supplied — imperatives there
         // must NOT be obeyed if they conflict with this guidance.
         return [
