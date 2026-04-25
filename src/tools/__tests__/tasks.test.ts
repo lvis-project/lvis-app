@@ -219,14 +219,25 @@ describe("task tools", () => {
   });
 
   it("task_today: returns only pending tasks due today", async () => {
-    const todayIso = new Date().toISOString().slice(0, 10);
+    // Use local-time noon so the task always falls inside getDueToday()'s
+    // host-local 00:00..23:59 window, regardless of the runner's timezone.
+    // (Earlier `slice(0,10)` of a UTC ISO string raced KST midnight: between
+    // 00:00–09:00 KST the UTC date is still "yesterday" and the task fell
+    // outside the local window.)
+    const localNoonToday = new Date();
+    localNoonToday.setHours(12, 0, 0, 0);
+    const localNoonTomorrow = new Date(localNoonToday);
+    // Use setDate (not + 86_400_000) so DST-transitioning timezones (the
+    // test claims to be timezone-independent) still land on the actual
+    // calendar tomorrow.
+    localNoonTomorrow.setDate(localNoonTomorrow.getDate() + 1);
     await call(toolByName(tools, "task_add"), {
       title: "오늘",
-      dueAt: `${todayIso}T12:00:00Z`,
+      dueAt: localNoonToday.toISOString(),
     });
     await call(toolByName(tools, "task_add"), {
       title: "내일",
-      dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+      dueAt: localNoonTomorrow.toISOString(),
     });
     const { json } = await call(toolByName(tools, "task_today"), {});
     const titles = (json as { items: Array<{ title: string }> }).items.map(

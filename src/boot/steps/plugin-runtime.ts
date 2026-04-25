@@ -17,7 +17,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
-import { AuditLogger } from "../../audit/audit-logger.js";
+import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
@@ -26,7 +26,12 @@ import { BUNDLED_PUBLISHER_PUBLIC_KEYS } from "../../plugins/publisher-keys.js";
 import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
 import { withMsGraphRetry } from "../../main/ms-graph-retry.js";
-import type { PluginHostApi, PluginManifest } from "../../plugins/types.js";
+import type {
+  ConversationTriggerResult,
+  ConversationTriggerSpec,
+  PluginHostApi,
+  PluginManifest,
+} from "../../plugins/types.js";
 import type { KeywordEngine } from "../../core/keyword-engine.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { SettingsService } from "../../data/settings-store.js";
@@ -39,6 +44,397 @@ import {
   registerPluginTools,
   runManifestStartupTools,
 } from "../plugins.js";
+
+/**
+ * In-memory dedupe for `hostApi.triggerConversation()`. A brain plugin can set
+ * `dedupeKey` on a trigger spec to suppress repeats from the same observation
+ * (e.g., the same mail re-emitting events). Keyed per pluginId so two plugins
+ * cannot collide. TTL is intentionally short — long-term suppression should
+ * live in the plugin, not the host.
+ */
+export const TRIGGER_CONVERSATION_DEDUPE_TTL_MS = 5 * 60 * 1000;
+
+export class TriggerConversationDedupe {
+  private readonly seen = new Map<string, number>();
+  private key(pluginId: string, dedupeKey: string): string {
+    return `${pluginId}::${dedupeKey}`;
+  }
+  has(pluginId: string, dedupeKey: string): boolean {
+    const key = this.key(pluginId, dedupeKey);
+    const seenAt = this.seen.get(key);
+    if (seenAt === undefined) return false;
+    if (Date.now() - seenAt > TRIGGER_CONVERSATION_DEDUPE_TTL_MS) {
+      this.seen.delete(key);
+      return false;
+    }
+    return true;
+  }
+  record(pluginId: string, dedupeKey: string): void {
+    // True LRU: delete-then-set refreshes Map insertion order so a frequently
+    // re-recorded key won't be evicted as "oldest" when capping. Map#set on
+    // an existing key would otherwise leave the original insertion position.
+    const key = this.key(pluginId, dedupeKey);
+    if (this.seen.has(key)) this.seen.delete(key);
+    this.seen.set(key, Date.now());
+    if (this.seen.size > 256) {
+      // Cap unbounded growth; drop the oldest recorded key. Cheap for the
+      // small N expected.
+      const oldestKey = this.seen.keys().next().value;
+      if (oldestKey !== undefined) this.seen.delete(oldestKey);
+    }
+  }
+}
+
+const ALLOWED_VISIBILITIES: ReadonlySet<"silent" | "summary-only" | "user-visible"> = new Set([
+  "silent",
+  "summary-only",
+  "user-visible",
+] as const);
+const ALLOWED_PRIORITIES: ReadonlySet<"low" | "normal" | "high"> = new Set([
+  "low",
+  "normal",
+  "high",
+] as const);
+/** Bound dedupeKey length so a malicious / buggy plugin cannot bloat audit logs. */
+const MAX_DEDUPE_KEY_LEN = 128;
+/** Bound source length — same reason. dedupeKey was bounded; review caught source. */
+const MAX_SOURCE_LEN = 128;
+/**
+ * Bound prompt length. The host trusts the plugin's templated-only contract
+ * (a comment in `types.ts`) but offers no enforcement; capping prevents an
+ * accidental whole-mail dump from blowing past the LLM context. 4 KB is
+ * generous for templated suggestions and tight enough to reject a body.
+ */
+const MAX_PROMPT_LEN = 4096;
+/**
+ * Strict pattern for `source`. Must start with `proactive:` followed by a
+ * non-empty kebab-case suffix. Rejects `proactive:` bare, `proactive:_x`,
+ * `proactive:Bad/Path`, etc., before the value flows into audit / system
+ * prompts where loose substrings would be confusing.
+ */
+const SOURCE_PATTERN = /^proactive:[a-z][a-z0-9-]*$/;
+
+/**
+ * Per-plugin rate limit for `triggerConversation()`. A plugin that omits
+ * `dedupeKey` (or rotates it per call) is otherwise unbounded — fire-and-
+ * forget into runTriggerTurn could spawn N concurrent LLM streams. Token
+ * bucket capped at 6 calls / 60 seconds per plugin (sustained), with
+ * burst of 3 — picked so the demo scenarios (one-meeting-mail, one-task-
+ * deadline) do not throttle but a tight loop adversary is stopped early.
+ */
+export const TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS = 60_000;
+export const TRIGGER_CONVERSATION_RATE_LIMIT_MAX_CALLS = 6;
+
+export class TriggerConversationRateLimiter {
+  private readonly windowMs: number;
+  private readonly maxCalls: number;
+  private readonly recent = new Map<string, number[]>();
+
+  constructor(
+    windowMs: number = TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS,
+    maxCalls: number = TRIGGER_CONVERSATION_RATE_LIMIT_MAX_CALLS,
+  ) {
+    this.windowMs = windowMs;
+    this.maxCalls = maxCalls;
+  }
+
+  /**
+   * True when adding one more call would exceed the cap. Compacts the
+   * underlying map entry as a side-effect — without this the entry would
+   * grow unboundedly during sustained denial loops.
+   */
+  isOverCap(pluginId: string, now: number = Date.now()): boolean {
+    const calls = this.recent.get(pluginId) ?? [];
+    const cutoff = now - this.windowMs;
+    const fresh = calls.filter((t) => t >= cutoff);
+    if (fresh.length !== calls.length) this.recent.set(pluginId, fresh);
+    return fresh.length >= this.maxCalls;
+  }
+
+  record(pluginId: string, now: number = Date.now()): void {
+    const calls = this.recent.get(pluginId) ?? [];
+    const cutoff = now - this.windowMs;
+    const fresh = calls.filter((t) => t >= cutoff);
+    fresh.push(now);
+    this.recent.set(pluginId, fresh);
+  }
+}
+
+const triggerConversationRateLimiter = new TriggerConversationRateLimiter();
+
+/**
+ * Suppress a flood of identical denial audit rows. Without this, a plugin in
+ * a tight loop with always-bad input (e.g. invalid source) hits the gate
+ * before the rate limiter `record` runs (denials don't consume cap), so it
+ * could write thousands of audit rows / second. We log the first denial of
+ * a (pluginId, reason) pair, then suppress identical follow-ups for 60s and
+ * emit one consolidated "...denials suppressed" line at expiry.
+ */
+const TRIGGER_DENY_AUDIT_WINDOW_MS = 60_000;
+
+export class TriggerDenyAuditThrottle {
+  private readonly windowMs: number;
+  private readonly state = new Map<string, { suppressedSince: number; count: number }>();
+
+  constructor(windowMs: number = TRIGGER_DENY_AUDIT_WINDOW_MS) {
+    this.windowMs = windowMs;
+  }
+
+  /**
+   * Returns whether the caller should write the audit row right now.
+   * - First seen → returns true, marks suppression window open.
+   * - Within open window → returns false, increments suppressed count.
+   * - Window expired → returns true (with a "suppressed N" hint via
+   *   {@link drainSuppressed}).
+   */
+  shouldEmit(pluginId: string, reason: string, now: number = Date.now()): boolean {
+    const key = `${pluginId}::${reason}`;
+    const entry = this.state.get(key);
+    if (entry === undefined) {
+      this.state.set(key, { suppressedSince: now, count: 0 });
+      return true;
+    }
+    if (now - entry.suppressedSince >= this.windowMs) {
+      // Window expired — emit again, and the caller can summarize the
+      // suppressed period via drainSuppressed().
+      this.state.set(key, { suppressedSince: now, count: 0 });
+      return true;
+    }
+    entry.count += 1;
+    return false;
+  }
+
+  /**
+   * Returns the count of suppressed events since the last emit for this key
+   * and resets the counter (caller appends `... +N suppressed` to the audit
+   * row). Returns 0 if the most recent decision was an emit.
+   */
+  drainSuppressed(pluginId: string, reason: string): number {
+    const entry = this.state.get(`${pluginId}::${reason}`);
+    if (!entry) return 0;
+    const n = entry.count;
+    entry.count = 0;
+    return n;
+  }
+}
+
+const triggerDenyAuditThrottle = new TriggerDenyAuditThrottle();
+
+/**
+ * Pure decision function for the `triggerConversation` gate. Extracted from
+ * createHostApi so production code and tests share one implementation —
+ * any future drift would have to be intentional.
+ *
+ * Returns either:
+ *   { kind: "deny", result }      — fully-formed ConversationTriggerResult
+ *                                   the host should return; audit row has
+ *                                   already been written.
+ *   { kind: "allow", result, ... } — caller should dispatch runTriggerTurn
+ *                                   with the normalized fields.
+ *
+ * The function ALSO writes the success / deny audit rows so the caller
+ * stays simple (no double-bookkeeping).
+ */
+export interface EvaluateTriggerSpecInput {
+  spec: ConversationTriggerSpec | undefined | null;
+  pluginId: string;
+  capabilities: readonly string[];
+  dedupe: TriggerConversationDedupe;
+  rateLimiter: TriggerConversationRateLimiter;
+  /** Burst-suppress identical denial audit rows. */
+  denyAuditThrottle?: TriggerDenyAuditThrottle;
+  loopBound: boolean;
+  auditLogger: { log(entry: AuditEntry): void };
+  now?: () => number;
+}
+
+export type EvaluateTriggerSpecOutcome =
+  | { kind: "deny"; result: ConversationTriggerResult }
+  | {
+      kind: "allow";
+      result: ConversationTriggerResult;
+      source: string;
+      visibility: "silent" | "summary-only" | "user-visible";
+      priority: "low" | "normal" | "high";
+    };
+
+export function evaluateTriggerSpec(
+  input: EvaluateTriggerSpecInput,
+): EvaluateTriggerSpecOutcome {
+  const {
+    spec,
+    pluginId,
+    capabilities,
+    dedupe,
+    rateLimiter,
+    loopBound,
+    auditLogger,
+  } = input;
+  const denyAuditThrottle = input.denyAuditThrottle;
+  const now = input.now ?? Date.now;
+
+  // NEVER slice-before-validate: slicing a too-long source could turn
+  // obviously-bad input into a passing prefix. Reject outright (below)
+  // so the regex sees the original.
+  const source = typeof spec?.source === "string" ? spec.source : "";
+  const { visibility, priority, dedupeKey } = normalizeTriggerSpecFields(
+    spec ?? ({} as ConversationTriggerSpec),
+  );
+
+  const auditDeny = (reasonInput: string) => {
+    // Reason key is the first `reason=<value>` token, used to throttle
+    // identical denials per-(pluginId, reason). Different reasons (e.g.
+    // capability_denied vs invalid_source) get independent windows.
+    const reasonKey = (/reason=([a-z_]+)/.exec(reasonInput)?.[1]) ?? "unknown";
+    if (denyAuditThrottle && !denyAuditThrottle.shouldEmit(pluginId, reasonKey, now())) {
+      return;
+    }
+    const suppressed = denyAuditThrottle?.drainSuppressed(pluginId, reasonKey) ?? 0;
+    try {
+      auditLogger.log({
+        timestamp: new Date(now()).toISOString(),
+        sessionId: "plugin",
+        type: "error",
+        input:
+          `[plugin:${pluginId}] trigger_conversation_denied ${reasonInput}` +
+          (suppressed > 0 ? ` (+${suppressed} suppressed)` : ""),
+      });
+    } catch { /* audit must not break host */ }
+  };
+
+  if (!capabilities.includes("conversation-trigger")) {
+    auditDeny("reason=capability_denied");
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "capability_denied", source: "" },
+    };
+  }
+  // Order matters: env-fault (`loop_unavailable`) supersedes state
+  // opinions (`duplicate`, `rate_limited`) so a plugin retrying during
+  // boot ordering windows sees the actual cause.
+  if (!loopBound) {
+    auditDeny("reason=loop_unavailable");
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "loop_unavailable", source },
+    };
+  }
+  // A too-long source is rejected outright; the regex sees the original
+  // string (no slice-before-validate). Same for prompt length.
+  if (source.length > MAX_SOURCE_LEN || !SOURCE_PATTERN.test(source)) {
+    auditDeny(`reason=invalid_source source=${source.slice(0, 32) || "<empty>"}`);
+    return {
+      kind: "deny",
+      // Echo only the first 32 chars so a malicious 10MB source cannot
+      // pin into the caller-visible result either.
+      result: { accepted: false, reason: "invalid_source", source: source.slice(0, 32) },
+    };
+  }
+  if (typeof spec?.prompt !== "string" || spec.prompt.trim().length === 0) {
+    auditDeny(`reason=invalid_source source=${source} (empty prompt)`);
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "invalid_source", source },
+    };
+  }
+  if (spec.prompt.length > MAX_PROMPT_LEN) {
+    auditDeny(`reason=invalid_source source=${source} (prompt>${MAX_PROMPT_LEN})`);
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "invalid_source", source },
+    };
+  }
+  if (rateLimiter.isOverCap(pluginId, now())) {
+    auditDeny("reason=rate_limited");
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "rate_limited", source },
+    };
+  }
+  if (dedupeKey && dedupe.has(pluginId, dedupeKey)) {
+    auditDeny(`reason=duplicate dedupeKey=${dedupeKey}`);
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "duplicate", source },
+    };
+  }
+
+  // Allow path — record both bookkeeping operations BEFORE returning so the
+  // caller never gets an "accepted=true" without the dedupe + rate window
+  // having advanced.
+  if (dedupeKey) dedupe.record(pluginId, dedupeKey);
+  rateLimiter.record(pluginId, now());
+
+  // Compose the success audit row with sanitized contextKeys — key names
+  // can carry PII so we accept only keys matching a strict identifier shape
+  // and report a count for the rest. Single audit row per accepted trigger;
+  // the loop-side trigger row would be redundant.
+  let contextSuffix = "";
+  if (spec?.context) {
+    const KEY_SHAPE = /^[a-zA-Z_][a-zA-Z0-9_]{0,32}$/;
+    const allKeys = Object.keys(spec.context);
+    const okKeys = allKeys.filter((k) => KEY_SHAPE.test(k));
+    const badCount = allKeys.length - okKeys.length;
+    const parts: string[] = [];
+    if (okKeys.length > 0) parts.push(`contextKeys=${okKeys.slice(0, 8).join(",")}`);
+    if (badCount > 0) parts.push(`contextKeysOmitted=${badCount}`);
+    if (parts.length > 0) contextSuffix = ` ${parts.join(" ")}`;
+  }
+  try {
+    auditLogger.log({
+      timestamp: new Date(now()).toISOString(),
+      sessionId: "plugin",
+      type: "tool_call",
+      input:
+        `[plugin:${pluginId}] trigger_conversation source=${source} ` +
+        `visibility=${visibility} priority=${priority}` +
+        (dedupeKey ? ` dedupeKey=${dedupeKey}` : "") +
+        contextSuffix,
+    });
+  } catch { /* audit must not break host */ }
+
+  return {
+    kind: "allow",
+    result: { accepted: true, source },
+    source,
+    visibility,
+    priority,
+  };
+}
+
+/**
+ * Normalize plugin-supplied trigger fields to known/safe values BEFORE they
+ * flow into audit logs or downstream pipelines. Unknown enum values fall
+ * back to defaults. Non-string dedupeKey is dropped.
+ */
+export function normalizeTriggerSpecFields(spec: ConversationTriggerSpec): {
+  visibility: "silent" | "summary-only" | "user-visible";
+  priority: "low" | "normal" | "high";
+  dedupeKey: string | undefined;
+} {
+  const visibility = ALLOWED_VISIBILITIES.has(
+    spec.visibility as "silent" | "summary-only" | "user-visible",
+  )
+    ? (spec.visibility as "silent" | "summary-only" | "user-visible")
+    : "summary-only";
+  const priority = ALLOWED_PRIORITIES.has(
+    spec.priority as "low" | "normal" | "high",
+  )
+    ? (spec.priority as "low" | "normal" | "high")
+    : "normal";
+  let dedupeKey: string | undefined;
+  if (typeof spec.dedupeKey === "string") {
+    const trimmed = spec.dedupeKey.trim();
+    if (trimmed.length > 0) {
+      dedupeKey = trimmed.length > MAX_DEDUPE_KEY_LEN
+        ? trimmed.slice(0, MAX_DEDUPE_KEY_LEN)
+        : trimmed;
+    }
+  }
+  return { visibility, priority, dedupeKey };
+}
+
+const triggerConversationDedupe = new TriggerConversationDedupe();
 
 /** Late-binding container the ConversationLoop fills in after it exists. */
 export interface LateBindingRefs {
@@ -391,6 +787,54 @@ export async function initPluginRuntime(
           ? opts
           : { ...opts, persistPartition: defaultPartition };
         return openAuthWindowService(mainWindow, effectiveOpts);
+      },
+
+      // ─── Proactive Brain — hostApi.triggerConversation() ───────────────
+      // Gate body lives in evaluateTriggerSpec() so prod and tests share
+      // one implementation; tests import + call this directly.
+      triggerConversation: async (spec: ConversationTriggerSpec) => {
+        const decision = evaluateTriggerSpec({
+          spec,
+          pluginId,
+          capabilities: manifest.capabilities ?? [],
+          dedupe: triggerConversationDedupe,
+          rateLimiter: triggerConversationRateLimiter,
+          denyAuditThrottle: triggerDenyAuditThrottle,
+          loopBound: !!lateBinding.conversationLoopRef.fn,
+          auditLogger: bootAuditLogger,
+        });
+        if (decision.kind === "deny") return decision.result;
+
+        // Dispatch fire-and-forget. Wrap in Promise.resolve to convert any
+        // synchronous throw inside runTriggerTurn into a rejection — the
+        // outer caller of triggerConversation must NEVER see an exception
+        // from this code path.
+        const loop = lateBinding.conversationLoopRef.fn!;
+        void Promise.resolve()
+          .then(() =>
+            loop.runTriggerTurn({
+              prompt: spec.prompt,
+              source: decision.source,
+              visibility: decision.visibility,
+              priority: decision.priority,
+              ...(spec.context ? { context: spec.context } : {}),
+            }),
+          )
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            try {
+              bootAuditLogger.log({
+                timestamp: new Date().toISOString(),
+                sessionId: "plugin",
+                type: "error",
+                input:
+                  `[plugin:${pluginId}] trigger_conversation_runtime_error ` +
+                  `source=${decision.source} message=${msg}`,
+              });
+            } catch { /* audit must not break host */ }
+          });
+
+        return decision.result;
       },
     }),
   });
