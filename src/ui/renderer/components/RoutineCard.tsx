@@ -1,6 +1,8 @@
 // RoutineCard — dismissable routine result card (RoutineResult.summary 전용).
 
 import { useMemo } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 
@@ -45,7 +47,9 @@ export function RoutineCard({
       </CardHeader>
       <CardContent className="pt-0">
         {result.summary ? (
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{result.summary}</p>
+          <div className="prose prose-sm prose-invert max-w-none break-words text-foreground">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown>
+          </div>
         ) : (
           <p className="text-xs text-muted-foreground">루틴 결과가 없습니다.</p>
         )}
