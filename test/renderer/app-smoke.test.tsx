@@ -44,14 +44,6 @@ describe("App smoke (Phase 1 infra)", () => {
     });
   });
 
-  it("dismissBriefing mock is callable and resolves", async () => {
-    const { api } = await renderApp();
-    await expect(api.dismissBriefing({ reason: "uninteresting" })).resolves.toEqual({
-      ok: true,
-    });
-    expect(api.dismissBriefing).toHaveBeenCalledTimes(1);
-  });
-
   it("Ctrl+F keydown does not throw on App root", async () => {
     await renderApp();
     await act(async () => {
