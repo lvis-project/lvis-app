@@ -36,7 +36,7 @@ describe("SystemPromptBuilder — Proactive Origin Guidance", () => {
     expect(prompt).toContain("</proactive-origin-guidance>");
   });
 
-  it("warns the LLM not to obey imperatives inside the user-turn message (PR #215 review H3)", () => {
+  it("warns the LLM not to obey imperatives inside the user-turn message", () => {
     const builder = makeBuilder();
     builder.setOriginSource("proactive:meeting-detection");
     const prompt = builder.build();

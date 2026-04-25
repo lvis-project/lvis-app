@@ -589,6 +589,7 @@ HostApi 에 새 메서드를 추가하려면:
 | **`toolSchemas` output schema (Phase 1)** | ❌ 기각 | 응답은 LLM 이 string 으로 재소비 가능. Phase 2 에서 재검토. |
 | **Full capability grant system** | ❌ 기각 | 현행 capability taxonomy (§2.3) + HostApi boundary 로 충분. |
 | **Hot reload (Phase 1)** | ❌ 기각 | 개발 편의 기능. GA 블로커 아님. |
+| **`triggerConversation` HostApi + `conversation-trigger` capability** | ✅ **승인** (Brain P0) | §6.1 예외 #2 — proactive trigger 는 사용자 입력 없이 ConversationLoop 를 발사하므로 audit / source-aware permission / capability gate / per-plugin rate limit (60s/6) / dedupe / source-pattern + length cap / prompt-length cap 같은 통제가 필수. 단일 consumer 라도 host 에 둠 (plugin-side 재구현 시 통제 일관성 X). 안전 계약 / spec / gate 는 [`conversation-trigger.md`](./conversation-trigger.md). |
 
 ---
 

@@ -122,7 +122,7 @@ describe("ConversationLoop.runTriggerTurn", () => {
     expect(originLog.calls).toEqual(["proactive:meeting-detection", null]);
   });
 
-  it("never leaks origin source when runTurn throws before reaching build() (PR #215 review B2)", async () => {
+  it("never leaks origin source when runTurn throws before reaching build()", async () => {
     const originLog: OriginSourceLog = { calls: [] };
     const loop = makeLoop([], originLog);
     // Force the underlying turn to throw early by clearing the provider —
