@@ -24,7 +24,7 @@ describe("Redact notice (Phase 3 regression net)", () => {
         llm: { provider: "openai", model: "gpt-4o-mini" },
         chat: { systemPrompt: "", autoCompact: true },
         webSearch: { provider: "none" },
-        proactive: { enableDailyBriefing: false },
+        routine: { enableWakeupRoutine: false },
         privacy: { piiRedactEnabled: true },
       },
     });

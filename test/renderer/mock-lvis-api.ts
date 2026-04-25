@@ -22,14 +22,14 @@ type ApiOverrides = {
   pluginCards?: unknown[];
   marketplace?: unknown[];
   pluginUiExtensions?: unknown[];
-  latestRoutineBriefing?: unknown;
+  latestRoutineResult?: unknown;
 };
 
 const DEFAULT_SETTINGS = {
   llm: { provider: "openai", model: "gpt-4o-mini" },
   chat: { systemPrompt: "", autoCompact: true },
   webSearch: { provider: "none" },
-  routine: { enableDailyBriefing: false },
+  routine: { enableWakeupRoutine: false },
   privacy: { piiRedactEnabled: false },
 };
 
@@ -62,7 +62,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const pluginCards = overrides.pluginCards ?? [];
   const marketplace = overrides.marketplace ?? [];
   const pluginUiExtensions = overrides.pluginUiExtensions ?? [];
-  const latestRoutineResult = overrides.latestRoutineBriefing ?? null;
+  const latestRoutineResult = overrides.latestRoutineResult ?? null;
 
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
   const routineCompletedHandlers = new Set<(r: unknown) => void>();
@@ -131,8 +131,6 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
 
     getUsageSummary: vi.fn(async () => usage),
     getLatestRoutineResult: vi.fn(async () => latestRoutineResult),
-    dismissBriefing: vi.fn(async () => ({ ok: true })),
-    snoozeBriefing: vi.fn(async () => ({ ok: true })),
     triggerWakeupRoutineDev: vi.fn(async () => ({ ok: true, summary: "dev trigger" })),
     onRoutineCompleted: vi.fn((h: (r: unknown) => void) => {
       routineCompletedHandlers.add(h);

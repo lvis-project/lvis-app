@@ -8,7 +8,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 
-function makeBriefing() {
+function makeRoutineResult() {
   return {
     routineId: "wakeup",
     trigger: "wakeup",
@@ -17,11 +17,11 @@ function makeBriefing() {
   };
 }
 
-describe("Briefing flow (Phase 3.3 regression net)", () => {
+describe("Routine flow (Phase 3.3 regression net)", () => {
   it("onRoutineCompleted renders the RoutineCard", async () => {
     const { container, emitRoutineCompleted } = await renderApp();
     await act(async () => {
-      emitRoutineCompleted(makeBriefing());
+      emitRoutineCompleted(makeRoutineResult());
     });
     await waitFor(() => {
       expect(container.querySelector('[data-testid="routine-card"]')).toBeTruthy();
@@ -30,8 +30,8 @@ describe("Briefing flow (Phase 3.3 regression net)", () => {
   });
 
   it("replays the latest result on mount when one was already generated", async () => {
-    const briefing = makeBriefing();
-    const { container } = await renderApp({ latestRoutineBriefing: briefing });
+    const briefing = makeRoutineResult();
+    const { container } = await renderApp({ latestRoutineResult: briefing });
     await waitFor(() => {
       expect(container.querySelector('[data-testid="routine-card"]')).toBeTruthy();
       expect(container.textContent).toContain("daily summary");
@@ -40,10 +40,10 @@ describe("Briefing flow (Phase 3.3 regression net)", () => {
 
   it("does not let a delayed replay overwrite a newer live result", async () => {
     let resolveLatest: ((value: unknown) => void) | null = null;
-    const stale = { ...makeBriefing(), summary: "stale summary" };
-    const fresh = { ...makeBriefing(), summary: "fresh summary" };
+    const stale = { ...makeRoutineResult(), summary: "stale summary" };
+    const fresh = { ...makeRoutineResult(), summary: "fresh summary" };
     const { container, emitRoutineCompleted } = await renderApp({
-      latestRoutineBriefing: new Promise((resolve) => {
+      latestRoutineResult: new Promise((resolve) => {
         resolveLatest = resolve;
       }),
     });
@@ -61,10 +61,10 @@ describe("Briefing flow (Phase 3.3 regression net)", () => {
     });
   });
 
-  it("clicking dismiss calls dismissBriefing and removes the card", async () => {
-    const { container, api, emitRoutineCompleted } = await renderApp();
+  it("clicking dismiss removes the card", async () => {
+    const { container, emitRoutineCompleted } = await renderApp();
     await act(async () => {
-      emitRoutineCompleted(makeBriefing());
+      emitRoutineCompleted(makeRoutineResult());
     });
     const card = await waitFor(() => {
       const el = container.querySelector('[data-testid="routine-card"]');
@@ -85,10 +85,10 @@ describe("Briefing flow (Phase 3.3 regression net)", () => {
     });
   });
 
-  it("clicking snooze calls snoozeBriefing and removes the card", async () => {
-    const { container, api, emitRoutineCompleted } = await renderApp();
+  it("clicking snooze removes the card", async () => {
+    const { container, emitRoutineCompleted } = await renderApp();
     await act(async () => {
-      emitRoutineCompleted(makeBriefing());
+      emitRoutineCompleted(makeRoutineResult());
     });
     const card = await waitFor(() => {
       const el = container.querySelector('[data-testid="routine-card"]');
