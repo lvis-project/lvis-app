@@ -356,7 +356,9 @@ export interface PluginHostApi {
    * (e.g., a meeting-request mail arrives).
    *
    * Capability gate: `conversation-trigger`. The plugin's manifest must
-   * declare it; otherwise the call throws.
+   * declare it; otherwise the host returns `{ accepted: false, reason:
+   * "capability_denied" }`. Callers should branch on `accepted` rather than
+   * expecting an exception for this condition.
    *
    * Safety contract — caller MUST follow:
    * - `prompt` is a templated message, NOT raw third-party content (mail body,
@@ -381,16 +383,30 @@ export interface ConversationTriggerSpec {
   prompt: string;
   /** Origin tag, must start with `proactive:` (e.g. `proactive:meeting-detection`). */
   source: string;
-  /** Side-channel metadata for the loop (IDs, references — not for prompt). */
+  /**
+   * Side-channel metadata (IDs, references) recorded with the trigger.
+   *
+   * **P0 limitation (Copilot review #1):** the host currently records
+   * `context` only into the audit chain — the ConversationLoop pipeline
+   * (system-prompt builder, tools, history) does NOT receive it. Plugins
+   * that need the LLM/tools to act on an ID (e.g., `emailId`) MUST embed
+   * the ID in `prompt` itself so it survives the trip into the loop.
+   * Future P2 will wire `context` into per-turn metadata — this field is
+   * kept now to lock the surface so adding plumbing later is non-breaking.
+   */
   context?: Record<string, unknown>;
   /**
    * UI behaviour:
    * - `silent`         — run without surfacing to the user; only audit + result tools.
    * - `summary-only`   — show one-line completion notice (default).
    * - `user-visible`   — surface as if the user opened a turn, modal-style.
+   *
+   * **P0 limitation:** all three values currently produce identical UI
+   * behaviour — the field is recorded into audit only. P2 will add the
+   * actual UI branching.
    */
   visibility?: "silent" | "summary-only" | "user-visible";
-  /** Routing hint for queueing when multiple triggers compete. */
+  /** Routing hint for queueing when multiple triggers compete (audit-only in P0). */
   priority?: "low" | "normal" | "high";
   /** Suppress duplicate triggers for the same observation (window enforced by host). */
   dedupeKey?: string;

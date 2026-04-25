@@ -417,6 +417,11 @@ export class ConversationLoop {
    * trigger's `source` and `visibility` so the source-aware permission model
    * (§6.3) can scope policies to `proactive:*` origins.
    *
+   * P0 limitation (Copilot review #1): `context` is currently audit-only —
+   * the system-prompt / tool pipeline does not receive it. Plugins that need
+   * tools to act on an ID must embed it in `spec.prompt` itself. P2 will
+   * plumb `context` into per-turn metadata.
+   *
    * The host enforces capability + source/dedupe in `createHostApi`; this
    * method assumes those checks already passed.
    */
@@ -431,13 +436,24 @@ export class ConversationLoop {
     callbacks?: TurnCallbacks,
     abortSignal?: AbortSignal,
   ): Promise<TurnResult> {
+    let contextSuffix = "";
+    if (spec.context) {
+      try {
+        // Truncate to keep audit rows bounded; full payload lives in plugin
+        // logs if needed.
+        const json = JSON.stringify(spec.context);
+        contextSuffix = ` context=${json.length > 256 ? `${json.slice(0, 256)}…` : json}`;
+      } catch {
+        contextSuffix = ` contextKeys=${Object.keys(spec.context).join(",")}`;
+      }
+    }
     this.auditLogger.log({
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
       type: "tool_call",
       input:
         `[trigger] source=${spec.source} visibility=${spec.visibility} priority=${spec.priority}` +
-        (spec.context ? ` contextKeys=${Object.keys(spec.context).join(",")}` : ""),
+        contextSuffix,
     });
     return this.runTurn(spec.prompt, callbacks, abortSignal);
   }

@@ -21,6 +21,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   TriggerConversationDedupe,
   TRIGGER_CONVERSATION_DEDUPE_TTL_MS,
+  normalizeTriggerSpecFields,
 } from "../steps/plugin-runtime.js";
 import type {
   ConversationTriggerResult,
@@ -88,8 +89,9 @@ function makeGate(opts: MakeGateOptions) {
     spec: ConversationTriggerSpec,
   ): Promise<ConversationTriggerResult> => {
     const source = typeof spec?.source === "string" ? spec.source : "";
-    const visibility = spec?.visibility ?? "summary-only";
-    const priority = spec?.priority ?? "normal";
+    const { visibility, priority, dedupeKey } = normalizeTriggerSpecFields(
+      spec ?? ({} as ConversationTriggerSpec),
+    );
     const auditDeny = (reasonInput: string) => {
       auditLogger.log({
         timestamp: new Date().toISOString(),
@@ -111,8 +113,8 @@ function makeGate(opts: MakeGateOptions) {
       auditDeny(`reason=invalid_source source=${source} (empty prompt)`);
       return { accepted: false, reason: "invalid_source", source };
     }
-    if (spec.dedupeKey && dedupe.has(pluginId, spec.dedupeKey)) {
-      auditDeny(`reason=duplicate dedupeKey=${spec.dedupeKey}`);
+    if (dedupeKey && dedupe.has(pluginId, dedupeKey)) {
+      auditDeny(`reason=duplicate dedupeKey=${dedupeKey}`);
       return { accepted: false, reason: "duplicate", source };
     }
 
@@ -122,7 +124,7 @@ function makeGate(opts: MakeGateOptions) {
       return { accepted: false, reason: "loop_unavailable", source };
     }
 
-    if (spec.dedupeKey) dedupe.record(pluginId, spec.dedupeKey);
+    if (dedupeKey) dedupe.record(pluginId, dedupeKey);
 
     auditLogger.log({
       timestamp: new Date().toISOString(),
@@ -131,11 +133,17 @@ function makeGate(opts: MakeGateOptions) {
       input:
         `[plugin:${pluginId}] trigger_conversation source=${source} ` +
         `visibility=${visibility} priority=${priority}` +
-        (spec.dedupeKey ? ` dedupeKey=${spec.dedupeKey}` : ""),
+        (dedupeKey ? ` dedupeKey=${dedupeKey}` : ""),
     });
 
     void loop
-      .runTriggerTurn({ ...spec, source, visibility, priority })
+      .runTriggerTurn({
+        prompt: spec.prompt,
+        source,
+        visibility,
+        priority,
+        ...(spec.context ? { context: spec.context } : {}),
+      })
       .catch(() => undefined);
 
     return { accepted: true, source };
@@ -201,6 +209,78 @@ describe("TriggerConversationDedupe", () => {
       dedupe as unknown as { seen: Map<string, number> }
     ).seen.set("p1::k1", seenAt);
     expect(dedupe.has("p1", "k1")).toBe(false);
+  });
+
+  it("refreshes LRU order on re-record so a frequently-recorded key is not evicted as oldest", () => {
+    // Copilot review #2 — Map#set on an existing key does NOT refresh
+    // insertion order; record() must delete-then-set. This test would fail
+    // before the fix.
+    dedupe.record("p1", "hot");        // hot is "oldest" by insertion
+    dedupe.record("p1", "cold-1");
+    dedupe.record("p1", "cold-2");
+    dedupe.record("p1", "hot");        // re-record → should move to newest
+    // Force capacity overflow by filling above MAX (256). Use a lightweight
+    // path: cap is checked in record(); insert 254 more synthetic keys.
+    for (let i = 0; i < 254; i += 1) dedupe.record("p1", `pad-${i}`);
+    // Now insert one more → triggers eviction of the genuine oldest, which
+    // should be "cold-1" (NOT "hot", which was refreshed above).
+    dedupe.record("p1", "trigger-eviction");
+    expect(dedupe.has("p1", "hot")).toBe(true);
+    expect(dedupe.has("p1", "cold-1")).toBe(false);
+  });
+});
+
+describe("normalizeTriggerSpecFields (Copilot review #3)", () => {
+  it("falls back to defaults for unknown enum-ish values", () => {
+    const out = normalizeTriggerSpecFields({
+      prompt: "x",
+      source: "proactive:x",
+      visibility: "loud" as unknown as "silent",
+      priority: "urgent" as unknown as "high",
+    });
+    expect(out.visibility).toBe("summary-only");
+    expect(out.priority).toBe("normal");
+  });
+
+  it("keeps explicit allowed values", () => {
+    const out = normalizeTriggerSpecFields({
+      prompt: "x",
+      source: "proactive:x",
+      visibility: "silent",
+      priority: "high",
+      dedupeKey: "  mail-123  ",
+    });
+    expect(out.visibility).toBe("silent");
+    expect(out.priority).toBe("high");
+    expect(out.dedupeKey).toBe("mail-123");
+  });
+
+  it("drops non-string and empty dedupeKeys", () => {
+    expect(
+      normalizeTriggerSpecFields({
+        prompt: "x",
+        source: "proactive:x",
+        dedupeKey: {} as unknown as string,
+      }).dedupeKey,
+    ).toBeUndefined();
+    expect(
+      normalizeTriggerSpecFields({
+        prompt: "x",
+        source: "proactive:x",
+        dedupeKey: "    ",
+      }).dedupeKey,
+    ).toBeUndefined();
+  });
+
+  it("truncates dedupeKey above 128 chars", () => {
+    const big = "k".repeat(200);
+    expect(
+      normalizeTriggerSpecFields({
+        prompt: "x",
+        source: "proactive:x",
+        dedupeKey: big,
+      }).dedupeKey,
+    ).toHaveLength(128);
   });
 });
 
@@ -288,6 +368,24 @@ describe("hostApi.triggerConversation gate", () => {
       visibility: "silent",
       priority: "low",
     });
+  });
+
+  it("falls back to safe defaults when plugin sends unknown visibility / priority (Copilot review #3)", async () => {
+    const gate = makeGate({ manifest: brainManifest(), loopBound: true });
+    await gate.invoke({
+      prompt: "x",
+      source: "proactive:bug",
+      visibility: "loud" as unknown as "silent",
+      priority: "urgent" as unknown as "high",
+    });
+    expect(gate.state.loopCalls[0]).toMatchObject({
+      visibility: "summary-only",
+      priority: "normal",
+    });
+    // audit must record the normalized values, not the raw plugin input
+    expect(gate.state.auditEntries.some((e) =>
+      String(e.input).includes("visibility=summary-only"),
+    )).toBe(true);
   });
 
   it("blocks the second call when dedupeKey matches a recent trigger", async () => {
