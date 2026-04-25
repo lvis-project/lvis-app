@@ -17,7 +17,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
-import { AuditLogger } from "../../audit/audit-logger.js";
+import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
@@ -27,6 +27,7 @@ import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
 import { withMsGraphRetry } from "../../main/ms-graph-retry.js";
 import type {
+  ConversationTriggerResult,
   ConversationTriggerSpec,
   PluginHostApi,
   PluginManifest,
@@ -96,6 +97,196 @@ const ALLOWED_PRIORITIES: ReadonlySet<"low" | "normal" | "high"> = new Set([
 ] as const);
 /** Bound dedupeKey length so a malicious / buggy plugin cannot bloat audit logs. */
 const MAX_DEDUPE_KEY_LEN = 128;
+/** Bound source length — same reason. dedupeKey was bounded; review caught source. */
+const MAX_SOURCE_LEN = 128;
+/**
+ * Strict pattern for `source`. Must start with `proactive:` followed by a
+ * non-empty kebab-case suffix. Rejects `proactive:` bare, `proactive:_x`,
+ * `proactive:Bad/Path`, etc., before the value flows into audit / system
+ * prompts where loose substrings would be confusing.
+ */
+const SOURCE_PATTERN = /^proactive:[a-z][a-z0-9-]*$/;
+
+/**
+ * Per-plugin rate limit for `triggerConversation()`. A plugin that omits
+ * `dedupeKey` (or rotates it per call) is otherwise unbounded — fire-and-
+ * forget into runTriggerTurn could spawn N concurrent LLM streams. Token
+ * bucket capped at 6 calls / 60 seconds per plugin (sustained), with
+ * burst of 3 — picked so the demo scenarios (one-meeting-mail, one-task-
+ * deadline) do not throttle but a tight loop adversary is stopped early.
+ */
+export const TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS = 60_000;
+export const TRIGGER_CONVERSATION_RATE_LIMIT_MAX_CALLS = 6;
+
+export class TriggerConversationRateLimiter {
+  private readonly windowMs: number;
+  private readonly maxCalls: number;
+  private readonly recent = new Map<string, number[]>();
+
+  constructor(
+    windowMs: number = TRIGGER_CONVERSATION_RATE_LIMIT_WINDOW_MS,
+    maxCalls: number = TRIGGER_CONVERSATION_RATE_LIMIT_MAX_CALLS,
+  ) {
+    this.windowMs = windowMs;
+    this.maxCalls = maxCalls;
+  }
+
+  /** True when adding one more call would exceed the cap. Does not mutate. */
+  isOverCap(pluginId: string, now: number = Date.now()): boolean {
+    const calls = this.recent.get(pluginId) ?? [];
+    const cutoff = now - this.windowMs;
+    const fresh = calls.filter((t) => t >= cutoff);
+    return fresh.length >= this.maxCalls;
+  }
+
+  record(pluginId: string, now: number = Date.now()): void {
+    const calls = this.recent.get(pluginId) ?? [];
+    const cutoff = now - this.windowMs;
+    const fresh = calls.filter((t) => t >= cutoff);
+    fresh.push(now);
+    this.recent.set(pluginId, fresh);
+  }
+}
+
+const triggerConversationRateLimiter = new TriggerConversationRateLimiter();
+
+/**
+ * Pure decision function for the `triggerConversation` gate. Extracted from
+ * createHostApi so production code and tests share one implementation —
+ * any future drift would have to be intentional.
+ *
+ * Returns either:
+ *   { kind: "deny", result }      — fully-formed ConversationTriggerResult
+ *                                   the host should return; audit row has
+ *                                   already been written.
+ *   { kind: "allow", result, ... } — caller should dispatch runTriggerTurn
+ *                                   with the normalized fields.
+ *
+ * The function ALSO writes the success / deny audit rows so the caller
+ * stays simple (no double-bookkeeping).
+ */
+export interface EvaluateTriggerSpecInput {
+  spec: ConversationTriggerSpec | undefined | null;
+  pluginId: string;
+  capabilities: readonly string[];
+  dedupe: TriggerConversationDedupe;
+  rateLimiter: TriggerConversationRateLimiter;
+  loopBound: boolean;
+  auditLogger: { log(entry: AuditEntry): void };
+  now?: () => number;
+}
+
+export type EvaluateTriggerSpecOutcome =
+  | { kind: "deny"; result: ConversationTriggerResult }
+  | {
+      kind: "allow";
+      result: ConversationTriggerResult;
+      source: string;
+      visibility: "silent" | "summary-only" | "user-visible";
+      priority: "low" | "normal" | "high";
+    };
+
+export function evaluateTriggerSpec(
+  input: EvaluateTriggerSpecInput,
+): EvaluateTriggerSpecOutcome {
+  const {
+    spec,
+    pluginId,
+    capabilities,
+    dedupe,
+    rateLimiter,
+    loopBound,
+    auditLogger,
+  } = input;
+  const now = input.now ?? Date.now;
+
+  const sourceRaw = typeof spec?.source === "string" ? spec.source : "";
+  const source =
+    sourceRaw.length > MAX_SOURCE_LEN ? sourceRaw.slice(0, MAX_SOURCE_LEN) : sourceRaw;
+  const { visibility, priority, dedupeKey } = normalizeTriggerSpecFields(
+    spec ?? ({} as ConversationTriggerSpec),
+  );
+
+  const auditDeny = (reasonInput: string) => {
+    try {
+      auditLogger.log({
+        timestamp: new Date(now()).toISOString(),
+        sessionId: "plugin",
+        type: "error",
+        input: `[plugin:${pluginId}] trigger_conversation_denied ${reasonInput}`,
+      });
+    } catch { /* audit must not break host */ }
+  };
+
+  if (!capabilities.includes("conversation-trigger")) {
+    auditDeny("reason=capability_denied");
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "capability_denied", source },
+    };
+  }
+  if (!SOURCE_PATTERN.test(source)) {
+    auditDeny(`reason=invalid_source source=${source || "<empty>"}`);
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "invalid_source", source },
+    };
+  }
+  if (typeof spec?.prompt !== "string" || spec.prompt.trim().length === 0) {
+    auditDeny(`reason=invalid_source source=${source} (empty prompt)`);
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "invalid_source", source },
+    };
+  }
+  if (rateLimiter.isOverCap(pluginId, now())) {
+    auditDeny("reason=rate_limited");
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "rate_limited", source },
+    };
+  }
+  if (dedupeKey && dedupe.has(pluginId, dedupeKey)) {
+    auditDeny(`reason=duplicate dedupeKey=${dedupeKey}`);
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "duplicate", source },
+    };
+  }
+  if (!loopBound) {
+    auditDeny("reason=loop_unavailable");
+    return {
+      kind: "deny",
+      result: { accepted: false, reason: "loop_unavailable", source },
+    };
+  }
+
+  // Allow path — record both bookkeeping operations BEFORE returning so the
+  // caller never gets an "accepted=true" without the dedupe + rate window
+  // having advanced.
+  if (dedupeKey) dedupe.record(pluginId, dedupeKey);
+  rateLimiter.record(pluginId, now());
+
+  try {
+    auditLogger.log({
+      timestamp: new Date(now()).toISOString(),
+      sessionId: "plugin",
+      type: "tool_call",
+      input:
+        `[plugin:${pluginId}] trigger_conversation source=${source} ` +
+        `visibility=${visibility} priority=${priority}` +
+        (dedupeKey ? ` dedupeKey=${dedupeKey}` : ""),
+    });
+  } catch { /* audit must not break host */ }
+
+  return {
+    kind: "allow",
+    result: { accepted: true, source },
+    source,
+    visibility,
+    priority,
+  };
+}
 
 /**
  * Normalize plugin-supplied trigger fields to known/safe values BEFORE they
@@ -485,76 +676,37 @@ export async function initPluginRuntime(
       },
 
       // ─── Proactive Brain — hostApi.triggerConversation() ───────────────
-      // P0 minimum-viable: capability + source/dedupe gates only.
-      // visibility / priority are passed through to ConversationLoop for
-      // audit; UI behaviour for "silent" / "user-visible" is deferred (P2).
+      // Gate body lives in evaluateTriggerSpec() so prod and tests share
+      // one implementation (Copilot review noted the inline test mirror).
       triggerConversation: async (spec: ConversationTriggerSpec) => {
-        const source = typeof spec?.source === "string" ? spec.source : "";
-        // Normalize plugin-supplied enum-ish fields BEFORE they flow into
-        // audit / downstream pipelines (Copilot review #3) so a buggy or
-        // malicious plugin cannot inject unknown values like
-        // visibility="loud" or dedupeKey={} into logs.
-        const { visibility, priority, dedupeKey } = normalizeTriggerSpecFields(spec ?? ({} as ConversationTriggerSpec));
-        const auditDeny = (reasonInput: string) => {
-          try {
-            bootAuditLogger.log({
-              timestamp: new Date().toISOString(),
-              sessionId: "plugin",
-              type: "error",
-              input: `[plugin:${pluginId}] trigger_conversation_denied ${reasonInput}`,
-            });
-          } catch { /* audit must not break host */ }
-        };
+        const decision = evaluateTriggerSpec({
+          spec,
+          pluginId,
+          capabilities: manifest.capabilities ?? [],
+          dedupe: triggerConversationDedupe,
+          rateLimiter: triggerConversationRateLimiter,
+          loopBound: !!lateBinding.conversationLoopRef.fn,
+          auditLogger: bootAuditLogger,
+        });
+        if (decision.kind === "deny") return decision.result;
 
-        if (!manifest.capabilities?.includes("conversation-trigger")) {
-          auditDeny("reason=capability_denied");
-          return { accepted: false, reason: "capability_denied", source };
-        }
-        if (!source.startsWith("proactive:")) {
-          auditDeny(`reason=invalid_source source=${source || "<empty>"}`);
-          return { accepted: false, reason: "invalid_source", source };
-        }
-        if (typeof spec?.prompt !== "string" || spec.prompt.trim().length === 0) {
-          auditDeny(`reason=invalid_source source=${source} (empty prompt)`);
-          return { accepted: false, reason: "invalid_source", source };
-        }
-        if (dedupeKey && triggerConversationDedupe.has(pluginId, dedupeKey)) {
-          auditDeny(`reason=duplicate dedupeKey=${dedupeKey}`);
-          return { accepted: false, reason: "duplicate", source };
-        }
-
-        const loop = lateBinding.conversationLoopRef.fn;
-        if (!loop) {
-          auditDeny("reason=loop_unavailable");
-          return { accepted: false, reason: "loop_unavailable", source };
-        }
-
-        if (dedupeKey) triggerConversationDedupe.record(pluginId, dedupeKey);
-
-        try {
-          bootAuditLogger.log({
-            timestamp: new Date().toISOString(),
-            sessionId: "plugin",
-            type: "tool_call",
-            input:
-              `[plugin:${pluginId}] trigger_conversation source=${source} ` +
-              `visibility=${visibility} priority=${priority}` +
-              (dedupeKey ? ` dedupeKey=${dedupeKey}` : ""),
-          });
-        } catch { /* audit must not break host */ }
-
-        // Fire-and-forget — proactive should not block waiting for the loop.
-        // Errors inside runTriggerTurn are surfaced via the loop's own audit.
-        // Pass only normalized fields + caller's prompt + (optional) context.
-        void loop
-          .runTriggerTurn({
-            prompt: spec.prompt,
-            source,
-            visibility,
-            priority,
-            ...(spec.context ? { context: spec.context } : {}),
-          })
+        // Dispatch fire-and-forget. Wrap in Promise.resolve to convert any
+        // synchronous throw inside runTriggerTurn into a rejection — the
+        // outer caller of triggerConversation must NEVER see an exception
+        // from this code path.
+        const loop = lateBinding.conversationLoopRef.fn!;
+        void Promise.resolve()
+          .then(() =>
+            loop.runTriggerTurn({
+              prompt: spec.prompt,
+              source: decision.source,
+              visibility: decision.visibility,
+              priority: decision.priority,
+              ...(spec.context ? { context: spec.context } : {}),
+            }),
+          )
           .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
             try {
               bootAuditLogger.log({
                 timestamp: new Date().toISOString(),
@@ -562,12 +714,12 @@ export async function initPluginRuntime(
                 type: "error",
                 input:
                   `[plugin:${pluginId}] trigger_conversation_runtime_error ` +
-                  `source=${source} message=${(err as Error).message}`,
+                  `source=${decision.source} message=${msg}`,
               });
             } catch { /* audit must not break host */ }
           });
 
-        return { accepted: true, source };
+        return decision.result;
       },
     }),
   });

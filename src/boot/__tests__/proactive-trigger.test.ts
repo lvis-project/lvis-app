@@ -2,25 +2,28 @@
  * P0 — `hostApi.triggerConversation()` proactive brain entry.
  *
  * Two layers tested:
- *   1. {@link TriggerConversationDedupe} — pure data-structure unit.
- *   2. The gate logic mirrored from `plugin-runtime.ts createHostApi` — same
- *      pattern as `capability-audit-trail.test.ts` (the createHostApi closure
- *      is built inline in boot, so tests duplicate the gate to exercise it
- *      against fixtures without spinning up a full PluginRuntime).
+ *   1. {@link TriggerConversationDedupe} + {@link TriggerConversationRateLimiter}
+ *      — pure data-structure units.
+ *   2. {@link evaluateTriggerSpec} — the gate that
+ *      `createHostApi.triggerConversation` calls. Exported from production
+ *      code so prod and tests share one implementation (PR #215 review M1
+ *      addressed the previous inline-mirror drift risk).
  *
  * The gate enforces:
  *   • capability `conversation-trigger` declared in manifest
- *   • `source` starts with `proactive:`
+ *   • `source` matches `^proactive:[a-z][a-z0-9-]*$`
  *   • non-empty prompt
+ *   • per-plugin rate limit not exceeded
  *   • dedupeKey not seen within {@link TRIGGER_CONVERSATION_DEDUPE_TTL_MS}
  *   • conversationLoopRef late-binding wired
- *
- * Successful triggers fire-and-forget into ConversationLoop.runTriggerTurn.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   TriggerConversationDedupe,
   TRIGGER_CONVERSATION_DEDUPE_TTL_MS,
+  TriggerConversationRateLimiter,
+  TRIGGER_CONVERSATION_RATE_LIMIT_MAX_CALLS,
+  evaluateTriggerSpec,
   normalizeTriggerSpecFields,
 } from "../steps/plugin-runtime.js";
 import type {
@@ -30,18 +33,11 @@ import type {
 } from "../../plugins/types.js";
 import type { AuditEntry } from "../../audit/audit-logger.js";
 
-interface FakeLoopCall {
-  prompt: string;
-  source: string;
-  visibility: string;
-  priority: string;
-  contextKeys: string[];
-}
-
 interface GateOutcome {
   result: ConversationTriggerResult;
-  loopCalls: FakeLoopCall[];
   auditEntries: AuditEntry[];
+  visibility?: string;
+  priority?: string;
 }
 
 interface MakeGateOptions {
@@ -49,123 +45,40 @@ interface MakeGateOptions {
   pluginId?: string;
   loopBound?: boolean;
   dedupe?: TriggerConversationDedupe;
+  rateLimiter?: TriggerConversationRateLimiter;
+  now?: () => number;
 }
 
-/**
- * Mirror the createHostApi triggerConversation closure from plugin-runtime.ts
- * so the gate is testable in isolation. Update this if the source-of-truth
- * gate changes.
- */
 function makeGate(opts: MakeGateOptions) {
   const pluginId = opts.pluginId ?? "test-brain";
   const auditEntries: AuditEntry[] = [];
-  const loopCalls: FakeLoopCall[] = [];
   const dedupe = opts.dedupe ?? new TriggerConversationDedupe();
+  const rateLimiter = opts.rateLimiter ?? new TriggerConversationRateLimiter();
   const auditLogger = { log: (e: AuditEntry) => auditEntries.push(e) };
-  const conversationLoopRef = opts.loopBound
-    ? {
-        fn: {
-          runTriggerTurn: async (spec: {
-            prompt: string;
-            source: string;
-            visibility: "silent" | "summary-only" | "user-visible";
-            priority: "low" | "normal" | "high";
-            context?: Record<string, unknown>;
-          }) => {
-            loopCalls.push({
-              prompt: spec.prompt,
-              source: spec.source,
-              visibility: spec.visibility,
-              priority: spec.priority,
-              contextKeys: spec.context ? Object.keys(spec.context) : [],
-            });
-            return { text: "", toolCalls: [], route: "general" } as const;
-          },
-        } as unknown as { runTriggerTurn: typeof loopRunTriggerTurn },
-      }
-    : { fn: null };
-
-  const triggerConversation = async (
-    spec: ConversationTriggerSpec,
-  ): Promise<ConversationTriggerResult> => {
-    const source = typeof spec?.source === "string" ? spec.source : "";
-    const { visibility, priority, dedupeKey } = normalizeTriggerSpecFields(
-      spec ?? ({} as ConversationTriggerSpec),
-    );
-    const auditDeny = (reasonInput: string) => {
-      auditLogger.log({
-        timestamp: new Date().toISOString(),
-        sessionId: "plugin",
-        type: "error",
-        input: `[plugin:${pluginId}] trigger_conversation_denied ${reasonInput}`,
-      });
-    };
-
-    if (!opts.manifest.capabilities?.includes("conversation-trigger")) {
-      auditDeny("reason=capability_denied");
-      return { accepted: false, reason: "capability_denied", source };
-    }
-    if (!source.startsWith("proactive:")) {
-      auditDeny(`reason=invalid_source source=${source || "<empty>"}`);
-      return { accepted: false, reason: "invalid_source", source };
-    }
-    if (typeof spec?.prompt !== "string" || spec.prompt.trim().length === 0) {
-      auditDeny(`reason=invalid_source source=${source} (empty prompt)`);
-      return { accepted: false, reason: "invalid_source", source };
-    }
-    if (dedupeKey && dedupe.has(pluginId, dedupeKey)) {
-      auditDeny(`reason=duplicate dedupeKey=${dedupeKey}`);
-      return { accepted: false, reason: "duplicate", source };
-    }
-
-    const loop = conversationLoopRef.fn;
-    if (!loop) {
-      auditDeny("reason=loop_unavailable");
-      return { accepted: false, reason: "loop_unavailable", source };
-    }
-
-    if (dedupeKey) dedupe.record(pluginId, dedupeKey);
-
-    auditLogger.log({
-      timestamp: new Date().toISOString(),
-      sessionId: "plugin",
-      type: "tool_call",
-      input:
-        `[plugin:${pluginId}] trigger_conversation source=${source} ` +
-        `visibility=${visibility} priority=${priority}` +
-        (dedupeKey ? ` dedupeKey=${dedupeKey}` : ""),
-    });
-
-    void loop
-      .runTriggerTurn({
-        prompt: spec.prompt,
-        source,
-        visibility,
-        priority,
-        ...(spec.context ? { context: spec.context } : {}),
-      })
-      .catch(() => undefined);
-
-    return { accepted: true, source };
-  };
 
   return {
-    invoke: async (spec: ConversationTriggerSpec): Promise<GateOutcome> => {
-      const result = await triggerConversation(spec);
-      return { result, loopCalls, auditEntries };
+    invoke(spec: ConversationTriggerSpec): GateOutcome {
+      const decision = evaluateTriggerSpec({
+        spec,
+        pluginId,
+        capabilities: opts.manifest.capabilities ?? [],
+        dedupe,
+        rateLimiter,
+        loopBound: opts.loopBound ?? true,
+        auditLogger,
+        now: opts.now,
+      });
+      return {
+        result: decision.result,
+        auditEntries,
+        visibility:
+          decision.kind === "allow" ? decision.visibility : undefined,
+        priority: decision.kind === "allow" ? decision.priority : undefined,
+      };
     },
-    state: { auditEntries, loopCalls, dedupe },
+    state: { auditEntries, dedupe, rateLimiter },
   };
 }
-
-// Type-only helper for the gate factory above.
-declare function loopRunTriggerTurn(spec: {
-  prompt: string;
-  source: string;
-  visibility: "silent" | "summary-only" | "user-visible";
-  priority: "low" | "normal" | "high";
-  context?: Record<string, unknown>;
-}): Promise<unknown>;
 
 function brainManifest(extra: Partial<PluginManifest> = {}): PluginManifest {
   return {
@@ -204,7 +117,6 @@ describe("TriggerConversationDedupe", () => {
     dedupe.record("p1", "k1");
     expect(dedupe.has("p1", "k1")).toBe(true);
     const seenAt = Date.now() - TRIGGER_CONVERSATION_DEDUPE_TTL_MS - 1;
-    // Reach into the private map to age the entry without waiting real time.
     (
       dedupe as unknown as { seen: Map<string, number> }
     ).seen.set("p1::k1", seenAt);
@@ -212,25 +124,44 @@ describe("TriggerConversationDedupe", () => {
   });
 
   it("refreshes LRU order on re-record so a frequently-recorded key is not evicted as oldest", () => {
-    // Copilot review #2 — Map#set on an existing key does NOT refresh
-    // insertion order; record() must delete-then-set. This test would fail
-    // before the fix.
-    dedupe.record("p1", "hot");        // hot is "oldest" by insertion
+    dedupe.record("p1", "hot");
     dedupe.record("p1", "cold-1");
     dedupe.record("p1", "cold-2");
-    dedupe.record("p1", "hot");        // re-record → should move to newest
-    // Force capacity overflow by filling above MAX (256). Use a lightweight
-    // path: cap is checked in record(); insert 254 more synthetic keys.
+    dedupe.record("p1", "hot");
     for (let i = 0; i < 254; i += 1) dedupe.record("p1", `pad-${i}`);
-    // Now insert one more → triggers eviction of the genuine oldest, which
-    // should be "cold-1" (NOT "hot", which was refreshed above).
     dedupe.record("p1", "trigger-eviction");
     expect(dedupe.has("p1", "hot")).toBe(true);
     expect(dedupe.has("p1", "cold-1")).toBe(false);
   });
 });
 
-describe("normalizeTriggerSpecFields (Copilot review #3)", () => {
+describe("TriggerConversationRateLimiter", () => {
+  it("allows up to maxCalls within the window", () => {
+    const rl = new TriggerConversationRateLimiter(60_000, 3);
+    rl.record("p1", 1000);
+    rl.record("p1", 1100);
+    expect(rl.isOverCap("p1", 1200)).toBe(false);
+    rl.record("p1", 1200);
+    expect(rl.isOverCap("p1", 1300)).toBe(true);
+  });
+
+  it("forgets calls older than the window", () => {
+    const rl = new TriggerConversationRateLimiter(60_000, 2);
+    rl.record("p1", 0);
+    rl.record("p1", 1000);
+    expect(rl.isOverCap("p1", 2000)).toBe(true);
+    expect(rl.isOverCap("p1", 60_001)).toBe(false);
+  });
+
+  it("scopes per plugin", () => {
+    const rl = new TriggerConversationRateLimiter(60_000, 1);
+    rl.record("p1", 1000);
+    expect(rl.isOverCap("p1", 1500)).toBe(true);
+    expect(rl.isOverCap("p2", 1500)).toBe(false);
+  });
+});
+
+describe("normalizeTriggerSpecFields", () => {
   it("falls back to defaults for unknown enum-ish values", () => {
     const out = normalizeTriggerSpecFields({
       prompt: "x",
@@ -284,40 +215,42 @@ describe("normalizeTriggerSpecFields (Copilot review #3)", () => {
   });
 });
 
-describe("hostApi.triggerConversation gate", () => {
-  it("rejects when the plugin lacks `conversation-trigger` capability", async () => {
-    const gate = makeGate({
-      manifest: brainManifest({ capabilities: [] }),
-      loopBound: true,
-    });
-    const out = await gate.invoke({
-      prompt: "hello",
-      source: "proactive:test",
-    });
+describe("evaluateTriggerSpec gate (PR #215 review M1: shared with prod)", () => {
+  it("rejects when the plugin lacks `conversation-trigger` capability", () => {
+    const gate = makeGate({ manifest: brainManifest({ capabilities: [] }) });
+    const out = gate.invoke({ prompt: "hi", source: "proactive:test" });
     expect(out.result).toEqual({
       accepted: false,
       reason: "capability_denied",
       source: "proactive:test",
     });
-    expect(out.loopCalls).toHaveLength(0);
     expect(out.auditEntries.some((e) =>
       String(e.input).includes("trigger_conversation_denied reason=capability_denied"),
     )).toBe(true);
   });
 
-  it("rejects sources that do not start with `proactive:`", async () => {
-    const gate = makeGate({ manifest: brainManifest(), loopBound: true });
-    const bad = await gate.invoke({ prompt: "hi", source: "user:typed" });
-    expect(bad.result.accepted).toBe(false);
-    expect(bad.result.reason).toBe("invalid_source");
-
-    const empty = await gate.invoke({ prompt: "hi", source: "" });
-    expect(empty.result.reason).toBe("invalid_source");
+  it("rejects sources that do not match `^proactive:[a-z][a-z0-9-]*$`", () => {
+    const gate = makeGate({ manifest: brainManifest() });
+    for (const bad of ["user:typed", "", "proactive:", "proactive:Bad", "proactive:_x", "proactive:has/slash"]) {
+      const out = gate.invoke({ prompt: "x", source: bad });
+      expect(out.result.accepted).toBe(false);
+      expect(out.result.reason).toBe("invalid_source");
+    }
   });
 
-  it("rejects empty prompts", async () => {
-    const gate = makeGate({ manifest: brainManifest(), loopBound: true });
-    const out = await gate.invoke({
+  it("truncates over-long source strings before audit (PR #215 review M2)", () => {
+    const gate = makeGate({ manifest: brainManifest() });
+    const huge = "proactive:" + "x".repeat(500);
+    const out = gate.invoke({ prompt: "x", source: huge });
+    // Truncation makes the audit row bounded; the source still passes the
+    // regex (truncated still matches), so accept goes through normally.
+    expect(out.result.accepted).toBe(true);
+    expect(out.result.source).toHaveLength(128);
+  });
+
+  it("rejects empty prompts", () => {
+    const gate = makeGate({ manifest: brainManifest() });
+    const out = gate.invoke({
       prompt: "   ",
       source: "proactive:meeting-detection",
     });
@@ -325,9 +258,9 @@ describe("hostApi.triggerConversation gate", () => {
     expect(out.result.reason).toBe("invalid_source");
   });
 
-  it("rejects when ConversationLoop is not yet bound (boot ordering)", async () => {
+  it("rejects when ConversationLoop is not yet bound (boot ordering)", () => {
     const gate = makeGate({ manifest: brainManifest(), loopBound: false });
-    const out = await gate.invoke({
+    const out = gate.invoke({
       prompt: "hi",
       source: "proactive:meeting-detection",
     });
@@ -335,9 +268,37 @@ describe("hostApi.triggerConversation gate", () => {
     expect(out.result.reason).toBe("loop_unavailable");
   });
 
-  it("forwards an accepted trigger to runTriggerTurn with defaults", async () => {
-    const gate = makeGate({ manifest: brainManifest(), loopBound: true });
-    const out = await gate.invoke({
+  it("returns rate_limited after the per-plugin cap", () => {
+    const rateLimiter = new TriggerConversationRateLimiter(60_000, 2);
+    const gate = makeGate({ manifest: brainManifest(), rateLimiter });
+    expect(gate.invoke({ prompt: "1", source: "proactive:x" }).result.accepted).toBe(true);
+    expect(gate.invoke({ prompt: "2", source: "proactive:x" }).result.accepted).toBe(true);
+    const third = gate.invoke({ prompt: "3", source: "proactive:x" });
+    expect(third.result.accepted).toBe(false);
+    expect(third.result.reason).toBe("rate_limited");
+  });
+
+  it("records dedupe + rate-limit only on the success path (denials must not consume budget)", () => {
+    const rateLimiter = new TriggerConversationRateLimiter(60_000, 2);
+    const gate = makeGate({
+      manifest: brainManifest({ capabilities: [] }),
+      rateLimiter,
+    });
+    // capability denial — must not advance the rate-limit window
+    gate.invoke({ prompt: "x", source: "proactive:x" });
+    gate.invoke({ prompt: "x", source: "proactive:x" });
+    gate.invoke({ prompt: "x", source: "proactive:x" });
+    // Now grant capability — should still have full budget
+    const gate2 = makeGate({
+      manifest: brainManifest(),
+      rateLimiter,
+    });
+    expect(gate2.invoke({ prompt: "ok", source: "proactive:x" }).result.accepted).toBe(true);
+  });
+
+  it("forwards an accepted trigger and reports normalized visibility / priority", () => {
+    const gate = makeGate({ manifest: brainManifest() });
+    const out = gate.invoke({
       prompt: "회의실 예약 도와드릴까요?",
       source: "proactive:meeting-detection",
       context: { emailId: "abc" },
@@ -346,56 +307,33 @@ describe("hostApi.triggerConversation gate", () => {
       accepted: true,
       source: "proactive:meeting-detection",
     });
-    expect(out.loopCalls).toHaveLength(1);
-    expect(out.loopCalls[0]).toMatchObject({
-      prompt: "회의실 예약 도와드릴까요?",
-      source: "proactive:meeting-detection",
-      visibility: "summary-only",
-      priority: "normal",
-      contextKeys: ["emailId"],
-    });
+    expect(out.visibility).toBe("summary-only");
+    expect(out.priority).toBe("normal");
   });
 
-  it("respects explicit visibility / priority over defaults", async () => {
-    const gate = makeGate({ manifest: brainManifest(), loopBound: true });
-    await gate.invoke({
-      prompt: "x",
-      source: "proactive:silent-watch",
-      visibility: "silent",
-      priority: "low",
-    });
-    expect(gate.state.loopCalls[0]).toMatchObject({
-      visibility: "silent",
-      priority: "low",
-    });
-  });
-
-  it("falls back to safe defaults when plugin sends unknown visibility / priority (Copilot review #3)", async () => {
-    const gate = makeGate({ manifest: brainManifest(), loopBound: true });
-    await gate.invoke({
+  it("falls back to safe defaults when plugin sends unknown visibility / priority", () => {
+    const gate = makeGate({ manifest: brainManifest() });
+    const out = gate.invoke({
       prompt: "x",
       source: "proactive:bug",
       visibility: "loud" as unknown as "silent",
       priority: "urgent" as unknown as "high",
     });
-    expect(gate.state.loopCalls[0]).toMatchObject({
-      visibility: "summary-only",
-      priority: "normal",
-    });
-    // audit must record the normalized values, not the raw plugin input
-    expect(gate.state.auditEntries.some((e) =>
+    expect(out.visibility).toBe("summary-only");
+    expect(out.priority).toBe("normal");
+    expect(out.auditEntries.some((e) =>
       String(e.input).includes("visibility=summary-only"),
     )).toBe(true);
   });
 
-  it("blocks the second call when dedupeKey matches a recent trigger", async () => {
-    const gate = makeGate({ manifest: brainManifest(), loopBound: true });
-    const first = await gate.invoke({
+  it("blocks the second call when dedupeKey matches a recent trigger", () => {
+    const gate = makeGate({ manifest: brainManifest() });
+    const first = gate.invoke({
       prompt: "first",
       source: "proactive:detect",
       dedupeKey: "mail-123",
     });
-    const second = await gate.invoke({
+    const second = gate.invoke({
       prompt: "second",
       source: "proactive:detect",
       dedupeKey: "mail-123",
@@ -403,32 +341,5 @@ describe("hostApi.triggerConversation gate", () => {
     expect(first.result.accepted).toBe(true);
     expect(second.result.accepted).toBe(false);
     expect(second.result.reason).toBe("duplicate");
-    expect(gate.state.loopCalls).toHaveLength(1);
-  });
-
-  it("records dedupe only after the first acceptance — failed gates do not reserve the key", async () => {
-    const gate = makeGate({
-      manifest: brainManifest({ capabilities: [] }),
-      loopBound: true,
-    });
-    const denied = await gate.invoke({
-      prompt: "x",
-      source: "proactive:detect",
-      dedupeKey: "shared-key",
-    });
-    expect(denied.result.reason).toBe("capability_denied");
-    // Now grant capability — the key should NOT have been reserved by the
-    // previous denial.
-    const gate2 = makeGate({
-      manifest: brainManifest(),
-      loopBound: true,
-      dedupe: gate.state.dedupe,
-    });
-    const accepted = await gate2.invoke({
-      prompt: "x",
-      source: "proactive:detect",
-      dedupeKey: "shared-key",
-    });
-    expect(accepted.result.accepted).toBe(true);
   });
 });

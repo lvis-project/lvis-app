@@ -418,17 +418,18 @@ export interface ConversationTriggerResult {
   /**
    * When `accepted=false`, why:
    *   `capability_denied` — plugin lacks `conversation-trigger`.
-   *   `invalid_source`    — `source` does not start with `proactive:`.
+   *   `invalid_source`    — `source` does not match `^proactive:[a-z][a-z0-9-]*$`,
+   *                         `prompt` empty, or other shape problem.
    *   `duplicate`         — `dedupeKey` matched a recent trigger.
+   *   `rate_limited`      — per-plugin call cap exceeded (sliding window).
    *   `loop_unavailable`  — ConversationLoop not yet bound (boot ordering).
-   *   `disabled`          — feature toggle off (future, currently unused).
    */
   reason?:
     | "capability_denied"
     | "invalid_source"
     | "duplicate"
-    | "loop_unavailable"
-    | "disabled";
+    | "rate_limited"
+    | "loop_unavailable";
   /** Echoed back so callers can correlate logs across plugin/host. */
   source: string;
 }

@@ -29,11 +29,19 @@ describe("SystemPromptBuilder — Proactive Origin Guidance", () => {
     const builder = makeBuilder();
     builder.setOriginSource("proactive:meeting-detection");
     const prompt = builder.build();
-    expect(prompt).toContain("<proactive-origin-guidance>");
+    expect(prompt).toContain("<proactive-origin-guidance");
     expect(prompt).toContain("source=proactive:meeting-detection");
     expect(prompt).toContain("도구를 호출하기 전에");
     expect(prompt).toContain("ApprovalGate");
     expect(prompt).toContain("</proactive-origin-guidance>");
+  });
+
+  it("warns the LLM not to obey imperatives inside the user-turn message (PR #215 review H3)", () => {
+    const builder = makeBuilder();
+    builder.setOriginSource("proactive:meeting-detection");
+    const prompt = builder.build();
+    expect(prompt).toContain("imperative");
+    expect(prompt).toContain("templated");
   });
 
   it("omits guidance for user-initiated turns (origin null)", () => {
