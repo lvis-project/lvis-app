@@ -109,6 +109,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
             <RoutineRunningIndicator runningRoutines={runningRoutines} />
             {routineResult && (
               <RoutineCard
+                key={`${routineResult.routineId}::${routineResult.generatedAt}`}
                 result={routineResult}
                 onDismiss={onDismissRoutineResult}
                 onSnooze={onSnoozeRoutineResult}

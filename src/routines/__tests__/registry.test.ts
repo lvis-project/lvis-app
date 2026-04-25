@@ -18,10 +18,13 @@ describe("buildRoutineForTrigger", () => {
       enableWakeupRoutine: true,
       wakeupRoutinePrompt: "사용자 정의 모닝 브리핑 prompt",
     });
-    expect(built).toEqual({
-      ok: true,
-      routine: { id: "wakeup", trigger: "wakeup", prePrompt: "사용자 정의 모닝 브리핑 prompt" },
-    });
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.routine.id).toBe("wakeup");
+      expect(built.routine.trigger).toBe("wakeup");
+      expect(built.routine.prePrompt).toBe("사용자 정의 모닝 브리핑 prompt");
+      expect(built.routine.title).toBe("웨이크업 루틴");
+    }
   });
 
   it("wakeup falls back to DEFAULT_WAKEUP_ROUTINE_PROMPT when unset", () => {

@@ -71,7 +71,7 @@ export function buildRoutineForTrigger(
     const prePrompt = typeof configured === "string" && configured.trim().length > 0
       ? configured.trim()
       : DEFAULT_WAKEUP_ROUTINE_PROMPT;
-    return { ok: true, routine: { id: meta.id, trigger: meta.trigger, prePrompt } };
+    return { ok: true, routine: { id: meta.id, trigger: meta.trigger, prePrompt, title: meta.title } };
   }
 
   if (meta.id === "shutdown") {
@@ -79,7 +79,7 @@ export function buildRoutineForTrigger(
     const prePrompt = typeof configured === "string" && configured.trim().length > 0
       ? configured.trim()
       : DEFAULT_SHUTDOWN_PROMPT;
-    return { ok: true, routine: { id: meta.id, trigger: meta.trigger, prePrompt } };
+    return { ok: true, routine: { id: meta.id, trigger: meta.trigger, prePrompt, title: meta.title } };
   }
 
   // schedule — pick first enabled entry's prompt
@@ -88,6 +88,6 @@ export function buildRoutineForTrigger(
   if (!active) return { ok: false, error: "schedule-no-active-entry" };
   return {
     ok: true,
-    routine: { id: active.id, trigger: meta.trigger, prePrompt: active.prompt },
+    routine: { id: active.id, trigger: meta.trigger, prePrompt: active.prompt, title: meta.title },
   };
 }

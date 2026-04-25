@@ -81,7 +81,12 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
       scheduleLastMinuteKeyByEntry.set(entry.id, minuteKey);
       notifyRoutineStarted(mainWindow, { routineId: entry.id, trigger: "schedule", startedAt: new Date().toISOString() });
       void routineEngine
-        .runRoutine({ id: entry.id, trigger: "schedule", prePrompt: entry.prompt })
+        .runRoutine({
+          id: entry.id,
+          trigger: "schedule",
+          prePrompt: entry.prompt,
+          title: `스케줄 — ${entry.id}`,
+        })
         .then((result) => onRoutineCompleted(result))
         .catch((e: Error) => {
           console.warn("[lvis] boot: schedule routine failed:", e.message);

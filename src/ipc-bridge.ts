@@ -655,7 +655,13 @@ ${input}`;
       type: "info",
       input: `dev-trigger ${routineId}`,
     });
-    const startedPayload = { routineId, trigger: routineId, startedAt: new Date().toISOString() };
+    // started/completed routineId MUST match so useRoutineRunning Map can
+    // delete the right key on completion. For schedule dev-trigger,
+    // built.routine.id = the picked entry's id (e.g. "schedule-2"), and the
+    // engine result's routineId mirrors that. Using the user-facing trigger
+    // type (e.g. "schedule") for started would leave a zombie spinner.
+    const trackedId = built.routine.id;
+    const startedPayload = { routineId: trackedId, trigger: built.routine.trigger, startedAt: new Date().toISOString() };
     notifyRoutineStarted(getMainWindow(), startedPayload);
     try {
       const result = await routineEngine.runRoutine(built.routine);
@@ -665,7 +671,7 @@ ${input}`;
       const message = error instanceof Error ? error.message : String(error);
       // Pair every started with a completed so the renderer's running
       // indicator clears even on failure (zombie spinner regression).
-      notifyRoutineFailed(getMainWindow(), { routineId, trigger: routineId }, message);
+      notifyRoutineFailed(getMainWindow(), { routineId: trackedId, trigger: built.routine.trigger }, message);
       return { ok: false, error: message };
     }
   };

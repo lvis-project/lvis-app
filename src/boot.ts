@@ -217,6 +217,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   };
   const routineEngine = createRoutineEngine({
     createConversationLoop: () => createRoutineConversationLoop(routineLoopDeps),
+    memoryManager,
   });
 
   // §7 Routine wiring — schedule cron timer + RoutineIdleSignaler (idle entry/exit).
