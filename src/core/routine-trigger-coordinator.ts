@@ -212,8 +212,3 @@ export function createPostTurnSignal(opts: {
     },
   };
 }
-
-// ─── Removed: createMeetingSignal, createTaskDeadlineSignal ──────────────────
-// These signals triggered the old generateDailyBriefing (pluginRuntime.call).
-// They are removed in the wakeup-routine refactor. If needed in future, add
-// them back as separate coordinator instances rather than mixing with routine triggers.

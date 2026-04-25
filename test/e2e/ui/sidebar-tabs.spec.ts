@@ -1,15 +1,13 @@
 import { test, expect } from './fixtures';
 
 /**
- * Sidebar tab switching — iterates plugins/tasks/starred/briefings tabs and
- * verifies at least one can be clicked. Skips cleanly when the sidebar is not
- * present.
+ * Sidebar tab switching — iterates plugins/tasks/starred tabs and verifies at
+ * least one can be clicked. Skips cleanly when the sidebar is not present.
  */
 const TABS = [
   { id: 'plugins', labels: ['Plugins', '플러그인'] },
   { id: 'tasks', labels: ['Tasks', '작업'] },
   { id: 'starred', labels: ['Starred', '즐겨찾기', '별표'] },
-  { id: 'briefings', labels: ['Briefings', 'Briefing', '브리핑'] },
 ];
 
 test('sidebar tabs switch or skip cleanly', async ({ mainWindow }) => {

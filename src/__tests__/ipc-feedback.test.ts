@@ -46,7 +46,6 @@ function makeServices(overrides: Record<string, unknown> = {}) {
       manualCompact: vi.fn(),
       resetAndResume: vi.fn(),
       permissionManager: null,
-      generateBriefing: vi.fn(),
     },
     pluginRuntime: { listUiExtensions: vi.fn(() => []), listPluginCards: vi.fn(() => []), callFromUi: vi.fn(), restartAll: vi.fn(), getPerfStats: vi.fn(() => ({})) },
     pluginMarketplace: { list: vi.fn(() => []), install: vi.fn(), uninstall: vi.fn() },
