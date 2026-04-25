@@ -18,26 +18,6 @@ export interface RoutineResult {
   generatedAt: string;
 }
 
-// ─── Legacy types — kept for work-proactive plugin compatibility ──────────────
-
-export interface BriefingItem {
-  category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
-  priority: "high" | "medium" | "low";
-  title: string;
-  detail?: string;
-}
-
-export interface Briefing {
-  generatedAt: string;
-  items: BriefingItem[];
-  summary?: string;
-}
-
-export interface ShutdownSummary {
-  generatedAt: string;
-  summary: string;
-}
-
 // ─── Engine ──────────────────────────────────────────────────────────────────
 
 export interface RoutineEngineDeps {

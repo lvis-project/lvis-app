@@ -17,7 +17,7 @@ export interface SessionResult {
  * D5 — memory search hook.
  *
  * Debounces query (200 ms), fires IPC calls, guards post-unmount setState
- * with aliveRef pattern (matching use-briefing.ts).
+ * with aliveRef pattern.
  */
 export function useMemorySearch(api: LvisApi) {
   const [query, setQuery] = useState("");

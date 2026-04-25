@@ -13,7 +13,7 @@ import { LlmTab } from "./tabs/LlmTab.js";
 import { AdvancedTab } from "./tabs/AdvancedTab.js";
 import { ChatTab } from "./tabs/ChatTab.js";
 import { WebTab } from "./tabs/WebTab.js";
-import { ProactiveTab } from "./tabs/ProactiveTab.js";
+import { RoutineTab } from "./tabs/RoutineTab.js";
 import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MsGraphTab } from "./tabs/MsGraphTab.js";
@@ -109,7 +109,7 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
           </TabsContent>
 
           <TabsContent value="routine">
-            <ProactiveTab
+            <RoutineTab
               enableWakeupRoutine={s.enableWakeupRoutine}
               setEnableWakeupRoutine={s.setEnableWakeupRoutine}
             />

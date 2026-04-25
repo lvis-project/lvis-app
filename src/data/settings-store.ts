@@ -477,30 +477,21 @@ export class SettingsService {
         marketplaceParsed.realCloudAllowPrivateNetwork = false;
       }
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
-      const legacyRoutine = parsed.routine ?? parsed.proactive;
+      const routine = parsed.routine;
       const normalizedRoutine: RoutineSettings = {
         ...DEFAULT_SETTINGS.routine,
-        ...legacyRoutine,
-        // migrate: dailyBriefingPrompt → wakeupRoutinePrompt
-        wakeupRoutinePrompt: typeof (legacyRoutine?.wakeupRoutinePrompt ?? legacyRoutine?.dailyBriefingPrompt) === "string"
-          && ((legacyRoutine?.wakeupRoutinePrompt ?? legacyRoutine?.dailyBriefingPrompt) as string).trim().length > 0
-          ? ((legacyRoutine?.wakeupRoutinePrompt ?? legacyRoutine?.dailyBriefingPrompt) as string).trim()
+        ...routine,
+        wakeupRoutinePrompt: typeof routine?.wakeupRoutinePrompt === "string" && routine.wakeupRoutinePrompt.trim().length > 0
+          ? routine.wakeupRoutinePrompt.trim()
           : DEFAULT_WAKEUP_ROUTINE_PROMPT,
-        // migrate: heartbeatEntries → scheduleEntries
-        scheduleEntries: normalizeScheduleEntries(
-          legacyRoutine?.scheduleEntries ?? legacyRoutine?.heartbeatEntries,
-        ),
-        shutdownPrompt: typeof legacyRoutine?.shutdownPrompt === "string" && legacyRoutine.shutdownPrompt.trim().length > 0
-          ? legacyRoutine.shutdownPrompt.trim()
+        scheduleEntries: normalizeScheduleEntries(routine?.scheduleEntries),
+        shutdownPrompt: typeof routine?.shutdownPrompt === "string" && routine.shutdownPrompt.trim().length > 0
+          ? routine.shutdownPrompt.trim()
           : DEFAULT_SHUTDOWN_PROMPT,
-        // migrate: enableDailyBriefing → enableWakeupRoutine
-        enableWakeupRoutine: legacyRoutine?.enableWakeupRoutine ?? legacyRoutine?.enableDailyBriefing ?? false,
-        // migrate: lastBriefingAt → lastWakeupRoutineAt
-        lastWakeupRoutineAt: legacyRoutine?.lastWakeupRoutineAt ?? legacyRoutine?.lastBriefingAt,
-        // migrate: enableShutdownSummary → enableShutdownRoutine
-        enableShutdownRoutine: legacyRoutine?.enableShutdownRoutine ?? legacyRoutine?.enableShutdownSummary ?? true,
-        // migrate: enableHeartbeat → enableScheduleRoutine
-        enableScheduleRoutine: legacyRoutine?.enableScheduleRoutine ?? legacyRoutine?.enableHeartbeat ?? true,
+        enableWakeupRoutine: routine?.enableWakeupRoutine ?? false,
+        lastWakeupRoutineAt: routine?.lastWakeupRoutineAt,
+        enableShutdownRoutine: routine?.enableShutdownRoutine ?? true,
+        enableScheduleRoutine: routine?.enableScheduleRoutine ?? true,
       };
 
       return {
