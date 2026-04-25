@@ -409,6 +409,40 @@ export class ConversationLoop {
   }
 
   /**
+   * Proactive Brain — start a turn from a brain-plugin observation.
+   *
+   * This is the host-side entry behind `hostApi.triggerConversation()`. It
+   * delegates to {@link runTurn} (so the templated prompt flows through the
+   * usual classify→route→loop pipeline), but tags the audit chain with the
+   * trigger's `source` and `visibility` so the source-aware permission model
+   * (§6.3) can scope policies to `proactive:*` origins.
+   *
+   * The host enforces capability + source/dedupe in `createHostApi`; this
+   * method assumes those checks already passed.
+   */
+  async runTriggerTurn(
+    spec: {
+      prompt: string;
+      source: string;
+      visibility: "silent" | "summary-only" | "user-visible";
+      priority: "low" | "normal" | "high";
+      context?: Record<string, unknown>;
+    },
+    callbacks?: TurnCallbacks,
+    abortSignal?: AbortSignal,
+  ): Promise<TurnResult> {
+    this.auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: this.sessionId,
+      type: "tool_call",
+      input:
+        `[trigger] source=${spec.source} visibility=${spec.visibility} priority=${spec.priority}` +
+        (spec.context ? ` contextKeys=${Object.keys(spec.context).join(",")}` : ""),
+    });
+    return this.runTurn(spec.prompt, callbacks, abortSignal);
+  }
+
+  /**
    * 한 턴 실행 — §4.5 Core Cycle
    * @param abortSignal  B4: optional external abort signal; if omitted a fresh
    *                     AbortController is created and stored in
