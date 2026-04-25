@@ -122,11 +122,14 @@ describe("ConversationLoop.runTriggerTurn", () => {
     expect(originLog.calls).toEqual(["proactive:meeting-detection", null]);
   });
 
-  it("clears origin source even when the delegated runTurn rejects (no leakage to next turn)", async () => {
+  it("never leaks origin source when runTurn throws before reaching build() (PR #215 review B2)", async () => {
     const originLog: OriginSourceLog = { calls: [] };
     const loop = makeLoop([], originLog);
-    // Force the underlying turn to reject by clearing the provider — runTurn
-    // throws "LLM 프로바이더가 설정되지 않았습니다." before any streaming.
+    // Force the underlying turn to throw early by clearing the provider —
+    // runTurn rejects "LLM 프로바이더가 설정되지 않았습니다." BEFORE the
+    // setToolScope / setOriginSource pair is reached. So setOriginSource
+    // must NOT have been called at all (nothing to clean up = no leak by
+    // construction).
     (loop as { provider: unknown }).provider = null;
 
     await expect(
@@ -138,8 +141,6 @@ describe("ConversationLoop.runTriggerTurn", () => {
       }),
     ).rejects.toBeDefined();
 
-    // Origin must still be cleared so the next user-initiated turn does not
-    // accidentally inherit the proactive guidance section.
-    expect(originLog.calls).toEqual(["proactive:meeting-detection", null]);
+    expect(originLog.calls).toEqual([]);
   });
 });

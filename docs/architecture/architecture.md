@@ -2142,7 +2142,7 @@ stateDiagram-v2
 | `onMsGraphAuthChange(handler)` | 인증 상태 변화 구독 | email, calendar |
 | `logEvent(level, message, data?)` | **[Phase 2]** 호스트 감사 로그에 플러그인 이벤트 기록. `level`: `"info"\|"warn"\|"error"` | 전체 |
 | `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
-| `triggerConversation(spec)` | **[Phase Brain P0]** 관찰 신호로부터 ConversationLoop 능동 발사 ("먼저 말 거는 비서" 차별화). `conversation-trigger` capability gated — 일반 plugin 차단. 자세한 사양: [`conversation-trigger.md`](../references/conversation-trigger.md) | proactive (work-proactive) |
+| `triggerConversation(spec)` | **[Brain P0]** 관찰 신호로부터 ConversationLoop 능동 발사 ("먼저 말 거는 비서" 차별화). `conversation-trigger` capability gated — 일반 plugin 차단. 자세한 사양: [`conversation-trigger.md`](../references/conversation-trigger.md). Brain track 은 §7 Proactive Engine 의 sub-phase 로 P0~P5 진행. | proactive (work-proactive) |
 
 **Microsoft Graph 공유 인증 (`ms-graph-consumer` capability gated):**
 

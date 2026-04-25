@@ -226,7 +226,11 @@ describe("task tools", () => {
     // outside the local window.)
     const localNoonToday = new Date();
     localNoonToday.setHours(12, 0, 0, 0);
-    const localNoonTomorrow = new Date(localNoonToday.getTime() + 86_400_000);
+    const localNoonTomorrow = new Date(localNoonToday);
+    // Use setDate (not + 86_400_000) so DST-transitioning timezones (the
+    // test claims to be timezone-independent) still land on the actual
+    // calendar tomorrow.
+    localNoonTomorrow.setDate(localNoonTomorrow.getDate() + 1);
     await call(toolByName(tools, "task_add"), {
       title: "오늘",
       dueAt: localNoonToday.toISOString(),
