@@ -47,7 +47,7 @@ const DEFAULT_USAGE = {
 export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   api: MockLvisApi;
   emitChatStream: (ev: unknown) => void;
-  emitRoutineBriefing: (b: unknown) => void;
+  emitRoutineCompleted: (r: unknown) => void;
   emitViewActivate: (v: string) => void;
 } {
   const settings = overrides.settings ?? DEFAULT_SETTINGS;
@@ -62,10 +62,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const pluginCards = overrides.pluginCards ?? [];
   const marketplace = overrides.marketplace ?? [];
   const pluginUiExtensions = overrides.pluginUiExtensions ?? [];
-  const latestRoutineBriefing = overrides.latestRoutineBriefing ?? null;
+  const latestRoutineResult = overrides.latestRoutineBriefing ?? null;
 
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
-  const routineBriefingHandlers = new Set<(b: unknown) => void>();
+  const routineCompletedHandlers = new Set<(r: unknown) => void>();
   const viewHandlers = new Set<(v: string) => void>();
 
   const api: MockLvisApi = {
@@ -130,13 +130,13 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     getRecentNotes: vi.fn(async () => []),
 
     getUsageSummary: vi.fn(async () => usage),
-    getLatestRoutineBriefing: vi.fn(async () => latestRoutineBriefing),
+    getLatestRoutineResult: vi.fn(async () => latestRoutineResult),
     dismissBriefing: vi.fn(async () => ({ ok: true })),
     snoozeBriefing: vi.fn(async () => ({ ok: true })),
-    resetDailyBriefingDev: vi.fn(async () => ({ ok: true, generated: true })),
-    onRoutineBriefing: vi.fn((h: (b: unknown) => void) => {
-      routineBriefingHandlers.add(h);
-      return () => routineBriefingHandlers.delete(h);
+    triggerWakeupRoutineDev: vi.fn(async () => ({ ok: true, summary: "dev trigger" })),
+    onRoutineCompleted: vi.fn((h: (r: unknown) => void) => {
+      routineCompletedHandlers.add(h);
+      return () => routineCompletedHandlers.delete(h);
     }),
 
     submitFeedback: vi.fn(async () => ({ ok: true })),
@@ -159,7 +159,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   return {
     api,
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
-    emitRoutineBriefing: (b) => routineBriefingHandlers.forEach((h) => h(b)),
+    emitRoutineCompleted: (r) => routineCompletedHandlers.forEach((h) => h(r)),
     emitViewActivate: (v) => viewHandlers.forEach((h) => h(v)),
   };
 }

@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import type { LvisApi } from "../types.js";
 import type { MarketplaceItem, PluginUiExtension } from "../types.js";
+import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 
 /**
  * Plugin marketplace actions + state. Extracted from App.tsx to keep the
@@ -32,7 +33,7 @@ export function usePluginMarketplace(api: LvisApi) {
   const installPlugin = useCallback(async (id: string) => {
     setWorking(true);
     try {
-      const result = await api.installMarketplacePlugin(id);
+      const result = await getHostMarketplaceApi().installMarketplacePlugin(id);
       if (!result.ok) {
         throw new Error(result.message ?? result.error);
       }
@@ -49,7 +50,7 @@ export function usePluginMarketplace(api: LvisApi) {
   const uninstallPlugin = useCallback(async (id: string) => {
     setWorking(true);
     try {
-      const result = await api.uninstallMarketplacePlugin(id);
+      const result = await getHostMarketplaceApi().uninstallMarketplacePlugin(id);
       if (!result.ok) {
         throw new Error(result.message ?? result.error);
       }

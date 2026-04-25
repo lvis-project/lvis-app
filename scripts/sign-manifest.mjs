@@ -4,7 +4,7 @@
  *
  * Plugin repos each ship their own `scripts/sign-manifest.mjs`; this copy lives
  * in lvis-app for reference and for any host-side signing utilities (e.g.
- * bundled-plugin re-signing, CI verification).
+ * packaged-plugin re-signing, CI verification).
  *
  * Usage:
  *   node scripts/sign-manifest.mjs <manifest-path>         # sign -> writes <manifest>.sig

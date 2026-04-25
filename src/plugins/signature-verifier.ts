@@ -14,7 +14,7 @@ import { readFile } from "node:fs/promises";
  *     the raw 64-byte ed25519 signature (binary) or the same bytes base64-
  *     encoded. We accept both to ease operator tooling.
  *   - Public key: a PEM-encoded ed25519 SPKI key supplied by the host (either
- *     bundled or cached under ~/.lvis/keys/).
+ *     embedded or cached under ~/.lvis/keys/).
  *
  * The SHA256 digest is computed alongside the verify() call purely so callers
  * can log/audit a stable content hash; `crypto.verify()` for ed25519 ignores
@@ -36,10 +36,7 @@ export class PluginSignatureVerifier {
   private readonly keys: KeyObject[];
 
   constructor(options: SignatureVerifierOptions) {
-    if (!options.publisherPublicKeysPem || options.publisherPublicKeysPem.length === 0) {
-      throw new Error("PluginSignatureVerifier requires at least one publisher public key");
-    }
-    this.keys = options.publisherPublicKeysPem.map((pem) => createPublicKey(pem));
+    this.keys = (options.publisherPublicKeysPem ?? []).map((pem) => createPublicKey(pem));
   }
 
   /**
@@ -50,6 +47,10 @@ export class PluginSignatureVerifier {
   async verifyManifestFile(manifestPath: string): Promise<SignatureVerificationResult> {
     const manifestBytes = await readFile(manifestPath);
     const sha256 = createHash("sha256").update(manifestBytes).digest("hex");
+
+    if (this.keys.length === 0) {
+      return { valid: false, sha256, reason: "no publisher public keys configured" };
+    }
 
     let sigRaw: Buffer;
     try {

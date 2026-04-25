@@ -8,14 +8,14 @@ import { Textarea } from "../../../components/ui/textarea.js";
 import type { LvisApi, RoutineRecord } from "../types.js";
 import {
   DEFAULT_SHUTDOWN_PROMPT,
-  DEFAULT_WAKEUP_PROMPT,
-  HEARTBEAT_AGENT_OPTIONS,
-  MAX_HEARTBEAT_ENTRIES,
-  createDefaultHeartbeatEntry,
-  getDefaultHeartbeatPrompt,
-  heartbeatScheduleToCron,
-  isValidHeartbeatEntries,
-  type HeartbeatEntry,
+  DEFAULT_WAKEUP_ROUTINE_PROMPT,
+  SCHEDULE_AGENT_OPTIONS,
+  MAX_SCHEDULE_ENTRIES,
+  createDefaultScheduleEntry,
+  getDefaultSchedulePrompt,
+  scheduleToCron,
+  isValidScheduleEntries,
+  type ScheduleRoutineEntry,
 } from "../../../routines/schedule.js";
 
 export interface RoutinePanelProps {
@@ -72,8 +72,8 @@ export function RoutinePanel({
   const [routines, setRoutines] = useState<RoutineRecord[]>([]);
   const [draftTimes, setDraftTimes] = useState<Record<string, string>>({});
   const [contextPromptDrafts, setContextPromptDrafts] = useState<Record<string, string>>({});
-  const [heartbeatDrafts, setHeartbeatDrafts] = useState<Record<string, HeartbeatEntry[]>>({});
-  const [devResetBusy, setDevResetBusy] = useState(false);
+  const [scheduleEntryDrafts, setScheduleEntryDrafts] = useState<Record<string, ScheduleRoutineEntry[]>>({});
+  const [devTriggerBusy, setDevTriggerBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const next = await api.listRoutines();
@@ -87,11 +87,11 @@ export function RoutinePanel({
       }
       return merged;
     });
-    setHeartbeatDrafts((current) => {
+    setScheduleEntryDrafts((current) => {
       const merged = { ...current };
       for (const routine of next) {
-        if (routine.heartbeatEntries && !merged[routine.id]) {
-          merged[routine.id] = routine.heartbeatEntries.map(({ cron: _cron, ...entry }) => ({
+        if (routine.scheduleEntries && !merged[routine.id]) {
+          merged[routine.id] = routine.scheduleEntries.map(({ cron: _cron, ...entry }) => ({
             ...entry,
             schedule: { ...entry.schedule },
           }));
@@ -122,13 +122,12 @@ export function RoutinePanel({
   const updateRoutine = useCallback(
     async (
       routineId: string,
-        patch: {
-          enabled?: boolean;
-          scheduleTimeKst?: string;
-          contextPrompt?: string;
-          postTurnEnabled?: boolean;
-          heartbeatEntries?: HeartbeatEntry[];
-        },
+      patch: {
+        enabled?: boolean;
+        scheduleTimeKst?: string;
+        contextPrompt?: string;
+        scheduleEntries?: ScheduleRoutineEntry[];
+      },
     ) => {
       await api.updateRoutine(routineId, patch);
       await refresh();
@@ -136,22 +135,22 @@ export function RoutinePanel({
     [api, refresh],
   );
 
-  const heartbeatEntriesFor = useCallback(
+  const scheduleEntriesFor = useCallback(
     (routine: RoutineRecord) =>
-      heartbeatDrafts[routine.id] ??
-      routine.heartbeatEntries?.map(({ cron: _cron, ...entry }) => ({
+      scheduleEntryDrafts[routine.id] ??
+      routine.scheduleEntries?.map(({ cron: _cron, ...entry }) => ({
         ...entry,
         schedule: { ...entry.schedule },
       })) ??
-      [createDefaultHeartbeatEntry(0)],
-    [heartbeatDrafts],
+      [createDefaultScheduleEntry(0)],
+    [scheduleEntryDrafts],
   );
 
   const defaultContextPromptFor = useCallback((routineId: string) => {
     switch (routineId) {
-      case "daily-briefing":
-        return DEFAULT_WAKEUP_PROMPT;
-      case "shutdown-summary":
+      case "wakeup":
+        return DEFAULT_WAKEUP_ROUTINE_PROMPT;
+      case "shutdown":
         return DEFAULT_SHUTDOWN_PROMPT;
       default:
         return "";
@@ -204,7 +203,7 @@ export function RoutinePanel({
                   </div>
                 </div>
 
-                {routine.scheduleTimeKst !== undefined || routine.contextPrompt !== undefined || routine.heartbeatEntries !== undefined || routine.postTurnEnabled !== undefined ? (
+                {routine.scheduleTimeKst !== undefined || routine.contextPrompt !== undefined || routine.scheduleEntries !== undefined ? (
                   <div className="mt-4 grid gap-3 rounded-md bg-muted/40 p-3 md:grid-cols-2">
                     {routine.scheduleTimeKst !== undefined ? (
                       <div className="space-y-1">
@@ -247,7 +246,7 @@ export function RoutinePanel({
                           </Button>
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          예시 문장을 바탕으로, 시작 브리핑이나 종료 요약에 필요한 맥락을 자연어로 자유롭게 적을 수 있습니다.
+                          루틴 시작 시 LLM에게 전달할 컨텍스트 프롬프트를 자유롭게 편집할 수 있습니다.
                         </div>
                         <Textarea
                           value={contextPromptDrafts[routine.id] ?? routine.contextPrompt}
@@ -274,65 +273,65 @@ export function RoutinePanel({
                         </div>
                       </label>
                     ) : null}
-                    {isDevMode && routine.id === "daily-briefing" ? (
+                    {isDevMode && routine.id === "wakeup" ? (
                       <div className="space-y-2 rounded-md border border-dashed border-amber-500/40 bg-amber-500/5 p-3 md:col-span-2">
                         <div className="text-xs font-medium text-muted-foreground">DEV 재트리거</div>
                         <div className="text-xs text-muted-foreground">
-                          오늘 이미 온 브리핑, dismiss, snooze 상태를 초기화하고 같은 Routine 경로로 즉시 다시 생성합니다.
+                          웨이크업 루틴을 즉시 수동으로 트리거합니다.
                         </div>
                         <div className="flex justify-end">
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={devResetBusy}
+                            disabled={devTriggerBusy}
                             onClick={async () => {
-                              setDevResetBusy(true);
+                              setDevTriggerBusy(true);
                               try {
-                                const result = await api.resetDailyBriefingDev();
+                                const result = await api.triggerWakeupRoutineDev();
                                 await refresh();
-                                if (result.ok && result.generated) {
+                                if (result.ok) {
                                   onActivateHome();
                                 }
                               } finally {
-                                setDevResetBusy(false);
+                                setDevTriggerBusy(false);
                               }
                             }}
                           >
-                            {devResetBusy ? "재생성 중..." : "오늘 브리핑 상태 초기화 후 지금 다시 보내기"}
+                            {devTriggerBusy ? "트리거 중..." : "웨이크업 루틴 지금 실행"}
                           </Button>
                         </div>
                       </div>
                     ) : null}
-                    {routine.heartbeatEntries !== undefined ? (
+                    {routine.scheduleEntries !== undefined ? (
                       <div className="space-y-3 md:col-span-2">
                         <div className="space-y-1">
-                          <div className="text-xs font-medium text-muted-foreground">하트비트 스케줄</div>
+                          <div className="text-xs font-medium text-muted-foreground">스케줄 엔트리</div>
                           <div className="text-xs text-muted-foreground">
-                            최대 5개까지 등록할 수 있습니다. 각 하트비트는 agent와 cron 스케줄을 따로 가집니다.
+                            최대 {MAX_SCHEDULE_ENTRIES}개까지 등록할 수 있습니다. 각 엔트리는 agent와 cron 스케줄을 따로 가집니다.
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">{heartbeatEntriesFor(routine).length}/{MAX_HEARTBEAT_ENTRIES} 등록</Badge>
+                          <Badge variant="outline">{scheduleEntriesFor(routine).length}/{MAX_SCHEDULE_ENTRIES} 등록</Badge>
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={heartbeatEntriesFor(routine).length >= MAX_HEARTBEAT_ENTRIES}
+                            disabled={scheduleEntriesFor(routine).length >= MAX_SCHEDULE_ENTRIES}
                             onClick={() =>
-                              setHeartbeatDrafts((current) => ({
+                              setScheduleEntryDrafts((current) => ({
                                 ...current,
-                                [routine.id]: [...heartbeatEntriesFor(routine), createDefaultHeartbeatEntry(heartbeatEntriesFor(routine).length)],
+                                [routine.id]: [...scheduleEntriesFor(routine), createDefaultScheduleEntry(scheduleEntriesFor(routine).length)],
                               }))
                             }
                           >
-                            하트비트 추가
+                            엔트리 추가
                           </Button>
                         </div>
                         <div className="space-y-3">
-                          {heartbeatEntriesFor(routine).map((entry, index) => (
+                          {scheduleEntriesFor(routine).map((entry, index) => (
                             <div key={entry.id} className="rounded-md border bg-background/60 p-3">
                               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                                 <div>
-                                  <div className="text-sm font-medium">Heartbeat {index + 1}</div>
+                                  <div className="text-sm font-medium">스케줄 {index + 1}</div>
                                   <div className="text-xs text-muted-foreground">{entry.id}</div>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -340,9 +339,9 @@ export function RoutinePanel({
                                     checked={entry.enabled}
                                     label="개별 활성화"
                                     onToggle={() =>
-                                      setHeartbeatDrafts((current) => ({
+                                      setScheduleEntryDrafts((current) => ({
                                         ...current,
-                                        [routine.id]: heartbeatEntriesFor(routine).map((candidate) =>
+                                        [routine.id]: scheduleEntriesFor(routine).map((candidate) =>
                                           candidate.id === entry.id ? { ...candidate, enabled: !candidate.enabled } : candidate
                                         ),
                                       }))
@@ -351,11 +350,11 @@ export function RoutinePanel({
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    disabled={heartbeatEntriesFor(routine).length <= 1}
+                                    disabled={scheduleEntriesFor(routine).length <= 1}
                                     onClick={() =>
-                                      setHeartbeatDrafts((current) => ({
+                                      setScheduleEntryDrafts((current) => ({
                                         ...current,
-                                        [routine.id]: heartbeatEntriesFor(routine).filter((candidate) => candidate.id !== entry.id),
+                                        [routine.id]: scheduleEntriesFor(routine).filter((candidate) => candidate.id !== entry.id),
                                       }))
                                     }
                                   >
@@ -369,30 +368,30 @@ export function RoutinePanel({
                                   <select
                                     className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                                     value={entry.agentId}
-                                     onChange={(event) =>
-                                       setHeartbeatDrafts((current) => ({
-                                         ...current,
-                                         [routine.id]: heartbeatEntriesFor(routine).map((candidate) =>
-                                            candidate.id === entry.id
-                                            ? (() => {
-                                              const nextAgentId = event.target.value as HeartbeatEntry["agentId"];
-                                              const shouldResetPrompt =
-                                                candidate.prompt.trim().length === 0 ||
-                                                candidate.prompt === getDefaultHeartbeatPrompt(candidate.agentId);
-                                              return {
-                                                ...candidate,
-                                                agentId: nextAgentId,
-                                                prompt: shouldResetPrompt
-                                                  ? getDefaultHeartbeatPrompt(nextAgentId)
-                                                  : candidate.prompt,
-                                              };
-                                            })()
-                                             : candidate
-                                         ),
-                                       }))
-                                     }
-                                   >
-                                    {HEARTBEAT_AGENT_OPTIONS.map((option) => (
+                                    onChange={(event) =>
+                                      setScheduleEntryDrafts((current) => ({
+                                        ...current,
+                                        [routine.id]: scheduleEntriesFor(routine).map((candidate) =>
+                                          candidate.id === entry.id
+                                          ? (() => {
+                                            const nextAgentId = event.target.value as ScheduleRoutineEntry["agentId"];
+                                            const shouldResetPrompt =
+                                              candidate.prompt.trim().length === 0 ||
+                                              candidate.prompt === getDefaultSchedulePrompt(candidate.agentId);
+                                            return {
+                                              ...candidate,
+                                              agentId: nextAgentId,
+                                              prompt: shouldResetPrompt
+                                                ? getDefaultSchedulePrompt(nextAgentId)
+                                                : candidate.prompt,
+                                            };
+                                          })()
+                                          : candidate
+                                        ),
+                                      }))
+                                    }
+                                  >
+                                    {SCHEDULE_AGENT_OPTIONS.map((option) => (
                                       <option key={option.id} value={option.id}>
                                         {option.label} - {option.description}
                                       </option>
@@ -407,11 +406,11 @@ export function RoutinePanel({
                                     size="sm"
                                     variant="ghost"
                                     onClick={() =>
-                                      setHeartbeatDrafts((current) => ({
+                                      setScheduleEntryDrafts((current) => ({
                                         ...current,
-                                        [routine.id]: heartbeatEntriesFor(routine).map((candidate) =>
+                                        [routine.id]: scheduleEntriesFor(routine).map((candidate) =>
                                           candidate.id === entry.id
-                                            ? { ...candidate, prompt: getDefaultHeartbeatPrompt(candidate.agentId) }
+                                            ? { ...candidate, prompt: getDefaultSchedulePrompt(candidate.agentId) }
                                             : candidate
                                         ),
                                       }))
@@ -426,9 +425,9 @@ export function RoutinePanel({
                                 <Textarea
                                   value={entry.prompt}
                                   onChange={(event) =>
-                                    setHeartbeatDrafts((current) => ({
+                                    setScheduleEntryDrafts((current) => ({
                                       ...current,
-                                      [routine.id]: heartbeatEntriesFor(routine).map((candidate) =>
+                                      [routine.id]: scheduleEntriesFor(routine).map((candidate) =>
                                         candidate.id === entry.id
                                           ? { ...candidate, prompt: event.target.value }
                                           : candidate
@@ -450,9 +449,9 @@ export function RoutinePanel({
                                     size="sm"
                                     variant="outline"
                                     onClick={() =>
-                                      setHeartbeatDrafts((current) => ({
+                                      setScheduleEntryDrafts((current) => ({
                                         ...current,
-                                        [routine.id]: heartbeatEntriesFor(routine).map((candidate) =>
+                                        [routine.id]: scheduleEntriesFor(routine).map((candidate) =>
                                           candidate.id === entry.id ? { ...candidate, schedule: preset.value } : candidate
                                         ),
                                       }))
@@ -475,9 +474,9 @@ export function RoutinePanel({
                                     <Input
                                       value={entry.schedule[field]}
                                       onChange={(event) =>
-                                        setHeartbeatDrafts((current) => ({
+                                        setScheduleEntryDrafts((current) => ({
                                           ...current,
-                                          [routine.id]: heartbeatEntriesFor(routine).map((candidate) =>
+                                          [routine.id]: scheduleEntriesFor(routine).map((candidate) =>
                                             candidate.id === entry.id
                                               ? {
                                                 ...candidate,
@@ -493,7 +492,7 @@ export function RoutinePanel({
                                 ))}
                               </div>
                               <div className="mt-3">
-                                <Badge variant="outline">{heartbeatScheduleToCron(entry.schedule)}</Badge>
+                                <Badge variant="outline">{scheduleToCron(entry.schedule)}</Badge>
                               </div>
                             </div>
                           ))}
@@ -501,17 +500,17 @@ export function RoutinePanel({
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge
                             variant="outline"
-                            className={isValidHeartbeatEntries(heartbeatEntriesFor(routine)) ? undefined : "border-destructive/50 text-destructive"}
+                            className={isValidScheduleEntries(scheduleEntriesFor(routine)) ? undefined : "border-destructive/50 text-destructive"}
                           >
-                            {isValidHeartbeatEntries(heartbeatEntriesFor(routine)) ? "유효한 설정" : "유효하지 않은 heartbeat 설정"}
+                            {isValidScheduleEntries(scheduleEntriesFor(routine)) ? "유효한 설정" : "유효하지 않은 스케줄 설정"}
                           </Badge>
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={!isValidHeartbeatEntries(heartbeatEntriesFor(routine))}
+                            disabled={!isValidScheduleEntries(scheduleEntriesFor(routine))}
                             onClick={() =>
                               void updateRoutine(routine.id, {
-                                heartbeatEntries: heartbeatEntriesFor(routine),
+                                scheduleEntries: scheduleEntriesFor(routine),
                               })
                             }
                           >
@@ -519,14 +518,6 @@ export function RoutinePanel({
                           </Button>
                         </div>
                       </div>
-                    ) : null}
-                    {routine.postTurnEnabled !== undefined ? (
-                      <SwitchRow
-                        checked={routine.postTurnEnabled}
-                        label="대화 후 브리핑"
-                        description="루틴 대화가 끝난 뒤 브리핑을 자동으로 생성합니다."
-                        onToggle={() => void updateRoutine(routine.id, { postTurnEnabled: !routine.postTurnEnabled })}
-                      />
                     ) : null}
                   </div>
                 ) : null}

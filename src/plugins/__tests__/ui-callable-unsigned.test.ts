@@ -5,7 +5,7 @@
  * `allowManagedUnsigned` escape hatch for managed plugins) has been
  * REMOVED. uiCallable validation is now purely structural: every entry
  * must be a string declared in manifest.tools[]. Any verb suffix
- * (`_get`, `_delete`, `_drop`, …) is accepted regardless of deployment
+ * (`_get`, `_delete`, `_drop`, …) is accepted regardless of install policy
  * type or signature status.
  *
  * Security model:
@@ -97,7 +97,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
 
   it("managed plugin with any suffix loads successfully (no verifier needed)", async () => {
     await writePlugin("p_managed_default", {
-      deployment: "managed",
+      installPolicy: "admin",
       uiCallable: ["p_managed_default_delete"],
     });
 
@@ -109,7 +109,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
 
   it("user plugin with any suffix loads successfully", async () => {
     await writePlugin("p_user_delete", {
-      deployment: "user",
+      installPolicy: "user",
       uiCallable: ["p_user_delete_delete"],
     });
 
@@ -121,11 +121,11 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
 
   it("allowManagedUnsigned has no effect on uiCallable validation (backward compat)", async () => {
     await writePlugin("p_managed_allow", {
-      deployment: "managed",
+      installPolicy: "admin",
       uiCallable: ["p_managed_allow_delete"],
     });
     await writePlugin("p_user_allow", {
-      deployment: "user",
+      installPolicy: "user",
       uiCallable: ["p_user_allow_delete"],
     });
 
@@ -151,7 +151,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
 
   it("auditLog is NOT called for destructive suffix (no longer blocked)", async () => {
     await writePlugin("p_audit_check", {
-      deployment: "user",
+      installPolicy: "user",
       uiCallable: ["p_audit_check_delete"],
     });
 

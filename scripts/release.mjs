@@ -6,7 +6,7 @@
  *   1. Pre-flight security checks (H2 dev-key block, H3 signing-env validation)
  *   2. Read + patch-bump version in package.json
  *   3. bun run build (or npm fallback)
- *   4. Sign each bundled plugin's manifest (scripts/sign-manifest.mjs)
+ *   4. Sign each packaged plugin's manifest (scripts/sign-manifest.mjs)
  *   5. electron-builder --publish=never → artifacts under ./release/
  *
  * Usage:  node scripts/release.mjs [--allow-dev-key] [--skip-code-sign]
@@ -48,7 +48,7 @@ function bumpPatch(version) {
 }
 
 /**
- * H2 — refuse to ship if the bundled publisher keys still include the
+ * H2 — refuse to ship if the embedded publisher keys still include the
  * development key. Under CI without --allow-dev-key this is a hard failure.
  * Locally it prints a loud warning so the developer notices before upload.
  */
@@ -66,7 +66,7 @@ async function checkDevPublisherKey() {
   const raw = readFileSync(pkKeysSrc, "utf-8");
   // Cheap heuristic: the dev-key constant contains "DEVELOPMENT" in its
   // name; if BUNDLED_PUBLISHER_PUBLIC_KEYS array literally references it we
-  // treat that as "dev key bundled".
+  // treat that as "dev key embedded".
   const arrayRefsDev = /BUNDLED_PUBLISHER_PUBLIC_KEYS[^=]*=\s*\[[^\]]*DEVELOPMENT_PUBLISHER_PUBLIC_KEY_PEM[^\]]*\]/s.test(raw);
   if (!arrayRefsDev) return;
   const msg =

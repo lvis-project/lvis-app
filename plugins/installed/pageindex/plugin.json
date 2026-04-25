@@ -2,7 +2,6 @@
   "id": "pageindex",
   "name": "LVIS PageIndex",
   "version": "1.0.0",
-  "deployment": "managed",
   "publisher": "the organization's IT",
   "startupTimeoutMs": 15000,
   "entry": "../../../node_modules/@lvis/plugin-pageindex/dist/hostPlugin.js",

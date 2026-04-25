@@ -29,7 +29,7 @@ describe("PluginRuntime.disable", () => {
 
   async function writeFakePlugin(
     id: string,
-    deployment?: "managed" | "user",
+    installPolicy?: "admin" | "user",
   ): Promise<string> {
     const pluginDir = join(installedDir, id);
     await mkdir(pluginDir, { recursive: true });
@@ -60,14 +60,14 @@ describe("PluginRuntime.disable", () => {
       entry: "entry.mjs",
       tools: [methodName],
     };
-    if (deployment) manifest.deployment = deployment;
+    if (installPolicy) manifest.installPolicy = installPolicy;
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return manifestPath;
   }
 
   async function writeRegistry(
-    entries: Array<{ id: string; manifestPath: string; enabled?: boolean }>,
+    entries: Array<{ id: string; manifestPath: string; enabled?: boolean; approvedPluginAccess?: unknown }>,
   ): Promise<void> {
     await mkdir(join(testDir, "plugins"), { recursive: true });
     await writeFile(
@@ -106,12 +106,12 @@ describe("PluginRuntime.disable", () => {
   });
 
   it("disable rejects managed plugin with guard error and leaves state unchanged", async () => {
-    const manifestPath = await writeFakePlugin("p-managed", "managed");
+    const manifestPath = await writeFakePlugin("p-managed", "admin");
     await writeRegistry([{ id: "p-managed", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.load();
 
-    await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Managed plugin/);
+    await expect(runtime.disable("p-managed", "user")).rejects.toThrow(/Admin plugin/);
 
     expect(runtime.listPluginIds()).toContain("p-managed");
     expect(runtime.listToolNames()).toContain("p_managed_hello");
@@ -123,7 +123,7 @@ describe("PluginRuntime.disable", () => {
   });
 
   it("disable allows it-admin actor to disable a managed plugin", async () => {
-    const manifestPath = await writeFakePlugin("p-managed", "managed");
+    const manifestPath = await writeFakePlugin("p-managed", "admin");
     await writeRegistry([{ id: "p-managed", manifestPath, enabled: true }]);
     const runtime = makeRuntime();
     await runtime.load();
@@ -362,6 +362,376 @@ describe("PluginRuntime.disable", () => {
 
     const manifest = runtime.getPluginManifest("meta-plugin");
     expect(manifest?.startupTools).toEqual(["meta_ping"]);
+  });
+
+  describe("PluginHostApi.callTool", () => {
+    it("callTool is injected into PluginHostApi via createHostApi", async () => {
+      const pluginDir = join(installedDir, "calltool-plugin");
+      await mkdir(pluginDir, { recursive: true });
+      await writeFile(
+        join(pluginDir, "entry.mjs"),
+        `export default async function createPlugin(ctx) {
+  return { handlers: { "calltool_ping": async () => "pong" } };
+}
+`,
+        "utf-8",
+      );
+      const manifestPath = join(pluginDir, "plugin.json");
+      await writeFile(
+        manifestPath,
+        JSON.stringify({ id: "calltool-plugin", name: "calltool-plugin", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_ping"] }),
+        "utf-8",
+      );
+      await writeRegistry([{ id: "calltool-plugin", manifestPath, enabled: true }]);
+
+      let injectedCallTool: ((toolName: string, payload?: unknown) => Promise<unknown>) | undefined;
+
+      const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+      const runtime = new PluginRuntime({
+        hostRoot: testDir,
+        registryPath,
+        deploymentGuard: guard,
+        createHostApi: (_pluginId, _manifest) => {
+          const hostApi = {
+            registerKeywords: () => {},
+            emitEvent: () => {},
+            onEvent: () => () => {},
+            addTask: () => {},
+            saveMemory: async () => {},
+            getSecret: () => null,
+            getMsGraphToken: async () => null,
+            startMsGraphAuth: async () => {},
+            isMsGraphAuthenticated: () => false,
+            getMsGraphAccount: () => null,
+            onMsGraphAuthChange: () => {},
+            callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> =>
+              runtime.call(toolName, payload) as Promise<T>,
+            withMsGraphRetry: async () => { throw new Error("not available"); },
+            callLlm: async () => { throw new Error("not available"); },
+            logEvent: () => {},
+            onShutdown: () => {},
+          };
+          injectedCallTool = hostApi.callTool;
+          return hostApi;
+        },
+      });
+      await runtime.load();
+
+      // Verify the tool is loaded and callTool was injected
+      expect(runtime.listToolNames()).toContain("calltool_ping");
+      expect(injectedCallTool).toBeTypeOf("function");
+    });
+
+    it("callTool delegates to pluginRuntime.call and returns Promise<T>", async () => {
+      const pluginDir = join(installedDir, "calltool-delegate");
+      await mkdir(pluginDir, { recursive: true });
+      await writeFile(
+        join(pluginDir, "entry.mjs"),
+        `export default async function createPlugin(ctx) {
+  return { handlers: { "calltool_echo": async (payload) => ({ echoed: payload }) } };
+}
+`,
+        "utf-8",
+      );
+      const manifestPath = join(pluginDir, "plugin.json");
+      await writeFile(
+        manifestPath,
+        JSON.stringify({ id: "calltool-delegate", name: "calltool-delegate", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_echo"] }),
+        "utf-8",
+      );
+      await writeRegistry([{ id: "calltool-delegate", manifestPath, enabled: true }]);
+
+      const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+      const runtime = new PluginRuntime({
+        hostRoot: testDir,
+        registryPath,
+        deploymentGuard: guard,
+        createHostApi: (_pluginId, _manifest) => ({
+          registerKeywords: () => {},
+          emitEvent: () => {},
+          onEvent: () => () => {},
+          addTask: () => {},
+          saveMemory: async () => {},
+          getSecret: () => null,
+          getMsGraphToken: async () => null,
+          startMsGraphAuth: async () => {},
+          isMsGraphAuthenticated: () => false,
+          getMsGraphAccount: () => null,
+          onMsGraphAuthChange: () => {},
+          callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> =>
+            runtime.call(toolName, payload) as Promise<T>,
+          withMsGraphRetry: async () => { throw new Error("not available"); },
+          callLlm: async () => { throw new Error("not available"); },
+          logEvent: () => {},
+          onShutdown: () => {},
+        }),
+      });
+      await runtime.load();
+
+      // callTool → pluginRuntime.call → returns Promise<T>
+      const result = await runtime.call("calltool_echo", { msg: "hello" });
+      expect(result).toEqual({ echoed: { msg: "hello" } });
+
+      // Return value is a Promise
+      const promise = runtime.call("calltool_echo", { msg: "world" });
+      expect(promise).toBeInstanceOf(Promise);
+      await expect(promise).resolves.toEqual({ echoed: { msg: "world" } });
+    });
+  });
+
+  it("enforces narrow cross-plugin tool/event access for orchestrator plugins", async () => {
+    const writePlugin = async (
+      id: string,
+      methodName: string,
+      extraManifest?: Record<string, unknown>,
+    ): Promise<string> => {
+      const pluginDir = join(installedDir, id);
+      await mkdir(pluginDir, { recursive: true });
+      await writeFile(
+        join(pluginDir, "entry.mjs"),
+        `export default async function createPlugin() {
+  return {
+    handlers: { "${methodName}": async () => "${id}" },
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+`,
+        "utf-8",
+      );
+      const manifestPath = join(pluginDir, "plugin.json");
+      await writeFile(
+        manifestPath,
+        JSON.stringify({
+          id,
+          name: id,
+          version: "1.0.0",
+          entry: "entry.mjs",
+          tools: [methodName],
+          ...extraManifest,
+        }),
+        "utf-8",
+      );
+      return manifestPath;
+    };
+
+    const workManifestPath = await writePlugin(
+      "work-proactive",
+      "work_proactive_ping",
+      {
+        pluginAccess: {
+          plugins: [
+            { pluginId: "calendar", tools: ["calendar_today"] },
+            { pluginId: "email", events: ["email.action.needed"] },
+            { pluginId: "meeting", events: ["meeting.summary.created", "meeting.ended"] },
+          ],
+        },
+      },
+    );
+    const calendarManifestPath = await writePlugin("calendar", "calendar_today");
+    const emailManifestPath = await writePlugin("email", "email_ping");
+    const meetingManifestPath = await writePlugin("meeting", "meeting_ping");
+    await writeRegistry([
+      {
+        id: "work-proactive",
+        manifestPath: workManifestPath,
+        enabled: true,
+        approvedPluginAccess: {
+          plugins: [
+            { pluginId: "calendar", tools: ["calendar_today"] },
+            { pluginId: "email", events: ["email.action.needed"] },
+            { pluginId: "meeting", events: ["meeting.summary.created", "meeting.ended"] },
+          ],
+        },
+      },
+      { id: "calendar", manifestPath: calendarManifestPath, enabled: true },
+      { id: "email", manifestPath: emailManifestPath, enabled: true },
+      { id: "meeting", manifestPath: meetingManifestPath, enabled: true },
+    ]);
+
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    expect(() => runtime.assertPluginToolAccess("work-proactive", "calendar_today")).not.toThrow();
+    expect(() => runtime.assertPluginEventAccess("work-proactive", "email.action.needed")).not.toThrow();
+    expect(() => runtime.assertPluginEventAccess("work-proactive", "meeting.summary.created")).not.toThrow();
+    expect(() => runtime.assertPluginToolAccess("calendar", "work_proactive_ping")).toThrow(/not allowed/i);
+    expect(() => runtime.assertPluginEventAccess("calendar", "email.action.needed")).toThrow(/not allowed/i);
+  });
+
+  it("allows load-time event subscriptions when manifest pluginAccess is declared", async () => {
+    const writePlugin = async (
+      id: string,
+      methodName: string,
+      entrySource: string,
+      extraManifest?: Record<string, unknown>,
+    ): Promise<string> => {
+      const pluginDir = join(installedDir, id);
+      await mkdir(pluginDir, { recursive: true });
+      await writeFile(join(pluginDir, "entry.mjs"), entrySource, "utf-8");
+      const manifestPath = join(pluginDir, "plugin.json");
+      await writeFile(
+        manifestPath,
+        JSON.stringify({
+          id,
+          name: id,
+          version: "1.0.0",
+          entry: "entry.mjs",
+          tools: [methodName],
+          ...extraManifest,
+        }),
+        "utf-8",
+      );
+      return manifestPath;
+    };
+
+    const calendarManifestPath = await writePlugin(
+      "calendar",
+      "calendar_today",
+      `export default async function createPlugin({ hostApi }) {
+  hostApi.onEvent("email.analyzed", () => {});
+  return {
+    handlers: { "calendar_today": async () => "calendar" },
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+`,
+      {
+        pluginAccess: {
+          plugins: [{ pluginId: "email", events: ["email.analyzed"] }],
+        },
+      },
+    );
+    const emailManifestPath = await writePlugin(
+      "email",
+      "email_ping",
+      `export default async function createPlugin() {
+  return {
+    handlers: { "email_ping": async () => "email" },
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+`,
+    );
+
+    await writeRegistry([
+      {
+        id: "calendar",
+        manifestPath: calendarManifestPath,
+        enabled: true,
+        approvedPluginAccess: {
+          plugins: [{ pluginId: "email", events: ["email.analyzed"] }],
+        },
+      },
+      { id: "email", manifestPath: emailManifestPath, enabled: true },
+    ]);
+
+    let runtime!: PluginRuntime;
+    runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      deploymentGuard: new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir }),
+      createHostApi: (pluginId) => ({
+        registerKeywords: () => {},
+        emitEvent: () => {},
+        onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
+        addTask: () => {},
+        getSecret: () => null,
+      } as unknown as import("../types.js").PluginHostApi),
+    });
+    await expect(runtime.load()).resolves.toBeUndefined();
+    expect(() => runtime.assertPluginEventAccess("calendar", "email.analyzed")).not.toThrow();
+  });
+
+  it("blocks load-time event subscriptions to later-loaded plugins without pluginAccess", async () => {
+    const writePlugin = async (
+      id: string,
+      methodName: string,
+      entrySource: string,
+      extraManifest?: Record<string, unknown>,
+    ): Promise<string> => {
+      const pluginDir = join(installedDir, id);
+      await mkdir(pluginDir, { recursive: true });
+      await writeFile(join(pluginDir, "entry.mjs"), entrySource, "utf-8");
+      const manifestPath = join(pluginDir, "plugin.json");
+      await writeFile(
+        manifestPath,
+        JSON.stringify({
+          id,
+          name: id,
+          version: "1.0.0",
+          entry: "entry.mjs",
+          tools: [methodName],
+          ...extraManifest,
+        }),
+        "utf-8",
+      );
+      return manifestPath;
+    };
+
+    const calendarManifestPath = await writePlugin(
+      "calendar",
+      "calendar_today",
+      `export default async function createPlugin({ hostApi }) {
+  hostApi.onEvent("email.analyzed", () => {});
+  return {
+    handlers: { "calendar_today": async () => "calendar" },
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+`,
+    );
+    const emailManifestPath = await writePlugin(
+      "email",
+      "email_ping",
+      `export default async function createPlugin() {
+  return {
+    handlers: { "email_ping": async () => "email" },
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+`,
+    );
+
+    await writeRegistry([
+      { id: "calendar", manifestPath: calendarManifestPath, enabled: true },
+      { id: "email", manifestPath: emailManifestPath, enabled: true },
+    ]);
+
+    let runtime!: PluginRuntime;
+    runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      deploymentGuard: new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir }),
+      createHostApi: (pluginId) => ({
+        registerKeywords: () => {},
+        emitEvent: () => {},
+        onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
+        addTask: () => {},
+        getSecret: () => null,
+      } as unknown as import("../types.js").PluginHostApi),
+    });
+    await expect(runtime.load()).rejects.toThrow(/not allowed/i);
+  });
+
+  it("blocks plugins from emitting events owned by another plugin", async () => {
+    const calendarManifestPath = await writeFakePlugin("calendar");
+    const emailManifestPath = await writeFakePlugin("email");
+
+    await writeRegistry([
+      { id: "calendar", manifestPath: calendarManifestPath, enabled: true },
+      { id: "email", manifestPath: emailManifestPath, enabled: true },
+    ]);
+
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    expect(() => runtime.assertPluginEventEmitAccess("email", "email.analyzed")).not.toThrow();
+    expect(() => runtime.assertPluginEventEmitAccess("calendar", "email.analyzed")).toThrow(/not allowed to emit/i);
   });
 
   it("drops plugins whose required capabilities are not provided by enabled manifests", async () => {

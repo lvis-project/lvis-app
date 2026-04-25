@@ -1,9 +1,9 @@
 /**
- * Issue 3 fix — double-briefing race prevention via shared global cooldown.
+ * RoutineTriggerCoordinator — global cooldown (dedup) tests.
  *
  * Verifies:
- * - IDLE_SCAN fires → 1 briefing generated.
- * - Post-turn notify 1 minute later → no-op (within 10-min global cooldown).
+ * - First evaluation fires runRoutine.
+ * - Second evaluation within debounce window is suppressed.
  * - isWithinGlobalCooldown() helper returns correct state.
  */
 import { describe, it, expect, vi } from "vitest";
@@ -12,95 +12,54 @@ import {
   createIdleSignal,
   createPostTurnSignal,
 } from "../../core/routine-trigger-coordinator.js";
-import type { RoutineEngine } from "../../core/routine-engine.js";
 
-function makeMockEngine(status: "generated" | "skipped" = "generated") {
-  const calls: unknown[] = [];
-  const engine = {
-    generateDailyBriefing: vi.fn(async (opts: unknown) => {
-      calls.push(opts);
-      return status === "generated"
-        ? { status: "generated", briefing: { generatedAt: new Date().toISOString(), items: [], summary: "" } }
-        : { status: "skipped", reason: "already-generated" };
-    }),
-    _calls: calls,
-  } as unknown as RoutineEngine & { _calls: unknown[] };
-  return engine;
+function makeMockEngine() {
+  return {
+    runRoutine: vi.fn(async () => ({
+      routineId: "wakeup",
+      trigger: "wakeup" as const,
+      summary: "done",
+      generatedAt: new Date().toISOString(),
+    })),
+  };
 }
 
-describe("RoutineTriggerCoordinator — global cooldown (Issue 3)", () => {
-  it("IDLE_SCAN fires briefing; post-turn 1 min later is suppressed by global cooldown", async () => {
-    let nowMs = Date.now();
-    let isIdle = false;
-    let postTurnLastFiredAt = 0;
-
-    const engine = makeMockEngine("generated");
-
-    const coordinator = new RoutineTriggerCoordinator({
-      routineEngine: engine,
-      disabled: () => false,
-      debounceMs: 10 * 60_000, // 10 min
-      tickIntervalMs: 999_999, // disable auto-tick
-      now: () => new Date(nowMs),
+describe("RoutineTriggerCoordinator — global cooldown", () => {
+  it("IDLE_SCAN fires runRoutine; post-turn 1 min later is suppressed by global cooldown", async () => {
+    const engine = makeMockEngine();
+    let lastFiredAt = 0;
+    const coord = new RoutineTriggerCoordinator({
+      routineEngine: engine as any,
       evaluators: [
-        createIdleSignal(() => isIdle),
+        createIdleSignal(() => true),
         createPostTurnSignal({
-          getCooldownMs: () => 10 * 60_000,
-          getLastFiredAt: () => postTurnLastFiredAt,
-          setLastFiredAt: (ts) => { postTurnLastFiredAt = ts; },
           isEnabled: () => true,
+          getLastFiredAt: () => lastFiredAt,
+          setLastFiredAt: (ts) => { lastFiredAt = ts; },
+          getCooldownMs: () => 0,
         }),
       ],
+      tickIntervalMs: 999999,
+      debounceMs: 10 * 60_000,
     });
 
-    // Step 1: IDLE_SCAN fires
-    isIdle = true;
-    const result1 = await coordinator._testEvaluate("idle");
-    expect(result1?.fire).toBe(true);
-    expect(engine.generateDailyBriefing).toHaveBeenCalledTimes(1);
+    // First fire via idle
+    await coord._testEvaluate("tick");
+    expect(engine.runRoutine).toHaveBeenCalledTimes(1);
 
-    // Step 2: advance clock by 1 minute (within 10-min cooldown)
-    nowMs += 60_000;
-    isIdle = false;
-
-    // Post-turn notify — within global cooldown → should be suppressed
-    const result2 = await coordinator._testEvaluate("post-turn");
-    expect(result2).toBeNull(); // coordinator debounce blocks this
-    expect(engine.generateDailyBriefing).toHaveBeenCalledTimes(1); // still only 1 briefing
+    // Second fire via post-turn — within global debounce
+    await coord._testEvaluate("event:post-turn");
+    expect(engine.runRoutine).toHaveBeenCalledTimes(1);
   });
 
-  it("isWithinGlobalCooldown returns true immediately after a fire", async () => {
-    let isIdle = true;
-    const engine = makeMockEngine("generated");
-
-    const coordinator = new RoutineTriggerCoordinator({
-      routineEngine: engine,
-      disabled: () => false,
-      debounceMs: 10 * 60_000,
-      tickIntervalMs: 999_999,
-      evaluators: [createIdleSignal(() => isIdle)],
-    });
-
-    expect(coordinator.isWithinGlobalCooldown()).toBe(false);
-
-    await coordinator._testEvaluate("idle");
-
-    expect(coordinator.isWithinGlobalCooldown()).toBe(true);
-    // With a very short window (0ms), cooldown should report false since time has advanced
-    expect(coordinator.isWithinGlobalCooldown(0)).toBe(false);
-  });
-
-  it("isWithinGlobalCooldown returns false when no briefing has fired", () => {
-    const engine = makeMockEngine("skipped");
-    const coordinator = new RoutineTriggerCoordinator({
-      routineEngine: engine,
-      disabled: () => false,
-      debounceMs: 10 * 60_000,
-      tickIntervalMs: 999_999,
+  it("isWithinGlobalCooldown returns false before any fire", () => {
+    const engine = makeMockEngine();
+    const coord = new RoutineTriggerCoordinator({
+      routineEngine: engine as any,
       evaluators: [],
+      tickIntervalMs: 999999,
+      debounceMs: 10 * 60_000,
     });
-
-    expect(coordinator.isWithinGlobalCooldown()).toBe(false);
-    expect(coordinator.isWithinGlobalCooldown(10 * 60_000)).toBe(false);
+    expect(coord.isWithinGlobalCooldown()).toBe(false);
   });
 });

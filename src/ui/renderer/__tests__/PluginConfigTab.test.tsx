@@ -31,7 +31,6 @@ beforeEach(() => {
     value: {
       plugins: {
         cards: mockCards,
-        uninstallMarketplacePlugin: mockUninstall,
       },
       pluginConfig: {
         get: mockGet,
@@ -41,11 +40,26 @@ beforeEach(() => {
     writable: true,
     configurable: true,
   });
+  Object.defineProperty(window, "lvisHost", {
+    value: {
+      takePluginMarketplaceApi: () => ({
+        installMarketplacePlugin: vi.fn(),
+        uninstallMarketplacePlugin: mockUninstall,
+      }),
+    },
+    writable: true,
+    configurable: true,
+  });
 });
 
 afterEach(() => {
   vi.clearAllMocks();
   Object.defineProperty(window, "lvis", {
+    value: undefined,
+    writable: true,
+    configurable: true,
+  });
+  Object.defineProperty(window, "lvisHost", {
     value: undefined,
     writable: true,
     configurable: true,

@@ -32,7 +32,7 @@ describe("PluginDeploymentGuard", () => {
   }
 
   it("rejects user uninstalling a managed plugin (outside installedDir)", async () => {
-    const managedRoot = join(testDir, "bundled");
+    const managedRoot = join(testDir, "bundle-root");
     await mkdir(join(managedRoot, "p-managed"), { recursive: true });
     const pluginManifest = join(managedRoot, "p-managed", "plugin.json");
     await writeFile(pluginManifest, "{}", "utf-8");
@@ -59,7 +59,7 @@ describe("PluginDeploymentGuard", () => {
   });
 
   it("always allows it-admin actor (trust boundary bypass)", async () => {
-    const managedRoot = join(testDir, "bundled");
+    const managedRoot = join(testDir, "bundle-root");
     await mkdir(join(managedRoot, "p-managed"), { recursive: true });
     const pluginManifest = join(managedRoot, "p-managed", "plugin.json");
     await writeFile(pluginManifest, "{}", "utf-8");
@@ -112,13 +112,13 @@ describe("PluginDeploymentGuard", () => {
     expect(result.allowed).toBe(false);
   });
 
-  it("rejects managed plugin inside installedDir via manifest deployment field", async () => {
+  it("rejects admin plugin inside installedDir via manifest installPolicy field", async () => {
     const userDir = join(installedDir, "p-managed-inside");
     await mkdir(userDir, { recursive: true });
     const manifestPath = join(userDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({ id: "p-managed-inside", deployment: "managed" }),
+      JSON.stringify({ id: "p-managed-inside", installPolicy: "admin" }),
       "utf-8",
     );
     await writeRegistry([{ id: "p-managed-inside", manifestPath }]);
@@ -127,16 +127,16 @@ describe("PluginDeploymentGuard", () => {
     const result = await guard.canUninstall("p-managed-inside", "user");
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toMatch(/deployment="managed"/);
+    expect(result.reason).toMatch(/installPolicy="admin"/);
   });
 
-  it("allows user plugin inside installedDir with explicit deployment: user", async () => {
+  it("allows user plugin inside installedDir with explicit installPolicy: user", async () => {
     const userDir = join(installedDir, "p-user-explicit");
     await mkdir(userDir, { recursive: true });
     const manifestPath = join(userDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({ id: "p-user-explicit", deployment: "user" }),
+      JSON.stringify({ id: "p-user-explicit", installPolicy: "user" }),
       "utf-8",
     );
     await writeRegistry([{ id: "p-user-explicit", manifestPath }]);
@@ -147,11 +147,11 @@ describe("PluginDeploymentGuard", () => {
     expect(result.allowed).toBe(true);
   });
 
-  it("BACKCOMPAT: absent deployment field in legacy manifest → allowed for user", async () => {
+  it("absent installPolicy field in legacy manifest → allowed for user", async () => {
     const userDir = join(installedDir, "p-legacy");
     await mkdir(userDir, { recursive: true });
     const manifestPath = join(userDir, "plugin.json");
-    // legacy manifest without deployment field (predates Phase 1.5)
+    // legacy manifest without installPolicy field
     await writeFile(
       manifestPath,
       JSON.stringify({ id: "p-legacy", name: "Legacy", version: "0.9.0" }),
@@ -167,7 +167,7 @@ describe("PluginDeploymentGuard", () => {
 
   it("canInstall: rejects user installing a managed catalog item", async () => {
     const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
-    const result = await guard.canInstall("p-managed", "user", "managed");
+    const result = await guard.canInstall("p-managed", "user", "admin");
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/installed by user/);
   });
@@ -178,7 +178,7 @@ describe("PluginDeploymentGuard", () => {
     expect(result.allowed).toBe(true);
   });
 
-  it("canInstall: allows user installing when deployment field is absent (backward compat)", async () => {
+  it("canInstall: allows user installing when installPolicy field is absent", async () => {
     const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
     const result = await guard.canInstall("p-legacy", "user", undefined);
     expect(result.allowed).toBe(true);
@@ -186,12 +186,12 @@ describe("PluginDeploymentGuard", () => {
 
   it("canInstall: always allows it-admin actor (trust boundary bypass)", async () => {
     const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
-    const result = await guard.canInstall("p-managed", "it-admin", "managed");
+    const result = await guard.canInstall("p-managed", "it-admin", "admin");
     expect(result.allowed).toBe(true);
   });
 
   it("canDisable mirrors canUninstall semantics", async () => {
-    const managedRoot = join(testDir, "bundled");
+    const managedRoot = join(testDir, "bundle-root");
     await mkdir(join(managedRoot, "p-managed"), { recursive: true });
     const pluginManifest = join(managedRoot, "p-managed", "plugin.json");
     await writeFile(pluginManifest, "{}", "utf-8");

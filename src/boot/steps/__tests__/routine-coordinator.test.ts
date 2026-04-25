@@ -3,49 +3,40 @@ import { wireRoutineCoordinator } from "../routine-coordinator.js";
 
 function makeSettings(overrides: Record<string, unknown> = {}) {
   return {
-    enableDailyBriefing: true,
+    enableWakeupRoutine: true,
     scheduleTimeKst: "08:30",
-    enableHeartbeat: true,
-    enablePostTurnBriefing: false,
-    heartbeatEntries: [],
+    enableScheduleRoutine: false,
+    enableShutdownRoutine: false,
+    scheduleEntries: [],
     ...overrides,
   };
 }
 
 describe("wireRoutineCoordinator", () => {
-  it("runs direct idle-scan briefing delivery and disposes idle listener", async () => {
-    let listener: ((state: "IDLE_SCAN" | "ACTIVE", old: "IDLE_SCAN" | "ACTIVE", reason: string) => void) | null = null;
-    const generateDailyBriefing = vi.fn(async () => ({
-      status: "generated",
-      briefing: {
-        generatedAt: new Date().toISOString(),
-        items: [{ category: "system", priority: "low", title: "idle" }],
-        summary: "idle",
-      },
-    }));
-    const saveSessionMetadata = vi.fn(async () => undefined);
-    const saveSession = vi.fn(async () => undefined);
-    const loadSession = vi.fn(() => []);
+  it("runs wakeup routine on IDLE_SCAN transition and calls onRoutineCompleted", async () => {
+    let listener: ((newState: string, oldState: string, reason: string) => void) | null = null;
+
+    const mockResult = {
+      routineId: "wakeup",
+      trigger: "wakeup" as const,
+      summary: "wakeup done",
+      generatedAt: new Date().toISOString(),
+    };
+
+    const runRoutine = vi.fn(async () => mockResult);
     const mainWindow = {
       isDestroyed: () => false,
       webContents: { send: vi.fn() },
     };
 
-    const pluginRuntime = {
-      findPluginIdByCapability: vi.fn(() => undefined),
-      getPluginManifest: vi.fn(() => undefined),
-    };
     const wired = wireRoutineCoordinator({
-      routineEngine: { generateDailyBriefing, runHeartbeatRoutine: vi.fn(async () => undefined) } as any,
+      routineEngine: { runRoutine } as any,
       taskService: { getPendingByPriority: () => [] } as any,
-      pluginRuntime: pluginRuntime as any,
-      settingsService: { get: () => makeSettings() } as any,
-      memoryManager: {
-        listSessionsByRoutine: () => [],
-        saveSessionMetadata,
-        saveSession,
-        loadSession,
+      pluginRuntime: {
+        findPluginIdByCapability: vi.fn(() => undefined),
+        getPluginManifest: vi.fn(() => undefined),
       } as any,
+      settingsService: { get: () => makeSettings() } as any,
       idleScheduler: {
         getState: () => "ACTIVE",
         setStateChangeListener: vi.fn((cb) => {
@@ -55,23 +46,23 @@ describe("wireRoutineCoordinator", () => {
       mainWindow: mainWindow as any,
     });
 
+    // Trigger idle-scan transition
     listener?.("IDLE_SCAN", "ACTIVE", "test");
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(generateDailyBriefing).toHaveBeenCalledWith({ idleState: "long_idle" });
+    expect(runRoutine).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "wakeup", trigger: "wakeup" }),
+    );
     expect(mainWindow.webContents.send).toHaveBeenCalledWith(
-      "lvis:routine:briefing",
-      expect.objectContaining({ summary: "idle" }),
+      "lvis:routine:completed",
+      expect.objectContaining({ summary: "wakeup done" }),
     );
 
     wired.dispose();
-    expect(saveSessionMetadata).toHaveBeenCalled();
   });
 
-  it("dedupes heartbeat execution within the same minute", async () => {
-    let listener: ((state: "IDLE_SCAN" | "ACTIVE", old: "IDLE_SCAN" | "ACTIVE", reason: string) => void) | null = null;
-    const runHeartbeatRoutine = vi.fn(async () => undefined);
+  it("dedupes schedule entry execution within the same minute", async () => {
     const intervalCallbacks: Array<() => void> = [];
     const setIntervalSpy = vi.spyOn(globalThis, "setInterval").mockImplementation(((cb: TimerHandler) => {
       intervalCallbacks.push(cb as () => void);
@@ -79,49 +70,48 @@ describe("wireRoutineCoordinator", () => {
     }) as typeof setInterval);
     const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => undefined);
 
-    const pluginRuntime = {
-      findPluginIdByCapability: vi.fn(() => undefined),
-      getPluginManifest: vi.fn(() => undefined),
-    };
+    const runRoutine = vi.fn(async () => ({
+      routineId: "s-1",
+      trigger: "schedule" as const,
+      summary: "sched done",
+      generatedAt: new Date().toISOString(),
+    }));
+
     const wired = wireRoutineCoordinator({
-      routineEngine: {
-        generateDailyBriefing: vi.fn(async () => ({ status: "skipped", reason: "disabled" })),
-        runHeartbeatRoutine,
-      } as any,
+      routineEngine: { runRoutine } as any,
       taskService: { getPendingByPriority: () => [] } as any,
-      pluginRuntime: pluginRuntime as any,
+      pluginRuntime: {
+        findPluginIdByCapability: vi.fn(() => undefined),
+        getPluginManifest: vi.fn(() => undefined),
+      } as any,
       settingsService: {
         get: () =>
           makeSettings({
-            heartbeatEntries: [
+            enableScheduleRoutine: true,
+            scheduleEntries: [
               {
-                id: "hb-1",
+                id: "s-1",
                 enabled: true,
-                agentId: "monitor",
+                prompt: "check in",
                 schedule: { minute: "*", hour: "*", dayOfMonth: "*", month: "*", dayOfWeek: "*" },
               },
             ],
           }),
       } as any,
-      memoryManager: {
-        listSessionsByRoutine: () => [],
-        saveSessionMetadata: vi.fn(async () => undefined),
-        saveSession: vi.fn(async () => undefined),
-        loadSession: vi.fn(() => []),
-      } as any,
       idleScheduler: {
         getState: () => "ACTIVE",
-        setStateChangeListener: vi.fn((cb) => {
-          listener = cb;
-        }),
+        setStateChangeListener: vi.fn(),
       } as any,
       mainWindow: { isDestroyed: () => true, webContents: { send: vi.fn() } } as any,
     });
 
+    // maybeRunScheduleRoutines is called immediately at wire time
     await Promise.resolve();
-    expect(runHeartbeatRoutine).toHaveBeenCalledTimes(1);
+    expect(runRoutine).toHaveBeenCalledTimes(1);
+
+    // Second call in same minute should dedupe
     intervalCallbacks[0]?.();
-    expect(runHeartbeatRoutine).toHaveBeenCalledTimes(1);
+    expect(runRoutine).toHaveBeenCalledTimes(1);
 
     wired.dispose();
     expect(clearIntervalSpy).toHaveBeenCalled();

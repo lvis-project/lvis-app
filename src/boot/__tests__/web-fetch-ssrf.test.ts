@@ -16,8 +16,6 @@ describe("web_fetch SSRF guard", () => {
       saveMemory: async () => {},
       searchMemoryEntries: () => [],
       listMemoryEntries: () => [],
-      saveNote: async () => {},
-      listNotes: () => [],
     } as unknown as Parameters<typeof registerBuiltinTools>[0];
     const settingsStub = {
       get: () => ({ provider: "duckduckgo" }),

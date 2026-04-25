@@ -12,7 +12,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
-    briefing, onDismissBriefing, onSnoozeBriefing,
+    routineResult, onDismissRoutineResult, onSnoozeRoutineResult,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet,
     searchIdx, searchHighlight, searchChangeQuery, searchToggleCase,
     searchNext, searchPrev, searchCloseOverlay,
@@ -27,7 +27,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
   return useMemo<ChatContextValue>(() => ({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
-    briefing, onDismissBriefing, onSnoozeBriefing,
+    routineResult, onDismissRoutineResult, onSnoozeRoutineResult,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet,
     searchIdx, searchHighlight, searchChangeQuery, searchToggleCase,
     searchNext, searchPrev, searchCloseOverlay,
@@ -40,7 +40,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
   }), [
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
-    briefing, onDismissBriefing, onSnoozeBriefing,
+    routineResult, onDismissRoutineResult, onSnoozeRoutineResult,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet,
     searchIdx, searchHighlight, searchChangeQuery, searchToggleCase,
     searchNext, searchPrev, searchCloseOverlay,
