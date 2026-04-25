@@ -53,24 +53,6 @@ export const DEFAULT_WAKEUP_ROUTINE_PROMPT =
 export const DEFAULT_SHUTDOWN_PROMPT =
   "오늘 마무리 시점에서 남은 후속 작업, 중요한 결정, 내일 이어서 볼 포인트를 중심으로 정리하세요.";
 
-// ─── Backward-compat aliases (legacy HeartbeatEntry consumers) ───────────────
-/** @deprecated Use ScheduleRoutineSchedule */
-export type HeartbeatSchedule = ScheduleRoutineSchedule;
-/** @deprecated Use ScheduleAgentId */
-export type HeartbeatAgentId = ScheduleAgentId;
-/** @deprecated Use ScheduleRoutineEntry */
-export type HeartbeatEntry = ScheduleRoutineEntry;
-/** @deprecated Use DEFAULT_SCHEDULE */
-export const DEFAULT_HEARTBEAT_SCHEDULE = DEFAULT_SCHEDULE;
-/** @deprecated Use DEFAULT_SCHEDULE_AGENT_ID */
-export const DEFAULT_HEARTBEAT_AGENT_ID = DEFAULT_SCHEDULE_AGENT_ID;
-/** @deprecated Use MAX_SCHEDULE_ENTRIES */
-export const MAX_HEARTBEAT_ENTRIES = MAX_SCHEDULE_ENTRIES;
-/** @deprecated Use DEFAULT_WAKEUP_ROUTINE_PROMPT */
-export const DEFAULT_DAILY_BRIEFING_PROMPT = DEFAULT_WAKEUP_ROUTINE_PROMPT;
-/** @deprecated Use SCHEDULE_AGENT_OPTIONS */
-export const HEARTBEAT_AGENT_OPTIONS = SCHEDULE_AGENT_OPTIONS;
-
 type CronFieldSpec = {
   min: number;
   max: number;
@@ -91,11 +73,11 @@ function isIntegerString(value: string): boolean {
 
 function normalizeCronField(
   value: unknown,
-  field: keyof HeartbeatSchedule,
+  field: keyof ScheduleRoutineSchedule,
 ): string {
-  if (typeof value !== "string") return DEFAULT_HEARTBEAT_SCHEDULE[field];
+  if (typeof value !== "string") return DEFAULT_SCHEDULE[field];
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : DEFAULT_HEARTBEAT_SCHEDULE[field];
+  return trimmed.length > 0 ? trimmed : DEFAULT_SCHEDULE[field];
 }
 
 function normalizeValue(value: number, spec: CronFieldSpec): number {
@@ -260,32 +242,6 @@ export function isValidScheduleEntries(value: unknown): value is ScheduleRoutine
   });
 }
 
-// ─── Backward-compat function aliases ────────────────────────────────────────
-/** @deprecated Use normalizeSchedule */
-export const normalizeHeartbeatSchedule = normalizeSchedule;
-/** @deprecated Use isValidSchedule */
-export const isValidHeartbeatSchedule = isValidSchedule;
-/** @deprecated Use scheduleToCron */
-export const heartbeatScheduleToCron = scheduleToCron;
-/** @deprecated Use isScheduleAgentId */
-export const isHeartbeatAgentId = isScheduleAgentId;
-/** @deprecated Use getScheduleAgentOption */
-export const getHeartbeatAgentOption = getScheduleAgentOption;
-/** @deprecated Use getDefaultSchedulePrompt */
-export const getDefaultHeartbeatPrompt = getDefaultSchedulePrompt;
-/** @deprecated Use normalizeScheduleAgentId */
-export const normalizeHeartbeatAgentId = normalizeScheduleAgentId;
-/** @deprecated Use createScheduleEntryId */
-export const createHeartbeatEntryId = createScheduleEntryId;
-/** @deprecated Use createDefaultScheduleEntry */
-export const createDefaultHeartbeatEntry = createDefaultScheduleEntry;
-/** @deprecated Use normalizeScheduleEntry */
-export const normalizeHeartbeatEntry = normalizeScheduleEntry;
-/** @deprecated Use normalizeScheduleEntries */
-export const normalizeHeartbeatEntries = (value: unknown, _legacySchedule?: unknown) => normalizeScheduleEntries(value);
-/** @deprecated Use isValidScheduleEntries */
-export const isValidHeartbeatEntries = isValidScheduleEntries;
-
 function getKstParts(now: Date): Record<string, number> {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul",
@@ -337,6 +293,3 @@ export function matchesSchedule(
     schedule.dayOfWeek.split(",").some((token) => matchCronToken(token, current.dayOfWeek, CRON_FIELD_SPECS.dayOfWeek))
   );
 }
-
-/** @deprecated Use matchesSchedule */
-export const matchesHeartbeatSchedule = matchesSchedule;

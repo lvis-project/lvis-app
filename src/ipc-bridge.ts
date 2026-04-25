@@ -224,7 +224,7 @@ const RESERVED_HOST_CHANNELS = new Set([
 
 /**
  * M3 — IPC sender validation. Sensitive handlers (api-key mutation, plugin
- * install/uninstall, policy mutation, proactive briefing dismissal) verify
+ * install/uninstall, policy mutation, routine result control) verify
  * that the invoking frame is our own renderer. Accepts `file://` (packaged
  * local renderer) and `http://localhost` (dev server). Anything else (e.g.
  * an embedded webview navigating to a remote origin, or a plugin-spawned

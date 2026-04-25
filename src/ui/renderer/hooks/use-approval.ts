@@ -16,7 +16,7 @@ export function useApproval() {
   // In-flight guard — prevents double-click from dropping the pending item
   // between shift() and respond(). See Copilot HIGH #2.
   const inFlightRef = useRef<boolean>(false);
-  // Fix 5 (PR #97) — aliveRef symmetry with use-briefing: guard late setQueue
+  // Fix 5 (PR #97) — aliveRef pattern: guard late setQueue
   // from async `respond()` callbacks resolving after unmount.
   const aliveRef = useRef(true);
   useEffect(() => {

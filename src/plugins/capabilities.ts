@@ -99,7 +99,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
     "routine-provider",
     {
       description:
-        "Advisory — signals the plugin provides routine execution tools (wakeup briefing, shutdown summary, heartbeat) consumable by the host Routine runtime.",
+        "Advisory — signals the plugin provides routine execution tools (wakeup, schedule, shutdown) consumable by the host Routine runtime.",
       enforcement: "advisory",
       gates: [],
     },

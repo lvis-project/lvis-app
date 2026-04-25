@@ -1,5 +1,4 @@
 // RoutineCard — dismissable routine result card (RoutineResult.summary 전용).
-// BriefingCard와 달리 items 목록 없이 summary 텍스트만 표시한다.
 
 import { useMemo } from "react";
 import { Button } from "../../../components/ui/button.js";
