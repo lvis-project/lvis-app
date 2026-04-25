@@ -99,7 +99,7 @@ export class PluginUpdateDetector {
         : resolve(dirname(this.registryPath), manifestPath),
     );
     // Path-escape defense: resolved manifest must live beneath either the
-    // registry directory (bundled plugins) or the per-user install dir
+    // registry directory (app-managed plugins) or the per-user install dir
     // `~/.lvis/plugins/` (dynamic installs). Anything else — e.g. a crafted
     // registry entry like "../../etc/passwd" — is rejected.
     const userInstalledDir = canonicalizeExistingPath(resolve(homedir(), ".lvis/plugins"));

@@ -232,10 +232,10 @@ export class PythonRuntimeBootstrapper {
     // 프로덕션: Electron Resources 번들
     const resourcesPath = process.resourcesPath;
     if (resourcesPath) {
-      const bundled = path.join(resourcesPath, LOCK_FILE_RESOURCE_NAME);
+      const packaged = path.join(resourcesPath, LOCK_FILE_RESOURCE_NAME);
       try {
-        await fs.access(bundled);
-        return bundled;
+        await fs.access(packaged);
+        return packaged;
       } catch {
         // fall through to dev path
       }

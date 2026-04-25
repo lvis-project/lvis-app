@@ -70,6 +70,14 @@ describe("PluginSignatureVerifier", () => {
     expect(result.reason).toMatch(/missing/);
   });
 
+  it("fails closed when no publisher keys are configured", async () => {
+    const verifier = new PluginSignatureVerifier({ publisherPublicKeysPem: [] });
+    const result = await verifier.verifyManifestFile(manifestPath);
+
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/no publisher public keys configured/);
+  });
+
   it("accepts base64-encoded signature files (operator-friendly format)", async () => {
     const manifestBytes = await readFileBuf(manifestPath);
     const signature = sign(null, manifestBytes, privateKey);

@@ -8,11 +8,11 @@ import {
   type PluginConfigRecord,
 } from "../shared/plugin-config.js";
 import {
-  createDefaultHeartbeatEntry,
+  createDefaultScheduleEntry,
   DEFAULT_SHUTDOWN_PROMPT,
-  DEFAULT_WAKEUP_PROMPT,
-  normalizeHeartbeatEntries,
-  type HeartbeatEntry,
+  DEFAULT_WAKEUP_ROUTINE_PROMPT,
+  normalizeScheduleEntries,
+  type ScheduleRoutineEntry,
 } from "../routines/schedule.js";
 
 export type LLMVendor =
@@ -153,32 +153,22 @@ export interface PrivacySettings {
 }
 
 /**
- * §7 Routine Engine — Daily Briefing feature flag.
- * §14.4 feature-flag pattern: default OFF to prevent noise.
+ * §7 Routine Engine settings.
  *
- * - `enableDailyBriefing`  — master switch for LLM-synthesized daily briefing
- * - `lastBriefingAt`       — ISO date (YYYY-MM-DD in KST) of most recent briefing,
- *                            used for once-per-day dedupe (persisted across restarts).
- * - `lastDismissedAt`      — ISO timestamp of last user dismissal; suppresses
- *                            re-trigger for 24h.
+ * - `enableWakeupRoutine`   — wakeup 루틴 마스터 스위치 (long_idle / schedule 트리거)
+ * - `lastWakeupRoutineAt`   — ISO date (YYYY-MM-DD KST) of most recent wakeup routine run
+ * - `lastDismissedAt`       — ISO timestamp of last user dismissal
  */
 export interface RoutineSettings {
-  enableDailyBriefing: boolean;
-  lastBriefingAt?: string;
+  enableWakeupRoutine: boolean;
+  lastWakeupRoutineAt?: string;
   lastDismissedAt?: string;
   scheduleTimeKst?: string;
-  wakeupPrompt?: string;
-  enableHeartbeat?: boolean;
-  heartbeatEntries?: HeartbeatEntry[];
-  /** @deprecated legacy single-heartbeat setting kept only for migration. */
-  heartbeatSchedule?: never;
-  enableShutdownSummary?: boolean;
+  wakeupRoutinePrompt?: string;
+  enableShutdownRoutine?: boolean;
   shutdownPrompt?: string;
-  /**
-   * Issue 3 fix: post-turn briefing signal flag, separate from schedule flag.
-   * Default false — must be opted in explicitly.
-   */
-  enablePostTurnBriefing?: boolean;
+  enableScheduleRoutine?: boolean;
+  scheduleEntries?: ScheduleRoutineEntry[];
 }
 
 export interface WebSearchSettings {
@@ -188,7 +178,7 @@ export interface WebSearchSettings {
 /**
  * §9.5 M4: plugin marketplace backend selection.
  *
- * - `"mock"`         — default; reads the bundled `plugins/marketplace.json`.
+ * - `"mock"`         — default; reads the local `plugins/marketplace.json`.
  * - `"real-cloud"`   — talks to lvis-marketplace REST server at
  *                      `realCloudBaseUrl`. Bearer auth via
  *                      `settings.marketplace.apiKey` secret.
@@ -248,13 +238,13 @@ const DEFAULT_SETTINGS: AppSettings = {
     realCloudAllowPrivateNetwork: false,
   },
   routine: {
-    enableDailyBriefing: false,
+    enableWakeupRoutine: false,
     scheduleTimeKst: "08:30",
-    wakeupPrompt: DEFAULT_WAKEUP_PROMPT,
-    enableHeartbeat: true,
-    heartbeatEntries: [createDefaultHeartbeatEntry(0)],
-    enableShutdownSummary: true,
+    wakeupRoutinePrompt: DEFAULT_WAKEUP_ROUTINE_PROMPT,
+    enableShutdownRoutine: true,
     shutdownPrompt: DEFAULT_SHUTDOWN_PROMPT,
+    enableScheduleRoutine: true,
+    scheduleEntries: [createDefaultScheduleEntry(0)],
   },
   privacy: {
     piiRedactEnabled: false,
@@ -488,19 +478,29 @@ export class SettingsService {
       }
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
       const legacyRoutine = parsed.routine ?? parsed.proactive;
-      const normalizedRoutine = {
+      const normalizedRoutine: RoutineSettings = {
         ...DEFAULT_SETTINGS.routine,
         ...legacyRoutine,
-        wakeupPrompt: typeof legacyRoutine?.wakeupPrompt === "string" && legacyRoutine.wakeupPrompt.trim().length > 0
-          ? legacyRoutine.wakeupPrompt.trim()
-          : DEFAULT_WAKEUP_PROMPT,
-        heartbeatEntries: normalizeHeartbeatEntries(
-          legacyRoutine?.heartbeatEntries,
-          legacyRoutine?.heartbeatSchedule,
+        // migrate: dailyBriefingPrompt → wakeupRoutinePrompt
+        wakeupRoutinePrompt: typeof (legacyRoutine?.wakeupRoutinePrompt ?? legacyRoutine?.dailyBriefingPrompt) === "string"
+          && ((legacyRoutine?.wakeupRoutinePrompt ?? legacyRoutine?.dailyBriefingPrompt) as string).trim().length > 0
+          ? ((legacyRoutine?.wakeupRoutinePrompt ?? legacyRoutine?.dailyBriefingPrompt) as string).trim()
+          : DEFAULT_WAKEUP_ROUTINE_PROMPT,
+        // migrate: heartbeatEntries → scheduleEntries
+        scheduleEntries: normalizeScheduleEntries(
+          legacyRoutine?.scheduleEntries ?? legacyRoutine?.heartbeatEntries,
         ),
         shutdownPrompt: typeof legacyRoutine?.shutdownPrompt === "string" && legacyRoutine.shutdownPrompt.trim().length > 0
           ? legacyRoutine.shutdownPrompt.trim()
           : DEFAULT_SHUTDOWN_PROMPT,
+        // migrate: enableDailyBriefing → enableWakeupRoutine
+        enableWakeupRoutine: legacyRoutine?.enableWakeupRoutine ?? legacyRoutine?.enableDailyBriefing ?? false,
+        // migrate: lastBriefingAt → lastWakeupRoutineAt
+        lastWakeupRoutineAt: legacyRoutine?.lastWakeupRoutineAt ?? legacyRoutine?.lastBriefingAt,
+        // migrate: enableShutdownSummary → enableShutdownRoutine
+        enableShutdownRoutine: legacyRoutine?.enableShutdownRoutine ?? legacyRoutine?.enableShutdownSummary ?? true,
+        // migrate: enableHeartbeat → enableScheduleRoutine
+        enableScheduleRoutine: legacyRoutine?.enableScheduleRoutine ?? legacyRoutine?.enableHeartbeat ?? true,
       };
 
       return {

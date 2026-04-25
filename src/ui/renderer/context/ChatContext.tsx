@@ -3,7 +3,13 @@ import type React from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { EstimateBreakdown } from "../../../lib/cost-estimator.js";
-import type { BriefingPayload } from "../types.js";
+
+type RoutineResult = {
+  routineId: string;
+  trigger: string;
+  summary: string;
+  generatedAt: string;
+};
 
 /**
  * Cross-cutting chat-view state bundle. Groups props by concern so ChatView
@@ -27,10 +33,10 @@ export interface ChatContextValue {
   hasApiKey: boolean | null;
   onOpenSettings: () => void;
 
-  // Briefing
-  briefing: BriefingPayload | null;
-  onDismissBriefing: (feedback?: { reason: string; details?: string }) => void;
-  onSnoozeBriefing: () => void;
+  // Routine result
+  routineResult: RoutineResult | null;
+  onDismissRoutineResult: () => void;
+  onSnoozeRoutineResult: () => void;
 
   // Search
   searchOpen: boolean;

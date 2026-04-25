@@ -41,7 +41,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-meeting",
             packageName: "@lvis/plugin-meeting",
             tools: [],
-            deployment: "managed",
+            installPolicy: "admin",
           },
         ],
       }),
@@ -74,7 +74,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.failed).toEqual([]);
   });
 
-  it("installs bundled companion plugins before the bundled root plugin", async () => {
+  it("installs bundle companion plugins before the bundle root plugin", async () => {
     await writeFile(
       marketplacePath,
       JSON.stringify({
@@ -87,7 +87,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-calendar",
             packageName: "@lvis/plugin-calendar",
             tools: [],
-            deployment: "managed",
+            installPolicy: "admin",
           },
           {
             id: "email",
@@ -96,7 +96,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-email",
             packageName: "@lvis/plugin-email",
             tools: [],
-            deployment: "managed",
+            installPolicy: "admin",
           },
           {
             id: "meeting",
@@ -105,7 +105,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-meeting",
             packageName: "@lvis/plugin-meeting",
             tools: [],
-            deployment: "managed",
+            installPolicy: "admin",
           },
           {
             id: "work-proactive",
@@ -114,9 +114,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-work-proactive",
             packageName: "@lvis/plugin-work-proactive",
             tools: [],
-            deployment: "managed",
-            deliveryMode: "bundled",
-            bundleDependencies: ["calendar", "email", "meeting"],
+            installPolicy: "user",
+            dependencies: ["calendar", "email", "meeting"],
           },
         ],
       }),
@@ -147,7 +146,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(cacheSpy).toHaveBeenCalledTimes(4);
   });
 
-  it("satisfies bundled root capability requirements via auto-installed bundle dependencies", async () => {
+  it("satisfies dependency root capability requirements via auto-installed dependencies", async () => {
     await writeFile(
       marketplacePath,
       JSON.stringify({
@@ -160,7 +159,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-calendar",
             packageName: "@lvis/plugin-calendar",
             tools: [],
-            deployment: "managed",
+            installPolicy: "admin",
             capabilities: ["calendar-source"],
           },
           {
@@ -170,9 +169,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-work-proactive",
             packageName: "@lvis/plugin-work-proactive",
             tools: [],
-            deployment: "managed",
-            deliveryMode: "bundled",
-            bundleDependencies: ["calendar"],
+            installPolicy: "user",
+            dependencies: ["calendar"],
             requires: { capabilities: ["calendar-source"] },
           },
         ],
@@ -211,7 +209,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     });
   });
 
-  it("lets a user install a bundled marketplace root plugin", async () => {
+  it("lets a user install a bundle marketplace root plugin", async () => {
     await writeFile(
       marketplacePath,
       JSON.stringify({
@@ -224,7 +222,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:./plugin-src/calendar",
             packageName: "@lvis/plugin-calendar",
             tools: [],
-            deployment: "managed",
+            installPolicy: "user",
             capabilities: ["calendar-source"],
           },
           {
@@ -234,7 +232,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:./plugin-src/email",
             packageName: "@lvis/plugin-email",
             tools: [],
-            deployment: "managed",
+            installPolicy: "user",
           },
           {
             id: "meeting",
@@ -243,7 +241,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:./plugin-src/meeting",
             packageName: "@lvis/plugin-meeting",
             tools: [],
-            deployment: "managed",
+            installPolicy: "user",
           },
           {
             id: "work-proactive",
@@ -252,9 +250,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:../lvis-plugin-work-proactive",
             packageName: "@lvis/plugin-work-proactive",
             tools: [],
-            deployment: "user",
-            deliveryMode: "bundled",
-            bundleDependencies: ["calendar", "email", "meeting"],
+            installPolicy: "user",
+            dependencies: ["calendar", "email", "meeting"],
           },
         ],
       }),
@@ -263,9 +260,12 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
 
     const service = new PluginMarketplaceService(testDir);
-    vi
+    const installSpy = vi
       .spyOn(service as unknown as { installArtifact: (...args: unknown[]) => Promise<string> }, "installArtifact")
-      .mockResolvedValue(join(testDir, "installed", "work-proactive", "plugin.json"));
+      .mockImplementation(async (plugin: unknown) => {
+        const item = plugin as { id: string };
+        return join(testDir, "installed", item.id, "plugin.json");
+      });
     vi
       .spyOn(service as unknown as { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> }, "cacheVersionFromManifest")
       .mockResolvedValue();
@@ -274,6 +274,12 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       pluginId: "work-proactive",
       installed: true,
     });
+    expect(installSpy.mock.calls.map(([plugin]) => (plugin as { id: string }).id)).toEqual([
+      "calendar",
+      "email",
+      "meeting",
+      "work-proactive",
+    ]);
   });
 
   it("preserves rich manifest metadata when synthesizing an installed manifest", async () => {
@@ -307,7 +313,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:./plugin-src/calendar",
             packageName: "@lvis/plugin-calendar",
             tools: [],
-            deployment: "managed",
+            installPolicy: "user",
             capabilities: ["calendar-source"],
           },
           {
@@ -317,7 +323,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:./plugin-src/email",
             packageName: "@lvis/plugin-email",
             tools: [],
-            deployment: "managed",
+            installPolicy: "user",
           },
           {
             id: "meeting",
@@ -326,7 +332,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:./plugin-src/meeting",
             packageName: "@lvis/plugin-meeting",
             tools: [],
-            deployment: "managed",
+            installPolicy: "user",
           },
           {
             id: "work-proactive",
@@ -335,14 +341,21 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: "file:./plugin-src/work-proactive",
             packageName: "@lvis/plugin-work-proactive",
             tools: ["work_proactive_generate_wakeup_briefing"],
-            deployment: "managed",
-            deliveryMode: "bundled",
-            bundleDependencies: ["calendar", "email", "meeting"],
+            installPolicy: "user",
+            dependencies: [
+              { pluginId: "calendar", required: true },
+              { pluginId: "email", required: true },
+              { pluginId: "meeting", required: true },
+            ],
+            pluginAccess: {
+              plugins: [
+                { pluginId: "calendar", tools: ["calendar_today"] },
+                { pluginId: "email", events: ["email.action.needed"] },
+                { pluginId: "meeting", events: ["meeting.summary.created", "meeting.ended"] },
+              ],
+            },
             capabilities: ["work-proactive-provider"],
             requires: { capabilities: ["calendar-source"] },
-            routineTools: {
-              wakeupBriefing: "work_proactive_generate_wakeup_briefing",
-            },
             toolSchemas: {
               work_proactive_generate_wakeup_briefing: {
                 description: "Generate wakeup briefing",
@@ -382,13 +395,21 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const manifestPath = registry.plugins.find((entry) => entry.id === "work-proactive")?.manifestPath;
     expect(manifestPath).toBeTruthy();
     const manifest = JSON.parse(await readFile(manifestPath!, "utf-8"));
-    expect(manifest.deliveryMode).toBe("bundled");
-    expect(manifest.bundleDependencies).toEqual(["calendar", "email", "meeting"]);
+    expect(manifest.installPolicy).toBe("user");
+    expect(manifest.dependencies).toEqual([
+      { pluginId: "calendar", required: true },
+      { pluginId: "email", required: true },
+      { pluginId: "meeting", required: true },
+    ]);
+    expect(manifest.pluginAccess).toEqual({
+      plugins: [
+        { pluginId: "calendar", tools: ["calendar_today"] },
+        { pluginId: "email", events: ["email.action.needed"] },
+        { pluginId: "meeting", events: ["meeting.summary.created", "meeting.ended"] },
+      ],
+    });
     expect(manifest.requires).toEqual({ capabilities: ["calendar-source"] });
     expect(manifest.capabilities).toEqual(["work-proactive-provider"]);
-    expect(manifest.routineTools).toEqual({
-      wakeupBriefing: "work_proactive_generate_wakeup_briefing",
-    });
     expect(manifest.toolSchemas?.work_proactive_generate_wakeup_briefing?.description).toBe(
       "Generate wakeup briefing",
     );
@@ -407,7 +428,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             packageSpec: `file:${homedir()}`,
             packageName: "@lvis/escape",
             tools: [],
-            deployment: "user",
           },
         ],
       }),
@@ -421,5 +441,215 @@ describe("PluginMarketplaceService managed bootstrap", () => {
 
     const service = new PluginMarketplaceService(testDir);
     await expect(service.install("escape-test")).rejects.toThrow(/escapes workspace root/i);
+  });
+
+  it("rejects marketplace artifacts whose pluginAccess exceeds the catalog-approved grant", async () => {
+    const pluginDir = join(testDir, "plugins", "installed", "user-plugin");
+    await mkdir(pluginDir, { recursive: true });
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "user-plugin",
+        name: "User Plugin",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+        pluginAccess: {
+          plugins: [{ pluginId: "email", events: ["email.analyzed"] }],
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new PluginMarketplaceService(testDir);
+    await expect(
+      (service as unknown as {
+        assertInstalledManifestMatchesCatalog: (
+          plugin: {
+            id: string;
+            installPolicy: "user";
+            pluginAccess?: unknown;
+          },
+          version: string,
+          manifestFile: string,
+          pluginDir: string,
+        ) => Promise<void>;
+      }).assertInstalledManifestMatchesCatalog(
+        {
+          id: "user-plugin",
+          installPolicy: "user",
+          pluginAccess: undefined,
+        },
+        "1.0.0",
+        manifestPath,
+        pluginDir,
+      ),
+    ).rejects.toThrow(/pluginAccess does not match the catalog-approved grant/i);
+  });
+
+  it("restores registry state during dependency rollback cleanup", async () => {
+    const calendarDir = join(testDir, "plugins", "installed", "calendar");
+    const emailDir = join(testDir, "plugins", "installed", "email");
+    await mkdir(calendarDir, { recursive: true });
+    await mkdir(emailDir, { recursive: true });
+    await writeFile(
+      join(calendarDir, "plugin.json"),
+      JSON.stringify({
+        id: "calendar",
+        name: "Calendar",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      join(emailDir, "plugin.json"),
+      JSON.stringify({
+        id: "email",
+        name: "Email",
+        version: "1.0.0",
+        entry: "dist/index.js",
+        tools: [],
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "calendar",
+            manifestPath: "installed/calendar/plugin.json",
+            enabled: false,
+            installedBy: "user",
+          },
+          {
+            id: "email",
+            manifestPath: "installed/email/plugin.json",
+            enabled: true,
+            installedBy: "user",
+            bundleRefs: ["work-proactive"],
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const service = new PluginMarketplaceService(testDir);
+    await (
+      service as unknown as {
+        rollbackInstallOperation: (state: {
+          installedPluginIds: string[];
+          touchedEntries: Map<string, { enabled?: boolean; bundleRefs?: string[]; installedBy?: "admin" | "user" }>;
+        }) => Promise<void>;
+      }
+    ).rollbackInstallOperation({
+      installedPluginIds: ["email"],
+      touchedEntries: new Map([
+        [
+          "calendar",
+          {
+            enabled: false,
+            bundleRefs: undefined,
+            installedBy: "user",
+          },
+        ],
+      ]),
+    });
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string; enabled?: boolean; bundleRefs?: string[] }>;
+    };
+    expect(registry.plugins).toEqual([
+      {
+        id: "calendar",
+        manifestPath: "installed/calendar/plugin.json",
+        enabled: false,
+        installedBy: "user",
+      },
+    ]);
+  });
+
+  it("removes bundle members only when explicitly requested and still unreferenced", async () => {
+    for (const pluginId of ["work-proactive", "email", "meeting", "calendar"]) {
+      const pluginDir = join(testDir, "plugins", "installed", pluginId);
+      await mkdir(pluginDir, { recursive: true });
+      await writeFile(
+        join(pluginDir, "plugin.json"),
+        JSON.stringify({
+          id: pluginId,
+          name: pluginId,
+          version: "1.0.0",
+          entry: "dist/index.js",
+          tools: [],
+        }),
+        "utf-8",
+      );
+    }
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "work-proactive",
+            manifestPath: "installed/work-proactive/plugin.json",
+            enabled: true,
+            installedBy: "user",
+          },
+          {
+            id: "email",
+            manifestPath: "installed/email/plugin.json",
+            enabled: true,
+            installedBy: "user",
+            bundleRefs: ["work-proactive"],
+          },
+          {
+            id: "meeting",
+            manifestPath: "installed/meeting/plugin.json",
+            enabled: true,
+            installedBy: "user",
+            bundleRefs: ["work-proactive", "other-bundle"],
+          },
+          {
+            id: "calendar",
+            manifestPath: "installed/calendar/plugin.json",
+            enabled: true,
+            installedBy: "admin",
+            bundleRefs: ["work-proactive"],
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const service = new PluginMarketplaceService(testDir);
+    await expect(service.uninstall("work-proactive", { removeBundleMembers: true })).resolves.toEqual({
+      pluginId: "work-proactive",
+      uninstalled: true,
+    });
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      plugins: Array<{ id: string; bundleRefs?: string[] }>;
+    };
+    expect(registry.plugins).toEqual([
+      {
+        id: "meeting",
+        manifestPath: "installed/meeting/plugin.json",
+        enabled: true,
+        installedBy: "user",
+        bundleRefs: ["other-bundle"],
+      },
+      {
+        id: "calendar",
+        manifestPath: "installed/calendar/plugin.json",
+        enabled: true,
+        installedBy: "admin",
+        bundleRefs: [],
+      },
+    ]);
   });
 });

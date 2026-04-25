@@ -138,8 +138,7 @@ describe("PostTurnHookChain", () => {
       title: "자동-이거 기억해줘",
       content: "# 자동-이거 기억해줘\n\n...",
     });
-    const saveNote = vi.fn();
-    const memoryManager = { saveSession, saveMemory, saveNote } as unknown as MemoryManager;
+    const memoryManager = { saveSession, saveMemory } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return { provider: "openai", model: "gpt-4o" };
@@ -159,6 +158,5 @@ describe("PostTurnHookChain", () => {
     });
 
     expect(saveMemory).toHaveBeenCalledOnce();
-    expect(saveNote).not.toHaveBeenCalled();
   });
 });

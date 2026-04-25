@@ -29,17 +29,18 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(true).toBe(true);
   });
 
-  it("BriefingCard appears when onRoutineBriefing fires", async () => {
-    const { container, emitRoutineBriefing } = await renderApp();
+  it("RoutineCard appears when onRoutineCompleted fires", async () => {
+    const { container, emitRoutineCompleted } = await renderApp();
     await act(async () => {
-      emitRoutineBriefing({
+      emitRoutineCompleted({
+        routineId: "wakeup",
+        trigger: "wakeup",
         generatedAt: new Date().toISOString(),
-        items: [{ category: "info", priority: "low", title: "Test briefing" }],
         summary: "smoke summary",
       });
     });
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="briefing-card"]')).toBeTruthy();
+      expect(container.querySelector('[data-testid="routine-card"]')).toBeTruthy();
     });
   });
 

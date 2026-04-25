@@ -77,9 +77,8 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
           packageName: "@acme/notes",
           packageSpec: "@acme/notes@1.2.3",
           methods: ["notes.add", "notes.list"],
-          deployment: "user",
-          deliveryMode: "bundled",
-          bundleDependencies: ["calendar"],
+          installPolicy: "user",
+          dependencies: ["calendar"],
           publisher: "Acme",
         },
       ]),
@@ -97,9 +96,8 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
       packageName: "@acme/notes",
       packageSpec: "@acme/notes@1.2.3",
       tools: ["notes.add", "notes.list"],
-      deployment: "user",
-      deliveryMode: "bundled",
-      bundleDependencies: ["calendar"],
+      installPolicy: "user",
+      dependencies: ["calendar"],
       publisher: "Acme",
     });
 
@@ -125,9 +123,8 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
             download_count: 0,
             organization_allowed: false,
             latest_stable_version: "0.1.0",
-            deployment: "managed",
-            delivery_mode: "bundled",
-            bundle_dependencies: ["calendar", { "pluginId": "email", "versionRange": "^1.0.0" }],
+            install_policy: "admin",
+            dependencies: ["calendar", { "pluginId": "email", "versionRange": "^1.0.0" }],
             created_at: "2026-01-01T00:00:00",
             updated_at: "2026-01-01T00:00:00",
           },
@@ -144,8 +141,8 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
     expect(plugins[0].name).toBe("Plugin A");
     // packageSpec synthesized from slug@version (no package_name in server response)
     expect(plugins[0].packageSpec).toBe("mp-a@0.1.0");
-    expect(plugins[0].deliveryMode).toBe("bundled");
-    expect(plugins[0].bundleDependencies).toEqual([
+    expect(plugins[0].installPolicy).toBe("admin");
+    expect(plugins[0].dependencies).toEqual([
       "calendar",
       { pluginId: "email", versionRange: "^1.0.0" },
     ]);
@@ -264,9 +261,8 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
     download_count: 0,
     organization_allowed: false,
     latest_stable_version: "0.1.0",
-    deployment: "managed",
-    delivery_mode: "bundled",
-    bundle_dependencies: ["calendar", "email", "meeting"],
+    install_policy: "admin",
+    dependencies: ["calendar", "email", "meeting"],
     created_at: "2026-01-01T00:00:00",
     updated_at: "2026-01-01T00:00:00",
   };
@@ -293,9 +289,8 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
     expect(p.packageSpec).toBe("lvis-plugin-meeting@0.1.0");
     // tools defaults to [] when methods is absent
     expect(p.tools).toEqual([]);
-    expect(p.deployment).toBe("managed");
-    expect(p.deliveryMode).toBe("bundled");
-    expect(p.bundleDependencies).toEqual(["calendar", "email", "meeting"]);
+    expect(p.installPolicy).toBe("admin");
+    expect(p.dependencies).toEqual(["calendar", "email", "meeting"]);
     expect(p.version).toBe("0.1.0");
     expect(p.channel).toBe("stable");
   });

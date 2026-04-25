@@ -21,15 +21,17 @@ vi.mock("electron", () => ({
 }));
 
 type ExposedApi = {
-  installMarketplacePlugin: (pluginId: string) => Promise<unknown>;
-  uninstallMarketplacePlugin: (pluginId: string) => Promise<unknown>;
+  takePluginMarketplaceApi: () => {
+    installMarketplacePlugin: (pluginId: string) => Promise<unknown>;
+    uninstallMarketplacePlugin: (pluginId: string) => Promise<unknown>;
+  } | null;
 };
 
 async function loadExposedApi(): Promise<ExposedApi> {
   await import("../preload.js");
-  const api = exposed.get("lvisApi");
+  const api = exposed.get("lvisHost");
   if (!api || typeof api !== "object") {
-    throw new Error("lvisApi was not exposed");
+    throw new Error("lvisHost was not exposed");
   }
   return api as ExposedApi;
 }
@@ -46,8 +48,10 @@ describe("preload plugin action normalization", () => {
   it("rejects malformed install payloads as invalid-result", async () => {
     mockInvoke.mockResolvedValueOnce({ installed: true });
     const api = await loadExposedApi();
+    const hostApi = api.takePluginMarketplaceApi();
+    if (!hostApi) throw new Error("host plugin marketplace api unavailable");
 
-    await expect(api.installMarketplacePlugin("meeting")).resolves.toEqual({
+    await expect(hostApi.installMarketplacePlugin("meeting")).resolves.toEqual({
       ok: false,
       error: "invalid-result",
       message: "플러그인 작업 결과가 올바르지 않습니다.",
@@ -57,11 +61,20 @@ describe("preload plugin action normalization", () => {
   it("preserves valid uninstall payloads", async () => {
     mockInvoke.mockResolvedValueOnce({ pluginId: "meeting", uninstalled: true });
     const api = await loadExposedApi();
+    const hostApi = api.takePluginMarketplaceApi();
+    if (!hostApi) throw new Error("host plugin marketplace api unavailable");
 
-    await expect(api.uninstallMarketplacePlugin("meeting")).resolves.toEqual({
+    await expect(hostApi.uninstallMarketplacePlugin("meeting")).resolves.toEqual({
       ok: true,
       pluginId: "meeting",
       uninstalled: true,
     });
+  });
+
+  it("allows the host marketplace api to be claimed only once", async () => {
+    const api = await loadExposedApi();
+
+    expect(api.takePluginMarketplaceApi()).not.toBeNull();
+    expect(api.takePluginMarketplaceApi()).toBeNull();
   });
 });

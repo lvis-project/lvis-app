@@ -1,32 +1,26 @@
 /**
  * Boot §4.2 Step 6 — Routine coordinator wiring.
- *
- * Builds the RoutineTriggerCoordinator, starts it, and (when idleScheduler
- * is present) installs the composite idle-state listener that fans IDLE_SCAN
- * into both (a) direct briefing generation and (b) the coordinator's
- * `idle-scan` notifier. Extracted from boot.ts for readability.
  */
 import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import type { TaskService } from "../../taskService.js";
 import type { SettingsService } from "../../data/settings-store.js";
-import type { Briefing, RoutineEngine } from "../../core/routine-engine.js";
-import type { MemoryManager } from "../../memory/memory-manager.js";
+import type { RoutineEngine, RoutineResult } from "../../core/routine-engine.js";
 import type { IdleSchedulerService, IdleState } from "../../main/idle-scheduler.js";
 import { createRoutineTriggerCoordinator } from "../routine.js";
 import {
   getKstMinuteKey,
-  matchesHeartbeatSchedule,
-  normalizeHeartbeatEntries,
+  matchesSchedule,
+  normalizeScheduleEntries,
 } from "../../routines/schedule.js";
-import { deliverRoutineBriefing } from "../../routines/briefing-delivery.js";
+import { deliverRoutineResult } from "../../routines/routine-delivery.js";
+import { REGISTERED_ROUTINES } from "../../routines/registry.js";
 
 export interface WireRoutineCoordinatorInput {
   routineEngine: RoutineEngine;
   taskService: TaskService;
   pluginRuntime: PluginRuntime;
   settingsService: SettingsService;
-  memoryManager: MemoryManager;
   idleScheduler: IdleSchedulerService | undefined;
   mainWindow: BrowserWindow;
 }
@@ -37,85 +31,79 @@ export interface WiredRoutineCoordinator {
 }
 
 export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): WiredRoutineCoordinator {
-  const { routineEngine, taskService, pluginRuntime, settingsService, memoryManager, idleScheduler, mainWindow } = input;
+  const { routineEngine, taskService, pluginRuntime, settingsService, idleScheduler, mainWindow } = input;
 
-  let proactiveScheduleLastDay: string | undefined;
-  const heartbeatLastMinuteKeyByEntry = new Map<string, string>();
-  const sendRoutineBriefing = async (briefing: Briefing): Promise<void> => {
-    await deliverRoutineBriefing(mainWindow, memoryManager, briefing).catch((e: Error) => {
-      console.warn("[lvis] boot: briefing session persist failed:", e.message);
+  let wakeupScheduleLastDay: string | undefined;
+  const scheduleLastMinuteKeyByEntry = new Map<string, string>();
+
+  const onRoutineCompleted = async (result: RoutineResult): Promise<void> => {
+    await deliverRoutineResult(mainWindow, result).catch((e: Error) => {
+      console.warn("[lvis] boot: routine result persist failed:", e.message);
     });
   };
+
   const routineCoordinator = createRoutineTriggerCoordinator({
     routineEngine,
     taskService,
     pluginRuntime,
     isIdleScanActive: () => idleScheduler?.getState() === "IDLE_SCAN",
     isScheduleEnabled: () =>
-      settingsService.get("routine")?.enableDailyBriefing ?? false,
+      settingsService.get("routine")?.enableWakeupRoutine ?? false,
     getScheduleTimeKst: () =>
       settingsService.get("routine")?.scheduleTimeKst ?? "08:30",
-    isPostTurnEnabled: () =>
-      settingsService.get("routine")?.enablePostTurnBriefing ?? false,
-    onBriefingGenerated: sendRoutineBriefing,
-    getScheduleLastFiredDayKey: () => proactiveScheduleLastDay,
-    setScheduleLastFiredDayKey: (key) => { proactiveScheduleLastDay = key; },
+    onRoutineCompleted,
+    getScheduleLastFiredDayKey: () => wakeupScheduleLastDay,
+    setScheduleLastFiredDayKey: (key) => { wakeupScheduleLastDay = key; },
   });
   routineCoordinator.start();
 
-  const maybeRunHeartbeat = () => {
+  // schedule 루틴: cron 기반 주기 실행
+  const maybeRunScheduleRoutines = () => {
     const routineSettings = settingsService.get("routine");
-    if (!(routineSettings?.enableHeartbeat ?? true)) return;
+    if (!(routineSettings?.enableScheduleRoutine ?? true)) return;
     const now = new Date();
     const minuteKey = getKstMinuteKey(now);
-    const entries = normalizeHeartbeatEntries(routineSettings?.heartbeatEntries);
-    const activeIds = new Set(entries.map((entry) => entry.id));
-    for (const knownId of heartbeatLastMinuteKeyByEntry.keys()) {
-      if (!activeIds.has(knownId)) heartbeatLastMinuteKeyByEntry.delete(knownId);
+    const entries = normalizeScheduleEntries(routineSettings?.scheduleEntries);
+    const activeIds = new Set(entries.map((e) => e.id));
+    for (const knownId of scheduleLastMinuteKeyByEntry.keys()) {
+      if (!activeIds.has(knownId)) scheduleLastMinuteKeyByEntry.delete(knownId);
     }
+    const scheduleRegistered = REGISTERED_ROUTINES.find((r) => r.id === "schedule");
+    if (!scheduleRegistered) return;
     for (const entry of entries) {
       if (!entry.enabled) continue;
-      if (heartbeatLastMinuteKeyByEntry.get(entry.id) === minuteKey) continue;
-      if (!matchesHeartbeatSchedule(entry.schedule, now)) continue;
-      heartbeatLastMinuteKeyByEntry.set(entry.id, minuteKey);
-      void routineEngine.runHeartbeatRoutine(now, entry);
+      if (scheduleLastMinuteKeyByEntry.get(entry.id) === minuteKey) continue;
+      if (!matchesSchedule(entry.schedule, now)) continue;
+      scheduleLastMinuteKeyByEntry.set(entry.id, minuteKey);
+      void routineEngine
+        .runRoutine({ id: entry.id, trigger: "schedule", prePrompt: entry.prompt })
+        .then((result) => onRoutineCompleted(result))
+        .catch((e: Error) =>
+          console.warn("[lvis] boot: schedule routine failed:", e.message),
+        );
     }
   };
 
-  const heartbeatTimer = setInterval(maybeRunHeartbeat, 60_000);
-  heartbeatTimer.unref?.();
-  maybeRunHeartbeat();
+  const scheduleTimer = setInterval(maybeRunScheduleRoutines, 60_000);
+  scheduleTimer.unref?.();
+  maybeRunScheduleRoutines();
 
   let compositeListenerInstalled = false;
 
   if (idleScheduler) {
     const existing = idleScheduler;
-    const notifyCoordinator = (state: IdleState) => {
-      if (state === "IDLE_SCAN") routineCoordinator.notify("idle-scan");
-    };
-    // setStateChangeListener accepts only one listener; this `composite` IS the
-    // idle-scheduler wiring for routine execution — fans IDLE_SCAN into direct briefing
-    // generation + the coordinator notifier.
-    const composite = (
-      newState: IdleState,
-      oldState: IdleState,
-      reason: string,
-    ): void => {
+    const composite = (newState: IdleState, _oldState: IdleState, _reason: string): void => {
       if (newState === "IDLE_SCAN" && !routineCoordinator.isWithinGlobalCooldown()) {
-        routineEngine
-          .generateDailyBriefing({ idleState: "long_idle" })
-          .then((r) => {
-            if (r.status === "generated") {
-              void sendRoutineBriefing(r.briefing);
-            }
-          })
+        const wakeupRoutine = { id: "wakeup", trigger: "wakeup" as const, prePrompt: "오늘 업무 맥락을 정리해줘." };
+        void routineEngine
+          .runRoutine(wakeupRoutine)
+          .then((result) => onRoutineCompleted(result))
           .catch((e: Error) =>
-            console.warn("[lvis] boot: daily briefing trigger failed (non-fatal):", e.message),
+            console.warn("[lvis] boot: wakeup routine failed:", e.message),
           );
-        maybeRunHeartbeat();
+        maybeRunScheduleRoutines();
       }
-      notifyCoordinator(newState);
-      void oldState; void reason;
+      if (newState === "IDLE_SCAN") routineCoordinator.notify("idle-scan");
     };
     existing.setStateChangeListener(composite);
     compositeListenerInstalled = true;
@@ -124,10 +112,11 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
   return {
     notify: (event: string) => routineCoordinator.notify(event),
     dispose: () => {
-      clearInterval(heartbeatTimer);
+      clearInterval(scheduleTimer);
       if (compositeListenerInstalled) {
         idleScheduler?.setStateChangeListener(null);
       }
+      routineCoordinator.stop();
     },
   };
 }

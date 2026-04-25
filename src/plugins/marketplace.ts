@@ -14,12 +14,54 @@ import AdmZip from "adm-zip";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
 import { installFromMarketplace, type MarketplaceHttp } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
+import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
+
+function normalizeInstallPolicy(source: {
+  installPolicy?: InstallPolicy;
+}): InstallPolicy {
+  if (source.installPolicy === "admin") {
+    return "admin";
+  }
+  return "user";
+}
+
+function normalizeDependencies(
+  plugin: Pick<PluginMarketplaceItem, "dependencies">,
+): Array<{ pluginId: string; versionRange?: string; required: boolean }> {
+  const result: Array<{ pluginId: string; versionRange?: string; required: boolean }> = [];
+  for (const dependency of plugin.dependencies ?? []) {
+    if (typeof dependency === "string") {
+      result.push({ pluginId: dependency, required: true });
+      continue;
+    }
+    if (!dependency?.pluginId) continue;
+    result.push({
+      pluginId: dependency.pluginId,
+      versionRange: dependency.versionRange,
+      required: dependency.required ?? true,
+    });
+  }
+  return result;
+}
 
 type MarketplaceCatalog = {
   version: number;
   plugins: PluginMarketplaceItem[];
+};
+
+type InstallOperationState = {
+  installedPluginIds: string[];
+  touchedEntries: Map<
+    string,
+    {
+      enabled: boolean | undefined;
+      bundleRefs: string[] | undefined;
+      installedBy: "admin" | "user" | undefined;
+      approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"];
+    }
+  >;
 };
 
 type VerifiedMarketplaceFetcher = MarketplaceFetcher & MarketplaceHttp;
@@ -90,7 +132,7 @@ export class PluginMarketplaceService {
   private readonly cacheRoot: string;
   /**
    * S9: base directory for the catalog cache. `null` disables catalog caching
-   * (used when the fetcher is the bundled mock / local-file path).
+   * (used when the fetcher is the local mock / local-file path).
    * `undefined` uses the default global path under `~/.lvis/marketplace-cache/`.
    */
   private readonly catalogCacheBase: string | null | undefined;
@@ -114,7 +156,7 @@ export class PluginMarketplaceService {
     this.marketplacePath = resolve(this.appRoot, "plugins/marketplace.json");
     this.installedDir = resolve(homedir(), ".lvis/plugins");
     this.deploymentGuard = deploymentGuard;
-    // When no external fetcher is provided we fall back to the bundled local
+    // When no external fetcher is provided we fall back to the local
     // marketplace.json mock — catalog caching makes no sense for local files.
     const usingMockFetcher = !fetcher;
     this.fetcher = fetcher ?? new MockMarketplaceFetcher(this.marketplacePath);
@@ -177,15 +219,15 @@ export class PluginMarketplaceService {
     catalogItem: PluginMarketplaceItem,
     installedManifestPath?: string,
   ): Promise<boolean> {
-    if (catalogItem.deployment === "managed") return true;
+    if (normalizeInstallPolicy(catalogItem) === "admin") return true;
     if (!installedManifestPath) return false;
     const abs = isAbsolute(installedManifestPath)
       ? installedManifestPath
       : resolve(dirname(this.registryPath), installedManifestPath);
     try {
       const raw = await readFile(abs, "utf-8");
-      const parsed = JSON.parse(raw) as { deployment?: string };
-      return parsed.deployment === "managed";
+      const parsed = JSON.parse(raw) as { installPolicy?: InstallPolicy };
+      return normalizeInstallPolicy(parsed) === "admin";
     } catch {
       return false;
     }
@@ -195,13 +237,24 @@ export class PluginMarketplaceService {
     pluginId: string,
     actor: "user" | "it-admin" = "user",
   ): Promise<{ pluginId: string; installed: true }> {
-    return this.installWithBundleDependencies(pluginId, actor, new Set<string>());
+    const state: InstallOperationState = {
+      installedPluginIds: [],
+      touchedEntries: new Map(),
+    };
+    try {
+      return await this.installWithDependencies(pluginId, actor, new Set<string>(), null, state);
+    } catch (error) {
+      await this.rollbackInstallOperation(state);
+      throw error;
+    }
   }
 
-  private async installWithBundleDependencies(
+  private async installWithDependencies(
     pluginId: string,
     actor: "user" | "it-admin",
     seen: Set<string>,
+    bundleRootId: string | null,
+    state: InstallOperationState,
   ): Promise<{ pluginId: string; installed: true }> {
     if (seen.has(pluginId)) {
       return { pluginId, installed: true };
@@ -213,26 +266,56 @@ export class PluginMarketplaceService {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
     }
 
-    // §7.2 canInstall — managed 카탈로그 항목은 user actor 차단 (defense-in-depth).
+    // §7.2 canInstall — admin-policy catalog entries block user actor installs.
     // Boot-time force-install uses actor="it-admin" to bypass this guard for
     // mandatory enterprise plugins (see ensureManagedInstalled).
     if (this.deploymentGuard) {
-      const guardResult = await this.deploymentGuard.canInstall(pluginId, actor, plugin.deployment);
+      const guardResult = await this.deploymentGuard.canInstall(
+        pluginId,
+        actor,
+        plugin.installPolicy,
+      );
       if (!guardResult.allowed) {
         throw new Error(guardResult.reason ?? `Plugin install denied: ${pluginId}`);
       }
     }
 
-    if (actor === "it-admin") {
-      for (const dependency of plugin.bundleDependencies ?? []) {
-        const dependencyId = typeof dependency === "string" ? dependency : dependency.pluginId;
-        await this.installWithBundleDependencies(dependencyId, actor, seen);
+    const activeBundleRootId =
+      bundleRootId ?? (normalizeDependencies(plugin).length > 0
+        ? plugin.id
+        : null);
+
+    for (const dependency of normalizeDependencies(plugin)) {
+      await this.installWithDependencies(
+        dependency.pluginId,
+        actor,
+        seen,
+        activeBundleRootId,
+        state,
+      );
+    }
+
+    const existingEntry = await this.getInstalledRegistryEntry(plugin.id);
+    if (existingEntry) {
+      // If the requested version matches the currently-installed version (or
+      // neither specifies a concrete semver version) treat this as a no-op so
+      // repeated installs of the same release are idempotent.  When the catalog
+      // advertises a DIFFERENT version we fall through to re-install so that an
+      // "install" call can act as an in-place upgrade and stale files from the
+      // old release do not survive.
+      const installedVersion = await this.getInstalledVersion(plugin.id);
+      const isSameVersion =
+        !plugin.version ||
+        !installedVersion ||
+        plugin.version === installedVersion;
+      if (isSameVersion) {
+        await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
+        return { pluginId: plugin.id, installed: true };
       }
     }
 
-    // S14: dependency preflight — evaluate after any managed bundle dependencies
-    // have been auto-installed so bundled providers can satisfy their own
-    // requires.capabilities through the companion plugins they bring along.
+    // S14: dependency preflight — evaluate after declared dependencies have
+    // been auto-installed so providers can satisfy their own requires.capabilities.
     if (plugin.requires && plugin.requires.capabilities.length > 0) {
       const installedManifests = await this.loadInstalledManifests();
       const result = resolveDependencies(plugin.requires.capabilities, installedManifests);
@@ -258,17 +341,28 @@ export class PluginMarketplaceService {
       if (existing) {
         existing.manifestPath = manifestPath;
         existing.enabled = true;
+        existing.installedBy = actor === "it-admin" ? "admin" : "user";
+        existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, activeBundleRootId, plugin.id);
+        existing.approvedPluginAccess = plugin.pluginAccess;
       } else {
-        registry.plugins.push({ id: plugin.id, manifestPath, enabled: true });
+        registry.plugins.push({
+          id: plugin.id,
+          manifestPath,
+          enabled: true,
+          installedBy: actor === "it-admin" ? "admin" : "user",
+          bundleRefs: this.mergeBundleRefs([], activeBundleRootId, plugin.id),
+          approvedPluginAccess: plugin.pluginAccess,
+        });
       }
     });
+    state.installedPluginIds.push(plugin.id);
     return { pluginId: plugin.id, installed: true };
   }
 
   /**
-   * Boot-time managed plugin bootstrap. Queries the marketplace catalog for
-   * every `deployment === "managed"` plugin and force-installs any that are
-   * missing from the local registry. Runs as actor="it-admin" so the deployment
+   * Boot-time admin plugin bootstrap. Queries the marketplace catalog for
+   * every admin-policy plugin and force-installs any that are
+    * missing from the local registry. Runs as actor="it-admin" so the install-policy
    * guard permits the install.
    *
    * Failure modes are intentionally graceful — marketplace unreachable or a
@@ -289,7 +383,7 @@ export class PluginMarketplaceService {
       );
       return result;
     }
-    const managed = plugins.filter((p) => p.deployment === "managed");
+    const managed = plugins.filter((p) => normalizeInstallPolicy(p) === "admin");
     if (managed.length === 0) return result;
     const registry = await readPluginRegistry(this.registryPath).catch(() => ({
       version: 1,
@@ -310,7 +404,10 @@ export class PluginMarketplaceService {
     return result;
   }
 
-  async uninstall(pluginId: string): Promise<{ pluginId: string; uninstalled: true }> {
+  async uninstall(
+    pluginId: string,
+    options?: { removeBundleMembers?: boolean },
+  ): Promise<{ pluginId: string; uninstalled: true }> {
     // §7.2 PluginDeploymentGuard — managed 플러그인은 user actor에게 차단.
     if (this.deploymentGuard) {
       const guardResult = await this.deploymentGuard.canUninstall(pluginId, "user");
@@ -326,31 +423,24 @@ export class PluginMarketplaceService {
       if (!target) {
         throw new Error(`Plugin not installed: ${pluginId}`);
       }
-
-      const remainingEntries = registry.plugins.filter((x) => x.id !== pluginId);
-      const manifestPath = isAbsolute(target.manifestPath)
-        ? target.manifestPath
-        : resolve(dirname(this.registryPath), target.manifestPath);
-      const installedManifestDir = dirname(manifestPath);
-      const isZipInstalled = this.isWithin(this.installedDir, installedManifestDir);
-
-      // npm-path legacy only applies to node_modules-resolved installs. Zip
-      // extractions under ~/.lvis/plugins/ are self-contained directories —
-      // running `npm uninstall` on them is meaningless and errors with "Plugin
-      // not found" because the package was never registered via npm.
-      if (!isZipInstalled) {
-        const packageName = await this.resolvePackageName(pluginId, manifestPath);
-        const shouldUninstallPackage =
-          packageName && !(await this.isPackageUsedByRemainingPlugins(packageName, remainingEntries.map((entry) => entry.id)));
-        if (shouldUninstallPackage && packageName) {
-          await this.runNpmUninstall(packageName);
+      const idsToRemove = new Set<string>([pluginId]);
+      for (const entry of registry.plugins) {
+        if (entry.id === pluginId) continue;
+        const withoutRoot = (entry.bundleRefs ?? []).filter((bundleId) => bundleId !== pluginId);
+        const referencedByRoot = withoutRoot.length !== (entry.bundleRefs ?? []).length;
+        if (!referencedByRoot) continue;
+        if (options?.removeBundleMembers && withoutRoot.length === 0 && entry.installedBy !== "admin") {
+          idsToRemove.add(entry.id);
+          continue;
         }
+        entry.bundleRefs = withoutRoot;
       }
 
-      if (isZipInstalled) {
-        await rm(installedManifestDir, { recursive: true, force: true });
+      const remainingEntries = registry.plugins.filter((x) => !idsToRemove.has(x.id));
+      for (const entry of registry.plugins) {
+        if (!idsToRemove.has(entry.id)) continue;
+        await this.removeInstalledEntry(entry, remainingEntries);
       }
-
       registry.plugins = remainingEntries;
       await writePluginRegistry(this.registryPath, registry);
       return { pluginId, uninstalled: true as const };
@@ -374,7 +464,11 @@ export class PluginMarketplaceService {
         throw new Error(`Plugin not found in marketplace: ${pluginId}`);
       }
       if (this.deploymentGuard) {
-        const guardResult = await this.deploymentGuard.canInstall(pluginId, "user", plugin.deployment);
+        const guardResult = await this.deploymentGuard.canInstall(
+          pluginId,
+          "user",
+          plugin.installPolicy,
+        );
         if (!guardResult.allowed) {
           throw new Error(guardResult.reason ?? `Plugin install denied: ${pluginId}`);
         }
@@ -382,10 +476,7 @@ export class PluginMarketplaceService {
 
       await this.cacheCurrentVersion(pluginId);
 
-      // Override packageSpec to pin the requested version. Preserve registry semantics.
-      const pinnedSpec = buildPinnedSpec(plugin.packageName, version);
-      await this.runNpmInstall(pinnedSpec);
-      const manifestPath = await this.writeInstalledManifest(plugin, version);
+      const manifestPath = await this.installArtifact(plugin, version);
       await this.cacheVersionFromManifest(pluginId, resolve(dirname(this.registryPath), manifestPath));
       // PR#44 HIGH: record install in per-plugin history.json (replaces the
       // mtime-based rollback target selection, which is unreliable across
@@ -397,8 +488,17 @@ export class PluginMarketplaceService {
         if (existing) {
           existing.manifestPath = manifestPath;
           existing.enabled = true;
+          existing.installedBy = "user";
+          existing.approvedPluginAccess = plugin.pluginAccess;
         } else {
-          registry.plugins.push({ id: plugin.id, manifestPath, enabled: true });
+          registry.plugins.push({
+            id: plugin.id,
+            manifestPath,
+            enabled: true,
+            installedBy: "user",
+            bundleRefs: [],
+            approvedPluginAccess: plugin.pluginAccess,
+          });
         }
       });
       return { pluginId: plugin.id, installed: true, version };
@@ -442,8 +542,16 @@ export class PluginMarketplaceService {
         if (existing) {
           existing.manifestPath = registryRelativePath;
           existing.enabled = true;
+          existing.installedBy = existing.installedBy ?? "user";
+          existing.bundleRefs = existing.bundleRefs ?? [];
         } else {
-          registry.plugins.push({ id: pluginId, manifestPath: registryRelativePath, enabled: true });
+          registry.plugins.push({
+            id: pluginId,
+            manifestPath: registryRelativePath,
+            enabled: true,
+            installedBy: "user",
+            bundleRefs: [],
+          });
         }
       });
       return { pluginId, rolledBackTo: priorVersion };
@@ -615,6 +723,125 @@ export class PluginMarketplaceService {
     };
   }
 
+  private async getInstalledRegistryEntry(pluginId: string): Promise<PluginRegistryEntry | null> {
+    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
+    if (!registry) return null;
+    const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
+    if (!entry) return null;
+    const manifestPath = isAbsolute(entry.manifestPath)
+      ? entry.manifestPath
+      : resolve(dirname(this.registryPath), entry.manifestPath);
+    try {
+      await readFile(manifestPath, "utf-8");
+      return entry;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Returns the version string from the currently-installed manifest, or null. */
+  private async getInstalledVersion(pluginId: string): Promise<string | null> {
+    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
+    if (!registry) return null;
+    const entry = registry.plugins.find((c) => c.id === pluginId);
+    if (!entry) return null;
+    const manifestPath = isAbsolute(entry.manifestPath)
+      ? entry.manifestPath
+      : resolve(dirname(this.registryPath), entry.manifestPath);
+    try {
+      const raw = await readFile(manifestPath, "utf-8");
+      const parsed = JSON.parse(raw) as { version?: unknown };
+      return typeof parsed.version === "string" ? parsed.version : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private mergeBundleRefs(
+    bundleRefs: string[] | undefined,
+    bundleRootId: string | null,
+    pluginId: string,
+  ): string[] {
+    if (!bundleRootId || bundleRootId === pluginId) {
+      return bundleRefs ?? [];
+    }
+    return [...new Set([...(bundleRefs ?? []), bundleRootId])];
+  }
+
+  private async touchInstalledRegistryEntry(
+    pluginId: string,
+    bundleRootId: string | null,
+    actor: "user" | "it-admin",
+    approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"],
+    state?: InstallOperationState,
+  ): Promise<void> {
+    await updatePluginRegistry(this.registryPath, (registry) => {
+      const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
+      if (!entry) return;
+      if (state && !state.touchedEntries.has(pluginId)) {
+        state.touchedEntries.set(pluginId, {
+          enabled: entry.enabled,
+          bundleRefs: entry.bundleRefs ? [...entry.bundleRefs] : undefined,
+          installedBy: entry.installedBy,
+          approvedPluginAccess: entry.approvedPluginAccess,
+        });
+      }
+      entry.enabled = true;
+      entry.installedBy = actor === "it-admin" ? "admin" : entry.installedBy ?? "user";
+      entry.bundleRefs = this.mergeBundleRefs(entry.bundleRefs, bundleRootId, pluginId);
+      entry.approvedPluginAccess = approvedPluginAccess;
+    });
+  }
+
+  private async rollbackInstallOperation(state: InstallOperationState): Promise<void> {
+    if (state.installedPluginIds.length === 0 && state.touchedEntries.size === 0) {
+      return;
+    }
+    await withRegistryLock(this.registryPath, async () => {
+      const registry = await readPluginRegistry(this.registryPath).catch(() => ({
+        version: 1,
+        plugins: [],
+      }));
+      for (const pluginId of [...state.installedPluginIds].reverse()) {
+        const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
+        if (!entry) continue;
+        registry.plugins = registry.plugins.filter((candidate) => candidate.id !== pluginId);
+        await this.removeInstalledEntry(entry, registry.plugins);
+      }
+      for (const [pluginId, snapshot] of state.touchedEntries) {
+        const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
+        if (!entry) continue;
+        entry.enabled = snapshot.enabled;
+        entry.bundleRefs = snapshot.bundleRefs;
+        entry.installedBy = snapshot.installedBy;
+        entry.approvedPluginAccess = snapshot.approvedPluginAccess;
+      }
+      await writePluginRegistry(this.registryPath, registry);
+    });
+  }
+
+  private async removeInstalledEntry(
+    entry: PluginRegistryEntry,
+    remainingEntries: PluginRegistryEntry[],
+  ): Promise<void> {
+    const manifestPath = isAbsolute(entry.manifestPath)
+      ? entry.manifestPath
+      : resolve(dirname(this.registryPath), entry.manifestPath);
+    const installedManifestDir = dirname(manifestPath);
+    const isZipInstalled = this.isWithin(this.installedDir, installedManifestDir);
+    if (!isZipInstalled) {
+      const packageName = await this.resolvePackageName(entry.id, manifestPath);
+      const shouldUninstallPackage =
+        packageName && !(await this.isPackageUsedByRemainingPlugins(packageName, remainingEntries.map((candidate) => candidate.id)));
+      if (shouldUninstallPackage && packageName) {
+        await this.runNpmUninstall(packageName);
+      }
+    }
+    if (isZipInstalled) {
+      await rm(installedManifestDir, { recursive: true, force: true });
+    }
+  }
+
   private async resolvePackageName(pluginId: string, manifestPath: string): Promise<string | undefined> {
     const plugins = await this.fetcher.listPlugins().catch(() => [] as PluginMarketplaceItem[]);
     const targetFromCatalog = plugins.find((x) => x.id === pluginId);
@@ -732,16 +959,15 @@ export class PluginMarketplaceService {
     if (plugin.description) manifest.description = plugin.description;
     if (options.ui && options.ui.length > 0) manifest.ui = options.ui;
     if (plugin.capabilities && plugin.capabilities.length > 0) manifest.capabilities = plugin.capabilities;
-    if (plugin.routineTools) manifest.routineTools = plugin.routineTools;
     if (plugin.startupTools && plugin.startupTools.length > 0) manifest.startupTools = plugin.startupTools;
     if (plugin.keywords && plugin.keywords.length > 0) manifest.keywords = plugin.keywords;
     if (plugin.uiCallable && plugin.uiCallable.length > 0) manifest.uiCallable = plugin.uiCallable;
     if (plugin.emittedEvents && plugin.emittedEvents.length > 0) manifest.emittedEvents = plugin.emittedEvents;
     if (plugin.notificationEvents && plugin.notificationEvents.length > 0) manifest.notificationEvents = plugin.notificationEvents;
     if (plugin.toolSchemas && Object.keys(plugin.toolSchemas).length > 0) manifest.toolSchemas = plugin.toolSchemas;
-    if (plugin.deployment) manifest.deployment = plugin.deployment;
-    if (plugin.deliveryMode) manifest.deliveryMode = plugin.deliveryMode;
-    if (plugin.bundleDependencies && plugin.bundleDependencies.length > 0) manifest.bundleDependencies = plugin.bundleDependencies;
+    if (plugin.installPolicy) manifest.installPolicy = plugin.installPolicy;
+    if (plugin.dependencies && plugin.dependencies.length > 0) manifest.dependencies = plugin.dependencies;
+    if (plugin.pluginAccess) manifest.pluginAccess = plugin.pluginAccess;
     if (plugin.requires && plugin.requires.capabilities.length > 0) manifest.requires = plugin.requires;
     if (plugin.publisher) manifest.publisher = plugin.publisher;
     return manifest;
@@ -770,6 +996,32 @@ export class PluginMarketplaceService {
       if (/^\d+\.\d+\.\d+/.test(version) && manifest.version !== version) {
         throw new Error(
           `plugin "${plugin.id}" artifact manifest version mismatch: expected "${version}", got "${String(manifest.version ?? "")}"`,
+        );
+      }
+
+      const expectedInstallPolicy = plugin.installPolicy ?? "user";
+      const actualInstallPolicy = manifest.installPolicy ?? "user";
+      if (actualInstallPolicy !== expectedInstallPolicy) {
+        throw new Error(
+          `plugin "${plugin.id}" artifact manifest installPolicy mismatch: expected "${expectedInstallPolicy}", got "${String(actualInstallPolicy)}"`,
+        );
+      }
+
+      const expectedPluginAccess = plugin.pluginAccess ?? undefined;
+      const actualPluginAccess = manifest.pluginAccess ?? undefined;
+      if (JSON.stringify(actualPluginAccess) !== JSON.stringify(expectedPluginAccess)) {
+        throw new Error(
+          `plugin "${plugin.id}" artifact manifest pluginAccess does not match the catalog-approved grant`,
+        );
+      }
+
+      const expectedDependencies = normalizeDependencies(plugin);
+      const actualDependencies = normalizeDependencies(
+        manifest as Pick<PluginManifest, "dependencies">,
+      );
+      if (JSON.stringify(actualDependencies) !== JSON.stringify(expectedDependencies)) {
+        throw new Error(
+          `plugin "${plugin.id}" artifact manifest dependencies do not match the catalog-approved dependencies`,
         );
       }
     } catch (err) {
@@ -829,8 +1081,33 @@ export class PluginMarketplaceService {
         await writeFile(targetPath, entry.getData());
       }
 
-      await rm(pluginDir, { recursive: true, force: true });
-      await rename(stageDir, pluginDir);
+      // Atomically swap stageDir → pluginDir.  On Windows, rename() refuses to
+      // overwrite a non-empty directory, so we first rename the existing
+      // pluginDir to a temporary name (which is always safe on the same volume)
+      // and then rename stageDir into place.  Only after both renames succeed do
+      // we remove the old directory, ensuring the live pluginDir is never in a
+      // half-removed state if the process is killed between operations.
+      const oldDir = resolve(this.installedDir, `.${pluginId}.old-${randomUUID()}`);
+      let hadOldDir = false;
+      try {
+        await rename(pluginDir, oldDir);
+        hadOldDir = true;
+      } catch {
+        // pluginDir did not exist yet (first install) — nothing to move aside.
+      }
+      try {
+        await rename(stageDir, pluginDir);
+      } catch (renameErr) {
+        // Restore the old directory if the swap failed so we don't leave the
+        // plugin in a broken state.
+        if (hadOldDir) {
+          await rename(oldDir, pluginDir).catch(() => undefined);
+        }
+        throw renameErr;
+      }
+      if (hadOldDir) {
+        await rm(oldDir, { recursive: true, force: true }).catch(() => undefined);
+      }
     } catch (err) {
       await rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
       throw err;

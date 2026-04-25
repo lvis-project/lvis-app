@@ -2,7 +2,7 @@
 /**
  * check-tool-namespace.mjs — Tool namespace collision detector
  *
- * Scans all bundled plugin.json files under plugins/installed/ and verifies:
+ * Scans all packaged plugin.json files under plugins/installed/ and verifies:
  *   1. Every tool name matches ^[a-zA-Z0-9_-]+$ (no dots)
  *   2. No tool name appears in more than one plugin (collision)
  *
@@ -53,7 +53,7 @@ const manifests = findPluginManifests(PLUGINS_DIR);
 if (manifests.length === 0) {
   console.warn(
     `[tool-namespace] WARNING: no plugin.json files found under ${PLUGINS_DIR}. ` +
-      `Run 'bun run prepare:plugins' first if checking bundled plugins.`
+      `Run 'bun run prepare:plugins' first if checking packaged plugins.`
   );
   process.exit(0);
 }

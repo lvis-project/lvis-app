@@ -15,7 +15,7 @@ import { Sidebar } from "./Sidebar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { useChatState } from "./hooks/use-chat-state.js";
-import { useBriefing } from "./hooks/use-briefing.js";
+import { useRoutineResult } from "./hooks/use-routine-result.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
 import { useContextBudget } from "./hooks/use-context-budget.js";
@@ -33,8 +33,8 @@ import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useChatActions } from "./hooks/use-chat-actions.js";
 import { useChatContextValue } from "./hooks/use-chat-context-value.js";
 
-// Phase 1 tests import `BriefingCard` from this module; preserve the export.
-export { BriefingCard } from "./components/BriefingCard.js";
+// RoutineCard: new routine result card
+export { RoutineCard } from "./components/RoutineCard.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandOpen, setCommandOpen] = useState(false);
-  const { briefing, dismiss: dismissBriefing, snooze: snoozeBriefing } = useBriefing(api);
+  const { routineResult, dismiss: dismissRoutineResult, snooze: snoozeRoutineResult } = useRoutineResult(api);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
 
@@ -199,7 +199,7 @@ export function App() {
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
-    briefing, onDismissBriefing: dismissBriefing, onSnoozeBriefing: snoozeBriefing,
+    routineResult, onDismissRoutineResult: dismissRoutineResult, onSnoozeRoutineResult: snoozeRoutineResult,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,

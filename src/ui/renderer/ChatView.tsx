@@ -8,7 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
-import { BriefingCard } from "./components/BriefingCard.js";
+import { RoutineCard } from "./components/RoutineCard.js";
 import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
@@ -41,7 +41,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef,
     hasApiKey, onOpenSettings,
-    briefing, onDismissBriefing, onSnoozeBriefing,
+    routineResult, onDismissRoutineResult, onSnoozeRoutineResult,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
@@ -100,11 +100,11 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
         </div>
       )}
       <ScrollArea className="h-full p-4"><div className="space-y-3">
-        {briefing && (
-          <BriefingCard
-            briefing={briefing}
-            onDismiss={onDismissBriefing}
-            onSnooze={onSnoozeBriefing}
+        {routineResult && (
+          <RoutineCard
+            result={routineResult}
+            onDismiss={onDismissRoutineResult}
+            onSnooze={onSnoozeRoutineResult}
           />
         )}
         {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
