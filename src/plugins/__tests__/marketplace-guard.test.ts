@@ -33,7 +33,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
-  async function writeCatalog(deployment?: "managed" | "user") {
+  async function writeCatalog(installPolicy?: "admin" | "user") {
     const catalogEntry: Record<string, unknown> = {
       id: "mp-test",
       name: "Marketplace Test",
@@ -42,7 +42,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
       packageName: "@lvis-test/nonexistent",
       methods: []
     };
-    if (deployment) catalogEntry.deployment = deployment;
+    if (installPolicy) catalogEntry.installPolicy = installPolicy;
     await writeFile(
       marketplacePath,
       JSON.stringify({ version: 1, plugins: [catalogEntry] }),
@@ -66,8 +66,8 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
     return new PluginMarketplaceService(testDir, guard);
   }
 
-  it("install() rejects managed catalog item before runNpmInstall fires", async () => {
-    await writeCatalog("managed");
+  it("install() rejects admin-policy catalog item before runNpmInstall fires", async () => {
+    await writeCatalog("admin");
     await writeEmptyRegistry();
     const service = makeService();
 
@@ -82,15 +82,15 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
   });
 
   it("install() surfaces 'Plugin not found' for unknown id (no guard bypass)", async () => {
-    await writeCatalog("managed");
+    await writeCatalog("admin");
     await writeEmptyRegistry();
     const service = makeService();
 
     await expect(service.install("does-not-exist")).rejects.toThrow(/not found in marketplace/);
   });
 
-  it("list() exposes isManaged=true for managed catalog entries", async () => {
-    await writeCatalog("managed");
+  it("list() exposes isManaged=true for admin-policy catalog entries", async () => {
+    await writeCatalog("admin");
     await writeEmptyRegistry();
     const service = makeService();
 
@@ -101,7 +101,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
     expect(items[0].installed).toBe(false);
   });
 
-  it("list() reports isManaged=false for user-deployment catalog entries", async () => {
+  it("list() reports isManaged=false for user install-policy catalog entries", async () => {
     await writeCatalog("user");
     await writeEmptyRegistry();
     const service = makeService();

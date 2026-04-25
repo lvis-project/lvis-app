@@ -5,14 +5,13 @@
  * - LVIS.md: 프로젝트·조직 컨텍스트 (관리자 배포 가능)
  * - user-preferences.md: 사용자 개인 선호
  * - memory/: 사용자 축적 메모 ("이거 기억해")
- * - notes/: 플러그인/시스템이 남기는 일반 노트 및 보조 기록
- *
+ * - sessions/: 대화 세션 JSONL *
  * 설계 원칙 (§5.1):
  * - 단순함 우선: 별도 기억 엔진·승격·만료 로직 없음
  * - 사용자 제어: 직접 확인·편집·삭제 가능
  * - 세션 독립: 파일은 영속, 인메모리는 휘발
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
 import { withFileLock } from "../lib/with-file-lock.js";
@@ -27,6 +26,7 @@ export interface NoteEntry {
   title: string;
   content: string;
   updatedAt?: string;
+  excerpt?: string;
 }
 
 export interface SessionSearchEntry {
@@ -84,9 +84,7 @@ const MAX_SESSION_FILE_BYTES = 5_000_000;
 export class MemoryManager {
   private readonly lvisDir: string;
   private readonly memoryDir: string;
-  private readonly notesDir: string;
   private readonly sessionsDir: string;
-
   // 부팅 시 로드되어 캐시되는 영속 기억
   private lvisMd: string = "";
   private userPreferences: string = "";
@@ -94,10 +92,8 @@ export class MemoryManager {
   constructor(options?: MemoryManagerOptions) {
     this.lvisDir = resolve(options?.lvisDir ?? join(homedir(), ".lvis"));
     this.memoryDir = join(this.lvisDir, "memory");
-    this.notesDir = join(this.lvisDir, "notes");
     this.sessionsDir = join(this.lvisDir, "sessions");
     this.ensureStructure();
-    this.migrateLegacyMemoryNotes();
   }
 
   /** 부팅 시 호출 — 영속 기억을 메모리에 로드 */
@@ -124,16 +120,6 @@ export class MemoryManager {
   /** memory/ 키워드 검색 — Agent Loop에서 on-demand 참조 (§5 참조 방식). Cap 50. */
   searchMemoryEntries(query: string): NoteEntry[] {
     return this.searchEntries(this.listMemoryEntries(), query);
-  }
-
-  /** notes/ 전체 목록 반환 — 플러그인/시스템 노트용. */
-  listNotes(): NoteEntry[] {
-    return this.readMarkdownEntries(this.notesDir, { excludeMarkedMemory: true });
-  }
-
-  /** notes/ 키워드 검색 — 플러그인/시스템 노트 조회용. */
-  searchNotesEntries(query: string): NoteEntry[] {
-    return this.searchEntries(this.listNotes(), query);
   }
 
   /** sessions/ 키워드 검색 — D5 메모리 검색 패널용. Cap 50. */
@@ -187,7 +173,6 @@ export class MemoryManager {
     return this.buildMarkdownContext(this.listMemoryEntries());
   }
 
-  /** notes/ 전체를 하나의 문자열로 — 보조 노트 조회용 */
   /** sessions/ 최근 목록 — 검색 전에도 항목을 확인할 수 있도록 최근 세션을 노출한다. */
   listSessionEntries(limit = 50): SessionSearchEntry[] {
     const UUID_RE = /^[0-9a-f-]{8,}$/i;
@@ -198,11 +183,6 @@ export class MemoryManager {
         matchedMessage: session.preview,
         timestamp: session.modifiedAt.toISOString(),
       }));
-  }
-
-  /** notes/ 전체를 하나의 문자열로 — 보조 노트 조회용 */
-  getNotesContext(): string {
-    return this.buildMarkdownContext(this.listNotes());
   }
 
   // ─── Write API ("이거 기억해" 명령) ───────────────
@@ -222,23 +202,6 @@ export class MemoryManager {
   /** 메모 삭제 */
   deleteMemory(filename: string): void {
     const path = join(this.memoryDir, filename);
-    if (existsSync(path)) unlinkSync(path);
-  }
-
-  /** 일반 note 저장 — 플러그인/시스템 보조 기록용 */
-  async saveNote(title: string, content: string): Promise<NoteEntry> {
-    const filename = this.slugify(title) + ".md";
-    const fullContent = `# ${title}\n\n${content}\n`;
-    const targetPath = join(this.notesDir, filename);
-    await withFileLock(targetPath, async () => {
-      writeFileSync(targetPath, fullContent, "utf-8");
-    });
-    return { filename, title, content: fullContent, updatedAt: new Date().toISOString() };
-  }
-
-  /** 일반 note 삭제 */
-  deleteNote(filename: string): void {
-    const path = join(this.notesDir, filename);
     if (existsSync(path)) unlinkSync(path);
   }
 
@@ -263,57 +226,6 @@ export class MemoryManager {
   /** ~/.lvis/ 경로 반환 */
   getDir(): string {
     return this.lvisDir;
-  }
-
-  // ─── Sprint E: Briefing feedback loop (user dissatisfaction → gradual tailoring) ─
-
-  /**
-   * 브리핑 dismiss 이유를 briefing-feedback.md 에 append.
-   * Sprint E §2 — 사용자 피드백 루프. RoutineEngine이 최근 5건을 읽어
-   * LLM 프롬프트에 "User feedback memory:" 섹션으로 주입한다.
-   */
-  async appendBriefingFeedback(entry: {
-    reason: "inaccurate" | "uninteresting" | "busy" | "other";
-    details?: string;
-    date?: string;
-  }): Promise<void> {
-    const date = entry.date ?? new Date().toISOString().slice(0, 10);
-    const block =
-      `---\n` +
-      `date: ${date}\n` +
-      `reason: ${entry.reason}\n` +
-      `details: ${(entry.details ?? "").replace(/\r?\n/g, " ").trim()}\n` +
-      `---\n\n`;
-    const targetPath = join(this.notesDir, "briefing-feedback.md");
-    await withFileLock(targetPath, async () => {
-      if (!existsSync(targetPath)) {
-        writeFileSync(
-          targetPath,
-          "# 브리핑 피드백 로그\n\n> 사용자가 브리핑을 닫을 때 남긴 이유가 기록됩니다. RoutineEngine이 최근 5건을 LLM 컨텍스트에 주입합니다.\n\n" +
-            block,
-          "utf-8",
-        );
-      } else {
-        appendFileSync(targetPath, block, "utf-8");
-      }
-    });
-  }
-
-  /** 최근 N건의 브리핑 피드백을 파싱해 반환 (신규가 마지막). */
-  readRecentBriefingFeedback(limit = 5): Array<{ date: string; reason: string; details: string }> {
-    const path = join(this.notesDir, "briefing-feedback.md");
-    if (!existsSync(path)) return [];
-    const content = readFileSync(path, "utf-8");
-    const blocks = content.split(/^---\s*$/m);
-    const out: Array<{ date: string; reason: string; details: string }> = [];
-    for (const b of blocks) {
-      const date = b.match(/date:\s*(.+)/)?.[1]?.trim();
-      const reason = b.match(/reason:\s*(.+)/)?.[1]?.trim();
-      if (!date || !reason) continue;
-      const details = b.match(/details:\s*(.+)/)?.[1]?.trim() ?? "";
-      out.push({ date, reason, details });
-    }
-    return out.slice(-limit);
   }
 
   // ─── Private ──────────────────────────────────────
@@ -417,7 +329,6 @@ export class MemoryManager {
 
   private ensureStructure(): void {
     mkdirSync(this.memoryDir, { recursive: true });
-    mkdirSync(this.notesDir, { recursive: true });
     mkdirSync(this.sessionsDir, { recursive: true });
 
     const lvisMdPath = join(this.lvisDir, "LVIS.md");
@@ -463,19 +374,6 @@ export class MemoryManager {
         }];
       })
       .sort((a, b) => new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime());
-  }
-
-  private migrateLegacyMemoryNotes(): void {
-    if (!existsSync(this.notesDir)) return;
-    const filenames = readdirSync(this.notesDir).filter((f) => f.endsWith(".md"));
-    for (const filename of filenames) {
-      const sourcePath = join(this.notesDir, filename);
-      const targetPath = join(this.memoryDir, filename);
-      if (existsSync(targetPath)) continue;
-      const content = readFileSync(sourcePath, "utf-8");
-      if (!this.hasMemoryMarker(content)) continue;
-      writeFileSync(targetPath, content, "utf-8");
-    }
   }
 
   private searchEntries(entries: NoteEntry[], query: string): NoteEntry[] {

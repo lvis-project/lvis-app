@@ -17,7 +17,7 @@
 | `MarketplaceService.install/uninstall` guard injection | ✅ | `src/plugin-runtime/marketplace.ts:83-88, 107-112` |
 | `PluginRuntime.disable(pluginId, actor)` new impl | ✅ | `src/plugin-runtime/runtime.ts:152-190` |
 | UI lock display (🔒 + disabled buttons) | ✅ | `src/renderer.tsx:429-440` |
-| 3 bundled plugins `deployment: "managed"` | ✅ | installed manifests + marketplace.json catalog + source plugin.json |
+| 3 packaged plugins `deployment: "managed"` | ✅ | installed manifests + marketplace.json catalog + source plugin.json |
 
 **Phase 2 exclusions respected**: policy file, signature verify, managed installer, IT admin API, LightRAG real impl, cloud index real client — all untouched and properly deferred.
 
@@ -30,7 +30,7 @@
 1. **Path check** — `userInstalledDir` 하위가 아니면 managed. prefix-confusion, traversal 차단.
 2. **Manifest field check** — `plugin.json` 의 `deployment === "managed"` 이면 managed.
 
-**Rationale**: registry.json 위변조(path 우회) + manifest.json 위변조(field 우회) 둘 다 막으려면 AND 게이트가 필요. 한 레이어만으로는 bundled plugins(installedDir 내부)과 외부 공격자 경로 둘 다를 커버할 수 없다.
+**Rationale**: registry.json 위변조(path 우회) + manifest.json 위변조(field 우회) 둘 다 막으려면 AND 게이트가 필요. 한 레이어만으로는 packaged plugins(installedDir 내부)과 외부 공격자 경로 둘 다를 커버할 수 없다.
 
 ### 2.2 Trust boundary (§7.3)
 - `actor` 파라미터는 main process 내부에서만 결정. IPC 핸들러는 절대 actor를 받지 않음.
@@ -148,7 +148,7 @@
 초기 설계는 `managedPluginsDir` 지정이었지만, dev 모드에서 sibling plugin repos(parent dir 공유)와 `plugins/installed/` (child dir)가 동일 부모를 공유하는 토폴로지 때문에 single-root 포함 판정이 false positive를 낸다. 반전해서 "`userInstalledDir` 하위가 아니면 모두 managed"로 바꾸니 unknown/공격 경로는 자동으로 보호 대상이 되는 default-deny 정책이 성립.
 
 ### 7.2 왜 hybrid(path + field) 판정인가?
-- 단일 path-only: bundled plugins이 `plugins/installed/` 에 설치되는 marketplace 플로우를 못 잡음
+- 단일 path-only: packaged plugins이 `plugins/installed/` 에 설치되는 marketplace 플로우를 못 잡음
 - 단일 field-only: manifest.json 위변조 시 우회 가능
 - hybrid: 두 layer를 곱셈으로 결합 → 공격자가 둘 다 뚫어야 함 → 공격 표면 기하급수적 축소
 
@@ -177,7 +177,7 @@ IPC 핸들러에서 actor 파라미터가 누락되더라도 최소 권한(user)
 `.ready` sentinel이 stale (이전 세션 mock 테스트의 잔재) — 실제 venv 바이너리는 부재. S1 cold boot physical run을 한 번 완주하면 S3/S4까지 자동 해결. 우회: `rm -rf ~/.lvis/runtime && npx tsx lvis-app/scripts/e2e-phase1.ts S1`.
 
 ### 8.4 Corporate TLS Interception (added 2026-04-14)
-사용자 실행 점검 중 meeting STT가 `SELF_SIGNED_CERT_IN_CHAIN`으로 실패. LG 사내망의 self-signed CA MITM이 원인. **dev bypass(D+E)를 `main.ts` 의 `if (!app.isPackaged)` 가드로 임시 적용** — `NODE_TLS_REJECT_UNAUTHORIZED=0` + Chromium `--ignore-certificate-errors`. **packaged build에는 자동 미적용**이므로 production 진입 전 정식 구현 필수.
+사용자 실행 점검 중 meeting STT가 `SELF_SIGNED_CERT_IN_CHAIN`으로 실패. LG 사내망의 self-signed CA MITM이 원인. **dev bypass(D+E)를 `main.ts` 의 `if (!app.isPackaged)` 가드로 임시 적용** — `NODE_TLS_REJECT_UNAUTHORIZED` 환경변수 값 `0` + Chromium `--ignore-certificate-errors`. **packaged build에는 자동 미적용**이므로 production 진입 전 정식 구현 필수.
 
 정식 대응: **Option B (OS keystore 런타임 추출, `mac-ca`/`win-ca`)** 권장. 상세 작업 + 체크리스트 + 보안 게이트는 `TODO.md §17` 참조. main.ts:30-44 에 inline TODO 마커 존재.
 

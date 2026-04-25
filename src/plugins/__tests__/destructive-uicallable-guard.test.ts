@@ -12,7 +12,7 @@
  *   - marketplace approval before publish,
  *   - signature verification at load (PluginSignatureVerifier),
  * NOT from naming conventions. Any suffix (_delete, _remove, _send, _reply,
- * _create, _update, …) is permitted regardless of deployment type. The
+ * _create, _update, …) is permitted regardless of install policy. The
  * plugin developer is responsible for destructive-action confirmation UX in
  * their own renderer surface — see `index_remove_folder` which ships this way
  * today (note: `email_reply` is in tools[] only, not uiCallable[]).
@@ -50,7 +50,7 @@ function listInstalledManifests(): Array<{ id: string; path: string; manifest: R
 }
 
 async function writeTempPlugin(opts: {
-  deployment: "managed" | "user";
+  installPolicy: "admin" | "user";
   tools: string[];
   uiCallable: string[];
 }): Promise<string> {
@@ -62,7 +62,7 @@ async function writeTempPlugin(opts: {
     entry: "dist/index.js",
     tools: opts.tools,
     uiCallable: opts.uiCallable,
-    deployment: opts.deployment,
+    installPolicy: opts.installPolicy,
   };
   writeFileSync(join(root, "plugin.json"), JSON.stringify(manifest, null, 2));
   return join(root, "plugin.json");
@@ -76,7 +76,7 @@ const mockVerifier = {
 } as unknown as PluginSignatureVerifier;
 
 // Previously rejected on user plugins; must now be accepted on every
-// deployment type so plugin authors can own their confirmation UX.
+// install policy so plugin authors can own their confirmation UX.
 const PREVIOUSLY_BLOCKED_VERBS = [
   "thing_delete",
   "thing_remove",
@@ -99,7 +99,7 @@ const PREVIOUSLY_BLOCKED_VERBS = [
 describe("uiCallable subset validation", () => {
   it("rejects manifest whose uiCallable entry is not in tools[]", async () => {
     const manifestPath = await writeTempPlugin({
-      deployment: "user",
+      installPolicy: "user",
       tools: ["foo_get"],
       uiCallable: ["foo_get", "foo_missing"],
     });
@@ -113,7 +113,7 @@ describe("uiCallable subset validation", () => {
 
   it("rejects non-string uiCallable entries", async () => {
     const manifestPath = await writeTempPlugin({
-      deployment: "user",
+      installPolicy: "user",
       tools: ["foo_get"],
       uiCallable: [123 as unknown as string],
     });
@@ -127,7 +127,7 @@ describe("uiCallable subset validation", () => {
 
   it("accepts when every uiCallable entry is declared in tools[]", async () => {
     const manifestPath = await writeTempPlugin({
-      deployment: "user",
+      installPolicy: "user",
       tools: ["foo_get", "foo_list"],
       uiCallable: ["foo_get", "foo_list"],
     });
@@ -140,11 +140,11 @@ describe("uiCallable subset validation", () => {
   });
 });
 
-describe("uiCallable accepts any suffix regardless of deployment type", () => {
+describe("uiCallable accepts any suffix regardless of install policy", () => {
   for (const verb of PREVIOUSLY_BLOCKED_VERBS) {
     it(`[user] accepts '${verb}' when it is in tools[]`, async () => {
       const manifestPath = await writeTempPlugin({
-        deployment: "user",
+        installPolicy: "user",
         tools: [verb],
         uiCallable: [verb],
       });
@@ -156,9 +156,9 @@ describe("uiCallable accepts any suffix regardless of deployment type", () => {
       await expect(parse(manifestPath)).resolves.toBeDefined();
     });
 
-    it(`[managed] accepts '${verb}' when it is in tools[]`, async () => {
+    it(`[admin] accepts '${verb}' when it is in tools[]`, async () => {
       const manifestPath = await writeTempPlugin({
-        deployment: "managed",
+        installPolicy: "admin",
         tools: [verb],
         uiCallable: [verb],
       });

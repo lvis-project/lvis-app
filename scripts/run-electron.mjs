@@ -32,7 +32,7 @@ if (!env.LVIS_ENABLE_DEV_CONSOLE) {
   env.LVIS_ENABLE_DEV_CONSOLE = "0";
 }
 
-// Force UTF-8 across every subprocess spoken to by Electron's bundled Node.
+// Force UTF-8 across every subprocess spoken to by Electron's embedded Node.
 // Without this, Windows' default ANSI code page (cp949 on Korean locale) turns
 // console logs and Python subprocess stdout into mojibake (깨진 한글). These
 // env vars are harmless on macOS/Linux (already UTF-8), so set them

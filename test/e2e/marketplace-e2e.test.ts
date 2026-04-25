@@ -40,7 +40,7 @@ function buildPluginZip(slug: string, version: string): Buffer {
     name: "M4 E2E Plugin",
     version,
     main: "index.js",
-    deployment: "free",
+    installPolicy: "user",
   };
   zip.addFile("plugin.json", Buffer.from(JSON.stringify(pluginJson)));
   // A trivial smoke handler that the assertion below exec()s indirectly by

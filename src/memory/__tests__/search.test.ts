@@ -50,54 +50,6 @@ describe("MemoryManager.searchMemoryEntries", () => {
     const results = mm.searchMemoryEntries("hello");
     expect(results.length).toBe(50);
   });
-
-  it("keeps generic notes out of memory search results", async () => {
-    await mm.saveMemory("개인 메모", "이번 주 우선순위");
-    await mm.saveNote("미팅-a1b2c3d4-주간회의", "# 주간회의\n> 세션: a1b2c3d4\n\n이번 주 우선순위");
-
-    const results = mm.searchMemoryEntries("우선순위");
-
-    expect(results).toHaveLength(1);
-    expect(results[0].title).toBe("개인 메모");
-  });
-});
-
-describe("MemoryManager migration", () => {
-  it("moves only explicitly marked legacy memories into memory/", async () => {
-    const { writeFileSync, existsSync } = await import("node:fs");
-    writeFileSync(join(dir, "notes", "legacy-memory.md"), "<!-- lvis:kind=memory -->\n# 레거시 메모\n\n개인 설정", "utf-8");
-    writeFileSync(join(dir, "notes", "plugin-note.md"), "# 플러그인 노트\n\n자동 생성 기록", "utf-8");
-
-    const migrated = new MemoryManager({ lvisDir: dir });
-
-    expect(migrated.listMemoryEntries().map((entry) => entry.title)).toContain("레거시 메모");
-    expect(existsSync(join(dir, "memory", "legacy-memory.md"))).toBe(true);
-    expect(existsSync(join(dir, "notes", "legacy-memory.md"))).toBe(true);
-    expect(migrated.listNotes().map((entry) => entry.filename)).not.toContain("legacy-memory.md");
-    expect(existsSync(join(dir, "notes", "plugin-note.md"))).toBe(true);
-  });
-
-  it("keeps unmarked notes in notes/", async () => {
-    const { writeFileSync, existsSync } = await import("node:fs");
-    writeFileSync(join(dir, "notes", "general-note.md"), "# 일반 회의\n> 세션: abc123\n\n본문", "utf-8");
-
-    const migrated = new MemoryManager({ lvisDir: dir });
-
-    expect(existsSync(join(dir, "notes", "general-note.md"))).toBe(true);
-    expect(migrated.listMemoryEntries().map((entry) => entry.filename)).not.toContain("general-note.md");
-  });
-
-  it("does not overwrite an existing memory target during migration", async () => {
-    const { writeFileSync, readFileSync } = await import("node:fs");
-    writeFileSync(join(dir, "notes", "legacy-memory.md"), "<!-- lvis:kind=memory -->\n# 레거시 메모\n\n노트 원본", "utf-8");
-    writeFileSync(join(dir, "memory", "legacy-memory.md"), "<!-- lvis:kind=memory -->\n# 레거시 메모\n\n기존 메모", "utf-8");
-
-    const migrated = new MemoryManager({ lvisDir: dir });
-
-    expect(readFileSync(join(dir, "memory", "legacy-memory.md"), "utf-8")).toContain("기존 메모");
-    expect(readFileSync(join(dir, "notes", "legacy-memory.md"), "utf-8")).toContain("노트 원본");
-    expect(migrated.listMemoryEntries().find((entry) => entry.filename === "legacy-memory.md")?.content).toContain("기존 메모");
-  });
 });
 
 describe("MemoryManager.searchSessions", () => {

@@ -1,17 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { readPluginRegistry } from "./registry.js";
-import type { DeploymentMode } from "./types.js";
+import type { InstallPolicy } from "./types.js";
 
 /**
- * Plugin Deployment Guard — §9.6 / plugin-deployment-model.md §7.2-§7.3
+ * Plugin install policy guard — §9.6 / plugin-deployment-model.md §7.2-§7.3
  *
  * Managed 플러그인이 user actor에 의해 제거/비활성화되지 않도록 차단.
  * Phase 1.5 hybrid 판정 (두 레이어가 모두 통과해야 "user" 허용):
  *
  *   1. Path check (default-deny): `userInstalledDir` 하위가 아니면 managed.
  *      registry.json 위변조로 외부 경로가 등록되는 경우를 차단.
- *   2. Manifest field check: `plugin.json`의 `deployment === "managed"`면 managed.
+ *   2. Manifest field check: `plugin.json`의 `installPolicy === "admin"`면 managed.
  *      `userInstalledDir` 안에 있더라도 번들 플러그인(설치 시점에 관리형으로
  *      지정됐던 것)은 필드로 식별.
  *
@@ -27,6 +27,15 @@ export type Actor = "user" | "it-admin";
 export interface GuardResult {
   allowed: boolean;
   reason?: string;
+}
+
+function normalizeInstallPolicy(value: {
+  installPolicy?: InstallPolicy;
+} | null | undefined): InstallPolicy {
+  if (value?.installPolicy === "admin") {
+    return "admin";
+  }
+  return "user";
 }
 
 export interface DeploymentGuardOptions {
@@ -71,10 +80,10 @@ export class PluginDeploymentGuard {
     }
 
     const manifest = await this.readManifestSafe(manifestAbs);
-    if (manifest?.deployment === "managed") {
+    if (normalizeInstallPolicy(manifest) === "admin") {
       return {
         allowed: false,
-        reason: `Managed plugin cannot be uninstalled by user: ${pluginId} (deployment="managed")`,
+        reason: `Admin plugin cannot be uninstalled by user: ${pluginId} (installPolicy="admin")`,
       };
     }
 
@@ -88,7 +97,7 @@ export class PluginDeploymentGuard {
   /**
    * Phase 1.5 §13 test requirement: install-side guard.
    *
-   * Catalog item에 `deployment: "managed"`가 붙어있으면 user actor의 설치 요청을
+   * Catalog item에 `installPolicy: "admin"`이 붙어있으면 user actor의 설치 요청을
    * 거부한다. UI는 이미 disabled 상태지만, 백엔드에서도 enforcement를 걸어
    * IPC 경유 우회를 차단한다 (defense in depth).
    *
@@ -97,24 +106,24 @@ export class PluginDeploymentGuard {
   async canInstall(
     pluginId: string,
     actor: Actor,
-    catalogDeployment?: DeploymentMode,
+    installPolicy?: InstallPolicy,
   ): Promise<GuardResult> {
     if (actor === "it-admin") {
       return { allowed: true };
     }
-    if (catalogDeployment === "managed") {
+    if (normalizeInstallPolicy({ installPolicy }) === "admin") {
       return {
         allowed: false,
-        reason: `Managed plugin cannot be installed by user: ${pluginId}`,
+        reason: `Admin plugin cannot be installed by user: ${pluginId}`,
       };
     }
     return { allowed: true };
   }
 
-  private async readManifestSafe(path: string): Promise<{ deployment?: string } | null> {
+  private async readManifestSafe(path: string): Promise<{ installPolicy?: InstallPolicy } | null> {
     try {
       const raw = await readFile(path, "utf-8");
-      return JSON.parse(raw) as { deployment?: string };
+      return JSON.parse(raw) as { installPolicy?: InstallPolicy };
     } catch (err) {
       // Corrupted / missing manifest. Path check alone may have already
       // decided, so we don't throw — but surface for forensics.

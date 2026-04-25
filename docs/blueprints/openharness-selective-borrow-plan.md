@@ -111,7 +111,7 @@ No runtime link to OpenHarness.
 | security-reviewer | CHANGES_REQUESTED | **C1 CRITICAL: S1 hard-block unreachable** (executor didn't populate `target.filePath`), H1 HTTP hook SSRF, H2 bash env leak, H3 path canonicalization |
 | code-reviewer | APPROVED_WITH_NOTES | MIT attribution 10/10, test counts 108/108 verified, 5 MEDIUM nits |
 
-C1 + H1 + H2 + H3 fixed in follow-up `fix/phase3-security-findings` branch bundled with architect's `BaseToolRegistry` rename + `ApprovalRequest` renderer mirror.
+C1 + H1 + H2 + H3 fixed in follow-up `fix/phase3-security-findings` branch grouped with architect's `BaseToolRegistry` rename + `ApprovalRequest` renderer mirror.
 
 ---
 
