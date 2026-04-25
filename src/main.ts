@@ -16,7 +16,7 @@ import { registerIpcHandlers } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
-import { persistShutdownSummary } from "./routines/briefing-delivery.js";
+import { deliverRoutineResult } from "./routines/routine-delivery.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -416,10 +416,12 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   void (async () => {
     try {
-      if (services.settingsService.get("routine")?.enableShutdownSummary ?? true) {
-        const shutdownSummary = await services.routineEngine?.runShutdownRoutine();
-        if (shutdownSummary) {
-          await persistShutdownSummary(services.memoryManager, shutdownSummary);
+      if (services.settingsService.get("routine")?.enableShutdownRoutine ?? true) {
+        const { getRegisteredRoutine } = await import("./routines/registry.js");
+        const shutdownRoutine = getRegisteredRoutine("shutdown");
+        if (shutdownRoutine && services.routineEngine) {
+          const result = await services.routineEngine.runRoutine(shutdownRoutine);
+          await deliverRoutineResult(null, result);
         }
       }
       await services.shutdown?.();

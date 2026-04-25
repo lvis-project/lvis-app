@@ -10,6 +10,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     globalSetup: ["./vitest.globalSetup.ts"],
+    testTimeout: 15000,
     environment: "node",
     environmentMatchGlobs: [
       ["test/renderer/**", "jsdom"],

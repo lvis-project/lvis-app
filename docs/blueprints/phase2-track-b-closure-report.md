@@ -218,7 +218,7 @@ Session-only forces users to re-approve the same tool every startup → approval
 
 ### 7.4 Why `managed: boolean` single-file (not hybrid)?
 
-Pragmatic Phase 1 shape. The Phase 1.5 deployment guard uses hybrid (path + manifest field) because bundled plugins live inside `plugins/installed/` with the same parent as user plugins — the ambiguity required hybrid check. Policy does not have this ambiguity: there's one policy file, owned by the host. Adding hybrid now would be premature; adding admin-dir merge later (Phase 2 proper A3) is a clean linear extension. The architect agent flagged this as HIGH because naming alignment with Phase 1.5 `managed` can mislead readers into expecting the same enforcement strength — closure report §2.2 documents the gap explicitly to prevent that misread.
+Pragmatic Phase 1 shape. The Phase 1.5 deployment guard uses hybrid (path + manifest field) because packaged plugins live inside `plugins/installed/` with the same parent as user plugins — the ambiguity required hybrid check. Policy does not have this ambiguity: there's one policy file, owned by the host. Adding hybrid now would be premature; adding admin-dir merge later (Phase 2 proper A3) is a clean linear extension. The architect agent flagged this as HIGH because naming alignment with Phase 1.5 `managed` can mislead readers into expecting the same enforcement strength — closure report §2.2 documents the gap explicitly to prevent that misread.
 
 ### 7.5 Why `approvalGate: required` in `ToolExecutor` (no optional fallback)?
 

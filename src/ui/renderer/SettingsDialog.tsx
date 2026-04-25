@@ -110,8 +110,8 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
 
           <TabsContent value="routine">
             <ProactiveTab
-              enableDailyBriefing={s.enableDailyBriefing}
-              setEnableDailyBriefing={s.setEnableDailyBriefing}
+              enableWakeupRoutine={s.enableWakeupRoutine}
+              setEnableWakeupRoutine={s.setEnableWakeupRoutine}
             />
           </TabsContent>
 

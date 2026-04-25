@@ -1,35 +1,36 @@
+import type { RoutineTriggerType } from "../core/routine-engine.js";
+
 export type RegisteredRoutine = {
-  id: "daily-briefing" | "heartbeat" | "shutdown-summary";
+  id: RoutineTriggerType;
   title: string;
   description: string;
-  trigger: "wakeup" | "heartbeat" | "shutdown";
+  trigger: RoutineTriggerType;
   configurable: {
     enabled: true;
     scheduleTimeKst?: boolean;
-    heartbeatEntries?: boolean;
-    postTurnEnabled?: boolean;
+    scheduleEntries?: boolean;
   };
 };
 
 export const REGISTERED_ROUTINES: RegisteredRoutine[] = [
   {
-    id: "daily-briefing",
-    title: "데일리 브리핑",
-    description: "장시간 idle 또는 예약 시각에 오늘의 업무 맥락을 요약하며, 홈 브리핑 카드와 루틴 대화에 함께 남깁니다.",
+    id: "wakeup",
+    title: "웨이크업 루틴",
+    description: "장시간 idle 또는 예약 시각에 오늘의 업무 맥락을 대화 형태로 정리합니다.",
     trigger: "wakeup",
-    configurable: { enabled: true, scheduleTimeKst: true, postTurnEnabled: true },
+    configurable: { enabled: true, scheduleTimeKst: true },
   },
   {
-    id: "heartbeat",
-    title: "하트비트",
-    description: "크론탭 스타일 스케줄에 맞춰 proactive 컨텍스트를 주기적으로 갱신합니다.",
-    trigger: "heartbeat",
-    configurable: { enabled: true, heartbeatEntries: true },
+    id: "schedule",
+    title: "스케줄 루틴",
+    description: "크론탭 스타일 스케줄에 맞춰 주기적으로 루틴 대화를 실행합니다.",
+    trigger: "schedule",
+    configurable: { enabled: true, scheduleEntries: true },
   },
   {
-    id: "shutdown-summary",
-    title: "종료 요약",
-    description: "앱 종료 시 오늘의 업무 흐름을 요약합니다.",
+    id: "shutdown",
+    title: "종료 루틴",
+    description: "앱 종료 시 오늘의 업무 흐름을 대화 형태로 정리합니다.",
     trigger: "shutdown",
     configurable: { enabled: true },
   },

@@ -4,6 +4,7 @@ import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/plugin-config.js";
+import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { PluginCardSummary } from "../types.js";
 
 type KV = { key: string; value: string };
@@ -149,7 +150,7 @@ export function PluginConfigTab() {
     if (!window.confirm(`"${selectedPlugin.name}" 플러그인을 제거하시겠습니까?`)) return;
     setSaving(true);
     try {
-      const result = await window.lvis.plugins.uninstallMarketplacePlugin(selectedId);
+      const result = await getHostMarketplaceApi().uninstallMarketplacePlugin(selectedId);
       if (!result.ok) {
         showBanner("error", result.message ?? "제거 실패");
         return;

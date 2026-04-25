@@ -19,12 +19,45 @@
     {
       "id": "calendar",
       "manifestPath": "installed/calendar/plugin.json",
-      "enabled": true
+      "enabled": true,
+      "approvedPluginAccess": {
+        "plugins": [
+          {
+            "pluginId": "email",
+            "events": ["email.analyzed", "email.invite.detected"]
+          },
+          {
+            "pluginId": "meeting",
+            "events": ["meeting.summary.created"]
+          }
+        ]
+      }
     },
     {
       "id": "lge-api",
       "manifestPath": "installed/lge-api/plugin.json",
       "enabled": true
+    },
+    {
+      "id": "work-proactive",
+      "manifestPath": "installed/work-proactive/plugin.json",
+      "enabled": true,
+      "approvedPluginAccess": {
+        "plugins": [
+          {
+            "pluginId": "calendar",
+            "tools": ["calendar_today"]
+          },
+          {
+            "pluginId": "email",
+            "events": ["email.action.needed"]
+          },
+          {
+            "pluginId": "meeting",
+            "events": ["meeting.summary.created", "meeting.ended"]
+          }
+        ]
+      }
     }
   ]
 }

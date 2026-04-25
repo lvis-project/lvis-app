@@ -138,6 +138,47 @@ export interface ConversationDeps {
   pluginRuntime: PluginRuntime;
 }
 
+/**
+ * §7: Routine-isolated ConversationLoop factory.
+ *
+ * Routine execution must NOT share the interactive chat's ConversationLoop
+ * instance — doing so would race with concurrent IPC chat turns and pollute
+ * the user's session history with routine output.
+ *
+ * Each call returns a *fresh* ConversationLoop that shares stateless deps
+ * (toolRegistry, settings, etc.) but owns its own ConversationHistory so
+ * routine turns never appear in the user's chat transcript. The heavier
+ * interactive-only deps (postTurnHookChain, approvalGate, hookRunner,
+ * idleScheduler, bashAstValidator) are intentionally omitted — routines run
+ * headlessly and do not need approval modals or idle-poke side-effects.
+ */
+export type RoutineConversationLoopDeps = Pick<
+  ConversationDeps,
+  | "settingsService"
+  | "systemPromptBuilder"
+  | "keywordEngine"
+  | "routeEngine"
+  | "toolRegistry"
+  | "memoryManager"
+  | "permissionManager"
+  | "pluginRuntime"
+>;
+
+export function createRoutineConversationLoop(deps: RoutineConversationLoopDeps): ConversationLoop {
+  return new ConversationLoop({
+    settingsService: deps.settingsService,
+    systemPromptBuilder: deps.systemPromptBuilder,
+    keywordEngine: deps.keywordEngine,
+    routeEngine: deps.routeEngine,
+    toolRegistry: deps.toolRegistry,
+    memoryManager: deps.memoryManager,
+    permissionManager: deps.permissionManager,
+    pluginRuntime: deps.pluginRuntime,
+    // postTurnHookChain / approvalGate / hookRunner / idleScheduler / bashAstValidator
+    // intentionally omitted — routine loops are headless and isolated.
+  });
+}
+
 export function createConversationLoop(deps: ConversationDeps): ConversationLoop {
   // §4.5: ConversationLoop
   return new ConversationLoop({

@@ -107,7 +107,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
   it("B-3: any suffix in uiCallable accepted when tool is in tools[]", async () => {
     await writePlugin("p_destructive", {
       uiCallable: ["p_destructive_delete"],
-      deployment: "user",
+      installPolicy: "user",
     });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
     await runtime.load();
@@ -115,7 +115,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
   });
 
   it("B-3: read-like uiCallable tool is permitted", async () => {
-    await writePlugin("p_ok", { tools: ["p_ok_get", "p_ok_delete"], uiCallable: ["p_ok_get"], deployment: "user" });
+    await writePlugin("p_ok", { tools: ["p_ok_get", "p_ok_delete"], uiCallable: ["p_ok_get"], installPolicy: "user" });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("p_ok");

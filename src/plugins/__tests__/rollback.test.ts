@@ -113,6 +113,23 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     await expect(svc.rollbackPlugin("com.lge.sample")).rejects.toThrow(/No prior version/);
   });
 
+  it("rollback preserves installedBy and bundleRefs metadata", async () => {
+    const svc = makeService();
+    await svc.installPlugin("com.lge.sample", "1.0.0");
+    await svc.installPlugin("com.lge.sample", "1.1.0");
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    registry.plugins[0].installedBy = "admin";
+    registry.plugins[0].bundleRefs = ["work-proactive"];
+    await writeFile(registryPath, JSON.stringify(registry), "utf-8");
+
+    await svc.rollbackPlugin("com.lge.sample");
+
+    const restored = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(restored.plugins[0].installedBy).toBe("admin");
+    expect(restored.plugins[0].bundleRefs).toEqual(["work-proactive"]);
+  });
+
   it("rollback fails for unknown plugin", async () => {
     const svc = makeService();
     await expect(svc.rollbackPlugin("no.such.plugin")).rejects.toThrow(/No prior version/);
