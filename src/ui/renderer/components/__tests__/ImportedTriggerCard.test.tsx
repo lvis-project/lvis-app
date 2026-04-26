@@ -21,6 +21,31 @@ describe("ImportedTriggerCard", () => {
     expect(getByText(/도구 2회/)).toBeTruthy();
   });
 
+  it("strips both - emailId and - eventId lines from the visible summary", () => {
+    // Both ids are useful to the chat LLM (via the wrapped envelope)
+    // but are opaque base64 noise to humans. The brain template
+    // surfaces them as `- emailId:` / `- eventId:` lines so the
+    // strip can be a single pattern across both detectors.
+    const { container } = render(
+      <ImportedTriggerCard
+        {...base}
+        summary={
+          "약 10분 후 일정이 시작됩니다.\n" +
+          "- 제목: 스프린트 리뷰\n" +
+          "- emailId: AAMkAGI2-base64-ish\n" +
+          "- eventId: AQMkADAwBASE64TAIL=="
+        }
+      />,
+    );
+    const text = container.textContent ?? "";
+    expect(text).toContain("일정이 시작됩니다");
+    expect(text).toContain("스프린트 리뷰");
+    expect(text).not.toContain("AAMkAGI2-base64-ish");
+    expect(text).not.toContain("AQMkADAwBASE64TAIL==");
+    expect(text).not.toMatch(/emailId/i);
+    expect(text).not.toMatch(/eventId/i);
+  });
+
   it("does NOT show the brain templated prompt by default (collapsed)", () => {
     const { queryByText } = render(<ImportedTriggerCard {...base} />);
     expect(queryByText(/회의 요청 이메일을 받았습니다/)).toBeNull();
