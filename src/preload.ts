@@ -307,6 +307,26 @@ const api = {
     return () => ipcRenderer.removeListener("marketplace:updates-available", listener);
   },
 
+  // ─── Phase 2d — managed bootstrap status ─────────
+  // The host emits these around `ensureManagedInstalled()` so the renderer
+  // can show a banner / toast during startup install. Three lifecycle states:
+  //   - { phase: "start" }
+  //   - { phase: "complete", installed[], failed[], skippedReason? }
+  //   - { phase: "error", message }
+  // Best-effort: the host swallows send errors, so the renderer must
+  // tolerate missing events (page reload during startup, etc.).
+  onBootstrapStatus: (
+    handler: (status:
+      | { phase: "start" }
+      | { phase: "complete"; installed: string[]; failed: Array<{ id: string; error: string }>; skippedReason?: string }
+      | { phase: "error"; message: string }
+    ) => void,
+  ) => {
+    const listener = (_event: unknown, status: Parameters<typeof handler>[0]) => handler(status);
+    ipcRenderer.on("lvis:bootstrap:status", listener);
+    return () => ipcRenderer.removeListener("lvis:bootstrap:status", listener);
+  },
+
   // ─── lvis:// deep-link install lifecycle ─────────
   // Fires when a marketplace install triggered via lvis://install/{slug} has
   // finished installing + restartAll() in the main process. Renderer uses

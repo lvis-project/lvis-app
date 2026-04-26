@@ -157,6 +157,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
 
     onMarketplaceUpdatesAvailable: vi.fn(() => () => {}),
+    onBootstrapStatus: vi.fn(() => () => {}),
 
     plugins: {
       getPerfStats: vi.fn(async () => ({})),
