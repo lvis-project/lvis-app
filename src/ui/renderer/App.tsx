@@ -79,6 +79,7 @@ export function App() {
   // Marketplace + plugin UI extensions
   const {
     pluginViews,
+    installInFlight,
     refreshViews, refreshMarketplace,
   } = usePluginMarketplace(api);
 
@@ -306,6 +307,7 @@ export function App() {
             pluginViews={pluginViews}
             setActiveView={setActiveView}
             starredCount={starred.length}
+            installInFlight={installInFlight}
           />
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">

@@ -24,12 +24,11 @@ import { fileURLToPath } from "node:url";
 import electronPath from "electron";
 
 // Windows corp PC runtime flags — see scripts/run-electron.mjs for rationale.
-const WINDOWS_SAFE_ELECTRON_FLAGS = [
-  "--disable-gpu",
-  "--disable-software-rasterizer",
-  "--disable-gpu-compositing",
-  "--no-sandbox",
-];
+// Flag strings come from scripts/electron-flags.mjs so the dev launcher, the
+// production launcher, and main.ts's lvis:// protocol registration agree on
+// the literal switch list.
+import { WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG } from "./electron-flags.mjs";
+const WINDOWS_SAFE_ELECTRON_FLAGS = [...WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG];
 
 function applyWindowsSafeFlags(args) {
   const next = [...args];
