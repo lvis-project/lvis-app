@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginMarketplaceService } from "../marketplace.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
+import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 
 /**
  * Phase 1.5 F-round §F6: integration test for
@@ -21,6 +22,10 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
   let installedDir: string;
 
   beforeEach(async () => {
+    // Track A pre-Phase-2: MockMarketplaceFetcher refuses to construct in
+    // packaged builds. dev-flags defaults to packaged-mode for safety, so
+    // tests must explicitly opt into the unpackaged gate.
+    setIsPackaged(false);
     testDir = join(homedir(), ".lvis", "test-tmp", `lvis-mp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     pluginsDir = join(testDir, "plugins");
     installedDir = join(pluginsDir, "installed");
@@ -31,6 +36,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
 
   afterEach(async () => {
     await rm(testDir, { recursive: true, force: true });
+    _resetForTest();
   });
 
   async function writeCatalog(installPolicy?: "admin" | "user") {

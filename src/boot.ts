@@ -41,7 +41,7 @@
 import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
-import { PluginMarketplaceService } from "./plugins/marketplace.js";
+import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
 import { StarredStore } from "./data/starred-store.js";
@@ -152,12 +152,16 @@ export async function bootstrap(
 
   // §9.5 M4: marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
-  // For "real-cloud" mode, pass an explicit fetcher so the service uses the
-  // network backend with catalog caching enabled.
-  // For "mock" mode, pass no fetcher — PluginMarketplaceService creates its
-  // own internal MockMarketplaceFetcher and disables catalog caching so that
-  // the local plugins/marketplace.json is always read fresh (no stale
-  // ~/.lvis/marketplace-cache/ data can shadow local changes).
+  // Selection rules:
+  //  - real-cloud + URL → RealCloudMarketplaceFetcher (production path)
+  //  - packaged + (no real-cloud OR mock) → DisabledMarketplaceFetcher (stub).
+  //    `MockMarketplaceFetcher` is dev-only and refuses to construct in
+  //    packaged builds (security-reviewer H-1: user-writable mock catalog
+  //    cannot be a trust anchor). `resolveManagedPluginBootstrap` already
+  //    short-circuits this combination, but the service must still
+  //    instantiate without crashing for boot to complete.
+  //  - dev + mock → undefined (service falls back to MockMarketplaceFetcher,
+  //    which reads the local plugins/marketplace.json fresh).
   let marketplaceFetcher: MarketplaceFetcher | undefined;
   if (
     marketplaceSettings.backend === "real-cloud" &&
@@ -169,6 +173,11 @@ export async function bootstrap(
       allowPrivateNetwork: marketplaceSettings.realCloudAllowPrivateNetwork,
     });
     console.log("[lvis] boot: marketplace backend = real-cloud (%s)", marketplaceSettings.realCloudBaseUrl);
+  } else if (app.isPackaged) {
+    marketplaceFetcher = new DisabledMarketplaceFetcher();
+    console.warn(
+      "[lvis] boot: marketplace backend disabled in packaged build (no real-cloud URL configured)",
+    );
   }
   const pluginMarketplace = new PluginMarketplaceService(
     projectRoot,
