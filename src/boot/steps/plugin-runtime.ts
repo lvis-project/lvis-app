@@ -23,6 +23,7 @@ import { PluginSignatureVerifier } from "../../plugins/signature-verifier.js";
 import { BUNDLED_PUBLISHER_PUBLIC_KEYS } from "../../plugins/publisher-keys.js";
 import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
+import { PROACTIVE_SOURCE_PATTERN } from "../../engine/proactive-source.js";
 import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
 import { withMsGraphRetry } from "../../main/ms-graph-retry.js";
 import type {
@@ -105,13 +106,14 @@ const MAX_SOURCE_LEN = 128;
  * generous for templated suggestions and tight enough to reject a body.
  */
 const MAX_PROMPT_LEN = 4096;
-/**
- * Strict pattern for `source`. Must start with `proactive:` followed by a
- * non-empty kebab-case suffix. Rejects `proactive:` bare, `proactive:_x`,
- * `proactive:Bad/Path`, etc., before the value flows into audit / system
- * prompts where loose substrings would be confusing.
- */
-const SOURCE_PATTERN = /^proactive:[a-z][a-z0-9-]*$/;
+// `SOURCE_PATTERN` is the strict shape required for the `source` field
+// of every proactive trigger spec. It's the SAME pattern used by the
+// keyword engine, the trigger executor envelope, the IPC bridge's
+// originSource detection, and the permission manager's proactive-
+// origin override — see `engine/proactive-source.ts` for the single
+// definition. Without this gate, malformed sources (`proactive:`,
+// `proactive:_x`, `proactive:Bad/Path`) could flow into audit logs and
+// system prompts where loose substrings would be confusing.
 
 /**
  * Per-plugin rate limit for `triggerConversation()`. A plugin that omits
@@ -320,7 +322,7 @@ export function evaluateTriggerSpec(
   }
   // A too-long source is rejected outright; the regex sees the original
   // string (no slice-before-validate). Same for prompt length.
-  if (source.length > MAX_SOURCE_LEN || !SOURCE_PATTERN.test(source)) {
+  if (source.length > MAX_SOURCE_LEN || !PROACTIVE_SOURCE_PATTERN.test(source)) {
     auditDeny(`reason=invalid_source source=${source.slice(0, 32) || "<empty>"}`);
     return {
       kind: "deny",

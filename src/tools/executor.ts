@@ -5,7 +5,7 @@
  *
  * 1. Lookup       — ToolRegistry.findByName() + source/trust 확인
  * 2. PreHook      — HookRunner.preToolUse() — 입력 검사/변환
- * 3. Permission   — PermissionManager.check(name, source, category)
+ * 3. Permission   — PermissionManager.checkDetailed(name, source, category, proactiveOrigin)
  * 4. HookOverride — PreHook deny 결과 적용
  * 5. RateLimit    — Trust별 호출 빈도 제한
  * 6. Execute      — tool.execute(args)

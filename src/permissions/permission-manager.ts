@@ -201,19 +201,6 @@ export class PermissionManager {
   // ─── 판정 (§4.1) ────────────────────────────────
 
   /**
-   * Source-aware 도구 실행 권한 판정.
-   * 간단 인터페이스 — 이전 호환.
-   */
-  check(
-    toolName: string,
-    source?: ToolSource,
-    category?: "read" | "write" | "dangerous",
-    proactiveOrigin?: string | null,
-  ): PermissionDecision {
-    return this.checkDetailed(toolName, source, category, proactiveOrigin).decision;
-  }
-
-  /**
    * 상세 판정 — 감사 로그용 사유 포함.
    *
    * `proactiveOrigin` (예: `"proactive:meeting-detection"`) 가 set 이면
