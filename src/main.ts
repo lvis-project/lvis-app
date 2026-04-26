@@ -482,10 +482,13 @@ app.on("web-contents-created", (_event, contents) => {
 
   // Plugin webview lifecycle: clean up the (webContents.id → pluginId)
   // registry entry on destroy so a stale id can't be reused for an
-  // unrelated future webContents.
-  contents.on("destroyed", () => {
-    unregisterPluginWebview(contents.id);
-  });
+  // unrelated future webContents. `render-process-gone` covers the case
+  // where the underlying renderer process crashes (sandbox kill, OOM,
+  // GPU lost) — Electron does not always emit `destroyed` synchronously
+  // afterwards, so we clear the binding eagerly.
+  const dropBinding = () => unregisterPluginWebview(contents.id);
+  contents.on("destroyed", dropBinding);
+  contents.on("render-process-gone", dropBinding);
 
   contents.on("will-navigate", (navEvent, url) => {
     // Plugin webview policy: allow file:// navigations ONLY into the app's

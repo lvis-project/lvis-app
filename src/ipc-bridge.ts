@@ -318,9 +318,6 @@ interface PluginWebviewBinding {
   entryUrl: string;
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
-export function lookupPluginWebview(webContentsId: number): PluginWebviewBinding | undefined {
-  return pluginWebviewRegistry.get(webContentsId);
-}
 export function unregisterPluginWebview(webContentsId: number): void {
   pluginWebviewRegistry.delete(webContentsId);
 }
@@ -1549,6 +1546,26 @@ ${input}`;
     if (typeof entryUrl !== "string" || !entryUrl.startsWith("file://")) {
       return { ok: false, error: "invalid-entry-url" };
     }
+    // Defense-in-depth: even though the host renderer derives entryUrl from
+    // the manifest, verify it resolves under the plugin's installed root
+    // before binding. A compromised host renderer (or a future regression)
+    // shouldn't be able to talk main into running an arbitrary file:// URL
+    // as the plugin's entry module.
+    const installRoot = pluginRuntime.getPluginRoot(pluginId);
+    if (!installRoot) {
+      return { ok: false, error: "plugin-not-loaded" };
+    }
+    let entryFsPath: string;
+    try {
+      entryFsPath = path.resolve(fileURLToPath(entryUrl));
+    } catch {
+      return { ok: false, error: "invalid-entry-url" };
+    }
+    const rootResolved = path.resolve(installRoot);
+    const rel = path.relative(rootResolved, entryFsPath);
+    if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+      return { ok: false, error: "entry-url-outside-install-root" };
+    }
     pluginWebviewRegistry.set(webContentsId, { pluginId, entryUrl });
     return { ok: true };
   });
@@ -1566,7 +1583,7 @@ ${input}`;
       auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
       return UNAUTHORIZED_FRAME;
     }
-    return binding.entryUrl;
+    return { ok: true as const, entryUrl: binding.entryUrl };
   });
 
   ipcMain.handle("lvis:plugin:call-tool", async (e, method: string, payload?: unknown) => {

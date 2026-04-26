@@ -87,14 +87,24 @@ describe("plugin-preload bridge", () => {
     );
   });
 
-  it("getEntryUrl invokes lvis:plugin:get-entry-url and returns the resolved string", async () => {
+  it("getEntryUrl invokes lvis:plugin:get-entry-url and unwraps the success sentinel", async () => {
     const bridge = exposed.get("lvisPlugin") as { getEntryUrl: () => Promise<string> };
-    mockInvoke.mockResolvedValueOnce("file:///plugins/agent-hub/dist/ui/agent-hub-panel.js");
+    mockInvoke.mockResolvedValueOnce({
+      ok: true,
+      entryUrl: "file:///plugins/agent-hub/dist/ui/agent-hub-panel.js",
+    });
 
     const url = await bridge.getEntryUrl();
 
     expect(mockInvoke).toHaveBeenCalledWith("lvis:plugin:get-entry-url");
     expect(url).toBe("file:///plugins/agent-hub/dist/ui/agent-hub-panel.js");
+  });
+
+  it("getEntryUrl throws when main returns a rejection sentinel", async () => {
+    const bridge = exposed.get("lvisPlugin") as { getEntryUrl: () => Promise<string> };
+    mockInvoke.mockResolvedValueOnce({ ok: false, error: "unauthorized-frame" });
+
+    await expect(bridge.getEntryUrl()).rejects.toThrow(/unauthorized-frame/);
   });
 
   it("onEvent registers listener on lvis:plugin:event IPC channel and returns unsubscribe", () => {
