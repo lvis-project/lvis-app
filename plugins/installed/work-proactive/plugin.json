@@ -62,7 +62,8 @@
     "email.new",
     "meeting.summary.created",
     "meeting.ended",
-    "calendar.event.upcoming"
+    "calendar.event.upcoming",
+    "calendar.event.conflict.detected"
   ],
   "emittedEvents": [],
   "toolSchemas": {
