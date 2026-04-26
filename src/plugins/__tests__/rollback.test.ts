@@ -30,6 +30,10 @@ describe("PluginMarketplaceService install → update → rollback", () => {
 
   beforeEach(async () => {
     setIsPackaged(false);
+    // Phase 2b-1: file:-spec install path is dev-only. Tests stub npm
+    // and exercise the file branch end-to-end, so they need the same
+    // env opt-in that real dev iteration uses.
+    process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY = "1";
     testDir = join(homedir(), ".lvis", "test-tmp", `lvis-rb-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     appRoot = testDir;
     const pluginsDir = join(appRoot, "plugins");
@@ -63,6 +67,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
   });
 
   afterEach(async () => {
+    delete process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY;
     await rm(testDir, { recursive: true, force: true });
     vi.restoreAllMocks();
     _resetForTest();

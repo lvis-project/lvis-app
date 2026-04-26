@@ -7,7 +7,7 @@ import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePlugin
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
-import { assertMockMarketplaceAllowed } from "../boot/dev-flags.js";
+import { assertMockMarketplaceAllowed, devLinkedInstallAllowed } from "../boot/dev-flags.js";
 import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -570,6 +570,9 @@ export class PluginMarketplaceService {
       if (cachedManifest.packageName) {
         // Reinstall the cached npm package at the prior version. npm resolves
         // `name@version` from the registry the host is configured against.
+        // Phase 2b-1: this path is currently dev-only because runNpmInstall
+        // is gated on `devLinkedInstallAllowed()`. Phase 2b-3 replaces this
+        // with a cached-zip restore so packaged builds can rollback too.
         await this.runNpmInstall(buildPinnedSpec(cachedManifest.packageName, priorVersion));
       }
 
@@ -952,7 +955,21 @@ export class PluginMarketplaceService {
     version: string,
     onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<string> {
-    if (plugin.packageSpec.startsWith("file:") || this.fetcher instanceof MockMarketplaceFetcher) {
+    // Phase 2b-1 gate: the file:-spec / npm-install branch is dev-only.
+    //   - Architect B1: `runNpmInstall` writes to `<appRoot>/node_modules`
+    //     which is read-only in packaged builds (`app.asar`).
+    //   - Security H-2: the branch bypasses envelope signature verification,
+    //     so a tampered catalog could install an attacker-controlled package
+    //     under `installPolicy:"admin"`.
+    // Production installs always take the signed-zip download path below.
+    const useDevLinkedBranch =
+      plugin.packageSpec.startsWith("file:") || this.fetcher instanceof MockMarketplaceFetcher;
+    if (useDevLinkedBranch) {
+      if (!devLinkedInstallAllowed()) {
+        throw new Error(
+          `[security] file:-spec install for "${plugin.id}" is dev-only — packaged builds must use a signed marketplace artifact`,
+        );
+      }
       const packageSpec = this.resolveLocalPackageSpec(plugin.packageSpec);
       await this.runNpmInstall(packageSpec);
       return this.writeInstalledManifest(plugin, version);
@@ -1238,6 +1255,16 @@ export class PluginMarketplaceService {
   }
 
   private async runNpmInstall(packageSpec: string): Promise<void> {
+    // Phase 2b-1 defense-in-depth: even if a future refactor calls this
+    // outside `installArtifact`, a packaged build refuses to spawn npm.
+    // `<appRoot>/node_modules` is inside `app.asar` and writes fail with
+    // EROFS regardless, but the explicit refusal surfaces a clear security
+    // error instead of an opaque filesystem one.
+    if (!devLinkedInstallAllowed()) {
+      throw new Error(
+        "[security] runNpmInstall is dev-only — packaged builds must install via signed marketplace artifacts",
+      );
+    }
     if (packageSpec.startsWith("file:")) {
       await new Promise<void>((resolvePromise, rejectPromise) => {
         const child = spawn("npm", ["install", "--prefix", this.appRoot, "--", packageSpec], {
