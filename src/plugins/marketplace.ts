@@ -7,6 +7,7 @@ import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePlugin
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { resolvePluginPaths, type PluginPaths } from "./plugin-paths.js";
+import { assertMockMarketplaceAllowed } from "../boot/dev-flags.js";
 import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -74,12 +75,47 @@ export interface MarketplaceListItem extends PluginMarketplaceItem {
 }
 
 /**
- * @internal Test-only fetcher. Reads a local JSON catalog file.
- * Production code must use {@link RealCloudMarketplaceFetcher} instead.
- * Note: downloadVersion() is not supported.
+ * Disabled fetcher — used when no real-cloud backend is configured in a
+ * packaged build. Constructor is side-effect free so boot does not crash;
+ * any actual marketplace method (list/install/download) throws a clear
+ * `marketplace-disabled` error so callers can degrade gracefully. The
+ * managed bootstrap (`resolveManagedPluginBootstrap`) short-circuits
+ * before reaching this fetcher in the same conditions.
+ */
+export class DisabledMarketplaceFetcher implements MarketplaceFetcher {
+  private static readonly ERR =
+    "marketplace-disabled: no marketplace backend configured for this build";
+
+  async listPlugins(): Promise<PluginMarketplaceItem[]> {
+    throw new Error(DisabledMarketplaceFetcher.ERR);
+  }
+
+  async getPluginDetail(): Promise<PluginMarketplaceItem | null> {
+    throw new Error(DisabledMarketplaceFetcher.ERR);
+  }
+
+  async downloadVersion(): Promise<{ zipBuffer: Buffer; sha256: string }> {
+    throw new Error(DisabledMarketplaceFetcher.ERR);
+  }
+}
+
+/**
+ * @internal Dev/test-only fetcher. Reads a local JSON catalog file.
+ *
+ * Production / packaged builds MUST use {@link RealCloudMarketplaceFetcher}
+ * — the constructor throws when invoked in a packaged build via the shared
+ * dev-flags gate. The local `plugins/marketplace.json` is user-writable and
+ * cannot serve as a trust anchor; any packaged binary that fell back to this
+ * fetcher would let local users advertise their own plugins as
+ * `installPolicy:"admin"` and get them auto-installed by the managed
+ * bootstrap (security-reviewer H-1, pre-Phase-2 audit).
+ *
+ * Note: downloadVersion() is not supported regardless of build mode.
  */
 export class MockMarketplaceFetcher implements MarketplaceFetcher {
-  constructor(private readonly marketplacePath: string) {}
+  constructor(private readonly marketplacePath: string) {
+    assertMockMarketplaceAllowed();
+  }
 
   async listPlugins(): Promise<PluginMarketplaceItem[]> {
     const catalog = await this.readCatalog();

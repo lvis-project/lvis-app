@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginMarketplaceService } from "../marketplace.js";
+import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 
 /**
  * Sprint 3-B §9.6 — install → update → rollback lifecycle.
@@ -27,6 +28,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
   let cacheRoot: string;
 
   beforeEach(async () => {
+    setIsPackaged(false);
     testDir = join(homedir(), ".lvis", "test-tmp", `lvis-rb-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     appRoot = testDir;
     const pluginsDir = join(appRoot, "plugins");
@@ -62,6 +64,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
   afterEach(async () => {
     await rm(testDir, { recursive: true, force: true });
     vi.restoreAllMocks();
+    _resetForTest();
   });
 
   function makeService(): TestableService {
