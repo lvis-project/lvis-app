@@ -1,9 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { PluginMarketplaceService } from "../marketplace.js";
+import { dirname, join, resolve } from "node:path";
+import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
+import { makeTestPluginPaths } from "./test-helpers.js";
+
+function makeManagedService(testDir: string, marketplacePath: string): PluginMarketplaceService {
+  const paths = makeTestPluginPaths({ rootDir: testDir });
+  const fetcher = new MockMarketplaceFetcher(marketplacePath);
+  return new PluginMarketplaceService(testDir, paths, fetcher);
+}
 
 describe("PluginMarketplaceService managed bootstrap", () => {
   let testDir: string;
@@ -19,9 +26,13 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "test-tmp",
       `lvis-managed-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
+    // Phase 2a: registry.json lives under userInstalledDir (= testDir/plugins
+    // when the helper picks defaults). marketplace.json is the dev mock
+    // catalog and lives outside that tree so writes never collide with the
+    // installed-plugin registry.
     pluginsDir = join(testDir, "plugins");
     registryPath = join(pluginsDir, "registry.json");
-    marketplacePath = join(pluginsDir, "marketplace.json");
+    marketplacePath = join(testDir, "marketplace.json");
     await mkdir(pluginsDir, { recursive: true });
   });
 
@@ -65,7 +76,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "utf-8",
     );
 
-    const service = new PluginMarketplaceService(testDir);
+    const service = makeManagedService(testDir, marketplacePath);
     const installSpy = vi
       .spyOn(service, "install")
       .mockResolvedValue({ pluginId: "meeting", installed: true });
@@ -126,7 +137,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     );
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
 
-    const service = new PluginMarketplaceService(testDir);
+    const service = makeManagedService(testDir, marketplacePath);
     const installSpy = vi
       .spyOn(service as unknown as { installArtifact: (...args: unknown[]) => Promise<string> }, "installArtifact")
       .mockImplementation(async (plugin: unknown) => {
@@ -182,7 +193,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     );
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
 
-    const service = new PluginMarketplaceService(testDir);
+    const service = makeManagedService(testDir, marketplacePath);
     vi
       .spyOn(service as unknown as { installArtifact: (...args: unknown[]) => Promise<string> }, "installArtifact")
       .mockImplementation(async (plugin: unknown) => {
@@ -262,7 +273,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     );
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
 
-    const service = new PluginMarketplaceService(testDir);
+    const service = makeManagedService(testDir, marketplacePath);
     const installSpy = vi
       .spyOn(service as unknown as { installArtifact: (...args: unknown[]) => Promise<string> }, "installArtifact")
       .mockImplementation(async (plugin: unknown) => {
@@ -382,7 +393,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "utf-8",
     );
 
-    const service = new PluginMarketplaceService(testDir);
+    const service = makeManagedService(testDir, marketplacePath);
     vi
       .spyOn(service as unknown as { runNpmInstall: (spec: string) => Promise<void> }, "runNpmInstall")
       .mockResolvedValue();
@@ -397,7 +408,10 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     };
     const manifestPath = registry.plugins.find((entry) => entry.id === "work-proactive")?.manifestPath;
     expect(manifestPath).toBeTruthy();
-    const manifest = JSON.parse(await readFile(manifestPath!, "utf-8"));
+    // Phase 2a: registry entries hold manifest paths relative to
+    // dirname(registryPath). Resolve to absolute before reading the file.
+    const absoluteManifestPath = resolve(dirname(registryPath), manifestPath!);
+    const manifest = JSON.parse(await readFile(absoluteManifestPath, "utf-8"));
     expect(manifest.installPolicy).toBe("user");
     expect(manifest.dependencies).toEqual([
       { pluginId: "calendar", required: true },
@@ -442,7 +456,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "utf-8",
     );
 
-    const service = new PluginMarketplaceService(testDir);
+    const service = makeManagedService(testDir, marketplacePath);
     await expect(service.install("escape-test")).rejects.toThrow(/escapes workspace root/i);
   });
 
@@ -465,7 +479,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "utf-8",
     );
 
-    const service = new PluginMarketplaceService(testDir);
+    const service = makeManagedService(testDir, marketplacePath);
     await expect(
       (service as unknown as {
         assertInstalledManifestMatchesCatalog: (
@@ -541,7 +555,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "utf-8",
     );
 
-    const service = new PluginMarketplaceService(testDir);
+    const service = makeManagedService(testDir, marketplacePath);
     await (
       service as unknown as {
         rollbackInstallOperation: (state: {
@@ -629,7 +643,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       "utf-8",
     );
 
-    const service = new PluginMarketplaceService(testDir);
+    const service = makeManagedService(testDir, marketplacePath);
     await expect(service.uninstall("work-proactive", { removeBundleMembers: true })).resolves.toEqual({
       pluginId: "work-proactive",
       uninstalled: true,

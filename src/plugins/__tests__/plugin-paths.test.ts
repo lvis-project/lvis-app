@@ -1,16 +1,15 @@
 /**
- * Phase 0 — plugin-paths SoT helper.
+ * Phase 2a — plugin-paths SoT helper.
  *
- * Behaviour locked here so future phase 2 path moves don't accidentally
- * reshuffle the layout that consumers (boot, marketplace, deployment-guard)
- * already depend on.
+ * Locks the new layout (rooted at userDataDir, no `<appRoot>/plugins/`
+ * fallback) and the registry-relative manifestPath helper used by every
+ * marketplace install path.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { resolvePluginPaths } from "../plugin-paths.js";
+import { resolvePluginPaths, toRegistryRelativeManifestPath } from "../plugin-paths.js";
 
-describe("resolvePluginPaths", () => {
+describe("resolvePluginPaths (Phase 2a)", () => {
   const originalEnv = process.env.LVIS_PLUGINS_DIR;
   beforeEach(() => {
     delete process.env.LVIS_PLUGINS_DIR;
@@ -23,36 +22,47 @@ describe("resolvePluginPaths", () => {
     }
   });
 
-  it("preserves the legacy default layout when nothing is overridden", () => {
-    const paths = resolvePluginPaths({ appRoot: "/tmp/appA" });
-    expect(paths.registryPath).toBe(resolve("/tmp/appA", "plugins/registry.json"));
-    expect(paths.marketplacePath).toBe(resolve("/tmp/appA", "plugins/marketplace.json"));
-    expect(paths.userInstalledDir).toBe(resolve(homedir(), ".lvis/plugins"));
-    expect(paths.cacheRoot).toBe(resolve(homedir(), ".lvis/plugins/.cache"));
+  it("anchors registry/installed/cache at userDataDir/plugins", () => {
+    const paths = resolvePluginPaths({ userDataDir: "/tmp/userData" });
+    expect(paths.userInstalledDir).toBe(resolve("/tmp/userData", "plugins"));
+    expect(paths.registryPath).toBe(resolve("/tmp/userData", "plugins/registry.json"));
+    expect(paths.cacheRoot).toBe(resolve("/tmp/userData", "plugins/.cache"));
   });
 
-  it("honors the LVIS_PLUGINS_DIR env override for user installs", () => {
-    process.env.LVIS_PLUGINS_DIR = "/tmp/custom-plugins";
-    const paths = resolvePluginPaths({ appRoot: "/tmp/appA" });
-    expect(paths.userInstalledDir).toBe(resolve("/tmp/custom-plugins"));
-    expect(paths.cacheRoot).toBe(resolve("/tmp/custom-plugins/.cache"));
-    // Registry/marketplace stay tied to appRoot — unaffected by env override.
-    expect(paths.registryPath).toBe(resolve("/tmp/appA", "plugins/registry.json"));
+  it("throws when userDataDir is missing — no legacy fallback", () => {
+    // @ts-expect-error — intentionally invalid input for runtime check
+    expect(() => resolvePluginPaths({})).toThrow(/userDataDir is required/);
   });
 
-  it("explicit userInstalledDir wins over env override", () => {
-    process.env.LVIS_PLUGINS_DIR = "/tmp/env-plugins";
+  it("registry path always sits inside userInstalledDir (Phase 2a invariant)", () => {
     const paths = resolvePluginPaths({
-      appRoot: "/tmp/appA",
+      userDataDir: "/tmp/userData",
       userInstalledDir: "/tmp/explicit",
     });
     expect(paths.userInstalledDir).toBe(resolve("/tmp/explicit"));
-    expect(paths.cacheRoot).toBe(resolve("/tmp/explicit/.cache"));
+    expect(paths.registryPath).toBe(resolve("/tmp/explicit", "registry.json"));
+  });
+
+  it("LVIS_PLUGINS_DIR env override redirects userInstalledDir + cache + registry", () => {
+    process.env.LVIS_PLUGINS_DIR = "/tmp/portable";
+    const paths = resolvePluginPaths({ userDataDir: "/tmp/userData" });
+    expect(paths.userInstalledDir).toBe(resolve("/tmp/portable"));
+    expect(paths.registryPath).toBe(resolve("/tmp/portable", "registry.json"));
+    expect(paths.cacheRoot).toBe(resolve("/tmp/portable", ".cache"));
+  });
+
+  it("explicit userInstalledDir wins over env override", () => {
+    process.env.LVIS_PLUGINS_DIR = "/tmp/env";
+    const paths = resolvePluginPaths({
+      userDataDir: "/tmp/userData",
+      userInstalledDir: "/tmp/explicit",
+    });
+    expect(paths.userInstalledDir).toBe(resolve("/tmp/explicit"));
   });
 
   it("explicit cacheRoot can decouple cache from userInstalledDir", () => {
     const paths = resolvePluginPaths({
-      appRoot: "/tmp/appA",
+      userDataDir: "/tmp/userData",
       userInstalledDir: "/tmp/u",
       cacheRoot: "/tmp/cache",
     });
@@ -61,12 +71,48 @@ describe("resolvePluginPaths", () => {
   });
 
   it("env override does not displace an explicit cacheRoot", () => {
-    process.env.LVIS_PLUGINS_DIR = "/tmp/env-plugins";
+    process.env.LVIS_PLUGINS_DIR = "/tmp/env";
     const paths = resolvePluginPaths({
-      appRoot: "/tmp/appA",
+      userDataDir: "/tmp/userData",
       cacheRoot: "/tmp/explicit-cache",
     });
-    expect(paths.userInstalledDir).toBe(resolve("/tmp/env-plugins"));
+    expect(paths.userInstalledDir).toBe(resolve("/tmp/env"));
     expect(paths.cacheRoot).toBe(resolve("/tmp/explicit-cache"));
+  });
+});
+
+describe("toRegistryRelativeManifestPath", () => {
+  it("returns POSIX-relative path for manifest under registry's directory", () => {
+    const out = toRegistryRelativeManifestPath(
+      "/userData/plugins/registry.json",
+      "/userData/plugins/calendar/plugin.json",
+    );
+    expect(out).toBe("calendar/plugin.json");
+  });
+
+  it("collapses already-relative input back to relative form", () => {
+    const out = toRegistryRelativeManifestPath(
+      "/userData/plugins/registry.json",
+      "calendar/plugin.json",
+    );
+    expect(out).toBe("calendar/plugin.json");
+  });
+
+  it("output never contains backslashes (POSIX separators only)", () => {
+    const out = toRegistryRelativeManifestPath(
+      "/userData/plugins/registry.json",
+      "/userData/plugins/email/plugin.json",
+    );
+    expect(out).not.toContain("\\");
+  });
+
+  it("returns absolute path verbatim when manifest is outside registry tree", () => {
+    // Phase 2c migration shim rejects these — production install must always
+    // be under userInstalledDir. Helper only normalizes; it does not enforce.
+    const out = toRegistryRelativeManifestPath(
+      "/userData/plugins/registry.json",
+      "/Users/dev/legacy/plugin.json",
+    );
+    expect(out).toMatch(/legacy\/plugin\.json$/);
   });
 });
