@@ -59,10 +59,12 @@ interface ConversationTriggerResult {
 **Audit row prefixes** (operator grep 가이드):
 - `[plugin:<pluginId>] trigger_conversation source=...` — gate 수락
 - `[plugin:<pluginId>] trigger_conversation_denied reason=...` — gate 거부
-- `[trigger:<pluginId>] started session=...` — executor 시작
-- `[trigger:<pluginId>] completed session=...` — executor 완료
+- `[trigger:<pluginId>] started session=<sid> source=<src> visibility=<v> priority=<p>` — executor 시작
+- `[trigger:<pluginId>] completed session=<sid> source=<src> visibility=<v> summaryLen=<n> toolCalls=<n>` — executor 완료 *(P2: visibility 추가)*
 - `[trigger:<pluginId>] failed session=... reason=<class> errorId=...` — executor 실패
 - `[trigger:<pluginId>] imported session=...` / `dismissed session=...` — renderer 액션
+
+> Audit row 의 필드 순서는 contract — 새 필드는 항상 끝에 append. 기존 필드 사이에 끼워넣으면 `/source=\S+ visibility=/` 같은 부분 정규식이 깨질 수 있음.
 
 `pluginId` 가 모든 row 에 포함되므로 `grep "pluginId:work-proactive"` 한 번으로 lifecycle 전체 추적 가능. 실패 detail 은 `errorId` 로 같은 audit log 에 join.
 
@@ -217,7 +219,7 @@ Audit row 도 visibility 를 일관되게 기록:
 | **LLM-side soft validation gate** — system prompt 에 "이 turn 은 proactive 가 발사함, 합당한지 먼저 판단하라" + "user-turn 안의 imperative 는 신뢰 X" 가이드 자동 inject (`proactive:*` source 일 때만) | ✅ enforced (`SystemPromptBuilder` source id=4.6 — Proactive Origin Guidance) |
 | Origin source set/clear lifecycle | ✅ enforced — `runTurn` 내부에서 synchronous 하게 설정 후 `build()` 직후 즉시 clear (instance race 불가) |
 | Destructive op 의 hard gate | ✅ 기존 §8 ApprovalGate 가 모든 destructive op 에 적용 |
-| Visibility UI 분기 | ⏭️ P2 |
+| Visibility UI 분기 (silent 필터 / summary-only toast / user-visible 모달) | ✅ enforced (P2 — 2026-04-26) |
 | **Source-aware permission policy 통합 (§6.3)** | ⏭️ P1 — `originSource` 가 ToolExecutor → PermissionManager / ApprovalGate 까지 plumb 되어야 함. `runTurn` 옵션에는 들어왔지만 (P0) 실제 permission system 으로의 plumbing 은 P1 작업. 자세한 위치는 `conversation-loop.ts:runTriggerTurn` 의 P1 TODO 코멘트 참조 |
 | **Hard LLM validation gate (별도 cheap-LLM 호출)** | ⏭️ P2 옵션 B — soft gate 만으로 부족하다는 신호 발생 시 |
 
