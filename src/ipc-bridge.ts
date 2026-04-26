@@ -1550,20 +1550,42 @@ ${input}`;
     // the manifest, verify it resolves under the plugin's installed root
     // before binding. A compromised host renderer (or a future regression)
     // shouldn't be able to talk main into running an arbitrary file:// URL
-    // as the plugin's entry module.
-    const installRoot = pluginRuntime.getPluginRoot(pluginId);
-    if (!installRoot) {
+    // as the plugin's entry module. Mirrors the strict containment check
+    // used by the html-shell read path above (realpathSync on both sides
+    // defeats Windows 8.3 short names, junctions, and case-folding tricks).
+    const rawInstallRoot = pluginRuntime.getPluginRoot(pluginId);
+    if (!rawInstallRoot) {
       return { ok: false, error: "plugin-not-loaded" };
     }
     let entryFsPath: string;
     try {
-      entryFsPath = path.resolve(fileURLToPath(entryUrl));
+      entryFsPath = fileURLToPath(entryUrl);
     } catch {
       return { ok: false, error: "invalid-entry-url" };
     }
-    const rootResolved = path.resolve(installRoot);
-    const rel = path.relative(rootResolved, entryFsPath);
-    if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+    // Dev-linked mode (npm file: links) legitimately resolves entry paths
+    // outside pluginRoot through a symlink. The prior load-time validator
+    // (resolveEntryPath in plugin-runtime) already vetted the entry; trust
+    // it and only perform the existence check.
+    if (devLinkedEntryAllowed()) {
+      try {
+        realpathSync(entryFsPath);
+      } catch {
+        return { ok: false, error: "entry-url-outside-install-root" };
+      }
+      pluginWebviewRegistry.set(webContentsId, { pluginId, entryUrl });
+      return { ok: true };
+    }
+    let realRoot: string;
+    let realEntry: string;
+    try {
+      realRoot = realpathSync(rawInstallRoot);
+      realEntry = realpathSync(entryFsPath);
+    } catch {
+      return { ok: false, error: "entry-url-outside-install-root" };
+    }
+    const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
+    if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
       return { ok: false, error: "entry-url-outside-install-root" };
     }
     pluginWebviewRegistry.set(webContentsId, { pluginId, entryUrl });
