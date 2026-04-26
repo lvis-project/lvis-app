@@ -200,6 +200,9 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:routines:dev-trigger-wakeup",
   "lvis:routines:dev-trigger-schedule",
   "lvis:routines:dev-trigger-shutdown",
+  // Brain — proactive trigger renderer-side IPC
+  "lvis:trigger:dismiss",
+  "lvis:trigger:import",
   // Sprint 4.B — usage observability
   "lvis:usage:summary",
   "lvis:usage:range",
@@ -296,6 +299,7 @@ export function registerIpcHandlers(
     memoryManager,
     conversationLoop,
     routineEngine,
+    triggerExecutor,
     approvalGate,
     refreshPluginNotifications,
     starredStore,
@@ -612,6 +616,35 @@ ${input}`;
   });
 
   ipcMain.handle("lvis:routine:get-latest-result", () => getLatestRoutineResult());
+
+  // ─── Brain — proactive trigger lifecycle ──────────────────────
+  // The renderer's TriggerCard surfaces a captured trigger session and
+  // lets the user pick "지금 답하기" (import into chat) or "무시" (drop).
+  // Both paths are guarded by validateSender to keep cross-window probes
+  // from poking the trigger session cache.
+  ipcMain.handle("lvis:trigger:dismiss", (e, sessionId: unknown) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:trigger:dismiss", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof sessionId !== "string" || sessionId.length === 0) {
+      return { ok: false, error: "invalid-session-id" };
+    }
+    if (!triggerExecutor) return { ok: false, error: "executor-unavailable" };
+    const removed = triggerExecutor.dismiss(sessionId);
+    return { ok: true, removed };
+  });
+  ipcMain.handle("lvis:trigger:import", (e, sessionId: unknown) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:trigger:import", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof sessionId !== "string" || sessionId.length === 0) {
+      return { ok: false, error: "invalid-session-id" };
+    }
+    if (!triggerExecutor) return { ok: false, error: "executor-unavailable" };
+    return triggerExecutor.importIntoChat(sessionId, conversationLoop);
+  });
 
   /**
    * Dev-only manual trigger for any of the 3 routine types. Builds the

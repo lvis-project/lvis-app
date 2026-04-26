@@ -28,6 +28,26 @@ function makeLoop(): ConversationLoop {
   return loop;
 }
 
+describe("ConversationLoop currentAbortController lifecycle", () => {
+  it("clears currentAbortController in finally even when queryLoop throws", async () => {
+    const loop = makeLoop();
+    // Provider that throws partway through the stream — simulates a network
+    // / API failure inside queryLoop. The original try/catch-less code path
+    // left `currentAbortController` set forever, breaking downstream
+    // consumers (TriggerExecutor's chat-busy guard).
+    (loop as { provider: LLMProvider }).provider = {
+      vendor: "openai" as const,
+      // eslint-disable-next-line require-yield
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        throw new Error("synthetic provider failure");
+      },
+    };
+
+    await expect(loop.runTurn("ask")).rejects.toBeDefined();
+    expect(loop.currentAbortController).toBeNull();
+  });
+});
+
 describe("ConversationLoop abort (B4)", () => {
   it("abort mid-stream saves partial text and returns stopReason=interrupted", async () => {
     const loop = makeLoop();
