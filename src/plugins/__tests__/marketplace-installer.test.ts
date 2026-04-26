@@ -448,6 +448,33 @@ describe("installFromMarketplace — envelope guards", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("surfaces empty-trusted-keys configuration with a clear message", async () => {
+    // Reproduces the `bun run start` failure mode: production launcher
+    // doesn't set LVIS_DEV / LVIS_ALLOW_TEST_MARKETPLACE_KEYS, so the
+    // bundled SDK keys are filtered to an empty set. Without this guard
+    // the error reads "no signature matched" and looks like envelope
+    // corruption.
+    const tarball = Buffer.from("config-fail");
+    const { privateKey } = freshEd25519();
+    const envelope = makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]);
+    const http = fakeHttp(tarball, envelope);
+    const root = tmpDownloadRoot();
+    try {
+      await expect(
+        installFromMarketplace("x", "1.0.0", {
+          http,
+          publicKeys: {},
+          downloadRoot: root
+        }),
+      ).rejects.toMatchObject({
+        code: "SIGNATURE_INVALID",
+        message: expect.stringMatching(/no trusted marketplace public keys/i),
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("installFromMarketplace — HTTP handling", () => {

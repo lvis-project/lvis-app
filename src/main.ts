@@ -16,6 +16,7 @@ import { registerIpcHandlers } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
+import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { deliverRoutineResult } from "./routines/routine-delivery.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -382,44 +383,20 @@ async function main() {
 // gates it. Without this, dev (Electron-LVIS-Dev) and the protocol-launched
 // process land on different userData dirs and both apps coexist.
 //
-// We also propagate the same Windows-safe Chromium flags used by the dev
-// launchers (--disable-gpu) on corp/VDI machines without GPU drivers; without
-// these the OS-launched process silently crashes before
-// requestSingleInstanceLock() runs and the running app never sees
-// `second-instance`. `--no-sandbox` is propagated only when explicitly
-// enabled via LVIS_DEV_NO_SANDBOX=1 so the registered protocol command does
-// not silently disable Chromium sandboxing for a packaged user who once ran
-// the dev binary.
-const WINDOWS_SAFE_GPU_FLAGS = [
-  "--disable-gpu",
-  "--disable-software-rasterizer",
-  "--disable-gpu-compositing",
-];
-function resolveScriptPathArg(): string {
-  const a = process.argv[1];
-  if (typeof a !== "string") return ".";
-  if (a.toLowerCase().startsWith("lvis://")) return ".";
-  // Skip Electron switches (e.g. `--user-data-dir=...`, `--no-sandbox`) that
-  // appear here when this code runs inside the OS-launched second instance —
-  // resolving them as a path would corrupt the registered command.
-  if (a.startsWith("--")) return ".";
-  return a;
-}
-function buildDevProtocolArgs(): string[] {
-  const args: string[] = [resolve(resolveScriptPathArg())];
-  const userDataDir = app.getPath("userData");
-  if (userDataDir) args.push(`--user-data-dir=${userDataDir}`);
-  if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
-    args.push(...WINDOWS_SAFE_GPU_FLAGS);
-  }
-  if (process.env.LVIS_DEV_NO_SANDBOX === "1") {
-    args.push("--no-sandbox");
-  }
-  return args;
-}
+// Argument-builder lives in `src/main/electron-protocol-args.ts` (pure helper)
+// so the platform / argv / env policy can be unit-tested without Electron.
 const _protocolRegistered = app.isPackaged
   ? app.setAsDefaultProtocolClient("lvis")
-  : app.setAsDefaultProtocolClient("lvis", process.execPath, buildDevProtocolArgs());
+  : app.setAsDefaultProtocolClient(
+      "lvis",
+      process.execPath,
+      buildDevProtocolArgs({
+        argv1: process.argv[1],
+        userDataDir: app.getPath("userData") || undefined,
+        platform: process.platform,
+        env: process.env,
+      }),
+    );
 if (!_protocolRegistered) {
   console.warn("[main] setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment");
 }

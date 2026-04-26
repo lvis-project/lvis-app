@@ -219,6 +219,19 @@ export async function installFromMarketplace(
   }
 
   // 5. Verify signature.
+  // Detect the empty trusted-key configuration up front. When the bundled
+  // SDK key set is filtered to empty (e.g. `bun run start` keeps the
+  // production SDK keys but `LVIS_DEV=1` / `LVIS_ALLOW_TEST_MARKETPLACE_KEYS`
+  // are unset, dropping the dev/poc test keys) every envelope hits a
+  // generic "no signature matched" error. Surfacing the misconfiguration
+  // explicitly avoids the user chasing signature corruption that isn't
+  // there.
+  if (Object.keys(opts.publicKeys).length === 0) {
+    throw new MarketplaceInstallerError(
+      "SIGNATURE_INVALID",
+      "no trusted marketplace public keys are configured for this build — set LVIS_DEV=1 or LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1 to enable the bundled dev/poc keys, or ship a packaged build with production keys",
+    );
+  }
   const result: VerifyResult = verifyEnvelope(body, envelope, opts.publicKeys);
   if (!result.ok) {
     throw new MarketplaceInstallerError(

@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import electronPath from "electron";
+import { WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG } from "./electron-flags.mjs";
 
 const args = process.argv.slice(2);
 const env = { ...process.env };
@@ -63,12 +64,7 @@ if (!env.LC_ALL) env.LC_ALL = "en_US.UTF-8";
 // CI). Override with `LVIS_EXTRA_ELECTRON_FLAGS="--foo --bar"` to append
 // extra flags without losing the defaults.
 if (process.platform === "win32" && env.LVIS_KEEP_GPU !== "1") {
-  const windowsSafeFlags = [
-    "--disable-gpu",
-    "--disable-software-rasterizer",
-    "--disable-gpu-compositing",
-    "--no-sandbox",
-  ];
+  const windowsSafeFlags = [...WINDOWS_SAFE_GPU_FLAGS, SANDBOX_BYPASS_FLAG];
   for (const flag of windowsSafeFlags) {
     if (!args.includes(flag)) args.push(flag);
   }
