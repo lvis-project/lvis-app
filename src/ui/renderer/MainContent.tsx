@@ -119,12 +119,7 @@ export function MainContent(props: MainContentProps): ReactNode {
 
   return (
     <MainPaneShell>
-      <PluginUiHostView
-        view={props.activePluginView ?? null}
-        callPluginMethod={(m, p) => api.callPluginMethod(m, p)}
-        onAskInHomeChat={async (q) => { props.onActivateHome(); await props.onAsk(q); }}
-        onAddTask={(t) => api.addTask(t)}
-      />
+      <PluginUiHostView view={props.activePluginView ?? null} />
     </MainPaneShell>
   );
 }

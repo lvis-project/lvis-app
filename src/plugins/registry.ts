@@ -3,7 +3,20 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import type { PluginRegistry, PluginRegistryEntry } from "./types.js";
 
 export async function readPluginRegistry(registryPath: string): Promise<PluginRegistry> {
-  const raw = await readFile(registryPath, "utf-8");
+  let raw: string;
+  try {
+    raw = await readFile(registryPath, "utf-8");
+  } catch (err) {
+    // First-boot path: PR #248 moved the registry from `lvis-app/plugins/`
+    // into the user's `userData/plugins/` directory. On a fresh dev boot
+    // (or a brand-new userData) the file simply doesn't exist yet —
+    // return the empty default so PluginRuntime.startAll can proceed and
+    // the registry will be lazily created by the first install/uninstall.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { version: 1, plugins: [] };
+    }
+    throw err;
+  }
   const parsed = JSON.parse(raw) as PluginRegistry;
   if (!Array.isArray(parsed.plugins)) {
     throw new Error(`Invalid plugin registry: ${registryPath}`);
