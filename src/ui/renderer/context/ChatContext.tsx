@@ -11,6 +11,17 @@ type RoutineResult = {
   generatedAt: string;
 };
 
+type TriggerResult = {
+  sessionId: string;
+  pluginId: string;
+  source: string;
+  visibility: "silent" | "summary-only" | "user-visible";
+  priority: "low" | "normal" | "high";
+  prompt: string;
+  summary: string;
+  completedAt: string;
+};
+
 /**
  * Cross-cutting chat-view state bundle. Groups props by concern so ChatView
  * and its subtree can consume via `useChatContext()` instead of ~41 props.
@@ -46,6 +57,11 @@ export interface ChatContextValue {
 
   // Routine running (spinner)
   runningRoutines: Map<string, { routineId: string; trigger: string; startedAt: string }>;
+
+  // Brain — proactive trigger result (isolated session — never in chat history)
+  triggerResult: TriggerResult | null;
+  onDismissTrigger: (sessionId: string) => void;
+  onAcceptTrigger: (sessionId: string) => Promise<{ ok: boolean; imported?: number; reason?: string }>;
 
   // Search
   searchOpen: boolean;

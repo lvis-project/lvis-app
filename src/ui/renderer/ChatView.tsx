@@ -10,6 +10,7 @@ import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
 import { RoutineCard } from "./components/RoutineCard.js";
 import { RoutineRunningIndicator } from "./components/RoutineRunningIndicator.js";
+import { TriggerCard } from "./components/TriggerCard.js";
 import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
@@ -45,6 +46,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
     routineResult, routineQueueIndex, routineQueueTotal,
     onDismissRoutineResult, onSnoozeRoutineResult,
     onPrevRoutineResult, onNextRoutineResult, runningRoutines,
+    triggerResult, onDismissTrigger, onAcceptTrigger,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
@@ -122,6 +124,22 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                 onNext={onNextRoutineResult}
               />
             ) : null}
+          </div>
+        </div>
+      )}
+      {/* Proactive trigger overlay — separate slot below the routine area so a
+          fired trigger surfaces alongside (not on top of) any routine result.
+          The trigger session is held in an isolated ConversationLoop so chat
+          history below remains clean unless the user clicks "지금 답하기". */}
+      {triggerResult && (
+        <div className="pointer-events-none absolute left-0 right-0 top-[calc(0.5rem+62vh)] z-20 flex justify-center px-4">
+          <div className="pointer-events-auto flex w-full max-w-2xl max-h-[40vh] flex-col overflow-hidden">
+            <TriggerCard
+              key={triggerResult.sessionId}
+              result={triggerResult}
+              onDismiss={onDismissTrigger}
+              onAccept={onAcceptTrigger}
+            />
           </div>
         </div>
       )}

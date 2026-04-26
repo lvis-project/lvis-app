@@ -215,6 +215,69 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:routine:completed", listener);
   },
 
+  // ─── Brain — proactive trigger lifecycle ────────────────────────────────
+  onTriggerStarted: (
+    handler: (payload: {
+      sessionId: string;
+      source: string;
+      visibility: "silent" | "summary-only" | "user-visible";
+      priority: "low" | "normal" | "high";
+      startedAt: string;
+    }) => void,
+  ) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:trigger:started", listener);
+    return () => ipcRenderer.removeListener("lvis:trigger:started", listener);
+  },
+  onTriggerCompleted: (
+    handler: (result: {
+      sessionId: string;
+      source: string;
+      visibility: "silent" | "summary-only" | "user-visible";
+      priority: "low" | "normal" | "high";
+      prompt: string;
+      summary: string;
+      completedAt: string;
+    }) => void,
+  ) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:trigger:completed", listener);
+    return () => ipcRenderer.removeListener("lvis:trigger:completed", listener);
+  },
+  onTriggerFailed: (
+    handler: (payload: {
+      sessionId: string;
+      pluginId: string;
+      source: string;
+      reason: "provider_error" | "tool_error" | "abort" | "unknown";
+      errorId: string;
+    }) => void,
+  ) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:trigger:failed", listener);
+    return () => ipcRenderer.removeListener("lvis:trigger:failed", listener);
+  },
+  onTriggerExpired: (
+    handler: (payload: { sessionId: string; pluginId: string; source: string }) => void,
+  ) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:trigger:expired", listener);
+    return () => ipcRenderer.removeListener("lvis:trigger:expired", listener);
+  },
+  dismissTrigger: async (sessionId: string) =>
+    ipcRenderer.invoke("lvis:trigger:dismiss", sessionId) as Promise<{
+      ok: boolean;
+      removed?: boolean;
+      error?: string;
+    }>,
+  importTrigger: async (sessionId: string) =>
+    ipcRenderer.invoke("lvis:trigger:import", sessionId) as Promise<{
+      ok: boolean;
+      imported?: number;
+      reason?: string;
+      error?: string;
+    }>,
+
   // ─── Marketplace update notifications (S8) ───────
   onMarketplaceUpdatesAvailable: (handler: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => {
     const listener = (_event: unknown, updates: Parameters<typeof handler>[0]) => handler(updates);
