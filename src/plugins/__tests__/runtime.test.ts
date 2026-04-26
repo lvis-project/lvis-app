@@ -897,3 +897,106 @@ describe("PluginRuntime.disable", () => {
     errSpy.mockRestore();
   });
 });
+
+/**
+ * Trusted-path filter for registry-listed manifests. Marketplace installs
+ * write under `~/.lvis/plugins/{slug}/`, which lives outside the project
+ * `hostRoot`. Without `userInstalledDir` widening, every cloud-installed
+ * plugin gets dropped on `restartAll()` after install.
+ */
+describe("PluginRuntime registry trusted-path", () => {
+  let testDir: string;
+  let hostRoot: string;
+  let userInstalledDir: string;
+  let registryPath: string;
+
+  beforeEach(async () => {
+    testDir = join(homedir(), ".lvis", "test-tmp", `trusted-path-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    hostRoot = join(testDir, "host");
+    userInstalledDir = join(testDir, "user-installs");
+    registryPath = join(hostRoot, "plugins", "registry.json");
+    await mkdir(join(hostRoot, "plugins"), { recursive: true });
+    await mkdir(userInstalledDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  async function writeMinimalPlugin(rootDir: string, id: string): Promise<string> {
+    const pluginDir = join(rootDir, id);
+    await mkdir(pluginDir, { recursive: true });
+    const entryPath = join(pluginDir, "entry.mjs");
+    await writeFile(
+      entryPath,
+      `export default async function createPlugin() {
+  return { handlers: { ${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping: async () => "ok" } };
+}
+`,
+      "utf-8",
+    );
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id,
+        name: id,
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [`${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`],
+      }),
+      "utf-8",
+    );
+    return manifestPath;
+  }
+
+  it("loads a plugin under userInstalledDir when widening is configured", async () => {
+    const manifestPath = await writeMinimalPlugin(userInstalledDir, "cloud-plugin");
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({ hostRoot, userInstalledDir, registryPath });
+    await runtime.load();
+    expect(runtime.listPluginIds()).toContain("cloud-plugin");
+  });
+
+  it("drops a plugin under userInstalledDir when widening is NOT configured", async () => {
+    const manifestPath = await writeMinimalPlugin(userInstalledDir, "cloud-plugin");
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
+      "utf-8",
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const runtime = new PluginRuntime({ hostRoot, registryPath });
+    await runtime.load();
+    expect(runtime.listPluginIds()).not.toContain("cloud-plugin");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/untrusted registry manifest path for cloud-plugin/),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("rejects a manifest path that is outside both trusted roots", async () => {
+    // Disguise the manifest at a sibling of userInstalledDir so neither root
+    // claims it; the prefix check must reject regardless of name similarity.
+    const escapeDir = join(testDir, "user-installs-evil");
+    const manifestPath = await writeMinimalPlugin(escapeDir, "evil");
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [{ id: "evil", manifestPath, enabled: true }] }),
+      "utf-8",
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const runtime = new PluginRuntime({ hostRoot, userInstalledDir, registryPath });
+    await runtime.load();
+    expect(runtime.listPluginIds()).not.toContain("evil");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/untrusted registry manifest path for evil/),
+    );
+    warnSpy.mockRestore();
+  });
+});
