@@ -899,17 +899,18 @@ ${input}`;
     };
   });
   // Static environment info surfaced in the status bar (#231 / #240) —
-  // platform / hostname / user / cwd. Static enough to fetch once on mount;
-  // no live polling needed.
+  // platform / hostname / user. Static enough to fetch once on mount.
+  // Cwd was deliberately dropped from this payload (least-privilege): no
+  // current consumer renders it, and plugin UI panels share the host
+  // renderer realm so any field returned here is reachable from third-
+  // party code (see #237 for the broader isolation work).
   ipcMain.handle("lvis:runtime:env", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:runtime:env", e); return UNAUTHORIZED_FRAME; }
     const os = await import("node:os");
     return {
       platform: process.platform,
-      release: os.release(),
       hostname: os.hostname(),
       user: os.userInfo().username,
-      cwd: process.cwd(),
     };
   });
   // Marketplace reachability probe for the status-bar online dot. Lives in

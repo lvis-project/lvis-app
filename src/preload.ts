@@ -339,16 +339,15 @@ const api = {
       plugins: number;
       mcps: number;
     }>,
-  // Status bar — static environment info (platform / hostname / user / cwd).
+  // Status bar — static environment info (platform / hostname / user).
   // Static enough to fetch once on mount; values don't change while the
-  // process is alive.
+  // process is alive. Cwd is intentionally NOT exposed — least-privilege
+  // for plugin UI panels that share this contextBridge.
   getRuntimeEnv: async () =>
     ipcRenderer.invoke("lvis:runtime:env") as Promise<{
       platform: string;
-      release: string;
       hostname: string;
       user: string;
-      cwd: string;
     }>,
   // Status bar — marketplace reachability probe. Returns `configured: false`
   // when the user is on the mock backend (nothing to ping).
