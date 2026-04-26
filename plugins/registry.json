@@ -51,7 +51,7 @@
           },
           {
             "pluginId": "email",
-            "events": ["email.new"]
+            "events": ["email.action.needed"]
           },
           {
             "pluginId": "meeting",
