@@ -133,4 +133,10 @@ export interface AppServices {
   autoUpdaterStop?: () => void;
   /** Central app shutdown hook for timers, background services, and transports. */
   shutdown?: () => Promise<void>;
+  /**
+   * L1: deferred RemindersScheduler.start() handle. main.ts calls this AFTER
+   * registerIpcHandlers() so a past-due reminder firing immediately on boot
+   * has a renderer listener attached. Idempotent — safe to call multiple times.
+   */
+  startRemindersScheduler?: () => void;
 }

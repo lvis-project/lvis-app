@@ -63,6 +63,21 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       },
     },
     execute: async (rawInput, ctx) => {
+      // C3(b): defense-in-depth — even if SubAgentRunner forgets to strip
+      // agent_spawn from the child registry, this guard refuses any
+      // invocation when the executor's metadata reports we are inside an
+      // already-spawned sub-agent.
+      const depth = typeof ctx.metadata?.spawnDepth === "number"
+        ? (ctx.metadata.spawnDepth as number)
+        : 0;
+      if (depth >= 1) {
+        return {
+          output: JSON.stringify({
+            error: "agent_spawn cannot be invoked from a sub-agent",
+          }),
+          isError: true,
+        };
+      }
       const runner = deps.getRunner();
       if (!runner) {
         return {

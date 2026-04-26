@@ -17,19 +17,35 @@ const POLL_INTERVAL_MS = 30_000;
 export class RemindersScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly handlers = new Set<ReminderFiredHandler>();
+  /**
+   * M1: reentrancy guard. If a `checkAndFire()` invocation is still
+   * running when the next interval tick arrives, we skip the new tick.
+   * Without this, slow `markFired` writes (file lock contention, network
+   * filesystem latency) could overlap and re-fire the same reminder.
+   */
+  private inFlight = false;
 
   constructor(private readonly store: RemindersStore) {}
 
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => {
-      void this.checkAndFire();
+      if (this.inFlight) return; // M1: skip overlapping ticks
+      this.inFlight = true;
+      void this.checkAndFire().finally(() => {
+        this.inFlight = false;
+      });
     }, POLL_INTERVAL_MS);
     if (typeof (this.timer as { unref?: () => void }).unref === "function") {
       (this.timer as { unref: () => void }).unref();
     }
     // Run once immediately so reminders past-due at boot fire without delay.
-    void this.checkAndFire();
+    if (!this.inFlight) {
+      this.inFlight = true;
+      void this.checkAndFire().finally(() => {
+        this.inFlight = false;
+      });
+    }
   }
 
   stop(): void {

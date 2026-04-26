@@ -39,6 +39,14 @@ export interface SystemPromptBuilderDeps {
     description: string;
     sampleTools: string[];
   }>;
+  /**
+   * C2(c): per-session SkillOverlay reader — returns the rendered
+   * <lvis-active-skills>…</lvis-active-skills> section for the current
+   * session, or "" when no skills have been loaded. Decoupled via this
+   * callback so SystemPromptBuilder doesn't import the SkillOverlay module
+   * (keeps the builder slim and testable).
+   */
+  getActiveSkillsSection?: (sessionId: string) => string;
 }
 
 // ─── Builder ────────────────────────────────────────
@@ -59,6 +67,12 @@ export class SystemPromptBuilder {
    * suggestion before running tools.
    */
   private originSource: string | null = null;
+  /**
+   * C2(c): current session id used by the active-skills overlay reader.
+   * Set per-turn by ConversationLoop before `build()` so the overlay can
+   * scope to the right session without leaking skills across sessions.
+   */
+  private overlaySessionId: string | null = null;
 
   constructor(deps: SystemPromptBuilderDeps) {
     this.initSources(deps);
@@ -118,6 +132,15 @@ export class SystemPromptBuilder {
    */
   setOriginSource(source: string | null): void {
     this.originSource = source && source.length > 0 ? source : null;
+  }
+
+  /**
+   * C2(c): per-turn current session id, used to scope the
+   * <lvis-active-skills> overlay section to the correct ChatSession.
+   * Pass `null` to clear (no overlay rendering).
+   */
+  setActiveSessionId(sessionId: string | null): void {
+    this.overlaySessionId = sessionId && sessionId.length > 0 ? sessionId : null;
   }
 
   // ─── Private ──────────────────────────────────────
@@ -200,6 +223,26 @@ export class SystemPromptBuilder {
         ].join("\n");
       },
     });
+
+    // ④-d Active Skills Overlay (per-turn, conditional)
+    //
+    // C2(c): rendered ONLY when at least one skill has been loaded for the
+    // current session. Bodies live inside <lvis-skill> fences so the LLM
+    // can attribute the guidance and an attacker-supplied body cannot
+    // masquerade as user input. See main/skill-overlay.ts for the registry.
+    const { getActiveSkillsSection } = deps;
+    if (getActiveSkillsSection) {
+      this.sources.push({
+        id: 4.7,
+        name: "Active Skills Overlay",
+        refresh: "per-turn",
+        build: () => {
+          const sid = this.overlaySessionId;
+          if (!sid) return "";
+          return getActiveSkillsSection(sid);
+        },
+      });
+    }
 
     // ⑤ Tool Schemas (매 턴)
     this.sources.push({

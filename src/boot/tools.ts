@@ -27,6 +27,9 @@ import type { RemindersStore } from "../main/reminders-store.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
 import type { SubAgentRunner } from "../engine/subagent-runner.js";
 import type { SkillStore } from "../main/skill-store.js";
+import type { SkillOverlay } from "../main/skill-overlay.js";
+import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
+import type { ApprovalGate } from "../permissions/approval-gate.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, adaptPowerMonitor, type WorkerClientLite } from "../main/idle-scheduler.js";
@@ -188,9 +191,14 @@ export interface WorkflowToolDeps {
   /** Lazy-resolved sub-agent runner — populated after ConversationLoop wiring. */
   getSubAgentRunner?: () => SubAgentRunner | undefined;
   skillStore?: SkillStore;
+  /** C2(c): per-session skill overlay registry. */
+  skillOverlay?: SkillOverlay;
+  /** C2(d): persistent skill-approval allowlist. */
+  skillApprovalsStore?: SkillApprovalsStore;
+  /** C2(d): ApprovalGate for first-use skill approval modal. */
+  getApprovalGate?: () => ApprovalGate | undefined;
   emitAgentSpawn?: (event: AgentSpawnEvent) => void;
   emitSkillLoad?: (event: SkillLoadEvent) => void;
-  injectSkillSystemMessage?: (sessionId: string, content: string) => void;
 }
 
 export function registerBuiltinTools(
@@ -438,13 +446,17 @@ export function registerBuiltinTools(
   if (
     workflowDeps?.skillStore &&
     workflowDeps.emitSkillLoad &&
-    workflowDeps.injectSkillSystemMessage
+    workflowDeps.skillOverlay &&
+    workflowDeps.skillApprovalsStore &&
+    workflowDeps.getApprovalGate
   ) {
     builtins.push(
       createSkillLoadTool({
         store: workflowDeps.skillStore,
+        overlay: workflowDeps.skillOverlay,
+        approvals: workflowDeps.skillApprovalsStore,
+        getApprovalGate: workflowDeps.getApprovalGate,
         emit: workflowDeps.emitSkillLoad,
-        injectSystemMessage: workflowDeps.injectSkillSystemMessage,
       }),
     );
   }

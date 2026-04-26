@@ -12,10 +12,22 @@
  *   ---
  *   <markdown body>              # appended to chat history as a system message
  */
-import { readFile, readdir } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { readFile, readdir, realpath } from "node:fs/promises";
+import { resolve, join, relative, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { BUILTIN_SKILLS } from "./builtin-skills.js";
+
+/**
+ * C2(b): allowlist for skill names. Skill files live in
+ * `~/.lvis/skills/<name>.md`; any name with `/`, `..`, NUL, or other
+ * non-printable noise is rejected up-front so an attacker cannot use the
+ * `skillName` arg to navigate outside the directory or smuggle shell
+ * metacharacters into the resolved file path.
+ */
+export const SKILL_NAME_ALLOWLIST = /^[a-zA-Z0-9_-]+$/;
+
+/** C2(e): skills with a body larger than this are refused at load time. */
+export const SKILL_MAX_BODY_BYTES = 8 * 1024;
 
 export interface SkillFrontmatter {
   name: string;
@@ -118,21 +130,80 @@ export class SkillStore {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw err;
     }
+
+    // C2(a): resolve the directory's real path ONCE so each scanned entry
+    // can be confined against it. If the directory itself doesn't exist as
+    // a real path (just-created via mkdir, race conditions), fall back to
+    // the supplied `dir` value — confinement still works because we resolve
+    // every entry the same way.
+    let realDir: string;
+    try {
+      realDir = await realpath(dir);
+    } catch {
+      realDir = resolve(dir);
+    }
+
     const skills: LoadedSkill[] = [];
     for (const entry of entries) {
       if (!entry.toLowerCase().endsWith(".md")) continue;
+      const baseName = entry.replace(/\.md$/i, "");
+      // C2(b): allowlist on filename — reject anything with `/`, `..`, NUL,
+      // or other disallowed characters before opening the file.
+      if (!SKILL_NAME_ALLOWLIST.test(baseName)) {
+        console.warn(`[lvis] skill scan: rejected non-allowlist filename: ${entry}`);
+        continue;
+      }
       const filePath = join(dir, entry);
+      // C2(a): resolve the entry's real path and verify it stays inside
+      // the (real) skills directory. Symlinks pointing outside (e.g.
+      // `evil.md → /etc/passwd`) are rejected here.
+      let realFile: string;
       try {
-        const raw = await readFile(filePath, "utf-8");
+        realFile = await realpath(filePath);
+      } catch (err) {
+        console.warn(
+          `[lvis] skill scan: realpath failed for ${filePath}:`,
+          (err as Error).message,
+        );
+        continue;
+      }
+      const rel = relative(realDir, realFile);
+      if (rel.startsWith("..") || isAbsolute(rel)) {
+        console.warn(
+          `[lvis] skill scan: rejected traversal — ${filePath} -> ${realFile} escapes ${realDir}`,
+        );
+        continue;
+      }
+      try {
+        const raw = await readFile(realFile, "utf-8");
         const { fm, body } = parseFrontmatter(raw);
-        const name = fm.name || entry.replace(/\.md$/i, "");
+        const name = fm.name || baseName;
+        // C2(b): the resolved-from-frontmatter name is also subject to the
+        // allowlist; if a malicious frontmatter sets `name: ../../etc`, we
+        // reject the skill rather than carry that ID into the load() lookup.
+        if (!SKILL_NAME_ALLOWLIST.test(name)) {
+          console.warn(
+            `[lvis] skill scan: rejected non-allowlist frontmatter name "${name}" in ${realFile}`,
+          );
+          continue;
+        }
+        const trimmedBody = body.trim();
+        // C2(e): cap body length so a malicious skill cannot blow up the
+        // system prompt or chew up tokens. 8 KB is generous for a markdown
+        // skill and tight enough that abuse is bounded.
+        if (Buffer.byteLength(trimmedBody, "utf-8") > SKILL_MAX_BODY_BYTES) {
+          console.warn(
+            `[lvis] skill scan: rejected oversized body for ${realFile} (>${SKILL_MAX_BODY_BYTES} bytes)`,
+          );
+          continue;
+        }
         skills.push({
           name,
           description: fm.description ?? "",
           triggers: fm.triggers ?? [],
-          body: body.trim(),
+          body: trimmedBody,
           source,
-          filePath,
+          filePath: realFile,
         });
       } catch (err) {
         console.warn(

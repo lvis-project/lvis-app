@@ -98,9 +98,23 @@ export interface ConversationLoopDeps {
   pluginRuntime?: {
     listPluginIds(): string[];
   };
+  /**
+   * C2(c): per-session SkillOverlay handle. Cleared on `newConversation()`
+   * so a brand-new session does not inherit a previous session's loaded
+   * skills. Optional — legacy unit-test setups skip the overlay.
+   */
+  skillOverlay?: { clear(sessionId: string): void };
 }
 
 const MAX_TOOL_ROUNDS = 10;
+/**
+ * C3(a): per-round cap on the number of tool calls an assistant round can
+ * issue. Pathological round-emitting many tool_use blocks at once would
+ * otherwise execute every one in parallel before the maxRounds guard could
+ * intervene. SubAgentRunner relies on this cap to keep a sub-agent's total
+ * tool execution count bounded by `maxRounds * MAX_TOOL_CALLS_PER_ROUND`.
+ */
+const MAX_TOOL_CALLS_PER_ROUND = 10;
 
 /** Phase 1 Lazy Tool Scoping — 매 턴 LLM에 노출할 도구 집합 정의. */
 interface ToolScope {
@@ -249,6 +263,9 @@ export class ConversationLoop {
         console.warn("[lvis] newConversation saveSession failed:", (err as Error).message);
       });
     }
+    // C2(c): drop the previous session's loaded skills so a fresh chat
+    // starts with a clean overlay. Tests / stubs without overlay omit this.
+    this.deps.skillOverlay?.clear(this.sessionId);
     this.sessionId = crypto.randomUUID();
     this.sessionRoutineId = null;
     this.history.clear();
@@ -422,7 +439,31 @@ export class ConversationLoop {
     input: string,
     callbacks?: TurnCallbacks,
     abortSignal?: AbortSignal,
-    options?: { originSource?: string | null },
+    options?: {
+      originSource?: string | null;
+      /**
+       * C3(a): hard cap on assistant rounds for this turn. When set,
+       * queryLoop terminates cleanly between rounds once the cap is hit
+       * regardless of tool_use chains the LLM still wants to run. Used by
+       * SubAgentRunner to enforce the agent_spawn `maxTurns` parameter at
+       * the loop boundary instead of leaning on `abortCurrentTurn()` which
+       * only halts the next streaming response.
+       */
+      maxRounds?: number;
+      /**
+       * C3(c): override session id used by the executor's
+       * ToolExecutionContext.metadata.sessionId. SubAgentRunner threads
+       * the child session id here so audit entries from the sub-agent's
+       * tool calls are attributed to the child, not the parent.
+       */
+      sessionIdOverride?: string;
+      /**
+       * C3(b): spawn depth carried through to the executor's metadata.
+       * Sub-agents see depth >= 1 and reject any nested agent_spawn call
+       * before it reaches the LLM-visible registry.
+       */
+      spawnDepth?: number;
+    },
   ): Promise<TurnResult> {
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
     this.tracer.step("REQUEST_ENTRY", { inputLen: input.length });
@@ -477,17 +518,33 @@ export class ConversationLoop {
     // turns do not see each other's flag. SystemPromptBuilder has a single
     // `originSource` slot; if we straddled an await we'd race.
     this.deps.systemPromptBuilder.setOriginSource?.(options?.originSource ?? null);
+    // C2(c): scope the SkillOverlay section to this session id. The setter
+    // is optional on the prompt builder so legacy unit-test stubs without
+    // skill overlay support keep working unchanged.
+    this.deps.systemPromptBuilder.setActiveSessionId?.(this.sessionId);
 
     const systemPrompt = this.deps.systemPromptBuilder.build();
     // Clear immediately so any nested or follow-up build() inside the same
     // tick (or a concurrent runTurn that starts during the upcoming await)
     // sees a clean slate.
     this.deps.systemPromptBuilder.setOriginSource?.(null);
+    this.deps.systemPromptBuilder.setActiveSessionId?.(null);
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
     this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
     let result: Awaited<ReturnType<ConversationLoop["queryLoop"]>>;
     try {
-      result = await this.queryLoop(systemPrompt, scope, callbacks, turnSignal, options?.originSource ?? null);
+      result = await this.queryLoop(
+        systemPrompt,
+        scope,
+        callbacks,
+        turnSignal,
+        options?.originSource ?? null,
+        {
+          maxRounds: options?.maxRounds,
+          sessionIdOverride: options?.sessionIdOverride,
+          spawnDepth: options?.spawnDepth,
+        },
+      );
     } finally {
       // Always clear the controller, even when `queryLoop` throws (provider
       // error / abort / tool error). Otherwise the loop looks "mid-turn"
@@ -563,6 +620,11 @@ export class ConversationLoop {
     callbacks?: TurnCallbacks,
     abortSignal?: AbortSignal,
     proactiveOrigin?: string | null,
+    bounds?: {
+      maxRounds?: number;
+      sessionIdOverride?: string;
+      spawnDepth?: number;
+    },
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const model = llmSettings.model;
@@ -581,8 +643,32 @@ export class ConversationLoop {
     let roundIndex = 0;
     // Reactive compact recovery: turn당 1회만 허용
     let reactiveCompacted = false;
+    // C3(a): assistant-round counter — used by the maxRounds break below.
+    let assistantRoundsRun = 0;
+    // C3(a): effective round budget. Default = MAX_TOOL_ROUNDS (10); when a
+    // caller supplies maxRounds (sub-agent runner) clamp to it. Negative or
+    // zero falls back to default so legacy callers keep working unchanged.
+    const requestedMaxRounds = bounds?.maxRounds;
+    const effectiveMaxRounds =
+      typeof requestedMaxRounds === "number" && Number.isFinite(requestedMaxRounds) && requestedMaxRounds > 0
+        ? Math.min(MAX_TOOL_ROUNDS, Math.floor(requestedMaxRounds))
+        : MAX_TOOL_ROUNDS;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      // C3(a): hard guard between rounds — if we have already executed
+      // `effectiveMaxRounds` assistant turns, stop cleanly and return the
+      // last text. This is the loop-boundary defense the agent_spawn
+      // turn-cap leans on (callbacks calling abortCurrentTurn only halts
+      // the next streaming response, not pending tool execution).
+      if (assistantRoundsRun >= effectiveMaxRounds) {
+        return {
+          text: allToolCalls.length > 0
+            ? `(round cap ${effectiveMaxRounds} reached — last assistant text: ${this.history.getMessages().filter((m) => m.role === "assistant").slice(-1)[0]?.content ?? ""})`
+            : `(round cap ${effectiveMaxRounds} reached without assistant output)`,
+          toolCalls: allToolCalls,
+          usage: turnUsage,
+        };
+      }
       // §4.5.2 step 7 — LLM_STREAM
       this.tracer.step("LLM_STREAM", { round, model, toolCount: toolSchemas.length });
 
@@ -677,13 +763,26 @@ export class ConversationLoop {
         toolCallCount: pendingToolCalls.length,
       });
       roundIndex += 1;
+      // C3(a): a "round" for cap purposes is any assistant message we
+      // committed to history — `end_turn` and `tool_use` both count.
+      assistantRoundsRun += 1;
 
       if (pendingToolCalls.length === 0 || stopReason === "end_turn") {
         return { text: textContent, toolCalls: allToolCalls, usage: turnUsage };
       }
 
       // §4.5.6 tool execution — request_plugin 가로채기 + knowledge depth cap + executor 호출
-      const toolUses: ToolUseBlock[] = pendingToolCalls.map((tc) => ({
+      // C3(a): bound the per-round tool fan-out. Past this cap we drop the
+      // overflow entries (they receive no tool_result so the LLM gets a
+      // signal to retry-fewer next round) and log a warn for telemetry.
+      let pendingToolCallsCapped = pendingToolCalls;
+      if (pendingToolCalls.length > MAX_TOOL_CALLS_PER_ROUND) {
+        console.warn(
+          `[lvis] conversation-loop: round ${roundIndex} emitted ${pendingToolCalls.length} tool_use blocks, capping to ${MAX_TOOL_CALLS_PER_ROUND}`,
+        );
+        pendingToolCallsCapped = pendingToolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND);
+      }
+      const toolUses: ToolUseBlock[] = pendingToolCallsCapped.map((tc) => ({
         id: tc.id, name: tc.name, input: tc.input,
       }));
 
@@ -745,11 +844,18 @@ export class ConversationLoop {
           onToolStart: callbacks?.onToolStart,
           onToolEnd: callbacks?.onToolEnd,
         },
-        this.sessionId,
+        // C3(c): sub-agents pass their childSessionId so audit attribution
+        // for tool calls flows to the child, not the parent. Falls back to
+        // this loop's sessionId for normal interactive turns.
+        bounds?.sessionIdOverride ?? this.sessionId,
         // Forward the turn's proactive origin so write/dangerous tools
         // bypass `allow-always` cache and force a user-confirmation
         // modal — the hard gate for the brain's "propose-only" contract.
         proactiveOrigin ?? null,
+        // C3(b): carry spawn depth into ToolExecutionContext.metadata.
+        // The executor uses this to refuse `agent_spawn` calls inside an
+        // already-spawned sub-agent (depth >= 1).
+        bounds?.spawnDepth,
       );
 
       for (let i = 0; i < capResult.allowed.length; i++) {

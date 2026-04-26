@@ -9,10 +9,25 @@
  * {@link RemindersScheduler} (separate module) drives the polling loop and
  * fires `lvis:reminder:fired` IPC events when `at` is reached.
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+
+/**
+ * H4(c): refuse `at` values further than this many milliseconds in the
+ * future. 5 years is far beyond any legitimate reminder horizon and
+ * blocks attackers from staging a long-tail of dormant entries. Past
+ * dates are allowed (they fire immediately on the next scheduler tick).
+ */
+const MAX_FUTURE_OFFSET_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+/**
+ * H4(c): per-store cap on persisted reminders. The store is single-user
+ * (host runs in-process per Electron window) so 50 active reminders is a
+ * generous personal limit. Hitting the cap means add() throws — the LLM
+ * receives a clear error and can prompt the user to dismiss old reminders.
+ */
+const MAX_PERSISTED_REMINDERS = 50;
 
 export type ReminderRepeat = "daily" | "weekly" | "none";
 
@@ -63,8 +78,22 @@ async function readFileOrEmpty(filePath: string): Promise<RemindersFile> {
 }
 
 async function writeFileAtomic(filePath: string, data: RemindersFile): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+  // H4(a): tighten directory permissions so `~/.lvis` is owner-only.
+  // mkdir is idempotent and silently ignores `mode` on existing dirs, but
+  // setting it on first creation is enough for fresh installs.
+  await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
+  // H4(b): real atomic write — write to a sibling tmp file first, then
+  // rename. A crash mid-write leaves either the previous content or the
+  // new content, never a half-written file. The previous "writeFileAtomic"
+  // overwrote in-place, which is not atomic on Windows or any FS without
+  // a journal+fsync sequence.
+  const tmp = `${filePath}.tmp`;
+  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, {
+    encoding: "utf-8",
+    // H4(a): owner-only file mode (umask-independent).
+    mode: 0o600,
+  });
+  await rename(tmp, filePath);
 }
 
 export class RemindersStore {
@@ -98,9 +127,26 @@ export class RemindersStore {
     repeat?: ReminderRepeat;
   }): Promise<ReminderRecord> {
     if (!this.loaded) await this.load();
+    // L3 + H4(c): validate the `at` field at the store boundary (caller
+    // tools also validate, but defense in depth). Reject NaN, too-far-
+    // future, and invalid ISO/Date inputs up front.
+    const parsedAt = new Date(input.at);
+    if (Number.isNaN(parsedAt.getTime())) {
+      throw new Error(
+        `RemindersStore.add: invalid 'at' (expected ISO 8601): ${input.at}`,
+      );
+    }
+    const offset = parsedAt.getTime() - Date.now();
+    if (offset > MAX_FUTURE_OFFSET_MS) {
+      throw new Error(
+        `RemindersStore.add: 'at' is too far in the future (>${Math.round(
+          MAX_FUTURE_OFFSET_MS / (24 * 60 * 60 * 1000),
+        )} days)`,
+      );
+    }
     const record: ReminderRecord = {
       id: randomUUID(),
-      at: new Date(input.at).toISOString(),
+      at: parsedAt.toISOString(),
       title: input.title,
       body: input.body,
       repeat: input.repeat ?? "none",
@@ -108,6 +154,14 @@ export class RemindersStore {
     };
     return withFileLock(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
+      // H4(c): per-store cap. We count *all* persisted reminders (active +
+      // dismissed) since the renderer can resurrect dismissed ones via
+      // remove/restore — a soft "dismissed" record still consumes storage.
+      if (file.reminders.length >= MAX_PERSISTED_REMINDERS) {
+        throw new Error(
+          `RemindersStore.add: reminder cap reached (${MAX_PERSISTED_REMINDERS}); dismiss/remove old reminders first`,
+        );
+      }
       file.reminders.push(record);
       await writeFileAtomic(this.filePath, file);
       this.cache = file.reminders;

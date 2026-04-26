@@ -65,6 +65,8 @@ import { RemindersScheduler } from "./main/reminders-scheduler.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { SkillStore } from "./main/skill-store.js";
+import { SkillOverlay } from "./main/skill-overlay.js";
+import { SkillApprovalsStore } from "./main/skill-approvals-store.js";
 import { SubAgentRunner } from "./engine/subagent-runner.js";
 import type { AgentSpawnEvent } from "./tools/agent-spawn.js";
 import type { SkillLoadEvent } from "./tools/skill-load.js";
@@ -160,16 +162,28 @@ export async function bootstrap(
   const remindersScheduler = new RemindersScheduler(remindersStore);
   const sessionTodoStore = new SessionTodoStore();
   const skillStore = new SkillStore();
+  const skillOverlay = new SkillOverlay();
+  const skillApprovalsStore = new SkillApprovalsStore();
+  await skillApprovalsStore.load().catch((err) => {
+    console.warn(
+      "[lvis] boot: skill-approvals load failed (non-fatal):",
+      (err as Error).message,
+    );
+  });
   const askUserQuestionGate = new AskUserQuestionGate(mainWindow.webContents);
   let subAgentRunnerRef: { fn: SubAgentRunner | undefined } = { fn: undefined };
-  // Conversation history injector for skill_load — holds a closure over the
-  // ConversationLoop wired below.
-  let injectSkillRef: { fn: ((sessionId: string, content: string) => void) | undefined } = { fn: undefined };
+  // Late-bound ApprovalGate ref — populated after createApprovalGate() below.
+  // skill_load needs the same gate the executor uses so user-authored skills
+  // pop the approval modal on first load (and only on first load).
+  let approvalGateRef: { fn: import("./permissions/approval-gate.js").ApprovalGate | undefined } = { fn: undefined };
   const workflowDeps: WorkflowToolDeps = {
     remindersStore,
     sessionTodoStore,
     skillStore,
+    skillOverlay,
+    skillApprovalsStore,
     getAskUserQuestionGate: () => askUserQuestionGate,
+    getApprovalGate: () => approvalGateRef.fn,
     getSubAgentRunner: () => subAgentRunnerRef.fn,
     emitAgentSpawn: (event: AgentSpawnEvent) => {
       try {
@@ -185,8 +199,6 @@ export async function bootstrap(
         console.warn("[lvis] skill_load emit failed:", (err as Error).message);
       }
     },
-    injectSkillSystemMessage: (sessionId, content) =>
-      injectSkillRef.fn?.(sessionId, content),
   };
 
   // §4.2 Step 4: builtin tools + request_plugin meta tool.
@@ -276,8 +288,13 @@ export async function bootstrap(
   const updateCheckFetcher: MarketplaceFetcher | undefined = marketplaceFetcher;
 
   // §4.5.9: SystemPromptBuilder.
+  // C2(c): wire the skill overlay reader so each turn's system prompt
+  // includes the <lvis-active-skills> section for the current session.
   const systemPromptBuilder = createSystemPromptBuilder({
-    memoryManager, toolRegistry, pluginRuntime,
+    memoryManager,
+    toolRegistry,
+    pluginRuntime,
+    getActiveSkillsSection: (sessionId) => skillOverlay.buildSection(sessionId),
   });
 
   // §6.3: PermissionManager (Layer 2-3).
@@ -327,6 +344,7 @@ export async function bootstrap(
 
   // B1 + §F7: ApprovalGate with audit.
   const approvalGate = await createApprovalGate(mainWindow, bootAuditLogger);
+  approvalGateRef.fn = approvalGate;
 
   // Tier A4 (W3): HookRunner.
   const hookRunner = createHookRunner();
@@ -347,6 +365,7 @@ export async function bootstrap(
     approvalGate,
     hookRunner,
     pluginRuntime,
+    skillOverlay,
   });
 
   // Late-binding 주입 — ConversationLoop 생성 직후.
@@ -373,14 +392,10 @@ export async function bootstrap(
     },
     toolRegistry,
   });
-  // skill_load injects the skill body into the live chat history so the next
-  // round sees it. Only works for the active chat session id; sub-agent
-  // spawns load skills via their own runTurn cycle.
-  injectSkillRef.fn = (sessionId, content) => {
-    if (sessionId === conversationLoop.getSessionId()) {
-      conversationLoop.getHistory().append({ role: "user", content });
-    }
-  };
+  // C2(c): skill_load no longer mutates conversation history. The body is
+  // registered into SkillOverlay (per-session) and read each turn by
+  // SystemPromptBuilder via getActiveSkillsSection. See main/skill-overlay.ts
+  // for the registry; src/tools/skill-load.ts for the tool entry point.
 
   // Reminders scheduler — fires `lvis:reminder:fired` per due reminder. The
   // renderer's RemindersList subscribes to this channel and shows a toast.
@@ -391,7 +406,11 @@ export async function bootstrap(
       console.warn("[lvis] reminder fired emit failed:", (err as Error).message);
     }
   });
-  remindersScheduler.start();
+  // L1: NOT started here. Boot order matters — if scheduler.start() runs
+  // before the renderer has its IPC listeners attached, a past-due
+  // reminder fires immediately into a void. main.ts now invokes
+  // `services.startRemindersScheduler()` AFTER `registerIpcHandlers()` to
+  // close that gap.
 
   // Trigger executor — spawns a fresh ConversationLoop per
   // hostApi.triggerConversation() call so the user's chat history is never
@@ -470,6 +489,7 @@ export async function bootstrap(
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,
     remindersStore, remindersScheduler, sessionTodoStore, askUserQuestionGate, skillStore,
     telemetry, pluginTelemetry, autoUpdaterStop,
+    startRemindersScheduler: () => remindersScheduler.start(),
     refreshPluginNotifications: () => {
       disposePluginNotifications();
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);

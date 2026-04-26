@@ -75,11 +75,23 @@ export function createRemindAtTool(store: RemindersStore): Tool {
           ? (a.repeat as ReminderRepeat)
           : "none";
       const body = typeof a.body === "string" ? a.body : undefined;
-      const record = await store.add({ at, title, body, repeat });
-      return {
-        output: JSON.stringify({ reminderId: record.id, at: record.at }),
-        isError: false,
-      };
+      try {
+        const record = await store.add({ at, title, body, repeat });
+        return {
+          output: JSON.stringify({ reminderId: record.id, at: record.at }),
+          isError: false,
+        };
+      } catch (err) {
+        // H4(c): surface the store's validation errors back to the LLM
+        // (cap reached, too-far-future, etc.) rather than silently
+        // crashing the tool call.
+        return {
+          output: JSON.stringify({
+            error: (err as Error).message ?? "remind_at failed",
+          }),
+          isError: true,
+        };
+      }
     },
   });
 }

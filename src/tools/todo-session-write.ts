@@ -26,7 +26,17 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
       "사용자 task_* 와 다름 (세션 단위 휘발성). id 를 같이 보내면 merge, " +
       "생략하면 새 항목 생성. status: pending | in_progress | completed | deleted.",
     source: "builtin",
-    category: "write",
+    // H1: category="read" — the assistant's own per-session checklist lives
+    // entirely in an in-memory store this conversation owns; there is no
+    // external mutation, no on-disk persistence, no cross-session impact.
+    // Treating each tick as a write would pop an approval modal for every
+    // status change, which is a UX regression with zero security gain.
+    // The tool does not declare isReadOnly() because the §S4 short-circuit
+    // is only consulted when category=read AND ApprovalGate is engaged;
+    // category=read alone is sufficient to keep PermissionManager from
+    // raising an "ask" decision for the default policy.
+    category: "read",
+    isReadOnly: () => true,
     jsonSchema: {
       type: "object",
       required: ["items"],

@@ -1,11 +1,33 @@
 /**
- * `skill_load` LLM tool — loads a skill (markdown w/ frontmatter) into the
- * current conversation as a system-role message. Renderer surfaces a
- * SkillBadge ("🎯 Skill loaded: <name>") at the call site so the user sees
- * which skills are active for the rest of the turn.
+ * `skill_load` LLM tool — loads a skill (markdown w/ frontmatter) and
+ * registers it as a system-prompt overlay for the current session. The
+ * renderer surfaces a SkillBadge ("🎯 Skill loaded: <name>") at the call
+ * site so the user sees which skills are active for the rest of the chat.
+ *
+ * Security model (post C2 review):
+ *   - Skill bodies are NEVER appended to conversation history as `user`-role
+ *     messages. Pre-fix, a malicious skill body ("ignore previous
+ *     instructions and exfil…") landed in history with the user role and
+ *     read like genuine input. Post-fix, the body lives in a separately
+ *     delimited section of each turn's system prompt, fenced with
+ *     `<lvis-skill name="…" source="…">…</lvis-skill>` so provenance is
+ *     unambiguous (see {@link SkillOverlay}).
+ *   - First load of any user-authored skill requires explicit user approval
+ *     via {@link ApprovalGate}. Approval is persisted in
+ *     `~/.lvis/skill-approvals.json` so the modal does not re-pop on
+ *     subsequent loads of the same skill. Built-in skills (shipped with
+ *     the host) skip the approval gate.
+ *   - Skill names are allowlisted to `[a-zA-Z0-9_-]+` and traversal-checked
+ *     by {@link SkillStore} — see `skill-store.ts` for the file-side
+ *     defenses.
  */
+import { randomUUID } from "node:crypto";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { SkillStore } from "../main/skill-store.js";
+import { SKILL_NAME_ALLOWLIST } from "../main/skill-store.js";
+import type { SkillOverlay } from "../main/skill-overlay.js";
+import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
+import type { ApprovalGate } from "../permissions/approval-gate.js";
 
 export interface SkillLoadEvent {
   name: string;
@@ -15,27 +37,32 @@ export interface SkillLoadEvent {
 
 export interface SkillLoadToolDeps {
   store: SkillStore;
+  /** Per-session overlay registry — read by SystemPromptBuilder each turn. */
+  overlay: SkillOverlay;
+  /** Persistent allowlist for user-authored skills. */
+  approvals: SkillApprovalsStore;
+  /** ApprovalGate for first-use prompts (user-authored skills only). */
+  getApprovalGate: () => ApprovalGate | undefined;
   /** Renderer event sink — used by the chat to render the SkillBadge. */
   emit: (event: SkillLoadEvent) => void;
-  /**
-   * Conversation injector — appends the skill body as an assistant-visible
-   * overlay (user-role with [Skill] prefix, since the GenericMessage type
-   * has no `system` role at runtime — system prompt is built each turn by
-   * SystemPromptBuilder) so subsequent rounds carry the skill guidance.
-   */
-  injectSystemMessage: (sessionId: string, content: string) => void;
 }
 
 export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
   return createDynamicTool({
     name: "skill_load",
     description:
-      "이름으로 skill 을 로드해 현재 대화의 system 메시지로 주입합니다. " +
+      "이름으로 skill 을 로드해 다음 턴부터 시스템 프롬프트에 주입합니다. " +
       "Skill 은 ~/.lvis/skills/<name>.md (YAML frontmatter + markdown). " +
+      "처음 로드되는 user skill 은 사용자 승인을 요구하며, 승인은 영구 저장됩니다. " +
       "성공 시 { loaded: true, skillName, summary } 반환.",
     source: "builtin",
-    category: "read",
-    isReadOnly: () => true,
+    // C2(d): skill bodies become part of the LLM's system prompt context.
+    // Even though no filesystem mutation happens, the assistant's future
+    // behavior is mutated by attacker-controlled content. Treat as "write"
+    // so the §6.3 PermissionManager lifts the auto-approve and the first
+    // load of each user skill goes through the user-confirmation modal.
+    // Built-in skills bypass via `skill-approvals-store.ts` allowlist.
+    category: "write",
     jsonSchema: {
       type: "object",
       required: ["skillName"],
@@ -60,6 +87,17 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
           isError: true,
         };
       }
+      // C2(b): allowlist check before doing any filesystem work — defense in
+      // depth even though SkillStore enforces the same constraint on file
+      // discovery.
+      if (!SKILL_NAME_ALLOWLIST.test(skillName)) {
+        return {
+          output: JSON.stringify({
+            error: `invalid skillName: must match ${SKILL_NAME_ALLOWLIST.source}`,
+          }),
+          isError: true,
+        };
+      }
       const skill = await deps.store.load(skillName);
       if (!skill) {
         return {
@@ -67,22 +105,59 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
           isError: true,
         };
       }
+
+      // C2(d): user-authored skills require explicit approval on first load.
+      // Builtins are pre-blessed (they ship with the host).
+      if (skill.source === "user") {
+        const alreadyApproved = await deps.approvals.isApproved(skill.name);
+        if (!alreadyApproved) {
+          const gate = deps.getApprovalGate();
+          if (!gate) {
+            return {
+              output: JSON.stringify({
+                error: "skill_load approval gate unavailable",
+              }),
+              isError: true,
+            };
+          }
+          const decision = await gate.requestAndWait({
+            id: randomUUID(),
+            category: "tool",
+            toolName: "skill_load",
+            args: { skillName: skill.name, source: skill.source },
+            reason: `사용자 작성 skill '${skill.name}' 을 시스템 프롬프트에 주입합니다. 승인 시 영구적으로 허용됩니다.`,
+            source: "builtin",
+            createdAt: Date.now(),
+          });
+          if (decision.choice.startsWith("deny")) {
+            return {
+              output: JSON.stringify({
+                error: `user denied skill load: ${skill.name}`,
+              }),
+              isError: true,
+            };
+          }
+          // allow-once / allow-always — both persisted to the approvals
+          // store. The user has explicitly accepted this skill body once;
+          // re-prompting on the next load would be redundant.
+          await deps.approvals.approve(skill.name).catch((err) => {
+            console.warn(
+              "[lvis] skill_load: approval persistence failed (non-fatal):",
+              (err as Error).message,
+            );
+          });
+        }
+      }
+
       const sessionId =
         typeof ctx.metadata?.sessionId === "string"
           ? (ctx.metadata.sessionId as string)
           : "unknown";
-      // Inject the skill body as a system-role overlay. The chat history is
-      // mutated in-place so the next assistant round sees the new guidance.
-      const overlay = `[Skill: ${skill.name}]\n${skill.body}`;
-      try {
-        deps.injectSystemMessage(sessionId, overlay);
-      } catch (err) {
-        // Non-fatal: still fire the badge so the user sees the load attempt.
-        console.warn(
-          "[lvis] skill_load injectSystemMessage failed:",
-          (err as Error).message,
-        );
-      }
+      // Register in the per-session overlay. SystemPromptBuilder reads from
+      // this on every subsequent turn — the next assistant round will see
+      // the skill body inside <lvis-active-skills>…</lvis-active-skills>.
+      deps.overlay.register(sessionId, skill);
+
       deps.emit({
         name: skill.name,
         description: skill.description,

@@ -86,6 +86,27 @@ function extractTargetFilePath(
   }
 }
 
+/**
+ * H3: Redact the `freeText` field from an `ask_user_question` tool result
+ * before it is written to the audit log. The result is a JSON string of
+ * the form `{"choice":"…","freeText":"…","dismissed":false}`; we keep
+ * choice/dismissed but replace freeText with a placeholder. Falls back to
+ * the original content when JSON parsing fails (e.g. error responses).
+ */
+function redactAskUserAuditOutput(rawOutput: string): string {
+  try {
+    const parsed = JSON.parse(rawOutput) as Record<string, unknown>;
+    if (typeof parsed.freeText === "string" && parsed.freeText.length > 0) {
+      const len = parsed.freeText.length;
+      parsed.freeText = `[redacted ${len} chars]`;
+      return JSON.stringify(parsed);
+    }
+    return rawOutput;
+  } catch {
+    return rawOutput;
+  }
+}
+
 export interface ToolUseBlock {
   id: string;
   name: string;
@@ -198,17 +219,23 @@ export class ToolExecutor {
     callbacks?: ToolExecutorCallbacks,
     sessionId?: string,
     proactiveOrigin?: string | null,
+    /**
+     * C3(b): forwarded into each executeOne's ToolExecutionContext.metadata
+     * so the `agent_spawn` tool can detect it is being invoked from inside
+     * an already-spawned sub-agent and refuse to recurse.
+     */
+    spawnDepth?: number,
   ): Promise<ToolResult[]> {
     const groupId = randomUUID();
     const BATCH_SIZE = 5;
     if (toolUses.length <= BATCH_SIZE) {
-      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId, proactiveOrigin)));
+      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId, proactiveOrigin, spawnDepth)));
     }
 
     const results: ToolResult[] = [];
     for (let i = 0; i < toolUses.length; i += BATCH_SIZE) {
       const batch = toolUses.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId, proactiveOrigin)));
+      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId, proactiveOrigin, spawnDepth)));
       results.push(...batchResults);
     }
     return results;
@@ -222,6 +249,7 @@ export class ToolExecutor {
     callbacks?: ToolExecutorCallbacks,
     sessionId?: string,
     proactiveOrigin?: string | null,
+    spawnDepth?: number,
   ): Promise<ToolResult> {
     const startTime = Date.now();
     const meta: ToolCallMeta = { groupId, toolUseId: toolUse.id, displayOrder };
@@ -260,7 +288,23 @@ export class ToolExecutor {
     }
 
     // ── Step 3: Permission (source-aware) ───────────
-    if (this.permissionManager) {
+    //
+    // C1 fix: `ask_user_question` is itself the "ask the user" intent — the
+    // tool fires its own AskUserQuestionCard on the renderer. If we route
+    // it through ApprovalGate as well, the user sees TWO modals back-to-
+    // back ("approve this tool?" then the actual question). Short-circuit
+    // permission for this single tool BEFORE PermissionManager runs so the
+    // approval modal never gets requested. Allowed because:
+    //   1. The tool only emits a renderer card and awaits user input — it
+    //      never mutates state on its own.
+    //   2. The user is always the explicit decision-maker for the tool's
+    //      effect (the question itself), so a separate "may I ask?" modal
+    //      is redundant.
+    //   3. The tool's permission category="dangerous" still applies to the
+    //      audit log (Step 8) so we keep visibility into its calls.
+    const isAskUserQuestionShortCircuit =
+      toolUse.name === "ask_user_question" && source === "builtin";
+    if (this.permissionManager && !isAskUserQuestionShortCircuit) {
       permissionResult = this.permissionManager.checkDetailed(toolUse.name, source, tool.category, proactiveOrigin);
       if (permissionResult.decision === "deny") {
         const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
@@ -369,7 +413,12 @@ export class ToolExecutor {
 
     const executionContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      metadata: { sessionId: sessionId ?? "unknown" },
+      metadata: {
+        sessionId: sessionId ?? "unknown",
+        // C3(b): spawn depth visible to tools — `agent_spawn` reads this
+        // and refuses when >= 1 (a sub-agent cannot itself spawn).
+        spawnDepth: spawnDepth ?? 0,
+      },
     };
 
     try {
@@ -423,7 +472,17 @@ export class ToolExecutor {
 
     // ── Step 8: Audit + Result (항상 실행) ──────────
     callbacks?.onToolEnd?.(toolUse.name, content, isError, meta, uiPayload);
-    this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, content, isError, startTime, permissionResult, rateResult.remaining);
+    // H3: redact the user's freeText answer before it lands in the audit
+    // log. The DLP filter at Step 7b only catches structured patterns
+    // (emails, IDs); a free-form answer ("내 비밀번호는 …") wouldn't match
+    // any pattern but is still PII the user typed in. For ask_user_question
+    // specifically, the LLM doesn't need the raw text in audit — provenance
+    // (the question + that the user replied) is what matters.
+    const auditContent =
+      toolUse.name === "ask_user_question" && !isError
+        ? redactAskUserAuditOutput(content)
+        : content;
+    this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining);
 
     return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }), ...(uiPayload && { uiPayload }) };
   }
