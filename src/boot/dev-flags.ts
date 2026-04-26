@@ -64,6 +64,22 @@ export function devLinkedEntryAllowed(packaged: boolean = isPackagedCached): boo
 }
 
 /**
+ * Allow marketplace `install()` to take the file:-spec / npm-install branch.
+ * That branch resolves a sibling repo (e.g. `file:../lvis-plugin-meeting`),
+ * spawns `npm install` against `<appRoot>/node_modules`, and writes a manifest
+ * entry pointing at the npm-installed package. Useful for fast dev-iterate
+ * but must NEVER fire in a packaged build:
+ *   1. `<appRoot>/node_modules` is read-only inside Electron's `app.asar`,
+ *      so the install hard-fails (Architect B1).
+ *   2. The branch bypasses signature envelope verification (Security H-2).
+ * Production installs always go through the signed-zip download path.
+ */
+export function devLinkedInstallAllowed(packaged: boolean = isPackagedCached): boolean {
+  if (packaged) return false;
+  return envEquals("LVIS_DEV", "1") || envEquals("LVIS_ALLOW_LINKED_PLUGIN_ENTRY", "1");
+}
+
+/**
  * Include marketplace test keys in the bundled publisher key set. Test keys
  * must NEVER be trusted in a packaged build.
  */
