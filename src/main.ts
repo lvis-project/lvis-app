@@ -105,10 +105,29 @@ function parseLvisInstallUri(url: string): { slug: string } | null {
   }
 }
 
+/**
+ * Diagnostic log gate — diagnostic console output is dev-only. Packaged
+ * builds skip these noisy traces so end-user log files stay clean.
+ */
+const lvisDevLog: typeof console.log = (...args) => {
+  if (app.isPackaged) return;
+  console.log(...args);
+};
+const lvisDevWarn: typeof console.warn = (...args) => {
+  if (app.isPackaged) return;
+  console.warn(...args);
+};
+
 async function handleLvisUri(url: string) {
+  lvisDevLog("[lvis] handleLvisUri called", { url });
   const params = parseLvisInstallUri(url);
-  if (!params) return;
+  if (!params) {
+    lvisDevWarn("[lvis] handleLvisUri: parseLvisInstallUri returned null", { url });
+    return;
+  }
+  lvisDevLog("[lvis] handleLvisUri parsed", { slug: params.slug, servicesReady: !!services });
   if (!services) {
+    lvisDevLog("[lvis] handleLvisUri: services not ready, queueing", { slug: params.slug });
     pendingLvisUri = url;
     return;
   }
@@ -116,6 +135,7 @@ async function handleLvisUri(url: string) {
   // with no window, re-open one so the confirmation dialog has a parent and the
   // user actually sees the install prompt (rather than it silently no-op'ing).
   if (!mainWindow || mainWindow.isDestroyed()) {
+    lvisDevLog("[lvis] handleLvisUri: recreating window");
     createWindow();
     try {
       if (mainWindow) await (mainWindow as BrowserWindow).loadFile(resolve(__dirname, "index.html"));
@@ -130,6 +150,7 @@ async function handleLvisUri(url: string) {
     console.warn("[lvis] handleLvisUri: no window available, aborting install");
     return;
   }
+  lvisDevLog("[lvis] handleLvisUri: showing confirmation dialog", { slug: params.slug });
   const { response } = await dialog.showMessageBox(win, {
     type: "question",
     buttons: ["설치", "취소"],
@@ -138,10 +159,13 @@ async function handleLvisUri(url: string) {
     message: `플러그인 '${params.slug}'을(를) 설치하시겠습니까?`,
     detail: "외부 링크로부터 요청된 설치입니다.",
   });
+  lvisDevLog("[lvis] handleLvisUri: dialog response", { slug: params.slug, response });
   if (response !== 0) return;
+  lvisDevLog("[lvis] handleLvisUri: starting install", { slug: params.slug });
   void services.pluginMarketplace
     .install(params.slug)
     .then(async () => {
+      lvisDevLog("[lvis] handleLvisUri: install succeeded", { slug: params.slug });
       // Mirror the post-install steps from the lvis:plugins:install IPC handler
       // so deep-link installs behave identically to in-app installs.
       try {
@@ -153,6 +177,7 @@ async function handleLvisUri(url: string) {
       mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: true });
     })
     .catch((err: Error) => {
+      console.error("[lvis] lvis:// install failed", { slug: params.slug, error: err.message, stack: err.stack });
       mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: false, error: err.message });
     });
 }
@@ -352,11 +377,49 @@ async function main() {
 // lvis:// custom URI scheme — register before app ready.
 // In dev mode (unpackaged) on Windows, Electron requires explicit execPath + args
 // so the OS can locate the app correctly when launching from a protocol URI.
+// We must also propagate the running process's --user-data-dir so the OS-spawned
+// instance lands on the same userData and the single-instance lock actually
+// gates it. Without this, dev (Electron-LVIS-Dev) and the protocol-launched
+// process land on different userData dirs and both apps coexist.
+//
+// We also propagate the same Windows-safe Chromium flags used by the dev
+// launchers (--disable-gpu) on corp/VDI machines without GPU drivers; without
+// these the OS-launched process silently crashes before
+// requestSingleInstanceLock() runs and the running app never sees
+// `second-instance`. `--no-sandbox` is propagated only when explicitly
+// enabled via LVIS_DEV_NO_SANDBOX=1 so the registered protocol command does
+// not silently disable Chromium sandboxing for a packaged user who once ran
+// the dev binary.
+const WINDOWS_SAFE_GPU_FLAGS = [
+  "--disable-gpu",
+  "--disable-software-rasterizer",
+  "--disable-gpu-compositing",
+];
+function resolveScriptPathArg(): string {
+  const a = process.argv[1];
+  if (typeof a !== "string") return ".";
+  if (a.toLowerCase().startsWith("lvis://")) return ".";
+  // Skip Electron switches (e.g. `--user-data-dir=...`, `--no-sandbox`) that
+  // appear here when this code runs inside the OS-launched second instance —
+  // resolving them as a path would corrupt the registered command.
+  if (a.startsWith("--")) return ".";
+  return a;
+}
+function buildDevProtocolArgs(): string[] {
+  const args: string[] = [resolve(resolveScriptPathArg())];
+  const userDataDir = app.getPath("userData");
+  if (userDataDir) args.push(`--user-data-dir=${userDataDir}`);
+  if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
+    args.push(...WINDOWS_SAFE_GPU_FLAGS);
+  }
+  if (process.env.LVIS_DEV_NO_SANDBOX === "1") {
+    args.push("--no-sandbox");
+  }
+  return args;
+}
 const _protocolRegistered = app.isPackaged
   ? app.setAsDefaultProtocolClient("lvis")
-  : app.setAsDefaultProtocolClient("lvis", process.execPath, [
-      resolve(typeof process.argv[1] === "string" ? process.argv[1] : "."),
-    ]);
+  : app.setAsDefaultProtocolClient("lvis", process.execPath, buildDevProtocolArgs());
 if (!_protocolRegistered) {
   console.warn("[main] setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment");
 }
@@ -377,7 +440,16 @@ if (!gotSingleInstanceLock) {
     pendingLvisUri = coldStartUri;
   }
   app.on("second-instance", (_event, argv) => {
+    // Redact `--user-data-dir=<absolute path>` before logging — the path
+    // contains the OS username and on shared/VDI/corp boxes that's PII that
+    // would otherwise land in screenshots, support bundles, and stdout
+    // capture tools.
+    const safeArgv = argv.map((a) =>
+      a.startsWith("--user-data-dir=") ? "--user-data-dir=<redacted>" : a,
+    );
+    lvisDevLog("[lvis] second-instance event fired", { argv: safeArgv });
     const url = findLvisProtocolUri(argv);
+    lvisDevLog("[lvis] second-instance URL extracted", { url });
     if (url) void handleLvisUri(url);
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
