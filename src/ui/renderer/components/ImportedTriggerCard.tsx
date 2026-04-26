@@ -20,6 +20,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
 
 /**
  * Strip lines whose only purpose is to feed an opaque base64 entry id
@@ -124,7 +125,9 @@ export function ImportedTriggerCard({
         </div>
         {response && response.length > 0 ? (
           <div className="prose prose-sm prose-invert max-w-none break-words text-foreground">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{response}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {responseStreaming ? clampDanglingMarkdownLink(response) : response}
+            </ReactMarkdown>
           </div>
         ) : !responseStreaming ? (
           <p className="text-xs text-muted-foreground">
