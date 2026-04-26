@@ -146,7 +146,10 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
         </div>
       )}
       {triggerResult && triggerResult.visibility === "summary-only" && (
-        <div className="pointer-events-none absolute right-4 top-2 z-20 flex justify-end">
+        // z-30 keeps the toast above the routine area (z-20) on narrow
+        // windows where the centered routine card and right-edge toast
+        // overlap horizontally.
+        <div className="pointer-events-none absolute right-4 top-2 z-30 flex justify-end">
           <div className="pointer-events-auto w-[380px] max-w-[calc(100vw-2rem)]">
             <TriggerCard
               key={triggerResult.sessionId}

@@ -11,11 +11,18 @@
 // chat — no context pollution.
 //
 // P2: visibility-driven render branching.
-//   - `user-visible` → modal-like card, no auto-dismiss
-//   - `summary-only` → compact toast, auto-dismiss after 8s (hover pauses
-//     the timer; leaving the toast resumes a fresh 8s window)
-//   - `silent` is filtered upstream in `useTriggerResult` so this component
-//     never receives one.
+//   - `user-visible` → centered card, no auto-dismiss
+//   - `summary-only` → compact toast, auto-dismiss after 8s; hover OR
+//     keyboard focus pauses the timer; releasing either restarts a fresh
+//     8s window. Pointer-already-over-on-mount is detected via
+//     `:hover` so a toast that pops under the cursor doesn't dismiss
+//     while the user reads it.
+//   - `silent` is filtered upstream in `useTriggerResult`, so this
+//     component never receives one.
+//
+// Lifecycle contract: parent MUST key on `result.sessionId` (see
+// ChatView) so a session change forces remount + cleanup of the in-flight
+// timer. The component does not defend against in-place sessionId swap.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -53,29 +60,48 @@ export function TriggerCard({
 
   const isSummary = result.visibility === "summary-only";
 
-  // Auto-dismiss for summary-only. Hovering pauses the timer; mouseleave
-  // restarts a fresh window so a partially-read toast does not vanish
-  // mid-read. The timer is also paused while an import is in flight so a
-  // network round-trip doesn't get cut by auto-dismiss.
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hoveringRef = useRef(false);
+  // Identity-stable callback ref — prevents a non-memoized `onDismiss`
+  // from re-arming a fresh 8s window on every parent render and
+  // effectively pinning the toast forever.
+  const onDismissRef = useRef(onDismiss);
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  });
 
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interactingRef = useRef(false);
+
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  // Auto-dismiss for summary-only. Cleanup clears the timer on unmount or
+  // dep change, so the timer callback can safely fire `onDismiss` without
+  // an `aliveRef` guard. The arming check skips while the user is
+  // interacting (hover or focus) and while an accept is in flight.
+  // sessionId is intentionally read inside the callback rather than
+  // captured at effect-setup so the call always uses the current session
+  // even though parent-side `key` already forces remount on change.
   useEffect(() => {
     if (!isSummary) return;
-    const armTimer = () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+    // Pointer-already-over guard: a toast that pops under the cursor may
+    // never receive `mouseEnter`. Inspect `:hover` once at arm-time and
+    // treat it as "interacting" so the timer doesn't fire mid-read.
+    const hoveredOnMount = cardRef.current?.matches(":hover") ?? false;
+    if (hoveredOnMount) interactingRef.current = true;
+
+    if (!interactingRef.current && !accepting) {
+      clearTimer();
       timerRef.current = setTimeout(() => {
-        if (aliveRef.current) onDismiss(result.sessionId);
+        onDismissRef.current(result.sessionId);
       }, SUMMARY_AUTO_DISMISS_MS);
-    };
-    if (!hoveringRef.current && !accepting) armTimer();
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [isSummary, accepting, result.sessionId, onDismiss]);
+    }
+    return clearTimer;
+  }, [isSummary, accepting, result.sessionId]);
 
   const completedLabel = useMemo(() => {
     try {
@@ -103,20 +129,21 @@ export function TriggerCard({
     }
   };
 
-  const handleMouseEnter = () => {
+  // Hover and keyboard focus both pause the auto-dismiss. `onFocus` /
+  // `onBlur` bubble from descendant buttons, so a keyboard user tabbing
+  // through the toast never sees it disappear mid-Tab.
+  const handleInteractStart = () => {
     if (!isSummary) return;
-    hoveringRef.current = true;
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
+    interactingRef.current = true;
+    clearTimer();
   };
-  const handleMouseLeave = () => {
+  const handleInteractEnd = () => {
     if (!isSummary) return;
-    hoveringRef.current = false;
-    if (timerRef.current) clearTimeout(timerRef.current);
+    interactingRef.current = false;
+    if (accepting) return; // accept in flight — re-arm only when it settles
+    clearTimer();
     timerRef.current = setTimeout(() => {
-      if (aliveRef.current) onDismiss(result.sessionId);
+      onDismissRef.current(result.sessionId);
     }, SUMMARY_AUTO_DISMISS_MS);
   };
 
@@ -124,13 +151,25 @@ export function TriggerCard({
     ? "flex flex-col border-amber-500/40 bg-amber-500/5 shadow-md backdrop-blur"
     : "flex h-full flex-col border-amber-500/40 bg-amber-500/5 shadow-lg backdrop-blur";
 
+  // a11y: the summary toast is a transient status message — announce it
+  // to assistive tech via aria-live so screen-reader users don't miss it
+  // when it auto-dismisses. Centered/user-visible variant is more
+  // persistent and gets the default `region` semantics from Card.
+  const a11yProps = isSummary
+    ? { role: "status", "aria-live": "polite" as const, "aria-atomic": true as const }
+    : {};
+
   return (
     <Card
+      ref={cardRef}
       data-testid="trigger-card"
-      data-variant={isSummary ? "summary" : "modal"}
+      data-variant={isSummary ? "summary" : "centered"}
       className={cardClassName}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      onMouseEnter={handleInteractStart}
+      onMouseLeave={handleInteractEnd}
+      onFocus={handleInteractStart}
+      onBlur={handleInteractEnd}
+      {...a11yProps}
     >
       <CardHeader className="shrink-0 pb-2">
         <div className="flex items-start justify-between gap-2">
@@ -148,6 +187,7 @@ export function TriggerCard({
               size="sm"
               variant="default"
               className="h-7 text-xs"
+              data-testid="trigger-accept"
               disabled={accepting}
               onClick={handleAccept}
             >
@@ -157,6 +197,7 @@ export function TriggerCard({
               size="sm"
               variant="outline"
               className="h-7 text-xs"
+              data-testid="trigger-dismiss"
               onClick={() => onDismiss(result.sessionId)}
             >
               무시
