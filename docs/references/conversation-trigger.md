@@ -186,6 +186,25 @@ Brain plugin 의 retry 로직은 위 분류를 그대로 따르면 됨. host 가
 | `chat_busy` | 사용자 chat 이 turn 진행 중 — 끝난 후 재시도 |
 | `history_capacity` | chat history 가 cap (50 msgs) 근접 — 사용자가 compact 후 재시도 |
 
+## Import 후 렌더링 — `lvis:trigger:imported` (PR #224)
+
+Import 가 성공하면 host 는 `lvis:trigger:imported` IPC 이벤트를 emit 한다. payload:
+
+```ts
+{
+  sessionId: string;       // trigger session id
+  source: string;          // "proactive:meeting-detection" 등
+  prompt: string;          // brain 이 생성한 templated prompt
+  summary: string;         // trigger session 의 마지막 assistant 응답
+  toolCallCount: number;   // 트리거 동안 실행된 tool_use 블록 수
+  importedAt: string;      // ISO 8601
+}
+```
+
+Renderer 는 이걸 받아 `kind: "imported_trigger"` 단일 entry 를 chat 의 `entries` 에 append (`appendImportedTriggerEntry`, idempotent on `sessionId`). UI 는 `ImportedTriggerCard` 로 렌더 — user 말풍선이 아니라 별도 카드 (badge "LVIS proactive" + source + summary + tool-call count + collapsible prompt).
+
+이 이벤트가 없으면 host history 에는 wrapped 메시지가 들어가지만 renderer 의 `entries` 가 갱신되지 않아 *현재 보고 있는 chat session* 에서 import 결과가 보이지 않는다 (사용자 입장에서는 "다른 세션으로 들어갔다"). 또한 `<imported-from-proactive>` envelope 안의 brain prompt 가 user 말풍선으로 잘못 렌더되는 문제도 같이 해결됨 — LLM 에게는 envelope 가 그대로 보여 prompt-injection 방어 유지.
+
 ## Visibility — P0 / P2 분리
 
 P0 는 **plumbing**: `visibility` 를 spec 에 받고 audit / runTriggerTurn 에 전달. UI 분기는 **P2 에서 구현 (✅ 2026-04-26)**.
