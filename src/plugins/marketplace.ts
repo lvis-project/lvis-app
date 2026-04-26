@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
+import { resolvePluginPaths, type PluginPaths } from "./plugin-paths.js";
 import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -150,17 +150,27 @@ export class PluginMarketplaceService {
     deploymentGuard?: PluginDeploymentGuard,
     fetcher?: MarketplaceFetcher,
     cacheRoot?: string,
+    paths?: PluginPaths,
   ) {
     this.appRoot = resolve(appRoot);
-    this.registryPath = resolve(this.appRoot, "plugins/registry.json");
-    this.marketplacePath = resolve(this.appRoot, "plugins/marketplace.json");
-    this.installedDir = resolve(homedir(), ".lvis/plugins");
+    // Phase 0 SoT consolidation: prefer the injected paths bundle when the
+    // caller has one (boot wires this up so PluginRuntime + DeploymentGuard +
+    // MarketplaceService all see the same layout). Fall back to the resolver
+    // for callers that haven't migrated yet (old test fixtures, scripts).
+    //
+    // Precedence rule: when `paths` is supplied it is authoritative, including
+    // for `cacheRoot` — the standalone `cacheRoot` arg is plumbed only into
+    // the resolver fallback path so callers can't get conflicting values.
+    const resolved = paths ?? resolvePluginPaths({ appRoot: this.appRoot, cacheRoot });
+    this.registryPath = resolved.registryPath;
+    this.marketplacePath = resolved.marketplacePath;
+    this.installedDir = resolved.userInstalledDir;
+    this.cacheRoot = resolved.cacheRoot;
     this.deploymentGuard = deploymentGuard;
     // When no external fetcher is provided we fall back to the local
     // marketplace.json mock — catalog caching makes no sense for local files.
     const usingMockFetcher = !fetcher;
     this.fetcher = fetcher ?? new MockMarketplaceFetcher(this.marketplacePath);
-    this.cacheRoot = cacheRoot ?? resolve(homedir(), ".lvis/plugins/.cache");
     this.catalogCacheBase = usingMockFetcher ? null : undefined;
   }
 
