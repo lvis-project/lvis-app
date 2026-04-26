@@ -95,8 +95,27 @@ export interface AppSettings {
   telemetry: TelemetrySettings;
   audit: AuditSettings;
   msGraph: MsGraphSettings;
+  /** Phase 1 §Step 2 — plugin trust-boundary settings. */
+  plugins: PluginSettings;
   /** 플러그인별 설정값 — pluginId → key/value 맵 */
   pluginConfigs: Record<string, PluginConfigRecord>;
+}
+
+/**
+ * Phase 1 §Step 2 — plugin trust-boundary opt-ins.
+ *
+ * `allowUnsignedUserPlugins`:
+ *   When false (default), an unsigned user plugin is fail-closed at boot —
+ *   the host SKIPS loading it and emits `plugin_unsigned_user_rejected`.
+ *   When true, the legacy "warn-and-load" behaviour returns and the host
+ *   emits `plugin_unsigned_user_loaded_with_optin`.
+ *
+ *   This is opt-in because user-installed plugins live in user-writable
+ *   HOME storage; loading unsigned code from there is persistent code-
+ *   execution-from-HOME after the path migration shipped in Phase 0.
+ */
+export interface PluginSettings {
+  allowUnsignedUserPlugins: boolean;
 }
 
 /**
@@ -270,6 +289,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   msGraph: {
     environment: "external",
+  },
+  plugins: {
+    allowUnsignedUserPlugins: false,
   },
   pluginConfigs: {},
 };
@@ -510,6 +532,17 @@ export class SettingsService {
         routineIdleThresholdMs: idleThresholdMs,
       };
 
+      // Phase 1 §Step 2 — sanitize plugins block. Default false; accept only
+      // booleans (unknown shapes silently fall back). Same pattern as the
+      // other normalization blocks above.
+      const rawPlugins = parsed.plugins;
+      const normalizedPlugins: PluginSettings = {
+        allowUnsignedUserPlugins:
+          typeof rawPlugins?.allowUnsignedUserPlugins === "boolean"
+            ? rawPlugins.allowUnsignedUserPlugins
+            : DEFAULT_SETTINGS.plugins.allowUnsignedUserPlugins,
+      };
+
       return {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
@@ -521,6 +554,7 @@ export class SettingsService {
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
         msGraph: { ...DEFAULT_SETTINGS.msGraph, ...parsed.msGraph },
+        plugins: normalizedPlugins,
         pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
       };
     } catch {
