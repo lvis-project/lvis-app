@@ -264,6 +264,13 @@ export type LvisApi = {
   dismissTrigger: (sessionId: string) => Promise<{ ok: boolean; removed?: boolean; error?: string }>;
   importTrigger: (sessionId: string) => Promise<{ ok: boolean; imported?: number; reason?: string; error?: string }>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
+  onBootstrapStatus: (
+    h: (status:
+      | { phase: "start" }
+      | { phase: "complete"; installed: string[]; failed: Array<{ id: string; error: string }>; skippedReason?: string }
+      | { phase: "error"; message: string }
+    ) => void,
+  ) => () => void;
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onPluginInstallProgress: (h: (payload:
