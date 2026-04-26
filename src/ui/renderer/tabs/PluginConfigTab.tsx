@@ -6,6 +6,7 @@ import { Separator } from "../../../components/ui/separator.js";
 import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/plugin-config.js";
 import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
+import type { InstallInFlight } from "../hooks/use-plugin-marketplace.js";
 import type { PluginCardSummary } from "../types.js";
 
 type KV = { key: string; value: string };
@@ -34,7 +35,7 @@ function entriesToConfig(entries: KV[]): Record<string, unknown> {
 
 export function PluginConfigTab() {
   const [plugins, setPlugins] = useState<PluginCardSummary[]>([]);
-  const [installInFlight, setInstallInFlight] = useState<Record<string, string>>({});
+  const [installInFlight, setInstallInFlight] = useState<InstallInFlight>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [entries, setEntries] = useState<KV[]>([]);
   const [newKey, setNewKey] = useState("");

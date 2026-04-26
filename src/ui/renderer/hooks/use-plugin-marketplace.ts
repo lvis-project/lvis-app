@@ -8,7 +8,7 @@ import { getHostMarketplaceApi } from "../host-marketplace-api.js";
  * surfaces (sidebar placeholder + settings tab skeleton) read this map to
  * render an in-flight indicator while the main process drives the install.
  */
-export type InstallPhase = "installing" | "downloading" | "verifying" | "extracting" | "registering" | "restarting";
+export type InstallPhase = "installing" | "downloading" | "verifying" | "registering" | "restarting";
 export type InstallInFlight = Record<string, InstallPhase>;
 
 /**
