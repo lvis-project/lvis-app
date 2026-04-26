@@ -128,16 +128,23 @@ export function useChatState(api: LvisApi) {
         });
       } else if (ev.type === "assistant_round") {
         setEntries((p) => {
-          // Brain trigger flow — DO NOT finalize the card here.
-          // assistant_round fires once per LLM round (tool_use → next
-          // round → end_turn). Finalizing on the first round (with
-          // stopReason="tool_use") would close the card before the
-          // LLM's actual reply text arrives in the next round, and
-          // those subsequent text_deltas would land in a sibling
-          // streaming-assistant entry — exactly the duplicate-response
-          // bug we're fixing. We finalize only on the `done` event.
+          // Brain trigger flow — DO NOT finalize the imported_trigger
+          // card here. assistant_round fires once per LLM round
+          // (tool_use → next round → end_turn). Finalizing on the
+          // first round (stopReason="tool_use") would close the card
+          // before the LLM's actual reply text arrives in the next
+          // round, and those subsequent text_deltas would land in a
+          // sibling streaming-assistant entry — exactly the
+          // duplicate-response bug we're fixing.
+          //
+          // BUT: a streaming `reasoning` entry for THIS round still
+          // needs sealing. Without this, a per-round reasoning entry
+          // stays `streaming: true` forever (thoughtRef gets reset
+          // on the next round, and the `done` branch only finalizes
+          // when thoughtRef is non-empty). Finalize reasoning even
+          // on the trigger path.
           if (isImportedTriggerStreaming(p)) {
-            return p;
+            return finalizeStreamingReasoning(p, ev.thought ?? thoughtRef.current);
           }
           const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
           guidanceResetPendingRef.current = false;
@@ -230,6 +237,18 @@ export function useChatState(api: LvisApi) {
     },
     [],
   );
+
+  /**
+   * Close any open imported_trigger card without surfacing an error.
+   * Used by App's handleAsk catch path: a `chatSend` rejection (network
+   * fail, abort) would otherwise leave the card's streaming spinner
+   * spinning forever — the `done` event never lands so the normal
+   * finalize doesn't fire. The error message itself surfaces via the
+   * regular setAssistantError sibling path.
+   */
+  const closeOpenImportedTrigger = useCallback(() => {
+    setEntries((p) => finalizeImportedTriggerResponse(p));
+  }, []);
 
   // Fallback toast — shown briefly when the LLM provider auto-switches.
   const [fallbackToast, setFallbackToast] = useState<string | null>(null);
@@ -425,5 +444,6 @@ export function useChatState(api: LvisApi) {
     applyLoadedSession,
     truncateToEntry,
     addImportedTriggerEntry,
+    closeOpenImportedTrigger,
   };
 }

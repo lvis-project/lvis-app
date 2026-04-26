@@ -12,6 +12,8 @@
  * 5. 일반 대화 (fallback)
  */
 
+import { parseImportedTriggerEnvelope } from "../engine/proactive-source.js";
+
 // ─── Types ──────────────────────────────────────────
 
 export type InputClassification =
@@ -75,15 +77,11 @@ export class KeywordEngine {
     const trimmed = input.trim();
 
     // 0. Brain proactive trigger envelope — bypass skill-keyword
-    // matching. Pattern matches the exact same shape ipc-bridge.ts'
-    // `detectImportedTriggerSource` accepts (`source="proactive:..."`),
-    // so the two gates can never disagree: an envelope that fires
-    // skill-bypass here also fires `originSource` plumbing there,
-    // and vice versa. Without this matched pair, a hand-pasted
-    // envelope with a non-conforming source would skip skill routing
-    // (here) but NOT activate `<proactive-origin-guidance>` (there),
-    // letting plugin-supplied imperatives through with no guard.
-    if (/^<imported-from-proactive\s+source="proactive:[a-z][a-z0-9-]*"\s*>/.test(trimmed)) {
+    // matching. Shares its pattern with ipc-bridge.ts's
+    // originSource detection, the host gate, and the trigger
+    // executor's wrap (see engine/proactive-source.ts) so all
+    // gates agree on what counts as a valid envelope.
+    if (parseImportedTriggerEnvelope(trimmed) !== null) {
       return { type: "general", input: trimmed };
     }
 

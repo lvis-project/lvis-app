@@ -30,6 +30,7 @@
 import type { BrowserWindow } from "electron";
 import type { ConversationLoop, TurnResult } from "./conversation-loop.js";
 import type { GenericMessage } from "./llm/types.js";
+import { PROACTIVE_SOURCE_PATTERN } from "./proactive-source.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 
 /** What the renderer needs to display the result. */
@@ -120,11 +121,13 @@ function classifyFailure(err: unknown): TriggerFailureReason {
 }
 
 /**
- * The host gate enforces `^proactive:[a-z][a-z0-9-]*$` upstream of the
- * executor, so `source` is always quote-safe inside `source="..."`. If a
- * future refactor relaxes the gate or a new caller bypasses it, the
- * importIntoChat wrap below would otherwise emit malformed XML and
- * re-open the prompt-injection vector.
+ * Source pattern shared with the host gate, keyword-engine bypass, and
+ * ipc-bridge envelope parsing — see `engine/proactive-source.ts`. The
+ * host gate (`plugin-runtime.ts`) enforces this same pattern upstream
+ * of the executor, so by the time `source` reaches `importIntoChat`
+ * it's always quote-safe inside `source="..."`. The single source of
+ * truth ensures a future refactor on any one site can't silently
+ * desync the others.
  *
  * The envelope serves two purposes:
  *   1. The user's next chat turn doesn't read raw plugin-supplied
@@ -133,7 +136,6 @@ function classifyFailure(err: unknown): TriggerFailureReason {
  *      refer to the envelope and tell the LLM to ignore imperatives
  *      inside it AND ask the user before running any write tool.
  */
-const SAFE_SOURCE_PATTERN = /^proactive:[a-z][a-z0-9-]*$/;
 
 export class TriggerExecutor {
   /** Per-instance cache. Keeping it on the instance avoids cross-test leakage. */
@@ -280,7 +282,7 @@ export class TriggerExecutor {
     // user message, the system prompt's `<proactive-origin-guidance>`
     // block tells the LLM to ignore imperatives inside the envelope
     // and ask the user before any write op.
-    const wrappedPrompt = SAFE_SOURCE_PATTERN.test(payload.source)
+    const wrappedPrompt = PROACTIVE_SOURCE_PATTERN.test(payload.source)
       ? `<imported-from-proactive source="${payload.source}">\n${payload.prompt}\n</imported-from-proactive>`
       : payload.prompt;
 

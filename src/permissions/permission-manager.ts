@@ -19,6 +19,7 @@ import { resolve } from "node:path";
 import type { DenyRule, ToolSource, TrustLevel } from "../tools/types.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
+import { isProactiveOrigin } from "../engine/proactive-source.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto";
@@ -229,8 +230,12 @@ export class PermissionManager {
     proactiveOrigin?: string | null,
   ): PermissionCheckResult {
     const trust = this.resolveTrust(toolName, source);
-    const isProactive =
-      typeof proactiveOrigin === "string" && proactiveOrigin.startsWith("proactive:");
+    // Strict pattern (shared with the rest of the proactive flow —
+    // see engine/proactive-source.ts). Loose `startsWith` would
+    // accept malformed values like "proactive:Bad/Path" that no
+    // upstream gate emits but a future hand-injected codepath might;
+    // fail-closed on malformed input.
+    const isProactive = isProactiveOrigin(proactiveOrigin ?? null);
     const resolvedCategory = category ?? classifyToolCategory(toolName);
     const isWrite = resolvedCategory === "write" || resolvedCategory === "dangerous";
 

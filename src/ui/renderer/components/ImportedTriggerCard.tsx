@@ -95,27 +95,36 @@ export function ImportedTriggerCard({
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripEmailIdLine(summary)}</ReactMarkdown>
         </div>
       ) : null}
-      {(response && response.length > 0) || responseStreaming ? (
-        <div
-          data-testid="imported-trigger-response"
-          className="mt-2 border-t border-amber-500/20 pt-2"
-        >
-          <div className="mb-1 flex items-center gap-1 text-[11px] text-muted-foreground">
-            <span>LVIS 응답</span>
-            {responseStreaming ? (
-              <span
-                className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"
-                aria-label="응답 중"
-              />
-            ) : null}
-          </div>
-          {response && response.length > 0 ? (
-            <div className="prose prose-sm prose-invert max-w-none break-words text-foreground">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{response}</ReactMarkdown>
-            </div>
+      {/*
+        Always render the response section after streaming has
+        started — even if the LLM emitted only a tool_use and ended
+        the turn with no text_delta. Hiding it on empty made the
+        accept-then-empty case look broken (card sat with brain
+        summary only and the user wondered if the click landed).
+      */}
+      <div
+        data-testid="imported-trigger-response"
+        className="mt-2 border-t border-amber-500/20 pt-2"
+      >
+        <div className="mb-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span>LVIS 응답</span>
+          {responseStreaming ? (
+            <span
+              className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"
+              aria-label="응답 중"
+            />
           ) : null}
         </div>
-      ) : null}
+        {response && response.length > 0 ? (
+          <div className="prose prose-sm prose-invert max-w-none break-words text-foreground">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{response}</ReactMarkdown>
+          </div>
+        ) : !responseStreaming ? (
+          <p className="text-xs text-muted-foreground">
+            응답이 비어있습니다. (도구 호출만 있었거나 LLM 이 텍스트를 생성하지 않음)
+          </p>
+        ) : null}
+      </div>
       <button
         type="button"
         className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"

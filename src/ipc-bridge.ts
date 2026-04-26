@@ -16,6 +16,7 @@ import { redactForLLM, initDlpAudit } from "./audit/dlp-filter.js";
 import type { AuditLogger } from "./audit/audit-logger.js";
 import type { GenericMessage } from "./engine/llm/types.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
+import { parseImportedTriggerEnvelope } from "./engine/proactive-source.js";
 import type { WebContents } from "electron";
 import { findMethodByCapability } from "./boot/plugins.js";
 import {
@@ -86,20 +87,10 @@ function isRoutineEnabled(
  * channel. Used by both `lvis:chat:send` and the edit/retry flows so callback
  * wiring isn't duplicated.
  */
-/**
- * If the input is an imported brain trigger envelope, parse out its
- * source so we can fire the system prompt's
- * `<proactive-origin-guidance>` block on this turn — the LLM gets a
- * "propose only, ask user before any write" instruction in its system
- * prompt instead of treating the wrapped prompt as a regular user
- * directive. Returns null for ordinary user turns.
- */
-function detectImportedTriggerSource(input: string): string | null {
-  const m = input
-    .trimStart()
-    .match(/^<imported-from-proactive\s+source="(proactive:[a-z][a-z0-9-]*)"\s*>/);
-  return m ? m[1] : null;
-}
+// Envelope detection shares its pattern with the keyword engine, the
+// trigger executor, and the system-prompt guidance gate (see
+// `engine/proactive-source.ts`) so all four agree on what counts as a
+// valid trigger envelope.
 
 async function runStreamedTurn(
   conversationLoop: ConversationLoop,
@@ -113,7 +104,7 @@ async function runStreamedTurn(
   },
 ): Promise<unknown> {
   const send = (payload: unknown) => webContents?.send(channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
-  const originSource = detectImportedTriggerSource(input);
+  const originSource = parseImportedTriggerEnvelope(input);
   const result = await conversationLoop.runTurn(
     input,
     {

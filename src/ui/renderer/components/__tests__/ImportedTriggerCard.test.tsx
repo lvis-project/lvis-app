@@ -76,10 +76,15 @@ describe("ImportedTriggerCard", () => {
     expect(getByText(/6\/1 15:00 캘린더 등록할까요\?/)).toBeTruthy();
   });
 
-  it("does NOT render the response section when no response and not streaming", () => {
-    const { queryByTestId } = render(
+  it("renders an empty-response placeholder when the LLM ended without text", () => {
+    // Edge case: LLM only emits a tool_use then end_turn, no text_delta.
+    // Earlier the response section was hidden on empty content, which
+    // made the click-then-blank case look broken to the user. Now we
+    // surface "응답이 비어있습니다…" so the user sees the click landed.
+    const { getByTestId, getByText } = render(
       <ImportedTriggerCard {...base} response="" responseStreaming={false} />,
     );
-    expect(queryByTestId("imported-trigger-response")).toBeNull();
+    expect(getByTestId("imported-trigger-response")).toBeTruthy();
+    expect(getByText(/응답이 비어있습니다/)).toBeTruthy();
   });
 });

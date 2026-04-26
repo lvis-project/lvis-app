@@ -50,7 +50,7 @@ export function App() {
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, applyLoadedSession, truncateToEntry,
-    addImportedTriggerEntry,
+    addImportedTriggerEntry, closeOpenImportedTrigger,
     fallbackToast,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
@@ -168,12 +168,17 @@ export function App() {
           await api.chatSend(outgoing);
         }
       } catch (err) {
+        // chatSend rejection (network fail, abort, etc.) on a
+        // trigger-import turn never lands a `done` event, so the
+        // open imported_trigger card's streaming spinner would hang
+        // forever. Close the card before surfacing the error.
+        if (mode === "trigger-import") closeOpenImportedTrigger();
         setErrorWithThought(`오류: ${(err as Error).message}`);
       } finally {
         if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
       }
     },
-    [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest, setErrorWithThought, handleCompactCommand],
+    [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest, setErrorWithThought, handleCompactCommand, closeOpenImportedTrigger],
   );
 
   // Brain trigger accept → chat takes over. Server emits
