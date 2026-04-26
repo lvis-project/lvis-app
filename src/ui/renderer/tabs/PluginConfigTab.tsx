@@ -34,7 +34,7 @@ function entriesToConfig(entries: KV[]): Record<string, unknown> {
 
 export function PluginConfigTab() {
   const [plugins, setPlugins] = useState<PluginCardSummary[]>([]);
-  const [installInFlight, setInstallInFlight] = useState<Record<string, "installing" | "restarting">>({});
+  const [installInFlight, setInstallInFlight] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [entries, setEntries] = useState<KV[]>([]);
   const [newKey, setNewKey] = useState("");
@@ -98,8 +98,8 @@ export function PluginConfigTab() {
     const unsubs: Array<() => void> = [];
     if (typeof api.onPluginInstallProgress === "function") {
       unsubs.push(
-        api.onPluginInstallProgress(({ slug, phase }) => {
-          setInstallInFlight((prev) => ({ ...prev, [slug]: phase }));
+        api.onPluginInstallProgress((payload) => {
+          setInstallInFlight((prev) => ({ ...prev, [payload.slug]: payload.phase }));
         }),
       );
     }

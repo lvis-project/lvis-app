@@ -266,7 +266,10 @@ export type LvisApi = {
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
-  onPluginInstallProgress: (h: (payload: { slug: string; phase: "installing" | "restarting" }) => void) => () => void;
+  onPluginInstallProgress: (h: (payload:
+    | { slug: string; phase: "installing" | "restarting" | "verifying" | "extracting" | "registering" }
+    | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
+  ) => void) => () => void;
   getRuntimeCounts: () => Promise<{ tools: number; plugins: number; mcps: number }>;
   getRuntimeEnv: () => Promise<{ platform: string; hostname: string; user: string }>;
   pingMarketplace: () => Promise<{ configured: boolean; online: boolean }>;

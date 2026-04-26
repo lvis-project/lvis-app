@@ -793,7 +793,18 @@ ${input}`;
     // phase events fire — see PluginConfigTab + Sidebar progress UI.
     const win = getMainWindow();
     win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "installing" });
-    const result = await pluginMarketplace.install(pluginId);
+    const result = await pluginMarketplace.install(pluginId, "user", (evt) => {
+      if (evt.phase === "downloading") {
+        win?.webContents.send("lvis:plugins:install-progress", {
+          slug: pluginId,
+          phase: "downloading",
+          bytesDownloaded: evt.bytesDownloaded,
+          bytesTotal: evt.bytesTotal,
+        });
+      } else {
+        win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: evt.phase });
+      }
+    });
     win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
     await pluginRuntime.restartAll();
     refreshPluginNotifications?.();
