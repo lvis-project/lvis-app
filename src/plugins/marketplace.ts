@@ -7,6 +7,7 @@ import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePlugin
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { resolvePluginPaths, type PluginPaths } from "./plugin-paths.js";
+import { assertMockMarketplaceAllowed } from "../boot/dev-flags.js";
 import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -74,12 +75,22 @@ export interface MarketplaceListItem extends PluginMarketplaceItem {
 }
 
 /**
- * @internal Test-only fetcher. Reads a local JSON catalog file.
- * Production code must use {@link RealCloudMarketplaceFetcher} instead.
- * Note: downloadVersion() is not supported.
+ * @internal Dev/test-only fetcher. Reads a local JSON catalog file.
+ *
+ * Production / packaged builds MUST use {@link RealCloudMarketplaceFetcher}
+ * — the constructor throws when invoked in a packaged build via the shared
+ * dev-flags gate. The local `plugins/marketplace.json` is user-writable and
+ * cannot serve as a trust anchor; any packaged binary that fell back to this
+ * fetcher would let local users advertise their own plugins as
+ * `installPolicy:"admin"` and get them auto-installed by the managed
+ * bootstrap (security-reviewer H-1, pre-Phase-2 audit).
+ *
+ * Note: downloadVersion() is not supported regardless of build mode.
  */
 export class MockMarketplaceFetcher implements MarketplaceFetcher {
-  constructor(private readonly marketplacePath: string) {}
+  constructor(private readonly marketplacePath: string) {
+    assertMockMarketplaceAllowed();
+  }
 
   async listPlugins(): Promise<PluginMarketplaceItem[]> {
     const catalog = await this.readCatalog();
