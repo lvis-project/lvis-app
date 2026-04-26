@@ -247,6 +247,8 @@ const RESERVED_HOST_CHANNELS = new Set([
   // #237 Option B — plugin webview bridge channels (plugin-preload.ts only)
   "lvis:plugin:call-tool",
   "lvis:plugin:emit-event",
+  "lvis:plugin:get-entry-url",
+  "lvis:plugin:register-webview",
 ]);
 
 /**
@@ -299,6 +301,27 @@ const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
  * In unit tests, a null/undefined event is treated as trusted (matching the
  * same ergonomics as `validateSender`).
  */
+/**
+ * Plugin webview registry — populated by the host renderer at the
+ * webview's `did-attach` event via `lvis:plugin:register-webview`. Main
+ * resolves `pluginId` and the verified entry URL from `event.sender.id`
+ * on every plugin IPC, eliminating the renderer-supplied pluginId
+ * spoofing surface.
+ *
+ * Key: webContents.id (numeric, assigned by Electron at webview attach).
+ * Value: { pluginId, entryUrl } — both validated against
+ * `pluginRuntime.listPluginIds()` + the manifest's resolved entry path
+ * before being stored.
+ */
+interface PluginWebviewBinding {
+  pluginId: string;
+  entryUrl: string;
+}
+const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
+export function unregisterPluginWebview(webContentsId: number): void {
+  pluginWebviewRegistry.delete(webContentsId);
+}
+
 export function validatePluginFrame(event: IpcMainInvokeEvent | null | undefined): boolean {
   const frame = event?.senderFrame;
   if (!frame) return true; // unit-test ergonomics
@@ -1492,44 +1515,121 @@ ${input}`;
 
   // ─── #237 Option B — Plugin webview bridge ────────────────────────────────
   //
-  // These two handlers are the ONLY IPC surface reachable from plugin webviews
-  // (plugin-preload.ts exposes no other ipcRenderer channels).  They are gated
-  // by validatePluginFrame() so the host renderer's frame cannot reach them
-  // accidentally.
+  // pluginId is NOT supplied by the renderer. The host renderer registers
+  // (webContents.id → pluginId, entryUrl) at the webview's `did-attach`
+  // event via `lvis:plugin:register-webview`. Every subsequent plugin IPC
+  // resolves pluginId from `event.sender.id` against that registry. This
+  // removes the spoofing vector from URL crafting / re-navigation /
+  // history.pushState entirely.
   //
-  // lvis:plugin:call-tool  — routes to pluginRuntime.callFromUi(), which
-  //   enforces the per-plugin uiCallable[] allowlist identical to how the host
-  //   renderer calls lvis:plugins:call.
-  //
-  // lvis:plugin:emit-event — allows a plugin webview to emit an event on the
-  //   host event bus.  Only events declared in the plugin's eventPublishes[]
-  //   actually reach subscribers; unregistered types are silently dropped by
-  //   the runtime's emitEvent() guard.
-  ipcMain.handle("lvis:plugin:call-tool", async (e, pluginId: string, method: string, payload?: unknown) => {
-    if (!validatePluginFrame(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugin:call-tool", e);
+  //   register-webview — host frame only; validates pluginId against the
+  //                      runtime registry + the entryUrl against the
+  //                      manifest before binding webContents.id.
+  //   call-tool        — plugin frame only; cross-plugin call denied at
+  //                      the resolveToolOwner() level.
+  //   emit-event       — plugin frame only; same capability + ownership
+  //                      gate as boot/steps/plugin-runtime.ts:emitEvent.
+  //   get-entry-url    — plugin frame only; returns the verified entry
+  //                      URL bound for this webview's pluginId.
+  ipcMain.handle("lvis:plugin:register-webview", (e, payload: { webContentsId: number; pluginId: string; entryUrl: string }) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugin:register-webview", e);
       return UNAUTHORIZED_FRAME;
     }
-    if (typeof pluginId !== "string" || !pluginId.trim()) {
-      return { ok: false, error: "invalid-plugin-id" };
+    const { webContentsId, pluginId, entryUrl } = payload ?? {};
+    if (typeof webContentsId !== "number" || !Number.isFinite(webContentsId)) {
+      return { ok: false, error: "invalid-webcontents-id" };
+    }
+    if (typeof pluginId !== "string" || !pluginRuntime.getPluginManifest(pluginId)) {
+      return { ok: false, error: "unknown-plugin-id" };
+    }
+    if (typeof entryUrl !== "string" || !entryUrl.startsWith("file://")) {
+      return { ok: false, error: "invalid-entry-url" };
+    }
+    // Defense-in-depth: even though the host renderer derives entryUrl from
+    // the manifest, verify it resolves under the plugin's installed root
+    // before binding. A compromised host renderer (or a future regression)
+    // shouldn't be able to talk main into running an arbitrary file:// URL
+    // as the plugin's entry module. Mirrors the strict containment check
+    // used by the html-shell read path above (realpathSync on both sides
+    // defeats Windows 8.3 short names, junctions, and case-folding tricks).
+    const rawInstallRoot = pluginRuntime.getPluginRoot(pluginId);
+    if (!rawInstallRoot) {
+      return { ok: false, error: "plugin-not-loaded" };
+    }
+    let entryFsPath: string;
+    try {
+      entryFsPath = fileURLToPath(entryUrl);
+    } catch {
+      return { ok: false, error: "invalid-entry-url" };
+    }
+    // Dev-linked mode (npm file: links) legitimately resolves entry paths
+    // outside pluginRoot through a symlink. The prior load-time validator
+    // (resolveEntryPath in plugin-runtime) already vetted the entry; trust
+    // it and only perform the existence check.
+    if (devLinkedEntryAllowed()) {
+      try {
+        realpathSync(entryFsPath);
+      } catch {
+        return { ok: false, error: "entry-url-outside-install-root" };
+      }
+      pluginWebviewRegistry.set(webContentsId, { pluginId, entryUrl });
+      return { ok: true };
+    }
+    let realRoot: string;
+    let realEntry: string;
+    try {
+      realRoot = realpathSync(rawInstallRoot);
+      realEntry = realpathSync(entryFsPath);
+    } catch {
+      return { ok: false, error: "entry-url-outside-install-root" };
+    }
+    const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
+    if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
+      return { ok: false, error: "entry-url-outside-install-root" };
+    }
+    pluginWebviewRegistry.set(webContentsId, { pluginId, entryUrl });
+    return { ok: true };
+  });
+
+  function resolvePluginFromSender(e: IpcMainInvokeEvent): PluginWebviewBinding | null {
+    if (!validatePluginFrame(e)) return null;
+    const senderId = e.sender?.id;
+    if (typeof senderId !== "number") return null;
+    return pluginWebviewRegistry.get(senderId) ?? null;
+  }
+
+  ipcMain.handle("lvis:plugin:get-entry-url", (e) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
+      auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    return { ok: true as const, entryUrl: binding.entryUrl };
+  });
+
+  ipcMain.handle("lvis:plugin:call-tool", async (e, method: string, payload?: unknown) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
+      auditUnauthorized(auditLogger, "lvis:plugin:call-tool", e);
+      return UNAUTHORIZED_FRAME;
     }
     if (typeof method !== "string" || !method.trim()) {
       return { ok: false, error: "invalid-method" };
     }
     // Cross-plugin tool invocation guard — the method's owner MUST be the
-    // calling plugin. `callFromUi` only enforces the global uiCallable[]
-    // allowlist; without this check, plugin A could invoke plugin B's
-    // uiCallable methods just by knowing the method name.
+    // calling plugin (resolved from the webContents binding, not from a
+    // renderer-supplied arg).
     const ownerPluginId = pluginRuntime.resolveToolOwner(method);
     if (!ownerPluginId) {
       return { ok: false, error: `Plugin method not found: ${method}` };
     }
-    if (ownerPluginId !== pluginId) {
+    if (ownerPluginId !== binding.pluginId) {
       auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: "plugin-frame",
         type: "error",
-        input: `[plugin:${pluginId}] cross-plugin call denied: method='${method}' owner='${ownerPluginId}'`,
+        input: `[plugin:${binding.pluginId}] cross-plugin call denied: method='${method}' owner='${ownerPluginId}'`,
       });
       return { ok: false, error: "cross-plugin-call-denied" };
     }
@@ -1541,13 +1641,11 @@ ${input}`;
     }
   });
 
-  ipcMain.handle("lvis:plugin:emit-event", (e, pluginId: string, type: string, data?: unknown) => {
-    if (!validatePluginFrame(e)) {
+  ipcMain.handle("lvis:plugin:emit-event", (e, type: string, data?: unknown) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
       auditUnauthorized(auditLogger, "lvis:plugin:emit-event", e);
       return UNAUTHORIZED_FRAME;
-    }
-    if (typeof pluginId !== "string" || !pluginId.trim()) {
-      return { ok: false, error: "invalid-plugin-id" };
     }
     if (typeof type !== "string" || !type.trim()) {
       return { ok: false, error: "invalid-event-type" };
@@ -1556,7 +1654,7 @@ ${input}`;
     // boot/steps/plugin-runtime.ts:emitEvent. Without this, a plugin
     // webview can forge events it doesn't own (e.g. meeting.summary.created
     // from a non-meeting plugin) and trigger downstream subscribers.
-    const manifest = pluginRuntime.getPluginManifest(pluginId);
+    const manifest = pluginRuntime.getPluginManifest(binding.pluginId);
     if (!manifest) {
       return { ok: false, error: "unknown-plugin-id" };
     }
@@ -1565,12 +1663,12 @@ ${input}`;
       return { ok: false, error: `missing-capability:${requiredCap}` };
     }
     try {
-      pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
+      pluginRuntime.assertPluginEventEmitAccess(binding.pluginId, type);
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
     try {
-      emitHostEvent(type, { ...((data as Record<string, unknown>) ?? {}), pluginId });
+      emitHostEvent(type, { ...((data as Record<string, unknown>) ?? {}), pluginId: binding.pluginId });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: (err as Error).message };

@@ -1,23 +1,20 @@
 /**
  * Plugin UI Host — #237 Option B
  *
- * Replaced the previous inline-import path (import(blobUrl) into the host
- * renderer's window) with an Electron <webview> that runs inside its own
- * renderer process and session partition.
+ * Mounts a plugin's sidebar UI inside an Electron <webview> running in its
+ * own renderer process + session partition. Security boundary:
+ *   • contextIsolation=true, nodeIntegration=false, sandbox=true.
+ *   • window.lvisApi is NOT exposed; only window.lvisPlugin from
+ *     plugin-preload.ts (callTool / emitEvent / onEvent / getEntryUrl).
+ *   • persist:plugin:<hash> partition silos cookies / IndexedDB / cache.
  *
- * Security properties of the new approach:
- *   • Plugin code runs in a separate OS process with contextIsolation=true,
- *     nodeIntegration=false, sandbox=true.
- *   • window.lvisApi is NOT available inside the webview — only window.lvisPlugin
- *     (injected by plugin-preload.ts), which exposes callTool / emitEvent /
- *     onEvent only.
- *   • Each plugin gets its own session partition (persist:plugin:<slug>) so
- *     storage / cookies / cache are silo-ed between plugins.
- *   • Lifecycle events, runtime counts, marketplace ping — none reachable.
- *
- * Fallback: if the webview's entryUrl is not a file:// path (dev server case)
- * we still render the webview pointing at the dev URL so hot-reload keeps
- * working during development.
+ * pluginId is NOT carried in the webview src query string. Instead, the
+ * host renderer registers (webContents.id → pluginId) with main on the
+ * `did-attach` event, before any IPC from the webview can land. Main
+ * resolves pluginId from `event.sender.id` on every plugin IPC. This
+ * removes the spoofing vector from history.pushState / re-navigation /
+ * URL crafting and lets us drop `entry` from the URL entirely (the shell
+ * fetches it via `lvisPlugin.getEntryUrl()`).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
@@ -39,19 +36,15 @@ export type PluginUiExtensionView = {
   entryUrl?: string;
 };
 
-/**
- * PluginUiBridge — kept for backward-compat typing; the actual bridge is now
- * window.lvisPlugin inside the webview, not this renderer-side object.
- */
-export type PluginUiBridge = {
-  callPluginMethod: (method: string, payload?: unknown) => Promise<unknown>;
-  askInHomeChat: (question: string) => Promise<void>;
-  addTask: (task: { title: string; source: string; sourceRef?: string; priority?: string; description?: string; dueAt?: string }) => Promise<unknown>;
-};
-
 export type PluginUiMountContext = {
   root: HTMLElement;
-  bridge: PluginUiBridge;
+  /** The narrow lvisPlugin bridge — see plugin-preload.ts. */
+  bridge: {
+    callTool: (name: string, args?: unknown) => Promise<unknown>;
+    emitEvent: (type: string, data?: unknown) => Promise<void>;
+    onEvent: (type: string, handler: (data: unknown) => void) => () => void;
+    getEntryUrl: () => Promise<string>;
+  };
   extension: PluginUiExtensionView["extension"];
 };
 
@@ -60,28 +53,16 @@ function getPluginViewLabel(item: PluginUiExtensionView): string {
 }
 
 /**
- * Derive the <webview> src URL from the view's entryUrl.
- *
- * The plugin-ui-shell.html is shipped alongside index.html in dist/src/.
- * We derive its path by replacing the renderer's own URL's filename with
- * plugin-ui-shell.html and append ?pluginId=&entry= query params.
- *
- * In the packaged app the renderer loads from a file:// URL so we can
- * use the same origin for the shell.  In the Vite dev server we point at
- * the shell served from the same dev server (the Vite config copy-plugin
- * must copy plugin-ui-shell.html to the dev-server root for this to work).
- */
-/**
  * Stable, collision-resistant per-plugin partition slug. Two pluginIds
  * that normalize to the same `[a-z0-9-]` slug would otherwise share the
- * `persist:plugin:` storage silo (cookies, IndexedDB, localStorage). Hash
- * the raw pluginId instead so plugin authors cannot pre-meditate a slug
- * collision via marketplace upload.
+ * `persist:plugin:` storage silo. Hash the raw pluginId so plugin authors
+ * cannot pre-meditate a slug collision via marketplace upload.
+ *
+ * 32-bit FNV-1a → 8 hex chars. Synchronous (renderer can't use SubtleCrypto
+ * inline) and good enough for collision resistance on a per-user plugin
+ * set < ~10k.
  */
 function pluginPartitionHash(pluginId: string): string {
-  // Web Crypto SubtleCrypto is async; for a renderer-side synchronous use
-  // we rely on a small FNV-1a 32-bit hash, hex-encoded. 8 hex chars are
-  // enough collision resistance for a per-user plugin set < ~10k.
   let h = 2166136261;
   for (let i = 0; i < pluginId.length; i++) {
     h ^= pluginId.charCodeAt(i);
@@ -90,71 +71,67 @@ function pluginPartitionHash(pluginId: string): string {
   return (h >>> 0).toString(16).padStart(8, "0");
 }
 
-function buildWebviewSrc(view: PluginUiExtensionView): string | null {
-  const entryUrl = view.entryUrl;
-  if (!entryUrl) return null;
-
-  // Determine shell base — same directory as the current document.
-  let shellBase: string;
+function resolveShellUrl(): string | null {
   try {
-    shellBase = new URL("plugin-ui-shell.html", window.location.href).toString();
+    return new URL("plugin-ui-shell.html", window.location.href).toString();
   } catch {
-    // Fallback: relative path (works when window.location is a file:// URL).
-    shellBase = "plugin-ui-shell.html";
+    return null;
   }
-
-  const params = new URLSearchParams({
-    pluginId: view.pluginId,
-    entry: entryUrl,
-  });
-  return `${shellBase}?${params.toString()}`;
 }
 
-export function PluginUiHostView({
-  view,
-  callPluginMethod,
-  onAskInHomeChat,
-  onAddTask,
-}: {
-  view: PluginUiExtensionView | null;
-  callPluginMethod: (method: string, payload?: unknown) => Promise<unknown>;
-  onAskInHomeChat: (question: string) => Promise<void>;
-  onAddTask: PluginUiBridge["addTask"];
-}) {
-  // Keep callPluginMethod etc. stable in refs so the webview ref callback
-  // does not regenerate on every render.
-  const callPluginMethodRef = useRef(callPluginMethod);
-  callPluginMethodRef.current = callPluginMethod;
-  const onAskInHomeChatRef = useRef(onAskInHomeChat);
-  onAskInHomeChatRef.current = onAskInHomeChat;
-  const onAddTaskRef = useRef(onAddTask);
-  onAddTaskRef.current = onAddTask;
+function resolvePreloadUrl(): string {
+  try {
+    return new URL("plugin-preload.js", window.location.href).toString();
+  } catch {
+    return "";
+  }
+}
 
+export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null }) {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   // Electron <webview> is a custom element — React's synthetic onLoad /
-  // onError do not fire for it. Wire native DOM listeners via the ref
-  // callback so the loading-spinner clears and load failures surface in
-  // the UI. Listeners use stable refs so add/remove identity matches.
+  // onError do not fire. Wire native DOM listeners via the ref callback
+  // with stable refs so add/remove identity matches.
   const onFinishRef = useRef(() => setLoading(false));
   const onFailRef = useRef(() => {
     setLoading(false);
     setErrorText("Plugin webview 로딩 실패.");
   });
+
+  // On did-attach, register the (webContents.id → pluginId, entryUrl)
+  // mapping with main BEFORE the webview navigates. Subsequent plugin
+  // IPCs (call-tool / emit-event / get-entry-url) derive pluginId from
+  // event.sender.id; the renderer-supplied pluginId arg is gone.
+  const onDidAttachRef = useRef<(() => void) | null>(null);
   const webviewRef = useRef<Electron.WebviewTag | null>(null);
+
   const handleWebviewRef = useCallback((node: Electron.WebviewTag | null) => {
     const prev = webviewRef.current;
     if (prev) {
       prev.removeEventListener("did-finish-load", onFinishRef.current);
       prev.removeEventListener("did-fail-load", onFailRef.current);
+      const onAttach = onDidAttachRef.current;
+      if (onAttach) prev.removeEventListener("did-attach", onAttach);
     }
     webviewRef.current = node;
     if (node) {
       node.addEventListener("did-finish-load", onFinishRef.current);
       node.addEventListener("did-fail-load", onFailRef.current);
+      const onAttach = () => {
+        const wcId = node.getWebContentsId();
+        const pluginId = view?.pluginId;
+        const entryUrl = view?.entryUrl;
+        if (typeof wcId !== "number" || !pluginId || !entryUrl) return;
+        // Fire-and-forget — main rejects unknown pluginId / non-host frame.
+        const api = (window as unknown as { lvisApi?: { registerPluginWebview?: (p: { webContentsId: number; pluginId: string; entryUrl: string }) => Promise<unknown> } }).lvisApi;
+        void api?.registerPluginWebview?.({ webContentsId: wcId, pluginId, entryUrl });
+      };
+      onDidAttachRef.current = onAttach;
+      node.addEventListener("did-attach", onAttach);
     }
-  }, []);
+  }, [view?.pluginId, view?.entryUrl]);
 
   useEffect(() => {
     if (!view) {
@@ -179,37 +156,19 @@ export function PluginUiHostView({
   } else if (!view || !view.entryUrl) {
     content = <div className="px-3 py-2 text-xs text-muted-foreground">UI 모듈 엔트리를 찾을 수 없습니다.</div>;
   } else {
-    const webviewSrc = buildWebviewSrc(view);
-    // Partition: persist:plugin:<hash> gives each plugin its own silo.
-    // Hash the pluginId so partitions never collide across plugins whose
-    // slugs would otherwise normalize to the same string (e.g.,
-    // `com.lge.foo` vs `com-lge-foo`). 12-byte SHA-256 prefix is plenty
-    // for collision-resistance on a small plugin set.
-    const partition = `persist:plugin:${pluginPartitionHash(view.pluginId)}`;
-
-    if (!webviewSrc) {
+    const shellUrl = resolveShellUrl();
+    if (!shellUrl) {
       content = <div className="px-3 py-2 text-xs text-muted-foreground">Webview src를 계산할 수 없습니다.</div>;
     } else {
-      // Resolve preload script as file:// — webview's `preload` attribute
-      // requires an absolute URL. The plugin-preload.js bundle is copied
-      // into dist/src/ alongside the shell HTML during build.
-      let preloadUrl = "";
-      try {
-        preloadUrl = new URL("plugin-preload.js", window.location.href).toString();
-      } catch {
-        preloadUrl = "";
-      }
+      const partition = `persist:plugin:${pluginPartitionHash(view.pluginId)}`;
+      const preloadUrl = resolvePreloadUrl();
       content = (
         <webview
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={handleWebviewRef as any}
-          src={webviewSrc}
+          src={shellUrl}
           partition={partition}
           preload={preloadUrl}
-          // Security: no node integration, context isolation enforced by
-          // Electron for webviews when the host window has contextIsolation=true.
-          // allowpopups is absent → popups blocked by default.
-          // disablewebsecurity is absent → same-origin + CORS enforced.
           webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
           style={{ width: "100%", height: "100%", border: "none" }}
         />
