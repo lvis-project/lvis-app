@@ -41,8 +41,7 @@
 import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
-import { resolve } from "node:path";
-import { DisabledMarketplaceFetcher, MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
+import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
 import { StarredStore } from "./data/starred-store.js";
@@ -153,48 +152,25 @@ export async function bootstrap(
 
   // §9.5 M4: marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
-  // Selection rules:
-  //  - real-cloud + URL → RealCloudMarketplaceFetcher (production path)
-  //  - packaged + (no real-cloud OR mock) → DisabledMarketplaceFetcher (stub).
-  //    `MockMarketplaceFetcher` is dev-only and refuses to construct in
-  //    packaged builds (security-reviewer H-1: user-writable mock catalog
-  //    cannot be a trust anchor). `resolveManagedPluginBootstrap` already
-  //    short-circuits this combination, but the service must still
-  //    instantiate without crashing for boot to complete.
-  //  - dev + mock → undefined (service falls back to MockMarketplaceFetcher,
-  //    which reads the local plugins/marketplace.json fresh).
-  // Phase 2a marketplace fetcher selection — every branch produces a fetcher;
-  // PluginMarketplaceService no longer falls back to a mock internally.
-  //   - real-cloud + URL → RealCloudMarketplaceFetcher (production path)
-  //   - packaged + (no real-cloud OR mock) → DisabledMarketplaceFetcher
-  //     (safe stub; resolveManagedPluginBootstrap short-circuits before use)
-  //   - dev unpackaged + mock → MockMarketplaceFetcher reading the in-tree
-  //     `plugins/marketplace.json`. This file ships with the dev workspace
-  //     only — Phase 2e deletes it once dev workflows route through a
-  //     localhost marketplace server.
+  // Phase 2-final marketplace fetcher selection — single production path:
+  //   - real-cloud + URL → RealCloudMarketplaceFetcher
+  //   - otherwise (no URL configured) → DisabledMarketplaceFetcher
+  // No `MockMarketplaceFetcher` fallback at boot. Dev environments default
+  // to `realCloudBaseUrl: "http://localhost:8000"` (settings-store default)
+  // and run the marketplace server locally; tests inject their own fetcher.
   let marketplaceFetcher: MarketplaceFetcher;
-  if (
-    marketplaceSettings.backend === "real-cloud" &&
-    marketplaceSettings.realCloudBaseUrl
-  ) {
+  if (marketplaceSettings.realCloudBaseUrl) {
     marketplaceFetcher = new RealCloudMarketplaceFetcher({
       baseUrl: marketplaceSettings.realCloudBaseUrl,
       apiKey: settingsService.getSecret("marketplace.apiKey") ?? undefined,
       allowPrivateNetwork: marketplaceSettings.realCloudAllowPrivateNetwork,
     });
     console.log("[lvis] boot: marketplace backend = real-cloud (%s)", marketplaceSettings.realCloudBaseUrl);
-  } else if (app.isPackaged) {
-    marketplaceFetcher = new DisabledMarketplaceFetcher();
-    console.warn(
-      "[lvis] boot: marketplace backend disabled in packaged build (no real-cloud URL configured)",
-    );
   } else {
-    marketplaceFetcher = new MockMarketplaceFetcher(
-      resolve(projectRoot, "plugins/marketplace.json"),
-    );
+    marketplaceFetcher = new DisabledMarketplaceFetcher();
+    console.warn("[lvis] boot: marketplace backend disabled (no realCloudBaseUrl configured)");
   }
   const pluginMarketplace = new PluginMarketplaceService(
-    projectRoot,
     pluginPaths,
     marketplaceFetcher,
     deploymentGuard,

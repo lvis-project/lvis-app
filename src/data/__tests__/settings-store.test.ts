@@ -31,34 +31,32 @@ describe("SettingsService marketplace defaults", () => {
     rmSync(userDataPath, { recursive: true, force: true });
   });
 
-  it("defaults to the safe mock marketplace backend", () => {
+  it("defaults to real-cloud against the local marketplace server", () => {
+    // Phase 2-final: marketplace server is the single source. Default
+    // points at the dev localhost server; production deployments override
+    // via settings UI / installer config.
     const service = new SettingsService({ userDataPath });
 
     expect(service.get("marketplace")).toEqual({
-      backend: "mock",
-      realCloudAllowPrivateNetwork: false,
+      backend: "real-cloud",
+      realCloudBaseUrl: "http://localhost:8000",
+      realCloudAllowPrivateNetwork: true,
     });
   });
 
-  it("migrates the legacy localhost real-cloud default back to the safe mock backend", () => {
+  it("coerces legacy 'mock' backend to real-cloud", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
       JSON.stringify({
         marketplace: {
-          backend: "real-cloud",
-          realCloudBaseUrl: "http://localhost:8000",
-          realCloudAllowPrivateNetwork: true,
+          backend: "mock",
         },
       }),
       "utf-8",
     );
 
     const service = new SettingsService({ userDataPath });
-
-    expect(service.get("marketplace")).toEqual({
-      backend: "mock",
-      realCloudAllowPrivateNetwork: false,
-    });
+    expect(service.get("marketplace").backend).toBe("real-cloud");
   });
 
   it("preserves an explicitly configured real-cloud endpoint", () => {
