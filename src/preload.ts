@@ -219,6 +219,7 @@ const api = {
   onTriggerStarted: (
     handler: (payload: {
       sessionId: string;
+      pluginId: string;
       source: string;
       visibility: "silent" | "summary-only" | "user-visible";
       priority: "low" | "normal" | "high";
@@ -232,6 +233,7 @@ const api = {
   onTriggerCompleted: (
     handler: (result: {
       sessionId: string;
+      pluginId: string;
       source: string;
       visibility: "silent" | "summary-only" | "user-visible";
       priority: "low" | "normal" | "high";
