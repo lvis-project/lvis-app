@@ -8,7 +8,7 @@ import { getHostMarketplaceApi } from "../host-marketplace-api.js";
  * surfaces (sidebar placeholder + settings tab skeleton) read this map to
  * render an in-flight indicator while the main process drives the install.
  */
-export type InstallPhase = "installing" | "restarting";
+export type InstallPhase = "installing" | "downloading" | "verifying" | "registering" | "restarting";
 export type InstallInFlight = Record<string, InstallPhase>;
 
 /**
@@ -81,8 +81,8 @@ export function usePluginMarketplace(api: LvisApi) {
     const unsubs: Array<() => void> = [];
     if (typeof api.onPluginInstallProgress === "function") {
       unsubs.push(
-        api.onPluginInstallProgress(({ slug, phase }) => {
-          setInstallInFlight((prev) => ({ ...prev, [slug]: phase }));
+        api.onPluginInstallProgress((payload) => {
+          setInstallInFlight((prev) => ({ ...prev, [payload.slug]: payload.phase }));
         }),
       );
     }

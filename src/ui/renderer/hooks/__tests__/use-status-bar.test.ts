@@ -158,10 +158,14 @@ describe("useStatusBar — removePersistent", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Case 5 — Install lifecycle producer wires onPluginInstallProgress
 // ─────────────────────────────────────────────────────────────────────────────
+type InstallProgressPayload =
+  | { slug: string; phase: "installing" | "restarting" | "verifying" | "extracting" | "registering" }
+  | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null };
+
 describe("useStatusBar — install lifecycle producer", () => {
   it("pushes a toast when onPluginInstallProgress fires with phase=installing", () => {
     let capturedHandler:
-      | ((payload: { slug: string; phase: "installing" | "restarting" }) => void)
+      | ((payload: InstallProgressPayload) => void)
       | null = null;
 
     const api = makeApi({
@@ -188,7 +192,7 @@ describe("useStatusBar — install lifecycle producer", () => {
 
   it("safeField strips C0 control characters (0x00–0x1F) from slug", () => {
     let capturedHandler:
-      | ((payload: { slug: string; phase: "installing" | "restarting" }) => void)
+      | ((payload: InstallProgressPayload) => void)
       | null = null;
 
     const api = makeApi({
@@ -212,6 +216,94 @@ describe("useStatusBar — install lifecycle producer", () => {
       capturedHandler!({ slug: "a\tb\nc\rd", phase: "installing" });
     });
     expect(result.current.toasts[1]?.message).toBe("abcd 설치 중…");
+  });
+
+  it("renders downloading label with byte counts when bytesTotal is known", () => {
+    let capturedHandler: ((payload: InstallProgressPayload) => void) | null = null;
+
+    const api = makeApi({
+      onPluginInstallProgress: vi.fn((h) => {
+        capturedHandler = h;
+        return noop();
+      }),
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    act(() => {
+      capturedHandler!({
+        slug: "agent-hub",
+        phase: "downloading",
+        bytesDownloaded: 13_000_000,
+        bytesTotal: 32_000_000,
+      });
+    });
+
+    expect(result.current.toasts).toHaveLength(1);
+    // 13 000 000 bytes = 12.4 MB (rounded), 32 000 000 bytes = 30.5 MB
+    expect(result.current.toasts[0]?.message).toBe("12.4 MB / 30.5 MB · agent-hub 다운로드 중");
+  });
+
+  it("renders downloading label without denominator when bytesTotal is null", () => {
+    let capturedHandler: ((payload: InstallProgressPayload) => void) | null = null;
+
+    const api = makeApi({
+      onPluginInstallProgress: vi.fn((h) => {
+        capturedHandler = h;
+        return noop();
+      }),
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    act(() => {
+      capturedHandler!({
+        slug: "my-plugin",
+        phase: "downloading",
+        bytesDownloaded: 5_000,
+        bytesTotal: null,
+      });
+    });
+
+    expect(result.current.toasts[0]?.message).toBe("my-plugin … 다운로드 중");
+  });
+
+  it("renders verifying label for phase=verifying", () => {
+    let capturedHandler: ((payload: InstallProgressPayload) => void) | null = null;
+
+    const api = makeApi({
+      onPluginInstallProgress: vi.fn((h) => {
+        capturedHandler = h;
+        return noop();
+      }),
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    act(() => {
+      capturedHandler!({ slug: "agent-hub", phase: "verifying" });
+    });
+
+    expect(result.current.toasts[0]?.message).toBe("agent-hub 검증 중…");
+  });
+
+  it("renders registering label for phase=registering", () => {
+    let capturedHandler: ((payload: InstallProgressPayload) => void) | null = null;
+
+    const api = makeApi({
+      onPluginInstallProgress: vi.fn((h) => {
+        capturedHandler = h;
+        return noop();
+      }),
+    });
+
+    const { result } = renderHook(() => useStatusBar({ api }));
+
+    act(() => {
+      capturedHandler!({ slug: "agent-hub", phase: "registering" });
+    });
+
+    expect(result.current.toasts[0]?.message).toBe("agent-hub 등록 중…");
   });
 });
 

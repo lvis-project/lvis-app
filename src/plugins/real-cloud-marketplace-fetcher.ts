@@ -125,6 +125,7 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
   async downloadArtifact(
     slug: string,
     version: string,
+    onChunk?: (bytesDownloaded: number, bytesTotal: number | null) => void,
   ): Promise<{
     body: Buffer;
     sha256Header: string | null;
@@ -137,10 +138,56 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
       { accept: "application/octet-stream" },
       { allowNonOk: true },
     );
-    const arrayBuffer = await res.arrayBuffer();
     const retryAfter = parseRetryAfterSeconds(res.headers?.get?.("retry-after") ?? null);
+
+    if (!onChunk || !res.body) {
+      // Fast path: no progress reporting needed or no readable stream available.
+      const arrayBuffer = await res.arrayBuffer();
+      return {
+        body: Buffer.from(arrayBuffer),
+        sha256Header: res.headers?.get?.("x-plugin-sha256") ?? null,
+        status: res.status,
+        retryAfterSeconds: retryAfter ?? undefined,
+      };
+    }
+
+    // Streaming path: accumulate chunks and emit throttled progress callbacks.
+    const contentLength = res.headers?.get?.("content-length");
+    const bytesTotal = contentLength ? parseInt(contentLength, 10) : null;
+    const validBytesTotal =
+      bytesTotal !== null && Number.isFinite(bytesTotal) && bytesTotal > 0
+        ? bytesTotal
+        : null;
+
+    const chunks: Buffer[] = [];
+    let bytesDownloaded = 0;
+    // Throttle: emit at most once per 100 ms to avoid IPC flooding.
+    let lastEmitMs = 0;
+    const THROTTLE_MS = 100;
+
+    const reader = res.body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(Buffer.from(value));
+          bytesDownloaded += value.byteLength;
+          const now = Date.now();
+          if (now - lastEmitMs >= THROTTLE_MS) {
+            lastEmitMs = now;
+            onChunk(bytesDownloaded, validBytesTotal);
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    // Always emit final progress so the bar reaches 100%.
+    onChunk(bytesDownloaded, validBytesTotal);
+
     return {
-      body: Buffer.from(arrayBuffer),
+      body: Buffer.concat(chunks),
       sha256Header: res.headers?.get?.("x-plugin-sha256") ?? null,
       status: res.status,
       retryAfterSeconds: retryAfter ?? undefined,
