@@ -145,111 +145,23 @@ type ConversationTurnResult = {
   stopReason?: "end_turn" | "tool_use" | "interrupted";
 };
 
-/**
- * All IPC channels reserved by the host. Plugin manifests must not declare
- * channels that collide with these, as doing so would shadow privileged
- * host handlers and create unpredictable (or malicious) behaviour.
- *
- * MAINTAINERS: add a new entry here whenever you register a new host channel
- * with ipcMain.handle() inside registerIpcHandlers().
- */
-const RESERVED_HOST_CHANNELS = new Set([
-  "lvis:settings:get",
-  "lvis:settings:update",
-  "lvis:settings:set-api-key",
-  "lvis:settings:has-api-key",
-  "lvis:settings:delete-api-key",
-  "lvis:settings:set-web-api-key",
-  "lvis:settings:has-web-api-key",
-  "lvis:settings:delete-web-api-key",
-  "lvis:ms-graph:get-state",
-  "lvis:ms-graph:switch-environment",
-  "lvis:ms-graph:sign-in",
-  "lvis:ms-graph:sign-out",
-  "lvis:chat:has-provider",
-  "lvis:chat:send",
-  "lvis:chat:guide",
-  "lvis:chat:new",
-  "lvis:chat:sessions",
-  "lvis:chat:load-session",
-  "lvis:memory:entries:list",
-  "lvis:memory:entries:save",
-  "lvis:memory:entries:delete",
-  "lvis:memory:entries:search",
-  "lvis:memory:sessions:list",
-  "lvis:memory:sessions:search",
-  "lvis:memory:lvis-md:get",
-  "lvis:memory:lvis-md:update",
-  "lvis:memory:user-prefs:get",
-  "lvis:memory:user-prefs:update",
-  "lvis:plugins:marketplace:list",
-  "lvis:plugins:install",
-  "lvis:plugins:uninstall",
-  "lvis:plugins:ui:list",
-  "lvis:plugins:ui:read-module",
-  "lvis:plugins:call",
-  "lvis:mcp:servers",
-  "lvis:mcp:kill",
-  "lvis:mcp:config:get",
-  "lvis:mcp:config:path",
-  "lvis:mcp:config:add",
-  "lvis:mcp:config:remove",
-  "lvis:mcp:ui-resource",
-  "lvis:permission:get-mode",
-  "lvis:permission:set-mode",
-  "lvis:permission:list-rules",
-  "lvis:permission:add-rule",
-  "lvis:permission:remove-rule",
-  "lvis:approval:respond",
-  "lvis:policy:get",
-  "lvis:policy:set",
-  "lvis:tasks:add",
-  "lvis:tasks:update",
-  "lvis:tasks:get",
-  "lvis:tasks:delete",
-  "lvis:tasks:query",
-  "lvis:tasks:pending",
-  "lvis:tasks:overdue",
-  "lvis:tasks:today",
-  "lvis:routine:get-latest-result",
-  "lvis:routines:dev-trigger-wakeup",
-  "lvis:routines:dev-trigger-schedule",
-  "lvis:routines:dev-trigger-shutdown",
-  // Brain — proactive trigger renderer-side IPC
-  "lvis:trigger:dismiss",
-  "lvis:trigger:import",
-  // Sprint 4.B — usage observability
-  "lvis:usage:summary",
-  "lvis:usage:range",
-  "lvis:usage:export-csv",
-  // Sprint 4.C — conversation UX
-  "lvis:chat:get-history",
-  "lvis:chat:edit-resend",
-  "lvis:chat:fork",
-  "lvis:chat:retry-effort",
-  "lvis:chat:export",
-  "lvis:chat:compact",
-  "lvis:chat:session-resume",
-  "lvis:starred:list",
-  "lvis:starred:add",
-  "lvis:starred:remove",
-  "lvis:plugins:cards",
-  "lvis:plugins:config:get",
-  "lvis:plugins:config:set",
-  "lvis:feedback:submit",
-  "lvis:telemetry:consent-answer",
-  "lvis:audit:search",
-  "lvis:audit:stats",
-  "lvis:plugins:perf-stats",
-  "lvis:dlp:stats",
-  "lvis:chat:abort",
-  "lvis:pageindex:scan-paths",
-  // #237 Option B — plugin webview bridge channels (plugin-preload.ts only)
-  "lvis:plugin:call-tool",
-  "lvis:plugin:emit-event",
-  "lvis:plugin:get-entry-url",
-  "lvis:plugin:register-webview",
-]);
+// R2-CR-5: previously a `RESERVED_HOST_CHANNELS` Set was declared here as
+// "documentation" of host-owned `lvis:*` channels. It was never `.has()`-ed
+// anywhere — adding entries to it provided zero defense against plugins
+// registering colliding channel names, so it functioned as an attractive
+// nuisance for maintainers (a list that LOOKS like a check but isn't).
+//
+// The actual defense lives elsewhere and is much narrower: plugin code only
+// runs inside a sandboxed `<webview>` partition (#237 Option B) whose
+// preload (`plugin-preload.ts`) exposes ONLY the `lvisPlugin` bridge —
+// `lvisApi` (the host's privileged surface) is never injected. So a plugin
+// cannot reach `ipcRenderer.invoke("lvis:settings:set-api-key", …)` even
+// if it knew the channel name. Channel-name collisions on the renderer
+// side are therefore not a useful threat model in this build.
+//
+// If a future host design ever loads plugin code into the same context as
+// the renderer (don't), reintroduce a Set here and check it at registration
+// time so the documentation matches the code.
 
 /**
  * M3 — IPC sender validation. Sensitive handlers (api-key mutation, plugin
@@ -385,6 +297,9 @@ export function registerIpcHandlers(
     feedbackStore,
     auditLogger,
     msGraphService,
+    askUserQuestionGate,
+    remindersStore,
+    sessionTodoStore,
   } = services;
 
   // Wire DLP audit logging so redactForLLM records hits to audit JSONL.
@@ -1674,4 +1589,85 @@ ${input}`;
       return { ok: false, error: (err as Error).message };
     }
   });
+
+  // ─── Workflow tools (S1+S2) ─────────────────────────────────────────────
+  // ask_user_question response — renderer dispatches when the user clicks a
+  // choice / submits free text / dismisses. Sender guarded so untrusted
+  // frames cannot inject answers on behalf of the user.
+  ipcMain.handle("lvis:ask-user-question:respond", (e, response: unknown) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:ask-user-question:respond", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!askUserQuestionGate) {
+      return { ok: false, error: "ask-user-question gate not configured" };
+    }
+    const r = (response ?? {}) as Record<string, unknown>;
+    const requestId = typeof r.requestId === "string" ? r.requestId : "";
+    if (!requestId) return { ok: false, error: "invalid-request-id" };
+    askUserQuestionGate.resolve({
+      requestId,
+      choice: typeof r.choice === "string" ? r.choice : undefined,
+      freeText: typeof r.freeText === "string" ? r.freeText : undefined,
+      dismissed: r.dismissed === true,
+    });
+    return { ok: true };
+  });
+
+  // reminders — list + dismiss + remove. M3: list is technically read-only
+  // but exposes user-authored content (PII risk if a third-party plugin
+  // webview probes it), so it goes through validateSender + audit just
+  // like the mutation channels. Mirrors the lvis:ms-graph:get-state pattern.
+  ipcMain.handle("lvis:reminders:list", (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:reminders:list", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!remindersStore) return [];
+    return remindersStore.listActive();
+  });
+  ipcMain.handle("lvis:reminders:dismiss", async (e, id: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:reminders:dismiss", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!remindersStore) return { ok: false, error: "no-store" };
+    const ok = await remindersStore.dismiss(id);
+    return { ok };
+  });
+  ipcMain.handle("lvis:reminders:remove", async (e, id: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:reminders:remove", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!remindersStore) return { ok: false, error: "no-store" };
+    const ok = await remindersStore.remove(id);
+    return { ok };
+  });
+
+  // session-todo — read-only list per chat session (defaults to current
+  // ConversationLoop session). The renderer subscribes to push updates via
+  // `lvis:session-todo:changed` events emitted by SessionTodoStore listeners.
+  // M3: read-only but exposes user-authored content; gate behind validateSender.
+  ipcMain.handle("lvis:session-todo:list", (e, sessionId?: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:session-todo:list", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!sessionTodoStore) return [];
+    const sid = sessionId ?? conversationLoop.getSessionId();
+    return sessionTodoStore.list(sid);
+  });
+  if (sessionTodoStore) {
+    sessionTodoStore.onChange((sessionId, items) => {
+      try {
+        getMainWindow()?.webContents.send("lvis:session-todo:changed", {
+          sessionId,
+          items,
+        });
+      } catch (err) {
+        console.warn("[lvis] session-todo emit failed:", (err as Error).message);
+      }
+    });
+  }
 }

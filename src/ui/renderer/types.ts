@@ -288,6 +288,78 @@ export type LvisApi = {
   plugins: {
     getPerfStats: () => Promise<Record<string, PluginPerfStats>>;
   };
+  // Workflow tools (S1+S2)
+  onAskUserQuestion: (
+    h: (req: {
+      id: string;
+      question: string;
+      choices?: string[];
+      allowFreeText: boolean;
+      urgent: boolean;
+      createdAt: number;
+    }) => void,
+  ) => () => void;
+  respondAskUserQuestion: (response: {
+    requestId: string;
+    choice?: string;
+    freeText?: string;
+    dismissed?: boolean;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  /** M2: renderer is notified when the gate's 5-minute timeout fires. */
+  onAskUserQuestionTimeout?: (
+    h: (payload: { requestId: string }) => void,
+  ) => () => void;
+  listReminders: () => Promise<
+    Array<{
+      id: string;
+      at: string;
+      title: string;
+      body?: string;
+      repeat: "daily" | "weekly" | "none";
+      createdAt: string;
+      lastFiredAt?: string;
+      dismissedAt?: string;
+    }>
+  >;
+  dismissReminder: (id: string) => Promise<{ ok: boolean }>;
+  removeReminder: (id: string) => Promise<{ ok: boolean }>;
+  onReminderFired: (
+    h: (reminder: {
+      id: string;
+      at: string;
+      title: string;
+      body?: string;
+      repeat: "daily" | "weekly" | "none";
+    }) => void,
+  ) => () => void;
+  listSessionTodos: (sessionId?: string) => Promise<
+    Array<{ id: string; content: string; status: string }>
+  >;
+  onSessionTodoChanged: (
+    h: (payload: {
+      sessionId: string;
+      items: Array<{ id: string; content: string; status: string }>;
+    }) => void,
+  ) => () => void;
+  onAgentSpawnEvent: (
+    h: (event: {
+      spawnId: string;
+      type: "start" | "turn" | "done" | "error";
+      title?: string;
+      turn?: number;
+      text?: string;
+      summary?: string;
+      toolCallCount?: number;
+      message?: string;
+    }) => void,
+  ) => () => void;
+  onSkillLoaded: (
+    h: (event: {
+      name: string;
+      description: string;
+      source: "user" | "builtin";
+    }) => void,
+  ) => () => void;
 };
 
 // ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─
