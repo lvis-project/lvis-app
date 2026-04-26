@@ -124,6 +124,7 @@ export async function bootstrap(
     deploymentGuard,
     taskSourceRegistry,
     lateBinding,
+    pluginPaths,
   } = await initPluginRuntime({
     projectRoot,
     settingsService,
@@ -173,6 +174,8 @@ export async function bootstrap(
     projectRoot,
     deploymentGuard,
     marketplaceFetcher,
+    undefined,
+    pluginPaths,
   );
 
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
@@ -348,6 +351,7 @@ export async function bootstrap(
       mainWindow,
       settingsService,
       marketplaceFetcher: updateCheckFetcher,
+      pluginPaths,
     });
   }
 
