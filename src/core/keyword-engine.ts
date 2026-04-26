@@ -12,6 +12,8 @@
  * 5. 일반 대화 (fallback)
  */
 
+import { parseImportedTriggerEnvelope } from "../engine/proactive-source.js";
+
 // ─── Types ──────────────────────────────────────────
 
 export type InputClassification =
@@ -73,6 +75,15 @@ export class KeywordEngine {
   /** 사용자 입력 분류 — §6.1 우선순위 기반 */
   classify(input: string): InputClassification {
     const trimmed = input.trim();
+
+    // 0. Brain proactive trigger envelope — bypass skill-keyword
+    // matching. Shares its pattern with ipc-bridge.ts's
+    // originSource detection, the host gate, and the trigger
+    // executor's wrap (see engine/proactive-source.ts) so all
+    // gates agree on what counts as a valid envelope.
+    if (parseImportedTriggerEnvelope(trimmed) !== null) {
+      return { type: "general", input: trimmed };
+    }
 
     // 1. 명시적 명령어: /command [args]
     const cmdMatch = trimmed.match(/^\/(\S+)\s*(.*)?$/s);

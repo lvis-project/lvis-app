@@ -3,7 +3,7 @@
 // Surfaces a captured `hostApi.triggerConversation()` session that ran on
 // an *isolated* ConversationLoop (not the user's chat). Two outcomes:
 //   - Dismiss → host drops the cached session; chat untouched.
-//   - 지금 답하기 → host appends the trigger turn(s) to the active chat
+//   - 확인하기 → host imports the trigger session into the active chat
 //     history; the conversation continues there as if the user had been
 //     in it the whole time.
 //
@@ -37,8 +37,6 @@ const VISIBILITY_LABEL: Record<string, string> = {
   "user-visible": "확인 필요",
 };
 
-const SUMMARY_AUTO_DISMISS_MS = 8000;
-
 export function TriggerCard({
   result,
   onDismiss,
@@ -60,48 +58,11 @@ export function TriggerCard({
 
   const isSummary = result.visibility === "summary-only";
 
-  // Identity-stable callback ref — prevents a non-memoized `onDismiss`
-  // from re-arming a fresh 8s window on every parent render and
-  // effectively pinning the toast forever.
-  const onDismissRef = useRef(onDismiss);
-  useEffect(() => {
-    onDismissRef.current = onDismiss;
-  });
-
-  const cardRef = useRef<HTMLDivElement | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const interactingRef = useRef(false);
-
-  const clearTimer = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  };
-
-  // Auto-dismiss for summary-only. Cleanup clears the timer on unmount or
-  // dep change, so the timer callback can safely fire `onDismiss` without
-  // an `aliveRef` guard. The arming check skips while the user is
-  // interacting (hover or focus) and while an accept is in flight.
-  // sessionId is intentionally read inside the callback rather than
-  // captured at effect-setup so the call always uses the current session
-  // even though parent-side `key` already forces remount on change.
-  useEffect(() => {
-    if (!isSummary) return;
-    // Pointer-already-over guard: a toast that pops under the cursor may
-    // never receive `mouseEnter`. Inspect `:hover` once at arm-time and
-    // treat it as "interacting" so the timer doesn't fire mid-read.
-    const hoveredOnMount = cardRef.current?.matches(":hover") ?? false;
-    if (hoveredOnMount) interactingRef.current = true;
-
-    if (!interactingRef.current && !accepting) {
-      clearTimer();
-      timerRef.current = setTimeout(() => {
-        onDismissRef.current(result.sessionId);
-      }, SUMMARY_AUTO_DISMISS_MS);
-    }
-    return clearTimer;
-  }, [isSummary, accepting, result.sessionId]);
+  // Toast persists until the user clicks "확인하기" or "무시" — earlier
+  // versions auto-dismissed after 8s with hover/focus pause, but
+  // clicking outside the app (or anywhere outside the toast) silently
+  // killed proactive notifications. The user has to make an explicit
+  // decision now.
 
   const completedLabel = useMemo(() => {
     try {
@@ -129,24 +90,6 @@ export function TriggerCard({
     }
   };
 
-  // Hover and keyboard focus both pause the auto-dismiss. `onFocus` /
-  // `onBlur` bubble from descendant buttons, so a keyboard user tabbing
-  // through the toast never sees it disappear mid-Tab.
-  const handleInteractStart = () => {
-    if (!isSummary) return;
-    interactingRef.current = true;
-    clearTimer();
-  };
-  const handleInteractEnd = () => {
-    if (!isSummary) return;
-    interactingRef.current = false;
-    if (accepting) return; // accept in flight — re-arm only when it settles
-    clearTimer();
-    timerRef.current = setTimeout(() => {
-      onDismissRef.current(result.sessionId);
-    }, SUMMARY_AUTO_DISMISS_MS);
-  };
-
   const cardClassName = isSummary
     ? "flex flex-col border-amber-500/40 bg-amber-500/5 shadow-md backdrop-blur"
     : "flex h-full flex-col border-amber-500/40 bg-amber-500/5 shadow-lg backdrop-blur";
@@ -161,14 +104,9 @@ export function TriggerCard({
 
   return (
     <Card
-      ref={cardRef}
       data-testid="trigger-card"
       data-variant={isSummary ? "summary" : "centered"}
       className={cardClassName}
-      onMouseEnter={handleInteractStart}
-      onMouseLeave={handleInteractEnd}
-      onFocus={handleInteractStart}
-      onBlur={handleInteractEnd}
       {...a11yProps}
     >
       <CardHeader className="shrink-0 pb-2">
@@ -191,7 +129,7 @@ export function TriggerCard({
               disabled={accepting}
               onClick={handleAccept}
             >
-              {accepting ? "이어받는 중..." : "지금 답하기"}
+              {accepting ? "확인 중..." : "확인하기"}
             </Button>
             <Button
               size="sm"
