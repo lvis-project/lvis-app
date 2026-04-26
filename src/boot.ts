@@ -51,6 +51,7 @@ import { McpManager } from "./mcp/mcp-manager.js";
 import { openAuthWindow as openAuthWindowService } from "./main/auth-window-service.js";
 
 import { type AppServices } from "./boot/types.js";
+import { notifyBootstrapStatus } from "./boot/bootstrap-status.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
 import {
@@ -183,7 +184,11 @@ export async function bootstrap(
     marketplace: marketplaceSettings,
     isPackaged: app.isPackaged,
   });
+  // Phase 2d: surface bootstrap status to the renderer so the user sees
+  // something tangible when the marketplace is unreachable or partial-fails.
+  // Three states emitted: start / complete / error.
   if (managedBootstrap.enabled) {
+    notifyBootstrapStatus(mainWindow, { phase: "start" });
     try {
       const ensureResult = await pluginMarketplace.ensureManagedInstalled();
       if (ensureResult.installed.length > 0) {
@@ -198,11 +203,24 @@ export async function bootstrap(
           ensureResult.failed,
         );
       }
+      notifyBootstrapStatus(mainWindow, {
+        phase: "complete",
+        installed: ensureResult.installed,
+        failed: ensureResult.failed,
+      });
     } catch (err) {
-      console.warn(`[lvis] boot: ensureManagedInstalled error:`, (err as Error).message);
+      const message = (err as Error).message;
+      console.warn(`[lvis] boot: ensureManagedInstalled error:`, message);
+      notifyBootstrapStatus(mainWindow, { phase: "error", message });
     }
   } else {
     console.warn(`[lvis] boot: managed plugin bootstrap skipped: ${managedBootstrap.reason}`);
+    notifyBootstrapStatus(mainWindow, {
+      phase: "complete",
+      installed: [],
+      failed: [],
+      skippedReason: managedBootstrap.reason,
+    });
   }
 
   // wireUpdateCheck needs a concrete fetcher for update detection.
