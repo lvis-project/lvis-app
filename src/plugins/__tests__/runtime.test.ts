@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { PluginRuntime } from "../runtime.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 
@@ -557,6 +557,86 @@ describe("PluginRuntime.disable", () => {
     expect(() => runtime.assertPluginEventAccess("work-proactive", "meeting.summary.created")).not.toThrow();
     expect(() => runtime.assertPluginToolAccess("calendar", "work_proactive_ping")).toThrow(/not allowed/i);
     expect(() => runtime.assertPluginEventAccess("calendar", "email.action.needed")).toThrow(/not allowed/i);
+  });
+
+  it("allows work-proactive to subscribe to calendar.event.upcoming when granted (P4 detector grant)", async () => {
+    // Regression net for the host catalog ↔ registry grant that
+    // pairs with `lvis-plugin-work-proactive` PR #7's
+    // calendar-event-detector. Without this grant the brain plugin
+    // throws on boot at the first `hostApi.onEvent("calendar.event.upcoming", ...)`
+    // call. Locks both the positive (granted) and negative (event
+    // not in scope) paths so a future catalog edit that drops the
+    // events array doesn't silently break the proactive flow.
+    const writePlugin = async (
+      id: string,
+      methodName: string,
+      extraManifest: Record<string, unknown> = {},
+    ): Promise<string> => {
+      const pluginDir = join(installedDir, id);
+      await mkdir(pluginDir, { recursive: true });
+      const entryPath = join(pluginDir, "entry.js");
+      await writeFile(
+        entryPath,
+        `export default async function createPlugin(ctx) { return { handlers: { ${methodName}: async () => "ok" } }; }`,
+        "utf-8",
+      );
+      const manifestPath = join(pluginDir, "plugin.json");
+      const manifest: Record<string, unknown> = {
+        id,
+        name: id,
+        version: "1.0.0",
+        installPolicy: "user",
+        entry: relative(pluginDir, entryPath),
+        tools: [methodName],
+        ...extraManifest,
+      };
+      await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+      return manifestPath;
+    };
+
+    const workManifestPath = await writePlugin("work-proactive", "work_proactive_ping", {
+      pluginAccess: {
+        plugins: [
+          {
+            pluginId: "calendar",
+            tools: ["calendar_today"],
+            events: ["calendar.event.upcoming"],
+          },
+        ],
+      },
+    });
+    const calendarManifestPath = await writePlugin("calendar", "calendar_today");
+    await writeRegistry([
+      {
+        id: "work-proactive",
+        manifestPath: workManifestPath,
+        enabled: true,
+        approvedPluginAccess: {
+          plugins: [
+            {
+              pluginId: "calendar",
+              tools: ["calendar_today"],
+              events: ["calendar.event.upcoming"],
+            },
+          ],
+        },
+      },
+      { id: "calendar", manifestPath: calendarManifestPath, enabled: true },
+    ]);
+
+    const runtime = makeRuntime();
+    await runtime.load();
+
+    // Granted path: subscription is allowed
+    expect(() =>
+      runtime.assertPluginEventAccess("work-proactive", "calendar.event.upcoming"),
+    ).not.toThrow();
+    // Negative path — least-privilege: only the events explicitly
+    // listed in the grant pass. `calendar.event.starting` is also a
+    // calendar event but NOT in the grant, so the runtime denies.
+    expect(() =>
+      runtime.assertPluginEventAccess("work-proactive", "calendar.event.starting"),
+    ).toThrow(/not allowed/i);
   });
 
   it("allows load-time event subscriptions when manifest pluginAccess is declared", async () => {

@@ -21,10 +21,15 @@ import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-function stripEmailIdLine(text: string): string {
+/**
+ * Strip lines whose only purpose is to feed an opaque base64 entry id
+ * to the chat LLM (`emailId`, `eventId`). The chat LLM still sees them
+ * via the wrapped envelope; humans reading the card just see noise.
+ */
+function stripOpaqueIdLines(text: string): string {
   return text
     .split("\n")
-    .filter((line) => !/^\s*-\s*emailId\s*:/i.test(line))
+    .filter((line) => !/^\s*-\s*(emailId|eventId)\s*:/i.test(line))
     .join("\n");
 }
 
@@ -86,13 +91,15 @@ export function ImportedTriggerCard({
       {summary ? (
         <div className="prose prose-sm prose-invert max-w-none break-words text-foreground">
           {/*
-            Strip the `- emailId: …` line for display. The id is
-            essential for the chat LLM (it uses it to call email_read)
-            and stays in the wrapped envelope sent over IPC, but it's
-            opaque base64 noise to a human reading the card. Keeping
-            it visible was making the card look cluttered.
+            Strip `- emailId: …` and `- eventId: …` lines from
+            display. Both ids are essential for the chat LLM (it uses
+            them to call email_read / calendar_get) and stay in the
+            wrapped envelope sent over IPC, but they're opaque base64
+            noise to a human reading the card. The brain template
+            surfaces a clickable webLink instead when one is
+            available (calendar events).
           */}
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripEmailIdLine(summary)}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripOpaqueIdLines(summary)}</ReactMarkdown>
         </div>
       ) : null}
       {/*

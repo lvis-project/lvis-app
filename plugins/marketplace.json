@@ -200,6 +200,9 @@
             "pluginId": "calendar",
             "tools": [
               "calendar_today"
+            ],
+            "events": [
+              "calendar.event.upcoming"
             ]
           },
           {
