@@ -361,3 +361,76 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
     expect(spyDeny).not.toHaveBeenCalled();
   }, 10000);
 });
+
+// ─── C1 regression — ask_user_question must NOT double-modal ──
+
+describe("ToolExecutor — C1 ask_user_question short-circuit", () => {
+  it("does NOT route ask_user_question through ApprovalGate", async () => {
+    // Build a minimal registry containing the (builtin) ask_user_question
+    // tool. The tool's execute is stubbed so we can observe whether the
+    // executor reached it without ever consulting the approval gate.
+    const innerExecuteSpy = vi.fn(async () => ({
+      output: JSON.stringify({ choice: "yes", dismissed: false }),
+      isError: false,
+    }));
+    const askTool = createDynamicTool({
+      name: "ask_user_question",
+      description: "ask the user",
+      source: "builtin",
+      // C2 / pre-fix: the tool was registered as `dangerous`, which forced
+      // a permission check. The C1 short-circuit lives in the executor and
+      // ignores PermissionManager entirely for this exact builtin name —
+      // even with category "dangerous" the gate must not be consulted.
+      category: "dangerous",
+      jsonSchema: { type: "object", properties: {} },
+      execute: innerExecuteSpy,
+    });
+
+    const registry = new ToolRegistry();
+    registry.register(askTool);
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    // PermissionManager would return "ask" if it ran. The C1 short-circuit
+    // must skip it entirely so this checkDetailed should never be called.
+    const checkSpy = vi.fn(() => ({
+      decision: "ask" as const,
+      reason: "should-not-be-called",
+      layer: 5,
+    }));
+    permMgr.checkDetailed = checkSpy;
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const requestSpy = vi.spyOn(gate, "requestAndWait");
+
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      gate,
+    );
+
+    const results = await executor.executeAll(
+      [
+        {
+          id: "tu-c1",
+          name: "ask_user_question",
+          input: { question: "Continue?" },
+        },
+      ],
+      undefined,
+      "sess-c1-double-modal",
+    );
+
+    // No approval modal should have been requested.
+    expect(requestSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    // Nor should PermissionManager have been consulted.
+    expect(checkSpy).not.toHaveBeenCalled();
+    // The tool should still have run.
+    expect(innerExecuteSpy).toHaveBeenCalledTimes(1);
+    expect(results).toHaveLength(1);
+    expect(results[0].is_error).toBeUndefined();
+  });
+});

@@ -17,7 +17,7 @@ describe("RemindersStore", () => {
     try {
       const a = new RemindersStore(path);
       await a.add({
-        at: "2099-01-01T00:00:00.000Z",
+        at: "2030-01-01T00:00:00.000Z",
         title: "a",
         repeat: "none",
       });
@@ -37,7 +37,7 @@ describe("RemindersStore", () => {
     try {
       const store = new RemindersStore(path);
       const r = await store.add({
-        at: "2099-01-01T00:00:00.000Z",
+        at: "2030-01-01T00:00:00.000Z",
         title: "x",
       });
       const dismissed = await store.dismiss(r.id);

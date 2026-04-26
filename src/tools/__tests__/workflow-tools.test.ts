@@ -18,6 +18,7 @@ import { createSkillLoadTool } from "../skill-load.js";
 import { RemindersStore } from "../../main/reminders-store.js";
 import { SessionTodoStore } from "../../main/session-todo-store.js";
 import { SkillStore } from "../../main/skill-store.js";
+import { SkillOverlay } from "../../main/skill-overlay.js";
 
 function ctx(sessionId = "session-x"): ToolExecutionContext {
   return { cwd: process.cwd(), metadata: { sessionId } };
@@ -93,7 +94,7 @@ describe("remind_at tool", () => {
       const tool = createRemindAtTool(store);
       const r = await tool.execute(
         {
-          at: "2099-12-31T09:00:00+09:00",
+          at: "2030-12-31T09:00:00+09:00",
           title: "year-end",
           repeat: "daily",
         },
@@ -117,13 +118,14 @@ describe("remind_at tool", () => {
       const store = new RemindersStore(join(tmp, "reminders.json"));
       const tool = createRemindAtTool(store);
       const r = await tool.execute(
-        { at: "2099-01-01", title: "newyear" },
+        { at: "2030-01-01", title: "newyear" },
         ctx(),
       );
       expect(r.isError).toBe(false);
       const list = store.listActive();
-      // 2099-01-01 09:00 KST = 2099-01-01 00:00 UTC
-      expect(list[0].at).toBe("2099-01-01T00:00:00.000Z");
+      // 2030-01-01 09:00 KST = 2030-01-01 00:00 UTC
+      expect(list[0].at).toBe("2030-01-01T00:00:00.000Z");
+      // (assertion preserved post H4(c) — 2030 is within the 5-year future cap)
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -230,34 +232,65 @@ describe("agent_spawn tool", () => {
 });
 
 describe("skill_load tool", () => {
+  // Built-in skills are pre-blessed: no approval gate is consulted, so we
+  // can stub it with a never-called fn. User-authored skills exercise the
+  // gate path — covered by the skill-store traversal tests below.
+  const stubApprovals = {
+    isApproved: async () => true,
+    approve: async () => undefined,
+  } as never;
+
   it("loads built-in report-writing skill and emits badge", async () => {
     const store = new SkillStore({});
+    const overlay = new SkillOverlay();
     const events: string[] = [];
-    let injected: string | null = null;
     const tool = createSkillLoadTool({
       store,
+      overlay,
+      approvals: stubApprovals,
+      getApprovalGate: () => undefined,
       emit: (e) => events.push(e.name),
-      injectSystemMessage: (_sid, content) => {
-        injected = content;
-      },
     });
-    const r = await tool.execute({ skillName: "report-writing" }, ctx());
+    const r = await tool.execute({ skillName: "report-writing" }, ctx("sess-1"));
     expect(r.isError).toBe(false);
     const parsed = JSON.parse(r.output);
     expect(parsed.loaded).toBe(true);
     expect(parsed.skillName).toBe("report-writing");
     expect(events).toEqual(["report-writing"]);
-    expect(injected).toContain("[Skill: report-writing]");
+    // C2(c): the overlay carries the skill body for the next turn's
+    // system prompt; previously this was a chat-history append.
+    const overlaySection = overlay.buildSection("sess-1");
+    expect(overlaySection).toContain("<lvis-skill name=\"report-writing\"");
+    expect(overlaySection).toContain("</lvis-active-skills>");
   });
 
   it("returns error for missing skill", async () => {
     const store = new SkillStore({});
+    const overlay = new SkillOverlay();
     const tool = createSkillLoadTool({
       store,
+      overlay,
+      approvals: stubApprovals,
+      getApprovalGate: () => undefined,
       emit: () => undefined,
-      injectSystemMessage: () => undefined,
     });
     const r = await tool.execute({ skillName: "does-not-exist" }, ctx());
     expect(r.isError).toBe(true);
+  });
+
+  it("rejects names outside the allowlist before any FS access", async () => {
+    const store = new SkillStore({});
+    const overlay = new SkillOverlay();
+    const tool = createSkillLoadTool({
+      store,
+      overlay,
+      approvals: stubApprovals,
+      getApprovalGate: () => undefined,
+      emit: () => undefined,
+    });
+    const r = await tool.execute({ skillName: "../../etc/passwd" }, ctx());
+    expect(r.isError).toBe(true);
+    const parsed = JSON.parse(r.output);
+    expect(parsed.error).toContain("invalid skillName");
   });
 });
