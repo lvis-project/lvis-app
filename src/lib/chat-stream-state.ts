@@ -48,7 +48,42 @@ export type ChatEntry =
   | { kind: "reasoning"; text: string; streaming?: boolean }
   | { kind: "assistant"; text: string; streaming?: boolean }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
-  | { kind: "system"; text: string };
+  | { kind: "system"; text: string }
+  // Brain proactive trigger that the user accepted ("지금 답하기"). The
+  // trigger session ran in an isolated ConversationLoop; once imported,
+  // its messages live in the chat loop's history (so the LLM has
+  // context for the user's next turn) but the renderer collapses the
+  // whole interaction into ONE card. Rendering as a user-message
+  // bubble would be wrong on two axes:
+  //   1. The brain wrote that prompt, not the user — showing "나" /
+  //      keyword-routing prefix misattributes authorship.
+  //   2. The trigger session is intentionally distinct from chat —
+  //      flattening it to user→assistant pair erases the proactive
+  //      provenance the user needs to triage what just happened.
+  | {
+      kind: "imported_trigger";
+      /** Trigger session id (from the isolated loop). */
+      sessionId: string;
+      /** Origin tag, e.g. "proactive:meeting-detection". */
+      source: string;
+      /** Plugin-authored templated prompt — shown collapsed by default. */
+      prompt: string;
+      /** Brain prompt summary (toast preview). */
+      summary: string;
+      /** Number of tool calls the trigger session made (0+). */
+      toolCallCount: number;
+      /** Wall-clock timestamp the import landed. */
+      importedAt: string;
+      /**
+       * Chat LLM's response to the brain prompt, streamed in after the
+       * user clicks 확인하기. Lives inside the imported card so the
+       * proactive flow stays visually grouped — separate user/assistant
+       * bubbles would scatter the interaction across the chat.
+       */
+      response?: string;
+      /** True while the response is mid-stream. */
+      responseStreaming?: boolean;
+    };
 
 type ReasoningEntry = Extract<ChatEntry, { kind: "reasoning" }>;
 type AssistantEntry = Extract<ChatEntry, { kind: "assistant" }>;
@@ -56,6 +91,87 @@ type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 
 export function appendUserEntry(entries: ChatEntry[], text: string): ChatEntry[] {
   return [...entries, { kind: "user", text }];
+}
+
+/**
+ * Append the consolidated card for an accepted brain trigger. Idempotent
+ * on `sessionId` so a re-emitted import event (renderer reload, IPC
+ * retry) doesn't insert two cards for the same trigger.
+ */
+export function appendImportedTriggerEntry(
+  entries: ChatEntry[],
+  payload: {
+    sessionId: string;
+    source: string;
+    prompt: string;
+    summary: string;
+    toolCallCount: number;
+    importedAt: string;
+  },
+): ChatEntry[] {
+  const exists = entries.some(
+    (e) => e.kind === "imported_trigger" && e.sessionId === payload.sessionId,
+  );
+  if (exists) return entries;
+  return [
+    ...entries,
+    {
+      kind: "imported_trigger",
+      ...payload,
+      response: "",
+      responseStreaming: true,
+    },
+  ];
+}
+
+/**
+ * Find the most recent imported_trigger entry with `responseStreaming`
+ * still true. Returns -1 when none. Tool calls and reasoning events
+ * may insert child entries AFTER an imported_trigger, so we don't
+ * assume "last entry"; instead scan from the tail for the open
+ * streaming card.
+ */
+function findStreamingImportedTriggerIndex(entries: ChatEntry[]): number {
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const e = entries[i];
+    if (e.kind === "imported_trigger" && e.responseStreaming) return i;
+  }
+  return -1;
+}
+
+/**
+ * Stream a delta into the open imported_trigger entry's response —
+ * keeps the chat LLM's reply inside the proactive card instead of
+ * spawning a sibling assistant bubble. No-op when no streaming
+ * imported_trigger exists (regular chat turn).
+ */
+export function appendDeltaToImportedTriggerResponse(
+  entries: ChatEntry[],
+  delta: string,
+): ChatEntry[] {
+  const idx = findStreamingImportedTriggerIndex(entries);
+  if (idx < 0) return entries;
+  const target = entries[idx] as Extract<ChatEntry, { kind: "imported_trigger" }>;
+  const next: ChatEntry[] = [...entries];
+  next[idx] = { ...target, response: (target.response ?? "") + delta };
+  return next;
+}
+
+/** Mark the imported_trigger response as no longer streaming (server "done"). */
+export function finalizeImportedTriggerResponse(
+  entries: ChatEntry[],
+): ChatEntry[] {
+  const idx = findStreamingImportedTriggerIndex(entries);
+  if (idx < 0) return entries;
+  const target = entries[idx] as Extract<ChatEntry, { kind: "imported_trigger" }>;
+  const next: ChatEntry[] = [...entries];
+  next[idx] = { ...target, responseStreaming: false };
+  return next;
+}
+
+/** True while a streaming imported_trigger card is open (text deltas redirect into it). */
+export function isImportedTriggerStreaming(entries: ChatEntry[]): boolean {
+  return findStreamingImportedTriggerIndex(entries) >= 0;
 }
 
 export function upsertStreamingReasoning(

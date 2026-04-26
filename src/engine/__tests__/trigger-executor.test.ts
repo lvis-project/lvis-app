@@ -72,7 +72,13 @@ const baseSpec = {
 };
 
 describe("TriggerExecutor.run", () => {
-  it("creates a fresh loop per call and tags audit with pluginId + sessionId", async () => {
+  it("does NOT create a ConversationLoop — trigger sessions are pure notifications (no LLM)", async () => {
+    // Earlier behaviour: each run() spun up a fresh loop and ran the
+    // brain prompt through the LLM with full tool access. That let
+    // write tools (calendar_create, email_create_event, ...) execute
+    // BEFORE the user could approve. Now run() is a pure notification
+    // path — no loop, no LLM, no autonomous side effects. Real work
+    // happens in the user's chat session after they click 지금 답하기.
     const create = vi.fn(() => makeLoop("ok"));
     const win = makeFakeWindow();
     const exec = new TriggerExecutor({
@@ -82,25 +88,27 @@ describe("TriggerExecutor.run", () => {
     });
     await exec.run({ ...baseSpec, prompt: "x" });
     await exec.run({ ...baseSpec, prompt: "y" });
-    expect(create).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledTimes(0);
   });
 
-  it("emits started + completed IPC events and the wire payload omits messages", async () => {
+  it("emits started + completed IPC events with summary === brain prompt", async () => {
     const win = makeFakeWindow();
     const exec = new TriggerExecutor({
-      createLoop: () => makeLoop("회의실 예약했습니다"),
+      createLoop: () => makeLoop("unused"),
       getMainWindow: () => win as never,
       auditLogger: auditLogger as never,
     });
-    await exec.run({ ...baseSpec, prompt: "회의실 예약 도와드릴까요?" });
+    await exec.run({ ...baseSpec, prompt: "회의 요청 이메일 도착. 진행할까요?" });
     const calls = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls;
     const completed = calls.find((c) => c[0] === "lvis:trigger:completed");
     expect(completed?.[1]).toMatchObject({
       pluginId: "work-proactive",
       source: "proactive:meeting-detection",
-      summary: "회의실 예약했습니다",
+      // Without an LLM, the toast text IS the brain prompt verbatim.
+      summary: "회의 요청 이메일 도착. 진행할까요?",
+      prompt: "회의 요청 이메일 도착. 진행할까요?",
     });
-    // Wire payload must NOT carry the heavy messages array.
+    // Wire payload omits the heavy messages array.
     expect(completed?.[1].messages).toBeUndefined();
   });
 
@@ -150,46 +158,83 @@ describe("TriggerExecutor.run", () => {
     },
   );
 
-  it("emits failed with classified reason + opaque errorId, never raw error.message on the wire", async () => {
-    const win = makeFakeWindow();
-    const broken = makeLoop("");
-    (broken as { provider: unknown }).provider = null;
-    const exec = new TriggerExecutor({
-      createLoop: () => broken,
-      getMainWindow: () => win as never,
-      auditLogger: auditLogger as never,
-    });
-    await expect(exec.run({ ...baseSpec, prompt: "x" })).rejects.toBeDefined();
-    const failed = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
-      .find((c) => c[0] === "lvis:trigger:failed");
-    expect(failed?.[1]).toMatchObject({ pluginId: "work-proactive", reason: "provider_error" });
-    expect(failed?.[1].errorId).toMatch(/^te-/);
-    // The wire payload MUST NOT include `message` / `error` text.
-    expect(failed?.[1].message).toBeUndefined();
-    expect(failed?.[1].error).toBeUndefined();
-  });
+  // Note: the prior "emits failed with classified reason" test relied on
+  // run() invoking an LLM that could throw. Now run() has no LLM and
+  // cannot fail at that layer — failures are constrained to the
+  // host-side gate (`triggerConversation`) which classifies and emits
+  // `lvis:trigger:failed` directly. That path is covered separately
+  // in `boot/__tests__/proactive-trigger.test.ts`.
 });
 
 describe("TriggerExecutor.importIntoChat", () => {
-  it("wraps the leading user message in <imported-from-proactive> so injected imperatives don't read as user input", async () => {
+  it("emits lvis:trigger:imported with a properly wrapped prompt (renderer fires the next chat turn)", async () => {
     const win = makeFakeWindow();
     const exec = new TriggerExecutor({
-      createLoop: () => makeLoop("응답"),
+      createLoop: () => makeLoop("unused"),
       getMainWindow: () => win as never,
       auditLogger: auditLogger as never,
     });
-    await exec.run({ ...baseSpec, prompt: "원본 templated prompt" });
+    await exec.run({ ...baseSpec, prompt: "회의 요청 이메일을 받았습니다." });
     const sessionId = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
       .find((c) => c[0] === "lvis:trigger:completed")?.[1].sessionId as string;
+
+    (win.webContents.send as ReturnType<typeof vi.fn>).mockClear();
 
     const chat = makeLoop("");
     const out = exec.importIntoChat(sessionId, chat);
     expect(out.ok).toBe(true);
-    const messages = chat.getHistory().getMessages();
-    const firstUser = messages.find((m) => m.role === "user");
-    expect(firstUser?.content).toContain("<imported-from-proactive");
-    expect(firstUser?.content).toContain("source=\"proactive:meeting-detection\"");
-    expect(firstUser?.content).toContain("원본 templated prompt");
+
+    const imported = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
+      .find((c) => c[0] === "lvis:trigger:imported");
+    expect(imported).toBeTruthy();
+    const payload = imported?.[1] as {
+      sessionId: string;
+      source: string;
+      prompt: string;
+      summary: string;
+      toolCallCount: number;
+      importedAt: string;
+      wrappedPrompt: string;
+    };
+    expect(payload.sessionId).toBe(sessionId);
+    expect(payload.source).toBe("proactive:meeting-detection");
+    expect(payload.prompt).toBe("회의 요청 이메일을 받았습니다.");
+    expect(payload.summary).toBe("회의 요청 이메일을 받았습니다.");
+    expect(payload.toolCallCount).toBe(0); // no LLM ran in trigger session
+    expect(typeof payload.importedAt).toBe("string");
+
+    // The wrapped prompt is what the renderer chatSends as the next
+    // user turn — the envelope keeps the LLM in a "treat as proactive,
+    // ask before writes" stance via the system prompt's
+    // <proactive-origin-guidance> block.
+    expect(payload.wrappedPrompt).toBe(
+      `<imported-from-proactive source="proactive:meeting-detection">\n` +
+        `회의 요청 이메일을 받았습니다.\n` +
+        `</imported-from-proactive>`,
+    );
+  });
+
+  it("does NOT pre-append wrapped messages to chat history (renderer's chatSend handles append)", async () => {
+    // Earlier behaviour pre-appended the trigger session's full
+    // message list to chat history, then expected the user to type
+    // something to engage. New flow: importIntoChat just emits the
+    // event, renderer chatSends the wrappedPrompt → runTurn appends
+    // exactly once via the normal chat path (cleaner streaming).
+    const win = makeFakeWindow();
+    const exec = new TriggerExecutor({
+      createLoop: () => makeLoop("unused"),
+      getMainWindow: () => win as never,
+      auditLogger: auditLogger as never,
+    });
+    await exec.run({ ...baseSpec, prompt: "x" });
+    const sessionId = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
+      .find((c) => c[0] === "lvis:trigger:completed")?.[1].sessionId as string;
+
+    const chat = makeLoop("");
+    const before = chat.getHistory().getMessages().length;
+    exec.importIntoChat(sessionId, chat);
+    const after = chat.getHistory().getMessages().length;
+    expect(after).toBe(before);
   });
 
   it("refuses when the chat loop is currently mid-turn (chat_busy)", async () => {
@@ -311,27 +356,30 @@ describe("TriggerExecutor isolation invariant", () => {
     expect(chat.getHistory().getMessages()).toHaveLength(0);
   });
 
-  it("cached payload messages are deep-cloned so chat-history mutations don't reflect into the cache", async () => {
+  it("cached payload is consumed (deleted) by import so a second accept fails not_found", async () => {
+    // Earlier deep-clone test guarded against shared-array mutation
+    // when import pre-appended trigger session messages. With the new
+    // flow there's no pre-append; the simpler invariant is "import
+    // is one-shot" — the cache entry is gone after a successful
+    // import, and a follow-up call gets `not_found`.
     const win = makeFakeWindow();
     const exec = new TriggerExecutor({
-      createLoop: () => makeLoop("응답"),
+      createLoop: () => makeLoop("unused"),
       getMainWindow: () => win as never,
       auditLogger: auditLogger as never,
     });
-    await exec.run({ ...baseSpec, prompt: "원본" });
+    await exec.run({ ...baseSpec, prompt: "x" });
     const sessionId = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
       .find((c) => c[0] === "lvis:trigger:completed")?.[1].sessionId as string;
 
-    const cachedBefore = exec.getCachedSession(sessionId);
+    expect(exec.getCachedSession(sessionId)).not.toBeNull();
     const chat = makeLoop("");
-    exec.importIntoChat(sessionId, chat);
-    // Even if we mutated chat-side messages later, the original cache is
-    // already gone (consumed by import). What we care about: the cached
-    // entry was independent of the trigger loop's internal array.
-    expect(cachedBefore?.messages.length).toBeGreaterThan(0);
-    // Mutate the snapshot we held — should not affect chat history.
-    if (cachedBefore) cachedBefore.messages[0].content = "MUTATED";
-    const chatFirstUser = chat.getHistory().getMessages().find((m) => m.role === "user");
-    expect(chatFirstUser?.content).not.toContain("MUTATED");
+    const first = exec.importIntoChat(sessionId, chat);
+    expect(first.ok).toBe(true);
+    expect(exec.getCachedSession(sessionId)).toBeNull();
+
+    const second = exec.importIntoChat(sessionId, chat);
+    expect(second.ok).toBe(false);
+    expect(second.reason).toBe("not_found");
   });
 });

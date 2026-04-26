@@ -30,6 +30,7 @@
 import type { BrowserWindow } from "electron";
 import type { ConversationLoop, TurnResult } from "./conversation-loop.js";
 import type { GenericMessage } from "./llm/types.js";
+import { PROACTIVE_SOURCE_PATTERN } from "./proactive-source.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 
 /** What the renderer needs to display the result. */
@@ -119,53 +120,22 @@ function classifyFailure(err: unknown): TriggerFailureReason {
   return "unknown";
 }
 
-function deepCloneMessage(msg: GenericMessage): GenericMessage {
-  // structuredClone handles all non-function fields; messages don't carry
-  // functions. Avoids the cache holding references that future post-stream
-  // hooks could mutate.
-  return structuredClone(msg);
-}
-
 /**
- * Wrap a captured trigger session for import into the user's chat history.
+ * Source pattern shared with the host gate, keyword-engine bypass, and
+ * ipc-bridge envelope parsing — see `engine/proactive-source.ts`. The
+ * host gate (`plugin-runtime.ts`) enforces this same pattern upstream
+ * of the executor, so by the time `source` reaches `importIntoChat`
+ * it's always quote-safe inside `source="..."`. The single source of
+ * truth ensures a future refactor on any one site can't silently
+ * desync the others.
  *
- * The leading templated `user` message is plugin-authored content the user
- * never typed. Surface it inside an `<imported-from-proactive source="...">`
- * envelope so:
- *   1. The user's next chat turn doesn't read raw plugin-supplied imperatives
- *      as their own prior input.
- *   2. The system prompt's `<proactive-origin-guidance>` block can refer to
- *      the envelope and tell the LLM to ignore imperatives inside it.
- *   3. Renderers / audit consumers can identify imported turns at a glance.
+ * The envelope serves two purposes:
+ *   1. The user's next chat turn doesn't read raw plugin-supplied
+ *      imperatives as their own prior input.
+ *   2. The system prompt's `<proactive-origin-guidance>` block can
+ *      refer to the envelope and tell the LLM to ignore imperatives
+ *      inside it AND ask the user before running any write tool.
  */
-/**
- * The host gate enforces `^proactive:[a-z][a-z0-9-]*$` upstream of the
- * executor, so `source` is always quote-safe inside `source="..."`. If a
- * future refactor relaxes the gate or a new caller bypasses it, the wrapper
- * could otherwise emit malformed XML and re-open the prompt-injection vector.
- */
-const SAFE_SOURCE_PATTERN = /^proactive:[a-z][a-z0-9-]*$/;
-
-function wrapImportedMessages(
-  messages: GenericMessage[],
-  source: string,
-): GenericMessage[] {
-  if (messages.length === 0) return messages;
-  if (!SAFE_SOURCE_PATTERN.test(source)) {
-    // Defensive: drop the wrap entirely rather than emit malformed
-    // attribution. The leading user message still reads as user input —
-    // worse for context, but never an injection vehicle.
-    return messages.map(deepCloneMessage);
-  }
-  const [first, ...rest] = messages;
-  if (first.role !== "user") return messages.map(deepCloneMessage);
-  const wrapped: GenericMessage = {
-    ...deepCloneMessage(first),
-    content:
-      `<imported-from-proactive source="${source}">\n${first.content}\n</imported-from-proactive>`,
-  };
-  return [wrapped, ...rest.map(deepCloneMessage)];
-}
 
 export class TriggerExecutor {
   /** Per-instance cache. Keeping it on the instance avoids cross-test leakage. */
@@ -179,13 +149,23 @@ export class TriggerExecutor {
   }
 
   /**
-   * Run a single trigger. Returns the loop's `TurnResult`. Errors are
-   * audited and surfaced via `lvis:trigger:failed`; the throw is rethrown
-   * so the host gate's caller can also note the runtime error.
+   * Surface a single brain trigger to the renderer.
+   *
+   * **The trigger session does NOT run an LLM.** Earlier iterations ran
+   * a fresh ConversationLoop here, which gave the LLM full tool access
+   * and let it autonomously execute write actions (e.g.
+   * `email_create_event`) before the user could approve. That violates
+   * the brain's role — propose, never execute. Now `run()` is a pure
+   * notification path: cache the spec, emit the toast/modal payload,
+   * return synchronously.
+   *
+   * Any actual work (read body, propose details, write calendar entry)
+   * happens in the user's chat session AFTER they click "지금 답하기".
+   * That path goes through the host's normal approval gate, so every
+   * write tool gets a confirmation modal.
    */
   async run(spec: TriggerSpec): Promise<TurnResult> {
-    const loop = this.deps.createLoop();
-    const sessionId = loop.getSessionId();
+    const sessionId = `trg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const startedAt = new Date().toISOString();
 
     this.emitStarted({
@@ -203,11 +183,19 @@ export class TriggerExecutor {
     );
 
     try {
-      const result = await loop.runTurn(spec.prompt, undefined, undefined, {
-        originSource: spec.source,
-      });
-
-      const messagesSnapshot = loop.getHistory().getMessages().map(deepCloneMessage);
+      // No LLM — the brain prompt itself is what the user sees on the
+      // toast/modal AND what later seeds the chat session on accept.
+      const summaryText = spec.prompt;
+      const messagesSnapshot: GenericMessage[] = [
+        { role: "user", content: spec.prompt },
+      ];
+      const result: TurnResult = {
+        text: summaryText,
+        stopReason: "end_turn",
+        usage: { inputTokens: 0, outputTokens: 0 },
+        toolCalls: [],
+        route: "proactive-trigger",
+      };
       const payload: TriggerResultPayload = {
         sessionId,
         pluginId: spec.pluginId,
@@ -215,7 +203,7 @@ export class TriggerExecutor {
         visibility: spec.visibility,
         priority: spec.priority,
         prompt: spec.prompt,
-        summary: result.text,
+        summary: summaryText,
         messages: messagesSnapshot,
         completedAt: new Date().toISOString(),
       };
@@ -224,7 +212,7 @@ export class TriggerExecutor {
       this.audit(
         "tool_call",
         `[trigger:${spec.pluginId}] completed session=${sessionId} source=${spec.source} ` +
-          `visibility=${spec.visibility} summaryLen=${result.text.length} toolCalls=${result.toolCalls.length}`,
+          `visibility=${spec.visibility} summaryLen=${summaryText.length} toolCalls=0`,
       );
       return result;
     } catch (err) {
@@ -265,16 +253,10 @@ export class TriggerExecutor {
       this.audit("error", `[trigger] import_failed session=${sessionId} reason=not_found`);
       return { ok: false, reason: "not_found" };
     }
-    if (payload.messages.length === 0) {
-      this.audit(
-        "error",
-        `[trigger:${payload.pluginId}] import_failed session=${sessionId} reason=empty`,
-      );
-      return { ok: false, reason: "empty" };
-    }
-    // Concurrency guard — host's chat loop is single-flight. If a turn is
-    // streaming, splicing into history would interleave foreign messages
-    // into the in-flight request body.
+    // Concurrency guard — host's chat loop is single-flight. The
+    // renderer fires a follow-up `chatSend(wrappedPrompt)` immediately
+    // after this returns; if a turn is already streaming, that send
+    // would interleave foreign messages into the in-flight request.
     if (chatLoop.currentAbortController !== null) {
       this.audit(
         "error",
@@ -282,9 +264,10 @@ export class TriggerExecutor {
       );
       return { ok: false, reason: "chat_busy" };
     }
+    // History capacity check — runTurn appends one user message and
+    // one assistant message at minimum.
     const history = chatLoop.getHistory();
-    const wrapped = wrapImportedMessages(payload.messages, payload.source);
-    if (wrapped.length > history.getCapacityRemaining()) {
+    if (history.getCapacityRemaining() < 2) {
       this.audit(
         "error",
         `[trigger:${payload.pluginId}] import_failed session=${sessionId} reason=history_capacity`,
@@ -292,14 +275,40 @@ export class TriggerExecutor {
       return { ok: false, reason: "history_capacity" };
     }
 
-    for (const msg of wrapped) history.append(msg);
+    // Build the protective envelope. Source is gate-validated upstream
+    // (`^proactive:[a-z][a-z0-9-]*$`) so it's quote-safe for the
+    // `source="..."` attribute. The renderer fires
+    // `chatSend(wrappedPrompt)` next — runTurn appends it as a normal
+    // user message, the system prompt's `<proactive-origin-guidance>`
+    // block tells the LLM to ignore imperatives inside the envelope
+    // and ask the user before any write op.
+    const wrappedPrompt = PROACTIVE_SOURCE_PATTERN.test(payload.source)
+      ? `<imported-from-proactive source="${payload.source}">\n${payload.prompt}\n</imported-from-proactive>`
+      : payload.prompt;
+
     this.sessionCache.delete(sessionId);
     this.audit(
       "tool_call",
       `[trigger:${payload.pluginId}] imported session=${sessionId} source=${payload.source} ` +
-        `messages=${wrapped.length} → chat=${chatLoop.getSessionId()}`,
+        `→ chat=${chatLoop.getSessionId()}`,
     );
-    return { ok: true, imported: wrapped.length };
+
+    // Renderer notification — adds the consolidated `imported_trigger`
+    // card AND fires the follow-up chatSend with the wrappedPrompt.
+    // Note: trigger-executor does NOT call runTurn itself — that path
+    // owns its own streaming hooks (renderer IPC channels) which this
+    // executor doesn't have direct access to. The renderer-driven
+    // chatSend reuses the existing chat streaming wiring.
+    this.emitImported({
+      sessionId,
+      source: payload.source,
+      prompt: payload.prompt,
+      summary: payload.summary,
+      toolCallCount: 0,
+      importedAt: new Date().toISOString(),
+      wrappedPrompt,
+    });
+    return { ok: true, imported: 1 };
   }
 
   /** Drop a cached trigger session — called when the renderer dismisses the card. */
@@ -369,6 +378,21 @@ export class TriggerExecutor {
       pluginId: payload.pluginId,
       source: payload.source,
     });
+  }
+
+  private emitImported(payload: {
+    sessionId: string;
+    source: string;
+    prompt: string;
+    summary: string;
+    toolCallCount: number;
+    importedAt: string;
+    /** The wrapped prompt the renderer should chatSend immediately. */
+    wrappedPrompt: string;
+  }): void {
+    const win = this.deps.getMainWindow();
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send("lvis:trigger:imported", payload);
   }
 
   private audit(type: "tool_call" | "error", input: string): void {
