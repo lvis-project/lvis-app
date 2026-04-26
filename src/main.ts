@@ -171,6 +171,9 @@ async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri: dialog response", { slug: params.slug, response });
   if (response !== 0) return;
   lvisDevLog("[lvis] handleLvisUri: starting install", { slug: params.slug });
+  // Renderer renders a skeleton card / sidebar placeholder while these
+  // phase events fire — see PluginConfigTab + Sidebar progress UI.
+  mainWindow?.webContents.send("lvis:plugins:install-progress", { slug: params.slug, phase: "installing" });
   void services.pluginMarketplace
     .install(params.slug)
     .then(async () => {
@@ -178,6 +181,7 @@ async function handleLvisUri(url: string) {
       // Mirror the post-install steps from the lvis:plugins:install IPC handler
       // so deep-link installs behave identically to in-app installs.
       try {
+        mainWindow?.webContents.send("lvis:plugins:install-progress", { slug: params.slug, phase: "restarting" });
         await services!.pluginRuntime.restartAll();
         services!.refreshPluginNotifications?.();
       } catch (err) {

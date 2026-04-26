@@ -34,6 +34,7 @@ function entriesToConfig(entries: KV[]): Record<string, unknown> {
 
 export function PluginConfigTab() {
   const [plugins, setPlugins] = useState<PluginCardSummary[]>([]);
+  const [installInFlight, setInstallInFlight] = useState<Record<string, "installing" | "restarting">>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [entries, setEntries] = useState<KV[]>([]);
   const [newKey, setNewKey] = useState("");
@@ -95,9 +96,22 @@ export function PluginConfigTab() {
       return;
     }
     const unsubs: Array<() => void> = [];
+    if (typeof api.onPluginInstallProgress === "function") {
+      unsubs.push(
+        api.onPluginInstallProgress(({ slug, phase }) => {
+          setInstallInFlight((prev) => ({ ...prev, [slug]: phase }));
+        }),
+      );
+    }
     if (typeof api.onPluginInstallResult === "function") {
       unsubs.push(
-        api.onPluginInstallResult(({ success }) => {
+        api.onPluginInstallResult(({ slug, success }) => {
+          setInstallInFlight((prev) => {
+            if (!(slug in prev)) return prev;
+            const next = { ...prev };
+            delete next[slug];
+            return next;
+          });
           if (success) void refreshPlugins();
         }),
       );
@@ -254,6 +268,31 @@ export function PluginConfigTab() {
                     </div>
                   </button>
                 ))}
+                {/* Skeleton rows for installs the main process is still
+                    pipelining. The slug is removed from `installInFlight`
+                    when the install-result event lands and `refreshPlugins`
+                    promotes it into a real `plugins` entry. */}
+                {Object.entries(installInFlight)
+                  .filter(([slug]) => !plugins.some((p) => p.id === slug))
+                  .map(([slug, phase]) => (
+                    <div
+                      key={`in-flight:${slug}`}
+                      className="flex w-full animate-pulse items-center gap-2 rounded border border-dashed border-muted px-2 py-1.5 text-xs text-muted-foreground"
+                      aria-label={`${slug} 설치 진행 중`}
+                      aria-live="polite"
+                    >
+                      <span
+                        className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+                        aria-hidden="true"
+                      />
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate">{slug}</span>
+                        <span className="truncate text-[9px] opacity-70">
+                          {phase === "installing" ? "설치 중…" : "재시작 중…"}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
               </div>
             </ScrollArea>
           </div>
