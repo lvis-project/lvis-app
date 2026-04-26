@@ -86,6 +86,21 @@ function isRoutineEnabled(
  * channel. Used by both `lvis:chat:send` and the edit/retry flows so callback
  * wiring isn't duplicated.
  */
+/**
+ * If the input is an imported brain trigger envelope, parse out its
+ * source so we can fire the system prompt's
+ * `<proactive-origin-guidance>` block on this turn — the LLM gets a
+ * "propose only, ask user before any write" instruction in its system
+ * prompt instead of treating the wrapped prompt as a regular user
+ * directive. Returns null for ordinary user turns.
+ */
+function detectImportedTriggerSource(input: string): string | null {
+  const m = input
+    .trimStart()
+    .match(/^<imported-from-proactive\s+source="(proactive:[a-z][a-z0-9-]*)"\s*>/);
+  return m ? m[1] : null;
+}
+
 async function runStreamedTurn(
   conversationLoop: ConversationLoop,
   input: string,
@@ -98,7 +113,10 @@ async function runStreamedTurn(
   },
 ): Promise<unknown> {
   const send = (payload: unknown) => webContents?.send(channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
-  const result = await conversationLoop.runTurn(input, {
+  const originSource = detectImportedTriggerSource(input);
+  const result = await conversationLoop.runTurn(
+    input,
+    {
     onReasoningDelta: (text) => send({ type: "reasoning_delta", text }),
     onTextDelta: (text) => {
       if (options?.shouldSuppressInterruptedTail?.() && text === "\n\n[중단됨]") return;
@@ -114,7 +132,10 @@ async function runStreamedTurn(
     onCompactOccurred: ({ removedMessages, freedTokens }) =>
       send({ type: "compact_notice", removedMessages, freedTokens }),
     onFallback: (from, to) => webContents?.send("lvis:chat:fallback", { from, to }),
-  });
+    },
+    undefined,
+    originSource ? { originSource } : undefined,
+  );
   if (
     options?.shouldSuppressInterruptedTail?.() &&
     (result as ConversationTurnResult).stopReason === "interrupted"

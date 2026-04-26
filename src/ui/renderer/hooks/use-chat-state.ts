@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  appendDeltaToImportedTriggerResponse,
+  appendImportedTriggerEntry,
   appendUserEntry,
   applyToolEnd,
   applyToolStart,
+  finalizeImportedTriggerResponse,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
+  isImportedTriggerStreaming,
   reopenLastAssistant,
   setAssistantError,
   upsertStreamingAssistant,
@@ -95,8 +99,22 @@ export function useChatState(api: LvisApi) {
         }
       }
       if (ev.type === "text_delta" && ev.text) {
-        streamRef.current += ev.text;
         setEntries((p) => {
+          // Brain trigger flow — when the LLM is responding to an
+          // accepted proactive trigger, redirect deltas INTO the
+          // imported_trigger card's response field so the whole
+          // interaction stays visually grouped. Falls back to the
+          // normal streaming-assistant path for ordinary user turns.
+          //
+          // Critical: do NOT accumulate streamRef when routing to the
+          // card. Otherwise the `done` handler's fallback in
+          // finalizeStreamingAssistant sees streamRef populated and
+          // appends a phantom assistant entry below the card, which
+          // looks like a duplicate response.
+          if (isImportedTriggerStreaming(p)) {
+            return appendDeltaToImportedTriggerResponse(p, ev.text!);
+          }
+          streamRef.current += ev.text!;
           const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
           guidanceResetPendingRef.current = false;
           return upsertStreamingAssistant(base, streamRef.current);
@@ -110,6 +128,17 @@ export function useChatState(api: LvisApi) {
         });
       } else if (ev.type === "assistant_round") {
         setEntries((p) => {
+          // Brain trigger flow — DO NOT finalize the card here.
+          // assistant_round fires once per LLM round (tool_use → next
+          // round → end_turn). Finalizing on the first round (with
+          // stopReason="tool_use") would close the card before the
+          // LLM's actual reply text arrives in the next round, and
+          // those subsequent text_deltas would land in a sibling
+          // streaming-assistant entry — exactly the duplicate-response
+          // bug we're fixing. We finalize only on the `done` event.
+          if (isImportedTriggerStreaming(p)) {
+            return p;
+          }
           const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
           guidanceResetPendingRef.current = false;
           let next = finalizeStreamingReasoning(base, ev.thought ?? thoughtRef.current);
@@ -145,6 +174,12 @@ export function useChatState(api: LvisApi) {
         const n = ev.removedMessages ?? 0;
         setEntries((p) => [...p, { kind: "system", text: `💾 이전 ${n}개 대화를 요약했습니다 (목표·결정사항 보존)` }]);
       } else if (ev.type === "done") {
+        // Brain trigger flow — close the card's streaming indicator.
+        // Independent of the regular streaming-assistant finalize; the
+        // card may have absorbed every text_delta of this turn so
+        // streamRef.current can be empty even though the card has
+        // content to seal.
+        setEntries((p) => finalizeImportedTriggerResponse(p));
         if (streamRef.current || thoughtRef.current) {
           setEntries((p) => {
             const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
@@ -162,6 +197,24 @@ export function useChatState(api: LvisApi) {
     });
     return () => { unsub(); };
   }, [api]);
+
+  // Imperative method exposed to App.tsx — App owns the trigger-import
+  // listener (it has access to handleAsk for the auto-fired chat
+  // follow-up). use-chat-state just provides the entry-mutation
+  // primitive; orchestration stays at App level.
+  const addImportedTriggerEntry = useCallback(
+    (payload: {
+      sessionId: string;
+      source: string;
+      prompt: string;
+      summary: string;
+      toolCallCount: number;
+      importedAt: string;
+    }) => {
+      setEntries((p) => appendImportedTriggerEntry(p, payload));
+    },
+    [],
+  );
 
   // Fallback toast — shown briefly when the LLM provider auto-switches.
   const [fallbackToast, setFallbackToast] = useState<string | null>(null);
@@ -356,5 +409,6 @@ export function useChatState(api: LvisApi) {
     appendUserEntry: appendUserMessage,
     applyLoadedSession,
     truncateToEntry,
+    addImportedTriggerEntry,
   };
 }

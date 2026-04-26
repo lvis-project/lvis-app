@@ -49,6 +49,7 @@ export function App() {
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, applyLoadedSession, truncateToEntry,
+    addImportedTriggerEntry,
     fallbackToast,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
@@ -132,31 +133,62 @@ export function App() {
     [activePreset, attachedDocs, langLock],
   );
 
-  const handleAsk = useCallback(async (q: string, mode: "default" | "guidance" = "default") => {
-    const t = q.trim();
-    if (!t) return;
-    if (mode === "default" && streaming) return;
-    if (mode === "default" && await handleCompactCommand(t)) return;
-    if (!(await checkApiKey())) { setSettingsOpen(true); return; }
-    const requestId = ++turnRequestRef.current;
-    const streamingRequestId = beginStreamingRequest();
-    setQuestion("");
-    const outgoing = composeOutgoing(t);
-    appendUserEntry(mode === "guidance" ? `↳ ${t}` : t);
-    resetStreamAccumulators();
-    try {
-      if (mode === "guidance") {
-        await api.chatGuide(outgoing);
-      } else {
-        await api.chatSend(outgoing);
+  const handleAsk = useCallback(
+    async (
+      q: string,
+      mode: "default" | "guidance" | "trigger-import" = "default",
+    ) => {
+      const t = q.trim();
+      if (!t) return;
+      if (mode === "default" && streaming) return;
+      if (mode === "default" && await handleCompactCommand(t)) return;
+      if (!(await checkApiKey())) { setSettingsOpen(true); return; }
+      const requestId = ++turnRequestRef.current;
+      const streamingRequestId = beginStreamingRequest();
+      setQuestion("");
+      // trigger-import: send the wrapped prompt verbatim. composeOutgoing
+      // would prefix it with role-preset / language-lock framing that
+      // doesn't apply to brain-authored prompts. The brain envelope and
+      // the system prompt's `<proactive-origin-guidance>` already steer
+      // the LLM correctly.
+      const outgoing = mode === "trigger-import" ? t : composeOutgoing(t);
+      // trigger-import: skip the user-bubble append. The
+      // ImportedTriggerCard already represents the brain's question
+      // visibly, and rendering the wrapped envelope as a user bubble
+      // would misattribute authorship.
+      if (mode !== "trigger-import") {
+        appendUserEntry(mode === "guidance" ? `↳ ${t}` : t);
       }
-      // Final state set by stream events + done
-    } catch (err) {
-      setErrorWithThought(`오류: ${(err as Error).message}`);
-    } finally {
-      if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
-    }
-  }, [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest, setErrorWithThought, handleCompactCommand]);
+      resetStreamAccumulators();
+      try {
+        if (mode === "guidance") {
+          await api.chatGuide(outgoing);
+        } else {
+          await api.chatSend(outgoing);
+        }
+      } catch (err) {
+        setErrorWithThought(`오류: ${(err as Error).message}`);
+      } finally {
+        if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
+      }
+    },
+    [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest, setErrorWithThought, handleCompactCommand],
+  );
+
+  // Brain trigger accept → chat takes over. Server emits
+  // `lvis:trigger:imported` with both metadata for the visible card and
+  // the pre-wrapped prompt that should fire as the next chat turn.
+  // This listener lives here (App-level) because it depends on
+  // handleAsk; co-locating it with the rest of useChatState would
+  // either duplicate streaming wiring or import handleAsk into the
+  // hook, both of which break the current composition cleanly.
+  useEffect(() => {
+    const unsub = api.onTriggerImported((payload) => {
+      addImportedTriggerEntry(payload);
+      void handleAsk(payload.wrappedPrompt, "trigger-import");
+    });
+    return () => { unsub(); };
+  }, [api, addImportedTriggerEntry, handleAsk]);
 
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });

@@ -74,6 +74,17 @@ export class KeywordEngine {
   classify(input: string): InputClassification {
     const trimmed = input.trim();
 
+    // 0. Brain proactive trigger envelope — bypass skill-keyword
+    // matching. The wrapped prompt is plugin-authored content the user
+    // never typed; routing it through skill prefix would misattribute
+    // authorship ("[스킬: email_list]") and pollute chat history.
+    // The chat LLM still sees the envelope verbatim and the system
+    // prompt's <proactive-origin-guidance> block tells it to ignore
+    // imperatives inside and ask the user before any write op.
+    if (trimmed.startsWith("<imported-from-proactive")) {
+      return { type: "general", input: trimmed };
+    }
+
     // 1. 명시적 명령어: /command [args]
     const cmdMatch = trimmed.match(/^\/(\S+)\s*(.*)?$/s);
     if (cmdMatch) {
