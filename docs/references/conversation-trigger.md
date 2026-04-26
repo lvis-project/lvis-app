@@ -27,7 +27,7 @@ interface ConversationTriggerSpec {
 
 interface ConversationTriggerResult {
   accepted: boolean;
-  reason?: "capability_denied" | "invalid_source" | "duplicate" | "loop_unavailable" | "disabled";
+  reason?: "capability_denied" | "invalid_source" | "duplicate" | "rate_limited" | "loop_unavailable";
   source: string;
 }
 ```
@@ -55,6 +55,18 @@ interface ConversationTriggerResult {
 | `loop_unavailable` | ConversationLoop 가 boot 순서상 아직 wire 안 됨 | reject + audit. dedupe / rate-limit 보다 먼저 평가 — 환경 fault 가 state opinion 보다 우선 |
 
 **Audit deny throttle**: 동일 `(pluginId, reason)` 조합의 반복 거부는 60초 윈도우당 1회만 audit 에 emit. 윈도우 만료 시 `(+N suppressed)` 카운트로 묶음. tight loop 의 audit log flooding 방어.
+
+### Reason 분류 — caller 가 어떻게 처리해야 하나
+
+| Reason | 분류 | Caller 권장 동작 |
+|--------|------|----------------|
+| `capability_denied` | **permanent (config)** | log + give up. manifest 가 cap 없음 — 코드 수정 외 회복 불가 |
+| `invalid_source` | **permanent (bug)** | log + give up. caller 의 spec 자체가 잘못됨 |
+| `duplicate` | **expected** | swallow. 같은 관찰이 두 번 emit 된 정상 흐름 |
+| `rate_limited` | **backpressure** | plugin 의 cooldown 유지. host 의 sliding window 가 풀릴 때까지 기다림 (다음 *새로운* 관찰에서 자연스럽게 재시도) |
+| `loop_unavailable` | **transient (boot)** | plugin cooldown clear 권장. 다음 관찰이 들어오면 재시도. 단 무한 retry 방지 위해 N회 연속 시 backoff |
+
+`rate_limited` 를 transient 로 분류하면 host 의 backpressure 신호가 무력화되므로 caller 는 cooldown 을 유지해야 한다. plugin 이 자체 rate-limit 도 가지고 있다면 host 의 cap 이 풀리는 동안 plugin cap 도 같이 sleep 됨.
 
 성공 시 fire-and-forget 으로 ConversationLoop.runTriggerTurn() 호출. 실패한 turn 은 loop 의 자체 audit 에 기록.
 

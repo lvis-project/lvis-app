@@ -69,9 +69,11 @@ import {
   createHookRunner,
   createConversationLoop,
   createRoutineConversationLoop,
+  createTriggerConversationLoop,
   createCallLlm,
   createCallLlmForPlugin,
 } from "./boot/conversation.js";
+import { TriggerExecutor } from "./engine/trigger-executor.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
@@ -272,6 +274,28 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
   console.log("[lvis] boot: plugin callLlm ready (rate-limited)");
 
+  // Trigger executor — spawns a fresh ConversationLoop per
+  // hostApi.triggerConversation() call so the user's chat history is never
+  // polluted by templated proactive turns. See trigger-executor.ts.
+  lateBinding.triggerExecutorRef.fn = new TriggerExecutor({
+    createLoop: () =>
+      createTriggerConversationLoop({
+        settingsService,
+        systemPromptBuilder,
+        keywordEngine,
+        routeEngine,
+        toolRegistry,
+        memoryManager,
+        permissionManager,
+        approvalGate,
+        bashAstValidator,
+        pluginRuntime,
+      }),
+    getMainWindow: () => mainWindow,
+    auditLogger: bootAuditLogger,
+  });
+  console.log("[lvis] boot: trigger executor wired (proactive turns isolated)");
+
   // §9.5: MCP Server 연결.
   const mcpGovernance = new McpGovernance();
   const mcpManager = new McpManager(mcpGovernance, toolRegistry, undefined, permissionManager, bootAuditLogger);
@@ -321,6 +345,7 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
     pluginRuntime, pluginMarketplace, taskService, taskSourceRegistry, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager,
+    triggerExecutor: lateBinding.triggerExecutorRef.fn ?? undefined,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, msGraphService, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,
     telemetry, pluginTelemetry, autoUpdaterStop,

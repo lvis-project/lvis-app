@@ -455,6 +455,15 @@ export interface LateBindingRefs {
   conversationLoopRef: {
     fn: import("../../engine/conversation-loop.js").ConversationLoop | null;
   };
+  /**
+   * Trigger executor — built once boot wires up the
+   * `createTriggerConversationLoop` factory + main window. Every
+   * `hostApi.triggerConversation()` call dispatches through this so the
+   * trigger turn runs on a *fresh* loop, not the user's chat loop.
+   */
+  triggerExecutorRef: {
+    fn: import("../../engine/trigger-executor.js").TriggerExecutor | null;
+  };
 }
 
 export interface InitPluginRuntimeInput {
@@ -557,6 +566,7 @@ export async function initPluginRuntime(
     llmCallerRef: { fn: null },
     pluginCallLlmRef: { fn: null },
     conversationLoopRef: { fn: null },
+    triggerExecutorRef: { fn: null },
   };
 
   // Sprint 4-B §B-4 — signature verifier wired end-to-end.
@@ -791,7 +801,10 @@ export async function initPluginRuntime(
 
       // ─── Proactive Brain — hostApi.triggerConversation() ───────────────
       // Gate body lives in evaluateTriggerSpec() so prod and tests share
-      // one implementation; tests import + call this directly.
+      // one implementation; tests import + call this directly. Dispatch
+      // goes through TriggerExecutor which spawns a fresh ConversationLoop
+      // per trigger so the user's chat history is never polluted by the
+      // templated proactive turn.
       triggerConversation: async (spec: ConversationTriggerSpec) => {
         const decision = evaluateTriggerSpec({
           spec,
@@ -800,19 +813,21 @@ export async function initPluginRuntime(
           dedupe: triggerConversationDedupe,
           rateLimiter: triggerConversationRateLimiter,
           denyAuditThrottle: triggerDenyAuditThrottle,
-          loopBound: !!lateBinding.conversationLoopRef.fn,
+          // `loop_unavailable` now maps to the trigger executor being unwired
+          // (boot ordering) rather than the user's chat loop missing.
+          loopBound: !!lateBinding.triggerExecutorRef.fn,
           auditLogger: bootAuditLogger,
         });
         if (decision.kind === "deny") return decision.result;
 
         // Dispatch fire-and-forget. Wrap in Promise.resolve to convert any
-        // synchronous throw inside runTriggerTurn into a rejection — the
+        // synchronous throw inside the executor into a rejection — the
         // outer caller of triggerConversation must NEVER see an exception
         // from this code path.
-        const loop = lateBinding.conversationLoopRef.fn!;
+        const executor = lateBinding.triggerExecutorRef.fn!;
         void Promise.resolve()
           .then(() =>
-            loop.runTriggerTurn({
+            executor.run({
               prompt: spec.prompt,
               source: decision.source,
               visibility: decision.visibility,

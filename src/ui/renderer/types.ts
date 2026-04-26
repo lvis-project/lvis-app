@@ -216,6 +216,32 @@ export type LvisApi = {
   triggerShutdownRoutineDev: () => Promise<{ ok: boolean; summary?: string; error?: string }>;
   onRoutineStarted: (h: (payload: { routineId: string; trigger: string; startedAt: string }) => void) => () => void;
   onRoutineCompleted: (h: (result: { routineId: string; trigger: string; summary: string; generatedAt: string }) => void) => () => void;
+  // Brain — proactive trigger lifecycle
+  onTriggerStarted: (
+    h: (payload: {
+      sessionId: string;
+      source: string;
+      visibility: "silent" | "summary-only" | "user-visible";
+      priority: "low" | "normal" | "high";
+      startedAt: string;
+    }) => void,
+  ) => () => void;
+  onTriggerCompleted: (
+    h: (result: {
+      sessionId: string;
+      source: string;
+      visibility: "silent" | "summary-only" | "user-visible";
+      priority: "low" | "normal" | "high";
+      prompt: string;
+      summary: string;
+      completedAt: string;
+    }) => void,
+  ) => () => void;
+  onTriggerFailed: (
+    h: (payload: { sessionId: string; source: string; error: string }) => void,
+  ) => () => void;
+  dismissTrigger: (sessionId: string) => Promise<{ ok: boolean; removed?: boolean; error?: string }>;
+  importTrigger: (sessionId: string) => Promise<{ ok: boolean; imported?: number; reason?: string; error?: string }>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onViewActivate: (h: (k: string) => void) => () => void;

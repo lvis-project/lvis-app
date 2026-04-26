@@ -139,6 +139,13 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       routineCompletedHandlers.add(h);
       return () => routineCompletedHandlers.delete(h);
     }),
+    // Brain — proactive trigger lifecycle. Tests that don't exercise the
+    // trigger card just need these to be callable subscribe/no-op functions.
+    onTriggerStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
+    onTriggerCompleted: vi.fn((_h: (r: unknown) => void) => () => {}),
+    onTriggerFailed: vi.fn((_h: (p: unknown) => void) => () => {}),
+    dismissTrigger: vi.fn(async () => ({ ok: true, removed: true })),
+    importTrigger: vi.fn(async () => ({ ok: true, imported: 0 })),
 
     submitFeedback: vi.fn(async () => ({ ok: true })),
 

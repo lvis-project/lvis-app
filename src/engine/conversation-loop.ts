@@ -409,56 +409,6 @@ export class ConversationLoop {
   }
 
   /**
-   * Proactive Brain — start a turn from a brain-plugin observation.
-   *
-   * This is the host-side entry behind `hostApi.triggerConversation()`. It
-   * delegates to {@link runTurn} (so the templated prompt flows through the
-   * usual classify→route→loop pipeline), but:
-   *   1. tags the audit chain with the trigger's `source` and `visibility`
-   *      so source-aware permission (§6.3) can scope policies to
-   *      `proactive:*` origins;
-   *   2. sets the origin source on the SystemPromptBuilder so the LLM
-   *      receives the Proactive Origin Guidance section — a soft "second
-   *      guess this suggestion before acting" gate that complements §8
-   *      ApprovalGate for destructive ops.
-   *
-   * P0 limitation: `context` is currently audit-only — the system-prompt /
-   * tool pipeline does not receive it. Plugins that need tools to act on an
-   * ID must embed it in `spec.prompt` itself. P2 will plumb `context` into
-   * per-turn metadata.
-   *
-   * The host enforces capability + source/dedupe in `createHostApi`; this
-   * method assumes those checks already passed.
-   */
-  async runTriggerTurn(
-    spec: {
-      prompt: string;
-      source: string;
-      visibility: "silent" | "summary-only" | "user-visible";
-      priority: "low" | "normal" | "high";
-      context?: Record<string, unknown>;
-    },
-    callbacks?: TurnCallbacks,
-    abortSignal?: AbortSignal,
-  ): Promise<TurnResult> {
-    // Audit row for the trigger entry lives in `evaluateTriggerSpec`
-    // (plugin-runtime). Soft LLM-side validation gate: `runTurn` accepts
-    // `originSource` as an option so the set/clear lifecycle on the
-    // SystemPromptBuilder runs synchronously around `build()`, not across
-    // an `await`. This avoids a singleton-state race when triggers overlap.
-    //
-    // TODO: thread `originSource` into ToolExecutor → PermissionManager →
-    // ApprovalGate so per-source policies (e.g. "always confirm
-    // `proactive:*` calendar writes") can fire. Currently the source
-    // reaches only the system prompt; permission/approval still see
-    // `source: "plugin"`. See `docs/references/conversation-trigger.md`
-    // deferred table.
-    return this.runTurn(spec.prompt, callbacks, abortSignal, {
-      originSource: spec.source,
-    });
-  }
-
-  /**
    * 한 턴 실행 — §4.5 Core Cycle
    * @param abortSignal  B4: optional external abort signal; if omitted a fresh
    *                     AbortController is created and stored in
