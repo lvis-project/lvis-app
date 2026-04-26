@@ -75,6 +75,31 @@ export interface MarketplaceListItem extends PluginMarketplaceItem {
 }
 
 /**
+ * Disabled fetcher — used when no real-cloud backend is configured in a
+ * packaged build. Constructor is side-effect free so boot does not crash;
+ * any actual marketplace method (list/install/download) throws a clear
+ * `marketplace-disabled` error so callers can degrade gracefully. The
+ * managed bootstrap (`resolveManagedPluginBootstrap`) short-circuits
+ * before reaching this fetcher in the same conditions.
+ */
+export class DisabledMarketplaceFetcher implements MarketplaceFetcher {
+  private static readonly ERR =
+    "marketplace-disabled: no marketplace backend configured for this build";
+
+  async listPlugins(): Promise<PluginMarketplaceItem[]> {
+    throw new Error(DisabledMarketplaceFetcher.ERR);
+  }
+
+  async getPluginDetail(): Promise<PluginMarketplaceItem | null> {
+    throw new Error(DisabledMarketplaceFetcher.ERR);
+  }
+
+  async downloadVersion(): Promise<{ zipBuffer: Buffer; sha256: string }> {
+    throw new Error(DisabledMarketplaceFetcher.ERR);
+  }
+}
+
+/**
  * @internal Dev/test-only fetcher. Reads a local JSON catalog file.
  *
  * Production / packaged builds MUST use {@link RealCloudMarketplaceFetcher}

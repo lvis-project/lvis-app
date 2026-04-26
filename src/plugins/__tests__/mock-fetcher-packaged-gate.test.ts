@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { MockMarketplaceFetcher } from "../marketplace.js";
+import { DisabledMarketplaceFetcher, MockMarketplaceFetcher } from "../marketplace.js";
 
 describe("MockMarketplaceFetcher — packaged-build gate", () => {
   beforeEach(() => {
@@ -47,5 +47,31 @@ describe("MockMarketplaceFetcher — packaged-build gate", () => {
     }
     expect(caught).not.toBeNull();
     expect(caught?.message).not.toContain("/secret/path");
+  });
+});
+
+describe("DisabledMarketplaceFetcher — packaged-build fallback stub", () => {
+  // Used by boot when packaged && no real-cloud URL. Constructor must be
+  // side-effect free (no throw) so PluginMarketplaceService boot doesn't
+  // crash even though every method call is fail-closed.
+  it("constructs in packaged builds without throwing", () => {
+    setIsPackaged(true);
+    expect(() => new DisabledMarketplaceFetcher()).not.toThrow();
+    _resetForTest();
+  });
+
+  it("listPlugins() throws marketplace-disabled", async () => {
+    const f = new DisabledMarketplaceFetcher();
+    await expect(f.listPlugins()).rejects.toThrow(/marketplace-disabled/);
+  });
+
+  it("getPluginDetail() throws marketplace-disabled", async () => {
+    const f = new DisabledMarketplaceFetcher();
+    await expect(f.getPluginDetail()).rejects.toThrow(/marketplace-disabled/);
+  });
+
+  it("downloadVersion() throws marketplace-disabled", async () => {
+    const f = new DisabledMarketplaceFetcher();
+    await expect(f.downloadVersion()).rejects.toThrow(/marketplace-disabled/);
   });
 });
