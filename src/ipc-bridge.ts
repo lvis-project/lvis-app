@@ -42,6 +42,7 @@ import {
   clearLatestRoutineResult,
   getLatestRoutineResult,
 } from "./routines/routine-delivery.js";
+import { devLinkedEntryAllowed, isDevModeUnlocked } from "./boot/dev-flags.js";
 
 /**
  * Convert the UI's "user-assistant-only ordinal" to the real index into
@@ -676,10 +677,8 @@ ${input}`;
     // Combine `!app.isPackaged` with the env gate so a packaged production
     // binary launched with LVIS_DEV=1 in its environment cannot manually
     // trigger routines (env vars are user-controllable on every desktop OS).
-    const isDev = !app.isPackaged && (
-      process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1"
-    );
-    if (!isDev) return { ok: false, error: "dev-only" };
+    // Phase 1 §Step 4 — single helper now centralizes the gate.
+    if (!isDevModeUnlocked()) return { ok: false, error: "dev-only" };
     if (!routineEngine) return { ok: false, error: "routine-engine-unavailable" };
 
     const built = buildRoutineForTrigger(routineId, settingsService.get("routine"));
@@ -833,8 +832,8 @@ ${input}`;
     // packages.  realpathSync would resolve through the link to the source
     // repo directory, making the prefix-based confinement check fail.
     // Trust the already-validated path and read directly.
-    const isDevLinkedEntry = process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1";
-    if (isDevLinkedEntry) {
+    // Phase 1 §Step 4 — gate hard-anchored to !app.isPackaged via dev-flags.
+    if (devLinkedEntryAllowed()) {
       let target: string;
       try {
         target = realpathSync(entryPath);

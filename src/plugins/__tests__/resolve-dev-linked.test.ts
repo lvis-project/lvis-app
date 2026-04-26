@@ -23,6 +23,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../runtime.js";
+import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 
 describe("PluginRuntime — resolveDevLinkedPackageEntry (via resolveEntryPath)", () => {
   let testDir: string;
@@ -47,11 +48,17 @@ describe("PluginRuntime — resolveDevLinkedPackageEntry (via resolveEntryPath)"
 
     prevDev = process.env.LVIS_DEV;
     process.env.LVIS_DEV = "1";
+    // Phase 1 §Step 4 — devLinkedEntryAllowed() reads the cached isPackaged
+    // gate. Tests run in node (no electron `app`) so we must wire the gate
+    // explicitly; without this the dev mode is treated as packaged-default
+    // and the LVIS_DEV env var is ignored.
+    setIsPackaged(false);
   });
 
   afterEach(async () => {
     if (prevDev === undefined) delete process.env.LVIS_DEV;
     else process.env.LVIS_DEV = prevDev;
+    _resetForTest();
     await rm(testDir, { recursive: true, force: true });
   });
 

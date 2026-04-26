@@ -87,13 +87,18 @@ describe("Sprint 4-B — signature enforcement", () => {
     expect(runtime.listPluginIds()).toContain("com.lge.managed-signed");
   });
 
-  it("user plugin without signature loads with warning", async () => {
+  it("user plugin without signature loads with warning when allowUnsignedUserPlugins=true", async () => {
+    // Phase 1 §Step 2 — fail-closed by default; the legacy "warn-and-load"
+    // path now requires the explicit opt-in flag. The new trust-boundary
+    // tests cover both branches; this case keeps the original positive-path
+    // assertion under the opt-in flag.
     await writePlugin("com.user.plug", "user", false);
     const verifier = new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] });
     const runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
       signatureVerifier: verifier,
+      allowUnsignedUserPlugins: true,
     });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("com.user.plug");
