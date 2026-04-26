@@ -66,9 +66,13 @@ export function BootstrapStatusBanner({ status, onDismiss }: Props): React.React
   }
 
   if (status.failed.length > 0) {
+    // Truncate long error strings (e.g. multi-line stack traces from
+    // tarball failures) so the banner stays single-line on narrow screens.
+    const truncate = (s: string, max = 120): string =>
+      s.length > max ? `${s.slice(0, max - 1)}…` : s;
     const summary =
       status.failed.length === 1
-        ? `플러그인 ${status.failed[0].id} 설치 실패: ${status.failed[0].error}`
+        ? `플러그인 ${status.failed[0].id} 설치 실패: ${truncate(status.failed[0].error)}`
         : `${status.failed.length}개 플러그인 설치 실패`;
     return (
       <div className="flex items-center justify-between gap-2 bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2 rounded-md mx-2 mt-2">
