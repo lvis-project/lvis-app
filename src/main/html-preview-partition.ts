@@ -60,6 +60,43 @@ function installCdnAllowlist(ses: Electron.Session): void {
   });
 }
 
+/**
+ * #237 Option B — Plugin webview partition policy.
+ *
+ * Plugin webviews use `persist:plugin:<slug>` partitions.  They load from a
+ * local file:// URL (plugin-ui-shell.html) and execute plugin-bundled JS.
+ * We apply a permissive policy that still blocks raw http/https to external
+ * hosts that weren't explicitly loaded by the plugin module itself.
+ *
+ * Allowed: file://, data:, blob:, about:
+ * Blocked: http, https, ftp, and any other scheme (plugin UI should be
+ *   self-contained; network calls go through lvis:plugin:call-tool IPC).
+ *
+ * This function is called once per partition name the first time a webview
+ * with that partition is attached.  The caller must pass the partition string
+ * exactly as used in the <webview> tag.
+ */
+export function installPluginPartitionPolicy(partitionName: string): void {
+  const ses = session.fromPartition(partitionName);
+  ses.webRequest.onBeforeRequest((details, callback) => {
+    try {
+      const url = new URL(details.url);
+      if (
+        url.protocol === "file:" ||
+        url.protocol === "data:" ||
+        url.protocol === "blob:" ||
+        url.protocol === "about:"
+      ) {
+        callback({ cancel: false });
+        return;
+      }
+      callback({ cancel: true });
+    } catch {
+      callback({ cancel: true });
+    }
+  });
+}
+
 export function installHtmlPreviewPartitionBlock(): void {
   // ── 1. LLM-authored HTML: strict inline-only partition ──
   installStrictInlineOnly(session.fromPartition("lvis-render-html"));
