@@ -17,6 +17,12 @@ import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
 import { ToolGroupCard } from "./components/ToolGroupCard.js";
 import { ChatSearchOverlay } from "./components/ChatSearchOverlay.js";
+import { AskUserQuestionCard } from "./components/AskUserQuestionCard.js";
+import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
+import { SubAgentCard } from "./components/SubAgentCard.js";
+import { SkillBadge } from "./components/SkillBadge.js";
+import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
+import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
 import { useChatContext } from "./context/ChatContext.js";
 
@@ -40,6 +46,16 @@ export interface ChatViewProps {
 }
 
 export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback }: ChatViewProps) {
+  // Workflow tools (S1+S2): inline cards layered above the chat entries.
+  // We grab the api lazily to avoid threading another prop through the
+  // context — the api is a singleton and equally valid here.
+  const workflowApi = getApi();
+  const {
+    askQuestions,
+    subAgentSpawns,
+    loadedSkills,
+    dismissAskQuestion,
+  } = useWorkflowTools(workflowApi);
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef,
@@ -162,6 +178,26 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
         </div>
       )}
       <ScrollArea className="h-full p-4"><div className="space-y-3">
+        {/* Workflow tools (S1+S2): assistant todo panel + skill badges + sub-agents + ask-user. */}
+        <SessionTodoPanel api={workflowApi} />
+        {loadedSkills.length > 0 && (
+          <div className="flex max-w-[85%] flex-wrap gap-2" data-testid="skill-badges-row">
+            {loadedSkills.map((s, i) => (
+              <SkillBadge key={`${s.name}:${i}`} {...s} />
+            ))}
+          </div>
+        )}
+        {subAgentSpawns.map((spawn) => (
+          <SubAgentCard key={spawn.spawnId} spawn={spawn} />
+        ))}
+        {askQuestions.map((req) => (
+          <AskUserQuestionCard
+            key={req.id}
+            api={workflowApi}
+            request={req}
+            onResolved={dismissAskQuestion}
+          />
+        ))}
         {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {entries.map((entry, idx) => {
           const isMatch = searchMatchSet.has(idx);

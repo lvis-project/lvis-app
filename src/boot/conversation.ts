@@ -27,8 +27,15 @@ export function createSystemPromptBuilder(opts: {
   memoryManager: MemoryManager;
   toolRegistry: ToolRegistry;
   pluginRuntime: PluginRuntime;
+  /**
+   * C2(c): per-session SkillOverlay reader. The builder calls this each
+   * turn with the active session id and folds the returned section into
+   * the system prompt. Optional so unit tests can stub the builder
+   * without touching the overlay.
+   */
+  getActiveSkillsSection?: (sessionId: string) => string;
 }): SystemPromptBuilder {
-  const { memoryManager, toolRegistry, pluginRuntime } = opts;
+  const { memoryManager, toolRegistry, pluginRuntime, getActiveSkillsSection } = opts;
   return new SystemPromptBuilder({
     memoryManager,
     toolRegistry,
@@ -43,6 +50,7 @@ export function createSystemPromptBuilder(opts: {
     },
     // Phase 1.5 Option C — 비활성 plugin 카탈로그 공급.
     getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
+    getActiveSkillsSection,
   });
 }
 
@@ -134,6 +142,8 @@ export interface ConversationDeps {
   approvalGate: ApprovalGate;
   hookRunner: HookRunner;
   pluginRuntime: PluginRuntime;
+  /** C2(c): per-session SkillOverlay handle, cleared on newConversation(). */
+  skillOverlay?: { clear(sessionId: string): void };
 }
 
 /**
@@ -248,6 +258,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     hookRunner: deps.hookRunner,
     // Phase 1.5 Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime: deps.pluginRuntime,
+    skillOverlay: deps.skillOverlay,
   });
 }
 
