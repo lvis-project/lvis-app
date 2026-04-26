@@ -189,12 +189,18 @@ export class TriggerExecutor {
       const messagesSnapshot: GenericMessage[] = [
         { role: "user", content: spec.prompt },
       ];
+      // `route` is required by `TurnResult` even though no consumer
+      // reads it for trigger-executor's synthesized result (the
+      // result never reaches `auditLogger.logTurn` — trigger
+      // lifecycle uses its own audit rows). Use the conventional
+      // "llm" value rather than a dead bespoke string so a future
+      // reader doesn't waste cycles tracing a phantom route.
       const result: TurnResult = {
         text: summaryText,
         stopReason: "end_turn",
         usage: { inputTokens: 0, outputTokens: 0 },
         toolCalls: [],
-        route: "proactive-trigger",
+        route: "llm",
       };
       const payload: TriggerResultPayload = {
         sessionId,
