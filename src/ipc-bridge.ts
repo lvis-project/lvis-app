@@ -796,9 +796,25 @@ ${input}`;
   });
   ipcMain.handle("lvis:plugins:uninstall", async (e, pluginId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:uninstall", e); return UNAUTHORIZED_FRAME; }
-    const result = await pluginMarketplace.uninstall(pluginId);
+    // Broadcast the lifecycle event to every window — mirrors the lvis://install
+    // deep-link path's install-result emission via `mainWindow?.webContents.send`.
+    // Using `e.sender.send` would only reach the calling frame and break any
+    // sibling settings window / sub-frame consumer.
+    const broadcastUninstallResult = (payload: { slug: string; success: boolean; error?: string }) => {
+      const win = getMainWindow();
+      win?.webContents.send("lvis:plugins:uninstall-result", payload);
+    };
+    let result: Awaited<ReturnType<typeof pluginMarketplace.uninstall>>;
+    try {
+      result = await pluginMarketplace.uninstall(pluginId);
+    } catch (err) {
+      const message = (err as Error).message ?? "uninstall failed";
+      broadcastUninstallResult({ slug: pluginId, success: false, error: message });
+      throw err;
+    }
     await pluginRuntime.restartAll();
     refreshPluginNotifications?.();
+    broadcastUninstallResult({ slug: pluginId, success: true });
     return result;
   });
   // read-only, sender guard optional

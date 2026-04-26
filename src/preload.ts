@@ -313,6 +313,15 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:plugins:install-result", listener);
   },
 
+  // Sibling of onPluginInstallResult — fires after PluginConfigTab or any
+  // other surface drives uninstall through the IPC handler. Renderer uses
+  // this to drop the removed plugin's sidebar tab + marketplace card.
+  onPluginUninstallResult: (handler: (payload: { slug: string; success: boolean; error?: string }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:plugins:uninstall-result", listener);
+    return () => ipcRenderer.removeListener("lvis:plugins:uninstall-result", listener);
+  },
+
   // ─── Plugin Events (§35 real-time streaming) ─────
   onPluginEvent: (
     eventType: string,

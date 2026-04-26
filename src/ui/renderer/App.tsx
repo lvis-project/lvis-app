@@ -127,6 +127,15 @@ export function App() {
     useContextBudget({ entries, llmVendor, llmModel });
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
+
+  // If the currently-open sidebar view belongs to a plugin that just got
+  // uninstalled, fall back to home so the renderer doesn't render a "view
+  // not found" placeholder for a stale plugin id.
+  useEffect(() => {
+    if (!activeView.startsWith("plugin:")) return;
+    if (activePluginView) return;
+    setActiveView("home");
+  }, [activeView, activePluginView]);
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
   const vendorSupportsThinking = useMemo(() => vendorSupportsThinkingShared(llmVendor, llmModel), [llmVendor, llmModel]);
   const composeOutgoing = useCallback(
@@ -237,6 +246,20 @@ export function App() {
   useEffect(() => {
     if (typeof api.onPluginInstallResult !== "function") return;
     const unsubscribe = api.onPluginInstallResult(({ success }) => {
+      if (!success) return;
+      void refreshViews();
+      void refreshMarketplace();
+    });
+    return unsubscribe;
+  }, [api, refreshViews, refreshMarketplace]);
+
+  // Same lifecycle for uninstall — PluginConfigTab and any other surface
+  // drive uninstall through the IPC handler which now broadcasts a result
+  // event. Without this subscription the sidebar would keep the removed
+  // plugin's tab until the app reloads.
+  useEffect(() => {
+    if (typeof api.onPluginUninstallResult !== "function") return;
+    const unsubscribe = api.onPluginUninstallResult(({ success }) => {
       if (!success) return;
       void refreshViews();
       void refreshMarketplace();
