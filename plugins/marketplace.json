@@ -176,12 +176,19 @@
       "id": "tasks",
       "slug": "tasks",
       "name": "LVIS Tasks",
-      "description": "[Phase 0 — draft, not installable] LVIS 태스크 저장·조회·완료 처리 플러그인. 호스트의 taskService가 본 플러그인으로 이전 예정. registry.json에 미등록 상태로 호스트는 본 플러그인을 로드하지 않음.",
+      "description": "LVIS 태스크 저장·조회·완료 처리 플러그인. Phase 1 — TaskStore + 6개 task_* 핸들러 포팅 완료. 호스트는 아직 cutover 전이라 registry.json 미등록 상태이며 자체 taskService.ts를 사용. Phase 2에서 host가 본 플러그인으로 위임 전환.",
       "packageSpec": "file:../lvis-plugin-tasks",
       "packageName": "@lvis/plugin-tasks",
       "installPolicy": "user",
       "publisher": "LG Electronics IT",
-      "tools": [],
+      "tools": [
+        "task_add",
+        "task_update",
+        "task_delete",
+        "task_list",
+        "task_today",
+        "task_overdue"
+      ],
       "defaultConfig": {},
       "ui": []
     },
