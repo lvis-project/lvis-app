@@ -13,8 +13,6 @@
  *
  * No plugin-specific literals here — everything is manifest-driven.
  */
-import { homedir } from "node:os";
-import { resolve } from "node:path";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
@@ -24,6 +22,7 @@ import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 import { PluginSignatureVerifier } from "../../plugins/signature-verifier.js";
 import { BUNDLED_PUBLISHER_PUBLIC_KEYS } from "../../plugins/publisher-keys.js";
 import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
 import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
 import { withMsGraphRetry } from "../../main/ms-graph-retry.js";
 import type {
@@ -489,6 +488,8 @@ export interface InitPluginRuntimeOutput {
   taskSourceRegistry: TaskSourceRegistry;
   lateBinding: LateBindingRefs;
   pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }>;
+  /** Phase 0 SoT — shared with MarketplaceService + post-boot update detector. */
+  pluginPaths: ReturnType<typeof resolvePluginPaths>;
 }
 
 /**
@@ -555,10 +556,13 @@ export async function initPluginRuntime(
     };
   }
 
-  // §7.2 Plugin Deployment Guard
+  // §7.2 Plugin Deployment Guard.
+  // Phase 0 SoT consolidation: resolve once, share across DeploymentGuard,
+  // PluginRuntime, and the marketplace service that boot.ts wires later.
+  const pluginPaths = resolvePluginPaths({ appRoot: projectRoot });
   const deploymentGuard = new PluginDeploymentGuard({
-    registryPath: resolve(projectRoot, "plugins/registry.json"),
-    userInstalledDir: resolve(homedir(), ".lvis/plugins"),
+    registryPath: pluginPaths.registryPath,
+    userInstalledDir: pluginPaths.userInstalledDir,
   });
 
   // Late-binding refs for ConversationLoop-dependent callers.
@@ -594,7 +598,7 @@ export async function initPluginRuntime(
 
   pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
-    registryPath: resolve(projectRoot, "plugins/registry.json"),
+    registryPath: pluginPaths.registryPath,
     configOverrides,
     deploymentGuard,
     signatureVerifier,
@@ -875,6 +879,7 @@ export async function initPluginRuntime(
     taskSourceRegistry,
     lateBinding,
     pluginShutdownHandlers,
+    pluginPaths,
   };
 }
 
