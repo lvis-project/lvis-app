@@ -121,15 +121,17 @@ describe("SubAgentRunner — maxRounds bound", () => {
         sourceTools: ["noop"],
         maxTurns: 2,
       });
-      // The loop must have stopped after at most 2 assistant rounds.
-      // (turnCount counts onAssistantRound callbacks the runner observed.)
-      expect(result.turnCount).toBeLessThanOrEqual(2);
+      // R2-CR-2: tighten — `<=2` would also pass on a regression that bails
+      // out at 0 or 1 rounds. The provider script emits 5 valid tool_use
+      // rounds, so with maxTurns=2 the loop MUST execute exactly 2 rounds.
+      expect(result.turnCount).toBe(2);
       // Per-round tool fan-out cap is 10; with maxTurns=2 the total tool
       // call count is bounded by 2 * 10 = 20.
       expect(result.toolCallCount).toBeLessThanOrEqual(2 * 10);
-      // And the tool itself was invoked at most 2 times (one per round
-      // since the provider emits a single tool_call per round).
-      expect(execSpy.mock.calls.length).toBeLessThanOrEqual(2);
+      // R2-CR-2: tighten — exactly 2 tool executions happened (one per round
+      // since the provider emits a single tool_call per round). A regression
+      // that early-terminates would invoke the executor 0 or 1 times only.
+      expect(execSpy).toHaveBeenCalledTimes(2);
     } finally {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();

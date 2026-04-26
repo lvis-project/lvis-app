@@ -734,14 +734,33 @@ export class ConversationLoop {
 
       const { text: textContent, thought: thoughtContent, thinkingBlocks: roundThinkingBlocks, toolCalls: pendingToolCalls, stopReason } = stream;
 
+      // R2-CR-1: cap BEFORE persisting to history. Anthropic + OpenAI strict
+      // APIs reject mismatches between assistant.tool_use blocks and the
+      // tool_result blocks in the next user turn. If we keep the un-capped
+      // pendingToolCalls in history, blocks 11..N never receive a matching
+      // tool_result (executor only runs the capped slice) and the next
+      // request 400s. Persist only what will be answered.
+      let pendingToolCallsCapped = pendingToolCalls;
+      const wasCapped = pendingToolCalls.length > MAX_TOOL_CALLS_PER_ROUND;
+      if (wasCapped) {
+        console.warn(
+          `[lvis] conversation-loop: round ${roundIndex} emitted ${pendingToolCalls.length} tool_use blocks, capping to ${MAX_TOOL_CALLS_PER_ROUND}`,
+        );
+        pendingToolCallsCapped = pendingToolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND);
+      }
+
       // thinkingBlocks는 tool_use 체인이 이어지는 다음 요청에만 signature 그대로 포함되어야 Anthropic이 수락한다.
-      const preserveThinkingBlocks = stopReason === "tool_use" && pendingToolCalls.length > 0;
+      const preserveThinkingBlocks = stopReason === "tool_use" && pendingToolCallsCapped.length > 0;
       this.history.append({
         role: "assistant",
-        content: textContent,
+        content: wasCapped ? `${textContent}\n\n[capped at ${MAX_TOOL_CALLS_PER_ROUND} of ${pendingToolCalls.length} tool_use blocks]` : textContent,
         ...(thoughtContent && { thought: thoughtContent }),
         ...(preserveThinkingBlocks && roundThinkingBlocks.length > 0 && { thinkingBlocks: roundThinkingBlocks }),
-        ...(pendingToolCalls.length > 0 && { toolCalls: pendingToolCalls }),
+        // R2-CR-1: persist only the capped slice — these are the only blocks
+        // that will receive a matching tool_result. Streaming UI still sees
+        // the un-capped count below via the assistant-round callback so the
+        // user can observe the original LLM intent (and the cap message).
+        ...(pendingToolCallsCapped.length > 0 && { toolCalls: pendingToolCallsCapped }),
       });
 
       // §4.5.2 step 8 — REASONING_ACCUMULATE
@@ -753,6 +772,8 @@ export class ConversationLoop {
         text: textContent,
         thought: thoughtContent,
         stopReason,
+        // The UI / telemetry callback receives the un-capped count so the
+        // user sees the LLM's full intent — only persisted history is capped.
         hasToolCalls: pendingToolCalls.length > 0,
       });
       // §4.5.2 step 10 — ROUND_COMMIT
@@ -772,16 +793,8 @@ export class ConversationLoop {
       }
 
       // §4.5.6 tool execution — request_plugin 가로채기 + knowledge depth cap + executor 호출
-      // C3(a): bound the per-round tool fan-out. Past this cap we drop the
-      // overflow entries (they receive no tool_result so the LLM gets a
-      // signal to retry-fewer next round) and log a warn for telemetry.
-      let pendingToolCallsCapped = pendingToolCalls;
-      if (pendingToolCalls.length > MAX_TOOL_CALLS_PER_ROUND) {
-        console.warn(
-          `[lvis] conversation-loop: round ${roundIndex} emitted ${pendingToolCalls.length} tool_use blocks, capping to ${MAX_TOOL_CALLS_PER_ROUND}`,
-        );
-        pendingToolCallsCapped = pendingToolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND);
-      }
+      // (cap already applied above before history commit; pendingToolCallsCapped is the
+      //  authoritative slice that flows through executor and produces tool_result blocks.)
       const toolUses: ToolUseBlock[] = pendingToolCallsCapped.map((tc) => ({
         id: tc.id, name: tc.name, input: tc.input,
       }));

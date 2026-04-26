@@ -56,6 +56,14 @@ export class SkillOverlay {
    * fenced with `<lvis-skill>` so the LLM can attribute the guidance and
    * the body cannot accidentally look like user-supplied content.
    * Empty when no skills are loaded.
+   *
+   * R2-SEC-LOW-2: skill BODIES are also sanitized — pre-fix, only the
+   * `name` attribute went through `escapeAttr`. A malicious body containing
+   * a literal `</lvis-skill>` could close the fence early and inject
+   * pseudo-system content; a literal `<lvis-skill …>` could inject a fake
+   * sibling skill entry. We neutralize those exact patterns by inserting a
+   * zero-width space, which preserves visual content for the LLM while
+   * preventing the parser-style injection.
    */
   buildSection(sessionId: string): string {
     const entries = this.list(sessionId);
@@ -63,7 +71,7 @@ export class SkillOverlay {
     const lines: string[] = ["<lvis-active-skills>"];
     for (const e of entries) {
       lines.push(`<lvis-skill name="${escapeAttr(e.name)}" source="${e.source}">`);
-      lines.push(e.body);
+      lines.push(neutralizeSkillFence(e.body));
       lines.push(`</lvis-skill>`);
     }
     lines.push(`</lvis-active-skills>`);
@@ -82,4 +90,19 @@ function escapeAttr(value: string): string {
     .replace(/"/g, "&quot;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+/**
+ * R2-SEC-LOW-2: neutralize literal `<lvis-skill …>` and `</lvis-skill>`
+ * patterns inside the body so an attacker-controlled skill cannot break
+ * out of its envelope. We insert a zero-width space (U+200B) after the
+ * opening `<` so the rendered text remains visually identical (and
+ * semantically intact for an LLM reading the prompt) while no longer
+ * matching a parser looking for the fence tags. Whitespace tolerance is
+ * applied so `< /lvis-skill >` and similar variants are also caught.
+ */
+const SKILL_FENCE_PATTERN = /<(\s*\/?\s*lvis-skill[^>]*)>/gi;
+const ZWSP = "​";
+function neutralizeSkillFence(body: string): string {
+  return body.replace(SKILL_FENCE_PATTERN, `<${ZWSP}$1>`);
 }

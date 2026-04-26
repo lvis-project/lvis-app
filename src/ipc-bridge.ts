@@ -145,117 +145,23 @@ type ConversationTurnResult = {
   stopReason?: "end_turn" | "tool_use" | "interrupted";
 };
 
-/**
- * All IPC channels reserved by the host. Plugin manifests must not declare
- * channels that collide with these, as doing so would shadow privileged
- * host handlers and create unpredictable (or malicious) behaviour.
- *
- * MAINTAINERS: add a new entry here whenever you register a new host channel
- * with ipcMain.handle() inside registerIpcHandlers().
- */
-const RESERVED_HOST_CHANNELS = new Set([
-  "lvis:settings:get",
-  "lvis:settings:update",
-  "lvis:settings:set-api-key",
-  "lvis:settings:has-api-key",
-  "lvis:settings:delete-api-key",
-  "lvis:settings:set-web-api-key",
-  "lvis:settings:has-web-api-key",
-  "lvis:settings:delete-web-api-key",
-  "lvis:ms-graph:get-state",
-  "lvis:ms-graph:switch-environment",
-  "lvis:ms-graph:sign-in",
-  "lvis:ms-graph:sign-out",
-  "lvis:chat:has-provider",
-  "lvis:chat:send",
-  "lvis:chat:guide",
-  "lvis:chat:new",
-  "lvis:chat:sessions",
-  "lvis:chat:load-session",
-  "lvis:memory:entries:list",
-  "lvis:memory:entries:save",
-  "lvis:memory:entries:delete",
-  "lvis:memory:entries:search",
-  "lvis:memory:sessions:list",
-  "lvis:memory:sessions:search",
-  "lvis:memory:lvis-md:get",
-  "lvis:memory:lvis-md:update",
-  "lvis:memory:user-prefs:get",
-  "lvis:memory:user-prefs:update",
-  "lvis:plugins:marketplace:list",
-  "lvis:plugins:install",
-  "lvis:plugins:uninstall",
-  "lvis:plugins:ui:list",
-  "lvis:plugins:ui:read-module",
-  "lvis:plugins:call",
-  "lvis:mcp:servers",
-  "lvis:mcp:kill",
-  "lvis:mcp:config:get",
-  "lvis:mcp:config:path",
-  "lvis:mcp:config:add",
-  "lvis:mcp:config:remove",
-  "lvis:mcp:ui-resource",
-  "lvis:permission:get-mode",
-  "lvis:permission:set-mode",
-  "lvis:permission:list-rules",
-  "lvis:permission:add-rule",
-  "lvis:permission:remove-rule",
-  "lvis:approval:respond",
-  "lvis:policy:get",
-  "lvis:policy:set",
-  "lvis:tasks:add",
-  "lvis:tasks:update",
-  "lvis:tasks:get",
-  "lvis:tasks:delete",
-  "lvis:tasks:query",
-  "lvis:tasks:pending",
-  "lvis:tasks:overdue",
-  "lvis:tasks:today",
-  "lvis:routine:get-latest-result",
-  "lvis:routines:dev-trigger-wakeup",
-  "lvis:routines:dev-trigger-schedule",
-  "lvis:routines:dev-trigger-shutdown",
-  // Brain — proactive trigger renderer-side IPC
-  "lvis:trigger:dismiss",
-  "lvis:trigger:import",
-  // Sprint 4.B — usage observability
-  "lvis:usage:summary",
-  "lvis:usage:range",
-  "lvis:usage:export-csv",
-  // Sprint 4.C — conversation UX
-  "lvis:chat:get-history",
-  "lvis:chat:edit-resend",
-  "lvis:chat:fork",
-  "lvis:chat:retry-effort",
-  "lvis:chat:export",
-  "lvis:chat:compact",
-  "lvis:chat:session-resume",
-  "lvis:starred:list",
-  "lvis:starred:add",
-  "lvis:starred:remove",
-  "lvis:plugins:cards",
-  "lvis:plugins:config:get",
-  "lvis:plugins:config:set",
-  "lvis:feedback:submit",
-  "lvis:telemetry:consent-answer",
-  "lvis:audit:search",
-  "lvis:audit:stats",
-  "lvis:plugins:perf-stats",
-  "lvis:dlp:stats",
-  "lvis:chat:abort",
-  "lvis:pageindex:scan-paths",
-  // #237 Option B — plugin webview bridge channels (plugin-preload.ts only)
-  "lvis:plugin:call-tool",
-  "lvis:plugin:emit-event",
-  "lvis:plugin:get-entry-url",
-  "lvis:plugin:register-webview",
-  // Workflow system tools (S1+S2)
-  "lvis:ask-user-question:respond",
-  "lvis:reminders:list",
-  "lvis:reminders:dismiss",
-  "lvis:reminders:remove",
-  "lvis:session-todo:list",
-]);
+// R2-CR-5: previously a `RESERVED_HOST_CHANNELS` Set was declared here as
+// "documentation" of host-owned `lvis:*` channels. It was never `.has()`-ed
+// anywhere — adding entries to it provided zero defense against plugins
+// registering colliding channel names, so it functioned as an attractive
+// nuisance for maintainers (a list that LOOKS like a check but isn't).
+//
+// The actual defense lives elsewhere and is much narrower: plugin code only
+// runs inside a sandboxed `<webview>` partition (#237 Option B) whose
+// preload (`plugin-preload.ts`) exposes ONLY the `lvisPlugin` bridge —
+// `lvisApi` (the host's privileged surface) is never injected. So a plugin
+// cannot reach `ipcRenderer.invoke("lvis:settings:set-api-key", …)` even
+// if it knew the channel name. Channel-name collisions on the renderer
+// side are therefore not a useful threat model in this build.
+//
+// If a future host design ever loads plugin code into the same context as
+// the renderer (don't), reintroduce a Set here and check it at registration
+// time so the documentation matches the code.
 
 /**
  * M3 — IPC sender validation. Sensitive handlers (api-key mutation, plugin

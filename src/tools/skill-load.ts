@@ -109,7 +109,15 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       // C2(d): user-authored skills require explicit approval on first load.
       // Builtins are pre-blessed (they ship with the host).
       if (skill.source === "user") {
-        const alreadyApproved = await deps.approvals.isApproved(skill.name);
+        // R2-CR-3: hash-bind approval to the current body. If the user
+        // approved an earlier body and the file has since been swapped,
+        // `isApproved` returns false and we re-prompt — this closes a TOCTOU
+        // window where post-approval body mutations would silently inherit
+        // the previous "yes."
+        const alreadyApproved = await deps.approvals.isApproved(
+          skill.name,
+          skill.body,
+        );
         if (!alreadyApproved) {
           const gate = deps.getApprovalGate();
           if (!gate) {
@@ -125,7 +133,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
             category: "tool",
             toolName: "skill_load",
             args: { skillName: skill.name, source: skill.source },
-            reason: `사용자 작성 skill '${skill.name}' 을 시스템 프롬프트에 주입합니다. 승인 시 영구적으로 허용됩니다.`,
+            reason: `사용자 작성 skill '${skill.name}' 을 시스템 프롬프트에 주입합니다. 승인 시 영구적으로 허용됩니다. (현재 본문 sha256 에 바인딩됩니다 — 본문이 변경되면 다시 확인합니다.)`,
             source: "builtin",
             createdAt: Date.now(),
           });
@@ -137,10 +145,9 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
               isError: true,
             };
           }
-          // allow-once / allow-always — both persisted to the approvals
-          // store. The user has explicitly accepted this skill body once;
-          // re-prompting on the next load would be redundant.
-          await deps.approvals.approve(skill.name).catch((err) => {
+          // R2-CR-3: persist approval BOUND TO the current body's sha256.
+          // A subsequent body swap will invalidate this record.
+          await deps.approvals.approve(skill.name, skill.body).catch((err) => {
             console.warn(
               "[lvis] skill_load: approval persistence failed (non-fatal):",
               (err as Error).message,
@@ -149,10 +156,23 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         }
       }
 
+      // R2-SEC-INFO: refuse to register a skill without a real session id.
+      // Falling back to "unknown" piles unattributed skills under one synthetic
+      // bucket and lets them leak across debug/test runs. The tool cannot
+      // function correctly without session attribution, so error out.
       const sessionId =
-        typeof ctx.metadata?.sessionId === "string"
+        typeof ctx.metadata?.sessionId === "string" && ctx.metadata.sessionId
           ? (ctx.metadata.sessionId as string)
-          : "unknown";
+          : "";
+      if (!sessionId) {
+        return {
+          output: JSON.stringify({
+            error:
+              "skill_load: missing sessionId in tool execution context (cannot attribute skill overlay)",
+          }),
+          isError: true,
+        };
+      }
       // Register in the per-session overlay. SystemPromptBuilder reads from
       // this on every subsequent turn — the next assistant round will see
       // the skill body inside <lvis-active-skills>…</lvis-active-skills>.

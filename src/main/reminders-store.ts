@@ -16,11 +16,16 @@ import { randomUUID } from "node:crypto";
 
 /**
  * H4(c): refuse `at` values further than this many milliseconds in the
- * future. 5 years is far beyond any legitimate reminder horizon and
- * blocks attackers from staging a long-tail of dormant entries. Past
- * dates are allowed (they fire immediately on the next scheduler tick).
+ * future. Approximately 5 years (using 365.25 days/year to account for
+ * leap years) is far beyond any legitimate reminder horizon and blocks
+ * attackers from staging a long-tail of dormant entries. Past dates are
+ * allowed (they fire immediately on the next scheduler tick).
+ *
+ * R2-CR-6: previously `5 * 365 * 24 * 60 * 60 * 1000` rounded down to
+ * ~4y 11mo 28d in calendar terms; using 365.25 makes the documented "5
+ * years" cap accurate.
  */
-const MAX_FUTURE_OFFSET_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+const MAX_FUTURE_OFFSET_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
 /**
  * H4(c): per-store cap on persisted reminders. The store is single-user
  * (host runs in-process per Electron window) so 50 active reminders is a
@@ -141,7 +146,7 @@ export class RemindersStore {
       throw new Error(
         `RemindersStore.add: 'at' is too far in the future (>${Math.round(
           MAX_FUTURE_OFFSET_MS / (24 * 60 * 60 * 1000),
-        )} days)`,
+        )} days, approximately 5 years)`,
       );
     }
     const record: ReminderRecord = {

@@ -434,3 +434,104 @@ describe("ToolExecutor — C1 ask_user_question short-circuit", () => {
     expect(results[0].is_error).toBeUndefined();
   });
 });
+
+// ─── R2-CR-4 regression — audit redaction must be source-gated ─────
+
+describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by source", () => {
+  it("does NOT redact freeText when a non-builtin (plugin) tool happens to be named 'ask_user_question'", async () => {
+    // A plugin or MCP tool may legitimately be named `ask_user_question` and
+    // return a `freeText` field. Pre-R2-CR-4, the host's audit-redaction
+    // function ran on it because the gate was name-only. Post-fix, the
+    // redaction must check `source === "builtin"` so plugin tools' outputs
+    // pass through unmodified.
+    const pluginAskTool = createDynamicTool({
+      name: "ask_user_question",
+      description: "plugin tool with the same name",
+      source: "plugin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({
+        output: JSON.stringify({ freeText: "hello world" }),
+        isError: false,
+      }),
+    });
+    const registry = new ToolRegistry();
+    registry.register(pluginAskTool);
+
+    // Spy on AuditLogger.prototype.log to capture what landed in the audit
+    // entry's `output` field (which is what redactAskUserAuditOutput would
+    // have rewritten, if the source-gate were missing).
+    const { AuditLogger: AL } = await import("../../audit/audit-logger.js");
+    const logSpy = vi
+      .spyOn(AL.prototype, "log")
+      .mockImplementation(() => undefined);
+
+    try {
+      const executor = new ToolExecutor(registry);
+      const results = await executor.executeAll(
+        [{ id: "tu-r2cr4", name: "ask_user_question", input: {} }],
+        undefined,
+        "sess-r2cr4-plugin",
+      );
+
+      expect(results).toHaveLength(1);
+      expect(results[0].is_error).toBeUndefined();
+
+      // Find the tool_call audit entry for our test session
+      const toolCallEntry = logSpy.mock.calls
+        .map((c) => c[0] as { type?: string; output?: string; sessionId?: string })
+        .find((e) => e.type === "tool_call" && e.sessionId === "sess-r2cr4-plugin");
+      expect(toolCallEntry).toBeDefined();
+      // R2-CR-4: plugin tool output must be logged un-redacted — the
+      // freeText field is NOT replaced by "[redacted N chars]".
+      expect(toolCallEntry!.output).toContain("hello world");
+      expect(toolCallEntry!.output).not.toContain("[redacted");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("DOES redact freeText for the builtin ask_user_question (positive control)", async () => {
+    const builtinAskTool = createDynamicTool({
+      name: "ask_user_question",
+      description: "builtin",
+      source: "builtin",
+      category: "dangerous",
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({
+        output: JSON.stringify({
+          choice: "yes",
+          freeText: "secret-content",
+          dismissed: false,
+        }),
+        isError: false,
+      }),
+    });
+    const registry = new ToolRegistry();
+    registry.register(builtinAskTool);
+
+    const { AuditLogger: AL } = await import("../../audit/audit-logger.js");
+    const logSpy = vi
+      .spyOn(AL.prototype, "log")
+      .mockImplementation(() => undefined);
+
+    try {
+      const executor = new ToolExecutor(registry);
+      await executor.executeAll(
+        [{ id: "tu-r2cr4-b", name: "ask_user_question", input: {} }],
+        undefined,
+        "sess-r2cr4-builtin",
+      );
+      const toolCallEntry = logSpy.mock.calls
+        .map((c) => c[0] as { type?: string; output?: string; sessionId?: string })
+        .find((e) => e.type === "tool_call" && e.sessionId === "sess-r2cr4-builtin");
+      expect(toolCallEntry).toBeDefined();
+      // The builtin path must redact.
+      expect(toolCallEntry!.output).not.toContain("secret-content");
+      expect(toolCallEntry!.output).toContain("[redacted");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+});
