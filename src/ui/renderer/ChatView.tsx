@@ -11,6 +11,7 @@ import { formatCostBadge } from "../../lib/cost-estimator.js";
 import { RoutineCard } from "./components/RoutineCard.js";
 import { RoutineRunningIndicator } from "./components/RoutineRunningIndicator.js";
 import { TriggerCard } from "./components/TriggerCard.js";
+import { ImportedTriggerCard } from "./components/ImportedTriggerCard.js";
 import { AssistantCard } from "./components/AssistantCard.js";
 import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
@@ -200,6 +201,20 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           if (entry.kind === "reasoning") return <ReasoningCard key={idx} entry={entry} />;
           if (entry.kind === "tool_group") return <ToolGroupCard key={entry.groupId} group={entry} />;
           if (entry.kind === "system") return <div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>;
+          if (entry.kind === "imported_trigger") {
+            return (
+              <ImportedTriggerCard
+                key={`trigger:${entry.sessionId}`}
+                source={entry.source}
+                prompt={entry.prompt}
+                summary={entry.summary}
+                toolCallCount={entry.toolCallCount}
+                importedAt={entry.importedAt}
+                response={entry.response}
+                responseStreaming={entry.responseStreaming}
+              />
+            );
+          }
           return (
             <div key={idx} className={`${ringCls} rounded-md`}>
               <AssistantCard

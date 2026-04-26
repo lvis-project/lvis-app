@@ -250,6 +250,17 @@ export type LvisApi = {
   onTriggerExpired: (
     h: (payload: { sessionId: string; pluginId: string; source: string }) => void,
   ) => () => void;
+  onTriggerImported: (
+    h: (payload: {
+      sessionId: string;
+      source: string;
+      prompt: string;
+      summary: string;
+      toolCallCount: number;
+      importedAt: string;
+      wrappedPrompt: string;
+    }) => void,
+  ) => () => void;
   dismissTrigger: (sessionId: string) => Promise<{ ok: boolean; removed?: boolean; error?: string }>;
   importTrigger: (sessionId: string) => Promise<{ ok: boolean; imported?: number; reason?: string; error?: string }>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;

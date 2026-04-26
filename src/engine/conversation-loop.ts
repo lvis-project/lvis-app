@@ -487,7 +487,7 @@ export class ConversationLoop {
     this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
     let result: Awaited<ReturnType<ConversationLoop["queryLoop"]>>;
     try {
-      result = await this.queryLoop(systemPrompt, scope, callbacks, turnSignal);
+      result = await this.queryLoop(systemPrompt, scope, callbacks, turnSignal, options?.originSource ?? null);
     } finally {
       // Always clear the controller, even when `queryLoop` throws (provider
       // error / abort / tool error). Otherwise the loop looks "mid-turn"
@@ -562,6 +562,7 @@ export class ConversationLoop {
     scope: ToolScope,
     callbacks?: TurnCallbacks,
     abortSignal?: AbortSignal,
+    proactiveOrigin?: string | null,
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" }> {
     const llmSettings = this.deps.settingsService.get("llm");
     const model = llmSettings.model;
@@ -738,10 +739,18 @@ export class ConversationLoop {
         toolNames: capResult.allowed.map((tu) => tu.name),
         capped: capResult.blocked.length,
       });
-      const toolResults = await this.toolExecutor.executeAll(capResult.allowed, {
-        onToolStart: callbacks?.onToolStart,
-        onToolEnd: callbacks?.onToolEnd,
-      }, this.sessionId);
+      const toolResults = await this.toolExecutor.executeAll(
+        capResult.allowed,
+        {
+          onToolStart: callbacks?.onToolStart,
+          onToolEnd: callbacks?.onToolEnd,
+        },
+        this.sessionId,
+        // Forward the turn's proactive origin so write/dangerous tools
+        // bypass `allow-always` cache and force a user-confirmation
+        // modal — the hard gate for the brain's "propose-only" contract.
+        proactiveOrigin ?? null,
+      );
 
       for (let i = 0; i < capResult.allowed.length; i++) {
         allToolCalls.push({
