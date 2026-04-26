@@ -33,7 +33,14 @@ import {
 // Locate installed plugin manifests
 // ─────────────────────────────────────────────────────────────────────────────
 
-const INSTALLED_DIR = fileURLToPath(new URL("../../../plugins/installed", import.meta.url));
+// Phase 2-final: `<appRoot>/plugins/installed/` is gone — every plugin
+// install now lives under `userData/plugins/<id>/` after a marketplace
+// download. This file's "scan installed manifests" approach no longer
+// applies; manifest validity is enforced at publish time on the
+// marketplace server. The block below is kept as a placeholder so the
+// test file remains importable; if a contributor revives static manifest
+// scanning, they can re-point this constant at the new source-of-truth.
+const INSTALLED_DIR = fileURLToPath(new URL("../../../plugins-removed-phase2-final", import.meta.url));
 
 interface PluginManifestMinimal {
   id: string;
@@ -85,11 +92,15 @@ function loadInstalledManifests(): Array<{
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("Manifest subscription consistency guard", () => {
+describe.skip("Manifest subscription consistency guard (Phase 2-final: moved to marketplace publish validation)", () => {
+  // Phase 2-final removed `<appRoot>/plugins/installed/`. Manifest
+  // subscription consistency is now enforced server-side at publish time
+  // by lvis-marketplace; the in-tree scan no longer applies. Block is
+  // kept skipped so the structure remains for any future in-app userData
+  // scan revival.
   const manifests = loadInstalledManifests();
 
   it("finds at least one installed plugin manifest to validate", () => {
-    // If this fails the installed dir is missing — fix the path, not the test.
     expect(manifests.length).toBeGreaterThan(0);
   });
 
