@@ -157,16 +157,20 @@ export class PluginMarketplaceService {
     // caller has one (boot wires this up so PluginRuntime + DeploymentGuard +
     // MarketplaceService all see the same layout). Fall back to the resolver
     // for callers that haven't migrated yet (old test fixtures, scripts).
+    //
+    // Precedence rule: when `paths` is supplied it is authoritative, including
+    // for `cacheRoot` — the standalone `cacheRoot` arg is plumbed only into
+    // the resolver fallback path so callers can't get conflicting values.
     const resolved = paths ?? resolvePluginPaths({ appRoot: this.appRoot, cacheRoot });
     this.registryPath = resolved.registryPath;
     this.marketplacePath = resolved.marketplacePath;
     this.installedDir = resolved.userInstalledDir;
+    this.cacheRoot = resolved.cacheRoot;
     this.deploymentGuard = deploymentGuard;
     // When no external fetcher is provided we fall back to the local
     // marketplace.json mock — catalog caching makes no sense for local files.
     const usingMockFetcher = !fetcher;
     this.fetcher = fetcher ?? new MockMarketplaceFetcher(this.marketplacePath);
-    this.cacheRoot = cacheRoot ?? resolved.cacheRoot;
     this.catalogCacheBase = usingMockFetcher ? null : undefined;
   }
 

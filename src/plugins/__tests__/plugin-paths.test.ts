@@ -59,4 +59,14 @@ describe("resolvePluginPaths", () => {
     expect(paths.userInstalledDir).toBe(resolve("/tmp/u"));
     expect(paths.cacheRoot).toBe(resolve("/tmp/cache"));
   });
+
+  it("env override does not displace an explicit cacheRoot", () => {
+    process.env.LVIS_PLUGINS_DIR = "/tmp/env-plugins";
+    const paths = resolvePluginPaths({
+      appRoot: "/tmp/appA",
+      cacheRoot: "/tmp/explicit-cache",
+    });
+    expect(paths.userInstalledDir).toBe(resolve("/tmp/env-plugins"));
+    expect(paths.cacheRoot).toBe(resolve("/tmp/explicit-cache"));
+  });
 });
