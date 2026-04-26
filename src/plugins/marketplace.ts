@@ -557,12 +557,18 @@ export class PluginMarketplaceService {
       // we've used), the binary itself is fetched fresh each time. No npm.
       const plugin = await this.fetcher.getPluginDetail(pluginId);
       if (!plugin) {
-        // TODO Phase 2-final follow-up: when a plugin is delisted from the
-        // catalog after install, rollback can't fetch its prior artifact.
-        // Consider synthesizing a `PluginMarketplaceItem` shim from the
-        // cached manifest's `packageName`/`slug` so cache-only rollback
-        // still works.
-        throw new Error(`Plugin not in marketplace catalog: ${pluginId}`);
+        // Delisted plugins cannot rollback: the marketplace server no
+        // longer serves the artifact, so the verified-zip download path
+        // has nothing to fetch. cacheRoot only persists the manifest
+        // (history breadcrumb), not the binary, by design — caching the
+        // binary locally would inflate userData with every install and
+        // would outlive the security yank that a delisting is meant to
+        // enforce. Surface the cause explicitly so settings UI / logs
+        // can communicate it instead of a generic "not found".
+        throw new Error(
+          `Cannot rollback "${pluginId}": plugin is no longer in the marketplace catalog. ` +
+            `Delisted plugins are unsupported for rollback (yanked artifacts are not retained locally).`,
+        );
       }
       const manifestPathRel = await this.installArtifact(plugin, priorVersion);
 
