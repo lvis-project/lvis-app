@@ -33,7 +33,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-        마켓플레이스 설정은 다음 앱 부팅부터 적용됩니다. 변경 후 앱을 재시작하거나 부트스트랩 배너의 \"다시 시도\" 버튼을 눌러주세요.
+        마켓플레이스 설정은 다음 앱 부팅부터 적용됩니다. URL 변경은 부트스트랩 배너의 “다시 시도” 버튼으로 즉시 재시도할 수 있고, API 키 변경은 fetcher 재구성을 위해 앱 재시작이 필요합니다.
       </div>
 
       <div className="space-y-2">
