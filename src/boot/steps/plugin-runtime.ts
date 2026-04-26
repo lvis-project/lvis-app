@@ -20,7 +20,12 @@ import { PluginRuntime } from "../../plugins/runtime.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 import { PluginSignatureVerifier } from "../../plugins/signature-verifier.js";
-import { BUNDLED_PUBLISHER_PUBLIC_KEYS } from "../../plugins/publisher-keys.js";
+import { getBundledPublisherPublicKeysPem } from "../../plugins/publisher-keys.js";
+import {
+  devSkipSignature,
+  setIsPackaged,
+  shouldWarnPackagedFlagsIgnored,
+} from "../dev-flags.js";
 import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
 import { PROACTIVE_SOURCE_PATTERN } from "../../engine/proactive-source.js";
@@ -575,15 +580,20 @@ export async function initPluginRuntime(
     triggerExecutorRef: { fn: null },
   };
 
-  // Sprint 4-B §B-4 — signature verifier wired end-to-end.
-  if (app.isPackaged && process.env.LVIS_DEV_SKIP_SIG) {
-    console.error("[lvis] LVIS_DEV_SKIP_SIG ignored in packaged build");
+  // Phase 1 §Step 4 — wire `app.isPackaged` into the dev-flag gate before any
+  // helper or downstream module reads it. Packaged builds with LVIS_DEV* set
+  // get a single audit warning, never a per-flag enumeration.
+  setIsPackaged(app.isPackaged);
+  if (shouldWarnPackagedFlagsIgnored()) {
+    console.error("[lvis] LVIS_DEV* ignored in packaged build");
   }
-  const skipSig = !app.isPackaged && process.env.LVIS_DEV_SKIP_SIG === "1";
+
+  // Sprint 4-B §B-4 — signature verifier wired end-to-end.
+  const skipSig = devSkipSignature();
   const signatureVerifier = skipSig
     ? undefined
     : new PluginSignatureVerifier({
-        publisherPublicKeysPem: BUNDLED_PUBLISHER_PUBLIC_KEYS,
+        publisherPublicKeysPem: getBundledPublisherPublicKeysPem(),
       });
   if (skipSig) {
     console.warn("[lvis] boot: LVIS_DEV_SKIP_SIG=1 — plugin signature verification disabled (dev-only)");
@@ -598,9 +608,14 @@ export async function initPluginRuntime(
   const hasMsGraphCapability = (manifest: PluginManifest): boolean =>
     manifest.capabilities?.includes("ms-graph-consumer") ?? false;
 
+  // Phase 1 §Step 1 + §Step 2 — thread the user-installed dir as a second
+  // trust root and the unsigned-user-plugin opt-in flag.
+  const pluginSettings = settingsService.get("plugins");
   pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
     registryPath: pluginPaths.registryPath,
+    userInstalledDir: pluginPaths.userInstalledDir,
+    allowUnsignedUserPlugins: pluginSettings?.allowUnsignedUserPlugins === true,
     configOverrides,
     deploymentGuard,
     signatureVerifier,

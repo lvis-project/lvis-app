@@ -79,12 +79,28 @@ export class PluginDeploymentGuard {
       };
     }
 
-    const manifest = await this.readManifestSafe(manifestAbs);
-    if (normalizeInstallPolicy(manifest) === "admin") {
+    // Phase 1 §Step 3 — Trust precedence:
+    //   registry-recorded `installedBy` (set at install time, verified
+    //   actor) ≫ manifest `installPolicy` (advisory, user-writable).
+    // Without this anchoring a user with write access to plugin.json could
+    // flip `"installPolicy":"user"` and bypass the managed-plugin uninstall
+    // guard. When `installedBy` is missing on a registry entry (legacy data
+    // pre-dating the field), fall back to the manifest field — that path
+    // is unchanged from the prior behaviour.
+    if (entry.installedBy === "admin") {
       return {
         allowed: false,
-        reason: `Admin plugin cannot be uninstalled by user: ${pluginId} (installPolicy="admin")`,
+        reason: `Admin plugin cannot be uninstalled by user: ${pluginId} (registry installedBy="admin")`,
       };
+    }
+    if (entry.installedBy === undefined) {
+      const manifest = await this.readManifestSafe(manifestAbs);
+      if (normalizeInstallPolicy(manifest) === "admin") {
+        return {
+          allowed: false,
+          reason: `Admin plugin cannot be uninstalled by user: ${pluginId} (installPolicy="admin")`,
+        };
+      }
     }
 
     return { allowed: true };
