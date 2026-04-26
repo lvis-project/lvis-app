@@ -570,6 +570,9 @@ export class PluginMarketplaceService {
       if (cachedManifest.packageName) {
         // Reinstall the cached npm package at the prior version. npm resolves
         // `name@version` from the registry the host is configured against.
+        // Phase 2b-1: this path is currently dev-only because runNpmInstall
+        // is gated on `devLinkedInstallAllowed()`. Phase 2b-3 replaces this
+        // with a cached-zip restore so packaged builds can rollback too.
         await this.runNpmInstall(buildPinnedSpec(cachedManifest.packageName, priorVersion));
       }
 
