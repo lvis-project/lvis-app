@@ -175,7 +175,18 @@ async function handleLvisUri(url: string) {
   // phase events fire — see PluginConfigTab + Sidebar progress UI.
   mainWindow?.webContents.send("lvis:plugins:install-progress", { slug: params.slug, phase: "installing" });
   void services.pluginMarketplace
-    .install(params.slug)
+    .install(params.slug, "user", (evt) => {
+      if (evt.phase === "downloading") {
+        mainWindow?.webContents.send("lvis:plugins:install-progress", {
+          slug: params.slug,
+          phase: "downloading",
+          bytesDownloaded: evt.bytesDownloaded,
+          bytesTotal: evt.bytesTotal,
+        });
+      } else {
+        mainWindow?.webContents.send("lvis:plugins:install-progress", { slug: params.slug, phase: evt.phase });
+      }
+    })
     .then(async () => {
       lvisDevLog("[lvis] handleLvisUri: install succeeded", { slug: params.slug });
       // Mirror the post-install steps from the lvis:plugins:install IPC handler

@@ -322,11 +322,15 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:plugins:uninstall-result", listener);
   },
 
-  // Phase progress for in-flight installs — `installing` (download + verify
-  // + extract + registry write) followed by `restarting` (runtime reload).
-  // The result event clears the in-flight state. Renderer renders a
-  // skeleton card / sidebar placeholder driven by these phases.
-  onPluginInstallProgress: (handler: (payload: { slug: string; phase: "installing" | "restarting" }) => void) => {
+  // Phase progress for in-flight installs. Granular phases fire from inside
+  // installFromMarketplace: downloading (byte-level) → verifying → registering.
+  // The callers (handleLvisUri, lvis:plugins:install) emit `installing` at the
+  // start and `restarting` after the install completes. The result event clears
+  // the in-flight state. Renderer renders a skeleton card / sidebar placeholder.
+  onPluginInstallProgress: (handler: (payload:
+    | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
+    | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
+  ) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:plugins:install-progress", listener);
     return () => ipcRenderer.removeListener("lvis:plugins:install-progress", listener);

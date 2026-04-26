@@ -13,7 +13,7 @@ import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
 import AdmZip from "adm-zip";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
-import { installFromMarketplace, type MarketplaceHttp } from "./marketplace-installer.js";
+import { installFromMarketplace, type InstallerProgressEvent, type MarketplaceHttp } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 
@@ -282,13 +282,14 @@ export class PluginMarketplaceService {
   async install(
     pluginId: string,
     actor: "user" | "it-admin" = "user",
+    onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<{ pluginId: string; installed: true }> {
     const state: InstallOperationState = {
       installedPluginIds: [],
       touchedEntries: new Map(),
     };
     try {
-      return await this.installWithDependencies(pluginId, actor, new Set<string>(), null, state);
+      return await this.installWithDependencies(pluginId, actor, new Set<string>(), null, state, onProgress);
     } catch (error) {
       await this.rollbackInstallOperation(state);
       throw error;
@@ -301,6 +302,7 @@ export class PluginMarketplaceService {
     seen: Set<string>,
     bundleRootId: string | null,
     state: InstallOperationState,
+    onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<{ pluginId: string; installed: true }> {
     if (seen.has(pluginId)) {
       return { pluginId, installed: true };
@@ -338,6 +340,7 @@ export class PluginMarketplaceService {
         seen,
         activeBundleRootId,
         state,
+        onProgress,
       );
     }
 
@@ -375,7 +378,7 @@ export class PluginMarketplaceService {
     await this.cacheCurrentVersion(pluginId);
 
     const dlVersion = plugin.version ?? "latest";
-    const manifestPath = await this.installArtifact(plugin, dlVersion);
+    const manifestPath = await this.installArtifact(plugin, dlVersion, onProgress);
     const manifestAbsPath = isAbsolute(manifestPath)
       ? manifestPath
       : resolve(dirname(this.registryPath), manifestPath);
@@ -950,6 +953,7 @@ export class PluginMarketplaceService {
   private async installArtifact(
     plugin: PluginMarketplaceItem,
     version: string,
+    onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<string> {
     if (plugin.packageSpec.startsWith("file:") || this.fetcher instanceof MockMarketplaceFetcher) {
       const packageSpec = this.resolveLocalPackageSpec(plugin.packageSpec);
@@ -958,7 +962,7 @@ export class PluginMarketplaceService {
     }
 
     const pluginDir = resolve(this.installedDir, plugin.id);
-    const zipBuffer = await this.downloadVerifiedMarketplaceZip(plugin, version);
+    const zipBuffer = await this.downloadVerifiedMarketplaceZip(plugin, version, onProgress);
     await this.extractMarketplaceZip(plugin.id, zipBuffer, pluginDir);
 
     const manifestFile = resolve(pluginDir, "plugin.json");
@@ -1079,6 +1083,7 @@ export class PluginMarketplaceService {
   private async downloadVerifiedMarketplaceZip(
     plugin: PluginMarketplaceItem,
     version: string,
+    onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<Buffer> {
     const slug = plugin.slug ?? plugin.id;
     if (!isVerifiedMarketplaceFetcher(this.fetcher)) {
@@ -1091,6 +1096,7 @@ export class PluginMarketplaceService {
       publicKeys: getBundledPublicKeys(),
       downloadRoot: resolve(this.cacheRoot, "verified-downloads"),
       cacheBase: null,
+      onProgress,
     });
     return readFile(verified.tarballPath);
   }
