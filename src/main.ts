@@ -376,6 +376,12 @@ async function main() {
   // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
   registerIpcHandlers(services, () => mainWindow);
 
+  // L1: start the reminders scheduler AFTER IPC handlers are wired so a
+  // reminder past-due at boot fires into a renderer that already has a
+  // `lvis:reminder:fired` listener attached. The scheduler is otherwise
+  // safe to start at any time — `start()` is idempotent.
+  services.startRemindersScheduler?.();
+
   refreshApplicationMenu();
   rendererReloadReady = true;
 

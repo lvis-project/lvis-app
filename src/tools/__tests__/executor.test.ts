@@ -361,3 +361,177 @@ describe("ToolExecutor — D4 parallel approval (§4.5.3)", () => {
     expect(spyDeny).not.toHaveBeenCalled();
   }, 10000);
 });
+
+// ─── C1 regression — ask_user_question must NOT double-modal ──
+
+describe("ToolExecutor — C1 ask_user_question short-circuit", () => {
+  it("does NOT route ask_user_question through ApprovalGate", async () => {
+    // Build a minimal registry containing the (builtin) ask_user_question
+    // tool. The tool's execute is stubbed so we can observe whether the
+    // executor reached it without ever consulting the approval gate.
+    const innerExecuteSpy = vi.fn(async () => ({
+      output: JSON.stringify({ choice: "yes", dismissed: false }),
+      isError: false,
+    }));
+    const askTool = createDynamicTool({
+      name: "ask_user_question",
+      description: "ask the user",
+      source: "builtin",
+      // C2 / pre-fix: the tool was registered as `dangerous`, which forced
+      // a permission check. The C1 short-circuit lives in the executor and
+      // ignores PermissionManager entirely for this exact builtin name —
+      // even with category "dangerous" the gate must not be consulted.
+      category: "dangerous",
+      jsonSchema: { type: "object", properties: {} },
+      execute: innerExecuteSpy,
+    });
+
+    const registry = new ToolRegistry();
+    registry.register(askTool);
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    // PermissionManager would return "ask" if it ran. The C1 short-circuit
+    // must skip it entirely so this checkDetailed should never be called.
+    const checkSpy = vi.fn(() => ({
+      decision: "ask" as const,
+      reason: "should-not-be-called",
+      layer: 5,
+    }));
+    permMgr.checkDetailed = checkSpy;
+
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const requestSpy = vi.spyOn(gate, "requestAndWait");
+
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      gate,
+    );
+
+    const results = await executor.executeAll(
+      [
+        {
+          id: "tu-c1",
+          name: "ask_user_question",
+          input: { question: "Continue?" },
+        },
+      ],
+      undefined,
+      "sess-c1-double-modal",
+    );
+
+    // No approval modal should have been requested.
+    expect(requestSpy).not.toHaveBeenCalled();
+    expect(wc.send).not.toHaveBeenCalled();
+    // Nor should PermissionManager have been consulted.
+    expect(checkSpy).not.toHaveBeenCalled();
+    // The tool should still have run.
+    expect(innerExecuteSpy).toHaveBeenCalledTimes(1);
+    expect(results).toHaveLength(1);
+    expect(results[0].is_error).toBeUndefined();
+  });
+});
+
+// ─── R2-CR-4 regression — audit redaction must be source-gated ─────
+
+describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by source", () => {
+  it("does NOT redact freeText when a non-builtin (plugin) tool happens to be named 'ask_user_question'", async () => {
+    // A plugin or MCP tool may legitimately be named `ask_user_question` and
+    // return a `freeText` field. Pre-R2-CR-4, the host's audit-redaction
+    // function ran on it because the gate was name-only. Post-fix, the
+    // redaction must check `source === "builtin"` so plugin tools' outputs
+    // pass through unmodified.
+    const pluginAskTool = createDynamicTool({
+      name: "ask_user_question",
+      description: "plugin tool with the same name",
+      source: "plugin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({
+        output: JSON.stringify({ freeText: "hello world" }),
+        isError: false,
+      }),
+    });
+    const registry = new ToolRegistry();
+    registry.register(pluginAskTool);
+
+    // Spy on AuditLogger.prototype.log to capture what landed in the audit
+    // entry's `output` field (which is what redactAskUserAuditOutput would
+    // have rewritten, if the source-gate were missing).
+    const { AuditLogger: AL } = await import("../../audit/audit-logger.js");
+    const logSpy = vi
+      .spyOn(AL.prototype, "log")
+      .mockImplementation(() => undefined);
+
+    try {
+      const executor = new ToolExecutor(registry);
+      const results = await executor.executeAll(
+        [{ id: "tu-r2cr4", name: "ask_user_question", input: {} }],
+        undefined,
+        "sess-r2cr4-plugin",
+      );
+
+      expect(results).toHaveLength(1);
+      expect(results[0].is_error).toBeUndefined();
+
+      // Find the tool_call audit entry for our test session
+      const toolCallEntry = logSpy.mock.calls
+        .map((c) => c[0] as { type?: string; output?: string; sessionId?: string })
+        .find((e) => e.type === "tool_call" && e.sessionId === "sess-r2cr4-plugin");
+      expect(toolCallEntry).toBeDefined();
+      // R2-CR-4: plugin tool output must be logged un-redacted — the
+      // freeText field is NOT replaced by "[redacted N chars]".
+      expect(toolCallEntry!.output).toContain("hello world");
+      expect(toolCallEntry!.output).not.toContain("[redacted");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("DOES redact freeText for the builtin ask_user_question (positive control)", async () => {
+    const builtinAskTool = createDynamicTool({
+      name: "ask_user_question",
+      description: "builtin",
+      source: "builtin",
+      category: "dangerous",
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({
+        output: JSON.stringify({
+          choice: "yes",
+          freeText: "secret-content",
+          dismissed: false,
+        }),
+        isError: false,
+      }),
+    });
+    const registry = new ToolRegistry();
+    registry.register(builtinAskTool);
+
+    const { AuditLogger: AL } = await import("../../audit/audit-logger.js");
+    const logSpy = vi
+      .spyOn(AL.prototype, "log")
+      .mockImplementation(() => undefined);
+
+    try {
+      const executor = new ToolExecutor(registry);
+      await executor.executeAll(
+        [{ id: "tu-r2cr4-b", name: "ask_user_question", input: {} }],
+        undefined,
+        "sess-r2cr4-builtin",
+      );
+      const toolCallEntry = logSpy.mock.calls
+        .map((c) => c[0] as { type?: string; output?: string; sessionId?: string })
+        .find((e) => e.type === "tool_call" && e.sessionId === "sess-r2cr4-builtin");
+      expect(toolCallEntry).toBeDefined();
+      // The builtin path must redact.
+      expect(toolCallEntry!.output).not.toContain("secret-content");
+      expect(toolCallEntry!.output).toContain("[redacted");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+});

@@ -471,6 +471,103 @@ const api = {
     ipcRenderer.on("lvis:view:activate", listener);
     return () => ipcRenderer.removeListener("lvis:view:activate", listener);
   },
+
+  // ─── Workflow tools (S1+S2) ──────────────────────
+  // ask_user_question — main process pushes inline question requests; the
+  // renderer card resolves via the respond channel.
+  onAskUserQuestion: (
+    handler: (req: {
+      id: string;
+      question: string;
+      choices?: string[];
+      allowFreeText: boolean;
+      urgent: boolean;
+      createdAt: number;
+    }) => void,
+  ) => {
+    const listener = (_e: unknown, req: Parameters<typeof handler>[0]) => handler(req);
+    ipcRenderer.on("lvis:ask-user-question:request", listener);
+    return () => ipcRenderer.removeListener("lvis:ask-user-question:request", listener);
+  },
+  respondAskUserQuestion: async (response: {
+    requestId: string;
+    choice?: string;
+    freeText?: string;
+    dismissed?: boolean;
+  }) => ipcRenderer.invoke("lvis:ask-user-question:respond", response),
+  // M2: timeout side-channel — main process notifies the renderer when an
+  // ask_user_question request expired (5 min default) so the card can drop
+  // the stale prompt before the user clicks into a no-op.
+  onAskUserQuestionTimeout: (
+    handler: (payload: { requestId: string }) => void,
+  ) => {
+    const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);
+    ipcRenderer.on("lvis:ask-user-question:timeout", listener);
+    return () => ipcRenderer.removeListener("lvis:ask-user-question:timeout", listener);
+  },
+
+  // remind_at — persistent reminder list + lifecycle
+  listReminders: async () => ipcRenderer.invoke("lvis:reminders:list"),
+  dismissReminder: async (id: string) => ipcRenderer.invoke("lvis:reminders:dismiss", id),
+  removeReminder: async (id: string) => ipcRenderer.invoke("lvis:reminders:remove", id),
+  onReminderFired: (
+    handler: (reminder: {
+      id: string;
+      at: string;
+      title: string;
+      body?: string;
+      repeat: "daily" | "weekly" | "none";
+    }) => void,
+  ) => {
+    const listener = (_e: unknown, r: Parameters<typeof handler>[0]) => handler(r);
+    ipcRenderer.on("lvis:reminder:fired", listener);
+    return () => ipcRenderer.removeListener("lvis:reminder:fired", listener);
+  },
+
+  // todo_session_write — assistant's per-session checklist
+  listSessionTodos: async (sessionId?: string) =>
+    ipcRenderer.invoke("lvis:session-todo:list", sessionId),
+  onSessionTodoChanged: (
+    handler: (payload: {
+      sessionId: string;
+      items: Array<{ id: string; content: string; status: string }>;
+    }) => void,
+  ) => {
+    const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);
+    ipcRenderer.on("lvis:session-todo:changed", listener);
+    return () => ipcRenderer.removeListener("lvis:session-todo:changed", listener);
+  },
+
+  // agent_spawn — sub-agent lifecycle event stream
+  onAgentSpawnEvent: (
+    handler: (event: {
+      spawnId: string;
+      type: "start" | "turn" | "done" | "error";
+      title?: string;
+      turn?: number;
+      text?: string;
+      summary?: string;
+      toolCallCount?: number;
+      message?: string;
+    }) => void,
+  ) => {
+    const listener = (_e: unknown, ev: Parameters<typeof handler>[0]) => handler(ev);
+    ipcRenderer.on("lvis:agent-spawn:event", listener);
+    return () => ipcRenderer.removeListener("lvis:agent-spawn:event", listener);
+  },
+
+  // skill_load — chat-side badge event
+  onSkillLoaded: (
+    handler: (event: {
+      name: string;
+      description: string;
+      source: "user" | "builtin";
+    }) => void,
+  ) => {
+    const listener = (_e: unknown, ev: Parameters<typeof handler>[0]) => handler(ev);
+    ipcRenderer.on("lvis:skill-load:event", listener);
+    return () => ipcRenderer.removeListener("lvis:skill-load:event", listener);
+  },
 };
 
 contextBridge.exposeInMainWorld("lvisApi", api);
