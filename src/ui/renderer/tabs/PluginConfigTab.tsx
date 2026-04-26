@@ -4,6 +4,7 @@ import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/plugin-config.js";
+import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { PluginCardSummary } from "../types.js";
 
@@ -54,26 +55,64 @@ export function PluginConfigTab() {
     };
   }, []);
 
-  // Load plugin list
+  // Load plugin list — extracted so install/uninstall result events can
+  // re-fetch without remounting the tab. Without this, the settings dialog
+  // would still display the pre-install plugin set after a `lvis://install`
+  // deep-link landed (sidebar refreshes via the same event but the settings
+  // tab's local `plugins` state was a one-shot mount-time snapshot).
+  const refreshPlugins = useCallback(async () => {
+    try {
+      const cards = await window.lvis.plugins.cards();
+      setPlugins(cards);
+      setSelectedId((current) => {
+        if (current && cards.some((c) => c.id === current)) return current;
+        return cards.length > 0 ? cards[0].id : null;
+      });
+    } catch (e) {
+      showBanner("error", (e as Error).message ?? "플러그인 목록 로드 실패");
+    } finally {
+      setLoading(false);
+    }
+  }, [showBanner]);
+
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const cards = await window.lvis.plugins.cards();
-        if (cancelled) return;
-        setPlugins(cards);
-        if (cards.length > 0 && !selectedId) {
-          setSelectedId(cards[0].id);
-        }
-      } catch (e) {
-        if (!cancelled) showBanner("error", (e as Error).message ?? "플러그인 목록 로드 실패");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void refreshPlugins();
+  }, [refreshPlugins]);
+
+  // Sync with main-process lifecycle events. Both install (via `lvis://`
+  // deep link) and uninstall (via this tab or any other surface) emit
+  // result events that the renderer subscribes to in App.tsx for sidebar
+  // refresh — wire the same hooks here so the settings list stays in sync.
+  useEffect(() => {
+    // `getApi()` throws if `window.lvisApi` isn't initialized — that path is
+    // taken by jsdom unit tests that mock only `window.lvis`. Skip the
+    // subscriptions in that case so the existing tests pass without forcing
+    // every consumer test to provide both namespaces.
+    let api: ReturnType<typeof getApi>;
+    try {
+      api = getApi();
+    } catch {
+      return;
+    }
+    const unsubs: Array<() => void> = [];
+    if (typeof api.onPluginInstallResult === "function") {
+      unsubs.push(
+        api.onPluginInstallResult(({ success }) => {
+          if (success) void refreshPlugins();
+        }),
+      );
+    }
+    if (typeof api.onPluginUninstallResult === "function") {
+      unsubs.push(
+        api.onPluginUninstallResult(({ success }) => {
+          if (success) void refreshPlugins();
+        }),
+      );
+    }
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, [refreshPlugins]);
 
   // Load config for selected plugin
   useEffect(() => {
