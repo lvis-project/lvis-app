@@ -12,6 +12,7 @@ import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import type { LLMProvider, StreamEvent } from "../llm/types.js";
+import type { AuditEntry } from "../../audit/audit-logger.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -123,6 +124,31 @@ describe("TriggerExecutor.run", () => {
     // winA didn't get the second batch of events.
     expect(winACalls).toBeLessThan(winACalls + winBCalls);
   });
+
+  it.each(["silent", "summary-only", "user-visible"] as const)(
+    "P2: audits visibility=%s on completed (parity with started, grep-able by visibility)",
+    async (visibility) => {
+      const win = makeFakeWindow();
+      const auditLog = { log: vi.fn() };
+      const exec = new TriggerExecutor({
+        createLoop: () => makeLoop("done"),
+        getMainWindow: () => win as never,
+        auditLogger: auditLog as never,
+      });
+      await exec.run({ ...baseSpec, visibility, prompt: "ok" });
+      const inputs = auditLog.log.mock.calls.map((c) => (c[0] as AuditEntry).input ?? "");
+      const completedRow = inputs.find((input) => input.includes("] completed session="));
+      expect(completedRow).toBeTruthy();
+      // Full-format match — locks field order so a future add can't slip
+      // a new field between existing ones and silently break grep regexes.
+      expect(completedRow).toMatch(
+        new RegExp(
+          String.raw`^\[trigger:work-proactive\] completed session=\S+ source=\S+ ` +
+            String.raw`visibility=${visibility} summaryLen=\d+ toolCalls=\d+$`,
+        ),
+      );
+    },
+  );
 
   it("emits failed with classified reason + opaque errorId, never raw error.message on the wire", async () => {
     const win = makeFakeWindow();
