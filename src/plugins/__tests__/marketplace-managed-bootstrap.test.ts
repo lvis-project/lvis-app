@@ -9,7 +9,7 @@ import { makeTestPluginPaths } from "./test-helpers.js";
 function makeManagedService(testDir: string, marketplacePath: string): PluginMarketplaceService {
   const paths = makeTestPluginPaths({ rootDir: testDir });
   const fetcher = new MockMarketplaceFetcher(marketplacePath);
-  return new PluginMarketplaceService(testDir, paths, fetcher);
+  return new PluginMarketplaceService(paths, fetcher);
 }
 
 describe("PluginMarketplaceService managed bootstrap", () => {
@@ -299,7 +299,12 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     ]);
   });
 
-  it("preserves rich manifest metadata when synthesizing an installed manifest", async () => {
+  // Removed in Phase 2-final: the synthesized-manifest code path was the
+  // file:-spec / npm-install branch's `writeInstalledManifest`, which is
+  // gone. The signed-zip path uses the plugin.json the publisher shipped
+  // in the artifact verbatim — there is nothing to "synthesize" anymore.
+  // Test kept as a `it.skip` placeholder so future readers know why.
+  it.skip("preserves rich manifest metadata when synthesizing an installed manifest", async () => {
     await mkdir(join(testDir, "plugin-src", "calendar"), { recursive: true });
     await mkdir(join(testDir, "plugin-src", "email"), { recursive: true });
     await mkdir(join(testDir, "plugin-src", "meeting"), { recursive: true });
@@ -435,33 +440,9 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     );
   });
 
-  it("rejects local file package specs that escape the isolated workspace root", async () => {
-    await writeFile(
-      marketplacePath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          {
-            id: "escape-test",
-            name: "Escape",
-            description: "fixture",
-            packageSpec: `file:${homedir()}`,
-            packageName: "@lvis/escape",
-            tools: [],
-          },
-        ],
-      }),
-      "utf-8",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({ version: 1, plugins: [] }),
-      "utf-8",
-    );
-
-    const service = makeManagedService(testDir, marketplacePath);
-    await expect(service.install("escape-test")).rejects.toThrow(/escapes workspace root/i);
-  });
+  // Removed in Phase 2-final: the file:-spec / npm-install branch and its
+  // workspace-root containment check are gone. Production has a single
+  // install path (signed-zip download), so there is no file:-spec to escape.
 
   it("rejects marketplace artifacts whose pluginAccess exceeds the catalog-approved grant", async () => {
     const pluginDir = join(testDir, "plugins", "installed", "user-plugin");

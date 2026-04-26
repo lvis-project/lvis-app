@@ -2,12 +2,11 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
-import { spawn } from "node:child_process";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
-import { assertMockMarketplaceAllowed, devLinkedInstallAllowed } from "../boot/dev-flags.js";
+import { assertMockMarketplaceAllowed } from "../boot/dev-flags.js";
 import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -146,11 +145,6 @@ export class MockMarketplaceFetcher implements MarketplaceFetcher {
   }
 }
 
-function buildPinnedSpec(packageName: string, version: string): string {
-  // Scoped packages: @scope/name@version. Unscoped: name@version.
-  return `${packageName}@${version}`;
-}
-
 /** Sprint 3-B §9.6 / PR#44 HIGH — per-plugin install/rollback history. */
 interface PluginHistoryEntry {
   version: string;
@@ -158,7 +152,6 @@ interface PluginHistoryEntry {
 }
 
 export class PluginMarketplaceService {
-  private readonly appRoot: string;
   private readonly registryPath: string;
   private readonly installedDir: string;
   private readonly deploymentGuard?: PluginDeploymentGuard;
@@ -167,8 +160,8 @@ export class PluginMarketplaceService {
   private readonly cacheRoot: string;
   /**
    * S9: base directory for the catalog cache. `null` disables catalog caching
-   * (used with the local mock fetcher in dev). `undefined` uses the default
-   * global path under `userData/marketplace-cache/`.
+   * (used with the dev test fetcher). `undefined` uses the default global
+   * path under `userData/marketplace-cache/`.
    */
   private readonly catalogCacheBase: string | null | undefined;
   /**
@@ -181,30 +174,25 @@ export class PluginMarketplaceService {
   readonly log?: (message: string, ...args: unknown[]) => void;
 
   /**
-   * Phase 2a constructor — `paths` is the single source of truth for the
-   * registry / installed-dir / cache layout. The previous 5-arg shape with
-   * an optional `paths` and an inline `MockMarketplaceFetcher` fallback is
-   * gone; callers (boot, tests) must wire their own fetcher.
-   *
-   * `appRoot` is retained for the npm-install code paths used by managed
-   * plugin bootstrap and rollback (`runNpmInstall` writes to
-   * `appRoot/node_modules`). Phase 2b rewrites `installArtifact` to a
-   * zip-extract under `userInstalledDir` and removes this dependency.
+   * Phase 2-final constructor — `paths` is the single source of truth for
+   * the registry / installed-dir / cache layout, and `fetcher` is required.
+   * The pre-Phase-2b `appRoot` argument used by the npm-install branch is
+   * gone; the only install path is the signed-zip download under
+   * `paths.userInstalledDir`.
    */
   constructor(
-    appRoot: string,
     paths: PluginPaths,
     fetcher: MarketplaceFetcher,
     deploymentGuard?: PluginDeploymentGuard,
   ) {
-    this.appRoot = resolve(appRoot);
     this.registryPath = paths.registryPath;
     this.installedDir = paths.userInstalledDir;
     this.cacheRoot = paths.cacheRoot;
     this.deploymentGuard = deploymentGuard;
     this.fetcher = fetcher;
-    // Catalog caching is disabled for the dev mock; production fetchers
-    // (RealCloud, Disabled stub) get the default cache base under userData.
+    // Catalog caching is disabled for the test mock fetcher; production
+    // fetchers (RealCloud, Disabled stub) get the default cache base under
+    // userData.
     this.catalogCacheBase = fetcher instanceof MockMarketplaceFetcher ? null : undefined;
   }
 
@@ -563,41 +551,34 @@ export class PluginMarketplaceService {
       if (!priorVersion) {
         throw new Error(`No prior version cached for plugin: ${pluginId}`);
       }
-
-      const cachedManifestPath = resolve(this.cacheRoot, pluginId, priorVersion, "plugin.json");
-      const raw = await readFile(cachedManifestPath, "utf-8");
-      const cachedManifest = JSON.parse(raw) as { packageName?: string };
-      if (cachedManifest.packageName) {
-        // Reinstall the cached npm package at the prior version. npm resolves
-        // `name@version` from the registry the host is configured against.
-        // Phase 2b-1: this path is currently dev-only because runNpmInstall
-        // is gated on `devLinkedInstallAllowed()`. Phase 2b-3 replaces this
-        // with a cached-zip restore so packaged builds can rollback too.
-        await this.runNpmInstall(buildPinnedSpec(cachedManifest.packageName, priorVersion));
+      // Phase 2-final rollback: re-run the verified-zip install path with
+      // the prior version. The marketplace server retains every published
+      // version; the client's `cacheRoot` only tracks history (which versions
+      // we've used), the binary itself is fetched fresh each time. No npm.
+      const plugin = await this.fetcher.getPluginDetail(pluginId);
+      if (!plugin) {
+        // TODO Phase 2-final follow-up: when a plugin is delisted from the
+        // catalog after install, rollback can't fetch its prior artifact.
+        // Consider synthesizing a `PluginMarketplaceItem` shim from the
+        // cached manifest's `packageName`/`slug` so cache-only rollback
+        // still works.
+        throw new Error(`Plugin not in marketplace catalog: ${pluginId}`);
       }
+      const manifestPathRel = await this.installArtifact(plugin, priorVersion);
 
-      // Restore the cached plugin.json into the live installed dir.
-      const liveDir = resolve(this.installedDir, pluginId);
-      await mkdir(liveDir, { recursive: true });
-      const liveManifest = resolve(liveDir, "plugin.json");
-      await writeFile(liveManifest, raw, "utf-8");
-
-      // Record the rollback as a new history entry so subsequent rollbacks
-      // pick the correct prior version.
       await this.appendHistoryEntry(pluginId, { version: priorVersion, installedAt: new Date().toISOString() });
 
-      const registryRelativePath = toRegistryRelativeManifestPath(this.registryPath, liveManifest);
       await updatePluginRegistry(this.registryPath, (registry) => {
         const existing = registry.plugins.find((x) => x.id === pluginId);
         if (existing) {
-          existing.manifestPath = registryRelativePath;
+          existing.manifestPath = manifestPathRel;
           existing.enabled = true;
           existing.installedBy = existing.installedBy ?? "user";
           existing.bundleRefs = existing.bundleRefs ?? [];
         } else {
           registry.plugins.push({
             id: pluginId,
-            manifestPath: registryRelativePath,
+            manifestPath: manifestPathRel,
             enabled: true,
             installedBy: "user",
             bundleRefs: [],
@@ -733,45 +714,6 @@ export class PluginMarketplaceService {
     return null;
   }
 
-  private async writeInstalledManifest(plugin: PluginMarketplaceItem, version?: string): Promise<string> {
-    const pluginDir = resolve(this.installedDir, plugin.id);
-    await mkdir(pluginDir, { recursive: true });
-    const manifestFile = resolve(pluginDir, "plugin.json");
-    const entryAbsPath = resolve(this.appRoot, "node_modules", plugin.packageName, "dist/hostPlugin.js");
-    this.assertPathWithinNodeModules(plugin.id, entryAbsPath, "package");
-    const entryRelPath = relative(pluginDir, entryAbsPath).split("\\").join("/");
-    const resolvedUi = (plugin.ui ?? []).map((extension) => this.resolveUiExtension(plugin, pluginDir, extension));
-    const manifest = this.buildInstalledManifest(plugin, {
-      version: version ?? "1.0.0",
-      entry: entryRelPath,
-      ui: resolvedUi,
-    });
-    await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
-    // Phase 2a invariant: registry.json and the plugin manifest both live
-    // under userInstalledDir, so the registry entry is always
-    // `<id>/plugin.json` style relative POSIX path. This makes registry.json
-    // portable across machines (no absolute paths) and forward-trackable
-    // when registries get committed for IT-managed deployments.
-    return toRegistryRelativeManifestPath(this.registryPath, manifestFile);
-  }
-
-  private resolveUiExtension(
-    plugin: PluginMarketplaceItem,
-    pluginDir: string,
-    extension: PluginUiExtension,
-  ): PluginUiExtension {
-    const entrySource = extension.entry ?? extension.page;
-    if (!entrySource) return extension;
-    const entryAbsPath = resolve(this.appRoot, "node_modules", plugin.packageName, entrySource);
-    this.assertPathWithinNodeModules(plugin.id, entryAbsPath, "UI entry");
-    const entryRelPath = relative(pluginDir, entryAbsPath).split("\\").join("/");
-    return {
-      ...extension,
-      entry: entryRelPath,
-      page: extension.page ? entryRelPath : undefined,
-    };
-  }
-
   private async getInstalledRegistryEntry(pluginId: string): Promise<PluginRegistryEntry | null> {
     const registry = await readPluginRegistry(this.registryPath).catch(() => null);
     if (!registry) return null;
@@ -871,53 +813,19 @@ export class PluginMarketplaceService {
 
   private async removeInstalledEntry(
     entry: PluginRegistryEntry,
-    remainingEntries: PluginRegistryEntry[],
+    _remainingEntries: PluginRegistryEntry[],
   ): Promise<void> {
+    // Phase 2-final: every install is a zip-extract under userInstalledDir,
+    // so uninstall is a recursive rm of the plugin's directory. The
+    // pre-Phase-2 npm-uninstall branch (`isZipInstalled === false`) is
+    // gone with the install-side npm path.
     const manifestPath = isAbsolute(entry.manifestPath)
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
     const installedManifestDir = dirname(manifestPath);
-    const isZipInstalled = this.isWithin(this.installedDir, installedManifestDir);
-    if (!isZipInstalled) {
-      const packageName = await this.resolvePackageName(entry.id, manifestPath);
-      const shouldUninstallPackage =
-        packageName && !(await this.isPackageUsedByRemainingPlugins(packageName, remainingEntries.map((candidate) => candidate.id)));
-      if (shouldUninstallPackage && packageName) {
-        await this.runNpmUninstall(packageName);
-      }
-    }
-    if (isZipInstalled) {
+    if (this.isWithin(this.installedDir, installedManifestDir)) {
       await rm(installedManifestDir, { recursive: true, force: true });
     }
-  }
-
-  private async resolvePackageName(pluginId: string, manifestPath: string): Promise<string | undefined> {
-    const plugins = await this.fetcher.listPlugins().catch(() => [] as PluginMarketplaceItem[]);
-    const targetFromCatalog = plugins.find((x) => x.id === pluginId);
-    if (targetFromCatalog?.packageName) {
-      return targetFromCatalog.packageName;
-    }
-
-    try {
-      const rawManifest = await readFile(manifestPath, "utf-8");
-      const parsed = JSON.parse(rawManifest) as { entry?: string };
-      return this.extractPackageNameFromEntry(parsed.entry);
-    } catch {
-      return undefined;
-    }
-  }
-
-  private extractPackageNameFromEntry(entry?: string): string | undefined {
-    if (!entry) return undefined;
-    const normalized = entry.split("\\").join("/");
-    const matched = normalized.match(/node_modules\/((?:@[^/]+\/[^/]+)|(?:[^/]+))/);
-    return matched?.[1];
-  }
-
-  private async isPackageUsedByRemainingPlugins(packageName: string, remainingPluginIds: string[]): Promise<boolean> {
-    const plugins = await this.fetcher.listPlugins().catch(() => [] as PluginMarketplaceItem[]);
-    const remaining = new Set(remainingPluginIds);
-    return plugins.some((plugin) => plugin.packageName === packageName && remaining.has(plugin.id));
   }
 
   private isWithin(basePath: string, targetPath: string): boolean {
@@ -950,31 +858,20 @@ export class PluginMarketplaceService {
     return manifests;
   }
 
+  /**
+   * Phase 2-final install path — single source: download + verify + extract.
+   *
+   * The historical file:-spec / npm-install branch is gone. Production and
+   * dev both fetch a signed zip from the marketplace API; the dev workflow
+   * runs the marketplace server locally (default `http://localhost:8000`)
+   * and publishes plugin artifacts via the server's CLI rather than
+   * sideloading sibling-repo paths.
+   */
   private async installArtifact(
     plugin: PluginMarketplaceItem,
     version: string,
     onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<string> {
-    // Phase 2b-1 gate: the file:-spec / npm-install branch is dev-only.
-    //   - Architect B1: `runNpmInstall` writes to `<appRoot>/node_modules`
-    //     which is read-only in packaged builds (`app.asar`).
-    //   - Security H-2: the branch bypasses envelope signature verification,
-    //     so a tampered catalog could install an attacker-controlled package
-    //     under `installPolicy:"admin"`.
-    // Production installs always take the signed-zip download path below.
-    const useDevLinkedBranch =
-      plugin.packageSpec.startsWith("file:") || this.fetcher instanceof MockMarketplaceFetcher;
-    if (useDevLinkedBranch) {
-      if (!devLinkedInstallAllowed()) {
-        throw new Error(
-          `[security] file:-spec install for "${plugin.id}" is dev-only — packaged builds must use a signed marketplace artifact`,
-        );
-      }
-      const packageSpec = this.resolveLocalPackageSpec(plugin.packageSpec);
-      await this.runNpmInstall(packageSpec);
-      return this.writeInstalledManifest(plugin, version);
-    }
-
     const pluginDir = resolve(this.installedDir, plugin.id);
     const zipBuffer = await this.downloadVerifiedMarketplaceZip(plugin, version, onProgress);
     await this.extractMarketplaceZip(plugin.id, zipBuffer, pluginDir);
@@ -1204,165 +1101,6 @@ export class PluginMarketplaceService {
     return installedIds;
   }
 
-  private resolveLocalPackageSpec(packageSpec: string): string {
-    if (!packageSpec.startsWith("file:")) {
-      return packageSpec;
-    }
-    const target = packageSpec.slice("file:".length).trim();
-    if (!target) {
-      throw new Error("local plugin packageSpec is empty");
-    }
-    const workspaceRoot = resolve(this.appRoot, "..");
-    const resolvedTarget = isAbsolute(target)
-      ? target
-      : resolve(this.appRoot, target);
-    if (!existsSync(resolvedTarget)) {
-      throw new Error(`local plugin package not found: ${packageSpec}`);
-    }
-    const realWorkspaceRoot = realpathSync(workspaceRoot);
-    const realTarget = realpathSync(resolvedTarget);
-    if (!this.isWithin(realWorkspaceRoot, realTarget)) {
-      throw new Error(`local plugin package escapes workspace root: ${packageSpec}`);
-    }
-    return `file:${realTarget}`;
-  }
-
-  private assertPathWithinNodeModules(
-    pluginId: string,
-    targetPath: string,
-    label: string,
-  ): void {
-    const nodeModulesRoot = resolve(this.appRoot, "node_modules");
-    const realNodeModulesRoot = existsSync(nodeModulesRoot)
-      ? realpathSync(nodeModulesRoot)
-      : nodeModulesRoot;
-    const resolvedTarget = existsSync(targetPath)
-      ? realpathSync(targetPath)
-      : targetPath;
-    if (!this.isWithin(realNodeModulesRoot, resolvedTarget)) {
-      throw new Error(`plugin "${pluginId}" ${label} path escapes node_modules`);
-    }
-  }
-
-  private isPathWithinAppRoot(targetPath: string): boolean {
-    const realAppRoot = existsSync(this.appRoot)
-      ? realpathSync(this.appRoot)
-      : this.appRoot;
-    const resolvedTarget = existsSync(targetPath)
-      ? realpathSync(targetPath)
-      : targetPath;
-    return this.isWithin(realAppRoot, resolvedTarget);
-  }
-
-  private async runNpmInstall(packageSpec: string): Promise<void> {
-    // Phase 2b-1 defense-in-depth: even if a future refactor calls this
-    // outside `installArtifact`, a packaged build refuses to spawn npm.
-    // `<appRoot>/node_modules` is inside `app.asar` and writes fail with
-    // EROFS regardless, but the explicit refusal surfaces a clear security
-    // error instead of an opaque filesystem one.
-    if (!devLinkedInstallAllowed()) {
-      throw new Error(
-        "[security] runNpmInstall is dev-only — packaged builds must install via signed marketplace artifacts",
-      );
-    }
-    if (packageSpec.startsWith("file:")) {
-      await new Promise<void>((resolvePromise, rejectPromise) => {
-        const child = spawn("npm", ["install", "--prefix", this.appRoot, "--", packageSpec], {
-          stdio: "pipe",
-          shell: false,
-          cwd: this.appRoot,
-        });
-        let stderr = "";
-        child.stdout.on("data", (chunk) => {
-          process.stdout.write(chunk);
-        });
-        child.stderr.on("data", (chunk) => {
-          stderr += chunk.toString("utf-8");
-          process.stderr.write(chunk);
-        });
-        const timeout = setTimeout(() => {
-          child.kill("SIGTERM");
-          rejectPromise(new Error(`npm install timeout for ${packageSpec}`));
-        }, 60_000);
-        child.on("exit", (code) => {
-          clearTimeout(timeout);
-          if (code === 0) {
-            resolvePromise();
-            return;
-          }
-          rejectPromise(new Error(stderr || `npm install failed (${code})`));
-        });
-      });
-      return;
-    }
-    // M4 defence-in-depth: refuse unpinned package specs to prevent unintended
-    // installs of "latest" from the public npm registry. The version portion
-    // (after the last '@') must start with a digit, '^', or '~'.
-    const lastAt = packageSpec.lastIndexOf("@");
-    const versionPart = lastAt > 0 ? packageSpec.slice(lastAt + 1) : "";
-    if (!versionPart || !/^[\d^~]/.test(versionPart)) {
-      throw new Error(
-        `refusing unpinned npm install for "${packageSpec}" — version must be pinned`,
-      );
-    }
-    await new Promise<void>((resolvePromise, rejectPromise) => {
-      const child = spawn("npm", ["install", "--prefix", this.appRoot, "--", packageSpec], {
-        stdio: "pipe",
-        shell: false,
-        cwd: this.appRoot,
-      });
-      let stderr = "";
-      child.stdout.on("data", (chunk) => {
-        process.stdout.write(chunk);
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString("utf-8");
-        process.stderr.write(chunk);
-      });
-      const timeout = setTimeout(() => {
-        child.kill("SIGTERM");
-        rejectPromise(new Error(`npm install timeout for ${packageSpec}`));
-      }, 60_000);
-      child.on("exit", (code) => {
-        clearTimeout(timeout);
-        if (code === 0) {
-          resolvePromise();
-          return;
-        }
-        rejectPromise(new Error(stderr || `npm install failed (${code})`));
-      });
-    });
-  }
-
-  private async runNpmUninstall(packageName: string): Promise<void> {
-    await new Promise<void>((resolvePromise, rejectPromise) => {
-      const child = spawn("npm", ["uninstall", "--prefix", this.appRoot, "--", packageName], {
-        stdio: "pipe",
-        shell: false,
-        cwd: this.appRoot,
-      });
-      let stderr = "";
-      child.stdout.on("data", (chunk) => {
-        process.stdout.write(chunk);
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString("utf-8");
-        process.stderr.write(chunk);
-      });
-      const timeout = setTimeout(() => {
-        child.kill("SIGTERM");
-        rejectPromise(new Error(`npm uninstall timeout for ${packageName}`));
-      }, 60_000);
-      child.on("exit", (code) => {
-        clearTimeout(timeout);
-        if (code === 0) {
-          resolvePromise();
-          return;
-        }
-        rejectPromise(new Error(stderr || `npm uninstall failed (${code})`));
-      });
-    });
-  }
 }
 
 function isVerifiedMarketplaceFetcher(fetcher: MarketplaceFetcher): fetcher is VerifiedMarketplaceFetcher {

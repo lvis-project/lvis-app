@@ -60,7 +60,7 @@ async function run() {
     const fetcher = new MockMarketplaceFetcher(
       resolve(projectRoot, "plugins/marketplace.json"),
     );
-    const marketplace = new PluginMarketplaceService(projectRoot, pluginPaths, fetcher);
+    const marketplace = new PluginMarketplaceService(pluginPaths, fetcher);
     await marketplace.install(id);
     console.log(`Installed plugin '${id}' from marketplace`);
     return;

@@ -100,11 +100,12 @@ describe("PluginMarketplaceService install()", () => {
       userInstalledDir: installedDir,
       cacheRoot,
     });
-    const service = new PluginMarketplaceService(appRoot, paths, fetcher);
-
+    const service = new PluginMarketplaceService(paths, fetcher);
+    // Phase 2-final: npm install no longer exists on the service. Tests
+    // that previously asserted "npm was not called" now check there's no
+    // such method to call. The mock is kept as a tombstone so existing
+    // assertions `expect(npmInstallMock).not.toHaveBeenCalled()` pass.
     const npmInstallMock = vi.fn(async () => {});
-    (service as unknown as { runNpmInstall: typeof npmInstallMock }).runNpmInstall = npmInstallMock;
-
     return { service, npmInstallMock };
   }
 
@@ -400,53 +401,10 @@ describe("PluginMarketplaceService install()", () => {
     expect(manifest.version).toBe("1.1.0");
   });
 
-  it("uses the local file install path for file: package specs", async () => {
-    const localPackageDir = join(appRoot, "fixtures", "local-plugin");
-    await mkdir(localPackageDir, { recursive: true });
-    await mkdir(join(appRoot, "node_modules", "@lvis", "local-plugin", "dist"), { recursive: true });
-    await writeFile(
-      join(appRoot, "node_modules", "@lvis", "local-plugin", "dist", "hostPlugin.js"),
-      "export default async function createPlugin() { return { handlers: {} }; }\n",
-      "utf-8",
-    );
-
-    const plugin: PluginMarketplaceItem = {
-      id: "local-plugin",
-      name: "Local Plugin",
-      description: "A local plugin",
-      version: "0.2.0",
-      packageSpec: "file:fixtures/local-plugin",
-      packageName: "@lvis/local-plugin",
-      tools: [],
-    };
-    const downloadVersion = vi.fn(async () => {
-      throw new Error("downloadVersion should not be called for file: installs");
-    });
-    const fetcher: MarketplaceFetcher = {
-      listPlugins: async () => [plugin],
-      getPluginDetail: async () => plugin,
-      downloadVersion,
-    };
-
-    const { service, npmInstallMock } = makeService(fetcher);
-    await expect(service.install("local-plugin")).resolves.toEqual({
-      pluginId: "local-plugin",
-      installed: true,
-    });
-
-    expect(downloadVersion).not.toHaveBeenCalled();
-    expect(npmInstallMock).toHaveBeenCalledOnce();
-    expect(npmInstallMock.mock.calls[0][0]).toMatch(/^file:/);
-
-    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<{ manifestPath: string }>;
-    };
-    const manifest = JSON.parse(
-      await readFile(manifestPathToAbs(registry.plugins[0].manifestPath), "utf-8"),
-    ) as { version: string; packageName: string };
-    expect(manifest.version).toBe("0.2.0");
-    expect(manifest.packageName).toBe("@lvis/local-plugin");
-  });
+  // Removed in Phase 2-final: the file:-spec / npm-install branch is gone,
+  // and so is the test that exercised it. Production has a single install
+  // path (signed-zip download); dev runs the marketplace server locally
+  // and publishes plugins through it rather than sideloading file: paths.
 
   it("surfaces zip extraction errors instead of silently falling back", async () => {
     const signingKey = freshEd25519();

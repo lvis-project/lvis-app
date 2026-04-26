@@ -210,7 +210,11 @@ describe("callFromUi scope enforcement", () => {
   });
 });
 
-describe("installed manifests: uiCallable ⊂ tools", () => {
+describe.skip("installed manifests: uiCallable ⊂ tools (Phase 2-final: scan moved to marketplace server)", () => {
+  // Phase 2-final removed `<appRoot>/plugins/installed/`. Static manifest
+  // scanning lives in the lvis-marketplace publish-time validator now.
+  // This block is kept skipped (not deleted) so the test data structure
+  // stays available if/when an in-app userData scan is wired up.
   const manifests = listInstalledManifests();
 
   it("discovers at least one installed manifest", () => {
