@@ -16,6 +16,8 @@ vi.mock("../publisher-keys.js", () => ({
 import { PluginMarketplaceService } from "../marketplace.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
+import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
+import { makeTestPluginPaths } from "./test-helpers.js";
 
 function makePluginZip(manifest: Record<string, unknown>): Buffer {
   const zip = new AdmZip();
@@ -59,6 +61,7 @@ describe("PluginMarketplaceService install()", () => {
   let cacheRoot: string;
 
   beforeEach(async () => {
+    setIsPackaged(false);
     testDir = join(
       homedir(),
       ".lvis",
@@ -66,9 +69,11 @@ describe("PluginMarketplaceService install()", () => {
       `lvis-marketplace-install-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     appRoot = testDir;
-    registryPath = join(appRoot, "plugins", "registry.json");
-    installedDir = join(appRoot, "plugins", "installed");
-    cacheRoot = join(appRoot, ".cache");
+    // Phase 2a: registry + installed plugins live under userInstalledDir
+    // (testDir/plugins). The legacy `installed/` subdir is gone.
+    installedDir = join(testDir, "plugins");
+    registryPath = join(installedDir, "registry.json");
+    cacheRoot = join(testDir, ".cache");
     await mkdir(installedDir, { recursive: true });
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
     mockedPublisherKeys.getBundledPublicKeys.mockReset();
@@ -77,21 +82,22 @@ describe("PluginMarketplaceService install()", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await rm(testDir, { recursive: true, force: true });
+    _resetForTest();
   });
 
   function manifestPathToAbs(manifestPath: string): string {
     return isAbsolute(manifestPath)
       ? manifestPath
-      : resolve(appRoot, "plugins", manifestPath);
+      : resolve(installedDir, manifestPath);
   }
 
   function makeService(fetcher: MarketplaceFetcher) {
-    const service = new PluginMarketplaceService(appRoot, undefined, fetcher, cacheRoot);
-    (
-      service as unknown as {
-        installedDir: string;
-      }
-    ).installedDir = installedDir;
+    const paths = makeTestPluginPaths({
+      rootDir: testDir,
+      userInstalledDir: installedDir,
+      cacheRoot,
+    });
+    const service = new PluginMarketplaceService(appRoot, paths, fetcher);
 
     const npmInstallMock = vi.fn(async () => {});
     (service as unknown as { runNpmInstall: typeof npmInstallMock }).runNpmInstall = npmInstallMock;
@@ -155,8 +161,17 @@ describe("PluginMarketplaceService install()", () => {
     const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
       plugins: Array<{ manifestPath: string }>;
     };
+    // Phase 2a invariant: the zip-install branch must emit a registry-
+    // relative POSIX path (NOT an absolute path). Locks the regression
+    // flagged by code-reviewer round 1 — production RealCloud installs
+    // were writing absolute paths into registry.json.
+    const entryPath = registry.plugins[0].manifestPath;
+    expect(entryPath).toBe("test-plugin/plugin.json");
+    expect(entryPath).not.toMatch(/^[/\\]|^[A-Za-z]:/);
+    expect(entryPath).not.toContain("\\");
+
     const manifest = JSON.parse(
-      await readFile(manifestPathToAbs(registry.plugins[0].manifestPath), "utf-8"),
+      await readFile(manifestPathToAbs(entryPath), "utf-8"),
     ) as { version: string; entry: string };
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");

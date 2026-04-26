@@ -10,6 +10,8 @@ import { randomBytes } from "node:crypto";
 import { PluginMarketplaceService } from "../marketplace.js";
 import type { PluginMarketplaceItem } from "../types.js";
 import { MissingDependenciesError } from "../types.js";
+import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
+import { makeTestPluginPaths } from "./test-helpers.js";
 
 // Minimal in-memory fetcher
 class StubFetcher {
@@ -90,6 +92,7 @@ describe("marketplace install dependency guard (S14)", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
+    setIsPackaged(false);
     tmpDir = join(homedir(), ".lvis", "test-tmp", `lvis-test-${randomBytes(8).toString("hex")}`);
     await mkdir(tmpDir, { recursive: true });
     // Stub runNpmInstall so tests don't spawn real npm processes (slow, flaky,
@@ -107,18 +110,25 @@ describe("marketplace install dependency guard (S14)", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await rm(tmpDir, { recursive: true, force: true });
+    _resetForTest();
   });
+
+  function makeService(
+    fetcher: StubFetcher,
+  ): PluginMarketplaceService {
+    return new PluginMarketplaceService(
+      tmpDir,
+      makeTestPluginPaths({ rootDir: tmpDir }),
+      fetcher as unknown as import("../marketplace-fetcher.js").MarketplaceFetcher,
+    );
+  }
 
   it("install succeeds when plugin has no requires", async () => {
     const item = makeItem("simple-plugin");
     const fetcher = new StubFetcher([item]);
     await setupTestDir(tmpDir, []);
 
-    const svc = new PluginMarketplaceService(
-      tmpDir,
-      undefined,
-      fetcher as unknown as import("../marketplace-fetcher.js").MarketplaceFetcher,
-    );
+    const svc = makeService(fetcher);
 
     // Should NOT throw MissingDependenciesError (it will fail later on npm install, which is fine)
     let threw: Error | null = null;
@@ -140,11 +150,7 @@ describe("marketplace install dependency guard (S14)", () => {
       JSON.stringify({ version: 1, plugins: [] }),
     );
 
-    const svc = new PluginMarketplaceService(
-      tmpDir,
-      undefined,
-      fetcher as unknown as import("../marketplace-fetcher.js").MarketplaceFetcher,
-    );
+    const svc = makeService(fetcher);
 
     await expect(svc.install("needs-meeting")).rejects.toBeInstanceOf(
       MissingDependenciesError,
@@ -184,11 +190,7 @@ describe("marketplace install dependency guard (S14)", () => {
       }),
     );
 
-    const svc = new PluginMarketplaceService(
-      tmpDir,
-      undefined,
-      fetcher as unknown as import("../marketplace-fetcher.js").MarketplaceFetcher,
-    );
+    const svc = makeService(fetcher);
 
     let err: MissingDependenciesError | null = null;
     try {
@@ -232,11 +234,7 @@ describe("marketplace install dependency guard (S14)", () => {
       }),
     );
 
-    const svc = new PluginMarketplaceService(
-      tmpDir,
-      undefined,
-      fetcher as unknown as import("../marketplace-fetcher.js").MarketplaceFetcher,
-    );
+    const svc = makeService(fetcher);
 
     let threw: Error | null = null;
     try {

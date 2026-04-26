@@ -41,7 +41,8 @@
 import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
-import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
+import { resolve } from "node:path";
+import { DisabledMarketplaceFetcher, MockMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
 import { StarredStore } from "./data/starred-store.js";
@@ -162,7 +163,16 @@ export async function bootstrap(
   //    instantiate without crashing for boot to complete.
   //  - dev + mock → undefined (service falls back to MockMarketplaceFetcher,
   //    which reads the local plugins/marketplace.json fresh).
-  let marketplaceFetcher: MarketplaceFetcher | undefined;
+  // Phase 2a marketplace fetcher selection — every branch produces a fetcher;
+  // PluginMarketplaceService no longer falls back to a mock internally.
+  //   - real-cloud + URL → RealCloudMarketplaceFetcher (production path)
+  //   - packaged + (no real-cloud OR mock) → DisabledMarketplaceFetcher
+  //     (safe stub; resolveManagedPluginBootstrap short-circuits before use)
+  //   - dev unpackaged + mock → MockMarketplaceFetcher reading the in-tree
+  //     `plugins/marketplace.json`. This file ships with the dev workspace
+  //     only — Phase 2e deletes it once dev workflows route through a
+  //     localhost marketplace server.
+  let marketplaceFetcher: MarketplaceFetcher;
   if (
     marketplaceSettings.backend === "real-cloud" &&
     marketplaceSettings.realCloudBaseUrl
@@ -178,13 +188,16 @@ export async function bootstrap(
     console.warn(
       "[lvis] boot: marketplace backend disabled in packaged build (no real-cloud URL configured)",
     );
+  } else {
+    marketplaceFetcher = new MockMarketplaceFetcher(
+      resolve(projectRoot, "plugins/marketplace.json"),
+    );
   }
   const pluginMarketplace = new PluginMarketplaceService(
     projectRoot,
-    deploymentGuard,
-    marketplaceFetcher,
-    undefined,
     pluginPaths,
+    marketplaceFetcher,
+    deploymentGuard,
   );
 
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
@@ -356,7 +369,6 @@ export async function bootstrap(
   });
   if (updateCheckFetcher) {
     wireUpdateCheck({
-      projectRoot,
       mainWindow,
       settingsService,
       marketplaceFetcher: updateCheckFetcher,

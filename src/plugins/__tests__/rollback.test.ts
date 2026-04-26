@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { PluginMarketplaceService } from "../marketplace.js";
+import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
+import { makeTestPluginPaths } from "./test-helpers.js";
 
 /**
  * Sprint 3-B §9.6 — install → update → rollback lifecycle.
@@ -68,13 +69,16 @@ describe("PluginMarketplaceService install → update → rollback", () => {
   });
 
   function makeService(): TestableService {
-    const svc = new TestableService(appRoot, undefined, undefined, cacheRoot);
-    (
-      svc as unknown as {
-        installedDir: string;
-      }
-    ).installedDir = join(appRoot, "plugins", "installed");
-    return svc;
+    // Phase 2a: registry + installedDir live under userData/plugins. Tests
+    // anchor that at testDir; the legacy `installedDir = appRoot/plugins/
+    // installed` patch is gone (registry-relative paths assume registry and
+    // manifests share a directory tree).
+    const paths = makeTestPluginPaths({
+      rootDir: testDir,
+      cacheRoot,
+    });
+    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    return new TestableService(appRoot, paths, fetcher);
   }
 
   it("rollback restores the prior installed version", async () => {
@@ -85,14 +89,14 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     const reg1 = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(reg1.plugins[0].id).toBe("com.lge.sample");
     const manifest1 = JSON.parse(
-      await readFile(join(appRoot, "plugins/installed/com.lge.sample/plugin.json"), "utf-8"),
+      await readFile(join(testDir, "plugins/com.lge.sample/plugin.json"), "utf-8"),
     );
     expect(manifest1.version).toBe("1.0.0");
 
     // Update to v1.1.0.
     await svc.installPlugin("com.lge.sample", "1.1.0");
     const manifest2 = JSON.parse(
-      await readFile(join(appRoot, "plugins/installed/com.lge.sample/plugin.json"), "utf-8"),
+      await readFile(join(testDir, "plugins/com.lge.sample/plugin.json"), "utf-8"),
     );
     expect(manifest2.version).toBe("1.1.0");
 
@@ -101,7 +105,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(result.rolledBackTo).toBe("1.0.0");
 
     const manifest3 = JSON.parse(
-      await readFile(join(appRoot, "plugins/installed/com.lge.sample/plugin.json"), "utf-8"),
+      await readFile(join(testDir, "plugins/com.lge.sample/plugin.json"), "utf-8"),
     );
     expect(manifest3.version).toBe("1.0.0");
 
