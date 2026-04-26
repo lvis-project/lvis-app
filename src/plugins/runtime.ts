@@ -23,6 +23,7 @@ import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
 import type { PluginSignatureVerifier } from "./signature-verifier.js";
 import { resolveDependencies } from "./dependency-resolver.js";
+import { devLinkedEntryAllowed, devSkipSignature } from "../boot/dev-flags.js";
 
 /**
  * M1 — uiCallable safety: inverted model.
@@ -142,6 +143,17 @@ export interface PluginRuntimeOptions {
   hostRoot: string;
   manifestPaths?: string[];
   registryPath?: string;
+  /**
+   * Phase 1 §Step 1 — second trust root for registry-recorded manifest paths.
+   *
+   * User-installed plugins write absolute manifest paths into `registry.json`
+   * because `installedDir` lives outside `appRoot` (e.g. `~/.lvis/plugins/`
+   * or `app.getPath('userData')/plugins/`). Without this option, every such
+   * entry was rejected at boot as "untrusted manifest path". A registry
+   * entry is trusted iff its realpath is contained under `hostRoot` OR
+   * (when this option is set) under `userInstalledDir`.
+   */
+  userInstalledDir?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** 플러그인별 HostApi를 생성하는 팩토리 — boot.ts에서 주입 */
   createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
@@ -163,12 +175,20 @@ export interface PluginRuntimeOptions {
    * conversationLoop.onPluginDisabled 을 boot.ts에서 주입한다.
    */
   onDisable?: (pluginId: string) => void;
+  /**
+   * Phase 1 §Step 2 — flag that opts INTO the legacy "warn-and-load"
+   * behaviour for unsigned user plugins. Default false (fail-closed). Boot
+   * threads this from `settings.plugins.allowUnsignedUserPlugins`.
+   */
+  allowUnsignedUserPlugins?: boolean;
 }
 
 export class PluginRuntime {
   private readonly hostRoot: string;
   private readonly manifestPaths: string[];
   private readonly registryPath?: string;
+  private readonly userInstalledDir?: string;
+  private readonly allowUnsignedUserPlugins: boolean;
   private configOverrides: Record<string, Record<string, unknown>>;
   private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
@@ -199,6 +219,10 @@ export class PluginRuntime {
     this.hostRoot = resolve(options.hostRoot);
     this.manifestPaths = (options.manifestPaths ?? []).map((path) => resolve(path));
     this.registryPath = options.registryPath ? resolve(options.registryPath) : undefined;
+    this.userInstalledDir = options.userInstalledDir
+      ? resolve(options.userInstalledDir)
+      : undefined;
+    this.allowUnsignedUserPlugins = options.allowUnsignedUserPlugins === true;
     this.configOverrides = options.configOverrides ?? {};
     this.createHostApi = options.createHostApi;
     this.deploymentGuard = options.deploymentGuard;
@@ -273,8 +297,10 @@ export class PluginRuntime {
 
       // Sprint 3-B §9.6 — manifest signature gate.
       // Managed plugins require a valid signature; unsigned user plugins are
-      // allowed but audit-logged. Invalid signatures always drop the plugin.
-      const skipSignatureVerification = process.env.LVIS_DEV_SKIP_SIG === "1";
+      // by default rejected (Phase 1 §Step 2) — the host opts into the
+      // legacy "warn-and-load" path via settings.plugins.allowUnsignedUserPlugins.
+      // Invalid signatures always drop the plugin (managed and user alike).
+      const skipSignatureVerification = devSkipSignature();
       if (this.signatureVerifier && !skipSignatureVerification) {
         const sigResult = await this.signatureVerifier.verifyManifestFile(manifestPath);
         const isManaged = normalizeInstallPolicy(manifest) === "admin";
@@ -292,12 +318,32 @@ export class PluginRuntime {
             continue;
           }
           if (sigResult.reason === "signature file missing") {
-            this.auditLog?.("warn", `plugin_signature_missing`, {
+            // Phase 1 §Step 2 — default fail-closed for unsigned user plugins.
+            // The legacy "load anyway" path is only taken when the host
+            // explicitly opts in via settings.plugins.allowUnsignedUserPlugins.
+            // Without the opt-in, unsigned user plugins are SKIPPED (graceful,
+            // same fail-soft pattern as the managed-plugin signature failure
+            // above) — no throw.
+            if (!this.allowUnsignedUserPlugins) {
+              this.auditLog?.("warn", "plugin_unsigned_user_rejected", {
+                pluginId: manifest.id,
+                sha256: sigResult.sha256,
+              });
+              console.warn(
+                `[plugin-runtime] user plugin '${manifest.id}' rejected — unsigned (set settings.plugins.allowUnsignedUserPlugins=true to override)`,
+              );
+              this.markFailed(manifest.id, {
+                name: manifest.name,
+                description: "Unsigned user plugin (signature missing).",
+              });
+              continue;
+            }
+            this.auditLog?.("warn", "plugin_unsigned_user_loaded_with_optin", {
               pluginId: manifest.id,
               sha256: sigResult.sha256,
             });
             console.warn(
-              `[plugin-runtime] user plugin '${manifest.id}' has no signature — loading unsigned`,
+              `[plugin-runtime] user plugin '${manifest.id}' has no signature — loading unsigned (opt-in)`,
             );
           } else {
             console.error(
@@ -1263,8 +1309,8 @@ export class PluginRuntime {
     // Dev mode: allow entries that traverse outside the plugin directory
     // (e.g., ../../../node_modules/@lvis/plugin-*/dist/hostPlugin.js).
     // Mirrors the signature-check bypass introduced in PR #171.
-    const isDev = process.env.LVIS_DEV === "1" || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1";
-    if (isDev && !isAbsolute(entry)) {
+    // Phase 1 §Step 4 — gate hard-anchored to !app.isPackaged via dev-flags.
+    if (devLinkedEntryAllowed() && !isAbsolute(entry)) {
       const resolved = resolve(pluginRoot, entry);
       if (existsSync(resolved)) return resolved;
       return this.resolveDevLinkedPackageEntry(entry) ?? resolved;
@@ -1272,13 +1318,69 @@ export class PluginRuntime {
     return resolvePluginEntryPath(pluginRoot, entry);
   }
 
-  private isTrustedRegistryManifestPath(manifestPath: string): boolean {
+  /**
+   * Phase 1 §Step 1 — Dual trust-root containment check for registry-recorded
+   * manifest paths.
+   *
+   * A registry entry's manifestPath is trusted iff its `realpathSync()`
+   * (symlinks resolved) is contained under `realpathSync(hostRoot)` OR (when
+   * provided) `realpathSync(userInstalledDir)`. This shape exists because:
+   *
+   *   1. Symlink defeat — without realpath, an attacker who controls HOME
+   *      can plant `~/.lvis/plugins/foo -> /some/sensitive/dir` and any
+   *      registry entry under `userInstalledDir` would naively pass.
+   *   2. `path.relative` not `startsWith` — the prefix variant has trailing-
+   *      separator pitfalls (`/foo` would falsely match `/foobar`).
+   *   3. Both roots realpath-resolved — keeps the check symmetric so a
+   *      `userInstalledDir` that itself contains a symlink (common on macOS
+   *      where `/var` -> `/private/var`) still works.
+   *
+   * Failures (manifestPath does not exist yet, realpath EACCES, etc.) are
+   * REJECTED rather than allowed-by-default: a missing or unreadable file is
+   * not a path the host should `import()`.
+   */
+  private isTrustedRegistryManifestPath(
+    manifestPath: string,
+    hostRoot: string,
+    userInstalledDir?: string,
+  ): boolean {
     if (!isAbsolute(manifestPath)) return true;
-    const normalizedHostRoot = resolve(this.hostRoot);
-    const normalizedManifestPath = resolve(manifestPath);
-    return normalizedManifestPath === normalizedHostRoot
-      || normalizedManifestPath.startsWith(`${normalizedHostRoot}\\`)
-      || normalizedManifestPath.startsWith(`${normalizedHostRoot}/`);
+    let realManifest: string;
+    let realHost: string;
+    try {
+      realManifest = realpathSync(manifestPath);
+      realHost = realpathSync(hostRoot);
+    } catch {
+      return false;
+    }
+    if (this.isPathContained(realHost, realManifest)) return true;
+    if (userInstalledDir) {
+      let realUser: string;
+      try {
+        realUser = realpathSync(userInstalledDir);
+      } catch {
+        // userInstalledDir doesn't exist yet (first-run before any user
+        // plugin is installed). Treat as "no second trust root" rather than
+        // a hard reject — the hostRoot path above already gave us a chance.
+        return false;
+      }
+      if (this.isPathContained(realUser, realManifest)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Containment via `path.relative` — null/empty/`..`/absolute means the
+   * candidate is outside `parent`. Equality is treated as "outside" because a
+   * registry entry pointing AT the trust root itself is degenerate (it's a
+   * directory, not a manifest file).
+   */
+  private isPathContained(parent: string, candidate: string): boolean {
+    const rel = relative(parent, candidate);
+    if (rel === "" || rel === ".") return false;
+    if (rel.startsWith("..")) return false;
+    if (isAbsolute(rel)) return false;
+    return true;
   }
 
   private async resolveManifestLoadPlan(): Promise<ManifestLoadPlan[]> {
@@ -1296,7 +1398,7 @@ export class PluginRuntime {
         const manifestPath = isAbsolute(entry.manifestPath)
           ? entry.manifestPath
           : resolve(dirname(this.registryPath!), entry.manifestPath);
-        if (!this.isTrustedRegistryManifestPath(manifestPath)) {
+        if (!this.isTrustedRegistryManifestPath(manifestPath, this.hostRoot, this.userInstalledDir)) {
           console.warn(`[plugin-runtime] ignoring untrusted registry manifest path for ${entry.id}: ${manifestPath}`);
           return [];
         }

@@ -42,6 +42,21 @@ if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
   app.disableHardwareAcceleration();
 }
 
+// Phase 1 trust-hardening — strip LVIS_DEV* / LVIS_ALLOW_* from process.env in
+// packaged builds before any preload, renderer, or worker inherits it.
+// Without this scrub, a packaged binary launched with LVIS_DEV=1 in the user
+// environment would expose `env.isDev=true` to the renderer (via preload's
+// contextBridge) and let UI code enable dev affordances. Renderer-side flags
+// are advisory rather than load-bearing for trust decisions, but allowing them
+// to flip in packaged builds creates a confusing forensic signal.
+if (app.isPackaged) {
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith("LVIS_DEV") || key.startsWith("LVIS_ALLOW_")) {
+      delete process.env[key];
+    }
+  }
+}
+
 // §17 C1: 사내망 Corporate CA 런타임 주입 — corp-ca-loader 사용 (정식 대응 완료).
 // Phase 1.5의 dev-only TLS bypass 완전 제거. Chromium은 OS keystore 자동 신뢰.
 async function injectCorporateCa() {

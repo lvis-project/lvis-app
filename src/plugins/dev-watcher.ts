@@ -12,6 +12,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import { resolve } from "node:path";
 import type { PluginRuntime } from "./runtime.js";
+import { devPluginReloadEnabled } from "../boot/dev-flags.js";
 
 export interface PluginDevWatcherOptions {
   pluginRuntime: PluginRuntime;
@@ -35,7 +36,8 @@ export interface PluginDevWatcherHandle {
 export function startPluginDevWatcher(
   opts: PluginDevWatcherOptions,
 ): PluginDevWatcherHandle {
-  if (process.env.LVIS_DEV_RELOAD !== "1") {
+  // Phase 1 §Step 4 — gate hard-anchored to !app.isPackaged via dev-flags.
+  if (!devPluginReloadEnabled()) {
     return { stop: () => {} };
   }
 
