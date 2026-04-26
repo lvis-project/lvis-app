@@ -154,7 +154,22 @@ export function useChatState(api: LvisApi) {
         const { groupId, toolUseId, result, isError, uiPayload } = ev;
         setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload }));
       } else if (ev.type === "error") {
-        setEntries((p) => setAssistantError(p, `오류: ${ev.error || "알 수 없는 오류"}`, thoughtRef.current));
+        setEntries((p) => {
+          // Error during a brain-trigger import turn: also close the
+          // card's streaming indicator so the spinner doesn't hang
+          // forever. The error message itself still surfaces via the
+          // normal setAssistantError sibling path — surfacing it inside
+          // the card would conflate the proactive interaction with a
+          // host-level error and is likely more confusing than helpful.
+          const closed = isImportedTriggerStreaming(p)
+            ? finalizeImportedTriggerResponse(p)
+            : p;
+          return setAssistantError(
+            closed,
+            `오류: ${ev.error || "알 수 없는 오류"}`,
+            thoughtRef.current,
+          );
+        });
         streamRef.current = "";
         thoughtRef.current = "";
         activeStreamIdRef.current = null;

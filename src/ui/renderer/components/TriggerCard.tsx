@@ -63,7 +63,6 @@ export function TriggerCard({
   // clicking outside the app (or anywhere outside the toast) silently
   // killed proactive notifications. The user has to make an explicit
   // decision now.
-  const cardRef = useRef<HTMLDivElement | null>(null);
 
   const completedLabel = useMemo(() => {
     try {
@@ -105,7 +104,6 @@ export function TriggerCard({
 
   return (
     <Card
-      ref={cardRef}
       data-testid="trigger-card"
       data-variant={isSummary ? "summary" : "centered"}
       className={cardClassName}

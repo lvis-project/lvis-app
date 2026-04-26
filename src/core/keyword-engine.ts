@@ -75,13 +75,15 @@ export class KeywordEngine {
     const trimmed = input.trim();
 
     // 0. Brain proactive trigger envelope — bypass skill-keyword
-    // matching. The wrapped prompt is plugin-authored content the user
-    // never typed; routing it through skill prefix would misattribute
-    // authorship ("[스킬: email_list]") and pollute chat history.
-    // The chat LLM still sees the envelope verbatim and the system
-    // prompt's <proactive-origin-guidance> block tells it to ignore
-    // imperatives inside and ask the user before any write op.
-    if (trimmed.startsWith("<imported-from-proactive")) {
+    // matching. Pattern matches the exact same shape ipc-bridge.ts'
+    // `detectImportedTriggerSource` accepts (`source="proactive:..."`),
+    // so the two gates can never disagree: an envelope that fires
+    // skill-bypass here also fires `originSource` plumbing there,
+    // and vice versa. Without this matched pair, a hand-pasted
+    // envelope with a non-conforming source would skip skill routing
+    // (here) but NOT activate `<proactive-origin-guidance>` (there),
+    // letting plugin-supplied imperatives through with no guard.
+    if (/^<imported-from-proactive\s+source="proactive:[a-z][a-z0-9-]*"\s*>/.test(trimmed)) {
       return { type: "general", input: trimmed };
     }
 

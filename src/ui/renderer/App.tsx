@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
@@ -176,15 +177,25 @@ export function App() {
   );
 
   // Brain trigger accept → chat takes over. Server emits
-  // `lvis:trigger:imported` with both metadata for the visible card and
-  // the pre-wrapped prompt that should fire as the next chat turn.
-  // This listener lives here (App-level) because it depends on
-  // handleAsk; co-locating it with the rest of useChatState would
-  // either duplicate streaming wiring or import handleAsk into the
-  // hook, both of which break the current composition cleanly.
+  // `lvis:trigger:imported` with both metadata for the visible card
+  // and the pre-wrapped prompt that should fire as the next chat
+  // turn.
+  //
+  // `flushSync` around the entry insert is load-bearing: handleAsk
+  // immediately fires `api.chatSend(wrappedPrompt)`, which round-
+  // trips to main and starts emitting `text_delta` events. The
+  // renderer's text_delta handler routes the delta INTO the
+  // imported_trigger card iff `responseStreaming === true` is
+  // already in `entries`. Without flushSync, React batching can
+  // delay the entry insert past the first delta arrival → the
+  // delta falls through to `upsertStreamingAssistant` and renders
+  // as a sibling assistant bubble below the card (the duplicate-
+  // response bug R1-1).
   useEffect(() => {
     const unsub = api.onTriggerImported((payload) => {
-      addImportedTriggerEntry(payload);
+      flushSync(() => {
+        addImportedTriggerEntry(payload);
+      });
       void handleAsk(payload.wrappedPrompt, "trigger-import");
     });
     return () => { unsub(); };

@@ -203,19 +203,36 @@ export class PermissionManager {
    * Source-aware 도구 실행 권한 판정.
    * 간단 인터페이스 — 이전 호환.
    */
-  check(toolName: string, source?: ToolSource, category?: "read" | "write" | "dangerous"): PermissionDecision {
-    return this.checkDetailed(toolName, source, category).decision;
+  check(
+    toolName: string,
+    source?: ToolSource,
+    category?: "read" | "write" | "dangerous",
+    proactiveOrigin?: string | null,
+  ): PermissionDecision {
+    return this.checkDetailed(toolName, source, category, proactiveOrigin).decision;
   }
 
   /**
    * 상세 판정 — 감사 로그용 사유 포함.
+   *
+   * `proactiveOrigin` (예: `"proactive:meeting-detection"`) 가 set 이면
+   * 모든 write/dangerous 도구는 **사용자 영구 승인 (`allow-always`) /
+   * config allow rules / auto 모드** 와 무관하게 `ask` 로 강제됨.
+   * Brain 트리거가 사용자 컨펌 없이 destructive 작업 자동 실행되는 것을
+   * 막는 차단막 — `<proactive-origin-guidance>` 시스템 프롬프트의 1차
+   * LLM-side 검토와 짝을 이루는 hard-gate. read 도구는 영향 없음.
    */
   checkDetailed(
     toolName: string,
     source?: ToolSource,
     category?: "read" | "write" | "dangerous",
+    proactiveOrigin?: string | null,
   ): PermissionCheckResult {
     const trust = this.resolveTrust(toolName, source);
+    const isProactive =
+      typeof proactiveOrigin === "string" && proactiveOrigin.startsWith("proactive:");
+    const resolvedCategory = category ?? classifyToolCategory(toolName);
+    const isWrite = resolvedCategory === "write" || resolvedCategory === "dangerous";
 
     // 1. Deny rules (최우선, 불변)
     for (const rule of this.rules) {
@@ -229,6 +246,17 @@ export class PermissionManager {
     const toolModeOverride = this.toolModeOverrides.get(toolName);
     if (toolModeOverride === "strict") {
       return { decision: "ask", reason: "MCP 서버 strict 모드", layer: 2 };
+    }
+
+    // Proactive origin override — write/dangerous 도구는 cached
+    // allow rules / always-allowed / auto-mode 를 모두 우회하고
+    // 항상 사용자 컨펌을 받음. read 는 자동 실행 OK.
+    if (isProactive && isWrite) {
+      return {
+        decision: "ask",
+        reason: `proactive 출처 (${proactiveOrigin}) — 쓰기 도구는 사용자 컨펌 필수`,
+        layer: 2,
+      };
     }
 
     // 3. Allow rules
