@@ -885,6 +885,82 @@ ${input}`;
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
+  // Aggregated runtime counters surfaced in the status bar (#231 / #240).
+  // Single round-trip so the renderer doesn't need to fan out three calls
+  // and reconcile their timing. Sender-guarded — even though the payload
+  // is just three numbers, an untrusted plugin webview could otherwise use
+  // it as a runtime fingerprint.
+  ipcMain.handle("lvis:runtime:counts", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:runtime:counts", e); return UNAUTHORIZED_FRAME; }
+    return {
+      tools: services.toolRegistry.size,
+      plugins: pluginRuntime.listPluginIds().length,
+      mcps: services.mcpManager.listServers().filter((s) => s.status === "connected").length,
+    };
+  });
+  // Static environment info surfaced in the status bar (#231 / #240) —
+  // platform / hostname / user. Static enough to fetch once on mount.
+  // Cwd was deliberately dropped from this payload (least-privilege): no
+  // current consumer renders it, and plugin UI panels share the host
+  // renderer realm so any field returned here is reachable from third-
+  // party code (see #237 for the broader isolation work).
+  ipcMain.handle("lvis:runtime:env", async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:runtime:env", e); return UNAUTHORIZED_FRAME; }
+    const os = await import("node:os");
+    return {
+      platform: process.platform,
+      hostname: os.hostname(),
+      user: os.userInfo().username,
+    };
+  });
+  // Marketplace reachability probe for the status-bar online dot. Lives in
+  // the main process so corp-CA injection (corp-ca-loader) applies — a
+  // direct renderer fetch may not respect the injected CA bundle.
+  //
+  // SSRF guard: routes through `fetchPublicHttpResponse` so the resolved IP
+  // is checked against private/loopback/link-local ranges. The
+  // `realCloudAllowPrivateNetwork` flag is honored — same opt-in already
+  // used by the marketplace artifact fetcher. Without this, a malicious
+  // settings-write that points `realCloudBaseUrl` at 169.254.169.254 would
+  // turn this handler into a private-network probe oracle.
+  //
+  // Base URL composition uses a relative path with a trailing-slash-normalized
+  // base so deployments fronted by a sub-path prefix
+  // (e.g. `https://corp.example/marketplace/`) preserve the prefix.
+  ipcMain.handle("lvis:marketplace:ping", async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:marketplace:ping", e); return UNAUTHORIZED_FRAME; }
+    const settings = settingsService.get("marketplace");
+    if (settings.backend !== "real-cloud" || !settings.realCloudBaseUrl) {
+      return { configured: false, online: false } as const;
+    }
+    try {
+      const base = settings.realCloudBaseUrl.replace(/\/?$/, "/");
+      const url = new URL("api/v1/health", base).toString();
+      let res: Response;
+      if (settings.realCloudAllowPrivateNetwork === true) {
+        // Local dev path — same explicit opt-in already used by the
+        // RealCloudMarketplaceFetcher so loopback (`127.0.0.1:8000`) works.
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 3000);
+        try {
+          res = await fetch(url, { signal: ctrl.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+      } else {
+        const { fetchPublicHttpResponse } = await import("./core/network-guard.js");
+        res = await fetchPublicHttpResponse(url, { timeoutMs: 3000 });
+      }
+      return { configured: true, online: res.ok } as const;
+    } catch (err) {
+      // Telemetry — corp-CA misconfiguration AND SSRF rejections must be
+      // distinguishable from a genuinely offline marketplace; surface the
+      // underlying error to logs so SREs can diagnose without the user
+      // having to reproduce the click.
+      console.warn("[lvis] marketplace ping failed", (err as Error).message);
+      return { configured: true, online: false } as const;
+    }
+  });
   ipcMain.handle("lvis:plugins:config:get", (e, pluginId: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:plugins:config:get", e);

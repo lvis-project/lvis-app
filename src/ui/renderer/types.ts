@@ -267,6 +267,9 @@ export type LvisApi = {
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onPluginInstallProgress: (h: (payload: { slug: string; phase: "installing" | "restarting" }) => void) => () => void;
+  getRuntimeCounts: () => Promise<{ tools: number; plugins: number; mcps: number }>;
+  getRuntimeEnv: () => Promise<{ platform: string; hostname: string; user: string }>;
+  pingMarketplace: () => Promise<{ configured: boolean; online: boolean }>;
   onViewActivate: (h: (k: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
   getUsageRange: (opts: { dateFrom: string; dateTo: string }) => Promise<UsageSummaryShape>;
