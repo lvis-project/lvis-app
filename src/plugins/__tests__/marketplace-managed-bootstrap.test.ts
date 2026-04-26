@@ -20,6 +20,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
 
   beforeEach(async () => {
     setIsPackaged(false);
+    // Phase 2b-1: file:-spec catalog entries route through the dev branch.
+    process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY = "1";
     testDir = join(
       homedir(),
       ".lvis",
@@ -37,6 +39,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   });
 
   afterEach(async () => {
+    delete process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY;
     vi.restoreAllMocks();
     await rm(testDir, { recursive: true, force: true });
     _resetForTest();
