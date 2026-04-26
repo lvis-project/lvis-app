@@ -128,4 +128,29 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     const svc = makeService();
     await expect(svc.rollbackPlugin("no.such.plugin")).rejects.toThrow(/No prior version/);
   });
+
+  it("rollback fails with explicit delisted-plugin message when catalog no longer lists the id", async () => {
+    // First install + update normally (catalog still lists the plugin),
+    // then simulate a yank by stubbing getPluginDetail to return null and
+    // calling rollback. The service must explain the delisted cause so
+    // settings UI can render an actionable message.
+    const svc = makeService();
+    await svc.installPlugin("com.lge.sample", "1.0.0");
+    await svc.installPlugin("com.lge.sample", "1.1.0");
+
+    // Now simulate the catalog yank — fetcher.getPluginDetail returns null.
+    vi.spyOn(svc as unknown as {
+      fetcher: MarketplaceFetcher;
+    }, "fetcher", "get").mockReturnValue({
+      listPlugins: async () => [],
+      getPluginDetail: async () => null,
+      downloadVersion: async () => {
+        throw new Error("never called");
+      },
+    });
+
+    await expect(svc.rollbackPlugin("com.lge.sample")).rejects.toThrow(
+      /no longer in the marketplace catalog.*Delisted plugins are unsupported/i,
+    );
+  });
 });
