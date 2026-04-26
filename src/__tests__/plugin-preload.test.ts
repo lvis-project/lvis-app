@@ -59,7 +59,9 @@ describe("plugin-preload bridge", () => {
     expect(exposed.has("lvis")).toBe(false);
   });
 
-  it("callTool invokes lvis:plugin:call-tool IPC channel", async () => {
+  it("callTool invokes lvis:plugin:call-tool IPC channel without pluginId arg", async () => {
+    // pluginId is now resolved by main from event.sender.id, NOT supplied
+    // by the renderer — the bridge MUST NOT pass it.
     const bridge = exposed.get("lvisPlugin") as { callTool: (name: string, args?: unknown) => Promise<unknown> };
     mockInvoke.mockResolvedValueOnce({ ok: true, result: "pong" });
 
@@ -67,13 +69,12 @@ describe("plugin-preload bridge", () => {
 
     expect(mockInvoke).toHaveBeenCalledWith(
       "lvis:plugin:call-tool",
-      expect.any(String), // pluginId from query string (empty string in test env)
       "agent_hub_status",
       { verbose: true },
     );
   });
 
-  it("emitEvent invokes lvis:plugin:emit-event IPC channel", async () => {
+  it("emitEvent invokes lvis:plugin:emit-event IPC channel without pluginId arg", async () => {
     const bridge = exposed.get("lvisPlugin") as { emitEvent: (type: string, data?: unknown) => Promise<void> };
     mockInvoke.mockResolvedValueOnce({ ok: true });
 
@@ -81,10 +82,19 @@ describe("plugin-preload bridge", () => {
 
     expect(mockInvoke).toHaveBeenCalledWith(
       "lvis:plugin:emit-event",
-      expect.any(String), // pluginId
       "my.custom.event",
       { foo: "bar" },
     );
+  });
+
+  it("getEntryUrl invokes lvis:plugin:get-entry-url and returns the resolved string", async () => {
+    const bridge = exposed.get("lvisPlugin") as { getEntryUrl: () => Promise<string> };
+    mockInvoke.mockResolvedValueOnce("file:///plugins/agent-hub/dist/ui/agent-hub-panel.js");
+
+    const url = await bridge.getEntryUrl();
+
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:plugin:get-entry-url");
+    expect(url).toBe("file:///plugins/agent-hub/dist/ui/agent-hub-panel.js");
   });
 
   it("onEvent registers listener on lvis:plugin:event IPC channel and returns unsubscribe", () => {

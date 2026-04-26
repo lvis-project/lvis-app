@@ -12,7 +12,7 @@ import * as tls from "node:tls";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fileURLToPath } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
-import { registerIpcHandlers } from "./ipc-bridge.js";
+import { registerIpcHandlers, unregisterPluginWebview } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
@@ -469,21 +469,22 @@ if (!gotSingleInstanceLock) {
 app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "webview") return;
 
-  // Determine the webview's session partition name so we can install the
-  // correct network policy before the first navigation.
-  // The partition is not directly readable from WebContents, but we can
-  // distinguish plugin webviews (persist:plugin:*) from the LLM-HTML webview
-  // by checking the initial URL once it's ready.
-  contents.once("did-navigate", (_navEvent, url) => {
-    if (url.includes("plugin-ui-shell")) {
-      // This is a plugin webview. Install a file://-allowing policy on its
-      // session partition.  We derive the partition name from the
-      // webContents session's partition identifier.
-      const partitionName = (contents.session as unknown as { partition?: string }).partition;
-      if (typeof partitionName === "string" && partitionName.startsWith("persist:plugin:")) {
-        installPluginPartitionPolicy(partitionName);
-      }
-    }
+  // Eagerly install the partition network policy at attach time —
+  // BEFORE the first navigation lands. The previous `did-navigate`
+  // hook ran AFTER the first request, leaving a TOCTOU window where
+  // the plugin shell document itself escaped the file://-only allow
+  // list. `installPluginPartitionPolicy` is idempotent so re-installs
+  // on the same partition are no-ops.
+  const partitionName = (contents.session as unknown as { partition?: string }).partition;
+  if (typeof partitionName === "string" && partitionName.startsWith("persist:plugin:")) {
+    installPluginPartitionPolicy(partitionName);
+  }
+
+  // Plugin webview lifecycle: clean up the (webContents.id → pluginId)
+  // registry entry on destroy so a stale id can't be reused for an
+  // unrelated future webContents.
+  contents.on("destroyed", () => {
+    unregisterPluginWebview(contents.id);
   });
 
   contents.on("will-navigate", (navEvent, url) => {
