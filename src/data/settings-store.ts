@@ -202,15 +202,16 @@ export interface WebSearchSettings {
 }
 
 /**
- * §9.5 M4: plugin marketplace backend selection.
+ * §9.5 — plugin marketplace backend.
  *
- * - `"mock"`         — default; reads the local `plugins/marketplace.json`.
- * - `"real-cloud"`   — talks to lvis-marketplace REST server at
- *                      `realCloudBaseUrl`. Bearer auth via
- *                      `settings.marketplace.apiKey` secret.
+ * Phase 2-final: server-only. The lvis-marketplace REST API is the single
+ * source of truth for catalog + signed artifacts. The historical "mock"
+ * backend that read `plugins/marketplace.json` from disk is removed; tests
+ * that need a deterministic catalog inject a stub fetcher directly.
  */
 export interface MarketplaceSettings {
-  backend: "mock" | "real-cloud";
+  /** Reserved for future variants. Currently always `"real-cloud"`. */
+  backend: "real-cloud";
   realCloudBaseUrl?: string;
   /** Local dev/test only: bypass SSRF guard for loopback servers. */
   realCloudAllowPrivateNetwork?: boolean;
@@ -234,12 +235,6 @@ export interface SettingsServiceOptions {
   userDataPath: string;
 }
 
-const LEGACY_INSECURE_MARKETPLACE_DEFAULT = {
-  backend: "real-cloud" as const,
-  realCloudBaseUrl: "http://localhost:8000",
-  realCloudAllowPrivateNetwork: true,
-};
-
 const DEFAULT_SETTINGS: AppSettings = {
   llm: {
     provider: "claude",
@@ -260,8 +255,14 @@ const DEFAULT_SETTINGS: AppSettings = {
     provider: "duckduckgo",
   },
   marketplace: {
-    backend: "mock",
-    realCloudAllowPrivateNetwork: false,
+    // Phase 2-final defaults — single source: marketplace server. The
+    // localhost URL + allow-private-network flag are dev-friendly defaults;
+    // production deployments override via settings UI or installer config.
+    // No fallback to a local catalog file — the only way to populate the
+    // host's plugin layout is through the marketplace API.
+    backend: "real-cloud",
+    realCloudBaseUrl: "http://localhost:8000",
+    realCloudAllowPrivateNetwork: true,
   },
   routine: {
     enableWakeupRoutine: false,
@@ -484,27 +485,12 @@ export class SettingsService {
         llm.model = DEFAULT_SETTINGS.llm.model;
       }
       const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
-      // Security hardening: an earlier default/migration auto-enabled a
-      // loopback marketplace (`http://localhost:8000`) with the private-network
-      // SSRF bypass set to true. Treat that exact tuple as an accidental legacy
-      // default, not an explicit user choice, and fall back to the safe mock
-      // backend instead. Real cloud deployments must now be configured
-      // intentionally.
-      if (
-        marketplaceParsed.backend === LEGACY_INSECURE_MARKETPLACE_DEFAULT.backend &&
-        marketplaceParsed.realCloudBaseUrl === LEGACY_INSECURE_MARKETPLACE_DEFAULT.realCloudBaseUrl &&
-        marketplaceParsed.realCloudAllowPrivateNetwork ===
-          LEGACY_INSECURE_MARKETPLACE_DEFAULT.realCloudAllowPrivateNetwork
-      ) {
-        marketplaceParsed.backend = DEFAULT_SETTINGS.marketplace.backend;
-        delete marketplaceParsed.realCloudBaseUrl;
-        marketplaceParsed.realCloudAllowPrivateNetwork =
-          DEFAULT_SETTINGS.marketplace.realCloudAllowPrivateNetwork;
-      } else if (
-        marketplaceParsed.backend === "real-cloud" &&
-        marketplaceParsed.realCloudAllowPrivateNetwork === undefined
-      ) {
-        marketplaceParsed.realCloudAllowPrivateNetwork = false;
+      // Phase 2-final: marketplace server is the only backend. Persisted
+      // settings from older "mock" installs are coerced to the real-cloud
+      // default; if no URL is configured, boot constructs a
+      // DisabledMarketplaceFetcher (Track A) so the app still starts.
+      if (marketplaceParsed.backend !== "real-cloud") {
+        marketplaceParsed.backend = "real-cloud";
       }
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
       const routine = parsed.routine;
