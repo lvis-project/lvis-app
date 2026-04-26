@@ -147,7 +147,7 @@ describe("PluginMarketplaceService install()", () => {
       installed: true,
     });
 
-    expect(downloadArtifact).toHaveBeenCalledWith("test-plugin", "1.2.3");
+    expect(downloadArtifact).toHaveBeenCalledWith("test-plugin", "1.2.3", undefined);
     expect(fetchSignatureEnvelope).toHaveBeenCalledWith("test-plugin", "1.2.3");
     expect(downloadVersion).not.toHaveBeenCalled();
     expect(npmInstallMock).not.toHaveBeenCalled();

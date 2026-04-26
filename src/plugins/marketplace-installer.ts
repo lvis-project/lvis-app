@@ -32,10 +32,15 @@ export interface MarketplaceHttp {
    * GET `/api/v1/plugins/{slug}/download?version=X`. Must return the raw
    * tarball bytes + the value of the `X-Plugin-SHA256` response header (hex)
    * and a numeric `status` for 4xx/5xx branch handling.
+   *
+   * When `onChunk` is provided, the implementation SHOULD call it periodically
+   * as bytes arrive so callers can report byte-level download progress. The
+   * final call with all bytes must always be emitted regardless of throttling.
    */
   downloadArtifact(
     slug: string,
     version: string,
+    onChunk?: (bytesDownloaded: number, bytesTotal: number | null) => void,
   ): Promise<{
     body: Buffer;
     sha256Header: string | null;
@@ -45,6 +50,16 @@ export interface MarketplaceHttp {
   /** GET `/api/v1/plugins/{slug}/download.sig?version=X`. */
   fetchSignatureEnvelope(slug: string, version: string): Promise<SignatureEnvelope>;
 }
+
+/**
+ * Granular install progress event fired by `installFromMarketplace` via
+ * `MarketplaceInstallerOptions.onProgress`. The `downloading` variant
+ * carries byte-level counters; all others are point-in-time signals.
+ */
+export type InstallerProgressEvent =
+  | { phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }
+  | { phase: "verifying" }
+  | { phase: "registering" };
 
 export interface MarketplaceInstallerOptions {
   http: MarketplaceHttp;
@@ -74,6 +89,15 @@ export interface MarketplaceInstallerOptions {
    * root under `~/.lvis/marketplace-cache/`.
    */
   cacheBase?: string | null;
+  /**
+   * Optional granular progress callback. Fired at natural phase boundaries
+   * during download → verify → persist. The `registering` event fires just
+   * before the final atomic rename so callers can show a "등록 중…" label.
+   * When omitted the installer runs silently (backward-compatible).
+   *
+   * Note: `downloading` events are NOT fired on cache hits (`fromCache=true`).
+   */
+  onProgress?: (event: InstallerProgressEvent) => void;
 }
 
 export interface InstalledArtifact {
@@ -170,13 +194,20 @@ export async function installFromMarketplace(
   let signerKeyId = "cached";
 
   if (!fromCache) {
-    const downloaded = await downloadWithRetry(opts.http, slug, version, maxRetries);
+    const onChunk = opts.onProgress
+      ? (bytesDownloaded: number, bytesTotal: number | null) => {
+          opts.onProgress!({ phase: "downloading", bytesDownloaded, bytesTotal });
+        }
+      : undefined;
+    const downloaded = await downloadWithRetry(opts.http, slug, version, maxRetries, onChunk);
     body = downloaded.body;
     sha256Header = downloaded.sha256Header;
   }
 
   // 2. SHA-256 cross-check against server header (skip for cache hits where
   //    no header was returned, but always compute the digest for sig verification).
+  // Fire verifying event before computing the sha256 digest.
+  opts.onProgress?.({ phase: "verifying" });
   computedSha256 = createHash("sha256").update(body).digest("hex");
   if (sha256Header && sha256Header.toLowerCase() !== computedSha256) {
     throw new MarketplaceInstallerError(
@@ -253,6 +284,7 @@ export async function installFromMarketplace(
   // 6. Persist tarball atomically: write to a temp file in the same directory
   //    then rename() into place so a crash/kill mid-write cannot leave a
   //    partial/corrupt verified tarball that looks "installed".
+  opts.onProgress?.({ phase: "registering" });
   const { pluginDir, tarballPath, tmpPath } = buildVerifiedTarballPaths(
     downloadRoot,
     slug,
@@ -300,12 +332,13 @@ async function downloadWithRetry(
   slug: string,
   version: string,
   maxRetries: number,
+  onChunk?: (bytesDownloaded: number, bytesTotal: number | null) => void,
 ): Promise<{ body: Buffer; sha256Header: string | null }> {
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     let res: Awaited<ReturnType<MarketplaceHttp["downloadArtifact"]>>;
     try {
-      res = await http.downloadArtifact(slug, version);
+      res = await http.downloadArtifact(slug, version, onChunk);
     } catch (err) {
       lastErr = err as Error;
       // Network errors: retry with backoff like 429.
