@@ -186,11 +186,21 @@ Brain plugin 의 retry 로직은 위 분류를 그대로 따르면 됨. host 가
 
 ## Visibility — P0 / P2 분리
 
-P0 는 **plumbing 만**:
-- `visibility` 를 spec 에 받고 audit / runTriggerTurn 에 전달
-- UI 분기 (silent vs user-visible 모달) 는 **P2 에서 구현**
+P0 는 **plumbing**: `visibility` 를 spec 에 받고 audit / runTriggerTurn 에 전달. UI 분기는 **P2 에서 구현 (✅ 2026-04-26)**.
 
-P0 행동: 모든 visibility 가 동일하게 한 turn 을 끝까지 실행. `summary-only` / `silent` 라도 chat UI 에 흐름이 보일 수 있음. P2 에서 silent 는 audit-only, user-visible 는 모달, summary-only 는 1줄 알림으로 분기.
+P2 행동:
+
+| visibility | 처리 |
+|------------|------|
+| `silent` | renderer 가 `useTriggerResult` 단계에서 필터 — 카드 렌더 X. 호스트는 여전히 audit + cache (debug 용) |
+| `summary-only` | `TriggerCard` 가 우상단 toast variant (380px wide, line-clamp-2 summary) 로 마운트. 8s auto-dismiss, hover 시 타이머 일시정지 + mouseleave 시 fresh 8s 재시작. accept(`지금 답하기`) / dismiss 버튼 모두 살아 있음 |
+| `user-visible` | 기존 모달 형태 카드 — 화면 중앙(루틴 영역 아래) 에 마운트. auto-dismiss 없음 |
+
+`TriggerCard` 는 `result.visibility` 를 보고 내부 분기 (`data-variant="modal" | "summary"`). `ChatView` 는 visibility 별로 별도 슬롯 (top-right toast / centered modal) 에 라우팅. 단일 슬롯 정책이라 같은 시점에 두 종류가 동시에 뜨는 일은 없다.
+
+Audit row 도 visibility 를 일관되게 기록:
+- `started`: `[trigger:<plugin>] started session=<sid> source=<src> visibility=<v> priority=<p>`
+- `completed`: `[trigger:<plugin>] completed session=<sid> source=<src> visibility=<v> summaryLen=<n> toolCalls=<n>` *(P2 추가)*
 
 ## 안전망 (P0 적용)
 

@@ -9,6 +9,13 @@
 //
 // Until the user picks one, the trigger session is fully isolated from
 // chat — no context pollution.
+//
+// P2: visibility-driven render branching.
+//   - `user-visible` → modal-like card, no auto-dismiss
+//   - `summary-only` → compact toast, auto-dismiss after 8s (hover pauses
+//     the timer; leaving the toast resumes a fresh 8s window)
+//   - `silent` is filtered upstream in `useTriggerResult` so this component
+//     never receives one.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -22,6 +29,8 @@ const VISIBILITY_LABEL: Record<string, string> = {
   "summary-only": "요약",
   "user-visible": "확인 필요",
 };
+
+const SUMMARY_AUTO_DISMISS_MS = 8000;
 
 export function TriggerCard({
   result,
@@ -41,6 +50,32 @@ export function TriggerCard({
       aliveRef.current = false;
     };
   }, []);
+
+  const isSummary = result.visibility === "summary-only";
+
+  // Auto-dismiss for summary-only. Hovering pauses the timer; mouseleave
+  // restarts a fresh window so a partially-read toast does not vanish
+  // mid-read. The timer is also paused while an import is in flight so a
+  // network round-trip doesn't get cut by auto-dismiss.
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoveringRef = useRef(false);
+
+  useEffect(() => {
+    if (!isSummary) return;
+    const armTimer = () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        if (aliveRef.current) onDismiss(result.sessionId);
+      }, SUMMARY_AUTO_DISMISS_MS);
+    };
+    if (!hoveringRef.current && !accepting) armTimer();
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [isSummary, accepting, result.sessionId, onDismiss]);
 
   const completedLabel = useMemo(() => {
     try {
@@ -68,10 +103,34 @@ export function TriggerCard({
     }
   };
 
+  const handleMouseEnter = () => {
+    if (!isSummary) return;
+    hoveringRef.current = true;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+  const handleMouseLeave = () => {
+    if (!isSummary) return;
+    hoveringRef.current = false;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      if (aliveRef.current) onDismiss(result.sessionId);
+    }, SUMMARY_AUTO_DISMISS_MS);
+  };
+
+  const cardClassName = isSummary
+    ? "flex flex-col border-amber-500/40 bg-amber-500/5 shadow-md backdrop-blur"
+    : "flex h-full flex-col border-amber-500/40 bg-amber-500/5 shadow-lg backdrop-blur";
+
   return (
     <Card
       data-testid="trigger-card"
-      className="flex h-full flex-col border-amber-500/40 bg-amber-500/5 shadow-lg backdrop-blur"
+      data-variant={isSummary ? "summary" : "modal"}
+      className={cardClassName}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <CardHeader className="shrink-0 pb-2">
         <div className="flex items-start justify-between gap-2">
@@ -105,9 +164,21 @@ export function TriggerCard({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="min-h-0 flex-1 overflow-y-auto pt-0">
+      <CardContent
+        className={
+          isSummary
+            ? "min-h-0 overflow-hidden pt-0"
+            : "min-h-0 flex-1 overflow-y-auto pt-0"
+        }
+      >
         {result.summary ? (
-          <div className="prose prose-sm prose-invert max-w-none break-words text-foreground">
+          <div
+            className={
+              isSummary
+                ? "prose prose-sm prose-invert line-clamp-2 max-w-none break-words text-foreground"
+                : "prose prose-sm prose-invert max-w-none break-words text-foreground"
+            }
+          >
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown>
           </div>
         ) : (

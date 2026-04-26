@@ -127,13 +127,27 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           </div>
         </div>
       )}
-      {/* Proactive trigger overlay — separate slot below the routine area so a
-          fired trigger surfaces alongside (not on top of) any routine result.
+      {/* Proactive trigger overlays — visibility-driven slot routing (P2):
+            user-visible → centered modal-like card (below routine area)
+            summary-only → top-right compact toast that auto-dismisses
+            silent       → never reaches here (filtered in useTriggerResult)
           The trigger session is held in an isolated ConversationLoop so chat
           history below remains clean unless the user clicks "지금 답하기". */}
-      {triggerResult && (
+      {triggerResult && triggerResult.visibility === "user-visible" && (
         <div className="pointer-events-none absolute left-0 right-0 top-[calc(0.5rem+62vh)] z-20 flex justify-center px-4">
           <div className="pointer-events-auto flex w-full max-w-2xl max-h-[40vh] flex-col overflow-hidden">
+            <TriggerCard
+              key={triggerResult.sessionId}
+              result={triggerResult}
+              onDismiss={onDismissTrigger}
+              onAccept={onAcceptTrigger}
+            />
+          </div>
+        </div>
+      )}
+      {triggerResult && triggerResult.visibility === "summary-only" && (
+        <div className="pointer-events-none absolute right-4 top-2 z-20 flex justify-end">
+          <div className="pointer-events-auto w-[380px] max-w-[calc(100vw-2rem)]">
             <TriggerCard
               key={triggerResult.sessionId}
               result={triggerResult}

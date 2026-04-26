@@ -124,6 +124,22 @@ describe("TriggerExecutor.run", () => {
     expect(winACalls).toBeLessThan(winACalls + winBCalls);
   });
 
+  it("P2: audits visibility on completed (parity with started, grep-able by visibility)", async () => {
+    const win = makeFakeWindow();
+    const auditLog = { log: vi.fn() };
+    const exec = new TriggerExecutor({
+      createLoop: () => makeLoop("done"),
+      getMainWindow: () => win as never,
+      auditLogger: auditLog as never,
+    });
+    await exec.run({ ...baseSpec, visibility: "summary-only", prompt: "ok" });
+    const completedRow = auditLog.log.mock.calls
+      .map((c) => (c[0] as { input: string }).input)
+      .find((input) => input.includes("] completed session="));
+    expect(completedRow).toBeTruthy();
+    expect(completedRow).toMatch(/visibility=summary-only/);
+  });
+
   it("emits failed with classified reason + opaque errorId, never raw error.message on the wire", async () => {
     const win = makeFakeWindow();
     const broken = makeLoop("");
