@@ -332,6 +332,31 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:plugins:install-progress", listener);
   },
 
+  // Status bar — aggregated runtime counters (tools / plugins / mcps).
+  getRuntimeCounts: async () =>
+    ipcRenderer.invoke("lvis:runtime:counts") as Promise<{
+      tools: number;
+      plugins: number;
+      mcps: number;
+    }>,
+  // Status bar — static environment info (platform / hostname / user).
+  // Static enough to fetch once on mount; values don't change while the
+  // process is alive. Cwd is intentionally NOT exposed — least-privilege
+  // for plugin UI panels that share this contextBridge.
+  getRuntimeEnv: async () =>
+    ipcRenderer.invoke("lvis:runtime:env") as Promise<{
+      platform: string;
+      hostname: string;
+      user: string;
+    }>,
+  // Status bar — marketplace reachability probe. Returns `configured: false`
+  // when the user is on the mock backend (nothing to ping).
+  pingMarketplace: async () =>
+    ipcRenderer.invoke("lvis:marketplace:ping") as Promise<{
+      configured: boolean;
+      online: boolean;
+    }>,
+
   // ─── Plugin Events (§35 real-time streaming) ─────
   onPluginEvent: (
     eventType: string,
