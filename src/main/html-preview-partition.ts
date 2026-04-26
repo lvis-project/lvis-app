@@ -76,7 +76,16 @@ function installCdnAllowlist(ses: Electron.Session): void {
  * with that partition is attached.  The caller must pass the partition string
  * exactly as used in the <webview> tag.
  */
+/**
+ * Tracked partitions so re-installing the same policy is a no-op. Without
+ * this, every webview re-attach (plugin tab switch / re-mount) would
+ * stack `onBeforeRequest` handlers on the same session.
+ */
+const installedPluginPartitions = new Set<string>();
+
 export function installPluginPartitionPolicy(partitionName: string): void {
+  if (installedPluginPartitions.has(partitionName)) return;
+  installedPluginPartitions.add(partitionName);
   const ses = session.fromPartition(partitionName);
   ses.webRequest.onBeforeRequest((details, callback) => {
     try {

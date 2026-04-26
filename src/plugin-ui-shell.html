@@ -2,16 +2,15 @@
 <!--
   Plugin UI Shell — #237 Option B
 
-  This minimal HTML document is loaded by each plugin <webview>.
-  The host renderer passes two query parameters:
-    ?pluginId=…   — the plugin's id (also available as window.lvisPlugin.pluginId)
-    &entry=…      — file:// URL of the plugin's JS entry module
+  Minimal HTML document loaded by each plugin <webview>. The shell asks
+  main for the verified entry URL (resolved server-side from the
+  webContents → pluginId mapping registered by the host renderer at
+  did-attach) and then dynamic-imports the plugin module.
 
-  The shell dynamically imports the plugin entry module and calls:
-    mount({ root: document.getElementById("root"), bridge: window.lvisPlugin })
+  No query parameters. No user-controllable URLs reach `import()`.
 
-  window.lvisPlugin is injected by plugin-preload.ts before this script runs.
-  window.lvisApi is NOT available here (it belongs to the host renderer process).
+  window.lvisPlugin is injected by plugin-preload.ts before this script.
+  window.lvisApi is unreachable here.
 -->
 <html lang="ko">
   <head>
@@ -28,10 +27,20 @@
     <div id="root"></div>
     <script type="module">
       (async () => {
-        const params = new URLSearchParams(window.location.search);
-        const entry = params.get("entry");
+        const root = document.getElementById("root");
+        if (!window.lvisPlugin?.getEntryUrl) {
+          root.textContent = "[lvis] plugin-ui-shell: lvisPlugin bridge missing.";
+          return;
+        }
+        let entry;
+        try {
+          entry = await window.lvisPlugin.getEntryUrl();
+        } catch (err) {
+          root.textContent = "[lvis] entry 조회 실패: " + (err?.message ?? String(err));
+          return;
+        }
         if (!entry) {
-          document.getElementById("root").textContent = "[lvis] plugin-ui-shell: entry 파라미터가 없습니다.";
+          root.textContent = "[lvis] plugin-ui-shell: entry URL을 찾을 수 없습니다.";
           return;
         }
         try {
@@ -43,10 +52,8 @@
           if (typeof mountFn !== "function") {
             throw new Error("플러그인 모듈에서 mount 함수를 찾을 수 없습니다.");
           }
-          const root = document.getElementById("root");
-          await mountFn({ root, bridge: window.lvisPlugin, extension: window.__lvisExtension ?? {} });
+          await mountFn({ root, bridge: window.lvisPlugin });
         } catch (err) {
-          const root = document.getElementById("root");
           root.style.color = "red";
           root.style.padding = "8px";
           root.style.fontSize = "12px";
