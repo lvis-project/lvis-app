@@ -28,7 +28,9 @@ import { useCostEstimate } from "./hooks/use-cost-estimate.js";
 import { useStarred } from "./hooks/use-starred.js";
 import { useSessions } from "./hooks/use-sessions.js";
 import { useMarketplaceUpdates } from "./hooks/use-marketplace-updates.js";
+import { useBootstrapStatus } from "./hooks/use-bootstrap-status.js";
 import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
+import { BootstrapStatusBanner } from "./components/BootstrapStatusBanner.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { DropZoneOverlay } from "./components/DropZoneOverlay.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
@@ -76,6 +78,7 @@ export function App() {
   const { runningRoutines } = useRoutineRunning(api);
   const { triggerResult, dismiss: dismissTrigger, importIntoChat: importTriggerIntoChat } = useTriggerResult(api);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
+  const { status: bootstrapStatus, dismiss: dismissBootstrapStatus } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
 
   // Marketplace + plugin UI extensions
@@ -320,6 +323,7 @@ export function App() {
           />
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} />
           <MarketplaceUpdateBanner updates={marketplaceUpdates} onDismiss={dismissMarketplaceUpdates} />
           {fallbackToast && (
             <div className="bg-yellow-100 text-yellow-800 text-xs px-4 py-2 border-b border-yellow-200">
