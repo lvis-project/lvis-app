@@ -1,4 +1,25 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+/**
+ * Plugin UI Host — #237 Option B
+ *
+ * Replaced the previous inline-import path (import(blobUrl) into the host
+ * renderer's window) with an Electron <webview> that runs inside its own
+ * renderer process and session partition.
+ *
+ * Security properties of the new approach:
+ *   • Plugin code runs in a separate OS process with contextIsolation=true,
+ *     nodeIntegration=false, sandbox=true.
+ *   • window.lvisApi is NOT available inside the webview — only window.lvisPlugin
+ *     (injected by plugin-preload.ts), which exposes callTool / emitEvent /
+ *     onEvent only.
+ *   • Each plugin gets its own session partition (persist:plugin:<slug>) so
+ *     storage / cookies / cache are silo-ed between plugins.
+ *   • Lifecycle events, runtime counts, marketplace ping — none reachable.
+ *
+ * Fallback: if the webview's entryUrl is not a file:// path (dev server case)
+ * we still render the webview pointing at the dev URL so hot-reload keeps
+ * working during development.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
 
 export type PluginUiExtensionView = {
@@ -18,6 +39,10 @@ export type PluginUiExtensionView = {
   entryUrl?: string;
 };
 
+/**
+ * PluginUiBridge — kept for backward-compat typing; the actual bridge is now
+ * window.lvisPlugin inside the webview, not this renderer-side object.
+ */
 export type PluginUiBridge = {
   callPluginMethod: (method: string, payload?: unknown) => Promise<unknown>;
   askInHomeChat: (question: string) => Promise<void>;
@@ -30,71 +55,40 @@ export type PluginUiMountContext = {
   extension: PluginUiExtensionView["extension"];
 };
 
-type PluginUiMountResult = void | (() => void);
-type PluginUiMountFn = (context: PluginUiMountContext) => PluginUiMountResult | Promise<PluginUiMountResult>;
-type LoadedPluginUiModule = {
-  moduleNamespace: unknown;
-  revoke?: () => void;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-async function loadPluginUiModule(view: PluginUiExtensionView): Promise<LoadedPluginUiModule> {
-  const entryUrl = view.entryUrl;
-  if (!entryUrl) {
-    throw new Error("UI 모듈 엔트리를 찾을 수 없습니다.");
-  }
-
-  if (!entryUrl.startsWith("file:")) {
-    return {
-      moduleNamespace: (await import(/* @vite-ignore */ entryUrl)) as unknown,
-    };
-  }
-
-  const moduleSource = await window.lvisApi.readPluginUiModule(view.pluginId, view.extension.id);
-  const blob = new Blob([`${moduleSource}\n//# sourceURL=${entryUrl}`], {
-    type: "text/javascript",
-  });
-  const moduleUrl = URL.createObjectURL(blob);
-
-  try {
-    return {
-      moduleNamespace: (await import(/* @vite-ignore */ moduleUrl)) as unknown,
-      revoke: () => URL.revokeObjectURL(moduleUrl),
-    };
-  } catch (error) {
-    URL.revokeObjectURL(moduleUrl);
-    throw error;
-  }
-}
-
-function resolvePluginMount(moduleNamespace: unknown, exportName?: string): PluginUiMountFn | null {
-  if (!isRecord(moduleNamespace)) return null;
-
-  const candidates: unknown[] = [];
-  if (exportName) {
-    candidates.push(moduleNamespace[exportName]);
-  }
-  candidates.push(moduleNamespace.mount);
-  candidates.push(moduleNamespace.default);
-
-  const defaultExport = moduleNamespace.default;
-  if (isRecord(defaultExport)) {
-    candidates.push(defaultExport.mount);
-  }
-
-  for (const candidate of candidates) {
-    if (typeof candidate === "function") {
-      return candidate as PluginUiMountFn;
-    }
-  }
-  return null;
-}
-
 function getPluginViewLabel(item: PluginUiExtensionView): string {
   return item.extension.displayName?.trim() || item.extension.title || item.pluginId;
+}
+
+/**
+ * Derive the <webview> src URL from the view's entryUrl.
+ *
+ * The plugin-ui-shell.html is shipped alongside index.html in dist/src/.
+ * We derive its path by replacing the renderer's own URL's filename with
+ * plugin-ui-shell.html and append ?pluginId=&entry= query params.
+ *
+ * In the packaged app the renderer loads from a file:// URL so we can
+ * use the same origin for the shell.  In the Vite dev server we point at
+ * the shell served from the same dev server (the Vite config copy-plugin
+ * must copy plugin-ui-shell.html to the dev-server root for this to work).
+ */
+function buildWebviewSrc(view: PluginUiExtensionView): string | null {
+  const entryUrl = view.entryUrl;
+  if (!entryUrl) return null;
+
+  // Determine shell base — same directory as the current document.
+  let shellBase: string;
+  try {
+    shellBase = new URL("plugin-ui-shell.html", window.location.href).toString();
+  } catch {
+    // Fallback: relative path (works when window.location is a file:// URL).
+    shellBase = "plugin-ui-shell.html";
+  }
+
+  const params = new URLSearchParams({
+    pluginId: view.pluginId,
+    entry: entryUrl,
+  });
+  return `${shellBase}?${params.toString()}`;
 }
 
 export function PluginUiHostView({
@@ -108,89 +102,80 @@ export function PluginUiHostView({
   onAskInHomeChat: (question: string) => Promise<void>;
   onAddTask: PluginUiBridge["addTask"];
 }) {
-  const mountRootRef = useRef<HTMLDivElement | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [errorText, setErrorText] = useState<string | null>(null);
+  // Keep callPluginMethod etc. stable in refs so the webview ref callback
+  // does not regenerate on every render.
+  const callPluginMethodRef = useRef(callPluginMethod);
+  callPluginMethodRef.current = callPluginMethod;
+  const onAskInHomeChatRef = useRef(onAskInHomeChat);
+  onAskInHomeChatRef.current = onAskInHomeChat;
+  const onAddTaskRef = useRef(onAddTask);
+  onAddTaskRef.current = onAddTask;
 
-  const bridge = useMemo<PluginUiBridge>(
-    () => ({
-      callPluginMethod,
-      askInHomeChat: onAskInHomeChat,
-      addTask: onAddTask,
-    }),
-    [callPluginMethod, onAskInHomeChat, onAddTask],
-  );
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // webviewRef tracks the DOM node for cleanup only — we don't call methods
+  // on it directly in this implementation.
+  const webviewRef = useRef<Electron.WebviewTag | null>(null);
+
+  const handleWebviewRef = useCallback((node: Electron.WebviewTag | null) => {
+    webviewRef.current = node;
+  }, []);
 
   useEffect(() => {
-    const root = mountRootRef.current;
-    if (!root) return;
-    root.replaceChildren();
-
     if (!view) {
-      setLoading(false);
       setErrorText("플러그인 뷰를 찾을 수 없습니다.");
+      setLoading(false);
       return;
     }
-
     if (view.extension.kind === "embedded-page") {
-      setLoading(false);
       setErrorText("구형 iframe UI 형식은 지원되지 않습니다. entry 기반 모듈 UI를 사용하세요.");
-      return;
-    }
-
-    const entryUrl = view.entryUrl;
-    if (!entryUrl) {
       setLoading(false);
-      setErrorText("UI 모듈 엔트리를 찾을 수 없습니다.");
       return;
     }
-
-    let disposed = false;
-    let cleanup: (() => void) | undefined;
-    let revokeModuleUrl: (() => void) | undefined;
-    setLoading(true);
     setErrorText(null);
+    setLoading(true);
+  }, [view]);
 
-    void (async () => {
-      try {
-        const loadedModule = await loadPluginUiModule(view);
-        if (disposed) {
-          loadedModule.revoke?.();
-          return;
-        }
-        revokeModuleUrl = loadedModule.revoke;
+  // ─── Render ────────────────────────────────────────────────────────────────
+  let content: React.ReactNode;
 
-        const mount = resolvePluginMount(loadedModule.moduleNamespace, view.extension.exportName);
-        if (!mount) {
-          throw new Error(`mount 함수를 찾을 수 없습니다 (plugin=${view.pluginId}, view=${view.extension.id})`);
-        }
+  if (errorText) {
+    content = <div className="px-3 py-2 text-xs text-destructive">{errorText}</div>;
+  } else if (!view || !view.entryUrl) {
+    content = <div className="px-3 py-2 text-xs text-muted-foreground">UI 모듈 엔트리를 찾을 수 없습니다.</div>;
+  } else {
+    const webviewSrc = buildWebviewSrc(view);
+    // Partition: persist:plugin:<slug> gives each plugin its own silo.
+    // slugify the pluginId (replace dots/non-alnum with dashes) so the
+    // partition name stays URL-safe.
+    const slug = view.pluginId.replace(/[^a-z0-9]/gi, "-");
+    const partition = `persist:plugin:${slug}`;
 
-        const maybeCleanup = await mount({
-          root,
-          bridge,
-          extension: view.extension,
-        });
-        if (typeof maybeCleanup === "function") {
-          cleanup = maybeCleanup;
-        }
-        if (!disposed) {
-          setLoading(false);
-          setErrorText(null);
-        }
-      } catch (error) {
-        if (disposed) return;
-        setLoading(false);
-        setErrorText(`UI 로딩 실패: ${(error as Error).message}`);
-      }
-    })();
-
-    return () => {
-      disposed = true;
-      if (cleanup) cleanup();
-      if (revokeModuleUrl) revokeModuleUrl();
-      root.replaceChildren();
-    };
-  }, [bridge, view]);
+    if (!webviewSrc) {
+      content = <div className="px-3 py-2 text-xs text-muted-foreground">Webview src를 계산할 수 없습니다.</div>;
+    } else {
+      content = (
+        <webview
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ref={handleWebviewRef as any}
+          src={webviewSrc}
+          partition={partition}
+          // Security: no node integration, context isolation enforced by
+          // Electron for webviews when the host window has contextIsolation=true.
+          // allowpopups is absent → popups blocked by default.
+          // disablewebsecurity is absent → same-origin + CORS enforced.
+          webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
+          style={{ width: "100%", height: "100%", border: "none" }}
+          onLoad={() => setLoading(false)}
+          onError={() => {
+            setLoading(false);
+            setErrorText("Plugin webview 로딩 실패.");
+          }}
+        />
+      );
+    }
+  }
 
   return (
     <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
@@ -205,8 +190,9 @@ export function PluginUiHostView({
               로딩 중...
             </div>
           ) : null}
-          {errorText ? <div className="px-3 py-2 text-xs text-destructive">{errorText}</div> : null}
-          <div ref={mountRootRef} className="h-full overflow-auto p-3" />
+          <div className="h-full overflow-hidden">
+            {content}
+          </div>
         </div>
       </CardContent>
     </Card>

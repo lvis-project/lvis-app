@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
-import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
+import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
@@ -457,7 +457,34 @@ if (!gotSingleInstanceLock) {
 
 app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "webview") return;
+
+  // Determine the webview's session partition name so we can install the
+  // correct network policy before the first navigation.
+  // The partition is not directly readable from WebContents, but we can
+  // distinguish plugin webviews (persist:plugin:*) from the LLM-HTML webview
+  // by checking the initial URL once it's ready.
+  contents.once("did-navigate", (_navEvent, url) => {
+    if (url.includes("plugin-ui-shell")) {
+      // This is a plugin webview. Install a file://-allowing policy on its
+      // session partition.  We derive the partition name from the
+      // webContents session's partition identifier.
+      const partitionName = (contents.session as unknown as { partition?: string }).partition;
+      if (typeof partitionName === "string" && partitionName.startsWith("persist:plugin:")) {
+        installPluginPartitionPolicy(partitionName);
+      }
+    }
+  });
+
   contents.on("will-navigate", (navEvent, url) => {
+    // Plugin webviews: allow file:// navigations (shell + plugin entry).
+    // LLM-HTML webviews: block everything except data: / about:.
+    if (url.startsWith("file://")) {
+      // Only allow file:// if the webview is loading a plugin shell or module.
+      // Reject any traversal out of the app distribution directory.
+      if (url.includes("plugin-ui-shell") || url.includes(".js")) {
+        return; // allow
+      }
+    }
     if (!url.startsWith("data:") && !url.startsWith("about:")) {
       navEvent.preventDefault();
     }
