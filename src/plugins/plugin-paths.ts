@@ -30,12 +30,17 @@
  * Override hooks:
  *  - `LVIS_PLUGINS_DIR` env — points the user-installed dir at an arbitrary
  *    location. Used by tests, portable installs, and CI sandbox isolation.
+ *    Hard-gated on `!app.isPackaged` via {@link devPluginsDirOverride}: a
+ *    packaged build silently ignores the env var so an attacker cannot
+ *    redirect the layout at a user-writable directory.
  *
  * Electron is intentionally NOT imported here so this module remains
  * unit-testable in node (vitest) without an electron stub. Boot wires
  * `app.getPath('userData')` in.
  */
 import { resolve } from "node:path";
+
+import { devPluginsDirOverride } from "../boot/dev-flags.js";
 
 export interface PluginPaths {
   /** Absolute path to `registry.json` (under userInstalledDir). */
@@ -81,7 +86,7 @@ export function resolvePluginPaths(input: ResolvePluginPathsInput): PluginPaths 
   if (!input.userDataDir) {
     throw new Error("resolvePluginPaths: userDataDir is required");
   }
-  const envOverride = process.env.LVIS_PLUGINS_DIR;
+  const envOverride = devPluginsDirOverride();
   const userInstalledDir = resolve(
     input.userInstalledDir ?? envOverride ?? resolve(input.userDataDir, "plugins"),
   );

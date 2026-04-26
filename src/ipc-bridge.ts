@@ -46,6 +46,7 @@ import {
 } from "./routines/routine-delivery.js";
 import { devLinkedEntryAllowed, isDevModeUnlocked } from "./boot/dev-flags.js";
 import { NOTIFICATION_KINDS } from "./main/notification-service.js";
+import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 
 /**
  * Convert the UI's "user-assistant-only ordinal" to the real index into
@@ -770,6 +771,27 @@ ${input}`;
   // ─── Marketplace ────────────────────────────────
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:marketplace:list", () => pluginMarketplace.list());
+
+  // Phase 2d FU — bootstrap retry. The renderer banner exposes a button so
+  // the user doesn't have to restart the app to recover from a transient
+  // marketplace outage. Re-runs the same bootstrap loop the boot code uses,
+  // including the start/complete/error status emission to the banner.
+  ipcMain.handle("lvis:bootstrap:retry", async (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:bootstrap:retry", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const marketplace = settingsService.get("marketplace");
+    await runManagedBootstrap({
+      pluginMarketplace,
+      pluginRuntime,
+      mainWindow: getMainWindow(),
+      marketplace,
+      isPackaged: app.isPackaged,
+    });
+    return { ok: true } as const;
+  });
+
   ipcMain.handle("lvis:plugins:install", async (e, pluginId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install", e); return UNAUTHORIZED_FRAME; }
     // Renderer renders a skeleton card / sidebar placeholder while these

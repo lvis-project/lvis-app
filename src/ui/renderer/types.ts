@@ -79,6 +79,7 @@ export type AppSettings = {
     shutdownPrompt?: string;
   };
   privacy?: { piiRedactEnabled: boolean };
+  plugins?: { allowUnsignedUserPlugins: boolean };
 };
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
@@ -271,6 +272,7 @@ export type LvisApi = {
       | { phase: "error"; message: string }
     ) => void,
   ) => () => void;
+  retryBootstrap: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onPluginInstallProgress: (h: (payload:
