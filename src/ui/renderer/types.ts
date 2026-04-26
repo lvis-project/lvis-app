@@ -305,6 +305,10 @@ export type LvisApi = {
     freeText?: string;
     dismissed?: boolean;
   }) => Promise<{ ok: boolean; error?: string }>;
+  /** M2: renderer is notified when the gate's 5-minute timeout fires. */
+  onAskUserQuestionTimeout?: (
+    h: (payload: { requestId: string }) => void,
+  ) => () => void;
   listReminders: () => Promise<
     Array<{
       id: string;

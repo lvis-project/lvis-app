@@ -495,6 +495,16 @@ const api = {
     freeText?: string;
     dismissed?: boolean;
   }) => ipcRenderer.invoke("lvis:ask-user-question:respond", response),
+  // M2: timeout side-channel — main process notifies the renderer when an
+  // ask_user_question request expired (5 min default) so the card can drop
+  // the stale prompt before the user clicks into a no-op.
+  onAskUserQuestionTimeout: (
+    handler: (payload: { requestId: string }) => void,
+  ) => {
+    const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);
+    ipcRenderer.on("lvis:ask-user-question:timeout", listener);
+    return () => ipcRenderer.removeListener("lvis:ask-user-question:timeout", listener);
+  },
 
   // remind_at — persistent reminder list + lifecycle
   listReminders: async () => ipcRenderer.invoke("lvis:reminders:list"),

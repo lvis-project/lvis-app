@@ -1708,10 +1708,15 @@ ${input}`;
     return { ok: true };
   });
 
-  // reminders — list + dismiss + remove. List is read-only; mutations go
-  // through validateSender + audit so a hostile frame cannot wipe a user's
-  // reminders.
-  ipcMain.handle("lvis:reminders:list", () => {
+  // reminders — list + dismiss + remove. M3: list is technically read-only
+  // but exposes user-authored content (PII risk if a third-party plugin
+  // webview probes it), so it goes through validateSender + audit just
+  // like the mutation channels. Mirrors the lvis:ms-graph:get-state pattern.
+  ipcMain.handle("lvis:reminders:list", (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:reminders:list", e);
+      return UNAUTHORIZED_FRAME;
+    }
     if (!remindersStore) return [];
     return remindersStore.listActive();
   });
@@ -1737,7 +1742,12 @@ ${input}`;
   // session-todo — read-only list per chat session (defaults to current
   // ConversationLoop session). The renderer subscribes to push updates via
   // `lvis:session-todo:changed` events emitted by SessionTodoStore listeners.
-  ipcMain.handle("lvis:session-todo:list", (_e, sessionId?: string) => {
+  // M3: read-only but exposes user-authored content; gate behind validateSender.
+  ipcMain.handle("lvis:session-todo:list", (e, sessionId?: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:session-todo:list", e);
+      return UNAUTHORIZED_FRAME;
+    }
     if (!sessionTodoStore) return [];
     const sid = sessionId ?? conversationLoop.getSessionId();
     return sessionTodoStore.list(sid);

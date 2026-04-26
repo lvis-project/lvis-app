@@ -28,9 +28,23 @@ export interface SubAgentSpawn {
   errorMessage?: string;
 }
 
+/**
+ * L2: cap the displayed title so a long attacker-supplied value does not
+ * blow up the chat layout. The full value is preserved in the card's
+ * tooltip-equivalent (the summary section), so legitimate long titles are
+ * still discoverable.
+ */
+const TITLE_DISPLAY_CAP = 80;
+function clipTitle(value: string): string {
+  return value.length > TITLE_DISPLAY_CAP
+    ? `${value.slice(0, TITLE_DISPLAY_CAP)}…`
+    : value;
+}
+
 export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
   const [open, setOpen] = useState(spawn.status === "running");
   const isError = spawn.status === "error";
+  const displayTitle = clipTitle(spawn.title);
   return (
     <div
       className={`max-w-[85%] rounded-md border text-xs ${isError ? "border-destructive/40 bg-destructive/5" : "border-blue-500/40 bg-blue-500/5"}`}
@@ -42,7 +56,7 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <Bot className="h-3 w-3" />
-        <span className="font-medium">{spawn.title}</span>
+        <span className="font-medium" title={spawn.title}>{displayTitle}</span>
         <Badge variant="outline" className="px-1 py-0 text-[10px]">
           {spawn.turns.length} turn
         </Badge>

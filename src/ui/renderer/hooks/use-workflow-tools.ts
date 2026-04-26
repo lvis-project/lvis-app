@@ -14,6 +14,15 @@ import type { AskUserQuestionRequest } from "../components/AskUserQuestionCard.j
 import type { SubAgentSpawn, SubAgentTurn } from "../components/SubAgentCard.js";
 import type { SkillBadgeProps } from "../components/SkillBadge.js";
 
+/**
+ * M4: cap the inline skill badges so a chatty assistant cannot grow the
+ * list unbounded across a long session. 10 is large enough that legitimate
+ * use is unaffected and small enough that abuse is bounded. Newest-first
+ * dedup: re-loading the same skill replaces the prior entry rather than
+ * stacking duplicates.
+ */
+const SKILL_BADGE_CAP = 10;
+
 export function useWorkflowTools(api: LvisApi) {
   const [askQuestions, setAskQuestions] = useState<AskUserQuestionRequest[]>([]);
   const [subAgentSpawns, setSubAgentSpawns] = useState<SubAgentSpawn[]>([]);
@@ -91,19 +100,36 @@ export function useWorkflowTools(api: LvisApi) {
       });
     });
     const unsubSkill = api.onSkillLoaded?.((event) => {
-      setLoadedSkills((prev) => [
-        ...prev,
-        {
-          name: event.name,
-          description: event.description,
-          source: event.source,
-        },
-      ]);
+      // M4: dedupe by name (newest wins) and cap to last SKILL_BADGE_CAP.
+      // Without this, a chatty assistant could grow the badge list
+      // unbounded over a long session.
+      setLoadedSkills((prev) => {
+        const filtered = prev.filter((s) => s.name !== event.name);
+        const next = [
+          ...filtered,
+          {
+            name: event.name,
+            description: event.description,
+            source: event.source,
+          },
+        ];
+        if (next.length > SKILL_BADGE_CAP) {
+          return next.slice(next.length - SKILL_BADGE_CAP);
+        }
+        return next;
+      });
+    });
+    // M2: ask-user-question timeout — drop the stale card so the user
+    // does not silently click into a no-op. The renderer subscribes to
+    // the explicit timeout channel emitted by AskUserQuestionGate.
+    const unsubAskTimeout = api.onAskUserQuestionTimeout?.(({ requestId }) => {
+      setAskQuestions((prev) => prev.filter((q) => q.id !== requestId));
     });
     return () => {
       unsubAsk?.();
       unsubSpawn?.();
       unsubSkill?.();
+      unsubAskTimeout?.();
     };
   }, [api]);
 
@@ -111,10 +137,22 @@ export function useWorkflowTools(api: LvisApi) {
     setAskQuestions((prev) => prev.filter((q) => q.id !== id));
   };
 
+  /**
+   * M4: explicit reset hook callable from the App (e.g. when the user
+   * clicks "new chat"). Clears the per-session skill badge list so a
+   * brand-new conversation does not inherit prior session badges.
+   */
+  const resetForNewSession = () => {
+    setLoadedSkills([]);
+    setSubAgentSpawns([]);
+    setAskQuestions([]);
+  };
+
   return {
     askQuestions,
     subAgentSpawns,
     loadedSkills,
     dismissAskQuestion,
+    resetForNewSession,
   };
 }
