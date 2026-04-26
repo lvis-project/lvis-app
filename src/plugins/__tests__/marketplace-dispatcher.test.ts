@@ -62,6 +62,8 @@ describe("PluginMarketplaceService install()", () => {
 
   beforeEach(async () => {
     setIsPackaged(false);
+    // Phase 2b-1: one test exercises the file:-spec dev branch.
+    process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY = "1";
     testDir = join(
       homedir(),
       ".lvis",
@@ -80,6 +82,7 @@ describe("PluginMarketplaceService install()", () => {
   });
 
   afterEach(async () => {
+    delete process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY;
     vi.restoreAllMocks();
     await rm(testDir, { recursive: true, force: true });
     _resetForTest();
