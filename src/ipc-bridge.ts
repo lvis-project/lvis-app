@@ -796,9 +796,21 @@ ${input}`;
   });
   ipcMain.handle("lvis:plugins:uninstall", async (e, pluginId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:uninstall", e); return UNAUTHORIZED_FRAME; }
-    const result = await pluginMarketplace.uninstall(pluginId);
+    let result: Awaited<ReturnType<typeof pluginMarketplace.uninstall>>;
+    try {
+      result = await pluginMarketplace.uninstall(pluginId);
+    } catch (err) {
+      const message = (err as Error).message ?? "uninstall failed";
+      e.sender.send("lvis:plugins:uninstall-result", { slug: pluginId, success: false, error: message });
+      throw err;
+    }
     await pluginRuntime.restartAll();
     refreshPluginNotifications?.();
+    // Notify the renderer so the sidebar / marketplace views refresh without
+    // an app restart — mirrors the lvis://install deep-link path's
+    // install-result event so any uninstall surface (PluginConfigTab,
+    // marketplace UI, etc.) gets the same lifecycle signal.
+    e.sender.send("lvis:plugins:uninstall-result", { slug: pluginId, success: true });
     return result;
   });
   // read-only, sender guard optional
