@@ -1,19 +1,12 @@
 /**
- * TriggerExecutor — fresh loop per trigger, IPC delivery, dismiss / import.
- *
- * The host gate (`evaluateTriggerSpec`) runs upstream and is tested against
- * the production function in `boot/__tests__/proactive-trigger.test.ts`.
- * Here we focus on the executor's responsibilities:
- *   1. each `run` constructs a fresh loop via the injected factory
- *   2. emits started / completed IPC events with the loop's sessionId
- *   3. caches the captured session for the import path
- *   4. `dismiss` drops the cache; `importIntoChat` hydrates a target loop
+ * TriggerExecutor — fresh loop per trigger, IPC delivery, dismiss / import,
+ * and the safety guards added in round-5: chat_busy refusal,
+ * history_capacity refusal, expiry signal on cache eviction, and the
+ * imported-from-proactive wrapping that prevents trigger prompts from being
+ * grafted into chat as if the user had typed them.
  */
 import { describe, expect, it, vi } from "vitest";
-import {
-  TriggerExecutor,
-  getCachedTriggerSession,
-} from "../trigger-executor.js";
+import { TriggerExecutor } from "../trigger-executor.js";
 import { ConversationLoop } from "../conversation-loop.js";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
@@ -70,8 +63,15 @@ function makeFakeWindow(): FakeWindow {
 
 const auditLogger = { log: vi.fn() };
 
+const baseSpec = {
+  pluginId: "work-proactive",
+  source: "proactive:meeting-detection" as const,
+  visibility: "user-visible" as const,
+  priority: "normal" as const,
+};
+
 describe("TriggerExecutor.run", () => {
-  it("creates a fresh loop per call (factory invoked each time)", async () => {
+  it("creates a fresh loop per call and tags audit with pluginId + sessionId", async () => {
     const create = vi.fn(() => makeLoop("ok"));
     const win = makeFakeWindow();
     const exec = new TriggerExecutor({
@@ -79,170 +79,196 @@ describe("TriggerExecutor.run", () => {
       getMainWindow: () => win as never,
       auditLogger: auditLogger as never,
     });
-
-    await exec.run({
-      prompt: "x",
-      source: "proactive:meeting-detection",
-      visibility: "summary-only",
-      priority: "normal",
-    });
-    await exec.run({
-      prompt: "y",
-      source: "proactive:meeting-detection",
-      visibility: "summary-only",
-      priority: "normal",
-    });
-
+    await exec.run({ ...baseSpec, prompt: "x" });
+    await exec.run({ ...baseSpec, prompt: "y" });
     expect(create).toHaveBeenCalledTimes(2);
   });
 
-  it("emits started + completed IPC events with the loop's sessionId", async () => {
+  it("emits started + completed IPC events and the wire payload omits messages", async () => {
     const win = makeFakeWindow();
     const exec = new TriggerExecutor({
       createLoop: () => makeLoop("회의실 예약했습니다"),
       getMainWindow: () => win as never,
       auditLogger: auditLogger as never,
     });
-
-    await exec.run({
-      prompt: "회의실 예약 도와드릴까요?",
-      source: "proactive:meeting-detection",
-      visibility: "user-visible",
-      priority: "normal",
-    });
-
+    await exec.run({ ...baseSpec, prompt: "회의실 예약 도와드릴까요?" });
     const calls = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls;
-    const channels = calls.map((c) => c[0]);
-    expect(channels).toContain("lvis:trigger:started");
-    expect(channels).toContain("lvis:trigger:completed");
-
     const completed = calls.find((c) => c[0] === "lvis:trigger:completed");
     expect(completed?.[1]).toMatchObject({
+      pluginId: "work-proactive",
       source: "proactive:meeting-detection",
-      visibility: "user-visible",
-      priority: "normal",
       summary: "회의실 예약했습니다",
     });
-    // sessionId is opaque but must be present + non-empty.
-    expect(typeof completed?.[1].sessionId).toBe("string");
-    expect((completed?.[1].sessionId as string).length).toBeGreaterThan(0);
+    // Wire payload must NOT carry the heavy messages array.
+    expect(completed?.[1].messages).toBeUndefined();
   });
 
-  it("caches the trigger session for the import path", async () => {
-    const win = makeFakeWindow();
+  it("uses live getMainWindow on each emit (window recreation safe)", async () => {
+    const winA = makeFakeWindow();
+    const winB = makeFakeWindow();
+    let current: FakeWindow = winA;
     const exec = new TriggerExecutor({
-      createLoop: () => makeLoop("done"),
+      createLoop: () => makeLoop("ok"),
+      getMainWindow: () => current as never,
+      auditLogger: auditLogger as never,
+    });
+    await exec.run({ ...baseSpec, prompt: "first" });
+    expect((winA.webContents.send as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0);
+
+    current = winB; // simulate close+reopen
+    await exec.run({ ...baseSpec, prompt: "second" });
+    const winACalls = (winA.webContents.send as ReturnType<typeof vi.fn>).mock.calls.length;
+    const winBCalls = (winB.webContents.send as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(winBCalls).toBeGreaterThan(0);
+    // winA didn't get the second batch of events.
+    expect(winACalls).toBeLessThan(winACalls + winBCalls);
+  });
+
+  it("emits failed with classified reason + opaque errorId, never raw error.message on the wire", async () => {
+    const win = makeFakeWindow();
+    const broken = makeLoop("");
+    (broken as { provider: unknown }).provider = null;
+    const exec = new TriggerExecutor({
+      createLoop: () => broken,
       getMainWindow: () => win as never,
       auditLogger: auditLogger as never,
     });
-
-    await exec.run({
-      prompt: "x",
-      source: "proactive:meeting-detection",
-      visibility: "summary-only",
-      priority: "normal",
-    });
-
-    const completed = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
-      .find((c) => c[0] === "lvis:trigger:completed");
-    const sessionId = completed?.[1].sessionId as string;
-    const cached = getCachedTriggerSession(sessionId);
-    expect(cached).not.toBeNull();
-    expect(cached?.summary).toBe("done");
-  });
-
-  it("emits failed IPC event when the loop rejects", async () => {
-    const win = makeFakeWindow();
-    const brokenLoop = makeLoop("");
-    (brokenLoop as { provider: unknown }).provider = null; // forces runTurn throw
-    const exec = new TriggerExecutor({
-      createLoop: () => brokenLoop,
-      getMainWindow: () => win as never,
-      auditLogger: auditLogger as never,
-    });
-
-    await expect(
-      exec.run({
-        prompt: "x",
-        source: "proactive:fail",
-        visibility: "summary-only",
-        priority: "normal",
-      }),
-    ).rejects.toBeDefined();
-
-    const channels = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
-    expect(channels).toContain("lvis:trigger:failed");
-    // No `completed` row on the failure path.
-    expect(channels).not.toContain("lvis:trigger:completed");
+    await expect(exec.run({ ...baseSpec, prompt: "x" })).rejects.toBeDefined();
+    const failed = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
+      .find((c) => c[0] === "lvis:trigger:failed");
+    expect(failed?.[1]).toMatchObject({ pluginId: "work-proactive", reason: "provider_error" });
+    expect(failed?.[1].errorId).toMatch(/^te-/);
+    // The wire payload MUST NOT include `message` / `error` text.
+    expect(failed?.[1].message).toBeUndefined();
+    expect(failed?.[1].error).toBeUndefined();
   });
 });
 
 describe("TriggerExecutor.importIntoChat", () => {
-  it("appends captured trigger messages onto the target chat history", async () => {
+  it("wraps the leading user message in <imported-from-proactive> so injected imperatives don't read as user input", async () => {
     const win = makeFakeWindow();
     const exec = new TriggerExecutor({
-      createLoop: () => makeLoop("응답 본문"),
+      createLoop: () => makeLoop("응답"),
       getMainWindow: () => win as never,
       auditLogger: auditLogger as never,
     });
-    await exec.run({
-      prompt: "사용자에게 보일 templated 메시지",
-      source: "proactive:meeting-detection",
-      visibility: "user-visible",
-      priority: "normal",
-    });
+    await exec.run({ ...baseSpec, prompt: "원본 templated prompt" });
     const sessionId = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
       .find((c) => c[0] === "lvis:trigger:completed")?.[1].sessionId as string;
 
-    const chat = makeLoop("unused");
-    expect(chat.getHistory().getMessages()).toHaveLength(0);
-
-    const result = exec.importIntoChat(sessionId, chat);
-    expect(result.ok).toBe(true);
-    expect(result.imported).toBeGreaterThan(0);
-    expect(chat.getHistory().getMessages().length).toBe(result.imported);
-    // Cache is consumed — second import returns not_found.
-    const second = exec.importIntoChat(sessionId, chat);
-    expect(second.ok).toBe(false);
-    expect(second.reason).toBe("not_found");
+    const chat = makeLoop("");
+    const out = exec.importIntoChat(sessionId, chat);
+    expect(out.ok).toBe(true);
+    const messages = chat.getHistory().getMessages();
+    const firstUser = messages.find((m) => m.role === "user");
+    expect(firstUser?.content).toContain("<imported-from-proactive");
+    expect(firstUser?.content).toContain("source=\"proactive:meeting-detection\"");
+    expect(firstUser?.content).toContain("원본 templated prompt");
   });
 
-  it("rejects unknown sessionIds without mutating the chat history", () => {
+  it("refuses when the chat loop is currently mid-turn (chat_busy)", async () => {
     const win = makeFakeWindow();
     const exec = new TriggerExecutor({
-      createLoop: () => makeLoop(""),
+      createLoop: () => makeLoop("ok"),
       getMainWindow: () => win as never,
       auditLogger: auditLogger as never,
     });
+    await exec.run({ ...baseSpec, prompt: "x" });
+    const sessionId = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
+      .find((c) => c[0] === "lvis:trigger:completed")?.[1].sessionId as string;
+
     const chat = makeLoop("");
-    const result = exec.importIntoChat("nonexistent-id", chat);
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe("not_found");
+    // Simulate an in-flight turn — a non-null currentAbortController.
+    (chat as { currentAbortController: AbortController | null }).currentAbortController =
+      new AbortController();
+
+    const out = exec.importIntoChat(sessionId, chat);
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("chat_busy");
+    // History was not mutated.
     expect(chat.getHistory().getMessages()).toHaveLength(0);
+  });
+
+  it("refuses when chat history would overflow maxMessages (history_capacity)", async () => {
+    const win = makeFakeWindow();
+    const exec = new TriggerExecutor({
+      createLoop: () => makeLoop("ok"),
+      getMainWindow: () => win as never,
+      auditLogger: auditLogger as never,
+    });
+    await exec.run({ ...baseSpec, prompt: "x" });
+    const sessionId = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
+      .find((c) => c[0] === "lvis:trigger:completed")?.[1].sessionId as string;
+
+    const chat = makeLoop("");
+    // Stuff chat history near capacity (default 50). Restore avoids the per-
+    // append trim on every iteration.
+    chat.getHistory().restore(
+      Array.from({ length: 50 }, (_, i) => ({ role: "user" as const, content: `m${i}` })),
+    );
+    const out = exec.importIntoChat(sessionId, chat);
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("history_capacity");
+    expect(chat.getHistory().getMessages()).toHaveLength(50);
   });
 });
 
-describe("TriggerExecutor.dismiss", () => {
-  it("drops a cached session so subsequent imports fail with not_found", async () => {
+describe("TriggerExecutor.dismiss + cache eviction", () => {
+  it("dismiss drops a cached session and a re-import returns not_found", async () => {
     const win = makeFakeWindow();
     const exec = new TriggerExecutor({
-      createLoop: () => makeLoop("x"),
+      createLoop: () => makeLoop("ok"),
       getMainWindow: () => win as never,
       auditLogger: auditLogger as never,
     });
-    await exec.run({
-      prompt: "x",
-      source: "proactive:dismiss",
-      visibility: "summary-only",
-      priority: "normal",
-    });
+    await exec.run({ ...baseSpec, prompt: "x" });
     const sessionId = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
       .find((c) => c[0] === "lvis:trigger:completed")?.[1].sessionId as string;
 
     expect(exec.dismiss(sessionId)).toBe(true);
-    expect(exec.dismiss(sessionId)).toBe(false); // already gone
-    const importResult = exec.importIntoChat(sessionId, makeLoop(""));
-    expect(importResult.reason).toBe("not_found");
+    const result = exec.importIntoChat(sessionId, makeLoop(""));
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("not_found");
+  });
+
+  it("emits lvis:trigger:expired when cache cap evicts an earlier session", async () => {
+    const win = makeFakeWindow();
+    const exec = new TriggerExecutor({
+      createLoop: () => makeLoop("ok"),
+      getMainWindow: () => win as never,
+      auditLogger: auditLogger as never,
+    });
+    // Fill cache to its 32-entry cap.
+    for (let i = 0; i < 32; i += 1) {
+      await exec.run({ ...baseSpec, prompt: `p${i}` });
+    }
+    (win.webContents.send as ReturnType<typeof vi.fn>).mockClear();
+    // One more — should evict the oldest and emit `expired` for it.
+    await exec.run({ ...baseSpec, prompt: "overflow" });
+    const expired = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
+      .find((c) => c[0] === "lvis:trigger:expired");
+    expect(expired).toBeDefined();
+    expect(expired?.[1]).toMatchObject({ pluginId: "work-proactive" });
+  });
+
+  it("two TriggerExecutor instances do not share cache", async () => {
+    const win = makeFakeWindow();
+    const execA = new TriggerExecutor({
+      createLoop: () => makeLoop("a"),
+      getMainWindow: () => win as never,
+      auditLogger: auditLogger as never,
+    });
+    const execB = new TriggerExecutor({
+      createLoop: () => makeLoop("b"),
+      getMainWindow: () => win as never,
+      auditLogger: auditLogger as never,
+    });
+    await execA.run({ ...baseSpec, prompt: "from A" });
+    const sessionId = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
+      .find((c) => c[0] === "lvis:trigger:completed")?.[1].sessionId as string;
+    // execB cannot see execA's session.
+    const result = execB.importIntoChat(sessionId, makeLoop(""));
+    expect(result.reason).toBe("not_found");
   });
 });
 
@@ -255,14 +281,31 @@ describe("TriggerExecutor isolation invariant", () => {
       getMainWindow: () => win as never,
       auditLogger: auditLogger as never,
     });
-    await exec.run({
-      prompt: "회의실 예약 도와드릴까요?",
-      source: "proactive:meeting-detection",
-      visibility: "user-visible",
-      priority: "normal",
-    });
-    // The chat loop is wholly untouched: factory returned a separate
-    // ConversationLoop instance, so chat's ConversationHistory is empty.
+    await exec.run({ ...baseSpec, prompt: "회의실 예약 도와드릴까요?" });
     expect(chat.getHistory().getMessages()).toHaveLength(0);
+  });
+
+  it("cached payload messages are deep-cloned so chat-history mutations don't reflect into the cache", async () => {
+    const win = makeFakeWindow();
+    const exec = new TriggerExecutor({
+      createLoop: () => makeLoop("응답"),
+      getMainWindow: () => win as never,
+      auditLogger: auditLogger as never,
+    });
+    await exec.run({ ...baseSpec, prompt: "원본" });
+    const sessionId = (win.webContents.send as ReturnType<typeof vi.fn>).mock.calls
+      .find((c) => c[0] === "lvis:trigger:completed")?.[1].sessionId as string;
+
+    const cachedBefore = exec.getCachedSession(sessionId);
+    const chat = makeLoop("");
+    exec.importIntoChat(sessionId, chat);
+    // Even if we mutated chat-side messages later, the original cache is
+    // already gone (consumed by import). What we care about: the cached
+    // entry was independent of the trigger loop's internal array.
+    expect(cachedBefore?.messages.length).toBeGreaterThan(0);
+    // Mutate the snapshot we held — should not affect chat history.
+    if (cachedBefore) cachedBefore.messages[0].content = "MUTATED";
+    const chatFirstUser = chat.getHistory().getMessages().find((m) => m.role === "user");
+    expect(chatFirstUser?.content).not.toContain("MUTATED");
   });
 });

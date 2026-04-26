@@ -829,25 +829,19 @@ export async function initPluginRuntime(
           .then(() =>
             executor.run({
               prompt: spec.prompt,
+              pluginId,
               source: decision.source,
               visibility: decision.visibility,
               priority: decision.priority,
               ...(spec.context ? { context: spec.context } : {}),
             }),
           )
-          .catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            try {
-              bootAuditLogger.log({
-                timestamp: new Date().toISOString(),
-                sessionId: "plugin",
-                type: "error",
-                input:
-                  `[plugin:${pluginId}] trigger_conversation_runtime_error ` +
-                  `source=${decision.source} message=${msg}`,
-              });
-            } catch { /* audit must not break host */ }
-          });
+          // The executor already audits the failure with classified reason
+          // + raw message (operator-only). Swallow the rejection here — a
+          // second audit row per failure would just inflate the log and
+          // could leak the raw error to a sessionId tag the executor
+          // intentionally split into "trigger-executor".
+          .catch(() => undefined);
 
         return decision.result;
       },

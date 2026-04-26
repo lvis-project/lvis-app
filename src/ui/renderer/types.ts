@@ -229,6 +229,7 @@ export type LvisApi = {
   onTriggerCompleted: (
     h: (result: {
       sessionId: string;
+      pluginId: string;
       source: string;
       visibility: "silent" | "summary-only" | "user-visible";
       priority: "low" | "normal" | "high";
@@ -238,7 +239,16 @@ export type LvisApi = {
     }) => void,
   ) => () => void;
   onTriggerFailed: (
-    h: (payload: { sessionId: string; source: string; error: string }) => void,
+    h: (payload: {
+      sessionId: string;
+      pluginId: string;
+      source: string;
+      reason: "provider_error" | "tool_error" | "abort" | "unknown";
+      errorId: string;
+    }) => void,
+  ) => () => void;
+  onTriggerExpired: (
+    h: (payload: { sessionId: string; pluginId: string; source: string }) => void,
   ) => () => void;
   dismissTrigger: (sessionId: string) => Promise<{ ok: boolean; removed?: boolean; error?: string }>;
   importTrigger: (sessionId: string) => Promise<{ ok: boolean; imported?: number; reason?: string; error?: string }>;

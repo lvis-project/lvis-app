@@ -144,6 +144,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     onTriggerStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
     onTriggerCompleted: vi.fn((_h: (r: unknown) => void) => () => {}),
     onTriggerFailed: vi.fn((_h: (p: unknown) => void) => () => {}),
+    onTriggerExpired: vi.fn((_h: (p: unknown) => void) => () => {}),
     dismissTrigger: vi.fn(async () => ({ ok: true, removed: true })),
     importTrigger: vi.fn(async () => ({ ok: true, imported: 0 })),
 

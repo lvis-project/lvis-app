@@ -56,6 +56,16 @@ interface ConversationTriggerResult {
 
 **Audit deny throttle**: 동일 `(pluginId, reason)` 조합의 반복 거부는 60초 윈도우당 1회만 audit 에 emit. 윈도우 만료 시 `(+N suppressed)` 카운트로 묶음. tight loop 의 audit log flooding 방어.
 
+**Audit row prefixes** (operator grep 가이드):
+- `[plugin:<pluginId>] trigger_conversation source=...` — gate 수락
+- `[plugin:<pluginId>] trigger_conversation_denied reason=...` — gate 거부
+- `[trigger:<pluginId>] started session=...` — executor 시작
+- `[trigger:<pluginId>] completed session=...` — executor 완료
+- `[trigger:<pluginId>] failed session=... reason=<class> errorId=...` — executor 실패
+- `[trigger:<pluginId>] imported session=...` / `dismissed session=...` — renderer 액션
+
+`pluginId` 가 모든 row 에 포함되므로 `grep "pluginId:work-proactive"` 한 번으로 lifecycle 전체 추적 가능. 실패 detail 은 `errorId` 로 같은 audit log 에 join.
+
 ### Reason 분류 — caller 가 어떻게 처리해야 하나
 
 | Reason | 분류 | Caller 권장 동작 |
@@ -118,7 +128,61 @@ context.hostApi.onEvent("email.action.needed", async (payload) => {
 });
 ```
 
-ConversationLoop 가 `prompt` 를 user turn 으로 받아 시스템 프롬프트 + 도구 셋과 함께 LLM 에 전달 — 이후 calendar / email tool 호출은 평소대로 §8 approval gate 거친다 (proactive 가 우회 X).
+## Lifecycle
+
+```
+plugin                   host gate                executor                  renderer
+  │                          │                       │                         │
+  │ triggerConversation(spec)│                       │                         │
+  ├─────────────────────────►│  evaluateTriggerSpec  │                         │
+  │                          │  (capability/source/  │                         │
+  │                          │   prompt/rate/dedupe) │                         │
+  │                          │                       │                         │
+  │                          ├──────────► run(spec) ─►│                         │
+  │ {accepted, source}       │                       │ createLoop()            │
+  │◄─────────────────────────┤                       │ ─── fresh ConvLoop ──── │
+  │  (returns synchronously) │                       │                         │
+  │                          │                       │ emitStarted ───────────►│
+  │                          │                       │ loop.runTurn(prompt)    │
+  │                          │                       │ ...                     │
+  │                          │                       │ emitCompleted ─────────►│ TriggerCard
+  │                          │                       │                         │   shown
+  │                          │                       │                         │
+  │                          │                       │   ◄── dismiss(id) ──────│
+  │                          │                       │   or                    │
+  │                          │                       │   ◄── import(id) ───────│
+  │                          │                       │       (chat history     │
+  │                          │                       │        gets <imported-  │
+  │                          │                       │        from-proactive>  │
+  │                          │                       │        wrapped turn)    │
+```
+
+Trigger turn does **NOT** mutate the user's chat ConversationHistory. Only after the user clicks "지금 답하기" on the TriggerCard does the host wrap the captured turn (leading user message into `<imported-from-proactive source="...">…</imported-from-proactive>`) and append to chat. Any destructive tool calls during the trigger turn already passed §8 ApprovalGate; importing does NOT replay approvals.
+
+## Reason classes — caller 처리 가이드
+
+`ConversationTriggerResult.reason` 분류:
+
+| Reason | 분류 | Caller 권장 동작 |
+|--------|------|----------------|
+| `capability_denied` | **permanent (config)** | log + give up. manifest 가 cap 없음 — 코드 수정 외 회복 불가 |
+| `invalid_source` | **permanent (bug)** | log + give up. caller 의 spec 자체가 잘못됨 |
+| `duplicate` | **expected** | swallow. 같은 관찰이 두 번 emit 된 정상 흐름 |
+| `rate_limited` | **backpressure** | plugin 의 cooldown 유지. host 의 sliding window 가 풀릴 때까지 기다림 (다음 *새로운* 관찰에서 자연스럽게 재시도) |
+| `loop_unavailable` | **transient (boot)** | plugin cooldown clear 권장. 다음 관찰이 들어오면 재시도. 단 무한 retry 방지 위해 N회 연속 시 backoff |
+
+Brain plugin 의 retry 로직은 위 분류를 그대로 따르면 됨. host 가 `retryAfter` 를 따로 surface 하지 않음 — 위 표가 contract.
+
+## Import 거부 사유
+
+`importIntoChat` 이 거부할 수 있는 케이스:
+
+| reason | 의미 |
+|--------|----|
+| `not_found` | 캐시 만료 또는 dismiss 후 → renderer 는 stale 카드 정리 |
+| `empty` | trigger 가 메시지 한 건도 만들지 못함 (보통 LLM 실패) |
+| `chat_busy` | 사용자 chat 이 turn 진행 중 — 끝난 후 재시도 |
+| `history_capacity` | chat history 가 cap (50 msgs) 근접 — 사용자가 compact 후 재시도 |
 
 ## Visibility — P0 / P2 분리
 

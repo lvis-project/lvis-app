@@ -245,11 +245,24 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:trigger:completed", listener);
   },
   onTriggerFailed: (
-    handler: (payload: { sessionId: string; source: string; error: string }) => void,
+    handler: (payload: {
+      sessionId: string;
+      pluginId: string;
+      source: string;
+      reason: "provider_error" | "tool_error" | "abort" | "unknown";
+      errorId: string;
+    }) => void,
   ) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:trigger:failed", listener);
     return () => ipcRenderer.removeListener("lvis:trigger:failed", listener);
+  },
+  onTriggerExpired: (
+    handler: (payload: { sessionId: string; pluginId: string; source: string }) => void,
+  ) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:trigger:expired", listener);
+    return () => ipcRenderer.removeListener("lvis:trigger:expired", listener);
   },
   dismissTrigger: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:trigger:dismiss", sessionId) as Promise<{

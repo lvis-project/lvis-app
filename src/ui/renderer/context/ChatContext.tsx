@@ -13,6 +13,7 @@ type RoutineResult = {
 
 type TriggerResult = {
   sessionId: string;
+  pluginId: string;
   source: string;
   visibility: "silent" | "summary-only" | "user-visible";
   priority: "low" | "normal" | "high";

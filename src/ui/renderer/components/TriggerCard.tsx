@@ -10,7 +10,7 @@
 // Until the user picks one, the trigger session is fully isolated from
 // chat — no context pollution.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "../../../components/ui/button.js";
@@ -34,6 +34,13 @@ export function TriggerCard({
 }) {
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   const completedLabel = useMemo(() => {
     try {
@@ -50,13 +57,14 @@ export function TriggerCard({
     setError(null);
     try {
       const out = await onAccept(result.sessionId);
+      if (!aliveRef.current) return;
       if (!out.ok) {
         setError(out.reason ?? "import 실패");
       }
     } catch (e) {
-      setError((e as Error).message);
+      if (aliveRef.current) setError((e as Error).message);
     } finally {
-      setAccepting(false);
+      if (aliveRef.current) setAccepting(false);
     }
   };
 

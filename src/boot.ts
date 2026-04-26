@@ -83,7 +83,20 @@ import { resolveManagedPluginBootstrap } from "./boot/managed-marketplace.js";
 
 export type { AppServices } from "./boot/types.js";
 
-export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow): Promise<AppServices> {
+/**
+ * @param getMainWindow Live BrowserWindow getter — must read the current
+ *   `main.ts` binding because Electron close+reopen replaces the window.
+ *   Bootstrap-time consumers (e.g. plugin event bridge) take the resolved
+ *   `mainWindow`; runtime consumers (e.g. TriggerExecutor) take this getter.
+ *   Defaults to a closure over `mainWindow` for callers that don't have a
+ *   live reference, but those callers will silently lose IPC after window
+ *   recreation.
+ */
+export async function bootstrap(
+  projectRoot: string,
+  mainWindow: BrowserWindow,
+  getMainWindow: () => BrowserWindow | null = () => mainWindow,
+): Promise<AppServices> {
   console.log("[lvis] boot: starting...");
 
   // §4.2 Step 0-1 + 4-5: Core services.
@@ -291,7 +304,8 @@ export async function bootstrap(projectRoot: string, mainWindow: BrowserWindow):
         bashAstValidator,
         pluginRuntime,
       }),
-    getMainWindow: () => mainWindow,
+    // Live getter so close+reopen window cycles still deliver trigger events.
+    getMainWindow,
     auditLogger: bootAuditLogger,
   });
   console.log("[lvis] boot: trigger executor wired (proactive turns isolated)");
