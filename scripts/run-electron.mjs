@@ -31,6 +31,14 @@ if (!env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY) {
 if (!env.LVIS_ENABLE_DEV_CONSOLE) {
   env.LVIS_ENABLE_DEV_CONSOLE = "0";
 }
+// `bun run start` already injects --no-sandbox via WINDOWS_SAFE_ELECTRON_FLAGS
+// below; tell main.ts to mirror that into the lvis:// protocol registration so
+// OS-launched second instances on corp boxes don't silently crash before
+// requestSingleInstanceLock(). Default-off in main.ts means a packaged build
+// without this opt-in keeps Chromium sandboxing.
+if (!env.LVIS_DEV_NO_SANDBOX) {
+  env.LVIS_DEV_NO_SANDBOX = "1";
+}
 
 // Force UTF-8 across every subprocess spoken to by Electron's embedded Node.
 // Without this, Windows' default ANSI code page (cp949 on Korean locale) turns
