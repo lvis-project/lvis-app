@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
-import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
+import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
@@ -468,7 +468,40 @@ if (!gotSingleInstanceLock) {
 
 app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "webview") return;
+
+  // Determine the webview's session partition name so we can install the
+  // correct network policy before the first navigation.
+  // The partition is not directly readable from WebContents, but we can
+  // distinguish plugin webviews (persist:plugin:*) from the LLM-HTML webview
+  // by checking the initial URL once it's ready.
+  contents.once("did-navigate", (_navEvent, url) => {
+    if (url.includes("plugin-ui-shell")) {
+      // This is a plugin webview. Install a file://-allowing policy on its
+      // session partition.  We derive the partition name from the
+      // webContents session's partition identifier.
+      const partitionName = (contents.session as unknown as { partition?: string }).partition;
+      if (typeof partitionName === "string" && partitionName.startsWith("persist:plugin:")) {
+        installPluginPartitionPolicy(partitionName);
+      }
+    }
+  });
+
   contents.on("will-navigate", (navEvent, url) => {
+    // Plugin webview policy: allow file:// navigations ONLY into the app's
+    // dist/src directory (plugin-ui-shell.html + plugin entry modules
+    // resolved by the shell). The previous substring match on ".js" or
+    // "plugin-ui-shell" let any local .js file load — treat that as LFI
+    // and reject. LLM-HTML webviews (different consumer) keep the
+    // data:/about: only fallback below.
+    const currentUrl = contents.getURL();
+    const isPluginShellFrame = currentUrl.includes("plugin-ui-shell.html");
+    if (isPluginShellFrame && url.startsWith("file://")) {
+      try {
+        const distSrc = resolve(distRoot, "src").replace(/\\/g, "/");
+        const allowedPrefix = `file:///${distSrc.replace(/^\//, "")}/`;
+        if (url.toLowerCase().startsWith(allowedPrefix.toLowerCase())) return; // allow
+      } catch { /* fall through */ }
+    }
     if (!url.startsWith("data:") && !url.startsWith("about:")) {
       navEvent.preventDefault();
     }

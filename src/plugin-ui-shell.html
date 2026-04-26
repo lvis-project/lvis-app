@@ -1,0 +1,59 @@
+<!doctype html>
+<!--
+  Plugin UI Shell — #237 Option B
+
+  This minimal HTML document is loaded by each plugin <webview>.
+  The host renderer passes two query parameters:
+    ?pluginId=…   — the plugin's id (also available as window.lvisPlugin.pluginId)
+    &entry=…      — file:// URL of the plugin's JS entry module
+
+  The shell dynamically imports the plugin entry module and calls:
+    mount({ root: document.getElementById("root"), bridge: window.lvisPlugin })
+
+  window.lvisPlugin is injected by plugin-preload.ts before this script runs.
+  window.lvisApi is NOT available here (it belongs to the host renderer process).
+-->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plugin UI</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body, #root { height: 100%; width: 100%; }
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      (async () => {
+        const params = new URLSearchParams(window.location.search);
+        const entry = params.get("entry");
+        if (!entry) {
+          document.getElementById("root").textContent = "[lvis] plugin-ui-shell: entry 파라미터가 없습니다.";
+          return;
+        }
+        try {
+          const mod = await import(/* @vite-ignore */ entry);
+          const mountFn =
+            mod.mount ??
+            mod.default?.mount ??
+            (typeof mod.default === "function" ? mod.default : null);
+          if (typeof mountFn !== "function") {
+            throw new Error("플러그인 모듈에서 mount 함수를 찾을 수 없습니다.");
+          }
+          const root = document.getElementById("root");
+          await mountFn({ root, bridge: window.lvisPlugin, extension: window.__lvisExtension ?? {} });
+        } catch (err) {
+          const root = document.getElementById("root");
+          root.style.color = "red";
+          root.style.padding = "8px";
+          root.style.fontSize = "12px";
+          root.textContent = "[lvis] Plugin UI 로딩 실패: " + (err?.message ?? String(err));
+          console.error("[lvis:plugin-shell] mount failed", err);
+        }
+      })();
+    </script>
+  </body>
+</html>
