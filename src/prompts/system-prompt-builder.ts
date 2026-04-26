@@ -39,6 +39,14 @@ export interface SystemPromptBuilderDeps {
     description: string;
     sampleTools: string[];
   }>;
+  /**
+   * C2(c): per-session SkillOverlay reader — returns the rendered
+   * <lvis-active-skills>…</lvis-active-skills> section for the current
+   * session, or "" when no skills have been loaded. Decoupled via this
+   * callback so SystemPromptBuilder doesn't import the SkillOverlay module
+   * (keeps the builder slim and testable).
+   */
+  getActiveSkillsSection?: (sessionId: string) => string;
 }
 
 // ─── Builder ────────────────────────────────────────
@@ -59,6 +67,12 @@ export class SystemPromptBuilder {
    * suggestion before running tools.
    */
   private originSource: string | null = null;
+  /**
+   * C2(c): current session id used by the active-skills overlay reader.
+   * Set per-turn by ConversationLoop before `build()` so the overlay can
+   * scope to the right session without leaking skills across sessions.
+   */
+  private overlaySessionId: string | null = null;
 
   constructor(deps: SystemPromptBuilderDeps) {
     this.initSources(deps);
@@ -118,6 +132,15 @@ export class SystemPromptBuilder {
    */
   setOriginSource(source: string | null): void {
     this.originSource = source && source.length > 0 ? source : null;
+  }
+
+  /**
+   * C2(c): per-turn current session id, used to scope the
+   * <lvis-active-skills> overlay section to the correct ChatSession.
+   * Pass `null` to clear (no overlay rendering).
+   */
+  setActiveSessionId(sessionId: string | null): void {
+    this.overlaySessionId = sessionId && sessionId.length > 0 ? sessionId : null;
   }
 
   // ─── Private ──────────────────────────────────────
@@ -200,6 +223,26 @@ export class SystemPromptBuilder {
         ].join("\n");
       },
     });
+
+    // ④-d Active Skills Overlay (per-turn, conditional)
+    //
+    // C2(c): rendered ONLY when at least one skill has been loaded for the
+    // current session. Bodies live inside <lvis-skill> fences so the LLM
+    // can attribute the guidance and an attacker-supplied body cannot
+    // masquerade as user input. See main/skill-overlay.ts for the registry.
+    const { getActiveSkillsSection } = deps;
+    if (getActiveSkillsSection) {
+      this.sources.push({
+        id: 4.7,
+        name: "Active Skills Overlay",
+        refresh: "per-turn",
+        build: () => {
+          const sid = this.overlaySessionId;
+          if (!sid) return "";
+          return getActiveSkillsSection(sid);
+        },
+      });
+    }
 
     // ⑤ Tool Schemas (매 턴)
     this.sources.push({
@@ -360,4 +403,11 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
 - 이미 대화 내용, <lvis-context>, <user-memory> 에 답이 있으면 도구를 호출하지 마세요.
 - 도구가 실패하면 입력을 조정해 재시도하되, 동일 입력으로 2회 이상 반복하지 마세요.
 - 같은 질문에 여러 번 호출해야 한다는 판단이 들면, 지금까지 모은 정보로 잠정 답을 먼저 정리하고 추가 조사 필요 여부를 다시 판단하세요.
-- 최종 답변에는 어떤 도구/자료를 근거로 결론에 도달했는지 간단히 밝히세요.`;
+- 최종 답변에는 어떤 도구/자료를 근거로 결론에 도달했는지 간단히 밝히세요.
+
+### 워크플로우 시스템 툴 (S1+S2)
+- **ask_user_question**: 분기점에서 가정에 의존하지 말고 사용자에게 직접 질문하세요. choices 가 명확한 경우에만 multi-choice, 자유서술 답이 필요하면 allowFreeText.
+- **remind_at**: "내일 오전 9시에 ~ 알려줘" 류 요청 시 사용. ISO 8601 또는 YYYY-MM-DD (KST 09:00 기본) 형식.
+- **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 시작 시점에 체크리스트로 만들고 단계가 끝날 때마다 status 를 갱신하세요. 사용자 task_* 와 다른 임시(세션) 체크리스트입니다.
+- **agent_spawn**: 본 대화 흐름과 분리해서 처리해도 되는 부분 작업(독립 검색, 부수 분석 등)을 sub-agent 로 위임. sourceTools 로 노출 도구를 제한하세요.
+- **skill_load**: 특정 작업 패턴(예: 보고서 작성)이 매칭될 때 미리 정의된 skill 을 로드하면 응답 품질이 안정됩니다.`;

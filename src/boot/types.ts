@@ -100,6 +100,12 @@ export interface AppServices {
   starredStore?: StarredStore;
   /** D6 privacy hardening — feedback persistence separate from audit log (~/.lvis/feedback.jsonl) */
   feedbackStore?: FeedbackStore;
+  /** Workflow tools (S1+S2) — exposed for IPC handlers + shutdown wiring. */
+  remindersStore?: import("../main/reminders-store.js").RemindersStore;
+  remindersScheduler?: import("../main/reminders-scheduler.js").RemindersScheduler;
+  sessionTodoStore?: import("../main/session-todo-store.js").SessionTodoStore;
+  askUserQuestionGate?: import("../main/ask-user-question-gate.js").AskUserQuestionGate;
+  skillStore?: import("../main/skill-store.js").SkillStore;
   /** 플러그인 설치/제거 후 OS 알림 핸들러를 재구성한다. */
   refreshPluginNotifications?: () => void;
   /**
@@ -127,4 +133,10 @@ export interface AppServices {
   autoUpdaterStop?: () => void;
   /** Central app shutdown hook for timers, background services, and transports. */
   shutdown?: () => Promise<void>;
+  /**
+   * L1: deferred RemindersScheduler.start() handle. main.ts calls this AFTER
+   * registerIpcHandlers() so a past-due reminder firing immediately on boot
+   * has a renderer listener attached. Idempotent — safe to call multiple times.
+   */
+  startRemindersScheduler?: () => void;
 }

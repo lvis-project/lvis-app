@@ -138,4 +138,87 @@ describe("ConversationLoop queryLoop", () => {
       },
     ]);
   });
+
+  // R2-CR-1: per-round fan-out cap must not orphan tool_use ids in history.
+  // If the LLM emits >MAX_TOOL_CALLS_PER_ROUND (10) tool_use blocks in one
+  // round, only the capped slice may be persisted — every tool_use block in
+  // assistant history MUST have a matching tool_result block in the next
+  // user turn, otherwise Anthropic + OpenAI strict APIs 400 the next request.
+  it("R2-CR-1: per-round fan-out cap persists only the capped slice (10) so tool_use/tool_result counts match", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "noop",
+      description: "no-op tool",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: "ok", isError: false }),
+    }));
+
+    // Round 1: LLM emits 15 tool_use blocks (5 over the cap).
+    // Round 2: LLM ends the turn cleanly.
+    const fifteenToolCalls = Array.from({ length: 15 }).map((_, i) => ({
+      type: "tool_call" as const,
+      id: `tu-${i}`,
+      name: "noop",
+      input: {},
+    }));
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "calling many" },
+        ...fifteenToolCalls,
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const keywordEngine = new KeywordEngine();
+    const routeEngine = new RouteEngine({ toolRegistry });
+    const loop = new ConversationLoop(({
+      settingsService: {
+        get: () => ({ provider: "openai", model: "gpt-4o" }),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: { build: () => "system" },
+      keywordEngine,
+      routeEngine,
+      toolRegistry,
+      memoryManager: {
+        saveSession: () => {},
+        listSessions: () => [],
+      },
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+
+    await loop.runTurn("call many tools");
+
+    const messages = loop.getHistory().getMessages();
+    // Find the assistant message that committed the over-cap tool_use round.
+    const assistantWithTools = messages.find(
+      (m) => m.role === "assistant" && Array.isArray((m as { toolCalls?: unknown[] }).toolCalls),
+    ) as { toolCalls: Array<{ id: string }> } | undefined;
+    expect(assistantWithTools).toBeDefined();
+    // CRITICAL: assistant history must contain exactly 10 tool_use blocks.
+    expect(assistantWithTools!.toolCalls).toHaveLength(10);
+
+    // CRITICAL: tool_result count in history must match the persisted
+    // tool_use count (10 ↔ 10). Any other ratio = next API request 400s.
+    const toolResults = messages.filter((m) => m.role === "tool_result");
+    expect(toolResults).toHaveLength(10);
+
+    // The persisted tool_use ids must be the first 10 (tu-0 .. tu-9), not
+    // a later subset, and every persisted tool_use id has a matching
+    // tool_result.toolUseId.
+    const persistedIds = assistantWithTools!.toolCalls.map((tc) => tc.id);
+    expect(persistedIds).toEqual(
+      Array.from({ length: 10 }).map((_, i) => `tu-${i}`),
+    );
+    const resultIds = toolResults.map(
+      (m) => (m as { toolUseId: string }).toolUseId,
+    );
+    expect(resultIds.sort()).toEqual(persistedIds.slice().sort());
+  });
 });
