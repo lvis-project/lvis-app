@@ -168,6 +168,97 @@ export function useStatusBar(opts: UseStatusBarOptions) {
     };
   }, [api, upsertPersistent, removePersistent]);
 
+  // ── Producer: runtime counters (tools / plugins / mcp).
+  // Mount fetch + refresh whenever an install/uninstall result lands so the
+  // counts reflect the new runtime state without a manual reload.
+  useEffect(() => {
+    if (typeof api.getRuntimeCounts !== "function") return;
+    let cancelled = false;
+    const refreshCounts = async () => {
+      try {
+        const c = await api.getRuntimeCounts();
+        if (cancelled) return;
+        upsertPersistent({
+          id: "runtime:counts",
+          severity: "info",
+          label: "Runtime",
+          value: `Tools ${c.tools} · Plugins ${c.plugins} · MCP ${c.mcps}`,
+        });
+      } catch {
+        // Non-fatal — counts are an awareness signal, not load-bearing.
+      }
+    };
+    void refreshCounts();
+    const unsubs: Array<() => void> = [];
+    if (typeof api.onPluginInstallResult === "function") {
+      unsubs.push(api.onPluginInstallResult(() => void refreshCounts()));
+    }
+    if (typeof api.onPluginUninstallResult === "function") {
+      unsubs.push(api.onPluginUninstallResult(() => void refreshCounts()));
+    }
+    return () => {
+      cancelled = true;
+      for (const u of unsubs) u();
+    };
+  }, [api, upsertPersistent]);
+
+  // ── Producer: marketplace reachability dot.
+  // Pings every 30 s while the window is focused; pauses when blurred so a
+  // long-idle dev session doesn't burn requests against the marketplace.
+  // The persistent item is omitted entirely when the user is on the mock
+  // backend — no service to ping, nothing to report.
+  useEffect(() => {
+    if (typeof api.pingMarketplace !== "function") return;
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    const refreshMarketplace = async () => {
+      try {
+        const result = await api.pingMarketplace();
+        if (cancelled) return;
+        if (!result.configured) {
+          removePersistent("marketplace:online");
+          return;
+        }
+        upsertPersistent({
+          id: "marketplace:online",
+          severity: result.online ? "success" : "error",
+          label: "Marketplace",
+          value: result.online ? "online" : "offline",
+        });
+      } catch {
+        if (cancelled) return;
+        upsertPersistent({
+          id: "marketplace:online",
+          severity: "error",
+          label: "Marketplace",
+          value: "offline",
+        });
+      }
+    };
+    const start = () => {
+      if (intervalId !== null) return;
+      void refreshMarketplace();
+      intervalId = setInterval(() => void refreshMarketplace(), 30_000);
+    };
+    const stop = () => {
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+    if (document.hasFocus()) start();
+    const onFocus = () => start();
+    const onBlur = () => stop();
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      cancelled = true;
+      stop();
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [api, upsertPersistent, removePersistent]);
+
   return {
     persistent,
     toasts,

@@ -332,6 +332,21 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:plugins:install-progress", listener);
   },
 
+  // Status bar — aggregated runtime counters (tools / plugins / mcps).
+  getRuntimeCounts: async () =>
+    ipcRenderer.invoke("lvis:runtime:counts") as Promise<{
+      tools: number;
+      plugins: number;
+      mcps: number;
+    }>,
+  // Status bar — marketplace reachability probe. Returns `configured: false`
+  // when the user is on the mock backend (nothing to ping).
+  pingMarketplace: async () =>
+    ipcRenderer.invoke("lvis:marketplace:ping") as Promise<{
+      configured: boolean;
+      online: boolean;
+    }>,
+
   // ─── Plugin Events (§35 real-time streaming) ─────
   onPluginEvent: (
     eventType: string,

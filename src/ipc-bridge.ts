@@ -885,6 +885,34 @@ ${input}`;
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
+  // Aggregated runtime counters surfaced in the status bar (#231 / #240).
+  // Single round-trip so the renderer doesn't need to fan out three calls
+  // and reconcile their timing.
+  ipcMain.handle("lvis:runtime:counts", () => ({
+    tools: services.toolRegistry.size,
+    plugins: pluginRuntime.listPluginIds().length,
+    mcps: services.mcpManager.listServers().filter((s) => s.status === "connected").length,
+  }));
+  // Marketplace reachability probe for the status-bar online dot. Lives in
+  // the main process so corp-CA injection (corp-ca-loader) applies — a
+  // direct renderer fetch may not respect the injected CA bundle.
+  ipcMain.handle("lvis:marketplace:ping", async () => {
+    const settings = settingsService.get("marketplace");
+    if (settings.backend !== "real-cloud" || !settings.realCloudBaseUrl) {
+      return { configured: false, online: false } as const;
+    }
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
+    try {
+      const url = new URL("/api/v1/health", settings.realCloudBaseUrl).toString();
+      const res = await fetch(url, { signal: ctrl.signal });
+      return { configured: true, online: res.ok } as const;
+    } catch {
+      return { configured: true, online: false } as const;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
   ipcMain.handle("lvis:plugins:config:get", (e, pluginId: string) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:plugins:config:get", e);
