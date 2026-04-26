@@ -224,7 +224,7 @@ export class TriggerExecutor {
       this.audit(
         "tool_call",
         `[trigger:${spec.pluginId}] completed session=${sessionId} source=${spec.source} ` +
-          `summaryLen=${result.text.length} toolCalls=${result.toolCalls.length}`,
+          `visibility=${spec.visibility} summaryLen=${result.text.length} toolCalls=${result.toolCalls.length}`,
       );
       return result;
     } catch (err) {
