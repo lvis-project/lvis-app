@@ -58,7 +58,16 @@ import {
   registerBuiltinTools,
   registerRequestPluginMetaTool,
   wireKnowledgeAndIdleScheduler,
+  type WorkflowToolDeps,
 } from "./boot/tools.js";
+import { RemindersStore } from "./main/reminders-store.js";
+import { RemindersScheduler } from "./main/reminders-scheduler.js";
+import { SessionTodoStore } from "./main/session-todo-store.js";
+import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
+import { SkillStore } from "./main/skill-store.js";
+import { SubAgentRunner } from "./engine/subagent-runner.js";
+import type { AgentSpawnEvent } from "./tools/agent-spawn.js";
+import type { SkillLoadEvent } from "./tools/skill-load.js";
 import {
   createRoutineEngine,
 } from "./boot/routine.js";
@@ -140,8 +149,48 @@ export async function bootstrap(
     openAuthWindowService,
   });
 
+  // Workflow system tools (S1+S2) — services constructed up-front so the
+  // tool registry can register them in one pass below. Late bindings
+  // (subAgentRunner, askUserQuestionGate) hop through closures so the
+  // ConversationLoop / BrowserWindow are available before the tool fires.
+  const remindersStore = new RemindersStore();
+  await remindersStore.load().catch((err) => {
+    console.warn("[lvis] boot: reminders load failed (non-fatal):", (err as Error).message);
+  });
+  const remindersScheduler = new RemindersScheduler(remindersStore);
+  const sessionTodoStore = new SessionTodoStore();
+  const skillStore = new SkillStore();
+  const askUserQuestionGate = new AskUserQuestionGate(mainWindow.webContents);
+  let subAgentRunnerRef: { fn: SubAgentRunner | undefined } = { fn: undefined };
+  // Conversation history injector for skill_load — holds a closure over the
+  // ConversationLoop wired below.
+  let injectSkillRef: { fn: ((sessionId: string, content: string) => void) | undefined } = { fn: undefined };
+  const workflowDeps: WorkflowToolDeps = {
+    remindersStore,
+    sessionTodoStore,
+    skillStore,
+    getAskUserQuestionGate: () => askUserQuestionGate,
+    getSubAgentRunner: () => subAgentRunnerRef.fn,
+    emitAgentSpawn: (event: AgentSpawnEvent) => {
+      try {
+        getMainWindow()?.webContents.send("lvis:agent-spawn:event", event);
+      } catch (err) {
+        console.warn("[lvis] agent_spawn emit failed:", (err as Error).message);
+      }
+    },
+    emitSkillLoad: (event: SkillLoadEvent) => {
+      try {
+        getMainWindow()?.webContents.send("lvis:skill-load:event", event);
+      } catch (err) {
+        console.warn("[lvis] skill_load emit failed:", (err as Error).message);
+      }
+    },
+    injectSkillSystemMessage: (sessionId, content) =>
+      injectSkillRef.fn?.(sessionId, content),
+  };
+
   // §4.2 Step 4: builtin tools + request_plugin meta tool.
-  registerBuiltinTools(memoryManager, toolRegistry, settingsService, taskService);
+  registerBuiltinTools(memoryManager, toolRegistry, settingsService, taskService, workflowDeps);
   registerRequestPluginMetaTool(toolRegistry);
 
   // §4.4 HybridRetriever + Knowledge Tools DI, §6.1 IdleSchedulerService.
@@ -306,6 +355,44 @@ export async function bootstrap(
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
   console.log("[lvis] boot: plugin callLlm ready (rate-limited)");
 
+  // Workflow system tools — late bindings now that ConversationLoop exists.
+  // SubAgentRunner reuses the parent loop's deps (LLM, registry, gates) but
+  // a fresh ConversationLoop is constructed per spawn inside the runner.
+  subAgentRunnerRef.fn = new SubAgentRunner({
+    parentDeps: {
+      settingsService,
+      systemPromptBuilder,
+      keywordEngine,
+      routeEngine,
+      toolRegistry,
+      memoryManager,
+      permissionManager,
+      approvalGate,
+      bashAstValidator,
+      hookRunner,
+    },
+    toolRegistry,
+  });
+  // skill_load injects the skill body into the live chat history so the next
+  // round sees it. Only works for the active chat session id; sub-agent
+  // spawns load skills via their own runTurn cycle.
+  injectSkillRef.fn = (sessionId, content) => {
+    if (sessionId === conversationLoop.getSessionId()) {
+      conversationLoop.getHistory().append({ role: "user", content });
+    }
+  };
+
+  // Reminders scheduler — fires `lvis:reminder:fired` per due reminder. The
+  // renderer's RemindersList subscribes to this channel and shows a toast.
+  remindersScheduler.onFired(({ reminder }) => {
+    try {
+      getMainWindow()?.webContents.send("lvis:reminder:fired", reminder);
+    } catch (err) {
+      console.warn("[lvis] reminder fired emit failed:", (err as Error).message);
+    }
+  });
+  remindersScheduler.start();
+
   // Trigger executor — spawns a fresh ConversationLoop per
   // hostApi.triggerConversation() call so the user's chat history is never
   // polluted by templated proactive turns. See trigger-executor.ts.
@@ -381,6 +468,7 @@ export async function bootstrap(
     triggerExecutor: lateBinding.triggerExecutorRef.fn ?? undefined,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, msGraphService, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,
+    remindersStore, remindersScheduler, sessionTodoStore, askUserQuestionGate, skillStore,
     telemetry, pluginTelemetry, autoUpdaterStop,
     refreshPluginNotifications: () => {
       disposePluginNotifications();
@@ -399,6 +487,8 @@ export async function bootstrap(
         telemetry?.stop();
         pluginTelemetry?.stop();
         idleScheduler?.stop();
+        remindersScheduler.stop();
+        askUserQuestionGate.disposeAll();
         mcpGovernance.stopPolicyRefresh();
         await mcpManager.disconnectAll();
         await auditService.stop();

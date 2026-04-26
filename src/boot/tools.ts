@@ -17,6 +17,16 @@ import { createKnowledgeSearchTools } from "../tools/knowledge-search.js";
 import { createSearchMemoryTool, memoryManagerNotesAdapter } from "../tools/search-memory.js";
 import { createRenderHtmlTool } from "../tools/render-html.js";
 import { createTaskTools } from "../tools/tasks.js";
+import { createAskUserQuestionTool } from "../tools/ask-user-question.js";
+import { createRemindAtTool } from "../tools/remind-at.js";
+import { createTodoSessionWriteTool } from "../tools/todo-session-write.js";
+import { createAgentSpawnTool, type AgentSpawnEvent } from "../tools/agent-spawn.js";
+import { createSkillLoadTool, type SkillLoadEvent } from "../tools/skill-load.js";
+import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
+import type { RemindersStore } from "../main/reminders-store.js";
+import type { SessionTodoStore } from "../main/session-todo-store.js";
+import type { SubAgentRunner } from "../engine/subagent-runner.js";
+import type { SkillStore } from "../main/skill-store.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, adaptPowerMonitor, type WorkerClientLite } from "../main/idle-scheduler.js";
@@ -170,11 +180,25 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
   return { idleScheduler, knowledgeAvailable };
 }
 
+export interface WorkflowToolDeps {
+  /** Lazy-resolved gate — populated after BrowserWindow is ready. */
+  getAskUserQuestionGate?: () => AskUserQuestionGate | undefined;
+  remindersStore?: RemindersStore;
+  sessionTodoStore?: SessionTodoStore;
+  /** Lazy-resolved sub-agent runner — populated after ConversationLoop wiring. */
+  getSubAgentRunner?: () => SubAgentRunner | undefined;
+  skillStore?: SkillStore;
+  emitAgentSpawn?: (event: AgentSpawnEvent) => void;
+  emitSkillLoad?: (event: SkillLoadEvent) => void;
+  injectSkillSystemMessage?: (sessionId: string, content: string) => void;
+}
+
 export function registerBuiltinTools(
   memoryManager: MemoryManager,
   toolRegistry: ToolRegistry,
   settingsService: SettingsService,
   taskService?: TaskService,
+  workflowDeps?: WorkflowToolDeps,
 ): void {
   const builtins: Tool[] = [
     // Task management tools — available only when TaskService is provided
@@ -387,6 +411,43 @@ export function registerBuiltinTools(
     }),
     createRenderHtmlTool(),
   ];
+
+  // Workflow system tools (S1+S2). Each is gated on its dependency being
+  // wired so unit tests that boot a minimal registry stay green.
+  if (workflowDeps?.getAskUserQuestionGate) {
+    builtins.push(
+      createAskUserQuestionTool({
+        getGate: workflowDeps.getAskUserQuestionGate,
+      }),
+    );
+  }
+  if (workflowDeps?.remindersStore) {
+    builtins.push(createRemindAtTool(workflowDeps.remindersStore));
+  }
+  if (workflowDeps?.sessionTodoStore) {
+    builtins.push(createTodoSessionWriteTool(workflowDeps.sessionTodoStore));
+  }
+  if (workflowDeps?.getSubAgentRunner && workflowDeps.emitAgentSpawn) {
+    builtins.push(
+      createAgentSpawnTool({
+        getRunner: workflowDeps.getSubAgentRunner,
+        emit: workflowDeps.emitAgentSpawn,
+      }),
+    );
+  }
+  if (
+    workflowDeps?.skillStore &&
+    workflowDeps.emitSkillLoad &&
+    workflowDeps.injectSkillSystemMessage
+  ) {
+    builtins.push(
+      createSkillLoadTool({
+        store: workflowDeps.skillStore,
+        emit: workflowDeps.emitSkillLoad,
+        injectSystemMessage: workflowDeps.injectSkillSystemMessage,
+      }),
+    );
+  }
 
   toolRegistry.registerBatch(builtins);
 }
