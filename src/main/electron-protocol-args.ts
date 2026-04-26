@@ -31,7 +31,21 @@ export interface ProtocolArgInputs {
   argv1: unknown;
   userDataDir: string | undefined;
   platform: NodeJS.Platform;
-  env: NodeJS.ProcessEnv;
+  /**
+   * Whether to inject the Windows-safe GPU disable flags. Caller wires this
+   * from `process.env.LVIS_KEEP_GPU !== "1"`. The env var stays a direct
+   * read at the call site because the GPU flag is purely a corp/VDI
+   * compatibility concession with no security surface (unlike sandbox).
+   */
+  disableGpu: boolean;
+  /**
+   * Whether to inject `--no-sandbox` into the registered protocol command.
+   * MUST be the resolved value from `dev-flags.ts:devNoSandboxAllowed()` so
+   * the `!app.isPackaged` SoT gate is enforced — passing the env var
+   * directly would let a packaged binary launched with the env set silently
+   * weaken Chromium sandboxing.
+   */
+  disableSandbox: boolean;
 }
 
 /**
@@ -42,10 +56,10 @@ export interface ProtocolArgInputs {
 export function buildDevProtocolArgs(input: ProtocolArgInputs): string[] {
   const args: string[] = [resolve(resolveScriptPathArg(input.argv1))];
   if (input.userDataDir) args.push(`--user-data-dir=${input.userDataDir}`);
-  if (input.platform === "win32" && input.env.LVIS_KEEP_GPU !== "1") {
+  if (input.platform === "win32" && input.disableGpu) {
     args.push(...WINDOWS_SAFE_GPU_FLAGS);
   }
-  if (input.env.LVIS_DEV_NO_SANDBOX === "1") {
+  if (input.disableSandbox) {
     args.push(SANDBOX_BYPASS_FLAG);
   }
   return args;

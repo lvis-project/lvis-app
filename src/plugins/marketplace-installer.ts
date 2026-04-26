@@ -226,9 +226,13 @@ export async function installFromMarketplace(
   // generic "no signature matched" error. Surfacing the misconfiguration
   // explicitly avoids the user chasing signature corruption that isn't
   // there.
+  // Distinct code (KEYS_NOT_CONFIGURED, not SIGNATURE_INVALID) so ops
+  // dashboards / SOC alerts that page on signature failures don't get false
+  // positives from a launcher misconfig — the two have very different
+  // operational meanings.
   if (Object.keys(opts.publicKeys).length === 0) {
     throw new MarketplaceInstallerError(
-      "SIGNATURE_INVALID",
+      "KEYS_NOT_CONFIGURED",
       "no trusted marketplace public keys are configured for this build — set LVIS_DEV=1 or LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1 to enable the bundled dev/poc keys, or ship a packaged build with production keys",
     );
   }

@@ -468,7 +468,7 @@ describe("installFromMarketplace — envelope guards", () => {
           downloadRoot: root
         }),
       ).rejects.toMatchObject({
-        code: "SIGNATURE_INVALID",
+        code: "KEYS_NOT_CONFIGURED",
         message: expect.stringMatching(/no trusted marketplace public keys/i),
       });
     } finally {

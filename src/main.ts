@@ -17,6 +17,7 @@ import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
+import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { deliverRoutineResult } from "./routines/routine-delivery.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -109,6 +110,13 @@ function parseLvisInstallUri(url: string): { slug: string } | null {
 /**
  * Diagnostic log gate — diagnostic console output is dev-only. Packaged
  * builds skip these noisy traces so end-user log files stay clean.
+ *
+ * Intentionally NOT routed through `dev-flags.ts:isDevModeUnlocked()`:
+ * those helpers require an explicit LVIS_DEV* opt-in to enable, but the
+ * lvis:// protocol diagnostic flow needs to be debuggable on every
+ * unpackaged dev session without forcing the operator to flip an env var.
+ * The `app.isPackaged` boundary alone is the right level for log-only
+ * output (no trust decisions ride on these calls).
  */
 const lvisDevLog: typeof console.log = (...args) => {
   if (app.isPackaged) return;
@@ -385,6 +393,13 @@ async function main() {
 //
 // Argument-builder lives in `src/main/electron-protocol-args.ts` (pure helper)
 // so the platform / argv / env policy can be unit-tested without Electron.
+//
+// `LVIS_DEV_NO_SANDBOX` is read through `dev-flags.ts` SoT instead of by the
+// helper itself: the helper takes a resolved `disableSandbox: boolean` so the
+// `!app.isPackaged` policy gate cannot be bypassed by a packaged binary that
+// inherits the env var. Boot also calls `setIsPackaged` later for any other
+// dev-flag callers; this top-level call early-seeds the cache.
+setIsPackaged(app.isPackaged);
 const _protocolRegistered = app.isPackaged
   ? app.setAsDefaultProtocolClient("lvis")
   : app.setAsDefaultProtocolClient(
@@ -394,7 +409,8 @@ const _protocolRegistered = app.isPackaged
         argv1: process.argv[1],
         userDataDir: app.getPath("userData") || undefined,
         platform: process.platform,
-        env: process.env,
+        disableGpu: process.env.LVIS_KEEP_GPU !== "1",
+        disableSandbox: devNoSandboxAllowed(),
       }),
     );
 if (!_protocolRegistered) {

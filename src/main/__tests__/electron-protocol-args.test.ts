@@ -32,7 +32,8 @@ describe("buildDevProtocolArgs", () => {
       argv1: "dist/src/main.js",
       userDataDir: "/tmp/userdata",
       platform: "linux",
-      env: {},
+      disableGpu: true,
+      disableSandbox: false,
       ...overrides,
     });
   }
@@ -47,30 +48,32 @@ describe("buildDevProtocolArgs", () => {
   });
 
   it("omits --user-data-dir when undefined", () => {
-    expect(args({ userDataDir: undefined })).not.toContain(expect.stringMatching(/^--user-data-dir/));
+    // Use a predicate via .some — `not.toContain(asymmetricMatcher)` does
+    // strict equality on array elements and would pass vacuously here.
+    expect(args({ userDataDir: undefined }).some((a) => a.startsWith("--user-data-dir="))).toBe(false);
   });
 
   it("does NOT add Windows-safe GPU flags on non-win32 platforms", () => {
-    const out = args({ platform: "darwin" });
+    const out = args({ platform: "darwin", disableGpu: true });
     expect(out).not.toContain("--disable-gpu");
     expect(out).not.toContain("--no-sandbox");
   });
 
-  it("adds Windows-safe GPU flags on win32 by default", () => {
-    const out = args({ platform: "win32" });
+  it("adds Windows-safe GPU flags on win32 when disableGpu=true", () => {
+    const out = args({ platform: "win32", disableGpu: true });
     expect(out).toContain("--disable-gpu");
     expect(out).toContain("--disable-software-rasterizer");
     expect(out).toContain("--disable-gpu-compositing");
   });
 
-  it("skips Windows GPU flags when LVIS_KEEP_GPU=1", () => {
-    const out = args({ platform: "win32", env: { LVIS_KEEP_GPU: "1" } });
+  it("skips Windows GPU flags when disableGpu=false", () => {
+    const out = args({ platform: "win32", disableGpu: false });
     expect(out).not.toContain("--disable-gpu");
   });
 
-  it("adds --no-sandbox only when LVIS_DEV_NO_SANDBOX=1", () => {
-    expect(args({ platform: "win32", env: {} })).not.toContain("--no-sandbox");
-    expect(args({ platform: "win32", env: { LVIS_DEV_NO_SANDBOX: "1" } })).toContain("--no-sandbox");
+  it("adds --no-sandbox only when disableSandbox=true", () => {
+    expect(args({ platform: "win32", disableSandbox: false })).not.toContain("--no-sandbox");
+    expect(args({ platform: "win32", disableSandbox: true })).toContain("--no-sandbox");
   });
 
   it("does not register a script-path arg derived from a lvis:// URL", () => {
