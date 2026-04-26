@@ -95,16 +95,16 @@ describe("marketplace install dependency guard (S14)", () => {
     setIsPackaged(false);
     tmpDir = join(homedir(), ".lvis", "test-tmp", `lvis-test-${randomBytes(8).toString("hex")}`);
     await mkdir(tmpDir, { recursive: true });
-    // Stub runNpmInstall so tests don't spawn real npm processes (slow, flaky,
-    // requires network). We accept the npm path failing earlier or later;
-    // these tests only assert the dependency-guard branch, which fires before
-    // npm is invoked.
+    // Phase 2-final: stub the install pipeline so dep-guard tests don't try
+    // to actually fetch / extract a zip. The dep-guard branch fires *before*
+    // installArtifact, so its outcome is fully observable from a stub that
+    // just records what it would have installed.
     vi.spyOn(
       PluginMarketplaceService.prototype as unknown as {
-        runNpmInstall: (spec: string) => Promise<void>;
+        installArtifact: (...args: unknown[]) => Promise<string>;
       },
-      "runNpmInstall",
-    ).mockResolvedValue(undefined);
+      "installArtifact",
+    ).mockResolvedValue("stub/plugin.json");
   });
 
   afterEach(async () => {
@@ -117,7 +117,6 @@ describe("marketplace install dependency guard (S14)", () => {
     fetcher: StubFetcher,
   ): PluginMarketplaceService {
     return new PluginMarketplaceService(
-      tmpDir,
       makeTestPluginPaths({ rootDir: tmpDir }),
       fetcher as unknown as import("../marketplace-fetcher.js").MarketplaceFetcher,
     );

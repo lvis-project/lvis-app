@@ -75,7 +75,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
       userInstalledDir: paths.userInstalledDir,
     });
     const fetcher = new MockMarketplaceFetcher(marketplacePath);
-    return new PluginMarketplaceService(testDir, paths, fetcher, guard);
+    return new PluginMarketplaceService(paths, fetcher, guard);
   }
 
   it("install() rejects admin-policy catalog item before runNpmInstall fires", async () => {
