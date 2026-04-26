@@ -249,6 +249,12 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:plugin:emit-event",
   "lvis:plugin:get-entry-url",
   "lvis:plugin:register-webview",
+  // Workflow system tools (S1+S2)
+  "lvis:ask-user-question:respond",
+  "lvis:reminders:list",
+  "lvis:reminders:dismiss",
+  "lvis:reminders:remove",
+  "lvis:session-todo:list",
 ]);
 
 /**
@@ -385,6 +391,9 @@ export function registerIpcHandlers(
     feedbackStore,
     auditLogger,
     msGraphService,
+    askUserQuestionGate,
+    remindersStore,
+    sessionTodoStore,
   } = services;
 
   // Wire DLP audit logging so redactForLLM records hits to audit JSONL.
@@ -1674,4 +1683,75 @@ ${input}`;
       return { ok: false, error: (err as Error).message };
     }
   });
+
+  // ─── Workflow tools (S1+S2) ─────────────────────────────────────────────
+  // ask_user_question response — renderer dispatches when the user clicks a
+  // choice / submits free text / dismisses. Sender guarded so untrusted
+  // frames cannot inject answers on behalf of the user.
+  ipcMain.handle("lvis:ask-user-question:respond", (e, response: unknown) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:ask-user-question:respond", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!askUserQuestionGate) {
+      return { ok: false, error: "ask-user-question gate not configured" };
+    }
+    const r = (response ?? {}) as Record<string, unknown>;
+    const requestId = typeof r.requestId === "string" ? r.requestId : "";
+    if (!requestId) return { ok: false, error: "invalid-request-id" };
+    askUserQuestionGate.resolve({
+      requestId,
+      choice: typeof r.choice === "string" ? r.choice : undefined,
+      freeText: typeof r.freeText === "string" ? r.freeText : undefined,
+      dismissed: r.dismissed === true,
+    });
+    return { ok: true };
+  });
+
+  // reminders — list + dismiss + remove. List is read-only; mutations go
+  // through validateSender + audit so a hostile frame cannot wipe a user's
+  // reminders.
+  ipcMain.handle("lvis:reminders:list", () => {
+    if (!remindersStore) return [];
+    return remindersStore.listActive();
+  });
+  ipcMain.handle("lvis:reminders:dismiss", async (e, id: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:reminders:dismiss", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!remindersStore) return { ok: false, error: "no-store" };
+    const ok = await remindersStore.dismiss(id);
+    return { ok };
+  });
+  ipcMain.handle("lvis:reminders:remove", async (e, id: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:reminders:remove", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!remindersStore) return { ok: false, error: "no-store" };
+    const ok = await remindersStore.remove(id);
+    return { ok };
+  });
+
+  // session-todo — read-only list per chat session (defaults to current
+  // ConversationLoop session). The renderer subscribes to push updates via
+  // `lvis:session-todo:changed` events emitted by SessionTodoStore listeners.
+  ipcMain.handle("lvis:session-todo:list", (_e, sessionId?: string) => {
+    if (!sessionTodoStore) return [];
+    const sid = sessionId ?? conversationLoop.getSessionId();
+    return sessionTodoStore.list(sid);
+  });
+  if (sessionTodoStore) {
+    sessionTodoStore.onChange((sessionId, items) => {
+      try {
+        getMainWindow()?.webContents.send("lvis:session-todo:changed", {
+          sessionId,
+          items,
+        });
+      } catch (err) {
+        console.warn("[lvis] session-todo emit failed:", (err as Error).message);
+      }
+    });
+  }
 }
