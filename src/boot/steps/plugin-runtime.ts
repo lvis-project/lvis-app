@@ -613,8 +613,8 @@ export async function initPluginRuntime(
   const pluginSettings = settingsService.get("plugins");
   pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
-    registryPath: pluginPaths.registryPath,
     userInstalledDir: pluginPaths.userInstalledDir,
+    registryPath: pluginPaths.registryPath,
     allowUnsignedUserPlugins: pluginSettings?.allowUnsignedUserPlugins === true,
     configOverrides,
     deploymentGuard,
