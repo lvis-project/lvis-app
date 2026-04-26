@@ -161,8 +161,17 @@ describe("PluginMarketplaceService install()", () => {
     const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
       plugins: Array<{ manifestPath: string }>;
     };
+    // Phase 2a invariant: the zip-install branch must emit a registry-
+    // relative POSIX path (NOT an absolute path). Locks the regression
+    // flagged by code-reviewer round 1 — production RealCloud installs
+    // were writing absolute paths into registry.json.
+    const entryPath = registry.plugins[0].manifestPath;
+    expect(entryPath).toBe("test-plugin/plugin.json");
+    expect(entryPath).not.toMatch(/^[/\\]|^[A-Za-z]:/);
+    expect(entryPath).not.toContain("\\");
+
     const manifest = JSON.parse(
-      await readFile(manifestPathToAbs(registry.plugins[0].manifestPath), "utf-8"),
+      await readFile(manifestPathToAbs(entryPath), "utf-8"),
     ) as { version: string; entry: string };
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");

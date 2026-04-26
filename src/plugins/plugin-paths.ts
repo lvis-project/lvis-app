@@ -106,9 +106,9 @@ export function resolvePluginPaths(input: ResolvePluginPathsInput): PluginPaths 
  *  - input may be absolute or relative to `dirname(registryPath)`
  *  - returns POSIX-separated relative path when the manifest lives under
  *    the registry's directory tree (the only valid Phase 2a shape)
- *  - returns the absolute path verbatim otherwise — the migration shim
- *    will reject those entries; production install paths must always be
- *    under userInstalledDir
+ *  - returns the absolute path with POSIX separators otherwise — the
+ *    migration shim will reject those entries; production install paths
+ *    must always be under userInstalledDir
  */
 export function toRegistryRelativeManifestPath(
   registryPath: string,

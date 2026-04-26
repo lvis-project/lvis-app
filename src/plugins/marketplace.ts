@@ -976,7 +976,11 @@ export class PluginMarketplaceService {
     } else {
       await this.assertInstalledManifestMatchesCatalog(plugin, version, manifestFile, pluginDir);
     }
-    return manifestFile;
+    // Phase 2a invariant: registry entries hold registry-relative POSIX
+    // paths regardless of which install branch produced the manifest. The
+    // file branch above already routes through writeInstalledManifest which
+    // applies the same normalization.
+    return toRegistryRelativeManifestPath(this.registryPath, manifestFile);
   }
 
   private buildInstalledManifest(
