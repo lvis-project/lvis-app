@@ -557,6 +557,11 @@ export class PluginMarketplaceService {
       // we've used), the binary itself is fetched fresh each time. No npm.
       const plugin = await this.fetcher.getPluginDetail(pluginId);
       if (!plugin) {
+        // TODO Phase 2-final follow-up: when a plugin is delisted from the
+        // catalog after install, rollback can't fetch its prior artifact.
+        // Consider synthesizing a `PluginMarketplaceItem` shim from the
+        // cached manifest's `packageName`/`slug` so cache-only rollback
+        // still works.
         throw new Error(`Plugin not in marketplace catalog: ${pluginId}`);
       }
       const manifestPathRel = await this.installArtifact(plugin, priorVersion);
