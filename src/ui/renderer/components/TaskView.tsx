@@ -1,3 +1,10 @@
+/**
+ * @deprecated Moving to `lvis-plugin-tasks` (Phase 0 — boundary declaration).
+ * TaskView will be bundled into the plugin's `ui[]` slot in Phase 2 and
+ * mounted by the host's `plugin-ui-host.tsx`. The host will keep the
+ * sidebar entry (navigation), but the view body comes from the plugin.
+ * See architecture.md §9 and the tasks-plugin-split migration plan.
+ */
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
