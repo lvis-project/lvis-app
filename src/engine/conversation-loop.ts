@@ -485,9 +485,17 @@ export class ConversationLoop {
     this.deps.systemPromptBuilder.setOriginSource?.(null);
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
     this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
-    const result = await this.queryLoop(systemPrompt, scope, callbacks, turnSignal);
-    // B4: clear controller once the turn is done (regardless of how it ended)
-    this.currentAbortController = null;
+    let result: Awaited<ReturnType<ConversationLoop["queryLoop"]>>;
+    try {
+      result = await this.queryLoop(systemPrompt, scope, callbacks, turnSignal);
+    } finally {
+      // Always clear the controller, even when `queryLoop` throws (provider
+      // error / abort / tool error). Otherwise the loop looks "mid-turn"
+      // forever to anyone consulting `currentAbortController` (e.g.
+      // TriggerExecutor's chat-busy guard), and a single failed chat turn
+      // would permanently block trigger imports.
+      this.currentAbortController = null;
+    }
     // lastTurnScope must reflect any Option C request_plugin expansions so
     // the next turn's keyword-miss fallback keeps those plugins visible.
     this.lastTurnScope = new Set(scope.activePluginIds);

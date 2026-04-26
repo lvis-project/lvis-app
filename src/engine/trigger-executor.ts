@@ -138,11 +138,25 @@ function deepCloneMessage(msg: GenericMessage): GenericMessage {
  *      the envelope and tell the LLM to ignore imperatives inside it.
  *   3. Renderers / audit consumers can identify imported turns at a glance.
  */
+/**
+ * The host gate enforces `^proactive:[a-z][a-z0-9-]*$` upstream of the
+ * executor, so `source` is always quote-safe inside `source="..."`. If a
+ * future refactor relaxes the gate or a new caller bypasses it, the wrapper
+ * could otherwise emit malformed XML and re-open the prompt-injection vector.
+ */
+const SAFE_SOURCE_PATTERN = /^proactive:[a-z][a-z0-9-]*$/;
+
 function wrapImportedMessages(
   messages: GenericMessage[],
   source: string,
 ): GenericMessage[] {
   if (messages.length === 0) return messages;
+  if (!SAFE_SOURCE_PATTERN.test(source)) {
+    // Defensive: drop the wrap entirely rather than emit malformed
+    // attribution. The leading user message still reads as user input —
+    // worse for context, but never an injection vehicle.
+    return messages.map(deepCloneMessage);
+  }
   const [first, ...rest] = messages;
   if (first.role !== "user") return messages.map(deepCloneMessage);
   const wrapped: GenericMessage = {
