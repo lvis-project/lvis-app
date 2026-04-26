@@ -1,17 +1,26 @@
 import { access } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   readPluginRegistry,
   writePluginRegistry,
 } from "../src/plugins/registry.js";
-import { PluginMarketplaceService } from "../src/plugins/marketplace.js";
+import { MockMarketplaceFetcher, PluginMarketplaceService } from "../src/plugins/marketplace.js";
+import { resolvePluginPaths } from "../src/plugins/plugin-paths.js";
+import { setIsPackaged } from "../src/boot/dev-flags.js";
 import type { PluginRegistry } from "../src/plugins/types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const projectRoot = resolve(__dirname, "..");
-const registryPath = resolve(projectRoot, "plugins/registry.json");
+// Phase 2a: CLI runs as a dev tool — use the same userData fallback as
+// Electron's `app.getPath('userData')` would yield in dev (homedir-based).
+// Real Electron boot uses app.getPath('userData') directly.
+setIsPackaged(false);
+const userDataDir = process.env.LVIS_USER_DATA_DIR ?? resolve(homedir(), ".lvis");
+const pluginPaths = resolvePluginPaths({ userDataDir });
+const registryPath = pluginPaths.registryPath;
 
 function usage(): never {
   throw new Error(
@@ -48,7 +57,10 @@ async function run() {
   if (command === "install") {
     const id = process.argv[3];
     if (!id) usage();
-    const marketplace = new PluginMarketplaceService(projectRoot);
+    const fetcher = new MockMarketplaceFetcher(
+      resolve(projectRoot, "plugins/marketplace.json"),
+    );
+    const marketplace = new PluginMarketplaceService(projectRoot, pluginPaths, fetcher);
     await marketplace.install(id);
     console.log(`Installed plugin '${id}' from marketplace`);
     return;

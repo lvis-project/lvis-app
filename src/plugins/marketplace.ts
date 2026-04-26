@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
-import { resolvePluginPaths, type PluginPaths } from "./plugin-paths.js";
+import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed } from "../boot/dev-flags.js";
 import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
@@ -160,7 +160,6 @@ interface PluginHistoryEntry {
 export class PluginMarketplaceService {
   private readonly appRoot: string;
   private readonly registryPath: string;
-  private readonly marketplacePath: string;
   private readonly installedDir: string;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly fetcher: MarketplaceFetcher;
@@ -168,8 +167,8 @@ export class PluginMarketplaceService {
   private readonly cacheRoot: string;
   /**
    * S9: base directory for the catalog cache. `null` disables catalog caching
-   * (used when the fetcher is the local mock / local-file path).
-   * `undefined` uses the default global path under `~/.lvis/marketplace-cache/`.
+   * (used with the local mock fetcher in dev). `undefined` uses the default
+   * global path under `userData/marketplace-cache/`.
    */
   private readonly catalogCacheBase: string | null | undefined;
   /**
@@ -181,33 +180,32 @@ export class PluginMarketplaceService {
   /** Optional diagnostic logger. Injected in tests; no-op in production. */
   readonly log?: (message: string, ...args: unknown[]) => void;
 
+  /**
+   * Phase 2a constructor — `paths` is the single source of truth for the
+   * registry / installed-dir / cache layout. The previous 5-arg shape with
+   * an optional `paths` and an inline `MockMarketplaceFetcher` fallback is
+   * gone; callers (boot, tests) must wire their own fetcher.
+   *
+   * `appRoot` is retained for the npm-install code paths used by managed
+   * plugin bootstrap and rollback (`runNpmInstall` writes to
+   * `appRoot/node_modules`). Phase 2b rewrites `installArtifact` to a
+   * zip-extract under `userInstalledDir` and removes this dependency.
+   */
   constructor(
     appRoot: string,
+    paths: PluginPaths,
+    fetcher: MarketplaceFetcher,
     deploymentGuard?: PluginDeploymentGuard,
-    fetcher?: MarketplaceFetcher,
-    cacheRoot?: string,
-    paths?: PluginPaths,
   ) {
     this.appRoot = resolve(appRoot);
-    // Phase 0 SoT consolidation: prefer the injected paths bundle when the
-    // caller has one (boot wires this up so PluginRuntime + DeploymentGuard +
-    // MarketplaceService all see the same layout). Fall back to the resolver
-    // for callers that haven't migrated yet (old test fixtures, scripts).
-    //
-    // Precedence rule: when `paths` is supplied it is authoritative, including
-    // for `cacheRoot` — the standalone `cacheRoot` arg is plumbed only into
-    // the resolver fallback path so callers can't get conflicting values.
-    const resolved = paths ?? resolvePluginPaths({ appRoot: this.appRoot, cacheRoot });
-    this.registryPath = resolved.registryPath;
-    this.marketplacePath = resolved.marketplacePath;
-    this.installedDir = resolved.userInstalledDir;
-    this.cacheRoot = resolved.cacheRoot;
+    this.registryPath = paths.registryPath;
+    this.installedDir = paths.userInstalledDir;
+    this.cacheRoot = paths.cacheRoot;
     this.deploymentGuard = deploymentGuard;
-    // When no external fetcher is provided we fall back to the local
-    // marketplace.json mock — catalog caching makes no sense for local files.
-    const usingMockFetcher = !fetcher;
-    this.fetcher = fetcher ?? new MockMarketplaceFetcher(this.marketplacePath);
-    this.catalogCacheBase = usingMockFetcher ? null : undefined;
+    this.fetcher = fetcher;
+    // Catalog caching is disabled for the dev mock; production fetchers
+    // (RealCloud, Disabled stub) get the default cache base under userData.
+    this.catalogCacheBase = fetcher instanceof MockMarketplaceFetcher ? null : undefined;
   }
 
   async list(): Promise<MarketplaceListItem[]> {
@@ -582,7 +580,7 @@ export class PluginMarketplaceService {
       // pick the correct prior version.
       await this.appendHistoryEntry(pluginId, { version: priorVersion, installedAt: new Date().toISOString() });
 
-      const registryRelativePath = relative(dirname(this.registryPath), liveManifest).split("\\").join("/");
+      const registryRelativePath = toRegistryRelativeManifestPath(this.registryPath, liveManifest);
       await updatePluginRegistry(this.registryPath, (registry) => {
         const existing = registry.plugins.find((x) => x.id === pluginId);
         if (existing) {
@@ -743,13 +741,12 @@ export class PluginMarketplaceService {
       ui: resolvedUi,
     });
     await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
-    // Use absolute path when installedDir is outside appRoot (e.g. ~/.lvis/plugins/)
-    // so the registry entry remains valid regardless of where registry.json lives.
-    const isOutsideApp = !this.isPathWithinAppRoot(manifestFile);
-    const registryPath = isOutsideApp
-      ? manifestFile
-      : relative(dirname(this.registryPath), manifestFile).split("\\").join("/");
-    return registryPath;
+    // Phase 2a invariant: registry.json and the plugin manifest both live
+    // under userInstalledDir, so the registry entry is always
+    // `<id>/plugin.json` style relative POSIX path. This makes registry.json
+    // portable across machines (no absolute paths) and forward-trackable
+    // when registries get committed for IT-managed deployments.
+    return toRegistryRelativeManifestPath(this.registryPath, manifestFile);
   }
 
   private resolveUiExtension(

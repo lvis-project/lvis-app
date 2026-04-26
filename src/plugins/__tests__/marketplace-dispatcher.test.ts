@@ -16,6 +16,8 @@ vi.mock("../publisher-keys.js", () => ({
 import { PluginMarketplaceService } from "../marketplace.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
+import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
+import { makeTestPluginPaths } from "./test-helpers.js";
 
 function makePluginZip(manifest: Record<string, unknown>): Buffer {
   const zip = new AdmZip();
@@ -59,6 +61,7 @@ describe("PluginMarketplaceService install()", () => {
   let cacheRoot: string;
 
   beforeEach(async () => {
+    setIsPackaged(false);
     testDir = join(
       homedir(),
       ".lvis",
@@ -66,9 +69,11 @@ describe("PluginMarketplaceService install()", () => {
       `lvis-marketplace-install-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     appRoot = testDir;
-    registryPath = join(appRoot, "plugins", "registry.json");
-    installedDir = join(appRoot, "plugins", "installed");
-    cacheRoot = join(appRoot, ".cache");
+    // Phase 2a: registry + installed plugins live under userInstalledDir
+    // (testDir/plugins). The legacy `installed/` subdir is gone.
+    installedDir = join(testDir, "plugins");
+    registryPath = join(installedDir, "registry.json");
+    cacheRoot = join(testDir, ".cache");
     await mkdir(installedDir, { recursive: true });
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
     mockedPublisherKeys.getBundledPublicKeys.mockReset();
@@ -77,21 +82,22 @@ describe("PluginMarketplaceService install()", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await rm(testDir, { recursive: true, force: true });
+    _resetForTest();
   });
 
   function manifestPathToAbs(manifestPath: string): string {
     return isAbsolute(manifestPath)
       ? manifestPath
-      : resolve(appRoot, "plugins", manifestPath);
+      : resolve(installedDir, manifestPath);
   }
 
   function makeService(fetcher: MarketplaceFetcher) {
-    const service = new PluginMarketplaceService(appRoot, undefined, fetcher, cacheRoot);
-    (
-      service as unknown as {
-        installedDir: string;
-      }
-    ).installedDir = installedDir;
+    const paths = makeTestPluginPaths({
+      rootDir: testDir,
+      userInstalledDir: installedDir,
+      cacheRoot,
+    });
+    const service = new PluginMarketplaceService(appRoot, paths, fetcher);
 
     const npmInstallMock = vi.fn(async () => {});
     (service as unknown as { runNpmInstall: typeof npmInstallMock }).runNpmInstall = npmInstallMock;

@@ -144,12 +144,11 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
 }
 
 export interface UpdateCheckInput {
-  projectRoot: string;
   mainWindow: BrowserWindow;
   settingsService: SettingsService;
   marketplaceFetcher: MarketplaceFetcher;
-  /** Phase 0 SoT — registry path resolved once at boot. Optional for legacy callers. */
-  pluginPaths?: PluginPaths;
+  /** Phase 2a SoT — registry path resolved once at boot from userDataDir. */
+  pluginPaths: PluginPaths;
 }
 
 /**
@@ -158,13 +157,13 @@ export interface UpdateCheckInput {
  * and on a configurable interval (default 6h). Feature-flagged.
  */
 export function wireUpdateCheck(input: UpdateCheckInput): void {
-  const { projectRoot, mainWindow, settingsService, marketplaceFetcher, pluginPaths } = input;
+  const { mainWindow, settingsService, marketplaceFetcher, pluginPaths } = input;
   const marketplaceSettings = settingsService.get("marketplace");
   const updateCheckFeatureEnabled =
     (marketplaceSettings?.updateCheckEnabled ?? true) && isUpdateCheckEnabled();
   if (!updateCheckFeatureEnabled) return;
 
-  const registryPath = pluginPaths?.registryPath ?? resolve(projectRoot, "plugins/registry.json");
+  const registryPath = pluginPaths.registryPath;
   const updateDetector = new PluginUpdateDetector(registryPath, marketplaceFetcher, {
     canaryOptIn: marketplaceSettings?.canaryOptIn ?? false,
   });

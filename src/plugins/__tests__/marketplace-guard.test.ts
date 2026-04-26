@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { PluginMarketplaceService } from "../marketplace.js";
+import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
+import { makeTestPluginPaths } from "./test-helpers.js";
 
 /**
  * Phase 1.5 F-round §F6: integration test for
@@ -28,9 +29,12 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
     setIsPackaged(false);
     testDir = join(homedir(), ".lvis", "test-tmp", `lvis-mp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     pluginsDir = join(testDir, "plugins");
-    installedDir = join(pluginsDir, "installed");
-    registryPath = join(pluginsDir, "registry.json");
-    marketplacePath = join(pluginsDir, "marketplace.json");
+    // Phase 2a invariant: registry.json and installed plugins live in the
+    // same directory tree (no `installed/` subdirectory). Tests that touched
+    // the legacy split need to be aligned with the new shape.
+    installedDir = pluginsDir;
+    registryPath = join(installedDir, "registry.json");
+    marketplacePath = join(testDir, "marketplace.json");
     await mkdir(installedDir, { recursive: true });
   });
 
@@ -65,11 +69,13 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
   }
 
   function makeService(): PluginMarketplaceService {
+    const paths = makeTestPluginPaths({ rootDir: testDir, userInstalledDir: installedDir });
     const guard = new PluginDeploymentGuard({
-      registryPath,
-      userInstalledDir: installedDir
+      registryPath: paths.registryPath,
+      userInstalledDir: paths.userInstalledDir,
     });
-    return new PluginMarketplaceService(testDir, guard);
+    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    return new PluginMarketplaceService(testDir, paths, fetcher, guard);
   }
 
   it("install() rejects admin-policy catalog item before runNpmInstall fires", async () => {
