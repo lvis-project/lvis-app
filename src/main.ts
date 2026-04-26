@@ -16,6 +16,8 @@ import { registerIpcHandlers } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
+import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
+import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { deliverRoutineResult } from "./routines/routine-delivery.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -108,6 +110,13 @@ function parseLvisInstallUri(url: string): { slug: string } | null {
 /**
  * Diagnostic log gate — diagnostic console output is dev-only. Packaged
  * builds skip these noisy traces so end-user log files stay clean.
+ *
+ * Intentionally NOT routed through `dev-flags.ts:isDevModeUnlocked()`:
+ * those helpers require an explicit LVIS_DEV* opt-in to enable, but the
+ * lvis:// protocol diagnostic flow needs to be debuggable on every
+ * unpackaged dev session without forcing the operator to flip an env var.
+ * The `app.isPackaged` boundary alone is the right level for log-only
+ * output (no trust decisions ride on these calls).
  */
 const lvisDevLog: typeof console.log = (...args) => {
   if (app.isPackaged) return;
@@ -162,6 +171,9 @@ async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri: dialog response", { slug: params.slug, response });
   if (response !== 0) return;
   lvisDevLog("[lvis] handleLvisUri: starting install", { slug: params.slug });
+  // Renderer renders a skeleton card / sidebar placeholder while these
+  // phase events fire — see PluginConfigTab + Sidebar progress UI.
+  mainWindow?.webContents.send("lvis:plugins:install-progress", { slug: params.slug, phase: "installing" });
   void services.pluginMarketplace
     .install(params.slug)
     .then(async () => {
@@ -169,6 +181,7 @@ async function handleLvisUri(url: string) {
       // Mirror the post-install steps from the lvis:plugins:install IPC handler
       // so deep-link installs behave identically to in-app installs.
       try {
+        mainWindow?.webContents.send("lvis:plugins:install-progress", { slug: params.slug, phase: "restarting" });
         await services!.pluginRuntime.restartAll();
         services!.refreshPluginNotifications?.();
       } catch (err) {
@@ -382,44 +395,28 @@ async function main() {
 // gates it. Without this, dev (Electron-LVIS-Dev) and the protocol-launched
 // process land on different userData dirs and both apps coexist.
 //
-// We also propagate the same Windows-safe Chromium flags used by the dev
-// launchers (--disable-gpu) on corp/VDI machines without GPU drivers; without
-// these the OS-launched process silently crashes before
-// requestSingleInstanceLock() runs and the running app never sees
-// `second-instance`. `--no-sandbox` is propagated only when explicitly
-// enabled via LVIS_DEV_NO_SANDBOX=1 so the registered protocol command does
-// not silently disable Chromium sandboxing for a packaged user who once ran
-// the dev binary.
-const WINDOWS_SAFE_GPU_FLAGS = [
-  "--disable-gpu",
-  "--disable-software-rasterizer",
-  "--disable-gpu-compositing",
-];
-function resolveScriptPathArg(): string {
-  const a = process.argv[1];
-  if (typeof a !== "string") return ".";
-  if (a.toLowerCase().startsWith("lvis://")) return ".";
-  // Skip Electron switches (e.g. `--user-data-dir=...`, `--no-sandbox`) that
-  // appear here when this code runs inside the OS-launched second instance —
-  // resolving them as a path would corrupt the registered command.
-  if (a.startsWith("--")) return ".";
-  return a;
-}
-function buildDevProtocolArgs(): string[] {
-  const args: string[] = [resolve(resolveScriptPathArg())];
-  const userDataDir = app.getPath("userData");
-  if (userDataDir) args.push(`--user-data-dir=${userDataDir}`);
-  if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
-    args.push(...WINDOWS_SAFE_GPU_FLAGS);
-  }
-  if (process.env.LVIS_DEV_NO_SANDBOX === "1") {
-    args.push("--no-sandbox");
-  }
-  return args;
-}
+// Argument-builder lives in `src/main/electron-protocol-args.ts` (pure helper)
+// so the platform / argv / env policy can be unit-tested without Electron.
+//
+// `LVIS_DEV_NO_SANDBOX` is read through `dev-flags.ts` SoT instead of by the
+// helper itself: the helper takes a resolved `disableSandbox: boolean` so the
+// `!app.isPackaged` policy gate cannot be bypassed by a packaged binary that
+// inherits the env var. Boot also calls `setIsPackaged` later for any other
+// dev-flag callers; this top-level call early-seeds the cache.
+setIsPackaged(app.isPackaged);
 const _protocolRegistered = app.isPackaged
   ? app.setAsDefaultProtocolClient("lvis")
-  : app.setAsDefaultProtocolClient("lvis", process.execPath, buildDevProtocolArgs());
+  : app.setAsDefaultProtocolClient(
+      "lvis",
+      process.execPath,
+      buildDevProtocolArgs({
+        argv1: process.argv[1],
+        userDataDir: app.getPath("userData") || undefined,
+        platform: process.platform,
+        disableGpu: process.env.LVIS_KEEP_GPU !== "1",
+        disableSandbox: devNoSandboxAllowed(),
+      }),
+    );
 if (!_protocolRegistered) {
   console.warn("[main] setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment");
 }

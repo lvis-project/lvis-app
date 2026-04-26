@@ -1,7 +1,15 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
 import type { MarketplaceItem, PluginUiExtension } from "../types.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
+
+/**
+ * Phase reported by `lvis:plugins:install-progress` IPC events. Renderer
+ * surfaces (sidebar placeholder + settings tab skeleton) read this map to
+ * render an in-flight indicator while the main process drives the install.
+ */
+export type InstallPhase = "installing" | "restarting";
+export type InstallInFlight = Record<string, InstallPhase>;
 
 /**
  * Plugin marketplace actions + state. Extracted from App.tsx to keep the
@@ -12,6 +20,7 @@ export function usePluginMarketplace(api: LvisApi) {
   const [pluginViews, setPluginViews] = useState<PluginUiExtension[]>([]);
   const [marketStatus, setMarketStatus] = useState("로딩 중...");
   const [working, setWorking] = useState(false);
+  const [installInFlight, setInstallInFlight] = useState<InstallInFlight>({});
 
   const refreshViews = useCallback(async () => {
     const v = (await api.listPluginUiExtensions()).filter((i) => i.extension.slot === "sidebar");
@@ -64,11 +73,42 @@ export function usePluginMarketplace(api: LvisApi) {
     }
   }, [api, refreshMarketplace, refreshViews]);
 
+  // Track in-flight installs so the renderer can render a skeleton card +
+  // sidebar placeholder while the main-process pipeline runs. Cleared on
+  // both the success and failure result events so a transient slug never
+  // sticks around as a permanent placeholder.
+  useEffect(() => {
+    const unsubs: Array<() => void> = [];
+    if (typeof api.onPluginInstallProgress === "function") {
+      unsubs.push(
+        api.onPluginInstallProgress(({ slug, phase }) => {
+          setInstallInFlight((prev) => ({ ...prev, [slug]: phase }));
+        }),
+      );
+    }
+    if (typeof api.onPluginInstallResult === "function") {
+      unsubs.push(
+        api.onPluginInstallResult(({ slug }) => {
+          setInstallInFlight((prev) => {
+            if (!(slug in prev)) return prev;
+            const next = { ...prev };
+            delete next[slug];
+            return next;
+          });
+        }),
+      );
+    }
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, [api]);
+
   return {
     marketplace,
     pluginViews,
     marketStatus,
     working,
+    installInFlight,
     refreshViews,
     refreshMarketplace,
     installPlugin,

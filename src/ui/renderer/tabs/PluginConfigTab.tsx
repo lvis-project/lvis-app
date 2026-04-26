@@ -4,6 +4,7 @@ import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/plugin-config.js";
+import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { PluginCardSummary } from "../types.js";
 
@@ -33,6 +34,7 @@ function entriesToConfig(entries: KV[]): Record<string, unknown> {
 
 export function PluginConfigTab() {
   const [plugins, setPlugins] = useState<PluginCardSummary[]>([]);
+  const [installInFlight, setInstallInFlight] = useState<Record<string, "installing" | "restarting">>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [entries, setEntries] = useState<KV[]>([]);
   const [newKey, setNewKey] = useState("");
@@ -54,26 +56,77 @@ export function PluginConfigTab() {
     };
   }, []);
 
-  // Load plugin list
+  // Load plugin list — extracted so install/uninstall result events can
+  // re-fetch without remounting the tab. Without this, the settings dialog
+  // would still display the pre-install plugin set after a `lvis://install`
+  // deep-link landed (sidebar refreshes via the same event but the settings
+  // tab's local `plugins` state was a one-shot mount-time snapshot).
+  const refreshPlugins = useCallback(async () => {
+    try {
+      const cards = await window.lvis.plugins.cards();
+      setPlugins(cards);
+      setSelectedId((current) => {
+        if (current && cards.some((c) => c.id === current)) return current;
+        return cards.length > 0 ? cards[0].id : null;
+      });
+    } catch (e) {
+      showBanner("error", (e as Error).message ?? "플러그인 목록 로드 실패");
+    } finally {
+      setLoading(false);
+    }
+  }, [showBanner]);
+
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const cards = await window.lvis.plugins.cards();
-        if (cancelled) return;
-        setPlugins(cards);
-        if (cards.length > 0 && !selectedId) {
-          setSelectedId(cards[0].id);
-        }
-      } catch (e) {
-        if (!cancelled) showBanner("error", (e as Error).message ?? "플러그인 목록 로드 실패");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void refreshPlugins();
+  }, [refreshPlugins]);
+
+  // Sync with main-process lifecycle events. Both install (via `lvis://`
+  // deep link) and uninstall (via this tab or any other surface) emit
+  // result events that the renderer subscribes to in App.tsx for sidebar
+  // refresh — wire the same hooks here so the settings list stays in sync.
+  useEffect(() => {
+    // `getApi()` throws if `window.lvisApi` isn't initialized — that path is
+    // taken by jsdom unit tests that mock only `window.lvis`. Skip the
+    // subscriptions in that case so the existing tests pass without forcing
+    // every consumer test to provide both namespaces.
+    let api: ReturnType<typeof getApi>;
+    try {
+      api = getApi();
+    } catch {
+      return;
+    }
+    const unsubs: Array<() => void> = [];
+    if (typeof api.onPluginInstallProgress === "function") {
+      unsubs.push(
+        api.onPluginInstallProgress(({ slug, phase }) => {
+          setInstallInFlight((prev) => ({ ...prev, [slug]: phase }));
+        }),
+      );
+    }
+    if (typeof api.onPluginInstallResult === "function") {
+      unsubs.push(
+        api.onPluginInstallResult(({ slug, success }) => {
+          setInstallInFlight((prev) => {
+            if (!(slug in prev)) return prev;
+            const next = { ...prev };
+            delete next[slug];
+            return next;
+          });
+          if (success) void refreshPlugins();
+        }),
+      );
+    }
+    if (typeof api.onPluginUninstallResult === "function") {
+      unsubs.push(
+        api.onPluginUninstallResult(({ success }) => {
+          if (success) void refreshPlugins();
+        }),
+      );
+    }
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, [refreshPlugins]);
 
   // Load config for selected plugin
   useEffect(() => {
@@ -215,6 +268,31 @@ export function PluginConfigTab() {
                     </div>
                   </button>
                 ))}
+                {/* Skeleton rows for installs the main process is still
+                    pipelining. The slug is removed from `installInFlight`
+                    when the install-result event lands and `refreshPlugins`
+                    promotes it into a real `plugins` entry. */}
+                {Object.entries(installInFlight)
+                  .filter(([slug]) => !plugins.some((p) => p.id === slug))
+                  .map(([slug, phase]) => (
+                    <div
+                      key={`in-flight:${slug}`}
+                      className="flex w-full animate-pulse items-center gap-2 rounded border border-dashed border-muted px-2 py-1.5 text-xs text-muted-foreground"
+                      aria-label={`${slug} 설치 진행 중`}
+                      aria-live="polite"
+                    >
+                      <span
+                        className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+                        aria-hidden="true"
+                      />
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate">{slug}</span>
+                        <span className="truncate text-[9px] opacity-70">
+                          {phase === "installing" ? "설치 중…" : "재시작 중…"}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
               </div>
             </ScrollArea>
           </div>
