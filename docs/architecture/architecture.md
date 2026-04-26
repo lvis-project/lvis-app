@@ -2142,6 +2142,7 @@ stateDiagram-v2
 | `onMsGraphAuthChange(handler)` | 인증 상태 변화 구독 | email, calendar |
 | `logEvent(level, message, data?)` | **[Phase 2]** 호스트 감사 로그에 플러그인 이벤트 기록. `level`: `"info"\|"warn"\|"error"` | 전체 |
 | `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
+| `triggerConversation(spec)` | **[Brain P0]** 관찰 신호로부터 ConversationLoop 능동 발사 ("먼저 말 거는 비서" 차별화). `conversation-trigger` capability gated — 일반 plugin 차단. 자세한 사양: [`conversation-trigger.md`](../references/conversation-trigger.md). Brain track 은 §7 Proactive Engine 의 sub-phase 로 P0~P5 진행. | proactive (work-proactive) |
 
 **Microsoft Graph 공유 인증 (`ms-graph-consumer` capability gated):**
 
@@ -2153,7 +2154,9 @@ stateDiagram-v2
 | `getMsGraphAccount()` | 로그인된 계정 이메일(UPN) 반환. 미인증 시 `null`. | email, calendar |
 | `onMsGraphAuthChange(handler)` | 토큰 갱신·로그아웃 이벤트 구독. UI 상태 뱃지 동기화에 사용. | email, calendar |
 
-이 5개 메서드는 `capabilities: ["ms-graph-consumer"]` 매니페스트 선언을 요구한다 (§9.6 deployment guard 가 정책상 게이팅). `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `worker-client`, `knowledge-index` 가 사용된다.
+이 5개 메서드는 `capabilities: ["ms-graph-consumer"]` 매니페스트 선언을 요구한다 (§9.6 deployment guard 가 정책상 게이팅). `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `worker-client`, `knowledge-index`, `conversation-trigger` 가 사용된다.
+
+**Proactive Brain — `conversation-trigger` capability:** read-only "두뇌" plugin 이 신호 관찰 후 ConversationLoop 를 *능동적*으로 시작하는 surface. 이 capability 가 부여된 plugin 만 `hostApi.triggerConversation()` 호출 가능. 일반 plugin 에 부여하지 말 것 — 사용자가 입력하지 않은 prompt 를 LLM 에 흘리는 권한이므로. 안전 계약 / spec / gate 는 [`conversation-trigger.md`](../references/conversation-trigger.md) 참조.
 
 **HostApi 확장 원칙 ("3+ 플러그인 규칙"):** 새 메서드는 3개 이상의 플러그인이 동일 기능을 필요로 하거나, 보안·감사 제어가 필요한 경우에만 추가한다. 상세: `docs/references/plugin-tool-schema-design.md` §6
 
