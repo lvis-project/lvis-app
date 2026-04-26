@@ -16,6 +16,7 @@ import { redactForLLM, initDlpAudit } from "./audit/dlp-filter.js";
 import type { AuditLogger } from "./audit/audit-logger.js";
 import type { GenericMessage } from "./engine/llm/types.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
+import { parseImportedTriggerEnvelope } from "./engine/proactive-source.js";
 import type { WebContents } from "electron";
 import { findMethodByCapability } from "./boot/plugins.js";
 import {
@@ -86,6 +87,11 @@ function isRoutineEnabled(
  * channel. Used by both `lvis:chat:send` and the edit/retry flows so callback
  * wiring isn't duplicated.
  */
+// Envelope detection shares its pattern with the keyword engine, the
+// trigger executor, and the system-prompt guidance gate (see
+// `engine/proactive-source.ts`) so all four agree on what counts as a
+// valid trigger envelope.
+
 async function runStreamedTurn(
   conversationLoop: ConversationLoop,
   input: string,
@@ -98,7 +104,10 @@ async function runStreamedTurn(
   },
 ): Promise<unknown> {
   const send = (payload: unknown) => webContents?.send(channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
-  const result = await conversationLoop.runTurn(input, {
+  const originSource = parseImportedTriggerEnvelope(input);
+  const result = await conversationLoop.runTurn(
+    input,
+    {
     onReasoningDelta: (text) => send({ type: "reasoning_delta", text }),
     onTextDelta: (text) => {
       if (options?.shouldSuppressInterruptedTail?.() && text === "\n\n[중단됨]") return;
@@ -114,7 +123,10 @@ async function runStreamedTurn(
     onCompactOccurred: ({ removedMessages, freedTokens }) =>
       send({ type: "compact_notice", removedMessages, freedTokens }),
     onFallback: (from, to) => webContents?.send("lvis:chat:fallback", { from, to }),
-  });
+    },
+    undefined,
+    originSource ? { originSource } : undefined,
+  );
   if (
     options?.shouldSuppressInterruptedTail?.() &&
     (result as ConversationTurnResult).stopReason === "interrupted"

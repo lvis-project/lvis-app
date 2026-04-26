@@ -186,22 +186,29 @@ export class ToolExecutor {
     return this.hookRunner;
   }
 
-  /** 복수 tool_use 병렬 실행 — 최대 5개씩 배치 처리 */
+  /** 복수 tool_use 병렬 실행 — 최대 5개씩 배치 처리.
+   *
+   * `proactiveOrigin` (예: `"proactive:meeting-detection"`) 가 set 이면
+   * 모든 write/dangerous 호출이 사용자 영구 승인을 우회해 ask 로 강제됨
+   * (PermissionManager.checkDetailed 의 새 가드). Brain 트리거가 자동
+   * 실행되는 destructive 작업 차단막.
+   */
   async executeAll(
     toolUses: ToolUseBlock[],
     callbacks?: ToolExecutorCallbacks,
     sessionId?: string,
+    proactiveOrigin?: string | null,
   ): Promise<ToolResult[]> {
     const groupId = randomUUID();
     const BATCH_SIZE = 5;
     if (toolUses.length <= BATCH_SIZE) {
-      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId)));
+      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId, proactiveOrigin)));
     }
 
     const results: ToolResult[] = [];
     for (let i = 0; i < toolUses.length; i += BATCH_SIZE) {
       const batch = toolUses.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId)));
+      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId, proactiveOrigin)));
       results.push(...batchResults);
     }
     return results;
@@ -214,6 +221,7 @@ export class ToolExecutor {
     displayOrder: number,
     callbacks?: ToolExecutorCallbacks,
     sessionId?: string,
+    proactiveOrigin?: string | null,
   ): Promise<ToolResult> {
     const startTime = Date.now();
     const meta: ToolCallMeta = { groupId, toolUseId: toolUse.id, displayOrder };
@@ -253,7 +261,7 @@ export class ToolExecutor {
 
     // ── Step 3: Permission (source-aware) ───────────
     if (this.permissionManager) {
-      permissionResult = this.permissionManager.checkDetailed(toolUse.name, source, tool.category);
+      permissionResult = this.permissionManager.checkDetailed(toolUse.name, source, tool.category, proactiveOrigin);
       if (permissionResult.decision === "deny") {
         const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
         callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);

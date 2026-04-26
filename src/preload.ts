@@ -266,6 +266,21 @@ const api = {
     ipcRenderer.on("lvis:trigger:expired", listener);
     return () => ipcRenderer.removeListener("lvis:trigger:expired", listener);
   },
+  onTriggerImported: (
+    handler: (payload: {
+      sessionId: string;
+      source: string;
+      prompt: string;
+      summary: string;
+      toolCallCount: number;
+      importedAt: string;
+      wrappedPrompt: string;
+    }) => void,
+  ) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:trigger:imported", listener);
+    return () => ipcRenderer.removeListener("lvis:trigger:imported", listener);
+  },
   dismissTrigger: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:trigger:dismiss", sessionId) as Promise<{
       ok: boolean;

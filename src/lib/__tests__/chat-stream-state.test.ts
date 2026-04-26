@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appendDeltaToImportedTriggerResponse,
+  appendImportedTriggerEntry,
   appendUserEntry,
   applyToolEnd,
   applyToolStart,
+  finalizeImportedTriggerResponse,
   finalizeStreamingReasoning,
   finalizeStreamingAssistant,
+  isImportedTriggerStreaming,
   upsertStreamingReasoning,
   upsertStreamingAssistant,
   type ChatEntry,
@@ -156,5 +160,88 @@ describe("chat-stream-state", () => {
       text: "이제 반영 방향을 설명하겠습니다.",
       streaming: false,
     });
+  });
+});
+
+describe("imported_trigger helpers (brain-import card lifecycle)", () => {
+  const trigger = {
+    sessionId: "s1",
+    source: "proactive:meeting-detection",
+    prompt: "p",
+    summary: "s",
+    toolCallCount: 0,
+    importedAt: "2026-04-26T00:00:00.000Z",
+  };
+
+  it("appendImportedTriggerEntry inserts a streaming card", () => {
+    const next = appendImportedTriggerEntry([], trigger);
+    expect(next).toHaveLength(1);
+    expect(next[0]).toMatchObject({
+      kind: "imported_trigger",
+      sessionId: "s1",
+      response: "",
+      responseStreaming: true,
+    });
+  });
+
+  it("appendImportedTriggerEntry is idempotent on duplicate sessionId", () => {
+    const first = appendImportedTriggerEntry([], trigger);
+    const second = appendImportedTriggerEntry(first, trigger);
+    expect(second).toHaveLength(1);
+    expect(second).toBe(first); // identity preserved
+  });
+
+  it("appendDeltaToImportedTriggerResponse appends to the open card's response", () => {
+    let entries = appendImportedTriggerEntry([], trigger);
+    entries = appendDeltaToImportedTriggerResponse(entries, "hello ");
+    entries = appendDeltaToImportedTriggerResponse(entries, "world");
+    const card = entries[0] as Extract<ChatEntry, { kind: "imported_trigger" }>;
+    expect(card.response).toBe("hello world");
+    expect(card.responseStreaming).toBe(true);
+  });
+
+  it("appendDeltaToImportedTriggerResponse is a no-op when no card is open", () => {
+    const before: ChatEntry[] = [{ kind: "user", text: "hi" }];
+    const after = appendDeltaToImportedTriggerResponse(before, "x");
+    expect(after).toBe(before);
+  });
+
+  it("finds the streaming card even when later entries (tool_group) follow", () => {
+    let entries = appendImportedTriggerEntry([], trigger);
+    entries = applyToolStart(entries, {
+      groupId: "g1",
+      toolUseId: "t1",
+      displayOrder: 0,
+      name: "email_read",
+      input: {},
+    });
+    entries = appendDeltaToImportedTriggerResponse(entries, "after-tool");
+    const card = entries.find(
+      (e): e is Extract<ChatEntry, { kind: "imported_trigger" }> =>
+        e.kind === "imported_trigger",
+    );
+    expect(card?.response).toBe("after-tool");
+  });
+
+  it("finalizeImportedTriggerResponse flips responseStreaming to false", () => {
+    let entries = appendImportedTriggerEntry([], trigger);
+    entries = appendDeltaToImportedTriggerResponse(entries, "done");
+    expect(isImportedTriggerStreaming(entries)).toBe(true);
+    entries = finalizeImportedTriggerResponse(entries);
+    expect(isImportedTriggerStreaming(entries)).toBe(false);
+    const card = entries[0] as Extract<ChatEntry, { kind: "imported_trigger" }>;
+    expect(card.responseStreaming).toBe(false);
+    expect(card.response).toBe("done");
+  });
+
+  it("appendDeltaToImportedTriggerResponse is a no-op after finalize", () => {
+    let entries = appendImportedTriggerEntry([], trigger);
+    entries = appendDeltaToImportedTriggerResponse(entries, "first");
+    entries = finalizeImportedTriggerResponse(entries);
+    const before = entries;
+    const after = appendDeltaToImportedTriggerResponse(entries, "leaked");
+    expect(after).toBe(before);
+    const card = after[0] as Extract<ChatEntry, { kind: "imported_trigger" }>;
+    expect(card.response).toBe("first");
   });
 });

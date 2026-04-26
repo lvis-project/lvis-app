@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
@@ -49,6 +50,7 @@ export function App() {
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, applyLoadedSession, truncateToEntry,
+    addImportedTriggerEntry, closeOpenImportedTrigger,
     fallbackToast,
   } = useChatState(api);
   const [question, setQuestion] = useState("");
@@ -132,31 +134,77 @@ export function App() {
     [activePreset, attachedDocs, langLock],
   );
 
-  const handleAsk = useCallback(async (q: string, mode: "default" | "guidance" = "default") => {
-    const t = q.trim();
-    if (!t) return;
-    if (mode === "default" && streaming) return;
-    if (mode === "default" && await handleCompactCommand(t)) return;
-    if (!(await checkApiKey())) { setSettingsOpen(true); return; }
-    const requestId = ++turnRequestRef.current;
-    const streamingRequestId = beginStreamingRequest();
-    setQuestion("");
-    const outgoing = composeOutgoing(t);
-    appendUserEntry(mode === "guidance" ? `↳ ${t}` : t);
-    resetStreamAccumulators();
-    try {
-      if (mode === "guidance") {
-        await api.chatGuide(outgoing);
-      } else {
-        await api.chatSend(outgoing);
+  const handleAsk = useCallback(
+    async (
+      q: string,
+      mode: "default" | "guidance" | "trigger-import" = "default",
+    ) => {
+      const t = q.trim();
+      if (!t) return;
+      if (mode === "default" && streaming) return;
+      if (mode === "default" && await handleCompactCommand(t)) return;
+      if (!(await checkApiKey())) { setSettingsOpen(true); return; }
+      const requestId = ++turnRequestRef.current;
+      const streamingRequestId = beginStreamingRequest();
+      setQuestion("");
+      // trigger-import: send the wrapped prompt verbatim. composeOutgoing
+      // would prefix it with role-preset / language-lock framing that
+      // doesn't apply to brain-authored prompts. The brain envelope and
+      // the system prompt's `<proactive-origin-guidance>` already steer
+      // the LLM correctly.
+      const outgoing = mode === "trigger-import" ? t : composeOutgoing(t);
+      // trigger-import: skip the user-bubble append. The
+      // ImportedTriggerCard already represents the brain's question
+      // visibly, and rendering the wrapped envelope as a user bubble
+      // would misattribute authorship.
+      if (mode !== "trigger-import") {
+        appendUserEntry(mode === "guidance" ? `↳ ${t}` : t);
       }
-      // Final state set by stream events + done
-    } catch (err) {
-      setErrorWithThought(`오류: ${(err as Error).message}`);
-    } finally {
-      if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
-    }
-  }, [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest, setErrorWithThought, handleCompactCommand]);
+      resetStreamAccumulators();
+      try {
+        if (mode === "guidance") {
+          await api.chatGuide(outgoing);
+        } else {
+          await api.chatSend(outgoing);
+        }
+      } catch (err) {
+        // chatSend rejection (network fail, abort, etc.) on a
+        // trigger-import turn never lands a `done` event, so the
+        // open imported_trigger card's streaming spinner would hang
+        // forever. Close the card before surfacing the error.
+        if (mode === "trigger-import") closeOpenImportedTrigger();
+        setErrorWithThought(`오류: ${(err as Error).message}`);
+      } finally {
+        if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
+      }
+    },
+    [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest, setErrorWithThought, handleCompactCommand, closeOpenImportedTrigger],
+  );
+
+  // Brain trigger accept → chat takes over. Server emits
+  // `lvis:trigger:imported` with both metadata for the visible card
+  // and the pre-wrapped prompt that should fire as the next chat
+  // turn.
+  //
+  // `flushSync` around the entry insert is load-bearing: handleAsk
+  // immediately fires `api.chatSend(wrappedPrompt)`, which round-
+  // trips to main and starts emitting `text_delta` events. The
+  // renderer's text_delta handler routes the delta INTO the
+  // imported_trigger card iff `responseStreaming === true` is
+  // already in `entries`. Without flushSync, React batching can
+  // delay the entry insert past the first delta arrival → the
+  // delta falls through to `upsertStreamingAssistant` and renders
+  // as a sibling assistant bubble below the card (the duplicate-
+  // response bug R1-1).
+  useEffect(() => {
+    const unsub = api.onTriggerImported((payload) => {
+      flushSync(() => {
+        addImportedTriggerEntry(payload);
+      });
+      void handleAsk(payload.wrappedPrompt, "trigger-import");
+    });
+    return () => { unsub(); };
+  }, [api, addImportedTriggerEntry, handleAsk]);
 
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });

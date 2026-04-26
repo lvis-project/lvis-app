@@ -201,3 +201,87 @@ describe("PermissionManager (B1 persistence)", () => {
     expect(result.layer).toBe(6);
   });
 });
+
+describe("PermissionManager — proactive-origin override (R2-1 fix)", () => {
+  // Background: a user who once clicks "allow-always" on a write tool
+  // (e.g. task_add) effectively delegated all future calls to that
+  // tool. For the brain proactive flow we want EVERY destructive
+  // call to ask again — the user explicitly said "한번 더 체크할 수
+  // 있도록". This guard wires a `proactiveOrigin` parameter through
+  // the executor so it's checked here BEFORE allow-rules / always-
+  // allowed cache.
+  let pm: PermissionManager;
+
+  beforeEach(() => {
+    mockStore.rules = [];
+    mockStore.mode = "default";
+    _mockLock = Promise.resolve();
+    pm = new PermissionManager("/tmp/test-permissions.json");
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("forces ASK on a write tool when proactive origin is set, even if always-allowed", async () => {
+    await pm.addAlwaysAllowedPersist("task_add");
+    // sanity: allow-always wins on a normal turn
+    expect(
+      pm.checkDetailed("task_add", "builtin", "write").decision,
+    ).toBe("allow");
+    // proactive turn → forced ask, regardless of the cached allow
+    const r = pm.checkDetailed(
+      "task_add",
+      "builtin",
+      "write",
+      "proactive:meeting-detection",
+    );
+    expect(r.decision).toBe("ask");
+    expect(r.reason).toMatch(/proactive 출처/);
+  });
+
+  it("forces ASK on dangerous tools too", () => {
+    const r = pm.checkDetailed(
+      "rm_anything",
+      "builtin",
+      "dangerous",
+      "proactive:meeting-detection",
+    );
+    expect(r.decision).toBe("ask");
+  });
+
+  it("does NOT force ASK on read tools (those are safe to auto-run for proactive)", async () => {
+    await pm.addAlwaysAllowedPersist("email_read");
+    const r = pm.checkDetailed(
+      "email_read",
+      "plugin",
+      "read",
+      "proactive:meeting-detection",
+    );
+    expect(r.decision).toBe("allow");
+  });
+
+  it("ignores non-proactive originSource strings (forward-compat)", async () => {
+    await pm.addAlwaysAllowedPersist("task_add");
+    // A future origin tag like "user-paste:x" must not trigger the
+    // override — only "proactive:*" does.
+    const r = pm.checkDetailed(
+      "task_add",
+      "builtin",
+      "write",
+      "user-paste:x",
+    );
+    expect(r.decision).toBe("allow");
+  });
+
+  it("deny rules still beat the proactive override (defense in depth)", async () => {
+    await pm.addAlwaysDeniedPersist("task_add");
+    const r = pm.checkDetailed(
+      "task_add",
+      "builtin",
+      "write",
+      "proactive:meeting-detection",
+    );
+    expect(r.decision).toBe("deny");
+  });
+});
