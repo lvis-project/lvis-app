@@ -32,7 +32,7 @@
       {
         "pluginId": "email",
         "events": [
-          "email.new"
+          "email.action.needed"
         ]
       },
       {
@@ -59,7 +59,7 @@
     ]
   },
   "eventSubscriptions": [
-    "email.new",
+    "email.action.needed",
     "meeting.summary.created",
     "meeting.ended",
     "calendar.event.upcoming",
