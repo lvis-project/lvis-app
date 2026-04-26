@@ -476,14 +476,20 @@ app.on("web-contents-created", (_event, contents) => {
   });
 
   contents.on("will-navigate", (navEvent, url) => {
-    // Plugin webviews: allow file:// navigations (shell + plugin entry).
-    // LLM-HTML webviews: block everything except data: / about:.
-    if (url.startsWith("file://")) {
-      // Only allow file:// if the webview is loading a plugin shell or module.
-      // Reject any traversal out of the app distribution directory.
-      if (url.includes("plugin-ui-shell") || url.includes(".js")) {
-        return; // allow
-      }
+    // Plugin webview policy: allow file:// navigations ONLY into the app's
+    // dist/src directory (plugin-ui-shell.html + plugin entry modules
+    // resolved by the shell). The previous substring match on ".js" or
+    // "plugin-ui-shell" let any local .js file load — treat that as LFI
+    // and reject. LLM-HTML webviews (different consumer) keep the
+    // data:/about: only fallback below.
+    const currentUrl = contents.getURL();
+    const isPluginShellFrame = currentUrl.includes("plugin-ui-shell.html");
+    if (isPluginShellFrame && url.startsWith("file://")) {
+      try {
+        const distSrc = resolve(distRoot, "src").replace(/\\/g, "/");
+        const allowedPrefix = `file:///${distSrc.replace(/^\//, "")}/`;
+        if (url.toLowerCase().startsWith(allowedPrefix.toLowerCase())) return; // allow
+      } catch { /* fall through */ }
     }
     if (!url.startsWith("data:") && !url.startsWith("about:")) {
       navEvent.preventDefault();

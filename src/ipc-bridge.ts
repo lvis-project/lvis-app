@@ -20,6 +20,7 @@ import { parseImportedTriggerEnvelope } from "./engine/proactive-source.js";
 import type { WebContents } from "electron";
 import { findMethodByCapability } from "./boot/plugins.js";
 import { emitEvent as emitHostEvent } from "./boot/types.js";
+import { requiredCapabilityForEmit } from "./plugins/capabilities.js";
 import {
   MS_GRAPH_ENVIRONMENTS,
   MS_GRAPH_ENVIRONMENT_CONFIGS,
@@ -305,8 +306,13 @@ export function validatePluginFrame(event: IpcMainInvokeEvent | null | undefined
   try {
     const url = new URL(rawUrl);
     if (url.protocol !== "file:") return false;
-    // Must come from the plugin-ui-shell document (or a sub-frame of it).
-    return rawUrl.includes("plugin-ui-shell");
+    // Strict path-end match — `rawUrl.includes("plugin-ui-shell")` would
+    // accept a `.html.bak` sibling, a confusingly-named directory, or a URL
+    // fragment containing the literal. Pin to the canonical filename so the
+    // only acceptable senders are the plugin shell document itself (or its
+    // child frames, which inherit the same URL pathname).
+    const pathname = url.pathname.toLowerCase();
+    return pathname.endsWith("/plugin-ui-shell.html");
   } catch {
     return false;
   }
@@ -1493,9 +1499,28 @@ ${input}`;
       auditUnauthorized(auditLogger, "lvis:plugin:call-tool", e);
       return UNAUTHORIZED_FRAME;
     }
-    // Validate pluginId shape to prevent injection of arbitrary method names.
     if (typeof pluginId !== "string" || !pluginId.trim()) {
       return { ok: false, error: "invalid-plugin-id" };
+    }
+    if (typeof method !== "string" || !method.trim()) {
+      return { ok: false, error: "invalid-method" };
+    }
+    // Cross-plugin tool invocation guard — the method's owner MUST be the
+    // calling plugin. `callFromUi` only enforces the global uiCallable[]
+    // allowlist; without this check, plugin A could invoke plugin B's
+    // uiCallable methods just by knowing the method name.
+    const ownerPluginId = pluginRuntime.resolveToolOwner(method);
+    if (!ownerPluginId) {
+      return { ok: false, error: `Plugin method not found: ${method}` };
+    }
+    if (ownerPluginId !== pluginId) {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "plugin-frame",
+        type: "error",
+        input: `[plugin:${pluginId}] cross-plugin call denied: method='${method}' owner='${ownerPluginId}'`,
+      });
+      return { ok: false, error: "cross-plugin-call-denied" };
     }
     try {
       const result = await pluginRuntime.callFromUi(method, payload);
@@ -1516,8 +1541,25 @@ ${input}`;
     if (typeof type !== "string" || !type.trim()) {
       return { ok: false, error: "invalid-event-type" };
     }
+    // Mirror the host-side capability + ownership gate from
+    // boot/steps/plugin-runtime.ts:emitEvent. Without this, a plugin
+    // webview can forge events it doesn't own (e.g. meeting.summary.created
+    // from a non-meeting plugin) and trigger downstream subscribers.
+    const manifest = pluginRuntime.getPluginManifest(pluginId);
+    if (!manifest) {
+      return { ok: false, error: "unknown-plugin-id" };
+    }
+    const requiredCap = requiredCapabilityForEmit(type);
+    if (requiredCap && !manifest.capabilities?.includes(requiredCap)) {
+      return { ok: false, error: `missing-capability:${requiredCap}` };
+    }
     try {
-      emitHostEvent(type, data);
+      pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+    try {
+      emitHostEvent(type, { ...((data as Record<string, unknown>) ?? {}), pluginId });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: (err as Error).message };

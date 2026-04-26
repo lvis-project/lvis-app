@@ -71,6 +71,25 @@ function getPluginViewLabel(item: PluginUiExtensionView): string {
  * the shell served from the same dev server (the Vite config copy-plugin
  * must copy plugin-ui-shell.html to the dev-server root for this to work).
  */
+/**
+ * Stable, collision-resistant per-plugin partition slug. Two pluginIds
+ * that normalize to the same `[a-z0-9-]` slug would otherwise share the
+ * `persist:plugin:` storage silo (cookies, IndexedDB, localStorage). Hash
+ * the raw pluginId instead so plugin authors cannot pre-meditate a slug
+ * collision via marketplace upload.
+ */
+function pluginPartitionHash(pluginId: string): string {
+  // Web Crypto SubtleCrypto is async; for a renderer-side synchronous use
+  // we rely on a small FNV-1a 32-bit hash, hex-encoded. 8 hex chars are
+  // enough collision resistance for a per-user plugin set < ~10k.
+  let h = 2166136261;
+  for (let i = 0; i < pluginId.length; i++) {
+    h ^= pluginId.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
 function buildWebviewSrc(view: PluginUiExtensionView): string | null {
   const entryUrl = view.entryUrl;
   if (!entryUrl) return null;
@@ -114,12 +133,27 @@ export function PluginUiHostView({
   const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // webviewRef tracks the DOM node for cleanup only — we don't call methods
-  // on it directly in this implementation.
+  // Electron <webview> is a custom element — React's synthetic onLoad /
+  // onError do not fire for it. Wire native DOM listeners via the ref
+  // callback so the loading-spinner clears and load failures surface in
+  // the UI. Listeners use stable refs so add/remove identity matches.
+  const onFinishRef = useRef(() => setLoading(false));
+  const onFailRef = useRef(() => {
+    setLoading(false);
+    setErrorText("Plugin webview 로딩 실패.");
+  });
   const webviewRef = useRef<Electron.WebviewTag | null>(null);
-
   const handleWebviewRef = useCallback((node: Electron.WebviewTag | null) => {
+    const prev = webviewRef.current;
+    if (prev) {
+      prev.removeEventListener("did-finish-load", onFinishRef.current);
+      prev.removeEventListener("did-fail-load", onFailRef.current);
+    }
     webviewRef.current = node;
+    if (node) {
+      node.addEventListener("did-finish-load", onFinishRef.current);
+      node.addEventListener("did-fail-load", onFailRef.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -146,32 +180,38 @@ export function PluginUiHostView({
     content = <div className="px-3 py-2 text-xs text-muted-foreground">UI 모듈 엔트리를 찾을 수 없습니다.</div>;
   } else {
     const webviewSrc = buildWebviewSrc(view);
-    // Partition: persist:plugin:<slug> gives each plugin its own silo.
-    // slugify the pluginId (replace dots/non-alnum with dashes) so the
-    // partition name stays URL-safe.
-    const slug = view.pluginId.replace(/[^a-z0-9]/gi, "-");
-    const partition = `persist:plugin:${slug}`;
+    // Partition: persist:plugin:<hash> gives each plugin its own silo.
+    // Hash the pluginId so partitions never collide across plugins whose
+    // slugs would otherwise normalize to the same string (e.g.,
+    // `com.lge.foo` vs `com-lge-foo`). 12-byte SHA-256 prefix is plenty
+    // for collision-resistance on a small plugin set.
+    const partition = `persist:plugin:${pluginPartitionHash(view.pluginId)}`;
 
     if (!webviewSrc) {
       content = <div className="px-3 py-2 text-xs text-muted-foreground">Webview src를 계산할 수 없습니다.</div>;
     } else {
+      // Resolve preload script as file:// — webview's `preload` attribute
+      // requires an absolute URL. The plugin-preload.js bundle is copied
+      // into dist/src/ alongside the shell HTML during build.
+      let preloadUrl = "";
+      try {
+        preloadUrl = new URL("plugin-preload.js", window.location.href).toString();
+      } catch {
+        preloadUrl = "";
+      }
       content = (
         <webview
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={handleWebviewRef as any}
           src={webviewSrc}
           partition={partition}
+          preload={preloadUrl}
           // Security: no node integration, context isolation enforced by
           // Electron for webviews when the host window has contextIsolation=true.
           // allowpopups is absent → popups blocked by default.
           // disablewebsecurity is absent → same-origin + CORS enforced.
           webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
           style={{ width: "100%", height: "100%", border: "none" }}
-          onLoad={() => setLoading(false)}
-          onError={() => {
-            setLoading(false);
-            setErrorText("Plugin webview 로딩 실패.");
-          }}
         />
       );
     }
