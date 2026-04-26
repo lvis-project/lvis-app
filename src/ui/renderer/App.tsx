@@ -14,6 +14,8 @@ import { MainToolbar } from "./MainToolbar.js";
 import { MainContent } from "./MainContent.js";
 import { Sidebar } from "./Sidebar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
+import { StatusBar } from "./components/StatusBar.js";
+import { useStatusBar } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useRoutineResult } from "./hooks/use-routine-result.js";
@@ -297,11 +299,18 @@ export function App() {
     vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
   });
 
+  // Bottom status bar (#231) — bottom slot for persistent items + transient
+  // toasts. The hook subscribes to existing install-progress / install-result
+  // / uninstall-result events and reads the routine schedule from settings,
+  // so wiring it here is enough to surface lifecycle feedback.
+  const { persistent: statusPersistent, toasts: statusToasts } = useStatusBar({ api });
+
   // ─── Render ───────────────────────────────────
   return (
     <ErrorBoundary fallback="앱 오류가 발생했습니다">
     <TooltipProvider>
-        <div className="flex h-screen overflow-hidden">
+        <div className="flex h-screen flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
           <Sidebar
             activeView={activeView}
             pluginViews={pluginViews}
@@ -360,6 +369,8 @@ export function App() {
             activePluginView={activePluginView ?? null}
           />
         </main>
+        </div>
+        <StatusBar persistent={statusPersistent} toasts={statusToasts} />
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
