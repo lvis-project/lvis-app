@@ -19,6 +19,8 @@ import type { ConversationLoop } from "./engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "./engine/proactive-source.js";
 import type { WebContents } from "electron";
 import { findMethodByCapability } from "./boot/plugins.js";
+import { emitEvent as emitHostEvent } from "./boot/types.js";
+import { requiredCapabilityForEmit } from "./plugins/capabilities.js";
 import {
   MS_GRAPH_ENVIRONMENTS,
   MS_GRAPH_ENVIRONMENT_CONFIGS,
@@ -242,6 +244,9 @@ const RESERVED_HOST_CHANNELS = new Set([
   "lvis:dlp:stats",
   "lvis:chat:abort",
   "lvis:pageindex:scan-paths",
+  // #237 Option B — plugin webview bridge channels (plugin-preload.ts only)
+  "lvis:plugin:call-tool",
+  "lvis:plugin:emit-event",
 ]);
 
 /**
@@ -274,6 +279,44 @@ export function validateSender(event: IpcMainInvokeEvent | null | undefined): bo
 }
 
 const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
+
+/**
+ * #237 Option B — Plugin webview sender validation.
+ *
+ * Plugin webviews use a `persist:plugin:<slug>` session partition and load
+ * `file://…/plugin-ui-shell.html`.  Their sender frame URL is a file:// URL,
+ * which `validateSender` already accepts.  However we want a separate guard
+ * so plugin-only handlers cannot be called from the host renderer's frame
+ * (where `window.lvisPlugin` is absent but any script could try `ipcRenderer`
+ * via the host preload).
+ *
+ * Strategy: plugin frames are also file:// so we cannot distinguish them by
+ * origin alone.  Instead, we trust that the host renderer never invokes plugin-
+ * scoped channels (`lvis:plugin:*`) — the host preload does not expose them.
+ * This function validates the sender is a frame that loaded a URL containing
+ * "plugin-ui-shell" as a simple heuristic; adjust if the shell path changes.
+ *
+ * In unit tests, a null/undefined event is treated as trusted (matching the
+ * same ergonomics as `validateSender`).
+ */
+export function validatePluginFrame(event: IpcMainInvokeEvent | null | undefined): boolean {
+  const frame = event?.senderFrame;
+  if (!frame) return true; // unit-test ergonomics
+  const rawUrl = frame.url ?? "";
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== "file:") return false;
+    // Strict path-end match — `rawUrl.includes("plugin-ui-shell")` would
+    // accept a `.html.bak` sibling, a confusingly-named directory, or a URL
+    // fragment containing the literal. Pin to the canonical filename so the
+    // only acceptable senders are the plugin shell document itself (or its
+    // child frames, which inherit the same URL pathname).
+    const pathname = url.pathname.toLowerCase();
+    return pathname.endsWith("/plugin-ui-shell.html");
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Emit a warn-level audit entry when an IPC call is rejected due to an
@@ -1442,6 +1485,93 @@ ${input}`;
     try {
       const result = await pluginRuntime.call(method, { paths: payload.paths });
       return { ok: true, ...(result as object) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  // ─── #237 Option B — Plugin webview bridge ────────────────────────────────
+  //
+  // These two handlers are the ONLY IPC surface reachable from plugin webviews
+  // (plugin-preload.ts exposes no other ipcRenderer channels).  They are gated
+  // by validatePluginFrame() so the host renderer's frame cannot reach them
+  // accidentally.
+  //
+  // lvis:plugin:call-tool  — routes to pluginRuntime.callFromUi(), which
+  //   enforces the per-plugin uiCallable[] allowlist identical to how the host
+  //   renderer calls lvis:plugins:call.
+  //
+  // lvis:plugin:emit-event — allows a plugin webview to emit an event on the
+  //   host event bus.  Only events declared in the plugin's eventPublishes[]
+  //   actually reach subscribers; unregistered types are silently dropped by
+  //   the runtime's emitEvent() guard.
+  ipcMain.handle("lvis:plugin:call-tool", async (e, pluginId: string, method: string, payload?: unknown) => {
+    if (!validatePluginFrame(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugin:call-tool", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof pluginId !== "string" || !pluginId.trim()) {
+      return { ok: false, error: "invalid-plugin-id" };
+    }
+    if (typeof method !== "string" || !method.trim()) {
+      return { ok: false, error: "invalid-method" };
+    }
+    // Cross-plugin tool invocation guard — the method's owner MUST be the
+    // calling plugin. `callFromUi` only enforces the global uiCallable[]
+    // allowlist; without this check, plugin A could invoke plugin B's
+    // uiCallable methods just by knowing the method name.
+    const ownerPluginId = pluginRuntime.resolveToolOwner(method);
+    if (!ownerPluginId) {
+      return { ok: false, error: `Plugin method not found: ${method}` };
+    }
+    if (ownerPluginId !== pluginId) {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "plugin-frame",
+        type: "error",
+        input: `[plugin:${pluginId}] cross-plugin call denied: method='${method}' owner='${ownerPluginId}'`,
+      });
+      return { ok: false, error: "cross-plugin-call-denied" };
+    }
+    try {
+      const result = await pluginRuntime.callFromUi(method, payload);
+      return { ok: true, result };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("lvis:plugin:emit-event", (e, pluginId: string, type: string, data?: unknown) => {
+    if (!validatePluginFrame(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugin:emit-event", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof pluginId !== "string" || !pluginId.trim()) {
+      return { ok: false, error: "invalid-plugin-id" };
+    }
+    if (typeof type !== "string" || !type.trim()) {
+      return { ok: false, error: "invalid-event-type" };
+    }
+    // Mirror the host-side capability + ownership gate from
+    // boot/steps/plugin-runtime.ts:emitEvent. Without this, a plugin
+    // webview can forge events it doesn't own (e.g. meeting.summary.created
+    // from a non-meeting plugin) and trigger downstream subscribers.
+    const manifest = pluginRuntime.getPluginManifest(pluginId);
+    if (!manifest) {
+      return { ok: false, error: "unknown-plugin-id" };
+    }
+    const requiredCap = requiredCapabilityForEmit(type);
+    if (requiredCap && !manifest.capabilities?.includes(requiredCap)) {
+      return { ok: false, error: `missing-capability:${requiredCap}` };
+    }
+    try {
+      pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+    try {
+      emitHostEvent(type, { ...((data as Record<string, unknown>) ?? {}), pluginId });
+      return { ok: true };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
