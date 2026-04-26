@@ -1,3 +1,10 @@
+/**
+ * @deprecated Moving to `lvis-plugin-tasks` (Phase 0 — boundary declaration).
+ * Tasks are migrating from a host-resident service to a dedicated plugin.
+ * See architecture.md §4.6.1 / §9.4a and the tasks-plugin-split migration plan.
+ * Behavior unchanged in Phase 0; cutover lands in Phase 2 (plugin owns the
+ * SQLite store, host calls `hostApi.callTool("task_*", …)`).
+ */
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";

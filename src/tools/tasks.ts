@@ -6,6 +6,11 @@
  *
  * Output shape: every tool returns a JSON string — callers (LLM, test)
  * parse it back into the structured Task/Task[] they expect.
+ *
+ * @deprecated Moving to `lvis-plugin-tasks` (Phase 0 — boundary declaration).
+ * These tools will be re-registered by the plugin's manifest in Phase 2;
+ * `HostApi.addTask` becomes a thin shim over `callTool("task_add", …)`.
+ * See architecture.md §9.4a and the tasks-plugin-split migration plan.
  */
 import { createDynamicTool, type Tool } from "./base.js";
 import type {
