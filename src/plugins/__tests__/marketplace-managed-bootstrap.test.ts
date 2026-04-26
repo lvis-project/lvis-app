@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginMarketplaceService } from "../marketplace.js";
+import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 
 describe("PluginMarketplaceService managed bootstrap", () => {
   let testDir: string;
@@ -11,6 +12,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   let marketplacePath: string;
 
   beforeEach(async () => {
+    setIsPackaged(false);
     testDir = join(
       homedir(),
       ".lvis",
@@ -26,6 +28,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await rm(testDir, { recursive: true, force: true });
+    _resetForTest();
   });
 
   it("reinstalls managed plugins when registry entry is stale", async () => {
