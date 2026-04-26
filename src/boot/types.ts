@@ -72,6 +72,13 @@ export interface AppServices {
   toolRegistry: ToolRegistry;
   systemPromptBuilder: SystemPromptBuilder;
   conversationLoop: ConversationLoop;
+  /**
+   * Brain — orchestrates `hostApi.triggerConversation()` calls on a fresh
+   * ConversationLoop per trigger so the user's chat history stays clean.
+   * Renderer uses this surface (via IPC) to dismiss / import a captured
+   * trigger session.
+   */
+  triggerExecutor?: import("../engine/trigger-executor.js").TriggerExecutor;
   routineEngine?: RoutineEngine;
   mcpManager: McpManager;
   idleScheduler?: IdleSchedulerService;

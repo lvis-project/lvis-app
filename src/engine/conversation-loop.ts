@@ -413,8 +413,17 @@ export class ConversationLoop {
    * @param abortSignal  B4: optional external abort signal; if omitted a fresh
    *                     AbortController is created and stored in
    *                     `currentAbortController` so `abortCurrentTurn()` works.
+   * @param options      P0 Brain: `originSource` enables the Proactive Origin
+   *                     Guidance prompt section for this single turn. Set/
+   *                     cleared synchronously around `build()` so concurrent
+   *                     turns do not corrupt one another's guidance state.
    */
-  async runTurn(input: string, callbacks?: TurnCallbacks, abortSignal?: AbortSignal): Promise<TurnResult> {
+  async runTurn(
+    input: string,
+    callbacks?: TurnCallbacks,
+    abortSignal?: AbortSignal,
+    options?: { originSource?: string | null },
+  ): Promise<TurnResult> {
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
     this.tracer.step("REQUEST_ENTRY", { inputLen: input.length });
     if (!this.provider) {
@@ -464,13 +473,29 @@ export class ConversationLoop {
     const scope = this.resolveToolScope(input);
     // Guard: test mocks may stub SystemPromptBuilder without this method.
     this.deps.systemPromptBuilder.setToolScope?.(scope);
+    // Brain origin: set + clear synchronously around build() so concurrent
+    // turns do not see each other's flag. SystemPromptBuilder has a single
+    // `originSource` slot; if we straddled an await we'd race.
+    this.deps.systemPromptBuilder.setOriginSource?.(options?.originSource ?? null);
 
     const systemPrompt = this.deps.systemPromptBuilder.build();
+    // Clear immediately so any nested or follow-up build() inside the same
+    // tick (or a concurrent runTurn that starts during the upcoming await)
+    // sees a clean slate.
+    this.deps.systemPromptBuilder.setOriginSource?.(null);
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
     this.tracer.step("PROMPT_ASSEMBLE", { promptLen: systemPrompt.length, activePlugins: scope.activePluginIds.size });
-    const result = await this.queryLoop(systemPrompt, scope, callbacks, turnSignal);
-    // B4: clear controller once the turn is done (regardless of how it ended)
-    this.currentAbortController = null;
+    let result: Awaited<ReturnType<ConversationLoop["queryLoop"]>>;
+    try {
+      result = await this.queryLoop(systemPrompt, scope, callbacks, turnSignal);
+    } finally {
+      // Always clear the controller, even when `queryLoop` throws (provider
+      // error / abort / tool error). Otherwise the loop looks "mid-turn"
+      // forever to anyone consulting `currentAbortController` (e.g.
+      // TriggerExecutor's chat-busy guard), and a single failed chat turn
+      // would permanently block trigger imports.
+      this.currentAbortController = null;
+    }
     // lastTurnScope must reflect any Option C request_plugin expansions so
     // the next turn's keyword-miss fallback keeps those plugins visible.
     this.lastTurnScope = new Set(scope.activePluginIds);

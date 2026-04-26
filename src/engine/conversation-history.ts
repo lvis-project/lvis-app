@@ -50,6 +50,15 @@ export class ConversationHistory {
     return this.messages.length;
   }
 
+  /**
+   * How many more messages can be appended before `trim()` would start
+   * dropping the oldest entries. Used by the trigger-import path to refuse
+   * imports that would silently evict user chat history.
+   */
+  getCapacityRemaining(): number {
+    return Math.max(0, this.maxMessages - this.messages.length);
+  }
+
   getLastAssistantText(): string {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const msg = this.messages[i];

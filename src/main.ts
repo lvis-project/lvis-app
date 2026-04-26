@@ -307,7 +307,7 @@ async function main() {
   createWindow();
 
   // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
-  services = await bootstrap(projectRoot, mainWindow!);
+  services = await bootstrap(projectRoot, mainWindow!, () => mainWindow);
 
   // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
   registerIpcHandlers(services, () => mainWindow);
