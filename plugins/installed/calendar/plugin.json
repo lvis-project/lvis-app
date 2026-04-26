@@ -77,7 +77,11 @@
     "calendar.link.failed",
     "calendar.link.pending",
     "calendar.from_email.suggested",
-    "calendar.pattern.detected"
+    "calendar.pattern.detected",
+    "calendar.event.added",
+    "calendar.event.upcoming",
+    "calendar.event.starting",
+    "calendar.event.conflict.detected"
   ],
   "uiCallable": [
     "calendar_status",

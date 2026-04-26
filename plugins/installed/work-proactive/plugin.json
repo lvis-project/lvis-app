@@ -25,7 +25,8 @@
           "calendar_today"
         ],
         "events": [
-          "calendar.event.upcoming"
+          "calendar.event.upcoming",
+          "calendar.event.conflict.detected"
         ]
       },
       {
