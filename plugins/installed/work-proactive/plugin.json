@@ -23,6 +23,9 @@
         "pluginId": "calendar",
         "tools": [
           "calendar_today"
+        ],
+        "events": [
+          "calendar.event.upcoming"
         ]
       },
       {
@@ -57,7 +60,8 @@
   "eventSubscriptions": [
     "email.new",
     "meeting.summary.created",
-    "meeting.ended"
+    "meeting.ended",
+    "calendar.event.upcoming"
   ],
   "emittedEvents": [],
   "toolSchemas": {

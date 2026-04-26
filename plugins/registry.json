@@ -46,7 +46,8 @@
         "plugins": [
           {
             "pluginId": "calendar",
-            "tools": ["calendar_today"]
+            "tools": ["calendar_today"],
+            "events": ["calendar.event.upcoming"]
           },
           {
             "pluginId": "email",
