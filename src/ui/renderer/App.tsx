@@ -17,6 +17,7 @@ import { useSettings } from "./hooks/use-settings.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useRoutineResult } from "./hooks/use-routine-result.js";
 import { useRoutineRunning } from "./hooks/use-routine-running.js";
+import { useTriggerResult } from "./hooks/use-trigger-result.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
 import { useContextBudget } from "./hooks/use-context-budget.js";
@@ -69,6 +70,7 @@ export function App() {
     goNext: nextRoutineResult,
   } = useRoutineResult(api);
   const { runningRoutines } = useRoutineRunning(api);
+  const { triggerResult, dismiss: dismissTrigger, importIntoChat: importTriggerIntoChat } = useTriggerResult(api);
   const { updates: marketplaceUpdates, dismiss: dismissMarketplaceUpdates } = useMarketplaceUpdates(api);
   const { queue: approvalQueue, decide: handleApprovalDecide, decideAll: handleApprovalDecideAll } = useApproval();
 
@@ -213,6 +215,7 @@ export function App() {
     onDismissRoutineResult: dismissRoutineResult, onSnoozeRoutineResult: snoozeRoutineResult,
     onPrevRoutineResult: prevRoutineResult, onNextRoutineResult: nextRoutineResult,
     runningRoutines,
+    triggerResult, onDismissTrigger: dismissTrigger, onAcceptTrigger: importTriggerIntoChat,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
