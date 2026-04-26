@@ -564,9 +564,11 @@ export async function initPluginRuntime(
   }
 
   // §7.2 Plugin Deployment Guard.
-  // Phase 0 SoT consolidation: resolve once, share across DeploymentGuard,
-  // PluginRuntime, and the marketplace service that boot.ts wires later.
-  const pluginPaths = resolvePluginPaths({ appRoot: projectRoot });
+  // Phase 2a SoT: anchor the layout at Electron's `userData` directory.
+  // `app.getPath('userData')` returns `%APPDATA%/lvis`, `~/Library/Application
+  // Support/lvis`, or `~/.config/lvis` per OS convention. The resolver throws
+  // if userDataDir is missing — there is no `<appRoot>/plugins/` fallback.
+  const pluginPaths = resolvePluginPaths({ userDataDir: app.getPath("userData") });
   const deploymentGuard = new PluginDeploymentGuard({
     registryPath: pluginPaths.registryPath,
     userInstalledDir: pluginPaths.userInstalledDir,
