@@ -23,7 +23,7 @@ function ev(url: string): IpcMainInvokeEvent {
 
 describe("validatePluginFrame", () => {
   it("accepts a plugin-ui-shell file:// frame", () => {
-    expect(validatePluginFrame(ev("file:///dist/src/plugin-ui-shell.html?pluginId=hello"))).toBe(true);
+    expect(validatePluginFrame(ev("file:///dist/src/plugin-ui-shell.html"))).toBe(true);
   });
 
   it("rejects a host renderer file:// frame (no plugin-ui-shell in path)", () => {
