@@ -1,0 +1,263 @@
+/**
+ * Unit tests for the 5 workflow system tools (S1+S2):
+ * ask_user_question, remind_at, todo_session_write, agent_spawn, skill_load.
+ *
+ * Each test stubs the service dependency and exercises the tool's
+ * `execute(rawInput, ctx)` contract directly — no Electron / IPC.
+ */
+import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import type { ToolExecutionContext } from "../base.js";
+import { createAskUserQuestionTool } from "../ask-user-question.js";
+import { createRemindAtTool } from "../remind-at.js";
+import { createTodoSessionWriteTool } from "../todo-session-write.js";
+import { createAgentSpawnTool } from "../agent-spawn.js";
+import { createSkillLoadTool } from "../skill-load.js";
+import { RemindersStore } from "../../main/reminders-store.js";
+import { SessionTodoStore } from "../../main/session-todo-store.js";
+import { SkillStore } from "../../main/skill-store.js";
+
+function ctx(sessionId = "session-x"): ToolExecutionContext {
+  return { cwd: process.cwd(), metadata: { sessionId } };
+}
+
+describe("ask_user_question tool", () => {
+  it("rejects when gate is missing", async () => {
+    const tool = createAskUserQuestionTool({ getGate: () => undefined });
+    const r = await tool.execute({ question: "Pick one" }, ctx());
+    expect(r.isError).toBe(true);
+  });
+
+  it("rejects empty question", async () => {
+    const tool = createAskUserQuestionTool({
+      getGate: () => ({
+        ask: () => Promise.resolve({ requestId: "r", choice: "a" }),
+      }) as never,
+    });
+    const r = await tool.execute({ question: "  " }, ctx());
+    expect(r.isError).toBe(true);
+  });
+
+  it("forwards question + returns user choice", async () => {
+    const ask = vi.fn().mockResolvedValue({
+      requestId: "r1",
+      choice: "yes",
+      dismissed: false,
+    });
+    const tool = createAskUserQuestionTool({
+      getGate: () => ({ ask }) as never,
+    });
+    const r = await tool.execute(
+      {
+        question: "Continue?",
+        choices: ["yes", "no"],
+        urgent: true,
+      },
+      ctx(),
+    );
+    expect(r.isError).toBe(false);
+    const parsed = JSON.parse(r.output);
+    expect(parsed.choice).toBe("yes");
+    expect(parsed.dismissed).toBe(false);
+    expect(ask).toHaveBeenCalledWith({
+      question: "Continue?",
+      choices: ["yes", "no"],
+      allowFreeText: true,
+      urgent: true,
+    });
+  });
+});
+
+describe("remind_at tool", () => {
+  it("rejects bad ISO", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-rem-"));
+    try {
+      const store = new RemindersStore(join(tmp, "reminders.json"));
+      const tool = createRemindAtTool(store);
+      const r = await tool.execute(
+        { at: "not-a-date", title: "x" },
+        ctx(),
+      );
+      expect(r.isError).toBe(true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("persists a reminder and returns the id", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-rem-"));
+    try {
+      const store = new RemindersStore(join(tmp, "reminders.json"));
+      const tool = createRemindAtTool(store);
+      const r = await tool.execute(
+        {
+          at: "2099-12-31T09:00:00+09:00",
+          title: "year-end",
+          repeat: "daily",
+        },
+        ctx(),
+      );
+      expect(r.isError).toBe(false);
+      const parsed = JSON.parse(r.output);
+      expect(parsed.reminderId).toMatch(/[0-9a-f-]{36}/);
+      const list = store.listActive();
+      expect(list).toHaveLength(1);
+      expect(list[0].repeat).toBe("daily");
+      expect(list[0].title).toBe("year-end");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts YYYY-MM-DD as KST 09:00", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "lvis-rem-"));
+    try {
+      const store = new RemindersStore(join(tmp, "reminders.json"));
+      const tool = createRemindAtTool(store);
+      const r = await tool.execute(
+        { at: "2099-01-01", title: "newyear" },
+        ctx(),
+      );
+      expect(r.isError).toBe(false);
+      const list = store.listActive();
+      // 2099-01-01 09:00 KST = 2099-01-01 00:00 UTC
+      expect(list[0].at).toBe("2099-01-01T00:00:00.000Z");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("todo_session_write tool", () => {
+  it("rejects empty items array", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const r = await tool.execute({ items: [] }, ctx());
+    expect(r.isError).toBe(true);
+  });
+
+  it("merges items by id and preserves order", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const r1 = await tool.execute(
+      {
+        items: [
+          { content: "step 1", status: "pending" },
+          { content: "step 2", status: "pending" },
+        ],
+      },
+      ctx("s1"),
+    );
+    const after1 = JSON.parse(r1.output).items as Array<{
+      id: string;
+      content: string;
+      status: string;
+    }>;
+    expect(after1).toHaveLength(2);
+    const firstId = after1[0].id;
+
+    // Update step 1 to completed by id
+    const r2 = await tool.execute(
+      {
+        items: [{ id: firstId, content: "step 1", status: "completed" }],
+      },
+      ctx("s1"),
+    );
+    const after2 = JSON.parse(r2.output).items as Array<{
+      id: string;
+      status: string;
+    }>;
+    expect(after2[0].id).toBe(firstId);
+    expect(after2[0].status).toBe("completed");
+    expect(after2[1].status).toBe("pending");
+  });
+});
+
+describe("agent_spawn tool", () => {
+  it("rejects when runner is missing", async () => {
+    const tool = createAgentSpawnTool({
+      getRunner: () => undefined,
+      emit: () => undefined,
+    });
+    const r = await tool.execute(
+      { title: "t", instructions: "do stuff" },
+      ctx(),
+    );
+    expect(r.isError).toBe(true);
+  });
+
+  it("forwards to runner and emits start/done events", async () => {
+    const events: Array<{ type: string; spawnId: string }> = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        spawn: async (input, callbacks) => {
+          callbacks?.onTurn?.({ turn: 1, text: "hello", toolCallCount: 0 });
+          return {
+            summary: "done-text",
+            toolCallCount: 0,
+            turnCount: 1,
+            childSessionId: "child-1",
+          };
+        },
+      }) as never,
+      emit: (e) => {
+        events.push({ type: e.type, spawnId: e.spawnId });
+      },
+    });
+    const r = await tool.execute(
+      { title: "search", instructions: "find X" },
+      ctx(),
+    );
+    expect(r.isError).toBe(false);
+    const parsed = JSON.parse(r.output);
+    expect(parsed.summary).toBe("done-text");
+    expect(parsed.toolCallCount).toBe(0);
+    const types = events.map((e) => e.type);
+    expect(types).toContain("start");
+    expect(types).toContain("done");
+  });
+
+  it("rejects missing title or instructions", async () => {
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({ spawn: async () => ({}) }) as never,
+      emit: () => undefined,
+    });
+    const r = await tool.execute({ title: "", instructions: "" }, ctx());
+    expect(r.isError).toBe(true);
+  });
+});
+
+describe("skill_load tool", () => {
+  it("loads built-in report-writing skill and emits badge", async () => {
+    const store = new SkillStore({});
+    const events: string[] = [];
+    let injected: string | null = null;
+    const tool = createSkillLoadTool({
+      store,
+      emit: (e) => events.push(e.name),
+      injectSystemMessage: (_sid, content) => {
+        injected = content;
+      },
+    });
+    const r = await tool.execute({ skillName: "report-writing" }, ctx());
+    expect(r.isError).toBe(false);
+    const parsed = JSON.parse(r.output);
+    expect(parsed.loaded).toBe(true);
+    expect(parsed.skillName).toBe("report-writing");
+    expect(events).toEqual(["report-writing"]);
+    expect(injected).toContain("[Skill: report-writing]");
+  });
+
+  it("returns error for missing skill", async () => {
+    const store = new SkillStore({});
+    const tool = createSkillLoadTool({
+      store,
+      emit: () => undefined,
+      injectSystemMessage: () => undefined,
+    });
+    const r = await tool.execute({ skillName: "does-not-exist" }, ctx());
+    expect(r.isError).toBe(true);
+  });
+});
