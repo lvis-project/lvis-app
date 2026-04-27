@@ -77,6 +77,15 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
 
   const handleAskCurrent = useCallback(() => { void onAsk(question); }, [onAsk, question]);
 
+  // Auto-scroll to the newly-appended ask card. App-level scroll effect
+  // only fires on `entries` changes; ask cards are not entries, so without
+  // this the card can land off-screen if it appears between assistant
+  // turns (e.g. tool execution prompts the user mid-loop).
+  useEffect(() => {
+    if (askQuestions.length === 0) return;
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [askQuestions.length, chatEndRef]);
+
   // B4: Ctrl/Cmd+C while streaming and no text selected → abort
   useEffect(() => {
     if (!streaming) return;
@@ -124,7 +133,11 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
       {/* 루틴 floating overlay — 단일 슬롯에 진행 중 / 결과 중 하나만 표시.
           진행 중이면 RoutineRunningIndicator, 아니면 직전 결과 RoutineCard.
           긴 브리핑은 카드 내부에서 스크롤 (max-h-[60vh] + overflow-y-auto). */}
-      {(runningRoutines.size > 0 || routineResult) && (
+      {/* Suppress the floating routine overlay while an ask card is pending —
+          a question demanding the user's response shouldn't compete with a
+          running-routine indicator for attention. The overlay reappears
+          automatically once the user resolves or dismisses the question. */}
+      {(runningRoutines.size > 0 || routineResult) && askQuestions.length === 0 && (
         <div className="pointer-events-none absolute left-0 right-0 top-2 z-20 flex justify-center px-4">
           <div className="pointer-events-auto flex w-full max-w-2xl max-h-[60vh] flex-col overflow-hidden">
             {runningRoutines.size > 0 ? (
@@ -192,15 +205,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
         {subAgentSpawns.map((spawn) => (
           <SubAgentCard key={spawn.spawnId} spawn={spawn} />
         ))}
-        {askQuestions.map((req) => (
-          <AskUserQuestionCard
-            key={req.id}
-            api={workflowApi}
-            request={req}
-            onResolved={dismissAskQuestion}
-          />
-        ))}
-        {entries.length === 0 && hasApiKey !== false && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
+        {entries.length === 0 && hasApiKey !== false && askQuestions.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {entries.map((entry, idx) => {
           const isMatch = searchMatchSet.has(idx);
           const isCurrentMatch = searchOpen && searchMatches[searchIdx] === idx;
@@ -269,6 +274,18 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
             </div>
           );
         })}
+        {/* Ask-user cards anchor at the END of the chat flow — same
+            inline-turn position as the assistant's last response, so the
+            user can reply without scrolling back up regardless of how
+            long the conversation has grown. */}
+        {askQuestions.map((req) => (
+          <AskUserQuestionCard
+            key={req.id}
+            api={workflowApi}
+            request={req}
+            onResolved={dismissAskQuestion}
+          />
+        ))}
         <div ref={chatEndRef} />
       </div></ScrollArea>
       {contextOverflowPct >= 0.95 && (
