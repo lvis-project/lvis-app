@@ -259,8 +259,11 @@ function shouldSkipPluginBuild(pluginDir) {
 }
 
 function fileMtimeMs(filePath) {
+  // statSync 만으로 mtime 을 얻을 수 있는데 기존 코드는 readFileSync 로
+  // 파일 전체를 메모리에 올린 뒤 truthy 체크용으로만 썼음. 플러그인 빌드
+  // 게이트가 자주 호출하는 hot path 라 큰 파일에서 비용이 누적된다.
   try {
-    return Number(readFileSync(filePath) ? statSync(filePath).mtimeMs : 0);
+    return Number(statSync(filePath).mtimeMs);
   } catch {
     return 0;
   }
@@ -284,22 +287,6 @@ function latestMtimeMs(dirPath) {
     }
   } catch {}
   return latest;
-}
-
-function removeDirRobust(dirPath, maxRetries = 5) {
-  for (let i = 0; i <= maxRetries; i++) {
-    try {
-      rmSync(dirPath, { recursive: true, force: true });
-      return;
-    } catch (err) {
-      const code = err && typeof err === "object" ? err.code : "";
-      if (i === maxRetries || (code !== "ENOTEMPTY" && code !== "EPERM" && code !== "EBUSY")) {
-        throw err;
-      }
-      // brief backoff for file-handle release on Windows
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60);
-    }
-  }
 }
 
 const disabledPluginIds = parseDisabledPluginIds();
@@ -506,13 +493,20 @@ function spawnWatcher(tag, cmd, args, opts = {}) {
 }
 
 function runStep(tag, cmd, args, options = {}) {
+  // env 머지 순서가 중요하다. 이전 코드는 default env 를 먼저 깔고 `...options`
+  // 를 뒤에 spread 했는데, caller 가 `options.env` 를 넘기면 spread 가 그
+  // env 객체 전체를 통째로 덮어써서 `LVIS_DEV=1` 가 사라졌다 (예: plugins
+  // 빌드가 `bunEnv` 를 넘길 때). 이제는 caller 의 env 를 먼저 분리하고
+  // process.env + LVIS_DEV + options.env 를 명시적으로 합쳐 caller 가
+  // 추가/오버라이드는 하되 default 는 잃지 않게 한다.
+  const { env: callerEnv, ...rest } = options;
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd: options.cwd ?? repoRoot,
       stdio: "inherit",
-      env: { ...process.env, LVIS_DEV: "1" },
       shell: process.platform === "win32" && cmd.toLowerCase().endsWith(".cmd"),
-      ...options,
+      ...rest,
+      env: { ...process.env, LVIS_DEV: "1", ...(callerEnv ?? {}) },
     });
     child.on("error", reject);
     child.on("exit", (code) => {
