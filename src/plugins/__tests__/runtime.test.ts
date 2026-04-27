@@ -18,9 +18,11 @@ describe("PluginRuntime.disable", () => {
 
   beforeEach(async () => {
     testDir = mkdtempSync(join(tmpdir(), "lvis-runtime-"));
-    installedDir = join(testDir, "plugins", "installed");
+    // pluginsRoot — every install lives at <pluginsRoot>/<id>/plugin.json.
+    // The registry sits at the root of pluginsRoot.
+    installedDir = join(testDir, "plugins");
     await mkdir(installedDir, { recursive: true });
-    registryPath = join(testDir, "plugins", "registry.json");
+    registryPath = join(installedDir, "registry.json");
   });
 
   afterEach(async () => {
@@ -83,6 +85,7 @@ describe("PluginRuntime.disable", () => {
     return new PluginRuntime({
       hostRoot: testDir,
       registryPath,
+      pluginsRoot: installedDir,
       deploymentGuard: guard,
     });
   }
@@ -392,6 +395,7 @@ describe("PluginRuntime.disable", () => {
         hostRoot: testDir,
         registryPath,
         deploymentGuard: guard,
+        pluginsRoot: installedDir,
         createHostApi: (_pluginId, _manifest) => {
           const hostApi = {
             registerKeywords: () => {},
@@ -447,6 +451,7 @@ describe("PluginRuntime.disable", () => {
         hostRoot: testDir,
         registryPath,
         deploymentGuard: guard,
+        pluginsRoot: installedDir,
         createHostApi: (_pluginId, _manifest) => ({
           registerKeywords: () => {},
           emitEvent: () => {},
@@ -722,6 +727,7 @@ describe("PluginRuntime.disable", () => {
     runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
+      pluginsRoot: installedDir,
       deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
       createHostApi: (pluginId) => ({
         registerKeywords: () => {},
@@ -796,6 +802,7 @@ describe("PluginRuntime.disable", () => {
     runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
+      pluginsRoot: installedDir,
       deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
       createHostApi: (pluginId) => ({
         registerKeywords: () => {},

@@ -97,24 +97,8 @@ describe("Phase 1 — plugin trust boundary", () => {
 
   // ───────────────────────────── §Step 1 ─────────────────────────────
 
-  describe("isTrustedRegistryManifestPath dual-root containment", () => {
-    it("accepts a registry manifest path under hostRoot", async () => {
-      const manifestPath = await writePluginAt(
-        join(hostRoot, "plugins", "installed", "p-host"),
-        "tb.host",
-      );
-      await writeRegistry([{ id: "tb.host", manifestPath }]);
-
-      const runtime = new PluginRuntime({
-        hostRoot,
-        registryPath,
-        pluginsRoot,
-      });
-      await runtime.load();
-      expect(runtime.listPluginIds()).toContain("tb.host");
-    });
-
-    it("accepts a registry manifest path under pluginsRoot (outside hostRoot)", async () => {
+  describe("isTrustedRegistryManifestPath single-root containment", () => {
+    it("accepts a registry manifest path under pluginsRoot", async () => {
       const manifestPath = await writePluginAt(
         join(pluginsRoot, "p-user"),
         "tb.user",
@@ -130,7 +114,23 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(runtime.listPluginIds()).toContain("tb.user");
     });
 
-    it("rejects a registry manifest path outside both hostRoot and pluginsRoot", async () => {
+    it("rejects a registry manifest path under hostRoot (no longer a trust root)", async () => {
+      const manifestPath = await writePluginAt(
+        join(hostRoot, "plugins", "installed", "p-host"),
+        "tb.host",
+      );
+      await writeRegistry([{ id: "tb.host", manifestPath }]);
+
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+      });
+      await runtime.load();
+      expect(runtime.listPluginIds()).not.toContain("tb.host");
+    });
+
+    it("rejects a registry manifest path outside pluginsRoot", async () => {
       const manifestPath = await writePluginAt(
         join(testDir, "rogue", "p-rogue"),
         "tb.rogue",
@@ -151,10 +151,10 @@ describe("Phase 1 — plugin trust boundary", () => {
     // check via a real on-disk path.
     const symlinkSkip = process.platform === "win32";
     it.skipIf(symlinkSkip)(
-      "rejects a symlink under pluginsRoot that points outside both trust roots",
+      "rejects a symlink under pluginsRoot that points outside the trust root",
       async () => {
         // Real plugin lives at testDir/outside/p-evil/plugin.json — outside
-        // both hostRoot and pluginsRoot.
+        // pluginsRoot.
         const realDir = join(testDir, "outside", "p-evil");
         const realManifest = await writePluginAt(realDir, "tb.evil");
         // Plant a symlink inside pluginsRoot that points at the real

@@ -15,6 +15,7 @@
  */
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
+import { mkdirSync } from "node:fs";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
@@ -569,6 +570,10 @@ export async function initPluginRuntime(
   // not by physical directory). The resolver picks `LVIS_PLUGINS_DIR` if
   // set on a dev build, else `homedir()/.lvis/plugins`.
   const pluginPaths = resolvePluginPaths();
+  // mkdir the root once so the trust-root realpath check in PluginRuntime
+  // (and any first-install write under pluginsRoot/<id>/) doesn't trip on a
+  // missing directory the very first time the app boots.
+  mkdirSync(pluginPaths.pluginsRoot, { recursive: true });
   const deploymentGuard = new PluginDeploymentGuard({
     registryPath: pluginPaths.registryPath,
     pluginsRoot: pluginPaths.pluginsRoot,

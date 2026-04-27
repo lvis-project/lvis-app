@@ -1327,10 +1327,8 @@ export class PluginRuntime {
    *
    * A registry entry's manifestPath is trusted iff its `realpathSync()`
    * (symlinks resolved) is contained under `realpathSync(pluginsRoot)`.
-   * `hostRoot` is also accepted as defense-in-depth for entries that
-   * pre-date Phase 2-final (the old `<appRoot>/plugins/installed/` layout);
-   * Phase 2c migration rewrites those into the pluginsRoot tree on
-   * boot, so production callers should never observe a hostRoot match.
+   * Single source of truth — every install lives at
+   * `<pluginsRoot>/<id>/plugin.json`, so the trust root is one path.
    *
    * Why the realpath + path.relative shape:
    *   1. Symlink defeat — without realpath, an attacker who controls HOME
@@ -1344,36 +1342,23 @@ export class PluginRuntime {
    *
    * Failures (manifestPath missing, realpath EACCES, etc.) are REJECTED
    * rather than allowed-by-default: a missing or unreadable file is not a
-   * path the host should `import()`.
+   * path the host should `import()`. pluginsRoot itself is mkdir'd at boot
+   * so realpath(pluginsRoot) succeeds even on first run with no installs.
    */
   private isTrustedRegistryManifestPath(
     manifestPath: string,
-    hostRoot: string,
-    pluginsRoot?: string,
+    pluginsRoot: string,
   ): boolean {
     if (!isAbsolute(manifestPath)) return true;
     let realManifest: string;
-    let realHost: string;
+    let realRoot: string;
     try {
       realManifest = realpathSync(manifestPath);
-      realHost = realpathSync(hostRoot);
+      realRoot = realpathSync(pluginsRoot);
     } catch {
       return false;
     }
-    if (this.isPathContained(realHost, realManifest)) return true;
-    if (pluginsRoot) {
-      let realUser: string;
-      try {
-        realUser = realpathSync(pluginsRoot);
-      } catch {
-        // pluginsRoot doesn't exist yet (first-run before any user
-        // plugin is installed). Treat as "no second trust root" rather than
-        // a hard reject — the hostRoot path above already gave us a chance.
-        return false;
-      }
-      if (this.isPathContained(realUser, realManifest)) return true;
-    }
-    return false;
+    return this.isPathContained(realRoot, realManifest);
   }
 
   /**
@@ -1405,7 +1390,7 @@ export class PluginRuntime {
         const manifestPath = isAbsolute(entry.manifestPath)
           ? entry.manifestPath
           : resolve(dirname(this.registryPath!), entry.manifestPath);
-        if (!this.isTrustedRegistryManifestPath(manifestPath, this.hostRoot, this.pluginsRoot)) {
+        if (!this.pluginsRoot || !this.isTrustedRegistryManifestPath(manifestPath, this.pluginsRoot)) {
           console.warn(`[plugin-runtime] ignoring untrusted registry manifest path for ${entry.id}: ${manifestPath}`);
           return [];
         }
