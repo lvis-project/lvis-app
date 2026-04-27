@@ -7,14 +7,14 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadHooksConfigFromPaths, EMPTY_HOOKS_CONFIG } from "../config-loader.js";
 
 let workDir: string;
 
 beforeEach(() => {
-  workDir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-hooks-"));
+  workDir = mkdtempSync(join(tmpdir(), "lvis-hooks-"));
   mkdirSync(join(workDir, "user"));
   mkdirSync(join(workDir, "admin"));
 });

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
+import { mkdtempSync } from "node:fs";
 
 /**
  * Phase 1.5 test gate — PluginDeploymentGuard §7.2-§7.3
@@ -16,7 +17,7 @@ describe("PluginDeploymentGuard", () => {
   let installedDir: string;
 
   beforeEach(async () => {
-    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-guard-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = mkdtempSync(join(tmpdir(), "lvis-guard-"));
     await mkdir(testDir, { recursive: true });
     registryPath = join(testDir, "registry.json");
     installedDir = join(testDir, "installed");
