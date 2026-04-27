@@ -17,9 +17,10 @@
 //   - restarts electron when dist/src/main.js changes (debounced)
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, watch, copyFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, watch, copyFileSync, mkdirSync, rmSync, cpSync, readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import electronPath from "electron";
 
@@ -55,12 +56,341 @@ function ensureWindowsUserDataDir(args, env, profileName) {
   return args;
 }
 
+function extractUserDataDir(args) {
+  const userDataArg = args.find((arg) => arg.startsWith("--user-data-dir="));
+  return userDataArg ? userDataArg.slice("--user-data-dir=".length) : "";
+}
+
+function escapePowerShellSingleQuoted(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function cleanupStaleWindowsDevProcesses(userDataDir) {
+  if (process.platform !== "win32") return;
+  // Escape hatch — devs running multiple parallel `npm run dev` sessions
+  // (e.g. branch comparison, side-by-side profiling) can opt out so the
+  // sibling launcher / Electron isn't culled when the second invocation
+  // boots. Default behaviour is unchanged.
+  if (
+    process.env.LVIS_DEV_NO_CLEANUP === "1" ||
+    process.env.LVIS_DEV_NO_CLEANUP === "true"
+  ) {
+    log("electron", "stale process cleanup skipped (LVIS_DEV_NO_CLEANUP)");
+    return;
+  }
+  const normalizedUserDataDir = String(userDataDir || "").trim();
+  const pageIndexWorkspace = resolve(repoRoot, ".pageindex-workspace");
+  const launcherScriptPath = resolve(repoRoot, "scripts", "run-electron-dev.mjs");
+  const mainEntryPath = mainOutput;
+  if (!normalizedUserDataDir) return;
+
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    `$currentPid = ${process.pid}`,
+    `$userDataDir = '${escapePowerShellSingleQuoted(normalizedUserDataDir)}'`,
+    `$pageIndexWorkspace = '${escapePowerShellSingleQuoted(pageIndexWorkspace)}'`,
+    `$launcherScriptPath = '${escapePowerShellSingleQuoted(launcherScriptPath)}'`,
+    `$mainEntryPath = '${escapePowerShellSingleQuoted(mainEntryPath)}'`,
+    "$killedPids = @()",
+    // Launcher kill 은 절대경로 (`$launcherScriptPath`) 만 매칭. 이전엔
+    // `$launcherScriptNeedle = ${basename(repoRoot)}/scripts/run-electron-dev.mjs`
+    // 를 OR 로 가지고 있었지만, 같은 폴더명을 가진 다른 checkout
+    // (`/work/lvis-app` vs `/home/lvis-app`) 의 launcher 까지 매칭돼
+    // sibling session 을 죽일 수 있었음. profile 은 hash 로 disjoint 하지만
+    // launcher 노드 프로세스에는 profile 정보가 없으므로 path 가 유일한
+    // discriminator.
+    "$staleLaunchers = @(Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | Where-Object { $_.ProcessId -ne $currentPid -and $_.CommandLine -like \"*$launcherScriptPath*\" })",
+    "foreach ($launcher in $staleLaunchers) {",
+    "  taskkill /PID $launcher.ProcessId /T /F | Out-Null",
+    "  $killedPids += \"node:$($launcher.ProcessId)\"",
+    "}",
+    "$targets = @()",
+    // Electron / pageindex worker 는 resolved userDataDir / workspace 의
+    // 전체 경로로 매칭 — `Electron-LVIS-Dev` substring 은 다른 dev profile
+    // prefix 와 collide 가능. profile hash suffix + path 매칭의 이중 가드.
+    "if ($userDataDir.Length -gt 0) {",
+    "  $targets += Get-CimInstance Win32_Process -Filter \"Name = 'electron.exe'\" | Where-Object { $_.CommandLine -like \"*$mainEntryPath*\" -and $_.CommandLine -like \"*$userDataDir*\" }",
+    "}",
+    "if ($pageIndexWorkspace.Length -gt 0) {",
+    "  $targets += Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*pageindex_worker.py*' -and $_.CommandLine -like \"*$pageIndexWorkspace*\" }",
+    "}",
+    "$targets = @($targets | Group-Object ProcessId | ForEach-Object { $_.Group[0] })",
+    "foreach ($target in $targets) {",
+    // taskkill /T /F 로 자식 프로세스 트리까지 같이 종료. `Stop-Process
+    // -Force` 는 자식을 남겨서 stale Electron 트리 청소 목적이 깨졌음.
+    "  taskkill /PID $target.ProcessId /T /F | Out-Null",
+    "  $killedPids += \"$($target.Name):$($target.ProcessId)\"",
+    "}",
+    "Remove-Item -LiteralPath (Join-Path $userDataDir 'lvis-tasks.db-wal') -Force -ErrorAction SilentlyContinue",
+    "Remove-Item -LiteralPath (Join-Path $userDataDir 'lvis-tasks.db-shm') -Force -ErrorAction SilentlyContinue",
+    "Write-Output (\"killed=\" + $killedPids.Count + \" pids=\" + ($killedPids -join ','))",
+  ].join("; ");
+
+  try {
+    const result = spawnSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    // PowerShell 자체 실패 (spawn 에러 / 비정상 exit) 는 stderr 만 찍히고
+    // status != 0 으로 떨어진다. 기존엔 stdout+stderr 를 합쳐 "killed=N"
+    // 패턴 검사만 했는데, 그럼 PS 가 에러 메시지를 stderr 로 뱉었을 때
+    // "cleaned stale dev processes (<error>)" 로 거짓 양성 로깅되는 케이스.
+    if (result.error) {
+      log("electron", `stale process cleanup skipped: ${result.error.message}`);
+      return;
+    }
+    if (typeof result.status === "number" && result.status !== 0) {
+      const detail = (`${result.stderr ?? ""}` || `${result.stdout ?? ""}`).trim()
+        || `exit code ${result.status}`;
+      log("electron", `stale process cleanup failed: ${detail}`);
+      return;
+    }
+    const output = `${result.stdout ?? ""}`.trim();
+    // 정리된 게 있을 때만 PID:name 리스트 로깅. dev 가 sibling 세션이
+    // 사라진 걸 발견했을 때 원인 추적 가능하도록.
+    if (output && !/^killed=0\b/.test(output)) {
+      log("electron", `cleaned stale dev processes (${output})`);
+    }
+  } catch (err) {
+    log("electron", `stale process cleanup skipped: ${err.message}`);
+  }
+}
+
+function pruneDuplicateMainElectronProcesses(userDataDir, keepPid) {
+  if (process.platform !== "win32") return;
+  const normalizedUserDataDir = String(userDataDir || "").trim();
+  const keep = Number(keepPid || 0);
+  if (!normalizedUserDataDir || !Number.isFinite(keep) || keep <= 0) return;
+
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    `$keepPid = ${keep}`,
+    `$userDataDir = '${escapePowerShellSingleQuoted(normalizedUserDataDir)}'`,
+    `$mainEntryPath = '${escapePowerShellSingleQuoted(mainOutput)}'`,
+    "$targets = @(Get-CimInstance Win32_Process -Filter \"Name = 'electron.exe'\" | Where-Object { $_.ProcessId -ne $keepPid -and $_.CommandLine -like \"*$mainEntryPath*\" -and $_.CommandLine -like \"*$userDataDir*\" })",
+    "$prunedPids = @()",
+    "foreach ($target in $targets) {",
+    "  taskkill /PID $target.ProcessId /T /F | Out-Null",
+    "  $prunedPids += $target.ProcessId",
+    "}",
+    "Write-Output (\"pruned=\" + $prunedPids.Count + \" pids=\" + ($prunedPids -join ','))",
+  ].join("; ");
+
+  try {
+    const result = spawnSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    // stale-cleanup 과 같은 이유로 status / error 우선 검사 — PS 가 stderr
+    // 로 에러 메시지를 뱉었을 때 "pruned (<error>)" 로 거짓 양성 로깅되는
+    // 케이스를 차단.
+    if (result.error) {
+      log("electron", `duplicate main prune skipped: ${result.error.message}`);
+      return;
+    }
+    if (typeof result.status === "number" && result.status !== 0) {
+      const detail = (`${result.stderr ?? ""}` || `${result.stdout ?? ""}`).trim()
+        || `exit code ${result.status}`;
+      log("electron", `duplicate main prune failed: ${detail}`);
+      return;
+    }
+    const output = `${result.stdout ?? ""}`.trim();
+    if (output && !/^pruned=0\b/.test(output)) {
+      log("electron", `pruned duplicate electron main instances (${output})`);
+    }
+  } catch (err) {
+    log("electron", `duplicate main prune skipped: ${err.message}`);
+  }
+}
+
 function applyUtf8Env(env) {
   if (!env.PYTHONIOENCODING) env.PYTHONIOENCODING = "utf-8";
   if (!env.PYTHONUTF8) env.PYTHONUTF8 = "1";
   if (!env.LANG) env.LANG = "en_US.UTF-8";
   if (!env.LC_ALL) env.LC_ALL = "en_US.UTF-8";
   return env;
+}
+
+function getBunInstallEnv() {
+  const localAppData = process.env.LOCALAPPDATA || resolve(homedir(), "AppData", "Local");
+  const bunRoot = resolve(localAppData, "lvis-bun");
+  const bunCacheDir = resolve(bunRoot, "install", "cache");
+  const bunTmpDir = resolve(bunRoot, "tmp");
+  mkdirSync(bunCacheDir, { recursive: true });
+  mkdirSync(bunTmpDir, { recursive: true });
+  return {
+    ...process.env,
+    BUN_INSTALL_CACHE_DIR: bunCacheDir,
+    TMP: bunTmpDir,
+    TEMP: bunTmpDir,
+    TMPDIR: bunTmpDir,
+  };
+}
+
+function seedPluginSdk(pluginDir) {
+  const sdkSrc = resolve(repoRoot, "packages/plugin-sdk");
+  const sdkDest = resolve(pluginDir, "node_modules/@lvis/plugin-sdk");
+  const sdkDestParent = dirname(sdkDest);
+  mkdirSync(sdkDestParent, { recursive: true });
+  rmSync(sdkDest, { recursive: true, force: true });
+  mkdirSync(sdkDest, { recursive: true });
+
+  const sdkPackageJson = resolve(sdkSrc, "package.json");
+  const sdkDist = resolve(sdkSrc, "dist");
+  const sdkSchemas = resolve(sdkSrc, "schemas");
+  const sdkKeys = resolve(sdkSrc, "src/keys.ts");
+
+  copyFileSync(sdkPackageJson, resolve(sdkDest, "package.json"));
+  if (existsSync(sdkDist)) cpSync(sdkDist, resolve(sdkDest, "dist"), { recursive: true, force: true });
+  if (existsSync(sdkSchemas)) cpSync(sdkSchemas, resolve(sdkDest, "schemas"), { recursive: true, force: true });
+  if (existsSync(sdkKeys)) {
+    mkdirSync(resolve(sdkDest, "src"), { recursive: true });
+    copyFileSync(sdkKeys, resolve(sdkDest, "src/keys.ts"));
+  }
+}
+
+function normalizeLinkedSubpath(packageName, subpath) {
+  const normalized = String(subpath).replaceAll("\\", "/").replace(/^\.\//, "");
+  return `../../../node_modules/${packageName}/${normalized}`;
+}
+
+function parseDisabledPluginIds() {
+  const defaults = ["work-proactive"];
+  const envRaw = process.env.LVIS_DEV_DISABLED_PLUGINS || "";
+  const envItems = envRaw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return new Set([...defaults, ...envItems]);
+}
+
+function shouldSkipPluginBuild(pluginDir) {
+  // Fast dev path: skip costly install/build only when artifacts are already
+  // present AND source/config inputs have not changed since last build.
+  if (process.env.LVIS_DEV_FORCE_PLUGIN_BUILD === "1") return false;
+  const hasDeps = existsSync(resolve(pluginDir, "node_modules"));
+  const distDir = resolve(pluginDir, "dist");
+  if (!hasDeps || !existsSync(distDir)) return false;
+
+  const latestDist = latestMtimeMs(distDir);
+  const srcDir = resolve(pluginDir, "src");
+  const workerDir = resolve(pluginDir, "worker");
+  const latestInputs = Math.max(
+    existsSync(srcDir) ? latestMtimeMs(srcDir) : 0,
+    existsSync(workerDir) ? latestMtimeMs(workerDir) : 0,
+    fileMtimeMs(resolve(pluginDir, "plugin.json")),
+    fileMtimeMs(resolve(pluginDir, "package.json")),
+    fileMtimeMs(resolve(pluginDir, "tsconfig.json")),
+  );
+  return latestDist >= latestInputs;
+}
+
+function fileMtimeMs(filePath) {
+  // statSync 만으로 mtime 을 얻을 수 있는데 기존 코드는 readFileSync 로
+  // 파일 전체를 메모리에 올린 뒤 truthy 체크용으로만 썼음. 플러그인 빌드
+  // 게이트가 자주 호출하는 hot path 라 큰 파일에서 비용이 누적된다.
+  try {
+    return Number(statSync(filePath).mtimeMs);
+  } catch {
+    return 0;
+  }
+}
+
+function latestMtimeMs(dirPath) {
+  let latest = 0;
+  try {
+    const entries = readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      const full = resolve(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        latest = Math.max(latest, latestMtimeMs(full));
+      } else {
+        try {
+          const mtimeMs = statSync(full).mtimeMs;
+          if (mtimeMs > latest) latest = mtimeMs;
+        } catch {}
+      }
+    }
+  } catch {}
+  return latest;
+}
+
+const disabledPluginIds = parseDisabledPluginIds();
+
+function seedDevPluginRegistry() {
+  const workspaceRoot = resolve(repoRoot, "..");
+  const devPluginsDir = resolve(repoRoot, ".lvis-dev", "plugins");
+  const registryPath = resolve(devPluginsDir, "registry.json");
+
+  mkdirSync(devPluginsDir, { recursive: true });
+
+  const registry = { version: 1, plugins: [] };
+  const pluginRepos = readdirSync(workspaceRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("lvis-plugin-"));
+
+  for (const repo of pluginRepos) {
+    const pluginRepoDir = resolve(workspaceRoot, repo.name);
+    const manifestPath = resolve(pluginRepoDir, "plugin.json");
+    const packageJsonPath = resolve(pluginRepoDir, "package.json");
+    if (!existsSync(manifestPath) || !existsSync(packageJsonPath)) continue;
+
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+      const pluginId = typeof manifest.id === "string" ? manifest.id : undefined;
+      const packageName = typeof packageJson.name === "string" ? packageJson.name : undefined;
+      const manifestEntry = typeof manifest.entry === "string" ? manifest.entry : undefined;
+      if (!pluginId || !packageName || !manifestEntry) continue;
+
+      const builtEntryPath = resolve(pluginRepoDir, manifestEntry);
+      if (!existsSync(builtEntryPath)) {
+        log("plugins", `skip unbuilt local plugin: ${repo.name}`);
+        continue;
+      }
+
+      const pluginInstallDir = resolve(devPluginsDir, pluginId);
+      mkdirSync(pluginInstallDir, { recursive: true });
+
+      const rewrittenManifest = {
+        ...manifest,
+        entry: normalizeLinkedSubpath(packageName, manifestEntry),
+        ...(Array.isArray(manifest.ui)
+          ? {
+              ui: manifest.ui.map((extension) => ({
+                ...extension,
+                ...(typeof extension.entry === "string"
+                  ? { entry: normalizeLinkedSubpath(packageName, extension.entry) }
+                  : {}),
+                ...(typeof extension.page === "string"
+                  ? { page: normalizeLinkedSubpath(packageName, extension.page) }
+                  : {}),
+              })),
+            }
+          : {}),
+      };
+
+      writeFileSync(
+        resolve(pluginInstallDir, "plugin.json"),
+        `${JSON.stringify(rewrittenManifest, null, 2)}\n`,
+        "utf-8",
+      );
+      registry.plugins.push({
+        id: pluginId,
+        manifestPath: `${pluginId}/plugin.json`,
+        enabled: !disabledPluginIds.has(pluginId),
+        installedBy: manifest.installPolicy === "admin" ? "admin" : "user",
+        ...(manifest.pluginAccess ? { approvedPluginAccess: manifest.pluginAccess } : {}),
+      });
+    } catch (err) {
+      log("plugins", `skip invalid local plugin ${repo.name}: ${err.message}`);
+    }
+  }
+
+  writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf-8");
+  return { devPluginsDir, pluginCount: registry.plugins.length };
 }
 
 function parseMsEnv(name, fallbackMs) {
@@ -76,12 +406,30 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function hashFile(filePath) {
+  try {
+    const buf = readFileSync(filePath);
+    return createHash("sha1").update(buf).digest("hex");
+  } catch {
+    return "";
+  }
+}
+
 // Dev mode wraps the Electron launch via cmd.exe /c "chcp 65001 & electron …"
 // in launchElectron() below so the code-page change shares Electron's console.
 // See scripts/run-electron.mjs for the detailed rationale.
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
+// Profile suffix mixes basename + 8-char hash of the absolute repoRoot.
+// basename alone collides when two checkouts share the directory name
+// (`/work/lvis-app` vs `/home/lvis-app` — not unusual in branch-compare
+// or multi-clone setups), and the kill / prune logic above keys off the
+// resolved userDataDir; a colliding profile would let a sibling
+// launcher's cleanup pass nuke this session's Electron. Keep basename
+// in the visible name so the AppData entry is still humane.
+const repoRootHash = createHash("sha256").update(repoRoot).digest("hex").slice(0, 8);
+const DEV_PROFILE_NAME = process.env.LVIS_DEV_PROFILE_NAME || `Electron-LVIS-Dev-${basename(repoRoot)}-${repoRootHash}`;
 const binDir = resolve(repoRoot, "node_modules/.bin");
 const mainOutput = resolve(repoRoot, "dist/src/main.js");
 const htmlSrc = resolve(repoRoot, "src/index.html");
@@ -98,6 +446,7 @@ let restartTimer = null;
 let shuttingDown = false;
 let restartInFlight = false;
 let shutdownPromise = null;
+let lastMainOutputHash = "";
 
 function log(tag, msg) {
   process.stdout.write(`[dev:${tag}] ${msg}\n`);
@@ -172,6 +521,36 @@ function spawnWatcher(tag, cmd, args, opts = {}) {
   return child;
 }
 
+function runStep(tag, cmd, args, options = {}) {
+  // env / cwd / shell / stdio 모두 caller 가 옵션으로 덮어쓸 수 있는 필드라
+  // 명시적으로 destructure 해서 default 와 머지 순서를 분리한다.
+  // - env: `{ ...process.env, LVIS_DEV: "1", ...callerEnv }` — caller 가
+  //   추가/오버라이드는 가능하지만 process.env / LVIS_DEV 같은 default 는
+  //   잃지 않게.
+  // - cwd: caller 명시값 우선, 없으면 repoRoot.
+  // 이전 구현은 `cwd: options.cwd ?? repoRoot` 다음에 `...options` 를
+  // spread 했는데, rest 안에도 cwd 가 살아있어 default 가 도로 덮어졌고
+  // env 도 통째로 교체되는 두 가지 함정이 있었다.
+  const { env: callerEnv, cwd: callerCwd, ...rest } = options;
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      stdio: "inherit",
+      shell: process.platform === "win32" && cmd.toLowerCase().endsWith(".cmd"),
+      ...rest,
+      cwd: callerCwd ?? repoRoot,
+      env: { ...process.env, LVIS_DEV: "1", ...(callerEnv ?? {}) },
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`${tag} failed (exit=${code ?? "null"})`));
+      }
+    });
+  });
+}
+
 function copyHtml() {
   try {
     mkdirSync(dirname(htmlOut), { recursive: true });
@@ -228,7 +607,9 @@ function launchElectron() {
     delete e.ELECTRON_RUN_AS_NODE;
     return e;
   })();
-  const electronArgs = ensureWindowsUserDataDir(applyWindowsSafeFlags([mainOutput]), launchEnv, "Electron-LVIS-Dev");
+  const electronArgs = ensureWindowsUserDataDir(applyWindowsSafeFlags([mainOutput]), launchEnv, DEV_PROFILE_NAME);
+  const userDataDir = extractUserDataDir(electronArgs);
+  cleanupStaleWindowsDevProcesses(userDataDir);
   log("electron", `launching ${mainOutput}`);
   const env = launchEnv;
   if (process.platform === "win32") {
@@ -244,6 +625,11 @@ function launchElectron() {
       stdio: "inherit",
       env,
     });
+  }
+  if (electronProc?.pid) {
+    setTimeout(() => {
+      pruneDuplicateMainElectronProcesses(userDataDir, electronProc?.pid ?? 0);
+    }, 5000);
   }
   electronProc.on("error", (err) => {
     log("electron", `spawn failed: ${err.message}`);
@@ -331,17 +717,51 @@ async function main() {
 
   if (!skipPlugins) {
     log("plugins", "building plugins (one-shot)");
-    const plugins = spawn("bun", ["run", "prepare:plugins"], {
-      cwd: repoRoot,
-      stdio: "inherit",
-      env: process.env,
-    });
-    plugins.on("error", (err) => {
-      log("plugins", `spawn failed: ${err.message}`);
-      void shutdown(1);
-    });
-    await new Promise((res) => plugins.on("exit", res));
+    const pluginRoots = [
+      "../lvis-plugin-pageindex",
+      "../lvis-plugin-meeting",
+      "../lvis-plugin-email",
+      "../lvis-plugin-calendar",
+      "../lvis-plugin-lge-api",
+      "../lvis-plugin-work-proactive",
+    ].filter((relPath) => !disabledPluginIds.has(relPath.replace("../lvis-plugin-", "")));
+
+    const bunEnv = getBunInstallEnv();
+    const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+
+    try {
+      for (const relPath of pluginRoots) {
+        const pluginDir = resolve(repoRoot, relPath);
+        if (shouldSkipPluginBuild(pluginDir)) {
+          log("plugins", `skip install+build (already prepared): ${relPath}`);
+          continue;
+        }
+        log("plugins", `install+build: ${relPath}`);
+        try {
+          await runStep("plugins:install", "bun", ["install", "--cwd", pluginDir], { env: bunEnv });
+          await runStep("plugins:build", "bun", ["run", "--cwd", pluginDir, "build"], { env: bunEnv });
+        } catch (bunErr) {
+          log("plugins", `bun failed for ${relPath}; fallback to npm (${bunErr.message})`);
+          try {
+            seedPluginSdk(pluginDir);
+            await runStep("plugins:build:bun-retry", "bun", ["run", "--cwd", pluginDir, "build"], { env: bunEnv });
+          } catch (bunRetryErr) {
+            log("plugins", `bun retry failed for ${relPath}; using npm fallback (${bunRetryErr.message})`);
+            await runStep("plugins:install:npm", npmCmd, ["install", "--prefix", pluginDir]);
+            await runStep("plugins:build:npm", npmCmd, ["run", "--prefix", pluginDir, "build"]);
+          }
+        }
+      }
+    } catch (err) {
+      log("plugins", `prepare failed: ${err.message}`);
+      await shutdown(1);
+      return;
+    }
   }
+
+  const { devPluginsDir, pluginCount } = seedDevPluginRegistry();
+  process.env.LVIS_PLUGINS_DIR = devPluginsDir;
+  log("plugins", `seeded dev registry (${pluginCount} plugins) -> ${devPluginsDir}`);
 
   // Initial html copy
   copyHtml();
@@ -362,6 +782,17 @@ async function main() {
     "--format=cjs",
     "--external:electron",
     "--outfile=dist/src/preload.js",
+    "--watch=forever",
+  ]);
+
+  // Plugin webview preload (esbuild --watch, CJS)
+  spawnWatcher("plugin-preload", resolveLocalBin("esbuild"), [
+    "src/plugin-preload.ts",
+    "--bundle",
+    "--platform=node",
+    "--format=cjs",
+    "--external:electron",
+    "--outfile=dist/src/plugin-preload.js",
     "--watch=forever",
   ]);
 
@@ -391,11 +822,17 @@ async function main() {
     return;
   }
 
+  lastMainOutputHash = hashFile(mainOutput);
   launchElectron();
 
   // Watch main output for rebuilds
   try {
-    watch(mainOutput, { persistent: true }, () => scheduleRestart());
+    watch(mainOutput, { persistent: true }, () => {
+      const nextHash = hashFile(mainOutput);
+      if (!nextHash || nextHash === lastMainOutputHash) return;
+      lastMainOutputHash = nextHash;
+      scheduleRestart();
+    });
   } catch (err) {
     log("main", `watch failed: ${err.message}`);
   }
