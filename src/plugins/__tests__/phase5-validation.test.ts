@@ -92,7 +92,7 @@ describe("Phase 5 — runtime validation hardening", () => {
     await writePlugin("p_kw", {
       keywords: [{ keyword: "회의", skillId: "p_kw_missing" }],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -114,7 +114,7 @@ describe("Phase 5 — runtime validation hardening", () => {
         },
       },
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -132,7 +132,7 @@ describe("Phase 5 — runtime validation hardening", () => {
       eventSubscriptions: ["meeting.started"],
       notificationEvents: [{ event: "meeting.ghost" }],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -158,7 +158,7 @@ describe("Phase 5 — runtime validation hardening", () => {
         { id: "c", slot: "sidebar", kind: "embedded-page", title: "C", page: "dist/c.html" },
       ],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -185,7 +185,7 @@ describe("Phase 5 — runtime validation hardening", () => {
         { id: "z", slot: "sidebar", kind: "info-card", title: "Z" },
       ],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const cap = captureErrors();
     try {
       await runtime.load();
@@ -204,7 +204,7 @@ describe("Phase 5 — runtime validation hardening", () => {
     await writePlugin("p_su", {
       startupTools: ["p_su_bad", "p_su_good"],
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     await runtime.startAll();
     expect(runtime.listPluginIds()).toContain("p_su");

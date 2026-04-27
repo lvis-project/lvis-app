@@ -87,6 +87,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
     return new PluginRuntime({
       hostRoot: testDir,
       registryPath,
+      pluginsRoot: installedDir,
       allowManagedUnsigned: opts.allowManagedUnsigned,
       auditLog: (level, message, data) => {
         auditEntries.push({ level, message, data });
