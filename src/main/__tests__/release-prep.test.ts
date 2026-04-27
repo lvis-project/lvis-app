@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createAutoUpdater, type UpdaterLike } from "../auto-updater.js";

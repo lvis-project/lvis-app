@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
 // Patch homedir so AuditLogger writes to a temp dir during tests.
-import { homedir } from "node:os";
 import { vi } from "vitest";
 
 vi.mock("node:os", async (importOriginal) => {

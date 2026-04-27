@@ -13,7 +13,6 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...orig, homedir: vi.fn(orig.homedir) };
 });
 
-import { homedir } from "node:os";
 import { AuditLogger } from "../audit-logger.js";
 
 let testHome: string;
