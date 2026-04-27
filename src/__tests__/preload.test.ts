@@ -56,7 +56,7 @@ describe("preload — plugin webview asset URLs", () => {
     // Anchor on the filename so the assertion catches regressions where the
     // path points to a wrong directory (e.g. dist/main/ instead of dist/src/).
     // __dirname is `src/` at test-time or `dist/src/` in production builds.
-    expect(url as string).toMatch(/\/(dist\/)?src\/plugin-preload\.cjs$/i);
+    expect(url as string).toMatch(/\/(dist\/)?src\/plugin-preload\.js$/i);
   });
 
   it("exposes pluginShellUrl as a file:// string under dist/src/", async () => {
