@@ -41,12 +41,35 @@ console.log("[lvis:plugin-preload] loaded", {
   url: typeof window !== "undefined" ? window.location?.href : "no-window",
 });
 
-contextBridge.exposeInMainWorld("lvisPlugin", {
-  callTool: (name: string, args?: unknown): Promise<unknown> =>
-    ipcRenderer.invoke("lvis:plugin:call-tool", name, args),
+/**
+ * Hide the host's `{ ok, result | error }` envelope from plugin code so
+ * `await bridge.callTool(...)` resolves to the raw tool result and rejects
+ * with an `Error` when the host returned `{ ok: false }`. Plugins should
+ * never have to know about the envelope — without this, a host-side
+ * capability denial or method-not-found becomes a *resolved* Promise
+ * carrying `{ ok: false, error }`, which silently bypasses every
+ * `try/catch` plugins write.
+ *
+ * Forward-compat: a non-envelope reply is passed through verbatim, so
+ * existing plugins that already unwrap defensively (e.g. lvis-plugin-lge-api's
+ * `unwrapBridgeReply`) continue to work unchanged after this lands.
+ */
+function unwrapEnvelope(reply: unknown): unknown {
+  if (reply && typeof reply === "object" && "ok" in reply) {
+    const env = reply as { ok: unknown; result?: unknown; error?: unknown };
+    if (env.ok) return "result" in env ? env.result : undefined;
+    throw new Error(typeof env.error === "string" ? env.error : "plugin-call-failed");
+  }
+  return reply;
+}
 
-  emitEvent: (type: string, data?: unknown): Promise<void> =>
-    ipcRenderer.invoke("lvis:plugin:emit-event", type, data) as Promise<void>,
+contextBridge.exposeInMainWorld("lvisPlugin", {
+  callTool: async (name: string, args?: unknown): Promise<unknown> =>
+    unwrapEnvelope(await ipcRenderer.invoke("lvis:plugin:call-tool", name, args)),
+
+  emitEvent: async (type: string, data?: unknown): Promise<void> => {
+    unwrapEnvelope(await ipcRenderer.invoke("lvis:plugin:emit-event", type, data));
+  },
 
   onEvent: (type: string, handler: (data: unknown) => void): (() => void) => {
     const listener = (_event: unknown, incomingType: string, data: unknown) => {

@@ -84,6 +84,29 @@ describe("plugin-preload bridge", () => {
     );
   });
 
+  it("callTool unwraps { ok: true, result } and resolves to the raw result", async () => {
+    const bridge = exposed.get("lvisPlugin") as { callTool: (name: string, args?: unknown) => Promise<unknown> };
+    mockInvoke.mockResolvedValueOnce({ ok: true, result: { authenticated: true, cookieCount: 7 } });
+
+    const value = await bridge.callTool("status", {});
+    expect(value).toEqual({ authenticated: true, cookieCount: 7 });
+  });
+
+  it("callTool throws Error(message) when host returns { ok: false, error }", async () => {
+    const bridge = exposed.get("lvisPlugin") as { callTool: (name: string, args?: unknown) => Promise<unknown> };
+    mockInvoke.mockResolvedValueOnce({ ok: false, error: "cross-plugin-call-denied" });
+
+    await expect(bridge.callTool("forbidden_tool", {})).rejects.toThrow(/cross-plugin-call-denied/);
+  });
+
+  it("callTool passes through non-envelope replies verbatim (forward compat)", async () => {
+    // Tolerates a future host change that emits raw values directly.
+    const bridge = exposed.get("lvisPlugin") as { callTool: (name: string, args?: unknown) => Promise<unknown> };
+    mockInvoke.mockResolvedValueOnce({ authenticated: true });
+
+    expect(await bridge.callTool("status", {})).toEqual({ authenticated: true });
+  });
+
   it("emitEvent invokes lvis:plugin:emit-event IPC channel without pluginId arg", async () => {
     const bridge = exposed.get("lvisPlugin") as { emitEvent: (type: string, data?: unknown) => Promise<void> };
     mockInvoke.mockResolvedValueOnce({ ok: true });
@@ -95,6 +118,13 @@ describe("plugin-preload bridge", () => {
       "my.custom.event",
       { foo: "bar" },
     );
+  });
+
+  it("emitEvent throws Error(message) when host returns { ok: false, error }", async () => {
+    const bridge = exposed.get("lvisPlugin") as { emitEvent: (type: string, data?: unknown) => Promise<void> };
+    mockInvoke.mockResolvedValueOnce({ ok: false, error: "missing-capability:event-emit" });
+
+    await expect(bridge.emitEvent("forbidden.event", {})).rejects.toThrow(/missing-capability/);
   });
 
   it("getEntryUrl invokes lvis:plugin:get-entry-url and unwraps the success sentinel", async () => {
