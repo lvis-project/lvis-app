@@ -146,7 +146,7 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
 
   it("rejects subscription to a private namespace with warn", async () => {
     await writePlugin("p_priv", ["memory.private.leaked"]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const warns: string[] = [];
@@ -165,7 +165,7 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
 
   it("accepts a known public subscription silently", async () => {
     await writePlugin("p_pub", ["email.new"]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const warns: string[] = [];
@@ -183,7 +183,7 @@ describe("Phase 5 — registerManifestEventSubscriptions namespace gate", () => 
 
   it("allows unknown neutral subscription with a drift warning", async () => {
     await writePlugin("p_neutral", ["custom.thing"]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const warns: string[] = [];
@@ -272,7 +272,7 @@ describe("Phase 5 — capability emit gate", () => {
 
   it("drops email.* emission from a plugin lacking mail-source capability", async () => {
     await writePlugin("p_no_mail", ["worker-client"]); // unrelated cap
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p_no_mail");
@@ -284,7 +284,7 @@ describe("Phase 5 — capability emit gate", () => {
 
   it("passes email.* emission from a plugin declaring mail-source", async () => {
     await writePlugin("p_mail", ["mail-source"]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p_mail");
@@ -296,7 +296,7 @@ describe("Phase 5 — capability emit gate", () => {
 
   it("does not gate events outside namespaced capabilities (e.g. task.*)", async () => {
     await writePlugin("p_task", []);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const { guardedEmit, emitted, warns } = makeEmitGate(runtime, "p_task");

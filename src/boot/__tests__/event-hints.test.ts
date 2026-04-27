@@ -69,7 +69,7 @@ describe("buildManifestEventHints", () => {
 
   it("string form → neutral fallback hint", async () => {
     await writePlugin(installedDir, registryPath, "p_str", ["meeting.ended"]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const hints = buildManifestEventHints(runtime);
@@ -84,7 +84,7 @@ describe("buildManifestEventHints", () => {
     await writePlugin(installedDir, registryPath, "p_obj", [
       { type: "meeting.summary.created", hint: { category: "meeting", priority: "medium", title: "회의 요약" } },
     ]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const hints = buildManifestEventHints(runtime);
@@ -99,7 +99,7 @@ describe("buildManifestEventHints", () => {
     await writePlugin(installedDir, registryPath, "p_nohint", [
       { type: "email.analyzed" },
     ]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const hints = buildManifestEventHints(runtime);
@@ -115,7 +115,7 @@ describe("buildManifestEventHints", () => {
       "email.analyzed",
       { type: "meeting.ended", hint: { category: "meeting", priority: "high", title: "회의 종료" } },
     ]);
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
 
     const hints = buildManifestEventHints(runtime);
