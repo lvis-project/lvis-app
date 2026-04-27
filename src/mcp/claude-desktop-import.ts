@@ -52,13 +52,46 @@ export interface ClaudeDesktopImportResult {
  * Heuristic: an env key is "suspected secret" if its uppercase form
  * contains any of these tokens. The list intentionally errs toward
  * false-positive — better to prompt the user once than silently persist
- * plaintext credentials.
+ * plaintext credentials. Loop #5 security review M-2 expanded the list
+ * to cover the most common foot-guns we saw in real-world MCP configs.
  */
-const SECRET_KEY_PATTERNS = ["KEY", "SECRET", "TOKEN", "PASSWORD", "PASS", "AUTH", "CREDENTIAL"];
+const SECRET_KEY_PATTERNS = [
+  "KEY",
+  "SECRET",
+  "TOKEN",
+  "PASSWORD",
+  "PASS",
+  "AUTH",
+  "CREDENTIAL",
+  "BEARER",
+  "JWT",
+  "COOKIE",
+  "SESSION",
+  "DSN",
+  "PRIVATE",
+  "SIGNATURE",
+  "APIKEY",
+];
+
+/**
+ * Heuristic: a value looks like a secret if it matches one of the
+ * well-known credential formats. Catches cases where the env *name* is
+ * generic (e.g. `MY_SETTING`) but the value is unmistakably a token.
+ */
+const SECRET_VALUE_PATTERNS: RegExp[] = [
+  /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/, // JWT
+  /^(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}$/, // GitHub PAT
+  /^sk-[A-Za-z0-9_-]{20,}$/, // OpenAI / Anthropic-style
+  /^xox[baprs]-[A-Za-z0-9-]{10,}$/, // Slack
+];
 
 function looksLikeSecretKey(key: string): boolean {
   const upper = key.toUpperCase();
   return SECRET_KEY_PATTERNS.some((p) => upper.includes(p));
+}
+
+function looksLikeSecretValue(value: string): boolean {
+  return SECRET_VALUE_PATTERNS.some((p) => p.test(value));
 }
 
 /**
@@ -146,7 +179,10 @@ export function parseClaudeDesktopConfig(raw: string): ClaudeDesktopImportResult
           break;
         }
         cleaned[k] = v;
-        if (looksLikeSecretKey(k) && v.length > 0) {
+        // Flag if EITHER the key name OR the value shape looks like a
+        // secret. The empty-value placeholder convention (`API_KEY: ""`)
+        // is intentionally NOT flagged — see below.
+        if (v.length > 0 && (looksLikeSecretKey(k) || looksLikeSecretValue(v))) {
           suspectedSecretEnvKeys.push(k);
         }
       }

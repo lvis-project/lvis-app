@@ -1052,10 +1052,15 @@ ${input}`;
   });
 
   // ─── #FU259 — MCP marketplace catalog + install ──
-  // Renderer surfaces MCP entries in a dedicated section. Catalog listing
-  // is read-only (sender guard optional); install mutates `mcp-servers.json`
-  // and triggers connect, so it's sender-guarded + audit-logged.
-  ipcMain.handle("lvis:mcp:catalog:list", async () => {
+  // Both handlers are sender-guarded. Even though `:list` is read-only at
+  // the renderer interface, it triggers an authenticated outbound HTTP
+  // call (loop #5 security review M-1) — an unauthorized frame could
+  // amplify outbound traffic carrying the user's marketplace API key.
+  ipcMain.handle("lvis:mcp:catalog:list", async (e) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:mcp:catalog:list", e);
+      return UNAUTHORIZED_FRAME;
+    }
     const all = await pluginMarketplace.list();
     return all.filter((p) => p.pluginType === "mcp");
   });
@@ -1100,11 +1105,28 @@ ${input}`;
   });
 
   // #FU262 — Claude Desktop config import.
-  // Two-phase API: preview (parse only, read-only, sender guard optional)
-  // → apply (mutates mcp-servers.json + connects, sender-guarded + audited).
-  // Splitting them lets the renderer surface conflict resolution + secret
-  // warnings before any state mutation.
-  ipcMain.handle("lvis:mcp:import:claude-desktop:preview", async (_e, raw: string) => {
+  // Two-phase API: preview (parse only) → apply (mutates mcp-servers.json
+  // + connects). Splitting them lets the renderer surface conflict
+  // resolution + secret warnings before any state mutation.
+  //
+  // Both are sender-guarded. Preview was originally exempted as "read-only"
+  // but it accepts attacker-controllable string input and returns parsed
+  // command/args/env back to the renderer, so an unauthorized frame could
+  // exfiltrate filesystem path strings + flagged secret-key names through
+  // crafted payloads (loop #5 security review).
+  ipcMain.handle("lvis:mcp:import:claude-desktop:preview", async (e, raw: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:mcp:import:claude-desktop:preview", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof raw === "string" && raw.length > 1_000_000) {
+      // Defensive cap on parser input to prevent main-process memory abuse
+      // from a 500MB pasted "config".
+      return {
+        entries: [],
+        errors: [{ id: "<root>", reason: "config exceeds 1MB size limit" }],
+      };
+    }
     const { parseClaudeDesktopConfig } = await import("./mcp/claude-desktop-import.js");
     return parseClaudeDesktopConfig(typeof raw === "string" ? raw : "");
   });
@@ -1121,6 +1143,18 @@ ${input}`;
       const { parseClaudeDesktopConfig } = await import("./mcp/claude-desktop-import.js");
       const policy = payload?.conflictPolicy ?? "skip";
       const parsed = parseClaudeDesktopConfig(typeof payload?.raw === "string" ? payload.raw : "");
+      // Dedupe entries by id so a single payload that lists `id: x` twice
+      // doesn't double-account against the conflict tracker (loop #5
+      // code-reviewer HIGH). First occurrence wins; later duplicates of
+      // the same id within one payload are dropped.
+      const seenIds = new Set<string>();
+      const dedupedEntries: typeof parsed.entries = [];
+      for (const entry of parsed.entries) {
+        if (seenIds.has(entry.id)) continue;
+        seenIds.add(entry.id);
+        dedupedEntries.push(entry);
+      }
+
       const existing = await services.mcpManager.getConfigs();
       const existingIds = new Set(existing.map((s) => s.id));
       const results: Array<{
@@ -1129,16 +1163,19 @@ ${input}`;
         reason?: string;
         warning?: string;
       }> = [];
-      for (const entry of parsed.entries) {
-        if (existingIds.has(entry.id)) {
+      for (const entry of dedupedEntries) {
+        const conflictedAtStart = existingIds.has(entry.id);
+        if (conflictedAtStart) {
           if (policy === "skip") {
             results.push({ id: entry.id, action: "skipped-conflict" });
             continue;
           }
           // overwrite: remove then re-add so addConfig's id-uniqueness check
-          // doesn't reject the import.
+          // doesn't reject the import. Update existingIds so the action
+          // labelling below reflects the post-remove state.
           try {
             await services.mcpManager.removeConfig(entry.id);
+            existingIds.delete(entry.id);
           } catch (err) {
             results.push({
               id: entry.id,
@@ -1150,9 +1187,13 @@ ${input}`;
         }
         try {
           const addResult = await services.mcpManager.addConfig(entry.config);
+          // Track the new entry in existingIds so any subsequent duplicate
+          // (in a future payload, not this one — already deduped) sees the
+          // correct conflict state.
+          existingIds.add(entry.id);
           results.push({
             id: entry.id,
-            action: existingIds.has(entry.id) ? "overwritten" : "added",
+            action: conflictedAtStart ? "overwritten" : "added",
             reason: addResult.connected ? undefined : addResult.warning,
             warning: entry.warning,
           });

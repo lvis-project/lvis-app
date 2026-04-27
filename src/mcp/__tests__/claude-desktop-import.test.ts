@@ -80,6 +80,61 @@ describe("parseClaudeDesktopConfig — secret heuristic", () => {
     const result = parseClaudeDesktopConfig(raw);
     expect(result.entries[0].suspectedSecretEnvKeys).toEqual([]);
   });
+
+  it("flags expanded set: BEARER / JWT / COOKIE / SESSION / DSN / PRIVATE / SIGNATURE / APIKEY", () => {
+    const raw = JSON.stringify({
+      mcpServers: {
+        s1: {
+          command: "node",
+          env: {
+            BEARER_HEADER: "abc",
+            MY_JWT: "xyz",
+            COOKIE_VAL: "session=1",
+            SESSION_TOKEN: "s",
+            SENTRY_DSN: "https://abc@sentry.io/123",
+            PRIVATE_KEY: "-----BEGIN",
+            SIGNATURE_PEM: "MIIB",
+            APIKEY: "k",
+          },
+        },
+      },
+    });
+    const result = parseClaudeDesktopConfig(raw);
+    expect(result.entries[0].suspectedSecretEnvKeys.sort()).toEqual([
+      "APIKEY",
+      "BEARER_HEADER",
+      "COOKIE_VAL",
+      "MY_JWT",
+      "PRIVATE_KEY",
+      "SENTRY_DSN",
+      "SESSION_TOKEN",
+      "SIGNATURE_PEM",
+    ]);
+  });
+
+  it("flags by value shape when key name is generic — JWT / GitHub PAT / OpenAI-style / Slack", () => {
+    const raw = JSON.stringify({
+      mcpServers: {
+        s1: {
+          command: "node",
+          env: {
+            CONFIG_A: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc-_def",
+            CONFIG_B: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            CONFIG_C: "sk-abcdefghijklmnopqrstuvwxyz",
+            CONFIG_D: "xoxb-1234567890-abcdefgh",
+            BENIGN: "info",
+          },
+        },
+      },
+    });
+    const result = parseClaudeDesktopConfig(raw);
+    expect(result.entries[0].suspectedSecretEnvKeys.sort()).toEqual([
+      "CONFIG_A",
+      "CONFIG_B",
+      "CONFIG_C",
+      "CONFIG_D",
+    ]);
+  });
 });
 
 describe("parseClaudeDesktopConfig — error paths", () => {
