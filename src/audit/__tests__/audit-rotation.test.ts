@@ -3,16 +3,9 @@
  * concurrent write + rotate race (withFileLock).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import {
-  mkdirSync,
-  writeFileSync,
-  rmSync,
-  existsSync,
-  readdirSync,
-  statSync
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { vi } from "vitest";
 
 vi.mock("node:os", async (importOriginal) => {
@@ -27,7 +20,7 @@ let testHome: string;
 let auditDir: string;
 
 beforeEach(() => {
-  testHome = join(homedir(), ".lvis", "test-tmp", `lvis-audit-rot-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  testHome = mkdtempSync(join(tmpdir(), "lvis-audit-rot-"));
   auditDir = join(testHome, ".lvis", "audit");
   mkdirSync(auditDir, { recursive: true });
   vi.mocked(homedir).mockReturnValue(testHome);

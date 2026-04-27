@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { PluginRuntime } from "../runtime.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
+import { mkdtempSync } from "node:fs";
 
 /**
  * Phase 1.5 F-round §F5: direct unit tests for `PluginRuntime.disable()`.
@@ -16,7 +17,7 @@ describe("PluginRuntime.disable", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = mkdtempSync(join(tmpdir(), "lvis-runtime-"));
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");
@@ -911,7 +912,7 @@ describe("PluginRuntime registry trusted-path", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(homedir(), ".lvis", "test-tmp", `trusted-path-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = mkdtempSync(join(tmpdir(), "trusted-path-"));
     hostRoot = join(testDir, "host");
     userInstalledDir = join(testDir, "user-installs");
     registryPath = join(hostRoot, "plugins", "registry.json");

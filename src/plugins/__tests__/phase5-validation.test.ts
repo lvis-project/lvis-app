@@ -10,10 +10,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../runtime.js";
 import { runManifestStartupTools } from "../../boot/plugins.js";
+import { mkdtempSync } from "node:fs";
 
 describe("Phase 5 — runtime validation hardening", () => {
   let testDir: string;
@@ -21,7 +22,7 @@ describe("Phase 5 — runtime validation hardening", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-p5-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = mkdtempSync(join(tmpdir(), "lvis-p5-"));
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");

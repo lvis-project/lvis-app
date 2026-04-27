@@ -2,9 +2,9 @@
  * AuditLogger.search() + getStats() — filter correctness, date range, pagination.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 
 // Patch homedir so AuditLogger writes to a temp dir during tests.
 import { homedir } from "node:os";
@@ -37,7 +37,7 @@ function writeJsonl(filename: string, entries: AuditEntry[]) {
 }
 
 beforeEach(() => {
-  testHome = join(homedir(), ".lvis", "test-tmp", `lvis-audit-test-${Date.now()}`);
+  testHome = mkdtempSync(join(tmpdir(), "lvis-audit-test-"));
   auditDir = join(testHome, ".lvis", "audit");
   mkdirSync(auditDir, { recursive: true });
   vi.mocked(homedir).mockReturnValue(testHome);
