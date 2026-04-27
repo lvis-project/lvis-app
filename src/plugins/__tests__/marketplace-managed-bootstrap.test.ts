@@ -27,7 +27,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       tmpdir(),
       `lvis-managed-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
-    // Phase 2a: registry.json lives under userInstalledDir (= testDir/plugins
+    // Phase 2a: registry.json lives under pluginsRoot (= testDir/plugins
     // when the helper picks defaults). marketplace.json is the dev mock
     // catalog and lives outside that tree so writes never collide with the
     // installed-plugin registry.

@@ -150,7 +150,7 @@ interface PluginHistoryEntry {
 
 export class PluginMarketplaceService {
   private readonly registryPath: string;
-  private readonly userInstalledDir: string;
+  private readonly pluginsRoot: string;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly fetcher: MarketplaceFetcher;
   /** Sprint 3-B §9.6: per-plugin version cache for rollback. */
@@ -164,8 +164,7 @@ export class PluginMarketplaceService {
   /**
    * S9: base directory for the catalog cache. `null` disables catalog caching
    * (test mock fetcher). Defaults to `paths.cacheRoot/marketplace-catalog`
-   * so the SoT stays under userData (#266 closed the historical homedir()
-   * fallback).
+   * so the SoT stays inside the plugin tree (`~/.lvis/plugins/.cache/`).
    */
   private readonly catalogCacheBase: string | null;
   /**
@@ -182,7 +181,7 @@ export class PluginMarketplaceService {
    * the registry / installed-dir / cache layout, and `fetcher` is required.
    * The pre-Phase-2b `appRoot` argument used by the npm-install branch is
    * gone; the only install path is the signed-zip download under
-   * `paths.userInstalledDir`.
+   * `paths.pluginsRoot`.
    */
   constructor(
     paths: PluginPaths,
@@ -190,7 +189,7 @@ export class PluginMarketplaceService {
     deploymentGuard?: PluginDeploymentGuard,
   ) {
     this.registryPath = paths.registryPath;
-    this.userInstalledDir = paths.userInstalledDir;
+    this.pluginsRoot = paths.pluginsRoot;
     this.cacheRoot = paths.cacheRoot;
     this.deploymentGuard = deploymentGuard;
     this.fetcher = fetcher;
@@ -200,11 +199,11 @@ export class PluginMarketplaceService {
       fetcher instanceof MockMarketplaceFetcher
         ? null
         : resolve(paths.cacheRoot, "marketplace-catalog");
-    // Artifact store owns the same `userInstalledDir` (extract target) +
+    // Artifact store owns the same `pluginsRoot` (extract target) +
     // `cacheRoot` (history + version snapshots). Tarball offline cache
     // also lives under `cacheRoot`, not homedir().
     this.artifactStore = new PluginArtifactStore({
-      installRoot: paths.userInstalledDir,
+      installRoot: paths.pluginsRoot,
       cacheRoot: paths.cacheRoot,
       fetcher,
       publicKeys: getBundledPublicKeys(),
@@ -223,7 +222,8 @@ export class PluginMarketplaceService {
 
   async list(): Promise<MarketplaceListItem[]> {
     // Catalog cache is null when using the test mock fetcher; production
-    // always has a userData-anchored cache base (set in constructor).
+    // always has a cache base under `~/.lvis/plugins/.cache/` (set in
+    // constructor).
     const cacheBase = this.catalogCacheBase;
     const useCache = cacheBase !== null && isOfflineCacheEnabled();
     let catalogPlugins: PluginMarketplaceItem[] | null = null;
@@ -596,9 +596,9 @@ export class PluginMarketplaceService {
         // longer serves the artifact, so the verified-zip download path
         // has nothing to fetch. cacheRoot only persists the manifest
         // (history breadcrumb), not the binary, by design — caching the
-        // binary locally would inflate userData with every install and
-        // would outlive the security yank that a delisting is meant to
-        // enforce. Surface the cause explicitly so settings UI / logs
+        // binary locally would inflate the plugin tree with every install
+        // and would outlive the security yank that a delisting is meant
+        // to enforce. Surface the cause explicitly so settings UI / logs
         // can communicate it instead of a generic "not found".
         throw new Error(
           `Cannot rollback "${pluginId}": plugin is no longer in the marketplace catalog. ` +
@@ -775,7 +775,7 @@ export class PluginMarketplaceService {
     entry: PluginRegistryEntry,
     _remainingEntries: PluginRegistryEntry[],
   ): Promise<void> {
-    // Phase 2-final: every install is a zip-extract under userInstalledDir,
+    // Phase 2-final: every install is a zip-extract under pluginsRoot,
     // so uninstall is a recursive rm of the plugin's directory. The
     // pre-Phase-2 npm-uninstall branch (`isZipInstalled === false`) is
     // gone with the install-side npm path.
@@ -783,7 +783,7 @@ export class PluginMarketplaceService {
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
     const installedManifestDir = dirname(manifestPath);
-    if (this.isWithin(this.userInstalledDir, installedManifestDir)) {
+    if (this.isWithin(this.pluginsRoot, installedManifestDir)) {
       await rm(installedManifestDir, { recursive: true, force: true });
     }
   }

@@ -7,10 +7,9 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
   try {
     raw = await readFile(registryPath, "utf-8");
   } catch (err) {
-    // First-boot path: PR #248 moved the registry from `lvis-app/plugins/`
-    // into the user's `userData/plugins/` directory. On a fresh dev boot
-    // (or a brand-new userData) the file simply doesn't exist yet —
-    // return the empty default so PluginRuntime.startAll can proceed and
+    // First-boot path: registry lives at `~/.lvis/plugins/registry.json`. On
+    // a fresh dev or first-time install the file simply doesn't exist yet
+    // — return the empty default so PluginRuntime.startAll can proceed and
     // the registry will be lazily created by the first install/uninstall.
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { version: 1, plugins: [] };
