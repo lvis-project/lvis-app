@@ -178,8 +178,10 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
         </div>
       )}
       <ScrollArea className="h-full p-4"><div className="space-y-3">
-        {/* Workflow tools (S1+S2): assistant todo panel + skill badges + sub-agents + ask-user. */}
-        <SessionTodoPanel api={workflowApi} />
+        {/* Workflow tools (S1+S2): skill badges + sub-agents + ask-user inline.
+            SessionTodoPanel is intentionally NOT here — it sits above the input
+            cluster (see below the ScrollArea) so it stays visible regardless of
+            chat scroll position. */}
         {loadedSkills.length > 0 && (
           <div className="flex max-w-[85%] flex-wrap gap-2" data-testid="skill-badges-row">
             {loadedSkills.map((s, i) => (
@@ -281,6 +283,12 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           <span>— 곧 자동 압축됩니다.</span>
         </div>
       )}
+      {/* Assistant todo panel — anchored above the input cluster, below the
+          chat scroll area. Stays visible regardless of where the user has
+          scrolled the chat. The panel collapses by default once it has
+          content; in the collapsed state the active item title streams next
+          to the count so the user always sees what step is running. */}
+      <SessionTodoPanel api={workflowApi} />
       <div className="border-t bg-card p-3 space-y-2">
         <div className="flex items-center justify-between gap-3 text-[11px]">
           <div className={`font-mono ${contextColor}`} title="추정 토큰 사용량 (대화 기반)">
