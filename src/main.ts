@@ -44,6 +44,12 @@ if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
   app.disableHardwareAcceleration();
 }
 
+// Windows 10/11 OS notifications require an AppUserModelId — without this,
+// `new Notification(...)` toasts are silently dropped or grouped under the
+// generic "Electron" identity. Issue #260 NotificationService relies on this.
+// Safe to call on all platforms; non-Windows treats it as a no-op.
+app.setAppUserModelId("com.lge.lvis");
+
 // Phase 1 trust-hardening — strip LVIS_DEV* / LVIS_ALLOW_* from process.env in
 // packaged builds before any preload, renderer, or worker inherits it.
 // Without this scrub, a packaged binary launched with LVIS_DEV=1 in the user
@@ -584,7 +590,9 @@ app.on("before-quit", (event) => {
                   ),
                 ),
               ]);
-              await deliverRoutineResult(mainWindow, result);
+              await deliverRoutineResult(mainWindow, result, {
+                notificationService: svc.notificationService,
+              });
             } catch (e) {
               const message = e instanceof Error ? e.message : String(e);
               console.warn("[lvis] before-quit: shutdown routine failed:", message);

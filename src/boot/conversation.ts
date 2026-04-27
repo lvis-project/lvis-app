@@ -22,6 +22,7 @@ import { HookRunner } from "../hooks/hook-runner.js";
 import { loadHooksConfig } from "../hooks/config-loader.js";
 import { ExternalHookExecutor } from "../hooks/external-executor.js";
 import { AuditLogger } from "../audit/audit-logger.js";
+import type { NotificationService } from "../main/notification-service.js";
 
 export function createSystemPromptBuilder(opts: {
   memoryManager: MemoryManager;
@@ -94,11 +95,19 @@ export function createPostTurnHookChain(opts: {
 export async function createApprovalGate(
   mainWindow: BrowserWindow,
   auditLogger: AuditLogger,
+  notificationService?: NotificationService,
 ): Promise<ApprovalGate> {
   // B1: Policy 로드 후 ApprovalGate 생성 — mainWindow.webContents 준비 후
   // §F7: bootAuditLogger 주입 → requested/decided/timeout/send-failed 4 phase 감사
+  // Issue #260: notificationService 주입 → 승인 트리거 시 OS/in-app notification
   const bootPolicy = await loadPolicy();
-  return new ApprovalGate(mainWindow.webContents, bootPolicy, 5 * 60 * 1000, auditLogger);
+  return new ApprovalGate(
+    mainWindow.webContents,
+    bootPolicy,
+    5 * 60 * 1000,
+    auditLogger,
+    notificationService,
+  );
 }
 
 export function createHookRunner(): HookRunner {
@@ -144,6 +153,8 @@ export interface ConversationDeps {
   pluginRuntime: PluginRuntime;
   /** C2(c): per-session SkillOverlay handle, cleared on newConversation(). */
   skillOverlay?: { clear(sessionId: string): void };
+  /** Issue #260: optional notification service for turn-end auto-fire. */
+  notificationService?: NotificationService;
 }
 
 /**
@@ -259,6 +270,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     // Phase 1.5 Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime: deps.pluginRuntime,
     skillOverlay: deps.skillOverlay,
+    notificationService: deps.notificationService,
   });
 }
 

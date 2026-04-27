@@ -15,6 +15,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { WebContents } from "electron";
 import type { PolicyFile } from "./policy-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import type { NotificationService } from "../main/notification-service.js";
 import { isSensitivePath, canonicalizePathForMatch } from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 
@@ -220,6 +221,12 @@ export class ApprovalGate {
   /** §S8: 감사 로거 (optional — 미주입 시 silent) */
   private readonly auditLogger?: AuditLogger;
   /**
+   * Issue #260: optional NotificationService — when supplied, the gate fires
+   * an `approval` system notification at the entry of `requestAndWait` so
+   * the user sees the prompt even if the window is backgrounded.
+   */
+  private readonly notificationService?: NotificationService;
+  /**
    * §D2: Per-instance HMAC secret. 32 random bytes generated at construction
    * time. Never leaves the main process — used only to sign/verify the nonce
    * that rides along with approval requests. A fresh key each boot naturally
@@ -232,10 +239,12 @@ export class ApprovalGate {
     initialPolicy?: PolicyFile,
     timeoutMs = 5 * 60 * 1000,
     auditLogger?: AuditLogger,
+    notificationService?: NotificationService,
   ) {
     this.webContents = webContents;
     this.timeoutMs = timeoutMs;
     this.auditLogger = auditLogger;
+    this.notificationService = notificationService;
     this.currentPolicy = initialPolicy ?? {
       version: 1,
       requireExplicitApproval: true,
@@ -326,6 +335,21 @@ export class ApprovalGate {
       type: "approval",
       input: `[approval:requested] ${fullReq.id} toolName=${fullReq.toolName} category=${fullReq.category} source=${fullReq.source ?? "unknown"}`,
     });
+
+    // Issue #260 — surface a system notification when an approval is about
+    // to block the user. Approval is the most user-visible gate; default to
+    // urgent so the OS toast plays sound even when window is backgrounded.
+    try {
+      this.notificationService?.fire({
+        kind: "approval",
+        title: "승인이 필요합니다",
+        body: `${fullReq.toolName}: ${fullReq.reason}`,
+        contextRef: { approvalId: fullReq.id },
+        urgent: true,
+      });
+    } catch {
+      // notification failure must never block approval flow
+    }
 
     // §D2: mint nonce + HMAC, attach to outgoing request
     const nonce = randomBytes(16).toString("hex");
