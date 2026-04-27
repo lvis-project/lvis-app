@@ -40,9 +40,9 @@ interface CacheRoot {
 }
 
 function cacheRoots(base: string): CacheRoot {
-  // #266 closure — caller must supply an explicit base under PluginPaths.
-  // The historical `homedir() + .lvis/marketplace-cache` default leaked
-  // outside `userData` and is no longer permitted.
+  // Caller must supply an explicit base under PluginPaths.cacheRoot. No
+  // homedir() fallback — every cache file must live inside the plugin
+  // tree's own `.cache/` so disk usage tracks install state.
   return {
     catalogFile: resolve(base, "catalog.json"),
     tarballDir: resolve(base, "tarballs"),

@@ -4,7 +4,7 @@
  * Covers four orthogonal hardening fixes:
  *
  *   1. (CRITICAL §Step 1) `isTrustedRegistryManifestPath` accepts BOTH
- *      hostRoot and userInstalledDir; rejects symlink escape.
+ *      hostRoot and pluginsRoot; rejects symlink escape.
  *   2. (HIGH §Step 2) Unsigned user plugins are fail-closed by default;
  *      `allowUnsignedUserPlugins=true` opt-in restores legacy behaviour.
  *   3. (HIGH §Step 3) `installedBy` recorded on the registry entry is
@@ -50,7 +50,7 @@ function makeAuditSink(): { calls: AuditCall[]; log: (l: "info" | "warn" | "erro
 describe("Phase 1 — plugin trust boundary", () => {
   let testDir: string;
   let hostRoot: string;
-  let userInstalledDir: string;
+  let pluginsRoot: string;
   let registryPath: string;
 
   beforeEach(async () => {
@@ -59,9 +59,9 @@ describe("Phase 1 — plugin trust boundary", () => {
       `lvis-trust-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     hostRoot = join(testDir, "host");
-    userInstalledDir = join(testDir, "userInstalled");
+    pluginsRoot = join(testDir, "userInstalled");
     await mkdir(join(hostRoot, "plugins"), { recursive: true });
-    await mkdir(userInstalledDir, { recursive: true });
+    await mkdir(pluginsRoot, { recursive: true });
     registryPath = join(hostRoot, "plugins", "registry.json");
   });
 
@@ -97,8 +97,24 @@ describe("Phase 1 — plugin trust boundary", () => {
 
   // ───────────────────────────── §Step 1 ─────────────────────────────
 
-  describe("isTrustedRegistryManifestPath dual-root containment", () => {
-    it("accepts a registry manifest path under hostRoot", async () => {
+  describe("isTrustedRegistryManifestPath single-root containment", () => {
+    it("accepts a registry manifest path under pluginsRoot", async () => {
+      const manifestPath = await writePluginAt(
+        join(pluginsRoot, "p-user"),
+        "tb.user",
+      );
+      await writeRegistry([{ id: "tb.user", manifestPath }]);
+
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+      });
+      await runtime.load();
+      expect(runtime.listPluginIds()).toContain("tb.user");
+    });
+
+    it("rejects a registry manifest path under hostRoot (no longer a trust root)", async () => {
       const manifestPath = await writePluginAt(
         join(hostRoot, "plugins", "installed", "p-host"),
         "tb.host",
@@ -108,29 +124,13 @@ describe("Phase 1 — plugin trust boundary", () => {
       const runtime = new PluginRuntime({
         hostRoot,
         registryPath,
-        userInstalledDir,
+        pluginsRoot,
       });
       await runtime.load();
-      expect(runtime.listPluginIds()).toContain("tb.host");
+      expect(runtime.listPluginIds()).not.toContain("tb.host");
     });
 
-    it("accepts a registry manifest path under userInstalledDir (outside hostRoot)", async () => {
-      const manifestPath = await writePluginAt(
-        join(userInstalledDir, "p-user"),
-        "tb.user",
-      );
-      await writeRegistry([{ id: "tb.user", manifestPath }]);
-
-      const runtime = new PluginRuntime({
-        hostRoot,
-        registryPath,
-        userInstalledDir,
-      });
-      await runtime.load();
-      expect(runtime.listPluginIds()).toContain("tb.user");
-    });
-
-    it("rejects a registry manifest path outside both hostRoot and userInstalledDir", async () => {
+    it("rejects a registry manifest path outside pluginsRoot", async () => {
       const manifestPath = await writePluginAt(
         join(testDir, "rogue", "p-rogue"),
         "tb.rogue",
@@ -140,7 +140,7 @@ describe("Phase 1 — plugin trust boundary", () => {
       const runtime = new PluginRuntime({
         hostRoot,
         registryPath,
-        userInstalledDir,
+        pluginsRoot,
       });
       await runtime.load();
       expect(runtime.listPluginIds()).not.toContain("tb.rogue");
@@ -151,16 +151,16 @@ describe("Phase 1 — plugin trust boundary", () => {
     // check via a real on-disk path.
     const symlinkSkip = process.platform === "win32";
     it.skipIf(symlinkSkip)(
-      "rejects a symlink under userInstalledDir that points outside both trust roots",
+      "rejects a symlink under pluginsRoot that points outside the trust root",
       async () => {
         // Real plugin lives at testDir/outside/p-evil/plugin.json — outside
-        // both hostRoot and userInstalledDir.
+        // pluginsRoot.
         const realDir = join(testDir, "outside", "p-evil");
         const realManifest = await writePluginAt(realDir, "tb.evil");
-        // Plant a symlink inside userInstalledDir that points at the real
+        // Plant a symlink inside pluginsRoot that points at the real
         // directory. Without realpath defeat, this would naively pass the
         // containment check.
-        const linkDir = join(userInstalledDir, "p-evil");
+        const linkDir = join(pluginsRoot, "p-evil");
         await symlink(realDir, linkDir, "dir");
         const linkedManifest = join(linkDir, "plugin.json");
         // Sanity check both paths resolve to the same file before runtime.
@@ -170,7 +170,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         const runtime = new PluginRuntime({
           hostRoot,
           registryPath,
-          userInstalledDir,
+          pluginsRoot,
         });
         await runtime.load();
         expect(runtime.listPluginIds()).not.toContain("tb.evil");
@@ -190,7 +190,7 @@ describe("Phase 1 — plugin trust boundary", () => {
 
     it("rejects an unsigned user plugin by default and emits plugin_unsigned_user_rejected", async () => {
       const manifestPath = await writePluginAt(
-        join(userInstalledDir, "p-unsigned"),
+        join(pluginsRoot, "p-unsigned"),
         "tb.unsigned",
         { installPolicy: "user" },
       );
@@ -200,7 +200,7 @@ describe("Phase 1 — plugin trust boundary", () => {
       const runtime = new PluginRuntime({
         hostRoot,
         registryPath,
-        userInstalledDir,
+        pluginsRoot,
         signatureVerifier: new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] }),
         auditLog: audit.log,
       });
@@ -219,7 +219,7 @@ describe("Phase 1 — plugin trust boundary", () => {
 
     it("loads an unsigned user plugin when allowUnsignedUserPlugins=true and emits plugin_unsigned_user_loaded_with_optin", async () => {
       const manifestPath = await writePluginAt(
-        join(userInstalledDir, "p-unsigned-optin"),
+        join(pluginsRoot, "p-unsigned-optin"),
         "tb.unsigned.optin",
         { installPolicy: "user" },
       );
@@ -229,7 +229,7 @@ describe("Phase 1 — plugin trust boundary", () => {
       const runtime = new PluginRuntime({
         hostRoot,
         registryPath,
-        userInstalledDir,
+        pluginsRoot,
         allowUnsignedUserPlugins: true,
         signatureVerifier: new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] }),
         auditLog: audit.log,
@@ -249,11 +249,11 @@ describe("Phase 1 — plugin trust boundary", () => {
 
   describe("installedBy authoritative over manifest installPolicy", () => {
     it("rejects user uninstall when registry installedBy=admin even if manifest installPolicy=user (tampered)", async () => {
-      // Plugin physically lives under userInstalledDir but the manifest is
+      // Plugin physically lives under pluginsRoot but the manifest is
       // stamped `installPolicy: "user"` (the tamper). The registry was
       // recorded with installedBy="admin" at install time — that record is
       // authoritative.
-      const userDir = join(userInstalledDir, "p-tampered");
+      const userDir = join(pluginsRoot, "p-tampered");
       const manifestPath = await writePluginAt(userDir, "tb.tampered", {
         installPolicy: "user",
       });
@@ -263,7 +263,7 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       const guard = new PluginDeploymentGuard({
         registryPath,
-        userInstalledDir,
+        pluginsRoot,
       });
       const result = await guard.canUninstall("tb.tampered", "user");
 
@@ -274,7 +274,7 @@ describe("Phase 1 — plugin trust boundary", () => {
     it("falls back to manifest installPolicy when registry has no installedBy (legacy data)", async () => {
       // Legacy entry with no `installedBy` recorded — guard must not break;
       // the manifest field is the only signal so it's used.
-      const userDir = join(userInstalledDir, "p-legacy");
+      const userDir = join(pluginsRoot, "p-legacy");
       const manifestPath = await writePluginAt(userDir, "tb.legacy", {
         installPolicy: "admin",
       });
@@ -282,7 +282,7 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       const guard = new PluginDeploymentGuard({
         registryPath,
-        userInstalledDir,
+        pluginsRoot,
       });
       const result = await guard.canUninstall("tb.legacy", "user");
 

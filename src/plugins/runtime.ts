@@ -146,18 +146,14 @@ export interface PluginRuntimeOptions {
   /**
    * Trust root for registry-recorded manifest paths.
    *
-   * Phase 2a anchors all installed plugins under
-   * `app.getPath('userData')/plugins/` (resolved by `resolvePluginPaths`),
-   * so production callers always supply this. A registry entry is trusted
-   * iff its `realpathSync()` is contained under `realpathSync(this)`. The
-   * hostRoot containment fallback in {@link PluginRuntime} is retained as
-   * defense-in-depth for legacy entries that pre-date Phase 2-final, but
-   * is dead in production.
+   * Anchored at `~/.lvis/plugins/` (resolved by `resolvePluginPaths`), so
+   * production callers always supply this. A registry entry is trusted iff
+   * its `realpathSync()` is contained under `realpathSync(this)`.
    *
    * Optional only because some unit tests construct PluginRuntime with a
    * `manifestPaths`-only seed that never touches `registryPath`.
    */
-  userInstalledDir?: string;
+  pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** 플러그인별 HostApi를 생성하는 팩토리 — boot.ts에서 주입 */
   createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
@@ -191,7 +187,7 @@ export class PluginRuntime {
   private readonly hostRoot: string;
   private readonly manifestPaths: string[];
   private readonly registryPath?: string;
-  private readonly userInstalledDir?: string;
+  private readonly pluginsRoot?: string;
   private readonly allowUnsignedUserPlugins: boolean;
   private configOverrides: Record<string, Record<string, unknown>>;
   private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
@@ -223,8 +219,8 @@ export class PluginRuntime {
     this.hostRoot = resolve(options.hostRoot);
     this.manifestPaths = (options.manifestPaths ?? []).map((path) => resolve(path));
     this.registryPath = options.registryPath ? resolve(options.registryPath) : undefined;
-    this.userInstalledDir = options.userInstalledDir
-      ? resolve(options.userInstalledDir)
+    this.pluginsRoot = options.pluginsRoot
+      ? resolve(options.pluginsRoot)
       : undefined;
     this.allowUnsignedUserPlugins = options.allowUnsignedUserPlugins === true;
     this.configOverrides = options.configOverrides ?? {};
@@ -1330,16 +1326,14 @@ export class PluginRuntime {
    * Trust-root containment check for registry-recorded manifest paths.
    *
    * A registry entry's manifestPath is trusted iff its `realpathSync()`
-   * (symlinks resolved) is contained under `realpathSync(userInstalledDir)`.
-   * `hostRoot` is also accepted as defense-in-depth for entries that
-   * pre-date Phase 2-final (the old `<appRoot>/plugins/installed/` layout);
-   * Phase 2c migration rewrites those into the userInstalledDir tree on
-   * boot, so production callers should never observe a hostRoot match.
+   * (symlinks resolved) is contained under `realpathSync(pluginsRoot)`.
+   * Single source of truth — every install lives at
+   * `<pluginsRoot>/<id>/plugin.json`, so the trust root is one path.
    *
    * Why the realpath + path.relative shape:
    *   1. Symlink defeat — without realpath, an attacker who controls HOME
    *      could plant `~/.lvis/plugins/foo -> /some/sensitive/dir` and a
-   *      registry entry under `userInstalledDir` would naively pass.
+   *      registry entry under `pluginsRoot` would naively pass.
    *   2. `path.relative` instead of `startsWith` — the prefix variant has
    *      trailing-separator pitfalls (`/foo` would falsely match `/foobar`).
    *   3. Roots realpath-resolved — keeps the check symmetric so a root
@@ -1348,36 +1342,23 @@ export class PluginRuntime {
    *
    * Failures (manifestPath missing, realpath EACCES, etc.) are REJECTED
    * rather than allowed-by-default: a missing or unreadable file is not a
-   * path the host should `import()`.
+   * path the host should `import()`. pluginsRoot itself is mkdir'd at boot
+   * so realpath(pluginsRoot) succeeds even on first run with no installs.
    */
   private isTrustedRegistryManifestPath(
     manifestPath: string,
-    hostRoot: string,
-    userInstalledDir?: string,
+    pluginsRoot: string,
   ): boolean {
     if (!isAbsolute(manifestPath)) return true;
     let realManifest: string;
-    let realHost: string;
+    let realRoot: string;
     try {
       realManifest = realpathSync(manifestPath);
-      realHost = realpathSync(hostRoot);
+      realRoot = realpathSync(pluginsRoot);
     } catch {
       return false;
     }
-    if (this.isPathContained(realHost, realManifest)) return true;
-    if (userInstalledDir) {
-      let realUser: string;
-      try {
-        realUser = realpathSync(userInstalledDir);
-      } catch {
-        // userInstalledDir doesn't exist yet (first-run before any user
-        // plugin is installed). Treat as "no second trust root" rather than
-        // a hard reject — the hostRoot path above already gave us a chance.
-        return false;
-      }
-      if (this.isPathContained(realUser, realManifest)) return true;
-    }
-    return false;
+    return this.isPathContained(realRoot, realManifest);
   }
 
   /**
@@ -1409,7 +1390,7 @@ export class PluginRuntime {
         const manifestPath = isAbsolute(entry.manifestPath)
           ? entry.manifestPath
           : resolve(dirname(this.registryPath!), entry.manifestPath);
-        if (!this.isTrustedRegistryManifestPath(manifestPath, this.hostRoot, this.userInstalledDir)) {
+        if (!this.pluginsRoot || !this.isTrustedRegistryManifestPath(manifestPath, this.pluginsRoot)) {
           console.warn(`[plugin-runtime] ignoring untrusted registry manifest path for ${entry.id}: ${manifestPath}`);
           return [];
         }
