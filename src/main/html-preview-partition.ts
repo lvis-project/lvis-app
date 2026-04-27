@@ -93,9 +93,9 @@ export function installPluginPartitionPolicy(partitionName: string): void {
   // alone is silently ignored when webpreferences="sandbox=yes". Electron
   // requires the preload to be registered on the partition's Session before
   // the webview begins loading. At runtime __dirname is `dist/src/main/`,
-  // so resolving "../plugin-preload.js" yields `dist/src/plugin-preload.js`,
+  // so resolving "../plugin-preload.cjs" yields `dist/src/plugin-preload.cjs`,
   // a sibling of the host preload.js.
-  const preloadPath = resolve(__dirname, "..", "plugin-preload.js");
+  const preloadPath = resolve(__dirname, "..", "plugin-preload.cjs");
   ses.setPreloads([preloadPath]);
 
   ses.webRequest.onBeforeRequest((details, callback) => {
