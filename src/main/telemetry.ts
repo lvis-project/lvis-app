@@ -12,14 +12,15 @@ import type { TelemetrySettings } from "../data/settings-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 
 /**
- * Default host allowlist for the telemetry endpoint. Can be overridden via
- * the LVIS_TELEMETRY_ALLOWLIST env var (comma-separated hostnames).
+ * Default host allowlist for the telemetry endpoint. Production deployments
+ * MUST set `LVIS_TELEMETRY_ALLOWLIST` env (comma-separated hostnames) — the
+ * corp telemetry host name is intentionally NOT hardcoded so the binary can
+ * ship to any environment without leaking the operator's domain.
  *
- * `localhost` is only honored in non-packaged (dev) builds; isPackaged check
- * in validateEndpoint() rejects it when app.isPackaged === true.
+ * `localhost` is only honored in non-packaged (dev) builds; the isPackaged
+ * check in validateEndpoint() rejects it when app.isPackaged === true.
  */
 export const DEFAULT_TELEMETRY_ALLOWLIST: readonly string[] = [
-  "telemetry.lge.com",
   "localhost",
 ];
 
