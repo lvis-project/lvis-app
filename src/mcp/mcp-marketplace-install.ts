@@ -37,7 +37,7 @@ export interface InstallMcpResult {
 
 export interface InstallMcpOptions {
   fetcher: MarketplaceFetcher;
-  /** Pre-constructed store rooted at `userData/mcp-servers/`. */
+  /** Pre-constructed store rooted at `~/.lvis/mcp/`. */
   store: PluginArtifactStore;
   onProgress?: (event: InstallerProgressEvent) => void;
   /** Optional substitution overrides — see {@link substituteRuntimeTokens}. */
