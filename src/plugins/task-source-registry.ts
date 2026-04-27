@@ -4,11 +4,6 @@
  * Plugins declare their category labels at load time via HostApi.addTask.
  * Legacy closed-union values (email/meeting/calendar/teams/manual) are seeded
  * as "legacy" entries so existing DB records continue to display correctly.
- *
- * @deprecated Folding into `lvis-plugin-tasks` (Phase 0 — boundary declaration).
- * Once tasks live in a dedicated plugin, source-category bookkeeping becomes
- * an internal plugin concern; this host-side registry will be removed in
- * Phase 2. See the tasks-plugin-split migration plan.
  */
 
 export type TaskSourceOrigin = "host-default" | "legacy" | "plugin";
