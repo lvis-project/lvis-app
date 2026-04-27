@@ -8,10 +8,22 @@ import type { PersistentItem, StatusBarSeverity, ToastItem } from "../hooks/use-
  * Component is intentionally presentational — all state and producer
  * wiring lives in `useStatusBar`. Keep it under ~24px of vertical space
  * to match iTerm / VS Code / Windows Terminal proportions.
+ *
+ * Issue #260 — toasts originating from the notification system carry a
+ * `notification` meta. When provided, `onToastClick` fires on click; the
+ * caller (App.tsx) wires this to `notifyClick` IPC and `removeToast`. Other
+ * toast producers (install progress, lifecycle results) leave the meta
+ * undefined and their toasts remain non-clickable cosmetic spans.
  */
 export interface StatusBarProps {
   persistent: PersistentItem[];
   toasts: ToastItem[];
+  /**
+   * Click handler invoked when a toast that has `notification` metadata is
+   * clicked. The handler receives the full ToastItem so callers can dispatch
+   * the IPC call and dismiss the toast in a single pass.
+   */
+  onToastClick?: (toast: ToastItem) => void;
 }
 
 const SEVERITY_DOT: Record<StatusBarSeverity, string> = {
@@ -29,7 +41,7 @@ const SEVERITY_TEXT: Record<StatusBarSeverity, string> = {
 };
 
 export function StatusBar(props: StatusBarProps) {
-  const { persistent, toasts } = props;
+  const { persistent, toasts, onToastClick } = props;
 
   return (
     <footer
@@ -57,18 +69,35 @@ export function StatusBar(props: StatusBarProps) {
         )}
       </div>
       <div className="flex min-w-0 items-center gap-3 truncate">
-        {toasts.slice(-3).map((toast) => (
-          <span
-            key={toast.id}
-            className={`flex min-w-0 items-center gap-1.5 truncate ${SEVERITY_TEXT[toast.severity]}`}
-          >
+        {toasts.slice(-3).map((toast) => {
+          const clickable = toast.notification !== undefined && typeof onToastClick === "function";
+          const baseClass = `flex min-w-0 items-center gap-1.5 truncate ${SEVERITY_TEXT[toast.severity]}`;
+          const dot = (
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${SEVERITY_DOT[toast.severity]}`}
               aria-hidden="true"
             />
-            <span className="truncate">{toast.message}</span>
-          </span>
-        ))}
+          );
+          if (clickable) {
+            return (
+              <button
+                key={toast.id}
+                type="button"
+                onClick={() => onToastClick?.(toast)}
+                className={`${baseClass} cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring`}
+              >
+                {dot}
+                <span className="truncate">{toast.message}</span>
+              </button>
+            );
+          }
+          return (
+            <span key={toast.id} className={baseClass}>
+              {dot}
+              <span className="truncate">{toast.message}</span>
+            </span>
+          );
+        })}
       </div>
     </footer>
   );
