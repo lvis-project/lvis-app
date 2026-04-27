@@ -13,6 +13,7 @@ import type { LvisApi } from "../../types.js";
 
 function makeApi() {
   let cb: ((status: Parameters<LvisApi["onBootstrapStatus"]>[0] extends (s: infer S) => void ? S : never) => void) | null = null;
+  const retryBootstrap = vi.fn().mockResolvedValue({ ok: true });
   const api = {
     onBootstrapStatus: vi.fn((handler: typeof cb) => {
       cb = handler;
@@ -20,9 +21,11 @@ function makeApi() {
         cb = null;
       };
     }),
+    retryBootstrap,
   } as unknown as LvisApi;
   return {
     api,
+    retryBootstrap,
     emit: (s: Parameters<NonNullable<typeof cb>>[0]) => cb?.(s),
   };
 }
@@ -77,5 +80,33 @@ describe("useBootstrapStatus", () => {
     expect(result.current.status).not.toBeNull();
     act(() => result.current.dismiss());
     expect(result.current.status).toBeNull();
+  });
+
+  it("retry calls api.retryBootstrap and lets host status events drive updates", async () => {
+    const { api, retryBootstrap, emit } = makeApi();
+    const { result } = renderHook(() => useBootstrapStatus(api));
+    act(() => emit({ phase: "error", message: "catalog down" }));
+    expect(result.current.status).toMatchObject({ phase: "error" });
+
+    await act(async () => {
+      await result.current.retry();
+    });
+    expect(retryBootstrap).toHaveBeenCalledTimes(1);
+    // The host re-emits the lifecycle around `runManagedBootstrap`. Hook must
+    // not synthesise its own state — it stays on the last received event
+    // until the next emit lands.
+    expect(result.current.status).toMatchObject({ phase: "error" });
+
+    act(() => emit({ phase: "complete", installed: ["calendar"], failed: [] }));
+    expect(result.current.status).toMatchObject({ phase: "complete", installed: ["calendar"] });
+  });
+
+  it("retry swallows api errors so the banner never throws", async () => {
+    const { api, retryBootstrap } = makeApi();
+    retryBootstrap.mockRejectedValueOnce(new Error("ipc closed"));
+    const { result } = renderHook(() => useBootstrapStatus(api));
+    await act(async () => {
+      await expect(result.current.retry()).resolves.toBeUndefined();
+    });
   });
 });
