@@ -21,6 +21,9 @@ const mockRemoveListener = vi.fn();
 // bundles them as `require("electron").contextBridge` directly — no
 // `__toESM` wrapper, no `.default` indirection. The mock therefore exposes
 // `contextBridge` and `ipcRenderer` as named exports.
+// Named exports only — no `default` wrapper. A regression to the old
+// `import electron from "electron"` default-import pattern will fail here
+// because the mock no longer supplies a `.default` object.
 vi.mock("electron", () => {
   const contextBridge = {
     exposeInMainWorld: (key: string, value: unknown) => {
@@ -35,7 +38,6 @@ vi.mock("electron", () => {
   return {
     contextBridge,
     ipcRenderer,
-    default: { contextBridge, ipcRenderer },
   };
 });
 

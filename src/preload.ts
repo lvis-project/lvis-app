@@ -1,10 +1,13 @@
-import electron from "electron";
+// Named imports — esbuild bundles these as direct property access on the CJS
+// module (no `__toESM` wrapper, no `.default` indirection). Aligned with
+// plugin-preload.ts for the same reason: Electron 41 sandboxed webview preload
+// contexts fail silently when the bundled output goes through
+// `__toESM(require("electron"), 1).default.contextBridge`.
+import { contextBridge, ipcRenderer } from "electron";
 import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { ScheduleAgentId, ScheduleRoutineSchedule } from "./routines/schedule.js";
-
-const { contextBridge, ipcRenderer } = electron;
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location

@@ -31,13 +31,16 @@
 // undefined while the preload appeared to have executed cleanly.
 import { contextBridge, ipcRenderer } from "electron";
 
-// Intentional diagnostic log — surfaces in the plugin webview's DevTools
-// console at preload boot. If `[lvis:plugin-preload] loaded` is missing, the
-// preload script never ran (URL wrong, sandbox isolation, etc.). Cheap, safe,
-// and a high-value leave-behind for next regression triage.
-console.log("[lvis:plugin-preload] loaded", {
-  url: typeof window !== "undefined" ? window.location?.href : "no-window",
-});
+// Diagnostic probe — gated behind LVIS_DEV=1 (same convention as dev-flags.ts)
+// to avoid console noise in production. Surfaces in the plugin webview's
+// DevTools console at preload boot. If `[lvis:plugin-preload] loaded` is
+// missing under LVIS_DEV=1, the preload script never ran (URL wrong, sandbox
+// isolation, etc.). Cheap, safe, and a high-value leave-behind for triage.
+if (process.env.LVIS_DEV === "1") {
+  console.log("[lvis:plugin-preload] loaded", {
+    url: typeof window !== "undefined" ? window.location?.href : "no-window",
+  });
+}
 
 contextBridge.exposeInMainWorld("lvisPlugin", {
   callTool: (name: string, args?: unknown): Promise<unknown> =>

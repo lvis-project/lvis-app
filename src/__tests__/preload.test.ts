@@ -13,18 +13,19 @@ const mockInvoke = vi.fn();
 const mockOn = vi.fn();
 const mockRemoveListener = vi.fn();
 
+// Named exports only — mirrors the named-import shape in preload.ts.
+// A regression to `import electron from "electron"` will fail here because
+// the mock no longer supplies a `.default` object.
 vi.mock("electron", () => ({
-  default: {
-    contextBridge: {
-      exposeInMainWorld: vi.fn((key: string, value: unknown) => {
-        exposed.set(key, value);
-      }),
-    },
-    ipcRenderer: {
-      invoke: mockInvoke,
-      on: mockOn,
-      removeListener: mockRemoveListener,
-    },
+  contextBridge: {
+    exposeInMainWorld: vi.fn((key: string, value: unknown) => {
+      exposed.set(key, value);
+    }),
+  },
+  ipcRenderer: {
+    invoke: mockInvoke,
+    on: mockOn,
+    removeListener: mockRemoveListener,
   },
 }));
 
@@ -52,10 +53,10 @@ describe("preload — plugin webview asset URLs", () => {
 
     expect(typeof url).toBe("string");
     expect(url as string).toMatch(/^file:\/\//);
-    expect(url as string).toContain("plugin-preload.js");
-    // __dirname of preload.ts is `src/` at test-time (ts-source) or
-    // `dist/src/` in production. Either path segment is acceptable.
-    expect((url as string).toLowerCase()).toMatch(/\/src\//);
+    // Anchor on the filename so the assertion catches regressions where the
+    // path points to a wrong directory (e.g. dist/main/ instead of dist/src/).
+    // __dirname is `src/` at test-time or `dist/src/` in production builds.
+    expect(url as string).toMatch(/\/(dist\/)?src\/plugin-preload\.js$/i);
   });
 
   it("exposes pluginShellUrl as a file:// string under dist/src/", async () => {
@@ -64,8 +65,7 @@ describe("preload — plugin webview asset URLs", () => {
 
     expect(typeof url).toBe("string");
     expect(url as string).toMatch(/^file:\/\//);
-    expect(url as string).toContain("plugin-ui-shell.html");
-    expect((url as string).toLowerCase()).toMatch(/\/src\//);
+    expect(url as string).toMatch(/\/plugin-ui-shell\.html$/i);
   });
 
   it("plugin asset URLs are static strings, not functions", async () => {

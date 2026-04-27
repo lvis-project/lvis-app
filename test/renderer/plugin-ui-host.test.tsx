@@ -67,6 +67,9 @@ describe("PluginUiHostView — deterministic webview asset URLs", () => {
 
     const container = mountHost(VIEW);
 
+    // querySelector("webview") works in JSDOM because Electron's <webview> is
+    // just a custom element name; these tests assert JSX shape only, not actual
+    // Electron webview behavior (preload execution, IPC wiring, etc.).
     const webview = container.querySelector("webview");
     expect(webview).not.toBeNull();
     expect(webview?.getAttribute("src")).toBe(SHELL_URL);
