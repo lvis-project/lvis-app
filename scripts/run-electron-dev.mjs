@@ -67,6 +67,17 @@ function escapePowerShellSingleQuoted(value) {
 
 function cleanupStaleWindowsDevProcesses(userDataDir) {
   if (process.platform !== "win32") return;
+  // Escape hatch — devs running multiple parallel `npm run dev` sessions
+  // (e.g. branch comparison, side-by-side profiling) can opt out so the
+  // sibling launcher / Electron isn't culled when the second invocation
+  // boots. Default behaviour is unchanged.
+  if (
+    process.env.LVIS_DEV_NO_CLEANUP === "1" ||
+    process.env.LVIS_DEV_NO_CLEANUP === "true"
+  ) {
+    log("electron", "stale process cleanup skipped (LVIS_DEV_NO_CLEANUP)");
+    return;
+  }
   const normalizedUserDataDir = String(userDataDir || "").trim();
   const pageIndexWorkspace = resolve(repoRoot, ".pageindex-workspace");
   const launcherScriptPath = resolve(repoRoot, "scripts", "run-electron-dev.mjs");
@@ -83,14 +94,21 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
     `$launcherScriptNeedle = '${escapePowerShellSingleQuoted(launcherScriptNeedle)}'`,
     `$mainEntryPath = '${escapePowerShellSingleQuoted(mainEntryPath)}'`,
     "$killed = 0",
+    "$killedPids = @()",
+    // Filter Electron processes by the resolved userDataDir path (full
+    // path match, not just the `Electron-LVIS-Dev` substring) so a
+    // sibling repo whose profile starts with the same prefix isn't
+    // culled. The hash-suffixed profile name also makes this disjoint
+    // by construction, but pinning to the path is the load-bearing
+    // guarantee.
     "$staleLaunchers = @(Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | Where-Object { $_.ProcessId -ne $currentPid -and ( $_.CommandLine -like \"*$launcherScriptPath*\" -or $_.CommandLine -like \"*$launcherScriptNeedle*\" ) })",
     "foreach ($launcher in $staleLaunchers) {",
     "  taskkill /PID $launcher.ProcessId /T /F | Out-Null",
-    "  $killed += 1",
+    "  $killedPids += \"node:$($launcher.ProcessId)\"",
     "}",
     "$targets = @()",
     "if ($userDataDir.Length -gt 0) {",
-    "  $targets += Get-CimInstance Win32_Process -Filter \"Name = 'electron.exe'\" | Where-Object { $_.CommandLine -like \"*$mainEntryPath*\" -and $_.CommandLine -like \"*Electron-LVIS-Dev*\" }",
+    "  $targets += Get-CimInstance Win32_Process -Filter \"Name = 'electron.exe'\" | Where-Object { $_.CommandLine -like \"*$mainEntryPath*\" -and $_.CommandLine -like \"*$userDataDir*\" }",
     "}",
     "if ($pageIndexWorkspace.Length -gt 0) {",
     "  $targets += Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*pageindex_worker.py*' -and $_.CommandLine -like \"*$pageIndexWorkspace*\" }",
@@ -98,11 +116,11 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
     "$targets = @($targets | Group-Object ProcessId | ForEach-Object { $_.Group[0] })",
     "foreach ($target in $targets) {",
     "  Stop-Process -Id $target.ProcessId -Force -ErrorAction SilentlyContinue",
-    "  $killed += 1",
+    "  $killedPids += \"$($target.Name):$($target.ProcessId)\"",
     "}",
     "Remove-Item -LiteralPath (Join-Path $userDataDir 'lvis-tasks.db-wal') -Force -ErrorAction SilentlyContinue",
     "Remove-Item -LiteralPath (Join-Path $userDataDir 'lvis-tasks.db-shm') -Force -ErrorAction SilentlyContinue",
-    "Write-Output (\"killed=\" + $killed)",
+    "Write-Output (\"killed=\" + $killedPids.Count + \" pids=\" + ($killedPids -join ','))",
   ].join("; ");
 
   try {
@@ -112,7 +130,10 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
     const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-    if (output && output !== "killed=0") {
+    // Skip the noise when nothing was killed; otherwise log the
+    // PID:name list so a dev who notices a sibling session vanish
+    // can attribute it.
+    if (output && !/^killed=0\b/.test(output)) {
       log("electron", `cleaned stale dev processes (${output})`);
     }
   } catch (err) {
@@ -132,8 +153,12 @@ function pruneDuplicateMainElectronProcesses(userDataDir, keepPid) {
     `$userDataDir = '${escapePowerShellSingleQuoted(normalizedUserDataDir)}'`,
     `$mainEntryPath = '${escapePowerShellSingleQuoted(mainOutput)}'`,
     "$targets = @(Get-CimInstance Win32_Process -Filter \"Name = 'electron.exe'\" | Where-Object { $_.ProcessId -ne $keepPid -and $_.CommandLine -like \"*$mainEntryPath*\" -and $_.CommandLine -like \"*$userDataDir*\" })",
-    "foreach ($target in $targets) { taskkill /PID $target.ProcessId /T /F | Out-Null }",
-    "Write-Output (\"pruned=\" + $targets.Count)",
+    "$prunedPids = @()",
+    "foreach ($target in $targets) {",
+    "  taskkill /PID $target.ProcessId /T /F | Out-Null",
+    "  $prunedPids += $target.ProcessId",
+    "}",
+    "Write-Output (\"pruned=\" + $prunedPids.Count + \" pids=\" + ($prunedPids -join ','))",
   ].join("; ");
 
   try {
@@ -143,7 +168,7 @@ function pruneDuplicateMainElectronProcesses(userDataDir, keepPid) {
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
     const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-    if (output && output !== "pruned=0") {
+    if (output && !/^pruned=0\b/.test(output)) {
       log("electron", `pruned duplicate electron main instances (${output})`);
     }
   } catch (err) {
@@ -380,7 +405,15 @@ function hashFile(filePath) {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
-const DEV_PROFILE_NAME = process.env.LVIS_DEV_PROFILE_NAME || `Electron-LVIS-Dev-${basename(repoRoot)}`;
+// Profile suffix mixes basename + 8-char hash of the absolute repoRoot.
+// basename alone collides when two checkouts share the directory name
+// (`/work/lvis-app` vs `/home/lvis-app` — not unusual in branch-compare
+// or multi-clone setups), and the kill / prune logic above keys off the
+// resolved userDataDir; a colliding profile would let a sibling
+// launcher's cleanup pass nuke this session's Electron. Keep basename
+// in the visible name so the AppData entry is still humane.
+const repoRootHash = createHash("sha256").update(repoRoot).digest("hex").slice(0, 8);
+const DEV_PROFILE_NAME = process.env.LVIS_DEV_PROFILE_NAME || `Electron-LVIS-Dev-${basename(repoRoot)}-${repoRootHash}`;
 const binDir = resolve(repoRoot, "node_modules/.bin");
 const mainOutput = resolve(repoRoot, "dist/src/main.js");
 const htmlSrc = resolve(repoRoot, "src/index.html");
