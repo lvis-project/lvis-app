@@ -555,11 +555,20 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
   if (partial.vendors) {
     for (const v of LLM_VENDORS) {
       const incoming = partial.vendors[v];
+      // Spread carries explicit `undefined` keys through (e.g. clearing `seed`).
+      // Omitting a key from the patch leaves the previous value intact —
+      // omit ≠ clear by design.
       if (incoming) vendors[v] = { ...vendors[v], ...incoming };
     }
   }
+  // Coerce stale on-disk `provider` (e.g. removed vendor "lgenie") to the
+  // base provider — `vendors[provider]` would otherwise be undefined and
+  // crash refreshProvider/stream-collector at first turn.
+  const providerValid =
+    partial.provider !== undefined &&
+    (LLM_VENDORS as readonly string[]).includes(partial.provider);
   return {
-    provider: partial.provider ?? base.provider,
+    provider: providerValid ? (partial.provider as LLMVendor) : base.provider,
     vendors,
     streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
     fallbackChain: partial.fallbackChain ?? base.fallbackChain,
