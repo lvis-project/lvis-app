@@ -144,14 +144,18 @@ export interface PluginRuntimeOptions {
   manifestPaths?: string[];
   registryPath?: string;
   /**
-   * Phase 1 §Step 1 — second trust root for registry-recorded manifest paths.
+   * Trust root for registry-recorded manifest paths.
    *
-   * User-installed plugins write absolute manifest paths into `registry.json`
-   * because `installedDir` lives outside `appRoot` (e.g. `~/.lvis/plugins/`
-   * or `app.getPath('userData')/plugins/`). Without this option, every such
-   * entry was rejected at boot as "untrusted manifest path". A registry
-   * entry is trusted iff its realpath is contained under `hostRoot` OR
-   * (when this option is set) under `userInstalledDir`.
+   * Phase 2a anchors all installed plugins under
+   * `app.getPath('userData')/plugins/` (resolved by `resolvePluginPaths`),
+   * so production callers always supply this. A registry entry is trusted
+   * iff its `realpathSync()` is contained under `realpathSync(this)`. The
+   * hostRoot containment fallback in {@link PluginRuntime} is retained as
+   * defense-in-depth for legacy entries that pre-date Phase 2-final, but
+   * is dead in production.
+   *
+   * Optional only because some unit tests construct PluginRuntime with a
+   * `manifestPaths`-only seed that never touches `registryPath`.
    */
   userInstalledDir?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
@@ -325,7 +329,11 @@ export class PluginRuntime {
             // same fail-soft pattern as the managed-plugin signature failure
             // above) — no throw.
             if (!this.allowUnsignedUserPlugins) {
-              this.auditLog?.("warn", "plugin_unsigned_user_rejected", {
+              // PR #234 round-1 review (INFO): bring this up to `error`
+              // for parity with `plugin_signature_rejected` above —
+              // both signal "plugin failed the signature gate". A warn
+              // for one and error for the other obscures forensics.
+              this.auditLog?.("error", "plugin_unsigned_user_rejected", {
                 pluginId: manifest.id,
                 sha256: sigResult.sha256,
               });
@@ -1319,25 +1327,28 @@ export class PluginRuntime {
   }
 
   /**
-   * Phase 1 §Step 1 — Dual trust-root containment check for registry-recorded
-   * manifest paths.
+   * Trust-root containment check for registry-recorded manifest paths.
    *
    * A registry entry's manifestPath is trusted iff its `realpathSync()`
-   * (symlinks resolved) is contained under `realpathSync(hostRoot)` OR (when
-   * provided) `realpathSync(userInstalledDir)`. This shape exists because:
+   * (symlinks resolved) is contained under `realpathSync(userInstalledDir)`.
+   * `hostRoot` is also accepted as defense-in-depth for entries that
+   * pre-date Phase 2-final (the old `<appRoot>/plugins/installed/` layout);
+   * Phase 2c migration rewrites those into the userInstalledDir tree on
+   * boot, so production callers should never observe a hostRoot match.
    *
+   * Why the realpath + path.relative shape:
    *   1. Symlink defeat — without realpath, an attacker who controls HOME
-   *      can plant `~/.lvis/plugins/foo -> /some/sensitive/dir` and any
+   *      could plant `~/.lvis/plugins/foo -> /some/sensitive/dir` and a
    *      registry entry under `userInstalledDir` would naively pass.
-   *   2. `path.relative` not `startsWith` — the prefix variant has trailing-
-   *      separator pitfalls (`/foo` would falsely match `/foobar`).
-   *   3. Both roots realpath-resolved — keeps the check symmetric so a
-   *      `userInstalledDir` that itself contains a symlink (common on macOS
-   *      where `/var` -> `/private/var`) still works.
+   *   2. `path.relative` instead of `startsWith` — the prefix variant has
+   *      trailing-separator pitfalls (`/foo` would falsely match `/foobar`).
+   *   3. Roots realpath-resolved — keeps the check symmetric so a root
+   *      that itself contains a symlink (common on macOS where `/var` ->
+   *      `/private/var`) still works.
    *
-   * Failures (manifestPath does not exist yet, realpath EACCES, etc.) are
-   * REJECTED rather than allowed-by-default: a missing or unreadable file is
-   * not a path the host should `import()`.
+   * Failures (manifestPath missing, realpath EACCES, etc.) are REJECTED
+   * rather than allowed-by-default: a missing or unreadable file is not a
+   * path the host should `import()`.
    */
   private isTrustedRegistryManifestPath(
     manifestPath: string,
