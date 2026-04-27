@@ -55,6 +55,9 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
 
   const scheduleLastMinuteKeyByEntry = new Map<string, string>();
 
+  // Issue #260: notification fire happens INSIDE deliverRoutineResult so all
+  // 3 callers (this coordinator, IPC dev-trigger, main.ts shutdown) get the
+  // user-facing cue without duplicating wiring. See routine-delivery.ts.
   const onRoutineCompleted = async (result: RoutineResult): Promise<void> => {
     await deliverRoutineResult(mainWindow, result).catch((e: Error) => {
       console.warn("[lvis] boot: routine result persist failed:", e.message);

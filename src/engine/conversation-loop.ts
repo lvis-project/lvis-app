@@ -104,6 +104,13 @@ export interface ConversationLoopDeps {
    * skills. Optional — legacy unit-test setups skip the overlay.
    */
   skillOverlay?: { clear(sessionId: string): void };
+  /**
+   * Issue #260: optional system notification service. When supplied, the
+   * loop fires a `turn-end` notification when runTurn resolves successfully
+   * (not aborted, not interrupted). Routine / sub-agent / trigger loops
+   * intentionally omit this so background turns don't spam the user.
+   */
+  notificationService?: import("../main/notification-service.js").NotificationService;
 }
 
 const MAX_TOOL_ROUNDS = 10;
@@ -608,6 +615,27 @@ export class ConversationLoop {
     }
 
     callbacks?.onTurnComplete?.(result.text);
+
+    // Issue #260 — fire system notification on turn-end. Skip if the turn
+    // was interrupted (user aborted) or produced no assistant text (rare
+    // tool-only termination). Body is the leading slice of the assistant
+    // response — NotificationService caps + ellipses it.
+    if (
+      result.stopReason !== "interrupted" &&
+      typeof result.text === "string" &&
+      result.text.trim().length > 0
+    ) {
+      try {
+        this.deps.notificationService?.fire({
+          kind: "turn-end",
+          title: "응답 완료",
+          body: result.text,
+          contextRef: { sessionId: this.sessionId },
+        });
+      } catch {
+        // notification failure must never block turn completion
+      }
+    }
 
     return { ...result, route: routeResult.route };
   }
