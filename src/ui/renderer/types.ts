@@ -80,6 +80,11 @@ export type AppSettings = {
   };
   privacy?: { piiRedactEnabled: boolean };
   plugins?: { allowUnsignedUserPlugins: boolean };
+  marketplace?: {
+    backend?: "real-cloud";
+    realCloudBaseUrl?: string;
+    realCloudAllowPrivateNetwork?: boolean;
+  };
 };
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
@@ -141,6 +146,9 @@ export type LvisApi = {
   setWebApiKey: (provider: string, k: string) => Promise<{ ok: true }>;
   hasWebApiKey: (provider: string) => Promise<boolean>;
   deleteWebApiKey: (provider: string) => Promise<{ ok: true }>;
+  setMarketplaceApiKey: (k: string) => Promise<{ ok: true }>;
+  hasMarketplaceApiKey: () => Promise<boolean>;
+  deleteMarketplaceApiKey: () => Promise<{ ok: true }>;
   msGraphGetState: () => Promise<{
     environment: "external" | "corporate";
     isAuthenticated: boolean;

@@ -77,6 +77,9 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     setWebApiKey: vi.fn(async () => ({ ok: true })),
     hasWebApiKey: vi.fn(async () => false),
     deleteWebApiKey: vi.fn(async () => ({ ok: true })),
+    setMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
+    hasMarketplaceApiKey: vi.fn(async () => false),
+    deleteMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
 
     chatHasProvider: vi.fn(async () => hasProvider),
     chatSend: vi.fn(async () => ({ ok: true })),
