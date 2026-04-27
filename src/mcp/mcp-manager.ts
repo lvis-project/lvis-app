@@ -10,7 +10,8 @@
  * - addConfig(config): 설정 파일에 서버 추가 + 연결 시도
  * - removeConfig(id): 설정 파일에서 서버 제거 + 연결 해제
  *
- * 설정 위치: ~/.lvis/mcp-servers.json
+ * 설정 위치: ~/.lvis/mcp/servers.json. 같은 ~/.lvis/mcp/ 아래에
+ * marketplace install 도 들어간다 (~/.lvis/mcp/<slug>/).
  */
 import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
@@ -25,7 +26,7 @@ import type { PermissionManager } from "../permissions/permission-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { withFileLock } from "../lib/with-file-lock.js";
 
-const DEFAULT_CONFIG_PATH = join(homedir(), ".lvis", "mcp-servers.json");
+const DEFAULT_CONFIG_PATH = join(homedir(), ".lvis", "mcp", "servers.json");
 
 export class McpManager {
   private readonly clients = new Map<string, McpClient>();

@@ -41,6 +41,7 @@
 import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
@@ -454,13 +455,16 @@ export async function bootstrap(
     }
   });
 
-  // §FU#259 — MCP marketplace artifact store. Rooted at userData/mcp-servers/
-  // so MCP server installs don't share a directory with regular plugins.
-  // Constructed only when the fetcher supports verified downloads (the
-  // disabled fetcher would throw on any download attempt anyway).
+  // §FU#259 — MCP marketplace artifact store. Rooted at ~/.lvis/mcp/ so the
+  // server config (servers.json) and install directories share one parent —
+  // user-controlled state lives under ~/.lvis/, not Electron's userData.
+  // Each installed server gets ~/.lvis/mcp/<slug>/; the catalog config sits
+  // at ~/.lvis/mcp/servers.json. Constructed only when the fetcher supports
+  // verified downloads (the disabled fetcher throws on any download attempt
+  // anyway).
   const mcpArtifactStore = (() => {
     if (marketplaceFetcher instanceof DisabledMarketplaceFetcher) return undefined;
-    const mcpInstallRoot = resolve(app.getPath("userData"), "mcp-servers");
+    const mcpInstallRoot = resolve(homedir(), ".lvis", "mcp");
     return new PluginArtifactStore({
       installRoot: mcpInstallRoot,
       cacheRoot: resolve(mcpInstallRoot, ".cache"),
