@@ -148,7 +148,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         return join(testDir, "installed", item.id, "plugin.json");
       });
     const cacheSpy = vi
-      .spyOn(service as unknown as { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> }, "cacheVersionFromManifest")
+      .spyOn((service as unknown as { artifactStore: { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> } }).artifactStore, "cacheVersionFromManifest")
       .mockResolvedValue();
 
     const result = await service.install("work-proactive", "it-admin");
@@ -218,7 +218,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         return manifestPath;
       });
     vi
-      .spyOn(service as unknown as { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> }, "cacheVersionFromManifest")
+      .spyOn((service as unknown as { artifactStore: { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> } }).artifactStore, "cacheVersionFromManifest")
       .mockResolvedValue();
     await expect(service.install("work-proactive", "it-admin")).resolves.toEqual({
       pluginId: "work-proactive",
@@ -284,7 +284,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         return join(testDir, "installed", item.id, "plugin.json");
       });
     vi
-      .spyOn(service as unknown as { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> }, "cacheVersionFromManifest")
+      .spyOn((service as unknown as { artifactStore: { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> } }).artifactStore, "cacheVersionFromManifest")
       .mockResolvedValue();
 
     await expect(service.install("work-proactive", "user")).resolves.toEqual({
