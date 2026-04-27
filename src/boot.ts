@@ -40,10 +40,13 @@
  */
 import { app, powerMonitor } from "electron";
 import type { BrowserWindow } from "electron";
+import { resolve } from "node:path";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
 import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
+import { PluginArtifactStore } from "./plugins/plugin-artifact-store.js";
+import { getBundledPublicKeys } from "./plugins/publisher-keys.js";
 import { StarredStore } from "./data/starred-store.js";
 import { FeedbackStore } from "./data/feedback-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
@@ -451,6 +454,21 @@ export async function bootstrap(
     }
   });
 
+  // §FU#259 — MCP marketplace artifact store. Rooted at userData/mcp-servers/
+  // so MCP server installs don't share a directory with regular plugins.
+  // Constructed only when the fetcher supports verified downloads (the
+  // disabled fetcher would throw on any download attempt anyway).
+  const mcpArtifactStore = (() => {
+    if (marketplaceFetcher instanceof DisabledMarketplaceFetcher) return undefined;
+    const mcpInstallRoot = resolve(app.getPath("userData"), "mcp-servers");
+    return new PluginArtifactStore({
+      installRoot: mcpInstallRoot,
+      cacheRoot: resolve(mcpInstallRoot, ".cache"),
+      fetcher: marketplaceFetcher,
+      publicKeys: getBundledPublicKeys(),
+    });
+  })();
+
   console.log("[lvis] boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
 
   // Sprint 4.C — starred store + D6 feedback store.
@@ -479,7 +497,7 @@ export async function bootstrap(
   return {
     pluginRuntime, pluginMarketplace, taskService, taskSourceRegistry, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
-    systemPromptBuilder, conversationLoop, routineEngine, mcpManager,
+    systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore,
     triggerExecutor: lateBinding.triggerExecutorRef.fn ?? undefined,
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, msGraphService, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,

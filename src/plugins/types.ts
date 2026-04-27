@@ -210,6 +210,26 @@ export class MissingDependenciesError extends Error {
   }
 }
 
+/**
+ * Mirror of the `runtime` block from `mcp.schema.json` (lvis-marketplace#52).
+ * Two transport branches; tokens in `args` (`$PLUGIN_DIR`, `$PYTHON`, `$NODE`)
+ * are substituted by the host at install time.
+ */
+export type McpRuntimeSpec =
+  | {
+      transport: "stdio";
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      auth?: "none" | "api-key" | "sso";
+    }
+  | {
+      transport: "http";
+      url: string;
+      auth?: "none" | "api-key" | "sso";
+      allowPrivateNetworks?: boolean;
+    };
+
 export interface PluginMarketplaceItem {
   id: string;
   /** Web marketplace slug — used when installing via lvis:// URI from the web catalog. */
@@ -243,6 +263,20 @@ export interface PluginMarketplaceItem {
   toolSchemas?: PluginManifest["toolSchemas"];
   /** S14: dependency capabilities this plugin requires. */
   requires?: RequiresSpec;
+  /**
+   * lvis-marketplace#52 — catalog entries are either a regular plugin or
+   * an MCP server. Defaults to `"plugin"` when the server omits the field
+   * (back-compat with pre-#52 catalogs).
+   */
+  pluginType?: "plugin" | "mcp";
+  /**
+   * MCP runtime block — present when `pluginType === "mcp"` and the
+   * server has the schema extension. The host materializes this into
+   * the user's mcp-servers.json after install. The authoritative copy
+   * always lives in the extracted manifest's `runtime` field; the
+   * catalog row may carry a duplicate as advisory metadata.
+   */
+  mcpRuntime?: McpRuntimeSpec;
 }
 
 /**
