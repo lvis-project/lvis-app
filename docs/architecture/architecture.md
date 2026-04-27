@@ -1235,15 +1235,30 @@ graph LR
 
 ### 5.2 Memory 파일 구조
 
+`~/.lvis/` 가 사용자 제어 데이터의 단일 root 다. 호스트 모듈은 각 topic 폴더로
+분리되고, 플러그인은 `~/.lvis/plugins/<id>/` 자기 디렉토리 안에서 install
+artifact 와 save data 를 함께 보관한다 (호스트 root 에 끼어들지 않음).
+
 ```
 ~/.lvis/
 ├── LVIS.md              # 프로젝트·팀·조직 컨텍스트 (관리자 배포 가능)
 ├── user-preferences.md  # 사용자 개인 선호 (보고 스타일, 자주 쓰는 도구 등)
-├── notes/               # 사용자가 "이거 기억해" 하면 저장되는 메모
-│   ├── 출장-절차.md
+├── notes/               # 호스트 메모 ("이거 기억해" 명령 — 플러그인 자체 메모는
+│   ├── 출장-절차.md     # 각 플러그인의 ~/.lvis/plugins/<id>/notes/ 안에 둔다)
 │   └── Q1-보고서-템플릿.md
-└── sessions/            # 세션 이력 (claw Session 패턴)
-    └── <session-id>.jsonl
+├── sessions/            # 세션 이력 (claw Session 패턴)
+│   └── <session-id>.jsonl
+├── audit/               # AuditLogger (회전·retention)
+├── traces/              # FileTracer 디버그 trace
+├── certs/               # 사내 CA 캐시
+├── governance/          # MCP / 플러그인 admin 정책
+├── tasks/               # SQLite task DB (lvis-tasks.db)
+├── mcp/                 # MCP servers config + install dir
+│   ├── servers.json
+│   └── <slug>/          # marketplace install
+└── plugins/             # 모든 플러그인 (user / managed 구분 없이 flat)
+    ├── registry.json
+    └── <plugin-id>/     # install artifact + plugin save data
 ```
 
 | 구분                    | 저장소    | 수명             | 제어 주체                |
@@ -2136,7 +2151,7 @@ stateDiagram-v2
 | `emitEvent(name, payload)` | 다른 플러그인·ProactiveEngine에 이벤트 발행 | 전체 |
 | `onEvent(name, handler)` | 이벤트 구독 | 전체 |
 | `addTask(task)` | LVIS 태스크 생성. **Phase 0 (2026-04-26)**: 현재는 호스트 `taskService.ts` 가 SQLite 에 직접 기록. Phase 2 cutover 이후 이 메서드는 `hostApi.callTool("task_add", …)` 로 위임되는 thin shim 으로 바뀐다 (`lvis-plugin-tasks` 가 owner). 호출자(meeting/email) API 는 그대로 유지. | meeting, email |
-| `saveNote(title, content)` | `~/.lvis/notes/`에 메모 저장 | meeting |
+| `saveNote(title, content)` | 플러그인 자기 dir 안에 메모 저장 (`~/.lvis/plugins/<id>/notes/`) | meeting |
 | `getSecret(key)` | 암호화된 API 키 조회 | meeting, email, calendar |
 | `getMsGraphToken()` | Microsoft Graph Bearer 토큰 획득 | email, calendar |
 | `startMsGraphAuth(openBrowser)` | OAuth 2.0 브라우저 플로우 개시 | email, calendar |
@@ -2305,8 +2320,8 @@ graph TB
     subgraph "managed (회사 배포)"
         M1["IT Admin API<br/>(사내 marketplace)"]
         M2["Managed Policy<br/>(서명된 JSON)"]
-        M3["ManagedPluginInstaller<br/>(boot 시 auto-sync)"]
-        M4["~/.lvis/plugins/managed/<br/>(사용자 삭제 불가)"]
+        M3["ensureManagedInstalled<br/>(boot 시 auto-sync)"]
+        M4["~/.lvis/plugins/&lt;id&gt;/<br/>(installedBy=admin, 사용자 삭제 불가)"]
         M1 --> M2 --> M3 --> M4
     end
 
@@ -2314,7 +2329,7 @@ graph TB
         U1["User 명시 액션<br/>(설치 UI / URL)"]
         U2["Policy allowlist<br/>/ denylist 검증"]
         U3["PluginMarketplaceService<br/>(수동 install)"]
-        U4["~/.lvis/plugins/user/<br/>(사용자 자유 관리)"]
+        U4["~/.lvis/plugins/&lt;id&gt;/<br/>(installedBy=user, 사용자 자유 관리)"]
         U1 --> U2 --> U3 --> U4
     end
 
@@ -2336,7 +2351,7 @@ graph TB
 | **삭제 권한** | 회사만 (`PluginDeploymentGuard.canUninstall()` = false) | 사용자 자유 |
 | **업데이트** | 정책 push 시 강제 | 사용자 opt-in |
 | **서명 검증** | **[Phase 3 계획]** Corporate Internal Root CA 필수 (실패 시 load 거부). 현 스키마는 서명 필드 미지원. | **[Phase 3 계획]** 정책에 따라 `warn` / `require` / `off` |
-| **Directory** | `~/.lvis/plugins/managed/<id>/<version>/` | `~/.lvis/plugins/user/<id>/` |
+| **Directory** | `~/.lvis/plugins/<id>/` (단일 root, `installedBy=admin` 메타데이터로 분류) | `~/.lvis/plugins/<id>/` (단일 root, `installedBy=user` 메타데이터로 분류) |
 | **Manifest 필드** | `deployment: "managed"`, `publisher` | `deployment: "user"` |
 | **Settings UI** | lock icon + "회사 배포" 표시, 제거 / 비활성화 버튼 잠금 | 정상 토글 |
 | **차단 시나리오** | 정책 `deny_list` 발행 → 다음 boot 시 자동 제거 | 정책 매치 시 즉시 비활성화 |
@@ -3210,7 +3225,7 @@ v4 §4.5 의 11-step 쿼리 루프(`onUserMessage → ... → onTurnComplete`)�
 
 v4 §5 의 `~/.lvis/` 파일 기반 경량 구조는 유지된다. 운영 안정성을 위해 다음을 덧붙인다.
 
-- **Cross-process file lock**: 모든 상태 파일 (`memory/*.md`, `tasks.json`, `audit.log`, `approval-queue.json`) 쓰기 경로에 `proper-lockfile` 을 적용. 두 Electron 인스턴스 또는 메인/렌더러 레이스 상황에서도 손상 방지. **Phase 0 (2026-04-26) 주석**: 현재 host 의 task 저장소는 `tasks.json` 이 아닌 SQLite (`<userData>/lvis-tasks.db`, WAL 모드) 이며, file lock 이 아닌 SQLite 자체 락에 의존한다. tasks-plugin-split Phase 2 이후에는 `lvis-plugin-tasks` 가 자체 데이터 디렉터리(`<userData>/plugins/lvis-plugin-tasks/tasks.db`) 에서 동일하게 SQLite WAL 로 운영하므로, 본 host-level cross-process lock 정책에서 tasks 항목은 제거 대상이다.
+- **Cross-process file lock**: 모든 상태 파일 (`memory/*.md`, `tasks.json`, `audit.log`, `approval-queue.json`) 쓰기 경로에 `proper-lockfile` 을 적용. 두 Electron 인스턴스 또는 메인/렌더러 레이스 상황에서도 손상 방지. **2026-04-27 갱신**: 현재 host 의 task 저장소는 `tasks.json` 이 아닌 SQLite (`~/.lvis/tasks/lvis-tasks.db`, WAL 모드) 이며, file lock 이 아닌 SQLite 자체 락에 의존한다. tasks-plugin-split Phase 2 이후에는 `lvis-plugin-tasks` 가 자체 데이터 디렉터리(`~/.lvis/plugins/lvis-plugin-tasks/tasks.db`) 에서 동일하게 SQLite WAL 로 운영하므로, 본 host-level cross-process lock 정책에서 tasks 항목은 제거 대상이다.
 - **Audit log rotation/retention**: `~/.lvis/audit/audit-YYYY-MM-DD.log` 일 단위 회전. 기본 retention 90일. 사이즈 한계(예: 50MB) 초과 시 그 날짜 내에서 `audit-YYYY-MM-DD.N.log` 로 분할.
 - **Write contract**: 락 획득 실패 시 최대 5회, 100ms 백오프 재시도. 최종 실패는 §6.6 Observability 의 Audit sink 로 `state.write.lock_failed` 이벤트를 남긴다.
 
