@@ -1,14 +1,21 @@
 /**
- * `ask_user_question` LLM tool — invites the assistant to surface a
- * question to the user before continuing. The tool blocks until the user
- * answers (clicks a choice / submits free text) or 5 minutes elapse.
+ * `ask_user_question` LLM tool — invites the assistant to surface 1–4
+ * inline questions to the user before continuing. Renderer shows a single
+ * AskUserQuestionCard that pages through every question, ends on a
+ * confirmation step where the user can review answers, and returns all
+ * responses at once. Blocks until the user confirms / dismisses or 5
+ * minutes elapse.
  *
- * Renderer integration: an `AskUserQuestionCard` is shown inline in the
- * chat. The tool execution `await`s a Promise that resolves via the
- * {@link AskUserQuestionGate} IPC channel.
+ * The conversation loop's per-turn AbortController flows in via
+ * `ToolExecutionContext.abortSignal` so the user's 중단 button unblocks
+ * the wait without sitting on the gate's timeout.
  */
 import { createDynamicTool, type Tool } from "./base.js";
-import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
+import {
+  MAX_QUESTIONS_PER_CARD,
+  type AskUserQuestionGate,
+  type AskUserQuestionItem,
+} from "../main/ask-user-question-gate.js";
 
 export interface AskUserQuestionToolDeps {
   getGate: () => AskUserQuestionGate | undefined;
@@ -18,27 +25,42 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
   return createDynamicTool({
     name: "ask_user_question",
     description:
-      "사용자에게 직접 질문하고 답을 기다립니다. 작업을 진행하기 전에 분기점이 있거나 " +
-      "추가 정보가 필요할 때 사용. choices 배열을 주면 multi-choice 카드, allowFreeText=true 면 " +
-      "자유 텍스트 입력. 5분 안에 답이 없으면 dismissed=true 로 반환.",
+      "사용자에게 1~4개의 관련 질문을 한 카드로 묶어서 묻고 답을 기다립니다. " +
+      "사용자가 모든 질문에 답한 뒤 최종 확인 페이지에서 컨펌하면 응답이 한꺼번에 반환됩니다. " +
+      "각 질문은 객관식(choices) 또는 자유 입력(allowFreeText) 또는 둘 다 허용 가능. " +
+      "5분 안에 확인이 없으면 dismissed=true 로 반환.",
     source: "builtin",
     category: "dangerous",
     jsonSchema: {
       type: "object",
-      required: ["question"],
+      required: ["questions"],
       properties: {
-        question: {
-          type: "string",
-          description: "사용자에게 보여줄 질문 본문 (한 줄 또는 두 줄).",
-        },
-        choices: {
+        questions: {
           type: "array",
-          items: { type: "string" },
-          description: "버튼으로 보여줄 선택지. 빈 배열 또는 생략 시 자유 입력만.",
-        },
-        allowFreeText: {
-          type: "boolean",
-          description: "자유 텍스트 입력 허용 여부. 기본 true.",
+          minItems: 1,
+          maxItems: MAX_QUESTIONS_PER_CARD,
+          description:
+            `한 카드 안에서 사용자에게 묶어 물을 질문 1~${MAX_QUESTIONS_PER_CARD}개. ` +
+            `사용자는 페이지네이션으로 차례로 답하고 마지막 컨펌 페이지에서 한꺼번에 제출.`,
+          items: {
+            type: "object",
+            required: ["question"],
+            properties: {
+              question: {
+                type: "string",
+                description: "사용자에게 보여줄 질문 본문 (한 줄 또는 두 줄).",
+              },
+              choices: {
+                type: "array",
+                items: { type: "string" },
+                description: "버튼으로 보여줄 선택지. 빈 배열 또는 생략 시 자유 입력만.",
+              },
+              allowFreeText: {
+                type: "boolean",
+                description: "자유 텍스트 입력 허용 여부. 기본 true.",
+              },
+            },
+          },
         },
         urgent: {
           type: "boolean",
@@ -57,25 +79,62 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
         };
       }
       const a = (rawInput ?? {}) as Record<string, unknown>;
-      const question = typeof a.question === "string" ? a.question.trim() : "";
-      if (!question) {
+      const rawQuestions = Array.isArray(a.questions) ? a.questions : null;
+      if (!rawQuestions || rawQuestions.length === 0) {
         return {
-          output: JSON.stringify({ error: "question is required" }),
+          output: JSON.stringify({
+            error: "questions[] is required and must contain at least one item",
+          }),
           isError: true,
         };
       }
-      const choices = Array.isArray(a.choices)
-        ? (a.choices as unknown[]).filter(
-            (c): c is string => typeof c === "string" && c.trim().length > 0,
-          )
-        : undefined;
-      const allowFreeText =
-        typeof a.allowFreeText === "boolean" ? a.allowFreeText : true;
+      if (rawQuestions.length > MAX_QUESTIONS_PER_CARD) {
+        return {
+          output: JSON.stringify({
+            error: `questions[] capped at ${MAX_QUESTIONS_PER_CARD} per card`,
+          }),
+          isError: true,
+        };
+      }
+      const questions: AskUserQuestionItem[] = [];
+      for (const raw of rawQuestions) {
+        const q = (raw ?? {}) as Record<string, unknown>;
+        const question = typeof q.question === "string" ? q.question.trim() : "";
+        if (!question) {
+          return {
+            output: JSON.stringify({
+              error: "every questions[].question must be a non-empty string",
+            }),
+            isError: true,
+          };
+        }
+        const filteredChoices = Array.isArray(q.choices)
+          ? (q.choices as unknown[]).filter(
+              (c): c is string => typeof c === "string" && c.trim().length > 0,
+            )
+          : undefined;
+        const allowFreeText = q.allowFreeText !== false;
+        // Refuse an unanswerable shape: no choices AND no free-text
+        // input would render a question with no inputs at all and the
+        // user would only be able to dismiss the card.
+        if ((!filteredChoices || filteredChoices.length === 0) && !allowFreeText) {
+          return {
+            output: JSON.stringify({
+              error:
+                "each question must allow at least one input — provide choices[] or set allowFreeText:true (default)",
+            }),
+            isError: true,
+          };
+        }
+        questions.push({
+          question,
+          choices: filteredChoices && filteredChoices.length > 0 ? filteredChoices : undefined,
+          allowFreeText,
+        });
+      }
       const urgent = a.urgent === true;
       const response = await gate.ask({
-        question,
-        choices,
-        allowFreeText,
+        questions,
         urgent,
         // Honor the user's 중단 button — without this the gate sits on its
         // 5-minute timer regardless of the conversation loop's abort.
@@ -83,8 +142,7 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
       });
       return {
         output: JSON.stringify({
-          choice: response.choice,
-          freeText: response.freeText,
+          answers: response.answers ?? [],
           dismissed: response.dismissed === true,
         }),
         isError: false,

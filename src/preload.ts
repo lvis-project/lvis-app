@@ -523,9 +523,11 @@ const api = {
   onAskUserQuestion: (
     handler: (req: {
       id: string;
-      question: string;
-      choices?: string[];
-      allowFreeText: boolean;
+      questions: Array<{
+        question: string;
+        choices?: string[];
+        allowFreeText: boolean;
+      }>;
       urgent: boolean;
       createdAt: number;
     }) => void,
@@ -536,8 +538,7 @@ const api = {
   },
   respondAskUserQuestion: async (response: {
     requestId: string;
-    choice?: string;
-    freeText?: string;
+    answers?: Array<{ choice?: string; freeText?: string }>;
     dismissed?: boolean;
   }) => ipcRenderer.invoke("lvis:ask-user-question:respond", response),
   // M2: timeout side-channel — main process notifies the renderer when an

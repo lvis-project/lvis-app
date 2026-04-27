@@ -34,19 +34,19 @@ function fakeApi(overrides: Partial<LvisApi> = {}): LvisApi {
   } as unknown as LvisApi;
 }
 
-describe("AskUserQuestionCard", () => {
-  it("renders question + choices and dispatches respond on click", async () => {
+describe("AskUserQuestionCard — single question", () => {
+  it("renders question + choices and dispatches answers[] on click", async () => {
     const respond = vi.fn().mockResolvedValue({ ok: true });
     const api = fakeApi({ respondAskUserQuestion: respond as never });
     const onResolved = vi.fn();
-    const { getByText, container } = render(
+    const { getByText, container, queryByTestId } = render(
       <AskUserQuestionCard
         api={api}
         request={{
           id: "q1",
-          question: "Continue?",
-          choices: ["yes", "no"],
-          allowFreeText: true,
+          questions: [
+            { question: "Continue?", choices: ["yes", "no"], allowFreeText: true },
+          ],
           urgent: false,
           createdAt: 0,
         }}
@@ -54,12 +54,91 @@ describe("AskUserQuestionCard", () => {
       />,
     );
     expect(container.textContent).toContain("Continue?");
+    // Single-question card has no pagination label.
+    expect(queryByTestId("ask-step-label")).toBeNull();
     expect(getByText("yes")).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(getByText("yes"));
     });
-    expect(respond).toHaveBeenCalledWith({ requestId: "q1", choice: "yes" });
+    expect(respond).toHaveBeenCalledWith({
+      requestId: "q1",
+      answers: [{ choice: "yes" }],
+    });
     await waitFor(() => expect(onResolved).toHaveBeenCalledWith("q1"));
+  });
+
+  it("dismiss surfaces dismissed:true with no answers", async () => {
+    const respond = vi.fn().mockResolvedValue({ ok: true });
+    const api = fakeApi({ respondAskUserQuestion: respond as never });
+    const { getByText } = render(
+      <AskUserQuestionCard
+        api={api}
+        request={{
+          id: "q-dismiss",
+          questions: [{ question: "?", allowFreeText: true }],
+          urgent: false,
+          createdAt: 0,
+        }}
+        onResolved={vi.fn()}
+      />,
+    );
+    await act(async () => {
+      fireEvent.click(getByText("건너뛰기"));
+    });
+    expect(respond).toHaveBeenCalledWith({ requestId: "q-dismiss", dismissed: true });
+  });
+});
+
+describe("AskUserQuestionCard — multi-question", () => {
+  it("paginates 1→2→confirm and submits all answers at once", async () => {
+    const respond = vi.fn().mockResolvedValue({ ok: true });
+    const api = fakeApi({ respondAskUserQuestion: respond as never });
+    const { getByText, getByTestId, queryByTestId, container } = render(
+      <AskUserQuestionCard
+        api={api}
+        request={{
+          id: "multi",
+          questions: [
+            { question: "Where?", choices: ["서울", "부산"], allowFreeText: false },
+            { question: "When?", choices: ["오늘", "내일"], allowFreeText: false },
+          ],
+          urgent: false,
+          createdAt: 0,
+        }}
+        onResolved={vi.fn()}
+      />,
+    );
+    // Step label shows pagination on multi.
+    expect(getByTestId("ask-step-label").textContent).toBe("1 / 2");
+    expect(container.textContent).toContain("Where?");
+    // Picking a choice on a multi-question card does NOT auto-submit;
+    // user must hit 다음/검토.
+    await act(async () => {
+      fireEvent.click(getByText("서울"));
+    });
+    expect(respond).not.toHaveBeenCalled();
+    // Step 0 of 2 → button reads "다음" (next).
+    await act(async () => {
+      fireEvent.click(getByText("다음"));
+    });
+    expect(getByTestId("ask-step-label").textContent).toBe("2 / 2");
+    await act(async () => {
+      fireEvent.click(getByText("내일"));
+    });
+    // Last question (step total-1) → button reads "검토" (review).
+    await act(async () => {
+      fireEvent.click(getByText("검토"));
+    });
+    // Now on the confirm page — review surface present.
+    expect(queryByTestId("ask-confirm-review")).not.toBeNull();
+    expect(getByTestId("ask-step-label").textContent).toBe("최종 확인");
+    await act(async () => {
+      fireEvent.click(getByText("보내기"));
+    });
+    expect(respond).toHaveBeenCalledWith({
+      requestId: "multi",
+      answers: [{ choice: "서울" }, { choice: "내일" }],
+    });
   });
 });
 

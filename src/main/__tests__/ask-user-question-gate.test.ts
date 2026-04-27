@@ -1,10 +1,12 @@
 /**
- * AskUserQuestionGate — H5 / M2 timeout coverage.
+ * AskUserQuestionGate — H5 / M2 timeout coverage + multi-question contract.
  *
  * The gate must:
  *   1. Resolve `{ dismissed: true }` after the configured timeout.
  *   2. Send a `lvis:ask-user-question:timeout` IPC event so the renderer
  *      can drop the stale card before the user clicks into a no-op.
+ *   3. Accept 1–4 questions per card and surface them as a single request
+ *      payload to the renderer.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -19,6 +21,11 @@ function makeMockWebContents() {
   };
 }
 
+/** Convenience — most tests only care about the wait/abort/timeout shape. */
+function single(question: string) {
+  return { questions: [{ question, allowFreeText: true }] };
+}
+
 describe("AskUserQuestionGate — timeout path", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -30,11 +37,13 @@ describe("AskUserQuestionGate — timeout path", () => {
   it("resolves with dismissed=true after 5 minutes and emits timeout event", async () => {
     const wc = makeMockWebContents();
     const gate = new AskUserQuestionGate(wc as never, 5 * 60 * 1000);
-    const promise = gate.ask({ question: "still there?" });
+    const promise = gate.ask(single("still there?"));
     // Drain the request emission tick first.
     expect(wc.send).toHaveBeenCalledWith(
       "lvis:ask-user-question:request",
-      expect.objectContaining({ question: "still there?" }),
+      expect.objectContaining({
+        questions: [expect.objectContaining({ question: "still there?" })],
+      }),
     );
 
     // Fast-forward past the 5-minute timeout.
@@ -57,11 +66,11 @@ describe("AskUserQuestionGate — timeout path", () => {
     const slots: Array<Promise<unknown>> = [];
     // Fill the gate up to the cap.
     for (let i = 0; i < 5; i++) {
-      slots.push(gate.ask({ question: `q-${i}` }));
+      slots.push(gate.ask(single(`q-${i}`)));
     }
     expect(gate.pendingCount).toBe(5);
     // The 6th must be dismissed immediately, not queued.
-    const overflow = await gate.ask({ question: "q-6" });
+    const overflow = await gate.ask(single("q-6"));
     expect(overflow.dismissed).toBe(true);
     // Pending count unchanged — the overflow never registered.
     expect(gate.pendingCount).toBe(5);
@@ -77,7 +86,7 @@ describe("AskUserQuestionGate — timeout path", () => {
     const wc = makeMockWebContents();
     const gate = new AskUserQuestionGate(wc as never, 60_000);
     const ac = new AbortController();
-    const promise = gate.ask({ question: "blocking?", abortSignal: ac.signal });
+    const promise = gate.ask({ ...single("blocking?"), abortSignal: ac.signal });
     expect(gate.pendingCount).toBe(1);
 
     ac.abort();
@@ -103,17 +112,17 @@ describe("AskUserQuestionGate — timeout path", () => {
     const ac = new AbortController();
     const removeSpy = vi.spyOn(ac.signal, "removeEventListener");
 
-    const slot = gate.ask({ question: "first?", abortSignal: ac.signal });
+    const slot = gate.ask({ ...single("first?"), abortSignal: ac.signal });
     // Find the request id that was sent to the renderer.
     const reqCall = wc.send.mock.calls.find(
       (c) => c[0] === "lvis:ask-user-question:request",
     );
     const requestId = (reqCall![1] as { id: string }).id;
 
-    // User clicks an option — this is what `ipcMain.handle("lvis:ask-user-question:respond")` calls.
-    gate.resolve({ requestId, choice: "yes" });
+    // User confirms — this is what `ipcMain.handle("lvis:ask-user-question:respond")` calls.
+    gate.resolve({ requestId, answers: [{ choice: "yes" }] });
     const response = await slot;
-    expect(response.choice).toBe("yes");
+    expect(response.answers).toEqual([{ choice: "yes" }]);
 
     // The listener registered on the controller's signal must have been cleaned up,
     // so a later abort on the same controller does not invoke a stale handler.
@@ -127,7 +136,7 @@ describe("AskUserQuestionGate — timeout path", () => {
     const ac = new AbortController();
     ac.abort();
 
-    const response = await gate.ask({ question: "stale", abortSignal: ac.signal });
+    const response = await gate.ask({ ...single("stale"), abortSignal: ac.signal });
     expect(response.dismissed).toBe(true);
     // Never registered as pending, so the request event never fires.
     expect(gate.pendingCount).toBe(0);
@@ -145,18 +154,90 @@ describe("AskUserQuestionGate — timeout path", () => {
     const gate = new AskUserQuestionGate(() => (current.isDestroyed() ? null : (current as never)), 60_000);
 
     // Stale window: gate must short-circuit to dismissed.
-    const dismissed = await gate.ask({ question: "before reload" });
+    const dismissed = await gate.ask(single("before reload"));
     expect(dismissed.dismissed).toBe(true);
     expect(stale.send).not.toHaveBeenCalled();
 
     // Simulate a reload — fresh webContents is now current.
     current = fresh;
-    const slot = gate.ask({ question: "after reload" });
+    const slot = gate.ask(single("after reload"));
     expect(fresh.send).toHaveBeenCalledWith(
       "lvis:ask-user-question:request",
-      expect.objectContaining({ question: "after reload" }),
+      expect.objectContaining({
+        questions: [expect.objectContaining({ question: "after reload" })],
+      }),
     );
     gate.disposeAll();
     await slot;
+  });
+});
+
+describe("AskUserQuestionGate — multi-question contract", () => {
+  it("rejects empty or oversized questions[] without engaging the timer", async () => {
+    const wc = makeMockWebContents();
+    const gate = new AskUserQuestionGate(wc as never, 60_000);
+
+    const empty = await gate.ask({ questions: [] });
+    expect(empty.dismissed).toBe(true);
+    expect(gate.pendingCount).toBe(0);
+    expect(wc.send).not.toHaveBeenCalled();
+
+    const oversized = await gate.ask({
+      questions: Array.from({ length: 5 }, (_, i) => ({
+        question: `q-${i}`,
+        allowFreeText: true,
+      })),
+    });
+    expect(oversized.dismissed).toBe(true);
+    expect(gate.pendingCount).toBe(0);
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+
+  it("emits one request payload carrying all questions in order", async () => {
+    const wc = makeMockWebContents();
+    const gate = new AskUserQuestionGate(wc as never, 60_000);
+
+    const slot = gate.ask({
+      questions: [
+        { question: "Where?", choices: ["A", "B"], allowFreeText: false },
+        { question: "When?", allowFreeText: true },
+        { question: "Why?", allowFreeText: true },
+      ],
+    });
+
+    const reqCall = wc.send.mock.calls.find(
+      (c) => c[0] === "lvis:ask-user-question:request",
+    );
+    expect(reqCall).toBeDefined();
+    const payload = reqCall![1] as { questions: Array<{ question: string }> };
+    expect(payload.questions.map((q) => q.question)).toEqual(["Where?", "When?", "Why?"]);
+
+    gate.disposeAll();
+    await slot;
+  });
+
+  it("propagates per-question answers from resolve() back to the awaiting caller", async () => {
+    const wc = makeMockWebContents();
+    const gate = new AskUserQuestionGate(wc as never, 60_000);
+
+    const slot = gate.ask({
+      questions: [
+        { question: "Where?", choices: ["서울", "부산"], allowFreeText: false },
+        { question: "When?", choices: ["오늘", "내일"], allowFreeText: false },
+      ],
+    });
+    const reqCall = wc.send.mock.calls.find(
+      (c) => c[0] === "lvis:ask-user-question:request",
+    );
+    const requestId = (reqCall![1] as { id: string }).id;
+
+    gate.resolve({
+      requestId,
+      answers: [{ choice: "서울" }, { choice: "내일" }],
+    });
+
+    const response = await slot;
+    expect(response.answers).toEqual([{ choice: "서울" }, { choice: "내일" }]);
+    expect(response.dismissed).toBeFalsy();
   });
 });

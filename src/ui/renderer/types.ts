@@ -357,17 +357,18 @@ export type LvisApi = {
   onAskUserQuestion: (
     h: (req: {
       id: string;
-      question: string;
-      choices?: string[];
-      allowFreeText: boolean;
+      questions: Array<{
+        question: string;
+        choices?: string[];
+        allowFreeText: boolean;
+      }>;
       urgent: boolean;
       createdAt: number;
     }) => void,
   ) => () => void;
   respondAskUserQuestion: (response: {
     requestId: string;
-    choice?: string;
-    freeText?: string;
+    answers?: Array<{ choice?: string; freeText?: string }>;
     dismissed?: boolean;
   }) => Promise<{ ok: boolean; error?: string }>;
   /** M2: renderer is notified when the gate's 5-minute timeout fires. */
