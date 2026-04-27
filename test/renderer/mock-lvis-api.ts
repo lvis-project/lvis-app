@@ -89,6 +89,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       needsCredential: false,
       authMode: "none" as const,
     })),
+    previewClaudeDesktopMcpImport: vi.fn(async () => ({ entries: [], errors: [] })),
+    applyClaudeDesktopMcpImport: vi.fn(async () => ({ ok: true, results: [], parseErrors: [] })),
 
     chatHasProvider: vi.fn(async () => hasProvider),
     chatSend: vi.fn(async () => ({ ok: true })),
