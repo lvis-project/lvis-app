@@ -160,20 +160,18 @@ bun 이 없는 환경에서는 `npm run start:npm` 또는 PowerShell 에서 `npm
 
 ## 8. 마켓플레이스로 넘어갈 때
 
-dev 루프가 안정되면 사내 카탈로그 배포로 졸업:
+dev 루프가 안정되면 마켓플레이스 흐름까지 검증해야 합니다.
 
-1. `plugin.json.sig` 생성 (Node `crypto.sign("ed25519", ...)`)
-2. zip 패키징 + SHA256 + 메타데이터
-3. 카탈로그 등록
-
-상세 절차: [`marketplace-publishing.md`](./marketplace-publishing.md).
+- **로컬 마켓플레이스로 end-to-end 테스트** (zip 패키징 → 서버 publish → 앱에서 install 까지) — [`local-marketplace-testing.md`](./local-marketplace-testing.md). prod 에 올리기 전 한 번은 도세요.
+- **prod 카탈로그 publish 절차** (관리형 승인 흐름, 서버 사인키 정책 포함) — [`marketplace-publishing.md`](./marketplace-publishing.md).
 
 ---
 
 ## 관련 문서
 
+- [`local-marketplace-testing.md`](./local-marketplace-testing.md) — 로컬 마켓플레이스 서버를 띄워 publish/install end-to-end 테스트
 - [`plugin-development.md`](./plugin-development.md) — 매니페스트 전체 스키마, HostApi 계약, capabilities, 이벤트, 서명, 테스팅 레퍼런스
 - [`windows-setup.md`](./windows-setup.md) — Windows 사내망 first-run 가이드
-- [`marketplace-publishing.md`](./marketplace-publishing.md) — 카탈로그 배포 채널
+- [`marketplace-publishing.md`](./marketplace-publishing.md) — 카탈로그 배포 채널 (prod publish 절차)
 - [`../architecture/architecture.md` §9](../architecture/architecture.md#9-plugin-system--ui-extension) — 플러그인 시스템 아키텍처
 - [`lvis-plugin-template/README.md`](https://github.com/lvis-project/lvis-plugin-template) — 템플릿 레포 사용법
