@@ -63,7 +63,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
 
   it("B-1: AJV rejects manifests with malformed version", async () => {
     await writePlugin("p_ajv_version", { version: "1.0" });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const errors: string[] = [];
     const origErr = console.error;
     console.error = (msg: string) => errors.push(String(msg));
@@ -78,7 +78,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
 
   it("B-1: AJV rejects manifests with description > 280 chars", async () => {
     await writePlugin("p_ajv_desc", { description: "x".repeat(300) });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const origErr = console.error;
     const errors: string[] = [];
     console.error = (msg: string) => errors.push(String(msg));
@@ -92,7 +92,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
 
   it("B-3: uiCallable not in tools[] is rejected", async () => {
     await writePlugin("p_ui_missing", { uiCallable: ["p_ui_missing_ghost"] });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const origErr = console.error;
     const errors: string[] = [];
     console.error = (msg: string) => errors.push(String(msg));
@@ -110,14 +110,14 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
       uiCallable: ["p_destructive_delete"],
       installPolicy: "user",
     });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("p_destructive");
   });
 
   it("B-3: read-like uiCallable tool is permitted", async () => {
     await writePlugin("p_ok", { tools: ["p_ok_get", "p_ok_delete"], uiCallable: ["p_ok_get"], installPolicy: "user" });
-    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("p_ok");
   });

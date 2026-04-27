@@ -70,6 +70,7 @@ describe("Sprint 4-B — signature enforcement", () => {
     const runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
+      pluginsRoot: installedDir,
       signatureVerifier: verifier,
     });
     await runtime.load();
@@ -82,6 +83,7 @@ describe("Sprint 4-B — signature enforcement", () => {
     const runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
+      pluginsRoot: installedDir,
       signatureVerifier: verifier,
     });
     await runtime.load();
@@ -98,6 +100,7 @@ describe("Sprint 4-B — signature enforcement", () => {
     const runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
+      pluginsRoot: installedDir,
       signatureVerifier: verifier,
       allowUnsignedUserPlugins: true,
     });
