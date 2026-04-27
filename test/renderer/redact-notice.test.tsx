@@ -8,6 +8,7 @@ import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
+import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
 
 async function submit(container: HTMLElement, text: string): Promise<void> {
   const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
@@ -21,7 +22,7 @@ describe("Redact notice (Phase 3 regression net)", () => {
   it("redact_notice with count renders a PII system badge", async () => {
     const { container, api, emitChatStream } = await renderApp({
       settings: {
-        llm: { provider: "openai", model: "gpt-4o-mini" },
+        llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
         chat: { systemPrompt: "", autoCompact: true },
         webSearch: { provider: "none" },
         routine: { enableWakeupRoutine: false },

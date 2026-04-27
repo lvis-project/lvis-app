@@ -14,7 +14,7 @@ export interface UseSettingsResult {
   llmVendor: string;
   /** Cached model id. */
   llmModel: string;
-  /** Cached `settings.llm.enableThinking` flag. */
+  /** Cached `enableThinking` flag for the active vendor. */
   enableThinkingChat: boolean;
   /** One-shot snapshot of {provider, model} used for context overflow %. */
   currentLlmSettings: { provider: string; model: string } | null;
@@ -45,9 +45,10 @@ export function useSettings(api: LvisApi): UseSettingsResult {
     try {
       const s = await api.getSettings();
       if (!isMountedRef.current) return;
+      const block = s.llm.vendors[s.llm.provider];
       setLlmVendor(s.llm.provider);
-      setLlmModel(s.llm.model);
-      setEnableThinkingChat(s.llm.enableThinking ?? true);
+      setLlmModel(block.model);
+      setEnableThinkingChat(block.enableThinking);
     } catch {
       /* ignore */
     }
@@ -59,10 +60,11 @@ export function useSettings(api: LvisApi): UseSettingsResult {
       .getSettings()
       .then((s) => {
         if (!isMountedRef.current) return;
+        const block = s.llm.vendors[s.llm.provider];
         setLlmVendor(s.llm.provider);
-        setLlmModel(s.llm.model);
-        setEnableThinkingChat(s.llm.enableThinking ?? true);
-        setCurrentLlmSettings({ provider: s.llm.provider, model: s.llm.model });
+        setLlmModel(block.model);
+        setEnableThinkingChat(block.enableThinking);
+        setCurrentLlmSettings({ provider: s.llm.provider, model: block.model });
       })
       .catch(() => {});
   }, [api]);
@@ -71,7 +73,10 @@ export function useSettings(api: LvisApi): UseSettingsResult {
     async (next: boolean) => {
       setEnableThinkingChat(next);
       try {
-        await api.updateSettings({ llm: { enableThinking: next } });
+        const s = await api.getSettings();
+        await api.updateSettings({
+          llm: { vendors: { [s.llm.provider]: { enableThinking: next } } },
+        });
       } catch {
         /* ignore */
       }

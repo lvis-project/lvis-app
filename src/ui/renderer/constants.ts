@@ -1,6 +1,7 @@
 // Phase 2: React-free constants extracted from src/renderer.tsx.
 
 import type { ExecMode, Task } from "./types.js";
+import { LLM_VENDOR_DEFAULTS } from "../../shared/llm-vendor-defaults.js";
 
 export const PRIORITY_CLASS: Record<Task["priority"], string> = {
   high: "text-red-400",
@@ -28,13 +29,15 @@ export const SOURCE_BADGE: Record<string, string> = {
   mcp: "MCP",
 };
 
+// `defaultModel` mirrors LLM_VENDOR_DEFAULTS so the settings dialog
+// placeholder stays in sync with the data layer's seed values.
 export const VENDORS = [
-  { id: "claude", label: "Anthropic Claude", placeholder: "sk-ant-...", defaultModel: "claude-sonnet-4-6", needsBaseUrl: false },
-  { id: "openai", label: "OpenAI", placeholder: "sk-...", defaultModel: "gpt-4o", needsBaseUrl: false },
-  { id: "gemini", label: "Google Gemini", placeholder: "AIza...", defaultModel: "gemini-2.0-flash", needsBaseUrl: false },
-  { id: "copilot", label: "GitHub Copilot", placeholder: "ghp_...", defaultModel: "gpt-4o", needsBaseUrl: false },
-  { id: "azure-foundry", label: "Azure AI Foundry", placeholder: "Azure API key...", defaultModel: "gpt-4o", needsBaseUrl: true, baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/deployments/{deployment}/" },
-  { id: "vertex-ai", label: "Google Vertex AI", placeholder: "service account (unused — uses ADC)", defaultModel: "gemini-2.5-flash", needsBaseUrl: false },
+  { id: "claude", label: "Anthropic Claude", placeholder: "sk-ant-...", defaultModel: LLM_VENDOR_DEFAULTS.claude.model, needsBaseUrl: false },
+  { id: "openai", label: "OpenAI", placeholder: "sk-...", defaultModel: LLM_VENDOR_DEFAULTS.openai.model, needsBaseUrl: false },
+  { id: "gemini", label: "Google Gemini", placeholder: "AIza...", defaultModel: LLM_VENDOR_DEFAULTS.gemini.model, needsBaseUrl: false },
+  { id: "copilot", label: "GitHub Copilot", placeholder: "ghp_...", defaultModel: LLM_VENDOR_DEFAULTS.copilot.model, needsBaseUrl: false },
+  { id: "azure-foundry", label: "Azure AI Foundry", placeholder: "Azure API key...", defaultModel: LLM_VENDOR_DEFAULTS["azure-foundry"].model, needsBaseUrl: true, baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/deployments/{deployment}/" },
+  { id: "vertex-ai", label: "Google Vertex AI", placeholder: "service account (unused — uses ADC)", defaultModel: LLM_VENDOR_DEFAULTS["vertex-ai"].model, needsBaseUrl: false },
 ] as const;
 
 export const WEB_PROVIDERS = [
