@@ -163,6 +163,13 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
  * Map of event namespace prefix → capability required to EMIT events in that
  * namespace. Plugins without the capability have their emissions dropped
  * (console.warn + no fan-out).
+ *
+ * `task` namespace is intentionally absent — `task.*` events are emitted
+ * only by the host's `TaskDeadlinePoller` (`src/main/task-deadline-poller.ts`)
+ * via the boot event bus, NOT by any plugin via `hostApi.emitEvent()`.
+ * If/when tasks-plugin-split resumes (memory `feedback-tasks-plugin-split-paused`)
+ * and a plugin starts emitting `task.*`, add a `tasks-source` capability
+ * here so spoofing is gated.
  */
 export const EVENT_NAMESPACE_CAPABILITY: ReadonlyMap<string, string> = new Map([
   ["email", "mail-source"],
