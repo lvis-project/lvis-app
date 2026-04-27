@@ -54,6 +54,15 @@ export interface SettingsOrchestrationState {
   setEnableWakeupRoutine: (updater: boolean | ((prev: boolean) => boolean)) => void;
   piiRedactEnabled: boolean;
   setPiiRedactEnabled: (v: boolean) => void;
+  // Marketplace
+  marketplaceBaseUrl: string;
+  setMarketplaceBaseUrl: (v: string) => void;
+  marketplaceAllowPrivateNetwork: boolean;
+  setMarketplaceAllowPrivateNetwork: (v: boolean) => void;
+  hasMarketplaceApiKey: boolean;
+  setHasMarketplaceApiKey: (v: boolean) => void;
+  marketplaceApiKeyInput: string;
+  setMarketplaceApiKeyInput: (v: string) => void;
   // Lifecycle
   settingsLoaded: boolean;
   saving: boolean;
@@ -91,6 +100,10 @@ export function useSettingsOrchestration(
   const [hasWebKey, setHasWebKey] = useState(false);
   const [enableWakeupRoutine, setEnableWakeupRoutine] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
+  const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
+  const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
+  const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
+  const [marketplaceApiKeyInput, setMarketplaceApiKeyInput] = useState("");
   const [saving, setSaving] = useState(false);
 
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
@@ -126,6 +139,11 @@ export function useSettingsOrchestration(
       setHasWebKey(webApiKeySet);
       setEnableWakeupRoutine(s.routine?.enableWakeupRoutine ?? false);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
+      setMarketplaceBaseUrl(s.marketplace?.realCloudBaseUrl ?? "");
+      setMarketplaceAllowPrivateNetwork(s.marketplace?.realCloudAllowPrivateNetwork ?? false);
+      const marketplaceKeySet = await api.hasMarketplaceApiKey();
+      if (cancelled) return;
+      setHasMarketplaceApiKey(marketplaceKeySet);
       setFallbackChain((s.llm.fallbackChain ?? []).map((e) => ({ provider: e.provider, model: e.model })));
       setSettingsLoaded(true);
     })();
@@ -171,6 +189,11 @@ export function useSettingsOrchestration(
           setWebKeyInput("");
           setHasWebKey(true);
         }
+        if (marketplaceApiKeyInput.trim()) {
+          await api.setMarketplaceApiKey(marketplaceApiKeyInput.trim());
+          setMarketplaceApiKeyInput("");
+          setHasMarketplaceApiKey(true);
+        }
         const current = await api.getSettings();
         const mergedBaseUrls = { ...(current.llm.baseUrls ?? {}) } as Record<string, string>;
         const trimmed = baseUrl.trim();
@@ -202,6 +225,10 @@ export function useSettingsOrchestration(
           chat: { autoCompact },
           routine: { enableWakeupRoutine } as any,
           privacy: { piiRedactEnabled },
+          marketplace: {
+            realCloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
+            realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
+          },
         } as any);
       }
       if (tab !== "permissions") { onSaved(); onOpenChange(false); }
@@ -233,6 +260,10 @@ export function useSettingsOrchestration(
     hasWebKey, setHasWebKey,
     enableWakeupRoutine, setEnableWakeupRoutine,
     piiRedactEnabled, setPiiRedactEnabled,
+    marketplaceBaseUrl, setMarketplaceBaseUrl,
+    marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,
+    hasMarketplaceApiKey, setHasMarketplaceApiKey,
+    marketplaceApiKeyInput, setMarketplaceApiKeyInput,
     settingsLoaded,
     saving,
     save,
