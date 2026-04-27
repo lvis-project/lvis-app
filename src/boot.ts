@@ -64,6 +64,7 @@ import { RemindersStore } from "./main/reminders-store.js";
 import { RemindersScheduler } from "./main/reminders-scheduler.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
+import { NotificationService } from "./main/notification-service.js";
 import { SkillStore } from "./main/skill-store.js";
 import { SkillOverlay } from "./main/skill-overlay.js";
 import { SkillApprovalsStore } from "./main/skill-approvals-store.js";
@@ -130,6 +131,24 @@ export async function bootstrap(
   const { AuditLogger } = await import("./audit/audit-logger.js");
   const bootAuditLogger = new AuditLogger();
 
+  // Issue #260 — system notification service. Constructed up-front so all
+  // 4 trigger sites (turn-end, routine, ask-user, approval) can call .fire().
+  // Live mainWindow getter avoids a stale handle after Electron close+reopen.
+  const notificationService = new NotificationService({
+    getMainWindow,
+    auditLogger: bootAuditLogger,
+  });
+  // Safety net: NotificationService is always constructed at this point.
+  // If it's somehow undefined, that indicates a boot-order regression
+  // (e.g. a refactor that moved the construction after a conditional branch).
+  // Throw early with a clear message so the regression is caught immediately
+  // rather than silently no-oping on every notification fire.
+  if (!notificationService) {
+    throw new Error("NotificationService failed to initialize — boot order regression");
+  }
+  // Routine delivery sites pass `notificationService` explicitly per-call so
+  // there's no module-level singleton to reset between tests/processes.
+
   // §4.2 Step 3 + 5: PluginRuntime + per-plugin HostApi factory.
   const {
     pluginRuntime,
@@ -170,7 +189,11 @@ export async function bootstrap(
       (err as Error).message,
     );
   });
-  const askUserQuestionGate = new AskUserQuestionGate(mainWindow.webContents);
+  const askUserQuestionGate = new AskUserQuestionGate(
+    mainWindow.webContents,
+    undefined,
+    notificationService,
+  );
   let subAgentRunnerRef: { fn: SubAgentRunner | undefined } = { fn: undefined };
   // Late-bound ApprovalGate ref — populated after createApprovalGate() below.
   // skill_load needs the same gate the executor uses so user-authored skills
@@ -321,6 +344,10 @@ export async function bootstrap(
   });
 
   // §7 Routine wiring — schedule cron timer + RoutineIdleSignaler (idle entry/exit).
+  // Note: routine notification firing lives inside deliverRoutineResult so all
+  // 3 delivery paths (coordinator / IPC dev-trigger / shutdown) participate.
+  // notificationService is passed in explicitly so each delivery site forwards
+  // it via deliverRoutineResult(... { notificationService }).
   const routineCoordinator = wireRoutineCoordinator({
     routineEngine,
     taskService,
@@ -328,6 +355,7 @@ export async function bootstrap(
     settingsService,
     powerMonitor: adaptPowerMonitor(powerMonitor),
     mainWindow,
+    notificationService,
   });
 
   // §4.2 Step 7: manifest-driven IPC bridges.
@@ -343,7 +371,7 @@ export async function bootstrap(
   });
 
   // B1 + §F7: ApprovalGate with audit.
-  const approvalGate = await createApprovalGate(mainWindow, bootAuditLogger);
+  const approvalGate = await createApprovalGate(mainWindow, bootAuditLogger, notificationService);
   approvalGateRef.fn = approvalGate;
 
   // Tier A4 (W3): HookRunner.
@@ -366,6 +394,7 @@ export async function bootstrap(
     hookRunner,
     pluginRuntime,
     skillOverlay,
+    notificationService,
   });
 
   // Late-binding 주입 — ConversationLoop 생성 직후.
@@ -488,6 +517,7 @@ export async function bootstrap(
     idleScheduler, bashAstValidator, auditService, auditLogger: bootAuditLogger, msGraphService, postTurnHookChain,
     approvalGate, knowledgeAvailable, starredStore, feedbackStore,
     remindersStore, remindersScheduler, sessionTodoStore, askUserQuestionGate, skillStore,
+    notificationService,
     telemetry, pluginTelemetry, autoUpdaterStop,
     startRemindersScheduler: () => remindersScheduler.start(),
     refreshPluginNotifications: () => {

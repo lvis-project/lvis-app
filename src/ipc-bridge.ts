@@ -45,6 +45,7 @@ import {
   getLatestRoutineResult,
 } from "./routines/routine-delivery.js";
 import { devLinkedEntryAllowed, isDevModeUnlocked } from "./boot/dev-flags.js";
+import { NOTIFICATION_KINDS } from "./main/notification-service.js";
 
 /**
  * Convert the UI's "user-assistant-only ordinal" to the real index into
@@ -300,6 +301,7 @@ export function registerIpcHandlers(
     askUserQuestionGate,
     remindersStore,
     sessionTodoStore,
+    notificationService,
   } = services;
 
   // Wire DLP audit logging so redactForLLM records hits to audit JSONL.
@@ -690,7 +692,7 @@ ${input}`;
     notifyRoutineStarted(getMainWindow(), startedPayload);
     try {
       const result = await routineEngine.runRoutine(built.routine);
-      await deliverRoutineResult(getMainWindow(), result);
+      await deliverRoutineResult(getMainWindow(), result, { notificationService });
       return { ok: true, summary: result.summary };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1611,6 +1613,55 @@ ${input}`;
       freeText: typeof r.freeText === "string" ? r.freeText : undefined,
       dismissed: r.dismissed === true,
     });
+    return { ok: true };
+  });
+
+  // ─── Notifications (#260) ────────────────────────────
+  // Renderer signals (via in-app toast click) that the user wants to focus
+  // the app. We restore + show + focus the main window. The OS-click path
+  // is handled directly inside NotificationService.fireOsNotification's
+  // click handler (which sends `lvis:notification:clicked` to the renderer
+  // for navigation), so this handler does NOT echo a click event back —
+  // doing so would deliver duplicate click events to renderer subscribers.
+  ipcMain.handle("lvis:notification:clicked", (e, payload: unknown) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:notification:clicked", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    // Manual shape check — payload comes from the renderer (untrusted).
+    // Reject anything that isn't one of the 4 known kinds and log a warn so
+    // a misbehaving renderer / plugin webview can't quietly trigger window
+    // focus with arbitrary state. No zod needed — the surface is tiny.
+    // NOTIFICATION_KINDS is the canonical set exported from notification-service
+    // so validation list and NotificationKind type stay in sync automatically.
+    const kind = (payload as { kind?: unknown } | null | undefined)?.kind;
+    if (typeof kind !== "string" || !NOTIFICATION_KINDS.has(kind as never)) {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "ipc-bridge",
+        type: "warn",
+        input: JSON.stringify({
+          event: "notification.clicked.invalid-payload",
+          receivedKind: typeof kind === "string" ? kind.slice(0, 32) : typeof kind,
+          // Forensic signal: whether contextRef was present on the malformed payload.
+          hasContextRef: typeof (payload as Record<string, unknown> | null | undefined)?.contextRef === "object",
+        }),
+      });
+      return { ok: false, error: "invalid-payload" };
+    }
+    const win = getMainWindow();
+    if (win && !win.isDestroyed()) {
+      try {
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+      } catch (err) {
+        console.warn(
+          "[lvis] notification:clicked focus failed:",
+          (err as Error).message,
+        );
+      }
+    }
     return { ok: true };
   });
 

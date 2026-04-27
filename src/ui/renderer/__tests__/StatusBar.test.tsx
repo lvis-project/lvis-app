@@ -1,6 +1,6 @@
 import "../../../../test/renderer/setup.js";
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { StatusBar } from "../components/StatusBar.js";
 import type { PersistentItem, ToastItem } from "../hooks/use-status-bar.js";
 
@@ -53,6 +53,45 @@ describe("StatusBar", () => {
     expect(screen.getByText("msg-3")).toBeInTheDocument();
     expect(screen.getByText("msg-4")).toBeInTheDocument();
     expect(screen.getByText("msg-5")).toBeInTheDocument();
+  });
+
+  it("invokes onToastClick when a notification toast is clicked (#260 M2)", () => {
+    const onToastClick = vi.fn();
+    const notif: ToastItem = toast({
+      id: "toast:n",
+      message: "질문이 도착했습니다: 진행 상태?",
+      severity: "info",
+      notification: { kind: "ask-user", contextRef: { questionId: "q-9" } },
+    });
+    render(<StatusBar persistent={[]} toasts={[notif]} onToastClick={onToastClick} />);
+    const btn = screen.getByRole("button", {
+      name: /질문이 도착했습니다/,
+    });
+    fireEvent.click(btn);
+    expect(onToastClick).toHaveBeenCalledTimes(1);
+    expect(onToastClick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "toast:n",
+        notification: expect.objectContaining({
+          kind: "ask-user",
+          contextRef: expect.objectContaining({ questionId: "q-9" }),
+        }),
+      }),
+    );
+  });
+
+  it("renders non-notification toasts as plain spans (no click handler)", () => {
+    const onToastClick = vi.fn();
+    render(
+      <StatusBar
+        persistent={[]}
+        toasts={[toast({ id: "toast:i", message: "agent-hub 설치 완료", severity: "success" })]}
+        onToastClick={onToastClick}
+      />,
+    );
+    // Plain producer toasts have no role=button, so clicking the text doesn't invoke the handler.
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(onToastClick).not.toHaveBeenCalled();
   });
 
   it("uses role=status with aria-live=polite for screen-reader updates", () => {
