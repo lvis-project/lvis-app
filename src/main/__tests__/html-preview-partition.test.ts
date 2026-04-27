@@ -144,10 +144,10 @@ describe("installPluginPartitionPolicy", () => {
     const [preloadList] = mockSetPreloadsPlugin.mock.calls[0] as [string[]];
     expect(Array.isArray(preloadList)).toBe(true);
     expect(preloadList).toHaveLength(1);
-    // resolve(__dirname, "..", "plugin-preload.cjs") at runtime; in tests
+    // resolve(__dirname, "..", "plugin-preload.js") at runtime; in tests
     // __dirname is `src/main/__tests__` so the resolved path ends with
     // `src/plugin-preload.js`. Match flexibly across path separators.
-    expect(preloadList[0]).toMatch(/plugin-preload\.cjs$/);
+    expect(preloadList[0]).toMatch(/plugin-preload\.js$/);
   });
 
   it("also installs the webRequest allowlist on the plugin partition session", () => {
