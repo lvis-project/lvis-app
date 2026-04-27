@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
+
 import { dirname, join, resolve } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
@@ -23,9 +24,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     // Phase 2b-1: file:-spec catalog entries route through the dev branch.
     process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY = "1";
     testDir = join(
-      homedir(),
-      ".lvis",
-      "test-tmp",
+      tmpdir(),
       `lvis-managed-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     // Phase 2a: registry.json lives under userInstalledDir (= testDir/plugins

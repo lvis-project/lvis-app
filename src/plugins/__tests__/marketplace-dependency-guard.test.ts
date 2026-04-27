@@ -5,13 +5,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import {resolve, join} from "node:path";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { PluginMarketplaceService } from "../marketplace.js";
 import type { PluginMarketplaceItem } from "../types.js";
 import { MissingDependenciesError } from "../types.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
+import { mkdtempSync } from "node:fs";
 
 // Minimal in-memory fetcher
 class StubFetcher {
@@ -93,7 +94,7 @@ describe("marketplace install dependency guard (S14)", () => {
 
   beforeEach(async () => {
     setIsPackaged(false);
-    tmpDir = join(homedir(), ".lvis", "test-tmp", `lvis-test-${randomBytes(8).toString("hex")}`);
+    tmpDir = mkdtempSync(join(tmpdir(), "lvis-test-"));
     await mkdir(tmpDir, { recursive: true });
     // Phase 2-final: stub the install pipeline so dep-guard tests don't try
     // to actually fetch / extract a zip. The dep-guard branch fires *before*

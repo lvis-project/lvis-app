@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
@@ -123,7 +123,7 @@ describe("ConversationTracer — §4.5 11-step", () => {
   });
 
   it("writes valid JSONL entries to the trace file when enabled", async () => {
-    const dir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-trace-"));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-trace-"));
     const sessionId = "test-session-abc";
     const tracer = createTracer(sessionId, { enabled: true, traceDir: dir });
     expect(tracer.enabled).toBe(true);

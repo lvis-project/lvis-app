@@ -8,7 +8,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { writeFile, mkdir, symlink } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import {resolve, join} from "node:path";
 import { PluginUpdateDetector, isNewer, isUpdateCheckEnabled } from "../update-detector.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
@@ -104,7 +104,7 @@ describe("PluginUpdateDetector", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "update-detector-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "update-detector-"));
   });
 
   afterEach(() => {

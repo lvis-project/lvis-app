@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import {
   buildVerifiedTarballPaths,
@@ -99,7 +99,7 @@ function fakeHttp(
 }
 
 function tmpDownloadRoot(): string {
-  return mkdtempSync(join(homedir(), ".lvis", "test-tmp", "s2-installer-"));
+  return mkdtempSync(join(tmpdir(), "s2-installer-"));
 }
 
 describe("installFromMarketplace — happy path", () => {

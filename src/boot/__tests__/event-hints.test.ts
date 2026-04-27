@@ -10,10 +10,11 @@
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { buildManifestEventHints } from "../plugins.js";
+import { mkdtempSync } from "node:fs";
 
 async function writePlugin(
   installedDir: string,
@@ -56,7 +57,7 @@ describe("buildManifestEventHints", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-hints-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = mkdtempSync(join(tmpdir(), "lvis-hints-"));
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");

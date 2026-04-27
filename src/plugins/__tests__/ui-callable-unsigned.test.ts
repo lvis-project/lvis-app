@@ -28,7 +28,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
+
 import { join } from "node:path";
 import { PluginRuntime } from "../runtime.js";
 
@@ -40,9 +41,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
 
   beforeEach(async () => {
     testDir = join(
-      homedir(),
-      ".lvis",
-      "test-tmp",
+      tmpdir(),
       `lvis-ui-unsigned-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     installedDir = join(testDir, "plugins", "installed");

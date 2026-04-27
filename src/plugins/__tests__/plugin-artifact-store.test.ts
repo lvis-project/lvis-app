@@ -18,7 +18,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PluginArtifactStore } from "../plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
@@ -39,9 +39,7 @@ function makeStore(tmpDir: string): PluginArtifactStore {
 }
 
 function makeTmpDir(): string {
-  // Mirror existing test convention — tmp under ~/.lvis/test-tmp so Windows
-  // doesn't need elevation for symlink-related cleanup.
-  const root = join(homedir(), ".lvis", "test-tmp");
+  const root = tmpdir();
   return mkdtempSync(join(root, "artifact-store-"));
 }
 

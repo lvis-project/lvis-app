@@ -13,7 +13,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
+
 import { join } from "node:path";
 import { generateKeyPairSync } from "node:crypto";
 import { PluginRuntime } from "../runtime.js";
@@ -54,9 +55,7 @@ describe("Phase 1 — plugin trust boundary", () => {
 
   beforeEach(async () => {
     testDir = join(
-      homedir(),
-      ".lvis",
-      "test-tmp",
+      tmpdir(),
       `lvis-trust-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     hostRoot = join(testDir, "host");

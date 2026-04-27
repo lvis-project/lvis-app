@@ -8,14 +8,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { withFileLock } from "../with-file-lock.js";
 
 let tmpDir: string;
 let testFile: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "with-file-lock-test-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "with-file-lock-test-"));
   testFile = join(tmpDir, "shared.json");
   writeFileSync(testFile, JSON.stringify({ counter: 0 }), "utf-8");
 });

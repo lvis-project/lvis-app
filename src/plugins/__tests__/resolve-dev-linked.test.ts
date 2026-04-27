@@ -20,7 +20,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
+
 import { join } from "node:path";
 import { PluginRuntime } from "../runtime.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
@@ -36,9 +37,7 @@ describe("PluginRuntime — resolveDevLinkedPackageEntry (via resolveEntryPath)"
 
   beforeEach(async () => {
     testDir = join(
-      homedir(),
-      ".lvis",
-      "test-tmp",
+      tmpdir(),
       `lvis-dev-linked-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     hostRoot = join(testDir, "host");

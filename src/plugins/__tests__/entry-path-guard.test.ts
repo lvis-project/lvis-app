@@ -6,9 +6,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime, resolvePluginEntryPath } from "../runtime.js";
+import { mkdtempSync } from "node:fs";
 
 describe("PluginRuntime — entry path allowlist", () => {
   let testDir: string;
@@ -17,7 +18,7 @@ describe("PluginRuntime — entry path allowlist", () => {
   let auditEntries: Array<{ level: string; message: string; data?: unknown }>;
 
   beforeEach(async () => {
-    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-entry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = mkdtempSync(join(tmpdir(), "lvis-entry-"));
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");
@@ -147,9 +148,7 @@ describe("PluginRuntime — entry path allowlist", () => {
  * the Windows fix preserves.
  */
 describe("resolvePluginEntryPath — direct", () => {
-  // Platform-neutral root: homedir() always returns a long-path canonical form
-  // on all OSes, avoiding POSIX/Windows separator divergence.
-  const root = join(homedir(), ".lvis", "test-tmp", "plugins", "sample");
+  const root = join(tmpdir(), "plugins", "sample");
 
   it("accepts a relative entry inside the plugin dir", () => {
     expect(() => resolvePluginEntryPath(root, "entry.mjs")).not.toThrow();

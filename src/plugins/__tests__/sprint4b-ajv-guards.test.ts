@@ -10,9 +10,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../runtime.js";
+import { mkdtempSync } from "node:fs";
 
 describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
   let testDir: string;
@@ -20,7 +21,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-4b-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = mkdtempSync(join(tmpdir(), "lvis-4b-"));
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");
