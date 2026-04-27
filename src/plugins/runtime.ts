@@ -157,7 +157,7 @@ export interface PluginRuntimeOptions {
    * Optional only because some unit tests construct PluginRuntime with a
    * `manifestPaths`-only seed that never touches `registryPath`.
    */
-  userInstalledDir?: string;
+  pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** 플러그인별 HostApi를 생성하는 팩토리 — boot.ts에서 주입 */
   createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
@@ -191,7 +191,7 @@ export class PluginRuntime {
   private readonly hostRoot: string;
   private readonly manifestPaths: string[];
   private readonly registryPath?: string;
-  private readonly userInstalledDir?: string;
+  private readonly pluginsRoot?: string;
   private readonly allowUnsignedUserPlugins: boolean;
   private configOverrides: Record<string, Record<string, unknown>>;
   private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
@@ -223,8 +223,8 @@ export class PluginRuntime {
     this.hostRoot = resolve(options.hostRoot);
     this.manifestPaths = (options.manifestPaths ?? []).map((path) => resolve(path));
     this.registryPath = options.registryPath ? resolve(options.registryPath) : undefined;
-    this.userInstalledDir = options.userInstalledDir
-      ? resolve(options.userInstalledDir)
+    this.pluginsRoot = options.pluginsRoot
+      ? resolve(options.pluginsRoot)
       : undefined;
     this.allowUnsignedUserPlugins = options.allowUnsignedUserPlugins === true;
     this.configOverrides = options.configOverrides ?? {};
@@ -1330,16 +1330,16 @@ export class PluginRuntime {
    * Trust-root containment check for registry-recorded manifest paths.
    *
    * A registry entry's manifestPath is trusted iff its `realpathSync()`
-   * (symlinks resolved) is contained under `realpathSync(userInstalledDir)`.
+   * (symlinks resolved) is contained under `realpathSync(pluginsRoot)`.
    * `hostRoot` is also accepted as defense-in-depth for entries that
    * pre-date Phase 2-final (the old `<appRoot>/plugins/installed/` layout);
-   * Phase 2c migration rewrites those into the userInstalledDir tree on
+   * Phase 2c migration rewrites those into the pluginsRoot tree on
    * boot, so production callers should never observe a hostRoot match.
    *
    * Why the realpath + path.relative shape:
    *   1. Symlink defeat — without realpath, an attacker who controls HOME
    *      could plant `~/.lvis/plugins/foo -> /some/sensitive/dir` and a
-   *      registry entry under `userInstalledDir` would naively pass.
+   *      registry entry under `pluginsRoot` would naively pass.
    *   2. `path.relative` instead of `startsWith` — the prefix variant has
    *      trailing-separator pitfalls (`/foo` would falsely match `/foobar`).
    *   3. Roots realpath-resolved — keeps the check symmetric so a root
@@ -1353,7 +1353,7 @@ export class PluginRuntime {
   private isTrustedRegistryManifestPath(
     manifestPath: string,
     hostRoot: string,
-    userInstalledDir?: string,
+    pluginsRoot?: string,
   ): boolean {
     if (!isAbsolute(manifestPath)) return true;
     let realManifest: string;
@@ -1365,12 +1365,12 @@ export class PluginRuntime {
       return false;
     }
     if (this.isPathContained(realHost, realManifest)) return true;
-    if (userInstalledDir) {
+    if (pluginsRoot) {
       let realUser: string;
       try {
-        realUser = realpathSync(userInstalledDir);
+        realUser = realpathSync(pluginsRoot);
       } catch {
-        // userInstalledDir doesn't exist yet (first-run before any user
+        // pluginsRoot doesn't exist yet (first-run before any user
         // plugin is installed). Treat as "no second trust root" rather than
         // a hard reject — the hostRoot path above already gave us a chance.
         return false;
@@ -1409,7 +1409,7 @@ export class PluginRuntime {
         const manifestPath = isAbsolute(entry.manifestPath)
           ? entry.manifestPath
           : resolve(dirname(this.registryPath!), entry.manifestPath);
-        if (!this.isTrustedRegistryManifestPath(manifestPath, this.hostRoot, this.userInstalledDir)) {
+        if (!this.isTrustedRegistryManifestPath(manifestPath, this.hostRoot, this.pluginsRoot)) {
           console.warn(`[plugin-runtime] ignoring untrusted registry manifest path for ${entry.id}: ${manifestPath}`);
           return [];
         }

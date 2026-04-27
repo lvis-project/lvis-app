@@ -564,14 +564,14 @@ export async function initPluginRuntime(
   }
 
   // §7.2 Plugin Deployment Guard.
-  // Phase 2a SoT: anchor the layout at Electron's `userData` directory.
-  // `app.getPath('userData')` returns `%APPDATA%/lvis`, `~/Library/Application
-  // Support/lvis`, or `~/.config/lvis` per OS convention. The resolver throws
-  // if userDataDir is missing — there is no `<appRoot>/plugins/` fallback.
-  const pluginPaths = resolvePluginPaths({ userDataDir: app.getPath("userData") });
+  // Plugin layout anchors at `~/.lvis/plugins/<id>/` — single root for both
+  // user-installed and admin-injected plugins (distinguished by metadata,
+  // not by physical directory). The resolver picks `LVIS_PLUGINS_DIR` if
+  // set on a dev build, else `homedir()/.lvis/plugins`.
+  const pluginPaths = resolvePluginPaths();
   const deploymentGuard = new PluginDeploymentGuard({
     registryPath: pluginPaths.registryPath,
-    userInstalledDir: pluginPaths.userInstalledDir,
+    pluginsRoot: pluginPaths.pluginsRoot,
   });
 
   // Late-binding refs for ConversationLoop-dependent callers.
@@ -615,7 +615,7 @@ export async function initPluginRuntime(
   const pluginSettings = settingsService.get("plugins");
   pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
-    userInstalledDir: pluginPaths.userInstalledDir,
+    pluginsRoot: pluginPaths.pluginsRoot,
     registryPath: pluginPaths.registryPath,
     allowUnsignedUserPlugins: pluginSettings?.allowUnsignedUserPlugins === true,
     configOverrides,

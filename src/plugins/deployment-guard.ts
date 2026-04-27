@@ -9,10 +9,10 @@ import type { InstallPolicy } from "./types.js";
  * Managed 플러그인이 user actor에 의해 제거/비활성화되지 않도록 차단.
  * Phase 1.5 hybrid 판정 (두 레이어가 모두 통과해야 "user" 허용):
  *
- *   1. Path check (default-deny): `userInstalledDir` 하위가 아니면 managed.
+ *   1. Path check (default-deny): `pluginsRoot` 하위가 아니면 managed.
  *      registry.json 위변조로 외부 경로가 등록되는 경우를 차단.
  *   2. Manifest field check: `plugin.json`의 `installPolicy === "admin"`면 managed.
- *      `userInstalledDir` 안에 있더라도 번들 플러그인(설치 시점에 관리형으로
+ *      `pluginsRoot` 안에 있더라도 번들 플러그인(설치 시점에 관리형으로
  *      지정됐던 것)은 필드로 식별.
  *
  * 위 두 검사 중 하나라도 managed를 가리키면 user actor는 거부되고 it-admin만 허용.
@@ -45,16 +45,16 @@ export interface DeploymentGuardOptions {
    * Absolute path to the directory where user-installed plugins live
    * (typically `{appRoot}/plugins/installed`).
    */
-  userInstalledDir: string;
+  pluginsRoot: string;
 }
 
 export class PluginDeploymentGuard {
   private readonly registryPath: string;
-  private readonly userInstalledDir: string;
+  private readonly pluginsRoot: string;
 
   constructor(options: DeploymentGuardOptions) {
     this.registryPath = resolve(options.registryPath);
-    this.userInstalledDir = resolve(options.userInstalledDir);
+    this.pluginsRoot = resolve(options.pluginsRoot);
   }
 
   async canUninstall(pluginId: string, actor: Actor): Promise<GuardResult> {
@@ -75,7 +75,7 @@ export class PluginDeploymentGuard {
     if (!this.isPathUnderUserInstalledDir(manifestAbs)) {
       return {
         allowed: false,
-        reason: `Managed plugin cannot be uninstalled by user: ${pluginId} (path outside userInstalledDir)`,
+        reason: `Managed plugin cannot be uninstalled by user: ${pluginId} (path outside pluginsRoot)`,
       };
     }
 
@@ -152,7 +152,7 @@ export class PluginDeploymentGuard {
   }
 
   private isPathUnderUserInstalledDir(absolutePath: string): boolean {
-    const rel = relative(this.userInstalledDir, absolutePath);
+    const rel = relative(this.pluginsRoot, absolutePath);
     if (rel === "" || rel === ".") return false;
     if (rel.startsWith("..")) return false;
     if (isAbsolute(rel)) return false;

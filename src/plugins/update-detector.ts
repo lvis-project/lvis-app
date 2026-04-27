@@ -102,9 +102,9 @@ export class PluginUpdateDetector {
     // registry directory (app-managed plugins) or the per-user install dir
     // `~/.lvis/plugins/` (dynamic installs). Anything else — e.g. a crafted
     // registry entry like "../../etc/passwd" — is rejected.
-    const userInstalledDir = canonicalizeExistingPath(resolve(homedir(), ".lvis/plugins"));
+    const pluginsRoot = canonicalizeExistingPath(resolve(homedir(), ".lvis/plugins"));
     const underRegistry = isWithin(registryDir, abs);
-    const underUserDir = isWithin(userInstalledDir, abs);
+    const underUserDir = isWithin(pluginsRoot, abs);
     if (!underRegistry && !underUserDir) {
       console.warn("[update-detector] manifestPath escapes allowed roots, skipping:", manifestPath);
       return null;

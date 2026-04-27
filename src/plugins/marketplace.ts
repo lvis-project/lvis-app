@@ -150,7 +150,7 @@ interface PluginHistoryEntry {
 
 export class PluginMarketplaceService {
   private readonly registryPath: string;
-  private readonly userInstalledDir: string;
+  private readonly pluginsRoot: string;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly fetcher: MarketplaceFetcher;
   /** Sprint 3-B §9.6: per-plugin version cache for rollback. */
@@ -182,7 +182,7 @@ export class PluginMarketplaceService {
    * the registry / installed-dir / cache layout, and `fetcher` is required.
    * The pre-Phase-2b `appRoot` argument used by the npm-install branch is
    * gone; the only install path is the signed-zip download under
-   * `paths.userInstalledDir`.
+   * `paths.pluginsRoot`.
    */
   constructor(
     paths: PluginPaths,
@@ -190,7 +190,7 @@ export class PluginMarketplaceService {
     deploymentGuard?: PluginDeploymentGuard,
   ) {
     this.registryPath = paths.registryPath;
-    this.userInstalledDir = paths.userInstalledDir;
+    this.pluginsRoot = paths.pluginsRoot;
     this.cacheRoot = paths.cacheRoot;
     this.deploymentGuard = deploymentGuard;
     this.fetcher = fetcher;
@@ -200,11 +200,11 @@ export class PluginMarketplaceService {
       fetcher instanceof MockMarketplaceFetcher
         ? null
         : resolve(paths.cacheRoot, "marketplace-catalog");
-    // Artifact store owns the same `userInstalledDir` (extract target) +
+    // Artifact store owns the same `pluginsRoot` (extract target) +
     // `cacheRoot` (history + version snapshots). Tarball offline cache
     // also lives under `cacheRoot`, not homedir().
     this.artifactStore = new PluginArtifactStore({
-      installRoot: paths.userInstalledDir,
+      installRoot: paths.pluginsRoot,
       cacheRoot: paths.cacheRoot,
       fetcher,
       publicKeys: getBundledPublicKeys(),
@@ -775,7 +775,7 @@ export class PluginMarketplaceService {
     entry: PluginRegistryEntry,
     _remainingEntries: PluginRegistryEntry[],
   ): Promise<void> {
-    // Phase 2-final: every install is a zip-extract under userInstalledDir,
+    // Phase 2-final: every install is a zip-extract under pluginsRoot,
     // so uninstall is a recursive rm of the plugin's directory. The
     // pre-Phase-2 npm-uninstall branch (`isZipInstalled === false`) is
     // gone with the install-side npm path.
@@ -783,7 +783,7 @@ export class PluginMarketplaceService {
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
     const installedManifestDir = dirname(manifestPath);
-    if (this.isWithin(this.userInstalledDir, installedManifestDir)) {
+    if (this.isWithin(this.pluginsRoot, installedManifestDir)) {
       await rm(installedManifestDir, { recursive: true, force: true });
     }
   }

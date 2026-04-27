@@ -79,7 +79,7 @@ describe("PluginRuntime.disable", () => {
   }
 
   function makeRuntime(): PluginRuntime {
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     return new PluginRuntime({
       hostRoot: testDir,
       registryPath,
@@ -387,7 +387,7 @@ describe("PluginRuntime.disable", () => {
 
       let injectedCallTool: ((toolName: string, payload?: unknown) => Promise<unknown>) | undefined;
 
-      const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+      const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
       const runtime = new PluginRuntime({
         hostRoot: testDir,
         registryPath,
@@ -442,7 +442,7 @@ describe("PluginRuntime.disable", () => {
       );
       await writeRegistry([{ id: "calltool-delegate", manifestPath, enabled: true }]);
 
-      const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+      const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
       const runtime = new PluginRuntime({
         hostRoot: testDir,
         registryPath,
@@ -722,7 +722,7 @@ describe("PluginRuntime.disable", () => {
     runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
-      deploymentGuard: new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir }),
+      deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
       createHostApi: (pluginId) => ({
         registerKeywords: () => {},
         emitEvent: () => {},
@@ -796,7 +796,7 @@ describe("PluginRuntime.disable", () => {
     runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
-      deploymentGuard: new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir }),
+      deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
       createHostApi: (pluginId) => ({
         registerKeywords: () => {},
         emitEvent: () => {},
@@ -902,22 +902,22 @@ describe("PluginRuntime.disable", () => {
 /**
  * Trusted-path filter for registry-listed manifests. Marketplace installs
  * write under `~/.lvis/plugins/{slug}/`, which lives outside the project
- * `hostRoot`. Without `userInstalledDir` widening, every cloud-installed
+ * `hostRoot`. Without `pluginsRoot` widening, every cloud-installed
  * plugin gets dropped on `restartAll()` after install.
  */
 describe("PluginRuntime registry trusted-path", () => {
   let testDir: string;
   let hostRoot: string;
-  let userInstalledDir: string;
+  let pluginsRoot: string;
   let registryPath: string;
 
   beforeEach(async () => {
     testDir = mkdtempSync(join(tmpdir(), "trusted-path-"));
     hostRoot = join(testDir, "host");
-    userInstalledDir = join(testDir, "user-installs");
+    pluginsRoot = join(testDir, "user-installs");
     registryPath = join(hostRoot, "plugins", "registry.json");
     await mkdir(join(hostRoot, "plugins"), { recursive: true });
-    await mkdir(userInstalledDir, { recursive: true });
+    await mkdir(pluginsRoot, { recursive: true });
   });
 
   afterEach(async () => {
@@ -952,20 +952,20 @@ describe("PluginRuntime registry trusted-path", () => {
     return manifestPath;
   }
 
-  it("loads a plugin under userInstalledDir when widening is configured", async () => {
-    const manifestPath = await writeMinimalPlugin(userInstalledDir, "cloud-plugin");
+  it("loads a plugin under pluginsRoot when widening is configured", async () => {
+    const manifestPath = await writeMinimalPlugin(pluginsRoot, "cloud-plugin");
     await writeFile(
       registryPath,
       JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
       "utf-8",
     );
-    const runtime = new PluginRuntime({ hostRoot, userInstalledDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot, pluginsRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).toContain("cloud-plugin");
   });
 
-  it("drops a plugin under userInstalledDir when widening is NOT configured", async () => {
-    const manifestPath = await writeMinimalPlugin(userInstalledDir, "cloud-plugin");
+  it("drops a plugin under pluginsRoot when widening is NOT configured", async () => {
+    const manifestPath = await writeMinimalPlugin(pluginsRoot, "cloud-plugin");
     await writeFile(
       registryPath,
       JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
@@ -982,7 +982,7 @@ describe("PluginRuntime registry trusted-path", () => {
   });
 
   it("rejects a manifest path that is outside both trusted roots", async () => {
-    // Disguise the manifest at a sibling of userInstalledDir so neither root
+    // Disguise the manifest at a sibling of pluginsRoot so neither root
     // claims it; the prefix check must reject regardless of name similarity.
     const escapeDir = join(testDir, "user-installs-evil");
     const manifestPath = await writeMinimalPlugin(escapeDir, "evil");
@@ -992,7 +992,7 @@ describe("PluginRuntime registry trusted-path", () => {
       "utf-8",
     );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const runtime = new PluginRuntime({ hostRoot, userInstalledDir, registryPath });
+    const runtime = new PluginRuntime({ hostRoot, pluginsRoot, registryPath });
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("evil");
     expect(warnSpy).toHaveBeenCalledWith(
