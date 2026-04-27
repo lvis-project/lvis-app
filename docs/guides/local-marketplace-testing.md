@@ -1,204 +1,176 @@
 # 로컬 마켓플레이스로 플러그인 테스트하기
 
-> **대상**: 플러그인을 사내 prod 마켓플레이스에 올리기 전, **end-to-end 마켓플레이스 흐름**(zip 패키징 → 서버 publish → 카탈로그 노출 → 앱에서 install)이 잘 도는지 로컬에서 검증하고 싶은 개발자.
+> **대상**: 사내 prod 마켓플레이스에 올리기 전, **end-to-end 마켓플레이스 흐름**(서버 부트스트랩 → 카탈로그 노출 → 앱 install)이 잘 도는지 로컬에서 검증하고 싶은 플러그인 개발자.
 >
-> **이 문서가 다루는 범위**: 로컬 `lvis-marketplace` 서버 띄우기 → CLI 로 publish → `lvis-app` 에서 install. 마켓플레이스 없이 그냥 사이드로드만 하려면 [`local-plugin-development.md`](./local-plugin-development.md). 프로덕션 publish 절차는 [`marketplace-publishing.md`](./marketplace-publishing.md).
+> **이 문서가 다루는 범위**: 로컬 `lvis-marketplace` 서버 띄우기 → 플러그인 git 레포에서 빌드/버전 bump → 서버가 자동으로 카탈로그에 등록 → `lvis-app` 에서 install. 마켓플레이스 없이 그냥 사이드로드만 하려면 [`local-plugin-development.md`](./local-plugin-development.md). prod 카탈로그 publish 절차는 [`marketplace-publishing.md`](./marketplace-publishing.md).
 
 ---
 
-## 언제 이 흐름이 필요한가
+## 한 줄 요약 — 배포 모델
 
-사이드로드(`plugins:add`)는 빠르지만, 다음을 검증할 수 없습니다:
+LVIS 마켓플레이스는 **git-based publish**입니다. Go 모듈 프록시처럼, 서버가 등록된 플러그인 git 레포를 직접 풀(pull)하고 packaging/signing 까지 서버 사이드에서 수행합니다. **개발자는 zip 을 만들 필요도, CLI 로 업로드할 필요도 없습니다.**
 
-- zip 구조가 서버 검증(`zip_validator`)을 통과하는지 (path traversal, symlink, 압축 비율)
-- 매니페스트가 서버 schema validation 을 통과하는지
-- `tools[]` namespace 충돌이 없는지
-- `installPolicy`, `dependencies`, `pluginAccess` 가 서버 정책 게이트를 통과하는지
-- 앱이 카탈로그에서 정상 노출 → 다운로드 → ed25519 envelope 검증 → 추출까지 도는지
-- `lvis://install/{slug}` 딥링크가 동작하는지
+```
+[plugin git repo: bun run build → package.json version bump → push]
+                              ↓
+[lvis-marketplace server: bootstrap on startup]
+   git pull --ff-only → plugin.json + dist/ + prod node_modules → 결정적 zip → ed25519 서명 → DB UPSERT
+                              ↓
+[lvis-app: catalog refresh → 카드 → install]
+   서버에서 zip 다운로드 → envelope 검증 → 추출 → registry 등록
+```
 
-prod 에 올리기 전 한 번은 이 루프를 도는 것을 권장.
+> 서버가 만드는 zip 은 클라이언트 전송 포맷일 뿐, 개발자 산출물이 아닙니다. 서명도 서버가 합니다 (`MARKETPLACE_SIGNING_PRIVATE_KEY_*` 키들).
 
 ---
 
-## 1. 사전 준비
+## 등록된 managed 플러그인
 
-| 도구 | 용도 |
-|------|------|
-| Python ≥ 3.11 + `uv` | `lvis-marketplace` 서버 |
-| Docker (선택) | Postgres 까지 한 번에 띄우려면 |
-| Node.js ≥ 20 | `lvis-publish` CLI 빌드/실행 |
-| `lvis-app` dev 빌드 | 카탈로그 consumer |
+`bootstrap.py` 의 `MANAGED_SOURCES` 에 하드코딩된 7개:
+
+| slug | 레포 디렉토리명 | install policy |
+|------|------------------|----------------|
+| `meeting` | `lvis-plugin-meeting` | user |
+| `pageindex` | `lvis-plugin-pageindex` | admin (managed) |
+| `email` | `lvis-plugin-email` | user |
+| `calendar` | `lvis-plugin-calendar` | user |
+| `lge-api` | `lvis-plugin-lge-api` | admin (managed) |
+| `work-proactive` | `lvis-plugin-work-proactive` | user |
+| `agent-hub` | `lvis-plugin-agent-hub` | user |
+
+이 7개 중 하나를 수정하고 있다면 — 별다른 등록 없이 바로 §3 의 "내 플러그인 변경 → 카탈로그 반영" 루프로 진입하면 됩니다.
+
+새 플러그인(목록에 없음) 테스트 방법은 §6 참고.
+
+---
+
+## 1. 워크스페이스 레이아웃
+
+서버는 `LVIS_PLUGIN_WORKSPACE_ROOT` 환경변수가 가리키는 디렉토리(미설정 시 `lvis-marketplace` 의 부모) 아래에서 **하드코딩된 디렉토리명**(예: `lvis-plugin-lge-api`)으로 레포를 찾습니다.
+
+권장 레이아웃 (이 워크스페이스 그대로):
+
+```
+lvis-project/
+├── lvis-app/
+├── lvis-marketplace/         ← 서버
+├── lvis-plugin-meeting/      ← bootstrap 이 git pull 대상으로 인식
+├── lvis-plugin-pageindex/
+├── lvis-plugin-email/
+├── lvis-plugin-calendar/
+├── lvis-plugin-lge-api/
+├── lvis-plugin-work-proactive/
+└── lvis-plugin-agent-hub/
+```
+
+7개 중 일부만 있어도 OK — 없는 것은 부트스트랩 시 `repo missing, skipped` 로그만 남기고 그 외 진행. 다른 위치에 있다면:
+
+```bash
+LVIS_PLUGIN_WORKSPACE_ROOT=/path/to/your/workspace uv run uvicorn ...
+```
 
 ---
 
 ## 2. 마켓플레이스 서버 로컬 실행
 
-두 가지 방법 — 빠르게 띄우려면 **uvicorn 단독**, Postgres 까지 재현하려면 **Docker Compose**.
-
-### 2-A. uvicorn 단독 (SQLite, 가장 빠름)
-
 ```bash
 cd lvis-marketplace/server
 uv sync
-cp .env.example .env                              # SQLite 기본값으로 충분
+cp .env.example .env                        # SQLite + dev-v1 키 기본값으로 충분
 uv run alembic upgrade head
 uv run uvicorn lvis_marketplace.main:create_app --factory --reload --host 127.0.0.1 --port 8000
+```
+
+부팅 로그에서 **bootstrap 라인을 확인**하세요:
+
+```
+bootstrap: meeting@1.0.0 unchanged — preserving existing artifact
+bootstrap: lge-api@0.1.0 published
+bootstrap: pageindex repo missing, skipped: /.../lvis-plugin-pageindex
 ```
 
 확인:
 
 ```bash
 curl -s http://localhost:8000/api/v1/health | jq
-# { "status": "ok", "ready": true, "bootstrap_status": ... }
+# { "status": "ok", "ready": true, "bootstrap_status": { "published": 4, "failures": [...] } }
+
+curl -s http://localhost:8000/api/v1/catalog | jq '.plugins[] | {slug, latest_stable_version}'
 ```
 
-### 2-B. Docker Compose (Postgres 포함)
-
-```bash
-cd lvis-marketplace/deploy
-docker compose up
-# postgres :5432, marketplace server :8000
-```
-
-### 환경변수
-
-서버는 부팅 시 `.env` 또는 환경변수에서 다음을 읽습니다 (`server/.env.example` 전체 목록):
+### 핵심 환경변수
 
 | 변수 | 기본 | 메모 |
 |------|------|------|
-| `LVIS_MARKETPLACE_STORAGE_DIR` | `./storage` | 업로드 zip 저장 위치 |
-| `LVIS_MARKETPLACE_DB_PATH` | `./lvis-marketplace.db` | SQLite 경로 (Postgres 사용 시 무시) |
-| `LVIS_MARKETPLACE_HOST` / `_PORT` | `127.0.0.1` / `8000` | bind |
-| `LVIS_MARKETPLACE_MAX_ARTIFACT_MB` | `50` | zip 사이즈 상한 (CLI 도 같은 값으로 가드) |
-| `MARKETPLACE_SIGNING_PRIVATE_KEY_DEV_V1` | `.env.example` 의 dev 값 | dev-v1 키 — 로컬 개발 OK, **prod 금지** |
-| `LVIS_SCHEMA_HOST` | `lvis.local` | 매니페스트 `$schema` URI 호스트. 로컬에서는 기본값 그대로 사용 |
+| `LVIS_MARKETPLACE_STORAGE_DIR` | `./storage` | 부트스트랩이 만든 zip + 서명 envelope 저장소 |
+| `LVIS_MARKETPLACE_DB_PATH` | `./lvis-marketplace.db` | SQLite. Postgres 사용 시 무시 |
+| `LVIS_PLUGIN_WORKSPACE_ROOT` | (자동 탐지) | 위 §1 참고 |
+| `LVIS_MARKETPLACE_SKIP_BOOTSTRAP` | 미설정 | `1` 이면 부트스트랩 자체 skip — 서버를 빠르게 띄우고 기존 DB 만 보고 싶을 때 |
+| `LVIS_SCHEMA_HOST` | `lvis.local` | 매니페스트 `$schema` URI 호스트. 로컬에서는 기본값 그대로 |
+| `MARKETPLACE_SIGNING_PRIVATE_KEY_DEV_V1` | `.env.example` 에 dev 값 | 서버가 zip sha256 을 서명할 키. 여러 키를 동시에 등록하면 모두로 dual-sign |
 
-서버는 시작 시 모든 환경변수에 잡히는 `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 키로 zip 의 sha256 을 **모두 자동 서명**합니다. 클라이언트(`lvis-app`)는 envelope 의 시그니처 중 하나라도 자기가 번들한 publisher key set 에 매칭되면 받아들입니다.
-
----
-
-## 3. CLI(`lvis-publish`) 빌드
-
-CLI 는 워크스페이스에 별도 빌드가 필요합니다.
-
-```bash
-cd lvis-marketplace/cli
-npm install
-npm run build
-# 실행 진입점: ./bin/lvis-publish
-```
-
-전역 등록(선택):
-
-```bash
-npm link                         # → 어디서든 `lvis-publish` 호출
-```
-
-이후부터는 `npx lvis-publish ...` 또는 `lvis-marketplace/cli/bin/lvis-publish ...` 로 실행.
+서버는 `MARKETPLACE_SIGNING_PRIVATE_KEY_<KEY_ID>` 형태로 잡히는 **모든 키로 dual-sign** 합니다. 클라이언트는 envelope 의 시그니처 중 하나라도 자기가 신뢰하는 publisher key set 에 매칭되면 OK.
 
 ---
 
-## 4. 플러그인 zip 패키징
+## 3. 내 플러그인 변경 → 카탈로그 반영
 
-> ⚠️ 현재 `lvis-plugin-template` 에는 `package.sh` 같은 zip 헬퍼가 없습니다. 직접 `zip` 으로 만듭니다. Windows 면 PowerShell `Compress-Archive` 또는 7-zip.
+managed 7개 중 하나를 작업하는 경우 — 한 사이클은 다음과 같습니다.
 
-### 4-1. 빌드
-
-플러그인 레포에서:
+### 3-1. 플러그인 레포에서 빌드
 
 ```bash
-cd lvis-plugin-<yourname>
+cd lvis-plugin-<your-managed-slug>
 bun install
-bun run build       # → dist/ 생성
+bun run build           # → dist/ 갱신. 서버는 dist/ 가 커밋되어 있을 거라 가정.
+bun run test            # 권장
 ```
 
-### 4-2. (선택) 매니페스트 서명
+### 3-2. 버전 bump
 
-마켓플레이스 서버는 zip 의 sha256 을 별도로 서명하지만, **매니페스트 자체 서명**(`plugin.json.sig`)은 `installPolicy: "admin"` 일 때 호스트가 강제합니다. 로컬 dev 에서는 `LVIS_DEV_SKIP_SIG=1` 로 우회 가능하지만, prod 흐름을 그대로 재현하려면 서명까지 해보는 것이 좋습니다.
+`package.json` 의 `version` 을 올립니다 (semver). 서버가 이 값을 읽어서 `PluginVersion` 행을 만듭니다.
 
 ```bash
-# (1) 개발용 키페어 생성 — lvis-app 의 헬퍼 사용
-cd ../lvis-app
-node scripts/keygen-publisher.mjs > /tmp/dev-publisher.pem
-# 출력에서 PRIVATE / PUBLIC PEM 블록을 분리해 저장
-
-# (2) 환경변수에 PRIVATE 넣고 매니페스트 서명
-cd ../lvis-plugin-<yourname>
-LVIS_PUBLISHER_SIGNING_KEY="$(cat /tmp/dev-publisher-private.pem)" \
-  node ../lvis-app/scripts/sign-manifest.mjs plugin.json
-# → plugin.json.sig 생성
+# 패치 bump 예
+npm version patch --no-git-tag-version
+# 또는 직접 편집
 ```
 
-`lvis-app` 이 이 PUBLIC 키를 신뢰하게 만들려면 SDK 의 `MARKETPLACE_PUBLIC_KEYS` 에 추가하거나(영구), 단발성 테스트면 `LVIS_DEV_SKIP_SIG=1` 로 검증을 건너뛰면 됩니다.
+> ⚠️ **동일 버전 재발행 불가**. 서버는 `(plugin_id, version)` 유니크 + 같은 버전 재빌드 시 sha256 비교까지 해서 mismatch 면 `immutable artifact mismatch` 로 거절합니다. dist/ 내용을 바꿨으면 반드시 버전을 올리세요. (DB 리셋은 §7)
 
-### 4-3. zip 만들기
-
-zip 루트에 `plugin.json` 과 `dist/` 가 있어야 합니다 (서브폴더 한 단계 들어가면 서버가 거절).
+### 3-3. 커밋
 
 ```bash
-zip -r lvis-plugin-<yourname>-0.1.0.zip plugin.json dist/ icons/ 2>/dev/null
-# 서명을 했다면
-zip -r lvis-plugin-<yourname>-0.1.0.zip plugin.json plugin.json.sig dist/ icons/
+git add plugin.json dist/ package.json
+git commit -m "chore: bump to 0.1.1"
+# git push 는 선택. 서버는 working tree 를 봅니다 — push 가 없으면 git pull 단계가
+# "using existing dist/" 경고만 남기고 통과.
 ```
 
-PowerShell:
+### 3-4. 서버 부트스트랩 재실행
 
-```powershell
-Compress-Archive -Path plugin.json,plugin.json.sig,dist,icons `
-  -DestinationPath lvis-plugin-<yourname>-0.1.0.zip
-```
-
-빠른 검증 (path traversal / symlink / 매직 바이트):
+부트스트랩은 **서버 시작 시점에만** 돌므로 서버를 재시작합니다 (`--reload` 모드라도 코드 수정이 아닌 외부 git/dist 변화는 트리거되지 않음).
 
 ```bash
-unzip -l lvis-plugin-<yourname>-0.1.0.zip | head
-# plugin.json 이 root 에 있어야 함. dist/ 도 root 직속.
+# 서버 터미널에서 Ctrl+C 후
+uv run uvicorn lvis_marketplace.main:create_app --factory --reload --host 127.0.0.1 --port 8000
 ```
+
+부팅 로그에 새 버전이 보여야 합니다:
+
+```
+bootstrap: <slug>@0.1.1 published
+```
+
+### 3-5. 앱에서 catalog refresh
+
+`lvis-app` 의 마켓플레이스 탭에서 **다시 시도** 또는 새로고침 — 새 버전이 카드에 반영됩니다.
 
 ---
 
-## 5. CLI 로 publish
+## 4. lvis-app 에서 install
 
-먼저 CLI 에 base URL + key 를 저장 (`~/.lvis/marketplace-cli.json`):
-
-```bash
-lvis-publish login --base-url http://localhost:8000
-# API key 프롬프트 — 로컬 dev 서버는 기본 인증이 켜져 있지 않으면 빈 값 OK
-lvis-publish status
-# server health + login state 출력
-```
-
-publish:
-
-```bash
-lvis-publish publish lvis-plugin-<yourname>-0.1.0.zip --slug <yourname>
-```
-
-CLI 가 client-side 에서 다음을 가드:
-- `.zip` 확장자 + ZIP magic bytes
-- 50 MB 상한
-- 파일 존재성
-
-서버 응답 예:
-
-```json
-{ "plugin_id": 7, "version": "0.1.0", "sha256": "abc..." }
-```
-
-확인:
-
-```bash
-lvis-publish list
-lvis-publish show <yourname>
-curl -s http://localhost:8000/api/v1/catalog | jq '.plugins[] | select(.slug == "<yourname>")'
-```
-
----
-
-## 6. lvis-app 에서 install
-
-### 6-1. 마켓플레이스 URL 등록
+### 4-1. 마켓플레이스 URL 등록
 
 `lvis-app` 실행 후 → 설정 → **마켓플레이스** 탭:
 
@@ -206,15 +178,13 @@ curl -s http://localhost:8000/api/v1/catalog | jq '.plugins[] | select(.slug == 
 |------|----|
 | 서버 URL | `http://localhost:8000` |
 | API 키 | (로컬 dev 서버는 비워둬도 됨) |
-| 사설 네트워크 허용 | **켜기** (loopback URL 이라 필요) |
+| 사설 네트워크 허용 | **켜기** (loopback URL 이라 필수) |
 
-저장 후 부트스트랩 배너의 **다시 시도** 버튼으로 catalog refresh.
+저장 후 부트스트랩 배너의 **다시 시도** 버튼으로 catalog refresh. URL 변경은 재시도로 충분, API 키 변경은 fetcher 재구성을 위해 앱 재시작 필요.
 
-> API 키가 변경되면 fetcher 재구성을 위해 앱 재시작이 필요합니다. URL 변경은 **다시 시도**로 충분.
+### 4-2. dev 플래그
 
-### 6-2. dev 플래그
-
-unpackaged 빌드는 `scripts/run-electron.mjs` 가 자동 세팅하지만, 로컬 마켓플레이스 테스트에는 보통 추가로:
+unpackaged 빌드는 `LVIS_DEV=1` / `LVIS_DEV_SKIP_SIG=1` 이 자동 세팅되지만, 마켓플레이스 zip 의 envelope 검증을 dev 키로 통과시키려면 추가로:
 
 ```bash
 LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1 bun run start
@@ -222,19 +192,19 @@ LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1 bun run start
 
 | 플래그 | 효과 |
 |--------|------|
-| `LVIS_DEV=1` | dev 게이트 활성화 (자동 세팅) |
-| `LVIS_DEV_SKIP_SIG=1` | 매니페스트 서명 검증 skip (자동 세팅) |
-| **`LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1`** | 번들된 publisher key set 에 `dev-v1`/`poc-v1` 같은 **테스트 키 포함**. 서버가 dev 키로 zip 을 서명했을 때 envelope 검증을 통과시키려면 필수. |
+| `LVIS_DEV=1` | dev 게이트 활성화 (자동) |
+| `LVIS_DEV_SKIP_SIG=1` | **매니페스트** 서명 검증 skip (자동). zip envelope 검증은 별개. |
+| `LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1` | 번들된 publisher key set 에 `dev-v1`/`poc-v1` 같은 **테스트 키 포함**. 서버가 dev 키로 서명한 zip envelope 를 받아들이려면 필수. |
 
-모든 `LVIS_*` 플래그는 `app.isPackaged === true` 일 때 hard-gate 로 무시됩니다 — packaged 빌드 누수 우려 없음.
+모든 `LVIS_*` 플래그는 `app.isPackaged === true` 일 때 hard-gate — packaged 빌드 누수 우려 없음.
 
-### 6-3. 두 가지 install 경로
+### 4-3. 두 install 경로
 
 **A. 마켓플레이스 탭 → 카드 → 설치**
 
 가장 흔한 흐름. 앱이:
 1. `GET /api/v1/plugins/<slug>/versions/<version>/download` 로 zip 다운로드
-2. ed25519 envelope 검증 — 키 ID 가 번들된 publisher key set 에 매칭되어야 통과
+2. ed25519 envelope 검증 — 키 ID 가 trust set 에 매칭되어야 통과
 3. zip → `userData/plugins/<id>/` 추출 (atomic stage → swap rename)
 4. `registry.json` 업데이트 → `pluginRuntime.restartAll()`
 
@@ -244,27 +214,88 @@ OS 가 `lvis://` 핸들러를 등록한 상태에서:
 
 ```bash
 # macOS
-open "lvis://install/<yourname>"
-
+open "lvis://install/<slug>"
 # Linux
-xdg-open "lvis://install/<yourname>"
-
+xdg-open "lvis://install/<slug>"
 # Windows
-start "lvis://install/<yourname>"
+start "lvis://install/<slug>"
 ```
 
-앱이 사용자 확인 다이얼로그를 띄우고 위 A 경로와 동일한 install pipeline 으로 진행. 진행률은 `lvis:plugins:install-progress`, 결과는 `lvis:plugins:install-result` IPC 이벤트로 broadcast.
+앱이 사용자 확인 다이얼로그를 띄우고 위 A 와 동일한 install pipeline 으로 진행. 진행률은 `lvis:plugins:install-progress`, 결과는 `lvis:plugins:install-result` IPC 로 broadcast.
 
-### 6-4. 설치 확인
-
-설치 후:
+### 4-4. 설치 확인
 
 ```bash
-ls ~/.lvis/plugins/user/<yourname>/      # 추출된 디렉토리 (또는 userData 경로)
-cat ~/.lvis/plugins/registry.json         # 항목 추가됐는지
+ls ~/.lvis/plugins/user/<slug>/         # 추출된 디렉토리 (또는 userData 경로)
+cat ~/.lvis/plugins/registry.json       # 항목 추가됐는지
 ```
 
-앱 부팅 로그에 `plugin loaded: <id>` 가 보이고, 도구가 채팅에서 호출 가능해야 정상.
+부팅 로그에 `plugin loaded: <id>` 가 보이고 도구가 채팅에서 호출 가능해야 정상.
+
+---
+
+## 5. 부트스트랩 동작 디테일 (알아두면 좋음)
+
+`lvis-marketplace/server/src/lvis_marketplace/bootstrap.py` 가 다음을 수행:
+
+1. `_resolve_workspace_root()` 로 워크스페이스 디렉토리 결정 (`LVIS_PLUGIN_WORKSPACE_ROOT` env 또는 자동 탐지)
+2. `MANAGED_SOURCES` 의 각 항목에 대해:
+   - `git pull --ff-only` (30 초 타임아웃, 실패 시 working tree 사용 + 경고)
+   - `package.json` 에서 `version` 읽기
+   - `npm ls --omit=dev --all --parseable` 로 production node_modules 클로저 산출 (vsce 스타일)
+   - `plugin.json` + `dist/**` + `worker/**` + `resources/**` + `assets/**` + filtered `node_modules/**` 을 **결정적(deterministic) zip** 으로 패키징 (1980-01-01 타임스탬프, ZIP_DEFLATED)
+   - 매니페스트의 `version` 필드를 `package.json` version 으로 강제 동기화
+   - sha256 계산 → `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 모든 키로 dual-sign envelope 생성
+   - storage 에 stage → atomic promote
+   - `Plugin` / `PluginVersion` 행 UPSERT (`approval_state="approved"`)
+3. 동기 이름이 같은 기존 버전이 있으면 sha256 비교 → 일치하면 그냥 `latest` 포인터만 갱신, 다르면 `immutable artifact mismatch` 로 실패 (이게 §3-2 의 "버전 bump 필수" 이유)
+
+부트스트랩은 graceful — 한 레포가 깨져도 나머지 진행.
+
+---
+
+## 6. MANAGED_SOURCES 에 없는 새 플러그인 테스트하기
+
+7개 등록된 슬러그가 아닌 **완전히 새로운 플러그인**은 두 가지 방법이 있습니다.
+
+### 6-A. 로컬에서 `MANAGED_SOURCES` 에 추가 (권장)
+
+`lvis-marketplace/server/src/lvis_marketplace/bootstrap.py` 의 `MANAGED_SOURCES` 리스트에 슬러그 추가:
+
+```python
+MANAGED_SOURCES: list[dict[str, Any]] = [
+    # … 기존 7개 …
+    dict(
+        slug="myplugin",
+        repo=_repo_path("lvis-plugin-myplugin"),
+        display_name="My Plugin",
+        description="새 플러그인 로컬 테스트",
+        category="productivity",
+        plugin_type="plugin",
+        install_policy="user",
+        deployment="user",
+    ),
+]
+```
+
+서버 재시작 → 부트스트랩 → 카탈로그에 노출. 사내 prod 에 올릴 때는 `lvis-marketplace` 에 PR 로 등록.
+
+### 6-B. `lvis-publish` CLI 직접 업로드 (ad-hoc)
+
+git-based 부트스트랩 외에 **CLI 로 직접 zip 업로드** 경로가 보조로 남아있습니다 — `MANAGED_SOURCES` 수정이 부담스러운 일회성 테스트나, dist/ 가 git 에 안 올라간 상태에서 빠르게 시도해보고 싶을 때.
+
+```bash
+cd lvis-marketplace/cli
+npm install && npm run build
+./bin/lvis-publish login --base-url http://localhost:8000
+
+cd /path/to/lvis-plugin-myplugin
+bun run build
+zip -r myplugin-0.1.0.zip plugin.json dist/ icons/        # zip 루트에 plugin.json
+../lvis-marketplace/cli/bin/lvis-publish publish myplugin-0.1.0.zip --slug myplugin
+```
+
+이 경로는 `marketplace-publishing.md` 에서 prod 퍼블리셔용으로 더 자세히 다룹니다. 단, 일상적인 dev 루프는 6-A 가 훨씬 빠릅니다.
 
 ---
 
@@ -272,34 +303,44 @@ cat ~/.lvis/plugins/registry.json         # 항목 추가됐는지
 
 | 증상 | 원인 / 해결 |
 |------|-------------|
-| `signature verification failed` | (a) `LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1` 누락. (b) 서버가 prod 키로 서명했는데 lvis-app 이 dev 빌드. 서버의 `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 환경변수와 lvis-app 의 trust set 이 같은 키 ID 를 공유하는지 확인. |
-| `manifest signature missing` (managed) | `installPolicy: "admin"` 인데 `plugin.json.sig` 가 zip 에 없음. §4-2 따라 서명하거나 dev 에서 `LVIS_DEV_SKIP_SIG=1`. |
-| `tool_name namespace conflict` (publish 시 거절) | 다른 플러그인이 같은 tool 이름을 이미 등록. publisher prefix 추가 (예: `myplugin_search`). |
-| `(plugin_id, version)` duplicate (publish 시 거절) | 동일 버전 재업로드는 차단. `version` 을 bump 하고 다시 publish. 또는 dev DB 를 날리려면: 서버 중지 → `rm lvis-marketplace-dev.db` → `alembic upgrade head` 재실행. |
-| 카탈로그가 비어 보임 | (a) 부트스트랩 배너 빨간색 — URL 오타 또는 사설 네트워크 토글 꺼짐. (b) `LVIS_MARKETPLACE_HOST=127.0.0.1` 인데 앱이 `localhost` 로 호출하면서 IPv6 가 끼어드는 경우 — 서버를 `0.0.0.0` 으로 띄우거나 앱 설정 URL 을 `127.0.0.1` 로 통일. |
-| `zip rejected: path traversal` | zip 안에 `../` 또는 절대 경로 항목. macOS 의 `__MACOSX/` 디렉토리도 경고/거절 사유 — `zip -r ... -x "__MACOSX/*" "*.DS_Store"`. |
-| `zip rejected: compression bomb` | 너무 높은 압축비. `dist/` 안에 거대한 placeholder asset 이 있는지 확인. 또는 서버의 `LVIS_MARKETPLACE_MAX_UNCOMPRESSED_MB` 상향. |
-| `LVIS_SCHEMA_HOST` 관련 매니페스트 검증 실패 | 매니페스트 `$schema` 가 `https://lvis.local/schemas/plugin.schema.json` 인데 서버가 다른 host 로 빌드된 schema 만 들고 있음. 둘 다 기본값(`lvis.local`)을 쓰거나, 같은 값으로 환경변수 통일. |
-| 딥링크 클릭해도 앱이 안 뜸 | OS 가 `lvis://` 를 다른 인스턴스에 라우팅. macOS: 앱을 한 번 packaged 형태로 실행해 protocol 등록. Windows: registry 의 `HKCR\lvis` 항목 확인. |
+| `bootstrap: <slug> repo missing, skipped` | 워크스페이스 root 아래 디렉토리명이 `MANAGED_SOURCES` 의 `repo=_repo_path(...)` 와 다름. 디렉토리 이름 정확히 맞추거나 `LVIS_PLUGIN_WORKSPACE_ROOT` 로 override. |
+| `immutable artifact mismatch — existing X != rebuilt Y` | 같은 버전인데 dist/ 내용이 바뀜. **`package.json` 버전을 올려주세요.** 또는 dev DB 리셋 (§아래). |
+| `bootstrap: <slug>@<v>: missing build output` | `dist/` 가 비어있거나 누락. `bun run build` 가 실제로 출력했는지, `.gitignore` 가 `dist/` 를 빼버리지 않았는지 확인. |
+| `git pull failed — using existing dist/` (경고만) | 정상. 로컬 전용 작업이거나 origin 미설정/네트워크 끊김. working tree 의 dist/ 가 그대로 패키징됨. |
+| `signature verification failed` (앱 install 시) | (a) `LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1` 누락. (b) 서버의 `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 키 ID 와 lvis-app 의 trust set 이 안 맞음. SDK 의 `MARKETPLACE_PUBLIC_KEYS` 와 keys/dev-v1.pub 등이 짝인지 확인. |
+| `manifest signature missing` (managed install) | `installPolicy: "admin"` 인데 매니페스트 서명(`plugin.json.sig`)이 zip 에 없음. dev 에서는 `LVIS_DEV_SKIP_SIG=1` (자동), prod 에서는 `sign-manifest.mjs` 로 서명 후 dist/ 옆에 커밋. |
+| `tool_name namespace conflict` (publish 시) | 다른 등록 플러그인이 같은 tool 이름을 이미 등록. publisher prefix 추가 (예: `myplugin_search`). |
+| 카탈로그가 비어 보임 | (a) 부트스트랩 배너 빨간색 — URL 오타 / 사설 네트워크 토글 꺼짐 / 서버 다운. (b) `LVIS_MARKETPLACE_HOST=127.0.0.1` 인데 앱 설정은 `localhost` — IPv6 가 끼어들기 쉬움. 양쪽 모두 `127.0.0.1` 로 통일 권장. |
+| 딥링크 클릭해도 앱이 안 뜸 | OS 가 `lvis://` 핸들러를 다른 인스턴스에 라우팅. macOS 는 packaged 빌드를 한 번 띄워 protocol 등록, Windows 는 `HKCR\lvis` 레지스트리 확인. |
 
----
+### dev DB 리셋
 
-## 8. 정리
-
-dev DB 에 쌓인 데이터를 한 번에 비우고 싶을 때:
+같은 버전을 강제로 다시 publish 하고 싶거나 상태를 초기화하려면:
 
 ```bash
 cd lvis-marketplace/server
 # 서버 중지 후
-rm -f lvis-marketplace-dev.db
+rm -f lvis-marketplace*.db
 rm -rf storage/
-uv run alembic upgrade head    # 빈 DB 재생성
+uv run alembic upgrade head        # 빈 DB 재생성
+# 다시 uv run uvicorn ... → 부트스트랩이 모든 managed 플러그인 재발행
 ```
 
-CLI 로그아웃:
+---
+
+## 8. 한 줄 정리 (managed 플러그인 dev loop)
 
 ```bash
-lvis-publish logout   # ~/.lvis/marketplace-cli.json 삭제
+# 플러그인 레포에서
+bun run build && \
+  npm version patch --no-git-tag-version && \
+  git add plugin.json dist/ package.json && \
+  git commit -m "test: bump"
+
+# 마켓플레이스 서버 터미널에서 — Ctrl+C 후
+uv run uvicorn lvis_marketplace.main:create_app --factory --reload --host 127.0.0.1 --port 8000
+
+# lvis-app — 마켓플레이스 탭 새로고침 → 새 버전 install
 ```
 
 ---
@@ -307,7 +348,7 @@ lvis-publish logout   # ~/.lvis/marketplace-cli.json 삭제
 ## 관련 문서
 
 - [`local-plugin-development.md`](./local-plugin-development.md) — 마켓플레이스 없이 사이드로드만으로 dev 루프 돌리기
-- [`marketplace-publishing.md`](./marketplace-publishing.md) — prod 마켓플레이스 publish 절차 (관리형 승인 흐름 포함)
+- [`marketplace-publishing.md`](./marketplace-publishing.md) — prod 마켓플레이스 publish 절차 (lvis-publish CLI 보조 경로 포함)
 - [`plugin-development.md`](./plugin-development.md) — 매니페스트·HostApi·서명 깊은 레퍼런스
-- `lvis-marketplace/server/README.md` — 서명 키 ID 회전, `(plugin, mcp)` schema 분류, 정책 계약
-- `lvis-marketplace/cli/src/index.ts` — CLI 서브커맨드 전체 목록 (login/logout/status/list/show/publish/yank/approve)
+- `lvis-marketplace/server/src/lvis_marketplace/bootstrap.py` — git-based 부트스트랩 구현 (MANAGED_SOURCES 정의)
+- `lvis-marketplace/server/README.md` — 서명 키 ID 회전, 정책 계약
