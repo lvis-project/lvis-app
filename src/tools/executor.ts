@@ -225,17 +225,24 @@ export class ToolExecutor {
      * an already-spawned sub-agent and refuse to recurse.
      */
     spawnDepth?: number,
+    /**
+     * Per-turn abort signal. Threaded into each tool's ToolExecutionContext
+     * so long-blocking tools (e.g. `ask_user_question`) can honor the user's
+     * "중단" button. Without this the turn stays stuck on a pending tool
+     * even though the streaming side has already been aborted.
+     */
+    abortSignal?: AbortSignal,
   ): Promise<ToolResult[]> {
     const groupId = randomUUID();
     const BATCH_SIZE = 5;
     if (toolUses.length <= BATCH_SIZE) {
-      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId, proactiveOrigin, spawnDepth)));
+      return Promise.all(toolUses.map((tu, idx) => this.executeOne(tu, groupId, idx, callbacks, sessionId, proactiveOrigin, spawnDepth, abortSignal)));
     }
 
     const results: ToolResult[] = [];
     for (let i = 0; i < toolUses.length; i += BATCH_SIZE) {
       const batch = toolUses.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId, proactiveOrigin, spawnDepth)));
+      const batchResults = await Promise.all(batch.map((tu, batchIdx) => this.executeOne(tu, groupId, i + batchIdx, callbacks, sessionId, proactiveOrigin, spawnDepth, abortSignal)));
       results.push(...batchResults);
     }
     return results;
@@ -250,6 +257,7 @@ export class ToolExecutor {
     sessionId?: string,
     proactiveOrigin?: string | null,
     spawnDepth?: number,
+    abortSignal?: AbortSignal,
   ): Promise<ToolResult> {
     const startTime = Date.now();
     const meta: ToolCallMeta = { groupId, toolUseId: toolUse.id, displayOrder };
@@ -419,6 +427,7 @@ export class ToolExecutor {
         // and refuses when >= 1 (a sub-agent cannot itself spawn).
         spawnDepth: spawnDepth ?? 0,
       },
+      abortSignal,
     };
 
     try {
