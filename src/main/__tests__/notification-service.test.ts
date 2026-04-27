@@ -1,0 +1,289 @@
+/**
+ * NotificationService — Issue #260 unit coverage.
+ *
+ * The service must:
+ *   1. Cap body at 80 chars + ellipsis.
+ *   2. Pick OS vs in-app gate based on window focused/minimized state.
+ *   3. Audit every fire — kind, gate, title (NEVER body — PII).
+ *   4. No-op when NODE_ENV === "test" or app not ready (guarded by ctor opts).
+ *   5. Click handler dispatches IPC payload with contextRef.
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  NotificationService,
+  IPC_NOTIFICATION_TOAST,
+  IPC_NOTIFICATION_CLICKED,
+  __test,
+} from "../notification-service.js";
+import type { AuditLogger } from "../../audit/audit-logger.js";
+
+interface MockWindow {
+  isDestroyed: () => boolean;
+  isFocused: () => boolean;
+  isMinimized: () => boolean;
+  show: () => void;
+  focus: () => void;
+  restore: () => void;
+  webContents: { send: (channel: string, payload: unknown) => void };
+}
+
+function makeMockWindow(opts: {
+  destroyed?: boolean;
+  focused?: boolean;
+  minimized?: boolean;
+} = {}): MockWindow & {
+  show: ReturnType<typeof vi.fn>;
+  focus: ReturnType<typeof vi.fn>;
+  restore: ReturnType<typeof vi.fn>;
+  webContents: { send: ReturnType<typeof vi.fn> };
+} {
+  return {
+    isDestroyed: vi.fn(() => opts.destroyed ?? false),
+    isFocused: vi.fn(() => opts.focused ?? false),
+    isMinimized: vi.fn(() => opts.minimized ?? false),
+    show: vi.fn(),
+    focus: vi.fn(),
+    restore: vi.fn(),
+    webContents: { send: vi.fn() },
+  };
+}
+
+function makeMockAuditLogger(): AuditLogger {
+  // Only `log` is used by NotificationService; cast through unknown so we
+  // don't have to stub the full AuditLogger surface.
+  const logger = { log: vi.fn() };
+  return logger as unknown as AuditLogger;
+}
+
+interface FactoryCall {
+  title: string;
+  body: string;
+  silent: boolean;
+  urgency: "normal" | "critical" | "low";
+  show: ReturnType<typeof vi.fn>;
+  clickHandler?: () => void;
+}
+
+function makeNotificationFactoryStub(): {
+  factory: NonNullable<ConstructorParameters<typeof NotificationService>[0]["notificationFactory"]>;
+  calls: FactoryCall[];
+} {
+  const calls: FactoryCall[] = [];
+  const factory: NonNullable<ConstructorParameters<typeof NotificationService>[0]["notificationFactory"]> = (opts) => {
+    const entry: FactoryCall = {
+      ...opts,
+      show: vi.fn(),
+    };
+    calls.push(entry);
+    return {
+      show: entry.show,
+      on: (event, handler) => {
+        if (event === "click") entry.clickHandler = handler;
+      },
+    };
+  };
+  return { factory, calls };
+}
+
+describe("NotificationService — body truncation", () => {
+  it("caps body at 80 chars and appends ellipsis", () => {
+    const long = "x".repeat(120);
+    const result = __test.truncateBody(long);
+    expect(result.length).toBe(81); // 80 + ellipsis(1)
+    expect(result.endsWith("…")).toBe(true);
+  });
+
+  it("leaves short bodies untouched", () => {
+    const short = "짧은 응답";
+    expect(__test.truncateBody(short)).toBe(short);
+  });
+});
+
+describe("NotificationService — routing decision", () => {
+  let auditLogger: AuditLogger;
+  let factoryStub: ReturnType<typeof makeNotificationFactoryStub>;
+
+  beforeEach(() => {
+    auditLogger = makeMockAuditLogger();
+    factoryStub = makeNotificationFactoryStub();
+  });
+
+  it("focused, non-minimized window → in-app toast IPC", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    svc.fire({
+      kind: "turn-end",
+      title: "응답 완료",
+      body: "hello world",
+      contextRef: { sessionId: "s-1" },
+    });
+    expect(win.webContents.send).toHaveBeenCalledWith(
+      IPC_NOTIFICATION_TOAST,
+      expect.objectContaining({
+        kind: "turn-end",
+        title: "응답 완료",
+        body: "hello world",
+        contextRef: { sessionId: "s-1" },
+      }),
+    );
+    expect(factoryStub.calls.length).toBe(0);
+    // Audit: gate=in-app
+    const log = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(log.input).toContain('"gate":"in-app"');
+    expect(log.input).toContain('"kind":"turn-end"');
+    expect(log.input).toContain('"title":"응답 완료"');
+    // Body MUST NOT appear in audit (PII).
+    expect(log.input).not.toContain("hello world");
+  });
+
+  it("minimized window → OS notification path", () => {
+    const win = makeMockWindow({ focused: false, minimized: true });
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    svc.fire({
+      kind: "approval",
+      title: "승인 필요",
+      body: "long body".repeat(20),
+      contextRef: { approvalId: "a-1" },
+      urgent: true,
+    });
+    expect(win.webContents.send).not.toHaveBeenCalledWith(
+      IPC_NOTIFICATION_TOAST,
+      expect.anything(),
+    );
+    expect(factoryStub.calls.length).toBe(1);
+    const call = factoryStub.calls[0];
+    expect(call.title).toBe("승인 필요");
+    expect(call.silent).toBe(false);
+    expect(call.urgency).toBe("critical");
+    // body capped
+    expect(call.body.length).toBe(81);
+    // Audit: gate=os
+    const log = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(log.input).toContain('"gate":"os"');
+    expect(log.input).toContain('"kind":"approval"');
+  });
+
+  it("blurred (non-focused) window → OS path", () => {
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    svc.fire({
+      kind: "ask-user",
+      title: "질문 도착",
+      body: "어떤 작업을 원하시나요?",
+    });
+    expect(factoryStub.calls.length).toBe(1);
+    expect(factoryStub.calls[0].silent).toBe(true); // not urgent → silent
+    expect(factoryStub.calls[0].urgency).toBe("normal");
+  });
+
+  it("destroyed window → falls through to OS path (focused returns false)", () => {
+    const win = makeMockWindow({ destroyed: true, focused: true });
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    svc.fire({ kind: "routine", title: "wakeup 완료", body: "morning briefing" });
+    expect(win.webContents.send).not.toHaveBeenCalled();
+    expect(factoryStub.calls.length).toBe(1);
+  });
+
+  it("approval kind defaults urgent=true (silent=false, urgency=critical)", () => {
+    const win = makeMockWindow({ focused: false });
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    svc.fire({ kind: "approval", title: "승인 필요", body: "do thing?" });
+    expect(factoryStub.calls[0].silent).toBe(false);
+    expect(factoryStub.calls[0].urgency).toBe("critical");
+  });
+});
+
+describe("NotificationService — quiet flags", () => {
+  it("isTestEnv true → no-op (no audit, no IPC, no factory call)", () => {
+    const win = makeMockWindow({ focused: true });
+    const auditLogger = makeMockAuditLogger();
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => true,
+    });
+    svc.fire({ kind: "turn-end", title: "x", body: "y" });
+    expect(win.webContents.send).not.toHaveBeenCalled();
+    expect(factoryStub.calls.length).toBe(0);
+    expect((auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+  });
+
+  it("isReady false → no-op", () => {
+    const win = makeMockWindow({ focused: true });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => false,
+      isTestEnv: () => false,
+    });
+    svc.fire({ kind: "turn-end", title: "x", body: "y" });
+    expect(win.webContents.send).not.toHaveBeenCalled();
+    expect(factoryStub.calls.length).toBe(0);
+  });
+});
+
+describe("NotificationService — click handler", () => {
+  it("OS notification click sends IPC payload + restores/focuses window", () => {
+    const win = makeMockWindow({ focused: false, minimized: true });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    svc.fire({
+      kind: "ask-user",
+      title: "질문",
+      body: "anything?",
+      contextRef: { questionId: "q-42" },
+    });
+    expect(factoryStub.calls[0].clickHandler).toBeDefined();
+    // Simulate the user clicking the OS toast.
+    factoryStub.calls[0].clickHandler!();
+    expect(win.restore).toHaveBeenCalled();
+    expect(win.show).toHaveBeenCalled();
+    expect(win.focus).toHaveBeenCalled();
+    expect(win.webContents.send).toHaveBeenCalledWith(
+      IPC_NOTIFICATION_CLICKED,
+      expect.objectContaining({
+        kind: "ask-user",
+        contextRef: { questionId: "q-42" },
+      }),
+    );
+  });
+});
