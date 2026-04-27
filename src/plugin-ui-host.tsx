@@ -71,20 +71,18 @@ function pluginPartitionHash(pluginId: string): string {
   return (h >>> 0).toString(16).padStart(8, "0");
 }
 
-function resolveShellUrl(): string | null {
-  try {
-    return new URL("plugin-ui-shell.html", window.location.href).toString();
-  } catch {
-    return null;
-  }
-}
-
-function resolvePreloadUrl(): string {
-  try {
-    return new URL("plugin-preload.js", window.location.href).toString();
-  } catch {
-    return "";
-  }
+/**
+ * Read the deterministic plugin shell + preload URLs from `window.lvisApi`.
+ * These are computed in the host preload (`src/preload.ts`) from `__dirname`
+ * which is reliably `dist/src/`. Avoids deriving from `window.location.href`,
+ * which can be a `data:text/html;...` URL during splash-phase render and
+ * thus produce a broken preload path that Electron silently skips.
+ */
+function readPluginAssetUrls(): { shellUrl: string; preloadUrl: string } {
+  const api = (window as unknown as { lvisApi?: { pluginShellUrl?: unknown; pluginPreloadUrl?: unknown } }).lvisApi;
+  const shellUrl = typeof api?.pluginShellUrl === "string" ? api.pluginShellUrl : "";
+  const preloadUrl = typeof api?.pluginPreloadUrl === "string" ? api.pluginPreloadUrl : "";
+  return { shellUrl, preloadUrl };
 }
 
 export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null }) {
@@ -156,12 +154,15 @@ export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null 
   } else if (!view || !view.entryUrl) {
     content = <div className="px-3 py-2 text-xs text-muted-foreground">UI 모듈 엔트리를 찾을 수 없습니다.</div>;
   } else {
-    const shellUrl = resolveShellUrl();
-    if (!shellUrl) {
-      content = <div className="px-3 py-2 text-xs text-muted-foreground">Webview src를 계산할 수 없습니다.</div>;
+    const { shellUrl, preloadUrl } = readPluginAssetUrls();
+    if (!shellUrl || !preloadUrl) {
+      content = (
+        <div className="px-3 py-2 text-xs text-muted-foreground">
+          Plugin webview 자산 URL을 lvisApi에서 찾을 수 없습니다 (preload 미주입 또는 dist 누락).
+        </div>
+      );
     } else {
       const partition = `persist:plugin:${pluginPartitionHash(view.pluginId)}`;
-      const preloadUrl = resolvePreloadUrl();
       content = (
         <webview
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
