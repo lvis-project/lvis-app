@@ -6,6 +6,8 @@
  * keyword/route/tool registry + BashTool).
  */
 import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { TaskService } from "../taskService.js";
@@ -101,8 +103,13 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   toolRegistry.register(new BashTool());
   const routeEngine = new RouteEngine({ toolRegistry });
 
+  // Task DB lives under `~/.lvis/tasks/` so all user-controlled state shares
+  // the single `~/.lvis/` root with memory, audit, mcp, plugins, etc. The
+  // SQLite open call doesn't create parent dirs, so do it once at boot.
+  const tasksDir = resolve(homedir(), ".lvis", "tasks");
+  mkdirSync(tasksDir, { recursive: true });
   const taskService = new TaskService({
-    dbPath: resolve(app.getPath("userData"), "lvis-tasks.db"),
+    dbPath: resolve(tasksDir, "lvis-tasks.db"),
   });
 
   return {
