@@ -61,6 +61,7 @@ describe("PluginRuntime config overrides", () => {
     const runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
+      pluginsRoot: installedDir,
       configOverrides: {
         "config-plugin": { apiKey: "before" },
       },
@@ -117,6 +118,7 @@ describe("PluginRuntime config overrides", () => {
     const runtime = new PluginRuntime({
       hostRoot: testDir,
       registryPath,
+      pluginsRoot: installedDir,
       onDisable: (pluginId) => events.push(`disable:${pluginId}`),
       createHostApi: (pluginId) => ({
         registerKeywords: () => {
