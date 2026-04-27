@@ -390,6 +390,12 @@ async function main() {
   // safe to start at any time — `start()` is idempotent.
   services.startRemindersScheduler?.();
 
+  // Same rationale as the reminders scheduler: only start the task-deadline
+  // poller after plugin runtime is up + IPC handlers are wired, so a
+  // past-due `task.deadline.approaching` event reaches subscribed brain
+  // plugins (work-proactive) instead of firing into a void on a clean boot.
+  services.startTaskDeadlinePoller?.();
+
   refreshApplicationMenu();
   rendererReloadReady = true;
 
