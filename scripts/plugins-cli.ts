@@ -1,5 +1,4 @@
 import { access } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -14,12 +13,12 @@ import type { PluginRegistry } from "../src/plugins/types.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const projectRoot = resolve(__dirname, "..");
-// Phase 2a: CLI runs as a dev tool — use the same userData fallback as
-// Electron's `app.getPath('userData')` would yield in dev (homedir-based).
-// Real Electron boot uses app.getPath('userData') directly.
+// CLI is a dev-only tool — flip the dev-flag gate so resolvePluginPaths()
+// honors `LVIS_PLUGINS_DIR` env override (test/portable installs). Without
+// the override, defaults to `~/.lvis/plugins/` — same as the Electron host
+// because both share the user-anchored plugin root.
 setIsPackaged(false);
-const userDataDir = process.env.LVIS_USER_DATA_DIR ?? resolve(homedir(), ".lvis");
-const pluginPaths = resolvePluginPaths({ userDataDir });
+const pluginPaths = resolvePluginPaths();
 const registryPath = pluginPaths.registryPath;
 
 function usage(): never {

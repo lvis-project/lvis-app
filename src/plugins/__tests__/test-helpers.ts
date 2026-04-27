@@ -1,11 +1,11 @@
 /**
- * Phase 2a — shared helpers for marketplace test fixtures.
+ * Shared helpers for marketplace test fixtures.
  *
- * Tests construct `PluginMarketplaceService` with the new (paths, fetcher,
- * deploymentGuard?) shape. The Phase 2a invariant is that registry.json
- * lives under `userInstalledDir`, so tests can pick a single tmp root and
- * the helper derives the rest.
+ * Tests construct `PluginMarketplaceService` with the (paths, fetcher,
+ * deploymentGuard?) shape. registry.json lives at the root of pluginsRoot,
+ * so tests pick a single tmp root and the helper derives the rest.
  */
+import { resolve } from "node:path";
 import type { PluginPaths } from "../plugin-paths.js";
 import { resolvePluginPaths } from "../plugin-paths.js";
 
@@ -13,8 +13,8 @@ export interface TestPluginPathsInput {
   /** A tmp directory; the helper anchors plugin paths under it. */
   rootDir: string;
   /** Optional override — defaults to `<rootDir>/plugins`. */
-  userInstalledDir?: string;
-  /** Optional override — defaults to `<userInstalledDir>/.cache`. */
+  pluginsRoot?: string;
+  /** Optional override — defaults to `<pluginsRoot>/.cache`. */
   cacheRoot?: string;
 }
 
@@ -25,8 +25,7 @@ export interface TestPluginPathsInput {
  */
 export function makeTestPluginPaths(input: TestPluginPathsInput): PluginPaths {
   return resolvePluginPaths({
-    userDataDir: input.rootDir,
-    userInstalledDir: input.userInstalledDir,
+    pluginsRoot: input.pluginsRoot ?? resolve(input.rootDir, "plugins"),
     cacheRoot: input.cacheRoot,
   });
 }

@@ -7,15 +7,13 @@ import type { InstallPolicy } from "./types.js";
  * Plugin install policy guard — §9.6 / plugin-deployment-model.md §7.2-§7.3
  *
  * Managed 플러그인이 user actor에 의해 제거/비활성화되지 않도록 차단.
- * Phase 1.5 hybrid 판정 (두 레이어가 모두 통과해야 "user" 허용):
  *
- *   1. Path check (default-deny): `userInstalledDir` 하위가 아니면 managed.
- *      registry.json 위변조로 외부 경로가 등록되는 경우를 차단.
- *   2. Manifest field check: `plugin.json`의 `installPolicy === "admin"`면 managed.
- *      `userInstalledDir` 안에 있더라도 번들 플러그인(설치 시점에 관리형으로
- *      지정됐던 것)은 필드로 식별.
- *
- * 위 두 검사 중 하나라도 managed를 가리키면 user actor는 거부되고 it-admin만 허용.
+ *   1. **Path-escape defense**: registry entry 의 manifestPath 가
+ *      `pluginsRoot` 하위가 아니면 거부. registry.json 위변조로 외부 경로가
+ *      등록되는 경우를 차단하는 가드 — managed 분류 신호가 아님 (모든 정상
+ *      install 은 pluginsRoot 안에 거주).
+ *   2. **Managed 분류**: registry 의 `installedBy === "admin"` 또는
+ *      manifest 의 `installPolicy === "admin"` 이면 managed. user actor 거부.
  *
  * Trust boundary (§7.3): main process 고정. `actor`는 main 내부 호출자만 결정.
  * IPC 핸들러에서 actor를 직접 받지 말 것 — UI는 항상 "user"로 고정, "it-admin"은
@@ -42,19 +40,21 @@ export interface DeploymentGuardOptions {
   /** Absolute path to plugin registry (plugins/registry.json) */
   registryPath: string;
   /**
-   * Absolute path to the directory where user-installed plugins live
-   * (typically `{appRoot}/plugins/installed`).
+   * Absolute path to the directory where every plugin lives — the single
+   * root `~/.lvis/plugins/`. user-installed and admin-injected plugins
+   * share this dir; classification is by metadata (`installedBy`,
+   * `installPolicy`), not by path.
    */
-  userInstalledDir: string;
+  pluginsRoot: string;
 }
 
 export class PluginDeploymentGuard {
   private readonly registryPath: string;
-  private readonly userInstalledDir: string;
+  private readonly pluginsRoot: string;
 
   constructor(options: DeploymentGuardOptions) {
     this.registryPath = resolve(options.registryPath);
-    this.userInstalledDir = resolve(options.userInstalledDir);
+    this.pluginsRoot = resolve(options.pluginsRoot);
   }
 
   async canUninstall(pluginId: string, actor: Actor): Promise<GuardResult> {
@@ -75,7 +75,7 @@ export class PluginDeploymentGuard {
     if (!this.isPathUnderUserInstalledDir(manifestAbs)) {
       return {
         allowed: false,
-        reason: `Managed plugin cannot be uninstalled by user: ${pluginId} (path outside userInstalledDir)`,
+        reason: `Managed plugin cannot be uninstalled by user: ${pluginId} (path outside pluginsRoot)`,
       };
     }
 
@@ -152,7 +152,7 @@ export class PluginDeploymentGuard {
   }
 
   private isPathUnderUserInstalledDir(absolutePath: string): boolean {
-    const rel = relative(this.userInstalledDir, absolutePath);
+    const rel = relative(this.pluginsRoot, absolutePath);
     if (rel === "" || rel === ".") return false;
     if (rel.startsWith("..")) return false;
     if (isAbsolute(rel)) return false;
