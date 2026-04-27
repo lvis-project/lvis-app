@@ -187,7 +187,9 @@ describe("TaskDeadlinePoller", () => {
     const dueAt = new Date(now + 60 * 60_000).toISOString();
     addTask(service, { title: "X", dueAt });
     const { poller } = makePoller({ nowMs: now, cooldownMs: 7 * 60_000 });
+    let throwCount = 0;
     poller.onApproaching(() => {
+      throwCount += 1;
       throw new Error("intentional handler failure");
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -198,8 +200,15 @@ describe("TaskDeadlinePoller", () => {
     } finally {
       warnSpy.mockRestore();
     }
-    // Successful collector handler still saw exactly one emit despite
-    // the throwing handler firing on every dispatch.
+    // Tight assertions — both halves of the contract:
+    //  (a) the throwing handler was actually invoked exactly once, proving
+    //      the `recordFired` write happened on the first emit and the
+    //      cooldown then suppressed re-dispatch on ticks 2 + 3.
+    //  (b) the surviving collector handler also saw exactly one emit,
+    //      proving handler error isolation didn't accidentally re-fire.
+    // Without (a), `collected.length === 1` could pass for the wrong
+    // reason (e.g. dispatch silently short-circuited on first error).
+    expect(throwCount).toBe(1);
     expect(collected).toHaveLength(1);
   });
 

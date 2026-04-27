@@ -80,7 +80,7 @@ export interface TaskDeadlinePollerOptions {
   pollIntervalMs?: number;
   /** Warning window in ms (dueAt - now ≤ window → emit). Default 2h. */
   windowMs?: number;
-  /** Re-emission cooldown per (taskId, dueAt) in ms. Default 30m. */
+  /** Re-emission cooldown per (taskId, dueAt) in ms. Default 7m — sized just above brain's TriggerConversationDedupe TTL (5m) so each retry meets a fresh dedupe window. */
   cooldownMs?: number;
   /** Override `Date.now` for tests. */
   now?: () => number;
@@ -116,13 +116,16 @@ export class TaskDeadlinePoller {
     // first run somehow throws, the interval was never set and a second
     // `start()` actually retries instead of becoming a no-op (`if (this.timer)
     // return`). `checkAndFire()` is synchronous and has internal try/catch
-    // around taskService.query() + each handler, so reaching this throw
-    // path requires a bug in the poller itself rather than a runtime fault.
+    // around taskService.query() + each handler, so a throw out of this
+    // call would indicate a bug in the surrounding helpers (Map ops,
+    // ISO date parsing) — defensive but should not normally fire.
     this.checkAndFire();
     this.timer = setInterval(() => {
-      // No reentrancy guard — `checkAndFire()` is synchronous and Node's
-      // event loop cannot pre-empt a still-running JS frame, so the next
-      // setInterval tick can never overlap.
+      // No reentrancy guard. SAFE ONLY AS LONG AS `checkAndFire()` REMAINS
+      // SYNCHRONOUS — Node's event loop cannot pre-empt a still-running
+      // JS frame, so the next setInterval tick can never overlap. If
+      // `checkAndFire()` ever gains an `await`, restore an `inFlight`
+      // guard or refactor to a chained `setTimeout` self-reschedule.
       this.checkAndFire();
     }, this.pollIntervalMs);
     if (typeof (this.timer as { unref?: () => void }).unref === "function") {
