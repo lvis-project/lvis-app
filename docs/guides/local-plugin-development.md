@@ -137,14 +137,14 @@ LVIS_USER_DATA_DIR="<위와-동일-경로>" bun run start
 | GPU safe-flags (Windows) | `--disable-gpu --disable-software-rasterizer --disable-gpu-compositing --no-sandbox` 자동 추가 |
 | 콘솔 UTF-8 (Windows) | `chcp 65001`, `PYTHONIOENCODING=utf-8` 등 |
 
-> `bun run start` 는 **`LVIS_DEV=1` 을 세팅하지 않습니다**. dev 게이트 전부를 켜고 싶으면 `bun run dev` (`run-electron-dev.mjs`) 를 쓰거나 직접 export. `LVIS_DEV` 가 켜져야 동작하는 것: `LVIS_DEV_RELOAD` (§5), `LVIS_ALLOW_TEST_MARKETPLACE_KEYS` (§3 와 무관), DevTools 자동 열림.
+> `bun run start` 는 **`LVIS_DEV=1` 을 세팅하지 않습니다**. dev 게이트 전부를 켜고 싶으면 `bun run dev` (`run-electron-dev.mjs`) 를 쓰거나 직접 export. `LVIS_DEV=1` 으로 추가 활성화되는 것: `LVIS_ALLOW_TEST_MARKETPLACE_KEYS` 와 동등한 효과 (`dev-flags.ts:88` testMarketplaceKeysAllowed 가 `LVIS_DEV` 도 OR 로 받음). `LVIS_DEV_RELOAD` (§5) 는 독립 — `LVIS_DEV` 없이 단독으로도 동작합니다 (`dev-flags.ts:103-106`). DevTools 자동 열림은 `LVIS_ENABLE_DEV_CONSOLE=1` 이 분리된 게이트.
 
 ### 3-6. 검증
 
 부팅 로그에서:
 
-- ✅ 정상 로드: `[lvis] plugin:<id> registered <N> keywords` (또는 `tools` 등록 로그) — `runtime.ts:642` 부근
-- ✅ 서명 우회 경고: `[lvis] boot: LVIS_DEV_SKIP_SIG=1 — plugin signature verification disabled (dev-only)` — `plugin-runtime.ts:601`
+- ✅ 정상 로드: `[lvis] plugin:<id> registered <N> keywords` (또는 `tools` 등록 로그) — `src/boot/steps/plugin-runtime.ts:645` 부근
+- ✅ 서명 우회 경고: `[lvis] boot: LVIS_DEV_SKIP_SIG=1 — plugin signature verification disabled (dev-only)` — `src/boot/steps/plugin-runtime.ts:601`
 - ❌ 거부됨: `[plugin-runtime] ignoring untrusted registry manifest path for <id>: <path>` → §3-1 참고
 - ❌ 매니페스트 자체 invalid: `[plugin-runtime] <id> rejected — <reason>`
 - ❌ 매니페스트 schema 실패: `[manifest:<id>] schema validation failed (<jsonpath>): <message>`

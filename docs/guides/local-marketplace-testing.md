@@ -186,7 +186,7 @@ git commit -m "chore: bump to 0.1.1"
 
 ### 3-4. 서버 부트스트랩 재실행
 
-부트스트랩은 **서버 시작 시점에만** 돕니다 (`--reload` 모드라도 코드 수정이 아닌 외부 git/dist 변화는 트리거 X). 서버 터미널에서 Ctrl+C 후:
+부트스트랩은 **서버 lifespan 시점**에 돕니다 — 외부 `dist/` 변경은 트리거되지 않습니다. 새 dist/ 를 반영하려면 서버 터미널에서 Ctrl+C 후 재시작:
 
 ```bash
 LVIS_MARKETPLACE_LOAD_DOTENV=1 \
@@ -304,7 +304,10 @@ cat "$HOME/Library/Application Support/Electron-LVIS-Run/plugins/registry.json"
    - `package.json` 에서 `version` 읽기 → 매니페스트의 `version` 필드를 이 값으로 **강제 동기화**
    - `npm ls --omit=dev --all --parseable` 로 production node_modules 클로저 산출 (vsce 스타일)
    - **번들 대상**: `plugin.json` + `dist/**` + `worker/**` + `resources/**` + `assets/**` + filtered `node_modules/**`
-   - **자동 제외**: `.map`, `.d.ts`, `__pycache__/`, `*.pyc`, `node_modules/.bin`, `.cache`, `.vite`, `.package-lock.json`
+   - **자동 제외** (`bootstrap.py:401-415`):
+     - `dist/`, `worker/`, `resources/`, `assets/` 트리: `.map`, `.d.ts`, `__pycache__/`, `*.pyc` 제외
+     - `node_modules/` 트리: `.DS_Store`, `.map` 제외 + 별도 production-dep 필터 (`npm ls --omit=dev --all --parseable` 결과 안에 든 패키지만)
+     - `.bin`, `.cache`, `.vite`, `.package-lock.json` 등은 production-dep 필터에서 자연스럽게 빠지지만 별도 blacklist 가 있는 건 아님
    - **결정적(deterministic) zip**: 1980-01-01 타임스탬프, ZIP_DEFLATED (`bootstrap.py:51, 306-310`)
    - sha256 계산 → `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 모든 키로 dual-sign envelope 생성
    - storage 에 stage → atomic promote
@@ -358,7 +361,7 @@ zip -r myplugin-0.1.0.zip plugin.json dist/ icons/        # zip 루트에 plugin
 ../lvis-marketplace/cli/bin/lvis-publish publish myplugin-0.1.0.zip --slug myplugin
 ```
 
-> ⚠️ **`installPolicy: "admin"` 으로 publish 한 zip 은 `approval_state="pending_review"` 로 들어가고 catalog 에 노출되지 않습니다** (`lvis_marketplace/api/publisher.py:382` + `catalog.py:170`). dev 환경에서는 (a) `installPolicy: "user"` 로 publish 하거나 (b) `lvis-publish approve <publish-id>` 로 직접 승인 (admin role 필요).
+> ⚠️ **`installPolicy: "admin"` 으로 publish 하면**: (a) `approval_state="pending_review"` 로 들어가 catalog 에 노출 안 됨 (`publisher.py:382` + `catalog.py:170`), (b) **동시에 `deployment="managed"` 로도 들어감** — 매니페스트 서명(`plugin.json.sig`) 가 zip 안에 없으면 §7 의 `manifest signature missing` 시나리오와 묶여 install 시점에 또 거절됨. dev 환경에서는 (1) `installPolicy: "user"` 로 publish, (2) `lvis-publish approve <publish-id>` 로 직접 승인 (admin role 필요), 또는 (3) zip 안에 미리 서명된 `plugin.json.sig` 포함.
 
 자세한 prod 흐름과 CLI 전체 명령은 [`marketplace-publishing.md`](./marketplace-publishing.md).
 

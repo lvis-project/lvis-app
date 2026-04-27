@@ -197,7 +197,7 @@ MANAGED_SOURCES: list[dict[str, Any]] = [
 ]
 ```
 
-> ⚠️ `install_policy` / `deployment` 를 둘 다 생략하면 `admin`/`managed` 로 간주됩니다 (`bootstrap.py:651-655` fallback). 의도된 admin 플러그인이 아니면 반드시 `"user"` 명시.
+> ⚠️ `install_policy` / `deployment` 를 둘 다 생략하면 `admin`/`managed` 로 간주됩니다 (`bootstrap.py:650-655` fallback). 의도된 admin 플러그인이 아니면 반드시 `"user"` 명시.
 
 ### 1-2. 레포에 빌드 산출물 커밋
 
@@ -247,9 +247,9 @@ myplugin@0.1.1: immutable artifact mismatch (existing 0123456789ab != rebuilt fe
 
 ```bash
 cd lvis-marketplace/cli
-npm install
-npm run build              # → ./bin/lvis-publish
-npm link                   # 선택 — 전역 등록
+bun install                # 또는 npm install — 둘 다 동작
+bun run build              # → ./bin/lvis-publish
+npm link                   # 선택 — 전역 등록 (bun 은 link subcommand 가 다름)
 ```
 
 ### 2-2. 인증
@@ -331,8 +331,8 @@ LVIS 앱 → 설정 → **마켓플레이스** 탭:
 2. 앱이 `GET /api/v1/plugins/<slug>/versions/<version>/download` 호출, `X-Plugin-SHA256` 헤더로 sha256 받음
 3. `GET /api/v1/plugins/<slug>/versions/<version>/download.sig` 로 envelope 별도 fetch
 4. envelope 검증 — 키 ID 가 번들된 publisher key set (SDK `MARKETPLACE_PUBLIC_KEYS`) 에 매칭되어야 통과
-5. zip → `<userData>/plugins/<id>/` 추출 (atomic stage → swap rename, `marketplace-installer.ts:298-312`)
-6. `<userData>/plugins/registry.json` 업데이트 → `pluginRuntime.restartAll()`
+5. **검증된 tarball atomic write→rename**: `writeFile(tmpPath) + rename(tmpPath, tarballPath)` (`marketplace-installer.ts:298-312`) — 이 단계에서는 zip 이 verified-cache 위치(`tarballPath`)에만 안전하게 자리잡습니다
+6. 이어서 install/registry 단계가 `<userData>/plugins/<id>/` 로 추출, `<userData>/plugins/registry.json` 업데이트 → `pluginRuntime.restartAll()`
 
 ### MCP 서버 install (lvis-app#267)
 
