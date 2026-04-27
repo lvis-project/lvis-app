@@ -58,7 +58,10 @@ export function SessionTodoPanel({ api }: { api: LvisApi }) {
 
   return (
     <div
-      className="max-w-[85%] rounded-md border border-dashed border-amber-500/40 bg-amber-500/5 text-xs"
+      // The input cluster below us already draws its own `border-t bg-card`
+      // — we don't double up. Side borders + dashed amber tint signal "this
+      // is the assistant's running plan" without a redundant horizontal rule.
+      className="border-x border-dashed border-amber-500/40 bg-amber-500/5 text-xs"
       data-testid="session-todo-panel"
     >
       <button
@@ -67,7 +70,7 @@ export function SessionTodoPanel({ api }: { api: LvisApi }) {
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <ListChecks className="h-3 w-3" />
-        <span className="font-medium">어시스턴트 체크리스트</span>
+        <span className="font-medium">Todos</span>
         <Badge variant="outline" className="px-1 py-0 text-[10px]">
           {completedCount}/{visible.length}
         </Badge>
@@ -85,7 +88,9 @@ export function SessionTodoPanel({ api }: { api: LvisApi }) {
         )}
       </button>
       {open && (
-        <ul className="space-y-1 border-t px-3 py-1.5">
+        // Cap the expanded list so a long plan doesn't push the input
+        // cluster off-screen — internal scroll preserves the chat layout.
+        <ul className="max-h-[35vh] space-y-1 overflow-y-auto border-t px-3 py-1.5">
           {items.map((it) => {
             const meta = STATUS_BADGE[it.status] ?? STATUS_BADGE.pending;
             const active = it.status === "in_progress";
