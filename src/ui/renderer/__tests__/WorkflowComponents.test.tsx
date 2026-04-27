@@ -111,6 +111,47 @@ describe("SessionTodoPanel", () => {
     expect(await findByText("step 1")).toBeInTheDocument();
     expect(await findByText("step 2")).toBeInTheDocument();
   });
+
+  it("pulses the in-progress row in the expanded view so it's the focal point", async () => {
+    const api = fakeApi({
+      listSessionTodos: () =>
+        Promise.resolve([
+          { id: "t1", content: "done thing", status: "completed" },
+          { id: "t2", content: "current thing", status: "in_progress" },
+          { id: "t3", content: "next thing", status: "pending" },
+        ]),
+    });
+    const { findByTestId, queryAllByTestId } = render(<SessionTodoPanel api={api} />);
+    const active = await findByTestId("session-todo-active-row");
+    expect(active.className).toContain("animate-pulse");
+    // Only the in-progress row gets the active testid — pending/completed
+    // must not.
+    expect(queryAllByTestId("session-todo-active-row")).toHaveLength(1);
+  });
+
+  it("shows the active item next to the count when collapsed, with pulse", async () => {
+    const api = fakeApi({
+      listSessionTodos: () =>
+        Promise.resolve([
+          { id: "t1", content: "done thing", status: "completed" },
+          { id: "t2", content: "current thing", status: "in_progress" },
+          { id: "t3", content: "next thing", status: "pending" },
+        ]),
+    });
+    const { findByText, container } = render(<SessionTodoPanel api={api} />);
+    // Wait for items to load + panel to render.
+    await findByText("current thing");
+    // Collapse the panel.
+    const header = container.querySelector('[data-testid="session-todo-panel"] button');
+    if (!header) throw new Error("panel header not found");
+    await act(async () => {
+      header.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const collapsed = container.querySelector('[data-testid="session-todo-collapsed-active"]');
+    expect(collapsed).not.toBeNull();
+    expect(collapsed!.textContent).toBe("current thing");
+    expect(collapsed!.className).toContain("animate-pulse");
+  });
 });
 
 describe("SubAgentCard", () => {

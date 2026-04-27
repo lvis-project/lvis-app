@@ -899,6 +899,10 @@ export class ConversationLoop {
         // The executor uses this to refuse `agent_spawn` calls inside an
         // already-spawned sub-agent (depth >= 1).
         bounds?.spawnDepth,
+        // Threading the turn's abort signal lets long-blocking tools
+        // (`ask_user_question`) honor the user's 중단 button instead of
+        // hanging until their internal timeout.
+        abortSignal,
       );
 
       for (let i = 0; i < capResult.allowed.length; i++) {

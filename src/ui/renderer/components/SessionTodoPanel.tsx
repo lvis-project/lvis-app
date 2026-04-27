@@ -3,6 +3,13 @@
  * `todo_session_write` LLM tool. Visually distinct from user TaskView
  * (dashed border, amber accent) so the user can tell at a glance this is
  * the assistant's running plan, not their persistent task list.
+ *
+ * Expanded view: every item with status pill + content. The currently
+ * in-progress item pulses so it's the obvious focal point.
+ *
+ * Collapsed view: header alone, but the title of the in-progress item
+ * keeps streaming next to the badge — user always knows what the
+ * assistant is working on without expanding.
  */
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, ListChecks } from "lucide-react";
@@ -47,6 +54,7 @@ export function SessionTodoPanel({ api }: { api: LvisApi }) {
 
   const visible = items.filter((i) => i.status !== "deleted");
   const completedCount = items.filter((i) => i.status === "completed").length;
+  const inProgress = items.find((i) => i.status === "in_progress");
 
   return (
     <div
@@ -63,13 +71,30 @@ export function SessionTodoPanel({ api }: { api: LvisApi }) {
         <Badge variant="outline" className="px-1 py-0 text-[10px]">
           {completedCount}/{visible.length}
         </Badge>
+        {/* Collapsed-state focal point: the active item streams next to
+            the count and pulses so the user can see progress at a glance
+            without expanding the panel. */}
+        {!open && inProgress && (
+          <span
+            className="ml-2 min-w-0 flex-1 truncate text-left text-amber-600 dark:text-amber-400 animate-pulse"
+            data-testid="session-todo-collapsed-active"
+            title={inProgress.content}
+          >
+            {inProgress.content}
+          </span>
+        )}
       </button>
       {open && (
         <ul className="space-y-1 border-t px-3 py-1.5">
           {items.map((it) => {
             const meta = STATUS_BADGE[it.status] ?? STATUS_BADGE.pending;
+            const active = it.status === "in_progress";
             return (
-              <li key={it.id} className="flex items-start gap-2">
+              <li
+                key={it.id}
+                className={`flex items-start gap-2 ${active ? "animate-pulse" : ""}`}
+                data-testid={active ? "session-todo-active-row" : undefined}
+              >
                 <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${meta.cls}`}>
                   {meta.label}
                 </span>

@@ -34,7 +34,14 @@ export const IPC_ASK_USER_QUESTION_RESPOND = "lvis:ask-user-question:respond";
 
 interface PendingEntry {
   resolve: (response: AskUserQuestionResponse) => void;
-  timer: ReturnType<typeof setTimeout>;
+  /**
+   * Centralized teardown — clears the timer, removes the abort listener,
+   * and removes this entry from the `pending` map. Called from every
+   * terminal path (timeout, abort, send-failure, IPC resolve, disposeAll)
+   * so a long-lived `AbortController` reused across multiple sequential
+   * questions never leaks listeners.
+   */
+  cleanup: () => void;
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -52,18 +59,32 @@ const MAX_CONCURRENT_PENDING = 5;
  */
 export const IPC_ASK_USER_QUESTION_TIMEOUT = "lvis:ask-user-question:timeout";
 
+/**
+ * Resolved lazily on every send so dev-mode reloads (which destroy the old
+ * webContents) don't strand the gate on a stale reference. Boot wires this
+ * to `() => getMainWindow()?.webContents ?? null`.
+ */
+export type WebContentsResolver = () => WebContents | null;
+
 export class AskUserQuestionGate {
   private readonly pending = new Map<string, PendingEntry>();
   private readonly timeoutMs: number;
   private readonly notificationService?: NotificationService;
+  private readonly resolveWebContents: WebContentsResolver;
 
   constructor(
-    private readonly webContents: WebContents,
+    webContents: WebContents | WebContentsResolver,
     timeoutMs: number = DEFAULT_TIMEOUT_MS,
     notificationService?: NotificationService,
   ) {
     this.timeoutMs = timeoutMs;
     this.notificationService = notificationService;
+    // Accept either a direct WebContents (legacy/tests) or a resolver
+    // function. Direct WebContents is wrapped so the rest of the gate
+    // talks to one shape.
+    this.resolveWebContents = typeof webContents === "function"
+      ? (webContents as WebContentsResolver)
+      : () => (webContents.isDestroyed() ? null : webContents);
   }
 
   ask(input: {
@@ -71,6 +92,13 @@ export class AskUserQuestionGate {
     choices?: string[];
     allowFreeText?: boolean;
     urgent?: boolean;
+    /**
+     * Per-turn abort signal from the conversation loop. When the user
+     * presses 중단 the signal fires and we resolve `dismissed: true` plus
+     * notify the renderer so the card disappears — without this, the gate
+     * sits on its 5-minute timer and the abort feels like a dead button.
+     */
+    abortSignal?: AbortSignal;
   }): Promise<AskUserQuestionResponse> {
     const req: AskUserQuestionRequest = {
       id: randomUUID(),
@@ -87,7 +115,11 @@ export class AskUserQuestionGate {
         dismissed: true,
       });
     }
-    if (this.webContents.isDestroyed()) {
+    const wc = this.resolveWebContents();
+    if (!wc) {
+      return Promise.resolve({ requestId: req.id, dismissed: true });
+    }
+    if (input.abortSignal?.aborted) {
       return Promise.resolve({ requestId: req.id, dismissed: true });
     }
     // Issue #260 — fire system notification at the entry of the wait. If
@@ -106,25 +138,41 @@ export class AskUserQuestionGate {
     }
     return new Promise<AskUserQuestionResponse>((resolve) => {
       const timer = setTimeout(() => {
-        this.pending.delete(req.id);
+        cleanup();
         // M2: notify the renderer so it drops the stale card.
         try {
-          if (!this.webContents.isDestroyed()) {
-            this.webContents.send(IPC_ASK_USER_QUESTION_TIMEOUT, {
-              requestId: req.id,
-            });
-          }
+          const live = this.resolveWebContents();
+          live?.send(IPC_ASK_USER_QUESTION_TIMEOUT, { requestId: req.id });
         } catch {
           // ignore — even if send fails the resolve below clears the gate
         }
         resolve({ requestId: req.id, dismissed: true });
       }, this.timeoutMs);
-      this.pending.set(req.id, { resolve, timer });
-      try {
-        this.webContents.send(IPC_ASK_USER_QUESTION_REQUEST, req);
-      } catch (err) {
-        clearTimeout(timer);
+      const abortListener = input.abortSignal
+        ? () => {
+            cleanup();
+            try {
+              const live = this.resolveWebContents();
+              live?.send(IPC_ASK_USER_QUESTION_TIMEOUT, { requestId: req.id });
+            } catch {
+              /* renderer may be tearing down — best-effort */
+            }
+            resolve({ requestId: req.id, dismissed: true });
+          }
+        : null;
+      const cleanup = () => {
         this.pending.delete(req.id);
+        clearTimeout(timer);
+        if (abortListener) input.abortSignal?.removeEventListener("abort", abortListener);
+      };
+      if (abortListener) {
+        input.abortSignal?.addEventListener("abort", abortListener, { once: true });
+      }
+      this.pending.set(req.id, { resolve, cleanup });
+      try {
+        wc.send(IPC_ASK_USER_QUESTION_REQUEST, req);
+      } catch (err) {
+        cleanup();
         console.warn(
           "[lvis] ask-user-question send failed:",
           (err as Error).message,
@@ -137,14 +185,13 @@ export class AskUserQuestionGate {
   resolve(response: AskUserQuestionResponse): void {
     const entry = this.pending.get(response.requestId);
     if (!entry) return;
-    clearTimeout(entry.timer);
-    this.pending.delete(response.requestId);
+    entry.cleanup();
     entry.resolve(response);
   }
 
   disposeAll(): void {
     for (const [id, entry] of this.pending) {
-      clearTimeout(entry.timer);
+      entry.cleanup();
       entry.resolve({ requestId: id, dismissed: true });
     }
     this.pending.clear();
