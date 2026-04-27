@@ -1,0 +1,1326 @@
+diff --git a/scripts/plugins-cli.ts b/scripts/plugins-cli.ts
+index 36ac7de9..02572b7a 100644
+--- a/scripts/plugins-cli.ts
++++ b/scripts/plugins-cli.ts
+@@ -1,5 +1,4 @@
+ import { access } from "node:fs/promises";
+-import { homedir } from "node:os";
+ import { dirname, resolve } from "node:path";
+ import { fileURLToPath } from "node:url";
+ import {
+@@ -14,12 +13,12 @@ import type { PluginRegistry } from "../src/plugins/types.js";
+ const __filename = fileURLToPath(import.meta.url);
+ const __dirname = dirname(__filename);
+ const projectRoot = resolve(__dirname, "..");
+-// Phase 2a: CLI runs as a dev tool — use the same userData fallback as
+-// Electron's `app.getPath('userData')` would yield in dev (homedir-based).
+-// Real Electron boot uses app.getPath('userData') directly.
++// CLI is a dev-only tool — flip the dev-flag gate so resolvePluginPaths()
++// honors `LVIS_PLUGINS_DIR` env override (test/portable installs). Without
++// the override, defaults to `~/.lvis/plugins/` — same as the Electron host
++// because both share the user-anchored plugin root.
+ setIsPackaged(false);
+-const userDataDir = process.env.LVIS_USER_DATA_DIR ?? resolve(homedir(), ".lvis");
+-const pluginPaths = resolvePluginPaths({ userDataDir });
++const pluginPaths = resolvePluginPaths();
+ const registryPath = pluginPaths.registryPath;
+ 
+ function usage(): never {
+diff --git a/src/boot/steps/plugin-runtime.ts b/src/boot/steps/plugin-runtime.ts
+index 9a17e9cb..f7657ef0 100644
+--- a/src/boot/steps/plugin-runtime.ts
++++ b/src/boot/steps/plugin-runtime.ts
+@@ -564,14 +564,14 @@ export async function initPluginRuntime(
+   }
+ 
+   // §7.2 Plugin Deployment Guard.
+-  // Phase 2a SoT: anchor the layout at Electron's `userData` directory.
+-  // `app.getPath('userData')` returns `%APPDATA%/lvis`, `~/Library/Application
+-  // Support/lvis`, or `~/.config/lvis` per OS convention. The resolver throws
+-  // if userDataDir is missing — there is no `<appRoot>/plugins/` fallback.
+-  const pluginPaths = resolvePluginPaths({ userDataDir: app.getPath("userData") });
++  // Plugin layout anchors at `~/.lvis/plugins/<id>/` — single root for both
++  // user-installed and admin-injected plugins (distinguished by metadata,
++  // not by physical directory). The resolver picks `LVIS_PLUGINS_DIR` if
++  // set on a dev build, else `homedir()/.lvis/plugins`.
++  const pluginPaths = resolvePluginPaths();
+   const deploymentGuard = new PluginDeploymentGuard({
+     registryPath: pluginPaths.registryPath,
+-    userInstalledDir: pluginPaths.userInstalledDir,
++    pluginsRoot: pluginPaths.pluginsRoot,
+   });
+ 
+   // Late-binding refs for ConversationLoop-dependent callers.
+@@ -615,7 +615,7 @@ export async function initPluginRuntime(
+   const pluginSettings = settingsService.get("plugins");
+   pluginRuntime = new PluginRuntime({
+     hostRoot: projectRoot,
+-    userInstalledDir: pluginPaths.userInstalledDir,
++    pluginsRoot: pluginPaths.pluginsRoot,
+     registryPath: pluginPaths.registryPath,
+     allowUnsignedUserPlugins: pluginSettings?.allowUnsignedUserPlugins === true,
+     configOverrides,
+diff --git a/src/plugins/__tests__/deployment-guard.test.ts b/src/plugins/__tests__/deployment-guard.test.ts
+index 743b4f6f..6620770f 100644
+--- a/src/plugins/__tests__/deployment-guard.test.ts
++++ b/src/plugins/__tests__/deployment-guard.test.ts
+@@ -7,7 +7,7 @@ import { PluginDeploymentGuard } from "../deployment-guard.js";
+ /**
+  * Phase 1.5 test gate — PluginDeploymentGuard §7.2-§7.3
+  *
+- * Guard는 default-deny 정책: userInstalledDir 하위에 있는 플러그인만 "user"로 간주.
++ * Guard는 default-deny 정책: pluginsRoot 하위에 있는 플러그인만 "user"로 간주.
+  * 그 외는 모두 "managed"로 간주하여 user actor의 제거/비활성화를 거부.
+  */
+ describe("PluginDeploymentGuard", () => {
+@@ -38,7 +38,7 @@ describe("PluginDeploymentGuard", () => {
+     await writeFile(pluginManifest, "{}", "utf-8");
+     await writeRegistry([{ id: "p-managed", manifestPath: pluginManifest }]);
+ 
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canUninstall("p-managed", "user");
+ 
+     expect(result.allowed).toBe(false);
+@@ -52,7 +52,7 @@ describe("PluginDeploymentGuard", () => {
+     await writeFile(manifestPath, "{}", "utf-8");
+     await writeRegistry([{ id: "p-user", manifestPath }]);
+ 
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canUninstall("p-user", "user");
+ 
+     expect(result.allowed).toBe(true);
+@@ -65,7 +65,7 @@ describe("PluginDeploymentGuard", () => {
+     await writeFile(pluginManifest, "{}", "utf-8");
+     await writeRegistry([{ id: "p-managed", manifestPath: pluginManifest }]);
+ 
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canUninstall("p-managed", "it-admin");
+ 
+     expect(result.allowed).toBe(true);
+@@ -74,7 +74,7 @@ describe("PluginDeploymentGuard", () => {
+   it("rejects unknown pluginId with 'not found' reason", async () => {
+     await writeRegistry([]);
+ 
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canUninstall("missing", "user");
+ 
+     expect(result.allowed).toBe(false);
+@@ -88,7 +88,7 @@ describe("PluginDeploymentGuard", () => {
+     await writeFile(manifestPath, "{}", "utf-8");
+     await writeRegistry([{ id: "spoof", manifestPath }]);
+ 
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canUninstall("spoof", "user");
+ 
+     // 'installed-foo'는 'installed/'의 prefix confusion. relative()가 '..'로 시작하는 값을
+@@ -105,7 +105,7 @@ describe("PluginDeploymentGuard", () => {
+     // relative manifestPath가 registry dirname 기준으로 resolve되어 installedDir 밖으로 탈출.
+     await writeRegistry([{ id: "escape", manifestPath: "elsewhere/plugin.json" }]);
+ 
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canUninstall("escape", "user");
+ 
+     // default-deny: installedDir 밖에 있으므로 managed로 처리 → user actor 거부.
+@@ -123,7 +123,7 @@ describe("PluginDeploymentGuard", () => {
+     );
+     await writeRegistry([{ id: "p-managed-inside", manifestPath }]);
+ 
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canUninstall("p-managed-inside", "user");
+ 
+     expect(result.allowed).toBe(false);
+@@ -141,7 +141,7 @@ describe("PluginDeploymentGuard", () => {
+     );
+     await writeRegistry([{ id: "p-user-explicit", manifestPath }]);
+ 
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canUninstall("p-user-explicit", "user");
+ 
+     expect(result.allowed).toBe(true);
+@@ -159,33 +159,33 @@ describe("PluginDeploymentGuard", () => {
+     );
+     await writeRegistry([{ id: "p-legacy", manifestPath }]);
+ 
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canUninstall("p-legacy", "user");
+ 
+     expect(result.allowed).toBe(true);
+   });
+ 
+   it("canInstall: rejects user installing a managed catalog item", async () => {
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canInstall("p-managed", "user", "admin");
+     expect(result.allowed).toBe(false);
+     expect(result.reason).toMatch(/installed by user/);
+   });
+ 
+   it("canInstall: allows user installing a non-managed catalog item", async () => {
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canInstall("p-user", "user", "user");
+     expect(result.allowed).toBe(true);
+   });
+ 
+   it("canInstall: allows user installing when installPolicy field is absent", async () => {
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canInstall("p-legacy", "user", undefined);
+     expect(result.allowed).toBe(true);
+   });
+ 
+   it("canInstall: always allows it-admin actor (trust boundary bypass)", async () => {
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const result = await guard.canInstall("p-managed", "it-admin", "admin");
+     expect(result.allowed).toBe(true);
+   });
+@@ -197,7 +197,7 @@ describe("PluginDeploymentGuard", () => {
+     await writeFile(pluginManifest, "{}", "utf-8");
+     await writeRegistry([{ id: "p-managed", manifestPath: pluginManifest }]);
+ 
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     const uninstall = await guard.canUninstall("p-managed", "user");
+     const disable = await guard.canDisable("p-managed", "user");
+ 
+diff --git a/src/plugins/__tests__/marketplace-dispatcher.test.ts b/src/plugins/__tests__/marketplace-dispatcher.test.ts
+index df4145d0..f1f2690f 100644
+--- a/src/plugins/__tests__/marketplace-dispatcher.test.ts
++++ b/src/plugins/__tests__/marketplace-dispatcher.test.ts
+@@ -71,7 +71,7 @@ describe("PluginMarketplaceService install()", () => {
+       `lvis-marketplace-install-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+     );
+     appRoot = testDir;
+-    // Phase 2a: registry + installed plugins live under userInstalledDir
++    // Phase 2a: registry + installed plugins live under pluginsRoot
+     // (testDir/plugins). The legacy `installed/` subdir is gone.
+     installedDir = join(testDir, "plugins");
+     registryPath = join(installedDir, "registry.json");
+@@ -97,7 +97,7 @@ describe("PluginMarketplaceService install()", () => {
+   function makeService(fetcher: MarketplaceFetcher) {
+     const paths = makeTestPluginPaths({
+       rootDir: testDir,
+-      userInstalledDir: installedDir,
++      pluginsRoot: installedDir,
+       cacheRoot,
+     });
+     const service = new PluginMarketplaceService(paths, fetcher);
+diff --git a/src/plugins/__tests__/marketplace-guard.test.ts b/src/plugins/__tests__/marketplace-guard.test.ts
+index e5fddebe..34e50b4e 100644
+--- a/src/plugins/__tests__/marketplace-guard.test.ts
++++ b/src/plugins/__tests__/marketplace-guard.test.ts
+@@ -69,10 +69,10 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
+   }
+ 
+   function makeService(): PluginMarketplaceService {
+-    const paths = makeTestPluginPaths({ rootDir: testDir, userInstalledDir: installedDir });
++    const paths = makeTestPluginPaths({ rootDir: testDir, pluginsRoot: installedDir });
+     const guard = new PluginDeploymentGuard({
+       registryPath: paths.registryPath,
+-      userInstalledDir: paths.userInstalledDir,
++      pluginsRoot: paths.pluginsRoot,
+     });
+     const fetcher = new MockMarketplaceFetcher(marketplacePath);
+     return new PluginMarketplaceService(paths, fetcher, guard);
+diff --git a/src/plugins/__tests__/marketplace-managed-bootstrap.test.ts b/src/plugins/__tests__/marketplace-managed-bootstrap.test.ts
+index ed90e61f..1964a9b2 100644
+--- a/src/plugins/__tests__/marketplace-managed-bootstrap.test.ts
++++ b/src/plugins/__tests__/marketplace-managed-bootstrap.test.ts
+@@ -28,7 +28,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
+       "test-tmp",
+       `lvis-managed-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+     );
+-    // Phase 2a: registry.json lives under userInstalledDir (= testDir/plugins
++    // Phase 2a: registry.json lives under pluginsRoot (= testDir/plugins
+     // when the helper picks defaults). marketplace.json is the dev mock
+     // catalog and lives outside that tree so writes never collide with the
+     // installed-plugin registry.
+diff --git a/src/plugins/__tests__/plugin-paths.test.ts b/src/plugins/__tests__/plugin-paths.test.ts
+index 45ef5a34..84c737c0 100644
+--- a/src/plugins/__tests__/plugin-paths.test.ts
++++ b/src/plugins/__tests__/plugin-paths.test.ts
+@@ -1,16 +1,16 @@
+ /**
+- * Phase 2a — plugin-paths SoT helper.
++ * plugin-paths SoT helper.
+  *
+- * Locks the new layout (rooted at userDataDir, no `<appRoot>/plugins/`
+- * fallback) and the registry-relative manifestPath helper used by every
+- * marketplace install path.
++ * Locks the layout (rooted at `~/.lvis/plugins/`) and the registry-relative
++ * manifestPath helper used by every marketplace install path.
+  */
+ import { describe, it, expect, beforeEach, afterEach } from "vitest";
+ import { resolve } from "node:path";
++import { homedir } from "node:os";
+ import { resolvePluginPaths, toRegistryRelativeManifestPath } from "../plugin-paths.js";
+ import { setIsPackaged, _resetForTest as resetDevFlags } from "../../boot/dev-flags.js";
+ 
+-describe("resolvePluginPaths (Phase 2a)", () => {
++describe("resolvePluginPaths", () => {
+   const originalEnv = process.env.LVIS_PLUGINS_DIR;
+   beforeEach(() => {
+     delete process.env.LVIS_PLUGINS_DIR;
+@@ -28,87 +28,73 @@ describe("resolvePluginPaths (Phase 2a)", () => {
+     resetDevFlags();
+   });
+ 
+-  it("anchors registry/installed/cache at userDataDir/plugins", () => {
+-    const paths = resolvePluginPaths({ userDataDir: "/tmp/userData" });
+-    expect(paths.userInstalledDir).toBe(resolve("/tmp/userData", "plugins"));
+-    expect(paths.registryPath).toBe(resolve("/tmp/userData", "plugins/registry.json"));
+-    expect(paths.cacheRoot).toBe(resolve("/tmp/userData", "plugins/.cache"));
++  it("defaults pluginsRoot to ~/.lvis/plugins/ with registry + cache derived under it", () => {
++    const paths = resolvePluginPaths();
++    const expected = resolve(homedir(), ".lvis", "plugins");
++    expect(paths.pluginsRoot).toBe(expected);
++    expect(paths.registryPath).toBe(resolve(expected, "registry.json"));
++    expect(paths.cacheRoot).toBe(resolve(expected, ".cache"));
+   });
+ 
+-  it("throws when userDataDir is missing — no legacy fallback", () => {
+-    // @ts-expect-error — intentionally invalid input for runtime check
+-    expect(() => resolvePluginPaths({})).toThrow(/userDataDir is required/);
+-  });
+-
+-  it("registry path always sits inside userInstalledDir (Phase 2a invariant)", () => {
+-    const paths = resolvePluginPaths({
+-      userDataDir: "/tmp/userData",
+-      userInstalledDir: "/tmp/explicit",
+-    });
+-    expect(paths.userInstalledDir).toBe(resolve("/tmp/explicit"));
++  it("explicit pluginsRoot wins over the homedir default", () => {
++    const paths = resolvePluginPaths({ pluginsRoot: "/tmp/explicit" });
++    expect(paths.pluginsRoot).toBe(resolve("/tmp/explicit"));
+     expect(paths.registryPath).toBe(resolve("/tmp/explicit", "registry.json"));
++    expect(paths.cacheRoot).toBe(resolve("/tmp/explicit", ".cache"));
+   });
+ 
+-  it("LVIS_PLUGINS_DIR env override redirects userInstalledDir + cache + registry", () => {
++  it("LVIS_PLUGINS_DIR env override redirects pluginsRoot + cache + registry on dev builds", () => {
+     process.env.LVIS_PLUGINS_DIR = "/tmp/portable";
+-    const paths = resolvePluginPaths({ userDataDir: "/tmp/userData" });
+-    expect(paths.userInstalledDir).toBe(resolve("/tmp/portable"));
++    const paths = resolvePluginPaths();
++    expect(paths.pluginsRoot).toBe(resolve("/tmp/portable"));
+     expect(paths.registryPath).toBe(resolve("/tmp/portable", "registry.json"));
+     expect(paths.cacheRoot).toBe(resolve("/tmp/portable", ".cache"));
+   });
+ 
+-  it("explicit userInstalledDir wins over env override", () => {
++  it("explicit pluginsRoot wins over env override", () => {
+     process.env.LVIS_PLUGINS_DIR = "/tmp/env";
+-    const paths = resolvePluginPaths({
+-      userDataDir: "/tmp/userData",
+-      userInstalledDir: "/tmp/explicit",
+-    });
+-    expect(paths.userInstalledDir).toBe(resolve("/tmp/explicit"));
++    const paths = resolvePluginPaths({ pluginsRoot: "/tmp/explicit" });
++    expect(paths.pluginsRoot).toBe(resolve("/tmp/explicit"));
+   });
+ 
+-  it("explicit cacheRoot can decouple cache from userInstalledDir", () => {
++  it("explicit cacheRoot can decouple cache from pluginsRoot", () => {
+     const paths = resolvePluginPaths({
+-      userDataDir: "/tmp/userData",
+-      userInstalledDir: "/tmp/u",
++      pluginsRoot: "/tmp/u",
+       cacheRoot: "/tmp/cache",
+     });
+-    expect(paths.userInstalledDir).toBe(resolve("/tmp/u"));
++    expect(paths.pluginsRoot).toBe(resolve("/tmp/u"));
+     expect(paths.cacheRoot).toBe(resolve("/tmp/cache"));
+   });
+ 
+   it("env override does not displace an explicit cacheRoot", () => {
+     process.env.LVIS_PLUGINS_DIR = "/tmp/env";
+-    const paths = resolvePluginPaths({
+-      userDataDir: "/tmp/userData",
+-      cacheRoot: "/tmp/explicit-cache",
+-    });
+-    expect(paths.userInstalledDir).toBe(resolve("/tmp/env"));
++    const paths = resolvePluginPaths({ cacheRoot: "/tmp/explicit-cache" });
++    expect(paths.pluginsRoot).toBe(resolve("/tmp/env"));
+     expect(paths.cacheRoot).toBe(resolve("/tmp/explicit-cache"));
+   });
+ 
+   it("packaged build silently ignores LVIS_PLUGINS_DIR env override", () => {
+     // Hard-gate: a packaged binary that inherits this env var must fall back
+-    // to the canonical userData/plugins layout, never the user-controlled
+-    // override path.
++    // to the canonical layout, never the user-controlled override path.
+     setIsPackaged(true);
+     process.env.LVIS_PLUGINS_DIR = "/tmp/attacker-controlled";
+-    const paths = resolvePluginPaths({ userDataDir: "/tmp/userData" });
+-    expect(paths.userInstalledDir).toBe(resolve("/tmp/userData", "plugins"));
++    const paths = resolvePluginPaths();
++    expect(paths.pluginsRoot).toBe(resolve(homedir(), ".lvis", "plugins"));
+   });
+ });
+ 
+ describe("toRegistryRelativeManifestPath", () => {
+   it("returns POSIX-relative path for manifest under registry's directory", () => {
+     const out = toRegistryRelativeManifestPath(
+-      "/userData/plugins/registry.json",
+-      "/userData/plugins/calendar/plugin.json",
++      "/lvis/plugins/registry.json",
++      "/lvis/plugins/calendar/plugin.json",
+     );
+     expect(out).toBe("calendar/plugin.json");
+   });
+ 
+   it("collapses already-relative input back to relative form", () => {
+     const out = toRegistryRelativeManifestPath(
+-      "/userData/plugins/registry.json",
++      "/lvis/plugins/registry.json",
+       "calendar/plugin.json",
+     );
+     expect(out).toBe("calendar/plugin.json");
+@@ -116,17 +102,17 @@ describe("toRegistryRelativeManifestPath", () => {
+ 
+   it("output never contains backslashes (POSIX separators only)", () => {
+     const out = toRegistryRelativeManifestPath(
+-      "/userData/plugins/registry.json",
+-      "/userData/plugins/email/plugin.json",
++      "/lvis/plugins/registry.json",
++      "/lvis/plugins/email/plugin.json",
+     );
+     expect(out).not.toContain("\\");
+   });
+ 
+   it("returns absolute path verbatim when manifest is outside registry tree", () => {
+-    // Phase 2c migration shim rejects these — production install must always
+-    // be under userInstalledDir. Helper only normalizes; it does not enforce.
++    // Runtime trust-root rejects these — production install must always be
++    // under pluginsRoot. Helper only normalizes; it does not enforce.
+     const out = toRegistryRelativeManifestPath(
+-      "/userData/plugins/registry.json",
++      "/lvis/plugins/registry.json",
+       "/Users/dev/legacy/plugin.json",
+     );
+     expect(out).toMatch(/legacy\/plugin\.json$/);
+diff --git a/src/plugins/__tests__/runtime.test.ts b/src/plugins/__tests__/runtime.test.ts
+index 9620ede0..a971110b 100644
+--- a/src/plugins/__tests__/runtime.test.ts
++++ b/src/plugins/__tests__/runtime.test.ts
+@@ -78,7 +78,7 @@ describe("PluginRuntime.disable", () => {
+   }
+ 
+   function makeRuntime(): PluginRuntime {
+-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+     return new PluginRuntime({
+       hostRoot: testDir,
+       registryPath,
+@@ -386,7 +386,7 @@ describe("PluginRuntime.disable", () => {
+ 
+       let injectedCallTool: ((toolName: string, payload?: unknown) => Promise<unknown>) | undefined;
+ 
+-      const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++      const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+       const runtime = new PluginRuntime({
+         hostRoot: testDir,
+         registryPath,
+@@ -441,7 +441,7 @@ describe("PluginRuntime.disable", () => {
+       );
+       await writeRegistry([{ id: "calltool-delegate", manifestPath, enabled: true }]);
+ 
+-      const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
++      const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
+       const runtime = new PluginRuntime({
+         hostRoot: testDir,
+         registryPath,
+@@ -721,7 +721,7 @@ describe("PluginRuntime.disable", () => {
+     runtime = new PluginRuntime({
+       hostRoot: testDir,
+       registryPath,
+-      deploymentGuard: new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir }),
++      deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
+       createHostApi: (pluginId) => ({
+         registerKeywords: () => {},
+         emitEvent: () => {},
+@@ -795,7 +795,7 @@ describe("PluginRuntime.disable", () => {
+     runtime = new PluginRuntime({
+       hostRoot: testDir,
+       registryPath,
+-      deploymentGuard: new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir }),
++      deploymentGuard: new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir }),
+       createHostApi: (pluginId) => ({
+         registerKeywords: () => {},
+         emitEvent: () => {},
+@@ -901,22 +901,22 @@ describe("PluginRuntime.disable", () => {
+ /**
+  * Trusted-path filter for registry-listed manifests. Marketplace installs
+  * write under `~/.lvis/plugins/{slug}/`, which lives outside the project
+- * `hostRoot`. Without `userInstalledDir` widening, every cloud-installed
++ * `hostRoot`. Without `pluginsRoot` widening, every cloud-installed
+  * plugin gets dropped on `restartAll()` after install.
+  */
+ describe("PluginRuntime registry trusted-path", () => {
+   let testDir: string;
+   let hostRoot: string;
+-  let userInstalledDir: string;
++  let pluginsRoot: string;
+   let registryPath: string;
+ 
+   beforeEach(async () => {
+     testDir = join(homedir(), ".lvis", "test-tmp", `trusted-path-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+     hostRoot = join(testDir, "host");
+-    userInstalledDir = join(testDir, "user-installs");
++    pluginsRoot = join(testDir, "user-installs");
+     registryPath = join(hostRoot, "plugins", "registry.json");
+     await mkdir(join(hostRoot, "plugins"), { recursive: true });
+-    await mkdir(userInstalledDir, { recursive: true });
++    await mkdir(pluginsRoot, { recursive: true });
+   });
+ 
+   afterEach(async () => {
+@@ -951,20 +951,20 @@ describe("PluginRuntime registry trusted-path", () => {
+     return manifestPath;
+   }
+ 
+-  it("loads a plugin under userInstalledDir when widening is configured", async () => {
+-    const manifestPath = await writeMinimalPlugin(userInstalledDir, "cloud-plugin");
++  it("loads a plugin under pluginsRoot when widening is configured", async () => {
++    const manifestPath = await writeMinimalPlugin(pluginsRoot, "cloud-plugin");
+     await writeFile(
+       registryPath,
+       JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
+       "utf-8",
+     );
+-    const runtime = new PluginRuntime({ hostRoot, userInstalledDir, registryPath });
++    const runtime = new PluginRuntime({ hostRoot, pluginsRoot, registryPath });
+     await runtime.load();
+     expect(runtime.listPluginIds()).toContain("cloud-plugin");
+   });
+ 
+-  it("drops a plugin under userInstalledDir when widening is NOT configured", async () => {
+-    const manifestPath = await writeMinimalPlugin(userInstalledDir, "cloud-plugin");
++  it("drops a plugin under pluginsRoot when widening is NOT configured", async () => {
++    const manifestPath = await writeMinimalPlugin(pluginsRoot, "cloud-plugin");
+     await writeFile(
+       registryPath,
+       JSON.stringify({ version: 1, plugins: [{ id: "cloud-plugin", manifestPath, enabled: true }] }),
+@@ -981,7 +981,7 @@ describe("PluginRuntime registry trusted-path", () => {
+   });
+ 
+   it("rejects a manifest path that is outside both trusted roots", async () => {
+-    // Disguise the manifest at a sibling of userInstalledDir so neither root
++    // Disguise the manifest at a sibling of pluginsRoot so neither root
+     // claims it; the prefix check must reject regardless of name similarity.
+     const escapeDir = join(testDir, "user-installs-evil");
+     const manifestPath = await writeMinimalPlugin(escapeDir, "evil");
+@@ -991,7 +991,7 @@ describe("PluginRuntime registry trusted-path", () => {
+       "utf-8",
+     );
+     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+-    const runtime = new PluginRuntime({ hostRoot, userInstalledDir, registryPath });
++    const runtime = new PluginRuntime({ hostRoot, pluginsRoot, registryPath });
+     await runtime.load();
+     expect(runtime.listPluginIds()).not.toContain("evil");
+     expect(warnSpy).toHaveBeenCalledWith(
+diff --git a/src/plugins/__tests__/test-helpers.ts b/src/plugins/__tests__/test-helpers.ts
+index 62c4a1d2..5159249a 100644
+--- a/src/plugins/__tests__/test-helpers.ts
++++ b/src/plugins/__tests__/test-helpers.ts
+@@ -1,11 +1,11 @@
+ /**
+- * Phase 2a — shared helpers for marketplace test fixtures.
++ * Shared helpers for marketplace test fixtures.
+  *
+- * Tests construct `PluginMarketplaceService` with the new (paths, fetcher,
+- * deploymentGuard?) shape. The Phase 2a invariant is that registry.json
+- * lives under `userInstalledDir`, so tests can pick a single tmp root and
+- * the helper derives the rest.
++ * Tests construct `PluginMarketplaceService` with the (paths, fetcher,
++ * deploymentGuard?) shape. registry.json lives at the root of pluginsRoot,
++ * so tests pick a single tmp root and the helper derives the rest.
+  */
++import { resolve } from "node:path";
+ import type { PluginPaths } from "../plugin-paths.js";
+ import { resolvePluginPaths } from "../plugin-paths.js";
+ 
+@@ -13,8 +13,8 @@ export interface TestPluginPathsInput {
+   /** A tmp directory; the helper anchors plugin paths under it. */
+   rootDir: string;
+   /** Optional override — defaults to `<rootDir>/plugins`. */
+-  userInstalledDir?: string;
+-  /** Optional override — defaults to `<userInstalledDir>/.cache`. */
++  pluginsRoot?: string;
++  /** Optional override — defaults to `<pluginsRoot>/.cache`. */
+   cacheRoot?: string;
+ }
+ 
+@@ -25,8 +25,7 @@ export interface TestPluginPathsInput {
+  */
+ export function makeTestPluginPaths(input: TestPluginPathsInput): PluginPaths {
+   return resolvePluginPaths({
+-    userDataDir: input.rootDir,
+-    userInstalledDir: input.userInstalledDir,
++    pluginsRoot: input.pluginsRoot ?? resolve(input.rootDir, "plugins"),
+     cacheRoot: input.cacheRoot,
+   });
+ }
+diff --git a/src/plugins/__tests__/trust-boundary.test.ts b/src/plugins/__tests__/trust-boundary.test.ts
+index 17689528..dad5acf2 100644
+--- a/src/plugins/__tests__/trust-boundary.test.ts
++++ b/src/plugins/__tests__/trust-boundary.test.ts
+@@ -4,7 +4,7 @@
+  * Covers four orthogonal hardening fixes:
+  *
+  *   1. (CRITICAL §Step 1) `isTrustedRegistryManifestPath` accepts BOTH
+- *      hostRoot and userInstalledDir; rejects symlink escape.
++ *      hostRoot and pluginsRoot; rejects symlink escape.
+  *   2. (HIGH §Step 2) Unsigned user plugins are fail-closed by default;
+  *      `allowUnsignedUserPlugins=true` opt-in restores legacy behaviour.
+  *   3. (HIGH §Step 3) `installedBy` recorded on the registry entry is
+@@ -49,7 +49,7 @@ function makeAuditSink(): { calls: AuditCall[]; log: (l: "info" | "warn" | "erro
+ describe("Phase 1 — plugin trust boundary", () => {
+   let testDir: string;
+   let hostRoot: string;
+-  let userInstalledDir: string;
++  let pluginsRoot: string;
+   let registryPath: string;
+ 
+   beforeEach(async () => {
+@@ -60,9 +60,9 @@ describe("Phase 1 — plugin trust boundary", () => {
+       `lvis-trust-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+     );
+     hostRoot = join(testDir, "host");
+-    userInstalledDir = join(testDir, "userInstalled");
++    pluginsRoot = join(testDir, "userInstalled");
+     await mkdir(join(hostRoot, "plugins"), { recursive: true });
+-    await mkdir(userInstalledDir, { recursive: true });
++    await mkdir(pluginsRoot, { recursive: true });
+     registryPath = join(hostRoot, "plugins", "registry.json");
+   });
+ 
+@@ -109,15 +109,15 @@ describe("Phase 1 — plugin trust boundary", () => {
+       const runtime = new PluginRuntime({
+         hostRoot,
+         registryPath,
+-        userInstalledDir,
++        pluginsRoot,
+       });
+       await runtime.load();
+       expect(runtime.listPluginIds()).toContain("tb.host");
+     });
+ 
+-    it("accepts a registry manifest path under userInstalledDir (outside hostRoot)", async () => {
++    it("accepts a registry manifest path under pluginsRoot (outside hostRoot)", async () => {
+       const manifestPath = await writePluginAt(
+-        join(userInstalledDir, "p-user"),
++        join(pluginsRoot, "p-user"),
+         "tb.user",
+       );
+       await writeRegistry([{ id: "tb.user", manifestPath }]);
+@@ -125,13 +125,13 @@ describe("Phase 1 — plugin trust boundary", () => {
+       const runtime = new PluginRuntime({
+         hostRoot,
+         registryPath,
+-        userInstalledDir,
++        pluginsRoot,
+       });
+       await runtime.load();
+       expect(runtime.listPluginIds()).toContain("tb.user");
+     });
+ 
+-    it("rejects a registry manifest path outside both hostRoot and userInstalledDir", async () => {
++    it("rejects a registry manifest path outside both hostRoot and pluginsRoot", async () => {
+       const manifestPath = await writePluginAt(
+         join(testDir, "rogue", "p-rogue"),
+         "tb.rogue",
+@@ -141,7 +141,7 @@ describe("Phase 1 — plugin trust boundary", () => {
+       const runtime = new PluginRuntime({
+         hostRoot,
+         registryPath,
+-        userInstalledDir,
++        pluginsRoot,
+       });
+       await runtime.load();
+       expect(runtime.listPluginIds()).not.toContain("tb.rogue");
+@@ -152,16 +152,16 @@ describe("Phase 1 — plugin trust boundary", () => {
+     // check via a real on-disk path.
+     const symlinkSkip = process.platform === "win32";
+     it.skipIf(symlinkSkip)(
+-      "rejects a symlink under userInstalledDir that points outside both trust roots",
++      "rejects a symlink under pluginsRoot that points outside both trust roots",
+       async () => {
+         // Real plugin lives at testDir/outside/p-evil/plugin.json — outside
+-        // both hostRoot and userInstalledDir.
++        // both hostRoot and pluginsRoot.
+         const realDir = join(testDir, "outside", "p-evil");
+         const realManifest = await writePluginAt(realDir, "tb.evil");
+-        // Plant a symlink inside userInstalledDir that points at the real
++        // Plant a symlink inside pluginsRoot that points at the real
+         // directory. Without realpath defeat, this would naively pass the
+         // containment check.
+-        const linkDir = join(userInstalledDir, "p-evil");
++        const linkDir = join(pluginsRoot, "p-evil");
+         await symlink(realDir, linkDir, "dir");
+         const linkedManifest = join(linkDir, "plugin.json");
+         // Sanity check both paths resolve to the same file before runtime.
+@@ -171,7 +171,7 @@ describe("Phase 1 — plugin trust boundary", () => {
+         const runtime = new PluginRuntime({
+           hostRoot,
+           registryPath,
+-          userInstalledDir,
++          pluginsRoot,
+         });
+         await runtime.load();
+         expect(runtime.listPluginIds()).not.toContain("tb.evil");
+@@ -191,7 +191,7 @@ describe("Phase 1 — plugin trust boundary", () => {
+ 
+     it("rejects an unsigned user plugin by default and emits plugin_unsigned_user_rejected", async () => {
+       const manifestPath = await writePluginAt(
+-        join(userInstalledDir, "p-unsigned"),
++        join(pluginsRoot, "p-unsigned"),
+         "tb.unsigned",
+         { installPolicy: "user" },
+       );
+@@ -201,7 +201,7 @@ describe("Phase 1 — plugin trust boundary", () => {
+       const runtime = new PluginRuntime({
+         hostRoot,
+         registryPath,
+-        userInstalledDir,
++        pluginsRoot,
+         signatureVerifier: new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] }),
+         auditLog: audit.log,
+       });
+@@ -220,7 +220,7 @@ describe("Phase 1 — plugin trust boundary", () => {
+ 
+     it("loads an unsigned user plugin when allowUnsignedUserPlugins=true and emits plugin_unsigned_user_loaded_with_optin", async () => {
+       const manifestPath = await writePluginAt(
+-        join(userInstalledDir, "p-unsigned-optin"),
++        join(pluginsRoot, "p-unsigned-optin"),
+         "tb.unsigned.optin",
+         { installPolicy: "user" },
+       );
+@@ -230,7 +230,7 @@ describe("Phase 1 — plugin trust boundary", () => {
+       const runtime = new PluginRuntime({
+         hostRoot,
+         registryPath,
+-        userInstalledDir,
++        pluginsRoot,
+         allowUnsignedUserPlugins: true,
+         signatureVerifier: new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] }),
+         auditLog: audit.log,
+@@ -250,11 +250,11 @@ describe("Phase 1 — plugin trust boundary", () => {
+ 
+   describe("installedBy authoritative over manifest installPolicy", () => {
+     it("rejects user uninstall when registry installedBy=admin even if manifest installPolicy=user (tampered)", async () => {
+-      // Plugin physically lives under userInstalledDir but the manifest is
++      // Plugin physically lives under pluginsRoot but the manifest is
+       // stamped `installPolicy: "user"` (the tamper). The registry was
+       // recorded with installedBy="admin" at install time — that record is
+       // authoritative.
+-      const userDir = join(userInstalledDir, "p-tampered");
++      const userDir = join(pluginsRoot, "p-tampered");
+       const manifestPath = await writePluginAt(userDir, "tb.tampered", {
+         installPolicy: "user",
+       });
+@@ -264,7 +264,7 @@ describe("Phase 1 — plugin trust boundary", () => {
+ 
+       const guard = new PluginDeploymentGuard({
+         registryPath,
+-        userInstalledDir,
++        pluginsRoot,
+       });
+       const result = await guard.canUninstall("tb.tampered", "user");
+ 
+@@ -275,7 +275,7 @@ describe("Phase 1 — plugin trust boundary", () => {
+     it("falls back to manifest installPolicy when registry has no installedBy (legacy data)", async () => {
+       // Legacy entry with no `installedBy` recorded — guard must not break;
+       // the manifest field is the only signal so it's used.
+-      const userDir = join(userInstalledDir, "p-legacy");
++      const userDir = join(pluginsRoot, "p-legacy");
+       const manifestPath = await writePluginAt(userDir, "tb.legacy", {
+         installPolicy: "admin",
+       });
+@@ -283,7 +283,7 @@ describe("Phase 1 — plugin trust boundary", () => {
+ 
+       const guard = new PluginDeploymentGuard({
+         registryPath,
+-        userInstalledDir,
++        pluginsRoot,
+       });
+       const result = await guard.canUninstall("tb.legacy", "user");
+ 
+diff --git a/src/plugins/deployment-guard.ts b/src/plugins/deployment-guard.ts
+index 3d0ed88b..2e0b816a 100644
+--- a/src/plugins/deployment-guard.ts
++++ b/src/plugins/deployment-guard.ts
+@@ -9,10 +9,10 @@ import type { InstallPolicy } from "./types.js";
+  * Managed 플러그인이 user actor에 의해 제거/비활성화되지 않도록 차단.
+  * Phase 1.5 hybrid 판정 (두 레이어가 모두 통과해야 "user" 허용):
+  *
+- *   1. Path check (default-deny): `userInstalledDir` 하위가 아니면 managed.
++ *   1. Path check (default-deny): `pluginsRoot` 하위가 아니면 managed.
+  *      registry.json 위변조로 외부 경로가 등록되는 경우를 차단.
+  *   2. Manifest field check: `plugin.json`의 `installPolicy === "admin"`면 managed.
+- *      `userInstalledDir` 안에 있더라도 번들 플러그인(설치 시점에 관리형으로
++ *      `pluginsRoot` 안에 있더라도 번들 플러그인(설치 시점에 관리형으로
+  *      지정됐던 것)은 필드로 식별.
+  *
+  * 위 두 검사 중 하나라도 managed를 가리키면 user actor는 거부되고 it-admin만 허용.
+@@ -45,16 +45,16 @@ export interface DeploymentGuardOptions {
+    * Absolute path to the directory where user-installed plugins live
+    * (typically `{appRoot}/plugins/installed`).
+    */
+-  userInstalledDir: string;
++  pluginsRoot: string;
+ }
+ 
+ export class PluginDeploymentGuard {
+   private readonly registryPath: string;
+-  private readonly userInstalledDir: string;
++  private readonly pluginsRoot: string;
+ 
+   constructor(options: DeploymentGuardOptions) {
+     this.registryPath = resolve(options.registryPath);
+-    this.userInstalledDir = resolve(options.userInstalledDir);
++    this.pluginsRoot = resolve(options.pluginsRoot);
+   }
+ 
+   async canUninstall(pluginId: string, actor: Actor): Promise<GuardResult> {
+@@ -75,7 +75,7 @@ export class PluginDeploymentGuard {
+     if (!this.isPathUnderUserInstalledDir(manifestAbs)) {
+       return {
+         allowed: false,
+-        reason: `Managed plugin cannot be uninstalled by user: ${pluginId} (path outside userInstalledDir)`,
++        reason: `Managed plugin cannot be uninstalled by user: ${pluginId} (path outside pluginsRoot)`,
+       };
+     }
+ 
+@@ -152,7 +152,7 @@ export class PluginDeploymentGuard {
+   }
+ 
+   private isPathUnderUserInstalledDir(absolutePath: string): boolean {
+-    const rel = relative(this.userInstalledDir, absolutePath);
++    const rel = relative(this.pluginsRoot, absolutePath);
+     if (rel === "" || rel === ".") return false;
+     if (rel.startsWith("..")) return false;
+     if (isAbsolute(rel)) return false;
+diff --git a/src/plugins/marketplace-installer.ts b/src/plugins/marketplace-installer.ts
+index b3de3bc0..5e3ff313 100644
+--- a/src/plugins/marketplace-installer.ts
++++ b/src/plugins/marketplace-installer.ts
+@@ -65,10 +65,10 @@ export interface MarketplaceInstallerOptions {
+   /** Map of `key_id → pub key` used to verify the envelope. */
+   publicKeys: Record<string, PublicKeyInput>;
+   /**
+-   * Target download root — REQUIRED (#266 closure). The historical
+-   * `homedir() + .lvis/plugins/.downloads` default violated the
+-   * Phase 2a PluginPaths SoT; callers must inject `paths.cacheRoot`
+-   * (or a sibling) explicitly so the layout stays under userData.
++   * Target download root — REQUIRED. Callers must inject
++   * `paths.cacheRoot` (or a sibling) explicitly so every download lands
++   * under the plugin tree's own `.cache/` and the layout stays in one
++   * place — no homedir() fallback that could leak outside PluginPaths.
+    */
+   downloadRoot: string;
+   /**
+diff --git a/src/plugins/marketplace.ts b/src/plugins/marketplace.ts
+index 3b15e2c4..d3849fd2 100644
+--- a/src/plugins/marketplace.ts
++++ b/src/plugins/marketplace.ts
+@@ -150,7 +150,7 @@ interface PluginHistoryEntry {
+ 
+ export class PluginMarketplaceService {
+   private readonly registryPath: string;
+-  private readonly userInstalledDir: string;
++  private readonly pluginsRoot: string;
+   private readonly deploymentGuard?: PluginDeploymentGuard;
+   private readonly fetcher: MarketplaceFetcher;
+   /** Sprint 3-B §9.6: per-plugin version cache for rollback. */
+@@ -164,8 +164,7 @@ export class PluginMarketplaceService {
+   /**
+    * S9: base directory for the catalog cache. `null` disables catalog caching
+    * (test mock fetcher). Defaults to `paths.cacheRoot/marketplace-catalog`
+-   * so the SoT stays under userData (#266 closed the historical homedir()
+-   * fallback).
++   * so the SoT stays inside the plugin tree (`~/.lvis/plugins/.cache/`).
+    */
+   private readonly catalogCacheBase: string | null;
+   /**
+@@ -182,7 +181,7 @@ export class PluginMarketplaceService {
+    * the registry / installed-dir / cache layout, and `fetcher` is required.
+    * The pre-Phase-2b `appRoot` argument used by the npm-install branch is
+    * gone; the only install path is the signed-zip download under
+-   * `paths.userInstalledDir`.
++   * `paths.pluginsRoot`.
+    */
+   constructor(
+     paths: PluginPaths,
+@@ -190,7 +189,7 @@ export class PluginMarketplaceService {
+     deploymentGuard?: PluginDeploymentGuard,
+   ) {
+     this.registryPath = paths.registryPath;
+-    this.userInstalledDir = paths.userInstalledDir;
++    this.pluginsRoot = paths.pluginsRoot;
+     this.cacheRoot = paths.cacheRoot;
+     this.deploymentGuard = deploymentGuard;
+     this.fetcher = fetcher;
+@@ -200,11 +199,11 @@ export class PluginMarketplaceService {
+       fetcher instanceof MockMarketplaceFetcher
+         ? null
+         : resolve(paths.cacheRoot, "marketplace-catalog");
+-    // Artifact store owns the same `userInstalledDir` (extract target) +
++    // Artifact store owns the same `pluginsRoot` (extract target) +
+     // `cacheRoot` (history + version snapshots). Tarball offline cache
+     // also lives under `cacheRoot`, not homedir().
+     this.artifactStore = new PluginArtifactStore({
+-      installRoot: paths.userInstalledDir,
++      installRoot: paths.pluginsRoot,
+       cacheRoot: paths.cacheRoot,
+       fetcher,
+       publicKeys: getBundledPublicKeys(),
+@@ -223,7 +222,8 @@ export class PluginMarketplaceService {
+ 
+   async list(): Promise<MarketplaceListItem[]> {
+     // Catalog cache is null when using the test mock fetcher; production
+-    // always has a userData-anchored cache base (set in constructor).
++    // always has a cache base under `~/.lvis/plugins/.cache/` (set in
++    // constructor).
+     const cacheBase = this.catalogCacheBase;
+     const useCache = cacheBase !== null && isOfflineCacheEnabled();
+     let catalogPlugins: PluginMarketplaceItem[] | null = null;
+@@ -596,9 +596,9 @@ export class PluginMarketplaceService {
+         // longer serves the artifact, so the verified-zip download path
+         // has nothing to fetch. cacheRoot only persists the manifest
+         // (history breadcrumb), not the binary, by design — caching the
+-        // binary locally would inflate userData with every install and
+-        // would outlive the security yank that a delisting is meant to
+-        // enforce. Surface the cause explicitly so settings UI / logs
++        // binary locally would inflate the plugin tree with every install
++        // and would outlive the security yank that a delisting is meant
++        // to enforce. Surface the cause explicitly so settings UI / logs
+         // can communicate it instead of a generic "not found".
+         throw new Error(
+           `Cannot rollback "${pluginId}": plugin is no longer in the marketplace catalog. ` +
+@@ -775,7 +775,7 @@ export class PluginMarketplaceService {
+     entry: PluginRegistryEntry,
+     _remainingEntries: PluginRegistryEntry[],
+   ): Promise<void> {
+-    // Phase 2-final: every install is a zip-extract under userInstalledDir,
++    // Phase 2-final: every install is a zip-extract under pluginsRoot,
+     // so uninstall is a recursive rm of the plugin's directory. The
+     // pre-Phase-2 npm-uninstall branch (`isZipInstalled === false`) is
+     // gone with the install-side npm path.
+@@ -783,7 +783,7 @@ export class PluginMarketplaceService {
+       ? entry.manifestPath
+       : resolve(dirname(this.registryPath), entry.manifestPath);
+     const installedManifestDir = dirname(manifestPath);
+-    if (this.isWithin(this.userInstalledDir, installedManifestDir)) {
++    if (this.isWithin(this.pluginsRoot, installedManifestDir)) {
+       await rm(installedManifestDir, { recursive: true, force: true });
+     }
+   }
+diff --git a/src/plugins/offline-cache.ts b/src/plugins/offline-cache.ts
+index 7cb61ab7..048a1470 100644
+--- a/src/plugins/offline-cache.ts
++++ b/src/plugins/offline-cache.ts
+@@ -40,9 +40,9 @@ interface CacheRoot {
+ }
+ 
+ function cacheRoots(base: string): CacheRoot {
+-  // #266 closure — caller must supply an explicit base under PluginPaths.
+-  // The historical `homedir() + .lvis/marketplace-cache` default leaked
+-  // outside `userData` and is no longer permitted.
++  // Caller must supply an explicit base under PluginPaths.cacheRoot. No
++  // homedir() fallback — every cache file must live inside the plugin
++  // tree's own `.cache/` so disk usage tracks install state.
+   return {
+     catalogFile: resolve(base, "catalog.json"),
+     tarballDir: resolve(base, "tarballs"),
+diff --git a/src/plugins/plugin-artifact-store.ts b/src/plugins/plugin-artifact-store.ts
+index 5a2584a8..1b0278b7 100644
+--- a/src/plugins/plugin-artifact-store.ts
++++ b/src/plugins/plugin-artifact-store.ts
+@@ -1,14 +1,13 @@
+ /**
+- * PluginArtifactStore — Phase 2 §FU#267 decomposition seam.
++ * PluginArtifactStore — artifact-management seam.
+  *
+  * Pulls the artifact-management responsibilities out of the
+  * 1100-line `PluginMarketplaceService` god-class so:
+  *
+  *   1. `marketplace.ts` becomes an orchestrator (catalog → install order →
+  *      registry write) and stops owning download/extract/cache plumbing.
+- *   2. The MCP marketplace install consumer (lvis-app#259) can instantiate
+- *      a parallel store rooted at `userData/mcp-servers/` without copying
+- *      the entire pipeline.
++ *   2. The MCP marketplace install consumer instantiates a parallel store
++ *      rooted at `~/.lvis/mcp/<slug>/` without copying the entire pipeline.
+  *
+  * What this module owns:
+  *   - signed-zip download + envelope verification (delegates to
+@@ -25,8 +24,8 @@
+  *
+  * The store is transport- and plugin-kind agnostic: callers supply
+  * `installRoot` (where to extract) and `cacheRoot` (where to keep history
+- * + version snapshots). The MCP consumer points these at
+- * `mcp-servers/` instead of `plugins/` and gets the same primitives.
++ * + version snapshots). Regular plugins point these at `~/.lvis/plugins/`;
++ * MCP consumers point them at `~/.lvis/mcp/`.
+  */
+ 
+ import AdmZip from "adm-zip";
+@@ -54,14 +53,14 @@ export interface ArtifactStoreHistoryEntry {
+ export interface ArtifactStoreOptions {
+   /**
+    * Where artifacts are extracted (`{installRoot}/<slug>/...`). For
+-   * regular plugins this is `userData/plugins/`; for MCP servers (#259)
+-   * it will be `userData/mcp-servers/`.
++   * regular plugins this is `~/.lvis/plugins/`; for MCP servers it is
++   * `~/.lvis/mcp/`.
+    */
+   installRoot: string;
+   /**
+    * Per-slug history + version snapshot root. For regular plugins this
+-   * is the existing `paths.cacheRoot`; for MCP servers it will be a
+-   * sibling under `userData/mcp-servers/.cache/`.
++   * is `~/.lvis/plugins/.cache/`; for MCP servers it is
++   * `~/.lvis/mcp/.cache/`.
+    */
+   cacheRoot: string;
+   /**
+@@ -76,9 +75,8 @@ export interface ArtifactStoreOptions {
+   /**
+    * Tarball offline cache base directory. Pass `null` to disable the
+    * cache entirely (test mock fetcher). Pass a path to enable. When
+-   * `undefined`, the store uses `cacheRoot/.tarballs` so the SoT stays
+-   * inside `userData` — historically this defaulted to `homedir()` which
+-   * leaked outside `PluginPaths` (cleared in lvis-app#266).
++   * `undefined`, the store uses `cacheRoot/.tarballs` so the cache stays
++   * inside the same `~/.lvis/<topic>/.cache/` tree as the SoT.
+    */
+   tarballCacheBase?: string | null;
+ }
+@@ -105,9 +103,9 @@ export class PluginArtifactStore {
+     this.fetcher = options.fetcher;
+     this.publicKeys = options.publicKeys;
+     // The store owns the SoT for the tarball cache. `null` disables it
+-    // (test fetcher); `undefined` falls back to a sibling under cacheRoot
+-    // — never to homedir(). `paths.cacheRoot` lives under userData, so
+-    // disk usage tracks plugin install state.
++    // (test fetcher); `undefined` falls back to a sibling under cacheRoot.
++    // `paths.cacheRoot` lives under the plugin tree's own `.cache/` so
++    // disk usage tracks install state.
+     this.tarballCacheBase =
+       options.tarballCacheBase === null
+         ? null
+diff --git a/src/plugins/plugin-paths.ts b/src/plugins/plugin-paths.ts
+index 419c81d7..dea2be58 100644
+--- a/src/plugins/plugin-paths.ts
++++ b/src/plugins/plugin-paths.ts
+@@ -1,119 +1,91 @@
+ /**
+- * Plugin path single source of truth — Phase 2a layout.
++ * Plugin path single source of truth.
+  *
+- * The path layout for managed and user-installed plugins is anchored at
+- * `app.getPath('userData')/plugins/`. There is no fallback to
+- * `<appRoot>/plugins/` — that location is being retired entirely (Phase 2e
+- * deletes it from the repo). The Phase 0 transitional resolver had three
+- * separate path roots (appRoot for registry/marketplace, homedir for user
+- * installs); Phase 2a collapses them to one.
++ * 모든 플러그인은 `~/.lvis/plugins/<id>/` 아래 단일 디렉토리에 거주한다.
++ * 그 안에 install artifact (`plugin.json`, `dist/`, ...) 와 plugin save data
++ * 가 함께 들어간다 — 플러그인이 자기 디렉토리를 곧 자기 저장소로 사용한다.
+  *
+- * **Status: in-development (Phase 2a of 2a-2e migration). Not for legacy
+- * compatibility.** The resolver only emits the new layout. Reading the old
+- * `<appRoot>/plugins/registry.json` is the responsibility of the Phase 2c
+- * migration shim (one-shot, idempotent, not a permanent fallback).
+- *
+- * Why required `userDataDir`:
+- *  - The previous resolver defaulted `userInstalledDir` to
+- *    `homedir()/.lvis/plugins`. Electron's canonical answer is
+- *    `app.getPath('userData')` — `%APPDATA%/lvis`, `~/Library/Application
+- *    Support/lvis`, `~/.config/lvis`. Forcing the caller to supply this
+- *    keeps the resolver testable (vitest passes a tmpdir) without leaking
+- *    Electron into this module.
+- *
+- * Marketplace catalog:
+- *  - Production catalog is the marketplace server (single source of truth).
+- *    LVIS no longer ships a local `marketplace.json`; the field is removed
+- *    from `PluginPaths` and dev's `MockMarketplaceFetcher` takes its path
+- *    argument directly from boot wiring.
++ * 호스트 모듈(memory, audit, mcp, traces, certs, ...) 은 별도로 `~/.lvis/` 의
++ * 다른 sibling 폴더에 있다. 즉 `~/.lvis/<topic>/` 는 호스트, `~/.lvis/plugins/<id>/`
++ * 는 플러그인 — 플러그인이 호스트 폴더에 끼어들거나 호스트가 플러그인 폴더를
++ * 들여다보지 않는다.
+  *
+  * Override hooks:
+- *  - `LVIS_PLUGINS_DIR` env — points the user-installed dir at an arbitrary
+- *    location. Used by tests, portable installs, and CI sandbox isolation.
+- *    Hard-gated on `!app.isPackaged` via {@link devPluginsDirOverride}: a
+- *    packaged build silently ignores the env var so an attacker cannot
+- *    redirect the layout at a user-writable directory.
++ *  - `LVIS_PLUGINS_DIR` env — 테스트 / portable install / CI sandbox 용. dev
++ *    빌드에서만 적용 (packaged 빌드에서는 `devPluginsDirOverride()` 가
++ *    `app.isPackaged === true` hard-gate 로 무시).
+  *
+- * Electron is intentionally NOT imported here so this module remains
+- * unit-testable in node (vitest) without an electron stub. Boot wires
+- * `app.getPath('userData')` in.
++ * Electron 은 의도적으로 import 하지 않는다 — 이 모듈은 vitest 에서 electron
++ * stub 없이도 동작한다. `LVIS_PLUGINS_DIR` 가 안 잡혀도 `homedir()` 만 있으면
++ * 충분하다.
+  */
+ import { resolve } from "node:path";
++import { homedir } from "node:os";
+ 
+ import { devPluginsDirOverride } from "../boot/dev-flags.js";
+ 
+ export interface PluginPaths {
+-  /** Absolute path to `registry.json` (under userInstalledDir). */
++  /** Absolute path to `registry.json` — sits at the root of `pluginsRoot`. */
+   registryPath: string;
+-  /** Directory where managed + user-installed plugin manifests + bundles live. */
+-  userInstalledDir: string;
++  /**
++   * Directory where every plugin lives — `<pluginsRoot>/<id>/plugin.json`.
++   * `installedBy: "user" | "admin"` is metadata only; both kinds share this
++   * root (no physical user/managed split).
++   */
++  pluginsRoot: string;
+   /** Per-plugin version cache for rollback (Sprint 3-B §9.6). */
+   cacheRoot: string;
+ }
+ 
+ export interface ResolvePluginPathsInput {
+   /**
+-   * Electron `app.getPath('userData')` — required. Tests pass a tmpdir.
+-   * No default; callers that don't have a userDataDir don't have a layout.
+-   */
+-  userDataDir: string;
+-  /**
+-   * Override for the user-installed directory. When omitted, falls back to
+-   * `LVIS_PLUGINS_DIR` env var, then to `userDataDir/plugins`.
++   * Override for the plugins root. When omitted, falls back to
++   * `LVIS_PLUGINS_DIR` env var, then to `homedir()/.lvis/plugins`.
+    *
+    * Tests and portable installs use this to redirect away from the real
+-   * userData location.
++   * `~/.lvis/plugins/`.
+    */
+-  userInstalledDir?: string;
+-  /** Optional cache root override. Defaults to a sibling of userInstalledDir. */
++  pluginsRoot?: string;
++  /** Optional cache root override. Defaults to `<pluginsRoot>/.cache`. */
+   cacheRoot?: string;
+ }
+ 
+ /**
+  * Resolve the plugin path layout.
+  *
+- * Phase 2a layout (final shape):
+- *   - `userDataDir/plugins/registry.json`
+- *   - `userDataDir/plugins/<id>/plugin.json`
+- *   - `userDataDir/plugins/.cache/`
++ * Final shape:
++ *   - `~/.lvis/plugins/registry.json`
++ *   - `~/.lvis/plugins/<id>/plugin.json`
++ *   - `~/.lvis/plugins/.cache/`
+  *
+- * `LVIS_PLUGINS_DIR` env (when set) overrides `userInstalledDir` and the
+- * derived registry/cache. By design `registryPath` is always
+- * `userInstalledDir/registry.json` so registry entries can hold paths
+- * relative to `dirname(registryPath)`.
++ * `LVIS_PLUGINS_DIR` env (when set on a dev build) overrides `pluginsRoot`
++ * and the derived registry/cache. By design `registryPath` is always
++ * `pluginsRoot/registry.json` so registry entries can hold paths relative
++ * to `dirname(registryPath)`.
+  */
+-export function resolvePluginPaths(input: ResolvePluginPathsInput): PluginPaths {
+-  if (!input.userDataDir) {
+-    throw new Error("resolvePluginPaths: userDataDir is required");
+-  }
++export function resolvePluginPaths(input: ResolvePluginPathsInput = {}): PluginPaths {
+   const envOverride = devPluginsDirOverride();
+-  const userInstalledDir = resolve(
+-    input.userInstalledDir ?? envOverride ?? resolve(input.userDataDir, "plugins"),
++  const pluginsRoot = resolve(
++    input.pluginsRoot ?? envOverride ?? resolve(homedir(), ".lvis", "plugins"),
+   );
+-  const cacheRoot = resolve(input.cacheRoot ?? resolve(userInstalledDir, ".cache"));
++  const cacheRoot = resolve(input.cacheRoot ?? resolve(pluginsRoot, ".cache"));
+   return {
+-    registryPath: resolve(userInstalledDir, "registry.json"),
+-    userInstalledDir,
++    registryPath: resolve(pluginsRoot, "registry.json"),
++    pluginsRoot,
+     cacheRoot,
+   };
+ }
+ 
+ /**
+  * Normalize a `manifestPath` registry entry value into the registry-relative
+- * form Phase 2a writes for every new install. POSIX-style separators.
+- *
+- * Why a helper: the Phase 2c migration shim runs this against legacy
+- * absolute and `installed/<id>/...` style paths from old `<appRoot>/plugins/
+- * registry.json` so they all collapse to `<id>/plugin.json`-style entries
+- * before being written into the new userData registry.
++ * form every install writes. POSIX-style separators.
+  *
+  * Behaviour:
+  *  - input may be absolute or relative to `dirname(registryPath)`
+  *  - returns POSIX-separated relative path when the manifest lives under
+- *    the registry's directory tree (the only valid Phase 2a shape)
+- *  - returns the absolute path with POSIX separators otherwise — the
+- *    migration shim will reject those entries; production install paths
+- *    must always be under userInstalledDir
++ *    the registry's directory tree (the only valid shape)
++ *  - returns the absolute path with POSIX separators otherwise — runtime
++ *    will reject those entries via the trust-root check
+  */
+ export function toRegistryRelativeManifestPath(
+   registryPath: string,
+diff --git a/src/plugins/registry.ts b/src/plugins/registry.ts
+index 2531effc..3e5098ad 100644
+--- a/src/plugins/registry.ts
++++ b/src/plugins/registry.ts
+@@ -7,10 +7,9 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
+   try {
+     raw = await readFile(registryPath, "utf-8");
+   } catch (err) {
+-    // First-boot path: PR #248 moved the registry from `lvis-app/plugins/`
+-    // into the user's `userData/plugins/` directory. On a fresh dev boot
+-    // (or a brand-new userData) the file simply doesn't exist yet —
+-    // return the empty default so PluginRuntime.startAll can proceed and
++    // First-boot path: registry lives at `~/.lvis/plugins/registry.json`. On
++    // a fresh dev or first-time install the file simply doesn't exist yet
++    // — return the empty default so PluginRuntime.startAll can proceed and
+     // the registry will be lazily created by the first install/uninstall.
+     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+       return { version: 1, plugins: [] };
+diff --git a/src/plugins/runtime.ts b/src/plugins/runtime.ts
+index 1e18c7c7..30b2e823 100644
+--- a/src/plugins/runtime.ts
++++ b/src/plugins/runtime.ts
+@@ -146,18 +146,14 @@ export interface PluginRuntimeOptions {
+   /**
+    * Trust root for registry-recorded manifest paths.
+    *
+-   * Phase 2a anchors all installed plugins under
+-   * `app.getPath('userData')/plugins/` (resolved by `resolvePluginPaths`),
+-   * so production callers always supply this. A registry entry is trusted
+-   * iff its `realpathSync()` is contained under `realpathSync(this)`. The
+-   * hostRoot containment fallback in {@link PluginRuntime} is retained as
+-   * defense-in-depth for legacy entries that pre-date Phase 2-final, but
+-   * is dead in production.
++   * Anchored at `~/.lvis/plugins/` (resolved by `resolvePluginPaths`), so
++   * production callers always supply this. A registry entry is trusted iff
++   * its `realpathSync()` is contained under `realpathSync(this)`.
+    *
+    * Optional only because some unit tests construct PluginRuntime with a
+    * `manifestPaths`-only seed that never touches `registryPath`.
+    */
+-  userInstalledDir?: string;
++  pluginsRoot?: string;
+   configOverrides?: Record<string, Record<string, unknown>>;
+   /** 플러그인별 HostApi를 생성하는 팩토리 — boot.ts에서 주입 */
+   createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
+@@ -191,7 +187,7 @@ export class PluginRuntime {
+   private readonly hostRoot: string;
+   private readonly manifestPaths: string[];
+   private readonly registryPath?: string;
+-  private readonly userInstalledDir?: string;
++  private readonly pluginsRoot?: string;
+   private readonly allowUnsignedUserPlugins: boolean;
+   private configOverrides: Record<string, Record<string, unknown>>;
+   private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
+@@ -223,8 +219,8 @@ export class PluginRuntime {
+     this.hostRoot = resolve(options.hostRoot);
+     this.manifestPaths = (options.manifestPaths ?? []).map((path) => resolve(path));
+     this.registryPath = options.registryPath ? resolve(options.registryPath) : undefined;
+-    this.userInstalledDir = options.userInstalledDir
+-      ? resolve(options.userInstalledDir)
++    this.pluginsRoot = options.pluginsRoot
++      ? resolve(options.pluginsRoot)
+       : undefined;
+     this.allowUnsignedUserPlugins = options.allowUnsignedUserPlugins === true;
+     this.configOverrides = options.configOverrides ?? {};
+@@ -1330,16 +1326,16 @@ export class PluginRuntime {
+    * Trust-root containment check for registry-recorded manifest paths.
+    *
+    * A registry entry's manifestPath is trusted iff its `realpathSync()`
+-   * (symlinks resolved) is contained under `realpathSync(userInstalledDir)`.
++   * (symlinks resolved) is contained under `realpathSync(pluginsRoot)`.
+    * `hostRoot` is also accepted as defense-in-depth for entries that
+    * pre-date Phase 2-final (the old `<appRoot>/plugins/installed/` layout);
+-   * Phase 2c migration rewrites those into the userInstalledDir tree on
++   * Phase 2c migration rewrites those into the pluginsRoot tree on
+    * boot, so production callers should never observe a hostRoot match.
+    *
+    * Why the realpath + path.relative shape:
+    *   1. Symlink defeat — without realpath, an attacker who controls HOME
+    *      could plant `~/.lvis/plugins/foo -> /some/sensitive/dir` and a
+-   *      registry entry under `userInstalledDir` would naively pass.
++   *      registry entry under `pluginsRoot` would naively pass.
+    *   2. `path.relative` instead of `startsWith` — the prefix variant has
+    *      trailing-separator pitfalls (`/foo` would falsely match `/foobar`).
+    *   3. Roots realpath-resolved — keeps the check symmetric so a root
+@@ -1353,7 +1349,7 @@ export class PluginRuntime {
+   private isTrustedRegistryManifestPath(
+     manifestPath: string,
+     hostRoot: string,
+-    userInstalledDir?: string,
++    pluginsRoot?: string,
+   ): boolean {
+     if (!isAbsolute(manifestPath)) return true;
+     let realManifest: string;
+@@ -1365,12 +1361,12 @@ export class PluginRuntime {
+       return false;
+     }
+     if (this.isPathContained(realHost, realManifest)) return true;
+-    if (userInstalledDir) {
++    if (pluginsRoot) {
+       let realUser: string;
+       try {
+-        realUser = realpathSync(userInstalledDir);
++        realUser = realpathSync(pluginsRoot);
+       } catch {
+-        // userInstalledDir doesn't exist yet (first-run before any user
++        // pluginsRoot doesn't exist yet (first-run before any user
+         // plugin is installed). Treat as "no second trust root" rather than
+         // a hard reject — the hostRoot path above already gave us a chance.
+         return false;
+@@ -1409,7 +1405,7 @@ export class PluginRuntime {
+         const manifestPath = isAbsolute(entry.manifestPath)
+           ? entry.manifestPath
+           : resolve(dirname(this.registryPath!), entry.manifestPath);
+-        if (!this.isTrustedRegistryManifestPath(manifestPath, this.hostRoot, this.userInstalledDir)) {
++        if (!this.isTrustedRegistryManifestPath(manifestPath, this.hostRoot, this.pluginsRoot)) {
+           console.warn(`[plugin-runtime] ignoring untrusted registry manifest path for ${entry.id}: ${manifestPath}`);
+           return [];
+         }
+diff --git a/src/plugins/update-detector.ts b/src/plugins/update-detector.ts
+index a94bae51..adb6697b 100644
+--- a/src/plugins/update-detector.ts
++++ b/src/plugins/update-detector.ts
+@@ -102,9 +102,9 @@ export class PluginUpdateDetector {
+     // registry directory (app-managed plugins) or the per-user install dir
+     // `~/.lvis/plugins/` (dynamic installs). Anything else — e.g. a crafted
+     // registry entry like "../../etc/passwd" — is rejected.
+-    const userInstalledDir = canonicalizeExistingPath(resolve(homedir(), ".lvis/plugins"));
++    const pluginsRoot = canonicalizeExistingPath(resolve(homedir(), ".lvis/plugins"));
+     const underRegistry = isWithin(registryDir, abs);
+-    const underUserDir = isWithin(userInstalledDir, abs);
++    const underUserDir = isWithin(pluginsRoot, abs);
+     if (!underRegistry && !underUserDir) {
+       console.warn("[update-detector] manifestPath escapes allowed roots, skipping:", manifestPath);
+       return null;
