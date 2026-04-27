@@ -13,21 +13,43 @@ import { randomUUID } from "node:crypto";
 import type { WebContents } from "electron";
 import type { NotificationService } from "./notification-service.js";
 
-export interface AskUserQuestionRequest {
-  id: string;
+/**
+ * One question inside a multi-question request. The card surfaces these as
+ * a paginated form (1 of N), then a final confirmation page so the user
+ * can review every answer before sending.
+ */
+export interface AskUserQuestionItem {
   question: string;
   choices?: string[];
   allowFreeText: boolean;
+}
+
+export interface AskUserQuestionRequest {
+  id: string;
+  questions: AskUserQuestionItem[];
   urgent: boolean;
   createdAt: number;
 }
 
-export interface AskUserQuestionResponse {
-  requestId: string;
+/** One answer inside a multi-question response. */
+export interface AskUserQuestionAnswer {
   choice?: string;
   freeText?: string;
+}
+
+export interface AskUserQuestionResponse {
+  requestId: string;
+  /**
+   * Per-question answers, in the same order as the request's `questions`.
+   * Length matches `questions.length` when the card is confirmed.
+   */
+  answers?: AskUserQuestionAnswer[];
+  /** Card-level dismissal — every question abandoned at once. */
   dismissed?: boolean;
 }
+
+/** 1–4 questions per card. Cap is shared between tool input validation and gate. */
+export const MAX_QUESTIONS_PER_CARD = 4;
 
 export const IPC_ASK_USER_QUESTION_REQUEST = "lvis:ask-user-question:request";
 export const IPC_ASK_USER_QUESTION_RESPOND = "lvis:ask-user-question:respond";
@@ -88,9 +110,12 @@ export class AskUserQuestionGate {
   }
 
   ask(input: {
-    question: string;
-    choices?: string[];
-    allowFreeText?: boolean;
+    /**
+     * 1–4 questions to ask in a single inline card. Anything outside that
+     * range is rejected up-front so the renderer never has to defend
+     * against malformed multi-question shapes.
+     */
+    questions: AskUserQuestionItem[];
     urgent?: boolean;
     /**
      * Per-turn abort signal from the conversation loop. When the user
@@ -100,11 +125,23 @@ export class AskUserQuestionGate {
      */
     abortSignal?: AbortSignal;
   }): Promise<AskUserQuestionResponse> {
+    if (
+      !Array.isArray(input.questions) ||
+      input.questions.length === 0 ||
+      input.questions.length > MAX_QUESTIONS_PER_CARD
+    ) {
+      return Promise.resolve({
+        requestId: "",
+        dismissed: true,
+      });
+    }
     const req: AskUserQuestionRequest = {
       id: randomUUID(),
-      question: input.question,
-      choices: input.choices,
-      allowFreeText: input.allowFreeText ?? true,
+      questions: input.questions.map((q) => ({
+        question: q.question,
+        choices: q.choices,
+        allowFreeText: q.allowFreeText !== false,
+      })),
       urgent: input.urgent ?? false,
       createdAt: Date.now(),
     };
@@ -126,10 +163,17 @@ export class AskUserQuestionGate {
     // the window is focused this becomes an in-app toast; otherwise an OS
     // notification surfaces the question while the user is in another app.
     try {
+      // For a single question we surface the prompt verbatim; for a
+      // multi-question card we surface the count + first prompt so the
+      // OS-toast preview is informative but not flooded.
+      const previewBody =
+        req.questions.length === 1
+          ? req.questions[0].question
+          : `질문 ${req.questions.length}개 — ${req.questions[0].question}`;
       this.notificationService?.fire({
         kind: "ask-user",
         title: "질문이 도착했습니다",
-        body: req.question,
+        body: previewBody,
         contextRef: { questionId: req.id },
         urgent: req.urgent,
       });

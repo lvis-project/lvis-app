@@ -1819,10 +1819,19 @@ ${input}`;
     const r = (response ?? {}) as Record<string, unknown>;
     const requestId = typeof r.requestId === "string" ? r.requestId : "";
     if (!requestId) return { ok: false, error: "invalid-request-id" };
+    const rawAnswers = Array.isArray(r.answers) ? (r.answers as unknown[]) : null;
+    const answers = rawAnswers
+      ? rawAnswers.map((entry) => {
+          const a = (entry ?? {}) as Record<string, unknown>;
+          return {
+            choice: typeof a.choice === "string" ? a.choice : undefined,
+            freeText: typeof a.freeText === "string" ? a.freeText : undefined,
+          };
+        })
+      : undefined;
     askUserQuestionGate.resolve({
       requestId,
-      choice: typeof r.choice === "string" ? r.choice : undefined,
-      freeText: typeof r.freeText === "string" ? r.freeText : undefined,
+      answers,
       dismissed: r.dismissed === true,
     });
     return { ok: true };
