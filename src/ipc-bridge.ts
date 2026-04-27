@@ -1614,6 +1614,41 @@ ${input}`;
     return { ok: true };
   });
 
+  // ─── Notifications (#260) ────────────────────────────
+  // Renderer signals (via in-app toast click or OS notification echo) that
+  // the user wants to focus the app. We restore + show + focus the main
+  // window; the renderer's toast handler still navigates to the appropriate
+  // surface (last assistant message / routine card / question card / approval
+  // dialog) via the same payload.
+  ipcMain.handle("lvis:notification:clicked", (e, payload: unknown) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:notification:clicked", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const win = getMainWindow();
+    if (win && !win.isDestroyed()) {
+      try {
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+      } catch (err) {
+        console.warn(
+          "[lvis] notification:clicked focus failed:",
+          (err as Error).message,
+        );
+      }
+    }
+    // Echo payload back so renderer hooks (status-bar bridge, dialogs) can
+    // observe a single cross-cutting "user clicked" signal regardless of
+    // whether the click originated in-app or in the OS notification center.
+    try {
+      win?.webContents.send("lvis:notification:clicked", payload);
+    } catch {
+      // non-fatal
+    }
+    return { ok: true };
+  });
+
   // reminders — list + dismiss + remove. M3: list is technically read-only
   // but exposes user-authored content (PII risk if a third-party plugin
   // webview probes it), so it goes through validateSender + audit just
