@@ -24,6 +24,7 @@ import { RouteEngine } from "../../core/route-engine.js";
 import { SubAgentRunner } from "../subagent-runner.js";
 import type { LLMProvider, StreamEvent } from "../llm/types.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
+import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 
@@ -47,7 +48,7 @@ function buildLoopDeps(toolRegistry: ToolRegistry) {
   const routeEngine = new RouteEngine({ toolRegistry });
   return {
     settingsService: {
-      get: () => ({ provider: "openai", model: "gpt-4o" }),
+      get: () => fakeLlmSettings(),
       getSecret: () => "test-key",
     },
     systemPromptBuilder: {

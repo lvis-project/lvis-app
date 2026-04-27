@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { LvisApi } from "../types.js";
+import type { AppSettings, LvisApi } from "../types.js";
 import { VENDORS } from "../constants.js";
 import type { FallbackEntry } from "../tabs/AdvancedTab.js";
 
@@ -116,19 +116,10 @@ export function useSettingsOrchestration(
     void (async () => {
       const s = await api.getSettings();
       if (cancelled) return;
+      const block = s.llm.vendors[s.llm.provider];
       setVendor(s.llm.provider);
-      setModel(s.llm.model);
-      setBaseUrl((s.llm.baseUrls ?? {})[s.llm.provider] ?? "");
-      setVertexProject(s.llm.vertexProject ?? "");
-      setVertexLocation(s.llm.vertexLocation ?? "");
-      setEnableThinking(s.llm.enableThinking ?? true);
-      setThinkingBudget(s.llm.thinkingBudgetTokens ?? 10_000);
-      setTemperature(s.llm.temperature ?? 0.7);
-      setMaxOutputTokens(s.llm.maxOutputTokens ?? 4096);
-      setSeedInput(s.llm.seed !== undefined ? String(s.llm.seed) : "");
-      setResponseFormat(s.llm.responseFormat ?? "text");
-      setStopSequencesText((s.llm.stopSequences ?? []).join("\n"));
-      setStreamSmoothing(s.llm.streamSmoothing ?? "none");
+      hydrateVendorBlock(block);
+      setStreamSmoothing(s.llm.streamSmoothing);
       setAutoCompact(s.chat.autoCompact ?? true);
       const apiKeySet = await api.hasApiKey(s.llm.provider);
       if (cancelled) return;
@@ -144,27 +135,41 @@ export function useSettingsOrchestration(
       const marketplaceKeySet = await api.hasMarketplaceApiKey();
       if (cancelled) return;
       setHasMarketplaceApiKey(marketplaceKeySet);
-      setFallbackChain((s.llm.fallbackChain ?? []).map((e) => ({ provider: e.provider, model: e.model })));
+      setFallbackChain(s.llm.fallbackChain.map((e) => ({ provider: e.provider, model: e.model })));
       setSettingsLoaded(true);
     })();
     return () => { cancelled = true; };
   }, [open, api]);
 
-  // Re-check key and model when vendor changes
+  // Re-hydrate every vendor-specific field when the active vendor changes.
+  // Switching from OpenAI → Foundry must NOT carry over OpenAI's
+  // maxOutputTokens / temperature / etc., or the next save will write
+  // those stale values into the new vendor's persisted block.
   useEffect(() => {
     if (!open) return;
-    const v = VENDORS.find((x) => x.id === vendor);
-    if (!v) return;
+    if (!VENDORS.some((x) => x.id === vendor)) return;
     let cancelled = false;
     void api.hasApiKey(vendor).then((k) => { if (!cancelled) setHasKey(k); });
     void api.getSettings().then((s) => {
       if (cancelled) return;
-      if (s.llm.provider !== vendor) setModel(v.defaultModel);
-      else setModel(s.llm.model);
-      setBaseUrl((s.llm.baseUrls ?? {})[vendor as any] ?? "");
+      hydrateVendorBlock(s.llm.vendors[vendor]);
     });
     return () => { cancelled = true; };
   }, [vendor, open, api]);
+
+  function hydrateVendorBlock(block: AppSettings["llm"]["vendors"][string]): void {
+    setModel(block.model);
+    setBaseUrl(block.baseUrl ?? "");
+    setVertexProject(block.vertexProject ?? "");
+    setVertexLocation(block.vertexLocation ?? "");
+    setEnableThinking(block.enableThinking);
+    setThinkingBudget(block.thinkingBudgetTokens);
+    setTemperature(block.temperature);
+    setMaxOutputTokens(block.maxOutputTokens);
+    setSeedInput(block.seed !== undefined ? String(block.seed) : "");
+    setResponseFormat(block.responseFormat);
+    setStopSequencesText(block.stopSequences.join("\n"));
+  }
 
   // Re-check web key when webProvider changes
   useEffect(() => {
@@ -194,33 +199,35 @@ export function useSettingsOrchestration(
           setMarketplaceApiKeyInput("");
           setHasMarketplaceApiKey(true);
         }
-        const current = await api.getSettings();
-        const mergedBaseUrls = { ...(current.llm.baseUrls ?? {}) } as Record<string, string>;
-        const trimmed = baseUrl.trim();
-        if (trimmed) mergedBaseUrls[vendor] = trimmed;
-        else delete mergedBaseUrls[vendor];
+        const seedNumber = (() => {
+          const raw = seedInput.trim();
+          if (raw === "") return undefined;
+          const n = Number.parseInt(raw, 10);
+          return Number.isFinite(n) ? n : undefined;
+        })();
+        const trimmedBaseUrl = baseUrl.trim();
+        const trimmedVertexProject = vertexProject.trim();
+        const trimmedVertexLocation = vertexLocation.trim();
+        const activeBlock: AppSettings["llm"]["vendors"][string] = {
+          model: model.trim() || vendorInfo.defaultModel,
+          baseUrl: trimmedBaseUrl || undefined,
+          vertexProject: trimmedVertexProject || undefined,
+          vertexLocation: trimmedVertexLocation || undefined,
+          maxOutputTokens,
+          temperature,
+          enableThinking,
+          thinkingBudgetTokens: thinkingBudget,
+          seed: seedNumber,
+          responseFormat,
+          stopSequences: stopSequencesText.split("\n").map((s) => s.trim()).filter((s) => s.length > 0),
+        };
         await api.updateSettings({
           llm: {
             provider: vendor as any,
-            model: model.trim() || vendorInfo.defaultModel,
-            baseUrls: mergedBaseUrls as any,
-            enableThinking,
-            thinkingBudgetTokens: thinkingBudget,
-            vertexProject: vertexProject.trim() || undefined,
-            vertexLocation: vertexLocation.trim() || undefined,
-            temperature,
-            maxOutputTokens,
-            seed: (() => {
-              const raw = seedInput.trim();
-              if (raw === "") return undefined;
-              const n = Number.parseInt(raw, 10);
-              return Number.isFinite(n) ? n : undefined;
-            })(),
-            responseFormat,
-            stopSequences: stopSequencesText.split("\n").map((s) => s.trim()).filter((s) => s.length > 0),
+            vendors: { [vendor]: activeBlock } as any,
             streamSmoothing,
-            fallbackChain: fallbackChain.filter((e) => e.provider && e.model).map((e) => ({ provider: e.provider as any, model: e.model })),
-          } as any,
+            fallbackChain: fallbackChain.filter((e) => e.provider && e.model).map((e) => ({ provider: e.provider, model: e.model })),
+          },
           webSearch: { provider: webProvider as any },
           chat: { autoCompact },
           routine: { enableWakeupRoutine } as any,

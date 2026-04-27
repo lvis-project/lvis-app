@@ -6,6 +6,7 @@ import { ConversationLoop } from "../conversation-loop.js";
 import type { LLMProvider, StreamEvent } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
+import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -58,7 +59,7 @@ describe("ConversationLoop queryLoop", () => {
 
     const loop = new ConversationLoop(({
       settingsService: {
-        get: () => ({ provider: "openai", model: "gpt-4o" }),
+        get: () => fakeLlmSettings(),
         getSecret: () => "test-key",
       },
       systemPromptBuilder: {
@@ -179,7 +180,7 @@ describe("ConversationLoop queryLoop", () => {
     const routeEngine = new RouteEngine({ toolRegistry });
     const loop = new ConversationLoop(({
       settingsService: {
-        get: () => ({ provider: "openai", model: "gpt-4o" }),
+        get: () => fakeLlmSettings(),
         getSecret: () => "test-key",
       },
       systemPromptBuilder: { build: () => "system" },

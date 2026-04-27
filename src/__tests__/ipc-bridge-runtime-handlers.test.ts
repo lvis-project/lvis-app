@@ -7,6 +7,7 @@
  * with a synthetic IpcMainInvokeEvent.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fakeLlmSettings } from "../shared/__tests__/fake-llm-settings.js";
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 
@@ -112,7 +113,7 @@ function makeServices(
       patch: vi.fn(),
       get: vi.fn((key: string) => {
         if (key === "marketplace") return marketplaceSettings;
-        return { provider: "openai" };
+        return fakeLlmSettings();
       }),
       getSecret: vi.fn(),
       setSecret: vi.fn(),

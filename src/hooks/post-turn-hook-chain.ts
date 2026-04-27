@@ -70,7 +70,7 @@ export class PostTurnHookChain {
         // Stage 1b: threshold-triggered full compact
         const llmSettings = this.deps.settingsService?.get("llm");
         const contextWindow = llmSettings
-          ? getModelContextWindow(llmSettings.provider as LLMVendor, llmSettings.model as string)
+          ? getModelContextWindow(llmSettings.provider as LLMVendor, llmSettings.vendors[llmSettings.provider].model)
           : undefined;
         if (shouldCompact(ctx.cumulativeUsage, contextWindow)) {
           const { messages: compacted, result: cr } = compactMessages(working, undefined, "auto");
