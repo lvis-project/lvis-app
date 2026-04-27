@@ -210,12 +210,12 @@ describe("McpServerConfig discriminated union", () => {
     const cfg: McpServerConfig = {
       id: "hr",
       transport: "http",
-      url: "https://hr-api.lge.com/mcp",
+      url: "https://api.example.com/mcp",
       headers: { "x-tenant": "lge" },
     };
     expect(cfg.transport).toBe("http");
     if (cfg.transport === "http") {
-      expect(cfg.url).toBe("https://hr-api.lge.com/mcp");
+      expect(cfg.url).toBe("https://api.example.com/mcp");
       expect(cfg.headers?.["x-tenant"]).toBe("lge");
     }
   });
@@ -276,14 +276,14 @@ describe("HttpTransport — happy path", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const gov = governanceWithPolicy(
-      buildPolicy([httpApproval("hr", "https://hr-api.lge.com/mcp")]),
+      buildPolicy([httpApproval("hr", "https://api.example.com/mcp")]),
     );
     const registry = new ToolRegistry();
     const client = new McpClient(
       {
         id: "hr",
         transport: "http",
-        url: "https://hr-api.lge.com/mcp",
+        url: "https://api.example.com/mcp",
       },
       gov,
       registry,

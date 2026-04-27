@@ -17,17 +17,19 @@ import {
 import type { TelemetrySettings } from "../../data/settings-store.js";
 
 describe("validateTelemetryEndpoint — schemes", () => {
-  it("accepts https://", () => {
+  it("accepts https:// when host is allowlisted (env override)", () => {
     expect(
-      validateTelemetryEndpoint("https://telemetry.lge.com/ingest", {
+      validateTelemetryEndpoint("https://telemetry.example.com/ingest", {
         isPackaged: true,
+        allowlistEnv: "telemetry.example.com",
       }).valid,
     ).toBe(true);
   });
 
-  it("rejects http://", () => {
-    const r = validateTelemetryEndpoint("http://telemetry.lge.com/ingest", {
+  it("rejects http:// regardless of allowlist", () => {
+    const r = validateTelemetryEndpoint("http://telemetry.example.com/ingest", {
       isPackaged: true,
+      allowlistEnv: "telemetry.example.com",
     });
     expect(r.valid).toBe(false);
     expect(r.reason).toMatch(/protocol/);
@@ -56,10 +58,13 @@ describe("validateTelemetryEndpoint — schemes", () => {
 });
 
 describe("validateTelemetryEndpoint — allowlist", () => {
-  it("accepts telemetry.lge.com by default", () => {
+  it("rejects production-style hosts when env override is missing (default = localhost only)", () => {
+    // The corp telemetry hostname is no longer hardcoded. Production
+    // builds inject `LVIS_TELEMETRY_ALLOWLIST`; without it, only
+    // localhost passes (and only in non-packaged mode).
     expect(
-      validateTelemetryEndpoint("https://telemetry.lge.com/x", { isPackaged: true }).valid,
-    ).toBe(true);
+      validateTelemetryEndpoint("https://telemetry.example.com/x", { isPackaged: true }).valid,
+    ).toBe(false);
   });
 
   it("rejects hosts not in the default allowlist", () => {
@@ -76,17 +81,16 @@ describe("validateTelemetryEndpoint — allowlist", () => {
     expect(r.valid).toBe(true);
   });
 
-  it("env override fully replaces default (e.g. telemetry.lge.com becomes rejected)", () => {
-    const r = validateTelemetryEndpoint("https://telemetry.lge.com/x", {
+  it("env override fully replaces default (custom host accepted, others rejected)", () => {
+    const r = validateTelemetryEndpoint("https://telemetry.example.com/x", {
       isPackaged: true,
       allowlistEnv: "only.this.host",
     });
     expect(r.valid).toBe(false);
   });
 
-  it("sanity — DEFAULT_TELEMETRY_ALLOWLIST exposes the documented hosts", () => {
-    expect(DEFAULT_TELEMETRY_ALLOWLIST).toContain("telemetry.lge.com");
-    expect(DEFAULT_TELEMETRY_ALLOWLIST).toContain("localhost");
+  it("sanity — DEFAULT_TELEMETRY_ALLOWLIST contains only localhost (corp host externalized)", () => {
+    expect(DEFAULT_TELEMETRY_ALLOWLIST).toEqual(["localhost"]);
   });
 });
 
@@ -179,7 +183,7 @@ describe("TelemetryService — isActive() + audit on invalid endpoint", () => {
   it("isActive() is false when endpoint is http://", () => {
     const { logger, entries } = makeLogger();
     const svc = new TelemetryService({
-      settings: makeSettings({ endpoint: "http://telemetry.lge.com/x" }),
+      settings: makeSettings({ endpoint: "http://telemetry.example.com/x" }),
       isPackaged: true,
       auditLogger: logger,
     });
