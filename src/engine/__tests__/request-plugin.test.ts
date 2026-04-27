@@ -15,6 +15,7 @@ import { ConversationLoop } from "../conversation-loop.js";
 import type { LLMProvider, StreamEvent, StreamTurnInput } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
+import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
 class RecordingProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -63,7 +64,7 @@ function makeLoop(opts: {
 
   const loop = new ConversationLoop(({
     settingsService: {
-      get: () => ({ provider: "openai", model: "gpt-4o" }),
+      get: () => fakeLlmSettings(),
       getSecret: () => "test-key",
     },
     systemPromptBuilder: {

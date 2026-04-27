@@ -82,6 +82,73 @@ describe("SettingsService marketplace defaults", () => {
   });
 });
 
+describe("SettingsService LLM per-vendor patching", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    mkdirSync(join(homedir(), ".lvis", "test-tmp"), { recursive: true });
+    userDataPath = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "settings-store-llm-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  // Regression for the bug shipped + reverted between #279 and the per-vendor
+  // refactor: switching the active provider used to carry the previous
+  // vendor's `maxOutputTokens` into the new vendor's persisted block. With
+  // per-vendor blocks, a patch touching only `azure-foundry` MUST leave
+  // every other vendor's settings intact.
+  it("vendor switch + save does not leak maxOutputTokens across vendors", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    // Establish a non-default OpenAI maxOutputTokens (simulating a user who
+    // raised it for OpenAI's wider output cap).
+    await service.patch({
+      llm: {
+        provider: "openai",
+        vendors: { openai: { maxOutputTokens: 16384 } },
+      },
+    });
+
+    // User switches to azure-foundry and saves with the FRESH Foundry block
+    // (4096 default) — this is what the renderer's hydrateVendorBlock +
+    // save() path produces.
+    await service.patch({
+      llm: {
+        provider: "azure-foundry",
+        vendors: { "azure-foundry": { maxOutputTokens: 4096 } },
+      },
+    });
+
+    const llm = service.get("llm");
+    expect(llm.provider).toBe("azure-foundry");
+    expect(llm.vendors["azure-foundry"].maxOutputTokens).toBe(4096);
+    // The OpenAI block must still hold the user-tuned value, not be
+    // overwritten by the Foundry save.
+    expect(llm.vendors.openai.maxOutputTokens).toBe(16384);
+  });
+
+  it("coerces a stale unknown provider on disk to the default", () => {
+    // Simulate an old install where the user had a since-removed vendor
+    // selected. Without coercion, `llm.vendors[llm.provider]` would be
+    // undefined and crash refreshProvider at first turn.
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ llm: { provider: "lgenie" } }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+    const llm = service.get("llm");
+
+    expect(llm.provider).toBe("claude");
+    expect(llm.vendors[llm.provider]).toBeDefined();
+  });
+});
+
 describe("SettingsService msGraph patching", () => {
   let userDataPath: string;
 

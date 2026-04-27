@@ -6,6 +6,7 @@
  * crashing.
  */
 import { vi, type Mock } from "vitest";
+import { fakeLlmSettings } from "../../src/shared/__tests__/fake-llm-settings.js";
 
 export type MockLvisApi = Record<string, Mock>;
 
@@ -26,7 +27,7 @@ type ApiOverrides = {
 };
 
 const DEFAULT_SETTINGS = {
-  llm: { provider: "openai", model: "gpt-4o-mini" },
+  llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
   chat: { systemPrompt: "", autoCompact: true },
   webSearch: { provider: "none" },
   routine: { enableWakeupRoutine: false },

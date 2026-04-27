@@ -12,6 +12,7 @@ import type { LLMProvider, StreamEvent } from "../llm/types.js";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { ToolRegistry } from "../../tools/registry.js";
+import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
 // ─── Helpers ────────────────────────────────────────
 
@@ -22,7 +23,7 @@ function makeLoop(provider: LLMProvider): ConversationLoop {
 
   const loop = new ConversationLoop(({
     settingsService: {
-      get: () => ({ provider: "openai", model: "gpt-4o", autoCompact: true }),
+      get: (key: string) => key === "chat" ? { autoCompact: true } : fakeLlmSettings(),
       getSecret: () => "test-key",
     },
     systemPromptBuilder: { build: () => "system" },

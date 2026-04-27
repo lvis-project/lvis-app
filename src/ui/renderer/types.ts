@@ -48,22 +48,26 @@ export type PluginCardSummary = {
   publisher?: string;
 };
 
+export type LLMVendorSettingsRenderer = {
+  model: string;
+  baseUrl?: string;
+  vertexProject?: string;
+  vertexLocation?: string;
+  maxOutputTokens: number;
+  temperature: number;
+  enableThinking: boolean;
+  thinkingBudgetTokens: number;
+  seed?: number;
+  responseFormat: "text" | "json";
+  stopSequences: string[];
+};
+
 export type AppSettings = {
   llm: {
     provider: string;
-    model: string;
-    enableThinking?: boolean;
-    thinkingBudgetTokens?: number;
-    baseUrls?: Record<string, string>;
-    vertexProject?: string;
-    vertexLocation?: string;
-    temperature?: number;
-    maxOutputTokens?: number;
-    seed?: number;
-    responseFormat?: "text" | "json";
-    stopSequences?: string[];
-    streamSmoothing?: "none" | "word" | "char";
-    fallbackChain?: Array<{ provider: string; model: string }>;
+    vendors: Record<string, LLMVendorSettingsRenderer>;
+    streamSmoothing: "none" | "word" | "char";
+    fallbackChain: Array<{ provider: string; model: string }>;
   };
   chat: { systemPrompt: string; autoCompact: boolean };
   webSearch: { provider: string };
