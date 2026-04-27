@@ -27,6 +27,18 @@ import type { AuditLogger } from "../audit/audit-logger.js";
 
 export type NotificationKind = "turn-end" | "routine" | "ask-user" | "approval";
 
+/**
+ * Closed enumeration of valid `NotificationKind` values. Exported so IPC
+ * handlers can validate untrusted renderer payloads without re-listing the
+ * 4 kinds inline.
+ */
+export const NOTIFICATION_KINDS: ReadonlySet<NotificationKind> = new Set([
+  "turn-end",
+  "routine",
+  "ask-user",
+  "approval",
+]);
+
 export interface NotificationContextRef {
   sessionId?: string;
   routineId?: string;
@@ -56,8 +68,40 @@ export const IPC_NOTIFICATION_TOAST = "lvis:notification:toast";
  */
 export const IPC_NOTIFICATION_CLICKED = "lvis:notification:clicked";
 
+/**
+ * Output cap — applied to BOTH body (toast / OS / audit) and title (audit).
+ * Body and title share the same 80-char limit; the constant name is retained
+ * for API stability but is now a single output cap rather than a body-only cap.
+ */
 const BODY_MAX_CHARS = 80;
 const ELLIPSIS = "…";
+
+/**
+ * Per-kind cooldown map (ms). Anti-spam guard against turn-loop bursts and
+ * micro-burst approvals. Values:
+ *   - turn-end : 30 s (most spammy — long agentic loops)
+ *   - approval : 2 s  (coalesce micro-bursts only)
+ *   - routine  : 0    (rare — always fire)
+ *   - ask-user : 0    (rare — user expects every one)
+ */
+const COOLDOWN_MS_BY_KIND: Record<NotificationKind, number> = {
+  "turn-end": 30_000,
+  approval: 2_000,
+  routine: 0,
+  "ask-user": 0,
+};
+
+/**
+ * Strip ASCII control chars (0x00-0x1F + 0x7F) which are common in LLM /
+ * user-supplied bodies (newlines from prompts, ANSI escape sequences from
+ * terminal-style output, etc). Windows toast XML and Linux notify-send both
+ * mis-render or split on these. Defense-in-depth: applied to title too,
+ * since the routine kind interpolates user/admin data.
+ */
+const CONTROL_CHARS_RE = /[\x00-\x1f\x7f]/g;
+function stripControlChars(s: string): string {
+  return s.replace(CONTROL_CHARS_RE, "");
+}
 
 export interface ToastPayload {
   kind: NotificationKind;
@@ -97,9 +141,27 @@ export interface NotificationServiceOptions {
   isTestEnv?: () => boolean;
 }
 
+/**
+ * Strip control chars then UTF-16 surrogate-safely cap at BODY_MAX_CHARS.
+ * Using `[...str]` decomposes the string into code-point units so a 4-byte
+ * emoji at position 80 doesn't get sliced into a lone surrogate.
+ */
 function truncateBody(body: string): string {
-  if (body.length <= BODY_MAX_CHARS) return body;
-  return body.slice(0, BODY_MAX_CHARS) + ELLIPSIS;
+  const clean = stripControlChars(body);
+  const codepoints = [...clean];
+  if (codepoints.length <= BODY_MAX_CHARS) return clean;
+  return codepoints.slice(0, BODY_MAX_CHARS).join("") + ELLIPSIS;
+}
+
+/**
+ * Cap title to BODY_MAX_CHARS with the same surrogate-safe slicing as body.
+ * No ellipsis appended — title slicing is for audit-output bounding only.
+ */
+function capTitle(title: string): string {
+  const clean = stripControlChars(title);
+  const codepoints = [...clean];
+  if (codepoints.length <= BODY_MAX_CHARS) return clean;
+  return codepoints.slice(0, BODY_MAX_CHARS).join("");
 }
 
 function defaultIsTestEnv(): boolean {
@@ -147,6 +209,13 @@ export class NotificationService {
   private readonly notificationFactory: NonNullable<NotificationServiceOptions["notificationFactory"]>;
   private readonly isReady: () => boolean;
   private readonly isTestEnv: () => boolean;
+  /**
+   * Per-kind last-fire timestamps (ms epoch). Used by the cooldown gate to
+   * suppress bursts on a per-kind basis. Suppressed events still flow through
+   * the audit logger — silently dropping would hide bugs (e.g. runaway
+   * turn-end loops).
+   */
+  private readonly lastFiredAt = new Map<NotificationKind, number>();
 
   constructor(opts: NotificationServiceOptions) {
     this.getMainWindow = opts.getMainWindow;
@@ -161,6 +230,26 @@ export class NotificationService {
     // app is ready or inside a vitest run.
     if (this.isTestEnv() || !this.isReady()) return;
 
+    // Per-kind cooldown — defense against runaway turn loops or approval
+    // bursts. Suppressed events MUST still go through the audit logger so we
+    // can detect spam in field telemetry. routine and ask-user have a 0 ms
+    // cooldown (always fire).
+    const cooldownMs = COOLDOWN_MS_BY_KIND[opts.kind] ?? 0;
+    if (cooldownMs > 0) {
+      const last = this.lastFiredAt.get(opts.kind) ?? 0;
+      const now = Date.now();
+      const elapsedMs = now - last;
+      if (last !== 0 && elapsedMs < cooldownMs) {
+        this.auditSuppressed(opts.kind, elapsedMs);
+        return;
+      }
+      this.lastFiredAt.set(opts.kind, now);
+    }
+
+    // Sanitize title and body — strip control chars defense-in-depth (body
+    // sources include LLM responses and user-typed questions; routine titles
+    // interpolate user-authored routine IDs).
+    const cleanTitle = capTitle(opts.title);
     const truncatedBody = truncateBody(opts.body);
     const urgent = opts.urgent ?? (opts.kind === "approval");
 
@@ -172,7 +261,7 @@ export class NotificationService {
     if (winFocused && win) {
       const payload: ToastPayload = {
         kind: opts.kind,
-        title: opts.title,
+        title: cleanTitle,
         body: truncatedBody,
         contextRef: opts.contextRef,
       };
@@ -185,23 +274,25 @@ export class NotificationService {
           "[lvis] notification toast send failed, falling back to OS:",
           (err as Error).message,
         );
-        this.fireOsNotification(opts, truncatedBody, urgent);
-        this.audit("os", opts.kind, opts.title);
+        this.fireOsNotification(opts, cleanTitle, truncatedBody, urgent);
+        this.audit("os", opts.kind, cleanTitle);
         return;
       }
     } else {
-      this.fireOsNotification(opts, truncatedBody, urgent);
+      this.fireOsNotification(opts, cleanTitle, truncatedBody, urgent);
     }
 
-    this.audit(gate, opts.kind, opts.title);
+    this.audit(gate, opts.kind, cleanTitle);
   }
 
-  private fireOsNotification(opts: FireOptions, body: string, urgent: boolean): void {
+  private fireOsNotification(opts: FireOptions, title: string, body: string, urgent: boolean): void {
     try {
       const n = this.notificationFactory({
-        title: opts.title,
+        title,
         body,
         silent: !urgent,
+        // urgency is Linux-only per Electron docs; on Windows/macOS, the
+        // silent flag drives sound. Kept set for cross-platform parity.
         urgency: urgent ? "critical" : "normal",
       });
       n.on("click", () => {
@@ -242,12 +333,40 @@ export class NotificationService {
         sessionId: "notification-service",
         type: "info",
         // body is intentionally NOT logged — body may contain user-typed
-        // question text or assistant response (PII). Title is bounded.
+        // question text or assistant response (PII). Title is already bounded
+        // by capTitle() at the entry point — the slice here is a belt-and-
+        // suspenders cap on whatever raw text the caller might pass through
+        // a future code path.
         input: JSON.stringify({
           event: "notification.fired",
           kind,
           gate,
+          // reuses body cap as title cap — same 80-char limit applies to
+          // audit fields.
           title: title.slice(0, BODY_MAX_CHARS),
+        }),
+      });
+    } catch {
+      // audit failure must never block the app
+    }
+  }
+
+  /**
+   * Audit a cooldown-suppressed fire. Must NEVER silently drop — a missing
+   * audit trail hides runaway-loop bugs.
+   */
+  private auditSuppressed(kind: NotificationKind, elapsedMs: number): void {
+    if (!this.auditLogger) return;
+    try {
+      this.auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "notification-service",
+        type: "info",
+        input: JSON.stringify({
+          event: "notification.suppressed",
+          kind,
+          reason: "cooldown",
+          elapsedMs,
         }),
       });
     } catch {
@@ -258,5 +377,8 @@ export class NotificationService {
 
 export const __test = {
   truncateBody,
+  capTitle,
+  stripControlChars,
   BODY_MAX_CHARS,
+  COOLDOWN_MS_BY_KIND,
 };

@@ -3,19 +3,6 @@ import type { RoutineResult } from "../core/routine-engine.js";
 import type { NotificationService } from "../main/notification-service.js";
 
 let latestRoutineResult: RoutineResult | null = null;
-/**
- * Issue #260 — singleton-style notification service handle. Boot wires this
- * once via {@link setNotificationServiceForRoutines}; every delivery site
- * (routine-coordinator, IPC dev-trigger, main.ts shutdown) then fires through
- * the shared instance without each caller needing direct wiring.
- *
- * Module-level state is acceptable here: {@link deliverRoutineResult} is
- * already module-level and singleton-scoped (latestRoutineResult above).
- */
-let notificationServiceForRoutines: NotificationService | undefined;
-export function setNotificationServiceForRoutines(svc: NotificationService | undefined): void {
-  notificationServiceForRoutines = svc;
-}
 
 export function getLatestRoutineResult(): RoutineResult | null {
   return latestRoutineResult ? { ...latestRoutineResult } : null;
@@ -33,9 +20,20 @@ export function notifyRoutineStarted(
   mainWindow.webContents.send("lvis:routine:started", payload);
 }
 
+export interface DeliverRoutineOptions {
+  /**
+   * Optional NotificationService — when provided, fires a `routine` system
+   * notification at the delivery site. Passed explicitly per-callsite (no
+   * module-level singleton) so parallel tests don't share state and so
+   * production wiring is locally auditable.
+   */
+  notificationService?: NotificationService;
+}
+
 export async function deliverRoutineResult(
   mainWindow: BrowserWindow | null,
   result: RoutineResult,
+  options: DeliverRoutineOptions = {},
 ): Promise<void> {
   latestRoutineResult = { ...result };
   // Issue #260 — fire `routine` system notification at the delivery site so
@@ -45,7 +43,7 @@ export async function deliverRoutineResult(
   // notification path uses NotificationService's live mainWindow getter and
   // can still emit an OS notification even when the window is gone.
   try {
-    notificationServiceForRoutines?.fire({
+    options.notificationService?.fire({
       kind: "routine",
       title: `${result.routineId} 완료`,
       body: result.summary ?? "",

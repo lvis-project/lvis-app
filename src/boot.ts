@@ -65,7 +65,6 @@ import { RemindersScheduler } from "./main/reminders-scheduler.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
-import { setNotificationServiceForRoutines } from "./routines/routine-delivery.js";
 import { SkillStore } from "./main/skill-store.js";
 import { SkillOverlay } from "./main/skill-overlay.js";
 import { SkillApprovalsStore } from "./main/skill-approvals-store.js";
@@ -139,10 +138,8 @@ export async function bootstrap(
     getMainWindow,
     auditLogger: bootAuditLogger,
   });
-  // Routes: deliverRoutineResult fires through this singleton so every
-  // routine delivery path (coordinator, IPC dev-trigger, main.ts shutdown)
-  // produces the user-facing notification without per-callsite wiring.
-  setNotificationServiceForRoutines(notificationService);
+  // Routine delivery sites pass `notificationService` explicitly per-call so
+  // there's no module-level singleton to reset between tests/processes.
 
   // §4.2 Step 3 + 5: PluginRuntime + per-plugin HostApi factory.
   const {
@@ -341,6 +338,8 @@ export async function bootstrap(
   // §7 Routine wiring — schedule cron timer + RoutineIdleSignaler (idle entry/exit).
   // Note: routine notification firing lives inside deliverRoutineResult so all
   // 3 delivery paths (coordinator / IPC dev-trigger / shutdown) participate.
+  // notificationService is passed in explicitly so each delivery site forwards
+  // it via deliverRoutineResult(... { notificationService }).
   const routineCoordinator = wireRoutineCoordinator({
     routineEngine,
     taskService,
@@ -348,6 +347,7 @@ export async function bootstrap(
     settingsService,
     powerMonitor: adaptPowerMonitor(powerMonitor),
     mainWindow,
+    notificationService,
   });
 
   // §4.2 Step 7: manifest-driven IPC bridges.

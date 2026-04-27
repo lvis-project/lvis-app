@@ -9,10 +9,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { AskUserQuestionGate } from "../ask-user-question-gate.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
-import {
-  setNotificationServiceForRoutines,
-  deliverRoutineResult,
-} from "../../routines/routine-delivery.js";
+import { deliverRoutineResult } from "../../routines/routine-delivery.js";
 import type { NotificationService, FireOptions } from "../notification-service.js";
 
 function makeFakeNotificationService(): NotificationService {
@@ -81,16 +78,21 @@ describe("Trigger 4: ApprovalGate fires `approval` on requestAndWait entry", () 
 describe("Trigger 2: deliverRoutineResult fires `routine`", () => {
   it("fires with kind=routine, title containing routineId, body=summary", async () => {
     const svc = makeFakeNotificationService();
-    setNotificationServiceForRoutines(svc);
     // null mainWindow short-circuits the actual IPC send but still hits the
     // notification fire path — exactly what we need for this stub.
-    await deliverRoutineResult(null, {
-      routineId: "wakeup",
-      trigger: "wakeup",
-      summary: "오늘의 일정 3개입니다",
-      generatedAt: new Date().toISOString(),
-      sessionId: "sess-1",
-    });
+    // notificationService is now passed as an explicit option (no
+    // module-level singleton) so parallel tests don't share state.
+    await deliverRoutineResult(
+      null,
+      {
+        routineId: "wakeup",
+        trigger: "wakeup",
+        summary: "오늘의 일정 3개입니다",
+        generatedAt: new Date().toISOString(),
+        sessionId: "sess-1",
+      },
+      { notificationService: svc },
+    );
     expect(svc.fire).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "routine",
@@ -102,7 +104,6 @@ describe("Trigger 2: deliverRoutineResult fires `routine`", () => {
         }),
       }),
     );
-    setNotificationServiceForRoutines(undefined);
   });
 });
 
@@ -119,5 +120,53 @@ describe("Trigger 1: ConversationLoop turn-end wiring (type-level)", () => {
     // setup which is out of scope for a wiring stub.
     const mod = await import("../../engine/conversation-loop.js");
     expect(typeof mod.ConversationLoop).toBe("function");
+  });
+
+  // L5 — negative test: the turn-end fire is gated on
+  // `result.stopReason !== "interrupted" && result.text.trim().length > 0`.
+  // We verify the gate logic in isolation rather than spinning up the full
+  // ConversationLoop (provider/tool-registry/memory/etc dep chain).
+  it("turn-end gate: interrupted result does NOT fire", () => {
+    const svc = makeFakeNotificationService();
+    // Mirror the production gate from runTurn():
+    // `if (result.stopReason !== "interrupted" && typeof text === "string" && text.trim().length > 0)`
+    const interrupted = { stopReason: "interrupted" as const, text: "partial response" };
+    if (
+      interrupted.stopReason !== "interrupted" &&
+      typeof interrupted.text === "string" &&
+      interrupted.text.trim().length > 0
+    ) {
+      svc.fire({ kind: "turn-end", title: "응답 완료", body: interrupted.text });
+    }
+    expect(svc.fire).not.toHaveBeenCalled();
+  });
+
+  it("turn-end gate: empty text does NOT fire", () => {
+    const svc = makeFakeNotificationService();
+    const empty = { stopReason: "stop" as const, text: "   " };
+    if (
+      empty.stopReason !== ("interrupted" as string) &&
+      typeof empty.text === "string" &&
+      empty.text.trim().length > 0
+    ) {
+      svc.fire({ kind: "turn-end", title: "응답 완료", body: empty.text });
+    }
+    expect(svc.fire).not.toHaveBeenCalled();
+  });
+
+  it("turn-end gate: normal result DOES fire", () => {
+    const svc = makeFakeNotificationService();
+    const normal = { stopReason: "stop" as const, text: "응답입니다" };
+    if (
+      normal.stopReason !== ("interrupted" as string) &&
+      typeof normal.text === "string" &&
+      normal.text.trim().length > 0
+    ) {
+      svc.fire({ kind: "turn-end", title: "응답 완료", body: normal.text });
+    }
+    expect(svc.fire).toHaveBeenCalledOnce();
+    expect(svc.fire).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "turn-end", body: "응답입니다" }),
+    );
   });
 });

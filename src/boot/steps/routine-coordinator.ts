@@ -23,6 +23,7 @@ import type { TaskService } from "../../taskService.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { RoutineEngine, RoutineResult } from "../../core/routine-engine.js";
 import type { PowerMonitorLike } from "../../main/idle-scheduler.js";
+import type { NotificationService } from "../../main/notification-service.js";
 import {
   getKstMinuteKey,
   matchesSchedule,
@@ -40,6 +41,12 @@ export interface WireRoutineCoordinatorInput {
   /** Electron powerMonitor (or test fake). Optional — Linux/test envs may pass undefined. */
   powerMonitor?: PowerMonitorLike;
   mainWindow: BrowserWindow;
+  /**
+   * Issue #260 — passed through to deliverRoutineResult so this delivery path
+   * fires the user-facing `routine` notification. Optional for tests that
+   * don't care about notifications.
+   */
+  notificationService?: NotificationService;
 }
 
 export interface WiredRoutineCoordinator {
@@ -51,15 +58,16 @@ export interface WiredRoutineCoordinator {
 const DEFAULT_ROUTINE_IDLE_THRESHOLD_MS = 10 * 60_000;
 
 export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): WiredRoutineCoordinator {
-  const { routineEngine, settingsService, powerMonitor, mainWindow } = input;
+  const { routineEngine, settingsService, powerMonitor, mainWindow, notificationService } = input;
 
   const scheduleLastMinuteKeyByEntry = new Map<string, string>();
 
   // Issue #260: notification fire happens INSIDE deliverRoutineResult so all
   // 3 callers (this coordinator, IPC dev-trigger, main.ts shutdown) get the
-  // user-facing cue without duplicating wiring. See routine-delivery.ts.
+  // user-facing cue without duplicating wiring. notificationService is passed
+  // through explicitly per-call (no module-level singleton).
   const onRoutineCompleted = async (result: RoutineResult): Promise<void> => {
-    await deliverRoutineResult(mainWindow, result).catch((e: Error) => {
+    await deliverRoutineResult(mainWindow, result, { notificationService }).catch((e: Error) => {
       console.warn("[lvis] boot: routine result persist failed:", e.message);
     });
   };

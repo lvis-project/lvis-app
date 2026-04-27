@@ -300,6 +300,7 @@ export function registerIpcHandlers(
     askUserQuestionGate,
     remindersStore,
     sessionTodoStore,
+    notificationService,
   } = services;
 
   // Wire DLP audit logging so redactForLLM records hits to audit JSONL.
@@ -690,7 +691,7 @@ ${input}`;
     notifyRoutineStarted(getMainWindow(), startedPayload);
     try {
       const result = await routineEngine.runRoutine(built.routine);
-      await deliverRoutineResult(getMainWindow(), result);
+      await deliverRoutineResult(getMainWindow(), result, { notificationService });
       return { ok: true, summary: result.summary };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1615,15 +1616,34 @@ ${input}`;
   });
 
   // ─── Notifications (#260) ────────────────────────────
-  // Renderer signals (via in-app toast click or OS notification echo) that
-  // the user wants to focus the app. We restore + show + focus the main
-  // window; the renderer's toast handler still navigates to the appropriate
-  // surface (last assistant message / routine card / question card / approval
-  // dialog) via the same payload.
+  // Renderer signals (via in-app toast click) that the user wants to focus
+  // the app. We restore + show + focus the main window. The OS-click path
+  // is handled directly inside NotificationService.fireOsNotification's
+  // click handler (which sends `lvis:notification:clicked` to the renderer
+  // for navigation), so this handler does NOT echo a click event back —
+  // doing so would deliver duplicate click events to renderer subscribers.
   ipcMain.handle("lvis:notification:clicked", (e, payload: unknown) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:notification:clicked", e);
       return UNAUTHORIZED_FRAME;
+    }
+    // Manual shape check — payload comes from the renderer (untrusted).
+    // Reject anything that isn't one of the 4 known kinds and log a warn so
+    // a misbehaving renderer / plugin webview can't quietly trigger window
+    // focus with arbitrary state. No zod needed — the surface is tiny.
+    const KNOWN_KINDS = new Set(["turn-end", "routine", "ask-user", "approval"]);
+    const kind = (payload as { kind?: unknown } | null | undefined)?.kind;
+    if (typeof kind !== "string" || !KNOWN_KINDS.has(kind)) {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "ipc-bridge",
+        type: "warn",
+        input: JSON.stringify({
+          event: "notification.clicked.invalid-payload",
+          receivedKind: typeof kind === "string" ? kind.slice(0, 32) : typeof kind,
+        }),
+      });
+      return { ok: false, error: "invalid-payload" };
     }
     const win = getMainWindow();
     if (win && !win.isDestroyed()) {
@@ -1637,14 +1657,6 @@ ${input}`;
           (err as Error).message,
         );
       }
-    }
-    // Echo payload back so renderer hooks (status-bar bridge, dialogs) can
-    // observe a single cross-cutting "user clicked" signal regardless of
-    // whether the click originated in-app or in the OS notification center.
-    try {
-      win?.webContents.send("lvis:notification:clicked", payload);
-    } catch {
-      // non-fatal
     }
     return { ok: true };
   });

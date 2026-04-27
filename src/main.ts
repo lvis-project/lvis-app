@@ -590,7 +590,9 @@ app.on("before-quit", (event) => {
                   ),
                 ),
               ]);
-              await deliverRoutineResult(mainWindow, result);
+              await deliverRoutineResult(mainWindow, result, {
+                notificationService: svc.notificationService,
+              });
             } catch (e) {
               const message = e instanceof Error ? e.message : String(e);
               console.warn("[lvis] before-quit: shutdown routine failed:", message);

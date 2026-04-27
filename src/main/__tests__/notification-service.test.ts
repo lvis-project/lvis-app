@@ -89,13 +89,38 @@ describe("NotificationService — body truncation", () => {
   it("caps body at 80 chars and appends ellipsis", () => {
     const long = "x".repeat(120);
     const result = __test.truncateBody(long);
-    expect(result.length).toBe(81); // 80 + ellipsis(1)
+    // Codepoint length: 80 base + 1 ellipsis = 81 codepoints.
+    expect([...result].length).toBe(81);
     expect(result.endsWith("…")).toBe(true);
   });
 
   it("leaves short bodies untouched", () => {
     const short = "짧은 응답";
     expect(__test.truncateBody(short)).toBe(short);
+  });
+
+  it("strips C0 control chars and DEL (M1)", () => {
+    const dirty = "hello\r\n\x1b[31mworld\x1b[0m\x07\x7fend";
+    expect(__test.truncateBody(dirty)).toBe("hello[31mworld[0mend");
+  });
+
+  it("collapses ANSI/CR/LF to a clean single-line string (M1)", () => {
+    const dirty = "line1\nline2\r\nline3";
+    expect(__test.truncateBody(dirty)).toBe("line1line2line3");
+  });
+
+  it("UTF-16 surrogate-safe truncation: emoji at boundary stays whole (L1)", () => {
+    // 79 chars + 4-byte emoji at codepoint 80. Without surrogate-safe slicing,
+    // `string.slice(0, 80)` would split the emoji's surrogate pair.
+    const padding = "x".repeat(79);
+    const emoji = "\u{1F389}"; // 🎉 — code-point 0x1F389, surrogate pair in UTF-16.
+    const input = padding + emoji + "rest";
+    const result = __test.truncateBody(input);
+    // Should contain the whole emoji (or none of it), never a lone surrogate.
+    const codepoints = [...result];
+    expect(codepoints.length).toBe(81); // 80 + ellipsis
+    // Emoji at position 79 (0-indexed) should be intact.
+    expect(codepoints[79]).toBe(emoji);
   });
 });
 
@@ -284,6 +309,119 @@ describe("NotificationService — click handler", () => {
         kind: "ask-user",
         contextRef: { questionId: "q-42" },
       }),
+    );
+  });
+});
+
+describe("NotificationService — per-kind rate limit (M4)", () => {
+  it("turn-end: 3 rapid fires within cooldown → only 1 fires; suppressions audited", () => {
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const auditLogger = makeMockAuditLogger();
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    // Fire 3 within 1s — cooldown is 30s for turn-end, so only the first fires.
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    svc.fire({ kind: "turn-end", title: "응답", body: "a" });
+    vi.spyOn(Date, "now").mockImplementation(() => now + 200);
+    svc.fire({ kind: "turn-end", title: "응답", body: "b" });
+    vi.spyOn(Date, "now").mockImplementation(() => now + 800);
+    svc.fire({ kind: "turn-end", title: "응답", body: "c" });
+    expect(factoryStub.calls.length).toBe(1);
+    // Audit: 1 fired + 2 suppressed.
+    const logs = (auditLogger.log as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => c[0].input as string,
+    );
+    expect(logs.filter((l) => l.includes('"event":"notification.fired"')).length).toBe(1);
+    expect(logs.filter((l) => l.includes('"event":"notification.suppressed"')).length).toBe(2);
+    expect(logs.filter((l) => l.includes('"reason":"cooldown"')).length).toBe(2);
+    vi.restoreAllMocks();
+  });
+
+  it("turn-end: 4th fire after cooldown elapses succeeds", () => {
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const auditLogger = makeMockAuditLogger();
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    svc.fire({ kind: "turn-end", title: "응답", body: "a" });
+    vi.spyOn(Date, "now").mockImplementation(() => now + 1_000);
+    svc.fire({ kind: "turn-end", title: "응답", body: "b" }); // suppressed
+    vi.spyOn(Date, "now").mockImplementation(() => now + 31_000);
+    svc.fire({ kind: "turn-end", title: "응답", body: "c" }); // succeeds
+    expect(factoryStub.calls.length).toBe(2);
+    vi.restoreAllMocks();
+  });
+
+  it("routine cooldown is 0 — back-to-back fires both succeed", () => {
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    svc.fire({ kind: "routine", title: "wakeup", body: "a" });
+    svc.fire({ kind: "routine", title: "wakeup", body: "b" });
+    expect(factoryStub.calls.length).toBe(2);
+  });
+
+  it("approval: 2s cooldown coalesces micro-bursts", () => {
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    svc.fire({ kind: "approval", title: "승인", body: "a" });
+    vi.spyOn(Date, "now").mockImplementation(() => now + 500);
+    svc.fire({ kind: "approval", title: "승인", body: "b" }); // suppressed
+    vi.spyOn(Date, "now").mockImplementation(() => now + 2_500);
+    svc.fire({ kind: "approval", title: "승인", body: "c" }); // succeeds
+    expect(factoryStub.calls.length).toBe(2);
+    vi.restoreAllMocks();
+  });
+});
+
+describe("NotificationService — title sanitization (M1)", () => {
+  it("strips control chars from title before send", () => {
+    const win = makeMockWindow({ focused: true });
+    const auditLogger = makeMockAuditLogger();
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    svc.fire({
+      kind: "routine",
+      title: "wake\nup\r\x1b[1m완료",
+      body: "ok",
+    });
+    // Toast IPC payload — title is sanitized.
+    expect(win.webContents.send).toHaveBeenCalledWith(
+      IPC_NOTIFICATION_TOAST,
+      expect.objectContaining({ title: "wakeup[1m완료" }),
     );
   });
 });
