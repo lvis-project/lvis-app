@@ -54,7 +54,7 @@ import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
 import { openAuthWindow as openAuthWindowService } from "./main/auth-window-service.js";
 
-import { type AppServices } from "./boot/types.js";
+import { type AppServices, emitEvent } from "./boot/types.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
 import {
@@ -65,6 +65,7 @@ import {
 } from "./boot/tools.js";
 import { RemindersStore } from "./main/reminders-store.js";
 import { RemindersScheduler } from "./main/reminders-scheduler.js";
+import { TaskDeadlinePoller } from "./main/task-deadline-poller.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
@@ -415,6 +416,19 @@ export async function bootstrap(
   // `services.startRemindersScheduler()` AFTER `registerIpcHandlers()` to
   // close that gap.
 
+  // Task deadline detector (observer side) — polls TaskService for pending
+  // tasks whose dueAt is within the warning window and emits
+  // `task.deadline.approaching` on the host event bus. Brain plugins
+  // (work-proactive etc.) subscribe via `pluginAccess.events` and decide
+  // whether to fire `triggerConversation()`. Same observer/judge split as
+  // calendar.event.upcoming → calendar plugin emits, brain subscribes.
+  // Tasks happen to live in host (split paused — memory
+  // `feedback-tasks-plugin-split-paused`), so the observer lives here.
+  const taskDeadlinePoller = new TaskDeadlinePoller(taskService);
+  taskDeadlinePoller.onApproaching((payload) => {
+    emitEvent("task.deadline.approaching", payload);
+  });
+
   // Trigger executor — spawns a fresh ConversationLoop per
   // hostApi.triggerConversation() call so the user's chat history is never
   // polluted by templated proactive turns. See trigger-executor.ts.
@@ -512,6 +526,7 @@ export async function bootstrap(
     notificationService,
     telemetry, pluginTelemetry, autoUpdaterStop,
     startRemindersScheduler: () => remindersScheduler.start(),
+    startTaskDeadlinePoller: () => taskDeadlinePoller.start(),
     refreshPluginNotifications: () => {
       disposePluginNotifications();
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
@@ -530,6 +545,7 @@ export async function bootstrap(
         pluginTelemetry?.stop();
         idleScheduler?.stop();
         remindersScheduler.stop();
+        taskDeadlinePoller.stop();
         askUserQuestionGate.disposeAll();
         mcpGovernance.stopPolicyRefresh();
         await mcpManager.disconnectAll();
