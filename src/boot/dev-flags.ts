@@ -118,6 +118,19 @@ export function devNoSandboxAllowed(packaged: boolean = isPackagedCached): boole
 }
 
 /**
+ * `LVIS_PLUGINS_DIR` redirects the user-installed plugin layout to an
+ * arbitrary path. Used by tests, portable installs, and CI sandbox isolation.
+ * Hard-gated on `!packaged` so a packaged build that inherits this env var
+ * cannot be steered at a user-writable directory outside the canonical
+ * `userData/plugins/` location.
+ */
+export function devPluginsDirOverride(packaged: boolean = isPackagedCached): string | undefined {
+  if (packaged) return undefined;
+  const value = process.env.LVIS_PLUGINS_DIR;
+  return value && value.length > 0 ? value : undefined;
+}
+
+/**
  * Returns true if any LVIS_DEV* / LVIS_ALLOW_* env var is set in a packaged
  * build — caller should log a single audit warning so operators can detect
  * tampered launches without the helper leaking which flag.
@@ -131,6 +144,7 @@ export function shouldWarnPackagedFlagsIgnored(packaged: boolean = isPackagedCac
     || process.env.LVIS_DEV_SKIP_SIG !== undefined
     || process.env.LVIS_DEV_RELOAD !== undefined
     || process.env.LVIS_DEV_NO_SANDBOX !== undefined
+    || process.env.LVIS_PLUGINS_DIR !== undefined
   );
 }
 

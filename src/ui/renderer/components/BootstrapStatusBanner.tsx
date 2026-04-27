@@ -17,9 +17,10 @@ import type { BootstrapStatusEvent } from "../hooks/use-bootstrap-status.js";
 interface Props {
   status: BootstrapStatusEvent | null;
   onDismiss: () => void;
+  onRetry: () => void;
 }
 
-export function BootstrapStatusBanner({ status, onDismiss }: Props): React.ReactElement | null {
+export function BootstrapStatusBanner({ status, onDismiss, onRetry }: Props): React.ReactElement | null {
   if (!status) return null;
 
   if (status.phase === "start") {
@@ -34,15 +35,25 @@ export function BootstrapStatusBanner({ status, onDismiss }: Props): React.React
     return (
       <div className="flex items-center justify-between gap-2 bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2 rounded-md mx-2 mt-2">
         <span>플러그인 부트스트랩 실패: {status.message}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onDismiss}
-          aria-label="알림 닫기"
-          className="text-red-700 hover:text-red-900 h-auto p-1"
-        >
-          ✕
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRetry}
+            className="h-auto px-2 py-0.5 text-xs text-red-700 border-red-300 hover:bg-red-100"
+          >
+            다시 시도
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onDismiss}
+            aria-label="알림 닫기"
+            className="text-red-700 hover:text-red-900 h-auto p-1"
+          >
+            ✕
+          </Button>
+        </div>
       </div>
     );
   }
@@ -77,15 +88,25 @@ export function BootstrapStatusBanner({ status, onDismiss }: Props): React.React
     return (
       <div className="flex items-center justify-between gap-2 bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2 rounded-md mx-2 mt-2">
         <span>{summary}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onDismiss}
-          aria-label="알림 닫기"
-          className="text-red-700 hover:text-red-900 h-auto p-1"
-        >
-          ✕
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRetry}
+            className="h-auto px-2 py-0.5 text-xs text-red-700 border-red-300 hover:bg-red-100"
+          >
+            다시 시도
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onDismiss}
+            aria-label="알림 닫기"
+            className="text-red-700 hover:text-red-900 h-auto p-1"
+          >
+            ✕
+          </Button>
+        </div>
       </div>
     );
   }

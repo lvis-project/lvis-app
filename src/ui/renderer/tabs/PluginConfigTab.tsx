@@ -44,6 +44,12 @@ export function PluginConfigTab() {
   const [saving, setSaving] = useState(false);
   const [banner, setBanner] = useState<{ type: "error" | "success"; msg: string } | null>(null);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Phase 1 §Step 2 trust-boundary toggle. Default OFF — when ON the host
+  // loads unsigned user-installed plugins with a warn-and-load fallback
+  // instead of fail-closed at boot. Surfaced here (and not in PrivacyTab)
+  // because it concerns plugin trust, not data redaction; takes effect on
+  // next boot since runtime trust decisions are evaluated at load time.
+  const [allowUnsigned, setAllowUnsigned] = useState<boolean | null>(null);
 
   const showBanner = useCallback((type: "error" | "success", msg: string) => {
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
@@ -80,6 +86,48 @@ export function PluginConfigTab() {
   useEffect(() => {
     void refreshPlugins();
   }, [refreshPlugins]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let api: ReturnType<typeof getApi>;
+    try {
+      api = getApi();
+    } catch {
+      return;
+    }
+    void api
+      .getSettings()
+      .then((s) => {
+        if (cancelled) return;
+        setAllowUnsigned(s.plugins?.allowUnsignedUserPlugins ?? false);
+      })
+      .catch(() => { /* keep null — toggle stays disabled */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleAllowUnsignedToggle = useCallback(async () => {
+    if (allowUnsigned === null) return;
+    let api: ReturnType<typeof getApi>;
+    try {
+      api = getApi();
+    } catch {
+      return;
+    }
+    const next = !allowUnsigned;
+    setAllowUnsigned(next);
+    try {
+      await api.updateSettings({ plugins: { allowUnsignedUserPlugins: next } });
+      showBanner(
+        "success",
+        next
+          ? "다음 부팅부터 서명되지 않은 사용자 플러그인을 경고와 함께 로드합니다."
+          : "다음 부팅부터 서명되지 않은 사용자 플러그인은 차단됩니다.",
+      );
+    } catch (e) {
+      setAllowUnsigned(!next);
+      showBanner("error", (e as Error).message ?? "설정 저장 실패");
+    }
+  }, [allowUnsigned, showBanner]);
 
   // Sync with main-process lifecycle events. Both install (via `lvis://`
   // deep link) and uninstall (via this tab or any other surface) emit
@@ -230,6 +278,35 @@ export function PluginConfigTab() {
           {banner.msg}
         </div>
       )}
+
+      <div className="flex items-start gap-3 rounded-md border px-3 py-2.5">
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={allowUnsigned === true}
+          aria-disabled={allowUnsigned === null}
+          aria-labelledby="allow-unsigned-user-plugins-label"
+          disabled={allowUnsigned === null}
+          className={`relative mt-0.5 h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${
+            allowUnsigned ? "border-primary bg-primary" : "border-muted-foreground"
+          } ${allowUnsigned === null ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:border-primary/60"}`}
+          onClick={() => void handleAllowUnsignedToggle()}
+        >
+          {allowUnsigned && (
+            <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">
+              ✓
+            </span>
+          )}
+        </button>
+        <div className="space-y-0.5">
+          <p id="allow-unsigned-user-plugins-label" className="text-sm font-medium">
+            서명되지 않은 사용자 플러그인 허용 (기본 OFF)
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            기본값에서는 서명 검증에 실패한 사용자 플러그인이 부팅 시 차단됩니다. 이 옵션을 켜면 경고 로그를 남기고 로드합니다 — 변경 사항은 다음 앱 부팅부터 적용됩니다.
+          </p>
+        </div>
+      </div>
 
       {loading ? (
         <p className="text-xs text-muted-foreground">로딩 중…</p>
