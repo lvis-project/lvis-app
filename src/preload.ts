@@ -568,6 +568,53 @@ const api = {
     ipcRenderer.on("lvis:skill-load:event", listener);
     return () => ipcRenderer.removeListener("lvis:skill-load:event", listener);
   },
+
+  // ─── Notifications (#260) ────────────────────────
+  // Main process pushes in-app toast payloads when the window is focused;
+  // OS notifications fire when backgrounded/minimized. Renderer also signals
+  // back when an in-app toast / OS notification is clicked so main can focus
+  // the window and the renderer can scroll/navigate to the source surface.
+  onNotificationToast: (
+    handler: (payload: {
+      kind: "turn-end" | "routine" | "ask-user" | "approval";
+      title: string;
+      body: string;
+      contextRef?: {
+        sessionId?: string;
+        routineId?: string;
+        questionId?: string;
+        approvalId?: string;
+      };
+    }) => void,
+  ) => {
+    const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);
+    ipcRenderer.on("lvis:notification:toast", listener);
+    return () => ipcRenderer.removeListener("lvis:notification:toast", listener);
+  },
+  onNotificationClicked: (
+    handler: (payload: {
+      kind: "turn-end" | "routine" | "ask-user" | "approval";
+      contextRef?: {
+        sessionId?: string;
+        routineId?: string;
+        questionId?: string;
+        approvalId?: string;
+      };
+    }) => void,
+  ) => {
+    const listener = (_e: unknown, p: Parameters<typeof handler>[0]) => handler(p);
+    ipcRenderer.on("lvis:notification:clicked", listener);
+    return () => ipcRenderer.removeListener("lvis:notification:clicked", listener);
+  },
+  notifyClick: async (payload: {
+    kind: "turn-end" | "routine" | "ask-user" | "approval";
+    contextRef?: {
+      sessionId?: string;
+      routineId?: string;
+      questionId?: string;
+      approvalId?: string;
+    };
+  }) => ipcRenderer.invoke("lvis:notification:clicked", payload),
 };
 
 contextBridge.exposeInMainWorld("lvisApi", api);
