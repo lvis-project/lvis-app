@@ -86,8 +86,7 @@ describe("SettingsService LLM per-vendor patching", () => {
   let userDataPath: string;
 
   beforeEach(() => {
-    mkdirSync(join(homedir(), ".lvis", "test-tmp"), { recursive: true });
-    userDataPath = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "settings-store-llm-"));
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-llm-"));
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 

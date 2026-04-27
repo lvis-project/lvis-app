@@ -193,7 +193,10 @@ export async function bootstrap(
     );
   });
   const askUserQuestionGate = new AskUserQuestionGate(
-    mainWindow.webContents,
+    // Lazy resolver — dev-mode reloads destroy the captured webContents.
+    // Looking it up on every send keeps the gate working across reloads
+    // and across window recreation.
+    () => getMainWindow()?.webContents ?? null,
     undefined,
     notificationService,
   );
