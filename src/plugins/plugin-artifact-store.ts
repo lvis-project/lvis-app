@@ -1,14 +1,13 @@
 /**
- * PluginArtifactStore — Phase 2 §FU#267 decomposition seam.
+ * PluginArtifactStore — artifact-management seam.
  *
  * Pulls the artifact-management responsibilities out of the
  * 1100-line `PluginMarketplaceService` god-class so:
  *
  *   1. `marketplace.ts` becomes an orchestrator (catalog → install order →
  *      registry write) and stops owning download/extract/cache plumbing.
- *   2. The MCP marketplace install consumer (lvis-app#259) can instantiate
- *      a parallel store rooted at `userData/mcp-servers/` without copying
- *      the entire pipeline.
+ *   2. The MCP marketplace install consumer instantiates a parallel store
+ *      rooted at `~/.lvis/mcp/<slug>/` without copying the entire pipeline.
  *
  * What this module owns:
  *   - signed-zip download + envelope verification (delegates to
@@ -25,8 +24,8 @@
  *
  * The store is transport- and plugin-kind agnostic: callers supply
  * `installRoot` (where to extract) and `cacheRoot` (where to keep history
- * + version snapshots). The MCP consumer points these at
- * `mcp-servers/` instead of `plugins/` and gets the same primitives.
+ * + version snapshots). Regular plugins point these at `~/.lvis/plugins/`;
+ * MCP consumers point them at `~/.lvis/mcp/`.
  */
 
 import AdmZip from "adm-zip";
@@ -54,14 +53,14 @@ export interface ArtifactStoreHistoryEntry {
 export interface ArtifactStoreOptions {
   /**
    * Where artifacts are extracted (`{installRoot}/<slug>/...`). For
-   * regular plugins this is `userData/plugins/`; for MCP servers (#259)
-   * it will be `userData/mcp-servers/`.
+   * regular plugins this is `~/.lvis/plugins/`; for MCP servers it is
+   * `~/.lvis/mcp/`.
    */
   installRoot: string;
   /**
    * Per-slug history + version snapshot root. For regular plugins this
-   * is the existing `paths.cacheRoot`; for MCP servers it will be a
-   * sibling under `userData/mcp-servers/.cache/`.
+   * is `~/.lvis/plugins/.cache/`; for MCP servers it is
+   * `~/.lvis/mcp/.cache/`.
    */
   cacheRoot: string;
   /**
@@ -76,9 +75,8 @@ export interface ArtifactStoreOptions {
   /**
    * Tarball offline cache base directory. Pass `null` to disable the
    * cache entirely (test mock fetcher). Pass a path to enable. When
-   * `undefined`, the store uses `cacheRoot/.tarballs` so the SoT stays
-   * inside `userData` — historically this defaulted to `homedir()` which
-   * leaked outside `PluginPaths` (cleared in lvis-app#266).
+   * `undefined`, the store uses `cacheRoot/.tarballs` so the cache stays
+   * inside the same `~/.lvis/<topic>/.cache/` tree as the SoT.
    */
   tarballCacheBase?: string | null;
 }
@@ -105,9 +103,9 @@ export class PluginArtifactStore {
     this.fetcher = options.fetcher;
     this.publicKeys = options.publicKeys;
     // The store owns the SoT for the tarball cache. `null` disables it
-    // (test fetcher); `undefined` falls back to a sibling under cacheRoot
-    // — never to homedir(). `paths.cacheRoot` lives under userData, so
-    // disk usage tracks plugin install state.
+    // (test fetcher); `undefined` falls back to a sibling under cacheRoot.
+    // `paths.cacheRoot` lives under the plugin tree's own `.cache/` so
+    // disk usage tracks install state.
     this.tarballCacheBase =
       options.tarballCacheBase === null
         ? null

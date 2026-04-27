@@ -70,7 +70,7 @@ describe("PluginMarketplaceService install()", () => {
       `lvis-marketplace-install-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     appRoot = testDir;
-    // Phase 2a: registry + installed plugins live under userInstalledDir
+    // Phase 2a: registry + installed plugins live under pluginsRoot
     // (testDir/plugins). The legacy `installed/` subdir is gone.
     installedDir = join(testDir, "plugins");
     registryPath = join(installedDir, "registry.json");
@@ -96,7 +96,7 @@ describe("PluginMarketplaceService install()", () => {
   function makeService(fetcher: MarketplaceFetcher) {
     const paths = makeTestPluginPaths({
       rootDir: testDir,
-      userInstalledDir: installedDir,
+      pluginsRoot: installedDir,
       cacheRoot,
     });
     const service = new PluginMarketplaceService(paths, fetcher);

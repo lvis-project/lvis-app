@@ -10,7 +10,6 @@
  */
 import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, dirname } from "node:path";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { readPluginRegistry } from "./registry.js";
@@ -98,14 +97,11 @@ export class PluginUpdateDetector {
         ? manifestPath
         : resolve(dirname(this.registryPath), manifestPath),
     );
-    // Path-escape defense: resolved manifest must live beneath either the
-    // registry directory (app-managed plugins) or the per-user install dir
-    // `~/.lvis/plugins/` (dynamic installs). Anything else — e.g. a crafted
-    // registry entry like "../../etc/passwd" — is rejected.
-    const userInstalledDir = canonicalizeExistingPath(resolve(homedir(), ".lvis/plugins"));
-    const underRegistry = isWithin(registryDir, abs);
-    const underUserDir = isWithin(userInstalledDir, abs);
-    if (!underRegistry && !underUserDir) {
+    // Path-escape defense: resolved manifest must live beneath the registry
+    // directory (= pluginsRoot — every install lives at
+    // `<pluginsRoot>/<id>/plugin.json`). A crafted registry entry like
+    // "../../etc/passwd" is rejected.
+    if (!isWithin(registryDir, abs)) {
       console.warn("[update-detector] manifestPath escapes allowed roots, skipping:", manifestPath);
       return null;
     }

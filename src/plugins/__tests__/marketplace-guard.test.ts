@@ -70,10 +70,10 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
   }
 
   function makeService(): PluginMarketplaceService {
-    const paths = makeTestPluginPaths({ rootDir: testDir, userInstalledDir: installedDir });
+    const paths = makeTestPluginPaths({ rootDir: testDir, pluginsRoot: installedDir });
     const guard = new PluginDeploymentGuard({
       registryPath: paths.registryPath,
-      userInstalledDir: paths.userInstalledDir,
+      pluginsRoot: paths.pluginsRoot,
     });
     const fetcher = new MockMarketplaceFetcher(marketplacePath);
     return new PluginMarketplaceService(paths, fetcher, guard);

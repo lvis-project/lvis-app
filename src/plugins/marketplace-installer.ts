@@ -65,10 +65,10 @@ export interface MarketplaceInstallerOptions {
   /** Map of `key_id → pub key` used to verify the envelope. */
   publicKeys: Record<string, PublicKeyInput>;
   /**
-   * Target download root — REQUIRED (#266 closure). The historical
-   * `homedir() + .lvis/plugins/.downloads` default violated the
-   * Phase 2a PluginPaths SoT; callers must inject `paths.cacheRoot`
-   * (or a sibling) explicitly so the layout stays under userData.
+   * Target download root — REQUIRED. Callers must inject
+   * `paths.cacheRoot` (or a sibling) explicitly so every download lands
+   * under the plugin tree's own `.cache/` and the layout stays in one
+   * place — no homedir() fallback that could leak outside PluginPaths.
    */
   downloadRoot: string;
   /**
