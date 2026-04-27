@@ -190,6 +190,7 @@ export class ConversationLoop {
   refreshProvider(): void {
     const llmSettings = this.deps.settingsService.get("llm");
     const vendor = llmSettings.provider;
+    const block = llmSettings.vendors[vendor];
     const apiKey = this.deps.settingsService.getSecret(secretKeyFor(vendor));
 
     // Vertex AI uses service account / ADC — apiKey not required, but project is.
@@ -198,22 +199,21 @@ export class ConversationLoop {
       this.provider = null;
       return;
     }
-    if (isVertex && !llmSettings.vertexProject && !process.env.GOOGLE_CLOUD_PROJECT && !process.env.GCLOUD_PROJECT) {
+    if (isVertex && !block.vertexProject && !process.env.GOOGLE_CLOUD_PROJECT && !process.env.GCLOUD_PROJECT) {
       this.provider = null;
       return;
     }
 
     try {
-      const baseUrl = llmSettings.baseUrls?.[vendor];
       const primary = createProvider({
         vendor,
         apiKey: apiKey ?? "",
-        model: llmSettings.model,
-        ...(baseUrl ? { baseUrl } : {}),
-        ...(llmSettings.vertexProject ? { vertexProject: llmSettings.vertexProject } : {}),
-        ...(llmSettings.vertexLocation ? { vertexLocation: llmSettings.vertexLocation } : {}),
+        model: block.model,
+        ...(block.baseUrl ? { baseUrl: block.baseUrl } : {}),
+        ...(block.vertexProject ? { vertexProject: block.vertexProject } : {}),
+        ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
       });
-      const chain = (llmSettings.fallbackChain ?? []).filter(
+      const chain = llmSettings.fallbackChain.filter(
         (e) => e.provider && e.model,
       );
       this.provider =
@@ -244,11 +244,12 @@ export class ConversationLoop {
   ): Promise<string> {
     if (!this.provider) throw new Error("LLM provider not configured");
     let text = "";
+    const llm = this.deps.settingsService.get("llm");
     for await (const ev of this.provider.streamTurn({
       systemPrompt,
       messages: [{ role: "user", content: prompt }],
       tools: [],
-      model: this.deps.settingsService.get("llm").model,
+      model: llm.vendors[llm.provider].model,
       maxTokens,
     })) {
       if (ev.type === "text_delta" && ev.text) text += ev.text;
@@ -378,7 +379,7 @@ export class ConversationLoop {
     let removedMessageCount = 0;
     if (this.isAutoCompactEnabled()) {
       const llmSettings = this.deps.settingsService.get("llm");
-      if (shouldCompact(this.cumulativeUsage, getModelContextWindow(llmSettings.provider, llmSettings.model))) {
+      if (shouldCompact(this.cumulativeUsage, getModelContextWindow(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
         const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages());
         if (cr.compacted) {
           this.history.clear();
@@ -593,7 +594,7 @@ export class ConversationLoop {
       // PostTurnHookChain을 주입한 경우와 fallback 모두 memory 추출은
       // hook chain의 memory-extract 단계에서만 일어난다.
       const llmSettings = this.deps.settingsService.get("llm");
-      if (this.isAutoCompactEnabled() && shouldCompact(this.cumulativeUsage, getModelContextWindow(llmSettings.provider, llmSettings.model))) {
+      if (this.isAutoCompactEnabled() && shouldCompact(this.cumulativeUsage, getModelContextWindow(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
         const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
         if (cr.compacted) {
           this.history.clear();
@@ -655,7 +656,8 @@ export class ConversationLoop {
     },
   ): Promise<{ text: string; toolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }>; usage?: TokenUsage; stopReason?: "end_turn" | "tool_use" | "interrupted" }> {
     const llmSettings = this.deps.settingsService.get("llm");
-    const model = llmSettings.model;
+    const activeBlock = llmSettings.vendors[llmSettings.provider];
+    const model = activeBlock.model;
     // Wire per-turn onFallback callback into FallbackProvider when available.
     if (this.provider instanceof FallbackProvider) {
       this.provider.setCallbacks({ onFallback: callbacks?.onFallback });
@@ -707,7 +709,7 @@ export class ConversationLoop {
         systemPrompt,
         messages: this.history.getMessages(),
         toolSchemas,
-        llmSettings,
+        llmSettings: { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing },
         abortSignal,
         onReasoningDelta: callbacks?.onReasoningDelta,
         onTextDelta: callbacks?.onTextDelta,
@@ -724,7 +726,7 @@ export class ConversationLoop {
             systemPrompt,
             messages: this.history.getMessages(),
             toolSchemas,
-            llmSettings,
+            llmSettings: { ...activeBlock, streamSmoothing: llmSettings.streamSmoothing },
             abortSignal,
             onReasoningDelta: callbacks?.onReasoningDelta,
             onTextDelta: callbacks?.onTextDelta,

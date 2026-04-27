@@ -5,6 +5,7 @@
  * then invoke each handler directly with mock arguments.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fakeLlmSettings } from "../shared/__tests__/fake-llm-settings.js";
 
 // ─── Mock electron ────────────────────────────────────
 
@@ -80,7 +81,7 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
     settingsService: {
       getAll: vi.fn(),
       patch: vi.fn(),
-      get: vi.fn(() => ({ provider: "openai" })),
+      get: vi.fn(() => fakeLlmSettings()),
       getSecret: vi.fn(),
       setSecret: vi.fn(),
       deleteSecret: vi.fn(),
