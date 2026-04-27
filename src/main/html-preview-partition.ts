@@ -17,6 +17,7 @@
  * All other https hosts and all non-https schemes remain blocked.
  */
 import { session } from "electron";
+import { resolve } from "node:path";
 
 const CDN_ALLOWLIST = new Set([
   "cdn.jsdelivr.net",
@@ -87,6 +88,16 @@ export function installPluginPartitionPolicy(partitionName: string): void {
   if (installedPluginPartitions.has(partitionName)) return;
   installedPluginPartitions.add(partitionName);
   const ses = session.fromPartition(partitionName);
+
+  // setPreloads is required for sandboxed <webview> — the preload= attribute
+  // alone is silently ignored when webpreferences="sandbox=yes". Electron
+  // requires the preload to be registered on the partition's Session before
+  // the webview begins loading. At runtime __dirname is `dist/src/main/`,
+  // so resolving "../plugin-preload.js" yields `dist/src/plugin-preload.js`,
+  // a sibling of the host preload.js.
+  const preloadPath = resolve(__dirname, "..", "plugin-preload.js");
+  ses.setPreloads([preloadPath]);
+
   ses.webRequest.onBeforeRequest((details, callback) => {
     try {
       const url = new URL(details.url);
