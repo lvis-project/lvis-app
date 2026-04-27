@@ -111,13 +111,25 @@ describe("plugin-preload bridge", () => {
     const bridge = exposed.get("lvisPlugin") as { emitEvent: (type: string, data?: unknown) => Promise<void> };
     mockInvoke.mockResolvedValueOnce({ ok: true });
 
-    await bridge.emitEvent("my.custom.event", { foo: "bar" });
+    const value = await bridge.emitEvent("my.custom.event", { foo: "bar" });
 
     expect(mockInvoke).toHaveBeenCalledWith(
       "lvis:plugin:emit-event",
       "my.custom.event",
       { foo: "bar" },
     );
+    // Lock the Promise<void> contract — emitEvent success resolves to undefined,
+    // not the host's `{ok:true}` envelope.
+    expect(value).toBeUndefined();
+  });
+
+  it("callTool resolves to undefined when host returns { ok: true } with no result field", async () => {
+    // Symmetric to emitEvent — a fire-and-forget tool that succeeds with no
+    // payload should resolve to undefined, not the envelope.
+    const bridge = exposed.get("lvisPlugin") as { callTool: (name: string, args?: unknown) => Promise<unknown> };
+    mockInvoke.mockResolvedValueOnce({ ok: true });
+
+    expect(await bridge.callTool("fire_and_forget", {})).toBeUndefined();
   });
 
   it("emitEvent throws Error(message) when host returns { ok: false, error }", async () => {

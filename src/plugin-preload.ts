@@ -57,7 +57,9 @@ console.log("[lvis:plugin-preload] loaded", {
 function unwrapEnvelope(reply: unknown): unknown {
   if (reply && typeof reply === "object" && "ok" in reply) {
     const env = reply as { ok: unknown; result?: unknown; error?: unknown };
-    if (env.ok) return "result" in env ? env.result : undefined;
+    // Strict boolean check — matches getEntryUrl's `reply.ok !== true` style
+    // and refuses to treat a host-side bug emitting `{ok: "yes"}` as success.
+    if (env.ok === true) return "result" in env ? env.result : undefined;
     throw new Error(typeof env.error === "string" ? env.error : "plugin-call-failed");
   }
   return reply;
