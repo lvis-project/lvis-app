@@ -87,21 +87,32 @@ function extractTargetFilePath(
 }
 
 /**
- * H3: Redact the `freeText` field from an `ask_user_question` tool result
- * before it is written to the audit log. The result is a JSON string of
- * the form `{"choice":"…","freeText":"…","dismissed":false}`; we keep
- * choice/dismissed but replace freeText with a placeholder. Falls back to
- * the original content when JSON parsing fails (e.g. error responses).
+ * H3: Redact every `freeText` field from an `ask_user_question` tool
+ * result before it is written to the audit log. Result shape (one card,
+ * 1–4 questions):
+ *   {"answers":[{"choice":"…"},{"freeText":"…"}],"dismissed":false}
+ * We keep choice/dismissed but replace each non-empty freeText with a
+ * placeholder so user-typed PII never lands in the audit trail. Falls
+ * back to the original content when JSON parsing fails (e.g. error
+ * responses).
  */
 function redactAskUserAuditOutput(rawOutput: string): string {
   try {
     const parsed = JSON.parse(rawOutput) as Record<string, unknown>;
-    if (typeof parsed.freeText === "string" && parsed.freeText.length > 0) {
-      const len = parsed.freeText.length;
-      parsed.freeText = `[redacted ${len} chars]`;
-      return JSON.stringify(parsed);
-    }
-    return rawOutput;
+    const answers = Array.isArray(parsed.answers) ? (parsed.answers as unknown[]) : null;
+    if (!answers) return rawOutput;
+    let touched = false;
+    const redacted = answers.map((entry) => {
+      if (!entry || typeof entry !== "object") return entry;
+      const a = entry as Record<string, unknown>;
+      if (typeof a.freeText === "string" && a.freeText.length > 0) {
+        touched = true;
+        return { ...a, freeText: `[redacted ${a.freeText.length} chars]` };
+      }
+      return a;
+    });
+    if (!touched) return rawOutput;
+    return JSON.stringify({ ...parsed, answers: redacted });
   } catch {
     return rawOutput;
   }
