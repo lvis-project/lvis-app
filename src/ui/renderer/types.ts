@@ -138,6 +138,18 @@ export type PluginMarketplaceActionResult =
   | { ok: false; error: string; message?: string };
 
 export type LvisApi = {
+  /**
+   * Deterministic file:// URL of the bundled `plugin-preload.js`. Computed in
+   * the host preload from `__dirname` (= `dist/src/`) so the plugin <webview>
+   * can be mounted with a stable preload regardless of `window.location.href`.
+   */
+  pluginPreloadUrl: string;
+  /**
+   * Deterministic file:// URL of the bundled `plugin-ui-shell.html`. Same
+   * stability guarantee as `pluginPreloadUrl` — read directly from the host
+   * renderer instead of resolving against `window.location.href`.
+   */
+  pluginShellUrl: string;
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<AppSettings>;
   setApiKey: (vendor: string, k: string) => Promise<{ ok: true }>;
