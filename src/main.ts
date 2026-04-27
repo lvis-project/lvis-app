@@ -278,9 +278,9 @@ const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
 </style></head><body><div class="wrap"><div class="spin"></div><h1>LVIS 초기 부팅 중</h1><p>Python 런타임과 플러그인을 준비하고 있습니다…</p></div></body></html>`;
 
 function createWindow() {
-  const preloadPath = resolve(__dirname, "preload.cjs");
+  const preloadPath = resolve(__dirname, "preload.js");
   if (!existsSync(preloadPath)) {
-    throw new Error(`[lvis] preload.cjs not found at ${preloadPath} — run 'npm run build:preload' first`);
+    throw new Error(`[lvis] preload.js not found at ${preloadPath} — run 'npm run build:preload' first`);
   }
 
   mainWindow = new BrowserWindow({
@@ -291,10 +291,6 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      // sandbox:false is required so the preload can use Node built-ins
-      // (node:path, node:url) that PR #273 introduced. contextIsolation:true
-      // still ensures the renderer cannot access Node APIs directly.
-      sandbox: false,
       // render_html tool renders LLM-produced HTML inside an Electron
       // <webview>. The webview runs on its own webContents / OS process so
       // a malicious or runaway payload (e.g. `while(true){}`) can't freeze
