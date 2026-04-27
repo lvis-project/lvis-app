@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useStatusBar } from "../use-status-bar.js";
 import type { LvisApi } from "../../types.js";
+import { fakeLlmSettings } from "../../../../shared/__tests__/fake-llm-settings.js";
 
 // ── Minimal API factory ───────────────────────────────────────────────────────
 // Only wire up the methods exercised by each test so that accidental calls to
@@ -25,7 +26,7 @@ function makeApi(overrides: Partial<LvisApi> = {}): LvisApi {
   return {
     // Defaults that let the hook mount without triggering visible side-effects.
     getSettings: vi.fn(async () => ({
-      llm: { provider: "openai", model: "gpt-4o-mini" },
+      llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
       chat: { systemPrompt: "", autoCompact: false },
       webSearch: { provider: "none" },
     })),

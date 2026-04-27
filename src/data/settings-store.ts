@@ -15,55 +15,42 @@ import {
   normalizeScheduleEntries,
   type ScheduleRoutineEntry,
 } from "../routines/schedule.js";
+import {
+  freshVendorBlocks,
+  LLM_VENDORS,
+  type LLMVendor,
+  type LLMVendorSettings,
+} from "../shared/llm-vendor-defaults.js";
 
-export type LLMVendor =
-  | "claude"
-  | "openai"
-  | "gemini"
-  | "copilot"
-  | "azure-foundry"
-  | "vertex-ai";
+export type { LLMVendor, LLMVendorSettings };
+export { LLM_VENDORS };
 
+/**
+ * LLM settings — single source of truth.
+ *
+ * - `provider` selects the active vendor.
+ * - `vendors` holds a complete configuration block per vendor; switching
+ *   `provider` never inherits stale values from another vendor's block.
+ * - `streamSmoothing` is a client-side post-processor applied to streamed
+ *   tokens regardless of vendor, so it lives at the top level.
+ * - `fallbackChain` references other vendors by id and is therefore
+ *   inherently cross-vendor.
+ */
 export interface LLMSettings {
   provider: LLMVendor;
-  model: string;
-  /**
-   * Per-vendor baseUrl overrides (keyed by vendor). Required for:
-   *   - azure-foundry: `https://{resource}.openai.azure.com/openai/deployments/{deployment}/`
-   * Optional for:
-   *   - openai / copilot: proxy endpoints
-   * Not used by:
-   *   - vertex-ai: uses project + location instead (see vertexProject / vertexLocation)
-   */
-  baseUrls?: Partial<Record<LLMVendor, string>>;
-  /**
-   * Vertex AI — GCP project ID (required for vendor="vertex-ai").
-   * Auth flows via service account: either GOOGLE_APPLICATION_CREDENTIALS env
-   * pointing at a credentials JSON, or Application Default Credentials (ADC).
-   */
-  vertexProject?: string;
-  /** Vertex AI — GCP region (e.g. "us-central1"). Defaults to "us-central1". */
-  vertexLocation?: string;
-  /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */
-  enableThinking?: boolean;
-  /** Token budget for Claude extended thinking (1024–32000). Only used when enableThinking is true. */
-  thinkingBudgetTokens?: number;
-  /** Sprint A — advanced generation settings. All optional; defaults applied in conversation-loop. */
-  temperature?: number;
-  /** Sprint A — max output tokens (renames maxTokens for clarity). */
-  maxOutputTokens?: number;
-  /** Sprint A — deterministic sampling seed. Undefined = random. */
-  seed?: number;
-  /** Sprint A — response format. "text" (default) or "json" (vendor-mapped). */
-  responseFormat?: "text" | "json";
-  /** Sprint A — stop sequences forwarded to the provider. */
-  stopSequences?: string[];
-  /** Sprint A — client-side stream smoothing. */
+  vendors: Record<LLMVendor, LLMVendorSettings>;
+  streamSmoothing: "none" | "word" | "char";
+  fallbackChain: Array<{ provider: LLMVendor; model: string }>;
+}
+
+/**
+ * Patch shape for `SettingsService.patch()`. Vendor blocks are partial so
+ * a UI save touching a single vendor doesn't have to send all six.
+ */
+export interface LLMSettingsPatch {
+  provider?: LLMVendor;
+  vendors?: Partial<Record<LLMVendor, Partial<LLMVendorSettings>>>;
   streamSmoothing?: "none" | "word" | "char";
-  /**
-   * D1a — ordered fallback chain tried in sequence when the primary vendor
-   * returns a transient error (5xx / 429 / network). Empty = no fallback.
-   */
   fallbackChain?: Array<{ provider: LLMVendor; model: string }>;
 }
 
@@ -238,13 +225,9 @@ export interface SettingsServiceOptions {
 const DEFAULT_SETTINGS: AppSettings = {
   llm: {
     provider: "claude",
-    model: "claude-sonnet-4-6",
-    enableThinking: true,
-    thinkingBudgetTokens: 10_000,
-    temperature: 0.7,
-    maxOutputTokens: 4096,
-    responseFormat: "text",
+    vendors: freshVendorBlocks(),
     streamSmoothing: "none",
+    fallbackChain: [],
   },
   chat: {
     systemPrompt:
@@ -355,8 +338,10 @@ export class SettingsService {
     await this.saveSettings();
   }
 
-  async patch(partial: Partial<AppSettings>): Promise<AppSettings> {
-    if (partial.llm) this.settings.llm = { ...this.settings.llm, ...partial.llm };
+  async patch(
+    partial: Partial<Omit<AppSettings, "llm">> & { llm?: LLMSettingsPatch },
+  ): Promise<AppSettings> {
+    if (partial.llm) this.settings.llm = mergeLlmPatch(this.settings.llm, partial.llm);
     if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
     if (partial.webSearch) this.settings.webSearch = { ...this.settings.webSearch, ...partial.webSearch };
     if (partial.marketplace) {
@@ -463,30 +448,7 @@ export class SettingsService {
     try {
       const raw = readFileSync(this.settingsPath, "utf-8");
       const parsed = JSON.parse(raw) as any;
-      const llm = { ...DEFAULT_SETTINGS.llm, ...parsed.llm };
-      // MEDIUM-2: enableThinking은 Claude 전용 기능.
-      // 파일에 명시되지 않은 경우, Claude면 true(기본값 유지), 그 외엔 false로 강제.
-      if (parsed.llm?.enableThinking === undefined && llm.provider !== "claude") {
-        llm.enableThinking = false;
-      }
-      // Migrate pre-thinking Claude models so enableThinking doesn't fail on load.
-      if (llm.provider === "claude" && /^claude-sonnet-4-2025/i.test(llm.model)) {
-        llm.model = DEFAULT_SETTINGS.llm.model;
-      }
-      // Migrate removed/unsupported vendors (e.g. pre-strip "lgenie") onto the
-      // current default so provider-factory doesn't throw at turn time.
-      const SUPPORTED_VENDORS = [
-        "claude",
-        "openai",
-        "gemini",
-        "copilot",
-        "azure-foundry",
-        "vertex-ai",
-      ] as const;
-      if (!(SUPPORTED_VENDORS as readonly string[]).includes(llm.provider)) {
-        llm.provider = DEFAULT_SETTINGS.llm.provider;
-        llm.model = DEFAULT_SETTINGS.llm.model;
-      }
+      const llm = mergeLlmPatch(DEFAULT_SETTINGS.llm, parsed.llm ?? {});
       const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
       // Phase 2-final: marketplace server is the only backend. Persisted
       // settings from older "mock" installs are coerced to the real-cloud
@@ -578,6 +540,30 @@ export class SettingsService {
       });
     });
   }
+}
+
+/**
+ * Merge a partial LLM patch onto a base settings block. Per-vendor entries
+ * inside `partial.vendors` are deep-merged with the corresponding existing
+ * block so a UI save touching one vendor never overwrites another's config.
+ *
+ * Unknown vendor ids in `partial.vendors` are ignored — the active provider
+ * must be one of LLM_VENDORS, validated below.
+ */
+function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSettings {
+  const vendors: Record<LLMVendor, LLMVendorSettings> = { ...base.vendors };
+  if (partial.vendors) {
+    for (const v of LLM_VENDORS) {
+      const incoming = partial.vendors[v];
+      if (incoming) vendors[v] = { ...vendors[v], ...incoming };
+    }
+  }
+  return {
+    provider: partial.provider ?? base.provider,
+    vendors,
+    streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
+    fallbackChain: partial.fallbackChain ?? base.fallbackChain,
+  };
 }
 
 function sanitizeStoredPluginConfigs(input: unknown): Record<string, PluginConfigRecord> {
