@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createAutoUpdater, type UpdaterLike } from "../auto-updater.js";
@@ -123,7 +123,7 @@ describe("auto-updater", () => {
 
 describe("crash-reporter", () => {
   it("creates local dump dir and does not upload by default", () => {
-    const userData = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-crash-"));
+    const userData = mkdtempSync(join(tmpdir(), "lvis-crash-"));
     const started: Array<{ uploadToServer?: boolean }> = [];
     const pathsSet: string[] = [];
     const handle = startCrashReporter({
@@ -144,7 +144,7 @@ describe("crash-reporter", () => {
   });
 
   it("enables upload when user opts in", () => {
-    const userData = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-crash-"));
+    const userData = mkdtempSync(join(tmpdir(), "lvis-crash-"));
     const started: Array<{ uploadToServer?: boolean; submitURL?: string }> = [];
     startCrashReporter({
       userDataPath: userData,
@@ -161,7 +161,7 @@ describe("crash-reporter", () => {
   });
 
   it("inits sentry only when DSN configured and loader returns module", () => {
-    const userData = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-crash-"));
+    const userData = mkdtempSync(join(tmpdir(), "lvis-crash-"));
     const dsnSeen: string[] = [];
     const handle = startCrashReporter({
       userDataPath: userData,

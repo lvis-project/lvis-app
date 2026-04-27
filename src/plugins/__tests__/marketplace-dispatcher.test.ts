@@ -2,7 +2,8 @@ import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdmZip from "adm-zip";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
+
 import { isAbsolute, join, resolve } from "node:path";
 
 const mockedPublisherKeys = vi.hoisted(() => ({
@@ -65,9 +66,7 @@ describe("PluginMarketplaceService install()", () => {
     // Phase 2b-1: one test exercises the file:-spec dev branch.
     process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY = "1";
     testDir = join(
-      homedir(),
-      ".lvis",
-      "test-tmp",
+      tmpdir(),
       `lvis-marketplace-install-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     appRoot = testDir;

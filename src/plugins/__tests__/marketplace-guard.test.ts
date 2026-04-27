@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
+import { mkdtempSync } from "node:fs";
 
 /**
  * Phase 1.5 F-round §F6: integration test for
@@ -27,7 +28,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
     // packaged builds. dev-flags defaults to packaged-mode for safety, so
     // tests must explicitly opt into the unpackaged gate.
     setIsPackaged(false);
-    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-mp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = mkdtempSync(join(tmpdir(), "lvis-mp-"));
     pluginsDir = join(testDir, "plugins");
     // Phase 2a invariant: registry.json and installed plugins live in the
     // same directory tree (no `installed/` subdirectory). Tests that touched

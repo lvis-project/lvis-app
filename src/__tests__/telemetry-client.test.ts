@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PluginTelemetryClient } from "../telemetry/client.js";
 import { scrubPii } from "../telemetry/client.js";
 import type { TelemetrySettings } from "../data/settings-store.js";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -39,7 +39,7 @@ function makeDeps(overrides: {
     settings: () => settings,
     marketplaceBaseUrl: () => overrides.marketplaceBaseUrl ?? "https://marketplace.lvis.local",
     installToken: () => overrides.installToken ?? null,
-    deviceUuidPath: join(homedir(), ".lvis", "test-tmp", `lvis-test-uuid-${randomUUID()}`),
+    deviceUuidPath: join(tmpdir(), `lvis-test-uuid-${randomUUID()}`),
     fetchImpl: overrides.fetchImpl,
     flushIntervalMs: overrides.flushIntervalMs ?? 99_999
   };

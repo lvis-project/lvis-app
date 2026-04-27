@@ -10,7 +10,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   buildMcpServerConfig,
@@ -23,7 +23,7 @@ import type { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js
 import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
 
 function makeTmpDir(): string {
-  const root = join(homedir(), ".lvis", "test-tmp");
+  const root = tmpdir();
   return mkdtempSync(join(root, "mcp-install-"));
 }
 

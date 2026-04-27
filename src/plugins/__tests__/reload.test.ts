@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as nodeFs from "node:fs";
 import { PluginRuntime } from "../runtime.js";
+import { mkdtempSync } from "node:fs";
 
 // ---------------------------------------------------------------------------
 // Module-level mock — hoisted by vitest before any imports.
@@ -35,7 +36,7 @@ describe("PluginRuntime.reloadPlugin", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = join(homedir(), ".lvis", "test-tmp", `lvis-reload-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = mkdtempSync(join(tmpdir(), "lvis-reload-"));
     installedDir = join(testDir, "plugins", "installed");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(testDir, "plugins", "registry.json");
