@@ -9,26 +9,42 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ─── Mock electron ────────────────────────────────────────────────────────────
 const mockOnBeforeRequest = vi.fn();
 const mockOnBeforeRequestMcp = vi.fn();
+const mockOnBeforeRequestPlugin = vi.fn();
+const mockSetPreloadsPlugin = vi.fn();
 const mockSession = {
   webRequest: {
     onBeforeRequest: mockOnBeforeRequest,
   },
+  setPreloads: vi.fn(),
 };
 const mockMcpSession = {
   webRequest: {
     onBeforeRequest: mockOnBeforeRequestMcp,
   },
+  setPreloads: vi.fn(),
+};
+const mockPluginSession = {
+  webRequest: {
+    onBeforeRequest: mockOnBeforeRequestPlugin,
+  },
+  setPreloads: mockSetPreloadsPlugin,
 };
 
 vi.mock("electron", () => ({
   session: {
-    fromPartition: vi.fn((partition: string) =>
-      partition === "lvis-mcp-app" ? mockMcpSession : mockSession),
+    fromPartition: vi.fn((partition: string) => {
+      if (partition === "lvis-mcp-app") return mockMcpSession;
+      if (partition.startsWith("persist:plugin:")) return mockPluginSession;
+      return mockSession;
+    }),
   },
 }));
 
 import { session } from "electron";
-import { installHtmlPreviewPartitionBlock } from "../html-preview-partition.js";
+import {
+  installHtmlPreviewPartitionBlock,
+  installPluginPartitionPolicy,
+} from "../html-preview-partition.js";
 
 // Helper: invoke the registered handler and return callback result
 function invokeHandler(url: string): { cancel: boolean } {
@@ -107,5 +123,43 @@ describe("installHtmlPreviewPartitionBlock", () => {
 
   it("blocks unknown scheme URLs", () => {
     expect(invokeHandler("custom-scheme://something")).toEqual({ cancel: true });
+  });
+});
+
+describe("installPluginPartitionPolicy", () => {
+  beforeEach(() => {
+    mockOnBeforeRequestPlugin.mockClear();
+    mockSetPreloadsPlugin.mockClear();
+    vi.mocked(session.fromPartition).mockClear();
+  });
+
+  it("registers plugin-preload.js via session.setPreloads (sandboxed <webview> requirement)", () => {
+    // Unique partition name avoids the module-level installedPluginPartitions
+    // Set short-circuit from prior test runs.
+    installPluginPartitionPolicy("persist:plugin:abc123");
+
+    expect(vi.mocked(session.fromPartition)).toHaveBeenCalledWith("persist:plugin:abc123");
+    expect(mockSetPreloadsPlugin).toHaveBeenCalledOnce();
+
+    const [preloadList] = mockSetPreloadsPlugin.mock.calls[0] as [string[]];
+    expect(Array.isArray(preloadList)).toBe(true);
+    expect(preloadList).toHaveLength(1);
+    // resolve(__dirname, "..", "plugin-preload.js") at runtime; in tests
+    // __dirname is `src/main/__tests__` so the resolved path ends with
+    // `src/plugin-preload.js`. Match flexibly across path separators.
+    expect(preloadList[0]).toMatch(/plugin-preload\.js$/);
+  });
+
+  it("also installs the webRequest allowlist on the plugin partition session", () => {
+    installPluginPartitionPolicy("persist:plugin:def456");
+    expect(mockOnBeforeRequestPlugin).toHaveBeenCalledOnce();
+    expect(mockOnBeforeRequestPlugin.mock.calls[0][0]).toBeTypeOf("function");
+  });
+
+  it("is idempotent: re-installing the same partition does not re-register setPreloads", () => {
+    installPluginPartitionPolicy("persist:plugin:idempotent");
+    installPluginPartitionPolicy("persist:plugin:idempotent");
+    expect(mockSetPreloadsPlugin).toHaveBeenCalledOnce();
+    expect(mockOnBeforeRequestPlugin).toHaveBeenCalledOnce();
   });
 });
