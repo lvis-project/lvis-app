@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager } from "../memory-manager.js";
 
@@ -11,7 +11,7 @@ let dir: string;
 let mm: MemoryManager;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "lvis-search-"));
+  dir = mkdtempSync(join(tmpdir(), "lvis-search-"));
   mm = new MemoryManager({ lvisDir: dir });
 });
 

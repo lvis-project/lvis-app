@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import {resolve, join} from "node:path";
 import {
   getCachedCatalog,
@@ -32,7 +32,7 @@ function makeItem(id: string): PluginMarketplaceItem {
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "offline-cache-test-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "offline-cache-test-"));
 });
 
 afterEach(() => {
