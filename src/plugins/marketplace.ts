@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
@@ -10,10 +9,10 @@ import { assertMockMarketplaceAllowed } from "../boot/dev-flags.js";
 import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
-import AdmZip from "adm-zip";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
-import { installFromMarketplace, type InstallerProgressEvent, type MarketplaceHttp } from "./marketplace-installer.js";
+import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
+import { PluginArtifactStore } from "./plugin-artifact-store.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
@@ -63,8 +62,6 @@ type InstallOperationState = {
     }
   >;
 };
-
-type VerifiedMarketplaceFetcher = MarketplaceFetcher & MarketplaceHttp;
 
 export interface MarketplaceListItem extends PluginMarketplaceItem {
   installed: boolean;
@@ -159,11 +156,18 @@ export class PluginMarketplaceService {
   /** Sprint 3-B §9.6: per-plugin version cache for rollback. */
   private readonly cacheRoot: string;
   /**
-   * S9: base directory for the catalog cache. `null` disables catalog caching
-   * (used with the dev test fetcher). `undefined` uses the default global
-   * path under `userData/marketplace-cache/`.
+   * Phase 2 §FU#267 — artifact-management subsystem. Owns signed-zip
+   * download, atomic extract, history journal, version snapshot cache.
+   * The orchestrator (this class) coordinates registry writes around it.
    */
-  private readonly catalogCacheBase: string | null | undefined;
+  private readonly artifactStore: PluginArtifactStore;
+  /**
+   * S9: base directory for the catalog cache. `null` disables catalog caching
+   * (test mock fetcher). Defaults to `paths.cacheRoot/marketplace-catalog`
+   * so the SoT stays under userData (#266 closed the historical homedir()
+   * fallback).
+   */
+  private readonly catalogCacheBase: string | null;
   /**
    * PR#44 HIGH: per-plugin in-process mutex. Concurrent install/rollback
    * calls for the same pluginId are serialized to protect the cache
@@ -190,21 +194,33 @@ export class PluginMarketplaceService {
     this.cacheRoot = paths.cacheRoot;
     this.deploymentGuard = deploymentGuard;
     this.fetcher = fetcher;
-    // Catalog caching is disabled for the test mock fetcher; production
-    // fetchers (RealCloud, Disabled stub) get the default cache base under
-    // userData.
-    this.catalogCacheBase = fetcher instanceof MockMarketplaceFetcher ? null : undefined;
+    // Catalog cache is off for the test mock fetcher; production fetchers
+    // get a sibling under `paths.cacheRoot` (closed #266 — was homedir()).
+    this.catalogCacheBase =
+      fetcher instanceof MockMarketplaceFetcher
+        ? null
+        : resolve(paths.cacheRoot, "marketplace-catalog");
+    // Artifact store owns the same `userInstalledDir` (extract target) +
+    // `cacheRoot` (history + version snapshots). Tarball offline cache
+    // also lives under `cacheRoot`, not homedir().
+    this.artifactStore = new PluginArtifactStore({
+      installRoot: paths.userInstalledDir,
+      cacheRoot: paths.cacheRoot,
+      fetcher,
+      publicKeys: getBundledPublicKeys(),
+      tarballCacheBase: fetcher instanceof MockMarketplaceFetcher ? null : undefined,
+    });
   }
 
   async list(): Promise<MarketplaceListItem[]> {
-    // Catalog cache is disabled when using MockMarketplaceFetcher (local files).
+    // Catalog cache is null when using the test mock fetcher; production
+    // always has a userData-anchored cache base (set in constructor).
     const cacheBase = this.catalogCacheBase;
     const useCache = cacheBase !== null && isOfflineCacheEnabled();
-    const cacheBaseArg = typeof cacheBase === "string" ? cacheBase : undefined;
     let catalogPlugins: PluginMarketplaceItem[] | null = null;
 
     if (useCache) {
-      catalogPlugins = await getCachedCatalog(cacheBaseArg);
+      catalogPlugins = await getCachedCatalog(cacheBase);
     }
 
     let fetchedFromNetwork = false;
@@ -215,7 +231,7 @@ export class PluginMarketplaceService {
       } catch (err) {
         // Network failure — fall back to stale cache if available (TTL bypassed
         // intentionally: any cached data is better than a hard failure offline).
-        const stale = useCache ? await getCachedCatalog(cacheBaseArg, { allowStale: true }) : null;
+        const stale = useCache ? await getCachedCatalog(cacheBase, { allowStale: true }) : null;
         if (stale) {
           console.warn("[marketplace] network fetch failed, using stale cache:", (err as Error).message);
           catalogPlugins = stale;
@@ -226,7 +242,7 @@ export class PluginMarketplaceService {
     }
 
     if (fetchedFromNetwork && useCache) {
-      await setCachedCatalog(catalogPlugins, cacheBaseArg);
+      await setCachedCatalog(catalogPlugins, cacheBase);
     }
 
     const [plugins, registry] = await Promise.all([
@@ -361,14 +377,14 @@ export class PluginMarketplaceService {
 
     // §3-B rollback support — snapshot the currently-installed manifest
     // before it gets overwritten so rollbackPlugin() can restore it.
-    await this.cacheCurrentVersion(pluginId);
+    await this.snapshotCurrentInstall(pluginId);
 
     const dlVersion = plugin.version ?? "latest";
     const manifestPath = await this.installArtifact(plugin, dlVersion, onProgress);
     const manifestAbsPath = isAbsolute(manifestPath)
       ? manifestPath
       : resolve(dirname(this.registryPath), manifestPath);
-    await this.cacheVersionFromManifest(pluginId, manifestAbsPath);
+    await this.artifactStore.cacheVersionFromManifest(pluginId, manifestAbsPath);
 
     // §M1 F-round: atomic read-modify-write under registry lock.
     await updatePluginRegistry(this.registryPath, (registry) => {
@@ -509,14 +525,20 @@ export class PluginMarketplaceService {
         }
       }
 
-      await this.cacheCurrentVersion(pluginId);
+      await this.snapshotCurrentInstall(pluginId);
 
       const manifestPath = await this.installArtifact(plugin, version);
-      await this.cacheVersionFromManifest(pluginId, resolve(dirname(this.registryPath), manifestPath));
+      await this.artifactStore.cacheVersionFromManifest(
+        pluginId,
+        resolve(dirname(this.registryPath), manifestPath),
+      );
       // PR#44 HIGH: record install in per-plugin history.json (replaces the
       // mtime-based rollback target selection, which is unreliable across
       // filesystems that round mtimes and cache writes).
-      await this.appendHistoryEntry(pluginId, { version, installedAt: new Date().toISOString() });
+      await this.artifactStore.appendHistory(pluginId, {
+        version,
+        installedAt: new Date().toISOString(),
+      });
 
       await updatePluginRegistry(this.registryPath, (registry) => {
         const existing = registry.plugins.find((x) => x.id === plugin.id);
@@ -547,7 +569,11 @@ export class PluginMarketplaceService {
    */
   async rollbackPlugin(pluginId: string): Promise<{ pluginId: string; rolledBackTo: string }> {
     return this.withPluginLock(pluginId, async () => {
-      const priorVersion = await this.findRollbackTargetVersion(pluginId);
+      const currentVersion = await this.getInstalledVersion(pluginId);
+      const priorVersion = await this.artifactStore.findRollbackTarget(
+        pluginId,
+        currentVersion ?? undefined,
+      );
       if (!priorVersion) {
         throw new Error(`No prior version cached for plugin: ${pluginId}`);
       }
@@ -572,7 +598,10 @@ export class PluginMarketplaceService {
       }
       const manifestPathRel = await this.installArtifact(plugin, priorVersion);
 
-      await this.appendHistoryEntry(pluginId, { version: priorVersion, installedAt: new Date().toISOString() });
+      await this.artifactStore.appendHistory(pluginId, {
+        version: priorVersion,
+        installedAt: new Date().toISOString(),
+      });
 
       await updatePluginRegistry(this.registryPath, (registry) => {
         const existing = registry.plugins.find((x) => x.id === pluginId);
@@ -619,105 +648,21 @@ export class PluginMarketplaceService {
     }
   }
 
-  private historyPath(pluginId: string): string {
-    return resolve(this.cacheRoot, pluginId, "history.json");
-  }
-
-  private async readHistory(pluginId: string): Promise<PluginHistoryEntry[]> {
-    try {
-      const raw = await readFile(this.historyPath(pluginId), "utf-8");
-      const parsed = JSON.parse(raw) as { entries?: PluginHistoryEntry[] };
-      return Array.isArray(parsed.entries) ? parsed.entries : [];
-    } catch {
-      return [];
-    }
-  }
-
-  private async appendHistoryEntry(pluginId: string, entry: PluginHistoryEntry): Promise<void> {
-    try {
-      const dir = resolve(this.cacheRoot, pluginId);
-      await mkdir(dir, { recursive: true });
-      const entries = await this.readHistory(pluginId);
-      entries.push(entry);
-      await writeFile(this.historyPath(pluginId), `${JSON.stringify({ entries }, null, 2)}\n`, "utf-8");
-    } catch (err) {
-      console.warn(`[marketplace] appendHistoryEntry failed for ${pluginId}:`, (err as Error).message);
-    }
-  }
-
   /**
-   * Reads the currently-installed manifest for `pluginId` (if any) and
-   * snapshots it under `{cacheRoot}/{pluginId}/{version}/plugin.json`.
-   * No-op when the plugin is not yet installed.
+   * Snapshot the currently-installed manifest into the artifact store's
+   * version cache before overwrite. No-op when the plugin is not yet
+   * installed. Wraps {@link PluginArtifactStore.cacheVersionFromManifest}
+   * with the registry-aware path resolution that the store deliberately
+   * does not own.
    */
-  private async cacheCurrentVersion(pluginId: string): Promise<void> {
+  private async snapshotCurrentInstall(pluginId: string): Promise<void> {
     const registry = await readPluginRegistry(this.registryPath).catch(() => null);
     const entry = registry?.plugins.find((p) => p.id === pluginId);
     if (!entry) return;
     const manifestAbs = isAbsolute(entry.manifestPath)
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
-    await this.cacheVersionFromManifest(pluginId, manifestAbs);
-  }
-
-  private async cacheVersionFromManifest(pluginId: string, manifestPath: string): Promise<void> {
-    try {
-      const raw = await readFile(manifestPath, "utf-8");
-      const parsed = JSON.parse(raw) as { version?: string };
-      const version = parsed.version ?? "unknown";
-      const dir = resolve(this.cacheRoot, pluginId, version);
-      await mkdir(dir, { recursive: true });
-      await writeFile(resolve(dir, "plugin.json"), raw, "utf-8");
-    } catch (err) {
-      console.warn(`[marketplace] cacheVersion failed for ${pluginId}:`, (err as Error).message);
-    }
-  }
-
-  /**
-   * PR#44 HIGH: use persisted history.json (install order-of-record) rather
-   * than filesystem mtimes. Picks the most recent history entry whose version
-   * differs from the currently-installed one. Falls back to `null` when no
-   * suitable prior version exists.
-   */
-  private async findRollbackTargetVersion(pluginId: string): Promise<string | null> {
-    const entries = await this.readHistory(pluginId);
-    if (entries.length === 0) return null;
-    // Determine the current version so we don't select it as the rollback target.
-    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
-    const current = registry?.plugins.find((p) => p.id === pluginId);
-    let currentVersion: string | undefined;
-    if (current) {
-      const manifestAbs = isAbsolute(current.manifestPath)
-        ? current.manifestPath
-        : resolve(dirname(this.registryPath), current.manifestPath);
-      try {
-        const raw = await readFile(manifestAbs, "utf-8");
-        currentVersion = (JSON.parse(raw) as { version?: string }).version;
-      } catch {
-        /* ignore */
-      }
-    }
-    // Walk history from newest → oldest, return first non-current version
-    // whose cached manifest still exists on disk.
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const candidate = entries[i].version;
-      // PR#44 Copilot: guard against empty/whitespace/invalid version dirs —
-      // they must be non-empty strings and the cached manifest must exist and
-      // parse as JSON with a matching `version` field. Invalid entries are
-      // skipped rather than treated as missing.
-      if (!candidate || typeof candidate !== "string" || candidate.trim().length === 0) continue;
-      if (candidate === currentVersion) continue;
-      const cachedManifest = resolve(this.cacheRoot, pluginId, candidate, "plugin.json");
-      try {
-        const raw = await readFile(cachedManifest, "utf-8");
-        const parsed = JSON.parse(raw) as { version?: string };
-        if (!parsed.version) continue;
-        return candidate;
-      } catch {
-        continue;
-      }
-    }
-    return null;
+    await this.artifactStore.cacheVersionFromManifest(pluginId, manifestAbs);
   }
 
   private async getInstalledRegistryEntry(pluginId: string): Promise<PluginRegistryEntry | null> {
@@ -873,14 +818,20 @@ export class PluginMarketplaceService {
    * and publishes plugin artifacts via the server's CLI rather than
    * sideloading sibling-repo paths.
    */
+  /**
+   * Orchestrate one verified-zip install: delegate download + extract to
+   * the artifact store, then layer plugin-specific manifest steps on top
+   * (catalog-vs-zip validation, fallback manifest fabrication when the
+   * zip omits plugin.json). Returns the registry-relative manifest path.
+   */
   private async installArtifact(
     plugin: PluginMarketplaceItem,
     version: string,
     onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<string> {
-    const pluginDir = resolve(this.userInstalledDir, plugin.id);
-    const zipBuffer = await this.downloadVerifiedMarketplaceZip(plugin, version, onProgress);
-    await this.extractMarketplaceZip(plugin.id, zipBuffer, pluginDir);
+    const pluginDir = this.artifactStore.installDirFor(plugin.id);
+    const zipBuffer = await this.artifactStore.downloadVerifiedZip(plugin, version, onProgress);
+    await this.artifactStore.extractZip(plugin.id, zipBuffer);
 
     const manifestFile = resolve(pluginDir, "plugin.json");
     let zipHasManifest = false;
@@ -901,9 +852,7 @@ export class PluginMarketplaceService {
       await this.assertInstalledManifestMatchesCatalog(plugin, version, manifestFile, pluginDir);
     }
     // Phase 2a invariant: registry entries hold registry-relative POSIX
-    // paths regardless of which install branch produced the manifest. The
-    // file branch above already routes through writeInstalledManifest which
-    // applies the same normalization.
+    // paths regardless of which install branch produced the manifest.
     return toRegistryRelativeManifestPath(this.registryPath, manifestFile);
   }
 
@@ -1001,92 +950,6 @@ export class PluginMarketplaceService {
     }
   }
 
-  private async downloadVerifiedMarketplaceZip(
-    plugin: PluginMarketplaceItem,
-    version: string,
-    onProgress?: (event: InstallerProgressEvent) => void,
-  ): Promise<Buffer> {
-    const slug = plugin.slug ?? plugin.id;
-    if (!isVerifiedMarketplaceFetcher(this.fetcher)) {
-      throw new Error(
-        `remote marketplace fetcher for "${plugin.id}" does not support signed artifact verification`,
-      );
-    }
-    const verified = await installFromMarketplace(slug, version, {
-      http: this.fetcher,
-      publicKeys: getBundledPublicKeys(),
-      downloadRoot: resolve(this.cacheRoot, "verified-downloads"),
-      cacheBase: null,
-      onProgress,
-    });
-    return readFile(verified.tarballPath);
-  }
-
-  private async extractMarketplaceZip(
-    pluginId: string,
-    zipBuffer: Buffer,
-    pluginDir: string,
-  ): Promise<void> {
-    const stageDir = resolve(this.userInstalledDir, `.${pluginId}.stage-${randomUUID()}`);
-    await rm(stageDir, { recursive: true, force: true });
-    await mkdir(stageDir, { recursive: true });
-
-    try {
-      let zip: AdmZip;
-      try {
-        zip = new AdmZip(zipBuffer);
-      } catch (err) {
-        throw new Error(`invalid zip format for plugin "${pluginId}": ${(err as Error).message}`);
-      }
-
-      for (const entry of zip.getEntries()) {
-        const safeEntryPath = sanitizeZipEntryPath(pluginId, entry.entryName);
-        if (!safeEntryPath) continue;
-        const targetPath = resolve(stageDir, safeEntryPath);
-        if (!this.isWithin(stageDir, targetPath)) {
-          throw new Error(`plugin "${pluginId}" zip entry escapes install root: ${entry.entryName}`);
-        }
-        if (entry.isDirectory) {
-          await mkdir(targetPath, { recursive: true });
-          continue;
-        }
-        await mkdir(dirname(targetPath), { recursive: true });
-        await writeFile(targetPath, entry.getData());
-      }
-
-      // Atomically swap stageDir → pluginDir.  On Windows, rename() refuses to
-      // overwrite a non-empty directory, so we first rename the existing
-      // pluginDir to a temporary name (which is always safe on the same volume)
-      // and then rename stageDir into place.  Only after both renames succeed do
-      // we remove the old directory, ensuring the live pluginDir is never in a
-      // half-removed state if the process is killed between operations.
-      const oldDir = resolve(this.userInstalledDir, `.${pluginId}.old-${randomUUID()}`);
-      let hadOldDir = false;
-      try {
-        await rename(pluginDir, oldDir);
-        hadOldDir = true;
-      } catch {
-        // pluginDir did not exist yet (first install) — nothing to move aside.
-      }
-      try {
-        await rename(stageDir, pluginDir);
-      } catch (renameErr) {
-        // Restore the old directory if the swap failed so we don't leave the
-        // plugin in a broken state.
-        if (hadOldDir) {
-          await rename(oldDir, pluginDir).catch(() => undefined);
-        }
-        throw renameErr;
-      }
-      if (hadOldDir) {
-        await rm(oldDir, { recursive: true, force: true }).catch(() => undefined);
-      }
-    } catch (err) {
-      await rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
-      throw err;
-    }
-  }
-
   private async resolveInstalledIds(
     entries: Array<{ id: string; manifestPath: string }>,
   ): Promise<Set<string>> {
@@ -1109,26 +972,3 @@ export class PluginMarketplaceService {
 
 }
 
-function isVerifiedMarketplaceFetcher(fetcher: MarketplaceFetcher): fetcher is VerifiedMarketplaceFetcher {
-  return (
-    typeof (fetcher as Partial<VerifiedMarketplaceFetcher>).downloadArtifact === "function" &&
-    typeof (fetcher as Partial<VerifiedMarketplaceFetcher>).fetchSignatureEnvelope === "function"
-  );
-}
-
-function sanitizeZipEntryPath(pluginId: string, entryName: string): string | null {
-  const normalized = entryName.split("\\").join("/").replace(/^\/+/, "");
-  if (!normalized || normalized === ".") return null;
-  if (normalized.includes("\u0000")) {
-    throw new Error(`plugin "${pluginId}" zip entry contains NUL byte`);
-  }
-  if (/^[A-Za-z]:/.test(normalized)) {
-    throw new Error(`plugin "${pluginId}" zip entry uses absolute drive path: ${entryName}`);
-  }
-  const collapsed = posix.normalize(normalized);
-  if (!collapsed || collapsed === ".") return null;
-  if (collapsed === ".." || collapsed.startsWith("../")) {
-    throw new Error(`plugin "${pluginId}" zip entry escapes install root: ${entryName}`);
-  }
-  return collapsed.endsWith("/") ? collapsed.slice(0, -1) : collapsed;
-}
