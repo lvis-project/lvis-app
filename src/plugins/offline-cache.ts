@@ -9,7 +9,6 @@
  */
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
-import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { PluginMarketplaceItem } from "./types.js";
 
@@ -40,12 +39,14 @@ interface CacheRoot {
   indexFile: string;
 }
 
-function cacheRoots(base?: string): CacheRoot {
-  const root = base ?? resolve(homedir(), ".lvis/marketplace-cache");
+function cacheRoots(base: string): CacheRoot {
+  // #266 closure — caller must supply an explicit base under PluginPaths.
+  // The historical `homedir() + .lvis/marketplace-cache` default leaked
+  // outside `userData` and is no longer permitted.
   return {
-    catalogFile: resolve(root, "catalog.json"),
-    tarballDir: resolve(root, "tarballs"),
-    indexFile: resolve(root, "tarballs.index.json"),
+    catalogFile: resolve(base, "catalog.json"),
+    tarballDir: resolve(base, "tarballs"),
+    indexFile: resolve(base, "tarballs.index.json"),
   };
 }
 
@@ -66,7 +67,7 @@ interface CatalogCacheFile {
  * (used as a network-failure fallback so the UI remains functional offline).
  */
 export async function getCachedCatalog(
-  base?: string,
+  base: string,
   opts?: { allowStale?: boolean },
 ): Promise<PluginMarketplaceItem[] | null> {
   const { catalogFile } = cacheRoots(base);
@@ -87,7 +88,7 @@ export async function getCachedCatalog(
 /** Writes `items` to the catalog cache with the current timestamp. */
 export async function setCachedCatalog(
   items: PluginMarketplaceItem[],
-  base?: string,
+  base: string,
 ): Promise<void> {
   const { catalogFile } = cacheRoots(base);
   try {
@@ -157,7 +158,7 @@ async function writeIndex(indexFile: string, index: TarballIndex): Promise<void>
 export async function getCachedTarball(
   slug: string,
   version: string,
-  base?: string,
+  base: string,
 ): Promise<Buffer | null> {
   const { tarballDir, indexFile } = cacheRoots(base);
   const filename = tarballFilename(slug, version);
@@ -186,7 +187,7 @@ export async function setCachedTarball(
   slug: string,
   version: string,
   body: Buffer,
-  base?: string,
+  base: string,
 ): Promise<void> {
   const { tarballDir, indexFile } = cacheRoots(base);
   try {

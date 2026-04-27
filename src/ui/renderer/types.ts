@@ -165,6 +165,29 @@ export type LvisApi = {
     | { ok: true; slug: string; installDir: string; connected: boolean; warning?: string; needsCredential: boolean; authMode: "none" | "api-key" | "sso" }
     | { ok: false; error: string; message: string }
   >;
+  /** #FU262 — Claude Desktop config import. */
+  previewClaudeDesktopMcpImport: (raw: string) => Promise<{
+    entries: Array<{
+      id: string;
+      config: McpServerConfig;
+      suspectedSecretEnvKeys: string[];
+      warning?: string;
+    }>;
+    errors: Array<{ id: string; reason: string }>;
+  }>;
+  applyClaudeDesktopMcpImport: (payload: { raw: string; conflictPolicy?: "skip" | "overwrite" }) => Promise<
+    | {
+        ok: true;
+        results: Array<{
+          id: string;
+          action: "added" | "skipped-conflict" | "overwritten" | "failed";
+          reason?: string;
+          warning?: string;
+        }>;
+        parseErrors: Array<{ id: string; reason: string }>;
+      }
+    | { ok: false; error: string }
+  >;
   msGraphGetState: () => Promise<{
     environment: "external" | "corporate";
     isAuthenticated: boolean;
