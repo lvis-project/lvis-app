@@ -326,6 +326,10 @@ const api = {
     ipcRenderer.on("lvis:bootstrap:status", listener);
     return () => ipcRenderer.removeListener("lvis:bootstrap:status", listener);
   },
+  // Phase 2d FU — banner-driven retry. Re-emits the start/complete/error
+  // status sequence so the banner subscriber updates without needing a
+  // separate result channel.
+  retryBootstrap: () => ipcRenderer.invoke("lvis:bootstrap:retry"),
 
   // ─── lvis:// deep-link install lifecycle ─────────
   // Fires when a marketplace install triggered via lvis://install/{slug} has

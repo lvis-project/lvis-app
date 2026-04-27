@@ -8,11 +8,16 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resolve } from "node:path";
 import { resolvePluginPaths, toRegistryRelativeManifestPath } from "../plugin-paths.js";
+import { setIsPackaged, _resetForTest as resetDevFlags } from "../../boot/dev-flags.js";
 
 describe("resolvePluginPaths (Phase 2a)", () => {
   const originalEnv = process.env.LVIS_PLUGINS_DIR;
   beforeEach(() => {
     delete process.env.LVIS_PLUGINS_DIR;
+    // dev-flags defaults to packaged-mode (env override ignored). The override
+    // is dev-only — every test in this block runs under unpackaged-mode unless
+    // it explicitly flips back.
+    setIsPackaged(false);
   });
   afterEach(() => {
     if (originalEnv === undefined) {
@@ -20,6 +25,7 @@ describe("resolvePluginPaths (Phase 2a)", () => {
     } else {
       process.env.LVIS_PLUGINS_DIR = originalEnv;
     }
+    resetDevFlags();
   });
 
   it("anchors registry/installed/cache at userDataDir/plugins", () => {
@@ -78,6 +84,16 @@ describe("resolvePluginPaths (Phase 2a)", () => {
     });
     expect(paths.userInstalledDir).toBe(resolve("/tmp/env"));
     expect(paths.cacheRoot).toBe(resolve("/tmp/explicit-cache"));
+  });
+
+  it("packaged build silently ignores LVIS_PLUGINS_DIR env override", () => {
+    // Hard-gate: a packaged binary that inherits this env var must fall back
+    // to the canonical userData/plugins layout, never the user-controlled
+    // override path.
+    setIsPackaged(true);
+    process.env.LVIS_PLUGINS_DIR = "/tmp/attacker-controlled";
+    const paths = resolvePluginPaths({ userDataDir: "/tmp/userData" });
+    expect(paths.userInstalledDir).toBe(resolve("/tmp/userData", "plugins"));
   });
 });
 

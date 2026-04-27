@@ -51,7 +51,6 @@ import { McpManager } from "./mcp/mcp-manager.js";
 import { openAuthWindow as openAuthWindowService } from "./main/auth-window-service.js";
 
 import { type AppServices } from "./boot/types.js";
-import { notifyBootstrapStatus } from "./boot/bootstrap-status.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
 import {
@@ -92,7 +91,7 @@ import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireRoutineCoordinator } from "./boot/steps/routine-coordinator.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
-import { resolveManagedPluginBootstrap } from "./boot/managed-marketplace.js";
+import { runManagedBootstrap } from "./boot/managed-marketplace.js";
 
 export type { AppServices } from "./boot/types.js";
 
@@ -264,48 +263,16 @@ export async function bootstrap(
   // §9.5 — Managed plugin bootstrap. Mandatory enterprise plugins are fetched
   // from the marketplace on boot (VS Code-style), not packaged in app source.
   // Graceful: marketplace unreachable or per-plugin failure never bricks boot.
-  const managedBootstrap = resolveManagedPluginBootstrap({
+  // Phase 2d surfaces lifecycle status (start/complete/error) to the renderer
+  // so the user sees something when the marketplace is unreachable or
+  // partial-fails. The same helper backs the `lvis:bootstrap:retry` IPC.
+  await runManagedBootstrap({
+    pluginMarketplace,
+    pluginRuntime,
+    mainWindow,
     marketplace: marketplaceSettings,
     isPackaged: app.isPackaged,
   });
-  // Phase 2d: surface bootstrap status to the renderer so the user sees
-  // something tangible when the marketplace is unreachable or partial-fails.
-  // Three states emitted: start / complete / error.
-  if (managedBootstrap.enabled) {
-    notifyBootstrapStatus(mainWindow, { phase: "start" });
-    try {
-      const ensureResult = await pluginMarketplace.ensureManagedInstalled();
-      if (ensureResult.installed.length > 0) {
-        console.log(
-          `[lvis] boot: managed plugin bootstrap installed ${ensureResult.installed.length}: ${ensureResult.installed.join(", ")}`,
-        );
-        await pluginRuntime.restartAll();
-      }
-      if (ensureResult.failed.length > 0) {
-        console.warn(
-          `[lvis] boot: managed plugin bootstrap failed ${ensureResult.failed.length}:`,
-          ensureResult.failed,
-        );
-      }
-      notifyBootstrapStatus(mainWindow, {
-        phase: "complete",
-        installed: ensureResult.installed,
-        failed: ensureResult.failed,
-      });
-    } catch (err) {
-      const message = (err as Error).message;
-      console.warn(`[lvis] boot: ensureManagedInstalled error:`, message);
-      notifyBootstrapStatus(mainWindow, { phase: "error", message });
-    }
-  } else {
-    console.warn(`[lvis] boot: managed plugin bootstrap skipped: ${managedBootstrap.reason}`);
-    notifyBootstrapStatus(mainWindow, {
-      phase: "complete",
-      installed: [],
-      failed: [],
-      skippedReason: managedBootstrap.reason,
-    });
-  }
 
   // wireUpdateCheck needs a concrete fetcher for update detection.
   const updateCheckFetcher: MarketplaceFetcher | undefined = marketplaceFetcher;
