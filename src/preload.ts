@@ -63,6 +63,11 @@ const api = {
   listMcpCatalog: async () => ipcRenderer.invoke("lvis:mcp:catalog:list"),
   installMcpFromMarketplace: async (slug: string) =>
     ipcRenderer.invoke("lvis:mcp:install-from-marketplace", slug),
+  // #FU262 — Claude Desktop config import (two-phase: preview → apply).
+  previewClaudeDesktopMcpImport: async (raw: string) =>
+    ipcRenderer.invoke("lvis:mcp:import:claude-desktop:preview", raw),
+  applyClaudeDesktopMcpImport: async (payload: { raw: string; conflictPolicy?: "skip" | "overwrite" }) =>
+    ipcRenderer.invoke("lvis:mcp:import:claude-desktop:apply", payload),
 
   // ─── Microsoft Graph — dual-environment login ────
   msGraphGetState: async () =>

@@ -24,12 +24,12 @@ import {
 import type { MarketplaceHttp } from "./marketplace-installer.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type {
-  McpRuntimeSpec,
   PluginMarketplaceItem,
   PluginUiExtension,
   RequiresSpec,
   SignatureEnvelope,
 } from "./types.js";
+import { parseMcpRuntimeSpec } from "./mcp-runtime-spec.js";
 
 /**
  * Allowlist for npm package identifiers. Matches scoped (@scope/name) and
@@ -423,7 +423,7 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
     const pluginTypeRaw = row.plugin_type ?? row.pluginType;
     if (pluginTypeRaw === "mcp") {
       item.pluginType = "mcp";
-      const runtime = parseMcpRuntime(row.runtime ?? row.mcpRuntime);
+      const runtime = parseMcpRuntimeSpec(row.runtime ?? row.mcpRuntime);
       if (runtime) item.mcpRuntime = runtime;
     } else {
       item.pluginType = "plugin";
@@ -431,50 +431,6 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
 
     return item;
   }
-}
-
-/**
- * Parse a catalog `runtime` block into the `McpRuntimeSpec` discriminated
- * union. Returns undefined when the discriminator or required field is
- * missing — the install path then falls back to reading the manifest
- * from the verified zip (the trust anchor).
- */
-function parseMcpRuntime(value: unknown): McpRuntimeSpec | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const r = value as Record<string, unknown>;
-  const auth = r.auth;
-  const validAuth =
-    auth === "none" || auth === "api-key" || auth === "sso" ? auth : undefined;
-
-  if (r.transport === "stdio") {
-    if (typeof r.command !== "string" || r.command.trim().length === 0) return undefined;
-    const args = Array.isArray(r.args)
-      ? r.args.filter((a): a is string => typeof a === "string")
-      : undefined;
-    const env =
-      r.env && typeof r.env === "object" && !Array.isArray(r.env)
-        ? Object.fromEntries(
-            Object.entries(r.env as Record<string, unknown>).filter(
-              (entry): entry is [string, string] => typeof entry[1] === "string",
-            ),
-          )
-        : undefined;
-    const out: McpRuntimeSpec = { transport: "stdio", command: r.command };
-    if (args && args.length > 0) out.args = args;
-    if (env && Object.keys(env).length > 0) out.env = env;
-    if (validAuth) out.auth = validAuth;
-    return out;
-  }
-  if (r.transport === "http") {
-    if (typeof r.url !== "string" || r.url.trim().length === 0) return undefined;
-    const out: McpRuntimeSpec = { transport: "http", url: r.url };
-    if (validAuth) out.auth = validAuth;
-    if (typeof r.allowPrivateNetworks === "boolean") {
-      out.allowPrivateNetworks = r.allowPrivateNetworks;
-    }
-    return out;
-  }
-  return undefined;
 }
 
 function parseRetryAfterSeconds(value: string | null): number | null {

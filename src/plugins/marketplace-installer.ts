@@ -16,7 +16,6 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { verifyEnvelope, type PublicKeyInput } from "./envelope-verifier.js";
 import type { SignatureEnvelope, VerifyResult } from "./types.js";
@@ -65,8 +64,13 @@ export interface MarketplaceInstallerOptions {
   http: MarketplaceHttp;
   /** Map of `key_id → pub key` used to verify the envelope. */
   publicKeys: Record<string, PublicKeyInput>;
-  /** Target download root; defaults to `~/.lvis/plugins/.downloads`. */
-  downloadRoot?: string;
+  /**
+   * Target download root — REQUIRED (#266 closure). The historical
+   * `homedir() + .lvis/plugins/.downloads` default violated the
+   * Phase 2a PluginPaths SoT; callers must inject `paths.cacheRoot`
+   * (or a sibling) explicitly so the layout stays under userData.
+   */
+  downloadRoot: string;
   /**
    * Maximum allowed future drift for `envelope.iat`, in seconds.
    * Default: 72h (matches §0.6 revocation guard window).
@@ -166,7 +170,7 @@ export async function installFromMarketplace(
   version: string,
   opts: MarketplaceInstallerOptions,
 ): Promise<InstalledArtifact> {
-  const downloadRoot = opts.downloadRoot ?? resolve(homedir(), ".lvis/plugins/.downloads");
+  const downloadRoot = opts.downloadRoot;
   const maxSkewSec = opts.maxClockSkewSec ?? DEFAULT_MAX_SKEW_SEC;
   const nowSec = opts.nowSec ?? (() => Date.now() / 1000);
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -176,13 +180,13 @@ export async function installFromMarketplace(
   // string AND the feature flag is enabled. Callers that don't set cacheBase
   // (including all pre-existing tests) bypass the cache entirely, preventing
   // stale-cache interference with signature verification tests.
-  const cacheBase = typeof opts.cacheBase === "string" ? opts.cacheBase : undefined;
-  const useCache = typeof opts.cacheBase === "string" && isOfflineCacheEnabled();
+  const cacheBase = typeof opts.cacheBase === "string" ? opts.cacheBase : null;
+  const useCache = cacheBase !== null && isOfflineCacheEnabled();
   let body: Buffer = Buffer.alloc(0);
   let sha256Header: string | null = null;
   let fromCache = false;
 
-  if (useCache) {
+  if (useCache && cacheBase) {
     const cached = await getCachedTarball(slug, version, cacheBase);
     if (cached) {
       body = cached;
@@ -277,7 +281,7 @@ export async function installFromMarketplace(
   signerKeyId = result.key_id ?? "unknown";
 
   // Store verified tarball in offline cache (only after successful verification).
-  if (useCache && !fromCache) {
+  if (useCache && cacheBase && !fromCache) {
     await setCachedTarball(slug, version, body, cacheBase);
   }
 

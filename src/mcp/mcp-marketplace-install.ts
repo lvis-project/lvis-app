@@ -21,6 +21,7 @@ import { resolve } from "node:path";
 
 import type { PluginArtifactStore } from "../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../plugins/marketplace-fetcher.js";
+import { parseMcpRuntimeSpec } from "../plugins/mcp-runtime-spec.js";
 import type { McpRuntimeSpec, PluginMarketplaceItem } from "../plugins/types.js";
 import type { McpServerConfig } from "./types.js";
 import type { InstallerProgressEvent } from "../plugins/marketplace-installer.js";
@@ -115,51 +116,13 @@ export async function readRuntimeFromInstalledManifest(installDir: string): Prom
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`MCP manifest at ${manifestPath} is not an object`);
   }
-  const runtime = parseRuntimeSpec((parsed as Record<string, unknown>).runtime);
+  const runtime = parseMcpRuntimeSpec((parsed as Record<string, unknown>).runtime);
   if (!runtime) {
     throw new Error(
       `MCP manifest at ${manifestPath} is missing a valid \`runtime\` block — required by lvis-marketplace#52 schema`,
     );
   }
   return runtime;
-}
-
-function parseRuntimeSpec(value: unknown): McpRuntimeSpec | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const r = value as Record<string, unknown>;
-  const auth = r.auth;
-  const validAuth =
-    auth === "none" || auth === "api-key" || auth === "sso" ? auth : undefined;
-
-  if (r.transport === "stdio") {
-    if (typeof r.command !== "string" || r.command.trim().length === 0) return undefined;
-    const args = Array.isArray(r.args)
-      ? r.args.filter((a): a is string => typeof a === "string")
-      : undefined;
-    const env =
-      r.env && typeof r.env === "object" && !Array.isArray(r.env)
-        ? Object.fromEntries(
-            Object.entries(r.env as Record<string, unknown>).filter(
-              (entry): entry is [string, string] => typeof entry[1] === "string",
-            ),
-          )
-        : undefined;
-    const out: McpRuntimeSpec = { transport: "stdio", command: r.command };
-    if (args && args.length > 0) out.args = args;
-    if (env && Object.keys(env).length > 0) out.env = env;
-    if (validAuth) out.auth = validAuth;
-    return out;
-  }
-  if (r.transport === "http") {
-    if (typeof r.url !== "string" || r.url.trim().length === 0) return undefined;
-    const out: McpRuntimeSpec = { transport: "http", url: r.url };
-    if (validAuth) out.auth = validAuth;
-    if (typeof r.allowPrivateNetworks === "boolean") {
-      out.allowPrivateNetworks = r.allowPrivateNetworks;
-    }
-    return out;
-  }
-  return undefined;
 }
 
 /**
