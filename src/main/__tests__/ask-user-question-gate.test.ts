@@ -94,6 +94,33 @@ describe("AskUserQuestionGate — timeout path", () => {
     expect(timeoutCall![1]).toMatchObject({ requestId: response.requestId });
   });
 
+  // Regression for the LOW from PR #287's review: a long-lived
+  // AbortController reused across several sequential asks must not leak an
+  // abort listener every time the user resolves a question via IPC.
+  it("removes the abort listener when the user resolves via IPC (no leak across sequential asks)", async () => {
+    const wc = makeMockWebContents();
+    const gate = new AskUserQuestionGate(wc as never, 60_000);
+    const ac = new AbortController();
+    const removeSpy = vi.spyOn(ac.signal, "removeEventListener");
+
+    const slot = gate.ask({ question: "first?", abortSignal: ac.signal });
+    // Find the request id that was sent to the renderer.
+    const reqCall = wc.send.mock.calls.find(
+      (c) => c[0] === "lvis:ask-user-question:request",
+    );
+    const requestId = (reqCall![1] as { id: string }).id;
+
+    // User clicks an option — this is what `ipcMain.handle("lvis:ask-user-question:respond")` calls.
+    gate.resolve({ requestId, choice: "yes" });
+    const response = await slot;
+    expect(response.choice).toBe("yes");
+
+    // The listener registered on the controller's signal must have been cleaned up,
+    // so a later abort on the same controller does not invoke a stale handler.
+    expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function));
+    expect(gate.pendingCount).toBe(0);
+  });
+
   it("returns immediately as dismissed when called with an already-aborted signal", async () => {
     const wc = makeMockWebContents();
     const gate = new AskUserQuestionGate(wc as never, 60_000);

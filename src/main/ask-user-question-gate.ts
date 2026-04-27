@@ -34,7 +34,14 @@ export const IPC_ASK_USER_QUESTION_RESPOND = "lvis:ask-user-question:respond";
 
 interface PendingEntry {
   resolve: (response: AskUserQuestionResponse) => void;
-  timer: ReturnType<typeof setTimeout>;
+  /**
+   * Centralized teardown — clears the timer, removes the abort listener,
+   * and removes this entry from the `pending` map. Called from every
+   * terminal path (timeout, abort, send-failure, IPC resolve, disposeAll)
+   * so a long-lived `AbortController` reused across multiple sequential
+   * questions never leaks listeners.
+   */
+  cleanup: () => void;
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -130,11 +137,6 @@ export class AskUserQuestionGate {
       // notification failure must never block the gate
     }
     return new Promise<AskUserQuestionResponse>((resolve) => {
-      const cleanup = () => {
-        this.pending.delete(req.id);
-        clearTimeout(timer);
-        if (abortListener) input.abortSignal?.removeEventListener("abort", abortListener);
-      };
       const timer = setTimeout(() => {
         cleanup();
         // M2: notify the renderer so it drops the stale card.
@@ -158,10 +160,15 @@ export class AskUserQuestionGate {
             resolve({ requestId: req.id, dismissed: true });
           }
         : null;
+      const cleanup = () => {
+        this.pending.delete(req.id);
+        clearTimeout(timer);
+        if (abortListener) input.abortSignal?.removeEventListener("abort", abortListener);
+      };
       if (abortListener) {
         input.abortSignal?.addEventListener("abort", abortListener, { once: true });
       }
-      this.pending.set(req.id, { resolve, timer });
+      this.pending.set(req.id, { resolve, cleanup });
       try {
         wc.send(IPC_ASK_USER_QUESTION_REQUEST, req);
       } catch (err) {
@@ -178,14 +185,13 @@ export class AskUserQuestionGate {
   resolve(response: AskUserQuestionResponse): void {
     const entry = this.pending.get(response.requestId);
     if (!entry) return;
-    clearTimeout(entry.timer);
-    this.pending.delete(response.requestId);
+    entry.cleanup();
     entry.resolve(response);
   }
 
   disposeAll(): void {
     for (const [id, entry] of this.pending) {
-      clearTimeout(entry.timer);
+      entry.cleanup();
       entry.resolve({ requestId: id, dismissed: true });
     }
     this.pending.clear();
