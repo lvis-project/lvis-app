@@ -1,0 +1,255 @@
+{
+  "$schema": "https://lvis.local/schemas/plugin.schema.json",
+  "id": "pageindex",
+  "name": "LVIS PageIndex",
+  "version": "0.1.0",
+  "publisher": "LG Electronics IT",
+  "installPolicy": "admin",
+  "entry": "../../../node_modules/@lvis/plugin-pageindex/dist/hostPlugin.js",
+  "description": "문서 파일 자동 인덱싱 및 BM25/벡터 검색 플러그인. 폴더 감시(chokidar), PDF/Markdown 파싱, 한국어 형태소 분석(kiwi), FTS5 기반 검색. 인덱스 위치: ~/.lvis/index/",
+  "python": {
+    "managedBy": "lvis-app",
+    "requirementsLock": "python-requirements.lock"
+  },
+  "tools": [
+    "index_scan",
+    "index_scan_cancel",
+    "index_scan_status",
+    "index_documents",
+    "index_folders",
+    "index_refresh_folder",
+    "index_add_folder",
+    "index_remove_folder",
+    "chat_preview",
+    "pageindex_scan"
+  ],
+  "capabilities": [
+    "worker-client",
+    "knowledge-index",
+    "document-indexer"
+  ],
+  "uiCallable": [
+    "index_scan",
+    "index_scan_cancel",
+    "index_scan_status",
+    "index_documents",
+    "index_folders",
+    "index_refresh_folder",
+    "index_folders_purge_orphans",
+    "index_add_folder",
+    "index_remove_folder",
+    "chat_preview",
+    "pageindex_scan"
+  ],
+  "startupTimeoutMs": 15000,
+  "eventPublishes": [
+    "index.document.updated",
+    "index.folders.changed",
+    "index.scan.progress",
+    "index.scan.completed"
+  ],
+  "toolSchemas": {
+    "index_scan": {
+      "description": "등록된 폴더를 즉시 스캔해 새 파일을 인덱싱합니다. 사용 시기: 사용자가 '문서 다시 인덱싱해줘', '방금 추가한 파일 반영해줘' 같이 최신화를 요청할 때, 또는 knowledge_search/chat_preview 결과가 예상보다 부족해 보일 때. 인자 없음. 반환: { indexed, totalIndexed, message }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_scan_cancel": {
+      "description": "진행 중인 문서 스캔에 대해 중단을 요청합니다. 사용 시기: 사용자가 스캔 중 중단 버튼을 누르거나 '인덱싱 멈춰줘'라고 요청했을 때. 사용 안 함: 스캔 상태만 확인하려면 index_scan_status. 반환: { canceled, message }. 실제 중단은 worker가 현재 파일 처리를 마친 뒤 반영될 수 있습니다.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_documents": {
+      "description": "인덱싱된 모든 문서 메타데이터 목록을 반환합니다. 사용 시기: 어떤 문서가 검색 대상인지 전체 목록이 필요할 때(특정 문서 지정 전). 사용 안 함: 내용 검색은 knowledge_search/chat_preview, 특정 문서 구조는 document_structure 를 사용. 인자 없음. 각 항목: doc_id, doc_name, type, path, page_count, line_count, indexed_at, status.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_folders": {
+      "description": "현재 인덱싱 대상으로 등록된 폴더 경로 목록을 반환합니다. 사용 시기: '어떤 폴더가 인덱싱되고 있지?' 같이 설정 확인. 사용 안 함: 문서 목록은 index_documents. 인자 없음. 반환: { folders: string[] }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "index_refresh_folder": {
+      "description": "등록된 특정 폴더 하나만 증분 갱신합니다. 사용 시기: 사용자가 '이 폴더만 다시 스캔해줘'라고 요청하거나 특정 폴더 변경만 빠르게 반영하고 싶을 때. 새 파일·변경 파일·삭제 파일만 조정하므로 전체 재스캔보다 가볍습니다. 사용 안 함: 모든 등록 폴더 갱신은 index_scan, 등록되지 않은 경로 즉시 인덱싱은 pageindex_scan. 반환: { indexed, removed, failed, folder, message }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "갱신할 등록 폴더의 절대 경로. index_folders 결과에 포함된 경로를 전달하세요."
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "index_add_folder": {
+      "description": "인덱싱 대상 폴더를 추가합니다. 사용 시기: 사용자가 '이 폴더도 검색 대상에 추가해줘' 라고 명시적으로 요청할 때. 시스템 디렉토리나 민감 경로(~/.ssh, /etc 등)는 차단됩니다. 추가 후에는 index_scan 을 불러 인덱싱을 트리거하세요. 반환: { folders, added: boolean, message }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "추가할 폴더의 절대 경로 또는 상대 경로 (예: /Users/ken/Documents)"
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "index_remove_folder": {
+      "description": "인덱싱 대상에서 폴더를 제거합니다. 사용 시기: 사용자가 '이 폴더는 더 이상 검색하지 마' 라고 명시할 때만. 제거 시 해당 폴더의 이미 인덱싱된 문서는 검색에서 빠집니다. 반환: { folders, removed: boolean, message }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "제거할 폴더의 절대 경로 또는 상대 경로"
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "chat_preview": {
+      "description": "자연어 질문을 인덱싱된 문서에서 BM25 로 검색해 미리보기 텍스트를 반환합니다. 사용 시기: 빠른 키워드-기반 1차 스크린 또는 UI 의 'preview' 영역이 필요할 때. 사용 안 함: 하이브리드(BM25+벡터) 정밀 검색은 knowledge_search 를 우선 사용. 반환: { question, documentCount, results, preview }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "검색할 자연어 질문 (예: '보안 정책 문서에서 비밀번호 규정은?')"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "pageindex_scan": {
+      "description": "지정된 절대 경로 파일/폴더 목록을 즉시 인덱싱합니다. 사용 시기: 사용자가 파일/폴더를 앱에 드래그 앤 드롭했거나, 등록 폴더에 추가하지 않고 이번 대화에서만 특정 자료를 검색 가능하게 만들고 싶을 때. 사용 안 함: 지속적으로 감시할 폴더는 index_add_folder 후 index_scan. 반환: { indexed, failed, jobId, message }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "인덱싱할 파일 또는 폴더의 절대 경로 목록"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "index_scan_status": {
+      "description": "현재 진행 중이거나 마지막으로 실행된 문서 스캔 상태를 반환합니다. 사용 시기: UI 진행률 표시, 사용자의 '인덱싱 어디까지 됐어?' 질문, index_scan/pageindex_scan 호출 직후 상태 확인. 사용 안 함: 문서 목록은 index_documents. 반환: { status, total, processed, indexed, failed, currentPath?, message? }.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  },
+  "keywords": [
+    {
+      "keyword": "문서",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "인덱스",
+      "skillId": "index_scan"
+    },
+    {
+      "keyword": "검색",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "문서검색",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "PDF",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "파일검색",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "문서찾기",
+      "skillId": "chat_preview"
+    },
+    {
+      "keyword": "인덱싱",
+      "skillId": "index_scan"
+    },
+    {
+      "keyword": "파일인덱스",
+      "skillId": "index_scan"
+    }
+  ],
+  "notificationEvents": [
+    {
+      "event": "index.scan.completed",
+      "titleField": "title",
+      "bodyField": "message"
+    },
+    {
+      "event": "index.folders.changed",
+      "titleField": "folder",
+      "bodyField": "message"
+    }
+  ],
+  "ui": [
+    {
+      "id": "pageindex-control",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "인덱서",
+      "title": "PageIndex Indexer",
+      "description": "문서 스캔/목록 확인과 채팅창 질문 전송을 제공합니다.",
+      "entry": "../../../node_modules/@lvis/plugin-pageindex/dist/ui/indexer-control.js",
+      "exportName": "mount"
+    }
+  ],
+  "permissions": [],
+  "emittedEvents": [
+    "index.document.updated",
+    "index.folders.changed",
+    "index.scan.progress",
+    "index.scan.completed"
+  ]
+}
