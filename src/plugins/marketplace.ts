@@ -164,8 +164,7 @@ export class PluginMarketplaceService {
   /**
    * S9: base directory for the catalog cache. `null` disables catalog caching
    * (test mock fetcher). Defaults to `paths.cacheRoot/marketplace-catalog`
-   * so the SoT stays under userData (#266 closed the historical homedir()
-   * fallback).
+   * so the SoT stays inside the plugin tree (`~/.lvis/plugins/.cache/`).
    */
   private readonly catalogCacheBase: string | null;
   /**
@@ -223,7 +222,8 @@ export class PluginMarketplaceService {
 
   async list(): Promise<MarketplaceListItem[]> {
     // Catalog cache is null when using the test mock fetcher; production
-    // always has a userData-anchored cache base (set in constructor).
+    // always has a cache base under `~/.lvis/plugins/.cache/` (set in
+    // constructor).
     const cacheBase = this.catalogCacheBase;
     const useCache = cacheBase !== null && isOfflineCacheEnabled();
     let catalogPlugins: PluginMarketplaceItem[] | null = null;
@@ -596,9 +596,9 @@ export class PluginMarketplaceService {
         // longer serves the artifact, so the verified-zip download path
         // has nothing to fetch. cacheRoot only persists the manifest
         // (history breadcrumb), not the binary, by design — caching the
-        // binary locally would inflate userData with every install and
-        // would outlive the security yank that a delisting is meant to
-        // enforce. Surface the cause explicitly so settings UI / logs
+        // binary locally would inflate the plugin tree with every install
+        // and would outlive the security yank that a delisting is meant
+        // to enforce. Surface the cause explicitly so settings UI / logs
         // can communicate it instead of a generic "not found".
         throw new Error(
           `Cannot rollback "${pluginId}": plugin is no longer in the marketplace catalog. ` +

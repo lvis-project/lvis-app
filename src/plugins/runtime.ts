@@ -146,13 +146,9 @@ export interface PluginRuntimeOptions {
   /**
    * Trust root for registry-recorded manifest paths.
    *
-   * Phase 2a anchors all installed plugins under
-   * `app.getPath('userData')/plugins/` (resolved by `resolvePluginPaths`),
-   * so production callers always supply this. A registry entry is trusted
-   * iff its `realpathSync()` is contained under `realpathSync(this)`. The
-   * hostRoot containment fallback in {@link PluginRuntime} is retained as
-   * defense-in-depth for legacy entries that pre-date Phase 2-final, but
-   * is dead in production.
+   * Anchored at `~/.lvis/plugins/` (resolved by `resolvePluginPaths`), so
+   * production callers always supply this. A registry entry is trusted iff
+   * its `realpathSync()` is contained under `realpathSync(this)`.
    *
    * Optional only because some unit tests construct PluginRuntime with a
    * `manifestPaths`-only seed that never touches `registryPath`.
