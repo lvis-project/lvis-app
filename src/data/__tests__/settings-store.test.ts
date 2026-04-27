@@ -65,7 +65,7 @@ describe("SettingsService marketplace defaults", () => {
       JSON.stringify({
         marketplace: {
           backend: "real-cloud",
-          realCloudBaseUrl: "https://marketplace.lvis.internal.lge.com",
+          realCloudBaseUrl: "https://marketplace.lvis.local",
           realCloudAllowPrivateNetwork: false,
         },
       }),
@@ -76,7 +76,7 @@ describe("SettingsService marketplace defaults", () => {
 
     expect(service.get("marketplace")).toEqual({
       backend: "real-cloud",
-      realCloudBaseUrl: "https://marketplace.lvis.internal.lge.com",
+      realCloudBaseUrl: "https://marketplace.lvis.local",
       realCloudAllowPrivateNetwork: false,
     });
   });

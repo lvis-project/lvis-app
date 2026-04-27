@@ -35,61 +35,61 @@ function cookie(overrides: Partial<Cookie>): Cookie {
 describe("filterCookiesByHost", () => {
   it("허용된 호스트의 쿠키만 통과시킨다", () => {
     const cookies = [
-      cookie({ name: "a", domain: ".sso.lge.com" }),
+      cookie({ name: "a", domain: ".sso.example.com" }),
       cookie({ name: "b", domain: ".other.com" }),
-      cookie({ name: "c", domain: "newep.lge.com" }),
+      cookie({ name: "c", domain: "portal.example.com" }),
     ];
-    const result = filterCookiesByHost(cookies, ["sso.lge.com", "newep.lge.com"]);
+    const result = filterCookiesByHost(cookies, ["sso.example.com", "portal.example.com"]);
     expect(result.map((c) => c.name).sort()).toEqual(["a", "c"]);
   });
 
   it("선행 점이 있는 domain과 없는 domain을 모두 정규화해 비교한다", () => {
     const cookies = [
-      cookie({ name: "dotted", domain: ".space.lge.com" }),
-      cookie({ name: "plain", domain: "space.lge.com" }),
+      cookie({ name: "dotted", domain: ".space.example.com" }),
+      cookie({ name: "plain", domain: "space.example.com" }),
     ];
-    const result = filterCookiesByHost(cookies, ["space.lge.com"]);
+    const result = filterCookiesByHost(cookies, ["space.example.com"]);
     expect(result).toHaveLength(2);
   });
 
   it("서브도메인 매칭: a.b.host는 host의 suffix로 인정", () => {
-    const cookies = [cookie({ name: "sub", domain: "a.newep.lge.com" })];
-    const result = filterCookiesByHost(cookies, ["newep.lge.com"]);
+    const cookies = [cookie({ name: "sub", domain: "a.portal.example.com" })];
+    const result = filterCookiesByHost(cookies, ["portal.example.com"]);
     expect(result).toHaveLength(1);
   });
 
-  it("부분 문자열 매칭은 거부 (evil-lge.com ≠ lge.com)", () => {
-    const cookies = [cookie({ name: "evil", domain: "evil-lge.com" })];
-    const result = filterCookiesByHost(cookies, ["lge.com"]);
+  it("부분 문자열 매칭은 거부 (evil-example.com ≠ example.com)", () => {
+    const cookies = [cookie({ name: "evil", domain: "evil-example.com" })];
+    const result = filterCookiesByHost(cookies, ["example.com"]);
     expect(result).toHaveLength(0);
   });
 
   it("domain 필드가 없으면 제외", () => {
     const cookies = [cookie({ name: "no-domain", domain: undefined })];
-    const result = filterCookiesByHost(cookies, ["lge.com"]);
+    const result = filterCookiesByHost(cookies, ["example.com"]);
     expect(result).toHaveLength(0);
   });
 
   it("allowedHosts가 비어있으면 전부 제외", () => {
-    const cookies = [cookie({ name: "a", domain: ".lge.com" })];
+    const cookies = [cookie({ name: "a", domain: ".example.com" })];
     expect(filterCookiesByHost(cookies, [])).toHaveLength(0);
   });
 
   it("allowedHosts의 선행 점·공백·대소문자를 정규화해 비교한다", () => {
-    const cookies = [cookie({ name: "n", domain: "space.lge.com" })];
-    // ".LGE.com" (선행 점 + 대문자) + " space.lge.com " (공백 포함) 모두 매칭되어야 함
-    expect(filterCookiesByHost(cookies, [".LGE.com"])).toHaveLength(1);
-    expect(filterCookiesByHost(cookies, [" space.lge.com "])).toHaveLength(1);
+    const cookies = [cookie({ name: "n", domain: "space.example.com" })];
+    // ".EXAMPLE.com" (선행 점 + 대문자) + " space.example.com " (공백 포함) 모두 매칭되어야 함
+    expect(filterCookiesByHost(cookies, [".EXAMPLE.com"])).toHaveLength(1);
+    expect(filterCookiesByHost(cookies, [" space.example.com "])).toHaveLength(1);
   });
 
   it("AuthCookie 직렬화: name/value/domain/path/secure/httpOnly/expirationDate", () => {
     const cookies = [cookie({
-      name: "n", value: "v", domain: ".lge.com", path: "/p",
+      name: "n", value: "v", domain: ".example.com", path: "/p",
       secure: true, httpOnly: true, expirationDate: 1700000000,
     })];
-    const [c] = filterCookiesByHost(cookies, ["lge.com"]);
+    const [c] = filterCookiesByHost(cookies, ["example.com"]);
     expect(c).toEqual({
-      name: "n", value: "v", domain: ".lge.com", path: "/p",
+      name: "n", value: "v", domain: ".example.com", path: "/p",
       secure: true, httpOnly: true, expirationDate: 1700000000,
     });
   });
@@ -97,26 +97,26 @@ describe("filterCookiesByHost", () => {
 
 describe("isCompletionUrl", () => {
   it("패턴 중 하나라도 substring으로 포함되면 true", () => {
-    expect(isCompletionUrl("https://newep.lge.com/portal", ["newep.lge.com", "space.lge.com"])).toBe(true);
+    expect(isCompletionUrl("https://portal.example.com/portal", ["portal.example.com", "space.example.com"])).toBe(true);
   });
 
   it("어느 패턴에도 포함되지 않으면 false", () => {
-    expect(isCompletionUrl("https://sso.lge.com/login", ["newep.lge.com"])).toBe(false);
+    expect(isCompletionUrl("https://sso.example.com/login", ["portal.example.com"])).toBe(false);
   });
 
   it("빈 패턴 배열은 항상 false", () => {
-    expect(isCompletionUrl("https://newep.lge.com", [])).toBe(false);
+    expect(isCompletionUrl("https://portal.example.com", [])).toBe(false);
   });
 
   it("query/hash 는 매칭 대상에서 제외 — IdP RelayState spoofing 방지", () => {
-    // IdP 가 아직 sso.lge.com 에 있는데 RelayState 에 newep.lge.com 을 담고 있는 경우.
+    // IdP 가 아직 sso.example.com 에 있는데 RelayState 에 portal.example.com 을 담고 있는 경우.
     const idpUrlWithRelay =
-      "https://sso.lge.com/saml/callback?RelayState=https%3A%2F%2Fnewep.lge.com%2F";
-    expect(isCompletionUrl(idpUrlWithRelay, ["newep.lge.com"])).toBe(false);
-    // 진짜로 newep.lge.com 으로 navigate 된 경우는 true
-    expect(isCompletionUrl("https://newep.lge.com/portal?foo=bar", ["newep.lge.com"])).toBe(true);
+      "https://sso.example.com/saml/callback?RelayState=https%3A%2F%2Fportal.example.com%2F";
+    expect(isCompletionUrl(idpUrlWithRelay, ["portal.example.com"])).toBe(false);
+    // 진짜로 portal.example.com 으로 navigate 된 경우는 true
+    expect(isCompletionUrl("https://portal.example.com/portal?foo=bar", ["portal.example.com"])).toBe(true);
     // hash 도 제외
-    expect(isCompletionUrl("https://sso.lge.com/login#newep.lge.com", ["newep.lge.com"])).toBe(false);
+    expect(isCompletionUrl("https://sso.example.com/login#portal.example.com", ["portal.example.com"])).toBe(false);
   });
 
   it("빈 문자열 패턴은 service 가 trim+filter 후 거부 — 하지만 isCompletionUrl 단독 호출 시 조기 true 위험", () => {
