@@ -368,6 +368,9 @@ export class SettingsService {
     if (partial.privacy) {
       this.settings.privacy = { ...this.settings.privacy, ...partial.privacy };
     }
+    if (partial.plugins) {
+      this.settings.plugins = { ...this.settings.plugins, ...partial.plugins };
+    }
     if (partial.updates) {
       this.settings.updates = { ...this.settings.updates, ...partial.updates };
     }
