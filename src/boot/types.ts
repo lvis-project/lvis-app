@@ -29,6 +29,7 @@ import type { FeedbackStore } from "../data/feedback-store.js";
 import type { TelemetryService } from "../main/telemetry.js";
 import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { TaskSourceRegistry } from "../plugins/task-source-registry.js";
+import type { NotificationService } from "../main/notification-service.js";
 
 export type EventHandler = (data: unknown) => void;
 
@@ -139,4 +140,11 @@ export interface AppServices {
    * has a renderer listener attached. Idempotent — safe to call multiple times.
    */
   startRemindersScheduler?: () => void;
+  /**
+   * Issue #260 — system-level notification service. Auto-fires desktop
+   * notifications at 4 lifecycle points (turn-end / routine / ask-user /
+   * approval). Constructed AFTER main window exists in boot.ts. The LLM never
+   * sees this — it's a passive surface called by the host at trigger sites.
+   */
+  notificationService?: NotificationService;
 }

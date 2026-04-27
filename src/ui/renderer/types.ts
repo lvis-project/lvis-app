@@ -360,6 +360,40 @@ export type LvisApi = {
       source: "user" | "builtin";
     }) => void,
   ) => () => void;
+  // ─── Notifications (#260) ────────────────────────
+  onNotificationToast?: (
+    h: (payload: {
+      kind: "turn-end" | "routine" | "ask-user" | "approval";
+      title: string;
+      body: string;
+      contextRef?: {
+        sessionId?: string;
+        routineId?: string;
+        questionId?: string;
+        approvalId?: string;
+      };
+    }) => void,
+  ) => () => void;
+  onNotificationClicked?: (
+    h: (payload: {
+      kind: "turn-end" | "routine" | "ask-user" | "approval";
+      contextRef?: {
+        sessionId?: string;
+        routineId?: string;
+        questionId?: string;
+        approvalId?: string;
+      };
+    }) => void,
+  ) => () => void;
+  notifyClick?: (payload: {
+    kind: "turn-end" | "routine" | "ask-user" | "approval";
+    contextRef?: {
+      sessionId?: string;
+      routineId?: string;
+      questionId?: string;
+      approvalId?: string;
+    };
+  }) => Promise<{ ok: boolean }>;
 };
 
 // ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─

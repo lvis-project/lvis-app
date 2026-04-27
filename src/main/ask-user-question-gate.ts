@@ -11,6 +11,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { WebContents } from "electron";
+import type { NotificationService } from "./notification-service.js";
 
 export interface AskUserQuestionRequest {
   id: string;
@@ -54,12 +55,15 @@ export const IPC_ASK_USER_QUESTION_TIMEOUT = "lvis:ask-user-question:timeout";
 export class AskUserQuestionGate {
   private readonly pending = new Map<string, PendingEntry>();
   private readonly timeoutMs: number;
+  private readonly notificationService?: NotificationService;
 
   constructor(
     private readonly webContents: WebContents,
     timeoutMs: number = DEFAULT_TIMEOUT_MS,
+    notificationService?: NotificationService,
   ) {
     this.timeoutMs = timeoutMs;
+    this.notificationService = notificationService;
   }
 
   ask(input: {
@@ -85,6 +89,20 @@ export class AskUserQuestionGate {
     }
     if (this.webContents.isDestroyed()) {
       return Promise.resolve({ requestId: req.id, dismissed: true });
+    }
+    // Issue #260 — fire system notification at the entry of the wait. If
+    // the window is focused this becomes an in-app toast; otherwise an OS
+    // notification surfaces the question while the user is in another app.
+    try {
+      this.notificationService?.fire({
+        kind: "ask-user",
+        title: "질문이 도착했습니다",
+        body: req.question,
+        contextRef: { questionId: req.id },
+        urgent: req.urgent,
+      });
+    } catch {
+      // notification failure must never block the gate
     }
     return new Promise<AskUserQuestionResponse>((resolve) => {
       const timer = setTimeout(() => {

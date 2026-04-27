@@ -15,7 +15,7 @@ import { MainContent } from "./MainContent.js";
 import { Sidebar } from "./Sidebar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
 import { StatusBar } from "./components/StatusBar.js";
-import { useStatusBar } from "./hooks/use-status-bar.js";
+import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useRoutineResult } from "./hooks/use-routine-result.js";
@@ -306,7 +306,27 @@ export function App() {
   // toasts. The hook subscribes to existing install-progress / install-result
   // / uninstall-result events and reads the routine schedule from settings,
   // so wiring it here is enough to surface lifecycle feedback.
-  const { persistent: statusPersistent, toasts: statusToasts } = useStatusBar({ api });
+  // Issue #260 — when a notification toast is clicked, dispatch the click via
+  // notifyClick IPC (which restores+focuses the window) and dismiss the
+  // toast. Other toast producers leave `notification` undefined so this
+  // handler is a no-op for them.
+  const { persistent: statusPersistent, toasts: statusToasts, removeToast: statusRemoveToast } =
+    useStatusBar({ api });
+  const handleStatusToastClick = useCallback(
+    (toast: { id: string; notification?: NotificationToastMeta }) => {
+      if (!toast.notification) return;
+      try {
+        void api.notifyClick?.({
+          kind: toast.notification.kind,
+          contextRef: toast.notification.contextRef,
+        });
+      } catch {
+        // notifyClick is best-effort UX; failure must not crash the bar.
+      }
+      statusRemoveToast(toast.id);
+    },
+    [api, statusRemoveToast],
+  );
 
   // ─── Render ───────────────────────────────────
   return (
@@ -374,7 +394,7 @@ export function App() {
           />
         </main>
         </div>
-        <StatusBar persistent={statusPersistent} toasts={statusToasts} />
+        <StatusBar persistent={statusPersistent} toasts={statusToasts} onToastClick={handleStatusToastClick} />
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
