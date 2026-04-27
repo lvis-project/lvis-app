@@ -15,7 +15,7 @@ import { MainContent } from "./MainContent.js";
 import { Sidebar } from "./Sidebar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
 import { StatusBar } from "./components/StatusBar.js";
-import { useStatusBar } from "./hooks/use-status-bar.js";
+import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useRoutineResult } from "./hooks/use-routine-result.js";
@@ -313,7 +313,7 @@ export function App() {
   const { persistent: statusPersistent, toasts: statusToasts, removeToast: statusRemoveToast } =
     useStatusBar({ api });
   const handleStatusToastClick = useCallback(
-    (toast: { id: string; notification?: { kind: "turn-end" | "routine" | "ask-user" | "approval"; contextRef?: { sessionId?: string; routineId?: string; questionId?: string; approvalId?: string } } }) => {
+    (toast: { id: string; notification?: NotificationToastMeta }) => {
       if (!toast.notification) return;
       try {
         void api.notifyClick?.({

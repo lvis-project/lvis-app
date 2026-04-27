@@ -138,6 +138,14 @@ export async function bootstrap(
     getMainWindow,
     auditLogger: bootAuditLogger,
   });
+  // Safety net: NotificationService is always constructed at this point.
+  // If it's somehow undefined, that indicates a boot-order regression
+  // (e.g. a refactor that moved the construction after a conditional branch).
+  // Throw early with a clear message so the regression is caught immediately
+  // rather than silently no-oping on every notification fire.
+  if (!notificationService) {
+    throw new Error("NotificationService failed to initialize — boot order regression");
+  }
   // Routine delivery sites pass `notificationService` explicitly per-call so
   // there's no module-level singleton to reset between tests/processes.
 

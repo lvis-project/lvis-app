@@ -83,6 +83,9 @@ const ELLIPSIS = "…";
  *   - approval : 2 s  (coalesce micro-bursts only)
  *   - routine  : 0    (rare — always fire)
  *   - ask-user : 0    (rare — user expects every one)
+ *
+ * In-memory only — cooldown resets on app restart by design
+ * (cross-restart persistence is overkill for an anti-spam gate).
  */
 const COOLDOWN_MS_BY_KIND: Record<NotificationKind, number> = {
   "turn-end": 30_000,
@@ -92,13 +95,14 @@ const COOLDOWN_MS_BY_KIND: Record<NotificationKind, number> = {
 };
 
 /**
- * Strip ASCII control chars (0x00-0x1F + 0x7F) which are common in LLM /
- * user-supplied bodies (newlines from prompts, ANSI escape sequences from
- * terminal-style output, etc). Windows toast XML and Linux notify-send both
- * mis-render or split on these. Defense-in-depth: applied to title too,
+ * Strip ASCII control chars (C0: 0x00–0x1F, DEL: 0x7F, C1: 0x80–0x9F) which
+ * are common in LLM / user-supplied bodies (newlines from prompts, ANSI escape
+ * sequences from terminal-style output, etc). Windows toast XML and Linux
+ * notify-send both mis-render or split on these. C1 range (0x80–0x9F) can
+ * also surprise Windows toast XML. Defense-in-depth: applied to title too,
  * since the routine kind interpolates user/admin data.
  */
-const CONTROL_CHARS_RE = /[\x00-\x1f\x7f]/g;
+const CONTROL_CHARS_RE = /[\x00-\x1f\x7f-\x9f]/g;
 function stripControlChars(s: string): string {
   return s.replace(CONTROL_CHARS_RE, "");
 }
@@ -210,10 +214,11 @@ export class NotificationService {
   private readonly isReady: () => boolean;
   private readonly isTestEnv: () => boolean;
   /**
-   * Per-kind last-fire timestamps (ms epoch). Used by the cooldown gate to
-   * suppress bursts on a per-kind basis. Suppressed events still flow through
-   * the audit logger — silently dropping would hide bugs (e.g. runaway
-   * turn-end loops).
+   * Per-kind last-fire monotonic timestamps (performance.now() ms). Using a
+   * monotonic clock (immune to NTP steps and manual clock changes) means a
+   * wall-clock jump backwards never produces a negative elapsedMs that would
+   * suppress all subsequent fires until real time "catches up". The audit
+   * `timestamp` field keeps Date.now() because it records wall-clock event time.
    */
   private readonly lastFiredAt = new Map<NotificationKind, number>();
 
@@ -234,10 +239,17 @@ export class NotificationService {
     // bursts. Suppressed events MUST still go through the audit logger so we
     // can detect spam in field telemetry. routine and ask-user have a 0 ms
     // cooldown (always fire).
+    //
+    // Timing: performance.now() is monotonic (immune to NTP steps / manual
+    // wall-clock changes). A Date.now() backwards jump would produce a
+    // negative elapsedMs that trivially passes `< cooldownMs`, suppressing
+    // every subsequent fire until real time "catches up". Monotonic timing
+    // avoids that. The audit `timestamp` field keeps Date.now() intentionally
+    // because it records wall-clock event time for human-readable log entries.
     const cooldownMs = COOLDOWN_MS_BY_KIND[opts.kind] ?? 0;
     if (cooldownMs > 0) {
       const last = this.lastFiredAt.get(opts.kind) ?? 0;
-      const now = Date.now();
+      const now = performance.now();
       const elapsedMs = now - last;
       if (last !== 0 && elapsedMs < cooldownMs) {
         this.auditSuppressed(opts.kind, elapsedMs);

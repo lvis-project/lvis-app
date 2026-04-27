@@ -104,6 +104,12 @@ describe("NotificationService — body truncation", () => {
     expect(__test.truncateBody(dirty)).toBe("hello[31mworld[0mend");
   });
 
+  it("L5: strips C1 control chars (0x80–0x9F) — Windows toast XML safety", () => {
+    // C1 range (\x80–\x9F) can surprise Windows toast XML just like C0 range.
+    const dirty = "start\x80mid\x9fend";
+    expect(__test.stripControlChars(dirty)).toBe("startmidend");
+  });
+
   it("collapses ANSI/CR/LF to a clean single-line string (M1)", () => {
     const dirty = "line1\nline2\r\nline3";
     expect(__test.truncateBody(dirty)).toBe("line1line2line3");
@@ -326,12 +332,13 @@ describe("NotificationService — per-kind rate limit (M4)", () => {
       isTestEnv: () => false,
     });
     // Fire 3 within 1s — cooldown is 30s for turn-end, so only the first fires.
-    const now = Date.now();
-    vi.spyOn(Date, "now").mockImplementation(() => now);
+    // Cooldown now uses performance.now() (monotonic) — stub it to control timing.
+    const perfBase = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase);
     svc.fire({ kind: "turn-end", title: "응답", body: "a" });
-    vi.spyOn(Date, "now").mockImplementation(() => now + 200);
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 200);
     svc.fire({ kind: "turn-end", title: "응답", body: "b" });
-    vi.spyOn(Date, "now").mockImplementation(() => now + 800);
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 800);
     svc.fire({ kind: "turn-end", title: "응답", body: "c" });
     expect(factoryStub.calls.length).toBe(1);
     // Audit: 1 fired + 2 suppressed.
@@ -355,12 +362,12 @@ describe("NotificationService — per-kind rate limit (M4)", () => {
       isReady: () => true,
       isTestEnv: () => false,
     });
-    const now = Date.now();
-    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const perfBase = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase);
     svc.fire({ kind: "turn-end", title: "응답", body: "a" });
-    vi.spyOn(Date, "now").mockImplementation(() => now + 1_000);
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 1_000);
     svc.fire({ kind: "turn-end", title: "응답", body: "b" }); // suppressed
-    vi.spyOn(Date, "now").mockImplementation(() => now + 31_000);
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 31_000);
     svc.fire({ kind: "turn-end", title: "응답", body: "c" }); // succeeds
     expect(factoryStub.calls.length).toBe(2);
     vi.restoreAllMocks();
@@ -389,13 +396,60 @@ describe("NotificationService — per-kind rate limit (M4)", () => {
       isReady: () => true,
       isTestEnv: () => false,
     });
-    const now = Date.now();
-    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const perfBase = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase);
     svc.fire({ kind: "approval", title: "승인", body: "a" });
-    vi.spyOn(Date, "now").mockImplementation(() => now + 500);
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 500);
     svc.fire({ kind: "approval", title: "승인", body: "b" }); // suppressed
-    vi.spyOn(Date, "now").mockImplementation(() => now + 2_500);
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 2_500);
     svc.fire({ kind: "approval", title: "승인", body: "c" }); // succeeds
+    expect(factoryStub.calls.length).toBe(2);
+    vi.restoreAllMocks();
+  });
+
+  it("L2: exactly cooldownMs elapsed allows fire (< not <=)", () => {
+    // Boundary semantics: elapsedMs === cooldownMs must be allowed through.
+    // This test locks the `<` comparison so it can't accidentally become `<=`.
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    const cooldownMs = __test.COOLDOWN_MS_BY_KIND["turn-end"]; // 30_000
+    const perfBase = performance.now();
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase);
+    svc.fire({ kind: "turn-end", title: "a", body: "a" }); // fires
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + cooldownMs); // exactly at boundary
+    svc.fire({ kind: "turn-end", title: "b", body: "b" }); // must fire (elapsedMs === cooldownMs is not suppressed)
+    expect(factoryStub.calls.length).toBe(2);
+    vi.restoreAllMocks();
+  });
+
+  it("M1: wall-clock backward jump (clock skew) does not suppress subsequent fires", () => {
+    // Simulate an NTP step where Date.now() jumps backwards. Since cooldown
+    // now uses performance.now() (monotonic), the backward wall-clock jump
+    // has no effect on the gate — fires proceed normally.
+    const win = makeMockWindow({ focused: false, minimized: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+    });
+    const perfBase = performance.now();
+    // First fire at perfBase, then advance monotonic clock past cooldown.
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase);
+    svc.fire({ kind: "turn-end", title: "a", body: "a" }); // fires
+    // Simulate wall clock going backward (Date.now() drops by 1 hour).
+    // Monotonic clock still advances past cooldown.
+    vi.spyOn(performance, "now").mockImplementation(() => perfBase + 31_000);
+    const wallNow = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => wallNow - 3_600_000); // 1h backward
+    svc.fire({ kind: "turn-end", title: "b", body: "b" }); // must fire despite wall clock going backward
     expect(factoryStub.calls.length).toBe(2);
     vi.restoreAllMocks();
   });

@@ -45,6 +45,7 @@ import {
   getLatestRoutineResult,
 } from "./routines/routine-delivery.js";
 import { devLinkedEntryAllowed, isDevModeUnlocked } from "./boot/dev-flags.js";
+import { NOTIFICATION_KINDS } from "./main/notification-service.js";
 
 /**
  * Convert the UI's "user-assistant-only ordinal" to the real index into
@@ -1631,9 +1632,10 @@ ${input}`;
     // Reject anything that isn't one of the 4 known kinds and log a warn so
     // a misbehaving renderer / plugin webview can't quietly trigger window
     // focus with arbitrary state. No zod needed — the surface is tiny.
-    const KNOWN_KINDS = new Set(["turn-end", "routine", "ask-user", "approval"]);
+    // NOTIFICATION_KINDS is the canonical set exported from notification-service
+    // so validation list and NotificationKind type stay in sync automatically.
     const kind = (payload as { kind?: unknown } | null | undefined)?.kind;
-    if (typeof kind !== "string" || !KNOWN_KINDS.has(kind)) {
+    if (typeof kind !== "string" || !NOTIFICATION_KINDS.has(kind as never)) {
       auditLogger.log({
         timestamp: new Date().toISOString(),
         sessionId: "ipc-bridge",
@@ -1641,6 +1643,8 @@ ${input}`;
         input: JSON.stringify({
           event: "notification.clicked.invalid-payload",
           receivedKind: typeof kind === "string" ? kind.slice(0, 32) : typeof kind,
+          // Forensic signal: whether contextRef was present on the malformed payload.
+          hasContextRef: typeof (payload as Record<string, unknown> | null | undefined)?.contextRef === "object",
         }),
       });
       return { ok: false, error: "invalid-payload" };
