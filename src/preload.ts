@@ -23,7 +23,7 @@ function safeResolveFileUrl(relative: string): string {
     return "";
   }
 }
-const pluginPreloadUrl = safeResolveFileUrl("plugin-preload.js");
+const pluginPreloadUrl = safeResolveFileUrl("plugin-preload.cjs");
 const pluginShellUrl = safeResolveFileUrl("plugin-ui-shell.html");
 
 type PluginActionResult =
