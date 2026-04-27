@@ -18,36 +18,15 @@
  * today (note: `email_reply` is in tools[] only, not uiCallable[]).
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { PluginRuntime } from "../runtime.js";
 import type { PluginSignatureVerifier } from "../signature-verifier.js";
 
-// ESM compatibility: `__dirname` is not defined under NodeNext/ESM. Derive it
-// from `import.meta.url` so this suite runs under both vitest's CJS shim and
-// a future pure-ESM runner.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const installedRoot = resolve(__dirname, "..", "..", "..", "plugins", "installed");
-
-function listInstalledManifests(): Array<{ id: string; path: string; manifest: Record<string, unknown> }> {
-  if (!existsSync(installedRoot)) return [];
-  const entries = readdirSync(installedRoot);
-  const manifests: Array<{ id: string; path: string; manifest: Record<string, unknown> }> = [];
-  for (const entry of entries) {
-    const dir = join(installedRoot, entry);
-    if (!statSync(dir).isDirectory()) continue;
-    const manifestPath = join(dir, "plugin.json");
-    if (!existsSync(manifestPath)) continue;
-    const raw = readFileSync(manifestPath, "utf8");
-    const manifest = JSON.parse(raw) as Record<string, unknown>;
-    manifests.push({ id: entry, path: manifestPath, manifest });
-  }
-  return manifests;
-}
 
 async function writeTempPlugin(opts: {
   installPolicy: "admin" | "user";
@@ -210,29 +189,3 @@ describe("callFromUi scope enforcement", () => {
   });
 });
 
-describe.skip("installed manifests: uiCallable ⊂ tools (Phase 2-final: scan moved to marketplace server)", () => {
-  // Phase 2-final removed `<appRoot>/plugins/installed/`. Static manifest
-  // scanning lives in the lvis-marketplace publish-time validator now.
-  // This block is kept skipped (not deleted) so the test data structure
-  // stays available if/when an in-app userData scan is wired up.
-  const manifests = listInstalledManifests();
-
-  it("discovers at least one installed manifest", () => {
-    expect(manifests.length).toBeGreaterThan(0);
-  });
-
-  for (const { id, path, manifest } of manifests) {
-    it(`[${id}] every uiCallable entry is declared in tools[]`, () => {
-      const uiCallable = Array.isArray(manifest.uiCallable) ? (manifest.uiCallable as unknown[]) : [];
-      const tools = Array.isArray(manifest.tools) ? (manifest.tools as unknown[]) : [];
-      const toolSet = new Set(tools.filter((t): t is string => typeof t === "string"));
-      const offenders = uiCallable.filter(
-        (name): name is string => typeof name === "string" && !toolSet.has(name),
-      );
-      expect(
-        offenders,
-        `manifest ${path} exposes uiCallable entries not in tools[]: ${offenders.join(", ")}`,
-      ).toEqual([]);
-    });
-  }
-});

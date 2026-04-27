@@ -208,9 +208,12 @@ describe("Phase 1 — plugin trust boundary", () => {
       await runtime.load();
 
       expect(runtime.listPluginIds()).not.toContain("tb.unsigned");
+      // Audit level is `error` for parity with `plugin_signature_rejected` —
+      // both signal "plugin failed the signature gate", and a warn for one
+      // and error for the other obscures forensics.
       expect(
         audit.calls.some(
-          (c) => c.level === "warn" && c.message === "plugin_unsigned_user_rejected",
+          (c) => c.level === "error" && c.message === "plugin_unsigned_user_rejected",
         ),
       ).toBe(true);
     });

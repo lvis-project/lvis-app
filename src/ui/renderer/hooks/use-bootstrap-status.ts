@@ -26,7 +26,9 @@ export interface BootstrapStatusState {
   installing: boolean;
 }
 
-export function useBootstrapStatus(api: LvisApi): BootstrapStatusState & { dismiss: () => void } {
+export function useBootstrapStatus(
+  api: LvisApi,
+): BootstrapStatusState & { dismiss: () => void; retry: () => Promise<void> } {
   const [status, setStatus] = useState<BootstrapStatusEvent | null>(null);
   const [installing, setInstalling] = useState(false);
 
@@ -47,5 +49,15 @@ export function useBootstrapStatus(api: LvisApi): BootstrapStatusState & { dismi
     status,
     installing,
     dismiss: () => setStatus(null),
+    // The host re-emits start/complete/error during the retry, so the hook
+    // doesn't need to mutate `status` itself — let the IPC subscription
+    // drive the banner update.
+    retry: async () => {
+      try {
+        await api.retryBootstrap();
+      } catch {
+        /* the host's error event will surface via onBootstrapStatus */
+      }
+    },
   };
 }

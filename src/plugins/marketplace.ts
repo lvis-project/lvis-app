@@ -153,7 +153,7 @@ interface PluginHistoryEntry {
 
 export class PluginMarketplaceService {
   private readonly registryPath: string;
-  private readonly installedDir: string;
+  private readonly userInstalledDir: string;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly fetcher: MarketplaceFetcher;
   /** Sprint 3-B §9.6: per-plugin version cache for rollback. */
@@ -186,7 +186,7 @@ export class PluginMarketplaceService {
     deploymentGuard?: PluginDeploymentGuard,
   ) {
     this.registryPath = paths.registryPath;
-    this.installedDir = paths.userInstalledDir;
+    this.userInstalledDir = paths.userInstalledDir;
     this.cacheRoot = paths.cacheRoot;
     this.deploymentGuard = deploymentGuard;
     this.fetcher = fetcher;
@@ -829,7 +829,7 @@ export class PluginMarketplaceService {
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
     const installedManifestDir = dirname(manifestPath);
-    if (this.isWithin(this.installedDir, installedManifestDir)) {
+    if (this.isWithin(this.userInstalledDir, installedManifestDir)) {
       await rm(installedManifestDir, { recursive: true, force: true });
     }
   }
@@ -878,7 +878,7 @@ export class PluginMarketplaceService {
     version: string,
     onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<string> {
-    const pluginDir = resolve(this.installedDir, plugin.id);
+    const pluginDir = resolve(this.userInstalledDir, plugin.id);
     const zipBuffer = await this.downloadVerifiedMarketplaceZip(plugin, version, onProgress);
     await this.extractMarketplaceZip(plugin.id, zipBuffer, pluginDir);
 
@@ -1027,7 +1027,7 @@ export class PluginMarketplaceService {
     zipBuffer: Buffer,
     pluginDir: string,
   ): Promise<void> {
-    const stageDir = resolve(this.installedDir, `.${pluginId}.stage-${randomUUID()}`);
+    const stageDir = resolve(this.userInstalledDir, `.${pluginId}.stage-${randomUUID()}`);
     await rm(stageDir, { recursive: true, force: true });
     await mkdir(stageDir, { recursive: true });
 
@@ -1060,7 +1060,7 @@ export class PluginMarketplaceService {
       // and then rename stageDir into place.  Only after both renames succeed do
       // we remove the old directory, ensuring the live pluginDir is never in a
       // half-removed state if the process is killed between operations.
-      const oldDir = resolve(this.installedDir, `.${pluginId}.old-${randomUUID()}`);
+      const oldDir = resolve(this.userInstalledDir, `.${pluginId}.old-${randomUUID()}`);
       let hadOldDir = false;
       try {
         await rename(pluginDir, oldDir);
