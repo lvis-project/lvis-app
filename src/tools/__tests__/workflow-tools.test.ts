@@ -27,24 +27,55 @@ function ctx(sessionId = "session-x"): ToolExecutionContext {
 describe("ask_user_question tool", () => {
   it("rejects when gate is missing", async () => {
     const tool = createAskUserQuestionTool({ getGate: () => undefined });
-    const r = await tool.execute({ question: "Pick one" }, ctx());
+    const r = await tool.execute(
+      { questions: [{ question: "Pick one" }] },
+      ctx(),
+    );
     expect(r.isError).toBe(true);
   });
 
-  it("rejects empty question", async () => {
+  it("rejects empty questions[]", async () => {
     const tool = createAskUserQuestionTool({
       getGate: () => ({
-        ask: () => Promise.resolve({ requestId: "r", choice: "a" }),
+        ask: () => Promise.resolve({ requestId: "r", answers: [] }),
       }) as never,
     });
-    const r = await tool.execute({ question: "  " }, ctx());
+    const r = await tool.execute({ questions: [] }, ctx());
     expect(r.isError).toBe(true);
   });
 
-  it("forwards question + returns user choice", async () => {
+  it("rejects when any questions[].question is blank", async () => {
+    const tool = createAskUserQuestionTool({
+      getGate: () => ({
+        ask: () => Promise.resolve({ requestId: "r", answers: [] }),
+      }) as never,
+    });
+    const r = await tool.execute(
+      { questions: [{ question: "  " }] },
+      ctx(),
+    );
+    expect(r.isError).toBe(true);
+  });
+
+  it("rejects when more than 4 questions are supplied", async () => {
+    const tool = createAskUserQuestionTool({
+      getGate: () => ({
+        ask: () => Promise.resolve({ requestId: "r", answers: [] }),
+      }) as never,
+    });
+    const r = await tool.execute(
+      {
+        questions: Array.from({ length: 5 }, (_, i) => ({ question: `q${i}` })),
+      },
+      ctx(),
+    );
+    expect(r.isError).toBe(true);
+  });
+
+  it("forwards questions + returns answers[] verbatim", async () => {
     const ask = vi.fn().mockResolvedValue({
       requestId: "r1",
-      choice: "yes",
+      answers: [{ choice: "yes" }, { freeText: "later" }],
       dismissed: false,
     });
     const tool = createAskUserQuestionTool({
@@ -52,22 +83,41 @@ describe("ask_user_question tool", () => {
     });
     const r = await tool.execute(
       {
-        question: "Continue?",
-        choices: ["yes", "no"],
+        questions: [
+          { question: "Continue?", choices: ["yes", "no"] },
+          { question: "When?" },
+        ],
         urgent: true,
       },
       ctx(),
     );
     expect(r.isError).toBe(false);
     const parsed = JSON.parse(r.output);
-    expect(parsed.choice).toBe("yes");
+    expect(parsed.answers).toEqual([{ choice: "yes" }, { freeText: "later" }]);
     expect(parsed.dismissed).toBe(false);
     expect(ask).toHaveBeenCalledWith({
-      question: "Continue?",
-      choices: ["yes", "no"],
-      allowFreeText: true,
+      questions: [
+        { question: "Continue?", choices: ["yes", "no"], allowFreeText: true },
+        { question: "When?", choices: undefined, allowFreeText: true },
+      ],
       urgent: true,
+      abortSignal: undefined,
     });
+  });
+
+  it("threads ctx.abortSignal into gate.ask", async () => {
+    const ask = vi.fn().mockResolvedValue({ requestId: "r1", answers: [] });
+    const tool = createAskUserQuestionTool({
+      getGate: () => ({ ask }) as never,
+    });
+    const ac = new AbortController();
+    await tool.execute(
+      { questions: [{ question: "x" }] },
+      { ...ctx(), abortSignal: ac.signal },
+    );
+    expect(ask).toHaveBeenCalledWith(
+      expect.objectContaining({ abortSignal: ac.signal }),
+    );
   });
 });
 
