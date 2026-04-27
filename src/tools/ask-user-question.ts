@@ -46,7 +46,7 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
         },
       },
     },
-    execute: async (rawInput) => {
+    execute: async (rawInput, ctx) => {
       const gate = deps.getGate();
       if (!gate) {
         return {
@@ -77,6 +77,9 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
         choices,
         allowFreeText,
         urgent,
+        // Honor the user's 중단 button — without this the gate sits on its
+        // 5-minute timer regardless of the conversation loop's abort.
+        abortSignal: ctx.abortSignal,
       });
       return {
         output: JSON.stringify({
