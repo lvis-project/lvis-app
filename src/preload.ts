@@ -59,6 +59,10 @@ const api = {
   setMarketplaceApiKey: async (apiKey: string) => ipcRenderer.invoke("lvis:settings:marketplace:set-api-key", apiKey),
   hasMarketplaceApiKey: async () => ipcRenderer.invoke("lvis:settings:marketplace:has-api-key") as Promise<boolean>,
   deleteMarketplaceApiKey: async () => ipcRenderer.invoke("lvis:settings:marketplace:delete-api-key"),
+  // #FU259 — MCP marketplace catalog + install
+  listMcpCatalog: async () => ipcRenderer.invoke("lvis:mcp:catalog:list"),
+  installMcpFromMarketplace: async (slug: string) =>
+    ipcRenderer.invoke("lvis:mcp:install-from-marketplace", slug),
 
   // ─── Microsoft Graph — dual-environment login ────
   msGraphGetState: async () =>

@@ -80,6 +80,15 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     setMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
     hasMarketplaceApiKey: vi.fn(async () => false),
     deleteMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
+    listMcpCatalog: vi.fn(async () => []),
+    installMcpFromMarketplace: vi.fn(async (slug: string) => ({
+      ok: true,
+      slug,
+      installDir: `/tmp/mcp-servers/${slug}`,
+      connected: true,
+      needsCredential: false,
+      authMode: "none" as const,
+    })),
 
     chatHasProvider: vi.fn(async () => hasProvider),
     chatSend: vi.fn(async () => ({ ok: true })),
