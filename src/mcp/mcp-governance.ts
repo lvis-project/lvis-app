@@ -442,7 +442,7 @@ export class McpGovernance {
 
 // ─── Helpers ────────────────────────────────────────
 
-/** URL 패턴 매칭 (*.portal.example.com → https://hr-api.portal.example.com/mcp 매칭) */
+/** URL 패턴 매칭 (*.example.com → https://api.example.com/mcp 매칭) */
 function matchUrlPattern(pattern: string, url: string): boolean {
   try {
     const hostname = new URL(url).hostname;
