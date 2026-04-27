@@ -58,7 +58,10 @@ export function SessionTodoPanel({ api }: { api: LvisApi }) {
 
   return (
     <div
-      className="border-t border-dashed border-amber-500/40 bg-amber-500/5 text-xs"
+      // The input cluster below us already draws its own `border-t bg-card`
+      // — we don't double up. Side borders + dashed amber tint signal "this
+      // is the assistant's running plan" without a redundant horizontal rule.
+      className="border-x border-dashed border-amber-500/40 bg-amber-500/5 text-xs"
       data-testid="session-todo-panel"
     >
       <button
