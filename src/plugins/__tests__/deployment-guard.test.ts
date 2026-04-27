@@ -8,7 +8,7 @@ import { mkdtempSync } from "node:fs";
 /**
  * Phase 1.5 test gate — PluginDeploymentGuard §7.2-§7.3
  *
- * Guard는 default-deny 정책: userInstalledDir 하위에 있는 플러그인만 "user"로 간주.
+ * Guard는 default-deny 정책: pluginsRoot 하위에 있는 플러그인만 "user"로 간주.
  * 그 외는 모두 "managed"로 간주하여 user actor의 제거/비활성화를 거부.
  */
 describe("PluginDeploymentGuard", () => {
@@ -39,7 +39,7 @@ describe("PluginDeploymentGuard", () => {
     await writeFile(pluginManifest, "{}", "utf-8");
     await writeRegistry([{ id: "p-managed", manifestPath: pluginManifest }]);
 
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-managed", "user");
 
     expect(result.allowed).toBe(false);
@@ -53,7 +53,7 @@ describe("PluginDeploymentGuard", () => {
     await writeFile(manifestPath, "{}", "utf-8");
     await writeRegistry([{ id: "p-user", manifestPath }]);
 
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-user", "user");
 
     expect(result.allowed).toBe(true);
@@ -66,7 +66,7 @@ describe("PluginDeploymentGuard", () => {
     await writeFile(pluginManifest, "{}", "utf-8");
     await writeRegistry([{ id: "p-managed", manifestPath: pluginManifest }]);
 
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-managed", "it-admin");
 
     expect(result.allowed).toBe(true);
@@ -75,7 +75,7 @@ describe("PluginDeploymentGuard", () => {
   it("rejects unknown pluginId with 'not found' reason", async () => {
     await writeRegistry([]);
 
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("missing", "user");
 
     expect(result.allowed).toBe(false);
@@ -89,7 +89,7 @@ describe("PluginDeploymentGuard", () => {
     await writeFile(manifestPath, "{}", "utf-8");
     await writeRegistry([{ id: "spoof", manifestPath }]);
 
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("spoof", "user");
 
     // 'installed-foo'는 'installed/'의 prefix confusion. relative()가 '..'로 시작하는 값을
@@ -106,7 +106,7 @@ describe("PluginDeploymentGuard", () => {
     // relative manifestPath가 registry dirname 기준으로 resolve되어 installedDir 밖으로 탈출.
     await writeRegistry([{ id: "escape", manifestPath: "elsewhere/plugin.json" }]);
 
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("escape", "user");
 
     // default-deny: installedDir 밖에 있으므로 managed로 처리 → user actor 거부.
@@ -124,7 +124,7 @@ describe("PluginDeploymentGuard", () => {
     );
     await writeRegistry([{ id: "p-managed-inside", manifestPath }]);
 
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-managed-inside", "user");
 
     expect(result.allowed).toBe(false);
@@ -142,7 +142,7 @@ describe("PluginDeploymentGuard", () => {
     );
     await writeRegistry([{ id: "p-user-explicit", manifestPath }]);
 
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-user-explicit", "user");
 
     expect(result.allowed).toBe(true);
@@ -160,33 +160,33 @@ describe("PluginDeploymentGuard", () => {
     );
     await writeRegistry([{ id: "p-legacy", manifestPath }]);
 
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canUninstall("p-legacy", "user");
 
     expect(result.allowed).toBe(true);
   });
 
   it("canInstall: rejects user installing a managed catalog item", async () => {
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canInstall("p-managed", "user", "admin");
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/installed by user/);
   });
 
   it("canInstall: allows user installing a non-managed catalog item", async () => {
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canInstall("p-user", "user", "user");
     expect(result.allowed).toBe(true);
   });
 
   it("canInstall: allows user installing when installPolicy field is absent", async () => {
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canInstall("p-legacy", "user", undefined);
     expect(result.allowed).toBe(true);
   });
 
   it("canInstall: always allows it-admin actor (trust boundary bypass)", async () => {
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const result = await guard.canInstall("p-managed", "it-admin", "admin");
     expect(result.allowed).toBe(true);
   });
@@ -198,7 +198,7 @@ describe("PluginDeploymentGuard", () => {
     await writeFile(pluginManifest, "{}", "utf-8");
     await writeRegistry([{ id: "p-managed", manifestPath: pluginManifest }]);
 
-    const guard = new PluginDeploymentGuard({ registryPath, userInstalledDir: installedDir });
+    const guard = new PluginDeploymentGuard({ registryPath, pluginsRoot: installedDir });
     const uninstall = await guard.canUninstall("p-managed", "user");
     const disable = await guard.canDisable("p-managed", "user");
 
