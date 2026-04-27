@@ -81,7 +81,6 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
   const normalizedUserDataDir = String(userDataDir || "").trim();
   const pageIndexWorkspace = resolve(repoRoot, ".pageindex-workspace");
   const launcherScriptPath = resolve(repoRoot, "scripts", "run-electron-dev.mjs");
-  const launcherScriptNeedle = `${basename(repoRoot)}/scripts/run-electron-dev.mjs`;
   const mainEntryPath = mainOutput;
   if (!normalizedUserDataDir) return;
 
@@ -91,22 +90,24 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
     `$userDataDir = '${escapePowerShellSingleQuoted(normalizedUserDataDir)}'`,
     `$pageIndexWorkspace = '${escapePowerShellSingleQuoted(pageIndexWorkspace)}'`,
     `$launcherScriptPath = '${escapePowerShellSingleQuoted(launcherScriptPath)}'`,
-    `$launcherScriptNeedle = '${escapePowerShellSingleQuoted(launcherScriptNeedle)}'`,
     `$mainEntryPath = '${escapePowerShellSingleQuoted(mainEntryPath)}'`,
-    "$killed = 0",
     "$killedPids = @()",
-    // Filter Electron processes by the resolved userDataDir path (full
-    // path match, not just the `Electron-LVIS-Dev` substring) so a
-    // sibling repo whose profile starts with the same prefix isn't
-    // culled. The hash-suffixed profile name also makes this disjoint
-    // by construction, but pinning to the path is the load-bearing
-    // guarantee.
-    "$staleLaunchers = @(Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | Where-Object { $_.ProcessId -ne $currentPid -and ( $_.CommandLine -like \"*$launcherScriptPath*\" -or $_.CommandLine -like \"*$launcherScriptNeedle*\" ) })",
+    // Launcher kill 은 절대경로 (`$launcherScriptPath`) 만 매칭. 이전엔
+    // `$launcherScriptNeedle = ${basename(repoRoot)}/scripts/run-electron-dev.mjs`
+    // 를 OR 로 가지고 있었지만, 같은 폴더명을 가진 다른 checkout
+    // (`/work/lvis-app` vs `/home/lvis-app`) 의 launcher 까지 매칭돼
+    // sibling session 을 죽일 수 있었음. profile 은 hash 로 disjoint 하지만
+    // launcher 노드 프로세스에는 profile 정보가 없으므로 path 가 유일한
+    // discriminator.
+    "$staleLaunchers = @(Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | Where-Object { $_.ProcessId -ne $currentPid -and $_.CommandLine -like \"*$launcherScriptPath*\" })",
     "foreach ($launcher in $staleLaunchers) {",
     "  taskkill /PID $launcher.ProcessId /T /F | Out-Null",
     "  $killedPids += \"node:$($launcher.ProcessId)\"",
     "}",
     "$targets = @()",
+    // Electron / pageindex worker 는 resolved userDataDir / workspace 의
+    // 전체 경로로 매칭 — `Electron-LVIS-Dev` substring 은 다른 dev profile
+    // prefix 와 collide 가능. profile hash suffix + path 매칭의 이중 가드.
     "if ($userDataDir.Length -gt 0) {",
     "  $targets += Get-CimInstance Win32_Process -Filter \"Name = 'electron.exe'\" | Where-Object { $_.CommandLine -like \"*$mainEntryPath*\" -and $_.CommandLine -like \"*$userDataDir*\" }",
     "}",
@@ -115,7 +116,9 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
     "}",
     "$targets = @($targets | Group-Object ProcessId | ForEach-Object { $_.Group[0] })",
     "foreach ($target in $targets) {",
-    "  Stop-Process -Id $target.ProcessId -Force -ErrorAction SilentlyContinue",
+    // taskkill /T /F 로 자식 프로세스 트리까지 같이 종료. `Stop-Process
+    // -Force` 는 자식을 남겨서 stale Electron 트리 청소 목적이 깨졌음.
+    "  taskkill /PID $target.ProcessId /T /F | Out-Null",
     "  $killedPids += \"$($target.Name):$($target.ProcessId)\"",
     "}",
     "Remove-Item -LiteralPath (Join-Path $userDataDir 'lvis-tasks.db-wal') -Force -ErrorAction SilentlyContinue",
@@ -129,10 +132,23 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
       ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
-    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-    // Skip the noise when nothing was killed; otherwise log the
-    // PID:name list so a dev who notices a sibling session vanish
-    // can attribute it.
+    // PowerShell 자체 실패 (spawn 에러 / 비정상 exit) 는 stderr 만 찍히고
+    // status != 0 으로 떨어진다. 기존엔 stdout+stderr 를 합쳐 "killed=N"
+    // 패턴 검사만 했는데, 그럼 PS 가 에러 메시지를 stderr 로 뱉었을 때
+    // "cleaned stale dev processes (<error>)" 로 거짓 양성 로깅되는 케이스.
+    if (result.error) {
+      log("electron", `stale process cleanup skipped: ${result.error.message}`);
+      return;
+    }
+    if (typeof result.status === "number" && result.status !== 0) {
+      const detail = (`${result.stderr ?? ""}` || `${result.stdout ?? ""}`).trim()
+        || `exit code ${result.status}`;
+      log("electron", `stale process cleanup failed: ${detail}`);
+      return;
+    }
+    const output = `${result.stdout ?? ""}`.trim();
+    // 정리된 게 있을 때만 PID:name 리스트 로깅. dev 가 sibling 세션이
+    // 사라진 걸 발견했을 때 원인 추적 가능하도록.
     if (output && !/^killed=0\b/.test(output)) {
       log("electron", `cleaned stale dev processes (${output})`);
     }
@@ -167,7 +183,20 @@ function pruneDuplicateMainElectronProcesses(userDataDir, keepPid) {
       ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
-    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+    // stale-cleanup 과 같은 이유로 status / error 우선 검사 — PS 가 stderr
+    // 로 에러 메시지를 뱉었을 때 "pruned (<error>)" 로 거짓 양성 로깅되는
+    // 케이스를 차단.
+    if (result.error) {
+      log("electron", `duplicate main prune skipped: ${result.error.message}`);
+      return;
+    }
+    if (typeof result.status === "number" && result.status !== 0) {
+      const detail = (`${result.stderr ?? ""}` || `${result.stdout ?? ""}`).trim()
+        || `exit code ${result.status}`;
+      log("electron", `duplicate main prune failed: ${detail}`);
+      return;
+    }
+    const output = `${result.stdout ?? ""}`.trim();
     if (output && !/^pruned=0\b/.test(output)) {
       log("electron", `pruned duplicate electron main instances (${output})`);
     }
@@ -493,19 +522,22 @@ function spawnWatcher(tag, cmd, args, opts = {}) {
 }
 
 function runStep(tag, cmd, args, options = {}) {
-  // env 머지 순서가 중요하다. 이전 코드는 default env 를 먼저 깔고 `...options`
-  // 를 뒤에 spread 했는데, caller 가 `options.env` 를 넘기면 spread 가 그
-  // env 객체 전체를 통째로 덮어써서 `LVIS_DEV=1` 가 사라졌다 (예: plugins
-  // 빌드가 `bunEnv` 를 넘길 때). 이제는 caller 의 env 를 먼저 분리하고
-  // process.env + LVIS_DEV + options.env 를 명시적으로 합쳐 caller 가
-  // 추가/오버라이드는 하되 default 는 잃지 않게 한다.
-  const { env: callerEnv, ...rest } = options;
+  // env / cwd / shell / stdio 모두 caller 가 옵션으로 덮어쓸 수 있는 필드라
+  // 명시적으로 destructure 해서 default 와 머지 순서를 분리한다.
+  // - env: `{ ...process.env, LVIS_DEV: "1", ...callerEnv }` — caller 가
+  //   추가/오버라이드는 가능하지만 process.env / LVIS_DEV 같은 default 는
+  //   잃지 않게.
+  // - cwd: caller 명시값 우선, 없으면 repoRoot.
+  // 이전 구현은 `cwd: options.cwd ?? repoRoot` 다음에 `...options` 를
+  // spread 했는데, rest 안에도 cwd 가 살아있어 default 가 도로 덮어졌고
+  // env 도 통째로 교체되는 두 가지 함정이 있었다.
+  const { env: callerEnv, cwd: callerCwd, ...rest } = options;
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
-      cwd: options.cwd ?? repoRoot,
       stdio: "inherit",
       shell: process.platform === "win32" && cmd.toLowerCase().endsWith(".cmd"),
       ...rest,
+      cwd: callerCwd ?? repoRoot,
       env: { ...process.env, LVIS_DEV: "1", ...(callerEnv ?? {}) },
     });
     child.on("error", reject);
