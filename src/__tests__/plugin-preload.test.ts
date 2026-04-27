@@ -16,20 +16,28 @@ const mockInvoke = vi.fn();
 const mockOn = vi.fn();
 const mockRemoveListener = vi.fn();
 
-vi.mock("electron", () => ({
-  default: {
-    contextBridge: {
-      exposeInMainWorld: (key: string, value: unknown) => {
-        exposed.set(key, value);
-      },
+// Plugin preload uses NAMED imports
+// (`import { contextBridge, ipcRenderer } from "electron"`) so esbuild
+// bundles them as `require("electron").contextBridge` directly — no
+// `__toESM` wrapper, no `.default` indirection. The mock therefore exposes
+// `contextBridge` and `ipcRenderer` as named exports.
+vi.mock("electron", () => {
+  const contextBridge = {
+    exposeInMainWorld: (key: string, value: unknown) => {
+      exposed.set(key, value);
     },
-    ipcRenderer: {
-      invoke: (...args: unknown[]) => mockInvoke(...args),
-      on: (...args: unknown[]) => mockOn(...args),
-      removeListener: (...args: unknown[]) => mockRemoveListener(...args),
-    },
-  },
-}));
+  };
+  const ipcRenderer = {
+    invoke: (...args: unknown[]) => mockInvoke(...args),
+    on: (...args: unknown[]) => mockOn(...args),
+    removeListener: (...args: unknown[]) => mockRemoveListener(...args),
+  };
+  return {
+    contextBridge,
+    ipcRenderer,
+    default: { contextBridge, ipcRenderer },
+  };
+});
 
 // Load the preload module once — top-level code executes once per module instance.
 beforeAll(async () => {
