@@ -108,15 +108,28 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
             isError: true,
           };
         }
-        const choices = Array.isArray(q.choices)
+        const filteredChoices = Array.isArray(q.choices)
           ? (q.choices as unknown[]).filter(
               (c): c is string => typeof c === "string" && c.trim().length > 0,
             )
           : undefined;
+        const allowFreeText = q.allowFreeText !== false;
+        // Refuse an unanswerable shape: no choices AND no free-text
+        // input would render a question with no inputs at all and the
+        // user would only be able to dismiss the card.
+        if ((!filteredChoices || filteredChoices.length === 0) && !allowFreeText) {
+          return {
+            output: JSON.stringify({
+              error:
+                "each question must allow at least one input — provide choices[] or set allowFreeText:true (default)",
+            }),
+            isError: true,
+          };
+        }
         questions.push({
           question,
-          choices,
-          allowFreeText: q.allowFreeText !== false,
+          choices: filteredChoices && filteredChoices.length > 0 ? filteredChoices : undefined,
+          allowFreeText,
         });
       }
       const urgent = a.urgent === true;

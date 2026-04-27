@@ -57,6 +57,22 @@ describe("ask_user_question tool", () => {
     expect(r.isError).toBe(true);
   });
 
+  it("rejects an unanswerable question (no choices and allowFreeText:false)", async () => {
+    // Without choices AND with free-text disabled the renderer would
+    // show no inputs at all; user could only dismiss. Guard at tool layer.
+    const tool = createAskUserQuestionTool({
+      getGate: () => ({
+        ask: () => Promise.resolve({ requestId: "r", answers: [] }),
+      }) as never,
+    });
+    const r = await tool.execute(
+      { questions: [{ question: "Pick", allowFreeText: false }] },
+      ctx(),
+    );
+    expect(r.isError).toBe(true);
+    expect(r.output).toContain("at least one input");
+  });
+
   it("rejects when more than 4 questions are supplied", async () => {
     const tool = createAskUserQuestionTool({
       getGate: () => ({
