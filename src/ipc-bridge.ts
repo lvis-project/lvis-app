@@ -148,6 +148,7 @@ type ConversationTurnResult = {
 };
 
 
+
 // R2-CR-5: previously a `RESERVED_HOST_CHANNELS` Set was declared here as
 // "documentation" of host-owned `lvis:*` channels. It was never `.has()`-ed
 // anywhere — adding entries to it provided zero defense against plugins
@@ -165,7 +166,6 @@ type ConversationTurnResult = {
 // If a future host design ever loads plugin code into the same context as
 // the renderer (don't), reintroduce a Set here and check it at registration
 // time so the documentation matches the code.
-
 
 /**
  * M3 — IPC sender validation. Sensitive handlers (api-key mutation, plugin
@@ -1098,6 +1098,80 @@ ${input}`;
       };
     }
   });
+
+  // #FU262 — Claude Desktop config import.
+  // Two-phase API: preview (parse only, read-only, sender guard optional)
+  // → apply (mutates mcp-servers.json + connects, sender-guarded + audited).
+  // Splitting them lets the renderer surface conflict resolution + secret
+  // warnings before any state mutation.
+  ipcMain.handle("lvis:mcp:import:claude-desktop:preview", async (_e, raw: string) => {
+    const { parseClaudeDesktopConfig } = await import("./mcp/claude-desktop-import.js");
+    return parseClaudeDesktopConfig(typeof raw === "string" ? raw : "");
+  });
+  ipcMain.handle(
+    "lvis:mcp:import:claude-desktop:apply",
+    async (
+      e,
+      payload: { raw: string; conflictPolicy?: "skip" | "overwrite" },
+    ) => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:mcp:import:claude-desktop:apply", e);
+        return UNAUTHORIZED_FRAME;
+      }
+      const { parseClaudeDesktopConfig } = await import("./mcp/claude-desktop-import.js");
+      const policy = payload?.conflictPolicy ?? "skip";
+      const parsed = parseClaudeDesktopConfig(typeof payload?.raw === "string" ? payload.raw : "");
+      const existing = await services.mcpManager.getConfigs();
+      const existingIds = new Set(existing.map((s) => s.id));
+      const results: Array<{
+        id: string;
+        action: "added" | "skipped-conflict" | "overwritten" | "failed";
+        reason?: string;
+        warning?: string;
+      }> = [];
+      for (const entry of parsed.entries) {
+        if (existingIds.has(entry.id)) {
+          if (policy === "skip") {
+            results.push({ id: entry.id, action: "skipped-conflict" });
+            continue;
+          }
+          // overwrite: remove then re-add so addConfig's id-uniqueness check
+          // doesn't reject the import.
+          try {
+            await services.mcpManager.removeConfig(entry.id);
+          } catch (err) {
+            results.push({
+              id: entry.id,
+              action: "failed",
+              reason: (err as Error).message ?? "remove failed",
+            });
+            continue;
+          }
+        }
+        try {
+          const addResult = await services.mcpManager.addConfig(entry.config);
+          results.push({
+            id: entry.id,
+            action: existingIds.has(entry.id) ? "overwritten" : "added",
+            reason: addResult.connected ? undefined : addResult.warning,
+            warning: entry.warning,
+          });
+        } catch (err) {
+          results.push({
+            id: entry.id,
+            action: "failed",
+            reason: (err as Error).message ?? "addConfig failed",
+            warning: entry.warning,
+          });
+        }
+      }
+      return {
+        ok: true as const,
+        results,
+        parseErrors: parsed.errors,
+      };
+    },
+  );
 
   // ─── Permission Prompt (§6.3 Layer 3) ─────────
   // read-only, sender guard optional
