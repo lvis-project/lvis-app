@@ -4,6 +4,7 @@ import { PostTurnHookChain } from "../post-turn-hook-chain.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import type { MemoryManager } from "../../memory/memory-manager.js";
 import type { SettingsService } from "../../data/settings-store.js";
+import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
 function createMessages(): GenericMessage[] {
   return [
@@ -26,7 +27,7 @@ describe("PostTurnHookChain", () => {
     const memoryManager = { saveSession } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
-        if (key === "llm") return { provider: "openai", model: "gpt-4o" };
+        if (key === "llm") return fakeLlmSettings();
         return { systemPrompt: "", autoCompact: false };
       }),
     } as unknown as SettingsService;
@@ -54,7 +55,7 @@ describe("PostTurnHookChain", () => {
     const memoryManager = { saveSession } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
-        if (key === "llm") return { provider: "openai", model: "gpt-4o" };
+        if (key === "llm") return fakeLlmSettings();
         return { systemPrompt: "", autoCompact: true };
       }),
     } as unknown as SettingsService;
@@ -86,7 +87,7 @@ describe("PostTurnHookChain", () => {
     const memoryManager = { saveSession } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
-        if (key === "llm") return { provider: "openai", model: "gpt-4o" };
+        if (key === "llm") return fakeLlmSettings();
         return { systemPrompt: "", autoCompact: true };
       }),
     } as unknown as SettingsService;
@@ -141,7 +142,7 @@ describe("PostTurnHookChain", () => {
     const memoryManager = { saveSession, saveMemory } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
-        if (key === "llm") return { provider: "openai", model: "gpt-4o" };
+        if (key === "llm") return fakeLlmSettings();
         return { systemPrompt: "", autoCompact: false };
       }),
     } as unknown as SettingsService;

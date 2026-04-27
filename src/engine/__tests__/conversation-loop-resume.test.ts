@@ -12,14 +12,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage } from "../llm/types.js";
+import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
 // ─── Minimal stubs ────────────────────────────────────────────────────────────
 
-function makeSettings(autoCompact = true, model = "gpt-4o", provider = "openai") {
+function makeSettings(autoCompact = true, model = "gpt-4o", provider: "openai" | "claude" | "gemini" | "copilot" | "azure-foundry" | "vertex-ai" = "openai") {
   return {
     get: (key: string) => {
       if (key === "chat") return { systemPrompt: "", autoCompact };
-      if (key === "llm") return { provider, model, maxOutputTokens: 4096 };
+      if (key === "llm") return fakeLlmSettings({ provider, model });
       return {};
     },
     getAll: () => ({}),

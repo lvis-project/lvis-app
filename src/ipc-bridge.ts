@@ -1456,18 +1456,27 @@ ${input}`;
     conversationLoop.getHistory().truncate(lastUserIdx);
 
     const prevLlm = settingsService.get("llm");
-    const nextLlm = {
-      ...prevLlm,
-      enableThinking: opts?.enableThinking ?? true,
-      thinkingBudgetTokens: opts?.thinkingBudgetTokens ?? 20000,
-    };
-    await settingsService.patch({ llm: nextLlm });
+    const provider = prevLlm.provider;
+    const prevBlock = prevLlm.vendors[provider];
+    await settingsService.patch({
+      llm: {
+        vendors: {
+          [provider]: {
+            ...prevBlock,
+            enableThinking: opts?.enableThinking ?? true,
+            thinkingBudgetTokens: opts?.thinkingBudgetTokens ?? 20000,
+          },
+        },
+      },
+    });
     conversationLoop.refreshProvider();
     try {
       const result = await streamTurn(lastUser.content);
       return { ok: true, result };
     } finally {
-      await settingsService.patch({ llm: prevLlm });
+      await settingsService.patch({
+        llm: { vendors: { [provider]: prevBlock } },
+      });
       conversationLoop.refreshProvider();
     }
   });

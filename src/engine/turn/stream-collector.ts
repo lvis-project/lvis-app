@@ -20,16 +20,21 @@ export interface StreamCollectParams {
   systemPrompt: string;
   messages: GenericMessage[];
   toolSchemas: ToolSchema[];
-  /** 정책(maxTokens, thinking 등). ConversationLoop 에서 llmSettings 를 그대로 넘긴다. */
+  /**
+   * Generation policy for this turn. ConversationLoop passes the active
+   * vendor block (`llm.vendors[provider]`) merged with the cross-vendor
+   * `streamSmoothing` setting from the top-level LLMSettings — this is
+   * the only place those two scopes meet.
+   */
   llmSettings: {
-    maxOutputTokens?: number;
-    temperature?: number;
+    maxOutputTokens: number;
+    temperature: number;
     seed?: number;
-    responseFormat?: unknown;
-    stopSequences?: string[];
-    streamSmoothing?: unknown;
-    enableThinking?: boolean;
-    thinkingBudgetTokens?: number;
+    responseFormat: "text" | "json";
+    stopSequences: string[];
+    streamSmoothing: "none" | "word" | "char";
+    enableThinking: boolean;
+    thinkingBudgetTokens: number;
   };
   abortSignal?: AbortSignal;
   /** stream 이벤트 콜백 — UI 로 delta 방출. */
@@ -103,7 +108,7 @@ export async function collectRoundStream(
       systemPrompt,
       messages,
       tools: toolSchemas.length > 0 ? toolSchemas : undefined,
-      maxTokens: llmSettings.maxOutputTokens ?? 4096,
+      maxTokens: llmSettings.maxOutputTokens,
       maxOutputTokens: llmSettings.maxOutputTokens,
       temperature: llmSettings.temperature,
       seed: llmSettings.seed,
