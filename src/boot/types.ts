@@ -148,6 +148,12 @@ export interface AppServices {
    */
   startRemindersScheduler?: () => void;
   /**
+   * Deferred TaskDeadlinePoller.start() handle. Started AFTER plugin runtime
+   * is up so brain subscribers (work-proactive etc.) are registered before
+   * the first deadline event fires. Idempotent.
+   */
+  startTaskDeadlinePoller?: () => void;
+  /**
    * Issue #260 — system-level notification service. Auto-fires desktop
    * notifications at 4 lifecycle points (turn-end / routine / ask-user /
    * approval). Constructed AFTER main window exists in boot.ts. The LLM never

@@ -1736,7 +1736,7 @@ flowchart LR
 | **idle** | `createIdleSignal()` | IdleScheduler 가 IDLE_SCAN 상태일 때 fire |
 | **schedule** | `createScheduleSignal()` | KST 08:30 (기본) 5분 윈도우 내 1일 1회 fire |
 | **meeting** | `createMeetingSignal()` | calendar-source capability 플러그인 이벤트 — 미팅 10분 전 fire |
-| **task-deadline** | _(예정)_ host 의 `task-deadline-poller` 가 `task.deadline.approaching` 발행 → brain 구독 | pending 태스크 dueAt 2시간 내 fire. **2026-04-27 갱신**: tasks-plugin-split 이 paused 됨 (memory `feedback-tasks-plugin-split-paused` 참조). 따라서 detector 의 observer 측 (폴링 + 이벤트 emit) 은 host 에 둔다. brain (work-proactive 등) 이 `pluginAccess.events` 로 구독해 `triggerConversation()` 호출 — 다른 detector 들과 동일한 observer/judge 분리 패턴. 미구현 단계. |
+| **task-deadline** | host 의 `TaskDeadlinePoller` (`src/main/task-deadline-poller.ts`) 가 `task.deadline.approaching` 발행 | pending 태스크 dueAt 2시간 내 fire. 60s 폴링, 30분 cooldown 으로 dedupe (judgment 재시도 가능). brain (work-proactive 등) 이 `pluginAccess.events` 로 구독해 `triggerConversation()` 호출 — calendar/email 등 다른 detector 와 동일한 observer/judge 분리 패턴. tasks-plugin-split 이 paused (memory `feedback-tasks-plugin-split-paused`) 라 observer 가 host 에 살지만 wire shape 은 동일. brain subscriber 는 별도 PR. |
 | **post-turn** ✅ | `createPostTurnSignal()` | 대화 턴 완료 후 `PostTurnHookChain` → `coordinator.notify("post-turn")`. 10분 cooldown. (B5 PR #134) |
 
 | 트리거 유형 | 예시 | 의도 |
