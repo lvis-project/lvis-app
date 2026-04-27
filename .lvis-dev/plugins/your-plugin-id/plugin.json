@@ -1,0 +1,14 @@
+{
+  "$schema": "https://lvis.local/schemas/plugin.schema.json",
+  "id": "your-plugin-id",
+  "name": "Your Plugin Display Name",
+  "version": "0.1.0",
+  "publisher": "Your Org",
+  "entry": "../../../node_modules/@lvis/plugin-__PLUGIN_NAME__/dist/index.js",
+  "description": "LVIS 플러그인 템플릿입니다. 새 플러그인 생성 시 id/name/description/tools를 실제 기능에 맞게 바꾸고, 각 tool에는 사용 시기·사용하지 말아야 할 경우·입력 스키마·반환 형태를 설명하는 toolSchemas 항목을 추가하세요. id는 lowercase + dash만 허용됩니다 (예: `my-plugin`, `agent-hub`).",
+  "installPolicy": "user",
+  "tools": [],
+  "capabilities": [],
+  "permissions": [],
+  "toolSchemas": {}
+}

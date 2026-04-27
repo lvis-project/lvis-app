@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "agent-hub",
+      "manifestPath": "agent-hub/plugin.json",
+      "enabled": true,
+      "installedBy": "user",
+      "approvedPluginAccess": {
+        "plugins": [
+          {
+            "pluginId": "calendar",
+            "tools": [
+              "calendar_today"
+            ]
+          },
+          {
+            "pluginId": "meeting",
+            "events": [
+              "meeting.summary.created",
+              "meeting.ended"
+            ]
+          },
+          {
+            "pluginId": "email",
+            "events": [
+              "email.action.needed"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "calendar",
+      "manifestPath": "calendar/plugin.json",
+      "enabled": true,
+      "installedBy": "user",
+      "approvedPluginAccess": {
+        "plugins": [
+          {
+            "pluginId": "email",
+            "events": [
+              "email.analyzed",
+              "email.invite.detected"
+            ]
+          },
+          {
+            "pluginId": "meeting",
+            "events": [
+              "meeting.summary.created"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "email",
+      "manifestPath": "email/plugin.json",
+      "enabled": true,
+      "installedBy": "user"
+    },
+    {
+      "id": "lge-api",
+      "manifestPath": "lge-api/plugin.json",
+      "enabled": true,
+      "installedBy": "admin"
+    },
+    {
+      "id": "meeting",
+      "manifestPath": "meeting/plugin.json",
+      "enabled": true,
+      "installedBy": "user"
+    },
+    {
+      "id": "pageindex",
+      "manifestPath": "pageindex/plugin.json",
+      "enabled": true,
+      "installedBy": "admin"
+    },
+    {
+      "id": "your-plugin-id",
+      "manifestPath": "your-plugin-id/plugin.json",
+      "enabled": true,
+      "installedBy": "user"
+    },
+    {
+      "id": "work-proactive",
+      "manifestPath": "work-proactive/plugin.json",
+      "enabled": false,
+      "installedBy": "user",
+      "approvedPluginAccess": {
+        "plugins": [
+          {
+            "pluginId": "calendar",
+            "tools": [
+              "calendar_today"
+            ],
+            "events": [
+              "calendar.event.upcoming",
+              "calendar.event.conflict.detected"
+            ]
+          },
+          {
+            "pluginId": "email",
+            "events": [
+              "email.new"
+            ]
+          },
+          {
+            "pluginId": "meeting",
+            "events": [
+              "meeting.summary.created",
+              "meeting.ended"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

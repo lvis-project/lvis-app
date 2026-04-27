@@ -1,0 +1,234 @@
+{
+  "$schema": "https://lvis.local/schemas/plugin.schema.json",
+  "id": "agent-hub",
+  "name": "LVIS Agent Hub",
+  "version": "0.1.0",
+  "publisher": "LG Electronics IT",
+  "installPolicy": "user",
+  "entry": "../../../node_modules/@lvis/plugin-agent-hub/dist/hostPlugin.js",
+  "description": "사원 에이전트 보드 동기화: 오늘 작업 게시, 개인·팀 주간보고 생성, 팀 작업 피드 옵트인",
+  "dependencies": [
+    {
+      "pluginId": "work-proactive",
+      "required": false
+    }
+  ],
+  "pluginAccess": {
+    "plugins": [
+      {
+        "pluginId": "calendar",
+        "tools": [
+          "calendar_today"
+        ]
+      },
+      {
+        "pluginId": "meeting",
+        "events": [
+          "meeting.summary.created",
+          "meeting.ended"
+        ]
+      },
+      {
+        "pluginId": "email",
+        "events": [
+          "email.action.needed"
+        ]
+      }
+    ]
+  },
+  "tools": [
+    "agent_hub_post_work_log",
+    "agent_hub_generate_weekly_report",
+    "agent_hub_generate_team_weekly_report",
+    "agent_hub_subscribe_team",
+    "agent_hub_status",
+    "agent_hub_check_inbox",
+    "agent_hub_my_recent_logs",
+    "agent_hub_list_inbox",
+    "agent_hub_dismiss_notifications"
+  ],
+  "uiCallable": [
+    "agent_hub_status",
+    "agent_hub_check_inbox",
+    "agent_hub_my_recent_logs",
+    "agent_hub_list_inbox",
+    "agent_hub_dismiss_notifications"
+  ],
+  "eventSubscriptions": [
+    "lvis:routine:completed",
+    "meeting.summary.created",
+    "meeting.ended",
+    "email.action.needed"
+  ],
+  "emittedEvents": [
+    "agent_hub.work_log.posted",
+    "agent_hub.team_feed.received",
+    "agent_hub.weekly_report.generated",
+    "agent_hub.notification.received"
+  ],
+  "ui": [
+    {
+      "id": "agent-hub-panel",
+      "slot": "sidebar",
+      "kind": "embedded-module",
+      "displayName": "허브",
+      "title": "Agent Hub",
+      "description": "오늘 일지 게시 + 통지 inbox 패널",
+      "entry": "../../../node_modules/@lvis/plugin-agent-hub/dist/ui/agent-hub-panel.js",
+      "exportName": "mount"
+    }
+  ],
+  "toolSchemas": {
+    "agent_hub_post_work_log": {
+      "description": "오늘 작업 내역을 Agent Hub 보드에 게시합니다. personal scope는 즉시 게시, 그 외 scope는 사용자 승인 큐(addTask)에 적재됩니다. 같은 날 같은 본문은 Idempotency-Key로 중복 게시를 방지합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team",
+              "org",
+              "global"
+            ]
+          },
+          "scopeTargetCode": {
+            "type": "string",
+            "description": "team/org scope일 때 대상 부서 코드"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "true면 본문만 생성하고 POST 안 함"
+          },
+          "customPrompt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "agent_hub_generate_weekly_report": {
+      "description": "이번 주(또는 지정 주) 본인의 work-log를 집계하여 개인 주간보고를 생성합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "weekIso": {
+            "type": "string",
+            "pattern": "^\\d{4}-W\\d{2}$"
+          },
+          "autoPost": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "agent_hub_generate_team_weekly_report": {
+      "description": "구독한 팀의 주간보고를 집계합니다. 옵트인된 팀만 가능.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "teamCode": {
+            "type": "string"
+          },
+          "weekIso": {
+            "type": "string",
+            "pattern": "^\\d{4}-W\\d{2}$"
+          }
+        },
+        "required": [
+          "teamCode"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "agent_hub_subscribe_team": {
+      "description": "팀 작업 피드 옵트인/옵트아웃.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "teamCode": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "subscribe",
+              "unsubscribe"
+            ]
+          }
+        },
+        "required": [
+          "teamCode",
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "agent_hub_status": {
+      "description": "현재 인증·구독·읽음 상태를 반환합니다 (UI 노출 가능).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "agent_hub_check_inbox": {
+      "description": "Hub 통지 polling — 멘션·DM·승인 통지를 호스트 작업 큐에 적재합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "agent_hub_list_inbox": {
+      "description": "Hub inbox에 적재된 미dismiss 통지 목록을 그대로 반환합니다 (server inbox는 그대로 유지). 사용자가 명시 dismiss할 때까지 항목이 남습니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "agent_hub_dismiss_notifications": {
+      "description": "사용자가 명시적으로 확인한 통지를 dismiss합니다. ids 배열 안의 통지 row를 server에서 dismissed_at으로 마킹합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "agent_hub_my_recent_logs": {
+      "description": "본인이 작성한 work-log 중 한 주 분량을 조회합니다. 일요일 KST 00:00을 주 경계로 사용해 일요일에 자동으로 차주로 rollover됩니다. weekOffset=0(이번 주, default), -1(지난 주) 등으로 페이지를 이동하세요.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "weekOffset": {
+            "type": "integer",
+            "description": "0=이번 주, 음수=과거 주, 양수=미래 주 (보통 0 또는 음수)"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "결과 cap (default 50)"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
