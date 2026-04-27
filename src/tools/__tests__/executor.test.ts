@@ -416,7 +416,7 @@ describe("ToolExecutor — C1 ask_user_question short-circuit", () => {
         {
           id: "tu-c1",
           name: "ask_user_question",
-          input: { question: "Continue?" },
+          input: { questions: [{ question: "Continue?" }] },
         },
       ],
       undefined,
@@ -493,6 +493,11 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
   });
 
   it("DOES redact freeText for the builtin ask_user_question (positive control)", async () => {
+    // Mirrors the actual `createAskUserQuestionTool` output shape: the
+    // tool returns `{ answers: [{...}, ...], dismissed }`. Earlier this
+    // test asserted on the legacy single-question flat shape, which made
+    // the redactor's regression invisible (the redactor read
+    // parsed.freeText that no production output ever carries).
     const builtinAskTool = createDynamicTool({
       name: "ask_user_question",
       description: "builtin",
@@ -501,8 +506,10 @@ describe("ToolExecutor — R2-CR-4 ask_user_question audit redaction is gated by
       jsonSchema: { type: "object", properties: {} },
       execute: async () => ({
         output: JSON.stringify({
-          choice: "yes",
-          freeText: "secret-content",
+          answers: [
+            { choice: "yes" },
+            { freeText: "secret-content" },
+          ],
           dismissed: false,
         }),
         isError: false,
