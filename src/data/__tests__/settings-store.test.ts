@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const mockedElectron = vi.hoisted(() => ({
@@ -21,8 +21,8 @@ describe("SettingsService marketplace defaults", () => {
   let userDataPath: string;
 
   beforeEach(() => {
-    mkdirSync(join(homedir(), ".lvis", "test-tmp"), { recursive: true });
-    userDataPath = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "settings-store-"));
+
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-"));
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
@@ -153,8 +153,8 @@ describe("SettingsService msGraph patching", () => {
   let userDataPath: string;
 
   beforeEach(() => {
-    mkdirSync(join(homedir(), ".lvis", "test-tmp"), { recursive: true });
-    userDataPath = mkdtempSync(join(homedir(), ".lvis", "test-tmp", "settings-store-msgraph-"));
+
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-msgraph-"));
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
