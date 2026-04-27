@@ -1,8 +1,27 @@
 import electron from "electron";
+import { resolve as pathResolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { ScheduleAgentId, ScheduleRoutineSchedule } from "./routines/schedule.js";
 
 const { contextBridge, ipcRenderer } = electron;
+
+// ─── Deterministic plugin webview asset URLs ────────────────────────────────
+// `__dirname` here resolves to the host preload's bundled location
+// (`dist/src/`). Compute the plugin shell + preload URLs once on preload boot
+// instead of deriving them from `window.location.href`, which can be the
+// splash phase's `data:text/html;...` URL when the host renderer queries it.
+// Producing `file://` strings means Electron always finds the assets even
+// across reloads / drag-drop / dev-mode navigation.
+function safeResolveFileUrl(relative: string): string {
+  try {
+    return pathToFileURL(pathResolve(__dirname, relative)).toString();
+  } catch {
+    return "";
+  }
+}
+const pluginPreloadUrl = safeResolveFileUrl("plugin-preload.js");
+const pluginShellUrl = safeResolveFileUrl("plugin-ui-shell.html");
 
 type PluginActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
@@ -47,6 +66,13 @@ function normalizePluginActionResult(result: unknown): PluginActionResult {
 }
 
 const api = {
+  // ─── Plugin webview asset URLs (deterministic file://) ────────────────────
+  // Static strings, NOT functions — the host renderer reads these directly
+  // when mounting the plugin <webview>. Computed once at preload boot from
+  // `__dirname` (= dist/src/) so they survive splash-phase data: URLs.
+  pluginPreloadUrl,
+  pluginShellUrl,
+
   // ─── Settings ────────────────────────────────────
   getSettings: async () => ipcRenderer.invoke("lvis:settings:get"),
   updateSettings: async (partial: unknown) => ipcRenderer.invoke("lvis:settings:update", partial),
