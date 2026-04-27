@@ -20,14 +20,16 @@
  * what brain code actually sees, so this seam is invisible to consumers.
  *
  * Dedupe: a per-task (id + dueAt) cooldown suppresses re-emission within
- * `COOLDOWN_MS`. Brain still has its own cross-pluggin TriggerConversation
- * dedupe upstream; this layer just keeps the bus from spamming when many
- * polling ticks see the same task.
+ * `COOLDOWN_MS`. Brain still has its own cross-plugin TriggerConversation
+ * dedupe upstream (5 min TTL); this layer just keeps the bus from spamming
+ * when many polling ticks see the same task.
  *
  * Cooldown semantics — re-firing IS desired: if brain decides "now is a bad
  * time" on the first emit, the next cooldown window gives it another chance
  * before the dueAt elapses. Once-only would mean "miss the boat, never
- * reconsider".
+ * reconsider". Default cooldown is sized just above the brain's TTL (5 min)
+ * so each retry meets a fresh brain dedupe window — too long a cooldown
+ * means the brain forgets but the poller still suppresses.
  */
 import type { TaskService, Task } from "../taskService.js";
 
@@ -52,8 +54,15 @@ export type TaskDeadlineApproachingHandler = (
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
 /** Default warning window — emit when dueAt is within this many ms of `now`. */
 const DEFAULT_WINDOW_MS = 2 * 60 * 60_000; // 2h
-/** Default cooldown — re-emit at most once per (taskId, dueAt) per this interval. */
-const DEFAULT_COOLDOWN_MS = 30 * 60_000; // 30m
+/**
+ * Default cooldown — re-emit at most once per (taskId, dueAt) per this
+ * interval. Sized just above the brain's TriggerConversationDedupe TTL
+ * (5 min — `src/boot/steps/plugin-runtime.ts` `TRIGGER_CONVERSATION_DEDUPE_TTL_MS`)
+ * so each retry meets a fresh brain dedupe window. A larger value means the
+ * brain has already forgotten by the time the poller re-emits and the
+ * "judgment retry" path stops working.
+ */
+const DEFAULT_COOLDOWN_MS = 7 * 60_000; // 7m
 /** Cap on dedupe map so a long-running session can't grow unbounded. */
 const DEDUPE_MAX_ENTRIES = 256;
 
@@ -85,7 +94,6 @@ export class TaskDeadlinePoller {
    * key's entry (delete-then-set) keeps it from being evicted as "oldest".
    */
   private readonly recentlyFired = new Map<string, number>();
-  private inFlight = false;
 
   private readonly pollIntervalMs: number;
   private readonly windowMs: number;
@@ -104,27 +112,21 @@ export class TaskDeadlinePoller {
 
   start(): void {
     if (this.timer) return;
+    // Run once immediately *before* arming the interval so that if the
+    // first run somehow throws, the interval was never set and a second
+    // `start()` actually retries instead of becoming a no-op (`if (this.timer)
+    // return`). `checkAndFire()` is synchronous and has internal try/catch
+    // around taskService.query() + each handler, so reaching this throw
+    // path requires a bug in the poller itself rather than a runtime fault.
+    this.checkAndFire();
     this.timer = setInterval(() => {
-      if (this.inFlight) return;
-      this.inFlight = true;
-      try {
-        this.checkAndFire();
-      } finally {
-        this.inFlight = false;
-      }
+      // No reentrancy guard — `checkAndFire()` is synchronous and Node's
+      // event loop cannot pre-empt a still-running JS frame, so the next
+      // setInterval tick can never overlap.
+      this.checkAndFire();
     }, this.pollIntervalMs);
     if (typeof (this.timer as { unref?: () => void }).unref === "function") {
       (this.timer as { unref: () => void }).unref();
-    }
-    // Run once immediately so an approaching task at boot fires without
-    // waiting for the first interval tick (mirrors RemindersScheduler).
-    if (!this.inFlight) {
-      this.inFlight = true;
-      try {
-        this.checkAndFire();
-      } finally {
-        this.inFlight = false;
-      }
     }
   }
 
@@ -170,6 +172,11 @@ export class TaskDeadlinePoller {
       if (lastFired !== undefined && nowMs - lastFired < this.cooldownMs) {
         continue;
       }
+      // Record BEFORE dispatching handlers — a handler that throws still
+      // counts toward the cooldown so a buggy subscriber can't cause an
+      // emit storm by failing on every retry. The per-handler try/catch
+      // below isolates failures so one bad subscriber doesn't poison
+      // siblings.
       this.recordFired(key, nowMs);
       const payload: TaskDeadlineApproachingPayload = {
         taskId: task.id,

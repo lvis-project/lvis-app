@@ -96,7 +96,7 @@ describe("TaskDeadlinePoller", () => {
     let now = opts.nowMs;
     const poller = new TaskDeadlinePoller(service, {
       windowMs: opts.windowMs ?? 2 * 60 * 60_000,
-      cooldownMs: opts.cooldownMs ?? 30 * 60_000,
+      cooldownMs: opts.cooldownMs ?? 7 * 60_000,
       now: () => now,
     });
     poller.onApproaching((p) => collected.push(p));
@@ -155,7 +155,7 @@ describe("TaskDeadlinePoller", () => {
     const now = new Date("2026-04-27T10:00:00Z").getTime();
     const dueAt = new Date(now + 60 * 60_000).toISOString();
     addTask(service, { title: "X", dueAt });
-    const { poller } = makePoller({ nowMs: now, cooldownMs: 30 * 60_000 });
+    const { poller } = makePoller({ nowMs: now, cooldownMs: 7 * 60_000 });
     poller.checkAndFire();
     poller.checkAndFire();
     poller.checkAndFire();
@@ -168,14 +168,39 @@ describe("TaskDeadlinePoller", () => {
     addTask(service, { title: "X", dueAt });
     const { poller, advance } = makePoller({
       nowMs: now,
-      cooldownMs: 30 * 60_000,
+      cooldownMs: 7 * 60_000,
     });
     poller.checkAndFire();
     expect(collected).toHaveLength(1);
-    advance(31 * 60_000);
+    advance(8 * 60_000);
     poller.checkAndFire();
     expect(collected).toHaveLength(2);
     expect(collected[0].taskId).toBe(collected[1].taskId);
+  });
+
+  it("a throwing handler still consumes the cooldown slot (no emit storm on error)", () => {
+    // recordFired runs BEFORE dispatch — a buggy subscriber that throws
+    // every time must not cause the poller to re-emit on every tick. The
+    // per-handler try/catch (already covered above) isolates the failure;
+    // this test pins down the cooldown-precedence half of the contract.
+    const now = new Date("2026-04-27T10:00:00Z").getTime();
+    const dueAt = new Date(now + 60 * 60_000).toISOString();
+    addTask(service, { title: "X", dueAt });
+    const { poller } = makePoller({ nowMs: now, cooldownMs: 7 * 60_000 });
+    poller.onApproaching(() => {
+      throw new Error("intentional handler failure");
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      poller.checkAndFire();
+      poller.checkAndFire();
+      poller.checkAndFire();
+    } finally {
+      warnSpy.mockRestore();
+    }
+    // Successful collector handler still saw exactly one emit despite
+    // the throwing handler firing on every dispatch.
+    expect(collected).toHaveLength(1);
   });
 
   it("re-fires when dueAt changes (rescheduled task)", () => {
@@ -258,6 +283,11 @@ describe("TaskDeadlinePoller", () => {
   });
 
   it("survives a query() failure without throwing", () => {
+    // Direct console.warn override (not vi.spyOn): vitest 2.x's spy on
+    // global console doesn't reliably capture calls made through the
+    // production module's reference to `console.warn`. Capturing via a
+    // fresh array sidesteps the indirection. See sibling tests for the
+    // vi.spyOn pattern when only call count matters.
     const now = Date.now();
     const poller = new TaskDeadlinePoller(
       {
