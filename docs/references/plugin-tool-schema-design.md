@@ -227,7 +227,7 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직
 **이벤트 subscription 정책** (`classifySubscription`):
 
 - `memory.private.*`, `settings.apiKey.*`, `audit.*`, `dlp.*` → `PLUGIN_PRIVATE_NAMESPACES` 에 매칭되어 **subscription 거부** (wiring 시 throw).
-- `meeting`, `calendar`, `email`, `index`, `task`, `briefing` → public. 조용히 허용. `task.*` namespace 는 host 의 `task-deadline-poller` 가 owner — `task.deadline.approaching` 등 발행 예정 (구현 단계).
+- `meeting`, `calendar`, `email`, `index`, `task`, `briefing` → public. 조용히 허용. `task.*` namespace 는 host 의 `TaskDeadlinePoller` (`src/main/task-deadline-poller.ts`) 가 owner — 현재 `task.deadline.approaching` 발행 (msUntilDeadline 포함). 추가 task lifecycle 이벤트 는 향후 확장.
 - 그 외 → neutral. 허용하되 namespace drift 추적 warn.
 
 ### 2.4 AJV 매니페스트 검증 플로우
