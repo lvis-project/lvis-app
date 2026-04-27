@@ -96,7 +96,7 @@ describe("PluginRuntime — resolveDevLinkedPackageEntry (via resolveEntryPath)"
   }
 
   function makeRuntime(): PluginRuntime {
-    return new PluginRuntime({ hostRoot, registryPath });
+    return new PluginRuntime({ hostRoot, registryPath, pluginsRoot: installedDir });
   }
 
   it("resolves a POSIX path ../../../node_modules/@lvis/plugin-*/… to the sibling repo", async () => {

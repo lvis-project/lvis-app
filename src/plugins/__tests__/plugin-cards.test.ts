@@ -137,7 +137,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       { id: "com.lge.failed", manifestPath: join(failedDir, "plugin.json"), enabled: true },
     ]);
 
-    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath });
+    const runtime = new PluginRuntime({ hostRoot: tmp, registryPath, pluginsRoot: tmp });
     await runtime.load();
 
     const cards = runtime.listPluginCards().sort((a, b) => a.id.localeCompare(b.id));

@@ -73,6 +73,7 @@ describe("PluginRuntime — entry path allowlist", () => {
     return new PluginRuntime({
       hostRoot: testDir,
       registryPath,
+      pluginsRoot: installedDir,
       auditLog: (level, message, data) => {
         auditEntries.push({ level, message, data });
       },
