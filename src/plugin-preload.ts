@@ -18,9 +18,29 @@
  *   - Lifecycle / runtime / marketplace / chat / memory / settings / MCP /
  *     permission / approval / audit / DLP APIs.
  */
-import electron from "electron";
+// Named imports — esbuild bundles these as
+// `var import_electron = require("electron"); import_electron.contextBridge`,
+// i.e. direct property access on the CJS module with NO `__toESM` wrapper
+// and NO `.default` indirection.
+//
+// `import electron from "electron"` is what previously caused the silent
+// failure in Electron 41 sandboxed webview preload contexts: the bundled
+// output went through `__toESM(require("electron"), 1).default.contextBridge`
+// and the wrapper machinery (Object.create + getter property descriptors)
+// interacted badly with the sandbox isolation, leaving `contextBridge`
+// undefined while the preload appeared to have executed cleanly.
+import { contextBridge, ipcRenderer } from "electron";
 
-const { contextBridge, ipcRenderer } = electron;
+// Diagnostic probe — gated behind LVIS_DEV=1 (same convention as dev-flags.ts)
+// to avoid console noise in production. Surfaces in the plugin webview's
+// DevTools console at preload boot. If `[lvis:plugin-preload] loaded` is
+// missing under LVIS_DEV=1, the preload script never ran (URL wrong, sandbox
+// isolation, etc.). Cheap, safe, and a high-value leave-behind for triage.
+if (process.env.LVIS_DEV === "1") {
+  console.log("[lvis:plugin-preload] loaded", {
+    url: typeof window !== "undefined" ? window.location?.href : "no-window",
+  });
+}
 
 contextBridge.exposeInMainWorld("lvisPlugin", {
   callTool: (name: string, args?: unknown): Promise<unknown> =>

@@ -5,18 +5,17 @@ const mockInvoke = vi.fn();
 const mockOn = vi.fn();
 const mockRemoveListener = vi.fn();
 
+// Named exports only — mirrors the named-import shape in preload.ts.
 vi.mock("electron", () => ({
-  default: {
-    contextBridge: {
-      exposeInMainWorld: vi.fn((key: string, value: unknown) => {
-        exposed.set(key, value);
-      }),
-    },
-    ipcRenderer: {
-      invoke: mockInvoke,
-      on: mockOn,
-      removeListener: mockRemoveListener,
-    },
+  contextBridge: {
+    exposeInMainWorld: vi.fn((key: string, value: unknown) => {
+      exposed.set(key, value);
+    }),
+  },
+  ipcRenderer: {
+    invoke: mockInvoke,
+    on: mockOn,
+    removeListener: mockRemoveListener,
   },
 }));
 
