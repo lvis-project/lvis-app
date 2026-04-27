@@ -7,7 +7,7 @@ import { ImportedTriggerCard } from "../ImportedTriggerCard.js";
 describe("ImportedTriggerCard", () => {
   const base = {
     source: "proactive:meeting-detection",
-    prompt: "회의 요청 이메일을 받았습니다. 발신자: jo.dreame@gmail.com",
+    prompt: "회의 요청 이메일을 받았습니다. 발신자: tester@example.com",
     summary: "개발 회의 6/1 15:00 캘린더 등록 완료",
     toolCallCount: 2,
     importedAt: "2026-04-26T06:31:08.682Z",

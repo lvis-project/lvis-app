@@ -45,7 +45,7 @@ export interface McpServerApproval {
   allowedCommands?: string[];
   /** stdio: 허용된 인수 패턴 */
   allowedArgs?: string[];
-  /** SSE/WebSocket: 허용된 URL (exact match 또는 *.lge.com 패턴) */
+  /** SSE/WebSocket: 허용된 URL (exact match 또는 *.example.com 패턴) */
   allowedUrls?: string[];
 
   // ─── Layer 2: 연결 보안 ────────────────────────

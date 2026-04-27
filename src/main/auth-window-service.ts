@@ -34,8 +34,9 @@ export interface OpenAuthWindowOptions {
    */
   completionUrlPatterns: string[];
   /**
-   * 수집할 쿠키의 도메인 suffix. 예: `["sso.lge.com", "newep.lge.com"]`.
+   * 수집할 쿠키의 도메인 suffix. 예: `["sso.example.com", "portal.example.com"]`.
    * 반환 쿠키는 `cookie.domain` 이 이 목록 중 하나의 suffix이어야 한다.
+   * 실제 도메인은 호출자(플러그인)가 제공 — 호스트 코드는 corp 도메인을 직접 박지 않는다.
    */
   cookieHosts: string[];
   /** 로그인 타임아웃. 기본 5분. */
@@ -65,7 +66,7 @@ function normalizeHost(raw: string): string {
 /**
  * 쿠키 배열에서 허용된 호스트만 필터링 + AuthCookie로 직렬화.
  * `allowedHosts` 도 쿠키 domain 과 동일 방식으로 정규화하여
- * ".lge.com" vs "lge.com" 같은 표기 차이로 매칭이 실패하지 않게 한다.
+ * ".example.com" vs "example.com" 같은 표기 차이로 매칭이 실패하지 않게 한다.
  */
 export function filterCookiesByHost(cookies: Cookie[], allowedHosts: string[]): AuthCookie[] {
   const normalizedAllowed = allowedHosts

@@ -350,7 +350,7 @@ export interface PluginHostApi {
    *
    * **완료 URL 매칭 규칙:** 호스트는 현재 URL 의 `origin + pathname` 에 대해서만
    * `completionUrlPatterns` substring 매칭을 수행한다. query / hash 는 제외되므로
-   * IdP 가 `RelayState=.../newep.lge.com/` 같은 파라미터로 목적지를 담아 와도
+   * IdP 가 `RelayState=.../portal.example.com/` 같은 파라미터로 목적지를 담아 와도
    * IdP 도메인에 있는 동안에는 "완료" 로 오인하지 않는다.
    *
    * **Capability gate:** `manifest.capabilities[]` 에 `external-auth-consumer`
