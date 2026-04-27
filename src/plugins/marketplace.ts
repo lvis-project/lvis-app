@@ -212,6 +212,15 @@ export class PluginMarketplaceService {
     });
   }
 
+  /**
+   * #FU259 accessor — the MCP install IPC needs the same fetcher to
+   * resolve catalog detail by slug before driving the artifact store.
+   * Read-only escape hatch; callers must not mutate fetcher state.
+   */
+  getFetcher(): MarketplaceFetcher {
+    return this.fetcher;
+  }
+
   async list(): Promise<MarketplaceListItem[]> {
     // Catalog cache is null when using the test mock fetcher; production
     // always has a userData-anchored cache base (set in constructor).

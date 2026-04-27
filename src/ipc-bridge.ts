@@ -147,6 +147,7 @@ type ConversationTurnResult = {
   stopReason?: "end_turn" | "tool_use" | "interrupted";
 };
 
+
 // R2-CR-5: previously a `RESERVED_HOST_CHANNELS` Set was declared here as
 // "documentation" of host-owned `lvis:*` channels. It was never `.has()`-ed
 // anywhere — adding entries to it provided zero defense against plugins
@@ -164,6 +165,7 @@ type ConversationTurnResult = {
 // If a future host design ever loads plugin code into the same context as
 // the renderer (don't), reintroduce a Set here and check it at registration
 // time so the documentation matches the code.
+
 
 /**
  * M3 — IPC sender validation. Sensitive handlers (api-key mutation, plugin
@@ -303,6 +305,7 @@ export function registerIpcHandlers(
     remindersStore,
     sessionTodoStore,
     notificationService,
+    mcpArtifactStore,
   } = services;
 
   // Wire DLP audit logging so redactForLLM records hits to audit JSONL.
@@ -1046,6 +1049,54 @@ ${input}`;
   ipcMain.handle("lvis:mcp:ui-resource", async (e, serverId: string, uri: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:mcp:ui-resource", e); return UNAUTHORIZED_FRAME; }
     return services.mcpManager.readUiResource(serverId, uri);
+  });
+
+  // ─── #FU259 — MCP marketplace catalog + install ──
+  // Renderer surfaces MCP entries in a dedicated section. Catalog listing
+  // is read-only (sender guard optional); install mutates `mcp-servers.json`
+  // and triggers connect, so it's sender-guarded + audit-logged.
+  ipcMain.handle("lvis:mcp:catalog:list", async () => {
+    const all = await pluginMarketplace.list();
+    return all.filter((p) => p.pluginType === "mcp");
+  });
+  ipcMain.handle("lvis:mcp:install-from-marketplace", async (e, slug: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:mcp:install-from-marketplace", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!mcpArtifactStore) {
+      return {
+        ok: false,
+        error: "marketplace-disabled",
+        message: "MCP marketplace install is unavailable: marketplace backend is disabled in this build.",
+      } as const;
+    }
+    if (typeof slug !== "string" || slug.trim().length === 0) {
+      return { ok: false, error: "invalid-slug", message: "slug is required" } as const;
+    }
+    try {
+      const { installMcpFromMarketplace } = await import("./mcp/mcp-marketplace-install.js");
+      const result = await installMcpFromMarketplace(slug.trim(), {
+        fetcher: pluginMarketplace.getFetcher(),
+        store: mcpArtifactStore,
+      });
+      const addResult = await services.mcpManager.addConfig(result.config);
+      return {
+        ok: true as const,
+        slug: slug.trim(),
+        installDir: result.installDir,
+        connected: addResult.connected,
+        warning: addResult.warning,
+        needsCredential: result.needsCredential,
+        authMode: result.authMode,
+      };
+    } catch (err) {
+      return {
+        ok: false as const,
+        error: "install-failed",
+        message: (err as Error).message ?? "MCP install failed",
+      };
+    }
   });
 
   // ─── Permission Prompt (§6.3 Layer 3) ─────────

@@ -149,6 +149,22 @@ export type LvisApi = {
   setMarketplaceApiKey: (k: string) => Promise<{ ok: true }>;
   hasMarketplaceApiKey: () => Promise<boolean>;
   deleteMarketplaceApiKey: () => Promise<{ ok: true }>;
+  /** #FU259 — MCP catalog (filtered to plugin_type === "mcp"). */
+  listMcpCatalog: () => Promise<Array<{
+    id: string;
+    name: string;
+    description: string;
+    version?: string;
+    publisher?: string;
+    pluginType?: "plugin" | "mcp";
+    installed: boolean;
+    enabled: boolean;
+    isManaged?: boolean;
+  }>>;
+  installMcpFromMarketplace: (slug: string) => Promise<
+    | { ok: true; slug: string; installDir: string; connected: boolean; warning?: string; needsCredential: boolean; authMode: "none" | "api-key" | "sso" }
+    | { ok: false; error: string; message: string }
+  >;
   msGraphGetState: () => Promise<{
     environment: "external" | "corporate";
     isAuthenticated: boolean;
