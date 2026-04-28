@@ -13,12 +13,14 @@ export function AssistantCard({
   actions,
   isStarred,
   onFeedback,
+  isFinal = true,
 }: {
   entry: Extract<ChatEntry, { kind: "assistant" }>;
   highlightQuery?: string;
   actions?: { onRetry?: () => void; onFork?: () => void; onToggleStar?: () => void };
   isStarred?: boolean;
   onFeedback?: (rating: "up" | "down", reason?: string) => void | Promise<void>;
+  isFinal?: boolean;
 }) {
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
   const [showReasonBox, setShowReasonBox] = useState(false);
@@ -28,7 +30,7 @@ export function AssistantCard({
   // Sprint 4.B: rough token estimate for tooltip (~4 chars/token)
   const outputTokens = Math.ceil(entry.text.length / 4);
   return (
-    <div className="group relative max-w-[85%] rounded-md border bg-card px-3 py-2 text-sm">
+    <div className={`group relative max-w-[85%] rounded-md px-3 py-2 text-sm ${isFinal !== false ? "border bg-card" : "text-muted-foreground"}`}>
       <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
         {title}
         {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
