@@ -274,18 +274,6 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
             </div>
           );
         })}
-        {/* Ask-user cards anchor at the END of the chat flow — same
-            inline-turn position as the assistant's last response, so the
-            user can reply without scrolling back up regardless of how
-            long the conversation has grown. */}
-        {askQuestions.map((req) => (
-          <AskUserQuestionCard
-            key={req.id}
-            api={workflowApi}
-            request={req}
-            onResolved={dismissAskQuestion}
-          />
-        ))}
         <div ref={chatEndRef} />
       </div></ScrollArea>
       {contextOverflowPct >= 0.95 && (
@@ -305,6 +293,14 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
+      {askQuestions.map((req) => (
+        <AskUserQuestionCard
+          key={req.id}
+          api={workflowApi}
+          request={req}
+          onResolved={dismissAskQuestion}
+        />
+      ))}
       <SessionTodoPanel api={workflowApi} />
       <div className="border-t bg-card p-3 space-y-2">
         <div className="flex items-center justify-between gap-3 text-[11px]">
