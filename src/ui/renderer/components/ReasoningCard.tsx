@@ -73,7 +73,7 @@ export function ReasoningCard({
         )}
       </button>
       {bodyVisible && (
-        <div className="whitespace-pre-wrap border-t px-3 py-2 text-[12px] italic leading-5">
+        <div className="whitespace-pre-wrap border-l-2 border-muted ml-3 pl-3 py-1 text-[12px] italic leading-5 text-muted-foreground/80">
           {entry.text || (streaming ? "생각을 정리하는 중..." : "")}
         </div>
       )}
