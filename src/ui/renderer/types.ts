@@ -310,7 +310,6 @@ export type LvisApi = {
       wrappedPrompt: string;
     }) => void,
   ) => () => void;
-  onAskFromPlugin: (h: (payload: { pluginId: string; text: string }) => void) => () => void;
   dismissTrigger: (sessionId: string) => Promise<{ ok: boolean; removed?: boolean; error?: string }>;
   importTrigger: (sessionId: string) => Promise<{ ok: boolean; imported?: number; reason?: string; error?: string }>;
   onMarketplaceUpdatesAvailable: (h: (updates: Array<{ pluginId: string; installedVersion: string; latestVersion: string }>) => void) => () => void;
