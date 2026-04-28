@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { Brain, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 
 /**
@@ -57,12 +57,12 @@ export function ReasoningCard({
         disabled={streaming}
         aria-expanded={bodyVisible}
       >
-        {streaming ? (
-          <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
-        ) : null}
+        {streaming
+          ? <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
+          : <Brain className="h-3 w-3 flex-shrink-0" />}
         <span className="font-medium">{title}</span>
         {approxTokens > 0 && (
-          <span className="ml-auto rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
+          <span className="rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
             ~{approxTokens >= 1000 ? `${(approxTokens / 1000).toFixed(1)}k` : approxTokens} tok
           </span>
         )}

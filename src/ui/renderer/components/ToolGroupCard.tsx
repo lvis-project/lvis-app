@@ -23,9 +23,9 @@ function SingleToolInline({ tool }: { tool: Extract<ChatEntry, { kind: "tool_gro
         <Wrench className="h-3 w-3 flex-shrink-0" />
         <span className="font-medium">{getToolDisplayName(tool.name)}</span>
         {isRunning ? (
-          <Loader2 className="ml-auto h-3 w-3 animate-spin" />
+          <Loader2 className="h-3 w-3 animate-spin" />
         ) : (
-          <Badge variant={isError ? "secondary" : "default"} className={`ml-auto px-1 py-0 text-[10px] ${isError ? "text-red-400" : ""}`}>
+          <Badge variant={isError ? "secondary" : "default"} className={`px-1 py-0 text-[10px] ${isError ? "text-red-400" : ""}`}>
             {isError ? "실패" : "완료"}
           </Badge>
         )}
@@ -102,7 +102,7 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
         <Wrench className="h-3 w-3 flex-shrink-0" />
         <span className="font-medium">{groupTitle}</span>
         <span className="text-[10px] opacity-60 truncate max-w-[200px]">{uniqueToolNames}</span>
-        <Badge variant="outline" className="px-1 py-0 text-[10px] ml-auto flex-shrink-0">
+        <Badge variant="outline" className="px-1 py-0 text-[10px] flex-shrink-0">
           {groupStatus === "running" ? `${doneCount}/${group.tools.length}` : `${group.tools.length}개`}
         </Badge>
         {groupStatus === "running" ? (
@@ -130,11 +130,11 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
                   {isExpanded ? <ChevronDown className="h-2.5 w-2.5 flex-shrink-0" /> : <ChevronRight className="h-2.5 w-2.5 flex-shrink-0" />}
                   <span>{getToolDisplayName(tool.name)}</span>
                   {tool.status === "running" ? (
-                    <Loader2 className="ml-auto h-2.5 w-2.5 animate-spin" />
+                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
                   ) : (
                     <Badge
                       variant={tool.status === "error" ? "secondary" : "default"}
-                      className={`ml-auto px-1 py-0 text-[10px] ${tool.status === "error" ? "text-red-400" : ""}`}
+                      className={`px-1 py-0 text-[10px] ${tool.status === "error" ? "text-red-400" : ""}`}
                     >
                       {tool.status === "error" ? "실패" : "완료"}
                     </Badge>
