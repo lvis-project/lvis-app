@@ -52,14 +52,15 @@ function SingleToolInline({ tool }: { tool: Extract<ChatEntry, { kind: "tool_gro
 }
 
 export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_group" }> }) {
+  // All hooks must be declared before any conditional return (Rules of Hooks)
   const [open, setOpen] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
 
   // Single tool: render inline without group wrapper
   if (group.tools.length === 1 && group.tools[0]) {
     return <SingleToolInline tool={group.tools[0]} />;
   }
-  const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
   const doneCount = group.tools.filter((t) => t.status !== "running").length;
   const hasError = group.tools.some((t) => t.status === "error");
   const groupStatus = group.status === "running"
