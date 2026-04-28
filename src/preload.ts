@@ -298,6 +298,11 @@ const api = {
     ipcRenderer.on("lvis:trigger:imported", listener);
     return () => ipcRenderer.removeListener("lvis:trigger:imported", listener);
   },
+  onAskFromPlugin: (handler: (payload: { pluginId: string; text: string }) => void) => {
+    const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
+    ipcRenderer.on("lvis:plugin:ask-home-chat", listener);
+    return () => ipcRenderer.removeListener("lvis:plugin:ask-home-chat", listener);
+  },
   dismissTrigger: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:trigger:dismiss", sessionId) as Promise<{
       ok: boolean;

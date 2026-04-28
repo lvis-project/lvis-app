@@ -1678,6 +1678,40 @@ ${input}`;
     }
   });
 
+  // Plugin-authored question → host home chat. Plugin webview cannot
+  // reach `window.lvisApi.chatSend` (only the narrow lvisPlugin bridge
+  // is exposed) so main forwards the request to the host renderer,
+  // which performs the same handleAsk path a user keystroke would —
+  // navigation to home + chatSend round-trip with the user-bubble
+  // append. Sender guard mirrors the other plugin handlers; cap the
+  // text length so a runaway plugin can't flood the chat.
+  ipcMain.handle("lvis:plugin:ask-home-chat", (e, text: unknown) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
+      auditUnauthorized(auditLogger, "lvis:plugin:ask-home-chat", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof text !== "string") {
+      return { ok: false, error: "invalid-text" };
+    }
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return { ok: false, error: "empty-text" };
+    }
+    if (trimmed.length > 4000) {
+      return { ok: false, error: "text-too-long" };
+    }
+    const win = getMainWindow();
+    if (!win || win.isDestroyed()) {
+      return { ok: false, error: "no-main-window" };
+    }
+    win.webContents.send("lvis:plugin:ask-home-chat", {
+      pluginId: binding.pluginId,
+      text: trimmed,
+    });
+    return { ok: true };
+  });
+
   ipcMain.handle("lvis:plugin:emit-event", (e, type: string, data?: unknown) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
