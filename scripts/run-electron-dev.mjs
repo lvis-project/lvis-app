@@ -723,6 +723,7 @@ async function main() {
       "../lvis-plugin-ms-graph",
       "../lvis-plugin-lge-api",
       "../lvis-plugin-work-proactive",
+      "../lvis-plugin-agent-hub",
     ].filter((relPath) => !disabledPluginIds.has(relPath.replace("../lvis-plugin-", "")));
 
     const bunEnv = getBunInstallEnv();
