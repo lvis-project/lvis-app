@@ -49,6 +49,36 @@ import { runManagedBootstrap } from "./boot/managed-marketplace.js";
  * translate before touching the raw message array — otherwise edit/fork/star
  * target the wrong message in conversations that used tools.
  */
+/** Remove trailing tool_use blocks from the last assistant message if no
+ *  corresponding tool_result follows. Prevents "Tool result is missing" errors
+ *  when forking/retrying mid-turn. */
+function removeOrphanToolUse(messages: GenericMessage[]): GenericMessage[] {
+  const result = [...messages];
+  // Collect tool_use ids that already have a tool_result in the slice
+  const resolvedIds = new Set<string>();
+  for (const m of result) {
+    if (m.role === "user" && Array.isArray(m.content)) {
+      for (const block of m.content as Array<Record<string, unknown>>) {
+        if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
+          resolvedIds.add(block.tool_use_id);
+        }
+      }
+    }
+  }
+  // Walk backwards and strip assistant messages that only contain unresolved tool_use
+  for (let i = result.length - 1; i >= 0; i--) {
+    const m = result[i];
+    if (m.role !== "assistant" || !Array.isArray(m.content)) break;
+    const blocks = m.content as Array<Record<string, unknown>>;
+    const hasOrphan = blocks.some(
+      (b) => b.type === "tool_use" && typeof b.id === "string" && !resolvedIds.has(b.id),
+    );
+    if (!hasOrphan) break;
+    result.splice(i, 1);
+  }
+  return result;
+}
+
 function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number): number {
   if (ordinal < 0) return -1;
   let count = 0;
@@ -1339,7 +1369,10 @@ ${input}`;
       const realIdx = entryOrdinalToHistoryIndex(current, messageIndex);
       if (realIdx >= 0) upto = Math.min(realIdx + 1, current.length);
     }
-    const slice = current.slice(0, upto);
+    let slice = current.slice(0, upto);
+    // Remove trailing tool_use blocks that have no matching tool_result in the
+    // slice — sending them to the API causes "Tool result is missing" errors.
+    slice = removeOrphanToolUse(slice);
     if (current.length > 0) {
       await memoryManager.saveSession(conversationLoop.getSessionId(), current);
     }
