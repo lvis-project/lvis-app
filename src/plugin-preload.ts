@@ -81,6 +81,14 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
     return () => ipcRenderer.removeListener("lvis:plugin:event", listener);
   },
 
+  // Forward a plugin-authored question into the host's home chat. Main
+  // re-emits to the host renderer, which navigates to home and fires
+  // the same chatSend path a typed user message would. Plugin webview
+  // never touches chat state directly — main remains the trust boundary.
+  askInHomeChat: async (text: string): Promise<void> => {
+    unwrapEnvelope(await ipcRenderer.invoke("lvis:plugin:ask-home-chat", text));
+  },
+
   /**
    * Fetch the verified entry URL for this plugin. Main resolves it from
    * the (webContents.id → pluginId, entryUrl) registry populated by the
