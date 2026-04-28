@@ -267,12 +267,12 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                   highlightQuery={searchHighlight}
                   isStarred={!!isEntryStarred(idx)}
                   isFinal={isFinal}
-                  actions={{
+                  actions={isFinal !== false ? {
                     onRetry: () => void onRetryEffort(),
                     onFork: () => void onFork(idx),
                     onToggleStar: () => void onToggleStar(idx),
-                  }}
-                  onFeedback={onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
+                  } : undefined}
+                  onFeedback={isFinal !== false && onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
                 />
               </div>
             );
