@@ -2,8 +2,10 @@
  * Boot §4.2 Step 0–1+5 — Core service wiring.
  *
  * Instantiates services that have no plugin dependency and must exist
- * before plugin loading (settings, memory, audit, ms-graph, python runtime,
+ * before plugin loading (settings, memory, audit, python runtime,
  * keyword/route/tool registry + BashTool).
+ *
+ * MS Graph 인증은 PR 3 이후 ms-graph 플러그인이 자체 소유 — host 에는 관련 코드 없음.
  */
 import { resolve } from "node:path";
 import { homedir } from "node:os";
@@ -21,12 +23,10 @@ import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
-import { MsGraphService } from "../main/ms-graph-service.js";
 
 export interface CoreServices {
   pythonPath: string | undefined;
   bashAstValidator: BashAstValidator;
-  msGraphService: MsGraphService;
   auditService: AuditService;
   settingsService: SettingsService;
   memoryManager: MemoryManager;
@@ -54,26 +54,10 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   const auditService = new AuditService();
   await auditService.start();
 
-  // §4.2 Step 1: Config — MsGraphService 가 이 설정(msGraph.environment) 을 읽으므로 먼저 init.
+  // §4.2 Step 1: Config
   const settingsService = new SettingsService({
     userDataPath: app.getPath("userData"),
   });
-
-  // Microsoft Graph 공유 인증 서비스 (이메일·캘린더 플러그인 공용).
-  // 환경(external / corporate) 는 settings 에서 택1 — ms-graph-auth-config.ts 참조.
-  const msGraphEnv = settingsService.get("msGraph")?.environment ?? "external";
-  const msGraphService = new MsGraphService(
-    app.getPath("userData"),
-    msGraphEnv,
-  );
-  await msGraphService.loadSavedToken();
-  if (msGraphService.isAuthenticated()) {
-    console.log(
-      `[lvis] boot: ms-graph token loaded [${msGraphEnv}] — ${msGraphService.getAccountName()}`,
-    );
-  } else {
-    console.log(`[lvis] boot: ms-graph env=${msGraphEnv}, unauthenticated`);
-  }
 
   // §14.2 Audit log rotation + retention — boot-time check + 1h interval
   const auditLogger = new AuditLogger();
@@ -115,7 +99,6 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   return {
     pythonPath,
     bashAstValidator,
-    msGraphService,
     auditService,
     settingsService,
     memoryManager,

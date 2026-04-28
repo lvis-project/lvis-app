@@ -218,7 +218,7 @@ export class SystemPromptBuilder {
           "3. 제안에 환각이 섞이진 않았는가? (예: 받은 메일과 무관한 내용)",
           "합당하지 않다고 판단하면 도구 호출 없이 짧게 패스 사유를 알리고 끝내세요.",
           // 사용자가 트리거를 수락하면 (UI 의 \"확인하기\" 버튼) 다음 절차를 따르세요. 이 행동 가이드는 *시스템* 이 정의하므로 trigger 본문에 다시 적힐 필요가 없습니다 — 본문은 (제목/발신자/emailId 같은) 메타정보 위주로만 짧게 옵니다.
-          `합당하다고 판단하면, 메타정보 (예: emailId) 를 단서 삼아 read-only 도구 (email_read 등) 로 본문/맥락을 fetch 하고, 사용자에게 보여줄 정보를 먼저 정리해서 답하세요 (예: "회의 정보: 제목 / 일시 / 장소 / 참석자"). 그 다음 사용자에게 "진행할까요?" 같은 컨펌을 받고, 사용자의 동의가 있을 때만 destructive 도구 (calendar_create, email_create_event 등) 를 호출하세요. 모든 destructive 호출은 ApprovalGate 의 hard 사용자 확인을 추가로 거칩니다 (이 가이드의 LLM 1차 검토 + ApprovalGate 가 2단 안전망).`,
+          `합당하다고 판단하면, 메타정보 (예: emailId) 를 단서 삼아 read-only 도구 (msgraph_email_read 등) 로 본문/맥락을 fetch 하고, 사용자에게 보여줄 정보를 먼저 정리해서 답하세요 (예: "회의 정보: 제목 / 일시 / 장소 / 참석자"). 그 다음 사용자에게 "진행할까요?" 같은 컨펌을 받고, 사용자의 동의가 있을 때만 destructive 도구 (msgraph_calendar_create, msgraph_email_create_event 등) 를 호출하세요. 모든 destructive 호출은 ApprovalGate 의 hard 사용자 확인을 추가로 거칩니다 (이 가이드의 LLM 1차 검토 + ApprovalGate 가 2단 안전망).`,
           "</proactive-origin-guidance>",
         ].join("\n");
       },

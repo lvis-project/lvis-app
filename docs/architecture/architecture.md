@@ -2040,7 +2040,7 @@ graph TB
 번들 플러그인 4개를 운영하면서 두 가지 패턴에서 LLM 파라미터 추론 실패가 반복 관찰되었다:
 
 1. **바이너리/배열 데이터** (`meeting_push_chunk.chunk.pcm16leMono`): LLM이 `number[]` 대신 base64 string을 시도.
-2. **nested required + 배열 항목** (`calendar_create.attendees`): LLM이 `string[]` 대신 단일 문자열 전달.
+2. **nested required + 배열 항목** (`msgraph_calendar_create.attendees`): LLM이 `string[]` 대신 단일 문자열 전달.
 
 기존 generic schema(`{ payload: object }`)는 LLM에 파라미터 구조를 전달하지 않아 이 문제를 해결할 수 없었다. `toolSchemas`를 선택적 필드로 도입하면 기존 플러그인에 하위 호환성을 유지하면서 필요한 메서드만 점진적으로 명세를 추가할 수 있다.
 
@@ -2149,27 +2149,45 @@ stateDiagram-v2
 | `onEvent(name, handler)` | 이벤트 구독 | 전체 |
 | `addTask(task)` | LVIS 태스크 생성. host `taskService.ts` 가 SQLite (`~/.lvis/tasks/lvis-tasks.db`) 에 직접 기록. tasks-plugin-split 은 paused (memory 참조) — 별도 plugin 으로 옮기지 않고 host 에서 owner 유지. | meeting, email |
 | `saveNote(title, content)` | 플러그인 자기 dir 안에 메모 저장 (`~/.lvis/plugins/<id>/notes/`) | meeting |
-| `getSecret(key)` | 암호화된 API 키 조회 | meeting, email, calendar |
-| `getMsGraphToken()` | Microsoft Graph Bearer 토큰 획득 | email, calendar |
-| `startMsGraphAuth(openBrowser)` | OAuth 2.0 브라우저 플로우 개시 | email, calendar |
-| `isMsGraphAuthenticated()` | 현재 인증 상태 조회 | email, calendar |
-| `getMsGraphAccount()` | 로그인 계정 이메일 반환 | email, calendar |
-| `onMsGraphAuthChange(handler)` | 인증 상태 변화 구독 | email, calendar |
+| `getSecret(key)` | 암호화된 API 키 조회 | meeting, ms-graph |
 | `logEvent(level, message, data?)` | **[Phase 2]** 호스트 감사 로그에 플러그인 이벤트 기록. `level`: `"info"\|"warn"\|"error"` | 전체 |
 | `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
 | `triggerConversation(spec)` | **[Brain P0]** 관찰 신호로부터 ConversationLoop 능동 발사 ("먼저 말 거는 비서" 차별화). `conversation-trigger` capability gated — 일반 plugin 차단. 자세한 사양: [`conversation-trigger.md`](../references/conversation-trigger.md). Brain track 은 §7 Proactive Engine 의 sub-phase 로 P0~P5 진행. | proactive (work-proactive) |
 
-**Microsoft Graph 공유 인증 (`ms-graph-consumer` capability gated):**
+**Plugin-Owned OAuth Authentication (PR 3 — 신 정책)**
 
-| 메서드 | 설명 | 소비 플러그인 |
-|--------|------|--------------|
-| `getMsGraphToken()` | 현재 세션의 Microsoft Graph Bearer 토큰을 반환(미인증 시 `null`). 각 플러그인이 직접 MSAL 인스턴스를 운영하지 않고 호스트의 단일 토큰 캐시를 공유. | email, calendar |
-| `startMsGraphAuth(openBrowser)` | OAuth 2.0 브라우저 플로우 개시. `openBrowser(url)` 콜백으로 시스템 브라우저를 열고, 호스트가 리다이렉트 URI 를 수신해 토큰을 교환한다. | email, calendar |
-| `isMsGraphAuthenticated()` | 현재 인증 상태 (동기). 툴 호출 전 가드에 사용. | email, calendar |
-| `getMsGraphAccount()` | 로그인된 계정 이메일(UPN) 반환. 미인증 시 `null`. | email, calendar |
-| `onMsGraphAuthChange(handler)` | 토큰 갱신·로그아웃 이벤트 구독. UI 상태 뱃지 동기화에 사용. | email, calendar |
+PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전되었다. 이는 §9.4a 의 일반 정책 — *플러그인은 HostApi 만으로 호스트 자원 접근* — 에 대한 정당한 예외이며, 이후 다른 OAuth-기반 플러그인 (Slack / Notion / Google 등) 도 동일 패턴을 따른다.
 
-이 5개 메서드는 `capabilities: ["ms-graph-consumer"]` 매니페스트 선언을 요구한다 (§9.6 deployment guard 가 정책상 게이팅). `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `worker-client`, `knowledge-index`, `conversation-trigger` 가 사용된다.
+**원칙**
+- OAuth 흐름이 필요한 플러그인은 자체적으로 다음을 소유할 수 있다:
+  - MSAL / OAuth 라이브러리 인스턴스
+  - 시스템 브라우저 호출 (`shell.openExternal`)
+  - loopback HTTP redirect 또는 custom protocol 핸들러
+  - `safeStorage` 토큰 캐시 (플러그인 namespace 안)
+  - 자체 settings UI (host `PluginConfigTab` 의 key-value 또는 sidebar embedded module)
+- 플러그인 manifest 에 `capabilities` 자기-식별 라벨을 선언한다 (예: `ms-graph-consumer`). 이 capability 는 PR 3 이후 advisory — host 측 게이트가 아니라 플러그인 분류·문서화 목적.
+- 호스트는 **OAuth-specific 코드를 포함하지 않는다**. MS Graph / Slack / Notion 등 외부 ID provider 는 모두 해당 플러그인이 소유.
+
+**근거**
+1. **OSS 친화성**: 호스트가 사내 (LG) tenant ID / client ID 를 소스에 두지 않고, 플러그인이 자기 config 에 둔다. 호스트 코드 자체는 어떤 외부 서비스도 모름.
+2. **플러그인 자율성**: 새 OAuth 플러그인을 추가할 때마다 호스트 PR 이 필요했던 종속을 끊는다.
+3. **보안 표면 최소화**: 호스트의 신뢰 경계가 좁아지고, OAuth 누수/오염은 해당 플러그인 안에서 격리.
+
+**보안 계약** — OAuth 권한을 가진 플러그인은 코드 리뷰에서 다음을 점검:
+- redirect URI 검증 (loopback `127.0.0.1:<random>` + state CSRF)
+- scope 최소화 (over-permissioning 금지)
+- 토큰을 plugin namespace 밖으로 (host root 또는 다른 plugin 디렉토리) 쓰지 않음
+- MSAL/OAuth 라이브러리 버전 SBOM 등록
+- 토큰 노출 경로 (logs, telemetry, error messages) 스크럽
+
+**ms-graph 플러그인 (현행 reference)** — `lvis-plugin-ms-graph`:
+- `src/auth/config.ts` — Azure AD app registration (external + corporate tenant)
+- `src/auth/msal-client.ts` — `@azure/msal-node` 래퍼, silentRefresh + interactive auth + envEpoch race guard
+- `src/auth/token-store.ts` — Electron `safeStorage` 암호화, `<hostRoot>/plugins/ms-graph/tokens/token-{env}.json`
+- `src/auth/migrator.ts` — 구 host `~/.lvis/ms-graph-token-{env}.json` 1회 자동 이전 (PR 3b 호환 유틸)
+- 환경 (external / corporate) 선택은 PluginConfigTab 의 `pluginConfigs["ms-graph"].environment` key
+
+**Capability 네이밍**: `ms-graph-consumer` 는 kebab-case capability 네이밍 컨벤션을 따르며, 동일 컨벤션으로 `mail-source`, `calendar-source`, `meeting-recorder`, `background-watcher`, `worker-client`, `knowledge-index`, `conversation-trigger` 가 사용된다.
 
 **Proactive Brain — `conversation-trigger` capability:** read-only "두뇌" plugin 이 신호 관찰 후 ConversationLoop 를 *능동적*으로 시작하는 surface. 이 capability 가 부여된 plugin 만 `hostApi.triggerConversation()` 호출 가능. 일반 plugin 에 부여하지 말 것 — 사용자가 입력하지 않은 prompt 를 LLM 에 흘리는 권한이므로. 안전 계약 / spec / gate 는 [`conversation-trigger.md`](../references/conversation-trigger.md) 참조.
 
@@ -2369,7 +2387,7 @@ graph TB
 }
 ```
 
-> `tools[]` 는 lower snake_case LLM tool name이며 (`calendar_today`, `email_start_watcher` 등), boot/runtime/keyword registration 경로에서도 동일한 이름이 그대로 전달된다. dotted form은 이벤트 이름에만 사용한다.
+> `tools[]` 는 lower snake_case LLM tool name이며 (`msgraph_calendar_today`, `msgraph_email_start_watcher` 등), boot/runtime/keyword registration 경로에서도 동일한 이름이 그대로 전달된다. dotted form은 이벤트 이름에만 사용한다.
 
 **Phase 3 계획 (미구현):** managed 매니페스트에 서명/게시 메타데이터를 추가한다. 구체적으로는 `publisherId`, `publishedAt` (ISO 8601), `signature` (base64 ECDSA-P256-SHA256), `signatureAlgorithm`, `minAppVersion`/`maxAppVersion`. 현재 스키마는 이 필드를 수용하지 않으며, runtime이 서명을 검증하지도 않는다.
 
