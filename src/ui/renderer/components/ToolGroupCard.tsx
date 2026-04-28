@@ -15,12 +15,11 @@ function SingleToolInline({ tool }: { tool: Extract<ChatEntry, { kind: "tool_gro
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
   return (
-    <div className="max-w-[85%] rounded-md border border-dashed text-xs text-muted-foreground">
+    <div className="max-w-[85%] rounded-md text-xs text-muted-foreground">
       <button
         className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
         onClick={() => setOpen((o) => !o)}
       >
-        {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
         <Wrench className="h-3 w-3 flex-shrink-0" />
         <span className="font-medium">{getToolDisplayName(tool.name)}</span>
         {isRunning ? (
@@ -30,6 +29,7 @@ function SingleToolInline({ tool }: { tool: Extract<ChatEntry, { kind: "tool_gro
             {isError ? "실패" : "완료"}
           </Badge>
         )}
+        {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
       </button>
       {open && (
         <div className="border-t px-3 py-1.5 font-mono text-[10px] space-y-1">
@@ -93,12 +93,11 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
   }
 
   return (
-    <div className="max-w-[85%] rounded-md border border-dashed text-xs text-muted-foreground">
+    <div className="max-w-[85%] rounded-md text-xs text-muted-foreground">
       <button
         className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
         onClick={() => setOpen((o) => !o)}
       >
-        {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
         <Wrench className="h-3 w-3 flex-shrink-0" />
         <span className="font-medium">{groupTitle}</span>
         <span className="text-[10px] opacity-60 truncate max-w-[200px]">{uniqueToolNames}</span>
@@ -115,6 +114,7 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
             {groupStatus === "error" ? "오류 있음" : "완료"}
           </Badge>
         )}
+        {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
       </button>
       {open && (
         <div className="space-y-1 border-t px-3 py-1.5">

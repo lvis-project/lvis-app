@@ -46,7 +46,7 @@ export function ReasoningCard({
     : 0;
 
   return (
-    <div className="max-w-[85%] rounded-md border border-dashed bg-muted/20 text-sm text-muted-foreground">
+    <div className="max-w-[85%] rounded-md bg-muted/20 text-sm text-muted-foreground">
       <button
         type="button"
         className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/30 disabled:cursor-default disabled:hover:bg-transparent"
@@ -59,16 +59,17 @@ export function ReasoningCard({
       >
         {streaming ? (
           <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
-        ) : bodyVisible ? (
-          <ChevronDown className="h-3 w-3 flex-shrink-0" />
-        ) : (
-          <ChevronRight className="h-3 w-3 flex-shrink-0" />
-        )}
+        ) : null}
         <span className="font-medium">{title}</span>
         {approxTokens > 0 && (
           <span className="ml-auto rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
             ~{approxTokens >= 1000 ? `${(approxTokens / 1000).toFixed(1)}k` : approxTokens} tok
           </span>
+        )}
+        {!streaming && (
+          bodyVisible
+            ? <ChevronDown className="h-3 w-3 flex-shrink-0" />
+            : <ChevronRight className="h-3 w-3 flex-shrink-0" />
         )}
       </button>
       {bodyVisible && (
