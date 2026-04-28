@@ -50,7 +50,7 @@ export function AssistantCard({
             </Tooltip>
           )}
           {actions && !entry.streaming ? (
-            <div className="hidden gap-1 group-hover:flex">
+            <div className={`gap-1 ${isFinal !== false ? "flex" : "hidden group-hover:flex"}`}>
               {actions.onRetry && (
                 <Tooltip><TooltipTrigger asChild>
                   <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onRetry} title="다시 시도 (깊이: high)">
