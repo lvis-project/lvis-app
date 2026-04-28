@@ -4,13 +4,61 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
+import { getToolDisplayName } from "../utils/tool-display.js";
 import type { RenderHtmlPayload } from "../types.js";
 import { HtmlPreview } from "./HtmlPreview.js";
 import { McpAppView } from "./McpAppView.js";
 
+/** Single-tool inline indicator — no collapsible wrapper */
+function SingleToolInline({ tool }: { tool: Extract<ChatEntry, { kind: "tool_group" }>["tools"][number] }) {
+  const [open, setOpen] = useState(false);
+  const isRunning = tool.status === "running";
+  const isError = tool.status === "error";
+  return (
+    <div className="max-w-[85%] rounded-md border border-dashed text-xs text-muted-foreground">
+      <button
+        className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
+        <Wrench className="h-3 w-3 flex-shrink-0" />
+        <span className="font-medium">{getToolDisplayName(tool.name)}</span>
+        {isRunning ? (
+          <Loader2 className="ml-auto h-3 w-3 animate-spin" />
+        ) : (
+          <Badge variant={isError ? "secondary" : "default"} className={`ml-auto px-1 py-0 text-[10px] ${isError ? "text-red-400" : ""}`}>
+            {isError ? "실패" : "완료"}
+          </Badge>
+        )}
+      </button>
+      {open && (
+        <div className="border-t px-3 py-1.5 font-mono text-[10px] space-y-1">
+          {tool.input && (
+            <div>
+              <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
+              <pre className="whitespace-pre-wrap break-all opacity-80">{JSON.stringify(tool.input, null, 2)}</pre>
+            </div>
+          )}
+          {tool.result !== undefined && (
+            <div>
+              <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${isError ? "text-red-400" : ""}`}>{isError ? "오류" : "결과"}</div>
+              <pre className={`whitespace-pre-wrap break-all opacity-80 ${isError ? "text-red-400" : ""}`}>{tool.result}</pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_group" }> }) {
   const [open, setOpen] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+
+  // Single tool: render inline without group wrapper
+  if (group.tools.length === 1 && group.tools[0]) {
+    return <SingleToolInline tool={group.tools[0]} />;
+  }
   const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
   const doneCount = group.tools.filter((t) => t.status !== "running").length;
   const hasError = group.tools.some((t) => t.status === "error");
@@ -18,6 +66,7 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
     ? "running"
     : hasError ? "error" : "done";
   const groupTitle = groupStatus === "running" ? "도구 사용 중" : "도구 사용 결과";
+  const uniqueToolNames = [...new Set(group.tools.map((t) => getToolDisplayName(t.name)))].join(" · ");
 
   function toggleTool(id: string) {
     setExpandedTools((prev) => {
@@ -52,15 +101,16 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
         {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
         <Wrench className="h-3 w-3 flex-shrink-0" />
         <span className="font-medium">{groupTitle}</span>
-        <Badge variant="outline" className="px-1 py-0 text-[10px]">
+        <span className="text-[10px] opacity-60 truncate max-w-[200px]">{uniqueToolNames}</span>
+        <Badge variant="outline" className="px-1 py-0 text-[10px] ml-auto flex-shrink-0">
           {groupStatus === "running" ? `${doneCount}/${group.tools.length}` : `${group.tools.length}개`}
         </Badge>
         {groupStatus === "running" ? (
-          <Loader2 className="ml-auto h-3 w-3 animate-spin" />
+          <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
         ) : (
           <Badge
             variant={groupStatus === "error" ? "secondary" : "default"}
-            className={`ml-auto px-1 py-0 text-[10px] ${groupStatus === "error" ? "text-red-400" : ""}`}
+            className={`px-1 py-0 text-[10px] flex-shrink-0 ${groupStatus === "error" ? "text-red-400" : ""}`}
           >
             {groupStatus === "error" ? "오류 있음" : "완료"}
           </Badge>
@@ -77,7 +127,7 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
                   onClick={() => toggleTool(tool.toolUseId)}
                 >
                   {isExpanded ? <ChevronDown className="h-2.5 w-2.5 flex-shrink-0" /> : <ChevronRight className="h-2.5 w-2.5 flex-shrink-0" />}
-                  <span className="font-mono">{tool.name}</span>
+                  <span>{getToolDisplayName(tool.name)}</span>
                   {tool.status === "running" ? (
                     <Loader2 className="ml-auto h-2.5 w-2.5 animate-spin" />
                   ) : (
