@@ -31,50 +31,81 @@ function makeGroup(overrides: Partial<ToolGroupEntry> = {}): ToolGroupEntry {
   };
 }
 
+/** Multi-tool group (2 tools) — tests group card behavior */
+function makeMultiGroup(overrides: Partial<ToolGroupEntry> = {}): ToolGroupEntry {
+  return {
+    kind: "tool_group",
+    groupId: "grp-2",
+    groupIds: ["grp-2"],
+    status: "done",
+    tools: [
+      { toolUseId: "tu-1", name: "knowledge_search", input: {}, result: "r1", status: "done", displayOrder: 0 },
+      { toolUseId: "tu-2", name: "read_file", input: {}, result: "r2", status: "done", displayOrder: 1 },
+    ],
+    ...overrides,
+  };
+}
+
 describe("ToolGroupCard", () => {
   it("renders without crashing", () => {
     const { container } = render(<ToolGroupCard group={makeGroup()} />);
     expect(container).toBeTruthy();
   });
 
-  it("shows '도구 사용 결과' when status is done", () => {
+  // Single tool → inline (no group header)
+  it("single tool: renders tool name inline without group header", () => {
     const { container } = render(<ToolGroupCard group={makeGroup({ status: "done" })} />);
+    expect(container.textContent).not.toContain("도구 사용 결과");
+    expect(container.textContent).toContain("read_file"); // unmapped name shown as-is
+  });
+
+  it("single tool running: shows spinner inline", () => {
+    const { container } = render(
+      <ToolGroupCard group={makeGroup({ status: "running", tools: [{ toolUseId: "tu-1", name: "read_file", input: {}, status: "running", displayOrder: 0 }] })} />,
+    );
+    expect(container.textContent).not.toContain("도구 사용 중");
+    expect(container.textContent).toContain("read_file");
+  });
+
+  it("single tool error: shows 실패 badge", () => {
+    const group = makeGroup({ status: "error", tools: [{ toolUseId: "tu-1", name: "read_file", input: {}, result: "err", status: "error", displayOrder: 0 }] });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.textContent).toContain("실패");
+  });
+
+  // Multi-tool → group card
+  it("multi-tool: shows '도구 사용 결과' header", () => {
+    const { container } = render(<ToolGroupCard group={makeMultiGroup({ status: "done" })} />);
     expect(container.textContent).toContain("도구 사용 결과");
   });
 
-  it("shows '도구 사용 중' when status is running", () => {
+  it("multi-tool: shows '도구 사용 중' header when running", () => {
     const { container } = render(
-      <ToolGroupCard
-        group={makeGroup({
-          status: "running",
-          tools: [{ toolUseId: "tu-1", name: "read_file", input: {}, status: "running", displayOrder: 0 }],
-        })}
-      />,
+      <ToolGroupCard group={makeMultiGroup({ status: "running", tools: [
+        { toolUseId: "tu-1", name: "knowledge_search", input: {}, status: "running", displayOrder: 0 },
+        { toolUseId: "tu-2", name: "read_file", input: {}, status: "running", displayOrder: 1 },
+      ] })} />,
     );
     expect(container.textContent).toContain("도구 사용 중");
   });
 
-  it("expands tool list when header button is clicked", () => {
-    const { container, getByText } = render(<ToolGroupCard group={makeGroup()} />);
-    const headerBtn = container.querySelector("button") as HTMLButtonElement;
-    fireEvent.click(headerBtn);
-    expect(getByText("read_file")).toBeTruthy();
+  it("multi-tool: shows tool display names in header", () => {
+    const { container } = render(<ToolGroupCard group={makeMultiGroup()} />);
+    expect(container.textContent).toContain("문서 검색"); // knowledge_search mapped
   });
 
-  it("shows error badge when a tool has status=error", () => {
-    const group = makeGroup({
-      status: "error",
-      tools: [
-        {
-          toolUseId: "tu-1",
-          name: "read_file",
-          input: {},
-          result: "Permission denied",
-          status: "error",
-          displayOrder: 0,
-        },
-      ],
-    });
+  it("multi-tool: expands tool list when clicked", () => {
+    const { container } = render(<ToolGroupCard group={makeMultiGroup()} />);
+    const headerBtn = container.querySelector("button") as HTMLButtonElement;
+    fireEvent.click(headerBtn);
+    expect(container.textContent).toContain("문서 검색");
+  });
+
+  it("multi-tool error: shows 오류 있음 badge", () => {
+    const group = makeMultiGroup({ status: "error", tools: [
+      { toolUseId: "tu-1", name: "knowledge_search", input: {}, result: "err", status: "error", displayOrder: 0 },
+      { toolUseId: "tu-2", name: "read_file", input: {}, result: "ok", status: "done", displayOrder: 1 },
+    ] });
     const { container } = render(<ToolGroupCard group={group} />);
     expect(container.textContent).toContain("오류 있음");
   });

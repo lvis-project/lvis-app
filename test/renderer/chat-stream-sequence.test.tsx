@@ -66,10 +66,10 @@ describe("Chat stream sequencing (Phase 3.2 regression net)", () => {
         input: { query: "hello" },
       });
     });
-    // ToolGroupCard renders "도구 사용 중" while running (collapsed by default);
-    // that's enough to prove the tool_group entry was created.
+    // Single tool renders inline with display name (no group header).
+    // "문서 검색" = display name for knowledge_search.
     await waitFor(() => {
-      expect(container.textContent).toContain("도구 사용 중");
+      expect(container.textContent).toContain("문서 검색");
     });
   });
 
