@@ -204,22 +204,7 @@ export type LvisApi = {
       }
     | { ok: false; error: string }
   >;
-  msGraphGetState: () => Promise<{
-    environment: "external" | "corporate";
-    isAuthenticated: boolean;
-    account: string | null;
-    configured: boolean;
-    label: string;
-    environments: Array<{
-      id: "external" | "corporate";
-      label: string;
-      description: string;
-      configured: boolean;
-    }>;
-  }>;
-  msGraphSwitchEnvironment: (env: "external" | "corporate") => Promise<{ ok: boolean; state?: unknown }>;
-  msGraphSignIn: () => Promise<{ ok: boolean; error?: string; state?: unknown }>;
-  msGraphSignOut: () => Promise<{ ok: boolean; state?: unknown }>;
+  // PR 3c: msGraph* bridge methods removed — ms-graph plugin owns auth.
   chatHasProvider: () => Promise<boolean>;
   chatSend: (input: string) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
