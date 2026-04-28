@@ -408,12 +408,12 @@ export class VercelUnifiedProvider implements LLMProvider {
       const apiVersion = parsedUrl.searchParams.get("api-version") ?? undefined;
       parsedUrl.search = "";
       const cleanBaseUrl = parsedUrl.toString().replace(/\/chat\/completions\/?$/, "/");
-      // gpt-5.x family requires max_completion_tokens instead of max_tokens.
-      // Intercept the request body to swap the field name transparently.
-      const isGpt5Model = /gpt-5/i.test(modelId);
+      // Azure AI Foundry newer models (o1/o3/o4 series, gpt-5.x+) require
+      // max_completion_tokens instead of max_tokens. Always swap for azure-foundry
+      // — all Azure OpenAI models accept max_completion_tokens; only newer ones
+      // reject max_tokens. Unconditional swap is safer than model-name heuristics.
       const baseFetch = this.customFetch ?? fetch;
-      const azureFetch: typeof fetch = isGpt5Model
-        ? async (input, init) => {
+      const azureFetch: typeof fetch = (async (input, init) => {
             if (init?.body) {
               if (typeof init.body === "string") {
                 try {
@@ -430,14 +430,13 @@ export class VercelUnifiedProvider implements LLMProvider {
                 // Non-string body (ReadableStream/Uint8Array) cannot be rewritten;
                 // max_tokens may still be present and cause a 400.
                 console.warn(
-                  "[azure-foundry] gpt-5.x fetch body is not a string — " +
+                  "[azure-foundry] fetch body is not a string — " +
                     "max_tokens→max_completion_tokens swap skipped",
                 );
               }
             }
             return baseFetch(input, init);
-          }
-        : baseFetch;
+          });
       const azure = createOpenAICompatible({
         name: "azure-foundry",
         baseURL: cleanBaseUrl,
