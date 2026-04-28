@@ -14,6 +14,7 @@ export function AssistantCard({
   isStarred,
   onFeedback,
   isFinal = true,
+  turnTokens,
 }: {
   entry: Extract<ChatEntry, { kind: "assistant" }>;
   highlightQuery?: string;
@@ -21,6 +22,7 @@ export function AssistantCard({
   isStarred?: boolean;
   onFeedback?: (rating: "up" | "down", reason?: string) => void | Promise<void>;
   isFinal?: boolean;
+  turnTokens?: number;
 }) {
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
   const [showReasonBox, setShowReasonBox] = useState(false);
@@ -36,7 +38,19 @@ export function AssistantCard({
           {title}
           {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
           {isStarred ? <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> : null}
-          {!entry.streaming && outputTokens > 0 && (
+          {!entry.streaming && (isFinal && turnTokens && turnTokens > 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="ml-auto cursor-default rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
+                  ~{turnTokens >= 1000 ? `${(turnTokens / 1000).toFixed(1)}k` : turnTokens} tok
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">
+                <div>이번 턴 전체 토큰(추정): {turnTokens.toLocaleString()}</div>
+                <div className="text-muted-foreground">실제값은 감사 로그에서 확인 가능</div>
+              </TooltipContent>
+            </Tooltip>
+          ) : outputTokens > 0 ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="ml-auto cursor-default rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
@@ -48,7 +62,7 @@ export function AssistantCard({
                 <div className="text-muted-foreground">실제값은 감사 로그에서 확인 가능</div>
               </TooltipContent>
             </Tooltip>
-          )}
+          ) : null)}
           {actions && !entry.streaming ? (
             <div className={`gap-1 ${isFinal !== false ? "flex" : "hidden group-hover:flex"}`}>
               {actions.onRetry && (

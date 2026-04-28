@@ -1,5 +1,28 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Wrench } from "lucide-react";
+
+/** Truncated/expandable code block for tool input or output */
+function ExpandableCode({ value, isError = false }: { value: string; isError?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const lines = value.split("\n");
+  const needsTruncation = lines.length > 5;
+  const displayed = expanded || !needsTruncation ? value : lines.slice(0, 5).join("\n");
+  return (
+    <div>
+      <pre className={`bg-muted rounded p-2 text-[10px] font-mono whitespace-pre-wrap break-all ${isError ? "text-red-400" : "opacity-80"} ${!expanded && needsTruncation ? "max-h-20 overflow-hidden" : ""}`}>
+        {displayed}
+      </pre>
+      {needsTruncation && (
+        <button
+          className="mt-0.5 text-[9px] text-muted-foreground hover:text-foreground"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "접기 ↑" : "전체 보기 ↓"}
+        </button>
+      )}
+    </div>
+  );
+}
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
@@ -36,13 +59,13 @@ function SingleToolInline({ tool }: { tool: Extract<ChatEntry, { kind: "tool_gro
           {tool.input && (
             <div>
               <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
-              <pre className="whitespace-pre-wrap break-all opacity-80">{JSON.stringify(tool.input, null, 2)}</pre>
+              <ExpandableCode value={JSON.stringify(tool.input, null, 2)} />
             </div>
           )}
           {tool.result !== undefined && (
             <div>
               <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${isError ? "text-red-400" : ""}`}>{isError ? "오류" : "결과"}</div>
-              <pre className={`whitespace-pre-wrap break-all opacity-80 ${isError ? "text-red-400" : ""}`}>{tool.result}</pre>
+              <ExpandableCode value={tool.result} isError={isError} />
             </div>
           )}
         </div>
@@ -145,7 +168,7 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
                     {tool.input && (
                       <div>
                         <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
-                        <pre className="whitespace-pre-wrap break-all opacity-80">{JSON.stringify(tool.input, null, 2)}</pre>
+                        <ExpandableCode value={JSON.stringify(tool.input, null, 2)} />
                       </div>
                     )}
                     {tool.result !== undefined && (
@@ -153,7 +176,7 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
                         <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${tool.status === "error" ? "text-red-400" : ""}`}>
                           {tool.status === "error" ? "오류" : "결과"}
                         </div>
-                        <pre className={`whitespace-pre-wrap break-all opacity-80 ${tool.status === "error" ? "text-red-400" : ""}`}>{tool.result}</pre>
+                        <ExpandableCode value={tool.result} isError={tool.status === "error"} />
                       </div>
                     )}
                   </div>

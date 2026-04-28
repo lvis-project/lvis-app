@@ -21,6 +21,7 @@ import { AskUserQuestionCard } from "./components/AskUserQuestionCard.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
+import { WorkGroup } from "./components/WorkGroup.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
@@ -206,78 +207,199 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           <SubAgentCard key={spawn.spawnId} spawn={spawn} />
         ))}
         {entries.length === 0 && hasApiKey !== false && askQuestions.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
-        {entries.map((entry, idx) => {
-          const isMatch = searchMatchSet.has(idx);
-          const isCurrentMatch = searchOpen && searchMatches[searchIdx] === idx;
-          const ringCls = isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
-          if (entry.kind === "user") {
-            if (editingEntryIdx === idx) {
-              return (
-                <UserMessageEditor
-                  key={idx}
-                  initialText={entry.text}
-                  busy={editBusy}
-                  onCancel={() => setEditingEntryIdx(null)}
-                  onSave={(next) => void onEditSave(idx, next)}
+        {(() => {
+          // Pre-compute turn structure:
+          // Identify turn boundaries and which assistant entry is the "final" one per turn.
+          // A turn starts at a user message. The final assistant in a turn is the last
+          // assistant entry before the next user message (or end of entries).
+          // All entries between the user message and the final assistant are "intermediate".
+
+          // Build a set of indices that are intermediate (non-final assistant, reasoning, tool_group within a turn)
+          const intermediateSet = new Set<number>();
+          // Map final assistant idx -> turn start idx (for turnTokens computation)
+          const finalAssistantTurnStart = new Map<number, number>();
+
+          let turnStart = -1;
+          for (let i = 0; i < entries.length; i++) {
+            const e = entries[i];
+            if (!e) continue;
+            if (e.kind === "user") {
+              turnStart = i;
+            } else if (e.kind === "assistant") {
+              // Check if this is the final assistant in its turn
+              const isFinal = !entries.slice(i + 1).some((ne) => ne.kind === "assistant" || ne.kind === "user");
+              // More precisely: final if no assistant comes before the next user message
+              let nextUserIdx = entries.length;
+              for (let j = i + 1; j < entries.length; j++) {
+                if (entries[j]?.kind === "user") { nextUserIdx = j; break; }
+              }
+              const isLastAssistantInTurn = !entries.slice(i + 1, nextUserIdx).some((ne) => ne.kind === "assistant");
+              if (!isLastAssistantInTurn) {
+                intermediateSet.add(i);
+              } else {
+                finalAssistantTurnStart.set(i, turnStart >= 0 ? turnStart : 0);
+              }
+            } else if (e.kind === "reasoning" || e.kind === "tool_group") {
+              // These are intermediate if they're within a turn that has a final assistant after them
+              // We'll mark them intermediate if there's any assistant after them before the next user
+              let nextUserIdx = entries.length;
+              for (let j = i + 1; j < entries.length; j++) {
+                if (entries[j]?.kind === "user") { nextUserIdx = j; break; }
+              }
+              const hasAssistantAfter = entries.slice(i + 1, nextUserIdx).some((ne) => ne.kind === "assistant");
+              if (hasAssistantAfter) {
+                intermediateSet.add(i);
+              }
+            }
+          }
+
+          // Group consecutive intermediate entries within the same turn
+          // We'll render them wrapped in WorkGroup
+          const rendered: React.ReactNode[] = [];
+          let i = 0;
+          while (i < entries.length) {
+            const entry = entries[i];
+            if (!entry) { i++; continue; }
+            // Capture idx by value to avoid closure-over-mutable-variable bug
+            const idx = i;
+
+            const isMatch = searchMatchSet.has(idx);
+            const isCurrentMatch = searchOpen && searchMatches[searchIdx] === idx;
+            const ringCls = isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
+
+            if (entry.kind === "user") {
+              if (editingEntryIdx === i) {
+                rendered.push(
+                  <UserMessageEditor
+                    key={idx}
+                    initialText={entry.text}
+                    busy={editBusy}
+                    onCancel={() => setEditingEntryIdx(null)}
+                    onSave={(next) => void onEditSave(idx, next)}
+                  />
+                );
+              } else {
+                const starId = isEntryStarred(idx);
+                const starActive = !!starId;
+                rendered.push(
+                  <div key={idx} className={`group relative ml-auto max-w-[85%] rounded-md border bg-primary px-3 py-2 text-sm text-primary-foreground ${ringCls}`}>
+                    <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <span>나</span>
+                      {starActive ? <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> : null}
+                      <div className="ml-auto hidden gap-1 group-hover:flex">
+                        <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
+                        <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
+                          <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="whitespace-pre-wrap">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
+                  </div>
+                );
+              }
+              i++;
+              continue;
+            }
+
+            if (entry.kind === "system") {
+              rendered.push(<div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>);
+              i++;
+              continue;
+            }
+
+            if (entry.kind === "imported_trigger") {
+              rendered.push(
+                <ImportedTriggerCard
+                  key={`trigger:${entry.sessionId}`}
+                  source={entry.source}
+                  prompt={entry.prompt}
+                  summary={entry.summary}
+                  toolCallCount={entry.toolCallCount}
+                  importedAt={entry.importedAt}
+                  response={entry.response}
+                  responseStreaming={entry.responseStreaming}
                 />
               );
+              i++;
+              continue;
             }
-            const starId = isEntryStarred(idx);
-            const starActive = !!starId;
-            return (
-              <div key={idx} className={`group relative ml-auto max-w-[85%] rounded-md border bg-primary px-3 py-2 text-sm text-primary-foreground ${ringCls}`}>
-                <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                  <span>나</span>
-                  {starActive ? <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> : null}
-                  <div className="ml-auto hidden gap-1 group-hover:flex">
-                    <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
-                    <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
-                    <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
-                      <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
-                    </button>
-                  </div>
+
+            // Collect a run of consecutive intermediate entries
+            if (intermediateSet.has(i)) {
+              const groupStart = i;
+              const groupEntries: { idx: number; node: React.ReactNode }[] = [];
+              while (i < entries.length && intermediateSet.has(i)) {
+                const e = entries[i];
+                if (!e) { i++; continue; }
+                if (e.kind === "reasoning") {
+                  groupEntries.push({ idx: i, node: <ReasoningCard key={idx} entry={e} /> });
+                } else if (e.kind === "tool_group") {
+                  groupEntries.push({ idx: i, node: <ToolGroupCard key={e.groupId} group={e} /> });
+                } else if (e.kind === "assistant") {
+                  groupEntries.push({ idx: i, node: (
+                    <AssistantCard
+                      key={idx}
+                      entry={e}
+                      highlightQuery={searchHighlight}
+                      isStarred={!!isEntryStarred(idx)}
+                      isFinal={false}
+                    />
+                  )});
+                }
+                i++;
+              }
+              // Determine if the group is still streaming
+              const groupStreaming = groupEntries.some((ge) => {
+                const e = entries[ge.idx];
+                return e && (e as any).streaming === true;
+              }) || (entries[i] && (entries[i] as any).streaming === true) || streaming;
+              rendered.push(
+                <WorkGroup key={`wg-${groupStart}`} stepCount={groupEntries.length} streaming={groupStreaming}>
+                  {groupEntries.map((ge) => ge.node)}
+                </WorkGroup>
+              );
+              continue;
+            }
+
+            // Final assistant entry
+            if (entry.kind === "assistant") {
+              const turnStartIdx = finalAssistantTurnStart.get(i) ?? 0;
+              const turnTokens = entries
+                .slice(turnStartIdx, i + 1)
+                .filter((e) => e.kind === "assistant" || e.kind === "reasoning")
+                .reduce((sum, e) => sum + Math.ceil(((e as any).text?.length ?? 0) / 4), 0);
+              rendered.push(
+                <div key={idx} className={`${ringCls} rounded-md`}>
+                  <AssistantCard
+                    entry={entry}
+                    highlightQuery={searchHighlight}
+                    isStarred={!!isEntryStarred(idx)}
+                    isFinal={true}
+                    turnTokens={turnTokens}
+                    actions={{
+                      onRetry: () => void onRetryEffort(),
+                      onFork: () => void onFork(idx),
+                      onToggleStar: () => void onToggleStar(idx),
+                    }}
+                    onFeedback={onFeedback ? (rating, reason) => void onFeedback(i, rating, reason) : undefined}
+                  />
                 </div>
-                <div className="whitespace-pre-wrap">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
-              </div>
-            );
+              );
+              i++;
+              continue;
+            }
+
+            // reasoning/tool_group not intermediate (no final assistant after in this turn)
+            if (entry.kind === "reasoning") {
+              rendered.push(<ReasoningCard key={idx} entry={entry} />);
+            } else if (entry.kind === "tool_group") {
+              rendered.push(<ToolGroupCard key={entry.groupId} group={entry} />);
+            }
+            i++;
           }
-          if (entry.kind === "reasoning") return <ReasoningCard key={idx} entry={entry} />;
-          if (entry.kind === "tool_group") return <ToolGroupCard key={entry.groupId} group={entry} />;
-          if (entry.kind === "system") return <div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>;
-          if (entry.kind === "imported_trigger") {
-            return (
-              <ImportedTriggerCard
-                key={`trigger:${entry.sessionId}`}
-                source={entry.source}
-                prompt={entry.prompt}
-                summary={entry.summary}
-                toolCallCount={entry.toolCallCount}
-                importedAt={entry.importedAt}
-                response={entry.response}
-                responseStreaming={entry.responseStreaming}
-              />
-            );
-          }
-          {
-            const isFinal = !entries.slice(idx + 1).some((e) => e.kind === "assistant");
-            return (
-              <div key={idx} className={`${ringCls} rounded-md`}>
-                <AssistantCard
-                  entry={entry}
-                  highlightQuery={searchHighlight}
-                  isStarred={!!isEntryStarred(idx)}
-                  isFinal={isFinal}
-                  actions={isFinal !== false ? {
-                    onRetry: () => void onRetryEffort(),
-                    onFork: () => void onFork(idx),
-                    onToggleStar: () => void onToggleStar(idx),
-                  } : undefined}
-                  onFeedback={isFinal !== false && onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
-                />
-              </div>
-            );
-          }
-        })}
+          return rendered;
+        })()}
         <div ref={chatEndRef} />
       </div></ScrollArea>
       {contextOverflowPct >= 0.95 && (
