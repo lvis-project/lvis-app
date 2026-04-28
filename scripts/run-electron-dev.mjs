@@ -720,8 +720,7 @@ async function main() {
     const pluginRoots = [
       "../lvis-plugin-pageindex",
       "../lvis-plugin-meeting",
-      "../lvis-plugin-email",
-      "../lvis-plugin-calendar",
+      "../lvis-plugin-ms-graph",
       "../lvis-plugin-lge-api",
       "../lvis-plugin-work-proactive",
     ].filter((relPath) => !disabledPluginIds.has(relPath.replace("../lvis-plugin-", "")));
