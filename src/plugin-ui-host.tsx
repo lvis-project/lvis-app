@@ -44,6 +44,7 @@ export type PluginUiMountContext = {
     emitEvent: (type: string, data?: unknown) => Promise<void>;
     onEvent: (type: string, handler: (data: unknown) => void) => () => void;
     getEntryUrl: () => Promise<string>;
+    askInHomeChat?: (text: string) => Promise<void>;
   };
   extension: PluginUiExtensionView["extension"];
 };
