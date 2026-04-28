@@ -717,9 +717,8 @@ lvis-app/plugins/installed/{plugin-id}/
   "version": 1,
   "plugins": [
     { "id": "meeting",   "manifestPath": "plugins/installed/meeting/plugin.json",   "enabled": true },
-    { "id": "email",     "manifestPath": "plugins/installed/email/plugin.json",     "enabled": true },
-    { "id": "pageindex", "manifestPath": "plugins/installed/pageindex/plugin.json", "enabled": true },
-    { "id": "calendar",  "manifestPath": "plugins/installed/calendar/plugin.json",  "enabled": true }
+    { "id": "ms-graph",  "manifestPath": "plugins/installed/ms-graph/plugin.json",  "enabled": true },
+    { "id": "pageindex", "manifestPath": "plugins/installed/pageindex/plugin.json", "enabled": true }
   ]
 }
 ```
@@ -739,11 +738,10 @@ lvis-app/plugins/installed/{plugin-id}/
 
 ## 완전한 예제
 
-Meeting / Email / Calendar / PageIndex 의 실제 플러그인 소스는 모두 `lvis-project/` 아래 형제 저장소에 있습니다:
+Meeting / Microsoft 365 (Outlook 메일+캘린더) / PageIndex 의 실제 플러그인 소스는 모두 `lvis-project/` 아래 형제 저장소에 있습니다:
 
 - `lvis-plugin-meeting`
-- `lvis-plugin-email`
-- `lvis-plugin-calendar`
+- `lvis-plugin-ms-graph` (구 `lvis-plugin-email` + `lvis-plugin-calendar` 통합)
 - `lvis-plugin-pageindex`
 
 각 저장소의 `src/hostPlugin.ts` 를 현행 HostApi 사용 패턴 레퍼런스로 삼으세요.

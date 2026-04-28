@@ -52,12 +52,13 @@ export interface PluginManifest {
    * - `meeting-recorder` — 실시간 음성 캡처 및 STT (meeting)
    * - `mail-source` — 이메일 소스 연결 (email)
    * - `calendar-source` — 캘린더 소스 연결 (calendar)
-   * - `background-watcher` — `startupTools` 로 백그라운드 폴러/감시자 기동 (email, calendar)
+   * - `background-watcher` — `startupTools` 로 백그라운드 폴러/감시자 기동 (ms-graph)
    * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼 (pageindex)
    * - `knowledge-index` — 문서 인덱스/검색 기능 제공 (pageindex)
-   * - `ms-graph-consumer` — HostApi 의 MS Graph 메서드(`getMsGraphToken`,
-   *   `startMsGraphAuth`, `isMsGraphAuthenticated`, `getMsGraphAccount`,
-   *   `onMsGraphAuthChange`) 사용. §9.4a 참고. (email, calendar)
+   * - `ms-graph-consumer` — Microsoft Graph 를 사용하는 플러그인의 자기-식별
+   *   라벨 (advisory). PR 3 이후 host 측 MS Graph HostApi 메서드는 모두 제거되어
+   *   강제할 게이트가 없음 — ms-graph 플러그인이 자체 MSAL + safeStorage 로
+   *   인증 처리. §9.4a "Plugin-Owned OAuth Authentication" 참고.
    */
   capabilities?: string[];
   startupTools?: string[];
@@ -300,24 +301,11 @@ export interface PluginHostApi {
   }): void;
   getSecret(key: string): string | null;
 
-  // Microsoft Graph 공유 인증 (메일·캘린더 플러그인)
-  getMsGraphToken(): Promise<string | null>;
-  startMsGraphAuth(openBrowser: (url: string) => Promise<void>): Promise<void>;
-  isMsGraphAuthenticated(): boolean;
-  getMsGraphAccount(): string | null;
-  onMsGraphAuthChange(handler: () => void): void;
+  // PR 3 이후: Microsoft Graph 인증은 ms-graph 플러그인이 자체 소유한다.
+  // host 측 HostApi 메서드 (getMsGraphToken, startMsGraphAuth, signOutMsGraph,
+  // withMsGraphRetry 등) 는 모두 제거됨. ms-graph plugin 은 자체 MSAL 인스턴스 +
+  // safeStorage 토큰 캐시 + loopback HTTP redirect 로 직접 처리.
   callTool<T = unknown>(toolName: string, payload?: unknown): Promise<T>;
-
-  /**
-   * Sprint 4-D T1: 한 번만 401 재시도를 수행하는 Graph API 호출 래퍼.
-   * 플러그인 (calendar/email) 에서 모든 Graph 호출을 이 함수로 감싼다.
-   * 내부적으로 `getMsGraphToken()` 을 사용하며, 호스트의 silent refresh 와
-   * 결합되어 토큰 만료 중 in-flight 요청이 자동 복구된다.
-   *
-   * @throws MsGraphAuthRequiredError 재인증 필요 시
-   * @throws 그 외 `fn` 이 던진 에러 (401 두 번이면 원래 에러 재던짐)
-   */
-  withMsGraphRetry<T>(fn: (token: string) => Promise<T>): Promise<T>;
 
   // ─── LLM 접근 (선제성 기능용) ────────────────────────────────────────
   /**
