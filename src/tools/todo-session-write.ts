@@ -45,10 +45,10 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
           type: "array",
           items: {
             type: "object",
-            required: ["content", "status"],
+            required: ["status"],
             properties: {
-              id: { type: "string", description: "기존 항목 갱신 시 id 전달." },
-              content: { type: "string" },
+              id: { type: "string", description: "기존 항목 id — 생략 시 신규 생성. id 전달 시 content 생략 가능(기존 내용 유지)." },
+              content: { type: "string", description: "항목 내용. 신규 생성 시 필수." },
               status: { type: "string", enum: STATUS_VALUES },
             },
           },
@@ -66,14 +66,13 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
       for (const it of itemsRaw) {
         if (!it || typeof it !== "object") continue;
         const obj = it as Record<string, unknown>;
-        const content = typeof obj.content === "string" ? obj.content : "";
+        const content = typeof obj.content === "string" ? obj.content : undefined;
+        const id = typeof obj.id === "string" ? obj.id : undefined;
         const status = obj.status as SessionTodoStatus;
-        if (!content.trim() || !STATUS_VALUES.includes(status)) continue;
-        updates.push({
-          id: typeof obj.id === "string" ? obj.id : undefined,
-          content,
-          status,
-        });
+        // new items require content; updates by id allow content omission
+        if (!id && !content?.trim()) continue;
+        if (!STATUS_VALUES.includes(status)) continue;
+        updates.push({ id, content, status });
       }
       if (updates.length === 0) {
         return {
