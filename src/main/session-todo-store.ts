@@ -23,7 +23,7 @@ export interface SessionTodoItem {
 
 export interface SessionTodoUpdate {
   id?: string;
-  content: string;
+  content?: string;  // omit to keep existing content when updating by id
   status: SessionTodoStatus;
 }
 
@@ -51,9 +51,10 @@ export class SessionTodoStore {
     const order: string[] = existing.map((i) => i.id);
     for (const u of updates) {
       const id = u.id ?? randomUUID();
+      const existing = byId.get(id);
       const item: SessionTodoItem = {
         id,
-        content: u.content,
+        content: u.content ?? existing?.content ?? "",
         status: u.status,
       };
       if (!byId.has(id)) {
