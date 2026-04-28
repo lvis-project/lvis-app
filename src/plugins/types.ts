@@ -300,24 +300,11 @@ export interface PluginHostApi {
   }): void;
   getSecret(key: string): string | null;
 
-  // Microsoft Graph 공유 인증 (메일·캘린더 플러그인)
-  getMsGraphToken(): Promise<string | null>;
-  startMsGraphAuth(openBrowser: (url: string) => Promise<void>): Promise<void>;
-  isMsGraphAuthenticated(): boolean;
-  getMsGraphAccount(): string | null;
-  onMsGraphAuthChange(handler: () => void): void;
+  // PR 3 이후: Microsoft Graph 인증은 ms-graph 플러그인이 자체 소유한다.
+  // host 측 HostApi 메서드 (getMsGraphToken, startMsGraphAuth, signOutMsGraph,
+  // withMsGraphRetry 등) 는 모두 제거됨. ms-graph plugin 은 자체 MSAL 인스턴스 +
+  // safeStorage 토큰 캐시 + loopback HTTP redirect 로 직접 처리.
   callTool<T = unknown>(toolName: string, payload?: unknown): Promise<T>;
-
-  /**
-   * Sprint 4-D T1: 한 번만 401 재시도를 수행하는 Graph API 호출 래퍼.
-   * 플러그인 (calendar/email) 에서 모든 Graph 호출을 이 함수로 감싼다.
-   * 내부적으로 `getMsGraphToken()` 을 사용하며, 호스트의 silent refresh 와
-   * 결합되어 토큰 만료 중 in-flight 요청이 자동 복구된다.
-   *
-   * @throws MsGraphAuthRequiredError 재인증 필요 시
-   * @throws 그 외 `fn` 이 던진 에러 (401 두 번이면 원래 에러 재던짐)
-   */
-  withMsGraphRetry<T>(fn: (token: string) => Promise<T>): Promise<T>;
 
   // ─── LLM 접근 (선제성 기능용) ────────────────────────────────────────
   /**

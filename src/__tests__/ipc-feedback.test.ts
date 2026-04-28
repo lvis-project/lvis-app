@@ -165,46 +165,5 @@ describe("lvis:feedback:submit", () => {
   });
 });
 
-describe("lvis:ms-graph:sign-in", () => {
-  beforeEach(() => {
-    handlers.clear();
-    vi.clearAllMocks();
-  });
-
-  it("returns an explicit stale-sign-in error when the environment changed mid-auth", async () => {
-    const msGraphService = {
-      getEnvironment: vi.fn(() => "external"),
-      startInteractiveAuth: vi.fn(async () => undefined),
-      getState: vi.fn(() => ({
-        environment: "corporate",
-        isAuthenticated: false,
-        account: null,
-        configured: true,
-        label: "Corporate",
-      })),
-      signOut: vi.fn(async () => undefined),
-      switchEnvironment: vi.fn(async () => undefined),
-      getAccountName: vi.fn(() => null),
-    };
-    registerIpcHandlers(makeServices({ msGraphService }) as never, () => null);
-
-    const handler = handlers.get("lvis:ms-graph:sign-in")!;
-    const result = await handler(null);
-
-    expect(result).toEqual({
-      ok: false,
-      error: "environment-switched-during-sign-in",
-      state: {
-        environment: "corporate",
-        isAuthenticated: false,
-        account: null,
-        configured: true,
-        label: "Corporate",
-      },
-    });
-    expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({
-      type: "warn",
-      output: "ms-graph sign-in failed: env=external error=environment-switched-during-sign-in",
-    }));
-  });
-});
+// PR 3c: lvis:ms-graph:* IPC 채널 제거 — ms-graph 플러그인이 자체 인증 소유.
+// 관련 IPC 통합 테스트도 함께 제거됨.
