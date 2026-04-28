@@ -258,21 +258,25 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
               />
             );
           }
-          return (
-            <div key={idx} className={`${ringCls} rounded-md`}>
-              <AssistantCard
-                entry={entry}
-                highlightQuery={searchHighlight}
-                isStarred={!!isEntryStarred(idx)}
-                actions={{
-                  onRetry: () => void onRetryEffort(),
-                  onFork: () => void onFork(idx),
-                  onToggleStar: () => void onToggleStar(idx),
-                }}
-                onFeedback={onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
-              />
-            </div>
-          );
+          {
+            const isFinal = !entries.slice(idx + 1).some((e) => e.kind === "assistant");
+            return (
+              <div key={idx} className={`${ringCls} rounded-md`}>
+                <AssistantCard
+                  entry={entry}
+                  highlightQuery={searchHighlight}
+                  isStarred={!!isEntryStarred(idx)}
+                  isFinal={isFinal}
+                  actions={isFinal !== false ? {
+                    onRetry: () => void onRetryEffort(),
+                    onFork: () => void onFork(idx),
+                    onToggleStar: () => void onToggleStar(idx),
+                  } : undefined}
+                  onFeedback={isFinal !== false && onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
+                />
+              </div>
+            );
+          }
         })}
         <div ref={chatEndRef} />
       </div></ScrollArea>
