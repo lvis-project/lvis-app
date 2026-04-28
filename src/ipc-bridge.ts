@@ -1705,7 +1705,7 @@ ${input}`;
     if (!win || win.isDestroyed()) {
       return { ok: false, error: "no-main-window" };
     }
-    win.webContents.send("lvis:plugin:ask-home-chat", {
+    win.webContents.send("lvis:host:plugin-ask", {
       pluginId: binding.pluginId,
       text: trimmed,
     });

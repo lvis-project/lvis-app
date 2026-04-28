@@ -300,8 +300,8 @@ const api = {
   },
   onAskFromPlugin: (handler: (payload: { pluginId: string; text: string }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
-    ipcRenderer.on("lvis:plugin:ask-home-chat", listener);
-    return () => ipcRenderer.removeListener("lvis:plugin:ask-home-chat", listener);
+    ipcRenderer.on("lvis:host:plugin-ask", listener);
+    return () => ipcRenderer.removeListener("lvis:host:plugin-ask", listener);
   },
   dismissTrigger: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:trigger:dismiss", sessionId) as Promise<{
