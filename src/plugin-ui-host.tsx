@@ -163,8 +163,19 @@ export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null 
       );
     } else {
       const partition = `persist:plugin:${pluginPartitionHash(view.pluginId)}`;
+      // `key={view.pluginId}` 가 결정적. Electron `<webview>` 는 처음
+      // attach 시점에만 partition / src 를 바인딩하고 이후 prop 변경을
+      // 완전히 적용하지 못한다 (mojo: "Message N rejected by interface
+      // blink.mojom.WidgetHost" 형태로 떨어짐). 사이드바에서 다른
+      // 플러그인 탭으로 전환하면 같은 React 컴포넌트 인스턴스가
+      // partition/src 만 바꿔서 재사용되는데 이때부터 webview 가
+      // half-loaded 상태로 남아 새 플러그인 UI 가 안 뜨고, 이전 탭으로
+      // 돌아가도 동일 webview 가 깨진 채라 그것도 같이 안 보인다.
+      // pluginId 를 key 로 주면 React 가 강제 unmount → mount 라
+      // Electron 도 fresh attach 사이클을 받는다.
       content = (
         <webview
+          key={view.pluginId}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={handleWebviewRef as any}
           src={shellUrl}
