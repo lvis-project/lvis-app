@@ -17,7 +17,6 @@ import { RoutineTab } from "./tabs/RoutineTab.js";
 import { McpTab } from "./tabs/McpTab.js";
 import { PluginConfigTab } from "./tabs/PluginConfigTab.js";
 import { MarketplaceTab } from "./tabs/MarketplaceTab.js";
-import { MsGraphTab } from "./tabs/MsGraphTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 
 export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; api: LvisApi; onSaved: () => void }) {
@@ -44,7 +43,6 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
             <TabsTrigger value="mcp">MCP 서버</TabsTrigger>
             <TabsTrigger value="plugin-config">플러그인 설정</TabsTrigger>
             <TabsTrigger value="marketplace">마켓플레이스</TabsTrigger>
-            <TabsTrigger value="ms-graph">Microsoft 계정</TabsTrigger>
           </TabsList>
 
           <TabsContent value="llm">
@@ -145,7 +143,6 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
               onSaved={onSaved}
             />
           </TabsContent>
-          <TabsContent value="ms-graph"><MsGraphTab api={api} /></TabsContent>
         </Tabs>
         <DialogFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>

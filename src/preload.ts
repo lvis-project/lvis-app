@@ -98,37 +98,8 @@ const api = {
   applyClaudeDesktopMcpImport: async (payload: { raw: string; conflictPolicy?: "skip" | "overwrite" }) =>
     ipcRenderer.invoke("lvis:mcp:import:claude-desktop:apply", payload),
 
-  // ─── Microsoft Graph — dual-environment login ────
-  msGraphGetState: async () =>
-    ipcRenderer.invoke("lvis:ms-graph:get-state") as Promise<{
-      environment: "external" | "corporate";
-      isAuthenticated: boolean;
-      account: string | null;
-      configured: boolean;
-      label: string;
-      environments: Array<{
-        id: "external" | "corporate";
-        label: string;
-        description: string;
-        configured: boolean;
-      }>;
-    }>,
-  msGraphSwitchEnvironment: async (env: "external" | "corporate") =>
-    ipcRenderer.invoke("lvis:ms-graph:switch-environment", env) as Promise<{
-      ok: boolean;
-      state?: unknown;
-    }>,
-  msGraphSignIn: async () =>
-    ipcRenderer.invoke("lvis:ms-graph:sign-in") as Promise<{
-      ok: boolean;
-      error?: string;
-      state?: unknown;
-    }>,
-  msGraphSignOut: async () =>
-    ipcRenderer.invoke("lvis:ms-graph:sign-out") as Promise<{
-      ok: boolean;
-      state?: unknown;
-    }>,
+  // PR 3c: lvis:ms-graph:* IPC 채널 + bridge 메서드 제거 — ms-graph
+  // 플러그인이 자체 인증을 소유한다.
 
   // ─── Chat (ConversationLoop) ─────────────────────
   chatHasProvider: async () => ipcRenderer.invoke("lvis:chat:has-provider") as Promise<boolean>,

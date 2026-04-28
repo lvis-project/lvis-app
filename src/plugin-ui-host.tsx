@@ -173,9 +173,13 @@ export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null 
       // 돌아가도 동일 webview 가 깨진 채라 그것도 같이 안 보인다.
       // pluginId 를 key 로 주면 React 가 강제 unmount → mount 라
       // Electron 도 fresh attach 사이클을 받는다.
+      // 같은 pluginId 의 다른 extension (예: ms-graph 의 email vs calendar) 으로
+      // 전환 시 webview 가 reuse 되면서 이전 entry 의 IPC 매핑이 남거나
+      // 이전 frame 이 잠시 보이는 문제 → key 를 extension.id 까지 포함시켜
+      // extension 단위로 fresh attach 보장.
       content = (
         <webview
-          key={view.pluginId}
+          key={`${view.pluginId}:${view.extension.id}`}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={handleWebviewRef as any}
           src={shellUrl}
@@ -196,14 +200,14 @@ export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null 
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
         <div className="relative h-full w-full overflow-hidden rounded-md border bg-card">
-          {loading ? (
-            <div className="absolute inset-x-0 top-0 z-10 px-3 py-2 text-xs text-muted-foreground">
-              로딩 중...
-            </div>
-          ) : null}
           <div className="h-full overflow-hidden">
             {content}
           </div>
+          {loading ? (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-card text-xs text-muted-foreground">
+              로딩 중...
+            </div>
+          ) : null}
         </div>
       </CardContent>
     </Card>

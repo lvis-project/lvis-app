@@ -31,7 +31,6 @@ import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
 import { PROACTIVE_SOURCE_PATTERN } from "../../engine/proactive-source.js";
 import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
-import { withMsGraphRetry } from "../../main/ms-graph-retry.js";
 import type {
   ConversationTriggerResult,
   ConversationTriggerSpec,
@@ -43,7 +42,6 @@ import type { ToolRegistry } from "../../tools/registry.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { MemoryManager } from "../../memory/memory-manager.js";
 import type { TaskService } from "../../taskService.js";
-import type { MsGraphService } from "../../main/ms-graph-service.js";
 import { emitEvent, onEvent } from "../types.js";
 import {
   buildPluginConfigOverrides,
@@ -480,7 +478,6 @@ export interface InitPluginRuntimeInput {
   keywordEngine: KeywordEngine;
   toolRegistry: ToolRegistry;
   taskService: TaskService;
-  msGraphService: MsGraphService;
   pythonPath: string | undefined;
   bootAuditLogger: AuditLogger;
   mainWindow: BrowserWindow;
@@ -515,7 +512,6 @@ export async function initPluginRuntime(
     keywordEngine,
     toolRegistry,
     taskService,
-    msGraphService,
     pythonPath,
     bootAuditLogger,
     mainWindow,
@@ -606,14 +602,10 @@ export async function initPluginRuntime(
     console.warn("[lvis] boot: LVIS_DEV_SKIP_SIG=1 — plugin signature verification disabled (dev-only)");
   }
 
-  // Capability gate helper (§B-5) — msGraph HostApi methods.
-  // Note: hasMsGraphCapability now uses the manifest passed directly to createHostApi
-  // to avoid a timing bug where getPluginManifest() returns undefined during createPlugin().
+  // PR 3c: ms-graph 자체 인증으로 이전 후 host 측 MS HostApi 메서드 / capability gate 제거.
+  // ms-graph-consumer capability 는 plugin 자기 식별 라벨로 plugin.json 에 남지만
+  // host 의 capability 검증 게이트는 더 이상 존재하지 않는다 (plugin 이 자체 MSAL 소유).
   let pluginRuntime!: PluginRuntime;
-  const capabilityDeniedMsg = (pluginId: string) =>
-    `[plugin:${pluginId}] capability not declared: ms-graph-consumer`;
-  const hasMsGraphCapability = (manifest: PluginManifest): boolean =>
-    manifest.capabilities?.includes("ms-graph-consumer") ?? false;
 
   // Phase 1 §Step 1 + §Step 2 — thread the user-installed dir as a second
   // trust root and the unsigned-user-plugin opt-in flag.
@@ -693,33 +685,9 @@ export async function initPluginRuntime(
       getSecret: (key) => {
         return settingsService.getSecret(key);
       },
-      getMsGraphToken: () => {
-        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
-        return msGraphService.getAccessToken();
-      },
-      startMsGraphAuth: async (openBrowser) => {
-        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
-        await msGraphService.startInteractiveAuth(openBrowser);
-      },
-      isMsGraphAuthenticated: () => {
-        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
-        return msGraphService.isAuthenticated();
-      },
-      getMsGraphAccount: () => {
-        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
-        return msGraphService.getAccountName();
-      },
-      onMsGraphAuthChange: (handler) => {
-        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
-        msGraphService.onAuthChange(handler);
-      },
       callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> => {
         pluginRuntime.assertPluginToolAccess(pluginId, toolName);
         return pluginRuntime.call(toolName, payload) as Promise<T>;
-      },
-      withMsGraphRetry: async (fn) => {
-        if (!hasMsGraphCapability(manifest)) throw new Error(capabilityDeniedMsg(pluginId));
-        return withMsGraphRetry(fn, () => msGraphService.getAccessToken());
       },
       callLlm: async (prompt, opts) => {
         if (lateBinding.pluginCallLlmRef.fn) {

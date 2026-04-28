@@ -28,7 +28,7 @@ interface PluginManifest {
   /**
    * 플러그인 고유 식별자. flat form 을 권장한다 —
    * 영문 소문자/숫자/`-`/`_`/`.` 허용 (`^[a-zA-Z][a-zA-Z0-9._-]*$`, 3~128자).
-   * 실제 번들 플러그인(meeting / pageindex / email / calendar) 은 모두 flat id
+   * 실제 번들 플러그인(meeting / pageindex / ms-graph) 은 모두 flat id
    * 를 사용한다. dot-form (`com.ep.meeting-recorder`) 도 허용하지만 강제하지
    * 않는다.
    */
@@ -202,7 +202,7 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직
 "uiCallable": ["meeting_transcript", "meeting_sessions"]
 
 // OK — 파괴적 동작도 등록 가능. 플러그인이 자체 UI 에서 확인 다이얼로그를 구현해야 함
-"uiCallable": ["email_send", "calendar_delete", "index_remove_folder"]
+"uiCallable": ["msgraph_email_reply", "msgraph_calendar_delete", "index_remove_folder"]
 
 // REJECT — tools[] 에 없는 이름
 "uiCallable": ["meeting_unknown"]
@@ -214,7 +214,7 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직
 
 | 값 | 강제/자문 | 역할 |
 |----|-----------|------|
-| `ms-graph-consumer` | **enforced** | HostApi MS Graph 메서드 (`getMsGraphToken`, `startMsGraphAuth`, `isMsGraphAuthenticated`, `getMsGraphAccount`, `onMsGraphAuthChange`) 호출 필수. 미선언 플러그인이 호출 시 throw. |
+| `ms-graph-consumer` | advisory (PR 3 이후) | Microsoft Graph 를 사용하는 플러그인의 자기-식별 라벨. PR 3 에서 host 측 MS HostApi 메서드가 모두 제거되어 강제할 게이트가 없으므로 advisory 로 강등. ms-graph 플러그인이 자체 MSAL + safeStorage 로 직접 인증 처리 (architecture.md §9.4a "Plugin-Owned OAuth Authentication" 참조). |
 | `external-auth-consumer` | **enforced** | `openAuthWindow` 호출 필수. 실 Chromium 창을 띄워 외부 포털 세션 쿠키를 수집하는 민감 operation — 선언적 opt-in 없이는 거부. |
 | `mail-source` | **enforced** | `email.*` 이벤트 emit 게이트. 미선언 시 emit 이 드롭되고 warn. |
 | `calendar-source` | **enforced** | `calendar.*` emit 게이트. |
@@ -284,7 +284,7 @@ plugin.json
 [manifest:lvis-plugin-meeting] schema validation failed (/path/to/plugin.json): /uiCallable/0 must match pattern "^[a-zA-Z_][a-zA-Z0-9_]*$"
 Invalid plugin manifest 'lvis-plugin-meeting' at 'startupTools[0]' (/path/to/plugin.json): entry 'meeting_watch' is not declared in tools[]. Example: add "meeting_watch" to tools[] or remove it from startupTools[]
 Invalid tool name 'meeting.start' in plugin 'lvis-plugin-meeting' at 'tools[0]' (/path/to/plugin.json): tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). Example: "tools": ["meeting_start"] (not "meeting.start")
-[plugin-runtime] managed plugin 'lvis-plugin-email' rejected — signature invalid
+[plugin-runtime] managed plugin 'lvis-plugin-ms-graph' rejected — signature invalid
 [plugin-runtime] managed plugin 'lvis-plugin-meeting' rejected — signature file missing
 ```
 
@@ -331,11 +331,11 @@ top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구�
 
 > **교훈**: `pcm16leMono`는 TypeScript에서 `number[]`로 전달된다. JSON Schema `items.type: "integer"`로 LLM에 명시하지 않으면 LLM이 base64 string을 시도할 수 있다.
 
-### 예시 2: calendar_create (nested required + attendees 배열)
+### 예시 2: msgraph_calendar_create (nested required + attendees 배열)
 
 ```json
 {
-  "calendar_create": {
+  "msgraph_calendar_create": {
     "description": "Microsoft Graph를 통해 캘린더 일정 생성. 참석자 이메일 배열을 지원한다.",
     "inputSchema": {
       "type": "object",
@@ -358,17 +358,17 @@ top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구�
 }
 ```
 
-### 예시 3: email_reply (사전 조건 명시)
+### 예시 3: msgraph_email_reply (사전 조건 명시)
 
 ```json
 {
-  "email_reply": {
-    "description": "지정 이메일에 답장. email_list 또는 email_read로 id를 먼저 획득해야 함.",
+  "msgraph_email_reply": {
+    "description": "지정 이메일에 답장. msgraph_email_list 또는 msgraph_email_read로 id를 먼저 획득해야 함.",
     "inputSchema": {
       "type": "object",
       "required": ["id", "body"],
       "properties": {
-        "id": { "type": "string", "description": "email_list 응답의 id 필드" },
+        "id": { "type": "string", "description": "msgraph_email_list 응답의 id 필드" },
         "body": { "type": "string", "description": "답장 본문 (plain text 또는 HTML)" },
         "subject": { "type": "string", "description": "선택. 생략 시 원본 제목 유지" },
         "to": { "type": "string", "description": "선택. 생략 시 원본 발신자에게 답장" }
@@ -401,11 +401,7 @@ top-level 은 반드시 `"type": "object"` — 모든 LLM vendor 공통 요구�
 | `addTask(task)` | 액션 아이템 → LVIS 태스크 자동 생성 (host `taskService` → `~/.lvis/tasks/lvis-tasks.db` SQLite). | UI 직접 조작 대체 |
 | `saveNote(title, content)` | `~/.lvis/notes/`에 회의록·요약 저장 | 대용량 바이너리 저장 |
 | `getSecret(key)` | 암호화된 API 키 조회 | 키를 메모리에 캐시 후 재사용 (매번 호출) |
-| `getMsGraphToken()` ([ms-graph-consumer] 필요) | Office 365 API 호출 전 토큰 획득 | email/calendar 외 플러그인 |
-| `startMsGraphAuth(openBrowser)` ([ms-graph-consumer]) | 사용자 브라우저 OAuth 플로우 개시 | 자동화 컨텍스트 |
-| `isMsGraphAuthenticated()` ([ms-graph-consumer]) | handler 진입부에서 인증 상태 확인 | — |
-| `getMsGraphAccount()` ([ms-graph-consumer]) | 현재 로그인 계정 이메일 조회 | — |
-| `onMsGraphAuthChange(handler)` ([ms-graph-consumer]) | 인증 상태 변화 감지 (logout 처리 등) | — |
+<!-- PR 3c: getMsGraphToken / startMsGraphAuth / isMsGraphAuthenticated / getMsGraphAccount / onMsGraphAuthChange / withMsGraphRetry — host HostApi 에서 제거됨. ms-graph 플러그인이 자체 MSAL 소유. architecture.md §9.4a "Plugin-Owned OAuth Authentication" 참조. -->
 | `callLlm(prompt, options?)` | 호스트 LLM 으로 단발 텍스트 생성 (선제성 본문·분류·요약) | 대화 히스토리·streaming·tool_use 필요 시 (플러그인이 직접 SDK 사용) |
 | `openAuthWindow(options)` ([external-auth-consumer] 필요) | 외부 포털 interactive 로그인 창을 띄우고 지정 도메인 쿠키 수집 (Selenium/webdriver 대체) | OAuth-style localhost callback이 되는 표준 플로우 (→ MS Graph 패턴 사용) |
 | `triggerConversation(spec)` ([conversation-trigger] 필요) | 관찰된 신호를 바탕으로 ConversationLoop 를 능동적으로 발사 ("먼저 말 거는 비서" 차별화) | 사용자 input → tool 결과 패턴 (chat 으로 충분) — 자세한 사용 패턴 / 안전 계약은 [`conversation-trigger.md`](./conversation-trigger.md) |
@@ -542,7 +538,7 @@ LVIS 는 IPC/RPC 를 **시스템 레벨 전용**으로 확정한다. 플러그�
 **파일:** `lvis-plugin-email/src/hostPlugin.ts:90-191`
 
 - `capabilities: ["mail-source", "ms-graph-consumer", "background-watcher"]`.
-- MS Graph OAuth 상태 확인이 모든 인증 필요 handler 진입부에 중복 — `if (!hostApi.isMsGraphAuthenticated()) throw`.
+- ms-graph 플러그인 내부에서 모든 인증 필요 handler 진입부의 `if (!isAuthed()) throw` 패턴 — plugin 자체 MsalClient 가 일관 게이트 (PR 3 이후).
 - `email_analyze` 는 내부적으로 LLM 을 직접 호출하거나 `hostApi.callLlm` 으로 전환 가능.
 - `email_start_watcher`/`email_stop_watcher` 는 `startupTools` 나 UI 에서 호출하는 것이 자연스럽다.
 - `email_send` 같은 파괴적 메서드도 `uiCallable` 에 넣을 수 있다 (§2.2) — 플러그인이 전송 전 확인 다이얼로그를 자체 UI 로 구현해야 한다.

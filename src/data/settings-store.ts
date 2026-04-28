@@ -106,14 +106,15 @@ export interface PluginSettings {
 }
 
 /**
- * MsGraph 환경 선택 — LVIS 는 2개 app registration (external / corporate) 을
- * 지원하며 사용자가 로그인 시점에 어느 환경을 쓸지 택1한다.
+ * MsGraph 환경 선택 — legacy 필드.
  *
- * 기본값 `external` — 대부분 개발자/외부 사용자 경로 유지.
- * 사내망 배포 시 `corporate` 로 기본값을 덮어쓰는 installer 정책 고려 가능.
+ * PR 3 이후 ms-graph 플러그인이 자체 인증을 소유하면서 환경 선택은
+ * `pluginConfigs["ms-graph"].environment` 로 이전됨. 이 필드는 구 settings.json
+ * 호환을 위해 잔존 (load 시 plugin config 로 1회 마이그레이션 가능). 새 코드는
+ * 이 필드를 읽지 않는다.
  */
 export interface MsGraphSettings {
-  /** "external" | "corporate" — ms-graph-auth-config.ts 참조 */
+  /** @deprecated PR 3 이후 plugin config (pluginConfigs["ms-graph"].environment) 로 이전 */
   environment: "external" | "corporate";
 }
 

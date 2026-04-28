@@ -13,29 +13,29 @@ import { test, expect } from './fixtures';
  * Plugin UI tab mapping (from each plugin.json `ui[].displayName`):
  *   pageindex → "인덱서"
  *   meeting   → "미팅"
- *   email     → "이메일"
- *   calendar  → (no UI extension — verified via sidebar marketplace only)
+ *   ms-graph  → "이메일" + "캘린더" (single plugin provides two sidebar UIs)
  */
 
 /**
  * Plugins that register a sidebar UI extension produce a TabsTrigger in
- * MainToolbar with their displayName as the label.
+ * MainToolbar with their displayName as the label. The ms-graph plugin
+ * registers two extensions (email + calendar) — both must appear.
  */
 const PLUGIN_TABS = [
   { id: 'pageindex', label: '인덱서' },
   { id: 'meeting', label: '미팅' },
-  { id: 'email', label: '이메일' },
+  { id: 'ms-graph', label: '이메일' },
+  { id: 'ms-graph', label: '캘린더' },
 ] as const;
 
 /**
- * All 4 managed plugins should appear in the sidebar marketplace, regardless
+ * All 3 bundled plugins should appear in the sidebar marketplace, regardless
  * of whether they have a UI extension.
  */
 const ALL_PLUGIN_NAMES = [
   'LVIS PageIndex',
   'LVIS Meeting',
-  'LVIS Email',
-  'LVIS Calendar',
+  'LVIS Microsoft 365',
 ] as const;
 
 test('plugins with UI extensions appear as toolbar tabs', async ({ mainWindow }) => {
@@ -61,7 +61,7 @@ test('plugins with UI extensions appear as toolbar tabs', async ({ mainWindow })
   }
 });
 
-test('all 4 managed plugins listed in sidebar marketplace', async ({ mainWindow }) => {
+test('all 3 bundled plugins listed in sidebar marketplace', async ({ mainWindow }) => {
   // The sidebar <aside> is always rendered (not conditionally mounted).
   const sidebar = mainWindow.locator('aside').first();
   await sidebar.waitFor({ state: 'visible', timeout: 15_000 });
@@ -81,9 +81,9 @@ test('managed plugins show installed status in sidebar', async ({ mainWindow }) 
   const sidebar = mainWindow.locator('aside').first();
   await sidebar.waitFor({ state: 'visible', timeout: 15_000 });
 
-  // Managed plugins should all show "설치됨" badge.
+  // Bundled plugins should all show "설치됨" badge.
   const installedBadges = sidebar.locator('text=설치됨');
 
-  // At least 4 managed plugins should be installed.
-  await expect(installedBadges).toHaveCount(4, { timeout: 30_000 });
+  // 3 bundled plugins should be installed (pageindex / meeting / ms-graph).
+  await expect(installedBadges).toHaveCount(3, { timeout: 30_000 });
 });
