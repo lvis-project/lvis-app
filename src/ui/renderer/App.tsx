@@ -221,6 +221,19 @@ export function App() {
     return () => { unsub(); };
   }, [api, addImportedTriggerEntry, handleAsk]);
 
+  // Plugin sidebar Ask buttons (e.g. pageindex "Ask about Documents") fire
+  // `bridge.askInHomeChat(text)` which round-trips through main and lands
+  // here. Switch to the home view so the chat surface is visible, then
+  // run the same handleAsk path a typed user message uses.
+  useEffect(() => {
+    if (typeof api.onAskFromPlugin !== "function") return;
+    const unsub = api.onAskFromPlugin(({ text }) => {
+      setActiveView("home");
+      void handleAsk(text);
+    });
+    return () => { unsub(); };
+  }, [api, handleAsk]);
+
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
 
