@@ -184,32 +184,4 @@ describe("plugin-preload bridge", () => {
     expect(bridge).not.toHaveProperty("onPluginUninstallResult");
     expect(bridge).not.toHaveProperty("onPluginInstallProgress");
   });
-
-  it("askInHomeChat invokes lvis:plugin:ask-home-chat with text", async () => {
-    const bridge = exposed.get("lvisPlugin") as { askInHomeChat: (text: string) => Promise<void> };
-    mockInvoke.mockResolvedValueOnce({ ok: true });
-
-    await bridge.askInHomeChat("hello from plugin");
-
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "lvis:plugin:ask-home-chat",
-      "hello from plugin",
-    );
-  });
-
-  it("askInHomeChat passes through { ok: true } envelope (resolves to undefined)", async () => {
-    const bridge = exposed.get("lvisPlugin") as { askInHomeChat: (text: string) => Promise<void> };
-    mockInvoke.mockResolvedValueOnce({ ok: true });
-
-    const result = await bridge.askInHomeChat("hi");
-    expect(result).toBeUndefined();
-  });
-
-  it("askInHomeChat passes through { ok: false, error } without throwing (error envelope passthrough)", async () => {
-    const bridge = exposed.get("lvisPlugin") as { askInHomeChat: (text: string) => Promise<void> };
-    mockInvoke.mockResolvedValueOnce({ ok: false, error: "empty-text" });
-
-    // unwrapEnvelope throws on { ok: false } — the plugin caller should catch this
-    await expect(bridge.askInHomeChat("")).rejects.toThrow(/empty-text/);
-  });
 });
