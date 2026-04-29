@@ -40,7 +40,7 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: lvis-app
       - name: Check plugin SDK drift
-        run: bun run --cwd packages/plugin-sdk check:drift
+        run: LVIS_HOST_TYPES_PATH="$PWD/src/plugins/types.ts" bun run --cwd packages/plugin-sdk check:drift
         working-directory: lvis-app
       - name: Build app
         run: bun run build
