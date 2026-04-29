@@ -368,8 +368,18 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
               const turnStartIdx = finalAssistantTurnStart.get(i) ?? 0;
               const turnTokens = entries
                 .slice(turnStartIdx, i + 1)
-                .filter((e) => e.kind === "assistant" || e.kind === "reasoning")
-                .reduce((sum, e) => sum + Math.ceil(((e as any).text?.length ?? 0) / 4), 0);
+                .reduce((sum, e) => {
+                  if (e.kind === "assistant" || e.kind === "reasoning" || e.kind === "user") {
+                    return sum + Math.ceil(((e as any).text?.length ?? 0) / 4);
+                  }
+                  if (e.kind === "tool_group") {
+                    // Sum input JSON + result strings for all tools in the group
+                    const toolSum = ((e as any).tools ?? []).reduce((ts: number, t: any) =>
+                      ts + Math.ceil((JSON.stringify(t.input ?? {}).length + (t.result?.length ?? 0)) / 4), 0);
+                    return sum + toolSum;
+                  }
+                  return sum;
+                }, 0);
               rendered.push(
                 <div key={idx} className={`${ringCls} rounded-md`}>
                   <AssistantCard
