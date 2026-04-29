@@ -67,9 +67,11 @@ export function ReasoningCard({
           </span>
         )}
         {!streaming && (
-          bodyVisible
-            ? <ChevronDown className="h-3 w-3 flex-shrink-0" />
-            : <ChevronRight className="h-3 w-3 flex-shrink-0" />
+          <span className="ml-auto">
+            {bodyVisible
+              ? <ChevronDown className="h-3 w-3 flex-shrink-0" />
+              : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
+          </span>
         )}
       </button>
       {bodyVisible && (
