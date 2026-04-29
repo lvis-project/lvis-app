@@ -466,6 +466,15 @@ export interface PluginRuntimeContext {
   pluginId: string;
   pluginRoot: string;
   hostRoot: string;
+  /**
+   * Absolute filesystem path to the plugin's writable data directory at
+   * `<pluginsRoot>/<pluginId>/data/`. The host creates this directory before
+   * calling the plugin factory. Plugins MUST write all runtime state (sessions,
+   * caches, downloaded artefacts, oauth tokens, etc.) under this path so user
+   * data stays scoped to the plugin and is not mixed with the install root
+   * (`pluginRoot`) which is overwritten on plugin updates.
+   */
+  pluginDataDir: string;
   config?: Record<string, unknown>;
   log: (message: string, meta?: unknown) => void;
   hostApi: PluginHostApi;
