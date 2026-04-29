@@ -22,6 +22,7 @@ import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
 import { PluginSignatureVerifier } from "../../plugins/signature-verifier.js";
 import { getBundledPublisherPublicKeysPem } from "../../plugins/publisher-keys.js";
+import { createPluginStorage } from "../../plugins/storage.js";
 import {
   devSkipSignature,
   setIsPackaged,
@@ -634,7 +635,17 @@ export async function initPluginRuntime(
       toolRegistry.unregisterByPlugin(pluginId);
       lateBinding.conversationLoopRef.fn?.onPluginDisabled(pluginId);
     },
-    createHostApi: (pluginId: string, manifest: PluginManifest): PluginHostApi => ({
+    createHostApi: (pluginId: string, manifest: PluginManifest, pluginDataDir: string): PluginHostApi => ({
+      storage: createPluginStorage(pluginId, pluginDataDir, (msg, meta) => {
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "warn",
+            input: `[plugin:${pluginId}] storage_${msg.replace(/\s+/g, "_")} ${typeof meta === "object" ? JSON.stringify(meta) : ""}`.trim(),
+          });
+        } catch { /* audit must not break host */ }
+      }),
       registerKeywords: (keywords) => {
         keywordEngine.registerKeywords(
           keywords.map((k) => ({ ...k, pluginId })),
