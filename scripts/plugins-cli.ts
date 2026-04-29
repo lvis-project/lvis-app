@@ -1,21 +1,11 @@
 import { access } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   readPluginRegistry,
   writePluginRegistry,
 } from "../src/plugins/registry.js";
-import { MockMarketplaceFetcher, PluginMarketplaceService } from "../src/plugins/marketplace.js";
 import { resolvePluginPaths } from "../src/plugins/plugin-paths.js";
-import { setIsPackaged } from "../src/boot/dev-flags.js";
 import type { PluginRegistry } from "../src/plugins/types.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const projectRoot = resolve(__dirname, "..");
-// CLI is a dev-only tool — flip the dev-flag gate so the marketplace install
-// path can take its dev branch.
-setIsPackaged(false);
 
 // Round-3: env-tier override removed. Use the explicit `--plugins-root <path>`
 // flag for portable installs / CI sandbox isolation. Default is
@@ -56,11 +46,14 @@ function usage(): never {
     [
       "Usage:",
       "  npm run plugins:list",
-      "  npm run plugins:install -- <plugin-id>",
       "  npm run plugins:add -- <plugin-id> <manifest-path>",
       "  npm run plugins:remove -- <plugin-id>",
       "  npm run plugins:enable -- <plugin-id>",
       "  npm run plugins:disable -- <plugin-id>",
+      "",
+      "Note: 'install' is no longer offered here — installs flow through the",
+      "marketplace API (Settings UI, lvis://install/<slug>, or the managed",
+      "bootstrap). Local sibling-repo dev installs use 'bun run dev:link'.",
       "",
       "Optional:",
       "  --plugins-root <path>   Override the canonical ~/.lvis/plugins/ root",
@@ -86,17 +79,6 @@ async function saveRegistry(registry: PluginRegistry): Promise<void> {
 async function run() {
   const command = cliArgs[0];
   if (!command) usage();
-  if (command === "install") {
-    const id = cliArgs[1];
-    if (!id) usage();
-    const fetcher = new MockMarketplaceFetcher(
-      resolve(projectRoot, "plugins/marketplace.json"),
-    );
-    const marketplace = new PluginMarketplaceService(pluginPaths, fetcher);
-    await marketplace.install(id);
-    console.log(`Installed plugin '${id}' from marketplace`);
-    return;
-  }
 
   const registry = await loadRegistry();
 
