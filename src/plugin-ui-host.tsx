@@ -98,11 +98,11 @@ export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null 
     setErrorText("Plugin webview 로딩 실패.");
   });
 
-  // On did-attach, register the (webContents.id → pluginId, entryUrl)
-  // mapping with main BEFORE the webview navigates. Subsequent plugin
-  // IPCs (call-tool / emit-event / get-entry-url) derive pluginId from
-  // event.sender.id; the renderer-supplied pluginId arg is gone.
-  const onDidAttachRef = useRef<(() => void) | null>(null);
+  // On dom-ready, register the (webContents.id → pluginId, entryUrl)
+  // mapping with main. dom-ready is required — Electron throws if
+  // getWebContentsId() is called before the guest renderer is fully
+  // initialized (did-attach fires earlier and is insufficient).
+  const onDomReadyRef = useRef<(() => void) | null>(null);
   const webviewRef = useRef<Electron.WebviewTag | null>(null);
 
   const handleWebviewRef = useCallback((node: Electron.WebviewTag | null) => {
@@ -110,24 +110,23 @@ export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null 
     if (prev) {
       prev.removeEventListener("did-finish-load", onFinishRef.current);
       prev.removeEventListener("did-fail-load", onFailRef.current);
-      const onAttach = onDidAttachRef.current;
-      if (onAttach) prev.removeEventListener("did-attach", onAttach);
+      const onDomReady = onDomReadyRef.current;
+      if (onDomReady) prev.removeEventListener("dom-ready", onDomReady);
     }
     webviewRef.current = node;
     if (node) {
       node.addEventListener("did-finish-load", onFinishRef.current);
       node.addEventListener("did-fail-load", onFailRef.current);
-      const onAttach = () => {
+      const onDomReady = () => {
         const wcId = node.getWebContentsId();
         const pluginId = view?.pluginId;
         const entryUrl = view?.entryUrl;
         if (typeof wcId !== "number" || !pluginId || !entryUrl) return;
-        // Fire-and-forget — main rejects unknown pluginId / non-host frame.
         const api = (window as unknown as { lvisApi?: { registerPluginWebview?: (p: { webContentsId: number; pluginId: string; entryUrl: string }) => Promise<unknown> } }).lvisApi;
         void api?.registerPluginWebview?.({ webContentsId: wcId, pluginId, entryUrl });
       };
-      onDidAttachRef.current = onAttach;
-      node.addEventListener("did-attach", onAttach);
+      onDomReadyRef.current = onDomReady;
+      node.addEventListener("dom-ready", onDomReady);
     }
   }, [view?.pluginId, view?.entryUrl]);
 

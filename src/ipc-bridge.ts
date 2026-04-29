@@ -258,8 +258,13 @@ interface PluginWebviewBinding {
   entryUrl: string;
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
+// Pending get-entry-url resolvers waiting for registration to arrive.
+// Necessary because host renderer and plugin webview are separate processes
+// with no IPC ordering guarantee between them.
+const pendingEntryUrlResolvers = new Map<number, Array<(b: PluginWebviewBinding) => void>>();
 export function unregisterPluginWebview(webContentsId: number): void {
   pluginWebviewRegistry.delete(webContentsId);
+  pendingEntryUrlResolvers.delete(webContentsId);
 }
 
 export function validatePluginFrame(event: IpcMainInvokeEvent | null | undefined): boolean {
@@ -1661,7 +1666,10 @@ ${input}`;
       } catch {
         return { ok: false, error: "entry-url-outside-install-root" };
       }
-      pluginWebviewRegistry.set(webContentsId, { pluginId, entryUrl });
+      const binding = { pluginId, entryUrl };
+      pluginWebviewRegistry.set(webContentsId, binding);
+      for (const resolve of pendingEntryUrlResolvers.get(webContentsId) ?? []) resolve(binding);
+      pendingEntryUrlResolvers.delete(webContentsId);
       return { ok: true };
     }
     let realRoot: string;
@@ -1676,7 +1684,10 @@ ${input}`;
     if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
       return { ok: false, error: "entry-url-outside-install-root" };
     }
-    pluginWebviewRegistry.set(webContentsId, { pluginId, entryUrl });
+    const binding = { pluginId, entryUrl };
+    pluginWebviewRegistry.set(webContentsId, binding);
+    for (const resolve of pendingEntryUrlResolvers.get(webContentsId) ?? []) resolve(binding);
+    pendingEntryUrlResolvers.delete(webContentsId);
     return { ok: true };
   });
 
@@ -1688,12 +1699,31 @@ ${input}`;
   }
 
   ipcMain.handle("lvis:plugin:get-entry-url", (e) => {
+    // Fast path: registration already complete.
     const binding = resolvePluginFromSender(e);
-    if (!binding) {
+    if (binding) return { ok: true as const, entryUrl: binding.entryUrl };
+
+    // Validate frame before queuing — reject non-shell frames immediately.
+    if (!validatePluginFrame(e)) {
       auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
       return UNAUTHORIZED_FRAME;
     }
-    return { ok: true as const, entryUrl: binding.entryUrl };
+    const senderId = e.sender?.id;
+    if (typeof senderId !== "number") return UNAUTHORIZED_FRAME;
+
+    // Race: host renderer and plugin webview are separate processes with no
+    // IPC ordering guarantee. Wait up to 500 ms for registerPluginWebview to
+    // arrive before giving up with unauthorized-frame.
+    return new Promise<{ ok: true; entryUrl: string } | typeof UNAUTHORIZED_FRAME>((resolve) => {
+      const timer = setTimeout(() => {
+        pendingEntryUrlResolvers.delete(senderId);
+        auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
+        resolve(UNAUTHORIZED_FRAME);
+      }, 500);
+      const resolvers = pendingEntryUrlResolvers.get(senderId) ?? [];
+      resolvers.push((b) => { clearTimeout(timer); resolve({ ok: true, entryUrl: b.entryUrl }); });
+      pendingEntryUrlResolvers.set(senderId, resolvers);
+    });
   });
 
   ipcMain.handle("lvis:plugin:call-tool", async (e, method: string, payload?: unknown) => {
