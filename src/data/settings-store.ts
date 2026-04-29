@@ -425,7 +425,12 @@ export class SettingsService {
 
     try {
       return safeStorage.decryptString(Buffer.from(stored, "base64"));
-    } catch {
+    } catch (err) {
+      // Round-3 §7: surface decrypt failures as a warning so a corrupted
+      // keychain entry doesn't masquerade as "no value set". Error semantics
+      // are preserved (still returns null) — only the diagnostic surface
+      // is added.
+      console.warn(`[settings] decryptString failed for key=${key}:`, (err as Error).message);
       return null;
     }
   }
