@@ -354,6 +354,14 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:plugins:install-result", listener);
   },
 
+  // Dev-only: install a plugin from a local directory (LVIS_DEV=1 required).
+  installLocalPlugin: async () => ipcRenderer.invoke("lvis:plugins:install-local"),
+  onInstallLocalResult: (cb: (result: { pluginId: string; installed: true } | null) => void) => {
+    const listener = (_: unknown, r: { pluginId: string; installed: true } | null) => cb(r);
+    ipcRenderer.on("lvis:plugins:install-local-result", listener);
+    return () => ipcRenderer.removeListener("lvis:plugins:install-local-result", listener);
+  },
+
   // Sibling of onPluginInstallResult — fires after PluginConfigTab or any
   // other surface drives uninstall through the IPC handler. Renderer uses
   // this to drop the removed plugin's sidebar tab + marketplace card.

@@ -246,6 +246,32 @@ export function PluginConfigTab() {
   }, [selectedId, entries, showBanner]);
 
   const selectedPlugin = plugins.find((p) => p.id === selectedId);
+  const isDevMode = window.lvis?.env?.isDev === true;
+  const [localInstalling, setLocalInstalling] = useState(false);
+
+  const handleInstallLocal = useCallback(async () => {
+    let api: ReturnType<typeof getApi>;
+    try {
+      api = getApi();
+    } catch {
+      showBanner("error", "API를 사용할 수 없습니다.");
+      return;
+    }
+    setLocalInstalling(true);
+    try {
+      const result = await api.installLocalPlugin?.();
+      if (!result) {
+        // user canceled the dialog
+        return;
+      }
+      showBanner("success", `로컬 플러그인 "${result.pluginId}" 설치 완료. 플러그인이 재시작됩니다.`);
+      void refreshPlugins();
+    } catch (e) {
+      showBanner("error", (e as Error).message ?? "로컬 설치 실패");
+    } finally {
+      setLocalInstalling(false);
+    }
+  }, [showBanner, refreshPlugins]);
 
   const handleUninstall = useCallback(async () => {
     if (!selectedId || !selectedPlugin) return;
@@ -307,6 +333,26 @@ export function PluginConfigTab() {
           </p>
         </div>
       </div>
+
+      {isDevMode && (
+        <div className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+          <div className="space-y-0.5">
+            <p className="text-xs font-medium text-amber-900">개발자 도구</p>
+            <p className="text-[11px] text-amber-700">
+              로컬 빌드 폴더에서 플러그인을 직접 설치합니다 (LVIS_DEV=1 필요).
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 shrink-0 text-xs border-amber-400 text-amber-900 hover:bg-amber-100"
+            onClick={() => void handleInstallLocal()}
+            disabled={localInstalling}
+          >
+            {localInstalling ? "설치 중…" : "로컬 폴더에서 설치"}
+          </Button>
+        </div>
+      )}
 
       {loading ? (
         <p className="text-xs text-muted-foreground">로딩 중…</p>
