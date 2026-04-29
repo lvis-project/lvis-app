@@ -323,7 +323,10 @@ export type LvisApi = {
   retryBootstrap: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
-  /** Dev-only: open a folder picker and install a local plugin directory. Returns null if canceled. */
+  /** Dev-only: open a folder picker and install a local plugin directory.
+   *  Returns null if the user cancels the dialog. Throws on installation
+   *  failure or when dev mode is not unlocked (never silently returns null
+   *  on error). */
   installLocalPlugin: () => Promise<{ pluginId: string; installed: true } | null>;
   onPluginInstallProgress: (h: (payload:
     | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
@@ -572,6 +575,8 @@ declare global {
       pluginConfig: LvisPluginConfigApi;
       env: {
         isDev: boolean;
+        /** True when any supported LVIS_DEV* flag is set (mirrors isDevModeUnlocked()). */
+        devUnlocked: boolean;
         enableDevConsole: boolean;
       };
     };

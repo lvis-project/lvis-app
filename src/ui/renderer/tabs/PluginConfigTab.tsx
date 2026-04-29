@@ -246,7 +246,7 @@ export function PluginConfigTab() {
   }, [selectedId, entries, showBanner]);
 
   const selectedPlugin = plugins.find((p) => p.id === selectedId);
-  const isDevMode = window.lvis?.env?.isDev === true;
+  const isDevMode = window.lvis?.env?.devUnlocked === true || window.lvis?.env?.isDev === true;
   const [localInstalling, setLocalInstalling] = useState(false);
 
   const handleInstallLocal = useCallback(async () => {

@@ -354,7 +354,8 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:plugins:install-result", listener);
   },
 
-  // Dev-only: install a plugin from a local directory (LVIS_DEV=1 required).
+  // Dev-only: install a plugin from a local directory (requires dev mode to
+  // be unlocked via a supported LVIS_DEV* flag in a non-packaged build).
   installLocalPlugin: async () => {
     const r = await ipcRenderer.invoke("lvis:plugins:install-local") as
       | { pluginId: string; installed: true }
@@ -682,6 +683,13 @@ contextBridge.exposeInMainWorld("lvis", {
   },
   env: {
     isDev: process.env.LVIS_DEV === "1",
+    // Mirrors isDevModeUnlocked(): true when any supported LVIS_DEV* flag is
+    // set in a non-packaged build. Use this (not isDev) to gate UI surfaces
+    // whose backend is gated by isDevModeUnlocked().
+    devUnlocked:
+      process.env.LVIS_DEV === "1" ||
+      process.env.LVIS_DEV_SKIP_SIG === "1" ||
+      process.env.LVIS_DEV_RELOAD === "1",
     enableDevConsole: process.env.LVIS_ENABLE_DEV_CONSOLE === "1",
   },
 });
