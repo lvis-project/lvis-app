@@ -17,6 +17,9 @@
  *  - `LVIS_ALLOW_LINKED_PLUGIN_ENTRY` removed — `LVIS_DEV=1` is the master
  *    dev unlock and already subsumed every use site.
  *  - `LVIS_ALLOW_TEST_MARKETPLACE_KEYS` removed — same rationale.
+ *  - Sidecar signature bypass removed with the sidecar gate. Marketplace
+ *    envelope verification and install receipt integrity are not bypassable by
+ *    dev env flags.
  *  - `LVIS_PLUGINS_DIR` env tier removed from path resolution. Plugin path
  *    overrides flow through constructor injection (`resolvePluginPaths`'s
  *    `pluginsRoot` argument). The env name remains in
@@ -50,7 +53,6 @@ let configured = false;
  */
 const PACKAGED_FORBIDDEN_VARS = [
   "LVIS_DEV",
-  "LVIS_DEV_SKIP_SIG",
   "LVIS_DEV_RELOAD",
   "LVIS_DEV_CONSOLE",
   "LVIS_WIN_NO_SANDBOX",
@@ -103,7 +105,6 @@ export function isDevModeUnlocked(packaged: boolean = isPackagedCached): boolean
   if (packaged) return false;
   return (
     envEquals("LVIS_DEV", "1")
-    || envEquals("LVIS_DEV_SKIP_SIG", "1")
     || envEquals("LVIS_DEV_RELOAD", "1")
   );
 }
@@ -132,24 +133,6 @@ export function devLinkedEntryAllowed(packaged: boolean = isPackagedCached): boo
 export function devLinkedInstallAllowed(packaged: boolean = isPackagedCached): boolean {
   if (packaged) return false;
   return envEquals("LVIS_DEV", "1");
-}
-
-/**
- * Include marketplace test keys in the bundled publisher key set. Test keys
- * must NEVER be trusted in a packaged build.
- */
-export function testMarketplaceKeysAllowed(packaged: boolean = isPackagedCached): boolean {
-  if (packaged) return false;
-  return envEquals("LVIS_DEV", "1");
-}
-
-/**
- * Skip plugin manifest signature verification entirely (dev escape hatch
- * for fast-iterate). Production builds must always verify.
- */
-export function devSkipSignature(packaged: boolean = isPackagedCached): boolean {
-  if (packaged) return false;
-  return envEquals("LVIS_DEV_SKIP_SIG", "1");
 }
 
 /**
@@ -248,3 +231,4 @@ export function assertMockMarketplaceAllowed(packaged: boolean = isPackagedCache
     );
   }
 }
+

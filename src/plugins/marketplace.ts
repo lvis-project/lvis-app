@@ -863,8 +863,8 @@ export class PluginMarketplaceService {
     onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<string> {
     const pluginDir = this.artifactStore.installDirFor(plugin.id);
-    const zipBuffer = await this.artifactStore.downloadVerifiedZip(plugin, version, onProgress);
-    await this.artifactStore.extractZip(plugin.id, zipBuffer);
+    const verified = await this.artifactStore.downloadVerifiedArtifact(plugin, version, onProgress);
+    const extractedFiles = await this.artifactStore.extractZip(plugin.id, verified.zipBuffer);
 
     const manifestFile = resolve(pluginDir, "plugin.json");
     let zipHasManifest = false;
@@ -881,9 +881,16 @@ export class PluginMarketplaceService {
         entry: "./dist/hostPlugin.js",
       });
       await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+      extractedFiles.push("plugin.json");
     } else {
       await this.assertInstalledManifestMatchesCatalog(plugin, version, manifestFile, pluginDir);
     }
+    await this.artifactStore.writeInstallReceipt(plugin.id, {
+      version,
+      artifactSha256: verified.artifactSha256,
+      signerKeyId: verified.signerKeyId,
+      files: extractedFiles,
+    });
     // Phase 2a invariant: registry entries hold registry-relative POSIX
     // paths regardless of which install branch produced the manifest.
     return toRegistryRelativeManifestPath(this.registryPath, manifestFile);

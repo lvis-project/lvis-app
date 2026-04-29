@@ -22,9 +22,9 @@ import type {
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
 import { createPluginStorage } from "./storage.js";
 import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
-import type { PluginSignatureVerifier } from "./signature-verifier.js";
 import { resolveDependencies } from "./dependency-resolver.js";
-import { devLinkedEntryAllowed, devSkipSignature } from "../boot/dev-flags.js";
+import { devLinkedEntryAllowed } from "../boot/dev-flags.js";
+import { verifyInstallReceipt } from "./plugin-install-receipt.js";
 
 /**
  * M1 — uiCallable safety: inverted model.
@@ -161,14 +161,12 @@ export interface PluginRuntimeOptions {
   /** Phase 1.5 §7.3: disable 시 managed 플러그인 차단 */
   deploymentGuard?: PluginDeploymentGuard;
   /**
-   * Sprint 3-B §9.6: ed25519 manifest signature check. When provided:
-   *   - managed plugins whose signature is missing/invalid are dropped.
-   *   - user plugins whose signature is missing produce a warning but load.
-   *   - user plugins with invalid signatures are dropped.
-   * When absent, signatures are not checked (backward compat).
+   * Cache root containing marketplace install receipts. When provided, every
+   * registry-loaded plugin must match the receipt written by the verified
+   * marketplace install gate before its manifest is parsed or entry imported.
    */
-  signatureVerifier?: PluginSignatureVerifier;
-  /** Optional sink for signature-related audit events. */
+  installReceiptCacheRoot?: string;
+  /** Optional sink for trust and runtime audit events. */
   auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   /**
    * HIGH-1: plugin disable 시 호출되는 콜백.
@@ -176,12 +174,6 @@ export interface PluginRuntimeOptions {
    * conversationLoop.onPluginDisabled 을 boot.ts에서 주입한다.
    */
   onDisable?: (pluginId: string) => void;
-  /**
-   * Phase 1 §Step 2 — flag that opts INTO the legacy "warn-and-load"
-   * behaviour for unsigned user plugins. Default false (fail-closed). Boot
-   * threads this from `settings.plugins.allowUnsignedUserPlugins`.
-   */
-  allowUnsignedUserPlugins?: boolean;
 }
 
 export class PluginRuntime {
@@ -189,11 +181,10 @@ export class PluginRuntime {
   private readonly manifestPaths: string[];
   private readonly registryPath?: string;
   private readonly pluginsRoot?: string;
-  private readonly allowUnsignedUserPlugins: boolean;
   private configOverrides: Record<string, Record<string, unknown>>;
   private readonly createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
-  private readonly signatureVerifier?: PluginSignatureVerifier;
+  private readonly installReceiptCacheRoot?: string;
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
   private readonly onDisable?: (pluginId: string) => void;
   private readonly plugins = new Map<string, LoadedPlugin>();
@@ -223,11 +214,12 @@ export class PluginRuntime {
     this.pluginsRoot = options.pluginsRoot
       ? resolve(options.pluginsRoot)
       : undefined;
-    this.allowUnsignedUserPlugins = options.allowUnsignedUserPlugins === true;
     this.configOverrides = options.configOverrides ?? {};
     this.createHostApi = options.createHostApi;
     this.deploymentGuard = options.deploymentGuard;
-    this.signatureVerifier = options.signatureVerifier;
+    this.installReceiptCacheRoot = options.installReceiptCacheRoot
+      ? resolve(options.installReceiptCacheRoot)
+      : undefined;
     this.auditLog = options.auditLog;
     this.onDisable = options.onDisable;
   }
@@ -249,6 +241,30 @@ export class PluginRuntime {
     }
     for (const plan of loadPlan) {
       const manifestPath = plan.manifestPath;
+      const pluginRoot = dirname(manifestPath);
+      if (this.installReceiptCacheRoot && plan.pluginIdHint) {
+        const receiptResult = await verifyInstallReceipt(
+          this.installReceiptCacheRoot,
+          plan.pluginIdHint,
+          pluginRoot,
+        );
+        if (!receiptResult.ok) {
+          console.error(
+            `[plugin-runtime] ${plan.pluginIdHint} rejected — install receipt integrity failed: ${receiptResult.reason}`,
+          );
+          this.auditLog?.("error", "plugin_integrity_rejected", {
+            pluginId: plan.pluginIdHint,
+            reason: receiptResult.reason,
+          });
+          this.markFailed(plan.pluginIdHint);
+          continue;
+        }
+        this.auditLog?.("info", "plugin_integrity_verified", {
+          pluginId: plan.pluginIdHint,
+          artifactSha256: receiptResult.receipt.artifactSha256,
+          signerKeyId: receiptResult.receipt.signerKeyId,
+        });
+      }
       let manifest: PluginManifest;
       try {
         manifest = await this.readManifest(manifestPath);
@@ -294,82 +310,6 @@ export class PluginRuntime {
           continue;
         }
       }
-      const pluginRoot = dirname(manifestPath);
-
-      // Sprint 3-B §9.6 — manifest signature gate.
-      // Managed plugins require a valid signature; unsigned user plugins are
-      // by default rejected (Phase 1 §Step 2) — the host opts into the
-      // legacy "warn-and-load" path via settings.plugins.allowUnsignedUserPlugins.
-      // Invalid signatures always drop the plugin (managed and user alike).
-      const skipSignatureVerification = devSkipSignature();
-      if (this.signatureVerifier && !skipSignatureVerification) {
-        const sigResult = await this.signatureVerifier.verifyManifestFile(manifestPath);
-        const isManaged = normalizeInstallPolicy(manifest) === "admin";
-        if (!sigResult.valid) {
-          if (isManaged) {
-            console.error(
-              `[plugin-runtime] managed plugin '${manifest.id}' rejected — ${sigResult.reason ?? "signature invalid"}`,
-            );
-            this.auditLog?.("error", `plugin_signature_rejected`, {
-              pluginId: manifest.id,
-              reason: sigResult.reason,
-              sha256: sigResult.sha256,
-            });
-            this.markFailed(manifest.id);
-            continue;
-          }
-          if (sigResult.reason === "signature file missing") {
-            // Phase 1 §Step 2 — default fail-closed for unsigned user plugins.
-            // The legacy "load anyway" path is only taken when the host
-            // explicitly opts in via settings.plugins.allowUnsignedUserPlugins.
-            // Without the opt-in, unsigned user plugins are SKIPPED (graceful,
-            // same fail-soft pattern as the managed-plugin signature failure
-            // above) — no throw.
-            if (!this.allowUnsignedUserPlugins) {
-              // PR #234 round-1 review (INFO): bring this up to `error`
-              // for parity with `plugin_signature_rejected` above —
-              // both signal "plugin failed the signature gate". A warn
-              // for one and error for the other obscures forensics.
-              this.auditLog?.("error", "plugin_unsigned_user_rejected", {
-                pluginId: manifest.id,
-                sha256: sigResult.sha256,
-              });
-              console.warn(
-                `[plugin-runtime] user plugin '${manifest.id}' rejected — unsigned (set settings.plugins.allowUnsignedUserPlugins=true to override)`,
-              );
-              this.markFailed(manifest.id, {
-                name: manifest.name,
-                description: "Unsigned user plugin (signature missing).",
-              });
-              continue;
-            }
-            this.auditLog?.("warn", "plugin_unsigned_user_loaded_with_optin", {
-              pluginId: manifest.id,
-              sha256: sigResult.sha256,
-            });
-            console.warn(
-              `[plugin-runtime] user plugin '${manifest.id}' has no signature — loading unsigned (opt-in)`,
-            );
-          } else {
-            console.error(
-              `[plugin-runtime] user plugin '${manifest.id}' rejected — ${sigResult.reason}`,
-            );
-            this.auditLog?.("error", `plugin_signature_rejected`, {
-              pluginId: manifest.id,
-              reason: sigResult.reason,
-              sha256: sigResult.sha256,
-            });
-            this.markFailed(manifest.id);
-            continue;
-          }
-        } else {
-          this.auditLog?.("info", `plugin_signature_verified`, {
-            pluginId: manifest.id,
-            sha256: sigResult.sha256,
-          });
-        }
-      }
-
       let entryPath: string;
       try {
         entryPath = this.resolveEntryPath(pluginRoot, manifest.entry);

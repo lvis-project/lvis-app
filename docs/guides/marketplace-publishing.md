@@ -218,8 +218,7 @@ LVIS_DEV=1 bun run dev
 
 | 플래그 | 효과 |
 |--------|------|
-| `LVIS_DEV=1` | 모든 dev 게이트 활성화 (linked entry, test publisher keys, signature skip 옵션 등 — 절대 packaged 빌드에 노출 금지) |
-| `LVIS_DEV_SKIP_SIG=1` | 서명 검증 스킵 — 로컬에서 서명 없는 zip 으로 설치 테스트 시 |
+| `LVIS_DEV=1` | linked entry 등 개발 전용 경로만 허용 — marketplace artifact signature 검증은 서버/호스트 경로에서 유지 |
 
 ⚠️ 모든 `LVIS_DEV*` 플래그는 `app.isPackaged === true` 일 때 hard-gate 되어 무시됩니다 ([dev-flags.ts](../../src/boot/dev-flags.ts)). packaged 빌드에 env 가 흘러들어와도 보안 약화 없음.
 
@@ -249,7 +248,7 @@ uv run lvm publish agent-hub-0.1.0.zip --base-url http://localhost:8000 --token 
 | `signature verification failed` 에러 | 사용자가 packaged 빌드를 사용 중인데 dev key 로 서명된 zip을 설치 시도 — 서버 prod 사인키로 재서명 후 재게시 |
 | 카탈로그에 새 버전이 보이지 않음 | (a) `pending_review` 상태 — admin 승인 필요. (b) 사용자 디바이스 UUID 가 카나리 롤아웃 비대상 — `rollout_percent` 확인 |
 | 부트스트랩 배너 빨간색 (`catalog fetch failed`) | (a) 마켓플레이스 URL 오타 / 서버 다운. (b) 사설 네트워크인데 toggle 안켜짐. 배너의 "다시 시도" 로 재호출 가능 |
-| `plugin_unsigned_user_rejected` audit | 사용자 플러그인이 서명되지 않음 — Phase 1 §Step 2 fail-closed. 설정 → 플러그인 설정 → "서명되지 않은 사용자 플러그인 허용" 토글 (PR #257) 또는 정상 마켓플레이스 경로로 재설치 |
+| `plugin_integrity_rejected` audit | 설치 영수증의 파일 해시와 디스크 파일이 불일치 — 플러그인을 marketplace에서 재설치 |
 | `plugin_type` 가 `"plugin"` 으로 등록됐는데 MCP 였음 | 매니페스트의 `$schema` URI 가 `mcp.schema.json` 가 아닌 `plugin.schema.json` 으로 들어감 — 매니페스트 수정 후 새 버전으로 재게시 |
 | `tool_name namespace conflict` 거절 | 다른 플러그인이 이미 같은 tool 이름을 등록함 (lvis-marketplace#51 publish-time 가드) — tool 이름에 publisher prefix 추가 권장 (예: `agenthub_search`) |
 
