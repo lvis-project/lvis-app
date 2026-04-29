@@ -441,29 +441,9 @@ export class SettingsService {
       const parsed = JSON.parse(raw) as any;
       const llm = mergeLlmPatch(DEFAULT_SETTINGS.llm, parsed.llm ?? {});
       const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
-      // Phase 2-final: marketplace server is the only backend. Persisted
-      // settings from older "mock" installs are coerced to the real-cloud
-      // default; if no URL is configured, boot constructs a
-      // DisabledMarketplaceFetcher (Track A) so the app still starts.
-      if (marketplaceParsed.backend !== "real-cloud") {
-        marketplaceParsed.backend = "real-cloud";
-      }
-      // Existing-user migration for #320: settings saved before the
-      // default flip carry the legacy `http://localhost:8000` URL, which
-      // means a `git pull` of the host alone wouldn't move them to the
-      // production tunnel. We rewrite *only* that exact legacy default —
-      // any other URL means the user explicitly chose a different
-      // deployment (sandbox, sibling-network staging, alternate dev box)
-      // and that choice must be preserved. The legacy default also
-      // forced realCloudAllowPrivateNetwork=true; flip it off when (and
-      // only when) we're actually migrating off localhost so the public
-      // HTTPS endpoint isn't paired with a now-irrelevant allowance.
-      if (marketplaceParsed.realCloudBaseUrl === "http://localhost:8000") {
-        marketplaceParsed.realCloudBaseUrl = "https://marketplace.lvisai.xyz";
-        if (marketplaceParsed.realCloudAllowPrivateNetwork === true) {
-          marketplaceParsed.realCloudAllowPrivateNetwork = false;
-        }
-      }
+      // Pin the only valid backend literal — narrows the unknown spread back
+      // to the AppSettings type without preserving legacy "mock" inputs.
+      marketplaceParsed.backend = "real-cloud";
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
       const routine = parsed.routine;
       const ROUTINE_IDLE_THRESHOLD_MIN_MS = 60_000;        // 1 min floor (debug/test)

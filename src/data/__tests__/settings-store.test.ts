@@ -45,21 +45,6 @@ describe("SettingsService marketplace defaults", () => {
     });
   });
 
-  it("coerces legacy 'mock' backend to real-cloud", () => {
-    writeFileSync(
-      join(userDataPath, "lvis-settings.json"),
-      JSON.stringify({
-        marketplace: {
-          backend: "mock",
-        },
-      }),
-      "utf-8",
-    );
-
-    const service = new SettingsService({ userDataPath });
-    expect(service.get("marketplace").backend).toBe("real-cloud");
-  });
-
   it("preserves an explicitly configured real-cloud endpoint", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
@@ -82,58 +67,6 @@ describe("SettingsService marketplace defaults", () => {
     });
   });
 
-  it("migrates the legacy http://localhost:8000 default to the production tunnel", () => {
-    // Existing users from before #320 carry the old default URL + the
-    // private-network allowance that paired with it. A `git pull` alone
-    // wouldn't move them, so the SettingsService rewrites that exact
-    // legacy default on load.
-    writeFileSync(
-      join(userDataPath, "lvis-settings.json"),
-      JSON.stringify({
-        marketplace: {
-          backend: "real-cloud",
-          realCloudBaseUrl: "http://localhost:8000",
-          realCloudAllowPrivateNetwork: true,
-        },
-      }),
-      "utf-8",
-    );
-
-    const service = new SettingsService({ userDataPath });
-
-    expect(service.get("marketplace")).toEqual({
-      backend: "real-cloud",
-      realCloudBaseUrl: "https://marketplace.lvisai.xyz",
-      realCloudAllowPrivateNetwork: false,
-    });
-  });
-
-  it("does not touch a non-legacy localhost URL the user explicitly configured", () => {
-    // Anything other than the exact legacy default is treated as an
-    // explicit deployment choice and preserved as-is. The migration is
-    // string-equality only — operators running their own marketplace
-    // server on a different port keep their override and their
-    // private-network allowance.
-    writeFileSync(
-      join(userDataPath, "lvis-settings.json"),
-      JSON.stringify({
-        marketplace: {
-          backend: "real-cloud",
-          realCloudBaseUrl: "http://localhost:9000",
-          realCloudAllowPrivateNetwork: true,
-        },
-      }),
-      "utf-8",
-    );
-
-    const service = new SettingsService({ userDataPath });
-
-    expect(service.get("marketplace")).toEqual({
-      backend: "real-cloud",
-      realCloudBaseUrl: "http://localhost:9000",
-      realCloudAllowPrivateNetwork: true,
-    });
-  });
 });
 
 describe("SettingsService LLM per-vendor patching", () => {
