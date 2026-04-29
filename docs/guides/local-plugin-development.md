@@ -217,6 +217,101 @@ watch 빌드가 `dist/*.js` 를 갱신하면 호스트 watcher 가 디바운스 
 
 ---
 
+## 7. 기존 dev 환경에서 단일 루트(`~/.lvis/plugins/`)로 마이그레이션
+
+> **대상**: 이전 세대 dev 환경에서 `LVIS_PLUGINS_DIR` 환경변수, `lvis-app/.lvis-dev/plugins/` 등을 사용하던 기존 LVIS 개발자.
+> **목표**: 충돌 없이 새 단일 루트 + `dev:link` 워크플로우로 전환.
+
+### 7-1. 무엇이 바뀌었나
+
+| 변경 전 (deprecated) | 변경 후 (canonical) |
+|---|---|
+| `LVIS_PLUGINS_DIR` 가 dev runner 에서 자동 세팅 | dev runner 는 `LVIS_PLUGINS_DIR` 더 이상 세팅 안 함 — 런타임은 항상 `~/.lvis/plugins/` 사용 |
+| `lvis-app/.lvis-dev/plugins/` 에 sibling repo 별 등록 | 단일 루트 `~/.lvis/plugins/` + `dev-link-plugins.mjs` 가 sibling repo `dist/` 를 symlink |
+| 마켓플레이스 서명 키: `dev-v1` + `poc-v1` 듀얼 | `poc-v1` 단일 키 (SDK / 마켓플레이스 / 서버 env 정렬됨) |
+| 외부 개발자 sideload: 수동 파일 복사만 | UI: Settings → Plugin Config → "로컬 폴더에서 설치" 버튼 |
+
+### 7-2. 마이그레이션 단계
+
+**(1) 모든 레포 최신화 + 서브모듈 동기화**
+
+```bash
+cd /path/to/lvis-project
+
+# lvis-app: 작업 중이면 stash 후 pull
+cd lvis-app
+git stash push --include-untracked -m "pre-single-root-migration"
+git checkout main
+git pull origin main
+git submodule update --init --recursive   # SDK 서브모듈 갱신 (af62b1e+)
+bun install                                # bun.lock 동기화
+git stash pop  # 필요 시
+
+# 모든 sibling 플러그인 최신화
+cd ..
+for r in lvis-plugin-meeting lvis-plugin-pageindex lvis-plugin-lge-api \
+         lvis-plugin-work-proactive lvis-plugin-ms-graph \
+         lvis-plugin-agent-hub lvis-plugin-template lvis-plugin-sdk \
+         lvis-marketplace lvis-agent-hub; do
+  (cd "$r" && git checkout main && git pull origin main)
+done
+```
+
+**(2) 옛 dev 디렉토리 + 환경변수 정리**
+
+```bash
+# .lvis-dev 디렉토리 잔재 제거 (있을 경우)
+rm -rf /path/to/lvis-project/lvis-app/.lvis-dev/plugins
+
+# 셸 rc 에서 LVIS_PLUGINS_DIR 제거
+grep -n "LVIS_PLUGINS_DIR" ~/.zshrc ~/.bashrc 2>/dev/null
+# 위 grep 결과를 보고 해당 줄 삭제. 현 세션에서는:
+unset LVIS_PLUGINS_DIR
+```
+
+**(3) (선택) 깨끗한 시작을 위해 `~/.lvis/plugins/` 백업 후 재구성**
+
+```bash
+mv ~/.lvis/plugins ~/.lvis/plugins.bak.$(date +%s)
+```
+
+**(4) 단일 루트로 dev 빌드 + 링크**
+
+```bash
+cd lvis-app
+
+# sibling 플러그인 빌드
+bun run prepare:plugins
+
+# ~/.lvis/plugins/<id>/{plugin.json, dist→symlink} 등록
+bun run dev:link
+
+# 또는 한 번에 (Electron 까지 기동):
+bun run dev
+```
+
+**(5) 외부 개발자 sideload 사용 (PR #306 신기능)**
+
+1. `LVIS_DEV=1 bun run start` (또는 `bun run dev`)
+2. Settings → Plugin Config → 하단 amber **개발자 도구** 패널 → **로컬 폴더에서 설치**
+3. `plugin.json` + `dist/` 가 포함된 빌드 디렉토리 선택
+4. 자동 재시작 후 즉시 사용 가능
+
+> 플러그인 디렉토리 요건: `plugin.json` 의 `id` 가 `^[a-zA-Z0-9._-]+$` 매치, `dist/` 빌드 산출물 존재. `installPolicy: "admin"` 으로 이미 설치된 같은 id 는 덮어쓰기 거부됨.
+
+### 7-3. 마이그레이션 후 자가 진단
+
+| 증상 | 원인 / 해결 |
+|------|-------------|
+| `Module '"@lvis/plugin-sdk/keys"' has no exported member 'MARKETPLACE_TEST_KEY_IDS'` | 로컬 working copy / SDK 서브모듈 stale. `git pull && git submodule update --recursive` |
+| `bun install --frozen-lockfile` 실패 | bun.lock 갱신 필요 → `bun install` (frozen 없이) 후 커밋 |
+| 플러그인이 안 보임 | `~/.lvis/plugins/registry.json` 확인 + `bun run dev:link` 재실행 |
+| 두 위치에서 플러그인 충돌 | `unset LVIS_PLUGINS_DIR` + `.lvis-dev` 잔재 삭제 |
+| 서명 검증 실패 (dev) | `LVIS_DEV=1 LVIS_DEV_SKIP_SIG=1` (이미 `bun run dev` 기본값) |
+| sideload 패널이 안 보임 | `LVIS_DEV=1` 환경변수 적용 확인. packaged 빌드는 dev 패널 비활성 |
+
+---
+
 ## 관련 문서
 
 - [`local-marketplace-testing.md`](./local-marketplace-testing.md) — **권장 dev 루프** (로컬 마켓플레이스 서버 + git-based 부트스트랩)
