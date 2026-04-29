@@ -27,6 +27,7 @@ import {
   devSkipSignature,
   setIsPackaged,
   shouldWarnPackagedFlagsIgnored,
+  tamperedVarsAtBoot,
 } from "../dev-flags.js";
 import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
@@ -564,8 +565,9 @@ export async function initPluginRuntime(
   // §7.2 Plugin Deployment Guard.
   // Plugin layout anchors at `~/.lvis/plugins/<id>/` — single root for both
   // user-installed and admin-injected plugins (distinguished by metadata,
-  // not by physical directory). The resolver picks `LVIS_PLUGINS_DIR` if
-  // set on a dev build, else `homedir()/.lvis/plugins`.
+  // not by physical directory). The resolver always uses
+  // `homedir()/.lvis/plugins`; tests pass an explicit `pluginsRoot` for
+  // sandbox isolation (Round-3 removed the env-tier override).
   const pluginPaths = resolvePluginPaths();
   // mkdir the root once so the trust-root realpath check in PluginRuntime
   // (and any first-install write under pluginsRoot/<id>/) doesn't trip on a
@@ -589,7 +591,12 @@ export async function initPluginRuntime(
   // get a single audit warning, never a per-flag enumeration.
   setIsPackaged(app.isPackaged);
   if (shouldWarnPackagedFlagsIgnored()) {
-    console.error("[lvis] LVIS_DEV* ignored in packaged build");
+    // Snapshot was captured at `dev-flags.ts` import time, BEFORE
+    // `main.ts:67-73` scrubbed the vars from `process.env`. Listing the
+    // specific names lets operators distinguish a stale launcher
+    // (`LVIS_PLUGINS_DIR`) from an active dev tamper (`LVIS_DEV=1`).
+    const names = tamperedVarsAtBoot();
+    console.error(`[lvis] LVIS_DEV* ignored in packaged build: ${names.join(", ")}`);
   }
 
   // Sprint 4-B §B-4 — signature verifier wired end-to-end.

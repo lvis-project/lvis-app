@@ -64,7 +64,8 @@ describe("PluginMarketplaceService install()", () => {
   beforeEach(async () => {
     setIsPackaged(false);
     // Phase 2b-1: one test exercises the file:-spec dev branch.
-    process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY = "1";
+    // Round-3: LVIS_DEV=1 subsumes the deprecated LVIS_ALLOW_LINKED_PLUGIN_ENTRY.
+    process.env.LVIS_DEV = "1";
     testDir = join(
       tmpdir(),
       `lvis-marketplace-install-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -81,7 +82,7 @@ describe("PluginMarketplaceService install()", () => {
   });
 
   afterEach(async () => {
-    delete process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY;
+    delete process.env.LVIS_DEV;
     vi.restoreAllMocks();
     await rm(testDir, { recursive: true, force: true });
     _resetForTest();
