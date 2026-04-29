@@ -684,8 +684,9 @@ async function main() {
   }
 
   // Install dev-built sibling plugins into ~/.lvis/plugins/ via real plugin.json
-  // + symlinked dist/. No LVIS_PLUGINS_DIR override — the runtime always reads
-  // from ~/.lvis/plugins/ regardless of environment.
+  // + symlinked dist/. The dev runner no longer sets LVIS_PLUGINS_DIR; dev:link
+  // installs into the default ~/.lvis/plugins/ location used by the runtime
+  // unless LVIS_PLUGINS_DIR is explicitly overridden in the environment.
   // Skip when --no-plugins is passed so the dev runner can start without touching
   // the user plugin directory (useful for CI and plugin-free debug sessions).
   if (!skipPlugins) {

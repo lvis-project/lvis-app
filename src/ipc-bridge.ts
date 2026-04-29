@@ -798,7 +798,7 @@ ${input}`;
   ipcMain.handle("lvis:plugins:install-local", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install-local", e); return UNAUTHORIZED_FRAME; }
     if (!isDevModeUnlocked()) {
-      throw new Error("[security] dev mode not unlocked — set LVIS_DEV=1 in a non-packaged build");
+      throw new Error("[security] dev mode not unlocked — enable a supported LVIS_DEV* flag in a non-packaged build");
     }
     const { filePaths, canceled } = await dialog.showOpenDialog({
       title: "로컬 플러그인 설치 (개발자)",
