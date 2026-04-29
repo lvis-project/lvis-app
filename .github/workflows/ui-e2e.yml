@@ -12,11 +12,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && github.event.label.name == 'ui-e2e')
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-      fail-fast: false
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, Linux, ARM64, oracle]
     timeout-minutes: 25
     env:
       E2E: "1"
@@ -85,19 +81,13 @@ jobs:
           npm run build:npm
 
       - name: Run Playwright UI E2E (Linux)
-        if: runner.os == 'Linux'
         working-directory: lvis-app
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" npx playwright test
-
-      - name: Run Playwright UI E2E (Windows)
-        if: runner.os == 'Windows'
-        working-directory: lvis-app
-        run: npx playwright test
 
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report-${{ matrix.os }}
+          name: playwright-report
           path: lvis-app/playwright-report
           if-no-files-found: ignore

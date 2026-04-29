@@ -6,11 +6,7 @@ on:
     branches: [main]
 jobs:
   build-and-test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-      fail-fast: false
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, Linux, ARM64, oracle]
     steps:
       - uses: actions/checkout@v6
         with:
