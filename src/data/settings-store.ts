@@ -224,14 +224,16 @@ const DEFAULT_SETTINGS: AppSettings = {
     provider: "duckduckgo",
   },
   marketplace: {
-    // Phase 2-final defaults — single source: marketplace server. The
-    // localhost URL + allow-private-network flag are dev-friendly defaults;
-    // production deployments override via settings UI or installer config.
+    // Phase 2-final defaults — single source: marketplace server. Default
+    // points at the production tunnel so a fresh install lands on the live
+    // catalog without any post-install configuration. Operators running a
+    // local marketplace (http://localhost:8000) can override via Settings →
+    // 마켓플레이스 tab and re-enable the private-network allowance there.
     // No fallback to a local catalog file — the only way to populate the
     // host's plugin layout is through the marketplace API.
     backend: "real-cloud",
-    realCloudBaseUrl: "http://localhost:8000",
-    realCloudAllowPrivateNetwork: true,
+    realCloudBaseUrl: "https://marketplace.lvisai.xyz",
+    realCloudAllowPrivateNetwork: false,
   },
   routine: {
     enableWakeupRoutine: false,
