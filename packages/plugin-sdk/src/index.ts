@@ -305,10 +305,6 @@ export interface PluginMarketplaceItem {
   mcpRuntime?: McpRuntimeSpec;
 }
 
-/**
- * Supported text encodings for PluginStorage read/write operations.
- * Defined explicitly to avoid a dependency on @types/node in the SDK public surface.
- */
 export type StorageEncoding =
   | "utf-8"
   | "utf8"

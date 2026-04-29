@@ -312,6 +312,20 @@ export class PluginStorageError extends Error {
 }
 
 /**
+ * Supported text encodings for PluginStorage read/write operations.
+ * Defined explicitly to avoid leaking @types/node into the SDK public surface.
+ */
+export type StorageEncoding =
+  | "utf-8"
+  | "utf8"
+  | "ascii"
+  | "base64"
+  | "base64url"
+  | "hex"
+  | "latin1"
+  | "binary";
+
+/**
  * Sandboxed storage rooted at `pluginDataDir`. All paths are resolved relative
  * to that root. Path traversal via `..`, absolute paths, and symlinks
  * escaping the root via realpath checks are rejected with `PluginStorageError`
@@ -337,11 +351,11 @@ export interface PluginStorage {
   /** Read raw bytes; throws ENOENT if the file does not exist. */
   read(relPath: string): Promise<Uint8Array>;
   /** Read text; throws ENOENT if the file does not exist. */
-  readText(relPath: string, encoding?: BufferEncoding): Promise<string>;
+  readText(relPath: string, encoding?: StorageEncoding): Promise<string>;
   /** Read + parse JSON; returns `null` on missing file, throws on bad JSON. */
   readJson<T = unknown>(relPath: string): Promise<T | null>;
   /** Write bytes / text; ensures parent directories exist. */
-  write(relPath: string, data: string | Uint8Array, encoding?: BufferEncoding): Promise<void>;
+  write(relPath: string, data: string | Uint8Array, encoding?: StorageEncoding): Promise<void>;
   /** Stringify + write JSON; ensures parent directories exist. */
   writeJson<T>(relPath: string, value: T, indent?: number): Promise<void>;
   /** Remove a file or directory tree; missing paths are ignored. */
