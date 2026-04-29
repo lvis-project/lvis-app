@@ -234,7 +234,12 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
               for (let j = i + 1; j < entries.length; j++) {
                 if (entries[j]?.kind === "user") { nextUserIdx = j; break; }
               }
-              const isLastAssistantInTurn = !entries.slice(i + 1, nextUserIdx).some((ne) => ne.kind === "assistant");
+              // An assistant entry is INTERMEDIATE if any assistant OR tool_group follows
+              // within the same turn. tool_group following means the LLM made tool calls
+              // and this is a planning message, not the final answer.
+              const isLastAssistantInTurn = !entries.slice(i + 1, nextUserIdx).some(
+                (ne) => ne.kind === "assistant" || ne.kind === "tool_group",
+              );
               if (!isLastAssistantInTurn) {
                 intermediateSet.add(i);
               } else {
