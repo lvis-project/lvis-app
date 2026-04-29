@@ -50,16 +50,23 @@ if (process.platform === "win32" && process.env.LVIS_KEEP_GPU !== "1") {
 // Safe to call on all platforms; non-Windows treats it as a no-op.
 app.setAppUserModelId("com.lge.lvis");
 
-// Phase 1 trust-hardening — strip LVIS_DEV* / LVIS_ALLOW_* from process.env in
-// packaged builds before any preload, renderer, or worker inherits it.
-// Without this scrub, a packaged binary launched with LVIS_DEV=1 in the user
-// environment would expose `env.isDev=true` to the renderer (via preload's
+// Phase 1 trust-hardening — strip LVIS_DEV* from process.env in packaged
+// builds before any preload, renderer, or worker inherits it. Without this
+// scrub, a packaged binary launched with LVIS_DEV=1 in the user environment
+// would expose `env.isDev=true` to the renderer (via preload's
 // contextBridge) and let UI code enable dev affordances. Renderer-side flags
-// are advisory rather than load-bearing for trust decisions, but allowing them
-// to flip in packaged builds creates a confusing forensic signal.
+// are advisory rather than load-bearing for trust decisions, but allowing
+// them to flip in packaged builds creates a confusing forensic signal.
+//
+// Round-3: the prefix scrub now catches `LVIS_DEV_CONSOLE` (renamed from
+// `LVIS_ENABLE_DEV_CONSOLE`) automatically. `LVIS_WIN_NO_SANDBOX` is the
+// Windows-only sandbox bypass — it was previously named
+// `LVIS_DEV_NO_SANDBOX`, which made it incorrectly look like a dev flag;
+// the rename moves it out of the dev mask but it's still hard-gated on
+// `!app.isPackaged` by `dev-flags.ts:devNoSandboxAllowed()`.
 if (app.isPackaged) {
   for (const key of Object.keys(process.env)) {
-    if (key.startsWith("LVIS_DEV") || key.startsWith("LVIS_ALLOW_")) {
+    if (key.startsWith("LVIS_DEV") || key === "LVIS_WIN_NO_SANDBOX") {
       delete process.env[key];
     }
   }
@@ -429,7 +436,7 @@ async function main() {
 // Argument-builder lives in `src/main/electron-protocol-args.ts` (pure helper)
 // so the platform / argv / env policy can be unit-tested without Electron.
 //
-// `LVIS_DEV_NO_SANDBOX` is read through `dev-flags.ts` SoT instead of by the
+// `LVIS_WIN_NO_SANDBOX` is read through `dev-flags.ts` SoT instead of by the
 // helper itself: the helper takes a resolved `disableSandbox: boolean` so the
 // `!app.isPackaged` policy gate cannot be bypassed by a packaged binary that
 // inherits the env var. Boot also calls `setIsPackaged` later for any other

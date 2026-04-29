@@ -1,11 +1,10 @@
 /**
  * Dev-mode flag gate (Phase 1 §Step 4).
  *
- * Single source of truth for every `LVIS_DEV*` / `LVIS_ALLOW_*` env var read
- * in main-process code. Each helper hard-gates on `!app.isPackaged` so a
- * packaged production binary launched with these env vars in its environment
- * cannot silently weaken trust (env vars are user-controllable on every
- * desktop OS).
+ * Single source of truth for every `LVIS_DEV*` env var read in main-process
+ * code. Each helper hard-gates on `!app.isPackaged` so a packaged production
+ * binary launched with these env vars in its environment cannot silently
+ * weaken trust (env vars are user-controllable on every desktop OS).
  *
  * Default behaviour: until `setIsPackaged()` is called by boot, helpers
  * report packaged-mode (i.e. flags are IGNORED). This keeps the failure
@@ -13,6 +12,19 @@
  *
  * Electron is intentionally NOT imported here so this module remains
  * unit-testable in node (vitest) without an electron stub.
+ *
+ * Round-3 cleanup (single direction):
+ *  - `LVIS_ALLOW_LINKED_PLUGIN_ENTRY` removed — `LVIS_DEV=1` is the master
+ *    dev unlock and already subsumed every use site.
+ *  - `LVIS_ALLOW_TEST_MARKETPLACE_KEYS` removed — same rationale.
+ *  - `LVIS_PLUGINS_DIR` env tier removed from path resolution. Plugin path
+ *    overrides flow through constructor injection (`resolvePluginPaths`'s
+ *    `pluginsRoot` argument). The env name remains in
+ *    {@link shouldWarnPackagedFlagsIgnored} for one release cycle so the
+ *    tamper-detect log catches stale launchers.
+ *  - `LVIS_DEV_NO_SANDBOX` → `LVIS_WIN_NO_SANDBOX` (separated from the dev
+ *    mask; it's a Windows-only sandbox bypass for corp/VDI boxes, not a
+ *    dev-mode flag).
  */
 
 let isPackagedCached = true;
@@ -46,8 +58,6 @@ export function isDevModeUnlocked(packaged: boolean = isPackagedCached): boolean
   if (packaged) return false;
   return (
     envEquals("LVIS_DEV", "1")
-    || envEquals("LVIS_ALLOW_LINKED_PLUGIN_ENTRY", "1")
-    || envEquals("LVIS_ALLOW_TEST_MARKETPLACE_KEYS", "1")
     || envEquals("LVIS_DEV_SKIP_SIG", "1")
     || envEquals("LVIS_DEV_RELOAD", "1")
   );
@@ -60,7 +70,7 @@ export function isDevModeUnlocked(packaged: boolean = isPackagedCached): boolean
  */
 export function devLinkedEntryAllowed(packaged: boolean = isPackagedCached): boolean {
   if (packaged) return false;
-  return envEquals("LVIS_DEV", "1") || envEquals("LVIS_ALLOW_LINKED_PLUGIN_ENTRY", "1");
+  return envEquals("LVIS_DEV", "1");
 }
 
 /**
@@ -76,7 +86,7 @@ export function devLinkedEntryAllowed(packaged: boolean = isPackagedCached): boo
  */
 export function devLinkedInstallAllowed(packaged: boolean = isPackagedCached): boolean {
   if (packaged) return false;
-  return envEquals("LVIS_DEV", "1") || envEquals("LVIS_ALLOW_LINKED_PLUGIN_ENTRY", "1");
+  return envEquals("LVIS_DEV", "1");
 }
 
 /**
@@ -85,7 +95,7 @@ export function devLinkedInstallAllowed(packaged: boolean = isPackagedCached): b
  */
 export function testMarketplaceKeysAllowed(packaged: boolean = isPackagedCached): boolean {
   if (packaged) return false;
-  return envEquals("LVIS_ALLOW_TEST_MARKETPLACE_KEYS", "1") || envEquals("LVIS_DEV", "1");
+  return envEquals("LVIS_DEV", "1");
 }
 
 /**
@@ -111,43 +121,35 @@ export function devPluginReloadEnabled(packaged: boolean = isPackagedCached): bo
  * sandbox init failure. Hard-gated on `!packaged` for the same reason as
  * every other dev flag — a packaged binary that inherits this env var must
  * not silently weaken Chromium sandboxing.
+ *
+ * Round-3: renamed from `LVIS_DEV_NO_SANDBOX` to `LVIS_WIN_NO_SANDBOX` to
+ * make the Windows-only intent explicit and decouple it from the dev-mode
+ * mask (this flag is needed for `bun run start` on corp Windows even
+ * outside a dev session).
  */
 export function devNoSandboxAllowed(packaged: boolean = isPackagedCached): boolean {
   if (packaged) return false;
-  return envEquals("LVIS_DEV_NO_SANDBOX", "1");
+  return envEquals("LVIS_WIN_NO_SANDBOX", "1");
 }
 
 /**
- * @deprecated LVIS_PLUGINS_DIR is no longer used by the dev runner.
- * Use `bun run dev:link` instead which installs plugins directly into
- * ~/.lvis/plugins/. This function is retained for test isolation only.
+ * Returns true if any LVIS_DEV* / LVIS_PLUGINS_DIR env var is set in a
+ * packaged build — caller should log a single audit warning so operators
+ * can detect tampered launches without the helper leaking which flag.
  *
- * `LVIS_PLUGINS_DIR` redirects the user-installed plugin layout to an
- * arbitrary path. Used by tests, portable installs, and CI sandbox isolation.
- * Hard-gated on `!packaged` so a packaged build that inherits this env var
- * cannot be steered at a user-writable directory outside the canonical
- * `userData/plugins/` location.
- */
-export function devPluginsDirOverride(packaged: boolean = isPackagedCached): string | undefined {
-  if (packaged) return undefined;
-  const value = process.env.LVIS_PLUGINS_DIR;
-  return value && value.length > 0 ? value : undefined;
-}
-
-/**
- * Returns true if any LVIS_DEV* / LVIS_ALLOW_* env var is set in a packaged
- * build — caller should log a single audit warning so operators can detect
- * tampered launches without the helper leaking which flag.
+ * `LVIS_PLUGINS_DIR` is intentionally retained here for one release cycle
+ * even though path resolution no longer reads it: stale launchers and
+ * external scripts may still set it, and the audit log is the only signal
+ * an operator gets that someone is shipping packaged builds with dev
+ * env vars in the environment.
  */
 export function shouldWarnPackagedFlagsIgnored(packaged: boolean = isPackagedCached): boolean {
   if (!packaged) return false;
   return (
     process.env.LVIS_DEV !== undefined
-    || process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY !== undefined
-    || process.env.LVIS_ALLOW_TEST_MARKETPLACE_KEYS !== undefined
     || process.env.LVIS_DEV_SKIP_SIG !== undefined
     || process.env.LVIS_DEV_RELOAD !== undefined
-    || process.env.LVIS_DEV_NO_SANDBOX !== undefined
+    || process.env.LVIS_WIN_NO_SANDBOX !== undefined
     || process.env.LVIS_PLUGINS_DIR !== undefined
   );
 }
