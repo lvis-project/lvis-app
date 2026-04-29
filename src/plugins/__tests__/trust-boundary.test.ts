@@ -5,52 +5,38 @@
  *
  *   1. (CRITICAL §Step 1) `isTrustedRegistryManifestPath` accepts BOTH
  *      hostRoot and pluginsRoot; rejects symlink escape.
- *   2. (HIGH §Step 2) Unsigned user plugins are fail-closed by default;
- *      `allowUnsignedUserPlugins=true` opt-in restores legacy behaviour.
- *   3. (HIGH §Step 3) `installedBy` recorded on the registry entry is
+ *   2. (HIGH §Step 2) `installedBy` recorded on the registry entry is
  *      authoritative; manifest `installPolicy` is advisory only.
- *   4. (MEDIUM §Step 4) `dev-flags.ts` helpers hard-gate on `app.isPackaged`.
+ *   3. (MEDIUM §Step 3) `dev-flags.ts` helpers hard-gate on `app.isPackaged`.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 import { join } from "node:path";
-import { generateKeyPairSync } from "node:crypto";
 import { PluginRuntime } from "../runtime.js";
-import { PluginSignatureVerifier } from "../signature-verifier.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
+import {
+  hashReceiptFiles,
+  writeInstallReceipt,
+  type PluginInstallReceipt,
+} from "../plugin-install-receipt.js";
 import {
   _resetForTest,
   devLinkedEntryAllowed,
-  devSkipSignature,
   isDevModeUnlocked,
   setIsPackaged,
-  testMarketplaceKeysAllowed,
 } from "../../boot/dev-flags.js";
 
 const ENTRY_SOURCE = `export default async function createPlugin(ctx) {
   return { handlers: { tb_ping: async () => "pong" }, start: async () => {}, stop: async () => {} };
 }`;
 
-interface AuditCall {
-  level: "info" | "warn" | "error";
-  message: string;
-  data?: unknown;
-}
-
-function makeAuditSink(): { calls: AuditCall[]; log: (l: "info" | "warn" | "error", m: string, d?: unknown) => void } {
-  const calls: AuditCall[] = [];
-  return {
-    calls,
-    log: (level, message, data) => calls.push({ level, message, data }),
-  };
-}
-
 describe("Phase 1 — plugin trust boundary", () => {
   let testDir: string;
   let hostRoot: string;
   let pluginsRoot: string;
+  let cacheRoot: string;
   let registryPath: string;
 
   beforeEach(async () => {
@@ -60,6 +46,7 @@ describe("Phase 1 — plugin trust boundary", () => {
     );
     hostRoot = join(testDir, "host");
     pluginsRoot = join(testDir, "userInstalled");
+    cacheRoot = join(pluginsRoot, ".cache");
     await mkdir(join(hostRoot, "plugins"), { recursive: true });
     await mkdir(pluginsRoot, { recursive: true });
     registryPath = join(hostRoot, "plugins", "registry.json");
@@ -93,6 +80,19 @@ describe("Phase 1 — plugin trust boundary", () => {
     entries: Array<{ id: string; manifestPath: string; installedBy?: "admin" | "user" }>,
   ): Promise<void> {
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: entries }), "utf-8");
+  }
+
+  async function writeReceipt(pluginId: string, pluginDir: string): Promise<void> {
+    const receipt: PluginInstallReceipt = {
+      schemaVersion: 1,
+      pluginId,
+      version: "1.0.0",
+      artifactSha256: "a".repeat(64),
+      signerKeyId: "poc-v1",
+      installedAt: new Date(0).toISOString(),
+      files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
+    };
+    await writeInstallReceipt(cacheRoot, receipt);
   }
 
   // ───────────────────────────── §Step 1 ─────────────────────────────
@@ -180,68 +180,46 @@ describe("Phase 1 — plugin trust boundary", () => {
 
   // ───────────────────────────── §Step 2 ─────────────────────────────
 
-  describe("unsigned user plugin fail-closed (allowUnsignedUserPlugins)", () => {
-    let publicKeyPem: string;
+  describe("marketplace install receipt integrity", () => {
+    it("loads a registry plugin when its install receipt matches installed files", async () => {
+      const pluginDir = join(pluginsRoot, "p-receipted");
+      const manifestPath = await writePluginAt(pluginDir, "tb.receipted");
+      await writeReceipt("tb.receipted", pluginDir);
+      await writeRegistry([{ id: "tb.receipted", manifestPath }]);
 
-    beforeEach(() => {
-      const keypair = generateKeyPairSync("ed25519");
-      publicKeyPem = keypair.publicKey.export({ type: "spki", format: "pem" }).toString();
-    });
-
-    it("rejects an unsigned user plugin by default and emits plugin_unsigned_user_rejected", async () => {
-      const manifestPath = await writePluginAt(
-        join(pluginsRoot, "p-unsigned"),
-        "tb.unsigned",
-        { installPolicy: "user" },
-      );
-      await writeRegistry([{ id: "tb.unsigned", manifestPath }]);
-
-      const audit = makeAuditSink();
+      const auditCalls: Array<{ level: string; message: string }> = [];
       const runtime = new PluginRuntime({
         hostRoot,
         registryPath,
         pluginsRoot,
-        signatureVerifier: new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] }),
-        auditLog: audit.log,
+        installReceiptCacheRoot: cacheRoot,
+        auditLog: (level, message) => auditCalls.push({ level, message }),
       });
       await runtime.load();
 
-      expect(runtime.listPluginIds()).not.toContain("tb.unsigned");
-      // Audit level is `error` for parity with `plugin_signature_rejected` —
-      // both signal "plugin failed the signature gate", and a warn for one
-      // and error for the other obscures forensics.
-      expect(
-        audit.calls.some(
-          (c) => c.level === "error" && c.message === "plugin_unsigned_user_rejected",
-        ),
-      ).toBe(true);
+      expect(runtime.listPluginIds()).toContain("tb.receipted");
+      expect(auditCalls).toContainEqual({ level: "info", message: "plugin_integrity_verified" });
     });
 
-    it("loads an unsigned user plugin when allowUnsignedUserPlugins=true and emits plugin_unsigned_user_loaded_with_optin", async () => {
-      const manifestPath = await writePluginAt(
-        join(pluginsRoot, "p-unsigned-optin"),
-        "tb.unsigned.optin",
-        { installPolicy: "user" },
-      );
-      await writeRegistry([{ id: "tb.unsigned.optin", manifestPath }]);
+    it("rejects a registry plugin when an installed file differs from its receipt", async () => {
+      const pluginDir = join(pluginsRoot, "p-tampered");
+      const manifestPath = await writePluginAt(pluginDir, "tb.receipt.tampered");
+      await writeReceipt("tb.receipt.tampered", pluginDir);
+      await writeFile(join(pluginDir, "entry.mjs"), `${ENTRY_SOURCE}\n// tampered`, "utf-8");
+      await writeRegistry([{ id: "tb.receipt.tampered", manifestPath }]);
 
-      const audit = makeAuditSink();
+      const auditCalls: Array<{ level: string; message: string }> = [];
       const runtime = new PluginRuntime({
         hostRoot,
         registryPath,
         pluginsRoot,
-        allowUnsignedUserPlugins: true,
-        signatureVerifier: new PluginSignatureVerifier({ publisherPublicKeysPem: [publicKeyPem] }),
-        auditLog: audit.log,
+        installReceiptCacheRoot: cacheRoot,
+        auditLog: (level, message) => auditCalls.push({ level, message }),
       });
       await runtime.load();
 
-      expect(runtime.listPluginIds()).toContain("tb.unsigned.optin");
-      expect(
-        audit.calls.some(
-          (c) => c.level === "warn" && c.message === "plugin_unsigned_user_loaded_with_optin",
-        ),
-      ).toBe(true);
+      expect(runtime.listPluginIds()).not.toContain("tb.receipt.tampered");
+      expect(auditCalls).toContainEqual({ level: "error", message: "plugin_integrity_rejected" });
     });
   });
 
@@ -299,7 +277,6 @@ describe("Phase 1 — plugin trust boundary", () => {
     // master dev unlock that already subsumed them.
     const ENV_NAMES = [
       "LVIS_DEV",
-      "LVIS_DEV_SKIP_SIG",
       "LVIS_DEV_RELOAD",
     ] as const;
     const saved: Partial<Record<string, string | undefined>> = {};
@@ -321,8 +298,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       setIsPackaged(true);
       expect(isDevModeUnlocked()).toBe(false);
       expect(devLinkedEntryAllowed()).toBe(false);
-      expect(testMarketplaceKeysAllowed()).toBe(false);
-      expect(devSkipSignature()).toBe(false);
     });
 
     it("returns true when isPackaged=false and the matching flag is set", () => {
@@ -333,10 +308,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       process.env.LVIS_DEV = "1";
       expect(isDevModeUnlocked()).toBe(true);
       expect(devLinkedEntryAllowed()).toBe(true);
-      expect(testMarketplaceKeysAllowed()).toBe(true);
-      delete process.env.LVIS_DEV;
-      process.env.LVIS_DEV_SKIP_SIG = "1";
-      expect(devSkipSignature()).toBe(true);
     });
 
     it("explicit packaged parameter overrides cached state for testability", () => {

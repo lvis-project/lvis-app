@@ -83,7 +83,7 @@ export type AppSettings = {
     shutdownPrompt?: string;
   };
   privacy?: { piiRedactEnabled: boolean };
-  plugins?: { allowUnsignedUserPlugins: boolean };
+  plugins?: Record<string, never>;
   marketplace?: {
     backend?: "real-cloud";
     realCloudBaseUrl?: string;

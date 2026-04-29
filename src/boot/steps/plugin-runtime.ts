@@ -2,7 +2,7 @@
  * Boot §4.2 Step 3-5 — Plugin runtime + HostApi factory.
  *
  * Extracted from boot.ts to keep orchestration thin. This module:
- *   • constructs the PluginDeploymentGuard + SignatureVerifier
+ *   • constructs the PluginDeploymentGuard and plugin runtime integrity gate
  *   • builds the per-plugin HostApi factory (registerKeywords / emitEvent /
  *     onEvent / addTask / getSecret / msGraph* / callLlm /
  *     logEvent / onShutdown)
@@ -20,11 +20,8 @@ import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
 import { PluginDeploymentGuard } from "../../plugins/deployment-guard.js";
-import { PluginSignatureVerifier } from "../../plugins/signature-verifier.js";
-import { getBundledPublisherPublicKeysPem } from "../../plugins/publisher-keys.js";
 import { createPluginStorage } from "../../plugins/storage.js";
 import {
-  devSkipSignature,
   setIsPackaged,
   shouldWarnPackagedFlagsIgnored,
   tamperedVarsAtBoot,
@@ -599,17 +596,6 @@ export async function initPluginRuntime(
     console.error(`[lvis] LVIS_DEV* ignored in packaged build: ${names.join(", ")}`);
   }
 
-  // Sprint 4-B §B-4 — signature verifier wired end-to-end.
-  const skipSig = devSkipSignature();
-  const signatureVerifier = skipSig
-    ? undefined
-    : new PluginSignatureVerifier({
-        publisherPublicKeysPem: getBundledPublisherPublicKeysPem(),
-      });
-  if (skipSig) {
-    console.warn("[lvis] boot: LVIS_DEV_SKIP_SIG=1 — plugin signature verification disabled (dev-only)");
-  }
-
   // PR 3c: ms-graph 자체 인증으로 이전 후 host 측 MS HostApi 메서드 / capability gate 제거.
   // ms-graph-consumer capability 는 plugin 자기 식별 라벨로 plugin.json 에 남지만
   // host 의 capability 검증 게이트는 더 이상 존재하지 않는다 (plugin 이 자체 MSAL 소유).
@@ -617,15 +603,13 @@ export async function initPluginRuntime(
 
   // Phase 1 §Step 1 + §Step 2 — thread the user-installed dir as a second
   // trust root and the unsigned-user-plugin opt-in flag.
-  const pluginSettings = settingsService.get("plugins");
   pluginRuntime = new PluginRuntime({
     hostRoot: projectRoot,
     pluginsRoot: pluginPaths.pluginsRoot,
     registryPath: pluginPaths.registryPath,
-    allowUnsignedUserPlugins: pluginSettings?.allowUnsignedUserPlugins === true,
     configOverrides,
     deploymentGuard,
-    signatureVerifier,
+    installReceiptCacheRoot: pluginPaths.cacheRoot,
     auditLog: (level, message, data) => {
       try {
         bootAuditLogger.log({
@@ -895,3 +879,4 @@ export async function initPluginRuntime(
 
 // Re-export so boot.ts's return statement can still reach BrowserWindow type.
 export type { BrowserWindow };
+
