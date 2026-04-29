@@ -31,6 +31,50 @@ let isPackagedCached = true;
 let configured = false;
 
 /**
+ * Round-4 tamper-detect snapshot.
+ *
+ * `main.ts` scrubs `LVIS_DEV*` and `LVIS_WIN_NO_SANDBOX` from `process.env`
+ * before the renderer / preload / plugin runtime boots in packaged mode. That
+ * scrub runs at `main.ts:67-73`, AFTER this module's import (line 20) but
+ * BEFORE {@link shouldWarnPackagedFlagsIgnored} is invoked from
+ * `plugin-runtime.ts`. Reading `process.env` inside the helper would observe
+ * the scrubbed (empty) state and silently disable the audit log.
+ *
+ * The fix: snapshot which forbidden vars were present at the moment this
+ * module first loads. ESM execution order guarantees this top-level body
+ * runs before any code in `main.ts`'s module body (including the scrub
+ * loop), so the snapshot captures the pre-scrub truth.
+ *
+ * The snapshot is intentionally a frozen `Set<string>` so neither the helper
+ * nor a malicious caller can mutate it after capture.
+ */
+const PACKAGED_FORBIDDEN_VARS = [
+  "LVIS_DEV",
+  "LVIS_DEV_SKIP_SIG",
+  "LVIS_DEV_RELOAD",
+  "LVIS_DEV_CONSOLE",
+  "LVIS_WIN_NO_SANDBOX",
+  "LVIS_PLUGINS_DIR",
+] as const;
+
+const tamperedAtBoot: ReadonlySet<string> = Object.freeze(
+  new Set(PACKAGED_FORBIDDEN_VARS.filter((name) => process.env[name] !== undefined)),
+);
+
+/**
+ * Test-only override of the boot snapshot. Production code never calls
+ * this — it only exists because the real snapshot is captured at
+ * module-load time and tests can't re-trigger module-load to exercise the
+ * warn-true / warn-false branches. Reset to `null` to fall back to the
+ * real frozen snapshot.
+ */
+let tamperedOverrideForTest: ReadonlySet<string> | null = null;
+
+function effectiveTamperedSet(): ReadonlySet<string> {
+  return tamperedOverrideForTest ?? tamperedAtBoot;
+}
+
+/**
  * Boot calls this once with `app.isPackaged`. Subsequent calls overwrite —
  * tests use this to flip between packaged / unpackaged scenarios.
  */
@@ -43,6 +87,7 @@ export function setIsPackaged(packaged: boolean): void {
 export function _resetForTest(): void {
   isPackagedCached = true;
   configured = false;
+  tamperedOverrideForTest = null;
 }
 
 function envEquals(name: string, value: string): boolean {
@@ -133,9 +178,15 @@ export function devNoSandboxAllowed(packaged: boolean = isPackagedCached): boole
 }
 
 /**
- * Returns true if any LVIS_DEV* / LVIS_PLUGINS_DIR env var is set in a
- * packaged build — caller should log a single audit warning so operators
- * can detect tampered launches without the helper leaking which flag.
+ * Returns true if any LVIS_DEV* / LVIS_WIN_NO_SANDBOX / LVIS_PLUGINS_DIR env
+ * var was present at module-load time in a packaged build — caller should
+ * log a single audit warning so operators can detect tampered launches.
+ *
+ * Reads from the {@link tamperedAtBoot} snapshot, NOT live `process.env`.
+ * `main.ts:67-73` scrubs these vars from `process.env` before this helper
+ * is called from `plugin-runtime.ts`, so a live read would always return
+ * `false` and silently defeat the audit log. The snapshot captures presence
+ * before the scrub runs (ESM import-order guarantee).
  *
  * `LVIS_PLUGINS_DIR` is intentionally retained here for one release cycle
  * even though path resolution no longer reads it: stale launchers and
@@ -145,13 +196,29 @@ export function devNoSandboxAllowed(packaged: boolean = isPackagedCached): boole
  */
 export function shouldWarnPackagedFlagsIgnored(packaged: boolean = isPackagedCached): boolean {
   if (!packaged) return false;
-  return (
-    process.env.LVIS_DEV !== undefined
-    || process.env.LVIS_DEV_SKIP_SIG !== undefined
-    || process.env.LVIS_DEV_RELOAD !== undefined
-    || process.env.LVIS_WIN_NO_SANDBOX !== undefined
-    || process.env.LVIS_PLUGINS_DIR !== undefined
-  );
+  return effectiveTamperedSet().size > 0;
+}
+
+/**
+ * Names of forbidden env vars that were present at module-load time. Empty
+ * array if none were set. Callers (e.g. the boot audit log) can use this to
+ * surface which specific flags triggered the warning without hand-rolling
+ * the same probe at every site.
+ *
+ * Returns a defensive copy — the underlying snapshot is frozen but this
+ * keeps the API symmetric with idiomatic readonly array returns.
+ */
+export function tamperedVarsAtBoot(): readonly string[] {
+  return Array.from(effectiveTamperedSet());
+}
+
+/**
+ * Test-only — override the boot snapshot. Pass an array of var names to
+ * simulate that those vars were present at boot, or `null` to restore the
+ * real captured snapshot. Not exported via barrel.
+ */
+export function _setTamperedSnapshotForTest(names: readonly string[] | null): void {
+  tamperedOverrideForTest = names === null ? null : Object.freeze(new Set(names));
 }
 
 /** True once boot has called {@link setIsPackaged}. */
