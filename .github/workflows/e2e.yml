@@ -15,7 +15,6 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           path: lvis-app
-          submodules: recursive
       - name: Clone sibling plugin repos
         run: |
           set -euo pipefail
@@ -25,11 +24,6 @@ jobs:
             git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/lvis-project/${slug}.git" "$slug"
           done
       - uses: oven-sh/setup-bun@v2
-      - name: Build plugin-sdk submodule
-        run: |
-          cd lvis-app/packages/plugin-sdk
-          bun install --frozen-lockfile
-          bun run build
       - name: Install plugin dependencies
         run: |
           bun install --frozen-lockfile --cwd ../lvis-plugin-pageindex
@@ -44,6 +38,9 @@ jobs:
         working-directory: lvis-app
       - name: Install app dependencies
         run: bun install --frozen-lockfile
+        working-directory: lvis-app
+      - name: Check plugin SDK drift
+        run: bun run --cwd packages/plugin-sdk check:drift
         working-directory: lvis-app
       - name: Build app
         run: bun run build
