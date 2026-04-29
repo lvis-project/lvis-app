@@ -220,18 +220,15 @@ describe("task tools", () => {
 
   it("task_today: returns only pending tasks due today", async () => {
     const nowKst = new Date(Date.now() + 9 * 60 * 60_000);
-    const y = nowKst.getUTCFullYear();
-    const m = String(nowKst.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(nowKst.getUTCDate()).padStart(2, "0");
-    const todayKstDate = `${y}-${m}-${d}`;
-    const tomorrowKst = new Date(
-      new Date(`${todayKstDate}T00:00:00+09:00`).getTime() + 24 * 60 * 60_000,
-    );
-    const tomorrowKstDate = [
-      tomorrowKst.getUTCFullYear(),
-      String(tomorrowKst.getUTCMonth() + 1).padStart(2, "0"),
-      String(tomorrowKst.getUTCDate()).padStart(2, "0"),
+    const formatKstDate = (date: Date) => [
+      date.getUTCFullYear(),
+      String(date.getUTCMonth() + 1).padStart(2, "0"),
+      String(date.getUTCDate()).padStart(2, "0"),
     ].join("-");
+    const tomorrowKst = new Date(nowKst);
+    tomorrowKst.setUTCDate(tomorrowKst.getUTCDate() + 1);
+    const todayKstDate = formatKstDate(nowKst);
+    const tomorrowKstDate = formatKstDate(tomorrowKst);
     await call(toolByName(tools, "task_add"), {
       title: "오늘",
       dueAt: new Date(`${todayKstDate}T12:00:00+09:00`).toISOString(),
