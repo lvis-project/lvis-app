@@ -92,9 +92,6 @@ export function supportsAdaptiveThinking(modelId: string): boolean {
   return parseInt(match[1]!, 10) >= 4;
 }
 
-/** @deprecated use supportsAdaptiveThinking — kept for backward compat. */
-export const isClaude4Family = supportsAdaptiveThinking;
-
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 
 export interface VercelProviderExtras {
