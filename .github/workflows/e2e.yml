@@ -25,11 +25,6 @@ jobs:
             git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/lvis-project/${slug}.git" "$slug"
           done
       - uses: oven-sh/setup-bun@v2
-      - name: Build plugin-sdk submodule
-        run: |
-          cd lvis-app/packages/plugin-sdk
-          bun install --frozen-lockfile
-          bun run build
       - name: Install plugin dependencies
         run: |
           bun install --frozen-lockfile --cwd ../lvis-plugin-pageindex
