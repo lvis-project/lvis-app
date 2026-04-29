@@ -451,10 +451,9 @@ describe("installFromMarketplace — envelope guards", () => {
 
   it("surfaces empty-trusted-keys configuration with a clear message", async () => {
     // Reproduces the `bun run start` failure mode: production launcher
-    // doesn't set LVIS_DEV / LVIS_ALLOW_TEST_MARKETPLACE_KEYS, so the
-    // bundled SDK keys are filtered to an empty set. Without this guard
-    // the error reads "no signature matched" and looks like envelope
-    // corruption.
+    // doesn't set LVIS_DEV, so the bundled SDK keys are filtered to an
+    // empty set. Without this guard the error reads "no signature matched"
+    // and looks like envelope corruption.
     const tarball = Buffer.from("config-fail");
     const { privateKey } = freshEd25519();
     const envelope = makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }]);
