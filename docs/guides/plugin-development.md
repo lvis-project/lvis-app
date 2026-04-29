@@ -3,6 +3,8 @@
 > **상태**: Sprint 4-A + 4-B 반영판 (2026-04-18)
 > **대상**: LVIS 플러그인 개발자
 > **선행 읽음**: [아키텍처 문서 §9](../architecture/architecture.md#9-plugin-system--ui-extension) · [CLAUDE.md](../../CLAUDE.md)
+>
+> **로컬 dev 루프부터 시작하려면** → [`local-plugin-development.md`](./local-plugin-development.md) (사이드로드) 또는 [`local-marketplace-testing.md`](./local-marketplace-testing.md) (로컬 마켓플레이스 end-to-end). 이 문서는 깊은 레퍼런스입니다.
 
 ---
 
