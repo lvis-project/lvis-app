@@ -9,41 +9,21 @@ on:
 jobs:
   e2e:
     name: Playwright E2E (Electron)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, ARM64, oracle]
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
           path: lvis-app
           submodules: recursive
-      - name: Generate plugin read token
-        id: app-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  # v3.1.1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: lvis-project
-          repositories: lvis-plugin-meeting,lvis-plugin-email,lvis-plugin-pageindex,lvis-plugin-calendar
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-meeting
-          path: lvis-plugin-meeting
-          token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-email
-          path: lvis-plugin-email
-          token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-pageindex
-          path: lvis-plugin-pageindex
-          token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-calendar
-          path: lvis-plugin-calendar
-          token: ${{ steps.app-token.outputs.token }}
+      - name: Clone sibling plugin repos
+        run: |
+          set -euo pipefail
+          GH_TOKEN=$(gh auth token)
+          for slug in lvis-plugin-meeting lvis-plugin-pageindex lvis-plugin-lge-api lvis-plugin-work-proactive lvis-plugin-agent-hub lvis-plugin-ms-graph; do
+            if [ -d "$slug" ]; then rm -rf "$slug"; fi
+            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/lvis-project/${slug}.git" "$slug"
+          done
       - uses: oven-sh/setup-bun@v2
       - name: Build plugin-sdk submodule
         run: |
@@ -54,8 +34,10 @@ jobs:
         run: |
           bun install --frozen-lockfile --cwd ../lvis-plugin-pageindex
           bun install --frozen-lockfile --cwd ../lvis-plugin-meeting
-          bun install --frozen-lockfile --cwd ../lvis-plugin-email
-          bun install --frozen-lockfile --cwd ../lvis-plugin-calendar
+          bun install --frozen-lockfile --cwd ../lvis-plugin-lge-api
+          bun install --frozen-lockfile --cwd ../lvis-plugin-work-proactive
+          bun install --frozen-lockfile --cwd ../lvis-plugin-agent-hub
+          bun install --frozen-lockfile --cwd ../lvis-plugin-ms-graph
         working-directory: lvis-app
       - name: Build all plugins
         run: bun run prepare:plugins
