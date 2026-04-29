@@ -84,12 +84,28 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   lge_facility_availability_day: "시설 일별 예약 현황",
   lge_facility_suggest: "시설 추천",
 
+  // Web / Search
+  web_search: "웹 검색",
+  web_fetch: "웹 페이지 가져오기",
+
+  // System
+  bash: "터미널 명령",
+  request_plugin: "플러그인 실행",
+
+  // Memory (boot/tools)
+  memory_save: "기억 저장",
+  memory_search: "기억 검색",
+  memory_list: "기억 목록",
+
   // Misc
   skill_load: "스킬 로드",
   ask_user_question: "사용자에게 질문",
   work_proactive_generate_daily_briefing: "일일 브리핑 생성",
+  noop: "대기",
 };
 
 export function getToolDisplayName(toolName: string): string {
-  return TOOL_DISPLAY_NAMES[toolName] ?? toolName;
+  if (TOOL_DISPLAY_NAMES[toolName]) return TOOL_DISPLAY_NAMES[toolName];
+  // Smart fallback: unknown tool names rendered as readable text (underscores → spaces)
+  return toolName.replace(/_/g, " ");
 }
