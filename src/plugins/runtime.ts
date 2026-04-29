@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
@@ -427,6 +427,7 @@ export class PluginRuntime {
         pluginId: manifest.id,
         pluginRoot,
         hostRoot: this.hostRoot,
+        pluginDataDir: this.ensurePluginDataDir(manifest.id, pluginRoot),
         config: {
           ...(manifest.config ?? {}),
           ...(this.configOverrides["*"] ?? {}),       // 와일드카드: 모든 플러그인에 적용
@@ -647,6 +648,7 @@ export class PluginRuntime {
       pluginId,
       pluginRoot,
       hostRoot: this.hostRoot,
+      pluginDataDir: this.ensurePluginDataDir(pluginId, pluginRoot),
       config: {
         ...(manifest.config ?? {}),
         ...(this.configOverrides["*"] ?? {}),
@@ -1307,6 +1309,20 @@ export class PluginRuntime {
     const siblingRepoEntry = resolve(this.hostRoot, "..", `lvis-${packageName}`, packageSubpath);
     if (!existsSync(siblingRepoEntry)) return undefined;
     return siblingRepoEntry;
+  }
+
+  /**
+   * Compute and ensure the plugin's writable data directory at
+   * `<pluginsRoot>/<pluginId>/data/`. The plugin install root holds plugin.json
+   * + dist/ which gets overwritten on update; runtime state must live in
+   * `data/` so it survives reinstalls. Falls back to `<pluginRoot>/data` when
+   * `pluginsRoot` is not configured (test harnesses, isolated installs).
+   */
+  private ensurePluginDataDir(pluginId: string, pluginRoot: string): string {
+    const baseRoot = this.pluginsRoot ?? dirname(pluginRoot);
+    const dataDir = resolve(baseRoot, pluginId, "data");
+    mkdirSync(dataDir, { recursive: true });
+    return dataDir;
   }
 
   private resolveEntryPath(pluginRoot: string, entry: string): string {
