@@ -7,10 +7,6 @@ interface WorkGroupProps {
   children: React.ReactNode;
 }
 
-/**
- * Collapsible wrapper for intermediate turn entries (reasoning + tool groups + non-final assistant).
- * Auto-collapses when streaming transitions from true to false.
- */
 export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
   const [open, setOpen] = useState(true);
   const prevStreaming = useRef(streaming);
@@ -23,23 +19,24 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
   }, [streaming]);
 
   return (
-    <div className="max-w-[85%] rounded-md border border-dashed text-xs text-muted-foreground">
+    <div className="max-w-[85%] text-xs text-muted-foreground">
       <button
-        className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
+        className="flex items-center gap-1.5 px-1 py-1 hover:opacity-80"
         onClick={() => setOpen((v) => !v)}
       >
-        {streaming ? (
-          <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
-        ) : (
-          open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />
-        )}
-        <span className="font-medium">작업 {stepCount}단계</span>
+        {streaming
+          ? <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
+          : null}
+        <span className="font-medium text-foreground/90">작업</span>
+        <span className="opacity-50">{stepCount}단계</span>
         {!streaming && (
-          <span className="text-[10px] opacity-60">{open ? "접기" : "펼치기"}</span>
+          open
+            ? <ChevronDown className="h-3 w-3 flex-shrink-0 opacity-50" />
+            : <ChevronRight className="h-3 w-3 flex-shrink-0 opacity-50" />
         )}
       </button>
       {open && (
-        <div className="border-t px-2 py-1.5 space-y-2">
+        <div className="pl-1 space-y-1.5 pt-1">
           {children}
         </div>
       )}

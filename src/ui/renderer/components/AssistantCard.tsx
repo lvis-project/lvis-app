@@ -32,7 +32,7 @@ export function AssistantCard({
   // Sprint 4.B: rough token estimate for tooltip (~4 chars/token)
   const outputTokens = Math.ceil(entry.text.length / 4);
   return (
-    <div className={`group relative max-w-[85%] rounded-md px-3 py-2 text-sm ${isFinal !== false ? "border bg-card" : "text-muted-foreground"}`}>
+    <div className="group relative max-w-[85%] rounded-md px-3 py-2 text-sm">
       {(actions !== undefined || isFinal !== false) && (
         <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
           {title}
