@@ -10,7 +10,8 @@
  *
  * pluginId is NOT carried in the webview src query string. Instead, the
  * host renderer registers (webContents.id → pluginId) with main on the
- * `did-attach` event, before any IPC from the webview can land. Main
+ * `dom-ready` event (not `did-attach` — Electron requires dom-ready before
+ * getWebContentsId() is callable). Main
  * resolves pluginId from `event.sender.id` on every plugin IPC. This
  * removes the spoofing vector from history.pushState / re-navigation /
  * URL crafting and lets us drop `entry` from the URL entirely (the shell

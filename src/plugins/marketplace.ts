@@ -1,5 +1,5 @@
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { cpSync, existsSync, realpathSync, statSync } from "node:fs";
+import { cp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
@@ -987,7 +987,7 @@ export class PluginMarketplaceService {
   async installLocal(sourcePath: string): Promise<{ pluginId: string; installed: true }> {
     if (!isDevModeUnlocked()) {
       throw new Error(
-        "[security] installLocal requires dev mode — set LVIS_DEV=1 in a non-packaged build",
+        "[security] installLocal requires dev mode — enable a supported LVIS_DEV* flag in a non-packaged build",
       );
     }
 
@@ -1026,8 +1026,10 @@ export class PluginMarketplaceService {
       const userPluginsRoot = this.pluginsRoot;
       const installDir = resolve(userPluginsRoot, pluginId);
 
-      // Copy directory contents into ~/.lvis/plugins/<id>/.
-      cpSync(sourcePath, installDir, { recursive: true });
+      // Remove any previous install first so deleted source files do not
+      // linger, then copy atomically into ~/.lvis/plugins/<id>/.
+      await rm(installDir, { recursive: true, force: true });
+      await cp(sourcePath, installDir, { recursive: true });
 
       // Register in the plugin registry.
       const registryManifestPath = posix.join(pluginId, "plugin.json");

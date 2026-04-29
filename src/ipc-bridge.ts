@@ -248,10 +248,12 @@ const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
  * on every plugin IPC, eliminating the renderer-supplied pluginId
  * spoofing surface.
  *
- * Key: webContents.id (numeric, assigned by Electron at webview attach).
+ * Key: webContents.id (numeric, assigned by Electron at webview dom-ready).
  * Value: { pluginId, entryUrl } — both validated against
  * `pluginRuntime.listPluginIds()` + the manifest's resolved entry path
- * before being stored.
+ * before being stored. Pending get-entry-url requests are queued in
+ * `pendingEntryUrlResolvers` until registration arrives (cross-process IPC
+ * ordering is not guaranteed).
  */
 interface PluginWebviewBinding {
   pluginId: string;
@@ -803,7 +805,7 @@ ${input}`;
   ipcMain.handle("lvis:plugins:install-local", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install-local", e); return UNAUTHORIZED_FRAME; }
     if (!isDevModeUnlocked()) {
-      throw new Error("[security] dev mode not unlocked — set LVIS_DEV=1 in a non-packaged build");
+      throw new Error("[security] dev mode not unlocked — enable a supported LVIS_DEV* flag in a non-packaged build");
     }
     const { filePaths, canceled } = await dialog.showOpenDialog({
       title: "로컬 플러그인 설치 (개발자)",
@@ -1715,14 +1717,20 @@ ${input}`;
     // IPC ordering guarantee. Wait up to 500 ms for registerPluginWebview to
     // arrive before giving up with unauthorized-frame.
     return new Promise<{ ok: true; entryUrl: string } | typeof UNAUTHORIZED_FRAME>((resolve) => {
+      const resolvers = pendingEntryUrlResolvers.get(senderId) ?? [];
+      pendingEntryUrlResolvers.set(senderId, resolvers);
+      const resolver = (b: PluginWebviewBinding) => { clearTimeout(timer); resolve({ ok: true, entryUrl: b.entryUrl }); };
+      resolvers.push(resolver);
       const timer = setTimeout(() => {
-        pendingEntryUrlResolvers.delete(senderId);
+        const arr = pendingEntryUrlResolvers.get(senderId);
+        if (arr) {
+          const idx = arr.indexOf(resolver);
+          if (idx !== -1) arr.splice(idx, 1);
+          if (arr.length === 0) pendingEntryUrlResolvers.delete(senderId);
+        }
         auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
         resolve(UNAUTHORIZED_FRAME);
       }, 500);
-      const resolvers = pendingEntryUrlResolvers.get(senderId) ?? [];
-      resolvers.push((b) => { clearTimeout(timer); resolve({ ok: true, entryUrl: b.entryUrl }); });
-      pendingEntryUrlResolvers.set(senderId, resolvers);
     });
   });
 
