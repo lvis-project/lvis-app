@@ -435,6 +435,12 @@ async function main() {
 // inherits the env var. Boot also calls `setIsPackaged` later for any other
 // dev-flag callers; this top-level call early-seeds the cache.
 setIsPackaged(app.isPackaged);
+// Signal packaged state to the preload process via env so the renderer-side
+// devUnlocked predicate can mirror the isPackaged short-circuit without IPC.
+// Must be set before any BrowserWindow is created.
+if (app.isPackaged) {
+  process.env.LVIS_PACKAGED_BUILD = "1";
+}
 const _protocolRegistered = app.isPackaged
   ? app.setAsDefaultProtocolClient("lvis")
   : app.setAsDefaultProtocolClient(

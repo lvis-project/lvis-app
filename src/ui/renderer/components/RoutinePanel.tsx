@@ -221,7 +221,9 @@ export function RoutinePanel({
   onJumpToSession,
   onStartRoutineSession,
 }: RoutinePanelProps) {
-  const isDevMode = window.lvis?.env?.isDev === true;
+  // Match the server-side gate: ipc-bridge.ts devTriggerHandler uses
+  // isDevModeUnlocked() which accepts all 5 LVIS_DEV* flags, not just LVIS_DEV.
+  const isDevMode = window.lvis?.env?.devUnlocked === true || window.lvis?.env?.isDev === true;
   const [routines, setRoutines] = useState<RoutineRecord[]>([]);
   const [draftTimes, setDraftTimes] = useState<Record<string, string>>({});
   const [contextPromptDrafts, setContextPromptDrafts] = useState<Record<string, string>>({});

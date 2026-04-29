@@ -686,10 +686,18 @@ contextBridge.exposeInMainWorld("lvis", {
     // Mirrors isDevModeUnlocked(): true when any supported LVIS_DEV* flag is
     // set in a non-packaged build. Use this (not isDev) to gate UI surfaces
     // whose backend is gated by isDevModeUnlocked().
+    // Mirrors isDevModeUnlocked() in src/boot/dev-flags.ts (all 5 flags).
+    // Also gates on LVIS_PACKAGED_BUILD which main.ts sets when app.isPackaged
+    // is true, so packaged builds cannot unlock dev surfaces via env injection.
     devUnlocked:
-      process.env.LVIS_DEV === "1" ||
-      process.env.LVIS_DEV_SKIP_SIG === "1" ||
-      process.env.LVIS_DEV_RELOAD === "1",
+      process.env.LVIS_PACKAGED_BUILD !== "1" &&
+      (
+        process.env.LVIS_DEV === "1" ||
+        process.env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY === "1" ||
+        process.env.LVIS_ALLOW_TEST_MARKETPLACE_KEYS === "1" ||
+        process.env.LVIS_DEV_SKIP_SIG === "1" ||
+        process.env.LVIS_DEV_RELOAD === "1"
+      ),
     enableDevConsole: process.env.LVIS_ENABLE_DEV_CONSOLE === "1",
   },
 });
