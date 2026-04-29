@@ -26,11 +26,8 @@ function ensureWindowsUserDataDir(argsList, envVars, profileName) {
 if (!env.LVIS_DEV_SKIP_SIG) {
   env.LVIS_DEV_SKIP_SIG = "1";
 }
-if (!env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY) {
-  env.LVIS_ALLOW_LINKED_PLUGIN_ENTRY = "1";
-}
-if (!env.LVIS_ENABLE_DEV_CONSOLE) {
-  env.LVIS_ENABLE_DEV_CONSOLE = "0";
+if (!env.LVIS_DEV_CONSOLE) {
+  env.LVIS_DEV_CONSOLE = "0";
 }
 // `bun run start` already injects --no-sandbox via WINDOWS_SAFE_ELECTRON_FLAGS
 // below; tell main.ts to mirror that into the lvis:// protocol registration so
@@ -39,10 +36,10 @@ if (!env.LVIS_ENABLE_DEV_CONSOLE) {
 // injection (win32 + LVIS_KEEP_GPU !== "1") so the foreground process and
 // the protocol-registered command always agree on sandbox posture. The dev-
 // flags.ts SoT in main.ts hard-gates this on `!app.isPackaged` regardless,
-// so a packaged binary that inherits LVIS_DEV_NO_SANDBOX=1 still keeps
+// so a packaged binary that inherits LVIS_WIN_NO_SANDBOX=1 still keeps
 // Chromium sandboxing.
-if (process.platform === "win32" && env.LVIS_KEEP_GPU !== "1" && !env.LVIS_DEV_NO_SANDBOX) {
-  env.LVIS_DEV_NO_SANDBOX = "1";
+if (process.platform === "win32" && env.LVIS_KEEP_GPU !== "1" && !env.LVIS_WIN_NO_SANDBOX) {
+  env.LVIS_WIN_NO_SANDBOX = "1";
 }
 
 // Force UTF-8 across every subprocess spoken to by Electron's embedded Node.

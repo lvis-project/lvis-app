@@ -339,7 +339,7 @@ export function PluginConfigTab() {
           <div className="space-y-0.5">
             <p className="text-xs font-medium text-amber-900">개발자 도구</p>
             <p className="text-[11px] text-amber-700">
-              로컬 빌드 폴더에서 플러그인을 직접 설치합니다 (LVIS_DEV=1 필요).
+              로컬 빌드 폴더에서 플러그인을 직접 설치합니다 (개발 모드 필요).
             </p>
           </div>
           <Button

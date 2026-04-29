@@ -25,7 +25,12 @@ export function useApproval() {
 
   useEffect(() => {
     aliveRef.current = true;
-    if (!window.lvis?.approval) {
+    // Round-3 §8: surface preload init bugs explicitly. The approval queue is
+    // a load-bearing UX path (every tool call routes through it); silently
+    // no-op'ing here when `window.lvis` is missing makes the bug present as
+    // "tools never resolve" instead of "preload didn't run".
+    if (!window.lvis) {
+      console.error("[use-approval] window.lvis is undefined — preload missing or failed to load");
       return () => {
         aliveRef.current = false;
       };
@@ -53,23 +58,30 @@ export function useApproval() {
       if (inFlightRef.current) return;
       const current = queueRef.current[0];
       if (!current) return;
+      // Round-3 §8: assert preload availability explicitly. If the user
+      // landed on this code path with no preload, the queue would never
+      // surface a request anyway (the subscription in the effect above is
+      // skipped); reaching here means the early-return safeguard exists
+      // in two places and one of them is stale. Surface it loudly.
+      if (!window.lvis) {
+        console.error("[use-approval] decide: window.lvis is undefined — preload missing");
+        return;
+      }
       inFlightRef.current = true;
       // shift 먼저 — respond 완료 전에 다음 항목 표시
       setQueue((q) => approvalQueueReducer(q, { type: "shift" }));
       try {
-        if (window.lvis?.approval) {
-          await window.lvis.approval.respond({
-            requestId: current.id,
-            choice,
-            rememberPattern: pattern,
-            // §D2: echo nonce + HMAC verbatim so the main process can verify
-            // this response was bound to the original request (confused-
-            // deputy defense). Stale or cross-wired responses fail the check
-            // and are forcibly downgraded to deny-once.
-            nonce: current.nonce,
-            hmac: current.hmac,
-          });
-        }
+        await window.lvis.approval.respond({
+          requestId: current.id,
+          choice,
+          rememberPattern: pattern,
+          // §D2: echo nonce + HMAC verbatim so the main process can verify
+          // this response was bound to the original request (confused-
+          // deputy defense). Stale or cross-wired responses fail the check
+          // and are forcibly downgraded to deny-once.
+          nonce: current.nonce,
+          hmac: current.hmac,
+        });
       } catch (err) {
         // Log only — do NOT re-push. See JSDoc above.
         console.warn("[lvis] approval.respond failed:", (err as Error).message);
@@ -97,24 +109,27 @@ export function useApproval() {
       if (inFlightRef.current) return;
       const snapshot = queueRef.current.slice();
       if (snapshot.length === 0) return;
+      // Round-3 §8: surface preload init bugs explicitly (same rationale as
+      // `decide()` above).
+      if (!window.lvis) {
+        console.error("[use-approval] decideAll: window.lvis is undefined — preload missing");
+        return;
+      }
+      const lvis = window.lvis;
       inFlightRef.current = true;
       // Clear first — respond 완료 전에 대기 UI 치워서 재클릭 방지
       setQueue((q) => approvalQueueReducer(q, { type: "clear" }));
       try {
-        if (window.lvis?.approval) {
-          await Promise.all(
-            snapshot.map((req) =>
-              window
-                .lvis!.approval.respond({ requestId: req.id, choice })
-                .catch((err) => {
-                  console.warn(
-                    `[lvis] approval.respond failed for ${req.id}:`,
-                    (err as Error).message,
-                  );
-                }),
-            ),
-          );
-        }
+        await Promise.all(
+          snapshot.map((req) =>
+            lvis.approval.respond({ requestId: req.id, choice }).catch((err) => {
+              console.warn(
+                `[lvis] approval.respond failed for ${req.id}:`,
+                (err as Error).message,
+              );
+            }),
+          ),
+        );
       } finally {
         inFlightRef.current = false;
       }
