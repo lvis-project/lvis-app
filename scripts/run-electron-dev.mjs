@@ -6,6 +6,8 @@
 //
 // Env:
 //   LVIS_DEV=1 (forced)
+//   LVIS_DEV_SKIP_SIG=1 (default, skip plugin signature checks in dev)
+//   Plugins are installed into ~/.lvis/plugins/ via dev:link (no LVIS_PLUGINS_DIR override)
 //
 // Behavior:
 //   - tsc --watch for main (src -> dist/src)
@@ -18,7 +20,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, watch, copyFileSync, mkdirSync, rmSync, cpSync, readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, watch, copyFileSync, mkdirSync, rmSync, cpSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -251,11 +253,6 @@ function seedPluginSdk(pluginDir) {
   }
 }
 
-function normalizeLinkedSubpath(packageName, subpath) {
-  const normalized = String(subpath).replaceAll("\\", "/").replace(/^\.\//, "");
-  return `../../../node_modules/${packageName}/${normalized}`;
-}
-
 function parseDisabledPluginIds() {
   const defaults = ["work-proactive"];
   const envRaw = process.env.LVIS_DEV_DISABLED_PLUGINS || "";
@@ -319,79 +316,6 @@ function latestMtimeMs(dirPath) {
 }
 
 const disabledPluginIds = parseDisabledPluginIds();
-
-function seedDevPluginRegistry() {
-  const workspaceRoot = resolve(repoRoot, "..");
-  const devPluginsDir = resolve(repoRoot, ".lvis-dev", "plugins");
-  const registryPath = resolve(devPluginsDir, "registry.json");
-
-  mkdirSync(devPluginsDir, { recursive: true });
-
-  const registry = { version: 1, plugins: [] };
-  const pluginRepos = readdirSync(workspaceRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith("lvis-plugin-"));
-
-  for (const repo of pluginRepos) {
-    const pluginRepoDir = resolve(workspaceRoot, repo.name);
-    const manifestPath = resolve(pluginRepoDir, "plugin.json");
-    const packageJsonPath = resolve(pluginRepoDir, "package.json");
-    if (!existsSync(manifestPath) || !existsSync(packageJsonPath)) continue;
-
-    try {
-      const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-      const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
-      const pluginId = typeof manifest.id === "string" ? manifest.id : undefined;
-      const packageName = typeof packageJson.name === "string" ? packageJson.name : undefined;
-      const manifestEntry = typeof manifest.entry === "string" ? manifest.entry : undefined;
-      if (!pluginId || !packageName || !manifestEntry) continue;
-
-      const builtEntryPath = resolve(pluginRepoDir, manifestEntry);
-      if (!existsSync(builtEntryPath)) {
-        log("plugins", `skip unbuilt local plugin: ${repo.name}`);
-        continue;
-      }
-
-      const pluginInstallDir = resolve(devPluginsDir, pluginId);
-      mkdirSync(pluginInstallDir, { recursive: true });
-
-      const rewrittenManifest = {
-        ...manifest,
-        entry: normalizeLinkedSubpath(packageName, manifestEntry),
-        ...(Array.isArray(manifest.ui)
-          ? {
-              ui: manifest.ui.map((extension) => ({
-                ...extension,
-                ...(typeof extension.entry === "string"
-                  ? { entry: normalizeLinkedSubpath(packageName, extension.entry) }
-                  : {}),
-                ...(typeof extension.page === "string"
-                  ? { page: normalizeLinkedSubpath(packageName, extension.page) }
-                  : {}),
-              })),
-            }
-          : {}),
-      };
-
-      writeFileSync(
-        resolve(pluginInstallDir, "plugin.json"),
-        `${JSON.stringify(rewrittenManifest, null, 2)}\n`,
-        "utf-8",
-      );
-      registry.plugins.push({
-        id: pluginId,
-        manifestPath: `${pluginId}/plugin.json`,
-        enabled: !disabledPluginIds.has(pluginId),
-        installedBy: manifest.installPolicy === "admin" ? "admin" : "user",
-        ...(manifest.pluginAccess ? { approvedPluginAccess: manifest.pluginAccess } : {}),
-      });
-    } catch (err) {
-      log("plugins", `skip invalid local plugin ${repo.name}: ${err.message}`);
-    }
-  }
-
-  writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf-8");
-  return { devPluginsDir, pluginCount: registry.plugins.length };
-}
 
 function parseMsEnv(name, fallbackMs) {
   const raw = process.env[name];
@@ -759,9 +683,27 @@ async function main() {
     }
   }
 
-  const { devPluginsDir, pluginCount } = seedDevPluginRegistry();
-  process.env.LVIS_PLUGINS_DIR = devPluginsDir;
-  log("plugins", `seeded dev registry (${pluginCount} plugins) -> ${devPluginsDir}`);
+  // Install dev-built sibling plugins into ~/.lvis/plugins/ via real plugin.json
+  // + symlinked dist/. No LVIS_PLUGINS_DIR override — the runtime always reads
+  // from ~/.lvis/plugins/ regardless of environment.
+  // Skip when --no-plugins is passed so the dev runner can start without touching
+  // the user plugin directory (useful for CI and plugin-free debug sessions).
+  if (!skipPlugins) {
+    const devLinkScript = resolve(repoRoot, "scripts/dev-link-plugins.mjs");
+    const devLinkResult = spawnSync(process.execPath, [devLinkScript], {
+      cwd: repoRoot,
+      stdio: "inherit",
+    });
+    if (devLinkResult.status !== 0) {
+      const errMsg = devLinkResult.error?.message ? `; error=${devLinkResult.error.message}` : "";
+      log("plugins", `dev:link failed (exit=${devLinkResult.status ?? "null"}${errMsg})`);
+      await shutdown(1);
+      return;
+    }
+    log("plugins", `dev:link installed plugins into ~/.lvis/plugins/`);
+  } else {
+    log("plugins", "dev:link skipped (--no-plugins)");
+  }
 
   // Initial html copy
   copyHtml();
