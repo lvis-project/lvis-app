@@ -109,3 +109,27 @@ export function getToolDisplayName(toolName: string): string {
   // Smart fallback: unknown tool names rendered as readable text (underscores → spaces)
   return toolName.replace(/_/g, " ");
 }
+
+/**
+ * Replace tool code-names (e.g. `web_search`) with their Korean display names
+ * inside free-form LLM response text.  Code spans and fenced code blocks are
+ * left untouched so code examples are never mangled.
+ * Only underscore-containing names are replaced — single-word names like
+ * `bash` are excluded to avoid false positives in normal prose.
+ */
+export function replaceToolNamesInText(text: string): string {
+  // Split into alternating [prose, code-block, prose, …] segments.
+  // Regex captures both fenced blocks (``` … ```) and inline backtick spans.
+  const segments = text.split(/(```[\s\S]*?```|`[^`\n]*`)/);
+  return segments
+    .map((seg, idx) => {
+      if (idx % 2 === 1) return seg; // code segment — leave as-is
+      let out = seg;
+      for (const [code, display] of Object.entries(TOOL_DISPLAY_NAMES)) {
+        if (!code.includes("_")) continue; // single-word names → skip (unsafe to replace in prose)
+        out = out.replace(new RegExp(`\\b${code}\\b`, "g"), display);
+      }
+      return out;
+    })
+    .join("");
+}
