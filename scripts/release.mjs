@@ -6,8 +6,7 @@
  *   1. Pre-flight security checks (H2 dev-key block, H3 signing-env validation)
  *   2. Read + patch-bump version in package.json
  *   3. bun run build (or npm fallback)
- *   4. Sign each packaged plugin's manifest (scripts/sign-manifest.mjs)
- *   5. electron-builder --publish=never → artifacts under ./release/
+ *   4. electron-builder --publish=never → artifacts under ./release/
  *
  * Usage:  node scripts/release.mjs [--allow-dev-key] [--skip-code-sign]
  *
@@ -150,23 +149,6 @@ async function main() {
 
   const useBun = process.env.LVIS_USE_NPM !== "1" && existsSync(resolve(root, "bun.lockb"));
   run(useBun ? "bun" : "npm", ["run", useBun ? "build" : "build:npm"]);
-
-  const signKey = process.env.LVIS_PUBLISHER_PRIVATE_KEY_PATH;
-  if (signKey) {
-    const pluginManifests = [
-      "../lvis-plugin-pageindex/plugin.json",
-      "../lvis-plugin-meeting/plugin.json",
-      "../lvis-plugin-email/plugin.json",
-      "../lvis-plugin-calendar/plugin.json",
-    ];
-    for (const rel of pluginManifests) {
-      const abs = resolve(root, rel);
-      if (!existsSync(abs)) continue;
-      run("node", ["scripts/sign-manifest.mjs", abs]);
-    }
-  } else {
-    console.warn("[release] LVIS_PUBLISHER_PRIVATE_KEY_PATH not set — skipping plugin signing");
-  }
 
   run("npx", ["electron-builder", "--publish=never"]);
 

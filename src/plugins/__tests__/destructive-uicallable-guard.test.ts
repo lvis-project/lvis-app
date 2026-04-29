@@ -10,7 +10,7 @@
  * Security properties come from:
  *   - code review of the plugin source,
  *   - marketplace approval before publish,
- *   - signature verification at load (PluginSignatureVerifier),
+ *   - marketplace install receipt integrity before runtime load,
  * NOT from naming conventions. Any suffix (_delete, _remove, _send, _reply,
  * _create, _update, …) is permitted regardless of install policy. The
  * plugin developer is responsible for destructive-action confirmation UX in
@@ -23,7 +23,6 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { PluginRuntime } from "../runtime.js";
-import type { PluginSignatureVerifier } from "../signature-verifier.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -46,13 +45,6 @@ async function writeTempPlugin(opts: {
   writeFileSync(join(root, "plugin.json"), JSON.stringify(manifest, null, 2));
   return join(root, "plugin.json");
 }
-
-// Mock signature verifier used as runtime test scaffolding. This suite
-// validates manifest parsing/subset checks and does not itself exercise the
-// signature-verification path (that requires `load()`).
-const mockVerifier = {
-  verifyManifestFile: async () => ({ valid: true, sha256: "x" }),
-} as unknown as PluginSignatureVerifier;
 
 // Previously rejected on user plugins; must now be accepted on every
 // install policy so plugin authors can own their confirmation UX.
@@ -144,7 +136,6 @@ describe("uiCallable accepts any suffix regardless of install policy", () => {
       const rt = new PluginRuntime({
         hostRoot: resolve(__dirname, "..", "..", ".."),
         manifestPaths: [manifestPath],
-        signatureVerifier: mockVerifier,
       });
       const parse = (rt as unknown as { readManifest(p: string): Promise<unknown> }).readManifest.bind(rt);
       await expect(parse(manifestPath)).resolves.toBeDefined();

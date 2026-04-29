@@ -116,15 +116,8 @@ UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인
 clone 시 submodule 을 함께 가져오는 것을 권장합니다:
 
 ```bash
-git clone --recurse-submodules <repo-url>
-# 이미 recurse 없이 clone 한 경우:
-git submodule update --init --recursive
+git clone <repo-url>
 ```
-
-`bun install` 은 `postinstall` 단계에서 `scripts/ensure-submodules.mjs` 가드를
-실행하여 submodule 디렉터리가 비어 있으면 자동으로 `git submodule update --init
---recursive` 를 호출합니다. 따라서 fresh clone 직후 `bun install` 이
-`@lvis/plugin-sdk/keys` 미존재로 실패하지 않습니다.
 
 ```bash
 bun install
@@ -147,14 +140,14 @@ Electron 런타임 자체는 여전히 Node로 구동됩니다 (`scripts/run-ele
 Windows corp PC(사내망, Hyper-V/VDI, EDR/AV 샌드박스 환경)에서의 first-run 경험을 단순화하기 위해 `scripts/run-electron.mjs` 가 다음을 자동 처리합니다.
 
 - **GPU 문제 우회** — Electron GPU 프로세스가 `error_code=18` 또는 "GPU process isn't usable. Goodbye!" 로 크래시하는 것을 막기 위해 `--disable-gpu`, `--disable-software-rasterizer`, `--disable-gpu-compositing`, `--no-sandbox` 플래그를 자동 추가합니다. GPU 정상 환경(패스스루 VM / CI)에서는 `LVIS_KEEP_GPU=1` 로 opt-out 하고, 추가 플래그가 필요하면 `LVIS_EXTRA_ELECTRON_FLAGS="--foo --bar"` 로 append 가능.
-- **플러그인 경로 허용** — `LVIS_DEV=1` + `LVIS_DEV_SKIP_SIG=1` 을 기본값으로 세팅해, `file:../` 로 설치된 사이드바이사이드 플러그인(`../lvis-plugin-*`)이 플러그인 루트 경계 검사에서 거부되지 않도록 합니다. 패키징 빌드(`app.isPackaged`)에서는 자동 off.
+- **플러그인 경로 허용** — dev runner는 `LVIS_DEV=1` 을 세팅해 로컬 개발 entry 경로를 허용합니다. 마켓플레이스 artifact 검증과 install receipt 무결성 검사는 dev env flag로 우회하지 않습니다.
 - **콘솔 UTF-8 정렬** — Windows 콘솔을 `chcp 65001` 로 UTF-8 로 전환하고 `PYTHONIOENCODING=utf-8`, `PYTHONUTF8=1`, `LANG/LC_ALL=en_US.UTF-8` 환경변수를 기본 주입합니다. cp949 로 인한 한글/이모지 깨짐이 사라집니다.
 
 ### 권장 설치 절차 (사내망)
 
 ```powershell
-# 1) submodule 까지 포함해 clone
-git clone --recurse-submodules <repo-url>
+# 1) clone
+git clone <repo-url>
 cd lvis-app
 
 # 2) file:../ symlink 대신 복사로 설치해 EISDIR 회피
@@ -167,8 +160,6 @@ npm run start:npm
 npm run start:win
 ```
 
-`postinstall` 훅(`scripts/ensure-submodules.mjs`)이 submodule 디렉터리가 비어 있으면 `git submodule update --init --recursive` 를 실행하고, `packages/plugin-sdk` 처럼 `package.json` 은 있으나 `dist/` 가 없는 submodule 은 자동으로 `npm install && npm run build` 를 수행합니다. 따라서 fresh clone 직후 `@lvis/plugin-sdk/keys` 미존재로 main 프로세스가 실패하지 않습니다.
-
 전체 Windows 설치/실행 가이드는 [`docs/guides/windows-setup.md`](./docs/guides/windows-setup.md) 참고.
 
 ### 사내망 환경변수 요약
@@ -176,7 +167,6 @@ npm run start:win
 | 변수 | 기본값 | 목적 |
 |------|--------|------|
 | `LVIS_DEV` | `1` (unpackaged) | 플러그인 루트 경계 검사 완화 (`../../../node_modules/@lvis/*` 허용) |
-| `LVIS_DEV_SKIP_SIG` | `1` (unpackaged) | 로컬 빌드 플러그인 서명 검증 skip |
 | `LVIS_KEEP_GPU` | 미설정 | `1` 이면 Windows GPU safe-flag 주입 skip |
 | `LVIS_EXTRA_ELECTRON_FLAGS` | 미설정 | 기본 flag 유지한 채 추가 Electron flag append (`"--foo --bar"`) |
 | `LVIS_DEBUG` | 미설정 | `1` 이면 `run-electron.mjs` 가 적용한 args/env 출력 |

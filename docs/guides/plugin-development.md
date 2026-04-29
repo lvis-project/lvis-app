@@ -568,32 +568,23 @@ OS 네이티브 알림으로 승격할 이벤트를 선언합니다.
 
 ---
 
-## 서명 및 배포 (ed25519)
+## Marketplace 배포 및 무결성
 
-Sprint 4-B §B-4 — `PluginSignatureVerifier` 가 로드 시점에 매니페스트 서명을 확인합니다.
+플러그인 개발자는 매니페스트 sidecar 서명을 직접 생성하지 않습니다. 배포 검증은 marketplace upload/publish 단계에서 수행되고, LVIS 호스트는 marketplace가 발급한 artifact envelope을 설치 시점에 ed25519로 검증합니다.
 
 ### installPolicy 정책
 
-| `installPolicy` | 서명 없음 | 서명 무효 | 서명 유효 |
-|--------------|-----------|-----------|-----------|
-| `"admin"` | **로드 거부** + audit `plugin_signature_rejected` | **로드 거부** | 로드 + audit `plugin_signature_verified` |
-| `"user"` (또는 미지정) | 경고 로그 + audit `plugin_signature_missing` + 로드 | **로드 거부** + audit | 로드 + audit |
+| `installPolicy` | 게시/설치 정책 |
+|--------------|-----------|
+| `"admin"` | marketplace admin review 후 공개. 호스트는 서명된 artifact envelope과 설치 영수증을 검증합니다. |
+| `"user"` (또는 미지정) | marketplace publish 경로로 게시. 호스트는 동일하게 envelope과 설치 영수증을 검증합니다. |
 
 ### 검증 메커니즘
 
-- 알고리즘: ed25519 detached signature.
-- 서명 파일: 매니페스트와 같은 디렉토리의 `plugin.json.sig` (바이너리).
-- 호스트는 `src/plugins/publisher-keys.ts` 의 `BUNDLED_PUBLISHER_PUBLIC_KEYS` 배열에 있는 **모든 PEM 공개키를 시도**하여 하나라도 맞으면 통과.
-- **현재 번들된 키는 개발용 (DEVELOPMENT_PUBLISHER_PUBLIC_KEY_PEM) 하나뿐**. 프로덕션 키 교체 및 CI 서명 파이프라인은 [열린 TODO](#미구현--열린-todo) 참고.
-
-### 개발 우회
-
-- 환경변수 `LVIS_DEV_SKIP_SIG=1` 설정 시 검증기 자체가 비활성화됩니다 (부팅 로그에 경고 출력).
-- **프로덕션 번들에서는 절대 사용 금지**.
-
-### 서명 스크립트
-
-**현재 저장소에는 서명용 CLI 스크립트가 아직 포함되어 있지 않습니다.** 개발 키로 로컬 서명할 때는 Node 표준 crypto (`crypto.sign("ed25519", manifestBytes, privateKey)`) 를 사용하고, 결과 바이너리를 `plugin.json.sig` 로 저장하면 됩니다. 공용 `scripts/sign-manifest.mjs` 배포는 [열린 TODO](#미구현--열린-todo).
+- 설치 시점: artifact zip bytes의 `artifact_sha256` 및 marketplace envelope signature 검증.
+- 로드 시점: 설치 시 기록한 `install-receipt.json` 의 파일 해시와 디스크 파일을 비교해 로컬 변조를 차단.
+- trust anchor는 SDK가 아니라 host runtime의 `src/plugins/marketplace-keys.ts` 에 있습니다.
+- 개발 중 직접 manifest path를 로드하는 테스트/dev 경로는 marketplace install receipt가 없으므로 배포 검증 경로와 분리됩니다.
 
 ---
 
@@ -706,7 +697,7 @@ const hostApi: PluginHostApi = {
 ```
 lvis-app/plugins/installed/{plugin-id}/
   plugin.json          ← 매니페스트 (AJV 검증 대상)
-  plugin.json.sig      ← ed25519 서명 (managed 필수)
+  install-receipt.json ← marketplace 설치 시 기록된 파일 해시 영수증
   (+ 필요 시 번들 파일)
 ```
 
@@ -763,9 +754,10 @@ Meeting / Microsoft 365 (Outlook 메일+캘린더) / PageIndex 의 실제 플러
   - [ ] `onEvent` disposer 보관 or `onShutdown` 에서 정리
   - [ ] `stop()` 에서 파이프라인 flush (또는 `onShutdown` 훅)
   - [ ] Electron IPC 직접 사용 금지
-- [ ] **서명 / 배포**
-  - [ ] `installPolicy: "admin"` 면 `plugin.json.sig` 함께 배포
-  - [ ] dev 에서는 `LVIS_DEV_SKIP_SIG=1` 허용 (프로덕션 금지)
+- [ ] **Marketplace 배포**
+  - [ ] zip artifact가 `plugin.json` 과 빌드 산출물을 포함
+  - [ ] marketplace publish/upload API 또는 UI로 게시
+  - [ ] `installPolicy: "admin"` 플러그인은 admin review 완료 후 공개
 - [ ] **테스트**
   - [ ] HostApi 모킹 시 `callLlm` / `logEvent` / `onShutdown` 포함
   - [ ] `onEvent` 모킹이 disposer 를 반환하도록
@@ -781,10 +773,9 @@ Meeting / Microsoft 365 (Outlook 메일+캘린더) / PageIndex 의 실제 플러
 3. **`notificationEvents.event ⊂ eventSubscriptions` 교차 검증** — 선언했지만 구독하지 않아 알림이 절대 뜨지 않는 상태 경고가 없음.
 4. **`capabilities` enum 화** — 현재 `ms-graph-consumer` 만 런타임에서 강제. 나머지는 자유 문자열. 정책 게이트 확장 필요 (예: `worker-client` 선언 플러그인만 Python runtime 사용 허용).
 5. **`eventSubscriptions` 민감 이벤트 allowlist / 네임스페이스 정책** — 임의 플러그인이 `email.*`, `calendar.*` 같은 타 플러그인 네임스페이스를 구독할 수 있음.
-6. **`scripts/sign-manifest.mjs` 부재** — ed25519 서명 CLI 가 아직 저장소에 포함되지 않음. 현재는 Node `crypto.sign` 을 개발자가 직접 호출해야 함.
-7. **프로덕션 퍼블리셔 공개키** — `src/plugins/publisher-keys.ts` 에 번들된 키는 개발용 하나뿐. 프로덕션 릴리스 전 로테이션/교체 및 CI 서명 파이프라인 필요.
-8. **`ui[]` kind 별 필드 규약** 은 스키마가 담고 있지만, 실제 로더는 엄격한 fallback 처리(`entry ?? page`)를 하므로 일부 오탈자가 silent 하게 넘어갈 여지가 남음.
-9. **`startupTools` 실패 정책** — 항목 하나가 실패해도 전체 플러그인은 계속 로드됨 (fail-soft). 명시적 요구 실패를 원하는 도구는 직접 throw 로직을 가져야 함.
+6. **프로덕션 marketplace 공개키 회전** — `src/plugins/marketplace-keys.ts` 의 POC 키는 프로덕션 릴리스 전 실제 운영 키로 교체해야 함.
+7. **`ui[]` kind 별 필드 규약** 은 스키마가 담고 있지만, 실제 로더는 엄격한 fallback 처리(`entry ?? page`)를 하므로 일부 오탈자가 silent 하게 넘어갈 여지가 남음.
+8. **`startupTools` 실패 정책** — 항목 하나가 실패해도 전체 플러그인은 계속 로드됨 (fail-soft). 명시적 요구 실패를 원하는 도구는 직접 throw 로직을 가져야 함.
 
 ---
 
@@ -792,7 +783,7 @@ Meeting / Microsoft 365 (Outlook 메일+캘린더) / PageIndex 의 실제 플러
 
 - [아키텍처 문서 §9 — Plugin System & UI Extension](../architecture/architecture.md#9-plugin-system--ui-extension)
 - [CLAUDE.md](../../CLAUDE.md)
-- `src/plugins/types.ts`, `src/plugins/runtime.ts`, `src/plugins/signature-verifier.ts`, `src/plugins/publisher-keys.ts`
+- `src/plugins/types.ts`, `src/plugins/runtime.ts`, `src/plugins/marketplace.ts`, `src/plugins/plugin-install-receipt.ts`, `src/plugins/publisher-keys.ts`
 - `src/boot.ts`, `src/boot/conversation.ts` (callLlm 레이트리밋), `src/boot/plugins.ts` (notification / eventSubscriptions)
 - `schemas/plugin.schema.json`
 - Meeting / Email / Calendar / PageIndex 플러그인 저장소 (현행 사용 예제)
