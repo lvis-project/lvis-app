@@ -1,5 +1,5 @@
-import { cp, readFile, rm, writeFile } from "node:fs/promises";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { cp, readFile, rm, stat as statAsync, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
@@ -991,12 +991,14 @@ export class PluginMarketplaceService {
       );
     }
 
-    // Validate the source path exists and is a directory.
-    if (!existsSync(sourcePath)) {
+    // Validate the source path exists and is a directory (non-blocking).
+    let srcStat: Awaited<ReturnType<typeof statAsync>>;
+    try {
+      srcStat = await statAsync(sourcePath);
+    } catch {
       throw new Error(`[installLocal] path does not exist: ${sourcePath}`);
     }
-    const stat = statSync(sourcePath);
-    if (!stat.isDirectory()) {
+    if (!srcStat.isDirectory()) {
       throw new Error(`[installLocal] path is not a directory: ${sourcePath}`);
     }
 
