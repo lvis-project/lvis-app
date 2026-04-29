@@ -281,10 +281,91 @@ export interface PluginMarketplaceItem {
 }
 
 /**
+ * Error thrown by every `PluginStorage` method when a path violates the
+ * sandbox rules: absolute paths, lexical `..` escapes, and symlinks whose
+ * realpath escapes `pluginDataDir` (including dangling symlinks whose target
+ * cannot be verified). Plugin authors writing TypeScript can branch on this
+ * class via `instanceof`:
+ *
+ * ```ts
+ * try {
+ *   await ctx.hostApi.storage.write(rel, data);
+ * } catch (err) {
+ *   if (err instanceof PluginStorageError) {
+ *     // err.pluginId, err.attemptedPath available for diagnostics
+ *   }
+ * }
+ * ```
+ *
+ * `name` is always `"PluginStorageError"` for plugins that prefer string
+ * matching across realm boundaries.
+ */
+export class PluginStorageError extends Error {
+  readonly pluginId: string;
+  readonly attemptedPath: string;
+  constructor(message: string, pluginId: string, attemptedPath: string) {
+    super(`[plugin-storage:${pluginId}] ${message}: ${attemptedPath}`);
+    this.name = "PluginStorageError";
+    this.pluginId = pluginId;
+    this.attemptedPath = attemptedPath;
+  }
+}
+
+/**
+ * Sandboxed storage rooted at `pluginDataDir`. All paths are resolved relative
+ * to that root. Path traversal via `..`, absolute paths, and symlinks
+ * escaping the root via realpath checks are rejected with `PluginStorageError`
+ * (exported from this module — plugin authors can `instanceof`-check it).
+ *
+ * The realpath check walks up from the resolved target until it finds an
+ * existing entry, then verifies that entry's canonical path stays inside the
+ * root — this catches both "reads through a symlink that points outside" and
+ * "writes whose closest existing ancestor is a symlink that points outside".
+ * Dangling symlinks (probe lstat = symlink, realpath ENOENT) are rejected
+ * conservatively because the host cannot validate where they would resolve to.
+ *
+ * Plugins should prefer this over `node:fs` so the host can audit / sandbox /
+ * restrict writes uniformly. Every operation throws if the resolved path
+ * escapes `pluginDataDir`.
+ */
+export interface PluginStorage {
+  /**
+   * Resolve `segments` to an absolute path inside the plugin's data root.
+   * Throws if the resolved path escapes the root.
+   */
+  resolve(...segments: string[]): string;
+  /** Read raw bytes; throws ENOENT if the file does not exist. */
+  read(relPath: string): Promise<Uint8Array>;
+  /** Read text; throws ENOENT if the file does not exist. */
+  readText(relPath: string, encoding?: BufferEncoding): Promise<string>;
+  /** Read + parse JSON; returns `null` on missing file, throws on bad JSON. */
+  readJson<T = unknown>(relPath: string): Promise<T | null>;
+  /** Write bytes / text; ensures parent directories exist. */
+  write(relPath: string, data: string | Uint8Array, encoding?: BufferEncoding): Promise<void>;
+  /** Stringify + write JSON; ensures parent directories exist. */
+  writeJson<T>(relPath: string, value: T, indent?: number): Promise<void>;
+  /** Remove a file or directory tree; missing paths are ignored. */
+  rm(relPath: string, options?: { recursive?: boolean }): Promise<void>;
+  /** List entries in `relPath` (directories included). Empty for missing dir. */
+  list(relPath?: string): Promise<string[]>;
+  /** Test whether the path exists. */
+  exists(relPath: string): Promise<boolean>;
+  /** Ensure a directory exists (recursive mkdir). */
+  mkdir(relPath: string): Promise<void>;
+}
+
+/**
  * Host API — 플러그인이 호스트 서비스에 접근하는 인터페이스.
  * 플러그인 제거 시 해당 플러그인이 등록한 모든 것이 자동 정리된다.
  */
 export interface PluginHostApi {
+  /**
+   * Sandboxed filesystem API scoped to this plugin's `pluginDataDir`. Plugins
+   * SHOULD prefer this over `node:fs` so the host can audit/restrict writes
+   * uniformly. Direct `node:fs` use is still possible but bypasses sandbox
+   * protections and is subject to future deprecation.
+   */
+  storage: PluginStorage;
   registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
   emitEvent(eventType: string, data?: unknown): void;
   /**
