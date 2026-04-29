@@ -686,17 +686,24 @@ async function main() {
   // Install dev-built sibling plugins into ~/.lvis/plugins/ via real plugin.json
   // + symlinked dist/. No LVIS_PLUGINS_DIR override — the runtime always reads
   // from ~/.lvis/plugins/ regardless of environment.
-  const devLinkScript = resolve(repoRoot, "scripts/dev-link-plugins.mjs");
-  const devLinkResult = spawnSync(process.execPath, [devLinkScript], {
-    cwd: repoRoot,
-    stdio: "inherit",
-  });
-  if (devLinkResult.status !== 0) {
-    log("plugins", `dev:link failed (exit=${devLinkResult.status ?? "null"})`);
-    await shutdown(1);
-    return;
+  // Skip when --no-plugins is passed so the dev runner can start without touching
+  // the user plugin directory (useful for CI and plugin-free debug sessions).
+  if (!skipPlugins) {
+    const devLinkScript = resolve(repoRoot, "scripts/dev-link-plugins.mjs");
+    const devLinkResult = spawnSync(process.execPath, [devLinkScript], {
+      cwd: repoRoot,
+      stdio: "inherit",
+    });
+    if (devLinkResult.status !== 0) {
+      const errMsg = devLinkResult.error?.message ? `; error=${devLinkResult.error.message}` : "";
+      log("plugins", `dev:link failed (exit=${devLinkResult.status ?? "null"}${errMsg})`);
+      await shutdown(1);
+      return;
+    }
+    log("plugins", `dev:link installed plugins into ~/.lvis/plugins/`);
+  } else {
+    log("plugins", "dev:link skipped (--no-plugins)");
   }
-  log("plugins", `dev:link installed plugins into ~/.lvis/plugins/`);
 
   // Initial html copy
   copyHtml();
