@@ -3,8 +3,10 @@
 
 ## 포함 내용
 - Plugin Runtime + Manifest 기반 동적 로딩
-- `plugins/registry.json` 기반 manifestPath 동적 로딩
-- `@lvis/plugin-pageindex`, `@lvis/plugin-meeting`, `@lvis/plugin-email`, `@lvis/plugin-calendar` 동적 통합
+- `~/.lvis/plugins/registry.json` 기반 manifestPath 동적 로딩
+- `@lvis/plugin-pageindex`, `@lvis/plugin-meeting`, `@lvis/plugin-ms-graph`,
+  `@lvis/plugin-lge-api`, `@lvis/plugin-work-proactive`, `@lvis/plugin-agent-hub`
+  마켓플레이스 install 또는 `bun run dev:link` 으로 사이드로드
 - 앱 시작 시 PageIndex 워커 + 자동 인덱서 구동
 - 실제 채팅 UI(렌더러) + preload IPC 브리지
 - IPC 핸들러
@@ -18,25 +20,21 @@
 - E2E 플로우 스모크 테스트 스크립트
 
 ## 동적 플러그인 매니페스트
-- `plugins/installed/pageindex/plugin.json`
-- `plugins/installed/meeting/plugin.json`
-- `plugins/installed/email/plugin.json`
-- `plugins/installed/calendar/plugin.json`
-- `plugins/registry.json` (활성 플러그인 목록)
+설치된 플러그인은 `~/.lvis/plugins/<id>/plugin.json` 에 위치하며 `~/.lvis/plugins/registry.json` 가 활성 목록을 관리합니다. `<repo>/plugins/installed/...` 의 in-tree 레이아웃은 Phase 2 부터 폐기되었습니다.
 
 ## Plugins Registry CLI
 ```bash
 bun run plugins:list
-bun run plugins:install -- <plugin-id>
 bun run plugins:add -- <plugin-id> <manifest-path>
 bun run plugins:remove -- <plugin-id>
 bun run plugins:enable -- <plugin-id>
 bun run plugins:disable -- <plugin-id>
 ```
 
+설치는 더 이상 이 CLI 가 다루지 않습니다. 마켓플레이스 카드 / `lvis://install/<slug>` 딥링크 / `bun run dev:link` (사이드 레포 dev) 가 현재 install 진입점입니다.
+
 예시:
 ```bash
-bun run plugins:install -- meeting
 bun run plugins:add -- search search/plugin.json
 ```
 
