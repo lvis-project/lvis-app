@@ -33,14 +33,15 @@ describe("SettingsService marketplace defaults", () => {
 
   it("defaults to real-cloud against the local marketplace server", () => {
     // Phase 2-final: marketplace server is the single source. Default
-    // points at the dev localhost server; production deployments override
-    // via settings UI / installer config.
+    // now points at the production tunnel so a fresh install lands on the
+    // live catalog with no extra setup. Local-marketplace operators
+    // override via Settings → 마켓플레이스 tab.
     const service = new SettingsService({ userDataPath });
 
     expect(service.get("marketplace")).toEqual({
       backend: "real-cloud",
-      realCloudBaseUrl: "http://localhost:8000",
-      realCloudAllowPrivateNetwork: true,
+      realCloudBaseUrl: "https://marketplace.lvisai.xyz",
+      realCloudAllowPrivateNetwork: false,
     });
   });
 
