@@ -1,11 +1,11 @@
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { existsSync, realpathSync } from "node:fs";
+import { cp, readFile, rename, rm, stat as statAsync, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
-import { assertMockMarketplaceAllowed } from "../boot/dev-flags.js";
+import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
 import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -977,6 +977,104 @@ export class PluginMarketplaceService {
       }
     }
     return installedIds;
+  }
+
+  /**
+   * Dev-only: copy a locally-built plugin directory into ~/.lvis/plugins/<id>/
+   * and register it in the plugin registry. Gated on isDevModeUnlocked() so
+   * packaged builds cannot invoke this path.
+   */
+  async installLocal(sourcePath: string): Promise<{ pluginId: string; installed: true }> {
+    if (!isDevModeUnlocked()) {
+      throw new Error(
+        "[security] installLocal requires dev mode — enable a supported LVIS_DEV* flag in a non-packaged build",
+      );
+    }
+
+    // Validate the source path exists and is a directory (non-blocking).
+    let srcStat: Awaited<ReturnType<typeof statAsync>>;
+    try {
+      srcStat = await statAsync(sourcePath);
+    } catch {
+      throw new Error(`[installLocal] path does not exist: ${sourcePath}`);
+    }
+    if (!srcStat.isDirectory()) {
+      throw new Error(`[installLocal] path is not a directory: ${sourcePath}`);
+    }
+
+    // Read and parse plugin.json from the source directory.
+    const manifestPath = resolve(sourcePath, "plugin.json");
+    let manifest: { id?: unknown; [key: string]: unknown };
+    try {
+      const raw = await readFile(manifestPath, "utf-8");
+      manifest = JSON.parse(raw) as { id?: unknown; [key: string]: unknown };
+    } catch {
+      throw new Error(`[installLocal] could not read plugin.json in ${sourcePath}`);
+    }
+
+    const pluginId = typeof manifest.id === "string" ? manifest.id.trim() : "";
+    if (!pluginId) {
+      throw new Error("[installLocal] plugin.json must have a non-empty 'id' field");
+    }
+
+    // Validate pluginId is a safe directory name.
+    if (!/^[a-zA-Z0-9._-]+$/.test(pluginId) || pluginId.includes("..") || pluginId.includes("/")) {
+      throw new Error(
+        `[installLocal] unsafe plugin id — must match ^[a-zA-Z0-9._-]+$: ${pluginId}`,
+      );
+    }
+
+    return this.withPluginLock(pluginId, async () => {
+      const userPluginsRoot = this.pluginsRoot;
+      const installDir = resolve(userPluginsRoot, pluginId);
+
+      // Refuse to clobber an admin-installed plugin under the same id —
+      // dev sideload should not silently downgrade an admin-managed entry.
+      const existingRegistry = await readPluginRegistry(this.registryPath);
+      const existingEntry = existingRegistry.plugins.find((p) => p.id === pluginId);
+      if (existingEntry?.installedBy === "admin") {
+        throw new Error(
+          `[installLocal] refusing to overwrite admin-installed plugin: ${pluginId}`,
+        );
+      }
+
+      // Stage the copy under a sibling tmp dir so an interrupted install
+      // never leaves the live install path half-written. The final rename
+      // is atomic on the same filesystem (which ~/.lvis/plugins/ guarantees).
+      const stagingDir = resolve(userPluginsRoot, `${pluginId}.tmp-${process.pid}-${Date.now()}`);
+      await rm(stagingDir, { recursive: true, force: true });
+      try {
+        await cp(sourcePath, stagingDir, { recursive: true });
+        await rm(installDir, { recursive: true, force: true });
+        await rename(stagingDir, installDir);
+      } catch (err) {
+        await rm(stagingDir, { recursive: true, force: true });
+        throw err;
+      }
+
+      // Register in the plugin registry. installedBy follows the manifest's
+      // declared installPolicy so dev-sideloading an admin-policy manifest
+      // doesn't silently downgrade it to "user".
+      const installedBy = manifest.installPolicy === "admin" ? "admin" : "user";
+      const registryManifestPath = posix.join(pluginId, "plugin.json");
+      await updatePluginRegistry(this.registryPath, (registry) => {
+        const existing = registry.plugins.find((x) => x.id === pluginId);
+        if (existing) {
+          existing.manifestPath = registryManifestPath;
+          existing.enabled = true;
+          existing.installedBy = installedBy;
+        } else {
+          registry.plugins.push({
+            id: pluginId,
+            manifestPath: registryManifestPath,
+            enabled: true,
+            installedBy,
+          });
+        }
+      });
+
+      return { pluginId, installed: true as const };
+    });
   }
 
 }

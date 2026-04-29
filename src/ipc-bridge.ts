@@ -243,23 +243,30 @@ const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
  */
 /**
  * Plugin webview registry — populated by the host renderer at the
- * webview's `did-attach` event via `lvis:plugin:register-webview`. Main
+ * webview's `dom-ready` event via `lvis:plugin:register-webview`. Main
  * resolves `pluginId` and the verified entry URL from `event.sender.id`
  * on every plugin IPC, eliminating the renderer-supplied pluginId
  * spoofing surface.
  *
- * Key: webContents.id (numeric, assigned by Electron at webview attach).
+ * Key: webContents.id (numeric, assigned by Electron at webview dom-ready).
  * Value: { pluginId, entryUrl } — both validated against
  * `pluginRuntime.listPluginIds()` + the manifest's resolved entry path
- * before being stored.
+ * before being stored. Pending get-entry-url requests are queued in
+ * `pendingEntryUrlResolvers` until registration arrives (cross-process IPC
+ * ordering is not guaranteed).
  */
 interface PluginWebviewBinding {
   pluginId: string;
   entryUrl: string;
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
+// Pending get-entry-url resolvers waiting for registration to arrive.
+// Necessary because host renderer and plugin webview are separate processes
+// with no IPC ordering guarantee between them.
+const pendingEntryUrlResolvers = new Map<number, Array<(b: PluginWebviewBinding) => void>>();
 export function unregisterPluginWebview(webContentsId: number): void {
   pluginWebviewRegistry.delete(webContentsId);
+  pendingEntryUrlResolvers.delete(webContentsId);
 }
 
 export function validatePluginFrame(event: IpcMainInvokeEvent | null | undefined): boolean {
@@ -793,6 +800,22 @@ ${input}`;
     await pluginRuntime.restartAll();
     refreshPluginNotifications?.();
     broadcastUninstallResult({ slug: pluginId, success: true });
+    return result;
+  });
+  ipcMain.handle("lvis:plugins:install-local", async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install-local", e); return UNAUTHORIZED_FRAME; }
+    if (!isDevModeUnlocked()) {
+      throw new Error("[security] dev mode not unlocked — enable a supported LVIS_DEV* flag in a non-packaged build");
+    }
+    const { filePaths, canceled } = await dialog.showOpenDialog({
+      title: "로컬 플러그인 설치 (개발자)",
+      properties: ["openDirectory"],
+      message: "plugin.json이 포함된 빌드 폴더를 선택하세요",
+    });
+    if (canceled || !filePaths[0]) return null;
+    const result = await pluginMarketplace.installLocal(filePaths[0]);
+    await pluginRuntime.restartAll();
+    refreshPluginNotifications?.();
     return result;
   });
   // read-only, sender guard optional
@@ -1643,7 +1666,10 @@ ${input}`;
       } catch {
         return { ok: false, error: "entry-url-outside-install-root" };
       }
-      pluginWebviewRegistry.set(webContentsId, { pluginId, entryUrl });
+      const binding = { pluginId, entryUrl };
+      pluginWebviewRegistry.set(webContentsId, binding);
+      for (const resolve of pendingEntryUrlResolvers.get(webContentsId) ?? []) resolve(binding);
+      pendingEntryUrlResolvers.delete(webContentsId);
       return { ok: true };
     }
     let realRoot: string;
@@ -1658,7 +1684,10 @@ ${input}`;
     if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
       return { ok: false, error: "entry-url-outside-install-root" };
     }
-    pluginWebviewRegistry.set(webContentsId, { pluginId, entryUrl });
+    const binding = { pluginId, entryUrl };
+    pluginWebviewRegistry.set(webContentsId, binding);
+    for (const resolve of pendingEntryUrlResolvers.get(webContentsId) ?? []) resolve(binding);
+    pendingEntryUrlResolvers.delete(webContentsId);
     return { ok: true };
   });
 
@@ -1670,12 +1699,49 @@ ${input}`;
   }
 
   ipcMain.handle("lvis:plugin:get-entry-url", (e) => {
+    // Fast path: registration already complete.
     const binding = resolvePluginFromSender(e);
-    if (!binding) {
+    if (binding) return { ok: true as const, entryUrl: binding.entryUrl };
+
+    // Validate frame before queuing — reject non-shell frames immediately.
+    if (!validatePluginFrame(e)) {
       auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
       return UNAUTHORIZED_FRAME;
     }
-    return { ok: true as const, entryUrl: binding.entryUrl };
+    const senderId = e.sender?.id;
+    if (typeof senderId !== "number") return UNAUTHORIZED_FRAME;
+
+    // Race: host renderer and plugin webview are separate processes with no
+    // IPC ordering guarantee. Wait up to 500 ms for registerPluginWebview to
+    // arrive before giving up with unauthorized-frame.
+    return new Promise<{ ok: true; entryUrl: string } | typeof UNAUTHORIZED_FRAME>((resolve) => {
+      const resolvers = pendingEntryUrlResolvers.get(senderId) ?? [];
+      pendingEntryUrlResolvers.set(senderId, resolvers);
+      const resolver = (b: PluginWebviewBinding) => { clearTimeout(timer); resolve({ ok: true, entryUrl: b.entryUrl }); };
+      resolvers.push(resolver);
+      const timer = setTimeout(() => {
+        const arr = pendingEntryUrlResolvers.get(senderId);
+        if (arr) {
+          const idx = arr.indexOf(resolver);
+          if (idx !== -1) arr.splice(idx, 1);
+          if (arr.length === 0) pendingEntryUrlResolvers.delete(senderId);
+        }
+        // Frame already passed validatePluginFrame above; this is a slow-start
+        // race, not an unauthorized sender. Audit it under a distinct reason
+        // so security log scans aren't polluted by registration races.
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "ipc-guard",
+          type: "warn",
+          input: JSON.stringify({
+            channel: "lvis:plugin:get-entry-url",
+            reason: "entry-url-timeout",
+            frameUrl: e?.senderFrame?.url ?? "",
+          }),
+        });
+        resolve(UNAUTHORIZED_FRAME);
+      }, 500);
+    });
   });
 
   ipcMain.handle("lvis:plugin:call-tool", async (e, method: string, payload?: unknown) => {
