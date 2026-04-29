@@ -1029,7 +1029,7 @@ export class PluginMarketplaceService {
       const installDir = resolve(userPluginsRoot, pluginId);
 
       // Remove any previous install first so deleted source files do not
-      // linger, then copy atomically into ~/.lvis/plugins/<id>/.
+      // linger, then copy into ~/.lvis/plugins/<id>/.
       await rm(installDir, { recursive: true, force: true });
       await cp(sourcePath, installDir, { recursive: true });
 

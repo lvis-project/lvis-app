@@ -25,6 +25,8 @@ const userPluginsRoot = resolve(homedir(), ".lvis", "plugins");
 const registryPath = resolve(userPluginsRoot, "registry.json");
 const dryRun = process.argv.includes("--dry-run");
 const force = process.argv.includes("--force");
+const disabledPluginIds = (process.env.LVIS_DEV_DISABLED_PLUGINS ?? "")
+  .split(",").map((s) => s.trim()).filter(Boolean);
 
 function log(msg) { console.log(`[dev:link] ${msg}`); }
 
@@ -93,6 +95,12 @@ for (const repo of repos) {
     continue;
   }
 
+  // Skip plugins explicitly disabled in this dev session
+  if (disabledPluginIds.includes(pluginId)) {
+    log(`skip: ${pluginId} (disabled by LVIS_DEV_DISABLED_PLUGINS)`);
+    continue;
+  }
+
   // Don't clobber a user-installed (non-_devLinked) entry with the same id
   if (existingPlugins.some(p => p.id === pluginId)) {
     log(`skip: ${pluginId} (already user-installed; remove it first to dev-link)`);
@@ -121,7 +129,8 @@ for (const repo of repos) {
       if (ok) log(`linked: ${pluginId}  dist/ → ${distTarget}`);
       else { log(`skip registry: ${pluginId} (dist/ symlink failed — run with --force to replace real dir)`); continue; }
     } else {
-      log(`warn: ${pluginId} dist/ not found at ${distTarget}`);
+      log(`warn: ${pluginId} dist/ not found at ${distTarget} — skipping registration`);
+      continue;
     }
   }
 

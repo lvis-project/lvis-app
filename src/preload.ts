@@ -355,7 +355,16 @@ const api = {
   },
 
   // Dev-only: install a plugin from a local directory (LVIS_DEV=1 required).
-  installLocalPlugin: async () => ipcRenderer.invoke("lvis:plugins:install-local"),
+  installLocalPlugin: async () => {
+    const r = await ipcRenderer.invoke("lvis:plugins:install-local") as
+      | { pluginId: string; installed: true }
+      | { ok: false; error: string }
+      | null;
+    // Normalise UNAUTHORIZED_FRAME (ok:false envelope) to null so callers
+    // only see { pluginId, installed: true } | null.
+    if (!r || "ok" in r) return null;
+    return r;
+  },
 
   // Sibling of onPluginInstallResult — fires after PluginConfigTab or any
   // other surface drives uninstall through the IPC handler. Renderer uses
