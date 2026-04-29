@@ -24,7 +24,6 @@
     "start:npm": "npm run prepare:plugins:npm && npm run build:npm && node scripts/run-electron.mjs dist/src/main.js",
     "start:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-windows.ps1",
     "plugins:list": "tsx scripts/plugins-cli.ts list",
-    "plugins:install": "tsx scripts/plugins-cli.ts install",
     "plugins:add": "tsx scripts/plugins-cli.ts add",
     "plugins:remove": "tsx scripts/plugins-cli.ts remove",
     "plugins:enable": "tsx scripts/plugins-cli.ts enable",
