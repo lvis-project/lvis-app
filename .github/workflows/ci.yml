@@ -12,44 +12,17 @@ jobs:
         with:
           path: lvis-app
           submodules: recursive
-      - name: Generate plugin read token
-        id: app-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  # v3.1.1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: lvis-project
-          repositories: lvis-plugin-meeting,lvis-plugin-pageindex,lvis-plugin-lge-api,lvis-plugin-work-proactive,lvis-plugin-agent-hub,lvis-plugin-ms-graph
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-meeting
-          path: lvis-plugin-meeting
-          token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-pageindex
-          path: lvis-plugin-pageindex
-          token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-lge-api
-          path: lvis-plugin-lge-api
-          token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-work-proactive
-          path: lvis-plugin-work-proactive
-          token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-agent-hub
-          path: lvis-plugin-agent-hub
-          token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-ms-graph
-          path: lvis-plugin-ms-graph
-          token: ${{ steps.app-token.outputs.token }}
+      - name: Clone sibling plugin repos
+        # Self-hosted runner has gh CLI authenticated as ubuntu user (repo scope).
+        # We use that token instead of GitHub App auth — the App is install-pinned
+        # to a different repo set and cannot be modified without org-owner UI access.
+        run: |
+          set -euo pipefail
+          GH_TOKEN=$(gh auth token)
+          for slug in lvis-plugin-meeting lvis-plugin-pageindex lvis-plugin-lge-api lvis-plugin-work-proactive lvis-plugin-agent-hub lvis-plugin-ms-graph; do
+            if [ -d "$slug" ]; then rm -rf "$slug"; fi
+            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/lvis-project/${slug}.git" "$slug"
+          done
       - uses: oven-sh/setup-bun@v2
       - name: Build plugin-sdk submodule
         run: |
