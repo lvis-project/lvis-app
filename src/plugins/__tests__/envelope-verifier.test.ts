@@ -114,7 +114,7 @@ describe("verifyEnvelope — first-matching-key_id contract", () => {
   });
 
   it("rejects when artifact_sha256 does not match the tarball", () => {
-    const body = Buffer.from("real-body");
+    const body = Buffer.from("artifact-body");
     const { privateKey, pubBuffer } = makeKeypair();
     const envelope: SignatureEnvelope = {
       version: 1,

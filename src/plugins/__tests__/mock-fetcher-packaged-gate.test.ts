@@ -51,7 +51,7 @@ describe("MockMarketplaceFetcher — packaged-build gate", () => {
 });
 
 describe("DisabledMarketplaceFetcher — packaged-build fallback stub", () => {
-  // Used by boot when packaged && no real-cloud URL. Constructor must be
+  // Used by boot when packaged && no marketplace-api URL. Constructor must be
   // side-effect free (no throw) so PluginMarketplaceService boot doesn't
   // crash even though every method call is fail-closed.
   it("constructs in packaged builds without throwing", () => {

@@ -45,7 +45,7 @@ const SAFE_PACKAGE_NAME_RE =
  */
 const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
-export interface RealCloudMarketplaceConfig {
+export interface MarketplaceApiConfig {
   baseUrl: string;
   apiKey?: string;
   timeoutMs?: number;
@@ -92,8 +92,8 @@ interface ServerCatalogRow {
   mcpRuntime?: unknown;
 }
 
-export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceHttp {
-  constructor(private readonly config: RealCloudMarketplaceConfig) {}
+export class MarketplaceApiFetcher implements MarketplaceFetcher, MarketplaceHttp {
+  constructor(private readonly config: MarketplaceApiConfig) {}
 
   async listPlugins(): Promise<PluginMarketplaceItem[]> {
     const res = await this.request("GET", "/api/v1/catalog");

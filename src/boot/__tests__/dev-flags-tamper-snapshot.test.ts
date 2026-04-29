@@ -76,17 +76,17 @@ describe("dev-flags tamper snapshot", () => {
     expect(names).toHaveLength(3);
   });
 
-  it("clearing the override restores the real snapshot", () => {
-    // First call without override → captures whatever the real snapshot is.
+  it("clearing the override restores the captured snapshot", () => {
+    // First call without override captures the process environment snapshot.
     _setTamperedSnapshotForTest(null);
-    const realSnapshot = tamperedVarsAtBoot();
+    const capturedSnapshot = tamperedVarsAtBoot();
 
     // Apply override → returns override.
     _setTamperedSnapshotForTest(["FAKE_OVERRIDE_VAR"]);
     expect(tamperedVarsAtBoot()).toEqual(["FAKE_OVERRIDE_VAR"]);
 
-    // Clear override → returns real snapshot again.
+    // Clear override → returns captured snapshot again.
     _setTamperedSnapshotForTest(null);
-    expect(tamperedVarsAtBoot()).toEqual(realSnapshot);
+    expect(tamperedVarsAtBoot()).toEqual(capturedSnapshot);
   });
 });

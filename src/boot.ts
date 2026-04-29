@@ -45,7 +45,7 @@ import { homedir } from "node:os";
 import { adaptPowerMonitor } from "./main/idle-scheduler.js";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "./plugins/marketplace.js";
 import type { MarketplaceFetcher } from "./plugins/marketplace.js";
-import { RealCloudMarketplaceFetcher } from "./plugins/real-cloud-marketplace-fetcher.js";
+import { MarketplaceApiFetcher } from "./plugins/marketplace-api-fetcher.js";
 import { PluginArtifactStore } from "./plugins/plugin-artifact-store.js";
 import { getBundledPublicKeys } from "./plugins/publisher-keys.js";
 import { StarredStore } from "./data/starred-store.js";
@@ -243,22 +243,22 @@ export async function bootstrap(
   // §9.5 M4: marketplace backend selection.
   const marketplaceSettings = settingsService.get("marketplace");
   // Phase 2-final marketplace fetcher selection — single production path:
-  //   - real-cloud + URL → RealCloudMarketplaceFetcher
+  //   - marketplace-api + URL → MarketplaceApiFetcher
   //   - otherwise (no URL configured) → DisabledMarketplaceFetcher
-  // No `MockMarketplaceFetcher` fallback at boot. Dev environments default
-  // to `realCloudBaseUrl: "http://localhost:8000"` (settings-store default)
-  // and run the marketplace server locally; tests inject their own fetcher.
+  // No `MockMarketplaceFetcher` fallback at boot. The settings-store default
+  // points at the public marketplace; dev environments can explicitly override
+  // to localhost with marketplaceAllowPrivateNetwork enabled.
   let marketplaceFetcher: MarketplaceFetcher;
-  if (marketplaceSettings.realCloudBaseUrl) {
-    marketplaceFetcher = new RealCloudMarketplaceFetcher({
-      baseUrl: marketplaceSettings.realCloudBaseUrl,
+  if (marketplaceSettings.marketplaceBaseUrl) {
+    marketplaceFetcher = new MarketplaceApiFetcher({
+      baseUrl: marketplaceSettings.marketplaceBaseUrl,
       apiKey: settingsService.getSecret("marketplace.apiKey") ?? undefined,
-      allowPrivateNetwork: marketplaceSettings.realCloudAllowPrivateNetwork,
+      allowPrivateNetwork: marketplaceSettings.marketplaceAllowPrivateNetwork,
     });
-    console.log("[lvis] boot: marketplace backend = real-cloud (%s)", marketplaceSettings.realCloudBaseUrl);
+    console.log("[lvis] boot: marketplace backend = marketplace-api (%s)", marketplaceSettings.marketplaceBaseUrl);
   } else {
     marketplaceFetcher = new DisabledMarketplaceFetcher();
-    console.warn("[lvis] boot: marketplace backend disabled (no realCloudBaseUrl configured)");
+    console.warn("[lvis] boot: marketplace backend disabled (no marketplaceBaseUrl configured)");
   }
   const pluginMarketplace = new PluginMarketplaceService(
     pluginPaths,

@@ -1,5 +1,5 @@
 /**
- * Tests for RealCloudMarketplaceFetcher — §9.5 M4.
+ * Tests for MarketplaceApiFetcher — §9.5 M4.
  *
  * We mock `fetchPublicHttpResponse` (public-network path) and the global
  * `fetch` (private-network path) to prove both wiring paths and the
@@ -20,7 +20,7 @@ vi.mock("../../core/network-guard.js", () => ({
 }));
 
 import { fetchPublicHttpResponse, NetworkGuardError } from "../../core/network-guard.js";
-import { RealCloudMarketplaceFetcher } from "../real-cloud-marketplace-fetcher.js";
+import { MarketplaceApiFetcher } from "../marketplace-api-fetcher.js";
 
 const mockedFetchPublic = fetchPublicHttpResponse as unknown as ReturnType<typeof vi.fn>;
 
@@ -58,7 +58,7 @@ function bytesResponse(bytes: Uint8Array): Response {
   } as unknown as Response;
 }
 
-describe("RealCloudMarketplaceFetcher (public-network path)", () => {
+describe("MarketplaceApiFetcher (public-network path)", () => {
   beforeEach(() => {
     mockedFetchPublic.mockReset();
   });
@@ -84,7 +84,7 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
       ]),
     );
 
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     const plugins = await fetcher.listPlugins();
@@ -132,7 +132,7 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
       }),
     );
 
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com/",
     });
     const plugins = await fetcher.listPlugins();
@@ -152,7 +152,7 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse({ error: "not found" }, { status: 404, ok: false }),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     const detail = await fetcher.getPluginDetail("ghost");
@@ -164,7 +164,7 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
     const expectedSha = createHash("sha256").update(Buffer.from(payload)).digest("hex");
     mockedFetchPublic.mockResolvedValueOnce(bytesResponse(payload));
 
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     const result = await fetcher.downloadVersion("acme-notes", "1.2.3");
@@ -181,7 +181,7 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
 
   it("sets Bearer header when apiKey is configured", async () => {
     mockedFetchPublic.mockResolvedValueOnce(jsonResponse([]));
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
       apiKey: "secret-token",
     });
@@ -196,14 +196,14 @@ describe("RealCloudMarketplaceFetcher (public-network path)", () => {
     mockedFetchPublic.mockRejectedValueOnce(
       new NetworkGuardError("target resolves to non-public address(es): 10.0.0.1"),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/network guard:/);
   });
 });
 
-describe("RealCloudMarketplaceFetcher (private-network path)", () => {
+describe("MarketplaceApiFetcher (private-network path)", () => {
   const originalFetch = global.fetch;
 
   afterEach(() => {
@@ -227,7 +227,7 @@ describe("RealCloudMarketplaceFetcher (private-network path)", () => {
     global.fetch = fakeFetch as unknown as typeof global.fetch;
     mockedFetchPublic.mockReset();
 
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "http://127.0.0.1:8080",
       allowPrivateNetwork: true,
     });
@@ -243,7 +243,7 @@ describe("RealCloudMarketplaceFetcher (private-network path)", () => {
   });
 });
 
-describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
+describe("MarketplaceApiFetcher — actual server response shape", () => {
   const originalFetch = global.fetch;
 
   afterEach(() => {
@@ -271,7 +271,7 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
     const fakeFetch = vi.fn().mockResolvedValue(jsonResponse([serverPlugin]));
     global.fetch = fakeFetch as unknown as typeof global.fetch;
 
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "http://127.0.0.1:8000",
       allowPrivateNetwork: true,
     });
@@ -302,7 +302,7 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
     const fakeFetch = vi.fn().mockResolvedValue(bytesResponse(payload));
     global.fetch = fakeFetch as unknown as typeof global.fetch;
 
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "http://127.0.0.1:8000",
       allowPrivateNetwork: true,
     });
@@ -321,7 +321,7 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
     const fakeFetch = vi.fn().mockResolvedValue(jsonResponse([pluginWithoutVersion]));
     global.fetch = fakeFetch as unknown as typeof global.fetch;
 
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "http://127.0.0.1:8000",
       allowPrivateNetwork: true,
     });
@@ -335,7 +335,7 @@ describe("RealCloudMarketplaceFetcher — actual server response shape", () => {
   });
 });
 
-describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
+describe("MarketplaceApiFetcher — input validation (security)", () => {
   beforeEach(() => {
     mockedFetchPublic.mockReset();
   });
@@ -348,7 +348,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse([{ id: "x", slug: "../../etc/passwd", name: "Evil" }]),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
@@ -358,7 +358,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse([{ id: "x", slug: "--registry=https://evil.example", name: "Evil" }]),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
@@ -368,7 +368,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse([{ id: "x", slug: "file:/tmp/evil.tgz", name: "Evil" }]),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
@@ -378,7 +378,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse([{ id: "x", slug: "git+https://evil/x.git", name: "Evil" }]),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
@@ -388,7 +388,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse([{ id: { evil: true }, name: "Evil" }]),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/missing id\/name/);
@@ -398,7 +398,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse([{ id: [1, 2, 3], name: "Evil" }]),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/missing id\/name/);
@@ -408,7 +408,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse([{ id: "../../../etc", name: "Evil", slug: "safe-slug" }]),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     await expect(fetcher.listPlugins()).rejects.toThrow(/invalid id format/);
@@ -418,7 +418,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
     mockedFetchPublic.mockResolvedValueOnce(
       jsonResponse([{ id: NaN, name: "Evil" }]),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     // NaN is not finite → id becomes undefined → throws missing id
@@ -434,7 +434,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
         packageSpec: "@acme/notes@1.0.0",
       }]),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     const plugins = await fetcher.listPlugins();
@@ -450,7 +450,7 @@ describe("RealCloudMarketplaceFetcher — input validation (security)", () => {
         latest_stable_version: "1.0.0",
       }]),
     );
-    const fetcher = new RealCloudMarketplaceFetcher({
+    const fetcher = new MarketplaceApiFetcher({
       baseUrl: "https://marketplace.example.com",
     });
     const plugins = await fetcher.listPlugins();

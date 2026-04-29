@@ -3,6 +3,8 @@ import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import type { LvisApi } from "../types.js";
 
+const DEFAULT_MARKETPLACE_BASE_URL = "https://marketplace.lvisai.xyz";
+
 export interface MarketplaceTabProps {
   api: LvisApi;
   baseUrl: string;
@@ -30,6 +32,20 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
     onSaved,
   } = props;
 
+  const openMarketplace = () => {
+    const raw = baseUrl.trim() || DEFAULT_MARKETPLACE_BASE_URL;
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      url = new URL(DEFAULT_MARKETPLACE_BASE_URL);
+    }
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      url = new URL(DEFAULT_MARKETPLACE_BASE_URL);
+    }
+    window.open(url.toString(), "_blank", "noopener,noreferrer");
+  };
+
   return (
     <div className="space-y-4 pt-4">
       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
@@ -37,10 +53,22 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">마켓플레이스 서버 URL</label>
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-sm font-medium">마켓플레이스 서버 URL</label>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 shrink-0 text-xs"
+            onClick={openMarketplace}
+            title="현재 설정된 마켓플레이스를 시스템 브라우저로 엽니다"
+          >
+            마켓플레이스로 이동
+          </Button>
+        </div>
         <Input
           type="url"
-          placeholder="https://marketplace.lge.internal"
+          placeholder={DEFAULT_MARKETPLACE_BASE_URL}
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
         />

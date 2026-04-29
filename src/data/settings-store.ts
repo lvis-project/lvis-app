@@ -183,11 +183,11 @@ export interface WebSearchSettings {
  * that need a deterministic catalog inject a stub fetcher directly.
  */
 export interface MarketplaceSettings {
-  /** Reserved for future variants. Currently always `"real-cloud"`. */
-  backend: "real-cloud";
-  realCloudBaseUrl?: string;
+  /** Reserved for future variants. Currently always `"marketplace-api"`. */
+  backend: "marketplace-api";
+  marketplaceBaseUrl?: string;
   /** Local dev/test only: bypass SSRF guard for loopback servers. */
-  realCloudAllowPrivateNetwork?: boolean;
+  marketplaceAllowPrivateNetwork?: boolean;
   /**
    * S8 — enable/disable plugin update detection at boot. Default true.
    */
@@ -208,6 +208,12 @@ export interface SettingsServiceOptions {
   userDataPath: string;
 }
 
+const DEFAULT_MARKETPLACE_BASE_URL = "https://marketplace.lvisai.xyz";
+const LEGACY_LOCAL_MARKETPLACE_BASE_URLS = new Set([
+  "http://localhost:8000",
+  "http://127.0.0.1:8000",
+]);
+
 const DEFAULT_SETTINGS: AppSettings = {
   llm: {
     provider: "claude",
@@ -224,14 +230,14 @@ const DEFAULT_SETTINGS: AppSettings = {
     provider: "duckduckgo",
   },
   marketplace: {
-    // Phase 2-final defaults — single source: marketplace server. The
-    // localhost URL + allow-private-network flag are dev-friendly defaults;
-    // production deployments override via settings UI or installer config.
+    // Phase 2-final defaults — single source: public marketplace server.
+    // Local development can still opt into localhost via settings UI/config
+    // with marketplaceAllowPrivateNetwork enabled explicitly.
     // No fallback to a local catalog file — the only way to populate the
     // host's plugin layout is through the marketplace API.
-    backend: "real-cloud",
-    realCloudBaseUrl: "http://localhost:8000",
-    realCloudAllowPrivateNetwork: true,
+    backend: "marketplace-api",
+    marketplaceBaseUrl: DEFAULT_MARKETPLACE_BASE_URL,
+    marketplaceAllowPrivateNetwork: false,
   },
   routine: {
     enableWakeupRoutine: false,
@@ -440,11 +446,19 @@ export class SettingsService {
       const llm = mergeLlmPatch(DEFAULT_SETTINGS.llm, parsed.llm ?? {});
       const marketplaceParsed: Record<string, unknown> = { ...(parsed.marketplace ?? {}) };
       // Phase 2-final: marketplace server is the only backend. Persisted
-      // settings from older "mock" installs are coerced to the real-cloud
+      // settings from older "mock" installs are coerced to the marketplace-api
       // default; if no URL is configured, boot constructs a
       // DisabledMarketplaceFetcher (Track A) so the app still starts.
-      if (marketplaceParsed.backend !== "real-cloud") {
-        marketplaceParsed.backend = "real-cloud";
+      if (marketplaceParsed.backend !== "marketplace-api") {
+        marketplaceParsed.backend = "marketplace-api";
+      }
+      if (
+        typeof marketplaceParsed.marketplaceBaseUrl === "string" &&
+        LEGACY_LOCAL_MARKETPLACE_BASE_URLS.has(marketplaceParsed.marketplaceBaseUrl.replace(/\/$/, "")) &&
+        marketplaceParsed.marketplaceAllowPrivateNetwork === true
+      ) {
+        marketplaceParsed.marketplaceBaseUrl = DEFAULT_MARKETPLACE_BASE_URL;
+        marketplaceParsed.marketplaceAllowPrivateNetwork = false;
       }
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
       const routine = parsed.routine;

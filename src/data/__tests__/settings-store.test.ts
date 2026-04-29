@@ -31,20 +31,84 @@ describe("SettingsService marketplace defaults", () => {
     rmSync(userDataPath, { recursive: true, force: true });
   });
 
-  it("defaults to real-cloud against the local marketplace server", () => {
-    // Phase 2-final: marketplace server is the single source. Default
-    // points at the dev localhost server; production deployments override
-    // via settings UI / installer config.
+  it("defaults to marketplace-api against the public marketplace server", () => {
+    // Phase 2-final: marketplace server is the single source. The app defaults
+    // to production marketplace; local dev can override via settings/config.
     const service = new SettingsService({ userDataPath });
 
     expect(service.get("marketplace")).toEqual({
-      backend: "real-cloud",
-      realCloudBaseUrl: "http://localhost:8000",
-      realCloudAllowPrivateNetwork: true,
+      backend: "marketplace-api",
+      marketplaceBaseUrl: "https://marketplace.lvisai.xyz",
+      marketplaceAllowPrivateNetwork: false,
     });
   });
 
-  it("coerces legacy 'mock' backend to real-cloud", () => {
+  it("migrates the legacy localhost marketplace default to the public server", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        marketplace: {
+          backend: "marketplace-api",
+          marketplaceBaseUrl: "http://localhost:8000/",
+          marketplaceAllowPrivateNetwork: true,
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+
+    expect(service.get("marketplace")).toEqual({
+      backend: "marketplace-api",
+      marketplaceBaseUrl: "https://marketplace.lvisai.xyz",
+      marketplaceAllowPrivateNetwork: false,
+    });
+  });
+
+  it("preserves explicitly configured localhost when private-network access was not enabled", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        marketplace: {
+          backend: "marketplace-api",
+          marketplaceBaseUrl: "http://localhost:8000/",
+          marketplaceAllowPrivateNetwork: false,
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+
+    expect(service.get("marketplace")).toEqual({
+      backend: "marketplace-api",
+      marketplaceBaseUrl: "http://localhost:8000/",
+      marketplaceAllowPrivateNetwork: false,
+    });
+  });
+
+  it("preserves explicitly configured localhost when private-network access is unset", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        marketplace: {
+          backend: "marketplace-api",
+          marketplaceBaseUrl: "http://127.0.0.1:8000",
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+
+    expect(service.get("marketplace")).toEqual({
+      backend: "marketplace-api",
+      marketplaceBaseUrl: "http://127.0.0.1:8000",
+      marketplaceAllowPrivateNetwork: false,
+    });
+  });
+
+  it("coerces legacy 'mock' backend to marketplace-api", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
       JSON.stringify({
@@ -56,17 +120,17 @@ describe("SettingsService marketplace defaults", () => {
     );
 
     const service = new SettingsService({ userDataPath });
-    expect(service.get("marketplace").backend).toBe("real-cloud");
+    expect(service.get("marketplace").backend).toBe("marketplace-api");
   });
 
-  it("preserves an explicitly configured real-cloud endpoint", () => {
+  it("preserves an explicitly configured marketplace-api endpoint", () => {
     writeFileSync(
       join(userDataPath, "lvis-settings.json"),
       JSON.stringify({
         marketplace: {
-          backend: "real-cloud",
-          realCloudBaseUrl: "https://marketplace.lvis.local",
-          realCloudAllowPrivateNetwork: false,
+          backend: "marketplace-api",
+          marketplaceBaseUrl: "https://marketplace.lvis.local",
+          marketplaceAllowPrivateNetwork: false,
         },
       }),
       "utf-8",
@@ -75,9 +139,9 @@ describe("SettingsService marketplace defaults", () => {
     const service = new SettingsService({ userDataPath });
 
     expect(service.get("marketplace")).toEqual({
-      backend: "real-cloud",
-      realCloudBaseUrl: "https://marketplace.lvis.local",
-      realCloudAllowPrivateNetwork: false,
+      backend: "marketplace-api",
+      marketplaceBaseUrl: "https://marketplace.lvis.local",
+      marketplaceAllowPrivateNetwork: false,
     });
   });
 });

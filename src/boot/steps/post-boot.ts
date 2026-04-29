@@ -73,7 +73,7 @@ export function wireReleasePrep(input: ReleasePrepInput): ReleasePrepOutput {
     // S12 — PluginTelemetryClient.
     const ptClient = new PluginTelemetryClient({
       settings: () => settingsService.get("telemetry"),
-      marketplaceBaseUrl: () => settingsService.get("marketplace").realCloudBaseUrl,
+      marketplaceBaseUrl: () => settingsService.get("marketplace").marketplaceBaseUrl,
       installToken: () => settingsService.getSecret("marketplace.apiKey"),
       deviceUuidPath: resolve(app.getPath("userData"), ".lvis", "device-uuid"),
     });

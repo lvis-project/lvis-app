@@ -153,18 +153,18 @@ describe("Phase 1 — plugin trust boundary", () => {
     it.skipIf(symlinkSkip)(
       "rejects a symlink under pluginsRoot that points outside the trust root",
       async () => {
-        // Real plugin lives at testDir/outside/p-evil/plugin.json — outside
+        // The target plugin lives at testDir/outside/p-evil/plugin.json — outside
         // pluginsRoot.
-        const realDir = join(testDir, "outside", "p-evil");
-        const realManifest = await writePluginAt(realDir, "tb.evil");
-        // Plant a symlink inside pluginsRoot that points at the real
+        const targetDir = join(testDir, "outside", "p-evil");
+        const targetManifest = await writePluginAt(targetDir, "tb.evil");
+        // Plant a symlink inside pluginsRoot that points at the target
         // directory. Without realpath defeat, this would naively pass the
         // containment check.
         const linkDir = join(pluginsRoot, "p-evil");
-        await symlink(realDir, linkDir, "dir");
+        await symlink(targetDir, linkDir, "dir");
         const linkedManifest = join(linkDir, "plugin.json");
         // Sanity check both paths resolve to the same file before runtime.
-        expect(realManifest).not.toEqual(linkedManifest);
+        expect(targetManifest).not.toEqual(linkedManifest);
         await writeRegistry([{ id: "tb.evil", manifestPath: linkedManifest }]);
 
         const runtime = new PluginRuntime({

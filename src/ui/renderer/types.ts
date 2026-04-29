@@ -85,9 +85,9 @@ export type AppSettings = {
   privacy?: { piiRedactEnabled: boolean };
   plugins?: Record<string, never>;
   marketplace?: {
-    backend?: "real-cloud";
-    realCloudBaseUrl?: string;
-    realCloudAllowPrivateNetwork?: boolean;
+    backend?: "marketplace-api";
+    marketplaceBaseUrl?: string;
+    marketplaceAllowPrivateNetwork?: boolean;
   };
 };
 

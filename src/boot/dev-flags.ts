@@ -213,7 +213,7 @@ export function isConfigured(): boolean {
  * Mock fetcher gate — packaged builds must never instantiate
  * `MockMarketplaceFetcher`, which serves catalog from a user-writable
  * `plugins/marketplace.json`. In production the only sanctioned source is
- * `RealCloudMarketplaceFetcher` talking to the marketplace server (envelope
+ * `MarketplaceApiFetcher` talking to the marketplace server (envelope
  * signatures are the trust anchor). Pre-Phase-2 review (security-reviewer
  * H-1) showed that allowing the mock in packaged builds would let any user
  * advertise their own plugin as `installPolicy:"admin"` and get it
@@ -227,7 +227,7 @@ export function isConfigured(): boolean {
 export function assertMockMarketplaceAllowed(packaged: boolean = isPackagedCached): void {
   if (packaged) {
     throw new Error(
-      "[security] MockMarketplaceFetcher is dev-only — packaged builds must use RealCloudMarketplaceFetcher",
+      "[security] MockMarketplaceFetcher is dev-only — packaged builds must use MarketplaceApiFetcher",
     );
   }
 }

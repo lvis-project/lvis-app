@@ -71,7 +71,7 @@ export interface MarketplaceListItem extends PluginMarketplaceItem {
 }
 
 /**
- * Disabled fetcher — used when no real-cloud backend is configured in a
+ * Disabled fetcher — used when no marketplace-api backend is configured in a
  * packaged build. Constructor is side-effect free so boot does not crash;
  * any actual marketplace method (list/install/download) throws a clear
  * `marketplace-disabled` error so callers can degrade gracefully. The
@@ -98,7 +98,7 @@ export class DisabledMarketplaceFetcher implements MarketplaceFetcher {
 /**
  * @internal Dev/test-only fetcher. Reads a local JSON catalog file.
  *
- * Production / packaged builds MUST use {@link RealCloudMarketplaceFetcher}
+ * Production / packaged builds MUST use {@link MarketplaceApiFetcher}
  * — the constructor throws when invoked in a packaged build via the shared
  * dev-flags gate. The local `plugins/marketplace.json` is user-writable and
  * cannot serve as a trust anchor; any packaged binary that fell back to this
@@ -128,7 +128,7 @@ export class MockMarketplaceFetcher implements MarketplaceFetcher {
     _version: string,
   ): Promise<{ zipBuffer: Buffer; sha256: string }> {
     throw new Error(
-      "MockMarketplaceFetcher does not support downloadVersion(); use RealCloudMarketplaceFetcher",
+      "MockMarketplaceFetcher does not support downloadVersion(); use MarketplaceApiFetcher",
     );
   }
 
@@ -846,10 +846,10 @@ export class PluginMarketplaceService {
    * Phase 2-final install path — single source: download + verify + extract.
    *
    * The historical file:-spec / npm-install branch is gone. Production and
-   * dev both fetch a signed zip from the marketplace API; the dev workflow
-   * runs the marketplace server locally (default `http://localhost:8000`)
-   * and publishes plugin artifacts via the server's CLI rather than
-   * sideloading sibling-repo paths.
+   * dev both fetch a signed zip from the marketplace API. The app default is
+   * the public marketplace; local dev can override the endpoint and publish
+   * plugin artifacts via the server's CLI rather than sideloading sibling-repo
+   * paths.
    */
   /**
    * Orchestrate one verified-zip install: delegate download + extract to

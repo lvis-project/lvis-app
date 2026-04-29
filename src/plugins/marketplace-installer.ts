@@ -23,7 +23,7 @@ import { getCachedTarball, isOfflineCacheEnabled, setCachedTarball } from "./off
 
 /**
  * Minimal HTTP surface the installer needs. Lets callers inject either
- * {@link RealCloudMarketplaceFetcher}-backed clients or test mocks without
+ * {@link MarketplaceApiFetcher}-backed clients or test mocks without
  * pulling the whole Marketplace service interface.
  */
 export interface MarketplaceHttp {

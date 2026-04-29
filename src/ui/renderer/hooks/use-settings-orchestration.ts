@@ -130,8 +130,8 @@ export function useSettingsOrchestration(
       setHasWebKey(webApiKeySet);
       setEnableWakeupRoutine(s.routine?.enableWakeupRoutine ?? false);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
-      setMarketplaceBaseUrl(s.marketplace?.realCloudBaseUrl ?? "");
-      setMarketplaceAllowPrivateNetwork(s.marketplace?.realCloudAllowPrivateNetwork ?? false);
+      setMarketplaceBaseUrl(s.marketplace?.marketplaceBaseUrl ?? "");
+      setMarketplaceAllowPrivateNetwork(s.marketplace?.marketplaceAllowPrivateNetwork ?? false);
       const marketplaceKeySet = await api.hasMarketplaceApiKey();
       if (cancelled) return;
       setHasMarketplaceApiKey(marketplaceKeySet);
@@ -233,8 +233,8 @@ export function useSettingsOrchestration(
           routine: { enableWakeupRoutine } as any,
           privacy: { piiRedactEnabled },
           marketplace: {
-            realCloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
-            realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
+            marketplaceBaseUrl: marketplaceBaseUrl.trim() || undefined,
+            marketplaceAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
           },
         } as any);
       }

@@ -73,8 +73,8 @@ function makeServices(
     mcpServers?: Array<{ status: string }>;
     marketplaceSettings?: {
       backend: string;
-      realCloudBaseUrl?: string;
-      realCloudAllowPrivateNetwork?: boolean;
+      marketplaceBaseUrl?: string;
+      marketplaceAllowPrivateNetwork?: boolean;
     };
   } = {},
 ) {
@@ -260,7 +260,7 @@ describe("lvis:runtime:env", () => {
 // lvis:marketplace:ping
 // ─────────────────────────────────────────────────────────────────────────────
 describe("lvis:marketplace:ping", () => {
-  it("returns { configured: false, online: false } when backend is not real-cloud", async () => {
+  it("returns { configured: false, online: false } when backend is not marketplace-api", async () => {
     await setupHandlers(makeMockPM(), makeMockGate(), {
       marketplaceSettings: { backend: "mock" },
     });
@@ -274,11 +274,11 @@ describe("lvis:marketplace:ping", () => {
     expect(result.online).toBe(false);
   });
 
-  it("returns { configured: false } when backend is real-cloud but no base URL", async () => {
+  it("returns { configured: false } when backend is marketplace-api but no base URL", async () => {
     await setupHandlers(makeMockPM(), makeMockGate(), {
       marketplaceSettings: {
-        backend: "real-cloud",
-        realCloudBaseUrl: "",
+        backend: "marketplace-api",
+        marketplaceBaseUrl: "",
       },
     });
 
@@ -301,8 +301,8 @@ describe("lvis:marketplace:ping", () => {
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
   });
 
-  it("returns { configured: true, online: false } when real-cloud fetch throws", async () => {
-    // Use realCloudAllowPrivateNetwork=true so the handler uses the direct
+  it("returns { configured: true, online: false } when marketplace-api fetch throws", async () => {
+    // Use marketplaceAllowPrivateNetwork=true so the handler uses the direct
     // fetch path (no dynamic network-guard import) and we can control the
     // global fetch stub.
     const fetchSpy = vi.spyOn(global, "fetch").mockRejectedValueOnce(
@@ -311,9 +311,9 @@ describe("lvis:marketplace:ping", () => {
 
     await setupHandlers(makeMockPM(), makeMockGate(), {
       marketplaceSettings: {
-        backend: "real-cloud",
-        realCloudBaseUrl: "http://127.0.0.1:9999/",
-        realCloudAllowPrivateNetwork: true,
+        backend: "marketplace-api",
+        marketplaceBaseUrl: "http://127.0.0.1:9999/",
+        marketplaceAllowPrivateNetwork: true,
       },
     });
 
@@ -328,16 +328,16 @@ describe("lvis:marketplace:ping", () => {
     fetchSpy.mockRestore();
   });
 
-  it("returns { configured: true, online: true } when real-cloud fetch succeeds (ok=true)", async () => {
+  it("returns { configured: true, online: true } when marketplace-api fetch succeeds (ok=true)", async () => {
     const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
       ok: true,
     } as Response);
 
     await setupHandlers(makeMockPM(), makeMockGate(), {
       marketplaceSettings: {
-        backend: "real-cloud",
-        realCloudBaseUrl: "http://127.0.0.1:9999/",
-        realCloudAllowPrivateNetwork: true,
+        backend: "marketplace-api",
+        marketplaceBaseUrl: "http://127.0.0.1:9999/",
+        marketplaceAllowPrivateNetwork: true,
       },
     });
 

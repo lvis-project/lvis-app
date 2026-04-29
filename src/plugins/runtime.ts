@@ -1321,15 +1321,15 @@ export class PluginRuntime {
     pluginsRoot: string,
   ): boolean {
     if (!isAbsolute(manifestPath)) return true;
-    let realManifest: string;
-    let realRoot: string;
+    let resolvedManifest: string;
+    let resolvedRoot: string;
     try {
-      realManifest = realpathSync(manifestPath);
-      realRoot = realpathSync(pluginsRoot);
+      resolvedManifest = realpathSync(manifestPath);
+      resolvedRoot = realpathSync(pluginsRoot);
     } catch {
       return false;
     }
-    return this.isPathContained(realRoot, realManifest);
+    return this.isPathContained(resolvedRoot, resolvedManifest);
   }
 
   /**

@@ -9,12 +9,12 @@
 
 ## 1. Context & Goals
 
-Phase 1 은 `MockCloudMarketplaceAdapter` 로 시작되었고 Phase 1.5 는 managed plugin guard + deployment model 을 확립했다. Phase 2 proper 에서는 **실 마켓플레이스 서버** 를 만들어 다음 요구사항을 충족한다:
+Phase 1 은 `MockMarketplaceAdapter` 로 시작되었고 Phase 1.5 는 managed plugin guard + deployment model 을 확립했다. Phase 2 proper 에서는 **실 마켓플레이스 서버** 를 만들어 다음 요구사항을 충족한다:
 
 1. **IT admin 이 플러그인을 사내 배포** — install 이 managed 정책과 자동 연동
 2. **개발자가 아닌 사용자 (기획, 운영, 영업 등) 도 플러그인 publish 가능** — 브라우저 Web UI
 3. **LVIS client 가 사내망에서만 catalog / zip 을 fetch** — 외부 노출 없음
-4. **Phase 1.5 의 `MockCloudMarketplaceAdapter` 를 adapter-only 교체** — 호스트 host 코드 변경 최소화
+4. **Phase 1.5 의 `MockMarketplaceAdapter` 를 adapter-only 교체** — 호스트 host 코드 변경 최소화
 5. **§17 corporate TLS** + **§16.2 SSO** 와 일관된 auth 모델
 
 **Non-goals (Phase 3 이월)**:
@@ -35,7 +35,7 @@ Phase 1 은 `MockCloudMarketplaceAdapter` 로 시작되었고 Phase 1.5 는 mana
 | Q1 | 서버 호스팅 | 별도 repo `lvis-marketplace-server/`, 사내망 Linux VM 배포 | 통제 + 비개발자 UI 요구 |
 | Q2 | 서버 언어 | **FastAPI (Python 3.12)** | pageindex 팀 python stack 재사용, uv 런타임 재활용, OpenAPI 자동 생성 → client 스펙 lock |
 | Q3 | Auth | **MVP: API key per publisher (Bearer)** / Phase 3: SSO (newep.lge.com OIDC) passthrough | API key 로 단순하게 시작, SSO 로 성숙도 올리기 |
-| Q4 | Artifact | **zip** | Phase 1.5 `MockCloudMarketplaceAdapter` 와 호환, 기존 `plugin.json` parser 재사용 |
+| Q4 | Artifact | **zip** | Phase 1.5 `MockMarketplaceAdapter` 와 호환, 기존 `plugin.json` parser 재사용 |
 | Q5 | Versioning + rollback | **semver 강제, single "stable" channel, server-side rollback/yank API** | Phase 3 에서 channel 분리 |
 | Q6 | Publishing workflow | **Web UI 주 + CLI 보조 (동일 API)** | 비개발자 = UI, 개발자 = CLI |
 | Q7 | Managed enforcement | **서버 + client 이중 (admin 이 `organization_allowed` flag + policy.json allow-list 둘 다 설정 가능)** | 방어 심층화 |
@@ -280,9 +280,9 @@ CREATE TABLE audit_log (
 
 ## 4. Client Adapter Design
 
-### 4.1 `RealCloudMarketplaceAdapter` (`lvis-app/src/plugin-runtime/real-marketplace-adapter.ts`)
+### 4.1 `MarketplaceApiAdapter` (`lvis-app/src/plugin-runtime/marketplace-api-adapter.ts`)
 
-Phase 1.5 의 `MockCloudMarketplaceAdapter` 를 교체. 동일한 interface 구현:
+Phase 1.5 의 `MockMarketplaceAdapter` 를 교체. 동일한 interface 구현:
 
 ```ts
 interface MarketplaceAdapter {
@@ -291,7 +291,7 @@ interface MarketplaceAdapter {
   verify(zipPath: string, expectedSha256: string): Promise<boolean>;
 }
 
-class RealCloudMarketplaceAdapter implements MarketplaceAdapter {
+class MarketplaceApiAdapter implements MarketplaceAdapter {
   constructor(private baseUrl: string, private apiKey?: string) {}
 
   async list() {
@@ -315,7 +315,7 @@ class RealCloudMarketplaceAdapter implements MarketplaceAdapter {
 }
 ```
 
-기존 `MockCloudMarketplaceAdapter` 는 test fixtures 용도로 유지 (`__tests__/fixtures/` 로 이동), production 경로는 `RealCloudMarketplaceAdapter`.
+기존 `MockMarketplaceAdapter` 는 test fixtures 용도로 유지 (`__tests__/fixtures/` 로 이동), production 경로는 `MarketplaceApiAdapter`.
 
 ### 4.2 Config
 
@@ -342,12 +342,12 @@ LVIS client 는 read-only 이므로 `apiKey: null` 기본. Admin policy (C2 admi
 
 ### 4.3 Integration with MarketplaceService
 
-`src/plugin-runtime/marketplace.ts` 의 `MarketplaceService` constructor 가 `adapter: MarketplaceAdapter` 인자를 받도록. 현재 `MockCloudMarketplaceAdapter` 가 하드코딩되어 있다면 factory 로 분리:
+`src/plugin-runtime/marketplace.ts` 의 `MarketplaceService` constructor 가 `adapter: MarketplaceAdapter` 인자를 받도록. 현재 `MockMarketplaceAdapter` 가 하드코딩되어 있다면 factory 로 분리:
 
 ```ts
 function createAdapter(config: MarketplaceConfig): MarketplaceAdapter {
-  if (config.useMock) return new MockCloudMarketplaceAdapter();
-  return new RealCloudMarketplaceAdapter(config.baseUrl, config.apiKey);
+  if (config.useMock) return new MockMarketplaceAdapter();
+  return new MarketplaceApiAdapter(config.baseUrl, config.apiKey);
 }
 ```
 
@@ -420,14 +420,14 @@ Phase 3 승격 시에도 API key 경로는 유지 (CI 용).
 
 ### 7.1 Adapter swap 로드맵
 
-1. **Pre-deploy**: `RealCloudMarketplaceAdapter` 구현 + mock 과 interface 호환 유지
+1. **Pre-deploy**: `MarketplaceApiAdapter` 구현 + mock 과 interface 호환 유지
 2. **Server up**: IT 가 VM + nginx + LGE CA 인증서 준비, systemd 서비스 기동
 3. **초기 catalog 시드**: 3개 번들 플러그인 (meeting/pageindex/email) 을 admin 이 CLI 로 publish. `deployment: "managed"` 로.
 4. **LVIS client 업데이트**: `marketplace.config.json` 에 실 baseUrl 주입, next release 에 적용
 5. **A/B**: `LVIS_MARKETPLACE_MOCK=1` env 로 dev/test 는 기존 mock 유지 (회귀 테스트)
 6. **Sunset**: 6개월 후 mock adapter 삭제 (test fixtures 제외)
 
-### 7.2 `MockCloudMarketplaceAdapter` 운명
+### 7.2 `MockMarketplaceAdapter` 운명
 
 - Phase 2 proper 커밋 후: `plugin-runtime/__tests__/fixtures/` 로 이동, test-only
 - Production 경로에서 import 금지 (`eslint-plugin-import` no-restricted rule 추가)
@@ -441,7 +441,7 @@ Phase 3 승격 시에도 API key 경로는 유지 (CI 용).
 | **M1** — Server skeleton | FastAPI + SQLite + /catalog + /plugins CRUD + API key auth | 3d | 없음 |
 | **M2** — Publisher API + zip validation | plugin.json schema + semver check + filesystem storage | 2d | M1 |
 | **M3** — Admin API | rollback, yank, org-allowed, key 발급 | 2d | M1 |
-| **M4** — Client adapter | `RealCloudMarketplaceAdapter` + config + MarketplaceService 교체 | 2d | M1 |
+| **M4** — Client adapter | `MarketplaceApiAdapter` + config + MarketplaceService 교체 | 2d | M1 |
 | **M5** — Deploy to IT VM | systemd + nginx + LGE CA cert + 초기 catalog seed | 1d | **IT 협조 (VM 프로비저닝)** |
 | **M6** — Web UI | React + shadcn + publish/dashboard/admin 페이지 | 5d | M1-M3 |
 | **M7** — E2E test + smoke | vitest + pytest integration, physical publish/install cycle | 2d | M1-M6 |

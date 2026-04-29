@@ -167,7 +167,7 @@ describe("PluginMarketplaceService install()", () => {
     };
     // Phase 2a invariant: the zip-install branch must emit a registry-
     // relative POSIX path (NOT an absolute path). Locks the regression
-    // flagged by code-reviewer round 1 — production RealCloud installs
+    // flagged by code-reviewer round 1 — production marketplace API installs
     // were writing absolute paths into registry.json.
     const entryPath = registry.plugins[0].manifestPath;
     expect(entryPath).toBe("test-plugin/plugin.json");

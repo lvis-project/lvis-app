@@ -7,7 +7,7 @@
  *
  * Implementations:
  *   - {@link MockMarketplaceFetcher}       — reads plugins/marketplace.json
- *   - {@link RealCloudMarketplaceFetcher}  — talks to the LVIS cloud server
+ *   - {@link MarketplaceApiFetcher}  — talks to the LVIS cloud server
  *
  * Note: `listPlugins()` returns the pure catalog shape
  * ({@link PluginMarketplaceItem}). Installed/enabled/isManaged flags are

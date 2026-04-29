@@ -866,17 +866,17 @@ ${input}`;
       throw new Error(`Plugin root not found (plugin=${pluginId}).`);
     }
     const pluginRoot = realpathSync(rawPluginRoot);
-    let realEntryPath: string;
+    let resolvedEntryPath: string;
     try {
-      realEntryPath = realpathSync(entryPath);
+      resolvedEntryPath = realpathSync(entryPath);
     } catch {
       throw new Error(`Plugin UI entry path could not be resolved (plugin=${pluginId}).`);
     }
     const rootWithSep = pluginRoot.endsWith(path.sep) ? pluginRoot : pluginRoot + path.sep;
-    if (realEntryPath !== pluginRoot && !realEntryPath.startsWith(rootWithSep)) {
+    if (resolvedEntryPath !== pluginRoot && !resolvedEntryPath.startsWith(rootWithSep)) {
       throw new Error(`Plugin UI entry path escapes plugin directory (plugin=${pluginId}).`);
     }
-    return readFile(realEntryPath, "utf-8");
+    return readFile(resolvedEntryPath, "utf-8");
   });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:cards", () => pluginRuntime.listPluginCards());
@@ -914,9 +914,9 @@ ${input}`;
   //
   // SSRF guard: routes through `fetchPublicHttpResponse` so the resolved IP
   // is checked against private/loopback/link-local ranges. The
-  // `realCloudAllowPrivateNetwork` flag is honored — same opt-in already
+  // `marketplaceAllowPrivateNetwork` flag is honored — same opt-in already
   // used by the marketplace artifact fetcher. Without this, a malicious
-  // settings-write that points `realCloudBaseUrl` at 169.254.169.254 would
+  // settings-write that points `marketplaceBaseUrl` at 169.254.169.254 would
   // turn this handler into a private-network probe oracle.
   //
   // Base URL composition uses a relative path with a trailing-slash-normalized
@@ -925,16 +925,16 @@ ${input}`;
   ipcMain.handle("lvis:marketplace:ping", async (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:marketplace:ping", e); return UNAUTHORIZED_FRAME; }
     const settings = settingsService.get("marketplace");
-    if (settings.backend !== "real-cloud" || !settings.realCloudBaseUrl) {
+    if (settings.backend !== "marketplace-api" || !settings.marketplaceBaseUrl) {
       return { configured: false, online: false } as const;
     }
     try {
-      const base = settings.realCloudBaseUrl.replace(/\/?$/, "/");
+      const base = settings.marketplaceBaseUrl.replace(/\/?$/, "/");
       const url = new URL("api/v1/health", base).toString();
       let res: Response;
-      if (settings.realCloudAllowPrivateNetwork === true) {
+      if (settings.marketplaceAllowPrivateNetwork === true) {
         // Local dev path — same explicit opt-in already used by the
-        // RealCloudMarketplaceFetcher so loopback (`127.0.0.1:8000`) works.
+        // MarketplaceApiFetcher so loopback (`127.0.0.1:8000`) works.
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 3000);
         try {
@@ -1374,12 +1374,12 @@ ${input}`;
     if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };
     if (typeof newText !== "string" || newText.trim().length === 0) return { ok: false, error: "empty-text" };
     // messageIndex is a user-assistant-only ordinal from the UI; convert to
-    // the real history index before truncating so tool_result entries
+    // the underlying history index before truncating so tool_result entries
     // (which the UI does not count) aren't mis-targeted.
     const history = conversationLoop.getHistory().getMessages() as GenericMessage[];
-    const realIdx = entryOrdinalToHistoryIndex(history, messageIndex);
-    if (realIdx < 0) return { ok: false, error: "index-out-of-range" };
-    conversationLoop.getHistory().truncate(realIdx);
+    const historyIndex = entryOrdinalToHistoryIndex(history, messageIndex);
+    if (historyIndex < 0) return { ok: false, error: "index-out-of-range" };
+    conversationLoop.getHistory().truncate(historyIndex);
     const result = await streamTurn(newText);
     return { ok: true, result };
   });
@@ -1389,8 +1389,8 @@ ${input}`;
     const current = conversationLoop.getHistory().getMessages() as GenericMessage[];
     let upto = current.length;
     if (typeof messageIndex === "number" && messageIndex >= 0) {
-      const realIdx = entryOrdinalToHistoryIndex(current, messageIndex);
-      if (realIdx >= 0) upto = Math.min(realIdx + 1, current.length);
+      const historyIndex = entryOrdinalToHistoryIndex(current, messageIndex);
+      if (historyIndex >= 0) upto = Math.min(historyIndex + 1, current.length);
     }
     let slice = current.slice(0, upto);
     // Remove trailing tool_use blocks that have no matching tool_result in the
@@ -1672,16 +1672,16 @@ ${input}`;
       pendingEntryUrlResolvers.delete(webContentsId);
       return { ok: true };
     }
-    let realRoot: string;
-    let realEntry: string;
+    let resolvedRoot: string;
+    let resolvedEntry: string;
     try {
-      realRoot = realpathSync(rawInstallRoot);
-      realEntry = realpathSync(entryFsPath);
+      resolvedRoot = realpathSync(rawInstallRoot);
+      resolvedEntry = realpathSync(entryFsPath);
     } catch {
       return { ok: false, error: "entry-url-outside-install-root" };
     }
-    const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-    if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
+    const rootWithSep = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
+    if (resolvedEntry !== resolvedRoot && !resolvedEntry.startsWith(rootWithSep)) {
       return { ok: false, error: "entry-url-outside-install-root" };
     }
     const binding = { pluginId, entryUrl };

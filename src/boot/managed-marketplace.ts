@@ -5,18 +5,18 @@ import type { PluginRuntime } from "../plugins/runtime.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 
 export function resolveManagedPluginBootstrap(input: {
-  marketplace: Pick<MarketplaceSettings, "backend" | "realCloudBaseUrl">;
+  marketplace: Pick<MarketplaceSettings, "backend" | "marketplaceBaseUrl">;
   isPackaged: boolean;
 }): { enabled: boolean; reason?: string } {
   const { marketplace, isPackaged } = input;
-  if (marketplace.backend === "real-cloud") {
-    const baseUrl = marketplace.realCloudBaseUrl?.trim();
+  if (marketplace.backend === "marketplace-api") {
+    const baseUrl = marketplace.marketplaceBaseUrl?.trim();
     if (baseUrl) {
       return { enabled: true };
     }
     return {
       enabled: false,
-      reason: "real-cloud backend has no configured base URL",
+      reason: "marketplace-api backend has no configured base URL",
     };
   }
   if (isPackaged) {
@@ -32,7 +32,7 @@ export interface RunManagedBootstrapInput {
   pluginMarketplace: PluginMarketplaceService;
   pluginRuntime: PluginRuntime;
   mainWindow: BrowserWindow | null | undefined;
-  marketplace: Pick<MarketplaceSettings, "backend" | "realCloudBaseUrl">;
+  marketplace: Pick<MarketplaceSettings, "backend" | "marketplaceBaseUrl">;
   isPackaged: boolean;
 }
 

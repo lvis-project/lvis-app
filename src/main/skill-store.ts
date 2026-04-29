@@ -131,16 +131,16 @@ export class SkillStore {
       throw err;
     }
 
-    // C2(a): resolve the directory's real path ONCE so each scanned entry
+    // C2(a): resolve the directory's canonical path ONCE so each scanned entry
     // can be confined against it. If the directory itself doesn't exist as
-    // a real path (just-created via mkdir, race conditions), fall back to
+    // a canonical path (just-created via mkdir, race conditions), fall back to
     // the supplied `dir` value — confinement still works because we resolve
     // every entry the same way.
-    let realDir: string;
+    let resolvedDir: string;
     try {
-      realDir = await realpath(dir);
+      resolvedDir = await realpath(dir);
     } catch {
-      realDir = resolve(dir);
+      resolvedDir = resolve(dir);
     }
 
     const skills: LoadedSkill[] = [];
@@ -154,12 +154,12 @@ export class SkillStore {
         continue;
       }
       const filePath = join(dir, entry);
-      // C2(a): resolve the entry's real path and verify it stays inside
-      // the (real) skills directory. Symlinks pointing outside (e.g.
+      // C2(a): resolve the entry's canonical path and verify it stays inside
+      // the canonical skills directory. Symlinks pointing outside (e.g.
       // `evil.md → /etc/passwd`) are rejected here.
-      let realFile: string;
+      let resolvedFile: string;
       try {
-        realFile = await realpath(filePath);
+        resolvedFile = await realpath(filePath);
       } catch (err) {
         console.warn(
           `[lvis] skill scan: realpath failed for ${filePath}:`,
@@ -167,15 +167,15 @@ export class SkillStore {
         );
         continue;
       }
-      const rel = relative(realDir, realFile);
+      const rel = relative(resolvedDir, resolvedFile);
       if (rel.startsWith("..") || isAbsolute(rel)) {
         console.warn(
-          `[lvis] skill scan: rejected traversal — ${filePath} -> ${realFile} escapes ${realDir}`,
+          `[lvis] skill scan: rejected traversal — ${filePath} -> ${resolvedFile} escapes ${resolvedDir}`,
         );
         continue;
       }
       try {
-        const raw = await readFile(realFile, "utf-8");
+        const raw = await readFile(resolvedFile, "utf-8");
         const { fm, body } = parseFrontmatter(raw);
         const name = fm.name || baseName;
         // C2(b): the resolved-from-frontmatter name is also subject to the
@@ -183,7 +183,7 @@ export class SkillStore {
         // reject the skill rather than carry that ID into the load() lookup.
         if (!SKILL_NAME_ALLOWLIST.test(name)) {
           console.warn(
-            `[lvis] skill scan: rejected non-allowlist frontmatter name "${name}" in ${realFile}`,
+            `[lvis] skill scan: rejected non-allowlist frontmatter name "${name}" in ${resolvedFile}`,
           );
           continue;
         }
@@ -193,7 +193,7 @@ export class SkillStore {
         // skill and tight enough that abuse is bounded.
         if (Buffer.byteLength(trimmedBody, "utf-8") > SKILL_MAX_BODY_BYTES) {
           console.warn(
-            `[lvis] skill scan: rejected oversized body for ${realFile} (>${SKILL_MAX_BODY_BYTES} bytes)`,
+            `[lvis] skill scan: rejected oversized body for ${resolvedFile} (>${SKILL_MAX_BODY_BYTES} bytes)`,
           );
           continue;
         }
@@ -203,7 +203,7 @@ export class SkillStore {
           triggers: fm.triggers ?? [],
           body: trimmedBody,
           source,
-          filePath: realFile,
+          filePath: resolvedFile,
         });
       } catch (err) {
         console.warn(

@@ -1,7 +1,7 @@
 /**
  * Shared parser for the `runtime` block on MCP plugin entries.
  *
- * Both the catalog row reader (`real-cloud-marketplace-fetcher.ts`) and
+ * Both the catalog row reader (`marketplace-api-fetcher.ts`) and
  * the install-time manifest reader (`mcp-marketplace-install.ts`) need
  * to validate the same discriminated union shape. Loop #5 code-review
  * MEDIUM flagged the duplicated parsers as drift risk: if the two

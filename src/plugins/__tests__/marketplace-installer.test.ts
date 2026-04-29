@@ -214,7 +214,7 @@ describe("installFromMarketplace — integrity failures", () => {
   });
 
   it("rejects when envelope.artifact_sha256 disagrees with body hash", async () => {
-    const tarball = Buffer.from("real-body");
+    const tarball = Buffer.from("artifact-body");
     const { privateKey, pubBuf } = freshEd25519();
     const envelope = makeEnvelope(tarball, [{ key_id: "prod-v1", privateKey }], {
       artifact_sha256: "00".repeat(32)

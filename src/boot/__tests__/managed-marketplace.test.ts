@@ -25,19 +25,19 @@ describe("resolveManagedPluginBootstrap", () => {
     });
   });
 
-  it("requires a base URL for real-cloud bootstrap", () => {
+  it("requires a base URL for marketplace-api bootstrap", () => {
     expect(resolveManagedPluginBootstrap({
-      marketplace: { backend: "real-cloud" },
+      marketplace: { backend: "marketplace-api" },
       isPackaged: true,
     })).toEqual({
       enabled: false,
-      reason: "real-cloud backend has no configured base URL",
+      reason: "marketplace-api backend has no configured base URL",
     });
   });
 
-  it("allows real-cloud bootstrap when a base URL is configured", () => {
+  it("allows marketplace-api bootstrap when a base URL is configured", () => {
     expect(resolveManagedPluginBootstrap({
-      marketplace: { backend: "real-cloud", realCloudBaseUrl: "https://marketplace.lvis.internal" },
+      marketplace: { backend: "marketplace-api", marketplaceBaseUrl: "https://marketplace.lvis.internal" },
       isPackaged: true,
     })).toEqual({ enabled: true });
   });
@@ -66,8 +66,8 @@ describe("runManagedBootstrap concurrency", () => {
       pluginRuntime,
       mainWindow: null,
       marketplace: {
-        backend: "real-cloud" as const,
-        realCloudBaseUrl: "https://marketplace.example.com",
+        backend: "marketplace-api" as const,
+        marketplaceBaseUrl: "https://marketplace.example.com",
       },
       isPackaged: false,
     };
@@ -100,8 +100,8 @@ describe("runManagedBootstrap concurrency", () => {
       pluginRuntime,
       mainWindow: null,
       marketplace: {
-        backend: "real-cloud" as const,
-        realCloudBaseUrl: "https://marketplace.example.com",
+        backend: "marketplace-api" as const,
+        marketplaceBaseUrl: "https://marketplace.example.com",
       },
       isPackaged: false,
     };
