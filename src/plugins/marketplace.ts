@@ -1,4 +1,4 @@
-import { cp, readFile, rm, stat as statAsync, writeFile } from "node:fs/promises";
+import { cp, readFile, rename, rm, stat as statAsync, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
@@ -1028,25 +1028,47 @@ export class PluginMarketplaceService {
       const userPluginsRoot = this.pluginsRoot;
       const installDir = resolve(userPluginsRoot, pluginId);
 
-      // Remove any previous install first so deleted source files do not
-      // linger, then copy into ~/.lvis/plugins/<id>/.
-      await rm(installDir, { recursive: true, force: true });
-      await cp(sourcePath, installDir, { recursive: true });
+      // Refuse to clobber an admin-installed plugin under the same id —
+      // dev sideload should not silently downgrade an admin-managed entry.
+      const existingRegistry = await readPluginRegistry(this.registryPath);
+      const existingEntry = existingRegistry.plugins.find((p) => p.id === pluginId);
+      if (existingEntry?.installedBy === "admin") {
+        throw new Error(
+          `[installLocal] refusing to overwrite admin-installed plugin: ${pluginId}`,
+        );
+      }
 
-      // Register in the plugin registry.
+      // Stage the copy under a sibling tmp dir so an interrupted install
+      // never leaves the live install path half-written. The final rename
+      // is atomic on the same filesystem (which ~/.lvis/plugins/ guarantees).
+      const stagingDir = resolve(userPluginsRoot, `${pluginId}.tmp-${process.pid}-${Date.now()}`);
+      await rm(stagingDir, { recursive: true, force: true });
+      try {
+        await cp(sourcePath, stagingDir, { recursive: true });
+        await rm(installDir, { recursive: true, force: true });
+        await rename(stagingDir, installDir);
+      } catch (err) {
+        await rm(stagingDir, { recursive: true, force: true });
+        throw err;
+      }
+
+      // Register in the plugin registry. installedBy follows the manifest's
+      // declared installPolicy so dev-sideloading an admin-policy manifest
+      // doesn't silently downgrade it to "user".
+      const installedBy = manifest.installPolicy === "admin" ? "admin" : "user";
       const registryManifestPath = posix.join(pluginId, "plugin.json");
       await updatePluginRegistry(this.registryPath, (registry) => {
         const existing = registry.plugins.find((x) => x.id === pluginId);
         if (existing) {
           existing.manifestPath = registryManifestPath;
           existing.enabled = true;
-          existing.installedBy = "user";
+          existing.installedBy = installedBy;
         } else {
           registry.plugins.push({
             id: pluginId,
             manifestPath: registryManifestPath,
             enabled: true,
-            installedBy: "user",
+            installedBy,
           });
         }
       });

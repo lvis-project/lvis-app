@@ -243,7 +243,7 @@ const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
  */
 /**
  * Plugin webview registry — populated by the host renderer at the
- * webview's `did-attach` event via `lvis:plugin:register-webview`. Main
+ * webview's `dom-ready` event via `lvis:plugin:register-webview`. Main
  * resolves `pluginId` and the verified entry URL from `event.sender.id`
  * on every plugin IPC, eliminating the renderer-supplied pluginId
  * spoofing surface.
@@ -1726,7 +1726,19 @@ ${input}`;
           if (idx !== -1) arr.splice(idx, 1);
           if (arr.length === 0) pendingEntryUrlResolvers.delete(senderId);
         }
-        auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
+        // Frame already passed validatePluginFrame above; this is a slow-start
+        // race, not an unauthorized sender. Audit it under a distinct reason
+        // so security log scans aren't polluted by registration races.
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "ipc-guard",
+          type: "warn",
+          input: JSON.stringify({
+            channel: "lvis:plugin:get-entry-url",
+            reason: "entry-url-timeout",
+            frameUrl: e?.senderFrame?.url ?? "",
+          }),
+        });
         resolve(UNAUTHORIZED_FRAME);
       }, 500);
     });

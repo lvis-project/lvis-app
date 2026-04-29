@@ -360,9 +360,13 @@ const api = {
       | { pluginId: string; installed: true }
       | { ok: false; error: string }
       | null;
-    // Normalise UNAUTHORIZED_FRAME (ok:false envelope) to null so callers
-    // only see { pluginId, installed: true } | null.
-    if (!r || "ok" in r) return null;
+    if (!r) return null; // user cancelled the folder picker
+    if ("ok" in r) {
+      // Auth/dev-mode failures surface as a real error so callers can
+      // distinguish them from "user cancelled" rather than collapsing the
+      // ok:false envelope into null. See installLocal in marketplace.ts.
+      throw new Error(`installLocalPlugin: ${r.error}`);
+    }
     return r;
   },
 
