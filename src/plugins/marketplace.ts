@@ -445,10 +445,11 @@ export class PluginMarketplaceService {
     }
     const managed = plugins.filter((p) => normalizeInstallPolicy(p) === "admin");
     if (managed.length === 0) return result;
-    const registry = await readPluginRegistry(this.registryPath).catch(() => ({
-      version: 1,
-      plugins: [],
-    }));
+    // Round-3 §6: registry read errors must propagate. ENOENT is already
+    // handled inside readPluginRegistry (returns empty default for first
+    // boot); a corrupt registry must NOT silently force-reinstall every
+    // managed plugin on top of an unknown prior state.
+    const registry = await readPluginRegistry(this.registryPath);
     const installedIds = await this.resolveInstalledIds(registry.plugins);
     for (const plugin of managed) {
       if (installedIds.has(plugin.id)) continue;
@@ -665,8 +666,13 @@ export class PluginMarketplaceService {
    * does not own.
    */
   private async snapshotCurrentInstall(pluginId: string): Promise<void> {
-    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
-    const entry = registry?.plugins.find((p) => p.id === pluginId);
+    // Round-3 §6: do NOT swallow registry read errors here. `readPluginRegistry`
+    // already returns the empty default on ENOENT (first-boot); any other
+    // error (corrupt JSON, IO failure) must propagate so we don't silently
+    // skip the rollback snapshot and then overwrite the install with an
+    // unrecoverable previous state.
+    const registry = await readPluginRegistry(this.registryPath);
+    const entry = registry.plugins.find((p) => p.id === pluginId);
     if (!entry) return;
     const manifestAbs = isAbsolute(entry.manifestPath)
       ? entry.manifestPath
@@ -675,8 +681,9 @@ export class PluginMarketplaceService {
   }
 
   private async getInstalledRegistryEntry(pluginId: string): Promise<PluginRegistryEntry | null> {
-    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
-    if (!registry) return null;
+    // Round-3 §6: registry read errors must surface (only ENOENT is silently
+    // handled inside `readPluginRegistry`, which returns the empty default).
+    const registry = await readPluginRegistry(this.registryPath);
     const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
     if (!entry) return null;
     const manifestPath = isAbsolute(entry.manifestPath)
@@ -685,27 +692,34 @@ export class PluginMarketplaceService {
     try {
       await readFile(manifestPath, "utf-8");
       return entry;
-    } catch {
-      return null;
+    } catch (err) {
+      // Manifest missing → registry entry is stale; treat as not-installed
+      // so callers can re-install. Only ENOENT collapses to null; permission
+      // errors / IO failures must propagate (Round-3 §6).
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
     }
   }
 
   /** Returns the version string from the currently-installed manifest, or null. */
   private async getInstalledVersion(pluginId: string): Promise<string | null> {
-    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
-    if (!registry) return null;
+    // Round-3 §6: registry read errors propagate; only the manifest-missing
+    // path returns null (stale registry entry).
+    const registry = await readPluginRegistry(this.registryPath);
     const entry = registry.plugins.find((c) => c.id === pluginId);
     if (!entry) return null;
     const manifestPath = isAbsolute(entry.manifestPath)
       ? entry.manifestPath
       : resolve(dirname(this.registryPath), entry.manifestPath);
+    let raw: string;
     try {
-      const raw = await readFile(manifestPath, "utf-8");
-      const parsed = JSON.parse(raw) as { version?: unknown };
-      return typeof parsed.version === "string" ? parsed.version : null;
-    } catch {
-      return null;
+      raw = await readFile(manifestPath, "utf-8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
     }
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : null;
   }
 
   private mergeBundleRefs(
@@ -749,10 +763,12 @@ export class PluginMarketplaceService {
       return;
     }
     await withRegistryLock(this.registryPath, async () => {
-      const registry = await readPluginRegistry(this.registryPath).catch(() => ({
-        version: 1,
-        plugins: [],
-      }));
+      // Round-3 §6: registry read errors must propagate; ENOENT is already
+      // resolved to the empty default inside readPluginRegistry. A corrupt
+      // registry during rollback must surface so the operator can recover
+      // manually rather than silently writing a fresh empty registry on
+      // top of partially-installed state.
+      const registry = await readPluginRegistry(this.registryPath);
       for (const pluginId of [...state.installedPluginIds].reverse()) {
         const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
         if (!entry) continue;
@@ -796,24 +812,32 @@ export class PluginMarketplaceService {
   /**
    * S14: load manifests for all currently-installed plugins so the dependency
    * resolver can inspect their `capabilities[]`.  Skips entries whose manifest
-   * cannot be read or parsed (fail-open — a corrupt manifest must not block
-   * unrelated installs).
+   * is missing (ENOENT — stale registry entry, fail-open per §S14: a single
+   * stray manifest must not block unrelated installs). Other manifest IO /
+   * parse errors propagate so corruption is surfaced rather than silently
+   * dropping a real plugin from dependency resolution.
+   *
+   * Round-3 §6: registry read errors propagate (ENOENT is already returned
+   * as the empty default inside readPluginRegistry).
    */
   private async loadInstalledManifests(): Promise<PluginManifest[]> {
-    const registry = await readPluginRegistry(this.registryPath).catch(() => null);
-    if (!registry) return [];
+    const registry = await readPluginRegistry(this.registryPath);
     const manifests: PluginManifest[] = [];
     for (const entry of registry.plugins) {
       if (entry.enabled === false) continue;
       const abs = isAbsolute(entry.manifestPath)
         ? entry.manifestPath
         : resolve(dirname(this.registryPath), entry.manifestPath);
+      let raw: string;
       try {
-        const raw = await readFile(abs, "utf-8");
-        manifests.push(JSON.parse(raw) as PluginManifest);
-      } catch {
-        // skip unreadable manifest
+        raw = await readFile(abs, "utf-8");
+      } catch (err) {
+        // ENOENT → stale registry entry; skip silently. Other errors
+        // (permission, IO) propagate.
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw err;
       }
+      manifests.push(JSON.parse(raw) as PluginManifest);
     }
     return manifests;
   }

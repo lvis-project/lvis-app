@@ -274,7 +274,12 @@ export class MemoryManager {
         routineId: typeof parsed.routineId === "string" ? parsed.routineId : undefined,
         routineTitle: typeof parsed.routineTitle === "string" ? parsed.routineTitle : undefined,
       };
-    } catch {
+    } catch (err) {
+      // Round-3 §7: surface metadata parse/IO failures as a warning so a
+      // corrupted .meta.json doesn't silently surface as "no metadata".
+      // Error semantics are preserved (still returns null) — only the
+      // diagnostic surface is added.
+      console.warn(`[memory] loadSessionMetadata failed for ${sessionId}:`, (err as Error).message);
       return null;
     }
   }
