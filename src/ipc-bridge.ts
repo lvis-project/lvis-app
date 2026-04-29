@@ -795,6 +795,24 @@ ${input}`;
     broadcastUninstallResult({ slug: pluginId, success: true });
     return result;
   });
+  ipcMain.handle("lvis:plugins:install-local", async (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install-local", e); return UNAUTHORIZED_FRAME; }
+    if (!isDevModeUnlocked()) {
+      throw new Error("[security] dev mode not unlocked — set LVIS_DEV=1 in a non-packaged build");
+    }
+    const { filePaths, canceled } = await dialog.showOpenDialog({
+      title: "로컬 플러그인 설치 (개발자)",
+      properties: ["openDirectory"],
+      message: "plugin.json이 포함된 빌드 폴더를 선택하세요",
+    });
+    if (canceled || !filePaths[0]) return null;
+    const result = await pluginMarketplace.installLocal(filePaths[0]);
+    await pluginRuntime.restartAll();
+    refreshPluginNotifications?.();
+    const win = getMainWindow();
+    win?.webContents.send("lvis:plugins:install-local-result", result);
+    return result;
+  });
   // read-only, sender guard optional
   ipcMain.handle("lvis:plugins:ui:list", () => pluginRuntime.listUiExtensions());
   ipcMain.handle("lvis:plugins:ui:read-module", async (e, payload?: { pluginId?: string; viewId?: string }) => {
