@@ -272,7 +272,7 @@
 
     "@lvis/plugin-pageindex": ["@lvis/plugin-pageindex@file:../lvis-plugin-pageindex", { "dependencies": { "chokidar": "^5.0.0" }, "devDependencies": { "@types/node": "^24.0.0", "tsup": "^8.2.4", "typescript": "^5.8.3", "vitest": "^4.1.4" } }],
 
-    "@lvis/plugin-sdk": ["@lvis/plugin-sdk@github:lvis-project/lvis-plugin-sdk#a623b3b", {}, "lvis-project-lvis-plugin-sdk-a623b3b"],
+    "@lvis/plugin-sdk": ["@lvis/plugin-sdk@github:lvis-project/lvis-plugin-sdk#9c0e473", {}, "lvis-project-lvis-plugin-sdk-9c0e473"],
 
     "@lvis/plugin-work-proactive": ["@lvis/plugin-work-proactive@file:../lvis-plugin-work-proactive", { "devDependencies": { "@lvis/plugin-sdk": "file:../lvis-app/packages/plugin-sdk", "@types/node": "^25.6.0", "tsup": "^8.2.4", "typescript": "^6.0.3", "vitest": "^4.1.4" } }],
 
