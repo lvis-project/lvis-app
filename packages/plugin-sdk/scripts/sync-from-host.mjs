@@ -640,7 +640,11 @@ try {
   const target = path.join(ROOT, "src/index.ts");
 
   // Normalize line endings so CRLF/LF differences don't trigger false drift.
-  const normalize = (s) => s.replace(/\r\n/g, "\n");
+  const normalize = (s) =>
+    s
+      .replace(/\r\n/g, "\n")
+      .replace(/[ \t]+$/gm, "")
+      .trimEnd() + "\n";
 
   if (process.argv.includes("--check")) {
     const current = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
