@@ -20,6 +20,7 @@ import type {
   RuntimePluginFactory,
 } from "./types.js";
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
+import { createPluginStorage } from "./storage.js";
 import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
 import type { PluginSignatureVerifier } from "./signature-verifier.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -156,7 +157,7 @@ export interface PluginRuntimeOptions {
   pluginsRoot?: string;
   configOverrides?: Record<string, Record<string, unknown>>;
   /** 플러그인별 HostApi를 생성하는 팩토리 — boot.ts에서 주입 */
-  createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
+  createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
   /** Phase 1.5 §7.3: disable 시 managed 플러그인 차단 */
   deploymentGuard?: PluginDeploymentGuard;
   /**
@@ -190,7 +191,7 @@ export class PluginRuntime {
   private readonly pluginsRoot?: string;
   private readonly allowUnsignedUserPlugins: boolean;
   private configOverrides: Record<string, Record<string, unknown>>;
-  private readonly createHostApi?: (pluginId: string, manifest: PluginManifest) => PluginHostApi;
+  private readonly createHostApi?: (pluginId: string, manifest: PluginManifest, pluginDataDir: string) => PluginHostApi;
   private readonly deploymentGuard?: PluginDeploymentGuard;
   private readonly signatureVerifier?: PluginSignatureVerifier;
   private readonly auditLog?: (level: "info" | "warn" | "error", message: string, data?: unknown) => void;
@@ -421,13 +422,14 @@ export class PluginRuntime {
       }
 
       // 플러그인별 스코프된 HostApi 생성
-      const hostApi = this.createHostApi?.(manifest.id, manifest) ?? createNoopHostApi();
+      const pluginDataDir = this.ensurePluginDataDir(manifest.id, pluginRoot);
+      const hostApi = this.createHostApi?.(manifest.id, manifest, pluginDataDir) ?? createNoopHostApi(manifest.id, pluginDataDir);
 
       const instance = await createPlugin({
         pluginId: manifest.id,
         pluginRoot,
         hostRoot: this.hostRoot,
-        pluginDataDir: this.ensurePluginDataDir(manifest.id, pluginRoot),
+        pluginDataDir,
         config: {
           ...(manifest.config ?? {}),
           ...(this.configOverrides["*"] ?? {}),       // 와일드카드: 모든 플러그인에 적용
@@ -643,12 +645,13 @@ export class PluginRuntime {
       throw new Error(`Plugin entry does not export default/createPlugin: ${pluginId}`);
     }
 
-    const hostApi = this.createHostApi?.(pluginId, manifest) ?? createNoopHostApi();
+    const pluginDataDir = this.ensurePluginDataDir(pluginId, pluginRoot);
+    const hostApi = this.createHostApi?.(pluginId, manifest, pluginDataDir) ?? createNoopHostApi(pluginId, pluginDataDir);
     const instance = await createPlugin({
       pluginId,
       pluginRoot,
       hostRoot: this.hostRoot,
-      pluginDataDir: this.ensurePluginDataDir(pluginId, pluginRoot),
+      pluginDataDir,
       config: {
         ...(manifest.config ?? {}),
         ...(this.configOverrides["*"] ?? {}),
@@ -1542,9 +1545,10 @@ export class PluginRuntime {
   }
 }
 
-/** 폴백: HostApi 없이 동작하는 noop 구현 */
-function createNoopHostApi(): PluginHostApi {
+/** 폴백: HostApi 없이 동작하는 noop 구현. `storage` 만큼은 실제 동작해야 한다 — 플러그인은 noop 컨텍스트에서도 자기 데이터를 읽고 쓸 수 있어야 한다. */
+function createNoopHostApi(pluginId: string, pluginDataDir: string): PluginHostApi {
   return {
+    storage: createPluginStorage(pluginId, pluginDataDir),
     registerKeywords: () => {},
     emitEvent: () => {},
     onEvent: () => () => {},
