@@ -281,14 +281,48 @@ export interface PluginMarketplaceItem {
 }
 
 /**
+ * Error thrown by every `PluginStorage` method when a path violates the
+ * sandbox rules: absolute paths, lexical `..` escapes, and symlinks whose
+ * realpath escapes `pluginDataDir` (including dangling symlinks whose target
+ * cannot be verified). Plugin authors writing TypeScript can branch on this
+ * class via `instanceof`:
+ *
+ * ```ts
+ * try {
+ *   await ctx.hostApi.storage.write(rel, data);
+ * } catch (err) {
+ *   if (err instanceof PluginStorageError) {
+ *     // err.pluginId, err.attemptedPath available for diagnostics
+ *   }
+ * }
+ * ```
+ *
+ * `name` is always `"PluginStorageError"` for plugins that prefer string
+ * matching across realm boundaries.
+ */
+export class PluginStorageError extends Error {
+  readonly pluginId: string;
+  readonly attemptedPath: string;
+  constructor(message: string, pluginId: string, attemptedPath: string) {
+    super(`[plugin-storage:${pluginId}] ${message}: ${attemptedPath}`);
+    this.name = "PluginStorageError";
+    this.pluginId = pluginId;
+    this.attemptedPath = attemptedPath;
+  }
+}
+
+/**
  * Sandboxed storage rooted at `pluginDataDir`. All paths are resolved relative
  * to that root. Path traversal via `..`, absolute paths, and symlinks
- * escaping the root via realpath checks are rejected with `PluginStorageError`.
+ * escaping the root via realpath checks are rejected with `PluginStorageError`
+ * (exported from this module — plugin authors can `instanceof`-check it).
  *
  * The realpath check walks up from the resolved target until it finds an
  * existing entry, then verifies that entry's canonical path stays inside the
  * root — this catches both "reads through a symlink that points outside" and
  * "writes whose closest existing ancestor is a symlink that points outside".
+ * Dangling symlinks (probe lstat = symlink, realpath ENOENT) are rejected
+ * conservatively because the host cannot validate where they would resolve to.
  *
  * Plugins should prefer this over `node:fs` so the host can audit / sandbox /
  * restrict writes uniformly. Every operation throws if the resolved path

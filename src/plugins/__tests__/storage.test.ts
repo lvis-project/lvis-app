@@ -79,6 +79,19 @@ describe("createPluginStorage path guards", () => {
       /symlink escapes plugin storage root/,
     );
   });
+
+  it("rejects dangling symlinks (target doesn't exist)", async () => {
+    // Plant a symlink inside dataDir whose *target* does not exist. realpath
+    // raises ENOENT (because the chain is broken) but lstat sees the
+    // symlink. The host cannot validate where the symlink would resolve, so
+    // it must fail closed — otherwise a plugin could plant a dangling link
+    // whose target is created later out of band.
+    symlinkSync(join(outsideDir, "does-not-exist"), join(dataDir, "dangling.txt"));
+    const s = createPluginStorage("p", dataDir);
+    await expect(s.write("dangling.txt", "x")).rejects.toThrow(/dangling symlink/);
+    await expect(s.read("dangling.txt")).rejects.toThrow(/dangling symlink/);
+    await expect(s.exists("dangling.txt")).rejects.toThrow(/dangling symlink/);
+  });
 });
 
 describe("createPluginStorage I/O", () => {
