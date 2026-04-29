@@ -1,18 +1,23 @@
 /**
  * Marketplace Fetcher — §9.5 M4
  *
- * Abstracts the source of marketplace catalog data so the host can swap
- * between a local JSON catalog (legacy/default) and a remote REST
- * service (lvis-marketplace).
+ * Abstracts the source of marketplace catalog data. Phase 2-final has a
+ * single production source: the lvis-marketplace REST service.
  *
  * Implementations:
- *   - {@link MockMarketplaceFetcher}       — reads plugins/marketplace.json
- *   - {@link RealCloudMarketplaceFetcher}  — talks to the LVIS cloud server
+ *   - `RealCloudMarketplaceFetcher` — talks to the lvis-marketplace server
+ *     (default `https://marketplace.lvisai.xyz`; local dev operators can
+ *     override via Settings → 마켓플레이스).
+ *   - `DisabledMarketplaceFetcher`  — no-op fetcher used when boot finds
+ *     no `realCloudBaseUrl`; every method throws `marketplace-disabled`.
+ *   - `MockMarketplaceFetcher`      — dev/test-only stub backed by a JSON
+ *     file; constructor is gated to fail in packaged builds. Production
+ *     boot never instantiates it.
  *
  * Note: `listPlugins()` returns the pure catalog shape
  * ({@link PluginMarketplaceItem}). Installed/enabled/isManaged flags are
- * resolved by {@link PluginMarketplaceService.list} from the local
- * plugin registry, not by the fetcher.
+ * resolved by `PluginMarketplaceService.list` from the local plugin
+ * registry, not by the fetcher.
  */
 import type { PluginMarketplaceItem } from "./types.js";
 
