@@ -40,6 +40,7 @@ function SingleToolInline({ tool }: { tool: Extract<ChatEntry, { kind: "tool_gro
   return (
     <div className="max-w-[85%] rounded-md text-[11px] text-muted-foreground">
       <button
+        type="button"
         className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
         onClick={() => setOpen((o) => !o)}
       >
@@ -90,8 +91,6 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
     ? "running"
     : hasError ? "error" : "done";
   const groupTitle = groupStatus === "running" ? "도구 사용 중" : "도구 사용 결과";
-  const uniqueToolNames = [...new Set(group.tools.map((t) => getToolDisplayName(t.name)))].join(" · ");
-
   function toggleTool(id: string) {
     setExpandedTools((prev) => {
       const next = new Set(prev);
@@ -102,6 +101,7 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
   }
 
   const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
+  const uniqueToolNames = [...new Set(tools.map((t) => getToolDisplayName(t.name)))].join(" · ");
   const htmlPreviews = tools
     .filter((t) => t.name === "render_html" && t.status === "done")
     .map((t) => ({ toolUseId: t.toolUseId, payload: parseRenderHtmlResult(t.result) }))

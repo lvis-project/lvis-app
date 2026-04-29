@@ -17,13 +17,13 @@ export function TurnActionBar({
   const [showReasonBox, setShowReasonBox] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
 
-  const timestamp = new Date().toLocaleString("ko-KR", {
+  const [timestamp] = useState(() => new Date().toLocaleString("ko-KR", {
     hour: "2-digit",
     minute: "2-digit",
     year: "numeric",
     month: "numeric",
     day: "numeric",
-  });
+  }));
 
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground/60 mt-0.5 px-1">
