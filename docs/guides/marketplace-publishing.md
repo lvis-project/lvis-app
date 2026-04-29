@@ -88,9 +88,9 @@ lvis-publish login --base-url https://<your-marketplace-host>
 ```bash
 # 운영팀의 키 생성 절차 (참고용):
 cd lvis-marketplace/server
-uv run python -m lvis_marketplace.keygen --key-id prod-v2 --out-file keys/prod-v2.pub
+uv run python -m lvis_marketplace.keygen --key-id prod-v2 --out-file schemas/keys/prod-v2.pub
 # → stderr 에 base64 private key 와 env-var block 출력
-# → keys/prod-v2.pub 에 base64 공개키 저장
+# → schemas/keys/prod-v2.pub 에 base64 공개키 저장
 ```
 
 env 주입은 per-key 형식 — `MARKETPLACE_SIGNING_PRIVATE_KEY_<KEY_ID_UPPER_UNDERSCORE>`:
@@ -197,7 +197,7 @@ MANAGED_SOURCES: list[dict[str, Any]] = [
 ]
 ```
 
-> ⚠️ `install_policy` / `deployment` 를 둘 다 생략하면 `admin`/`managed` 로 간주됩니다 (`bootstrap.py:650-655` fallback). 의도된 admin 플러그인이 아니면 반드시 `"user"` 명시.
+> ⚠️ `install_policy` / `deployment` 를 둘 다 생략하면 `admin`/`managed` 로 간주됩니다 (`bootstrap.py:643-646` fallback). 의도된 admin 플러그인이 아니면 반드시 `"user"` 명시.
 
 ### 1-2. 레포에 빌드 산출물 커밋
 
