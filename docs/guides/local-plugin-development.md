@@ -135,7 +135,7 @@ bun run start
 | GPU safe-flags (Windows) | `--disable-gpu --disable-software-rasterizer --disable-gpu-compositing --no-sandbox` 자동 추가 |
 | 콘솔 UTF-8 (Windows) | `chcp 65001`, `PYTHONIOENCODING=utf-8` 등 |
 
-> `bun run start` 는 **`LVIS_DEV=1` 을 세팅하지 않습니다**. dev 게이트 전부를 켜고 싶으면 `bun run dev` (`run-electron-dev.mjs`) 를 쓰거나 직접 export. `LVIS_DEV=1` 으로 추가 활성화되는 것: `LVIS_ALLOW_TEST_MARKETPLACE_KEYS` 와 동등한 효과 (`dev-flags.ts:88` testMarketplaceKeysAllowed 가 `LVIS_DEV` 도 OR 로 받음). `LVIS_DEV_RELOAD` (§5) 는 독립 — `LVIS_DEV` 없이 단독으로도 동작합니다 (`dev-flags.ts:103-106`). DevTools 자동 열림은 `LVIS_ENABLE_DEV_CONSOLE=1` 이 분리된 게이트.
+> `bun run start` 는 **`LVIS_DEV=1` 을 세팅하지 않습니다**. dev 게이트 전부를 켜고 싶으면 `bun run dev` (`run-electron-dev.mjs`) 를 쓰거나 직접 export. `LVIS_DEV_RELOAD` (§5) 는 독립 — `LVIS_DEV` 없이 단독으로도 동작합니다 (`dev-flags.ts:103-106`). DevTools 자동 열림은 `LVIS_ENABLE_DEV_CONSOLE=1` 이 분리된 게이트. **마켓플레이스 서명 키는 단일 키 모델 (`poc-v1`) 이라 dev/prod 무관하게 항상 `MARKETPLACE_PUBLIC_KEYS` 에 들어 있어** 별도 trust-set 토글 불필요.
 
 ### 3-6. 검증
 

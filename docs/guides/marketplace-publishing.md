@@ -353,19 +353,20 @@ uv sync && cp .env.example .env && uv run alembic upgrade head
 LVIS_MARKETPLACE_LOAD_DOTENV=1 \
   uv run uvicorn lvis_marketplace.main:create_app --factory --reload --host 127.0.0.1 --port 8000
 
-# 2) lvis-app (테스트 서명 키 trust)
+# 2) lvis-app
 cd ../lvis-app
-LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1 bun run start
-# 또는: bun run dev   (LVIS_DEV=1 자동 — 테스트 키 자동 trust)
+bun run start
+# 또는: bun run dev   (LVIS_DEV=1 + hot-reload + DevTools 자동)
 ```
+
+마켓플레이스 서명 키는 단일 정규 키 (`poc-v1`) 단일 모델이므로, `MARKETPLACE_PUBLIC_KEYS` 가 dev/prod 무관하게 항상 trust 합니다 — 별도 trust-set 토글 불필요.
 
 | 플래그 | 효과 |
 |--------|------|
-| `LVIS_DEV=1` | dev 게이트 마스터 (linked entry, 테스트 키, hot-reload). `bun run dev` 가 자동 세팅. `bun run start` 는 **세팅 안 함** |
+| `LVIS_DEV=1` | dev 게이트 마스터 (linked entry, hot-reload, DevTools). `bun run dev` 가 자동 세팅. `bun run start` 는 **세팅 안 함** |
 | `LVIS_DEV_SKIP_SIG=1` | 매니페스트 서명 검증 skip. unpackaged 빌드 (`start`/`dev` 모두) 자동 |
-| `LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1` | publisher trust set 에 dev/poc 테스트 키 포함. `LVIS_DEV=1` 으로도 동등 |
 | `LVIS_DEV_RELOAD=1` | `dist/` watch + reloadPlugin (수동 export) |
-| `LVIS_PLUGINS_DIR=/path` | userData 가 아닌 임의 위치에 플러그인 저장 (CI sandbox 등) |
+| `LVIS_PLUGINS_DIR=/path` | (deprecated, CI sandbox 전용) userData 가 아닌 임의 위치에 플러그인 저장 |
 
 ⚠️ 모든 `LVIS_DEV*` / `LVIS_ALLOW_*` 플래그는 `app.isPackaged === true` 일 때 hard-gate 로 무시됩니다 (`src/boot/dev-flags.ts:18-54`). packaged 빌드에 env 가 흘러들어와도 보안 약화 없음.
 
@@ -375,7 +376,7 @@ LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1 bun run start
 
 | 증상 | 원인 / 해결 |
 |------|-------------|
-| `signature verification failed` (앱) | 사용자가 packaged 빌드인데 dev key 로 서명된 zip 을 설치 시도. 운영팀 prod 사인키로 재서명되어 다시 게시되어야 함. `LVIS_ALLOW_TEST_MARKETPLACE_KEYS` 는 packaged 빌드에서 hard-gate 로 무시됨 |
+| `signature verification failed` (앱) | 서버가 zip 을 trust set 밖의 키로 서명. 단일 키 모델에서는 양쪽 모두 `poc-v1` 이어야 정상 — 서버 `MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1` 와 SDK `MARKETPLACE_PUBLIC_KEYS["poc-v1"]` 가 짝 안 맞으면 발생. 서버 `/api/v1/keys` 응답으로 즉시 비교. |
 | 카탈로그에 새 버전 안 보임 | (a) `installPolicy: "admin"` + CLI publish → `pending_review` 상태. admin approve 필요. (b) 카나리 롤아웃 비대상 — `rollout_percent` 확인. (c) bootstrap 서버 `bootstrap_status="failed"` |
 | 부트스트랩 배너 빨간색 (`catalog fetch failed`) | (a) 마켓플레이스 URL 오타 / 서버 다운. (b) 사설 네트워크인데 toggle 안 켜짐. 배너 "다시 시도" 로 재호출. (c) `localhost` IPv6 우선순위 → `127.0.0.1` 권장 |
 | `plugin_unsigned_user_rejected` audit | 사용자 플러그인이 서명되지 않음 + 사용자가 unsigned 허용 토글 안 켬 (Phase 1 fail-closed). 정상 마켓플레이스 경로로 재설치하거나 설정 → 플러그인 → "서명되지 않은 사용자 플러그인 허용" 토글 |
