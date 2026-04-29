@@ -2024,9 +2024,9 @@ graph TB
 
 > **Deprecated (현재 스키마에서 제거됨):** 아래 legacy 셰이프는 AJV `additionalProperties: false` 이므로 매니페스트에 포함하면 로드 거부된다: top-level `permissions[]` 문자열 배열, nested 객체 형태의 `tools[{ name, entry, description }]`, `skills[]`, 객체 형태의 `ui`, `hooks`, `events`, `dependencies`, `lgenie`, `python`. 이전 설계 초안은 git history (pre-Sprint-3-B) 에서만 확인 가능하다.
 
-**서명 검증 (Sprint 3-B §9.6):** managed 플러그인은 `plugin.json.sig` (ed25519, base64) 필수. 서명 도구: `scripts/sign-manifest.mjs`. 검증: `src/plugins/signature-verifier.ts` + `src/plugins/publisher-keys.ts`.
+**마켓플레이스 검증:** 플러그인 repo는 sidecar signature를 만들지 않는다. Marketplace upload API가 zip/manifest/schema/version/policy/dependency/access를 검증하고 최종 artifact envelope에 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장한다.
 
-**검증 플로우:** JSON.parse → AJV (`schemas/plugin.schema.json`) → cross-field (tool-name regex, `startupTools ⊂ tools`, `uiCallable ⊂ tools`, `startupTimeoutMs > 0`) → ed25519 signature → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.4.
+**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`schemas/plugin.schema.json`) → cross-field (tool-name regex, `startupTools ⊂ tools`, `uiCallable ⊂ tools`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.4.
 
 규칙:
 - top-level `"type": "object"` 필수 (OpenAI / Claude / Gemini 공통 요구사항)
@@ -3003,25 +3003,24 @@ flowchart TB
 
 ## 15. Security Hardening — 구현 완료 항목
 
-### 15.1 SDK 기반 퍼블리셔 키 관리 (AP-1 FU)
+### 15.1 Host 기반 마켓플레이스 trust anchor
 
-플러그인 매니페스트 서명 검증에 사용되는 Ed25519 공개 키는 `@lvis/plugin-sdk/keys` (v1.0.1+)를 단일 소스로 삼는다. 호스트 앱이 직접 키 배열을 관리하지 않으며, SDK 서브모듈 버전 범프로 키 로테이션이 이루어진다.
+마켓플레이스 artifact envelope 검증에 사용되는 Ed25519 공개 키는 host runtime이 소유한다. `@lvis/plugin-sdk`는 플러그인 authoring type contract만 제공하며 trust anchor를 포함하지 않는다.
 
 **파일**: `src/plugins/publisher-keys.ts`
 
 | 항목 | 내용 |
 |------|------|
-| 키 형식 | Ed25519 원시 32바이트 (base64) → PEM SPKI 변환 후 `PluginSignatureVerifier`에 전달 |
-| 소스 | `MARKETPLACE_PUBLIC_KEYS` from `@lvis/plugin-sdk/keys` |
-| 실패 정책 | Managed 플러그인은 서명 불일치 시 로드 거부 (fail-closed). `LVIS_DEV_SKIP_SIG=1`로 개발 우회 가능. User 플러그인은 서명 없을 경우 경고만 출력. |
-| 로테이션 | SDK 서브모듈 버전 범프 → `getBundledPublicKeys()` / `BUNDLED_PUBLISHER_PUBLIC_KEYS` 자동 갱신 |
+| 키 형식 | Ed25519 원시 32바이트 (base64) |
+| 소스 | `MARKETPLACE_PUBLIC_KEYS` from `src/plugins/marketplace-keys.ts` |
+| 실패 정책 | Envelope 검증 실패 또는 install receipt hash mismatch 시 로드 거부 (fail-closed) |
+| 로테이션 | Host release가 새 trust anchor를 포함. 장기적으로 signed key metadata/TUF-style rotation 도입 가능 |
 
 ```typescript
 // src/plugins/publisher-keys.ts (요약)
-import { MARKETPLACE_PUBLIC_KEYS } from "@lvis/plugin-sdk/keys";
+import { MARKETPLACE_PUBLIC_KEYS } from "./marketplace-keys.js";
 
 export function getBundledPublicKeys(): Record<string, Buffer>  // raw ed25519 키
-export const BUNDLED_PUBLISHER_PUBLIC_KEYS: string[]            // PEM SPKI (PluginSignatureVerifier용)
 ```
 
 ---

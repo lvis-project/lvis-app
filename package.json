@@ -6,7 +6,7 @@
   "description": "Test Electron host app for LVIS plugins.",
   "main": "dist/src/main.js",
   "scripts": {
-    "postinstall": "node scripts/ensure-submodules.mjs && bun run --cwd packages/plugin-sdk build && electron-rebuild && node scripts/fetch-uv.mjs",
+    "postinstall": "electron-rebuild && node scripts/fetch-uv.mjs",
     "prepare:plugins": "bun run --cwd ../lvis-plugin-pageindex build && bun run --cwd ../lvis-plugin-meeting build && bun run --cwd ../lvis-plugin-ms-graph build && bun run --cwd ../lvis-plugin-lge-api build && bun run --cwd ../lvis-plugin-work-proactive build && bun run --cwd ../lvis-plugin-agent-hub build",
     "prepare:plugins:npm": "npm run --prefix ../lvis-plugin-pageindex build && npm run --prefix ../lvis-plugin-meeting build && npm run --prefix ../lvis-plugin-ms-graph build && npm run --prefix ../lvis-plugin-lge-api build && npm run --prefix ../lvis-plugin-work-proactive build && npm run --prefix ../lvis-plugin-agent-hub build",
     "build:main": "tsc -p tsconfig.json",
@@ -38,8 +38,6 @@
     "test:meeting-flow:npm": "npm run prepare:plugins:npm && tsx scripts/test-meeting-flow.ts",
     "test:main-flow": "bun run prepare:plugins && tsx scripts/test-main-flow.ts",
     "test:main-flow:npm": "npm run prepare:plugins:npm && tsx scripts/test-main-flow.ts",
-    "sign:manifest": "node scripts/sign-manifest.mjs",
-    "keygen:publisher": "node scripts/keygen-publisher.mjs",
     "release": "node scripts/release.mjs",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"

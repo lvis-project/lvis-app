@@ -43,11 +43,22 @@ import { sanitizeZipEntryPath } from "./zip-entry-path.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PublicKeyInput } from "./envelope-verifier.js";
 import type { PluginMarketplaceItem } from "./types.js";
+import {
+  hashReceiptFiles,
+  writeInstallReceipt,
+  type PluginInstallReceipt,
+} from "./plugin-install-receipt.js";
 
 export interface ArtifactStoreHistoryEntry {
   version: string;
   /** ISO timestamp. */
   installedAt: string;
+}
+
+export interface VerifiedArtifact {
+  zipBuffer: Buffer;
+  artifactSha256: string;
+  signerKeyId: string;
 }
 
 export interface ArtifactStoreOptions {
@@ -128,6 +139,14 @@ export class PluginArtifactStore {
     version: string,
     onProgress?: (event: InstallerProgressEvent) => void,
   ): Promise<Buffer> {
+    return (await this.downloadVerifiedArtifact(plugin, version, onProgress)).zipBuffer;
+  }
+
+  async downloadVerifiedArtifact(
+    plugin: PluginMarketplaceItem,
+    version: string,
+    onProgress?: (event: InstallerProgressEvent) => void,
+  ): Promise<VerifiedArtifact> {
     const slug = plugin.slug ?? plugin.id;
     if (!isVerifiedMarketplaceFetcher(this.fetcher)) {
       throw new Error(
@@ -139,9 +158,13 @@ export class PluginArtifactStore {
       publicKeys: this.publicKeys,
       downloadRoot: resolve(this.cacheRoot, "verified-downloads"),
       cacheBase: this.tarballCacheBase,
-      onProgress,
-    });
-    return readFile(verified.tarballPath);
+        onProgress,
+      });
+    return {
+      zipBuffer: await readFile(verified.tarballPath),
+      artifactSha256: verified.sha256,
+      signerKeyId: verified.signerKeyId,
+    };
   }
 
   /**
@@ -153,11 +176,12 @@ export class PluginArtifactStore {
    * Throws if any zip entry escapes the install root (defense-in-depth
    * against `..` traversal that slipped through `sanitizeZipEntryPath`).
    */
-  async extractZip(slug: string, zipBuffer: Buffer): Promise<void> {
+  async extractZip(slug: string, zipBuffer: Buffer): Promise<string[]> {
     const installDir = this.installDirFor(slug);
     const stageDir = resolve(this.installRoot, `.${slug}.stage-${randomUUID()}`);
     await rm(stageDir, { recursive: true, force: true });
     await mkdir(stageDir, { recursive: true });
+    const extractedFiles: string[] = [];
 
     try {
       let zip: AdmZip;
@@ -180,6 +204,7 @@ export class PluginArtifactStore {
         }
         await mkdir(dirname(targetPath), { recursive: true });
         await writeFile(targetPath, entry.getData());
+        extractedFiles.push(safeEntryPath.split("\\").join("/"));
       }
 
       // Windows-safe atomic swap: rename existing installDir to a unique
@@ -205,12 +230,37 @@ export class PluginArtifactStore {
       if (hadOldDir) {
         await rm(oldDir, { recursive: true, force: true }).catch(() => undefined);
       }
+      return extractedFiles.sort();
     } catch (err) {
       if (existsSync(stageDir)) {
         await rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
       }
       throw err;
     }
+  }
+
+  async writeInstallReceipt(
+    slug: string,
+    input: {
+      version: string;
+      artifactSha256: string;
+      signerKeyId: string;
+      files: string[];
+      installedAt?: string;
+    },
+  ): Promise<PluginInstallReceipt> {
+    const pluginRoot = this.installDirFor(slug);
+    const receipt: PluginInstallReceipt = {
+      schemaVersion: 1,
+      pluginId: slug,
+      version: input.version,
+      artifactSha256: input.artifactSha256,
+      signerKeyId: input.signerKeyId,
+      installedAt: input.installedAt ?? new Date().toISOString(),
+      files: await hashReceiptFiles(pluginRoot, input.files),
+    };
+    await writeInstallReceipt(this.cacheRoot, receipt);
+    return receipt;
   }
 
   /**

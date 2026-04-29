@@ -17,15 +17,6 @@ function ensureWindowsUserDataDir(argsList, envVars, profileName) {
   return argsList;
 }
 
-// `bun run start` is still an unpackaged local run: it builds sibling plugins,
-// then launches Electron against registry manifests under plugins/installed/*
-// whose entries resolve into ../../../node_modules/@lvis/... and are unsigned.
-// Keep those local compatibility relaxations here so normal local runs keep
-// loading managed plugins, while dev-only UX (watchers, LVIS_DEV, dev console)
-// remains exclusive to scripts/run-electron-dev.mjs.
-if (!env.LVIS_DEV_SKIP_SIG) {
-  env.LVIS_DEV_SKIP_SIG = "1";
-}
 if (!env.LVIS_DEV_CONSOLE) {
   env.LVIS_DEV_CONSOLE = "0";
 }
@@ -90,7 +81,7 @@ if (process.platform === "win32") {
   if (env.LVIS_DEBUG === "1") {
     process.stderr.write(
       `[run-electron] args=${JSON.stringify(args)}\n` +
-        `[run-electron] LVIS_DEV=${env.LVIS_DEV} LVIS_DEV_SKIP_SIG=${env.LVIS_DEV_SKIP_SIG} LVIS_KEEP_GPU=${env.LVIS_KEEP_GPU ?? "<unset>"}\n`,
+        `[run-electron] LVIS_DEV=${env.LVIS_DEV} LVIS_KEEP_GPU=${env.LVIS_KEEP_GPU ?? "<unset>"}\n`,
     );
   }
   const quote = (s) => `"${String(s).replace(/"/g, '""')}"`;

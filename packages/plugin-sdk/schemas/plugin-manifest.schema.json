@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lvis-project.github.io/schemas/plugin-manifest.schema.json",
+  "title": "LVIS Plugin Manifest",
+  "description": "JSON Schema for LVIS plugin.json manifests. Validated in each plugin's CI via ajv.",
+  "type": "object",
+  "required": ["id", "name", "version", "entry"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique plugin identifier (slug or reverse-DNS)."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable plugin display name."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$",
+      "description": "Semver version (major.minor.patch with optional pre-release/build)."
+    },
+    "entry": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Relative path to the compiled plugin entry module."
+    },
+    "description": { "type": "string" },
+    "publisher": { "type": "string" },
+    "installPolicy": {
+      "type": "string",
+      "enum": ["admin", "user"]
+    },
+    "dependencies": {
+      "type": "array",
+      "description": "Plugin dependencies. This is not a delivery mode.",
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "required": ["pluginId"],
+            "properties": {
+              "pluginId": { "type": "string", "minLength": 1 },
+              "versionRange": { "type": "string", "minLength": 1 },
+              "required": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "pluginAccess": {
+      "type": "object",
+      "required": ["plugins"],
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["pluginId"],
+            "properties": {
+              "pluginId": { "type": "string", "minLength": 1 },
+              "tools": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true
+              },
+              "events": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["core", "official", "community", "experimental"]
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9_-]+$"
+      },
+      "uniqueItems": true,
+      "description": "Tool names. Must match ^[a-zA-Z0-9_-]+$ (no dots, per OpenAI/Gemini/Claude constraints)."
+    },
+    "startupTools": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$" },
+      "uniqueItems": true
+    },
+    "uiCallable": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$" },
+      "uniqueItems": true
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "eventPublishes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "eventSubscriptions": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": { "type": "string", "minLength": 1 },
+              "hint": {
+                "type": "object",
+                "required": ["category", "priority", "title"],
+                "properties": {
+                  "category": {
+                    "type": "string",
+                    "enum": ["task", "note", "session", "meeting", "email", "calendar", "system"]
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": ["high", "medium", "low"]
+                  },
+                  "title": { "type": "string", "minLength": 1 }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "uniqueItems": true
+    },
+    "emittedEvents": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "notificationEvents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["event"],
+        "properties": {
+          "event": { "type": "string" },
+          "titleField": { "type": "string" },
+          "bodyField": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["keyword", "skillId"],
+        "properties": {
+          "keyword": { "type": "string", "minLength": 1 },
+          "skillId": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "uiSlots": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "ui": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "slot", "kind", "entry"],
+        "properties": {
+          "id": { "type": "string" },
+          "slot": { "type": "string" },
+          "kind": { "type": "string" },
+          "displayName": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "entry": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "toolSchemas": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" },
+          "inputSchema": { "type": "object" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "startupTimeoutMs": { "type": "integer", "minimum": 0 },
+    "python": {
+      "type": "object",
+      "properties": {
+        "managedBy": { "type": "string" },
+        "requirementsLock": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "config": { "type": "object" }
+  },
+  "additionalProperties": true
+}
