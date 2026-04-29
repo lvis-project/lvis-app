@@ -3,6 +3,9 @@
  *
  * Locks the layout (rooted at `~/.lvis/plugins/`) and the registry-relative
  * manifestPath helper used by every marketplace install path.
+ *
+ * Round-3: env-tier override removed. Tests now exercise constructor
+ * injection only (the sole remaining override mechanism).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resolve } from "node:path";
@@ -11,20 +14,10 @@ import { resolvePluginPaths, toRegistryRelativeManifestPath } from "../plugin-pa
 import { setIsPackaged, _resetForTest as resetDevFlags } from "../../boot/dev-flags.js";
 
 describe("resolvePluginPaths", () => {
-  const originalEnv = process.env.LVIS_PLUGINS_DIR;
   beforeEach(() => {
-    delete process.env.LVIS_PLUGINS_DIR;
-    // dev-flags defaults to packaged-mode (env override ignored). The override
-    // is dev-only — every test in this block runs under unpackaged-mode unless
-    // it explicitly flips back.
     setIsPackaged(false);
   });
   afterEach(() => {
-    if (originalEnv === undefined) {
-      delete process.env.LVIS_PLUGINS_DIR;
-    } else {
-      process.env.LVIS_PLUGINS_DIR = originalEnv;
-    }
     resetDevFlags();
   });
 
@@ -43,16 +36,22 @@ describe("resolvePluginPaths", () => {
     expect(paths.cacheRoot).toBe(resolve("/tmp/explicit", ".cache"));
   });
 
-  it("LVIS_PLUGINS_DIR env override redirects pluginsRoot + cache + registry on dev builds", () => {
-    process.env.LVIS_PLUGINS_DIR = "/tmp/portable";
-    const paths = resolvePluginPaths();
+  it("constructor-injected pluginsRoot redirects pluginsRoot + cache + registry", () => {
+    // Round-3: this replaces the previous LVIS_PLUGINS_DIR env-override
+    // test. Tests / portable installs / CI sandbox isolation pass an
+    // explicit `pluginsRoot` instead of relying on env var resolution.
+    const paths = resolvePluginPaths({ pluginsRoot: "/tmp/portable" });
     expect(paths.pluginsRoot).toBe(resolve("/tmp/portable"));
     expect(paths.registryPath).toBe(resolve("/tmp/portable", "registry.json"));
     expect(paths.cacheRoot).toBe(resolve("/tmp/portable", ".cache"));
   });
 
-  it("explicit pluginsRoot wins over env override", () => {
-    process.env.LVIS_PLUGINS_DIR = "/tmp/env";
+  it("constructor-injected pluginsRoot is honored even on packaged builds", () => {
+    // Round-3: there is no env-tier hard-gate to bypass anymore. Constructor
+    // injection is the only override path and it works regardless of
+    // packaged-mode (the input value is trusted because it came from
+    // boot-process code, not a user-controllable env var).
+    setIsPackaged(true);
     const paths = resolvePluginPaths({ pluginsRoot: "/tmp/explicit" });
     expect(paths.pluginsRoot).toBe(resolve("/tmp/explicit"));
   });
@@ -66,18 +65,17 @@ describe("resolvePluginPaths", () => {
     expect(paths.cacheRoot).toBe(resolve("/tmp/cache"));
   });
 
-  it("env override does not displace an explicit cacheRoot", () => {
-    process.env.LVIS_PLUGINS_DIR = "/tmp/env";
-    const paths = resolvePluginPaths({ cacheRoot: "/tmp/explicit-cache" });
-    expect(paths.pluginsRoot).toBe(resolve("/tmp/env"));
+  it("explicit cacheRoot is independent of pluginsRoot", () => {
+    const paths = resolvePluginPaths({
+      pluginsRoot: "/tmp/p",
+      cacheRoot: "/tmp/explicit-cache",
+    });
+    expect(paths.pluginsRoot).toBe(resolve("/tmp/p"));
     expect(paths.cacheRoot).toBe(resolve("/tmp/explicit-cache"));
   });
 
-  it("packaged build silently ignores LVIS_PLUGINS_DIR env override", () => {
-    // Hard-gate: a packaged binary that inherits this env var must fall back
-    // to the canonical layout, never the user-controlled override path.
+  it("packaged build with no input falls back to canonical homedir layout", () => {
     setIsPackaged(true);
-    process.env.LVIS_PLUGINS_DIR = "/tmp/attacker-controlled";
     const paths = resolvePluginPaths();
     expect(paths.pluginsRoot).toBe(resolve(homedir(), ".lvis", "plugins"));
   });

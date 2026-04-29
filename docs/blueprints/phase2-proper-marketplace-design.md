@@ -351,7 +351,7 @@ function createAdapter(config: MarketplaceConfig): MarketplaceAdapter {
 }
 ```
 
-환경변수 `LVIS_MARKETPLACE_MOCK=1` 로 dev/test 에서 mock 강제.
+환경변수 `LVIS_MARKETPLACE_MOCK=1` 로 dev/test 에서 mock 강제. *(future-work; not yet implemented — Round-3 1방향 정리 시 미도입 확인)*
 
 ---
 

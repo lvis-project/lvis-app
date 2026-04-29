@@ -197,7 +197,5 @@ bunx vitest run
 ```bash
 # 실제 PageIndex 모드 (설치/키 필요)
 # PAGEINDEX_ROOT=/absolute/path/to/PageIndex OPENAI_API_KEY=... bun run start
-
-# 테스트 모드(기본): 외부 LLM 없이 로컬 Markdown 기준 검증
-LVIS_PAGEINDEX_TEST_MODE=1 bun run start
+bun run start
 ```
