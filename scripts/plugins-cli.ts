@@ -13,12 +13,42 @@ import type { PluginRegistry } from "../src/plugins/types.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const projectRoot = resolve(__dirname, "..");
-// CLI is a dev-only tool — flip the dev-flag gate so resolvePluginPaths()
-// honors `LVIS_PLUGINS_DIR` env override (test/portable installs). Without
-// the override, defaults to `~/.lvis/plugins/` — same as the Electron host
-// because both share the user-anchored plugin root.
+// CLI is a dev-only tool — flip the dev-flag gate so the marketplace install
+// path can take its dev branch.
 setIsPackaged(false);
-const pluginPaths = resolvePluginPaths();
+
+// Round-3: env-tier override removed. Use the explicit `--plugins-root <path>`
+// flag for portable installs / CI sandbox isolation. Default is
+// `~/.lvis/plugins/` — same as the Electron host (single source of truth).
+function extractPluginsRootFlag(argv: string[]): { pluginsRoot?: string; rest: string[] } {
+  const rest: string[] = [];
+  let pluginsRoot: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--plugins-root") {
+      const value = argv[i + 1];
+      if (typeof value !== "string" || value.length === 0) {
+        throw new Error("--plugins-root requires a path argument");
+      }
+      pluginsRoot = value;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--plugins-root=")) {
+      const value = arg.slice("--plugins-root=".length);
+      if (value.length === 0) {
+        throw new Error("--plugins-root requires a path argument");
+      }
+      pluginsRoot = value;
+      continue;
+    }
+    rest.push(arg);
+  }
+  return { pluginsRoot, rest };
+}
+
+const { pluginsRoot, rest: cliArgs } = extractPluginsRootFlag(process.argv.slice(2));
+const pluginPaths = resolvePluginPaths(pluginsRoot ? { pluginsRoot } : {});
 const registryPath = pluginPaths.registryPath;
 
 function usage(): never {
@@ -31,6 +61,9 @@ function usage(): never {
       "  npm run plugins:remove -- <plugin-id>",
       "  npm run plugins:enable -- <plugin-id>",
       "  npm run plugins:disable -- <plugin-id>",
+      "",
+      "Optional:",
+      "  --plugins-root <path>   Override the canonical ~/.lvis/plugins/ root",
     ].join("\n"),
   );
 }
@@ -51,10 +84,10 @@ async function saveRegistry(registry: PluginRegistry): Promise<void> {
 }
 
 async function run() {
-  const command = process.argv[2];
+  const command = cliArgs[0];
   if (!command) usage();
   if (command === "install") {
-    const id = process.argv[3];
+    const id = cliArgs[1];
     if (!id) usage();
     const fetcher = new MockMarketplaceFetcher(
       resolve(projectRoot, "plugins/marketplace.json"),
@@ -78,8 +111,8 @@ async function run() {
   }
 
   if (command === "add") {
-    const id = process.argv[3];
-    const manifestPath = process.argv[4];
+    const id = cliArgs[1];
+    const manifestPath = cliArgs[2];
     if (!id || !manifestPath) usage();
     if (registry.plugins.some((plugin) => plugin.id === id)) {
       throw new Error(`Plugin already exists: ${id}`);
@@ -94,7 +127,7 @@ async function run() {
   }
 
   if (command === "remove") {
-    const id = process.argv[3];
+    const id = cliArgs[1];
     if (!id) usage();
     const before = registry.plugins.length;
     registry.plugins = registry.plugins.filter((plugin) => plugin.id !== id);
@@ -107,7 +140,7 @@ async function run() {
   }
 
   if (command === "enable" || command === "disable") {
-    const id = process.argv[3];
+    const id = cliArgs[1];
     if (!id) usage();
     const target = registry.plugins.find((plugin) => plugin.id === id);
     if (!target) {

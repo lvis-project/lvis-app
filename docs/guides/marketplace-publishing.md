@@ -213,15 +213,13 @@ uv run uvicorn lvis_marketplace.main:app --reload --host 127.0.0.1 --port 8000
 
 ```bash
 cd lvis-app
-LVIS_DEV=1 LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1 bun run dev
+LVIS_DEV=1 bun run dev
 ```
 
 | 플래그 | 효과 |
 |--------|------|
-| `LVIS_DEV=1` | 모든 dev 게이트 활성화 (linked entry, signature skip 등 — 절대 packaged 빌드에 노출 금지) |
-| `LVIS_ALLOW_TEST_MARKETPLACE_KEYS=1` | 번들된 publisher key set 에 테스트 키 포함 |
+| `LVIS_DEV=1` | 모든 dev 게이트 활성화 (linked entry, test publisher keys, signature skip 옵션 등 — 절대 packaged 빌드에 노출 금지) |
 | `LVIS_DEV_SKIP_SIG=1` | 서명 검증 스킵 — 로컬에서 서명 없는 zip 으로 설치 테스트 시 |
-| `LVIS_PLUGINS_DIR=/path/to/portable` | userData 가 아닌 임의 위치에 플러그인 저장 (CI sandbox 등) |
 
 ⚠️ 모든 `LVIS_DEV*` 플래그는 `app.isPackaged === true` 일 때 hard-gate 되어 무시됩니다 ([dev-flags.ts](../../src/boot/dev-flags.ts)). packaged 빌드에 env 가 흘러들어와도 보안 약화 없음.
 

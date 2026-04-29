@@ -10,19 +10,16 @@
  * 는 플러그인 — 플러그인이 호스트 폴더에 끼어들거나 호스트가 플러그인 폴더를
  * 들여다보지 않는다.
  *
- * Override hooks:
- *  - `LVIS_PLUGINS_DIR` env — 테스트 / portable install / CI sandbox 용. dev
- *    빌드에서만 적용 (packaged 빌드에서는 `devPluginsDirOverride()` 가
- *    `app.isPackaged === true` hard-gate 로 무시).
+ * Round-3 cleanup: env-tier override (`LVIS_PLUGINS_DIR`) 제거. 이제 경로
+ * 오버라이드는 constructor injection (resolvePluginPaths의 `pluginsRoot`
+ * 인자) 단일 경로만 지원한다 — 테스트는 항상 DI, dev 런타임은 항상 canonical
+ * `~/.lvis/plugins/`. env tier 가 없어도 모든 호출자가 이미 DI 를 쓰고 있다.
  *
  * Electron 은 의도적으로 import 하지 않는다 — 이 모듈은 vitest 에서 electron
- * stub 없이도 동작한다. `LVIS_PLUGINS_DIR` 가 안 잡혀도 `homedir()` 만 있으면
- * 충분하다.
+ * stub 없이도 동작한다.
  */
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-
-import { devPluginsDirOverride } from "../boot/dev-flags.js";
 
 export interface PluginPaths {
   /** Absolute path to `registry.json` — sits at the root of `pluginsRoot`. */
@@ -39,11 +36,11 @@ export interface PluginPaths {
 
 export interface ResolvePluginPathsInput {
   /**
-   * Override for the plugins root. When omitted, falls back to
-   * `LVIS_PLUGINS_DIR` env var, then to `homedir()/.lvis/plugins`.
+   * Override for the plugins root. When omitted, defaults to
+   * `homedir()/.lvis/plugins`.
    *
-   * Tests and portable installs use this to redirect away from the real
-   * `~/.lvis/plugins/`.
+   * Tests use this for sandbox isolation. There is no env-tier fallback —
+   * if an override is needed, callers must pass it explicitly.
    */
   pluginsRoot?: string;
   /** Optional cache root override. Defaults to `<pluginsRoot>/.cache`. */
@@ -58,15 +55,13 @@ export interface ResolvePluginPathsInput {
  *   - `~/.lvis/plugins/<id>/plugin.json`
  *   - `~/.lvis/plugins/.cache/`
  *
- * `LVIS_PLUGINS_DIR` env (when set on a dev build) overrides `pluginsRoot`
- * and the derived registry/cache. By design `registryPath` is always
- * `pluginsRoot/registry.json` so registry entries can hold paths relative
- * to `dirname(registryPath)`.
+ * Override is via the `pluginsRoot` argument only (constructor injection).
+ * By design `registryPath` is always `pluginsRoot/registry.json` so registry
+ * entries can hold paths relative to `dirname(registryPath)`.
  */
 export function resolvePluginPaths(input: ResolvePluginPathsInput = {}): PluginPaths {
-  const envOverride = devPluginsDirOverride();
   const pluginsRoot = resolve(
-    input.pluginsRoot ?? envOverride ?? resolve(homedir(), ".lvis", "plugins"),
+    input.pluginsRoot ?? resolve(homedir(), ".lvis", "plugins"),
   );
   const cacheRoot = resolve(input.cacheRoot ?? resolve(pluginsRoot, ".cache"));
   return {
