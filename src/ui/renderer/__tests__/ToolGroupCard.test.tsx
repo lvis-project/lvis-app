@@ -56,7 +56,7 @@ describe("ToolGroupCard", () => {
   it("single tool: renders tool name inline without group header", () => {
     const { container } = render(<ToolGroupCard group={makeGroup({ status: "done" })} />);
     expect(container.textContent).not.toContain("도구 사용 결과");
-    expect(container.textContent).toContain("read_file"); // unmapped name shown as-is
+    expect(container.textContent).toContain("read file"); // unmapped name: underscores → spaces fallback
   });
 
   it("single tool running: shows spinner inline", () => {
@@ -64,7 +64,7 @@ describe("ToolGroupCard", () => {
       <ToolGroupCard group={makeGroup({ status: "running", tools: [{ toolUseId: "tu-1", name: "read_file", input: {}, status: "running", displayOrder: 0 }] })} />,
     );
     expect(container.textContent).not.toContain("도구 사용 중");
-    expect(container.textContent).toContain("read_file");
+    expect(container.textContent).toContain("read file"); // unmapped name: underscores → spaces fallback
   });
 
   it("single tool error: shows 실패 badge", () => {
