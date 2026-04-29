@@ -354,7 +354,18 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:plugins:install-result", listener);
   },
 
-  // Dev-only: install a plugin from a local directory (LVIS_DEV=1 required).
+  /**
+   * Dev-only: install a plugin from a local directory (LVIS_DEV=1 required).
+   *
+   * Return shape:
+   *   - `null` — the user cancelled the folder picker. NOT an error.
+   *   - `{ pluginId, installed: true }` — install succeeded.
+   *   - throws — auth/dev-mode/IO error. Callers should surface this as a
+   *     toast/alert rather than collapsing it into `null`, otherwise users
+   *     can't distinguish "didn't run" from "ran but failed". See
+   *     `installLocal` in `src/plugins/marketplace.ts` for the error
+   *     producer side.
+   */
   installLocalPlugin: async () => {
     const r = await ipcRenderer.invoke("lvis:plugins:install-local") as
       | { pluginId: string; installed: true }
@@ -362,9 +373,6 @@ const api = {
       | null;
     if (!r) return null; // user cancelled the folder picker
     if ("ok" in r) {
-      // Auth/dev-mode failures surface as a real error so callers can
-      // distinguish them from "user cancelled" rather than collapsing the
-      // ok:false envelope into null. See installLocal in marketplace.ts.
       throw new Error(`installLocalPlugin: ${r.error}`);
     }
     return r;
@@ -682,6 +690,6 @@ contextBridge.exposeInMainWorld("lvis", {
   },
   env: {
     isDev: process.env.LVIS_DEV === "1",
-    enableDevConsole: process.env.LVIS_ENABLE_DEV_CONSOLE === "1",
+    enableDevConsole: process.env.LVIS_DEV_CONSOLE === "1",
   },
 });

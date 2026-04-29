@@ -21,6 +21,12 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 const workspaceRoot = resolve(repoRoot, "..");
+// Hardcoded canonical default — must match `resolvePluginPaths()`'s default
+// in `src/plugins/plugin-paths.ts`. This script is a .mjs runtime tool that
+// runs before any TypeScript compile step, so importing the resolver would
+// require either a parallel .mjs constants module or a ts-loader hop. Keeping
+// it duplicated with this comment is simpler; if the canonical root ever
+// changes in plugin-paths.ts, update this line in lockstep.
 const userPluginsRoot = resolve(homedir(), ".lvis", "plugins");
 const registryPath = resolve(userPluginsRoot, "registry.json");
 const dryRun = process.argv.includes("--dry-run");

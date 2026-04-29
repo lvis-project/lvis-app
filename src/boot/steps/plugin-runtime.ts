@@ -564,8 +564,9 @@ export async function initPluginRuntime(
   // §7.2 Plugin Deployment Guard.
   // Plugin layout anchors at `~/.lvis/plugins/<id>/` — single root for both
   // user-installed and admin-injected plugins (distinguished by metadata,
-  // not by physical directory). The resolver picks `LVIS_PLUGINS_DIR` if
-  // set on a dev build, else `homedir()/.lvis/plugins`.
+  // not by physical directory). The resolver always uses
+  // `homedir()/.lvis/plugins`; tests pass an explicit `pluginsRoot` for
+  // sandbox isolation (Round-3 removed the env-tier override).
   const pluginPaths = resolvePluginPaths();
   // mkdir the root once so the trust-root realpath check in PluginRuntime
   // (and any first-install write under pluginsRoot/<id>/) doesn't trip on a

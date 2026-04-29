@@ -323,7 +323,15 @@ export type LvisApi = {
   retryBootstrap: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onPluginInstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
-  /** Dev-only: open a folder picker and install a local plugin directory. Returns null if canceled. */
+  /**
+   * Dev-only: open a folder picker and install a local plugin directory.
+   *
+   * Return shape:
+   *   - `null` — the user cancelled the folder picker. NOT an error.
+   *   - `{ pluginId, installed: true }` — install succeeded.
+   *   - throws — auth/dev-mode/IO error. Callers must catch + surface as a
+   *     toast/alert; collapsing the error into `null` would hide failures.
+   */
   installLocalPlugin: () => Promise<{ pluginId: string; installed: true } | null>;
   onPluginInstallProgress: (h: (payload:
     | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
