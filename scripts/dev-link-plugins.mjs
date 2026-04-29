@@ -13,8 +13,7 @@
  * Usage: node scripts/dev-link-plugins.mjs [--dry-run] [--force]
  *   --force  Replace real dist/ directories with symlinks (destructive)
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, unlinkSync, rmSync, readdirSync } from "node:fs";
-import { lstatSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +25,8 @@ const userPluginsRoot = resolve(homedir(), ".lvis", "plugins");
 const registryPath = resolve(userPluginsRoot, "registry.json");
 const dryRun = process.argv.includes("--dry-run");
 const force = process.argv.includes("--force");
+const disabledPluginIds = (process.env.LVIS_DEV_DISABLED_PLUGINS ?? "")
+  .split(",").map((s) => s.trim()).filter(Boolean);
 
 function log(msg) { console.log(`[dev:link] ${msg}`); }
 
@@ -94,13 +95,23 @@ for (const repo of repos) {
     continue;
   }
 
+  // Skip plugins explicitly disabled in this dev session
+  if (disabledPluginIds.includes(pluginId)) {
+    log(`skip: ${pluginId} (disabled by LVIS_DEV_DISABLED_PLUGINS)`);
+    continue;
+  }
+
   // Don't clobber a user-installed (non-_devLinked) entry with the same id
   if (existingPlugins.some(p => p.id === pluginId)) {
     log(`skip: ${pluginId} (already user-installed; remove it first to dev-link)`);
     continue;
   }
 
-  const entryRelative = typeof manifest.entry === "string" ? manifest.entry : "dist/hostPlugin.js";
+  if (typeof manifest.entry !== "string" || !manifest.entry) {
+    log(`skip: ${pluginId} (manifest.entry missing or not a string)`);
+    continue;
+  }
+  const entryRelative = manifest.entry;
   const builtEntry = resolve(pluginRepoDir, entryRelative);
   if (!existsSync(builtEntry)) { log(`skip: ${pluginId} (not built: ${entryRelative})`); continue; }
 
@@ -112,12 +123,14 @@ for (const repo of repos) {
     mkdirSync(installDir, { recursive: true });
     // Write real plugin.json (entry stays as "dist/hostPlugin.js")
     writeFileSync(resolve(installDir, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n", "utf-8");
-    // Symlink dist/ directory
+    // Symlink dist/ directory — skip registration when symlink cannot be created
     if (existsSync(distTarget)) {
       const ok = forceSymlink(distLink, distTarget);
       if (ok) log(`linked: ${pluginId}  dist/ → ${distTarget}`);
+      else { log(`skip registry: ${pluginId} (dist/ symlink failed — run with --force to replace real dir)`); continue; }
     } else {
-      log(`warn: ${pluginId} dist/ not found at ${distTarget}`);
+      log(`warn: ${pluginId} dist/ not found at ${distTarget} — skipping registration`);
+      continue;
     }
   }
 

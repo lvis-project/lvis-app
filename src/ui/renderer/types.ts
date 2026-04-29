@@ -325,8 +325,6 @@ export type LvisApi = {
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   /** Dev-only: open a folder picker and install a local plugin directory. Returns null if canceled. */
   installLocalPlugin: () => Promise<{ pluginId: string; installed: true } | null>;
-  /** Dev-only: subscribe to local install result events. */
-  onInstallLocalResult: (cb: (result: { pluginId: string; installed: true } | null) => void) => () => void;
   onPluginInstallProgress: (h: (payload:
     | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" }
     | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null }

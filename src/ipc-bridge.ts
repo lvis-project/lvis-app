@@ -816,8 +816,6 @@ ${input}`;
     const result = await pluginMarketplace.installLocal(filePaths[0]);
     await pluginRuntime.restartAll();
     refreshPluginNotifications?.();
-    const win = getMainWindow();
-    win?.webContents.send("lvis:plugins:install-local-result", result);
     return result;
   });
   // read-only, sender guard optional

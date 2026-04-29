@@ -355,11 +355,15 @@ const api = {
   },
 
   // Dev-only: install a plugin from a local directory (LVIS_DEV=1 required).
-  installLocalPlugin: async () => ipcRenderer.invoke("lvis:plugins:install-local"),
-  onInstallLocalResult: (cb: (result: { pluginId: string; installed: true } | null) => void) => {
-    const listener = (_: unknown, r: { pluginId: string; installed: true } | null) => cb(r);
-    ipcRenderer.on("lvis:plugins:install-local-result", listener);
-    return () => ipcRenderer.removeListener("lvis:plugins:install-local-result", listener);
+  installLocalPlugin: async () => {
+    const r = await ipcRenderer.invoke("lvis:plugins:install-local") as
+      | { pluginId: string; installed: true }
+      | { ok: false; error: string }
+      | null;
+    // Normalise UNAUTHORIZED_FRAME (ok:false envelope) to null so callers
+    // only see { pluginId, installed: true } | null.
+    if (!r || "ok" in r) return null;
+    return r;
   },
 
   // Sibling of onPluginInstallResult — fires after PluginConfigTab or any
