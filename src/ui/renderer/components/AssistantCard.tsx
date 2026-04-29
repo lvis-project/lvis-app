@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { highlightText } from "../utils/html-preview.js";
 import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
+import { replaceToolNamesInText } from "../utils/tool-display.js";
 
 export function AssistantCard({
   entry,
@@ -91,8 +92,8 @@ export function AssistantCard({
         ) : (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {entry.streaming
-              ? clampDanglingMarkdownLink(entry.text) || "응답을 작성하는 중..."
-              : (entry.text || "")}
+              ? clampDanglingMarkdownLink(replaceToolNamesInText(entry.text)) || "응답을 작성하는 중..."
+              : replaceToolNamesInText(entry.text || "")}
           </ReactMarkdown>
         )}
       </div>
