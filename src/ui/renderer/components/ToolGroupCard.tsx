@@ -38,7 +38,7 @@ function SingleToolInline({ tool }: { tool: Extract<ChatEntry, { kind: "tool_gro
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
   return (
-    <div className="max-w-[85%] rounded-md text-xs text-muted-foreground">
+    <div className="max-w-[85%] rounded-md text-[11px] text-muted-foreground">
       <button
         className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
         onClick={() => setOpen((o) => !o)}
@@ -117,7 +117,7 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
   }
 
   return (
-    <div className="max-w-[85%] rounded-md text-xs text-muted-foreground">
+    <div className="max-w-[85%] rounded-md text-[11px] text-muted-foreground">
       <button
         className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
         onClick={() => setOpen((o) => !o)}
