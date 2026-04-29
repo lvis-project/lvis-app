@@ -22,6 +22,7 @@ import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
+import { TurnActionBar } from "./components/TurnActionBar.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
@@ -377,13 +378,19 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                     isStarred={!!isEntryStarred(idx)}
                     isFinal={true}
                     turnTokens={turnTokens}
-                    actions={{
-                      onRetry: () => void onRetryEffort(),
-                      onFork: () => void onFork(idx),
-                      onToggleStar: () => void onToggleStar(idx),
-                    }}
-                    onFeedback={onFeedback ? (rating, reason) => void onFeedback(i, rating, reason) : undefined}
                   />
+                  {!entry.streaming && (
+                    <TurnActionBar
+                      turnTokens={turnTokens}
+                      isStarred={!!isEntryStarred(idx)}
+                      actions={{
+                        onRetry: () => void onRetryEffort(),
+                        onFork: () => void onFork(idx),
+                        onToggleStar: () => void onToggleStar(idx),
+                      }}
+                      onFeedback={onFeedback ? (rating, reason) => void onFeedback(i, rating, reason) : undefined}
+                    />
+                  )}
                 </div>
               );
               i++;
