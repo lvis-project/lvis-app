@@ -45,7 +45,7 @@ export function TurnActionBar({
       {actions?.onRetry && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <button className="rounded p-0.5 hover:bg-muted hover:text-foreground transition-colors" onClick={actions.onRetry}>
+            <button className="rounded p-0.5 hover:bg-muted hover:text-foreground transition-colors" title="다시 시도 (깊이: high)" onClick={actions.onRetry}>
               <RefreshCw className="h-3 w-3" />
             </button>
           </TooltipTrigger>
