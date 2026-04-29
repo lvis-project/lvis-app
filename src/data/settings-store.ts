@@ -448,6 +448,22 @@ export class SettingsService {
       if (marketplaceParsed.backend !== "real-cloud") {
         marketplaceParsed.backend = "real-cloud";
       }
+      // Existing-user migration for #320: settings saved before the
+      // default flip carry the legacy `http://localhost:8000` URL, which
+      // means a `git pull` of the host alone wouldn't move them to the
+      // production tunnel. We rewrite *only* that exact legacy default —
+      // any other URL means the user explicitly chose a different
+      // deployment (sandbox, sibling-network staging, alternate dev box)
+      // and that choice must be preserved. The legacy default also
+      // forced realCloudAllowPrivateNetwork=true; flip it off when (and
+      // only when) we're actually migrating off localhost so the public
+      // HTTPS endpoint isn't paired with a now-irrelevant allowance.
+      if (marketplaceParsed.realCloudBaseUrl === "http://localhost:8000") {
+        marketplaceParsed.realCloudBaseUrl = "https://marketplace.lvisai.xyz";
+        if (marketplaceParsed.realCloudAllowPrivateNetwork === true) {
+          marketplaceParsed.realCloudAllowPrivateNetwork = false;
+        }
+      }
       const pluginConfigs = sanitizeStoredPluginConfigs(parsed.pluginConfigs);
       const routine = parsed.routine;
       const ROUTINE_IDLE_THRESHOLD_MIN_MS = 60_000;        // 1 min floor (debug/test)
