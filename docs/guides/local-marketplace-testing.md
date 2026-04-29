@@ -28,14 +28,13 @@ LVIS 마켓플레이스는 **git-based publish** (Go 모듈 프록시 스타일)
 
 ## 등록된 managed 플러그인 (`MANAGED_SOURCES`)
 
-`lvis-marketplace/server/src/lvis_marketplace/bootstrap.py:124-197` 에 하드코딩된 7개 + 합성 1개:
+`lvis-marketplace/server/src/lvis_marketplace/bootstrap.py:121-187` 에 하드코딩된 6개 + 합성 1개:
 
 | slug | 레포 디렉토리명 | install policy | 비고 |
 |------|------------------|----------------|------|
 | `meeting` | `lvis-plugin-meeting` | user (명시) | |
 | `pageindex` | `lvis-plugin-pageindex` | admin (fallback) | `install_policy`/`deployment` 키 생략 → fallback 룰로 admin |
-| `email` | `lvis-plugin-email` | user (명시) | |
-| `calendar` | `lvis-plugin-calendar` | user (명시) | |
+| `ms-graph` | `lvis-plugin-ms-graph` | user (명시) | 구 email + calendar 플러그인 합본 |
 | `lge-api` | `lvis-plugin-lge-api` | admin (fallback) | 위 pageindex 와 동일 |
 | `work-proactive` | `lvis-plugin-work-proactive` | user (명시) | |
 | `agent-hub` | `lvis-plugin-agent-hub` | user (명시) | |
@@ -43,7 +42,7 @@ LVIS 마켓플레이스는 **git-based publish** (Go 모듈 프록시 스타일)
 
 > ⚠️ **fallback 룰 주의**: `MANAGED_SOURCES` 항목에서 `install_policy` / `deployment` 를 둘 다 생략하면 `admin`/`managed` 로 간주됩니다 (`bootstrap.py:651-655`). 새 user-policy 플러그인은 반드시 둘 다 명시(`install_policy="user", deployment="user"`)하세요. pageindex/lge-api 가 admin 인 것은 두 필드를 모두 생략한 결과지 의도된 admin 정책이라는 보장은 코드 차원입니다.
 
-이 7개 중 하나를 수정하고 있다면 §3 의 dev 루프로 바로 진입. 새 플러그인은 §6 참고.
+이 6개 중 하나를 수정하고 있다면 §3 의 dev 루프로 바로 진입. 새 플러그인은 §6 참고.
 
 ---
 
@@ -140,8 +139,8 @@ curl -s http://localhost:8000/api/v1/catalog | jq '.[] | {slug, latest_stable_ve
 | `LVIS_PLUGIN_WORKSPACE_ROOT` | (자동 탐지) | §1 참고 |
 | `LVIS_MARKETPLACE_SKIP_BOOTSTRAP` | 미설정 | `1` 이면 git pull / 패키징 skip — 기존 DB 만 보고 빠르게 띄울 때 |
 | `LVIS_SCHEMA_HOST` | `lvis.local` | 매니페스트 `$schema` URI 호스트. 로컬에서는 기본값. (URL 자체는 매니페스트에 박히는 식별자일 뿐, fetch 되지 않음 — DNS 이슈 없음) |
-| `MARKETPLACE_SIGNING_PRIVATE_KEY_DEV_V1` | `.env.example` 에 dev 값 | 서버가 zip sha256 을 서명할 키. 여러 키 등록 시 모두 dual-sign |
-| `MARKETPLACE_SIGNING_PRIVATE_KEY_<KEY_ID>` | (없음) | `<KEY_ID>` = key_id 를 대문자화 + `-` → `_`. 예: `dev-v1` → `DEV_V1` |
+| `MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1` | `.env.example` 에 dev 값 | 서버가 zip sha256 을 서명할 키. 여러 키 등록 시 모두 dual-sign |
+| `MARKETPLACE_SIGNING_PRIVATE_KEY_<KEY_ID>` | (없음) | `<KEY_ID>` = key_id 를 대문자화 + `-` → `_`. 예: `poc-v1` → `POC_V1` |
 
 서버는 `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 형태로 잡히는 모든 키로 **dual-sign** 합니다. 클라이언트(`lvis-app`)는 envelope 의 시그니처 중 하나라도 자기가 신뢰하는 publisher key set 에 매칭되면 OK.
 
@@ -361,7 +360,7 @@ zip -r myplugin-0.1.0.zip plugin.json dist/ icons/        # zip 루트에 plugin
 ../lvis-marketplace/cli/bin/lvis-publish publish myplugin-0.1.0.zip --slug myplugin
 ```
 
-> ⚠️ **`installPolicy: "admin"` 으로 publish 하면**: (a) `approval_state="pending_review"` 로 들어가 catalog 에 노출 안 됨 (`publisher.py:382` + `catalog.py:170`), (b) **동시에 `deployment="managed"` 로도 들어감** — 매니페스트 서명(`plugin.json.sig`) 가 zip 안에 없으면 §7 의 `manifest signature missing` 시나리오와 묶여 install 시점에 또 거절됨. dev 환경에서는 (1) `installPolicy: "user"` 로 publish, (2) `lvis-publish approve <publish-id>` 로 직접 승인 (admin role 필요), 또는 (3) zip 안에 미리 서명된 `plugin.json.sig` 포함.
+> ⚠️ **`installPolicy: "admin"` 으로 publish 하면**: (a) `approval_state="pending_review"` 로 들어가 catalog 에 노출 안 됨 (`publisher.py:381` + `catalog.py:170`), (b) **동시에 `deployment="managed"` 로도 들어감** — 매니페스트 서명(`plugin.json.sig`) 가 zip 안에 없으면 §7 의 `manifest signature missing` 시나리오와 묶여 install 시점에 또 거절됨. dev 환경에서는 (1) `installPolicy: "user"` 로 publish, (2) `lvis-publish approve <publish-id>` 로 직접 승인 (admin role 필요), 또는 (3) zip 안에 미리 서명된 `plugin.json.sig` 포함.
 
 자세한 prod 흐름과 CLI 전체 명령은 [`marketplace-publishing.md`](./marketplace-publishing.md).
 
@@ -403,7 +402,7 @@ uv run alembic upgrade head        # 빈 DB 재생성
 | 항목 | dev (이 가이드) | prod ([marketplace-publishing.md](./marketplace-publishing.md)) |
 |------|------|------|
 | 마켓플레이스 URL | `http://127.0.0.1:8000` | 사내 prod URL (env 로 주입) |
-| 서버 서명 키 | `dev-v1` (테스트 키) | prod 키. POC 키는 `LVIS_ENV=production` 일 때 서버가 부팅 거절 |
+| 서버 서명 키 | `poc-v1` (테스트 키) | prod 키. POC 키는 `LVIS_ENV=production` 일 때 서버가 부팅 거절 |
 | `LVIS_ALLOW_TEST_MARKETPLACE_KEYS` | `1` 또는 `LVIS_DEV=1` 필수 | (packaged 빌드는 무시 — hard-gate) |
 | `LVIS_MARKETPLACE_LOAD_DOTENV` | `1` 필수 | **금지** — 운영 환경은 secret manager 또는 정식 env 주입 |
 | publish 채널 | git-based 부트스트랩 (managed) + CLI ad-hoc | 동일 (managed 는 `lvis-marketplace` PR + 서버 재배포, ad-hoc 은 CLI publish + admin approve) |
