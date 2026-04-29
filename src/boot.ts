@@ -245,9 +245,10 @@ export async function bootstrap(
   // Phase 2-final marketplace fetcher selection — single production path:
   //   - real-cloud + URL → RealCloudMarketplaceFetcher
   //   - otherwise (no URL configured) → DisabledMarketplaceFetcher
-  // No `MockMarketplaceFetcher` fallback at boot. Dev environments default
-  // to `realCloudBaseUrl: "http://localhost:8000"` (settings-store default)
-  // and run the marketplace server locally; tests inject their own fetcher.
+  // No `MockMarketplaceFetcher` fallback at boot. Default points at the
+  // production tunnel (`https://marketplace.lvisai.xyz`); dev operators
+  // running the marketplace server locally override via the settings UI.
+  // Tests inject their own fetcher.
   let marketplaceFetcher: MarketplaceFetcher;
   if (marketplaceSettings.realCloudBaseUrl) {
     marketplaceFetcher = new RealCloudMarketplaceFetcher({
