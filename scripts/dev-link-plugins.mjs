@@ -10,9 +10,10 @@
  * Existing user-installed entries (no _devLinked flag) are preserved.
  * Run after `bun run prepare:plugins` to refresh.
  *
- * Usage: node scripts/dev-link-plugins.mjs [--dry-run]
+ * Usage: node scripts/dev-link-plugins.mjs [--dry-run] [--force]
+ *   --force  Replace real dist/ directories with symlinks (destructive)
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, unlinkSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, unlinkSync, rmSync, readdirSync } from "node:fs";
 import { lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve, dirname } from "node:path";
@@ -24,26 +25,44 @@ const workspaceRoot = resolve(repoRoot, "..");
 const userPluginsRoot = resolve(homedir(), ".lvis", "plugins");
 const registryPath = resolve(userPluginsRoot, "registry.json");
 const dryRun = process.argv.includes("--dry-run");
+const force = process.argv.includes("--force");
 
 function log(msg) { console.log(`[dev:link] ${msg}`); }
+
+/** Validate that pluginId is a safe directory name (no path traversal). */
+function isSafePluginId(id) {
+  return typeof id === "string" && id.length > 0 && /^[a-zA-Z0-9_.\-]+$/.test(id) && !id.includes("..");
+}
 
 function forceSymlink(linkPath, target) {
   try {
     const st = lstatSync(linkPath);
-    if (st.isSymbolicLink() || st.isFile()) unlinkSync(linkPath);
-    else { log(`warn: ${linkPath} is a real directory, skipping`); return false; }
+    if (st.isSymbolicLink() || st.isFile()) {
+      unlinkSync(linkPath);
+    } else if (st.isDirectory()) {
+      if (!force) {
+        log(`warn: ${linkPath} is a real directory — run with --force to replace it`);
+        return false;
+      }
+      rmSync(linkPath, { recursive: true, force: true });
+    }
   } catch { /* doesn't exist — fine */ }
-  symlinkSync(target, linkPath);
+  if (process.platform === "win32") symlinkSync(target, linkPath, "junction");
+  else symlinkSync(target, linkPath);
   return true;
 }
 
-// Read existing registry, keep non-devLinked entries (user-installed)
+// Read existing registry, keep non-devLinked entries (user-installed).
+// Abort on parse error to avoid silently dropping user-installed entries.
 let existingPlugins = [];
 if (existsSync(registryPath)) {
   try {
     const reg = JSON.parse(readFileSync(registryPath, "utf-8"));
     existingPlugins = (reg.plugins ?? []).filter(p => !p._devLinked);
-  } catch {}
+  } catch (err) {
+    log(`error: failed to read or parse registry at ${registryPath} — aborting to avoid data loss`);
+    throw err;
+  }
 }
 
 const devPlugins = [];
@@ -60,9 +79,24 @@ for (const repo of repos) {
   catch (e) { log(`skip: ${repo.name} (parse error: ${e.message})`); continue; }
 
   const pluginId = manifest.id;
-  // Skip template repos (placeholder IDs like com.example.*)
-  if (!pluginId || typeof pluginId !== "string" || pluginId.startsWith("com.example.")) {
+
+  // Skip template repos: match only the generated placeholder pattern, not all com.example.*
+  const hasTemplatePlaceholderId =
+    typeof pluginId === "string" && /^com\.example\.__[A-Z0-9_]+__$/.test(pluginId);
+  if (!pluginId || typeof pluginId !== "string" || hasTemplatePlaceholderId) {
     log(`skip: ${repo.name} (template/placeholder id: ${pluginId})`);
+    continue;
+  }
+
+  // Validate pluginId is a safe directory name (no path traversal)
+  if (!isSafePluginId(pluginId)) {
+    log(`skip: ${repo.name} (unsafe plugin id: ${pluginId})`);
+    continue;
+  }
+
+  // Don't clobber a user-installed (non-_devLinked) entry with the same id
+  if (existingPlugins.some(p => p.id === pluginId)) {
+    log(`skip: ${pluginId} (already user-installed; remove it first to dev-link)`);
     continue;
   }
 
