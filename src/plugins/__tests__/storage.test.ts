@@ -2,7 +2,7 @@
  * Sandboxed PluginStorage — verifies path-traversal guards, ENOENT handling,
  * and JSON helpers stay scoped to pluginDataDir.
  */
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -49,10 +49,35 @@ describe("createPluginStorage path guards", () => {
     symlinkSync(join(outsideDir, "escape.txt"), join(dataDir, "link-out.txt"));
     const s = createPluginStorage("p", dataDir);
     // The realpath of `link-out.txt` resolves outside the root → reject.
-    await expect(s.write("link-out.txt", "tampered")).resolves.toBeUndefined();
+    await expect(s.write("link-out.txt", "tampered")).rejects.toThrow(
+      /symlink escapes plugin storage root/,
+    );
+    // The escape target on disk must remain untouched.
+    expect(readFileSync(join(outsideDir, "escape.txt"), "utf-8")).toBe("untouched");
     // Direct attempts to traverse through the link path should be rejected.
     expect(() => s.resolve("..", outsideDir.split(sep).pop()!, "escape.txt"))
       .toThrow(/escapes plugin storage root/);
+  });
+
+  it("rejects reads through symlinks pointing outside the root", async () => {
+    // Plant a symlink inside dataDir whose realpath escapes via outsideDir.
+    writeFileSync(join(outsideDir, "secret.txt"), "shhh", "utf-8");
+    symlinkSync(join(outsideDir, "secret.txt"), join(dataDir, "leak.txt"));
+    const s = createPluginStorage("p", dataDir);
+    await expect(s.read("leak.txt")).rejects.toThrow(/symlink escapes plugin storage root/);
+    await expect(s.readText("leak.txt")).rejects.toThrow(/symlink escapes plugin storage root/);
+  });
+
+  it("rejects writes whose existing ancestor is a symlink to outside", async () => {
+    // The new file (`payload.txt`) doesn't exist yet, but its closest
+    // existing ancestor (`escape/`) is a symlink whose realpath points
+    // outside the root. The realpath check must climb up to the symlink
+    // and reject before any write touches disk.
+    symlinkSync(outsideDir, join(dataDir, "escape"));
+    const s = createPluginStorage("p", dataDir);
+    await expect(s.write("escape/payload.txt", "x")).rejects.toThrow(
+      /symlink escapes plugin storage root/,
+    );
   });
 });
 

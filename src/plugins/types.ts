@@ -281,13 +281,18 @@ export interface PluginMarketplaceItem {
 }
 
 /**
- * Sandboxed filesystem API scoped to a plugin's `pluginDataDir`. All paths are
- * resolved relative to that root and validated against path-escape attempts
- * (`..`, absolute paths, symlinks pointing outside the root). Plugins should
- * prefer this over `node:fs` so the host can audit / sandbox / restrict
- * writes uniformly.
+ * Sandboxed storage rooted at `pluginDataDir`. All paths are resolved relative
+ * to that root. Path traversal via `..`, absolute paths, and symlinks
+ * escaping the root via realpath checks are rejected with `PluginStorageError`.
  *
- * Every operation throws if the resolved path escapes `pluginDataDir`.
+ * The realpath check walks up from the resolved target until it finds an
+ * existing entry, then verifies that entry's canonical path stays inside the
+ * root — this catches both "reads through a symlink that points outside" and
+ * "writes whose closest existing ancestor is a symlink that points outside".
+ *
+ * Plugins should prefer this over `node:fs` so the host can audit / sandbox /
+ * restrict writes uniformly. Every operation throws if the resolved path
+ * escapes `pluginDataDir`.
  */
 export interface PluginStorage {
   /**

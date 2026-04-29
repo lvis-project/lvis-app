@@ -40,6 +40,49 @@ export function createPluginStorage(
 ): PluginStorage {
   const canonicalRoot = realpathSync(pluginDataDir);
 
+  /**
+   * Climb up the path until we hit an existing entry, then realpath it and
+   * confirm it stays inside `canonicalRoot`. This catches the case where the
+   * lexical target itself doesn't exist yet (writes/mkdir creating new
+   * entries) but its closest existing ancestor IS a symlink pointing outside
+   * the root, *and* the case where the target itself is a symlink (reads).
+   *
+   * Without this, a plugin could plant a symlink inside `pluginDataDir` and
+   * then read/write through it to escape the sandbox — `path.resolve` is
+   * purely lexical and never follows symlinks.
+   */
+  function realpathContainmentCheck(target: string): void {
+    let probe = target;
+    // Stop when probe equals the lexical root or we've climbed to the
+    // filesystem root (dirname returns the same path when at /).
+    // Bound the loop to avoid pathological recursion.
+    for (let i = 0; i < 4096; i++) {
+      try {
+        const real = realpathSync(probe);
+        if (real !== canonicalRoot && !real.startsWith(canonicalRoot + sep)) {
+          log?.(`storage: rejected symlink escape`, { target, probe, real });
+          throw new PluginStorageError("symlink escapes plugin storage root", pluginId, target);
+        }
+        return;
+      } catch (err) {
+        if (err instanceof PluginStorageError) throw err;
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ENOTDIR") {
+          const parent = dirname(probe);
+          if (parent === probe) {
+            // Climbed past the filesystem root without finding an existing
+            // ancestor; nothing to validate, the lexical resolve already
+            // confirmed containment.
+            return;
+          }
+          probe = parent;
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
   function guard(rel: string): string {
     if (typeof rel !== "string") {
       throw new PluginStorageError("path must be a string", pluginId, String(rel));
@@ -53,6 +96,10 @@ export function createPluginStorage(
       log?.(`storage: rejected escape attempt`, { rel, resolved: target });
       throw new PluginStorageError("path escapes plugin storage root", pluginId, rel);
     }
+    // Lexical containment passed; now verify symlinks don't smuggle the
+    // target outside the root. Walks up from `target` until it finds an
+    // existing entry and realpath-checks it.
+    realpathContainmentCheck(target);
     return target;
   }
 

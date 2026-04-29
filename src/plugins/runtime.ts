@@ -424,6 +424,13 @@ export class PluginRuntime {
       // 플러그인별 스코프된 HostApi 생성
       const pluginDataDir = this.ensurePluginDataDir(manifest.id, pluginRoot);
       const hostApi = this.createHostApi?.(manifest.id, manifest, pluginDataDir) ?? createNoopHostApi(manifest.id, pluginDataDir);
+      // Defence-in-depth: PluginHostApi.storage is required, but partial
+      // hostApi objects from test harnesses / external callers may omit it.
+      // Fall back to the sandboxed storage rooted at pluginDataDir so plugins
+      // never see `undefined` here.
+      if (!hostApi.storage) {
+        hostApi.storage = createPluginStorage(manifest.id, pluginDataDir);
+      }
 
       const instance = await createPlugin({
         pluginId: manifest.id,
@@ -647,6 +654,11 @@ export class PluginRuntime {
 
     const pluginDataDir = this.ensurePluginDataDir(pluginId, pluginRoot);
     const hostApi = this.createHostApi?.(pluginId, manifest, pluginDataDir) ?? createNoopHostApi(pluginId, pluginDataDir);
+    // Defence-in-depth: ensure storage is wired even if a partial hostApi was
+    // returned (test harnesses, embedders). See loadAll() for rationale.
+    if (!hostApi.storage) {
+      hostApi.storage = createPluginStorage(pluginId, pluginDataDir);
+    }
     const instance = await createPlugin({
       pluginId,
       pluginRoot,
