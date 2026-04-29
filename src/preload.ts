@@ -354,6 +354,22 @@ const api = {
     return () => ipcRenderer.removeListener("lvis:plugins:install-result", listener);
   },
 
+  // Dev-only: install a plugin from a local directory (LVIS_DEV=1 required).
+  installLocalPlugin: async () => {
+    const r = await ipcRenderer.invoke("lvis:plugins:install-local") as
+      | { pluginId: string; installed: true }
+      | { ok: false; error: string }
+      | null;
+    if (!r) return null; // user cancelled the folder picker
+    if ("ok" in r) {
+      // Auth/dev-mode failures surface as a real error so callers can
+      // distinguish them from "user cancelled" rather than collapsing the
+      // ok:false envelope into null. See installLocal in marketplace.ts.
+      throw new Error(`installLocalPlugin: ${r.error}`);
+    }
+    return r;
+  },
+
   // Sibling of onPluginInstallResult — fires after PluginConfigTab or any
   // other surface drives uninstall through the IPC handler. Renderer uses
   // this to drop the removed plugin's sidebar tab + marketplace card.
