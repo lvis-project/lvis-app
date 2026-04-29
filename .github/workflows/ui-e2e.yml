@@ -12,11 +12,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && github.event.label.name == 'ui-e2e')
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-      fail-fast: false
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, Linux, ARM64, oracle]
     timeout-minutes: 25
     env:
       E2E: "1"
@@ -28,27 +24,16 @@ jobs:
           path: lvis-app
 
       # Sibling plugin repos are required because lvis-app declares
-      # file:../lvis-plugin-* dependencies in package.json.
-      - name: Checkout lvis-plugin-pageindex
-        uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-pageindex
-          path: lvis-plugin-pageindex
-      - name: Checkout lvis-plugin-meeting
-        uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-meeting
-          path: lvis-plugin-meeting
-      - name: Checkout lvis-plugin-email
-        uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-email
-          path: lvis-plugin-email
-      - name: Checkout lvis-plugin-calendar
-        uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-calendar
-          path: lvis-plugin-calendar
+      # file:../lvis-plugin-* dependencies in package.json. Self-hosted runner
+      # uses host gh CLI auth (repo scope) instead of a GitHub App token.
+      - name: Clone sibling plugin repos
+        run: |
+          set -euo pipefail
+          GH_TOKEN=$(gh auth token)
+          for slug in lvis-plugin-pageindex lvis-plugin-meeting lvis-plugin-lge-api lvis-plugin-work-proactive lvis-plugin-agent-hub lvis-plugin-ms-graph; do
+            if [ -d "$slug" ]; then rm -rf "$slug"; fi
+            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/lvis-project/${slug}.git" "$slug"
+          done
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -85,19 +70,13 @@ jobs:
           npm run build:npm
 
       - name: Run Playwright UI E2E (Linux)
-        if: runner.os == 'Linux'
         working-directory: lvis-app
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" npx playwright test
-
-      - name: Run Playwright UI E2E (Windows)
-        if: runner.os == 'Windows'
-        working-directory: lvis-app
-        run: npx playwright test
 
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report-${{ matrix.os }}
+          name: playwright-report
           path: lvis-app/playwright-report
           if-no-files-found: ignore
