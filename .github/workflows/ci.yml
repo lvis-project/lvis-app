@@ -19,7 +19,7 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: lvis-project
-          repositories: lvis-plugin-meeting,lvis-plugin-email,lvis-plugin-pageindex,lvis-plugin-calendar,lvis-plugin-lge-api,lvis-plugin-work-proactive
+          repositories: lvis-plugin-meeting,lvis-plugin-pageindex,lvis-plugin-lge-api,lvis-plugin-work-proactive,lvis-plugin-agent-hub,lvis-plugin-ms-graph
       - uses: actions/checkout@v6
         with:
           repository: lvis-project/lvis-plugin-meeting
@@ -27,18 +27,8 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
       - uses: actions/checkout@v6
         with:
-          repository: lvis-project/lvis-plugin-email
-          path: lvis-plugin-email
-          token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/checkout@v6
-        with:
           repository: lvis-project/lvis-plugin-pageindex
           path: lvis-plugin-pageindex
-          token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/checkout@v6
-        with:
-          repository: lvis-project/lvis-plugin-calendar
-          path: lvis-plugin-calendar
           token: ${{ steps.app-token.outputs.token }}
       - uses: actions/checkout@v6
         with:
@@ -49,6 +39,16 @@ jobs:
         with:
           repository: lvis-project/lvis-plugin-work-proactive
           path: lvis-plugin-work-proactive
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: actions/checkout@v6
+        with:
+          repository: lvis-project/lvis-plugin-agent-hub
+          path: lvis-plugin-agent-hub
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: actions/checkout@v6
+        with:
+          repository: lvis-project/lvis-plugin-ms-graph
+          path: lvis-plugin-ms-graph
           token: ${{ steps.app-token.outputs.token }}
       - uses: oven-sh/setup-bun@v2
       - name: Build plugin-sdk submodule
