@@ -209,64 +209,63 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
         ))}
         {entries.length === 0 && hasApiKey !== false && askQuestions.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {(() => {
-          // Pre-compute turn structure:
-          // Identify turn boundaries and which assistant entry is the "final" one per turn.
-          // A turn starts at a user message. The final assistant in a turn is the last
-          // assistant entry before the next user message (or end of entries).
-          // All entries between the user message and the final assistant are "intermediate".
+          // Three-way entry classification eliminates retroactive-reclassification flicker.
+          //
+          // "intermediate" — has ≥1 subsequent entry in the same turn → lives in WorkGroup
+          // "live"         — last entry in turn while global streaming is still active
+          //                  → shown below WorkGroup, NO TurnActionBar (prevents premature
+          //                    action-bar flash when a planning message transitions to a tool call)
+          // "final"        — last assistant entry AND global streaming=false
+          //                  → shown with TurnActionBar (turn truly complete)
+          //
+          // TurnActionBar therefore appears ONLY when the whole turn is done, never during it.
 
-          // Build a set of indices that are intermediate (non-final assistant, reasoning, tool_group within a turn)
-          const intermediateSet = new Set<number>();
-          // Map final assistant idx -> turn start idx (for turnTokens computation)
-          const finalAssistantTurnStart = new Map<number, number>();
+          // Last user-message index: determines which WorkGroup belongs to the active turn.
+          let lastUserIdx = -1;
+          for (let k = entries.length - 1; k >= 0; k--) {
+            if (entries[k]?.kind === "user") { lastUserIdx = k; break; }
+          }
+
+          type EntryClass = "intermediate" | "live" | "final";
+          const entryClassMap = new Map<number, EntryClass>();
+          const finalTurnStartMap = new Map<number, number>(); // final idx → turn-start idx
+          const entryTurnStartMap = new Map<number, number>(); // classified idx → turn-start idx
 
           let turnStart = -1;
           for (let i = 0; i < entries.length; i++) {
             const e = entries[i];
             if (!e) continue;
-            if (e.kind === "user") {
-              turnStart = i;
-            } else if (e.kind === "assistant") {
-              // Check if this is the final assistant in its turn
-              const isFinal = !entries.slice(i + 1).some((ne) => ne.kind === "assistant" || ne.kind === "user");
-              // More precisely: final if no assistant comes before the next user message
-              let nextUserIdx = entries.length;
-              for (let j = i + 1; j < entries.length; j++) {
-                if (entries[j]?.kind === "user") { nextUserIdx = j; break; }
-              }
-              // An assistant entry is INTERMEDIATE if any assistant OR tool_group follows
-              // within the same turn. tool_group following means the LLM made tool calls
-              // and this is a planning message, not the final answer.
-              const isLastAssistantInTurn = !entries.slice(i + 1, nextUserIdx).some(
-                (ne) => ne.kind === "assistant" || ne.kind === "tool_group",
-              );
-              if (!isLastAssistantInTurn) {
-                intermediateSet.add(i);
-              } else {
-                finalAssistantTurnStart.set(i, turnStart >= 0 ? turnStart : 0);
-              }
-            } else if (e.kind === "reasoning" || e.kind === "tool_group") {
-              // These are intermediate if they're within a turn that has a final assistant after them
-              // We'll mark them intermediate if there's any assistant after them before the next user
-              let nextUserIdx = entries.length;
-              for (let j = i + 1; j < entries.length; j++) {
-                if (entries[j]?.kind === "user") { nextUserIdx = j; break; }
-              }
-              const hasAssistantAfter = entries.slice(i + 1, nextUserIdx).some((ne) => ne.kind === "assistant");
-              if (hasAssistantAfter) {
-                intermediateSet.add(i);
-              }
+            if (e.kind === "user") { turnStart = i; continue; }
+            if (e.kind !== "assistant" && e.kind !== "reasoning" && e.kind !== "tool_group") continue;
+
+            let nextUserIdx = entries.length;
+            for (let j = i + 1; j < entries.length; j++) {
+              if (entries[j]?.kind === "user") { nextUserIdx = j; break; }
+            }
+
+            const hasSubsequent = entries.slice(i + 1, nextUserIdx).some(
+              (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning",
+            );
+
+            const myTurnStart = turnStart >= 0 ? turnStart : 0;
+            entryTurnStartMap.set(i, myTurnStart);
+
+            if (hasSubsequent) {
+              entryClassMap.set(i, "intermediate");
+            } else if (e.kind === "assistant" && !streaming) {
+              entryClassMap.set(i, "final");
+              finalTurnStartMap.set(i, myTurnStart);
+            } else {
+              entryClassMap.set(i, "live");
             }
           }
 
-          // Group consecutive intermediate entries within the same turn
-          // We'll render them wrapped in WorkGroup
           const rendered: React.ReactNode[] = [];
           let i = 0;
           while (i < entries.length) {
             const entry = entries[i];
             if (!entry) { i++; continue; }
-            // Capture idx by value to avoid closure-over-mutable-variable bug
+            // Capture idx by value — closures in this loop must not close over mutable `i`
             const idx = i;
 
             const isMatch = searchMatchSet.has(idx);
@@ -331,60 +330,82 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
               continue;
             }
 
-            // Collect a run of consecutive intermediate entries
-            if (intermediateSet.has(i)) {
+            // ── Intermediate: collect consecutive intermediate entries into one WorkGroup ──
+            if (entryClassMap.get(i) === "intermediate") {
               const groupStart = i;
+              const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
+              // Spinner is shown only while this WorkGroup belongs to the currently active turn
+              const groupIsActiveTurn = groupTurnStart === lastUserIdx && streaming;
               const groupEntries: { idx: number; node: React.ReactNode }[] = [];
-              while (i < entries.length && intermediateSet.has(i)) {
+
+              while (i < entries.length && entryClassMap.get(i) === "intermediate") {
                 const e = entries[i];
                 if (!e) { i++; continue; }
                 if (e.kind === "reasoning") {
-                  groupEntries.push({ idx: i, node: <ReasoningCard key={idx} entry={e} /> });
+                  groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
                 } else if (e.kind === "tool_group") {
                   groupEntries.push({ idx: i, node: <ToolGroupCard key={e.groupId} group={e} /> });
                 } else if (e.kind === "assistant") {
                   groupEntries.push({ idx: i, node: (
                     <AssistantCard
-                      key={idx}
+                      key={i}
                       entry={e}
                       highlightQuery={searchHighlight}
-                      isStarred={!!isEntryStarred(idx)}
+                      isStarred={false}
                       isFinal={false}
                     />
                   )});
                 }
                 i++;
               }
-              // Determine if the group is still streaming
-              const groupStreaming = groupEntries.some((ge) => {
-                const e = entries[ge.idx];
-                return e && (e as any).streaming === true;
-              }) || (entries[i] && (entries[i] as any).streaming === true) || streaming;
+
               rendered.push(
-                <WorkGroup key={`wg-${groupStart}`} stepCount={groupEntries.length} streaming={groupStreaming}>
+                <WorkGroup key={`wg-${groupStart}`} stepCount={groupEntries.length} streaming={groupIsActiveTurn}>
                   {groupEntries.map((ge) => ge.node)}
                 </WorkGroup>
               );
               continue;
             }
 
-            // Final assistant entry
-            if (entry.kind === "assistant") {
-              const turnStartIdx = finalAssistantTurnStart.get(i) ?? 0;
-              const turnTokens = entries
-                .slice(turnStartIdx, i + 1)
-                .reduce((sum, e) => {
-                  if (e.kind === "assistant" || e.kind === "reasoning" || e.kind === "user") {
-                    return sum + Math.ceil(((e as any).text?.length ?? 0) / 4);
-                  }
-                  if (e.kind === "tool_group") {
-                    // Sum input JSON + result strings for all tools in the group
-                    const toolSum = ((e as any).tools ?? []).reduce((ts: number, t: any) =>
-                      ts + Math.ceil((JSON.stringify(t.input ?? {}).length + (t.result?.length ?? 0)) / 4), 0);
-                    return sum + toolSum;
-                  }
-                  return sum;
-                }, 0);
+            // ── Live: last entry in turn while streaming — no TurnActionBar ──
+            if (entryClassMap.get(i) === "live") {
+              if (entry.kind === "reasoning") {
+                rendered.push(<ReasoningCard key={idx} entry={entry} />);
+              } else if (entry.kind === "tool_group") {
+                rendered.push(<ToolGroupCard key={entry.groupId} group={entry} />);
+              } else if (entry.kind === "assistant") {
+                rendered.push(
+                  <div key={idx} className={ringCls || undefined}>
+                    <AssistantCard
+                      entry={entry}
+                      highlightQuery={searchHighlight}
+                      isStarred={!!isEntryStarred(idx)}
+                      isFinal={true}
+                    />
+                  </div>
+                );
+              }
+              i++;
+              continue;
+            }
+
+            // ── Final: turn complete, last assistant — show TurnActionBar ──
+            if (entryClassMap.get(i) === "final" && entry.kind === "assistant") {
+              const turnStartIdx = finalTurnStartMap.get(i) ?? 0;
+              const turnTokens = entries.slice(turnStartIdx, i + 1).reduce((sum, e) => {
+                if (e.kind === "assistant" || e.kind === "reasoning" || e.kind === "user") {
+                  return sum + Math.ceil(((e as any).text?.length ?? 0) / 4);
+                }
+                if (e.kind === "tool_group") {
+                  const toolSum = ((e as any).tools ?? []).reduce(
+                    (ts: number, t: any) => ts + Math.ceil((JSON.stringify(t.input ?? {}).length + (t.result?.length ?? 0)) / 4),
+                    0,
+                  );
+                  return sum + toolSum;
+                }
+                return sum;
+              }, 0);
+
               rendered.push(
                 <div key={idx} className={`${ringCls} rounded-md`}>
                   <AssistantCard
@@ -394,25 +415,23 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                     isFinal={true}
                     turnTokens={turnTokens}
                   />
-                  {!entry.streaming && (
-                    <TurnActionBar
-                      turnTokens={turnTokens}
-                      isStarred={!!isEntryStarred(idx)}
-                      actions={{
-                        onRetry: () => void onRetryEffort(),
-                        onFork: () => void onFork(idx),
-                        onToggleStar: () => void onToggleStar(idx),
-                      }}
-                      onFeedback={onFeedback ? (rating, reason) => void onFeedback(i, rating, reason) : undefined}
-                    />
-                  )}
+                  <TurnActionBar
+                    turnTokens={turnTokens}
+                    isStarred={!!isEntryStarred(idx)}
+                    actions={{
+                      onRetry: () => void onRetryEffort(),
+                      onFork: () => void onFork(idx),
+                      onToggleStar: () => void onToggleStar(idx),
+                    }}
+                    onFeedback={onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
+                  />
                 </div>
               );
               i++;
               continue;
             }
 
-            // reasoning/tool_group not intermediate (no final assistant after in this turn)
+            // ── Fallback: unclassified edge-case entries ──
             if (entry.kind === "reasoning") {
               rendered.push(<ReasoningCard key={idx} entry={entry} />);
             } else if (entry.kind === "tool_group") {
