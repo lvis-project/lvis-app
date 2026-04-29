@@ -248,9 +248,11 @@ bootstrap: <slug>@0.1.1 published (NNN bytes, sha256…)
 
 | 필드 | 저장 키 | 값 |
 |------|---------|----|
-| 서버 URL | `marketplace.realCloudBaseUrl` | `http://127.0.0.1:8000` (IPv6 회피) |
-| API 키 | `marketplace.apiKey` (keychain) | (로컬 dev 서버는 비워둬도 됨 — read-only catalog/download 엔드포인트는 인증 없음. 인증은 `lvis-publish publish/yank/approve` 만) |
-| 사설 네트워크 허용 | `marketplace.realCloudAllowPrivateNetwork` | **켜기** (loopback URL 이라 필수) |
+| 필드 | 값 |
+|------|----|
+| 서버 URL | `http://127.0.0.1:8000` (IPv6 회피) |
+| API 키 | 비워둠. read-only catalog/download 엔드포인트는 인증 없음 |
+| 사설 네트워크 허용 | **켜기** (loopback URL 이라 필수) |
 
 > ⚠️ **URL/API key/사설 네트워크 토글 변경 모두 앱 재시작 필요**. fetcher 가 `boot.ts:248-258` 에서 한 번만 잡히므로 settings 만 바꾼다고 동적으로 갱신되지 않음. 같은 URL 에서 catalog 만 새로고침은 부트스트랩 배너의 "다시 시도" 로 충분.
 
@@ -265,7 +267,7 @@ bootstrap: <slug>@0.1.1 published (NNN bytes, sha256…)
 | `LVIS_DEV=1` | ❌ | ✅ | dev 게이트 마스터 — DevTools / hot-reload 활성화 |
 | `LVIS_DEV_RELOAD=1` | ❌ | ❌ (수동) | dist/ watch + reloadPlugin |
 
-**마켓플레이스 zip envelope 검증**: SDK 가 `poc-v1` 단일 정규 키만 export 하므로 (`@lvis/plugin-sdk/keys` `MARKETPLACE_PUBLIC_KEYS`), dev/prod 무관하게 마켓플레이스 서명은 항상 `poc-v1` 으로 검증됩니다 — 추가 env 불필요.
+**마켓플레이스 zip envelope 검증**: 앱 호스트가 `src/plugins/marketplace-keys.ts` 의 내장 publisher key set 으로 검증합니다. SDK 는 타입/소스 계약만 제공하고 런타임 trust root 를 소유하지 않습니다.
 
 모든 `LVIS_*` 플래그는 `app.isPackaged === true` 일 때 hard-gate 로 무시됩니다 (`dev-flags.ts:18-54`) — packaged 빌드 누수 우려 없음.
 
@@ -277,8 +279,8 @@ bootstrap: <slug>@0.1.1 published (NNN bytes, sha256…)
 1. `GET /api/v1/plugins/<slug>/versions/<version>/download` 로 zip 다운로드 — `X-Plugin-SHA256` 헤더로 sha256 전달
 2. `GET /api/v1/plugins/<slug>/versions/<version>/download.sig` 로 envelope 별도 fetch
 3. envelope 검증 — 키 ID 가 trust set 에 매칭되어야 통과
-4. zip → `<userData>/plugins/<id>/` 추출 (atomic stage → swap rename)
-5. `<userData>/plugins/registry.json` 업데이트 → `pluginRuntime.restartAll()`
+4. zip → `~/.lvis/plugins/<id>/` 추출 (atomic stage → swap rename)
+5. `~/.lvis/plugins/registry.json` 업데이트 → `pluginRuntime.restartAll()`
 
 **B. 딥링크 (`lvis://install/<slug>`)**
 
@@ -297,20 +299,20 @@ start "lvis://install/<slug>"
 
 ### 4-4. 설치 확인
 
-`lvis-app` 가 사용하는 **userData 경로** (`scripts/run-electron.mjs:82` Electron profile = `Electron-LVIS-Run`):
+`lvis-app` 가 사용하는 **플러그인 루트**:
 
 | OS | 경로 |
 |----|------|
-| Windows | `%APPDATA%\Electron-LVIS-Run\plugins\` |
-| macOS | `~/Library/Application Support/Electron-LVIS-Run/plugins/` |
-| Linux | `~/.config/Electron-LVIS-Run/plugins/` |
+| Windows | `%USERPROFILE%\.lvis\plugins\` |
+| macOS | `~/.lvis/plugins/` |
+| Linux | `~/.lvis/plugins/` |
 
-`LVIS_USER_DATA_DIR=/path` 로 override 가능.
+Electron profile/userData 와 별개이며, registry 는 항상 이 루트의 `registry.json` 입니다.
 
 ```bash
-# macOS 예
-ls "$HOME/Library/Application Support/Electron-LVIS-Run/plugins/<slug>/"
-cat "$HOME/Library/Application Support/Electron-LVIS-Run/plugins/registry.json"
+# macOS/Linux 예
+ls "$HOME/.lvis/plugins/<slug>/"
+cat "$HOME/.lvis/plugins/registry.json"
 ```
 
 부팅 로그에 `[lvis] plugin:<id> registered <N> keywords` (또는 tools 등록 로그) 가 보이면 정상.
@@ -399,7 +401,7 @@ zip -r myplugin-0.1.0.zip plugin.json dist/ icons/        # zip 루트에 plugin
 | `<slug>@<v>: immutable artifact mismatch (existing X != rebuilt Y)` | 같은 버전인데 dist/ 내용이 바뀜. **`package.json` 버전을 올려주세요.** 또는 §7 DB 리셋. |
 | `<slug>@<v>: missing build output` | `dist/` 가 비어있거나 누락. `bun run build` 가 실제로 출력했는지, `.gitignore` 가 `dist/` 를 제외하지 않았는지 확인. |
 | `bootstrap: <slug> git pull failed (...) — using existing dist/` (경고만) | 정상 dev 동작. 로컬 전용 / 네트워크 끊김 / non-ff. working tree 의 dist/ 그대로 패키징. |
-| `signature verification failed` (앱 install 시) | 서버 `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 키 ID 와 lvis-app trust set (SDK `MARKETPLACE_PUBLIC_KEYS`) 가 짝 안 맞음 — 단일 키 모델에서는 양쪽 모두 `poc-v1` 이어야 정상. 서버 `/api/v1/keys` 응답과 SDK 의 `MARKETPLACE_PUBLIC_KEYS` 비교. |
+| `signature verification failed` (앱 install 시) | 서버 `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 키 ID 와 lvis-app 호스트의 내장 trust set 이 짝 안 맞음. 현재 단일 키 모델에서는 양쪽 모두 `poc-v1` 이어야 정상. |
 | `manifest signature missing` (managed install) | bootstrap.py 는 `.sig` 를 zip 에 번들하지 않음. dev 에서는 `LVIS_DEV_SKIP_SIG=1` (자동) 으로 통과. prod 에서 admin-policy managed 플러그인을 git-based 부트스트랩으로 배포하려면 별도 매니페스트 서명 파이프라인이 필요 — 현재 CLI publish 경로 또는 user-policy 가 prod 권장. |
 | `tool_name namespace conflict` (publish 시) | 다른 등록 플러그인이 같은 tool 이름 등록. publisher prefix 추가 (예: `myplugin_search`). |
 | 카탈로그가 비어 보임 | (a) 부트스트랩 배너 빨간색 — URL 오타 / 사설 네트워크 토글 꺼짐 / 서버 다운. (b) `localhost` 사용 시 IPv6 우선순위로 연결 실패 — 양쪽 모두 `127.0.0.1` 권장. (c) 서버 `bootstrap_status="failed"` (health 확인). |
@@ -426,7 +428,7 @@ uv run alembic upgrade head        # 빈 DB 재생성
 | 항목 | dev (이 가이드) | prod ([marketplace-publishing.md](./marketplace-publishing.md)) |
 |------|------|------|
 | 마켓플레이스 URL | `http://127.0.0.1:8000` | 사내 prod URL (env 로 주입) |
-| 서버 서명 키 | `poc-v1` (현 단일 정규 키, POC 신분) | prod 키 회전 후 — 새 SDK major 가 `MARKETPLACE_PUBLIC_KEYS` 추가, 서버 env 갈아끼움. POC 키는 `LVIS_ENV=production` 일 때 서버가 부팅 거절 |
+| 서버 서명 키 | `poc-v1` (현 단일 정규 키) | prod 키 회전 시 서버 env 와 앱 호스트의 `marketplace-keys.ts` 를 함께 갱신 |
 | `LVIS_MARKETPLACE_LOAD_DOTENV` | `1` 필수 | **금지** — 운영 환경은 secret manager 또는 정식 env 주입 |
 | publish 채널 | git-based 부트스트랩 (managed) + CLI ad-hoc | 동일 (managed 는 `lvis-marketplace` PR + 서버 재배포, ad-hoc 은 CLI publish + admin approve) |
 | `installPolicy: "admin"` | bootstrap 자동 approve | CLI publish 는 `pending_review` → admin approve |
@@ -455,7 +457,7 @@ LVIS_MARKETPLACE_LOAD_DOTENV=1 \
 
 ## 관련 문서
 
-- [`local-plugin-development.md`](./local-plugin-development.md) — 마켓플레이스 우회 시나리오 (`<userData>/plugins/` 직접 복사 — 제한적)
+- [`local-plugin-development.md`](./local-plugin-development.md) — 마켓플레이스 우회 시나리오 (`~/.lvis/plugins/` 직접 복사 — 제한적)
 - [`marketplace-publishing.md`](./marketplace-publishing.md) — prod 마켓플레이스 publish 절차
 - [`plugin-development.md`](./plugin-development.md) — 매니페스트·HostApi·서명 깊은 레퍼런스
 - `lvis-marketplace/server/src/lvis_marketplace/bootstrap.py` — git-based 부트스트랩 구현 (MANAGED_SOURCES 정의)
