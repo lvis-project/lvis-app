@@ -7,6 +7,35 @@
 
 ---
 
+## ⚡ 빠른 시작 (TL;DR)
+
+**managed (권장)** — git-based bootstrap
+
+1. 본인 플러그인 레포에서 `package.json` 버전 bump + `bun run build`
+2. `dist/` + `plugin.json` 커밋, 메인 브랜치에 머지
+3. `lvis-marketplace` 의 `MANAGED_SOURCES` 에 본 레포가 등록되어 있는지 확인 (없으면 마켓플레이스 PR 한 번 필요)
+4. 마켓플레이스 서버가 다음 부팅 (또는 admin 트리거) 시 자동 publish — **zip / CLI / 사이닝 작업 불필요**
+
+**ad-hoc** — CLI publish
+
+```bash
+cd <your-plugin-repo>
+bun run build
+lvis-publish \
+  --marketplace-url https://marketplace.example.com \
+  --api-key "$LVIS_PUBLISHER_KEY" \
+  --slug my-plugin --version 1.2.3 \
+  --plugin-dir .
+```
+
+`installPolicy: "admin"` 매니페스트는 publisher 키가 admin 역할이거나 admin 승인 필요.
+
+**서명 키 모델**: 단일 정규 키 `poc-v1`. SDK `MARKETPLACE_PUBLIC_KEYS` 와 서버 `MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1` 가 짝. 회전은 새 SDK major 발행으로.
+
+상세 흐름 / 검증 / 트러블슈팅은 아래 본문 참고.
+
+---
+
 ## 한 줄 요약
 
 LVIS 마켓플레이스는 **두 가지 publish 채널**을 운영합니다:

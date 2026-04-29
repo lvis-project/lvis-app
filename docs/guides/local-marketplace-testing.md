@@ -8,6 +8,40 @@
 
 ---
 
+## ⚡ 빠른 시작 (TL;DR)
+
+**1) 마켓플레이스 서버 띄우기**
+
+```bash
+cd lvis-marketplace/server
+uv sync
+cp .env.example .env                       # POC_V1 키 자동 포함
+uv run alembic upgrade head
+LVIS_MARKETPLACE_LOAD_DOTENV=1 \
+  uv run uvicorn lvis_marketplace.main:create_app --factory --reload --host 127.0.0.1 --port 8000
+```
+
+서버가 `MANAGED_SOURCES` 의 형제 lvis-plugin-* 레포를 자동 부트스트랩 → 카탈로그 노출.
+
+**2) lvis-app 가 로컬 서버 가리키도록**
+
+Settings → 마켓플레이스 → URL = `http://127.0.0.1:8000` + 사설 네트워크 토글 ON → 앱 재시작.
+
+**3) lvis-app 기동**
+
+```bash
+cd ../lvis-app
+bun run dev      # LVIS_DEV=1 + hot-reload 자동
+```
+
+**4) 카탈로그 → 카드 클릭 → 설치** 또는 딥링크 `lvis://install/<slug>?version=<v>&source=...`.
+
+**5) 새 버전 발행**: 플러그인 레포에서 `package.json` 버전 bump + `bun run build` → 서버 재시작 → 자동 publish.
+
+상세 (서버 env, install 두 경로, 트러블슈팅 등) 은 §1-8 참고.
+
+---
+
 ## 한 줄 요약 — 배포 모델
 
 LVIS 마켓플레이스는 **git-based publish** (Go 모듈 프록시 스타일). 서버가 등록된 플러그인 git 레포를 직접 풀(pull)하고 packaging/signing 까지 서버 사이드에서 수행. **개발자는 zip 을 만들 필요도, CLI 로 업로드할 필요도 없습니다.**

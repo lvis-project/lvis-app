@@ -6,6 +6,30 @@
 
 ---
 
+## ⚡ 빠른 시작 (TL;DR)
+
+**A. dev 빌드에서 형제 레포 sideload (5초)**
+
+```bash
+cd lvis-app
+bun run prepare:plugins   # 형제 lvis-plugin-* 빌드
+bun run dev               # 자동: dev:link → ~/.lvis/plugins/<id>/ → Electron 기동
+```
+
+**B. 외부 빌드 폴더 sideload — UI (PR #306 신기능)**
+
+1. `LVIS_DEV=1 bun run start` (또는 `bun run dev`)
+2. Settings → Plugin Config → 하단 amber **"개발자 도구"** → **"로컬 폴더에서 설치"**
+3. `plugin.json` + `dist/` 들어있는 빌드 디렉토리 선택 → 자동 재시작
+
+**C. 기존 dev 환경에서 새 단일 루트로 마이그레이션** → §7 참고
+
+**D. packaged 빌드 sideload?** → **지원 안 됨**. 정식 마켓플레이스 publish 만 ([`marketplace-publishing.md`](./marketplace-publishing.md))
+
+상세 절차/제한/트러블슈팅은 §3-7 참고.
+
+---
+
 ## 4-quadrant 매트릭스
 
 | | 마켓플레이스 있이 | 마켓플레이스 없이 |
