@@ -16,7 +16,6 @@ jobs:
     timeout-minutes: 20
     env:
       PUBLISHER_KEY: lvismkt_e2epubKEY1234_abcd1234
-      MARKETPLACE_SIGNING_PRIVATE_KEY_DEV_V1: "1FZSYHgqzY3cRPqFPMEP0DR7G3qesM7eGcB2BVeYzqk="
       MARKETPLACE_SIGNING_PRIVATE_KEY_POC_V1: "Bp4Luwxz5EAAat48KhCUhpDFIgDjZ4WY3T081QvQfJs="
     steps:
       - name: Checkout lvis-app
