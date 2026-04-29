@@ -34,7 +34,7 @@ describe("dev-flags tamper snapshot", () => {
   });
 
   it("returns false for unpackaged builds even if vars were tampered", () => {
-    _setTamperedSnapshotForTest(["LVIS_DEV", "LVIS_DEV_SKIP_SIG"]);
+    _setTamperedSnapshotForTest(["LVIS_DEV", "LVIS_DEV_RELOAD"]);
     expect(shouldWarnPackagedFlagsIgnored(false)).toBe(false);
   });
 
@@ -66,12 +66,12 @@ describe("dev-flags tamper snapshot", () => {
   it("lists all tampered vars for the audit log message body", () => {
     _setTamperedSnapshotForTest([
       "LVIS_DEV",
-      "LVIS_DEV_SKIP_SIG",
+      "LVIS_DEV_RELOAD",
       "LVIS_WIN_NO_SANDBOX",
     ]);
     const names = tamperedVarsAtBoot();
     expect(names).toContain("LVIS_DEV");
-    expect(names).toContain("LVIS_DEV_SKIP_SIG");
+    expect(names).toContain("LVIS_DEV_RELOAD");
     expect(names).toContain("LVIS_WIN_NO_SANDBOX");
     expect(names).toHaveLength(3);
   });

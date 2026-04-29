@@ -169,21 +169,17 @@ interface PluginManifest {
 
 ---
 
-### 2.1 매니페스트 서명 (Sprint 3-B §9.6 / 4-B)
+### 2.1 마켓플레이스 artifact 검증
 
-**managed 플러그인은 ed25519 서명 필수**이다. `plugin.json` 과 동일 디렉토리에 `plugin.json.sig` (base64 encoded signature) 를 함께 배포해야 한다. 호스트는 `src/plugins/signature-verifier.ts` + `src/plugins/publisher-keys.ts` 의 번들 공개키 리스트를 사용해 `verifyManifestFile()` 을 수행한다.
+플러그인 repo는 `plugin.json` sidecar signature를 만들지 않는다. Marketplace upload API가 manifest/schema/policy/access를 검증하고 최종 artifact envelope를 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장하며, runtime load 전에 receipt의 file hash를 확인한다.
 
 | 상황 | 정책 |
 |------|------|
-| managed + 유효 서명 | 로드. `plugin_signature_verified` 감사 이벤트 기록. |
-| managed + 서명 누락/무효 | **드롭 (fail-closed)**. `plugin_signature_rejected` 감사 이벤트 기록. `LVIS_DEV_SKIP_SIG=1` 개발 전용 escape hatch 존재. |
-| user + 유효 서명 | 로드. |
-| user + 서명 누락 | 로드(warn-on-missing). `plugin_signature_missing` 감사 이벤트. |
-| user + 서명 무효 | 드롭. |
+| envelope 검증 성공 + receipt hash 일치 | 로드 후보. `plugin_integrity_verified` 감사 이벤트 기록. |
+| envelope 검증 실패 | 설치 거부. |
+| receipt 누락/불일치 | **드롭 (fail-closed)**. `plugin_integrity_rejected` 감사 이벤트 기록. |
 
-서명 생성 도구: `scripts/sign-manifest.mjs` (CI/릴리즈 파이프라인에서 호출). 서명 대상은 manifest 파일 바이트 그 자체.
-
-> **번들 키 롤오버:** `BUNDLED_PUBLISHER_PUBLIC_KEYS` 배열에 신규 키를 추가하고 검증기가 OR 매칭한다. 구 키는 롤오버 완료 후 PR 로 제거.
+마켓플레이스 trust anchor는 host-owned `src/plugins/marketplace-keys.ts`에 있다. `@lvis/plugin-sdk`는 type/source-only 계약이며 키를 포함하지 않는다.
 
 ### 2.2 uiCallable 보안 경계
 
@@ -577,7 +573,7 @@ HostApi 에 새 메서드를 추가하려면:
 | 제안 | 결정 | 사유 |
 |------|------|------|
 | **worker_threads / process 격리** | ❌ 기각 | in-process + try/catch 로 95% 장애 커버. 격리 시 IPC 오버헤드 + 디버깅 복잡도 증가. |
-| **manifest signature 검증 재도입** | ✅ **승인** (Sprint 3-B, §9.6) | managed 플러그인에 ed25519 서명 필수 (`plugin.json.sig`), user 플러그인은 warn-on-missing. `scripts/sign-manifest.mjs` + `src/plugins/publisher-keys.ts` 참조. §2.1. |
+| **marketplace artifact 검증** | ✅ **승인** | 플러그인 저자가 sidecar 서명을 만들지 않고 marketplace가 artifact envelope을 서명합니다. 호스트는 설치 시 envelope을 검증하고 로드 시 install receipt 해시를 확인합니다. §2.1. |
 | **`permissions[]` 선언형 필드** | ⚠️ **부분 승인** | full permission 문자열 배열은 기각되었지만, 다음 3종의 선언형 게이트가 대체 도입됨: (1) `uiCallable[]` — renderer→plugin allowlist (구조적 `⊂ tools[]` 제약만 강제, 파괴적 도구의 확인 UX 는 플러그인이 책임), (2) `capabilities[]` — `ms-graph-consumer` HostApi gate + event-emit namespace gate, (3) `PLUGIN_PRIVATE_NAMESPACES` — subscription deny-list. §2.2, §2.3. |
 | **LLM invoke HostApi 추상화 (full surface)** | ❌ 기각 (callLlm 만 채택) | 단발 텍스트 생성 `callLlm()` 만 Phase 1에서 채택 (§4). streaming·tool_choice·thinking·multi-turn 등 vendor 편차 큰 surface 는 여전히 기각. |
 | **파일 watcher HostApi (`watchFiles`)** | ❌ 기각 | pageindex 1개 플러그인만 필요. "3+ 플러그인 규칙" 미충족. |
@@ -602,11 +598,11 @@ HostApi 에 새 메서드를 추가하려면:
 
 | 항목 | `managed` | `user` |
 |------|-----------|--------|
-| 설치 주체 | 회사 IT Admin | 사용자 직접 |
+| 설치 주체 | 회사 IT Admin / marketplace admin review | 사용자 marketplace publish |
 | 삭제 권한 | 회사만 (`PluginDeploymentGuard.canUninstall()` = false) | 사용자 자유 |
 | 업데이트 | 정책 push 시 강제 | 사용자 opt-in |
-| 저장 경로 | `~/.lvis/plugins/managed/<id>/<version>/` | `~/.lvis/plugins/user/<id>/` |
-| 서명 검증 | **필수 (fail-closed)** | warn-on-missing / invalid 시 드롭 |
+| 저장 경로 | `~/.lvis/plugins/installed/<id>/` | `~/.lvis/plugins/installed/<id>/` |
+| 검증 | marketplace envelope + install receipt 해시 fail-closed | marketplace envelope + install receipt 해시 fail-closed |
 
 상세 설계: `docs/architecture/plugin-deployment-model.md`
 
@@ -616,11 +612,12 @@ HostApi 에 새 메서드를 추가하려면:
 |------|------|
 | `PluginManifest` 타입 | `src/plugins/types.ts` |
 | `PluginHostApi` 인터페이스 | `src/plugins/types.ts` |
-| 플러그인 런타임 (로딩·주입·AJV·시그니처) | `src/plugins/runtime.ts` |
+| 플러그인 런타임 (로딩·주입·AJV·설치 영수증 검증) | `src/plugins/runtime.ts` |
 | Manifest JSON Schema | `schemas/plugin.schema.json` |
 | Capability taxonomy | `src/plugins/capabilities.ts` |
-| Signature verifier | `src/plugins/signature-verifier.ts` |
-| Publisher keys (embedded) | `src/plugins/publisher-keys.ts` |
+| Marketplace artifact verifier | `src/plugins/envelope-verifier.ts` |
+| Marketplace keys (host-owned) | `src/plugins/marketplace-keys.ts` |
+| Install receipt integrity | `src/plugins/plugin-install-receipt.ts` |
 | Deployment 가드 | `src/plugins/deployment-guard.ts` |
 | callLlm rate-limit | `src/boot/conversation.ts` (`createCallLlmForPlugin`) |
 | 등록 진입점 | `src/boot.ts` |
@@ -635,7 +632,6 @@ HostApi 에 새 메서드를 추가하려면:
 ```
 my-plugin/
   plugin.json          ← manifest
-  plugin.json.sig      ← managed 배포 시 필수 (ed25519)
   package.json
   tsconfig.json
   src/
@@ -696,7 +692,7 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
 - [ ] `dist/index.js` 가 `RuntimePluginFactory` 를 default export
 - [ ] `plugin.json` 의 `entry` 가 실제 빌드 산출물 경로
 - [ ] LLM 파라미터 추론 테스트 후 필요시 `toolSchemas` 추가 (`description` 10자 이상)
-- [ ] managed 배포면 `plugin.json.sig` 생성 (`scripts/sign-manifest.mjs`)
+- [ ] marketplace publish/upload 경로로 artifact를 게시
 
 ### @lvis/plugin-sdk (현행)
 

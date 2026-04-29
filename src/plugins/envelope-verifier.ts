@@ -1,8 +1,7 @@
 /**
  * S2 — Envelope-format signature verifier for marketplace binary delivery.
  *
- * Unlike `signature-verifier.ts` (manifest.json + sidecar raw ed25519 sig,
- * Sprint 3-B), this verifier consumes the JSON envelope served at
+ * Verifies the JSON envelope served at
  * `/api/v1/plugins/{slug}/download.sig`:
  *
  *   { "version": 1, "iat": <unix>, "artifact_sha256": "<hex>",
@@ -81,7 +80,7 @@ export function verifyEnvelope(
 
   // 2. Try each signature against its corresponding public key. Iterate ALL
   //    signatures before returning to avoid leaking which key_id matched via
-  //    timing side-channel (mirrors signature-verifier.ts PR#44 HIGH fix).
+  //    timing side-channel.
   let matchedKeyId: string | undefined;
   for (const sig of envelope.signatures) {
     if (!sig || sig.alg !== "ed25519" || typeof sig.key_id !== "string" || typeof sig.sig !== "string") {

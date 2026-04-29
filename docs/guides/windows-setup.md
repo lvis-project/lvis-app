@@ -67,19 +67,17 @@ Windows 는 non-admin 계정에서 symlink 생성이 제한된다. npm 기본 �
 
 1. `packages/plugin-sdk` submodule 이 비어있으면
    `git submodule update --init --recursive`
-2. submodule 이 `package.json` 은 있지만 `dist/` 가 없으면
-   `npm install && npm run build` 실행
-3. `node_modules/@lvis/plugin-sdk/dist` 가 실-디렉터리 copy 이면,
-   방금 빌드한 dist 를 그곳으로 sync (Windows `--install-links=true` 순서 문제 해결)
+2. `packages/plugin-sdk` 는 source/type-only 패키지입니다. 별도 `dist/` 빌드나
+   submodule 초기화가 필요하지 않습니다.
+3. `node_modules/@lvis/plugin-sdk` 가 `packages/plugin-sdk/src/index.ts` 를 가리키면 정상입니다.
 
 ### 설치 확인
 
 ```powershell
-dir node_modules\@lvis\plugin-sdk\dist\keys.js
+dir node_modules\@lvis\plugin-sdk\src\index.ts
 ```
 
-`keys.js` 파일이 찍혀야 정상. 안 찍히면 [5. 문제 해결](#5-문제-해결)
-의 "Cannot find module '@lvis/plugin-sdk/keys'" 참고.
+`src\index.ts` 파일이 찍혀야 정상입니다.
 
 ## 3. 실행
 
@@ -109,7 +107,6 @@ npm run start:win
 | 항목 | 기본값 | 목적 |
 |------|--------|------|
 | `LVIS_DEV` | `1` | 플러그인 루트 경계 검사 완화 (dev 사이드-바이-사이드 링크 허용) |
-| `LVIS_DEV_SKIP_SIG` | `1` | 로컬 빌드 플러그인 서명 검증 skip |
 | `PYTHONIOENCODING` / `PYTHONUTF8` | `utf-8` / `1` | Python subprocess 출력 UTF-8 고정 |
 | `LANG` / `LC_ALL` | `en_US.UTF-8` | locale UTF-8 |
 | Electron flags (win32) | `--disable-gpu --use-angle=swiftshader --no-sandbox --in-process-gpu` 등 | GPU error_code=18 회피 |
@@ -139,7 +136,6 @@ calendar, ep-api) 가 보이면 성공.
 | `LVIS_SKIP_CORP_CA` | `1` | 해외망/비-사내 네트워크 — 사내망 CA 추출 완전 skip |
 | `LVIS_CORP_CA_DEBUG` | `1` | Windows/Linux CA 추출 Phase 3 pending 로그 표시 |
 | `LVIS_DEV` | `0` | 플러그인 경로 경계 검사 엄격 모드 (production-like) |
-| `LVIS_DEV_SKIP_SIG` | `0` | 플러그인 서명 검증 활성화 (managed 빌드 테스트용) |
 | `LVIS_DEBUG` | `1` | `run-electron.mjs` 가 적용한 args/env 를 stderr 로 출력 |
 
 일회성 사용:
@@ -169,24 +165,13 @@ cmd /c "if exist packages\plugin-sdk\dist rmdir /s /q packages\plugin-sdk\dist"
 cmd /c "if exist packages\plugin-sdk\node_modules rmdir /s /q packages\plugin-sdk\node_modules"
 ```
 
-### 실행 시 `Cannot find module '@lvis/plugin-sdk/keys'` / `dist/keys.js` 없음
-**원인**: `--install-links=true` 가 `packages/plugin-sdk` 를 빌드 전에 snapshot 복사 →
-postinstall 이 빌드를 해도 `node_modules` copy 에는 반영 안됨.
-
-최신 main 에는 이 순서 문제를 해결하는 sync 스텝이 `ensure-submodules.mjs` 에 들어있음
-([`commit d956fb5`](https://github.com/lvis-project/lvis-app/commit/d956fb5)).
-main 에서 설치했는데도 재현되면:
+### 실행 시 `Cannot find module '@lvis/plugin-sdk'`
+**원인**: `node_modules` 가 오래되어 source/type-only SDK 링크가 갱신되지 않음.
+**해결**: `node_modules` 를 삭제한 뒤 다시 설치합니다.
 
 ```powershell
-git log -1 --format=%H scripts/ensure-submodules.mjs
-# d956fb5 이후 커밋이어야 함
-```
-
-수동 workaround:
-```powershell
-cmd /c "if exist node_modules\@lvis\plugin-sdk\dist rmdir /s /q node_modules\@lvis\plugin-sdk\dist"
-xcopy /E /I /Y packages\plugin-sdk\dist node_modules\@lvis\plugin-sdk\dist
-dir node_modules\@lvis\plugin-sdk\dist\keys.js
+cmd /c "if exist node_modules rmdir /s /q node_modules"
+npm install --legacy-peer-deps --install-links=true
 npm run start:npm
 ```
 
