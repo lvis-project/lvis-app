@@ -33,7 +33,7 @@ export function AssistantCard({
   const outputTokens = Math.ceil(entry.text.length / 4);
   return (
     <div className="group relative max-w-[85%] rounded-md px-3 py-2 text-sm">
-      {(actions !== undefined || isFinal !== false) && (
+      {(actions !== undefined || entry.streaming) && (
         <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
           {title}
           {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
