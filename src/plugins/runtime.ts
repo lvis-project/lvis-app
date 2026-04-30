@@ -125,6 +125,8 @@ export interface PluginCard {
   toolDescriptions?: Record<string, string>;
   /** true when the plugin is protected from ordinary user uninstall/disable */
   isManaged?: boolean;
+  /** Install policy declared in the manifest: "admin" (IT-managed) or "user" (anyone). */
+  installPolicy?: "admin" | "user";
   /** Runtime load status derived from loaded/failed/disabled runtime state. */
   loadStatus: "loaded" | "failed" | "disabled";
   version?: string;
@@ -1634,6 +1636,7 @@ export class PluginRuntime {
       capabilities: manifest.capabilities ?? [],
       toolDescriptions: Object.keys(toolDescriptions).length > 0 ? toolDescriptions : undefined,
       isManaged: normalizeInstallPolicy(manifest) === "admin",
+      installPolicy: manifest.installPolicy ?? "user",
       loadStatus,
       version: manifest.version,
       publisher: manifest.publisher,
