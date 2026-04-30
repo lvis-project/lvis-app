@@ -277,7 +277,7 @@ function QuestionForm({
           ))}
         </div>
       )}
-      {suggestedChipsSlot}
+      {(!item.choices || item.choices.length === 0) && suggestedChipsSlot}
       {item.allowFreeText && (
         // US-FQP2.3: reduced to rows=2 / min-h-[3rem]; CSS field-sizing:content
         // for auto-expand; max-h-[6rem] prevents unbounded panel growth.

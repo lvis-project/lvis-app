@@ -69,7 +69,9 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
                   "[allowFreeText=true 이고 choices 가 비어 있을 때 필수] " +
                   "이 turn 의 컨텍스트에서 모델이 생성한 3개의 contextual 후보 답변. " +
                   "UI 는 이를 quick-chip 으로 노출해 사용자가 빠르게 선택하거나 직접 입력할 수 있게 한다. " +
-                  "정적 폴백(\"네\"/\"아니오\"/\"잘 모르겠어요\") 절대 사용 금지.",
+                  "정적 폴백(\"네\"/\"아니오\"/\"잘 모르겠어요\") 절대 사용 금지. " +
+                  "choices 와 suggestedAnswers 는 상호 배타적: choices 가 있으면 객관식 질문으로 suggestedAnswers 를 함께 제공하지 말 것 — " +
+                  "choices 는 닫힌 선택지(사용자가 반드시 하나를 골라야 함), suggestedAnswers 는 자유 입력 질문의 3개 빠른 힌트. 절대 둘 다 넣지 말 것.",
               },
             },
           },
