@@ -252,7 +252,7 @@ export interface DenyListEntry {
       {
         "id": "lvis-plugin-pageindex",
         "version": "0.2.0",
-        "source": "https://internal.lge.com/lvis/marketplace/api/v1/plugins/lvis-plugin-pageindex/0.2.0.tgz",
+        "source": "https://internal.your-corp.example/lvis/marketplace/api/v1/plugins/lvis-plugin-pageindex/0.2.0.tgz",
         "sha256": "abc123def456...",
         "forceInstall": true,
         "autoUpdate": true,
@@ -262,7 +262,7 @@ export interface DenyListEntry {
       {
         "id": "lvis-plugin-meeting",
         "version": "1.1.3",
-        "source": "https://internal.lge.com/lvis/marketplace/api/v1/plugins/lvis-plugin-meeting/1.1.3.tgz",
+        "source": "https://internal.your-corp.example/lvis/marketplace/api/v1/plugins/lvis-plugin-meeting/1.1.3.tgz",
         "sha256": "def789abc012...",
         "forceInstall": true,
         "autoUpdate": true
@@ -301,7 +301,7 @@ export class ManagedPolicySync {
   constructor(
     private readonly opts: {
       policyDir: string;            // ~/.lvis/governance
-      apiEndpoint: string;          // https://internal.lge.com/lvis/policy
+      apiEndpoint: string;          // https://internal.your-corp.example/lvis/policy
       trustedCaPath: string;        // ~/.lvis/governance/trusted-ca.pem
       auditService: AuditService;
     },
