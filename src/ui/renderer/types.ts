@@ -576,6 +576,17 @@ export type LvisPluginConfigApi = {
     | { ok: true }
     | { ok: false; error: string; message?: string }
   >;
+  /**
+   * US-3c.1 — batch secret-presence query. Returns the list of
+   * `format:"secret"` keys from the plugin's configSchema for which the
+   * keychain currently holds a value. Use this to populate `secretsPresent`
+   * in PluginConfigSchemaForm so the masked "**** (저장됨)" placeholder
+   * appears correctly. Fewer IPC round-trips than per-key checks.
+   */
+  listSecretKeys: (pluginId: string) => Promise<
+    | { ok: true; keys: string[] }
+    | { ok: false; error: string; message?: string }
+  >;
 };
 
 export type LvisPluginsApi = {

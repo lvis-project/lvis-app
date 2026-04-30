@@ -73,6 +73,9 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
       listToolNames: vi.fn(() => []),
       listPluginIds: vi.fn(() => []),
       restartAll: vi.fn(),
+      // US-3c.2: config:set now calls restartPlugin(pluginId) instead of
+      // restartAll() so only the affected plugin is restarted.
+      restartPlugin: vi.fn(),
       setConfigOverride: vi.fn(),
       listUiExtensions: vi.fn(() => []),
       // §9.2 Track B — config:set IPC handler reads the manifest to detect
@@ -366,7 +369,9 @@ describe("lvis:plugins:config:*", () => {
     expect(result).toEqual({ ok: true, config: { apiKey: "secret" } });
     expect(services.settingsService.setPluginConfig).toHaveBeenCalledWith("meeting", { apiKey: "secret" });
     expect(services.pluginRuntime.setConfigOverride).toHaveBeenCalledWith("meeting", { apiKey: "secret" });
-    expect(services.pluginRuntime.restartAll).toHaveBeenCalledOnce();
+    // US-3c.2: targeted restart — only the affected plugin is restarted.
+    expect(services.pluginRuntime.restartPlugin).toHaveBeenCalledWith("meeting");
+    expect(services.pluginRuntime.restartAll).not.toHaveBeenCalled();
   });
 
   // §9.2 Track B — US-B5
