@@ -110,7 +110,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
   }, [streaming, onAbort]);
 
   return (
-    <div className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto]">
+    <div className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] mx-auto w-full max-w-3xl">
       <ChatSearchOverlay
         open={searchOpen}
         query={searchQuery}
