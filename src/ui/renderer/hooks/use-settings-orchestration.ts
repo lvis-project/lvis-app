@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AppSettings, LvisApi } from "../types.js";
 import { VENDORS } from "../constants.js";
-import type { FallbackEntry } from "../tabs/AdvancedTab.js";
+import type { FallbackEntry } from "../tabs/LlmTab.js";
 
 export interface SettingsOrchestrationState {
   // LLM
@@ -25,17 +25,7 @@ export interface SettingsOrchestrationState {
   setVertexProject: (v: string) => void;
   vertexLocation: string;
   setVertexLocation: (v: string) => void;
-  // Advanced
-  temperature: number;
-  setTemperature: (v: number) => void;
-  maxOutputTokens: number;
-  setMaxOutputTokens: (v: number) => void;
-  seedInput: string;
-  setSeedInput: (v: string) => void;
-  responseFormat: "text" | "json";
-  setResponseFormat: (v: "text" | "json") => void;
-  stopSequencesText: string;
-  setStopSequencesText: (v: string) => void;
+  // Cross-vendor LLM controls (UI moved out of "Advanced")
   streamSmoothing: "none" | "word" | "char";
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
   fallbackChain: FallbackEntry[];
@@ -87,11 +77,6 @@ export function useSettingsOrchestration(
   const [baseUrl, setBaseUrl] = useState("");
   const [vertexProject, setVertexProject] = useState("");
   const [vertexLocation, setVertexLocation] = useState("");
-  const [temperature, setTemperature] = useState<number>(0.7);
-  const [maxOutputTokens, setMaxOutputTokens] = useState<number>(4096);
-  const [seedInput, setSeedInput] = useState<string>("");
-  const [responseFormat, setResponseFormat] = useState<"text" | "json">("text");
-  const [stopSequencesText, setStopSequencesText] = useState<string>("");
   const [streamSmoothing, setStreamSmoothing] = useState<"none" | "word" | "char">("none");
   const [fallbackChain, setFallbackChain] = useState<FallbackEntry[]>([]);
   const [fallbackOpen, setFallbackOpen] = useState(false);
@@ -142,9 +127,6 @@ export function useSettingsOrchestration(
   }, [open, api]);
 
   // Re-hydrate every vendor-specific field when the active vendor changes.
-  // Switching from OpenAI → Foundry must NOT carry over OpenAI's
-  // maxOutputTokens / temperature / etc., or the next save will write
-  // those stale values into the new vendor's persisted block.
   useEffect(() => {
     if (!open) return;
     if (!VENDORS.some((x) => x.id === vendor)) return;
@@ -164,11 +146,6 @@ export function useSettingsOrchestration(
     setVertexLocation(block.vertexLocation ?? "");
     setEnableThinking(block.enableThinking);
     setThinkingBudget(block.thinkingBudgetTokens);
-    setTemperature(block.temperature);
-    setMaxOutputTokens(block.maxOutputTokens);
-    setSeedInput(block.seed !== undefined ? String(block.seed) : "");
-    setResponseFormat(block.responseFormat);
-    setStopSequencesText(block.stopSequences.join("\n"));
   }
 
   // Re-check web key when webProvider changes
@@ -199,12 +176,6 @@ export function useSettingsOrchestration(
           setMarketplaceApiKeyInput("");
           setHasMarketplaceApiKey(true);
         }
-        const seedNumber = (() => {
-          const raw = seedInput.trim();
-          if (raw === "") return undefined;
-          const n = Number.parseInt(raw, 10);
-          return Number.isFinite(n) ? n : undefined;
-        })();
         const trimmedBaseUrl = baseUrl.trim();
         const trimmedVertexProject = vertexProject.trim();
         const trimmedVertexLocation = vertexLocation.trim();
@@ -213,13 +184,8 @@ export function useSettingsOrchestration(
           baseUrl: trimmedBaseUrl || undefined,
           vertexProject: trimmedVertexProject || undefined,
           vertexLocation: trimmedVertexLocation || undefined,
-          maxOutputTokens,
-          temperature,
           enableThinking,
           thinkingBudgetTokens: thinkingBudget,
-          seed: seedNumber,
-          responseFormat,
-          stopSequences: stopSequencesText.split("\n").map((s) => s.trim()).filter((s) => s.length > 0),
         };
         await api.updateSettings({
           llm: {
@@ -254,11 +220,6 @@ export function useSettingsOrchestration(
     baseUrl, setBaseUrl,
     vertexProject, setVertexProject,
     vertexLocation, setVertexLocation,
-    temperature, setTemperature,
-    maxOutputTokens, setMaxOutputTokens,
-    seedInput, setSeedInput,
-    responseFormat, setResponseFormat,
-    stopSequencesText, setStopSequencesText,
     streamSmoothing, setStreamSmoothing,
     fallbackChain, setFallbackChain,
     fallbackOpen, setFallbackOpen,
