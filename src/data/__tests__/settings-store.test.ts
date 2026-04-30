@@ -84,37 +84,40 @@ describe("SettingsService LLM per-vendor patching", () => {
 
   // Regression for the bug shipped + reverted between #279 and the per-vendor
   // refactor: switching the active provider used to carry the previous
-  // vendor's `maxOutputTokens` into the new vendor's persisted block. With
-  // per-vendor blocks, a patch touching only `azure-foundry` MUST leave
-  // every other vendor's settings intact.
-  it("vendor switch + save does not leak maxOutputTokens across vendors", async () => {
+  // vendor's model into the new vendor's persisted block. With per-vendor
+  // blocks, a patch touching only `azure-foundry` MUST leave every other
+  // vendor's settings intact.
+  //
+  // CTRL simplification: test rewritten to use `model` instead of the
+  // removed `maxOutputTokens` field.
+  it("vendor switch + save does not leak model across vendors", async () => {
     const service = new SettingsService({ userDataPath });
 
-    // Establish a non-default OpenAI maxOutputTokens (simulating a user who
-    // raised it for OpenAI's wider output cap).
+    // Establish a non-default OpenAI model (simulating a user who switched to
+    // a specific model for OpenAI).
     await service.patch({
       llm: {
         provider: "openai",
-        vendors: { openai: { maxOutputTokens: 16384 } },
+        vendors: { openai: { model: "gpt-5-turbo" } },
       },
     });
 
     // User switches to azure-foundry and saves with the FRESH Foundry block
-    // (4096 default) — this is what the renderer's hydrateVendorBlock +
+    // (default model) — this is what the renderer's hydrateVendorBlock +
     // save() path produces.
     await service.patch({
       llm: {
         provider: "azure-foundry",
-        vendors: { "azure-foundry": { maxOutputTokens: 4096 } },
+        vendors: { "azure-foundry": { model: "gpt-4o" } },
       },
     });
 
     const llm = service.get("llm");
     expect(llm.provider).toBe("azure-foundry");
-    expect(llm.vendors["azure-foundry"].maxOutputTokens).toBe(4096);
+    expect(llm.vendors["azure-foundry"].model).toBe("gpt-4o");
     // The OpenAI block must still hold the user-tuned value, not be
     // overwritten by the Foundry save.
-    expect(llm.vendors.openai.maxOutputTokens).toBe(16384);
+    expect(llm.vendors.openai.model).toBe("gpt-5-turbo");
   });
 
   it("coerces a stale unknown provider on disk to the default", () => {
