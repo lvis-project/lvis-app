@@ -243,7 +243,12 @@ export class PluginRuntime {
     for (const plan of loadPlan) {
       const manifestPath = plan.manifestPath;
       const pluginRoot = dirname(manifestPath);
-      if (this.installReceiptCacheRoot && plan.pluginIdHint && !plan.devLinked) {
+      // dev-linked plugins skip receipt verification ONLY in dev mode —
+      // packaged builds keep the integrity gate even if a malicious actor
+      // sets `_devLinked: true` in registry.json. dev-flags docstring:
+      // "install receipt integrity is not bypassable by dev env flags".
+      const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
+      if (this.installReceiptCacheRoot && plan.pluginIdHint && !skipReceiptForDevLink) {
         const receiptResult = await verifyInstallReceipt(
           this.installReceiptCacheRoot,
           plan.pluginIdHint,
