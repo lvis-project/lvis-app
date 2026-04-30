@@ -10,9 +10,20 @@
  * Collapsed view: header alone, but the title of the in-progress item
  * keeps streaming next to the badge — user always knows what the
  * assistant is working on without expanding.
+ *
+ * Continuation indicator: when items survive a panel re-mount on the same
+ * `sessionId` we surface a small "이어서" badge so the user can tell the
+ * panel is continuing prior work rather than starting fresh. Without this
+ * the user reported confusion about whether a new turn resets state.
+ *
+ * Session filtering: pushes from `onSessionTodoChanged` are filtered by
+ * the current `sessionId` prop so a stale session's emissions cannot
+ * clobber the active view (the renderer used to apply every push
+ * regardless of which session emitted it, which surfaced the bug
+ * "TODO 가 작성은 되는데 업데이트는 안됨").
  */
-import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, ListChecks } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, ListChecks, RotateCcw, Sparkles } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import type { LvisApi } from "../types.js";
 
@@ -22,47 +33,138 @@ interface SessionTodoItem {
   status: string;
 }
 
-const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
-  pending: { label: "대기", cls: "bg-muted text-muted-foreground" },
-  in_progress: { label: "진행", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
-  completed: { label: "완료", cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
-  deleted: { label: "취소", cls: "bg-muted text-muted-foreground line-through" },
+const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> = {
+  pending: {
+    label: "대기",
+    cls: "bg-muted text-muted-foreground",
+    dot: "bg-muted-foreground/40",
+  },
+  in_progress: {
+    label: "진행",
+    cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+    dot: "bg-amber-500",
+  },
+  completed: {
+    label: "완료",
+    cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+    dot: "bg-emerald-500",
+  },
+  failed: {
+    label: "실패",
+    cls: "bg-rose-500/15 text-rose-600 dark:text-rose-400",
+    dot: "bg-rose-500",
+  },
+  deleted: {
+    label: "취소",
+    cls: "bg-muted text-muted-foreground line-through",
+    dot: "bg-muted-foreground/40",
+  },
 };
 
-export function SessionTodoPanel({ api }: { api: LvisApi }) {
+/**
+ * Detects whether the prefers-reduced-motion media query is honored at
+ * mount time. The result is captured once — a runtime change to the OS
+ * preference would require a remount, which is acceptable for a UX hint
+ * and avoids a useEffect listener for a signal that almost never flips.
+ */
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
+export function SessionTodoPanel({
+  api,
+  sessionId,
+}: {
+  api: LvisApi;
+  /**
+   * Current chat session id. Used to (a) filter incoming `:changed`
+   * pushes so a stale session can't clobber the visible list, and (b)
+   * decide whether to render the "이어서" continuation chip when the
+   * panel re-mounts on the same id with prior items.
+   */
+  sessionId?: string;
+}) {
   const [items, setItems] = useState<SessionTodoItem[]>([]);
   const [open, setOpen] = useState(true);
+  // Continuation marker: true when the panel surfaced items via the
+  // initial `listSessionTodos` fetch (i.e. items already existed for
+  // this session before mount). Distinguishes "이어서 진행" from "새 시작".
+  const [resumed, setResumed] = useState<boolean | null>(null);
+  // Track which session's items are currently rendered so a `:changed`
+  // event for a different session id is dropped instead of overwriting.
+  const visibleSessionRef = useRef<string | undefined>(sessionId);
 
   const refresh = useCallback(async () => {
     if (typeof api.listSessionTodos !== "function") return;
-    const list = await api.listSessionTodos();
+    const list = await api.listSessionTodos(sessionId);
+    visibleSessionRef.current = sessionId;
     setItems(list);
-  }, [api]);
+    // First fetch on a session id determines the continuation state:
+    //   - existing items => "이어서" (resumed)
+    //   - empty list     => "새 시작" (fresh)
+    setResumed(list.length > 0);
+  }, [api, sessionId]);
 
   useEffect(() => {
     void refresh();
     if (typeof api.onSessionTodoChanged !== "function") {
       return undefined;
     }
-    const unsub = api.onSessionTodoChanged(({ items: next }) => {
+    const unsub = api.onSessionTodoChanged(({ sessionId: emittedSid, items: next }) => {
+      // Drop pushes from a different session — without this, switching
+      // chats keeps the old session emitting into the active panel.
+      // The bridge is permitted to omit `sessionId` (legacy clients);
+      // in that case we accept the push as the bridge already filtered.
+      if (emittedSid && sessionId && emittedSid !== sessionId) {
+        return;
+      }
+      visibleSessionRef.current = emittedSid ?? sessionId;
       setItems(next);
+      // Latch the continuation marker on the very first arrival so it
+      // stays stable for the lifetime of this mount:
+      //   - null → false  (panel mounted empty, items just landed = 새 시작)
+      //   - null → true   (panel mounted with items already = 이어서)
+      // Subsequent pushes do not flip the marker.
+      setResumed((prev) => (prev === null ? next.length > 0 : prev));
     });
     return unsub;
-  }, [api, refresh]);
+  }, [api, refresh, sessionId]);
+
+  // When the chat session id flips (new chat, load session, fork) we want
+  // the panel to drop stale state immediately — otherwise the user sees
+  // the prior session's items until the next push lands. Resetting via
+  // refresh covers both "swap to a session that has todos" (fetch repopulates)
+  // and "swap to a session that has none" (fetch returns []).
+  useEffect(() => {
+    setResumed(null);
+    setItems([]);
+  }, [sessionId]);
 
   if (items.length === 0) return null;
 
   const visible = items.filter((i) => i.status !== "deleted");
   const completedCount = items.filter((i) => i.status === "completed").length;
   const inProgress = items.find((i) => i.status === "in_progress");
+  const reduceMotion = prefersReducedMotion();
+  // Pulse only when motion is allowed; otherwise rely on color/dot to
+  // signal "active" (still readable, no jitter for sensitive users).
+  const activePulse = reduceMotion ? "" : "animate-pulse";
 
   return (
     <div
       // The input cluster below us already draws its own `border-t bg-card`
       // — we don't double up. Side borders + dashed amber tint signal "this
       // is the assistant's running plan" without a redundant horizontal rule.
-      className="border-x border-dashed border-amber-500/40 bg-amber-500/5 text-xs"
+      className="border-x border-dashed border-amber-500/40 bg-amber-500/5 text-xs transition-colors"
       data-testid="session-todo-panel"
+      data-session-id={sessionId ?? ""}
     >
       <button
         className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-amber-500/10"
@@ -74,12 +176,36 @@ export function SessionTodoPanel({ api }: { api: LvisApi }) {
         <Badge variant="outline" className="px-1 py-0 text-[10px]">
           {completedCount}/{visible.length}
         </Badge>
+        {/* Continuation chip — explicit affordance for the user feedback:
+            "신규 TODO 를 작성하거나, 다음 턴을 시작할 때, 계속 이어서 하는 것인지
+            초기화 하고 가는 것인지도 판단이 잘 안되고 있음". `resumed === null`
+            means the first fetch hasn't resolved yet, so show nothing. */}
+        {resumed === true && (
+          <span
+            className="ml-1 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0 text-[10px] text-amber-600 dark:text-amber-400"
+            data-testid="session-todo-continuation"
+            title="이전 턴의 TODO 를 이어서 진행 중"
+          >
+            <RotateCcw className="h-2.5 w-2.5" />
+            이어서
+          </span>
+        )}
+        {resumed === false && (
+          <span
+            className="ml-1 inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0 text-[10px] text-emerald-600 dark:text-emerald-400"
+            data-testid="session-todo-fresh"
+            title="새 세션에서 TODO 를 새로 작성"
+          >
+            <Sparkles className="h-2.5 w-2.5" />
+            새 시작
+          </span>
+        )}
         {/* Collapsed-state focal point: the active item streams next to
             the count and pulses so the user can see progress at a glance
             without expanding the panel. */}
         {!open && inProgress && (
           <span
-            className="ml-2 min-w-0 flex-1 truncate text-left text-amber-600 dark:text-amber-400 animate-pulse"
+            className={`ml-2 min-w-0 flex-1 truncate text-left text-amber-600 dark:text-amber-400 ${activePulse}`}
             data-testid="session-todo-collapsed-active"
             title={inProgress.content}
           >
@@ -97,13 +223,31 @@ export function SessionTodoPanel({ api }: { api: LvisApi }) {
             return (
               <li
                 key={it.id}
-                className={`flex items-start gap-2 ${active ? "animate-pulse" : ""}`}
+                className={`flex items-start gap-2 transition-opacity duration-200 ${
+                  active ? activePulse : ""
+                } ${it.status === "deleted" ? "opacity-50" : "opacity-100"}`}
                 data-testid={active ? "session-todo-active-row" : undefined}
+                data-status={it.status}
               >
-                <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${meta.cls}`}>
+                {/* Warp-style leading dot — color alone communicates state
+                    even when the user has dimmed text or scaled the chip
+                    label below readability. */}
+                <span
+                  aria-hidden
+                  className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full transition-colors ${meta.dot} ${
+                    active ? activePulse : ""
+                  }`}
+                />
+                <span
+                  className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${meta.cls}`}
+                >
                   {meta.label}
                 </span>
-                <span className={`min-w-0 flex-1 ${it.status === "completed" ? "line-through opacity-70" : ""} ${it.status === "deleted" ? "line-through opacity-50" : ""}`}>
+                <span
+                  className={`min-w-0 flex-1 transition-opacity duration-200 ${
+                    it.status === "completed" ? "line-through opacity-70" : ""
+                  } ${it.status === "deleted" ? "line-through opacity-50" : ""}`}
+                >
                   {it.content}
                 </span>
               </li>
