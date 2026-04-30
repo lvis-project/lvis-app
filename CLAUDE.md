@@ -106,6 +106,26 @@ src/
 3. **Multi-vendor LLM** — GenericMessage abstraction, never vendor-specific in core logic
 4. **Config wildcard** — `configOverrides["*"]` passes API keys to all plugins
 
+## Playwright Verification (REQUIRED for app changes)
+
+UI/렌더러 변경은 **반드시 Playwright e2e 검증** 거친 후 머지. 빌드/typecheck/단위 테스트만으로는 시각적 회귀를 잡을 수 없음 — 실제 사용자 플로우가 깨지지 않았는지 마지막에 한 번 더 확인.
+
+- **테마/색상/투명도**, **dialog/modal**, **floating panel**, **chat 흐름** 변경 → e2e 필수
+- 단순 타입 정의, 백엔드 모듈, 도구 레이어 등 렌더러 영향 없는 변경 → 면제 가능
+- CI 의 `ui-e2e.yml` / `e2e.yml` / `m4-e2e.yml` 가 자동 실행. 로컬 검증은 `bunx playwright test`
+- e2e 가 빨간 채로 머지하면 안 됨 — admin merge 로 우회 시 즉시 후속 fix PR 의무
+
+위반 시 시각적 회귀 (예: 2026-04-30 styles.css conflict marker 잔존 가설 — typecheck/단위 통과했지만 PostCSS 가 silent fail 하면 e2e 만 잡을 수 있음) 가 production 까지 흘러갈 수 있음.
+
+## No Fallback Code (REQUIRED)
+
+루트 CLAUDE.md `No Fallback Code` 룰 그대로 적용 — 처음부터 올바른 코드 작성. 본 레포 specific 사례:
+
+- 플러그인 manifest 에 새 필드 추가 시: schema 와 SDK 타입을 **같은 PR 에서 함께** 업데이트. "schema 만 먼저 추가하고 type 은 나중에" 식의 단계적 접근 금지 — AJV strict 가 deny 하거나 type-cast 가 필요한 fallback 강요됨
+- 새 IPC 채널 추가 시: handler / preload bridge / renderer 타입 / 호출 사이트가 한 PR 에 모두 있어야 함. 일부만 있으면 호출 측에 `if (typeof api.x === "function") { api.x() } else { fallback }` 같은 우회 코드 강요됨
+- HostApi 변경 시: 모든 플러그인 dep 도 같은 PR 에서 sdk 새 버전으로 bump. 누락하면 plugin 코드가 `(hostApi as any).newMethod?.()` 우회 작성
+- 가시적 회귀 (theme/transparency/animation) 발견 시: 우선순위 SEV-1 fix, hotfix branch 로 즉시 처리 — fallback 토큰 추가로 가리지 말 것
+
 ## Build
 
 This repo uses **bun** as the default package manager + script runner.
