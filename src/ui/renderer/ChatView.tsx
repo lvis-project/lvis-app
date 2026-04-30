@@ -17,17 +17,17 @@ import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
 import { ToolGroupCard } from "./components/ToolGroupCard.js";
 import { ChatSearchOverlay } from "./components/ChatSearchOverlay.js";
-import { FloatingQuestionPanel } from "./components/FloatingQuestionPanel.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
-import { TokenProgressChip } from "./components/TokenProgressChip.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
-import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
 import { useChatContext } from "./context/ChatContext.js";
+import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
+import type { SubAgentSpawn } from "./components/SubAgentCard.js";
+import type { SkillBadgeProps } from "./components/SkillBadge.js";
 
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
@@ -46,19 +46,16 @@ export interface ChatViewProps {
   onAbort: () => void | Promise<void>;
   /** D6: submit thumbs up/down feedback for an assistant message */
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
+  /** Workflow tool state — lifted to App level so panel survives view navigation */
+  subAgentSpawns: SubAgentSpawn[];
+  loadedSkills: SkillBadgeProps[];
+  /** True when FloatingQuestionPanel (mounted in App) has pending questions — used to suppress routine overlay */
+  hasAskQuestions: boolean;
 }
 
-export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback }: ChatViewProps) {
-  // Workflow tools (S1+S2): inline cards layered above the chat entries.
-  // We grab the api lazily to avoid threading another prop through the
-  // context — the api is a singleton and equally valid here.
+export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions }: ChatViewProps) {
+  // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
-  const {
-    askQuestions,
-    subAgentSpawns,
-    loadedSkills,
-    dismissAskQuestion,
-  } = useWorkflowTools(workflowApi);
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
@@ -128,22 +125,13 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
       )}
       {/* 루틴 floating overlay — 단일 슬롯에 진행 중 / 결과 중 하나만 표시.
           진행 중이면 RoutineRunningIndicator, 아니면 직전 결과 RoutineCard.
-          긴 브리핑은 카드 내부에서 스크롤 (max-h-[60vh] + overflow-y-auto). */}
-      {/* FloatingQuestionPanel — anchored at the top of the chat area (z-40),
-          above the routine overlay (z-20). Positioned outside the ScrollArea
-          so it stays visible regardless of scroll position.
-          The routine overlay is suppressed while questions are pending so
-          the two floating surfaces don't compete for attention. */}
-      <FloatingQuestionPanel
-        api={workflowApi}
-        requests={askQuestions}
-        onResolved={dismissAskQuestion}
-      />
+          긴 브리핑은 카드 내부에서 스크롤 (max-h-[60vh] + overflow-y-auto).
+          FloatingQuestionPanel은 App 레벨에서 렌더링 — 뷰 전환 시에도 유지. */}
       {/* Suppress the floating routine overlay while an ask card is pending —
           a question demanding the user's response shouldn't compete with a
           running-routine indicator for attention. The overlay reappears
           automatically once the user resolves or dismisses the question. */}
-      {(runningRoutines.size > 0 || routineResult) && askQuestions.length === 0 && (
+      {(runningRoutines.size > 0 || routineResult) && !hasAskQuestions && (
         <div className="pointer-events-none absolute left-0 right-0 top-2 z-20 flex justify-center px-4">
           <div className="pointer-events-auto flex w-full max-w-2xl max-h-[60vh] flex-col overflow-hidden">
             {runningRoutines.size > 0 ? (
@@ -211,7 +199,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
         {subAgentSpawns.map((spawn) => (
           <SubAgentCard key={spawn.spawnId} spawn={spawn} />
         ))}
-        {entries.length === 0 && hasApiKey !== false && askQuestions.length === 0 && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
+        {entries.length === 0 && hasApiKey !== false && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {(() => {
           // Three-way entry classification eliminates retroactive-reclassification flicker.
           //
@@ -469,8 +457,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           inline stream to eliminate the buried-question UX pain point. */}
       <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
       <div className="border-t bg-card p-3 space-y-2">
-        <div className="flex items-center justify-between gap-3 text-[11px]">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 text-[11px]">
             {/* Sprint B — Role preset dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -535,8 +522,6 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                 <span>Thinking</span>
               </label>
             )}
-          </div>
-          <TokenProgressChip used={usedTokens} budget={contextBudget} />
         </div>
         {/* Sprint B — attached-doc chips */}
         {attachedDocs.length > 0 && (

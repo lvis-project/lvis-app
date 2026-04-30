@@ -1,10 +1,10 @@
 /**
- * initial-size E2E (PR #368 — halve initial window size).
+ * initial-size E2E (PR #368 follow-up — narrow width, restored height).
  *
  * Verifies that on first launch (no persisted window-state.json) the main
- * BrowserWindow is created at the new compact dimensions:
- *   width  ≤ 600 px  (target 560)
- *   height ≤ 420 px  (target 380)
+ * BrowserWindow is created at the correct dimensions:
+ *   width  ≤ 600 px  (target 560 — narrow chat column from #364)
+ *   height ≤ 760 px  (target 720 — restored from original; PR #368 incorrectly halved this)
  *
  * Uses `app.evaluate` to read bounds directly via Electron BrowserWindow APIs.
  * Skipped automatically when the built app binary is absent so CI that doesn't
@@ -36,13 +36,15 @@ test.describe("initial window size", () => {
     await app.close();
   });
 
-  test("main window opens at compact dimensions (≤ 600×420)", async () => {
+  test("main window opens at narrow-width, full-height dimensions (≤ 600×760)", async () => {
     const bounds = await app.evaluate(({ BrowserWindow }) => {
       const [win] = BrowserWindow.getAllWindows();
       return win.getBounds();
     });
 
     expect(bounds.width).toBeLessThanOrEqual(600);
-    expect(bounds.height).toBeLessThanOrEqual(420);
+    expect(bounds.height).toBeLessThanOrEqual(760);
+    // Ensure height is not accidentally compact (the PR #368 regression was 380px)
+    expect(bounds.height).toBeGreaterThanOrEqual(600);
   });
 });
