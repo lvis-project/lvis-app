@@ -45,11 +45,11 @@ function usage(): never {
   throw new Error(
     [
       "Usage:",
-      "  npm run plugins:list",
-      "  npm run plugins:add -- <plugin-id> <manifest-path>",
-      "  npm run plugins:remove -- <plugin-id>",
-      "  npm run plugins:enable -- <plugin-id>",
-      "  npm run plugins:disable -- <plugin-id>",
+      "  bun run plugins:list",
+      "  bun run plugins:add -- <plugin-id> <manifest-path>",
+      "  bun run plugins:remove -- <plugin-id>",
+      "  bun run plugins:enable -- <plugin-id>",
+      "  bun run plugins:disable -- <plugin-id>",
       "",
       "Note: 'install' is no longer offered here — installs flow through the",
       "marketplace API (Settings UI, lvis://install/<slug>, or the managed",

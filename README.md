@@ -124,8 +124,7 @@ bun install
 이 저장소는 **bun**을 기본 패키지 매니저 + 스크립트 러너로 사용합니다.
 Electron 런타임 자체는 여전히 Node로 구동됩니다 (`scripts/run-electron.mjs`
 가 `electron` 바이너리를 실행하며, bun으로 Electron 프로세스를 띄우지는
-않습니다). 문제가 발생하면 `*:npm` 폴백 스크립트(`start:npm`, `build:npm`,
-`prepare:plugins:npm` 등)를 사용할 수 있습니다.
+않습니다).
 
 > **⚠️ Node.js 필수:** bun이 기본 러너이지만, `postinstall` 스크립트
 > (`node scripts/fetch-uv.mjs`)와 Electron 실행 스크립트
@@ -143,19 +142,23 @@ Windows corp PC(사내망, Hyper-V/VDI, EDR/AV 샌드박스 환경)에서의 fir
 
 ### 권장 설치 절차 (사내망)
 
-```powershell
+```bash
 # 1) clone
 git clone <repo-url>
 cd lvis-app
 
-# 2) file:../ symlink 대신 복사로 설치해 EISDIR 회피
-npm install --legacy-peer-deps --install-links=true
+# 2) deps 설치
+bun install
 
-# 3) 빌드 + 실행 (bun 이 없어도 동작)
-npm run start:npm
+# 3) 빌드 + 실행
+bun run start
+```
 
-# 3-대안) PowerShell 에서 한글이 깨지면 세션 인코딩을 자동 세팅하는 launcher 사용
-npm run start:win
+PowerShell 에서 한글이 깨지면 세션을 UTF-8 로 전환 후 동일 명령:
+
+```powershell
+chcp 65001
+bun run start
 ```
 
 전체 Windows 설치/실행 가이드는 [`docs/guides/windows-setup.md`](./docs/guides/windows-setup.md) 참고.
@@ -175,8 +178,6 @@ npm run start:win
 ## 테스트
 ```bash
 bun run test:electron-smoke
-bun run test:plugin-flow
-bun run test:meeting-flow
 bun run test:main-flow
 bunx vitest run
 ```
