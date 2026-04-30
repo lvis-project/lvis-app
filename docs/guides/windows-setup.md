@@ -59,6 +59,10 @@ bun install
 `packages/plugin-sdk` 는 source/type-only 패키지라 별도 빌드 불필요. `bun install`
 이 sibling plugin repos 의 `file:../lvis-plugin-*` 경로를 자동으로 처리한다.
 
+> **CI 와의 차이**: CI 는 `bun install --frozen-lockfile` 로 잠금 상태 그대로 재현한다.
+> 로컬에서 잘 빌드되는데 CI 가 "lockfile mismatch" 로 실패하면 `bun install --frozen-lockfile`
+> 로 동일 조건 재현 후 `bun.lock` 변경분을 commit.
+
 ## 3. 실행
 
 ```powershell
@@ -72,6 +76,11 @@ UTF-8 로 전환:
 chcp 65001
 bun run start
 ```
+
+> **PowerShell 5.x 사용자 주의**: Windows 10/11 의 기본 PowerShell (5.1) 은 `chcp 65001`
+> 이후에도 `[Console]::OutputEncoding` 이 세션 시작 시점의 cp949 로 캐시되어 있어 mojibake
+> 가 그대로 나오는 경우가 있다. 이 때는 5절 "한글 로그 깨짐" 의 `[Console]::OutputEncoding`
+> 명령을 함께 실행 (또는 PowerShell 7+ / Windows Terminal 사용).
 
 영구 설정은 `$PROFILE` 에 추가 (5절 "한글 로그 깨짐" 참고).
 
