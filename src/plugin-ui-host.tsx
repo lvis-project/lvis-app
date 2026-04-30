@@ -33,6 +33,14 @@ export type PluginUiExtensionView = {
     entry?: string;
     exportName?: string;
     page?: string;
+    /**
+     * Window placement preference. When `defaultMode` is `"detached"` the
+     * host opens the extension in a magnetic-snap BrowserWindow on sidebar
+     * click rather than rendering it inline.
+     */
+    window?: {
+      defaultMode?: "embedded" | "detached";
+    };
   };
   entryUrl?: string;
 };
