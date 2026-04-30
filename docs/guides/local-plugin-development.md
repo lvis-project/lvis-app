@@ -234,8 +234,7 @@ watch 빌드가 `dist/*.js` 를 갱신하면 호스트 watcher 가 디바운스 
 | `plugin signature required` 또는 `plugin signature verification failed` (packaged 빌드에서) | §4 참고 — packaged 빌드는 dev skip flag 무시. 정식 publish 또는 사용자 토글 필요. |
 | `Plugin already exists: <id>` (`plugins:add`) | 같은 id 가 registry 에 이미 있음. `bun run plugins:remove -- <id>` 후 재등록. |
 | Hot-reload 가 안 됨 | (a) `LVIS_DEV_RELOAD=1` 누락 (`bun run start` 는 자동 세팅 X — `bun run dev` 거나 직접 export). (b) `dist/` 가 watch 가능 위치인지 확인 (네트워크 드라이브 등에서는 fs.watch 부정확). (c) plugin.json 자체를 바꿨다면 호스트 재시작 필수. |
-| Windows 에서 `EISDIR` (file:../ 설치 시) | npm 의 file: 링크가 symlink 모드로 동작. `npm install --legacy-peer-deps --install-links=true` 또는 bun 사용. |
-| 한글 깨짐 (cp949) | `npm run start:win` (PowerShell launcher) 또는 `chcp 65001` 직접. `bun run start` 는 자동 처리. |
+| 한글 깨짐 (cp949) | PowerShell 에서 `chcp 65001` 후 `bun run start`. 또는 Windows Terminal (UTF-8 default) 사용. |
 
 ---
 
