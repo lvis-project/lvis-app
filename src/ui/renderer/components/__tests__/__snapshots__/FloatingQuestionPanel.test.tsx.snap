@@ -1,15 +1,44 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`FloatingQuestionPanel > chip rows snapshot matches expected chip count and labels 1`] = `
+<div
+  class="flex flex-wrap gap-1.5 px-3 pt-2 pb-0"
+  data-testid="fqp-chips-row"
+>
+  <button
+    class="rounded-full px-3 py-1 text-xs font-medium bg-secondary/40 text-secondary-foreground border border-border/60 hover:bg-secondary hover:border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-150"
+    data-testid="fqp-chip"
+    type="button"
+  >
+    네
+  </button>
+  <button
+    class="rounded-full px-3 py-1 text-xs font-medium bg-secondary/40 text-secondary-foreground border border-border/60 hover:bg-secondary hover:border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-150"
+    data-testid="fqp-chip"
+    type="button"
+  >
+    아니오
+  </button>
+  <button
+    class="rounded-full px-3 py-1 text-xs font-medium bg-secondary/40 text-secondary-foreground border border-border/60 hover:bg-secondary hover:border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-150"
+    data-testid="fqp-chip"
+    type="button"
+  >
+    잘 모르겠어요
+  </button>
+</div>
+`;
+
 exports[`FloatingQuestionPanel > matches snapshot with a single question 1`] = `
 <div
-  class="pointer-events-none absolute left-0 right-0 z-40 flex justify-center px-4 fqp-root-top"
+  class="pointer-events-none absolute inset-x-0 z-40 px-4 fqp-root-top"
   data-testid="floating-question-panel"
 >
   <div
     aria-label="질문 대기열"
     aria-labelledby="_r_b_"
     aria-live="polite"
-    class="pointer-events-auto w-full max-w-2xl"
+    class="pointer-events-auto mx-auto w-full max-w-2xl"
     role="region"
     tabindex="-1"
   >
