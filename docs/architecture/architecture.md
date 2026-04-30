@@ -2345,12 +2345,12 @@ graph TB
       "transport": "stdio"
     },
     "hr-system": {
-      "url": "https://hr-api.lge.com/mcp",
+      "url": "https://hr-api.your-corp.example/mcp",
       "transport": "sse",
       "auth": "sso"
     },
     "erp-realtime": {
-      "url": "wss://erp.lge.com/mcp",
+      "url": "wss://erp.your-corp.example/mcp",
       "transport": "websocket",
       "auth": "sso"
     }
@@ -2489,7 +2489,7 @@ Step 1-8:  기존 boot sequence
       {
         "id": "lvis-plugin-pageindex",
         "version": "0.2.0",
-        "source": "https://internal.lge.com/lvis/marketplace/api/v1/plugins/lvis-plugin-pageindex/0.2.0",
+        "source": "https://internal.your-corp.example/lvis/marketplace/api/v1/plugins/lvis-plugin-pageindex/0.2.0",
         "sha256": "...",
         "forceInstall": true,
         "autoUpdate": true
