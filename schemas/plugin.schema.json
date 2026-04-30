@@ -233,6 +233,59 @@
           }
         }
       }
+    },
+    "configSchema": {
+      "type": "object",
+      "description": "§9.2 Track B — declarative settings schema. JSON Schema draft-07 subset rendered as a typed form in PluginConfigTab. format:'secret' routes the value through the encrypted keychain instead of cleartext pluginConfigs.",
+      "required": ["properties"],
+      "additionalProperties": false,
+      "properties": {
+        "$schema": { "type": "string" },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["type"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "type": "string", "enum": ["string", "number", "integer", "boolean", "array"] },
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "default": {},
+              "enum": { "type": "array" },
+              "minimum": { "type": "number" },
+              "maximum": { "type": "number" },
+              "minLength": { "type": "integer", "minimum": 0 },
+              "maxLength": { "type": "integer", "minimum": 0 },
+              "pattern": { "type": "string" },
+              "format": { "type": "string", "enum": ["secret", "uri", "email", "date-time"] },
+              "items": {
+                "type": "object",
+                "required": ["type"],
+                "additionalProperties": false,
+                "properties": {
+                  "type": { "type": "string", "enum": ["string", "number", "integer", "boolean"] },
+                  "enum": { "type": "array" }
+                }
+              }
+            }
+          }
+        },
+        "required": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "customPanel": {
+          "type": "object",
+          "required": ["entry", "exportName"],
+          "additionalProperties": false,
+          "properties": {
+            "entry": { "type": "string", "minLength": 1 },
+            "exportName": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
     }
   }
 }

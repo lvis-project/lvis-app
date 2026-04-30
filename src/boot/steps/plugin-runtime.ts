@@ -28,6 +28,10 @@ import {
 } from "../dev-flags.js";
 import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
+import {
+  emitPluginConfigChange,
+  subscribePluginConfigChange,
+} from "../../plugins/config-change-bus.js";
 import { PROACTIVE_SOURCE_PATTERN } from "../../engine/proactive-source.js";
 import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
 import type {
@@ -637,6 +641,77 @@ export async function initPluginRuntime(
           });
         } catch { /* audit must not break host */ }
       }),
+      // §9.2 Track B — typed plugin config access, scoped to this pluginId.
+      // `get` reads the live merged config (manifest defaults + saved
+      //   overrides) directly from settingsService so a write from another
+      //   surface (renderer, IPC, sibling plugin) is visible without reload.
+      // `set` persists via the same `setPluginConfig` IPC bridge used by the
+      //   settings UI and triggers a plugin reload so the plugin's `config`
+      //   snapshot in `PluginRuntimeContext.config` is rebuilt with the new
+      //   value. `format: "secret"` keys are rejected here — secrets MUST go
+      //   through `hostApi.setSecret` so they land encrypted, never in
+      //   cleartext `pluginConfigs`.
+      // `onChange` listeners are registered against the plugin's own id only;
+      //   the underlying bus rejects cross-plugin observation.
+      config: {
+        get: <T = unknown>(key: string): T | undefined => {
+          const merged = {
+            ...(manifest.config ?? {}),
+            ...(settingsService.getPluginConfig(pluginId) ?? {}),
+          };
+          return merged[key] as T | undefined;
+        },
+        set: async <T = unknown>(key: string, value: T): Promise<void> => {
+          const schemaProp = manifest.configSchema?.properties?.[key];
+          if (schemaProp?.type === "string" && schemaProp.format === "secret") {
+            throw new Error(
+              `[plugin:${pluginId}] config.set('${key}'): secret fields must be saved via hostApi.setSecret(), not config.set().`,
+            );
+          }
+          const current = settingsService.getPluginConfig(pluginId) ?? {};
+          // structuredClone so we never accidentally hand the plugin our
+          // internal record reference.
+          const nextRecord = structuredClone({
+            ...current,
+            [key]: value as unknown,
+          });
+          await settingsService.setPluginConfig(pluginId, nextRecord);
+          // Mirror the IPC handler — refresh the runtime's per-plugin
+          // override so the next reload picks up the new value, then emit
+          // the change so existing listeners observe it without waiting
+          // for the reload.
+          pluginRuntime.setConfigOverride(pluginId, nextRecord);
+          emitPluginConfigChange(pluginId, key, value);
+          // Reload the affected plugin so its handlers see the new config
+          // on next invocation. We restart the whole runtime to match the
+          // existing IPC `set` behaviour (lvis:plugins:config:set →
+          // restartAll).
+          try {
+            await pluginRuntime.restartAll();
+          } catch (err) {
+            // Restart already audits per-plugin failures; surface the
+            // outer error so the calling plugin can branch on it.
+            throw new Error(
+              `[plugin:${pluginId}] config.set('${key}'): runtime reload failed: ${(err as Error).message}`,
+            );
+          }
+        },
+        onChange: <T = unknown>(
+          key: string,
+          callback: (value: T | undefined) => void,
+        ): (() => void) => {
+          const unsubscribe = subscribePluginConfigChange(
+            pluginId,
+            key,
+            (_changedKey, value) => {
+              callback(value as T | undefined);
+            },
+          );
+          // Auto-cleanup on plugin disable to mirror onEvent semantics.
+          pluginRuntime.registerDisposer(pluginId, unsubscribe);
+          return unsubscribe;
+        },
+      },
       registerKeywords: (keywords) => {
         keywordEngine.registerKeywords(
           keywords.map((k) => ({ ...k, pluginId })),

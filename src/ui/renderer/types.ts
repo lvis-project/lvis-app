@@ -34,6 +34,28 @@ export type Task = {
   updatedAt: string;
 };
 
+export type PluginConfigSchemaPropertySummary = {
+  type: "string" | "number" | "integer" | "boolean" | "array";
+  title?: string;
+  description?: string;
+  default?: unknown;
+  enum?: Array<string | number | boolean>;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  format?: "secret" | "uri" | "email" | "date-time";
+  items?: { type: "string" | "number" | "integer" | "boolean"; enum?: Array<string | number | boolean> };
+};
+
+export type PluginConfigSchemaSummary = {
+  $schema?: string;
+  properties: Record<string, PluginConfigSchemaPropertySummary>;
+  required?: string[];
+  customPanel?: { entry: string; exportName: string };
+};
+
 export type PluginCardSummary = {
   id: string;
   name: string;
@@ -46,6 +68,8 @@ export type PluginCardSummary = {
   loadStatus?: "loaded" | "failed" | "disabled";
   version?: string;
   publisher?: string;
+  /** §9.2 Track B — declarative settings schema, when the manifest declares one. */
+  configSchema?: PluginConfigSchemaSummary;
 };
 
 export type LLMVendorSettingsRenderer = {
@@ -536,6 +560,20 @@ export type LvisPluginConfigApi = {
   >;
   set: (pluginId: string, config: Record<string, unknown>) => Promise<
     | { ok: true; config: PluginConfigRecord }
+    | { ok: false; error: string; message?: string }
+  >;
+  /** §9.2 Track B — fetch the manifest's declarative settings schema. */
+  getSchema: (pluginId: string) => Promise<
+    | { ok: true; schema: PluginConfigSchemaSummary | null }
+    | { ok: false; error: string; message?: string }
+  >;
+  /**
+   * §9.2 Track B — persist a `format: "secret"` field. The value lands in
+   * the encrypted keychain (`lvis-secrets.json`) and the host strips any
+   * stale cleartext mirror from `pluginConfigs`.
+   */
+  setSecret: (pluginId: string, key: string, value: string) => Promise<
+    | { ok: true }
     | { ok: false; error: string; message?: string }
   >;
 };
