@@ -90,7 +90,7 @@ export function ImportedTriggerCard({
         ) : null}
       </div>
       {summary ? (
-        <div className="prose prose-sm prose-invert max-w-none break-words text-foreground">
+        <div className="prose prose-sm lvis-prose max-w-none break-words">
           {/*
             Strip `- emailId: …` and `- eventId: …` lines from
             display. Both ids are essential for the chat LLM (it uses
@@ -124,7 +124,7 @@ export function ImportedTriggerCard({
           ) : null}
         </div>
         {response && response.length > 0 ? (
-          <div className="prose prose-sm prose-invert max-w-none break-words text-foreground">
+          <div className="prose prose-sm lvis-prose max-w-none break-words">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {responseStreaming ? clampDanglingMarkdownLink(response) : response}
             </ReactMarkdown>
