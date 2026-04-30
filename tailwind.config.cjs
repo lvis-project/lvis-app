@@ -1,6 +1,18 @@
-/** @type {import('tailwindcss').Config} */
+/**
+ * Tailwind config — references SEMANTIC design tokens defined in
+ * `src/styles.css`. Adding a new theme variant is a CSS-only change; this
+ * file only changes when a new SEMANTIC token name is introduced.
+ *
+ * `darkMode: "class"` is retained for ecosystem compatibility (Storybook,
+ * `dark:` utility) but theme switching is driven by `data-theme` on <html>
+ * via ThemeProvider — see `docs/development/theme-system.md`.
+ *
+ * Token tier docs: docs/development/theme-system.md
+ *
+ * @type {import('tailwindcss').Config}
+ */
 module.exports = {
-  darkMode: ["class"],
+  darkMode: ["class", '[data-theme="dark"]'],
   content: ["./src/**/*.{ts,tsx,html}"],
   theme: {
     extend: {
@@ -35,6 +47,11 @@ module.exports = {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+        },
+        success: "hsl(var(--success))",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
