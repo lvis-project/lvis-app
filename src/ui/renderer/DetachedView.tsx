@@ -2,8 +2,7 @@
  * DetachedView — shell for a tab opened in a standalone BrowserWindow.
  *
  * Mounts when renderer.tsx detects `#detached/<viewKey>` in the URL fragment.
- * Renders a minimal shell: a stub title bar (TODO: replace with B1's
- * <CustomTitleBar /> once that PR merges) + the actual content view.
+ * Renders a minimal shell: the B1 CustomTitleBar + the actual content view.
  *
  * Supported viewKeys:
  *   "tasks", "reminders", "routines", "memory", "starred",
@@ -27,19 +26,7 @@ import { StarredView } from "./components/StarredView.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { useStarred } from "./hooks/use-starred.js";
-
-// ─── Stub title bar (B1 replacement TODO) ────────────────────────────────────
-// TODO: replace with B1's <CustomTitleBar /> once that PR merges.
-function StubTitleBar({ title }: { title: string }) {
-  return (
-    <div
-      className="flex h-9 shrink-0 items-center border-b bg-background px-3 text-sm font-medium text-foreground"
-      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
-    >
-      <span className="select-none">{title}</span>
-    </div>
-  );
-}
+import { CustomTitleBar } from "./components/CustomTitleBar.js";
 
 // ─── Snap edge highlight overlay ─────────────────────────────────────────────
 
@@ -74,24 +61,6 @@ function SnapEdgeHighlight() {
       aria-hidden="true"
     />
   );
-}
-
-// ─── View label helper ────────────────────────────────────────────────────────
-
-function viewLabel(viewKey: string): string {
-  const labels: Record<string, string> = {
-    tasks: "태스크",
-    reminders: "리마인더",
-    routines: "루틴",
-    memory: "메모리",
-    starred: "즐겨찾기",
-    home: "홈",
-  };
-  if (labels[viewKey]) return `LVIS — ${labels[viewKey]}`;
-  // plugin:<pluginId>:<ext>
-  const parts = viewKey.split(":");
-  if (parts[0] === "plugin" && parts.length >= 2) return `LVIS — ${parts[1]}`;
-  return `LVIS — ${viewKey}`;
 }
 
 // ─── Content dispatcher ───────────────────────────────────────────────────────
@@ -176,8 +145,7 @@ export function DetachedView({ viewKey }: DetachedViewProps) {
     <ThemeProvider>
       <TooltipProvider>
         <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-          {/* TODO: replace StubTitleBar with B1's <CustomTitleBar /> once merged */}
-          <StubTitleBar title={viewLabel(viewKey)} />
+          <CustomTitleBar />
           <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
             <ErrorBoundary>
               <DetachedContent viewKey={viewKey} />
