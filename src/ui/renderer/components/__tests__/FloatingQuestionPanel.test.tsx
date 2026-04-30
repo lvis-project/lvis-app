@@ -22,6 +22,42 @@ function makeRequest(
   };
 }
 
+/** Request with no choices and allowFreeText=true — should show generic chips */
+function makeFreeTextRequest(
+  overrides: Partial<AskUserQuestionRequest> = {},
+): AskUserQuestionRequest {
+  return {
+    id: "ft-1",
+    urgent: false,
+    createdAt: Date.now(),
+    questions: [
+      { question: "추가 설명이 필요한가요?", choices: [], allowFreeText: true },
+    ],
+    ...overrides,
+  };
+}
+
+/** Request with suggestedAnswers — should show those chips instead */
+function makeSuggestedRequest(
+  overrides: Partial<AskUserQuestionRequest> = {},
+): AskUserQuestionRequest {
+  return {
+    id: "sg-1",
+    urgent: false,
+    createdAt: Date.now(),
+    questions: [
+      {
+        question: "어떤 방식을 선호하시나요?",
+        choices: [],
+        allowFreeText: true,
+        // suggestedAnswers is an extension field
+        ...(({ suggestedAnswers: ["A 방식", "B 방식", "C 방식"] }) as Record<string, unknown>),
+      },
+    ] as AskUserQuestionRequest["questions"],
+    ...overrides,
+  };
+}
+
 function makeApi(overrides: Partial<LvisApi> = {}): LvisApi {
   return {
     respondAskUserQuestion: vi.fn().mockResolvedValue({ ok: true }),
@@ -304,6 +340,128 @@ describe("FloatingQuestionPanel", () => {
       />,
     );
     expect(container.firstChild).toMatchSnapshot();
+  });
+
+  // ── US-FQP2.2: Default chips ───────────────────────────────────────────────
+
+  it("shows 3 generic chips for free-text requests with no choices", () => {
+    const { getAllByTestId } = render(
+      <FloatingQuestionPanel
+        api={makeApi()}
+        requests={[makeFreeTextRequest()]}
+        onResolved={vi.fn()}
+      />,
+    );
+    const chips = getAllByTestId("fqp-chip");
+    expect(chips).toHaveLength(3);
+    expect(chips[0]?.textContent).toBe("네");
+    expect(chips[1]?.textContent).toBe("아니오");
+    expect(chips[2]?.textContent).toBe("잘 모르겠어요");
+  });
+
+  it("does NOT show chips when request already has choice buttons", () => {
+    const { queryByTestId } = render(
+      <FloatingQuestionPanel
+        api={makeApi()}
+        requests={[makeRequest()]}
+        onResolved={vi.fn()}
+      />,
+    );
+    expect(queryByTestId("fqp-chips-row")).toBeNull();
+  });
+
+  it("shows suggestedAnswers chips when present (max 3)", () => {
+    const { getAllByTestId } = render(
+      <FloatingQuestionPanel
+        api={makeApi()}
+        requests={[makeSuggestedRequest()]}
+        onResolved={vi.fn()}
+      />,
+    );
+    const chips = getAllByTestId("fqp-chip");
+    expect(chips).toHaveLength(3);
+    expect(chips[0]?.textContent).toBe("A 방식");
+  });
+
+  it("chip click calls respondAskUserQuestion with the chip text", async () => {
+    const respond = vi.fn().mockResolvedValue({ ok: true });
+    const api = makeApi({ respondAskUserQuestion: respond });
+
+    const { getAllByTestId } = render(
+      <FloatingQuestionPanel
+        api={api}
+        requests={[makeFreeTextRequest({ id: "chip-test" })]}
+        onResolved={vi.fn()}
+      />,
+    );
+    const chips = getAllByTestId("fqp-chip");
+    fireEvent.click(chips[0]!);
+    await act(async () => { await Promise.resolve(); });
+    expect(respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "chip-test",
+        answers: [{ choice: "네" }],
+      }),
+    );
+  });
+
+  it("chip click triggers exit animation on the slot", async () => {
+    const { getAllByTestId, getByTestId } = render(
+      <FloatingQuestionPanel
+        api={makeApi()}
+        requests={[makeFreeTextRequest({ id: "chip-exit" })]}
+        onResolved={vi.fn()}
+      />,
+    );
+    const chips = getAllByTestId("fqp-chip");
+    fireEvent.click(chips[0]!);
+    await act(async () => { await Promise.resolve(); });
+    const slot = getByTestId("fqp-slot");
+    expect(slot.className).toMatch(/exit/);
+  });
+
+  // ── US-FQP2.4: Symmetric layout ───────────────────────────────────────────
+
+  it("outer panel div uses inset-x-0 for symmetric horizontal alignment", () => {
+    const { getByTestId } = render(
+      <FloatingQuestionPanel
+        api={makeApi()}
+        requests={[makeRequest()]}
+        onResolved={vi.fn()}
+      />,
+    );
+    const panel = getByTestId("floating-question-panel");
+    // inset-x-0 renders as left-0 + right-0 via Tailwind
+    expect(panel.className).toMatch(/inset-x-0/);
+    // Must NOT use the old asymmetric pattern
+    expect(panel.className).not.toMatch(/\bleft-0\b.*\bright-0\b/);
+  });
+
+  it("inner region div uses mx-auto for centering", () => {
+    const { getByTestId } = render(
+      <FloatingQuestionPanel
+        api={makeApi()}
+        requests={[makeRequest()]}
+        onResolved={vi.fn()}
+      />,
+    );
+    const panel = getByTestId("floating-question-panel");
+    const region = panel.querySelector('[role="region"]');
+    expect(region?.className).toMatch(/mx-auto/);
+  });
+
+  // ── US-FQP2.3: Textarea size snapshot ────────────────────────────────────
+
+  it("chip rows snapshot matches expected chip count and labels", () => {
+    const { getByTestId } = render(
+      <FloatingQuestionPanel
+        api={makeApi()}
+        requests={[makeFreeTextRequest({ id: "chip-snap", createdAt: 0 })]}
+        onResolved={vi.fn()}
+      />,
+    );
+    const chipsRow = getByTestId("fqp-chips-row");
+    expect(chipsRow).toMatchSnapshot();
   });
 
   // Timeout: external removal cleans up state without errors.
