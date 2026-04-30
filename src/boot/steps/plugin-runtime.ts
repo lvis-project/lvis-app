@@ -682,12 +682,12 @@ export async function initPluginRuntime(
           // for the reload.
           pluginRuntime.setConfigOverride(pluginId, nextRecord);
           emitPluginConfigChange(pluginId, key, value);
-          // Reload the affected plugin so its handlers see the new config
-          // on next invocation. We restart the whole runtime to match the
-          // existing IPC `set` behaviour (lvis:plugins:config:set →
-          // restartAll).
+          // US-A3 — only the calling plugin needs its handlers to see the new
+          // config. Mirrors the IPC `lvis:plugins:config:set` behaviour
+          // (restartPlugin, not restartAll) so changing one plugin's config
+          // does NOT wipe every other loaded plugin's in-memory state.
           try {
-            await pluginRuntime.restartAll();
+            await pluginRuntime.restartPlugin(pluginId);
           } catch (err) {
             // Restart already audits per-plugin failures; surface the
             // outer error so the calling plugin can branch on it.

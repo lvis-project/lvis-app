@@ -807,7 +807,12 @@ ${input}`;
       }
     });
     win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
-    await pluginRuntime.restartAll();
+    // US-A3 — single-plugin lifecycle: only the newly installed plugin starts
+    // up. Other loaded plugins keep their in-memory state (open streams,
+    // caches, MCP server connections, etc.). `addPlugin` falls back to
+    // `restartPlugin` if the id is already loaded (reinstall over an existing
+    // version), so reinstalls also pick up the latest bundle.
+    await pluginRuntime.addPlugin(pluginId);
     refreshPluginNotifications?.();
     win?.webContents.send("lvis:plugins:install-result", { slug: pluginId, success: true });
     return result;
@@ -830,7 +835,9 @@ ${input}`;
       broadcastUninstallResult({ slug: pluginId, success: false, error: message });
       throw err;
     }
-    await pluginRuntime.restartAll();
+    // US-A3 — single-plugin lifecycle: stop and drop just the uninstalled
+    // plugin. Other plugins keep running with their in-memory state intact.
+    await pluginRuntime.removePlugin(pluginId);
     refreshPluginNotifications?.();
     broadcastUninstallResult({ slug: pluginId, success: true });
     return result;
@@ -847,7 +854,8 @@ ${input}`;
     });
     if (canceled || !filePaths[0]) return null;
     const result = await pluginMarketplace.installLocal(filePaths[0]);
-    await pluginRuntime.restartAll();
+    // US-A3 — single-plugin lifecycle: the local plugin's id is in the result.
+    await pluginRuntime.addPlugin(result.pluginId);
     refreshPluginNotifications?.();
     return result;
   });

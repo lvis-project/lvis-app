@@ -699,6 +699,316 @@ export class PluginRuntime {
   }
 
   /**
+   * US-A3 — Targeted single-plugin add for install / install-local paths.
+   *
+   * Resolves the load plan, picks the entry whose manifest id matches
+   * `pluginId`, and runs the per-plugin load + start sequence in isolation.
+   * All other loaded plugins are undisturbed (no `restartAll` ripple, no
+   * state loss in their in-memory caches / open streams / etc.).
+   *
+   * Idempotency contract:
+   *   - If the plugin is already loaded, this is a `restartPlugin(pluginId)`
+   *     under the hood (re-reads manifest + bundle from disk, picks up new
+   *     install).
+   *   - If the registry has no entry, this throws — the caller is expected
+   *     to install the artifact (which writes the registry entry) before
+   *     calling this method.
+   *
+   * Used by ipc-bridge `lvis:plugins:install`, `lvis:plugins:install-local`,
+   * and the lvis:// deep-link install handler in main.ts so a single install
+   * doesn't ripple into a full reload of every other loaded plugin.
+   */
+  async addPlugin(pluginId: string): Promise<void> {
+    if (this.plugins.has(pluginId)) {
+      // Already loaded — defer to restartPlugin so on-disk changes
+      // (e.g. version bump via reinstall) are picked up.
+      await this.restartPlugin(pluginId);
+      return;
+    }
+
+    const loadPlan = await this.resolveManifestLoadPlan();
+    const enabledSnapshots = await this.readEnabledManifestSnapshots(loadPlan);
+    const snapshot = enabledSnapshots.get(pluginId);
+    if (!snapshot) {
+      throw new Error(`addPlugin: plugin not found in registry or disabled: ${pluginId}`);
+    }
+    const targetPlan = loadPlan.find(
+      (p) => p.pluginIdHint === pluginId || (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
+    );
+    if (!targetPlan) {
+      throw new Error(`addPlugin: load plan entry missing for ${pluginId}`);
+    }
+
+    const { manifest, approvedPluginAccess } = snapshot;
+    this.knownPluginManifests.set(pluginId, manifest);
+    this.knownPluginAccessGrants.set(pluginId, approvedPluginAccess);
+    for (const toolName of manifest.tools ?? []) {
+      this.knownToolOwners.set(toolName, pluginId);
+    }
+    for (const eventType of getDeclaredEmittedEvents(manifest)) {
+      this.knownEventOwners.set(eventType, pluginId);
+    }
+
+    await this.instantiateAndStartSinglePlugin(targetPlan, manifest, approvedPluginAccess);
+  }
+
+  /**
+   * US-A3 — Targeted single-plugin remove for uninstall paths.
+   *
+   * Stops and tears down exactly one plugin without touching the registry
+   * (the marketplace uninstall flow has already removed the entry on disk).
+   * Mirrors `disable()` minus the registry write + minus the deployment
+   * guard check (uninstall has its own guard).
+   *
+   * Falls back to a no-op (with a warning) when the pluginId is not currently
+   * loaded — the caller need not guard against that case.
+   */
+  async removePlugin(pluginId: string): Promise<void> {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) {
+      console.warn(`[plugin-runtime] removePlugin: plugin not loaded — ${pluginId}`);
+      return;
+    }
+
+    try {
+      await plugin.instance.stop?.();
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] stop during removePlugin failed:`, (err as Error).message);
+    }
+
+    for (const method of plugin.methods.keys()) {
+      this.methodMap.delete(method);
+    }
+    this.plugins.delete(pluginId);
+
+    const pluginDisposers = this.disposers.get(pluginId);
+    if (pluginDisposers) {
+      for (const d of pluginDisposers) {
+        try { d(); } catch (err) {
+          console.error(`[plugin:${pluginId}] disposer failed during removePlugin:`, (err as Error).message);
+        }
+      }
+      this.disposers.delete(pluginId);
+    }
+
+    // Drop known-* caches so a subsequent addPlugin starts from a clean slate.
+    this.knownPluginManifests.delete(pluginId);
+    this.knownPluginAccessGrants.delete(pluginId);
+    for (const [toolName, ownerId] of [...this.knownToolOwners.entries()]) {
+      if (ownerId === pluginId) this.knownToolOwners.delete(toolName);
+    }
+    for (const [eventType, ownerId] of [...this.knownEventOwners.entries()]) {
+      if (ownerId === pluginId) this.knownEventOwners.delete(eventType);
+    }
+    this.failedPluginIds.delete(pluginId);
+    this.failedPluginStubs.delete(pluginId);
+    this.disabledPluginIds.delete(pluginId);
+
+    this.onDisable?.(pluginId);
+  }
+
+  /** Helper: does a manifest path's directory name suggest it owns `pluginId`? */
+  private matchesManifestPath(manifestPath: string, pluginId: string): boolean {
+    const parent = dirname(manifestPath);
+    const dirName = parent.split(/[\\/]/).pop() ?? "";
+    return dirName === pluginId || dirName === pluginId.replace(/[^a-zA-Z0-9._-]/g, "-");
+  }
+
+  /**
+   * Per-plugin instantiation + start. Extracted from `load()` + `startAll()`
+   * so single-plugin install (`addPlugin`) can run the same path without a
+   * full restart. Throws if the plugin is already loaded — caller validates.
+   */
+  private async instantiateAndStartSinglePlugin(
+    plan: { pluginIdHint?: string; manifestPath: string; enabled: boolean; approvedPluginAccess?: PluginAccessSpec; devLinked?: boolean },
+    manifest: PluginManifest,
+    approvedPluginAccess: PluginAccessSpec | undefined,
+  ): Promise<void> {
+    const pluginRoot = dirname(plan.manifestPath);
+    const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
+    if (this.installReceiptCacheRoot && plan.pluginIdHint && !skipReceiptForDevLink) {
+      const receiptResult = await verifyInstallReceipt(
+        this.installReceiptCacheRoot,
+        plan.pluginIdHint,
+        pluginRoot,
+      );
+      if (!receiptResult.ok) {
+        console.error(
+          `[plugin-runtime] ${plan.pluginIdHint} rejected — install receipt integrity failed: ${receiptResult.reason}`,
+        );
+        this.auditLog?.("error", "plugin_integrity_rejected", {
+          pluginId: plan.pluginIdHint,
+          reason: receiptResult.reason,
+        });
+        this.markFailed(plan.pluginIdHint);
+        return;
+      }
+      this.auditLog?.("info", "plugin_integrity_verified", {
+        pluginId: plan.pluginIdHint,
+        artifactSha256: receiptResult.receipt.artifactSha256,
+        signerKeyId: receiptResult.receipt.signerKeyId,
+      });
+    }
+
+    const requiredCapabilities = manifest.requires?.capabilities ?? [];
+    if (requiredCapabilities.length > 0) {
+      const availableManifests = [...this.knownPluginManifests.entries()]
+        .filter(([id]) => id !== manifest.id)
+        .map(([, m]) => m);
+      const dependencyResult = resolveDependencies(requiredCapabilities, availableManifests);
+      if (!dependencyResult.ok) {
+        const reason = `missing required capabilities: ${dependencyResult.missing.join(", ")}`;
+        console.error(`[plugin-runtime] ${manifest.id} rejected — ${reason}`);
+        this.auditLog?.("error", "plugin_dependency_missing", {
+          pluginId: manifest.id,
+          missing: dependencyResult.missing,
+        });
+        this.markFailed(manifest.id, {
+          name: manifest.name,
+          description: `Missing capabilities: ${dependencyResult.missing.join(", ")}`,
+        });
+        return;
+      }
+    }
+
+    let entryPath: string;
+    try {
+      entryPath = this.resolveEntryPath(pluginRoot, manifest.entry);
+    } catch (err) {
+      const reason = (err as Error).message;
+      console.error(`[plugin-runtime] ${manifest.id} rejected: ${reason}`);
+      this.auditLog?.("error", "plugin_entry_path_rejected", {
+        pluginId: manifest.id,
+        entry: manifest.entry,
+        reason,
+      });
+      this.markFailed(manifest.id);
+      return;
+    }
+    let resolvedEntryPath: string;
+    try {
+      resolvedEntryPath = realpathSync(entryPath);
+    } catch {
+      resolvedEntryPath = entryPath;
+    }
+
+    let module: { default?: RuntimePluginFactory; createPlugin?: RuntimePluginFactory };
+    try {
+      module = (await import(pathToFileURL(resolvedEntryPath).href)) as {
+        default?: RuntimePluginFactory;
+        createPlugin?: RuntimePluginFactory;
+      };
+    } catch (err) {
+      console.error(`[plugin-runtime] ${manifest.id} import failed:`, (err as Error).message);
+      this.auditLog?.("error", "plugin_import_failed", {
+        pluginId: manifest.id,
+        reason: (err as Error).message,
+      });
+      this.markFailed(manifest.id);
+      return;
+    }
+    const createPlugin = module.default ?? module.createPlugin;
+    if (!createPlugin) {
+      console.error(`[plugin-runtime] ${manifest.id} entry does not export default/createPlugin — skipped`);
+      this.markFailed(manifest.id);
+      return;
+    }
+
+    const pluginDataDir = this.ensurePluginDataDir(manifest.id, pluginRoot);
+    const hostApi = this.createHostApi?.(manifest.id, manifest, pluginDataDir) ?? createNoopHostApi(manifest.id, pluginDataDir);
+    if (!hostApi.storage) {
+      hostApi.storage = createPluginStorage(manifest.id, pluginDataDir);
+    }
+
+    let instance: RuntimePlugin;
+    try {
+      instance = await createPlugin({
+        pluginId: manifest.id,
+        pluginRoot,
+        hostRoot: this.hostRoot,
+        pluginDataDir,
+        config: {
+          ...(manifest.config ?? {}),
+          ...(this.configOverrides["*"] ?? {}),
+          ...(this.configOverrides[manifest.id] ?? {}),
+        },
+        log: (message, meta) => {
+          if (meta !== undefined) {
+            console.log(`[plugin:${manifest.id}] ${message}`, meta);
+            return;
+          }
+          console.log(`[plugin:${manifest.id}] ${message}`);
+        },
+        hostApi,
+      });
+    } catch (err) {
+      console.error(`[plugin-runtime] ${manifest.id} createPlugin failed:`, (err as Error).message);
+      this.markFailed(manifest.id);
+      return;
+    }
+
+    const methods = new Map<string, PluginToolHandler>();
+    for (const toolName of manifest.tools) {
+      const handler = instance.handlers[toolName];
+      if (!handler) {
+        console.warn(`[plugin:${manifest.id}] missing handler '${toolName}' — tool disabled`);
+        continue;
+      }
+      methods.set(toolName, handler);
+      if (this.methodMap.has(toolName)) {
+        throw new Error(`Duplicate plugin method registered: ${toolName}`);
+      }
+      this.methodMap.set(toolName, { pluginId: manifest.id, handler });
+    }
+
+    if (manifest.keywords && manifest.keywords.length > 0) {
+      hostApi.registerKeywords(manifest.keywords);
+    }
+
+    this.plugins.set(manifest.id, {
+      manifest,
+      pluginRoot,
+      instance,
+      methods,
+      approvedPluginAccess,
+    });
+    this.failedPluginIds.delete(manifest.id);
+    this.disabledPluginIds.delete(manifest.id);
+
+    if (!this.perfStats.has(manifest.id)) {
+      this.perfStats.set(manifest.id, { startupMs: 0, toolCallCount: 0, errorCount: 0, totalExecMs: 0, lastCallAt: null });
+    }
+
+    if (instance.start) {
+      const startedAt = Date.now();
+      try {
+        const hardTimeoutMs = manifest.startupTimeoutMs;
+        if (hardTimeoutMs && hardTimeoutMs > 0) {
+          let timer: NodeJS.Timeout | undefined;
+          const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`startup timeout (>${hardTimeoutMs}ms)`)), hardTimeoutMs);
+          });
+          try {
+            await Promise.race([Promise.resolve(instance.start()), timeout]);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        } else {
+          await instance.start();
+        }
+        this.perfStats.get(manifest.id)!.startupMs = Date.now() - startedAt;
+      } catch (err) {
+        console.error(`[plugin:${manifest.id}] start during addPlugin failed:`, (err as Error).message);
+        this.markFailed(manifest.id);
+        for (const method of methods.keys()) {
+          this.methodMap.delete(method);
+        }
+        this.plugins.delete(manifest.id);
+      }
+    }
+  }
+
+  /**
    * I2 — Plugin live-reload (dev only).
    *
    * Safely tears down a single loaded plugin (stop → scrub methods/disposers →
