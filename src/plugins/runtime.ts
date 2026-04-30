@@ -85,6 +85,7 @@ type ManifestLoadPlan = {
   manifestPath: string;
   enabled: boolean;
   approvedPluginAccess?: PluginAccessSpec;
+  devLinked?: boolean;
 };
 
 function normalizeInstallPolicy(
@@ -242,7 +243,12 @@ export class PluginRuntime {
     for (const plan of loadPlan) {
       const manifestPath = plan.manifestPath;
       const pluginRoot = dirname(manifestPath);
-      if (this.installReceiptCacheRoot && plan.pluginIdHint) {
+      // dev-linked plugins bypass the receipt check only when
+      // `devLinkedEntryAllowed()` is true (`!isPackaged && LVIS_DEV=1`).
+      // Packaged builds always enforce integrity even if a tampered registry
+      // sets `_devLinked: true`, since `devLinkedEntryAllowed()` returns false.
+      const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
+      if (this.installReceiptCacheRoot && plan.pluginIdHint && !skipReceiptForDevLink) {
         const receiptResult = await verifyInstallReceipt(
           this.installReceiptCacheRoot,
           plan.pluginIdHint,
@@ -1370,6 +1376,7 @@ export class PluginRuntime {
           manifestPath,
           enabled: entry.enabled !== false,
           approvedPluginAccess: entry.approvedPluginAccess,
+          devLinked: entry._devLinked === true,
         }];
       }),
     );

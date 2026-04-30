@@ -77,7 +77,7 @@ describe("Phase 1 — plugin trust boundary", () => {
   }
 
   async function writeRegistry(
-    entries: Array<{ id: string; manifestPath: string; installedBy?: "admin" | "user" }>,
+    entries: Array<{ id: string; manifestPath: string; installedBy?: "admin" | "user"; _devLinked?: boolean }>,
   ): Promise<void> {
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: entries }), "utf-8");
   }
@@ -220,6 +220,54 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       expect(runtime.listPluginIds()).not.toContain("tb.receipt.tampered");
       expect(auditCalls).toContainEqual({ level: "error", message: "plugin_integrity_rejected" });
+    });
+
+    // dev-link receipt skip — bypass MUST be gated on dev mode, not just on
+    // the registry flag. Otherwise a malicious actor who can write to
+    // registry.json on a packaged install could plant `_devLinked: true`
+    // and skip integrity verification entirely.
+    describe("dev-link receipt skip is gated on dev mode", () => {
+      const savedLvisDev = process.env.LVIS_DEV;
+      afterEach(() => {
+        _resetForTest();
+        if (savedLvisDev === undefined) delete process.env.LVIS_DEV;
+        else process.env.LVIS_DEV = savedLvisDev;
+      });
+
+      it("dev mode + _devLinked=true → loads without a receipt", async () => {
+        process.env.LVIS_DEV = "1";
+        setIsPackaged(false);
+        const pluginDir = join(pluginsRoot, "p-devlinked");
+        const manifestPath = await writePluginAt(pluginDir, "tb.devlinked");
+        // No receipt written — the skip path is the only way this can load.
+        await writeRegistry([{ id: "tb.devlinked", manifestPath, _devLinked: true }]);
+
+        const runtime = new PluginRuntime({
+          hostRoot,
+          registryPath,
+          pluginsRoot,
+          installReceiptCacheRoot: cacheRoot,
+        });
+        await runtime.load();
+        expect(runtime.listPluginIds()).toContain("tb.devlinked");
+      });
+
+      it("packaged + _devLinked=true → still rejected without a receipt", async () => {
+        delete process.env.LVIS_DEV;
+        setIsPackaged(true);
+        const pluginDir = join(pluginsRoot, "p-devlinked-packaged");
+        const manifestPath = await writePluginAt(pluginDir, "tb.devlinked.packaged");
+        await writeRegistry([{ id: "tb.devlinked.packaged", manifestPath, _devLinked: true }]);
+
+        const runtime = new PluginRuntime({
+          hostRoot,
+          registryPath,
+          pluginsRoot,
+          installReceiptCacheRoot: cacheRoot,
+        });
+        await runtime.load();
+        expect(runtime.listPluginIds()).not.toContain("tb.devlinked.packaged");
+      });
     });
   });
 
