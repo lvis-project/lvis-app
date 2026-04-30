@@ -60,6 +60,42 @@ async function injectAskQuestion(
   );
 }
 
+/**
+ * Inject an ask_user_question with BOTH choices AND suggestedAnswers present —
+ * simulates the regression scenario from PR #347/#350.
+ */
+async function injectBothChoicesAndSuggested(
+  page: import('@playwright/test').Page,
+  id: string,
+): Promise<boolean> {
+  return page.evaluate(
+    ({ id }: { id: string }) => {
+      const api = (window as unknown as Record<string, unknown>).__lvisApi as
+        | undefined
+        | { _askUserQuestionCallbacks?: Array<(req: unknown) => void> };
+      if (!api?._askUserQuestionCallbacks?.length) return false;
+      const req = {
+        id,
+        urgent: false,
+        createdAt: Date.now(),
+        questions: [
+          {
+            question: '기간과 언어를 선택하세요.',
+            choices: ['최근 24시간 / 한국어', '최근 7일 / 한국어', '최근 30일 / 영어(글로벌)'],
+            allowFreeText: false,
+            suggestedAnswers: ['최근 7일 / 한국어', '최근 24시간 / 한국어', '최근 7일 / 영어(글로벌)'],
+          },
+        ],
+      };
+      for (const cb of api._askUserQuestionCallbacks) {
+        cb(req);
+      }
+      return true;
+    },
+    { id },
+  );
+}
+
 test.describe('FQP layout — chip placement and margin symmetry', () => {
   // Shared helper: wait for the FQP to appear, optionally injecting a mock
   // event. Returns true when the panel is visible.
@@ -208,6 +244,33 @@ test.describe('FQP layout — chip placement and margin symmetry', () => {
     await mainWindow.screenshot({
       path: `${SCREENSHOT_DIR}/fqp-layout-1440x900.png`,
     });
+  });
+
+  // Regression #347/#350: when model emits BOTH choices AND suggestedAnswers,
+  // only the choices row must be visible — fqp-chips-row must not appear.
+  test('suppresses suggestedAnswers chip row when choices are present (regression #347/#350)', async ({
+    mainWindow,
+  }) => {
+    const injected = await injectBothChoicesAndSuggested(
+      mainWindow,
+      'e2e-both-chips-regression',
+    );
+    if (!injected) {
+      // Graceful skip when IPC injection unavailable (e.g. non-E2E build).
+      test.skip();
+      return;
+    }
+
+    const panel = mainWindow.locator('[data-testid="floating-question-panel"]');
+    await panel.waitFor({ state: 'visible', timeout: 5_000 });
+
+    // suggestedAnswers chip row must NOT be visible
+    const chipsRow = panel.locator('[data-testid="fqp-chips-row"]');
+    await expect(chipsRow).toBeHidden();
+
+    // choices buttons ARE rendered (by AskUserQuestionCard's choices section)
+    const firstChoiceBtn = panel.getByRole('button', { name: '최근 24시간 / 한국어' });
+    await expect(firstChoiceBtn).toBeVisible();
   });
 
   test('layout stays symmetric with sidebar visible', async ({ mainWindow }) => {
