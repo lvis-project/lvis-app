@@ -136,6 +136,23 @@ export function App() {
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
 
+  // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
+  // click opens it in a separate magnetic-snap BrowserWindow instead of
+  // switching the main window's active view.
+  const handleSidebarSelect = useCallback(
+    (key: string) => {
+      if (key.startsWith("plugin:")) {
+        const view = pluginViews.find((v) => toViewKey(v) === key);
+        if (view?.extension.window?.defaultMode === "detached") {
+          void api.window?.openDetached(key);
+          return;
+        }
+      }
+      setActiveView(key);
+    },
+    [api, pluginViews],
+  );
+
   // If the currently-open sidebar view belongs to a plugin that just got
   // uninstalled, fall back to home so the renderer doesn't render a "view
   // not found" placeholder for a stale plugin id.
@@ -341,7 +358,7 @@ export function App() {
           <Sidebar
             activeView={activeView}
             pluginViews={pluginViews}
-            setActiveView={setActiveView}
+            setActiveView={handleSidebarSelect}
             starredCount={starred.length}
             installInFlight={installInFlight}
           />
