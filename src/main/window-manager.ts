@@ -16,10 +16,40 @@
  * BrowserWindow.getBounds() always returns DIP values.
  */
 
-import { BrowserWindow, ipcMain, screen } from "electron";
+import { BrowserWindow, ipcMain, screen, type IpcMainInvokeEvent } from "electron";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
+import type { AuditLogger } from "../audit/audit-logger.js";
+
+/**
+ * Allowlist for viewKey values accepted by the detach IPC handlers.
+ * Built-in view keys are listed explicitly; plugin views use the
+ * `plugin:<slug>` format where slug is alphanumeric with dots/underscores/hyphens.
+ */
+export const ALLOWED_VIEW_KEYS = /^(tasks|reminders|routines|memory|starred|plugin:[a-z0-9_.-]+)$/;
+
+/** Human-readable window titles for built-in view keys. */
+const BUILTIN_VIEW_LABELS: Record<string, string> = {
+  tasks: "Tasks",
+  reminders: "Reminders",
+  routines: "Routines",
+  memory: "Memory",
+  starred: "Starred",
+};
+
+/** Returns a safe window title for a validated viewKey. */
+function viewKeyLabel(viewKey: string): string {
+  if (Object.prototype.hasOwnProperty.call(BUILTIN_VIEW_LABELS, viewKey)) {
+    return BUILTIN_VIEW_LABELS[viewKey];
+  }
+  // plugin:<slug> — use the slug portion only
+  if (viewKey.startsWith("plugin:")) {
+    return viewKey.slice("plugin:".length);
+  }
+  return viewKey;
+}
 
 // Distance in DIP within which a child snaps to a main-window edge.
 const SNAP_THRESHOLD_DIP = 20;
@@ -221,7 +251,7 @@ export class WindowManager {
       x: restoredX,
       y: restoredY,
       show: false,
-      title: `LVIS — ${viewKey}`,
+      title: `LVIS — ${viewKeyLabel(viewKey)}`,
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -398,9 +428,15 @@ export class WindowManager {
 
   // ── IPC registration ──────────────────────────────────────────────────────
 
-  registerIpc(): void {
-    ipcMain.handle("lvis:window:open-detached", (_event, viewKey: unknown) => {
-      if (typeof viewKey !== "string" || !viewKey) return { ok: false, error: "invalid-view-key" };
+  registerIpc(auditLogger: AuditLogger): void {
+    ipcMain.handle("lvis:window:open-detached", (event: IpcMainInvokeEvent, viewKey: unknown) => {
+      if (!validateSender(event)) {
+        auditUnauthorized(auditLogger, "lvis:window:open-detached", event);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (typeof viewKey !== "string" || !ALLOWED_VIEW_KEYS.test(viewKey)) {
+        return { ok: false, error: "invalid-view-key" };
+      }
       try {
         const win = this.openDetachedTab(viewKey);
         return { ok: true, windowId: win.id };
@@ -409,14 +445,22 @@ export class WindowManager {
       }
     });
 
-    ipcMain.handle("lvis:window:close-detached", (event) => {
+    ipcMain.handle("lvis:window:close-detached", (event: IpcMainInvokeEvent) => {
+      if (!validateSender(event)) {
+        auditUnauthorized(auditLogger, "lvis:window:close-detached", event);
+        return UNAUTHORIZED_FRAME;
+      }
       const win = BrowserWindow.fromWebContents(event.sender);
       if (!win) return { ok: false, error: "no-window" };
       this.closeDetachedTab(win.id);
       return { ok: true };
     });
 
-    ipcMain.handle("lvis:window:list-detached", () => {
+    ipcMain.handle("lvis:window:list-detached", (event: IpcMainInvokeEvent) => {
+      if (!validateSender(event)) {
+        auditUnauthorized(auditLogger, "lvis:window:list-detached", event);
+        return UNAUTHORIZED_FRAME;
+      }
       return this.listChildren();
     });
   }
