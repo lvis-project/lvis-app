@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import { ChevronDown, Globe, KeyRound, Loader2, Paperclip, Pencil, Square, Star, User, X as XIcon, GitBranch } from "lucide-react";
+import { ChevronDown, KeyRound, Loader2, Paperclip, Pencil, Square, Star, User, X as XIcon, GitBranch } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
@@ -72,7 +72,6 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
     indexedDocs, docsLoading, refreshIndexedDocs,
-    langLock, setLangLock,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass,
   } = useChatContext();
@@ -528,17 +527,6 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                 </div>
               </PopoverContent>
             </Popover>
-            {/* Sprint B — Language lock toggle */}
-            <Button
-              variant={langLock === "off" ? "outline" : "default"}
-              size="sm"
-              className="h-7 gap-1 text-[11px]"
-              title="응답 언어 강제"
-              onClick={() => setLangLock((v) => v === "off" ? "ko" : v === "ko" ? "en" : "off")}
-            >
-              <Globe className="h-3 w-3" />
-              {langLock === "off" ? "자동" : langLock === "ko" ? "한국어" : "English"}
-            </Button>
             {vendorSupportsThinking && (
               <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
                 <input
