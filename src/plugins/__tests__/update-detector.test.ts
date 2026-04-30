@@ -190,6 +190,38 @@ describe("PluginUpdateDetector", () => {
     expect(updates).toHaveLength(0);
   });
 
+  it("skips _devLinked entries (source repo is authoritative, catalog meaningless)", async () => {
+    // Dev-linked installs symlink plugin.json out to the source repo —
+    // path-traversal guard would refuse to follow it and emit
+    // "manifestPath escapes allowed roots" on every poll. Detector now
+    // continues past _devLinked entries before that check fires.
+    const registryPath = resolve(tmpDir, "registry.json");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "agent-hub", manifestPath: "agent-hub/plugin.json", _devLinked: true },
+        ],
+      }),
+      "utf-8",
+    );
+    const fetcher = makeFetcher([makeCatalogPlugin("agent-hub", "9.9.9")]);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const detector = new PluginUpdateDetector(registryPath, fetcher);
+
+    const updates = await detector.checkForUpdates();
+
+    expect(updates).toHaveLength(0);
+    // The path-escape warning must not fire — that was the symptom we
+    // observed in production for every dev-linked plugin on every poll.
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      "[update-detector] manifestPath escapes allowed roots, skipping:",
+      expect.anything(),
+    );
+    warnSpy.mockRestore();
+  });
+
   it("ignores catalog plugins without a version field", async () => {
     const registryPath = await setupRegistry([{ id: "pageindex", version: "1.0.0" }]);
     const catalogPlugin = makeCatalogPlugin("pageindex", "1.1.0");
