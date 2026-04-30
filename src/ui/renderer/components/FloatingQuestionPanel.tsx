@@ -12,6 +12,20 @@
  *     identical to the routine overlay pattern already in ChatView.
  *   - On narrow viewports (< 480 px) it switches to a bottom-sheet that
  *     slides up from the bottom so it doesn't cover the message input.
+ *   - Width is anchored with `inset-x-0` so left and right margins are always
+ *     symmetric (US-FQP2.4). Inner content max-w-2xl + mx-auto for centering.
+ *
+ * Default chips (US-FQP2.2):
+ *   - When `suggestedAnswers` is set on the first question item (max 3), those
+ *     are rendered as quick-response chip buttons above the card body.
+ *   - When no suggestedAnswers and the question allows free text but has no
+ *     explicit choices, generic chips ("네", "아니오", "잘 모르겠어요") appear.
+ *   - Clicking a chip dispatches the answer immediately, skipping the textarea.
+ *
+ * Textarea sizing (US-FQP2.3):
+ *   - AskUserQuestionCard textarea is reduced from min-h-[60px] to min-h-[44px].
+ *   - Auto-expands via CSS field-sizing:content (Chromium/Electron supported).
+ *   - max-h-[200px] prevents unbounded panel expansion.
  *
  * Queue semantics:
  *   - Up to MAX_VISIBLE (3) question cards are shown stacked.
@@ -50,6 +64,9 @@ import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import type { LvisApi } from "../types.js";
 
 const MAX_VISIBLE = 3;
+
+/** Generic chips shown when the question allows free text but has no choices/suggestedAnswers. */
+const GENERIC_CHIPS = ["네", "아니오", "잘 모르겠어요"] as const;
 
 export interface FloatingQuestionPanelProps {
   api: LvisApi;
@@ -105,6 +122,69 @@ function AnimatedSlot({
       data-testid="fqp-slot"
     >
       {children}
+    </div>
+  );
+}
+
+/**
+ * QuickChips — suggestion chips row above the card body.
+ *
+ * Priority:
+ *   1. suggestedAnswers field on the first question (max 3).
+ *   2. Generic fallbacks when allowFreeText=true and no choices/suggestedAnswers.
+ *   3. Nothing when explicit choice buttons are already present.
+ */
+function QuickChips({
+  request,
+  onChipClick,
+}: {
+  request: AskUserQuestionRequest;
+  onChipClick: (answer: string) => void;
+}) {
+  const firstQ = request.questions[0];
+  if (!firstQ) return null;
+
+  // suggestedAnswers is an optional extension on the base type.
+  const suggested = (firstQ as typeof firstQ & { suggestedAnswers?: string[] })
+    .suggestedAnswers;
+
+  let chips: readonly string[] | string[];
+
+  if (suggested && suggested.length > 0) {
+    chips = suggested.slice(0, 3);
+  } else if (
+    firstQ.allowFreeText &&
+    (!firstQ.choices || firstQ.choices.length === 0)
+  ) {
+    chips = GENERIC_CHIPS;
+  } else {
+    // Explicit choice buttons rendered by AskUserQuestionCard — skip chips.
+    return null;
+  }
+
+  return (
+    <div
+      className="flex flex-wrap gap-1.5 px-3 pt-2 pb-0"
+      data-testid="fqp-chips-row"
+    >
+      {chips.map((chip) => (
+        <button
+          key={chip}
+          type="button"
+          className={[
+            "rounded-full px-3 py-1 text-xs font-medium",
+            "bg-secondary/40 text-secondary-foreground",
+            "border border-border/60",
+            "hover:bg-secondary hover:border-border",
+            "focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary",
+            "transition-colors duration-150",
+          ].join(" ")}
+          data-testid="fqp-chip"
+          onClick={() => onChipClick(chip)}
+        >
+          {chip}
+        </button>
+      ))}
     </div>
   );
 }
@@ -217,6 +297,24 @@ export function FloatingQuestionPanel({
     [],
   );
 
+  /**
+   * Chip click: immediately dispatch the chip text as the answer for the
+   * first question, then trigger the exit animation.
+   */
+  const handleChipClick = useCallback(
+    async (req: AskUserQuestionRequest, answer: string) => {
+      try {
+        await api.respondAskUserQuestion({
+          requestId: req.id,
+          answers: [{ choice: answer }],
+        });
+      } finally {
+        setRemovingIds((prev) => new Set([...prev, req.id]));
+      }
+    },
+    [api],
+  );
+
   // When a request is removed from the parent array externally (timeout),
   // clean up exitedIds to avoid stale entries.
   useEffect(() => {
@@ -235,14 +333,15 @@ export function FloatingQuestionPanel({
 
   return (
     // pointer-events-none on outer so clicks on underlying chat scroll through.
+    // US-FQP2.4: inset-x-0 ensures symmetric left/right margins.
     <div
-      className={`pointer-events-none absolute left-0 right-0 z-40 flex justify-center px-4 ${positionCls}`}
+      className={`pointer-events-none absolute inset-x-0 z-40 px-4 ${positionCls}`}
       data-testid="floating-question-panel"
     >
-      {/* pointer-events-auto on the actual panel */}
+      {/* pointer-events-auto on the actual panel; mx-auto centres within px-4 */}
       <div
         ref={panelRef}
-        className="pointer-events-auto w-full max-w-2xl"
+        className="pointer-events-auto mx-auto w-full max-w-2xl"
         role="region"
         aria-label="질문 대기열"
         aria-live="polite"
@@ -288,6 +387,11 @@ export function FloatingQuestionPanel({
                         <XIcon className="h-3.5 w-3.5" />
                       </button>
                     </div>
+                    {/* US-FQP2.2: Quick-response chips above the card body */}
+                    <QuickChips
+                      request={req}
+                      onChipClick={(answer) => void handleChipClick(req, answer)}
+                    />
                     {/* The existing AskUserQuestionCard handles all UX */}
                     <div className="px-0">
                       <AskUserQuestionCard
