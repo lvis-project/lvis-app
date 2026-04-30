@@ -216,6 +216,37 @@ export function PluginConfigTab() {
     }
     return merged;
   }, [selectedPlugin, savedConfig]);
+  // US-3c.1: build secretsPresent map for PluginConfigSchemaForm.
+  // Batches a single IPC call per plugin selection to find which secret
+  // fields already have a value in the keychain, so the masked input shows
+  // "**** (저장됨)" instead of the empty placeholder.
+  const [secretsPresent, setSecretsPresent] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (!selectedId) {
+      setSecretsPresent({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await window.lvis.pluginConfig.listSecretKeys(selectedId);
+        if (cancelled) return;
+        if (result && result.ok && Array.isArray(result.keys)) {
+          const map: Record<string, boolean> = {};
+          for (const k of result.keys as string[]) {
+            map[k] = true;
+          }
+          setSecretsPresent(map);
+        } else {
+          setSecretsPresent({});
+        }
+      } catch {
+        if (!cancelled) setSecretsPresent({});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId]);
+
   const isDevMode = window.lvis?.env?.isDev === true;
   const [localInstalling, setLocalInstalling] = useState(false);
 
@@ -441,7 +472,7 @@ export function PluginConfigTab() {
                         pluginId={selectedPlugin.id}
                         schema={selectedPlugin.configSchema}
                         values={mergedConfigValues}
-                        secretsPresent={{}}
+                        secretsPresent={secretsPresent}
                         saving={saving}
                         onSave={async (values) => {
                           setSaving(true);
@@ -473,6 +504,9 @@ export function PluginConfigTab() {
                             showBanner("error", result.message ?? "비밀 값 저장 실패");
                             return;
                           }
+                          // Optimistically mark the key as present so the
+                          // masked "**** (저장됨)" placeholder appears immediately.
+                          setSecretsPresent((prev) => ({ ...prev, [key]: true }));
                           showBanner("success", `${key} 저장 완료`);
                         }}
                       />

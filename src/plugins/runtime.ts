@@ -541,6 +541,153 @@ export class PluginRuntime {
     await this.startAll();
   }
 
+  /**
+   * US-3c.2 — Targeted single-plugin restart.
+   *
+   * Stops and tears down exactly one plugin, then reloads it from disk with
+   * the latest config overrides applied. All other loaded plugins are
+   * undisturbed. Use this instead of `restartAll()` when only one plugin's
+   * config was changed so the restart cost scales with the number of affected
+   * plugins (O(1)) rather than the total plugin count (O(n)).
+   *
+   * Falls back to a no-op (with a warning) when the pluginId is not currently
+   * loaded — the caller need not guard against that case.
+   */
+  async restartPlugin(pluginId: string): Promise<void> {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) {
+      console.warn(`[plugin-runtime] restartPlugin: plugin not loaded — ${pluginId}`);
+      return;
+    }
+
+    // Stop the running instance gracefully.
+    try {
+      await plugin.instance.stop?.();
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] stop during restartPlugin failed:`, (err as Error).message);
+    }
+
+    // Flush method registrations and disposers, then notify the host so
+    // keyword/tool/scope state is cleaned up (same pattern as reloadPlugin).
+    for (const method of plugin.methods.keys()) {
+      this.methodMap.delete(method);
+    }
+    this.plugins.delete(pluginId);
+
+    const pluginDisposers = this.disposers.get(pluginId);
+    if (pluginDisposers) {
+      for (const d of pluginDisposers) {
+        try { d(); } catch (err) {
+          console.error(`[plugin:${pluginId}] disposer failed during restartPlugin:`, (err as Error).message);
+        }
+      }
+      this.disposers.delete(pluginId);
+    }
+
+    this.onDisable?.(pluginId);
+
+    // Re-import and re-instantiate the plugin with the latest configOverrides.
+    // Unlike reloadPlugin (dev hot-reload), we do NOT cache-bust the import URL —
+    // the on-disk bundle is unchanged; only the config values differ.
+    const { manifest, pluginRoot } = plugin;
+    const entryPath = this.resolveEntryPath(pluginRoot, manifest.entry);
+    let resolvedEntryPath: string;
+    try {
+      resolvedEntryPath = realpathSync(entryPath);
+    } catch {
+      resolvedEntryPath = entryPath;
+    }
+    const importUrl = pathToFileURL(resolvedEntryPath).href;
+
+    let module: { default?: RuntimePluginFactory; createPlugin?: RuntimePluginFactory };
+    try {
+      module = (await import(importUrl)) as {
+        default?: RuntimePluginFactory;
+        createPlugin?: RuntimePluginFactory;
+      };
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] import failed during restartPlugin:`, (err as Error).message);
+      this.markFailed(pluginId);
+      return;
+    }
+
+    const createPlugin = module.default ?? module.createPlugin;
+    if (!createPlugin) {
+      console.error(`[plugin:${pluginId}] entry does not export default/createPlugin after restartPlugin`);
+      this.markFailed(pluginId);
+      return;
+    }
+
+    const pluginDataDir = this.ensurePluginDataDir(pluginId, pluginRoot);
+    const hostApi = this.createHostApi?.(pluginId, manifest, pluginDataDir) ?? createNoopHostApi(pluginId, pluginDataDir);
+    if (!hostApi.storage) {
+      hostApi.storage = createPluginStorage(pluginId, pluginDataDir);
+    }
+
+    let instance: RuntimePlugin;
+    try {
+      instance = await createPlugin({
+        pluginId,
+        pluginRoot,
+        hostRoot: this.hostRoot,
+        pluginDataDir,
+        config: {
+          ...(manifest.config ?? {}),
+          ...(this.configOverrides["*"] ?? {}),
+          ...(this.configOverrides[pluginId] ?? {}),
+        },
+        log: (message, meta) => {
+          if (meta !== undefined) {
+            console.log(`[plugin:${pluginId}] ${message}`, meta);
+            return;
+          }
+          console.log(`[plugin:${pluginId}] ${message}`);
+        },
+        hostApi,
+      });
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] createPlugin failed during restartPlugin:`, (err as Error).message);
+      this.markFailed(pluginId);
+      return;
+    }
+
+    const methods = new Map<string, PluginToolHandler>();
+    for (const toolName of manifest.tools) {
+      const handler = instance.handlers[toolName];
+      if (!handler) {
+        console.warn(`[plugin:${pluginId}] missing handler '${toolName}' after restartPlugin — tool disabled`);
+        continue;
+      }
+      methods.set(toolName, handler);
+      this.methodMap.set(toolName, { pluginId, handler });
+    }
+
+    if (manifest.keywords && manifest.keywords.length > 0) {
+      hostApi.registerKeywords(manifest.keywords);
+    }
+
+    this.plugins.set(pluginId, {
+      manifest,
+      pluginRoot,
+      instance,
+      methods,
+      approvedPluginAccess: this.knownPluginAccessGrants.get(pluginId),
+    });
+    this.failedPluginIds.delete(pluginId);
+    this.disabledPluginIds.delete(pluginId);
+
+    try {
+      await instance.start?.();
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] start after restartPlugin failed:`, (err as Error).message);
+      this.markFailed(pluginId);
+      for (const method of methods.keys()) {
+        this.methodMap.delete(method);
+      }
+      this.plugins.delete(pluginId);
+    }
+  }
+
   setConfigOverride(pluginId: string, config: Record<string, unknown>): void {
     if (Object.keys(config).length === 0) {
       delete this.configOverrides[pluginId];

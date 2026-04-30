@@ -11,7 +11,45 @@
  * the renderer boundary today (the typed `PluginConfigTab` writes go
  * through IPC and trigger a host-side reload, after which plugin
  * handlers see the new values on next call).
+ *
+ * ## Secret sentinel
+ *
+ * When a secret field is updated via `lvis:plugins:config:secret:set`, the
+ * actual secret value is written to the encrypted keychain and NEVER passed
+ * to listeners. Instead, `emitPluginConfigChange` receives
+ * `SECRET_REDACTED_SENTINEL` as the value. Listeners can reliably distinguish
+ * "secret was changed (value masked)" from same-value transitions by checking
+ * `value === SECRET_REDACTED_SENTINEL` — unlike the old `"[REDACTED]"` string,
+ * a Symbol identity check cannot produce false positives.
+ *
+ * Usage:
+ * ```ts
+ * import { SECRET_REDACTED_SENTINEL } from "./config-change-bus.js";
+ *
+ * hostApi.config.onChange("apiKey", (key, value) => {
+ *   if (value === SECRET_REDACTED_SENTINEL) {
+ *     // Secret was saved — reload using hostApi.getSecret()
+ *   } else {
+ *     // Normal cleartext value change
+ *   }
+ * });
+ * ```
  */
+
+/**
+ * Sentinel value passed to `emitPluginConfigChange` (and therefore to
+ * `hostApi.config.onChange` listeners) when a secret field is updated.
+ *
+ * Using a unique Symbol guarantees identity-safe equality checks:
+ *   `value === SECRET_REDACTED_SENTINEL` → secret was updated, actual
+ *   value is in the keychain, never in the listener payload.
+ *
+ * Prefer `Symbol.for(...)` so the sentinel is stable across module
+ * reloads (e.g. Electron renderer hot-reloads or test re-imports).
+ */
+export const SECRET_REDACTED_SENTINEL: unique symbol = Symbol.for(
+  "lvis.config.secret.redacted",
+);
 
 type ConfigChangeListener = (key: string, value: unknown) => void;
 
