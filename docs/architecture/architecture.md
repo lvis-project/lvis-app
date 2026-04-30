@@ -19,7 +19,7 @@
 5. [Memory — 경량 기억 구조](#5-memory--경량-기억-구조)
    - 5.1 설계 원칙 · 5.2 Memory 파일 구조
 6. [Client Core Engines](#6-client-core-engines)
-   - 6.1 Keyword Detecting Engine · 6.2 Agent Route Engine · **6.3 Tool Permission Model** · **6.4 Tool Registry & Taxonomy** · **6.5 Command Safety**
+   - 6.1 Keyword Detecting Engine · 6.2 Agent Route Engine · **6.3 Tool Permission Model** · **6.4 Tool Registry & Taxonomy** · **6.5 Command Safety** · **6.6 Observability & Audit** · **6.7 Theme & Design Tokens** · **6.8 Floating Question Panel**
 7. [Proactive Engine — Daily Briefing (Core)](#7-proactive-engine--daily-briefing-core)
 8. [Agent Approval System — 에이전트 요청 승인](#8-agent-approval-system--에이전트-요청-승인)
 9. [Plugin System & UI Extension](#9-plugin-system--ui-extension)
@@ -1664,6 +1664,63 @@ DLP 통계는 audit NDJSON에서 `type = "dlp"` 엔트리만 집계한다.
 - **탭 분리**: `src/ui/renderer/tabs/` 아래 각 탭이 독립 컴포넌트. `SettingsDialog.tsx`는 탭 등록만 담당.
 - **IPC 명명**: `lvis:<domain>:<action>` 패턴 (예: `lvis:audit:search`, `lvis:dlp:stats`).
 - **인메모리 stats 한계**: Plugin Perf stats는 세션 범위. 히스토리 추이가 필요하면 `~/.lvis/perf/` 영속화를 별도 스프린트에서 설계한다.
+
+---
+
+## 6.7 Theme & Design Tokens (PR #336)
+
+LVIS 호스트 렌더러는 단일 **semantic-token** 테마 시스템을 사용한다. 컴포넌트는
+색상·간격·radius를 하드코딩하지 않고, `bg-background`, `text-foreground`,
+`text-muted-foreground`, `bg-primary`, `bg-destructive`, `border-border` 같은
+**시멘틱 토큰**만 소비한다. 각 테마 변형은 CSS 레벨에서 토큰을 다른 primitive로
+재매핑하므로, 테마 추가/교체에 컴포넌트 변경이 필요 없다.
+
+```
+Components ─► Semantic tokens (--background, --primary, --destructive)
+              ─► Primitive tokens (--p-blue-500, --p-slate-50)
+```
+
+- **토큰 정의**: `src/styles.css` (`:root` primitive + `[data-theme="<id>"]` semantic)
+- **Provider**: `src/ui/renderer/theme/` (`ThemeProvider`, OS `prefers-color-scheme`
+  추적, `~/.lvis/settings.json#appearance.theme` 영속화)
+- **변형**: `dark` (기본), `light`, `high-contrast`. `system`은 런타임에서
+  `light`/`dark`로 해석된다.
+- **사용 가이드**: 새 컴포넌트는 Tailwind utility (`bg-background`,
+  `text-destructive`, `border-border`) 만 사용. 임의의 `bg-red-500`,
+  `text-neutral-700` 같은 팔레트 직접 참조는 dark/high-contrast에서
+  대비 깨짐을 유발하므로 금지. (위반 사례: `installPolicyChip`,
+  marketplace `chip.tsx` install-policy 변형 — 2026-04-30 audit에서 시멘틱
+  토큰으로 교체.)
+
+상세 토큰 표·마이그레이션 가이드는 [`docs/development/theme-system.md`](../development/theme-system.md)
+참조.
+
+---
+
+## 6.8 Floating Question Panel (PR #334)
+
+`ask_user_question` 도구가 발생시키는 사용자 질문은 메시지 스트림 안에서 스크롤에
+파묻히기 쉬웠다. **FloatingQuestionPanel** 은 이 문제를 해결하기 위해 ChatScroll
+**위쪽**(메시지 영역 상단, ScrollArea viewport 바깥)에 anchor 되는 floating
+오버레이로, 항상 즉시 보이도록 설계되었다.
+
+- **위치**: `src/ui/renderer/components/FloatingQuestionPanel.tsx`
+- **렌더 트리**: `App.tsx` → `ChatView.tsx` 안에서 `SessionTodoPanel`의 sibling
+  으로 배치. `ChatScroll` 위, `MessageInput` 아래 영역에 absolute positioning.
+  부모는 `position: relative` (ChatView 외곽 div가 이미 그렇다).
+- **큐 시멘틱**: 최대 3장(`MAX_VISIBLE`) 카드를 stack으로 표시. 초과분은 마지막
+  카드의 `+N more` 칩으로 표시. 각 카드는 독립 dismiss.
+- **반응형**: `< 480px`에서는 bottom-sheet 모드로 전환되어 메시지 입력을 가리지
+  않는다.
+- **데이터 경로**: ChatView의 기존 `askQuestions` / `dismissAskQuestion` / `api`
+  props를 그대로 받는다. 새 IPC 채널 없음. 내부 `AskUserQuestionCard` 가
+  `respondAskUserQuestion` 을 처리하고 본 컴포넌트는 visibility/animation만 관리.
+- **접근성**: 외곽 wrapper `role="region" aria-label="질문 대기열"
+  aria-live="polite"`, focus trap, Esc dismiss(부분 입력 시 confirm),
+  `prefers-reduced-motion` 시 translate 제거.
+
+테스트는 `src/ui/renderer/components/__tests__/FloatingQuestionPanel.test.tsx`
++ snapshot.
 
 ---
 
