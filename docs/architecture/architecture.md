@@ -19,7 +19,7 @@
 5. [Memory — 경량 기억 구조](#5-memory--경량-기억-구조)
    - 5.1 설계 원칙 · 5.2 Memory 파일 구조
 6. [Client Core Engines](#6-client-core-engines)
-   - 6.1 Keyword Detecting Engine · 6.2 Agent Route Engine · **6.3 Tool Permission Model** · **6.4 Tool Registry & Taxonomy** · **6.5 Command Safety** · **6.6 Observability & Audit** · **6.7 Theme & Design Tokens** · **6.8 Floating Question Panel**
+   - 6.1 Keyword Detecting Engine · 6.2 Agent Route Engine · **6.3 Tool Permission Model** · **6.4 Tool Registry & Taxonomy** · **6.5 Command Safety** · **6.6 Observability & Audit** · **6.7 Theme & Design Tokens** · **6.8 Floating Question Panel** · **6.9 Settings Dialog Tab Layout**
 7. [Proactive Engine — Daily Briefing (Core)](#7-proactive-engine--daily-briefing-core)
 8. [Agent Approval System — 에이전트 요청 승인](#8-agent-approval-system--에이전트-요청-승인)
 9. [Plugin System & UI Extension](#9-plugin-system--ui-extension)
@@ -1101,8 +1101,10 @@ lvis-app/src/
 │   │                            #  MarketplaceUpdateBanner
 │   ├── dialogs/                 # ApprovalDialog, PluginInstallDialog,
 │   │                            #  PluginUninstallDialog, CommandPaletteDialog
-│   ├── tabs/                    # RolesTab, PermissionsTab, AuditTab,
-│   │                            #  PluginPerfTab, PrivacyTab
+│   ├── tabs/                    # LlmTab, AppearanceTab, ChatTab, WebTab,
+│   │                            #  RoutineTab, PrivacyTab, PermissionsTab,
+│   │                            #  RolesTab, AuditTab, PluginPerfTab,
+│   │                            #  McpTab, PluginConfigTab, MarketplaceTab
 │   ├── utils/                   # cost-format, html-preview, history, compose
 │   └── types.ts, constants.ts, api-client.ts
 │
@@ -1721,6 +1723,42 @@ Components ─► Semantic tokens (--background, --primary, --destructive)
 
 테스트는 `src/ui/renderer/components/__tests__/FloatingQuestionPanel.test.tsx`
 + snapshot.
+
+---
+
+## 6.9 Settings Dialog — Tab Layout (PR #342 기준)
+
+`SettingsDialog.tsx`는 탭 등록 허브 역할만 한다. 각 탭은 `src/ui/renderer/tabs/`
+아래 독립 컴포넌트로 존재하며, `use-settings-orchestration` 훅이 상태를 총괄한다.
+
+### 현행 탭 구성 (2026-04-30 기준)
+
+| 탭 값 | 표시 이름 | 컴포넌트 | 주요 기능 |
+|-------|-----------|----------|-----------|
+| `llm` | 지능 (LLM) | `LlmTab.tsx` | 벤더·API 키·모델 선택·Extended Thinking·**Model Fallback Chain** (PR #342 이관) |
+| `appearance` | 테마 | `AppearanceTab.tsx` | 테마 선택 (dark / light / high-contrast / system) |
+| `chat` | 채팅 | `ChatTab.tsx` | 자동 컴팩트 토글·**Stream Smoothing** (PR #342 이관) |
+| `web` | 검색 (Web) | `WebTab.tsx` | 웹 검색 공급자·API 키 |
+| `routine` | 브리핑 | `RoutineTab.tsx` | Wake-up Routine 활성화 |
+| `privacy` | 프라이버시 | `PrivacyTab.tsx` | DLP(PII) 리댁션 토글 + 통계 |
+| `permissions` | 권한 | `PermissionsTab.tsx` | 도구 권한 정책 |
+| `roles` | 역할 | `RolesTab.tsx` | Role Preset 편집 (이름·systemPromptAdd·effort) |
+| `usage` | 사용량 | `UsageDashboard.tsx` | LLM 비용 모니터 |
+| `audit` | 감사 | `AuditTab.tsx` | 감사 로그 검색 |
+| `plugin-perf` | 플러그인 성능 | `PluginPerfTab.tsx` | 플러그인 성능 대시보드 |
+| `mcp` | MCP 서버 | `McpTab.tsx` | MCP 서버 등록 관리 |
+| `plugin-config` | 플러그인 설정 | `PluginConfigTab.tsx` | 플러그인별 설정 (configSchema 기반 폼 또는 raw key-value) |
+| `marketplace` | 마켓플레이스 | `MarketplaceTab.tsx` | 마켓플레이스 URL·API 키·private network 허용 |
+
+### PR #342 재배치 요약
+
+| 항목 | 이전 위치 | 현재 위치 |
+|------|-----------|-----------|
+| Stream Smoothing | 고급 (Advanced) 탭 | **채팅** 탭 |
+| Model Fallback Chain | 고급 (Advanced) 탭 | **지능 (LLM)** 탭 |
+| temperature / seed / maxOutputTokens / responseFormat / stopSequences | 고급 (Advanced) 탭 | **삭제** (프론티어 모델 자동 처리) |
+| 채팅 언어 선택기 (langLock) | ChatView 툴바 | **삭제** (LLM 자동 감지) |
+| 고급 (Advanced) 탭 | 존재 | **탭 전체 삭제** |
 
 ---
 
