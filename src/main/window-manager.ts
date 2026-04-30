@@ -17,7 +17,7 @@
  */
 
 import { BrowserWindow, ipcMain, screen, type IpcMainInvokeEvent } from "electron";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
@@ -108,11 +108,10 @@ function loadWindowState(): WindowState {
 }
 
 function saveWindowState(state: WindowState): void {
-  try {
-    writeFileSync(windowStatePath(), JSON.stringify(state, null, 2), "utf-8");
-  } catch {
-    // non-fatal
-  }
+  const dest = windowStatePath();
+  const tmp = `${dest}.tmp`;
+  writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
+  renameSync(tmp, dest);
 }
 
 // ─── Geometry helpers ───────────────────────────────────────────────────────
@@ -223,11 +222,34 @@ export class WindowManager {
     // Restore saved bounds if available.
     const saved = loadWindowState().detached.find((d) => d.viewKey === viewKey);
 
+    // Validate saved position against current displays. On multi-monitor
+    // setups a window may be saved to a display that is no longer connected;
+    // without this check the window opens off-screen and the user cannot
+    // interact with it (§354 follow-up, SEV-2).
+    let restoredX = saved?.bounds.x;
+    let restoredY = saved?.bounds.y;
+    if (restoredX !== undefined && restoredY !== undefined) {
+      const displays = screen.getAllDisplays();
+      const fitsAnyDisplay = displays.some(
+        (d) =>
+          restoredX! >= d.bounds.x &&
+          restoredX! < d.bounds.x + d.bounds.width &&
+          restoredY! >= d.bounds.y &&
+          restoredY! < d.bounds.y + d.bounds.height,
+      );
+      if (!fitsAnyDisplay) {
+        // Clamp to primary display work area, preserving size.
+        const primary = screen.getPrimaryDisplay();
+        restoredX = primary.workArea.x + 100;
+        restoredY = primary.workArea.y + 100;
+      }
+    }
+
     const child = new BrowserWindow({
       width: saved?.bounds.width ?? 800,
       height: saved?.bounds.height ?? 600,
-      x: saved?.bounds.x,
-      y: saved?.bounds.y,
+      x: restoredX,
+      y: restoredY,
       show: false,
       title: `LVIS — ${viewKeyLabel(viewKey)}`,
       webPreferences: {
