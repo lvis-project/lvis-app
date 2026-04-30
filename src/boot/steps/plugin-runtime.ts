@@ -843,6 +843,9 @@ export async function initPluginRuntime(
 
         return decision.result;
       },
+      // Backward-compat shim — 구 calendar/email 플러그인이 호출.
+      // ms-graph 통합 이후 호스트 MS 인증 코드가 제거됐으므로 no-op.
+      onMsGraphAuthChange: (_handler: () => void) => { /* deprecated */ },
     }),
   });
 
