@@ -41,4 +41,34 @@ describe("validateExternalUrl", () => {
   it("rejects malformed URLs", () => {
     expect(validateExternalUrl("not a url")).toEqual({ ok: false, error: "malformed-url" });
   });
+
+  it("rejects miscellaneous handler schemes (positive-allowlist contract)", () => {
+    // The validator is allowlist-based, not denylist — so any future
+    // handler scheme is rejected by default. Pin that contract on a
+    // representative trio so a regression that flips to a denylist
+    // would fail here loudly.
+    expect(validateExternalUrl("vbscript:msgbox(1)")).toEqual({
+      ok: false,
+      error: "disallowed-protocol",
+      protocol: "vbscript:",
+    });
+    expect(validateExternalUrl("chrome-extension://abc/page.html")).toEqual({
+      ok: false,
+      error: "disallowed-protocol",
+      protocol: "chrome-extension:",
+    });
+    expect(validateExternalUrl("ms-windows-store://download")).toEqual({
+      ok: false,
+      error: "disallowed-protocol",
+      protocol: "ms-windows-store:",
+    });
+  });
+
+  it("accepts http URLs with path, query, and credentials", () => {
+    // Documents the positive case beyond the bare-host smoke test —
+    // path/query do not change the validator's decision.
+    const result = validateExternalUrl("https://marketplace.lvisai.xyz/admin?tab=keys");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.url).toBe("https://marketplace.lvisai.xyz/admin?tab=keys");
+  });
 });
