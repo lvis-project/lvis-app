@@ -58,6 +58,26 @@ function makeSuggestedRequest(
   };
 }
 
+/** Request with BOTH choices AND suggestedAnswers — should show choices row only, no chip row */
+function makeBothChoicesAndSuggestedRequest(
+  overrides: Partial<AskUserQuestionRequest> = {},
+): AskUserQuestionRequest {
+  return {
+    id: "both-1",
+    urgent: false,
+    createdAt: Date.now(),
+    questions: [
+      {
+        question: "기간과 언어를 선택하세요.",
+        choices: ["최근 24시간 / 한국어", "최근 7일 / 한국어", "최근 30일 / 영어(글로벌)"],
+        allowFreeText: false,
+        suggestedAnswers: ["최근 7일 / 한국어", "최근 24시간 / 한국어", "최근 7일 / 영어(글로벌)"],
+      },
+    ] as AskUserQuestionRequest["questions"],
+    ...overrides,
+  };
+}
+
 function makeApi(overrides: Partial<LvisApi> = {}): LvisApi {
   return {
     respondAskUserQuestion: vi.fn().mockResolvedValue({ ok: true }),
@@ -365,6 +385,27 @@ describe("FloatingQuestionPanel", () => {
       />,
     );
     expect(queryByTestId("fqp-chips-row")).toBeNull();
+  });
+
+  // Regression: when BOTH choices AND suggestedAnswers are present, only the
+  // choices row (rendered by AskUserQuestionCard) must appear; suggestedChipsSlot
+  // must be suppressed. Fixes the duplicate chip row regression from PR #347/#350.
+  it("suppresses suggestedAnswers chip row when choices is also present (regression #347/#350)", () => {
+    const { queryByTestId, getAllByRole } = render(
+      <FloatingQuestionPanel
+        api={makeApi()}
+        requests={[makeBothChoicesAndSuggestedRequest()]}
+        onResolved={vi.fn()}
+      />,
+    );
+    // suggestedChipsSlot must not render
+    expect(queryByTestId("fqp-chips-row")).toBeNull();
+    // choices buttons ARE present (rendered by the card's choices section)
+    const buttons = getAllByRole("button");
+    const choiceButtons = buttons.filter((b) =>
+      ["최근 24시간 / 한국어", "최근 7일 / 한국어", "최근 30일 / 영어(글로벌)"].includes(b.textContent ?? ""),
+    );
+    expect(choiceButtons).toHaveLength(3);
   });
 
   it("shows suggestedAnswers chips when present (max 3)", () => {
