@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import { ChevronDown, KeyRound, ListChecks, Loader2, Paperclip, Pencil, Square, Star, User, X as XIcon, GitBranch } from "lucide-react";
+import { ChevronDown, KeyRound, Loader2, Paperclip, Pencil, Square, Star, User, X as XIcon, GitBranch } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
@@ -17,10 +17,8 @@ import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
 import { ToolGroupCard } from "./components/ToolGroupCard.js";
 import { ChatSearchOverlay } from "./components/ChatSearchOverlay.js";
-import { ChatTodoPanel } from "./components/ChatTodoPanel.js";
 import { FloatingQuestionPanel } from "./components/FloatingQuestionPanel.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
-import { useChatTodos } from "./hooks/use-chat-todos.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
@@ -47,11 +45,9 @@ export interface ChatViewProps {
   onAbort: () => void | Promise<void>;
   /** D6: submit thumbs up/down feedback for an assistant message */
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
-  /** Navigate to the full TaskView when the user clicks "+N more" in the chat todo panel */
-  onNavigateToTasks?: () => void;
 }
 
-export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, onNavigateToTasks }: ChatViewProps) {
+export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback }: ChatViewProps) {
   // Workflow tools (S1+S2): inline cards layered above the chat entries.
   // We grab the api lazily to avoid threading another prop through the
   // context — the api is a singleton and equally valid here.
@@ -62,7 +58,6 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
     loadedSkills,
     dismissAskQuestion,
   } = useWorkflowTools(workflowApi);
-  const { tasks: pendingTasks, expanded: todoExpanded, loading: todoLoading, toggle: toggleTodo } = useChatTodos(workflowApi);
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
@@ -472,44 +467,12 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           (positioned absolutely at the top of this grid, z-40). Removed from
           inline stream to eliminate the buried-question UX pain point. */}
       <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
-      {todoExpanded && (
-        <ChatTodoPanel
-          api={workflowApi}
-          tasks={pendingTasks}
-          loading={todoLoading}
-          onNavigateToTasks={onNavigateToTasks}
-        />
-      )}
       <div className="border-t bg-card p-3 space-y-2">
         <div className="flex items-center justify-between gap-3 text-[11px]">
           <div className={`font-mono ${contextColor}`} title="추정 토큰 사용량 (대화 기반)">
             {usedTokens.toLocaleString()} / {contextBudget.toLocaleString()} tokens ({contextPercent}%)
           </div>
           <div className="flex items-center gap-2">
-            {/* Chat TODO toggle button */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={todoExpanded ? "secondary" : "outline"}
-                  size="sm"
-                  className="relative h-7 gap-1 text-[11px]"
-                  onClick={toggleTodo}
-                  data-testid="chat-todo-toggle-btn"
-                  title="진행중인 TODO 보기"
-                >
-                  <ListChecks className="h-3 w-3" />
-                  {pendingTasks.length > 0 && (
-                    <span
-                      className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground"
-                      data-testid="chat-todo-count-badge"
-                    >
-                      {pendingTasks.length > 99 ? "99+" : pendingTasks.length}
-                    </span>
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>진행중인 TODO {pendingTasks.length > 0 ? `(${pendingTasks.length}개)` : ""}</TooltipContent>
-            </Tooltip>
             {/* Sprint B — Role preset dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
