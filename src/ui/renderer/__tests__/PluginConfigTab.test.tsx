@@ -105,3 +105,110 @@ describe("PluginConfigTab", () => {
     expect(screen.queryByText("설정이 저장되었습니다.")).toBeNull();
   });
 });
+
+describe("PluginConfigTab — §9.2 Track B configSchema rendering", () => {
+  it("renders the typed form when manifest declares configSchema and routes secrets through setSecret", async () => {
+    // Override the cards mock with a plugin that declares a typed schema
+    // including one secret key.
+    const mockCardsTyped = vi.fn(async () => [
+      {
+        id: "with-schema",
+        name: "Schema Plugin",
+        description: "Has configSchema",
+        sampleTools: [],
+        capabilities: [],
+        tools: [],
+        loadStatus: "loaded" as const,
+        configSchema: {
+          properties: {
+            endpoint: { type: "string", title: "Endpoint", default: "https://api" },
+            apiKey: { type: "string", format: "secret", title: "API Key" },
+          },
+        },
+      },
+    ]);
+    const mockGetTyped = vi.fn(async () => ({ ok: true as const, config: {} }));
+    const mockSetTyped = vi.fn(async () => ({ ok: true as const, config: { endpoint: "https://api" } }));
+    const mockSetSecret = vi.fn(async () => ({ ok: true as const }));
+
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards: mockCardsTyped },
+        pluginConfig: {
+          get: mockGetTyped,
+          set: mockSetTyped,
+          getSchema: vi.fn(),
+          setSecret: mockSetSecret,
+        },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisHost", {
+      value: { takePluginMarketplaceApi: () => null },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    // The schema-driven form renders fields with deriveLabel("Endpoint"/"API Key").
+    await waitFor(() => {
+      expect(screen.getByText("Endpoint")).toBeInTheDocument();
+      expect(screen.getByText("API Key")).toBeInTheDocument();
+    });
+
+    // Legacy raw-KV editor must NOT render — the "+ 추가" button is the marker.
+    expect(screen.queryByText("+ 추가")).toBeNull();
+
+    // Type a secret value, click its dedicated 저장 button. setSecret MUST
+    // be called (NOT pluginConfig.set with the cleartext value).
+    const secretInputs = document.querySelectorAll('input[type="password"]');
+    expect(secretInputs.length).toBe(1);
+    fireEvent.change(secretInputs[0], { target: { value: "sk-LIVE" } });
+    const saveButtons = screen.getAllByRole("button", { name: /저장/ });
+    // The first 저장 button belongs to the secret row; the form-level
+    // 저장 lives further down. We click the secret one explicitly via test id.
+    const secretSaveBtn = document.querySelector(
+      '[data-testid="pcfg:with-schema:apiKey:save"]',
+    ) as HTMLButtonElement;
+    expect(secretSaveBtn).not.toBeNull();
+    fireEvent.click(secretSaveBtn);
+    await waitFor(() => {
+      expect(mockSetSecret).toHaveBeenCalledWith("with-schema", "apiKey", "sk-LIVE");
+      expect(mockSetTyped).not.toHaveBeenCalledWith(
+        "with-schema",
+        expect.objectContaining({ apiKey: "sk-LIVE" }),
+      );
+    });
+
+    // Sanity: form-level 저장 button still exists for cleartext fields.
+    expect(saveButtons.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the legacy raw key/value editor when manifest has NO configSchema", async () => {
+    // Use the original mock from the outer `beforeEach`. Re-install here
+    // explicitly because this describe block does not share the parent's
+    // hooks.
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards: mockCards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisHost", {
+      value: { takePluginMarketplaceApi: () => null },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    // Legacy `+ 추가` button proves the raw KV editor is used.
+    await waitFor(() => {
+      expect(screen.getByText("+ 추가")).toBeInTheDocument();
+    });
+  });
+});

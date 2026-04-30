@@ -696,6 +696,9 @@ contextBridge.exposeInMainWorld("lvis", {
   pluginConfig: {
     get: (pluginId: string) => ipcRenderer.invoke("lvis:plugins:config:get", pluginId),
     set: (pluginId: string, config: Record<string, unknown>) => ipcRenderer.invoke("lvis:plugins:config:set", pluginId, config),
+    getSchema: (pluginId: string) => ipcRenderer.invoke("lvis:plugins:config:schema:get", pluginId),
+    setSecret: (pluginId: string, key: string, value: string) =>
+      ipcRenderer.invoke("lvis:plugins:config:secret:set", pluginId, key, value),
   },
   env: {
     isDev: process.env.LVIS_DEV === "1",

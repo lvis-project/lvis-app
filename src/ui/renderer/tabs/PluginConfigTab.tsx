@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
@@ -8,6 +8,7 @@ import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { InstallInFlight } from "../hooks/use-plugin-marketplace.js";
 import type { PluginCardSummary } from "../types.js";
+import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
 
 type KV = { key: string; value: string };
 
@@ -129,9 +130,11 @@ export function PluginConfigTab() {
   }, [refreshPlugins]);
 
   // Load config for selected plugin
+  const [savedConfig, setSavedConfig] = useState<Record<string, unknown>>({});
   useEffect(() => {
     if (!selectedId) {
       setEntries([]);
+      setSavedConfig({});
       return;
     }
     let cancelled = false;
@@ -141,10 +144,12 @@ export function PluginConfigTab() {
         if (cancelled) return;
         if (!result.ok) {
           setEntries([]);
+          setSavedConfig({});
           showBanner("error", result.message ?? "설정 로드 실패");
           return;
         }
         setEntries(configToEntries(result.config));
+        setSavedConfig(result.config as Record<string, unknown>);
       } catch (e) {
         if (!cancelled) showBanner("error", (e as Error).message ?? "설정 로드 실패");
       }
@@ -197,6 +202,20 @@ export function PluginConfigTab() {
   }, [selectedId, entries, showBanner]);
 
   const selectedPlugin = plugins.find((p) => p.id === selectedId);
+  // §9.2 Track B — merge schema-declared defaults with the saved config
+  // so the typed form always shows the value the plugin will actually
+  // receive (defaults first, saved overrides win).
+  const mergedConfigValues = useMemo(() => {
+    const schema = selectedPlugin?.configSchema;
+    if (!schema?.properties) return savedConfig;
+    const merged: Record<string, unknown> = { ...savedConfig };
+    for (const [key, prop] of Object.entries(schema.properties)) {
+      if (merged[key] === undefined && prop.default !== undefined) {
+        merged[key] = prop.default;
+      }
+    }
+    return merged;
+  }, [selectedPlugin, savedConfig]);
   const isDevMode = window.lvis?.env?.isDev === true;
   const [localInstalling, setLocalInstalling] = useState(false);
 
@@ -411,63 +430,115 @@ export function PluginConfigTab() {
                 )}
                 <Separator />
 
-                <ScrollArea className="flex-1 min-h-0">
-                  <div className="space-y-1.5 pr-2">
-                    {entries.length === 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        설정된 값이 없습니다. 아래에서 추가하세요.
-                      </p>
-                    )}
-                    {entries.map((entry) => (
-                      <div key={entry.key} className="flex items-center gap-2">
-                        <Input
-                          className="h-7 text-xs font-mono flex-[0_0_35%]"
-                          value={entry.key}
-                          readOnly
-                        />
-                        <Input
-                          className="h-7 text-xs font-mono flex-1"
-                          value={entry.value}
-                          onChange={(e) => handleUpdateValue(entry.key, e.target.value)}
-                        />
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs px-2 text-red-600 border-red-300"
-                          onClick={() => handleRemoveEntry(entry.key)}
-                        >
-                          삭제
-                        </Button>
+                {selectedPlugin.configSchema ? (
+                  // §9.2 Track B — declarative form. Cleartext fields go
+                  // through pluginConfig.set; format:'secret' fields go
+                  // through pluginConfig.setSecret so values land in the
+                  // encrypted keychain instead of cleartext settings.json.
+                  <ScrollArea className="flex-1 min-h-0">
+                    <div className="pr-2">
+                      <PluginConfigSchemaForm
+                        pluginId={selectedPlugin.id}
+                        schema={selectedPlugin.configSchema}
+                        values={mergedConfigValues}
+                        secretsPresent={{}}
+                        saving={saving}
+                        onSave={async (values) => {
+                          setSaving(true);
+                          try {
+                            const result = await window.lvis.pluginConfig.set(
+                              selectedPlugin.id,
+                              values,
+                            );
+                            if (!result.ok) {
+                              showBanner("error", result.message ?? "저장 실패");
+                              return;
+                            }
+                            setSavedConfig(result.config as Record<string, unknown>);
+                            setEntries(configToEntries(result.config));
+                            showBanner("success", "설정이 저장되었습니다.");
+                          } catch (e) {
+                            showBanner("error", (e as Error).message ?? "저장 실패");
+                          } finally {
+                            setSaving(false);
+                          }
+                        }}
+                        onSetSecret={async (key, value) => {
+                          const result = await window.lvis.pluginConfig.setSecret(
+                            selectedPlugin.id,
+                            key,
+                            value,
+                          );
+                          if (!result.ok) {
+                            showBanner("error", result.message ?? "비밀 값 저장 실패");
+                            return;
+                          }
+                          showBanner("success", `${key} 저장 완료`);
+                        }}
+                      />
+                    </div>
+                  </ScrollArea>
+                ) : (
+                  <>
+                    <ScrollArea className="flex-1 min-h-0">
+                      <div className="space-y-1.5 pr-2">
+                        {entries.length === 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            설정된 값이 없습니다. 아래에서 추가하세요.
+                          </p>
+                        )}
+                        {entries.map((entry) => (
+                          <div key={entry.key} className="flex items-center gap-2">
+                            <Input
+                              className="h-7 text-xs font-mono flex-[0_0_35%]"
+                              value={entry.key}
+                              readOnly
+                            />
+                            <Input
+                              className="h-7 text-xs font-mono flex-1"
+                              value={entry.value}
+                              onChange={(e) => handleUpdateValue(entry.key, e.target.value)}
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs px-2 text-red-600 border-red-300"
+                              onClick={() => handleRemoveEntry(entry.key)}
+                            >
+                              삭제
+                            </Button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </ScrollArea>
+                    </ScrollArea>
 
-                <Separator />
+                    <Separator />
 
-                <div className="flex items-center gap-2">
-                  <Input
-                    className="h-7 text-xs font-mono flex-[0_0_35%]"
-                    placeholder="key"
-                    value={newKey}
-                    onChange={(e) => setNewKey(e.target.value)}
-                  />
-                  <Input
-                    className="h-7 text-xs font-mono flex-1"
-                    placeholder="value (string / JSON)"
-                    value={newValue}
-                    onChange={(e) => setNewValue(e.target.value)}
-                  />
-                  <Button size="sm" className="h-7 text-xs px-2" onClick={handleAddEntry}>
-                    + 추가
-                  </Button>
-                </div>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        className="h-7 text-xs font-mono flex-[0_0_35%]"
+                        placeholder="key"
+                        value={newKey}
+                        onChange={(e) => setNewKey(e.target.value)}
+                      />
+                      <Input
+                        className="h-7 text-xs font-mono flex-1"
+                        placeholder="value (string / JSON)"
+                        value={newValue}
+                        onChange={(e) => setNewValue(e.target.value)}
+                      />
+                      <Button size="sm" className="h-7 text-xs px-2" onClick={handleAddEntry}>
+                        + 추가
+                      </Button>
+                    </div>
 
-                <div className="flex justify-end">
-                  <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
-                    {saving ? "저장 중…" : "저장"}
-                  </Button>
-                </div>
+                    <div className="flex justify-end">
+                      <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
+                        {saving ? "저장 중…" : "저장"}
+                      </Button>
+                    </div>
+                  </>
+                )}
               </>
             ) : (
               <p className="text-xs text-muted-foreground">플러그인을 선택하세요.</p>
