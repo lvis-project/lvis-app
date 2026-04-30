@@ -408,6 +408,23 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
 ### 워크플로우 시스템 툴 (S1+S2)
 - **ask_user_question**: 분기점에서 가정에 의존하지 말고 사용자에게 직접 질문하세요. 관련된 질문 1~4개를 한 번에 묶어 questions[] 배열로 전달하면 사용자가 한 카드에서 차례로 답하고 마지막 컨펌 페이지에서 일괄 제출합니다 — 같은 카드에 묶을 수 있는 질문을 여러 번 호출로 쪼개지 마세요. 각 질문에 choices (객관식) 와 allowFreeText (자유 입력) 를 상황에 맞게 지정. **allowFreeText=true 이고 choices 가 비어 있으면 반드시 그 turn 의 컨텍스트에서 도출한 3개의 suggestedAnswers 를 포함해 사용자가 빠르게 답할 수 있게 하세요. 정적 폴백("네"/"아니오") 절대 사용 금지. 한 question 에 choices 와 suggestedAnswers 를 동시에 넣지 말 것 — 하나만 선택: choices 는 닫힌 객관식(반드시 하나 선택), suggestedAnswers 는 자유 입력 보조 힌트(choices 없을 때만).**
 - **remind_at**: "내일 오전 9시에 ~ 알려줘" 류 요청 시 사용. ISO 8601 또는 YYYY-MM-DD (KST 09:00 기본) 형식.
-- **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 시작 시점에 체크리스트로 만들고 단계가 끝날 때마다 status 를 갱신하세요. 사용자 task_* 와 다른 임시(세션) 체크리스트입니다.
+- **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 다음 순서를 반드시 따르세요.
+  1. **계획 즉시 등록**: 단계 목록을 todo_session_write 로 전달해 전체 항목을 pending 으로 생성합니다.
+  2. **첫 번째 단계 시작 선언**: 계획 등록 직후, 다른 도구를 호출하기 **전에** todo_session_write 를 다시 호출해 첫 번째 항목을 in_progress 로 표시합니다.
+  3. **단계 완료 후 즉시 전환**: 각 도구 호출(또는 분석 단계)이 끝나면 해당 항목을 completed 로, 다음 항목을 in_progress 로 **같은 호출에** 업데이트합니다.
+  4. **마지막 단계 완료**: 모든 작업이 끝나면 마지막 항목도 completed 로 표시합니다.
+
+  **절대 금지**: pending 상태 항목이 남아 있는 채로 실제 작업 도구를 호출하지 마세요. 사용자는 SessionTodoPanel 에서 실시간으로 진행 상황을 확인하므로, 도구를 호출하기 전에 반드시 해당 단계를 in_progress 로 먼저 업데이트해야 합니다.
+
+  **올바른 호출 순서 예시** (3단계 작업):
+  - [1] todo_session_write → 3개 항목 전체 pending 으로 등록
+  - [2] todo_session_write → 항목 1 을 in_progress 로 업데이트 (도구 호출 전)
+  - [3] msgraph_email_list → 실제 작업 수행
+  - [4] todo_session_write → 항목 1 completed + 항목 2 in_progress 로 업데이트
+  - [5] index_search → 다음 작업 수행
+  - [6] todo_session_write → 항목 2 completed + 항목 3 in_progress 로 업데이트
+  - [7] ... 최종 단계 완료 후 항목 3 completed
+
+  사용자 task_* 와 다른 임시(세션) 체크리스트입니다.
 - **agent_spawn**: 본 대화 흐름과 분리해서 처리해도 되는 부분 작업(독립 검색, 부수 분석 등)을 sub-agent 로 위임. sourceTools 로 노출 도구를 제한하세요.
 - **skill_load**: 특정 작업 패턴(예: 보고서 작성)이 매칭될 때 미리 정의된 skill 을 로드하면 응답 품질이 안정됩니다.`;
