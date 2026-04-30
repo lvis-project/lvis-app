@@ -287,7 +287,7 @@ export function App() {
   // ChatView context bundle — avoids drilling ~40 props through the tree.
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
+    question, setQuestion, chatEndRef, currentSessionId, hasApiKey, onOpenSettings,
     routineResult, routineQueueIndex, routineQueueTotal,
     onDismissRoutineResult: dismissRoutineResult, onSnoozeRoutineResult: snoozeRoutineResult,
     onPrevRoutineResult: prevRoutineResult, onNextRoutineResult: nextRoutineResult,
