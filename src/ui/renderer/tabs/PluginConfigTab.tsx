@@ -406,7 +406,7 @@ export function PluginConfigTab() {
                       )}
                       {selectedPlugin.installPolicy === "admin" && (
                         <span
-                          className="inline-flex items-center gap-0.5 rounded-full border border-red-300 bg-red-50 px-1.5 py-px text-[9px] font-medium text-red-800"
+                          className="inline-flex items-center gap-0.5 rounded-full border border-destructive/30 bg-destructive/10 px-1.5 py-px text-[9px] font-medium text-destructive"
                           title="관리자만 설치할 수 있는 플러그인입니다"
                           aria-label="관리자 전용 플러그인"
                         >
@@ -415,7 +415,7 @@ export function PluginConfigTab() {
                       )}
                       {selectedPlugin.installPolicy === "user" && (
                         <span
-                          className="inline-flex items-center gap-0.5 rounded-full border border-neutral-300 bg-neutral-100 px-1.5 py-px text-[9px] font-medium text-neutral-600"
+                          className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground"
                           title="모든 사용자가 설치할 수 있는 플러그인입니다"
                           aria-label="사용자 설치 가능 플러그인"
                         >
