@@ -127,10 +127,6 @@ bun run prepare:plugins  # Build all 4 packaged plugins (pageindex/meeting/email
 bunx vitest run        # Run tests
 ```
 
-Legacy npm scripts are retained as fallbacks: `start:npm`, `build:npm`,
-`prepare:plugins:npm`, `test:meeting-flow:npm`, `test:main-flow:npm`. Use them
-only if a bun-specific issue surfaces.
-
 ## TODO Tracking
 
 Always update `../TODO.md` when completing or discovering work items.
