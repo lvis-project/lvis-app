@@ -404,6 +404,24 @@ export function PluginConfigTab() {
                       {selectedPlugin.isManaged && (
                         <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-px text-[9px] font-medium text-blue-700">🔒 관리형</span>
                       )}
+                      {selectedPlugin.installPolicy === "admin" && (
+                        <span
+                          className="inline-flex items-center gap-0.5 rounded-full border border-red-300 bg-red-50 px-1.5 py-px text-[9px] font-medium text-red-800"
+                          title="관리자만 설치할 수 있는 플러그인입니다"
+                          aria-label="관리자 전용 플러그인"
+                        >
+                          🔐 관리자 전용
+                        </span>
+                      )}
+                      {selectedPlugin.installPolicy === "user" && (
+                        <span
+                          className="inline-flex items-center gap-0.5 rounded-full border border-neutral-300 bg-neutral-100 px-1.5 py-px text-[9px] font-medium text-neutral-600"
+                          title="모든 사용자가 설치할 수 있는 플러그인입니다"
+                          aria-label="사용자 설치 가능 플러그인"
+                        >
+                          사용자 설치 가능
+                        </span>
+                      )}
                       {selectedPlugin.loadStatus && (
                         selectedPlugin.loadStatus === "loaded" ? (
                           <span className="inline-block rounded-full bg-green-100 px-1.5 py-px text-[9px] font-medium text-green-700">로드됨</span>

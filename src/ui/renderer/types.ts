@@ -65,6 +65,8 @@ export type PluginCardSummary = {
   tools: string[];
   toolDescriptions?: Record<string, string>;
   isManaged?: boolean;
+  /** Install policy from the plugin manifest: "admin" (IT-managed only) or "user" (anyone). */
+  installPolicy?: "admin" | "user";
   loadStatus?: "loaded" | "failed" | "disabled";
   version?: string;
   publisher?: string;
