@@ -147,14 +147,7 @@ async function main() {
   pkg.version = newVersion;
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
 
-  // bun-only — the npm fallback was removed alongside the *:npm scripts
-  // (see PR #327/#328). The legacy `useBun` ternary checked for `bun.lockb`,
-  // which became permanently absent when bun 1.2 switched to the text-format
-  // `bun.lock`, so the npm path was *always* taken — and `build:npm` no
-  // longer exists, so any release would have failed at this point. Single
-  // bun call now.
   run("bun", ["run", "build"]);
-
   run("bunx", ["electron-builder", "--publish=never"]);
 
   console.log(`[release] done. Artifacts in release/  (version ${newVersion})`);

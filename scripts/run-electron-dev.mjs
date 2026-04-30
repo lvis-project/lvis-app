@@ -661,12 +661,10 @@ async function main() {
           await runStep("plugins:install", "bun", ["install", "--cwd", pluginDir], { env: bunEnv });
           await runStep("plugins:build", "bun", ["run", "--cwd", pluginDir, "build"], { env: bunEnv });
         } catch (bunErr) {
-          // Single retry with an explicit SDK seed — covers the cases
-          // where `bun install` chokes on `@lvis/plugin-sdk` because the
-          // seed step hasn't materialised the local symlink target yet.
-          // The outer try/catch (below) handles a true bun failure with
-          // a hard shutdown — bun is the only supported runner per the
-          // bun-only sweep (PR #327/#328).
+          // Retry once with an explicit SDK seed — covers `bun install`
+          // racing against the symlinked `@lvis/plugin-sdk` not yet
+          // materialised. Persistent failure falls through to the outer
+          // catch and shuts the runner down.
           log("plugins", `bun failed for ${relPath}; retrying with SDK seed (${bunErr.message})`);
           seedPluginSdk(pluginDir);
           await runStep("plugins:build:bun-retry", "bun", ["run", "--cwd", pluginDir, "build"], { env: bunEnv });
