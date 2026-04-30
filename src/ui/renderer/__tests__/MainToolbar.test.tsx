@@ -1,6 +1,6 @@
 import "../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { MainToolbar } from "../MainToolbar.js";
 
@@ -22,6 +22,8 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     onSearchToggle: vi.fn(),
     onOpenSettings: vi.fn(),
     onOpenCommand: vi.fn(),
+    usedTokens: 0,
+    contextBudget: 64000,
     ...overrides,
   };
 }
@@ -34,54 +36,62 @@ function renderWithProvider(props: Parameters<typeof MainToolbar>[0]) {
   );
 }
 
+/** Open the hamburger menu dropdown via pointerDown (Radix UI trigger) */
+async function openHamburger() {
+  const hamburger = screen.getByTitle("더 많은 메뉴");
+  fireEvent.pointerDown(hamburger);
+  // Wait for dropdown items to appear (rendered into document.body portal)
+  await waitFor(() => expect(screen.queryByText("대화 검색")).toBeTruthy());
+}
+
 describe("MainToolbar", () => {
-  it("renders action buttons", () => {
-    const { getByText } = renderWithProvider(defaultProps());
-    expect(getByText("새 대화")).toBeTruthy();
-    expect(getByText("기록")).toBeTruthy();
-    expect(getByText("세션")).toBeTruthy();
-    expect(getByText("내보내기")).toBeTruthy();
-    expect(getByText("찾기")).toBeTruthy();
-    expect(getByText("설정")).toBeTruthy();
-    expect(getByText("Cmd")).toBeTruthy();
+  it("renders 새 대화 button and hamburger trigger", () => {
+    renderWithProvider(defaultProps());
+    expect(screen.getByText("새 대화")).toBeTruthy();
+    expect(screen.getByTitle("더 많은 메뉴")).toBeTruthy();
+    // Token ring is leftmost
+    expect(document.querySelector("[data-testid='token-progress-ring']")).toBeTruthy();
   });
 
   it("calls onNewChat when 새 대화 button clicked", () => {
     const onNewChat = vi.fn();
-    const { getByText } = renderWithProvider(defaultProps({ onNewChat }));
-    fireEvent.click(getByText("새 대화"));
+    renderWithProvider(defaultProps({ onNewChat }));
+    fireEvent.click(screen.getByText("새 대화"));
     expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onSearchToggle when 찾기 button clicked", () => {
+  it("calls onSearchToggle when 대화 검색 menu item clicked", async () => {
     const onSearchToggle = vi.fn();
-    const { getByText } = renderWithProvider(defaultProps({ onSearchToggle }));
-    fireEvent.click(getByText("찾기"));
+    renderWithProvider(defaultProps({ onSearchToggle }));
+    await openHamburger();
+    fireEvent.click(screen.getByText("대화 검색"));
     expect(onSearchToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onOpenSettings when 설정 button clicked", () => {
+  it("calls onOpenSettings when 설정 menu item clicked", async () => {
     const onOpenSettings = vi.fn();
-    const { getByText } = renderWithProvider(defaultProps({ onOpenSettings }));
-    fireEvent.click(getByText("설정"));
+    renderWithProvider(defaultProps({ onOpenSettings }));
+    await openHamburger();
+    fireEvent.click(screen.getByText("설정"));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onToggleCurrentSessionStar when current session star clicked", () => {
+  it("calls onToggleCurrentSessionStar when star menu item clicked", async () => {
     const onToggleCurrentSessionStar = vi.fn();
-    const { getByText } = renderWithProvider(defaultProps({ onToggleCurrentSessionStar }));
-    fireEvent.click(getByText("세션"));
+    renderWithProvider(defaultProps({ onToggleCurrentSessionStar }));
+    await openHamburger();
+    fireEvent.click(screen.getByText("현재 세션 즐겨찾기"));
     expect(onToggleCurrentSessionStar).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps history trigger enabled while streaming", () => {
-    const { getByText } = renderWithProvider(defaultProps({ streaming: true }));
-    expect(getByText("기록")).not.toBeDisabled();
+  it("keeps hamburger enabled while streaming", () => {
+    renderWithProvider(defaultProps({ streaming: true }));
+    expect(screen.getByTitle("더 많은 메뉴")).not.toBeDisabled();
   });
 
   it("does not load the current session from history", async () => {
     const onLoadSession = vi.fn();
-    const { getByText, queryByText } = renderWithProvider(defaultProps({
+    renderWithProvider(defaultProps({
       currentSessionId: "sess-1",
       sessions: [
         { id: "sess-1", modifiedAt: new Date().toISOString(), title: "현재 세션" },
@@ -89,17 +99,17 @@ describe("MainToolbar", () => {
       onLoadSession,
     }));
 
-    fireEvent.pointerDown(getByText("기록"));
+    await openHamburger();
 
-    await waitFor(() => expect(queryByText("현재 세션")).toBeTruthy());
-    fireEvent.click(getByText("현재 세션"));
+    await waitFor(() => expect(screen.queryByText("현재 세션")).toBeTruthy());
+    fireEvent.click(screen.getByText("현재 세션"));
     expect(onLoadSession).not.toHaveBeenCalled();
   });
 
   it("starring a history session does not also load it", async () => {
     const onLoadSession = vi.fn();
     const onToggleSessionStar = vi.fn();
-    const { getByText, getByTitle } = renderWithProvider(defaultProps({
+    renderWithProvider(defaultProps({
       currentSessionId: "sess-current",
       sessions: [
         { id: "sess-other", modifiedAt: new Date().toISOString(), title: "다른 세션" },
@@ -108,10 +118,10 @@ describe("MainToolbar", () => {
       onToggleSessionStar,
     }));
 
-    fireEvent.pointerDown(getByText("기록"));
+    await openHamburger();
 
-    await waitFor(() => expect(getByText("다른 세션")).toBeTruthy());
-    fireEvent.click(getByTitle("세션 즐겨찾기"));
+    await waitFor(() => expect(screen.getByText("다른 세션")).toBeTruthy());
+    fireEvent.click(screen.getByTitle("세션 즐겨찾기"));
 
     expect(onToggleSessionStar).toHaveBeenCalledWith("sess-other", "다른 세션");
     expect(onLoadSession).not.toHaveBeenCalled();
