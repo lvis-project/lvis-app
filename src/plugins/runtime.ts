@@ -85,6 +85,7 @@ type ManifestLoadPlan = {
   manifestPath: string;
   enabled: boolean;
   approvedPluginAccess?: PluginAccessSpec;
+  devLinked?: boolean;
 };
 
 function normalizeInstallPolicy(
@@ -242,7 +243,7 @@ export class PluginRuntime {
     for (const plan of loadPlan) {
       const manifestPath = plan.manifestPath;
       const pluginRoot = dirname(manifestPath);
-      if (this.installReceiptCacheRoot && plan.pluginIdHint) {
+      if (this.installReceiptCacheRoot && plan.pluginIdHint && !plan.devLinked) {
         const receiptResult = await verifyInstallReceipt(
           this.installReceiptCacheRoot,
           plan.pluginIdHint,
@@ -1370,6 +1371,7 @@ export class PluginRuntime {
           manifestPath,
           enabled: entry.enabled !== false,
           approvedPluginAccess: entry.approvedPluginAccess,
+          devLinked: entry._devLinked === true,
         }];
       }),
     );
