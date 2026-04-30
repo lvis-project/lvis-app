@@ -165,6 +165,13 @@ export type LvisApi = {
   setMarketplaceApiKey: (k: string) => Promise<{ ok: true }>;
   hasMarketplaceApiKey: () => Promise<boolean>;
   deleteMarketplaceApiKey: () => Promise<{ ok: true }>;
+  /** Open an http(s) URL in the system browser. Main-side rejects any other scheme. */
+  openExternalUrl: (url: string) => Promise<{
+    ok: boolean;
+    error?: string;
+    protocol?: string;
+    message?: string;
+  }>;
   /** #FU259 — MCP catalog (filtered to plugin_type === "mcp"). */
   listMcpCatalog: () => Promise<Array<{
     id: string;
