@@ -64,9 +64,16 @@ describe("ALLOWED_VIEW_KEYS", () => {
     }
   });
 
-  it("accepts valid plugin view key", () => {
-    expect(ALLOWED_VIEW_KEYS.test("plugin:my-plugin")).toBe(true);
-    expect(ALLOWED_VIEW_KEYS.test("plugin:my_plugin.v2")).toBe(true);
+  it("accepts valid plugin view keys (pluginId:extensionId format)", () => {
+    // toViewKey() produces plugin:<pluginId>:<extensionId>
+    expect(ALLOWED_VIEW_KEYS.test("plugin:meeting:meeting-control")).toBe(true);
+    expect(ALLOWED_VIEW_KEYS.test("plugin:my-plugin:main-view")).toBe(true);
+    expect(ALLOWED_VIEW_KEYS.test("plugin:my_plugin.v2:panel_a")).toBe(true);
+  });
+
+  it("rejects single-segment plugin keys (missing extensionId)", () => {
+    expect(ALLOWED_VIEW_KEYS.test("plugin:my-plugin")).toBe(false);
+    expect(ALLOWED_VIEW_KEYS.test("plugin:meeting")).toBe(false);
   });
 
   it("rejects path traversal attempts", () => {
