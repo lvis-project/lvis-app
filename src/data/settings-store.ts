@@ -82,6 +82,8 @@ export interface AppSettings {
   telemetry: TelemetrySettings;
   audit: AuditSettings;
   msGraph: MsGraphSettings;
+  /** UX Track 3 — visual theme + future UI preferences. */
+  appearance: AppearanceSettings;
   /** Plugin settings reserved for non-trust UI preferences. Trust gates are host-owned. */
   plugins: PluginSettings;
   /** 플러그인별 설정값 — pluginId → key/value 맵 */
@@ -89,6 +91,26 @@ export interface AppSettings {
 }
 
 export interface PluginSettings {}
+
+/**
+ * UX Track 3 — visual appearance preferences.
+ *
+ * `theme` controls which semantic-token mapping is active in the renderer:
+ *   - "system":         follow the OS `prefers-color-scheme` (default)
+ *   - "light":          force the light variant
+ *   - "dark":           force the dark variant
+ *   - "high-contrast":  force the high-contrast variant
+ *
+ * The renderer's ThemeProvider is the single consumer of this field. A
+ * change here is propagated by writing `data-theme` on <html>; no reload.
+ *
+ * See `docs/development/theme-system.md` for the token-tier model.
+ */
+export type ThemePreference = "system" | "light" | "dark" | "high-contrast";
+
+export interface AppearanceSettings {
+  theme: ThemePreference;
+}
 
 /**
  * MsGraph 환경 선택 — legacy 필드.
@@ -262,6 +284,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   msGraph: {
     environment: "external",
   },
+  appearance: {
+    theme: "system",
+  },
   plugins: {},
   pluginConfigs: {},
 };
@@ -353,6 +378,9 @@ export class SettingsService {
     }
     if (partial.msGraph) {
       this.settings.msGraph = { ...this.settings.msGraph, ...partial.msGraph };
+    }
+    if (partial.appearance) {
+      this.settings.appearance = { ...this.settings.appearance, ...partial.appearance };
     }
     if (partial.pluginConfigs) {
       const sanitized: Record<string, PluginConfigRecord> = {};
@@ -481,6 +509,7 @@ export class SettingsService {
         telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
         msGraph: { ...DEFAULT_SETTINGS.msGraph, ...parsed.msGraph },
+        appearance: normalizeAppearance(parsed.appearance),
         plugins: {},
         pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
       };
@@ -549,6 +578,28 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
     streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
     fallbackChain: partial.fallbackChain ?? base.fallbackChain,
   };
+}
+
+/**
+ * UX Track 3 — coerce on-disk `appearance` block back into the
+ * AppearanceSettings shape. Old installs (pre-theme-system) have no
+ * `appearance` field — they fall through to the default ("system").
+ *
+ * Unknown theme strings (e.g. a hand-edited settings.json with a typo) are
+ * coerced to "system" rather than thrown — settings load must never crash
+ * boot over a UI-only field.
+ */
+const VALID_THEMES: readonly ThemePreference[] = ["system", "light", "dark", "high-contrast"];
+function normalizeAppearance(input: unknown): AppearanceSettings {
+  if (!input || typeof input !== "object") {
+    return { ...DEFAULT_SETTINGS.appearance };
+  }
+  const raw = (input as { theme?: unknown }).theme;
+  const theme: ThemePreference =
+    typeof raw === "string" && (VALID_THEMES as readonly string[]).includes(raw)
+      ? (raw as ThemePreference)
+      : "system";
+  return { theme };
 }
 
 function sanitizeStoredPluginConfigs(input: unknown): Record<string, PluginConfigRecord> {

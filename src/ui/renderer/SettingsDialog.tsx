@@ -11,6 +11,7 @@ import { PluginPerfTab } from "./tabs/PluginPerfTab.js";
 import { PrivacyTab } from "./tabs/PrivacyTab.js";
 import { LlmTab } from "./tabs/LlmTab.js";
 import { AdvancedTab } from "./tabs/AdvancedTab.js";
+import { AppearanceTab } from "./tabs/AppearanceTab.js";
 import { ChatTab } from "./tabs/ChatTab.js";
 import { WebTab } from "./tabs/WebTab.js";
 import { RoutineTab } from "./tabs/RoutineTab.js";
@@ -31,6 +32,7 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 [&>*]:!grow-0 [&>*]:!shrink-0 [&>*]:!basis-auto overflow-x-auto">
             <TabsTrigger value="llm">지능 (LLM)</TabsTrigger>
             <TabsTrigger value="advanced">고급</TabsTrigger>
+            <TabsTrigger value="appearance">테마</TabsTrigger>
             <TabsTrigger value="chat">채팅</TabsTrigger>
             <TabsTrigger value="web">검색 (Web)</TabsTrigger>
             <TabsTrigger value="routine">브리핑</TabsTrigger>
@@ -91,6 +93,10 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
             />
           </TabsContent>
 
+          <TabsContent value="appearance">
+            <AppearanceTab />
+          </TabsContent>
+
           <TabsContent value="chat">
             <ChatTab autoCompact={s.autoCompact} setAutoCompact={s.setAutoCompact} />
           </TabsContent>
@@ -146,7 +152,7 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
         </Tabs>
         <DialogFooter>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>닫기</Button>
-          {tab !== "permissions" && tab !== "usage" && tab !== "roles" && tab !== "audit" && tab !== "plugin-perf" && tab !== "mcp" && tab !== "plugin-config" && (
+          {tab !== "permissions" && tab !== "usage" && tab !== "roles" && tab !== "audit" && tab !== "plugin-perf" && tab !== "mcp" && tab !== "plugin-config" && tab !== "appearance" && (
             <Button onClick={() => void s.save(tab)} disabled={s.saving || !s.settingsLoaded}>{s.saving ? "저장 중..." : "저장"}</Button>
           )}
         </DialogFooter>
