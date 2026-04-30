@@ -17,7 +17,7 @@
  */
 
 import { BrowserWindow, ipcMain, screen } from "electron";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -78,11 +78,10 @@ function loadWindowState(): WindowState {
 }
 
 function saveWindowState(state: WindowState): void {
-  try {
-    writeFileSync(windowStatePath(), JSON.stringify(state, null, 2), "utf-8");
-  } catch {
-    // non-fatal
-  }
+  const dest = windowStatePath();
+  const tmp = `${dest}.tmp`;
+  writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
+  renameSync(tmp, dest);
 }
 
 // ─── Geometry helpers ───────────────────────────────────────────────────────
