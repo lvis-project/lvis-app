@@ -521,7 +521,6 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                 {rolePresets.map((p) => (
                   <DropdownMenuItem key={p.id} onClick={() => setActivePresetId(p.id)}>
                     <span className={activePresetId === p.id ? "font-semibold" : ""}>{p.name}</span>
-                    {p.isDefault ? null : <span className="ml-2 text-[10px] text-muted-foreground">effort: {p.effort}</span>}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
