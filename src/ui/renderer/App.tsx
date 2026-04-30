@@ -42,6 +42,8 @@ import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useChatActions } from "./hooks/use-chat-actions.js";
 import { useChatContextValue } from "./hooks/use-chat-context-value.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
+import { FloatingQuestionPanel } from "./components/FloatingQuestionPanel.js";
+import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 
 // RoutineCard: new routine result card
 export { RoutineCard } from "./components/RoutineCard.js";
@@ -50,6 +52,16 @@ export { RoutineCard } from "./components/RoutineCard.js";
 
 export function App() {
   const api = useMemo(() => getApi(), []);
+
+  // Workflow tools (S1+S2) — lifted to App level so FloatingQuestionPanel
+  // survives sidebar navigation (question state persists across view changes).
+  const {
+    askQuestions,
+    subAgentSpawns,
+    loadedSkills,
+    dismissAskQuestion,
+    resetForNewSession,
+  } = useWorkflowTools(api);
 
   // Chat state + stream lifecycle (useChatState is the sole owner of entries).
   const {
@@ -245,8 +257,8 @@ export function App() {
 
   const handleNewChat = useCallback(async () => {
     if (streaming) { console.warn("new chat blocked during streaming"); return; }
-    await api.chatNew(); clearForNewChat(); void refreshSessionId();
-  }, [api, streaming, refreshSessionId, clearForNewChat]);
+    await api.chatNew(); clearForNewChat(); resetForNewSession(); void refreshSessionId();
+  }, [api, streaming, refreshSessionId, clearForNewChat, resetForNewSession]);
 
   const handleStartRoutineSession = useCallback(async (routineId: string) => {
     const result = await api.startRoutineSession(routineId);
@@ -390,6 +402,8 @@ export function App() {
             onSearchToggle={searchToggleOverlay}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenCommand={() => setCommandOpen(true)}
+            usedTokens={usedTokens}
+            contextBudget={contextBudget}
           />
 
           <MainContent
@@ -411,6 +425,9 @@ export function App() {
             isEntryStarred={isEntryStarred}
             onAbort={handleAbort}
             onFeedback={handleFeedback}
+            subAgentSpawns={subAgentSpawns}
+            loadedSkills={loadedSkills}
+            hasAskQuestions={askQuestions.length > 0}
             activePluginView={activePluginView ?? null}
           />
         </main>
@@ -418,6 +435,15 @@ export function App() {
         <StatusBar persistent={statusPersistent} toasts={statusToasts} onToastClick={handleStatusToastClick} />
       </div>
 
+      {/* FloatingQuestionPanel — mounted at App level (not inside ChatView) so
+          ask_user_question requests survive sidebar navigation. Uses fixed
+          positioning to overlay the entire window regardless of active view. */}
+      <FloatingQuestionPanel
+        api={api}
+        requests={askQuestions}
+        onResolved={dismissAskQuestion}
+        fixed
+      />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
       <ApprovalQueueStatus queue={approvalQueue} />

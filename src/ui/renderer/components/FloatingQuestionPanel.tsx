@@ -73,6 +73,12 @@ export interface FloatingQuestionPanelProps {
   api: LvisApi;
   requests: AskUserQuestionRequest[];
   onResolved: (id: string) => void;
+  /**
+   * When true, uses `position: fixed` so the panel overlays the entire window
+   * from the App root (survives sidebar navigation). Default `false` uses
+   * `position: absolute` (legacy, ChatView-local mount).
+   */
+  fixed?: boolean;
 }
 
 /**
@@ -183,6 +189,7 @@ export function FloatingQuestionPanel({
   api,
   requests,
   onResolved,
+  fixed = false,
 }: FloatingQuestionPanelProps) {
   // Track which ids are in the process of being removed (for exit animation).
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
@@ -325,7 +332,7 @@ export function FloatingQuestionPanel({
     // pointer-events-none on outer so clicks on underlying chat scroll through.
     // US-FQP2.4: inset-x-0 ensures symmetric left/right margins.
     <div
-      className={`pointer-events-none absolute inset-x-0 z-40 px-4 ${positionCls}`}
+      className={`pointer-events-none ${fixed ? "fixed" : "absolute"} inset-x-0 z-40 px-4 ${positionCls}`}
       data-testid="floating-question-panel"
     >
       {/* pointer-events-auto on the actual panel; mx-auto centres within px-4 */}
