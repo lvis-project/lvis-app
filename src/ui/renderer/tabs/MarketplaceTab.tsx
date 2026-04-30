@@ -41,7 +41,7 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         <div className="flex items-center gap-2">
           <Input
             type="url"
-            placeholder="https://marketplace.lge.internal"
+            placeholder="https://marketplace.your-corp.example"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
             className="flex-1"
