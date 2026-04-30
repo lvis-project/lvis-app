@@ -575,3 +575,67 @@
     transition: none;
   }
 }
+
+/* ─── lvis-prose — theme-aware Tailwind Typography wrapper ────────────────
+   Replaces direct `prose-invert` usage on chat surfaces. The original
+   `prose-invert` modifier hard-codes near-white text, which makes assistant
+   bubbles invisible once `data-theme="light"` paints the chat background
+   white.
+
+   Strategy: keep the @tailwindcss/typography plugin's structural rules
+   (margins, lists, code blocks) but rebind every `--tw-prose-*` variable
+   to a SEMANTIC token (`--foreground`, `--muted-foreground`,
+   `--code-fg`, …) so the body text follows the active theme.
+
+   Apply alongside `prose prose-sm`:
+     <div class="prose prose-sm lvis-prose ...">
+   Do NOT combine with `prose-invert` — that would re-shadow the variables
+   with the plugin's hard-coded dark-bg defaults.
+
+   Code spans/blocks deliberately reuse `--code-*` so a "dark code on light
+   shell" combination still has a readable embedded code panel.
+──────────────────────────────────────────────────────────────────────────── */
+@layer components {
+  .lvis-prose {
+    /* Body + inline content */
+    --tw-prose-body: hsl(var(--foreground));
+    --tw-prose-headings: hsl(var(--foreground));
+    --tw-prose-lead: hsl(var(--foreground));
+    --tw-prose-links: hsl(var(--primary));
+    --tw-prose-bold: hsl(var(--foreground));
+    --tw-prose-counters: hsl(var(--muted-foreground));
+    --tw-prose-bullets: hsl(var(--muted-foreground));
+    --tw-prose-hr: hsl(var(--border));
+    --tw-prose-quotes: hsl(var(--foreground));
+    --tw-prose-quote-borders: hsl(var(--border));
+    --tw-prose-captions: hsl(var(--muted-foreground));
+    --tw-prose-kbd: hsl(var(--foreground));
+    --tw-prose-kbd-shadows: var(--foreground);
+    /* Code surfaces — bind to dedicated --code-* tokens so the chat-side
+       code panel can independently follow its own data-code-theme. */
+    --tw-prose-code: hsl(var(--code-fg));
+    --tw-prose-pre-code: hsl(var(--code-fg));
+    --tw-prose-pre-bg: hsl(var(--code-bg));
+    /* Tables */
+    --tw-prose-th-borders: hsl(var(--border));
+    --tw-prose-td-borders: hsl(var(--border));
+
+    /* Belt-and-suspenders: even if a stray `prose-invert` is left elsewhere,
+       this wrapper still anchors the body color to the semantic token. */
+    color: hsl(var(--foreground));
+  }
+  /* Inline code chip — the typography plugin paints a transparent bg by
+     default, which can render unreadable on tinted bubbles. Force the code
+     surface so the chip stays legible across all 16 theme combinations. */
+  .lvis-prose :where(code):not(:where(pre code, [class~="not-prose"] *)) {
+    background-color: hsl(var(--code-bg));
+    color: hsl(var(--code-fg));
+    padding: 0.1rem 0.3rem;
+    border-radius: 0.25rem;
+    font-weight: 500;
+  }
+  .lvis-prose :where(code):not(:where(pre code, [class~="not-prose"] *))::before,
+  .lvis-prose :where(code):not(:where(pre code, [class~="not-prose"] *))::after {
+    content: "";
+  }
+}
