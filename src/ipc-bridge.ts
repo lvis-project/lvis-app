@@ -22,7 +22,7 @@ import { findMethodByCapability } from "./boot/plugins.js";
 import { emitEvent as emitHostEvent } from "./boot/types.js";
 import { requiredCapabilityForEmit } from "./plugins/capabilities.js";
 import { stripSecretFields } from "./plugins/config-schema.js";
-import { emitPluginConfigChange } from "./plugins/config-change-bus.js";
+import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "./plugins/config-change-bus.js";
 import {
   REGISTERED_ROUTINES,
   buildRoutineForTrigger,
@@ -1032,7 +1032,10 @@ ${input}`;
       for (const k of observed) {
         emitPluginConfigChange(pluginId, k, savedConfig?.[k]);
       }
-      await pluginRuntime.restartAll();
+      // US-3c.2: restart only the affected plugin instead of the full runtime.
+      // `restartPlugin` stops, tears down, and re-loads exactly one plugin with
+      // the updated configOverrides — all other plugins are undisturbed.
+      await pluginRuntime.restartPlugin(pluginId);
       return { ok: true as const, config: savedConfig };
     } catch (err) {
       return pluginConfigError(
@@ -1088,11 +1091,43 @@ ${input}`;
         await settingsService.setPluginConfig(safePluginId, next);
         pluginRuntime.setConfigOverride(safePluginId, next);
       }
-      emitPluginConfigChange(safePluginId, key, "[REDACTED]");
+      // US-3c.3: emit the sentinel instead of a literal string so listeners
+      // can reliably distinguish "secret updated (value masked)" from genuine
+      // same-value transitions via identity check (value === SECRET_REDACTED_SENTINEL).
+      emitPluginConfigChange(safePluginId, key, SECRET_REDACTED_SENTINEL);
       return { ok: true as const };
     } catch (err) {
       return pluginConfigError(
         "plugin-config-secret-save-failed",
+        (err as Error).message,
+      );
+    }
+  });
+  // US-3c.1: batch secret-presence query — renderer calls this once per plugin
+  // selection to build the `secretsPresent` map for PluginConfigSchemaForm.
+  // Returns an array of keys (within the plugin's configSchema) for which the
+  // keychain holds a non-null value. Fewer IPC round-trips than per-key checks.
+  ipcMain.handle("lvis:plugins:config:secret:list-keys", (e, pluginId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugins:config:secret:list-keys", e);
+      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
+    }
+    try {
+      const manifest = pluginRuntime.getPluginManifest(pluginId);
+      const schema = manifest?.configSchema;
+      if (!schema?.properties) return { ok: true as const, keys: [] as string[] };
+      const presentKeys: string[] = [];
+      for (const key of Object.keys(schema.properties)) {
+        const prop = schema.properties[key];
+        if (prop?.type === "string" && prop.format === "secret") {
+          const stored = settingsService.getSecret(`plugin.${pluginId}.${key}`);
+          if (stored !== null) presentKeys.push(key);
+        }
+      }
+      return { ok: true as const, keys: presentKeys };
+    } catch (err) {
+      return pluginConfigError(
+        "plugin-config-secret-list-failed",
         (err as Error).message,
       );
     }
