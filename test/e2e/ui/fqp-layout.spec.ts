@@ -86,7 +86,7 @@ test.describe('FQP layout — chip placement and margin symmetry', () => {
     mainWindow,
   }) => {
     const panelVisible = await ensurePanelVisible(mainWindow);
-    test.skip(!panelVisible, 'FQP not triggered — skipping DOM-order assertion.');
+    expect(panelVisible, 'FQP injection must succeed — if this fails, check __lvisApi._askUserQuestionCallbacks is registered').toBe(true);
 
     const panel = mainWindow.locator('[data-testid="floating-question-panel"]');
 
@@ -96,7 +96,7 @@ test.describe('FQP layout — chip placement and margin symmetry', () => {
       .waitFor({ state: 'visible', timeout: 3_000 })
       .then(() => true)
       .catch(() => false);
-    test.skip(!chipsRowVisible, 'No chips row found — skipping DOM-order assertion.');
+    expect(chipsRowVisible, 'fqp-chips-row must be visible after injection').toBe(true);
 
     // Verify DOM order: questionText < chipsRow < textarea.
     const orderOk = await mainWindow.evaluate(() => {
@@ -143,7 +143,7 @@ test.describe('FQP layout — chip placement and margin symmetry', () => {
     await mainWindow.setViewportSize({ width: 1100, height: 720 });
 
     const panelVisible = await ensurePanelVisible(mainWindow);
-    test.skip(!panelVisible, 'FQP not triggered — skipping layout assertion at 1100×720.');
+    expect(panelVisible, 'FQP injection must succeed at 1100×720').toBe(true);
 
     const panel = mainWindow.locator('[data-testid="floating-question-panel"]');
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
@@ -181,7 +181,7 @@ test.describe('FQP layout — chip placement and margin symmetry', () => {
     await mainWindow.setViewportSize({ width: 1440, height: 900 });
 
     const panelVisible = await ensurePanelVisible(mainWindow);
-    test.skip(!panelVisible, 'FQP not triggered — skipping layout assertion at 1440×900.');
+    expect(panelVisible, 'FQP injection must succeed at 1440×900').toBe(true);
 
     const panel = mainWindow.locator('[data-testid="floating-question-panel"]');
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
@@ -219,10 +219,10 @@ test.describe('FQP layout — chip placement and margin symmetry', () => {
       .waitFor({ state: 'visible', timeout: 5_000 })
       .then(() => true)
       .catch(() => false);
-    test.skip(!sidebarVisible, 'Sidebar not found — skipping sidebar-visible layout check.');
+    expect(sidebarVisible, 'Sidebar must be visible for sidebar-visible layout check').toBe(true);
 
     const panelVisible = await ensurePanelVisible(mainWindow);
-    test.skip(!panelVisible, 'FQP not triggered — skipping sidebar layout assertion.');
+    expect(panelVisible, 'FQP injection must succeed for sidebar layout assertion').toBe(true);
 
     const panel = mainWindow.locator('[data-testid="floating-question-panel"]');
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
