@@ -5,7 +5,7 @@
  * Steps:
  *   1. Pre-flight security checks (H2 dev-key block, H3 signing-env validation)
  *   2. Read + patch-bump version in package.json
- *   3. bun run build (or npm fallback)
+ *   3. bun run build
  *   4. electron-builder --publish=never → artifacts under ./release/
  *
  * Usage:  node scripts/release.mjs [--allow-dev-key] [--skip-code-sign]
@@ -147,10 +147,15 @@ async function main() {
   pkg.version = newVersion;
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
 
-  const useBun = process.env.LVIS_USE_NPM !== "1" && existsSync(resolve(root, "bun.lockb"));
-  run(useBun ? "bun" : "npm", ["run", useBun ? "build" : "build:npm"]);
+  // bun-only — the npm fallback was removed alongside the *:npm scripts
+  // (see PR #327/#328). The legacy `useBun` ternary checked for `bun.lockb`,
+  // which became permanently absent when bun 1.2 switched to the text-format
+  // `bun.lock`, so the npm path was *always* taken — and `build:npm` no
+  // longer exists, so any release would have failed at this point. Single
+  // bun call now.
+  run("bun", ["run", "build"]);
 
-  run("npx", ["electron-builder", "--publish=never"]);
+  run("bunx", ["electron-builder", "--publish=never"]);
 
   console.log(`[release] done. Artifacts in release/  (version ${newVersion})`);
 }
