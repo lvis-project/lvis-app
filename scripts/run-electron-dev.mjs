@@ -648,7 +648,6 @@ async function main() {
     ].filter((relPath) => !disabledPluginIds.has(relPath.replace("../lvis-plugin-", "")));
 
     const bunEnv = getBunInstallEnv();
-    const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
 
     try {
       for (const relPath of pluginRoots) {
@@ -662,15 +661,13 @@ async function main() {
           await runStep("plugins:install", "bun", ["install", "--cwd", pluginDir], { env: bunEnv });
           await runStep("plugins:build", "bun", ["run", "--cwd", pluginDir, "build"], { env: bunEnv });
         } catch (bunErr) {
-          log("plugins", `bun failed for ${relPath}; fallback to npm (${bunErr.message})`);
-          try {
-            seedPluginSdk(pluginDir);
-            await runStep("plugins:build:bun-retry", "bun", ["run", "--cwd", pluginDir, "build"], { env: bunEnv });
-          } catch (bunRetryErr) {
-            log("plugins", `bun retry failed for ${relPath}; using npm fallback (${bunRetryErr.message})`);
-            await runStep("plugins:install:npm", npmCmd, ["install", "--prefix", pluginDir]);
-            await runStep("plugins:build:npm", npmCmd, ["run", "--prefix", pluginDir, "build"]);
-          }
+          // Retry once with an explicit SDK seed — covers `bun install`
+          // racing against the symlinked `@lvis/plugin-sdk` not yet
+          // materialised. Persistent failure falls through to the outer
+          // catch and shuts the runner down.
+          log("plugins", `bun failed for ${relPath}; retrying with SDK seed (${bunErr.message})`);
+          seedPluginSdk(pluginDir);
+          await runStep("plugins:build:bun-retry", "bun", ["run", "--cwd", pluginDir, "build"], { env: bunEnv });
         }
       }
     } catch (err) {
