@@ -60,7 +60,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
   } = useWorkflowTools(workflowApi);
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef,
+    question, setQuestion, chatEndRef, currentSessionId,
     hasApiKey, onOpenSettings,
     routineResult, routineQueueIndex, routineQueueTotal,
     onDismissRoutineResult, onSnoozeRoutineResult,
@@ -467,7 +467,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
       {/* AskUserQuestionCard instances are now rendered inside FloatingQuestionPanel
           (positioned absolutely at the top of this grid, z-40). Removed from
           inline stream to eliminate the buried-question UX pain point. */}
-      <SessionTodoPanel api={workflowApi} />
+      <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
       <div className="border-t bg-card p-3 space-y-2">
         <div className="flex items-center justify-between gap-3 text-[11px]">
           <div className={`font-mono ${contextColor}`} title="추정 토큰 사용량 (대화 기반)">

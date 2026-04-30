@@ -83,29 +83,201 @@
   }
 }
 
+||||||| 41d9493
+/*
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  LVIS theme system — semantic design tokens
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ *  Two-tier model:
+ *    1. PRIMITIVE tokens (--p-*)   — raw HSL values; the single place a real
+ *                                    color exists. Never consumed directly by
+ *                                    components.
+ *    2. SEMANTIC tokens  (--background, --foreground, --primary, …)
+ *                                  — meaning-based references that point at
+ *                                    a primitive. Components consume ONLY
+ *                                    semantic tokens (via Tailwind shortcuts
+ *                                    like `bg-background`, `text-primary`).
+ *
+ *  A theme variant = a remapping of semantic → primitive. Adding a new theme
+ *  is a CSS-only change (see `[data-theme="light"]` / `[data-theme="dark"]`
+ *  selectors below). Components do not change.
+ *
+ *  Theme switching is live (no reload) and is driven by ThemeProvider, which
+ *  sets `data-theme` on <html>.
+ *
+ *  See `docs/development/theme-system.md` for the full pattern + how to add
+ *  a new semantic token or theme variant.
+ */
+
 @layer base {
+  /* ── Tier 1: primitive palette ─────────────────────────────────────── */
+  /*  These are written as HSL triples (no hsl() wrapper) so Tailwind's
+   *  `hsl(var(--token) / <alpha>)` syntax still works (e.g. `bg-primary/30`).
+   */
   :root {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 7%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    /* Brand / accent — same in both themes */
+    --p-blue-400: 217.2 91.2% 67%;
+    --p-blue-500: 217.2 91.2% 59.8%;
+    --p-blue-600: 224.3 76.3% 48%;
+    --p-blue-700: 224.3 76.3% 38%;
+
+    /* Neutral grays */
+    --p-slate-0:   0 0% 100%;
+    --p-slate-50:  210 40% 98%;
+    --p-slate-100: 210 40% 96%;
+    --p-slate-200: 214 32% 91%;
+    --p-slate-300: 213 27% 84%;
+    --p-slate-400: 215 20% 65%;
+    --p-slate-500: 215 16% 47%;
+    --p-slate-600: 215 19% 35%;
+    --p-slate-700: 215 25% 27%;
+    --p-slate-800: 217 33% 17%;
+    --p-slate-900: 222 47% 11%;
+    --p-slate-950: 222.2 84% 4.9%;
+    --p-slate-card-dark: 222.2 84% 7%;
+
+    /* Status colors */
+    --p-red-500:    0 84% 60%;
+    --p-red-700:    0 62.8% 30.6%;
+    --p-yellow-100: 48 96% 89%;
+    --p-yellow-200: 48 97% 77%;
+    --p-yellow-800: 30 80% 25%;
+    --p-green-500: 142 71% 45%;
+
+    /* Shape — does not vary by theme */
     --radius: 0.6rem;
   }
+
+  /* ── Tier 2: semantic mapping — DARK (default) ─────────────────────── */
+  :root,
+  :root[data-theme="dark"] {
+    --background:           var(--p-slate-950);
+    --foreground:           var(--p-slate-50);
+
+    --card:                 var(--p-slate-card-dark);
+    --card-foreground:      var(--p-slate-50);
+
+    --popover:              var(--p-slate-950);
+    --popover-foreground:   var(--p-slate-50);
+
+    --primary:              var(--p-blue-500);
+    --primary-foreground:   var(--p-slate-50);
+
+    --secondary:            var(--p-slate-800);
+    --secondary-foreground: var(--p-slate-50);
+
+    --muted:                var(--p-slate-800);
+    --muted-foreground:     var(--p-slate-400);
+
+    --accent:               var(--p-slate-800);
+    --accent-foreground:    var(--p-slate-50);
+
+    --destructive:          var(--p-red-700);
+    --destructive-foreground: var(--p-slate-50);
+
+    --warning:              var(--p-yellow-200);
+    --warning-foreground:   var(--p-yellow-800);
+
+    --success:              var(--p-green-500);
+
+    --border:               var(--p-slate-800);
+    --input:                var(--p-slate-800);
+    --ring:                 var(--p-blue-600);
+
+    color-scheme: dark;
+  }
+
+  /* ── Tier 2: semantic mapping — LIGHT ──────────────────────────────── */
+  :root[data-theme="light"] {
+    --background:           var(--p-slate-0);
+    --foreground:           var(--p-slate-900);
+
+    --card:                 var(--p-slate-0);
+    --card-foreground:      var(--p-slate-900);
+
+    --popover:              var(--p-slate-0);
+    --popover-foreground:   var(--p-slate-900);
+
+    --primary:              var(--p-blue-600);
+    --primary-foreground:   var(--p-slate-50);
+
+    --secondary:            var(--p-slate-100);
+    --secondary-foreground: var(--p-slate-900);
+
+    --muted:                var(--p-slate-100);
+    --muted-foreground:     var(--p-slate-500);
+
+    --accent:               var(--p-slate-100);
+    --accent-foreground:    var(--p-slate-900);
+
+    --destructive:          var(--p-red-500);
+    --destructive-foreground: var(--p-slate-50);
+
+    --warning:              var(--p-yellow-100);
+    --warning-foreground:   var(--p-yellow-800);
+
+    --success:              var(--p-green-500);
+
+    --border:               var(--p-slate-200);
+    --input:                var(--p-slate-200);
+    --ring:                 var(--p-blue-500);
+
+    color-scheme: light;
+  }
+
+  /* ── Tier 2: semantic mapping — HIGH-CONTRAST (optional 3rd) ───────── */
+  :root[data-theme="high-contrast"] {
+    --background:           0 0% 0%;
+    --foreground:           0 0% 100%;
+
+    --card:                 0 0% 0%;
+    --card-foreground:      0 0% 100%;
+
+    --popover:              0 0% 0%;
+    --popover-foreground:   0 0% 100%;
+
+    --primary:              60 100% 50%;
+    --primary-foreground:   0 0% 0%;
+
+    --secondary:            0 0% 15%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted:                0 0% 15%;
+    --muted-foreground:     0 0% 80%;
+
+    --accent:               60 100% 50%;
+    --accent-foreground:    0 0% 0%;
+
+    --destructive:          0 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --warning:              48 100% 50%;
+    --warning-foreground:   0 0% 0%;
+
+    --success:              120 100% 40%;
+
+    --border:               0 0% 100%;
+    --input:                0 0% 100%;
+    --ring:                 60 100% 50%;
+
+    color-scheme: dark;
+  }
+
+  /*
+   * Theme transition: keep root background/foreground swap smooth, but
+   * respect `prefers-reduced-motion` — users with that preference set must
+   * NOT see a transition flicker on first paint or theme switch.
+   */
+  :root {
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      transition: none;
+    }
+  }
+
   * {
     @apply border-border;
   }

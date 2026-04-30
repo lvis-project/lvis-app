@@ -65,6 +65,8 @@ export type PluginCardSummary = {
   tools: string[];
   toolDescriptions?: Record<string, string>;
   isManaged?: boolean;
+  /** Install policy from the plugin manifest: "admin" (IT-managed only) or "user" (anyone). */
+  installPolicy?: "admin" | "user";
   loadStatus?: "loaded" | "failed" | "disabled";
   version?: string;
   publisher?: string;
@@ -113,6 +115,8 @@ export type AppSettings = {
     realCloudBaseUrl?: string;
     realCloudAllowPrivateNetwork?: boolean;
   };
+  /** UX Track 3 — visual theme preference. */
+  appearance?: { theme: "system" | "light" | "dark" | "high-contrast" };
 };
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;

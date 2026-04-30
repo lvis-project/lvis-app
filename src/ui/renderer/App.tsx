@@ -4,6 +4,7 @@ import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
+import { ThemeProvider } from "./theme/index.js";
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
@@ -287,7 +288,7 @@ export function App() {
   // ChatView context bundle — avoids drilling ~40 props through the tree.
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
+    question, setQuestion, chatEndRef, currentSessionId, hasApiKey, onOpenSettings,
     routineResult, routineQueueIndex, routineQueueTotal,
     onDismissRoutineResult: dismissRoutineResult, onSnoozeRoutineResult: snoozeRoutineResult,
     onPrevRoutineResult: prevRoutineResult, onNextRoutineResult: nextRoutineResult,
@@ -331,6 +332,7 @@ export function App() {
   // ─── Render ───────────────────────────────────
   return (
     <ErrorBoundary fallback="앱 오류가 발생했습니다">
+    <ThemeProvider api={api}>
     <TooltipProvider>
         <div className="flex h-screen flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -346,7 +348,7 @@ export function App() {
           <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
           <MarketplaceUpdateBanner updates={marketplaceUpdates} onDismiss={dismissMarketplaceUpdates} />
           {fallbackToast && (
-            <div className="bg-yellow-100 text-yellow-800 text-xs px-4 py-2 border-b border-yellow-200">
+            <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
               {fallbackToast}
             </div>
           )}
@@ -404,6 +406,7 @@ export function App() {
       <DropZoneOverlay />
       <DevConsoleToggle />
     </TooltipProvider>
+    </ThemeProvider>
     </ErrorBoundary>
   );
 }
