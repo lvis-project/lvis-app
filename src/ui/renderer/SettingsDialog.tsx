@@ -10,7 +10,6 @@ import { UsageDashboard } from "./components/UsageDashboard.js";
 import { PluginPerfTab } from "./tabs/PluginPerfTab.js";
 import { PrivacyTab } from "./tabs/PrivacyTab.js";
 import { LlmTab } from "./tabs/LlmTab.js";
-import { AdvancedTab } from "./tabs/AdvancedTab.js";
 import { AppearanceTab } from "./tabs/AppearanceTab.js";
 import { ChatTab } from "./tabs/ChatTab.js";
 import { WebTab } from "./tabs/WebTab.js";
@@ -31,7 +30,6 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 [&>*]:!grow-0 [&>*]:!shrink-0 [&>*]:!basis-auto overflow-x-auto">
             <TabsTrigger value="llm">지능 (LLM)</TabsTrigger>
-            <TabsTrigger value="advanced">고급</TabsTrigger>
             <TabsTrigger value="appearance">테마</TabsTrigger>
             <TabsTrigger value="chat">채팅</TabsTrigger>
             <TabsTrigger value="web">검색 (Web)</TabsTrigger>
@@ -68,28 +66,11 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
               setEnableThinking={s.setEnableThinking}
               thinkingBudget={s.thinkingBudget}
               setThinkingBudget={s.setThinkingBudget}
-              onSaved={onSaved}
-            />
-          </TabsContent>
-
-          <TabsContent value="advanced">
-            <AdvancedTab
-              temperature={s.temperature}
-              setTemperature={s.setTemperature}
-              maxOutputTokens={s.maxOutputTokens}
-              setMaxOutputTokens={s.setMaxOutputTokens}
-              seedInput={s.seedInput}
-              setSeedInput={s.setSeedInput}
-              responseFormat={s.responseFormat}
-              setResponseFormat={s.setResponseFormat}
-              stopSequencesText={s.stopSequencesText}
-              setStopSequencesText={s.setStopSequencesText}
-              streamSmoothing={s.streamSmoothing}
-              setStreamSmoothing={s.setStreamSmoothing}
               fallbackChain={s.fallbackChain}
               setFallbackChain={s.setFallbackChain}
               fallbackOpen={s.fallbackOpen}
               setFallbackOpen={s.setFallbackOpen}
+              onSaved={onSaved}
             />
           </TabsContent>
 
@@ -98,7 +79,12 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
           </TabsContent>
 
           <TabsContent value="chat">
-            <ChatTab autoCompact={s.autoCompact} setAutoCompact={s.setAutoCompact} />
+            <ChatTab
+              autoCompact={s.autoCompact}
+              setAutoCompact={s.setAutoCompact}
+              streamSmoothing={s.streamSmoothing}
+              setStreamSmoothing={s.setStreamSmoothing}
+            />
           </TabsContent>
 
           <TabsContent value="web">
