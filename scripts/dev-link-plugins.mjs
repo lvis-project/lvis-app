@@ -127,8 +127,18 @@ for (const repo of repos) {
 
   if (!dryRun) {
     mkdirSync(installDir, { recursive: true });
-    // Write real plugin.json (entry stays as "dist/hostPlugin.js")
-    writeFileSync(resolve(installDir, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n", "utf-8");
+    // Symlink plugin.json → source manifest. Used to be a one-time file copy,
+    // which left ~/.lvis stale whenever the source manifest changed (version
+    // bumps, tools/permissions/keywords edits) until the user re-ran dev:link.
+    // Host treats plugin.json as read-only, so a symlink is safe and gives the
+    // same single-source-of-truth guarantee that dist/ already has.
+    const manifestLink = resolve(installDir, "plugin.json");
+    const okManifest = forceSymlink(manifestLink, manifestPath);
+    if (!okManifest) {
+      log(`skip registry: ${pluginId} (plugin.json symlink failed — run with --force to replace real file)`);
+      continue;
+    }
+    log(`linked: ${pluginId}  plugin.json → ${manifestPath}`);
     // Symlink dist/ directory — skip registration when symlink cannot be created
     if (existsSync(distTarget)) {
       const ok = forceSymlink(distLink, distTarget);
