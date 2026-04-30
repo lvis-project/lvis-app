@@ -27,20 +27,21 @@ export type LLMVendor = (typeof LLM_VENDORS)[number];
  *
  * Optional fields are vendor-specific: `baseUrl` is required only for
  * `azure-foundry`; `vertexProject` / `vertexLocation` only meaningful for
- * `vertex-ai`; `seed` undefined = random sampling.
+ * `vertex-ai`.
+ *
+ * CHANGELOG (CTRL simplification):
+ *   Removed `temperature`, `maxOutputTokens`, `seed`, `responseFormat`,
+ *   `stopSequences` — modern frontier models (GPT-5+, Claude 4+) deprecate
+ *   or ignore these sampling/decoding params. Vendor SDK defaults are used.
+ *   Persisted values for these keys are silently dropped on next write.
  */
 export interface LLMVendorSettings {
   model: string;
   baseUrl?: string;
   vertexProject?: string;
   vertexLocation?: string;
-  maxOutputTokens: number;
-  temperature: number;
   enableThinking: boolean;
   thinkingBudgetTokens: number;
-  seed?: number;
-  responseFormat: "text" | "json";
-  stopSequences: string[];
 }
 
 const DEFAULT_MODEL: Record<LLMVendor, string> = {
@@ -56,12 +57,8 @@ function defaultBlock(vendor: LLMVendor): LLMVendorSettings {
   const model = DEFAULT_MODEL[vendor];
   return {
     model,
-    maxOutputTokens: 4096,
-    temperature: 0.7,
     enableThinking: vendorSupportsThinking(vendor, model),
     thinkingBudgetTokens: 10_000,
-    responseFormat: "text",
-    stopSequences: [],
   };
 }
 
