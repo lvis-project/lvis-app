@@ -17,7 +17,8 @@
  *
  * Default chips (US-FQP2.2):
  *   - When `suggestedAnswers` is set on the first question item (max 3), those
- *     are rendered as quick-response chip buttons above the card body.
+ *     are rendered as quick-response chip buttons BETWEEN the question text and
+ *     the free-text input (via `suggestedChipsSlot` prop on AskUserQuestionCard).
  *   - When explicit `choices` are present, those drive the card body buttons —
  *     no chip row is shown by this panel.
  *   - When neither suggestedAnswers nor choices are present, NO chips are shown.
@@ -376,17 +377,20 @@ export function FloatingQuestionPanel({
                         <XIcon className="h-3.5 w-3.5" />
                       </button>
                     </div>
-                    {/* US-FQP2.2: Quick-response chips above the card body */}
-                    <QuickChips
-                      request={req}
-                      onChipClick={(answer) => void handleChipClick(req, answer)}
-                    />
-                    {/* The existing AskUserQuestionCard handles all UX */}
+                    {/* US-FQP2.2: Quick-response chips are passed as a slot to
+                        AskUserQuestionCard so they render BETWEEN the question
+                        text and the free-text input (not above the card body). */}
                     <div className="px-0">
                       <AskUserQuestionCard
                         api={api}
                         request={req}
                         onResolved={handleResolved}
+                        suggestedChipsSlot={
+                          <QuickChips
+                            request={req}
+                            onChipClick={(answer) => void handleChipClick(req, answer)}
+                          />
+                        }
                       />
                     </div>
                   </div>
