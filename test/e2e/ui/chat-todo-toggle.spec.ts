@@ -19,7 +19,7 @@ test('chat todo toggle button is visible in the chat toolbar', async ({ mainWind
     .then(() => true)
     .catch(() => false);
 
-  test.skip(!found, 'Chat TODO toggle button not found — skipping.');
+  expect(found, 'Chat TODO toggle button must be present — if missing, check data-testid="chat-todo-toggle-btn" is rendered').toBe(true);
   await expect(btn).toBeVisible();
 });
 
@@ -30,7 +30,7 @@ test('chat todo panel slides in and shows pending tasks or empty state', async (
     .then(() => true)
     .catch(() => false);
 
-  test.skip(!found, 'Chat TODO toggle button not found — skipping.');
+  expect(found, 'Chat TODO toggle button must be present — if missing, check data-testid="chat-todo-toggle-btn" is rendered').toBe(true);
 
   // Panel should not be visible before clicking
   const panelBefore = await mainWindow
@@ -68,7 +68,7 @@ test('chat todo panel state persists across simulated reload (localStorage)', as
     .then(() => true)
     .catch(() => false);
 
-  test.skip(!found, 'Chat TODO toggle button not found — skipping.');
+  expect(found, 'Chat TODO toggle button must be present — if missing, check data-testid="chat-todo-toggle-btn" is rendered').toBe(true);
 
   // Open the panel
   await btn.click();
