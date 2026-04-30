@@ -154,8 +154,8 @@ export function TriggerCard({
           <div
             className={
               isSummary
-                ? "prose prose-sm prose-invert line-clamp-2 max-w-none break-words text-foreground"
-                : "prose prose-sm prose-invert max-w-none break-words text-foreground"
+                ? "prose prose-sm lvis-prose line-clamp-2 max-w-none break-words"
+                : "prose prose-sm lvis-prose max-w-none break-words"
             }
           >
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown>

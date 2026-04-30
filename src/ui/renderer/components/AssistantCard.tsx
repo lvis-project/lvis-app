@@ -86,7 +86,7 @@ export function AssistantCard({
         </div>
       )}
 
-      <div className="prose prose-sm prose-invert max-w-none break-words">
+      <div className="prose prose-sm lvis-prose max-w-none break-words" data-testid="assistant-message-body">
         {highlightQuery && highlighted ? (
           <div className="whitespace-pre-wrap">{highlighted}</div>
         ) : (
