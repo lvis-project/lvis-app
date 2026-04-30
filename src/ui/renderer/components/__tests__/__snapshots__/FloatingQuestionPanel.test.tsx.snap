@@ -10,21 +10,21 @@ exports[`FloatingQuestionPanel > chip rows snapshot matches expected chip count 
     data-testid="fqp-chip"
     type="button"
   >
-    네
+    A 방식
   </button>
   <button
     class="rounded-full px-3 py-1 text-xs font-medium bg-secondary/40 text-secondary-foreground border border-border/60 hover:bg-secondary hover:border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-150"
     data-testid="fqp-chip"
     type="button"
   >
-    아니오
+    B 방식
   </button>
   <button
     class="rounded-full px-3 py-1 text-xs font-medium bg-secondary/40 text-secondary-foreground border border-border/60 hover:bg-secondary hover:border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary transition-colors duration-150"
     data-testid="fqp-chip"
     type="button"
   >
-    잘 모르겠어요
+    C 방식
   </button>
 </div>
 `;
