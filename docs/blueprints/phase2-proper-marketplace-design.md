@@ -34,7 +34,7 @@ Phase 1 은 `MockCloudMarketplaceAdapter` 로 시작되었고 Phase 1.5 는 mana
 |---|---|---|---|
 | Q1 | 서버 호스팅 | 별도 repo `lvis-marketplace-server/`, 사내망 Linux VM 배포 | 통제 + 비개발자 UI 요구 |
 | Q2 | 서버 언어 | **FastAPI (Python 3.12)** | pageindex 팀 python stack 재사용, uv 런타임 재활용, OpenAPI 자동 생성 → client 스펙 lock |
-| Q3 | Auth | **MVP: API key per publisher (Bearer)** / Phase 3: SSO (newep.lge.com OIDC) passthrough | API key 로 단순하게 시작, SSO 로 성숙도 올리기 |
+| Q3 | Auth | **MVP: API key per publisher (Bearer)** / Phase 3: SSO (sso.your-corp.example OIDC) passthrough | API key 로 단순하게 시작, SSO 로 성숙도 올리기 |
 | Q4 | Artifact | **zip** | Phase 1.5 `MockCloudMarketplaceAdapter` 와 호환, 기존 `plugin.json` parser 재사용 |
 | Q5 | Versioning + rollback | **semver 강제, single "stable" channel, server-side rollback/yank API** | Phase 3 에서 channel 분리 |
 | Q6 | Publishing workflow | **Web UI 주 + CLI 보조 (동일 API)** | 비개발자 = UI, 개발자 = CLI |
@@ -272,8 +272,8 @@ CREATE TABLE audit_log (
 ```
 
 **nginx reverse proxy (사내 도메인)**:
-- `https://marketplace.lvis.internal.lge.com` → `127.0.0.1:8080`
-- TLS cert: LGE internal CA 서명 (IT 발급)
+- `https://marketplace.lvis.internal.your-corp.example` → `127.0.0.1:8080`
+- TLS cert: corporate internal CA 서명 (IT 발급)
 - Client max body size: 100 MB (artifact upload 상한)
 
 ---
@@ -322,7 +322,7 @@ class RealCloudMarketplaceAdapter implements MarketplaceAdapter {
 `~/.lvis/marketplace.config.json`:
 ```json
 {
-  "baseUrl": "https://marketplace.lvis.internal.lge.com",
+  "baseUrl": "https://marketplace.lvis.internal.your-corp.example",
   "apiKey": null,
   "timeoutMs": 30000
 }
@@ -335,7 +335,7 @@ LVIS client 는 read-only 이므로 `apiKey: null` 기본. Admin policy (C2 admi
 {
   "managed": true,
   "marketplace": {
-    "baseUrl": "https://marketplace.lvis.internal.lge.com"
+    "baseUrl": "https://marketplace.lvis.internal.your-corp.example"
   }
 }
 ```
@@ -378,7 +378,7 @@ function createAdapter(config: MarketplaceConfig): MarketplaceAdapter {
 
 ```bash
 npm install -g @lvis/marketplace-cli
-lvis-marketplace config set baseUrl https://marketplace.lvis.internal.lge.com
+lvis-marketplace config set baseUrl https://marketplace.lvis.internal.your-corp.example
 lvis-marketplace config set apiKey $LVIS_MARKETPLACE_API_KEY
 lvis-marketplace publish ./my-plugin-1.2.0.zip
 lvis-marketplace yank my-plugin 1.1.0
@@ -402,10 +402,10 @@ lvis-marketplace list
 
 ### 6.2 Phase 3 승격 (SSO)
 
-**newep.lge.com OIDC passthrough**:
+**sso.your-corp.example OIDC passthrough**:
 - LVIS client 가 OS 에 저장된 SSO refresh token 을 fetch
 - marketplace server 에 `Authorization: Bearer <access_token>` 로 전달
-- 서버는 token 을 newep.lge.com 에 검증 요청
+- 서버는 token 을 sso.your-corp.example 에 검증 요청
 - publisher 권한은 LDAP group 또는 SAML claim 으로 결정
 
 Phase 3 승격 시에도 API key 경로는 유지 (CI 용).
@@ -458,9 +458,9 @@ Phase 3 승격 시에도 API key 경로는 유지 (CI 용).
 다음 세션 coding 시작 전에 IT 에 문의:
 
 1. **VM 프로비저닝** — 사내망 Ubuntu/RHEL VM 1대 (2 vCPU / 4 GB / 50 GB) 확보 절차, 소요 시간, 요청 양식
-2. **사내 도메인 등록** — `marketplace.lvis.internal.lge.com` (또는 유사) 할당 + DNS record + LGE CA 서명 cert 발급 가능 여부
+2. **사내 도메인 등록** — `marketplace.lvis.internal.your-corp.example` (또는 유사) 할당 + DNS record + corporate CA 서명 cert 발급 가능 여부
 3. **nginx / systemd 권한** — LVIS 팀이 직접 운영 가능한지, IT 운영팀 관리 대상인지
-4. **SSO 통합 일정** — newep.lge.com OIDC client 등록 절차, 개발자가 직접 가능한지, IT 승인 필요한지
+4. **SSO 통합 일정** — sso.your-corp.example OIDC client 등록 절차, 개발자가 직접 가능한지, IT 승인 필요한지
 5. **API key tier "admin" 의 발급 주체** — IT 가 발급? LVIS 팀이 발급 후 audit 제출?
 6. **Audit log 보존 정책** — GDPR/회사 보안 정책상 최소 보존 기간 (1년? 3년?)
 7. **artifact 크기 상한** — 서버 측 upload 제한 (기본 100 MB 제안, 적절한지 확인)
