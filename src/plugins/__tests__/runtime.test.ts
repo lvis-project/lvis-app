@@ -996,3 +996,216 @@ describe("PluginRuntime registry trusted-path", () => {
     warnSpy.mockRestore();
   });
 });
+
+/**
+ * US-A3 — single-plugin lifecycle smoke tests.
+ *
+ * Audit complaint: ipc-bridge install / uninstall / install-local handlers
+ * called `restartAll()` which wipes every loaded plugin's in-memory state.
+ * `addPlugin(pluginId)` and `removePlugin(pluginId)` were added so a single
+ * install/uninstall does not ripple into a full reload.
+ *
+ * The behavioral guarantee these tests anchor:
+ *   - Adding a freshly-registered plugin does NOT restart any other plugin.
+ *   - Removing one plugin does NOT restart any other plugin.
+ *   - Re-adding an already-loaded plugin acts as a `restartPlugin` (picks up
+ *     the latest bundle).
+ */
+describe("PluginRuntime addPlugin/removePlugin (US-A3)", () => {
+  let testDir: string;
+  let installedDir: string;
+  let registryPath: string;
+
+  beforeEach(async () => {
+    testDir = mkdtempSync(join(tmpdir(), "lvis-runtime-add-"));
+    installedDir = join(testDir, "plugins");
+    await mkdir(installedDir, { recursive: true });
+    registryPath = join(installedDir, "registry.json");
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  async function writePlugin(id: string): Promise<string> {
+    const pluginDir = join(installedDir, id);
+    await mkdir(pluginDir, { recursive: true });
+    const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`;
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `let started = 0;
+export default async function createPlugin(ctx) {
+  return {
+    handlers: { "${methodName}": async () => "hi-${id}-" + started },
+    start: async () => { started += 1; },
+    stop: async () => {},
+  };
+}
+`,
+      "utf-8",
+    );
+    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName] };
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    return manifestPath;
+  }
+
+  function makeRuntime(): PluginRuntime {
+    return new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+  }
+
+  it("setting plugin A config does not restart plugin B (single-plugin lifecycle)", async () => {
+    // Two plugins both loaded; restartPlugin('p-a') must not affect p-b.
+    const aPath = await writePlugin("p-a");
+    const bPath = await writePlugin("p-b");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "p-a", manifestPath: aPath, enabled: true },
+          { id: "p-b", manifestPath: bPath, enabled: true },
+        ],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+
+    // Sanity — both loaded with handlers.
+    expect(runtime.listPluginIds().sort()).toEqual(["p-a", "p-b"]);
+    const beforeA = await runtime.call("p_a_ping");
+    const beforeB = await runtime.call("p_b_ping");
+
+    // restartPlugin only restarts p-a; p-b's start counter must be unchanged.
+    await runtime.restartPlugin("p-a");
+
+    const afterA = await runtime.call("p_a_ping");
+    const afterB = await runtime.call("p_b_ping");
+    // start counter increments on each start. p-a went 1 → 2; p-b stays at 1.
+    expect(beforeA).toBe("hi-p-a-1");
+    expect(afterA).toBe("hi-p-a-2");
+    expect(beforeB).toBe("hi-p-b-1");
+    expect(afterB).toBe("hi-p-b-1");
+  });
+
+  it("addPlugin loads a newly-registered plugin without restarting others", async () => {
+    // p-existing is loaded first; then p-new is added to the registry and
+    // addPlugin('p-new') is called. p-existing must not have its start
+    // counter incremented.
+    const existingPath = await writePlugin("p-existing");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-existing", manifestPath: existingPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    expect(await runtime.call("p_existing_ping")).toBe("hi-p-existing-1");
+
+    // Simulate marketplace install: write the new plugin + extend registry.
+    const newPath = await writePlugin("p-new");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "p-existing", manifestPath: existingPath, enabled: true },
+          { id: "p-new", manifestPath: newPath, enabled: true },
+        ],
+      }),
+      "utf-8",
+    );
+
+    await runtime.addPlugin("p-new");
+
+    expect(runtime.listPluginIds().sort()).toEqual(["p-existing", "p-new"]);
+    expect(await runtime.call("p_new_ping")).toBe("hi-p-new-1");
+    // p-existing was NOT restarted — counter still at 1.
+    expect(await runtime.call("p_existing_ping")).toBe("hi-p-existing-1");
+  });
+
+  it("addPlugin on an already-loaded plugin acts as restartPlugin (reinstall path)", async () => {
+    // A reinstall over an existing version should still pick up the latest
+    // bundle. addPlugin's idempotency contract: if loaded, defer to restartPlugin.
+    const aPath = await writePlugin("p-existing");
+    const bPath = await writePlugin("p-other");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "p-existing", manifestPath: aPath, enabled: true },
+          { id: "p-other", manifestPath: bPath, enabled: true },
+        ],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+
+    expect(await runtime.call("p_existing_ping")).toBe("hi-p-existing-1");
+    expect(await runtime.call("p_other_ping")).toBe("hi-p-other-1");
+
+    await runtime.addPlugin("p-existing");
+
+    // p-existing restarted (start counter 1 → 2), p-other unchanged.
+    expect(await runtime.call("p_existing_ping")).toBe("hi-p-existing-2");
+    expect(await runtime.call("p_other_ping")).toBe("hi-p-other-1");
+  });
+
+  it("removePlugin drops a single plugin without restarting others", async () => {
+    const aPath = await writePlugin("p-target");
+    const bPath = await writePlugin("p-bystander");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "p-target", manifestPath: aPath, enabled: true },
+          { id: "p-bystander", manifestPath: bPath, enabled: true },
+        ],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+    await runtime.startAll();
+    expect(await runtime.call("p_target_ping")).toBe("hi-p-target-1");
+    expect(await runtime.call("p_bystander_ping")).toBe("hi-p-bystander-1");
+
+    await runtime.removePlugin("p-target");
+
+    expect(runtime.listPluginIds()).toEqual(["p-bystander"]);
+    expect(runtime.listToolNames()).not.toContain("p_target_ping");
+    // p-bystander was NOT restarted — counter still at 1.
+    expect(await runtime.call("p_bystander_ping")).toBe("hi-p-bystander-1");
+  });
+
+  it("removePlugin on an unloaded plugin is a no-op (idempotent)", async () => {
+    const runtime = makeRuntime();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Should not throw.
+    await runtime.removePlugin("nonexistent");
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("removePlugin: plugin not loaded — nonexistent"),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("addPlugin throws when registry has no entry for the id", async () => {
+    const runtime = makeRuntime();
+    // Empty registry — no plugin to add.
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: [] }), "utf-8");
+    await expect(runtime.addPlugin("ghost")).rejects.toThrow(/not found in registry/);
+  });
+});
