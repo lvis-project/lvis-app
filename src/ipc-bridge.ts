@@ -41,6 +41,7 @@ import {
 import { devLinkedEntryAllowed, isDevModeUnlocked } from "./boot/dev-flags.js";
 import { NOTIFICATION_KINDS } from "./main/notification-service.js";
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
+import { validateExternalUrl } from "./shared/external-url.js";
 
 /**
  * Convert the UI's "user-assistant-only ordinal" to the real index into
@@ -381,6 +382,23 @@ export function registerIpcHandlers(
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:settings:marketplace:delete-api-key", e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret("marketplace.apiKey");
     return { ok: true };
+  });
+
+  // ─── Shell external link ───────────────────────────
+  // Renderer-driven `shell.openExternal` for the marketplace tab's "open in
+  // browser" button. The scheme allowlist lives in shared/external-url.ts
+  // so the renderer can't bypass it (preload only forwards the string and
+  // main re-validates).
+  ipcMain.handle("lvis:shell:open-external", async (e, url: unknown) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:shell:open-external", e); return UNAUTHORIZED_FRAME; }
+    const validated = validateExternalUrl(url);
+    if (!validated.ok) return validated;
+    try {
+      await shell.openExternal(validated.url);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: "open-failed", message: (err as Error)?.message };
+    }
   });
 
   // ─── Web Search Keys ───────────────────────────
