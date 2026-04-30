@@ -218,6 +218,15 @@ export interface PluginUiExtension {
   entry?: string;
   exportName?: string;
   page?: string;
+  /**
+   * Window placement preference. When `defaultMode` is `"detached"` the host
+   * opens the extension in a magnetic-snap BrowserWindow on sidebar click
+   * instead of rendering it inline. Omitting this field or setting
+   * `"embedded"` preserves the existing behaviour.
+   */
+  window?: {
+    defaultMode?: "embedded" | "detached";
+  };
 }
 
 export interface PluginRegistryEntry {
