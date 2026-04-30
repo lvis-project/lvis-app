@@ -313,7 +313,16 @@ describe("<ThemeProvider>", () => {
   });
 
   it("setChatTheme=default removes data-chat-theme attribute", async () => {
-    const { api } = makeMockLvisApi();
+    // Note: `initialChatTheme="purple"` alone is not enough — ThemeProvider's
+    // settings-hydration effect will resolve `api.getSettings()` and overwrite
+    // the initial state with whatever the mock returns (default → "default").
+    // The test must therefore either wait for hydration to finish, or feed
+    // the mock a settings shape whose `appearance.chatTheme` agrees with the
+    // initial value. We do the latter so the assertion is deterministic and
+    // unaffected by future shifts in effect ordering.
+    const { api } = makeMockLvisApi({
+      settings: { appearance: { chatTheme: "purple" } } as never,
+    });
     let setter: ((v: "default" | "purple" | "orange" | "blue") => void) | null = null;
     function Capture() {
       const { setChatTheme } = useTheme();
@@ -326,7 +335,11 @@ describe("<ThemeProvider>", () => {
       </ThemeProvider>,
     );
     await waitFor(() => { expect(setter).not.toBeNull(); });
-    expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
+    // Wait for the chat-theme effect to flush. Without this, the assertion
+    // races against React's effect scheduler and flakes on slow CI.
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
+    });
     act(() => { setter!("default"); });
     await waitFor(() => {
       expect(document.documentElement.hasAttribute("data-chat-theme")).toBe(false);
