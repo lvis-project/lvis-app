@@ -17,7 +17,8 @@
  *
  * Default chips (US-FQP2.2):
  *   - When `suggestedAnswers` is set on the first question item (max 3), those
- *     are rendered as quick-response chip buttons above the card body.
+ *     are rendered as quick-response chip buttons BETWEEN the question text and
+ *     the free-text input (via `suggestedChipsSlot` prop on AskUserQuestionCard).
  *   - When no suggestedAnswers and the question allows free text but has no
  *     explicit choices, generic chips ("네", "아니오", "잘 모르겠어요") appear.
  *   - Clicking a chip dispatches the answer immediately, skipping the textarea.
@@ -387,17 +388,20 @@ export function FloatingQuestionPanel({
                         <XIcon className="h-3.5 w-3.5" />
                       </button>
                     </div>
-                    {/* US-FQP2.2: Quick-response chips above the card body */}
-                    <QuickChips
-                      request={req}
-                      onChipClick={(answer) => void handleChipClick(req, answer)}
-                    />
-                    {/* The existing AskUserQuestionCard handles all UX */}
+                    {/* US-FQP2.2: Quick-response chips are passed as a slot to
+                        AskUserQuestionCard so they render BETWEEN the question
+                        text and the free-text input (not above the card body). */}
                     <div className="px-0">
                       <AskUserQuestionCard
                         api={api}
                         request={req}
                         onResolved={handleResolved}
+                        suggestedChipsSlot={
+                          <QuickChips
+                            request={req}
+                            onChipClick={(answer) => void handleChipClick(req, answer)}
+                          />
+                        }
                       />
                     </div>
                   </div>

@@ -14,6 +14,7 @@
  * fires the renderer→main response and removes the card.
  */
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Textarea } from "../../../components/ui/textarea.js";
@@ -41,6 +42,8 @@ export interface AskUserQuestionCardProps {
   api: LvisApi;
   request: AskUserQuestionRequest;
   onResolved: (id: string) => void;
+  /** Optional slot rendered between the question text and the free-text input. */
+  suggestedChipsSlot?: ReactNode;
 }
 
 function isAnswerComplete(item: AskUserQuestionItem, draft: DraftAnswer): boolean {
@@ -61,6 +64,7 @@ export function AskUserQuestionCard({
   api,
   request,
   onResolved,
+  suggestedChipsSlot,
 }: AskUserQuestionCardProps) {
   const total = request.questions.length;
   const isMulti = total > 1;
@@ -138,7 +142,7 @@ export function AskUserQuestionCard({
 
   return (
     <Card
-      className={`max-w-[85%] border ${request.urgent ? "border-amber-500/60 bg-amber-500/5" : ""}`}
+      className={`w-full border ${request.urgent ? "border-amber-500/60 bg-amber-500/5" : ""}`}
       data-testid="ask-user-question-card"
     >
       <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
@@ -157,6 +161,7 @@ export function AskUserQuestionCard({
             item={currentItem}
             draft={currentDraft}
             disabled={submitting}
+            suggestedChipsSlot={suggestedChipsSlot}
             onChoose={(choice) => {
               setAnswer(step, { choice });
               // For a single-question card, picking a choice IS the submit.
@@ -232,18 +237,25 @@ function QuestionForm({
   item,
   draft,
   disabled,
+  suggestedChipsSlot,
   onChoose,
   onFreeText,
 }: {
   item: AskUserQuestionItem;
   draft: DraftAnswer;
   disabled: boolean;
+  suggestedChipsSlot?: ReactNode;
   onChoose: (choice: string) => void;
   onFreeText: (text: string) => void;
 }) {
   return (
     <>
-      <div className="whitespace-pre-wrap text-sm">{item.question}</div>
+      <div
+        className="whitespace-pre-wrap text-sm"
+        data-testid="fqp-question-text"
+      >
+        {item.question}
+      </div>
       {item.choices && item.choices.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {item.choices.map((c) => (
@@ -259,14 +271,16 @@ function QuestionForm({
           ))}
         </div>
       )}
+      {suggestedChipsSlot}
       {item.allowFreeText && (
-        // US-FQP2.3: reduced min-height; CSS field-sizing:content for auto-expand;
-        // max-h-[200px] prevents unbounded panel growth.
+        // US-FQP2.3: reduced to rows=2 / min-h-[3rem]; CSS field-sizing:content
+        // for auto-expand; max-h-[6rem] prevents unbounded panel growth.
         <Textarea
           value={draft.freeText ?? ""}
           onChange={(e) => onFreeText(e.target.value)}
           placeholder="직접 입력..."
-          className="min-h-[44px] max-h-[200px] resize-none overflow-y-auto text-sm [field-sizing:content]"
+          rows={2}
+          className="min-h-[3rem] max-h-[6rem] resize-none overflow-y-auto text-sm [field-sizing:content]"
           disabled={disabled}
         />
       )}
