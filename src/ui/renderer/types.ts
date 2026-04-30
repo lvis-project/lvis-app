@@ -490,6 +490,14 @@ export type LvisApi = {
       approvalId?: string;
     };
   }) => Promise<{ ok: boolean }>;
+
+  // ─── Window management (tab detach + magnetic snap) ─────────────────────
+  window?: {
+    openDetached: (viewKey: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
+    closeDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
+    listDetached: () => Promise<Array<{ windowId: number; viewKey: string; snapped: boolean }>>;
+    onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => () => void;
+  };
 };
 
 // ─── Approval types (mirrored from approval-gate.ts — no node import in renderer) ─

@@ -1,3 +1,4 @@
+import { useCallback, useRef, useState } from "react";
 import { Button } from "../../components/ui/button.js";
 import { getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { InstallInFlight } from "./hooks/use-plugin-marketplace.js";
@@ -16,8 +17,43 @@ const PHASE_LABEL: Record<string, string> = {
   restarting: "재시작 중…",
 };
 
+// "home" is the chat view — not detachable (it is the primary anchor window).
+const DETACHABLE_KEYS = new Set(["tasks", "reminders", "routines", "memory", "starred"]);
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  viewKey: string;
+}
+
 export function Sidebar(props: SidebarProps) {
   const { activeView, pluginViews, setActiveView, starredCount, installInFlight } = props;
+
+  // Context menu for "Open in new window"
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, key: string) => {
+      // Only show "Open in new window" for detachable views or plugin views.
+      const isDetachable = DETACHABLE_KEYS.has(key) || key.startsWith("plugin:");
+      if (!isDetachable) return;
+      e.preventDefault();
+      setContextMenu({ x: e.clientX, y: e.clientY, viewKey: key });
+    },
+    [],
+  );
+
+  const handleOpenInNewWindow = useCallback(async () => {
+    if (!contextMenu) return;
+    setContextMenu(null);
+    const api = window.lvisApi;
+    if (!api?.window?.openDetached) return;
+    await api.window.openDetached(contextMenu.viewKey);
+  }, [contextMenu]);
+
+  const dismissContextMenu = useCallback(() => setContextMenu(null), []);
+
   // Surface in-flight installs as disabled skeleton rows so the user sees
   // their click registered immediately even before the main-process pipeline
   // (download → verify → register → restart) finishes. Slugs that already
@@ -51,6 +87,7 @@ export function Sidebar(props: SidebarProps) {
             variant={activeView === item.key ? "secondary" : "ghost"}
             className="w-full min-w-0 justify-start gap-2 px-3"
             onClick={() => setActiveView(item.key)}
+            onContextMenu={(e) => handleContextMenu(e, item.key)}
           >
             <span className="truncate">{item.label}</span>
             {item.badge ? <span className="shrink-0 text-[10px] text-muted-foreground">{item.badge}</span> : null}
@@ -74,6 +111,33 @@ export function Sidebar(props: SidebarProps) {
           </div>
         ))}
       </div>
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <>
+          {/* Click-away overlay */}
+          <div
+            className="fixed inset-0 z-40"
+            aria-hidden="true"
+            onClick={dismissContextMenu}
+            onContextMenu={(e) => { e.preventDefault(); dismissContextMenu(); }}
+          />
+          <div
+            ref={menuRef}
+            role="menu"
+            className="fixed z-50 min-w-[160px] rounded-md border bg-popover py-1 shadow-md"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+          >
+            <button
+              role="menuitem"
+              className="flex w-full items-center px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+              onClick={handleOpenInNewWindow}
+            >
+              새 창으로 열기
+            </button>
+          </div>
+        </>
+      )}
     </aside>
   );
 }
