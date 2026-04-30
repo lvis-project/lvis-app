@@ -40,6 +40,7 @@ import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useChatActions } from "./hooks/use-chat-actions.js";
 import { useChatContextValue } from "./hooks/use-chat-context-value.js";
+import { CustomTitleBar } from "./components/CustomTitleBar.js";
 
 // RoutineCard: new routine result card
 export { RoutineCard } from "./components/RoutineCard.js";
@@ -334,6 +335,7 @@ export function App() {
     <ThemeProvider api={api}>
     <TooltipProvider>
         <div className="flex h-screen flex-col overflow-hidden">
+          <CustomTitleBar />
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Sidebar
             activeView={activeView}

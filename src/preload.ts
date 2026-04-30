@@ -683,6 +683,31 @@ contextBridge.exposeInMainWorld("lvisHost", {
   },
 });
 
+// ─── Window control bridge (custom titlebar) ─────────────────────────────
+// Exposed unconditionally so the renderer can branch at runtime.
+// On macOS the windowControl methods are never called (traffic lights
+// are OS-managed). isDarwin lets the renderer suppress Win/Linux buttons.
+contextBridge.exposeInMainWorld("lvisPlatform", {
+  isDarwin: process.platform === "darwin",
+});
+contextBridge.exposeInMainWorld("lvisWindow", {
+  minimize: () => ipcRenderer.invoke("window:minimize"),
+  toggleMaximize: () => ipcRenderer.invoke("window:toggleMaximize"),
+  close: () => ipcRenderer.invoke("window:close"),
+  syncTitleBarTheme: (color: string, symbolColor: string) =>
+    ipcRenderer.invoke("window:syncTitleBarTheme", { color, symbolColor }),
+  onMaximizedChanged: (handler: (maximized: boolean) => void) => {
+    const listener = (_event: unknown, maximized: boolean) => handler(maximized);
+    ipcRenderer.on("window:maximizedChanged", listener);
+    return () => ipcRenderer.removeListener("window:maximizedChanged", listener);
+  },
+  onFullscreenChanged: (handler: (fullscreen: boolean) => void) => {
+    const listener = (_event: unknown, fullscreen: boolean) => handler(fullscreen);
+    ipcRenderer.on("window:fullscreenChanged", listener);
+    return () => ipcRenderer.removeListener("window:fullscreenChanged", listener);
+  },
+});
+
 // ─── lvis 네임스페이스 (B1: Approval Gate + Permission) ──
 // renderer에서 window.lvis.approval / window.lvis.permission으로 접근
 contextBridge.exposeInMainWorld("lvis", {
