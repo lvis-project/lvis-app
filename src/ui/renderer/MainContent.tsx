@@ -35,6 +35,10 @@ export interface MainContentProps {
   isEntryStarred: (entryIdx: number) => string | null;
   onAbort: () => Promise<void>;
   onFeedback: Parameters<typeof ChatView>[0]["onFeedback"];
+  // workflow tool state (lifted from ChatView to survive navigation)
+  subAgentSpawns: Parameters<typeof ChatView>[0]["subAgentSpawns"];
+  loadedSkills: Parameters<typeof ChatView>[0]["loadedSkills"];
+  hasAskQuestions: boolean;
   // plugin view
   activePluginView: PluginView | null;
 }
@@ -120,6 +124,9 @@ export function MainContent(props: MainContentProps): ReactNode {
             isEntryStarred={props.isEntryStarred}
             onAbort={props.onAbort}
             onFeedback={props.onFeedback}
+            subAgentSpawns={props.subAgentSpawns}
+            loadedSkills={props.loadedSkills}
+            hasAskQuestions={props.hasAskQuestions}
           />
         </ChatContextProvider>
       </MainPaneShell>
