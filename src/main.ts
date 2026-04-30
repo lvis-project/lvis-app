@@ -12,7 +12,7 @@ import * as tls from "node:tls";
 import { Agent, setGlobalDispatcher } from "undici";
 import { fileURLToPath } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
-import { registerIpcHandlers, unregisterPluginWebview } from "./ipc-bridge.js";
+import { registerIpcHandlers, registerWindowEventListeners, unregisterPluginWebview } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
@@ -336,6 +336,13 @@ function createWindow() {
   if (windowManager) {
     windowManager.registerMainWindow(win);
   }
+
+  // Attach maximize / fullscreen broadcast listeners. These must be registered
+  // on every new BrowserWindow instance (initial boot, macOS re-activation,
+  // and any recovery path). The IPC handlers in ipc-bridge.ts look up the
+  // current window via getMainWindow() at call-time, but win.on() bindings
+  // are instance-specific and are lost when a new window object is created.
+  registerWindowEventListeners(win);
 
   // Development debugging is provided by an in-app floating console toggle in
   // the renderer. Avoid docking Chromium DevTools into the main window because

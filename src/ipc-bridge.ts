@@ -329,6 +329,35 @@ function asPlainRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
+/**
+ * Attach maximize / fullscreen state-broadcast listeners to a BrowserWindow.
+ *
+ * Must be called every time a new BrowserWindow is created (initial startup,
+ * macOS re-activation, and any recovery path that calls createWindow()).
+ * The IPC handlers registered by `registerIpcHandlers` use `getMainWindow()`
+ * to find the current window at call-time, but these `win.on(...)` listeners
+ * are bound to a specific BrowserWindow instance — so they must be re-attached
+ * whenever a new window object is created.
+ */
+export function registerWindowEventListeners(win: BrowserWindow): void {
+  const broadcastMaximized = (maximized: boolean) => {
+    try {
+      win.webContents.send("window:maximizedChanged", maximized);
+    } catch {
+      // webContents may be destroyed
+    }
+  };
+  win.on("maximize", () => broadcastMaximized(true));
+  win.on("unmaximize", () => broadcastMaximized(false));
+  // Fullscreen: notify renderer to hide/show the custom titlebar.
+  win.on("enter-full-screen", () => {
+    try { win.webContents.send("window:fullscreenChanged", true); } catch { /* destroyed */ }
+  });
+  win.on("leave-full-screen", () => {
+    try { win.webContents.send("window:fullscreenChanged", false); } catch { /* destroyed */ }
+  });
+}
+
 export function registerIpcHandlers(
   services: AppServices,
   getMainWindow: () => BrowserWindow | null,
@@ -2120,27 +2149,6 @@ ${input}`;
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:close", e); return; }
     getMainWindow()?.close();
   });
-
-  // Broadcast maximize state to renderer so the toggle icon updates.
-  const broadcastMaximized = (maximized: boolean) => {
-    try {
-      getMainWindow()?.webContents.send("window:maximizedChanged", maximized);
-    } catch {
-      // window may be destroyed
-    }
-  };
-  const win = getMainWindow();
-  if (win) {
-    win.on("maximize", () => broadcastMaximized(true));
-    win.on("unmaximize", () => broadcastMaximized(false));
-    // Fullscreen: notify renderer to hide/show the custom titlebar.
-    win.on("enter-full-screen", () => {
-      try { win.webContents.send("window:fullscreenChanged", true); } catch { /* destroyed */ }
-    });
-    win.on("leave-full-screen", () => {
-      try { win.webContents.send("window:fullscreenChanged", false); } catch { /* destroyed */ }
-    });
-  }
 
   // Theme sync — renderer dispatches this after a theme change so the
   // native titlebar overlay on Win/Linux keeps visual parity.
