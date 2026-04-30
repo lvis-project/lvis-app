@@ -531,6 +531,7 @@ const api = {
         question: string;
         choices?: string[];
         allowFreeText: boolean;
+        suggestedAnswers?: string[];
       }>;
       urgent: boolean;
       createdAt: number;
