@@ -25,13 +25,12 @@ export interface StreamCollectParams {
    * vendor block (`llm.vendors[provider]`) merged with the cross-vendor
    * `streamSmoothing` setting from the top-level LLMSettings — this is
    * the only place those two scopes meet.
+   *
+   * CTRL simplification: per-vendor sampling controls removed. Vendor SDK
+   * defaults govern temperature / max output / etc. Only stream smoothing
+   * (UX), thinking toggle, and thinking budget remain user-configurable.
    */
   llmSettings: {
-    maxOutputTokens: number;
-    temperature: number;
-    seed?: number;
-    responseFormat: "text" | "json";
-    stopSequences: string[];
     streamSmoothing: "none" | "word" | "char";
     enableThinking: boolean;
     thinkingBudgetTokens: number;
@@ -108,12 +107,6 @@ export async function collectRoundStream(
       systemPrompt,
       messages,
       tools: toolSchemas.length > 0 ? toolSchemas : undefined,
-      maxTokens: llmSettings.maxOutputTokens,
-      maxOutputTokens: llmSettings.maxOutputTokens,
-      temperature: llmSettings.temperature,
-      seed: llmSettings.seed,
-      responseFormat: llmSettings.responseFormat as never,
-      stopSequences: llmSettings.stopSequences,
       streamSmoothing: llmSettings.streamSmoothing as never,
       enableThinking: llmSettings.enableThinking,
       thinkingBudgetTokens: llmSettings.thinkingBudgetTokens,

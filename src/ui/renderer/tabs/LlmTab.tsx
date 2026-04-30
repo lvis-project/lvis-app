@@ -4,6 +4,11 @@ import { Input } from "../../../components/ui/input.js";
 import { REASONING_EFFORT_STEPS, VENDORS, budgetToEffortIndex } from "../constants.js";
 import type { LvisApi } from "../types.js";
 
+export interface FallbackEntry {
+  provider: string;
+  model: string;
+}
+
 export interface LlmTabProps {
   api: LvisApi;
   vendor: string;
@@ -24,6 +29,10 @@ export interface LlmTabProps {
   setEnableThinking: (v: boolean) => void;
   thinkingBudget: number;
   setThinkingBudget: (v: number) => void;
+  fallbackChain: FallbackEntry[];
+  setFallbackChain: (updater: FallbackEntry[] | ((c: FallbackEntry[]) => FallbackEntry[])) => void;
+  fallbackOpen: boolean;
+  setFallbackOpen: (updater: boolean | ((o: boolean) => boolean)) => void;
   onSaved: () => void;
 }
 
@@ -48,6 +57,10 @@ export function LlmTab(props: LlmTabProps) {
     setEnableThinking,
     thinkingBudget,
     setThinkingBudget,
+    fallbackChain,
+    setFallbackChain,
+    fallbackOpen,
+    setFallbackOpen,
     onSaved,
   } = props;
   const vendorInfo = VENDORS.find((v) => v.id === vendor) ?? VENDORS[0];
@@ -164,6 +177,62 @@ export function LlmTab(props: LlmTabProps) {
             <p className="text-[11px] text-muted-foreground">
               높을수록 더 많은 사고 토큰을 사용해 꼼꼼히 추론하지만 지연 시간과 비용이 증가합니다. 현재 이 설정은 Claude·OpenAI에 적용되며, Gemini는 모델이 지원하는 경우 추론 표시만 자동으로 동작하고 이 예산 값은 적용되지 않습니다.
             </p>
+          </div>
+        )}
+      </div>
+      <div className="space-y-2 rounded-md border" data-testid="fallback-chain-section">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
+          onClick={() => setFallbackOpen((o) => !o)}
+        >
+          <span>장애 복구 (Fallback Chain)</span>
+          <span className="text-muted-foreground">{fallbackOpen ? "▲" : "▼"}</span>
+        </button>
+        {fallbackOpen && (
+          <div className="space-y-2 px-3 pb-3">
+            <p className="text-[11px] text-muted-foreground">기본 모델이 5xx/429/네트워크 오류를 반환할 때 순서대로 시도할 벤더·모델 목록입니다.</p>
+            {fallbackChain.map((entry, idx) => (
+              <div key={idx} className="flex gap-2">
+                <select
+                  className="flex h-8 rounded-md border border-input bg-background px-2 text-xs"
+                  value={entry.provider}
+                  onChange={(e) => {
+                    const next = [...fallbackChain];
+                    next[idx] = { ...next[idx]!, provider: e.target.value };
+                    setFallbackChain(next);
+                  }}
+                >
+                  {VENDORS.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+                </select>
+                <Input
+                  className="h-8 text-xs"
+                  value={entry.model}
+                  placeholder="모델 이름"
+                  onChange={(e) => {
+                    const next = [...fallbackChain];
+                    next[idx] = { ...next[idx]!, model: e.target.value };
+                    setFallbackChain(next);
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-xs text-destructive"
+                  onClick={() => setFallbackChain((c) => c.filter((_, i) => i !== idx))}
+                >
+                  삭제
+                </Button>
+              </div>
+            ))}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              onClick={() => setFallbackChain((c) => [...c, { provider: "openai", model: "" }])}
+            >
+              + 추가
+            </Button>
           </div>
         )}
       </div>

@@ -89,12 +89,11 @@ export function App() {
     refreshViews, refreshMarketplace,
   } = usePluginMarketplace(api);
 
-  // Sprint B — role preset, cost preview, attached docs, language lock
+  // Sprint B — role preset, cost preview, attached docs
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets();
   const [attachedDocs, setAttachedDocs] = useState<Array<{ id: string; name: string }>>([]);
   const [docPopoverOpen, setDocPopoverOpen] = useState(false);
   const { indexedDocs, docsLoading, refreshIndexedDocs } = useIndexedDocs(api);
-  const [langLock, setLangLock] = useState<"off" | "ko" | "en">("off");
   const [maxOutputTokens] = useState<number>(4096);
 
   // Search / starred / sessions
@@ -146,8 +145,8 @@ export function App() {
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
   const vendorSupportsThinking = useMemo(() => vendorSupportsThinkingShared(llmVendor, llmModel), [llmVendor, llmModel]);
   const composeOutgoing = useCallback(
-    (raw: string): string => composeOutgoingUtil({ raw, activePreset, attachedDocs, langLock }),
-    [activePreset, attachedDocs, langLock],
+    (raw: string): string => composeOutgoingUtil({ raw, activePreset, attachedDocs }),
+    [activePreset, attachedDocs],
   );
 
   const handleAsk = useCallback(
@@ -299,7 +298,7 @@ export function App() {
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
-    indexedDocs, docsLoading, refreshIndexedDocs, langLock, setLangLock,
+    indexedDocs, docsLoading, refreshIndexedDocs,
     vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
   });
 

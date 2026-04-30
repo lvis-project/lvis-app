@@ -236,10 +236,13 @@ export class ConversationLoop {
   /**
    * 플러그인 callLlm용 범용 텍스트 생성.
    * 독립적인 단발 LLM 호출 — 대화 히스토리와 무관.
+   *
+   * CTRL simplification: maxTokens 파라미터 제거. Vendor SDK 기본값 사용.
+   * 호출 측 시그니처는 SettingsService get("llm").vendors[provider].model 만 사용.
    */
   async generateText(
     prompt: string,
-    maxTokens = 400,
+    _maxTokensIgnored?: number,
     systemPrompt = "당신은 LVIS, 사용자의 AI 비서입니다.",
   ): Promise<string> {
     if (!this.provider) throw new Error("LLM provider not configured");
@@ -250,7 +253,6 @@ export class ConversationLoop {
       messages: [{ role: "user", content: prompt }],
       tools: [],
       model: llm.vendors[llm.provider].model,
-      maxTokens,
     })) {
       if (ev.type === "text_delta" && ev.text) text += ev.text;
       if (ev.type === "message_complete") break;

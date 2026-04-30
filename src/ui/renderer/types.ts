@@ -79,13 +79,8 @@ export type LLMVendorSettingsRenderer = {
   baseUrl?: string;
   vertexProject?: string;
   vertexLocation?: string;
-  maxOutputTokens: number;
-  temperature: number;
   enableThinking: boolean;
   thinkingBudgetTokens: number;
-  seed?: number;
-  responseFormat: "text" | "json";
-  stopSequences: string[];
 };
 
 export type AppSettings = {

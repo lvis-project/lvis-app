@@ -1,9 +1,11 @@
 export interface ChatTabProps {
   autoCompact: boolean;
   setAutoCompact: (updater: boolean | ((prev: boolean) => boolean)) => void;
+  streamSmoothing: "none" | "word" | "char";
+  setStreamSmoothing: (v: "none" | "word" | "char") => void;
 }
 
-export function ChatTab({ autoCompact, setAutoCompact }: ChatTabProps) {
+export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStreamSmoothing }: ChatTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
@@ -28,6 +30,24 @@ export function ChatTab({ autoCompact, setAutoCompact }: ChatTabProps) {
             <p className="text-[11px] text-muted-foreground">끄면 자동 요약은 중단되고, 수동 `/compact`만 사용할 수 있습니다.</p>
           </div>
         </div>
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">스트림 부드럽게 표시 (Stream Smoothing)</label>
+        <div className="flex gap-4 text-sm" role="radiogroup" aria-label="Stream smoothing">
+          {(["none", "word", "char"] as const).map((opt) => (
+            <label key={opt} className="flex items-center gap-1">
+              <input
+                type="radio"
+                name="stream-smoothing"
+                value={opt}
+                checked={streamSmoothing === opt}
+                onChange={() => setStreamSmoothing(opt)}
+              />
+              {opt === "none" ? "없음" : opt === "word" ? "단어" : "글자"}
+            </label>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted-foreground">출력 스트림을 단어 또는 글자 단위로 부드럽게 표시합니다.</p>
       </div>
     </div>
   );

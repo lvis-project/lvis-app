@@ -32,9 +32,15 @@ export { LLM_VENDORS };
  * - `vendors` holds a complete configuration block per vendor; switching
  *   `provider` never inherits stale values from another vendor's block.
  * - `streamSmoothing` is a client-side post-processor applied to streamed
- *   tokens regardless of vendor, so it lives at the top level.
+ *   tokens regardless of vendor; UI lives under the Chat settings tab.
  * - `fallbackChain` references other vendors by id and is therefore
- *   inherently cross-vendor.
+ *   inherently cross-vendor; UI lives under the Intelligence (LLM) tab.
+ *
+ * CHANGELOG (CTRL simplification):
+ *   Removed per-vendor sampling/decoding controls (temperature, maxOutputTokens,
+ *   seed, responseFormat, stopSequences). Modern frontier models (GPT-5+,
+ *   Claude 4+) deprecate fine-grained sampling — vendor SDK defaults are
+ *   the policy. Stale on-disk keys are dropped on next write.
  */
 export interface LLMSettings {
   provider: LLMVendor;
