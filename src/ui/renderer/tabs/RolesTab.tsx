@@ -12,13 +12,13 @@ import {
 
 export function RolesTab() {
   const [list, setList] = useState<RolePreset[]>(() => loadRolePresets());
-  const [draft, setDraft] = useState<RolePreset>({ id: "", name: "", systemPromptAdd: "", effort: "medium", temperature: 0.5 });
+  const [draft, setDraft] = useState<RolePreset>({ id: "", name: "", systemPromptAdd: "", effort: "medium" });
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const persist = useCallback((next: RolePreset[]) => { setList(next); saveRolePresets(next); }, []);
 
   const startEdit = (p: RolePreset) => { setEditingId(p.id); setDraft({ ...p }); };
-  const cancelEdit = () => { setEditingId(null); setDraft({ id: "", name: "", systemPromptAdd: "", effort: "medium", temperature: 0.5 }); };
+  const cancelEdit = () => { setEditingId(null); setDraft({ id: "", name: "", systemPromptAdd: "", effort: "medium" }); };
   const saveDraft = () => {
     if (!draft.name.trim()) return;
     const id = editingId ?? draft.name.toLowerCase().replace(/\s+/g, "-") + "-" + Math.random().toString(36).slice(2, 6);
@@ -51,7 +51,7 @@ export function RolesTab() {
                 {!p.isDefault && <Button size="sm" variant="ghost" className="h-7 text-[11px] text-destructive" onClick={() => removePreset(p.id)}>삭제</Button>}
               </div>
             </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">effort: {p.effort} · temperature: {p.temperature}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">effort: {p.effort}</div>
             {p.systemPromptAdd && <div className="mt-1 line-clamp-2 text-xs">{p.systemPromptAdd}</div>}
           </div>
         ))}
@@ -65,9 +65,6 @@ export function RolesTab() {
             <select className="rounded border bg-background px-1 py-0.5" value={draft.effort} onChange={(e) => setDraft({ ...draft, effort: e.target.value as any })}>
               <option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
             </select>
-          </label>
-          <label className="flex items-center gap-1">temperature:
-            <Input className="h-7 w-20" type="number" step="0.1" min="0" max="2" value={draft.temperature} onChange={(e) => setDraft({ ...draft, temperature: Number(e.target.value) })} />
           </label>
         </div>
         <div className="flex gap-2">
