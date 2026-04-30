@@ -39,7 +39,7 @@ describe("role-presets", () => {
   it("save + load round-trips custom presets when localStorage exists", () => {
     if (typeof window === "undefined" || !window.localStorage) return;
     const custom = [
-      { id: "x", name: "X", systemPromptAdd: "hi", effort: "low" as const },
+      { id: "x", name: "X", systemPromptAdd: "hi" },
     ];
     saveRolePresets(custom);
     expect(loadRolePresets()).toEqual(custom);
