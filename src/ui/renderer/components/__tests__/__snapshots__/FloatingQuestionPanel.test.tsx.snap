@@ -104,7 +104,7 @@ exports[`FloatingQuestionPanel > matches snapshot with a single question 1`] = `
               class="px-0"
             >
               <div
-                class="rounded-lg bg-card text-card-foreground shadow-sm max-w-[85%] border"
+                class="rounded-lg bg-card text-card-foreground shadow-sm w-full border"
                 data-testid="ask-user-question-card"
               >
                 <div
@@ -121,6 +121,7 @@ exports[`FloatingQuestionPanel > matches snapshot with a single question 1`] = `
                 >
                   <div
                     class="whitespace-pre-wrap text-sm"
+                    data-testid="fqp-question-text"
                   >
                     계속 진행할까요?
                   </div>
