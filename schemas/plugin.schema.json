@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://lvis.lge.com/schemas/plugin.schema.json",
+  "$id": "https://sdk.lvis.com/schemas/plugin.schema.json",
   "title": "LVIS Plugin Manifest",
   "description": "Validates plugin.json manifest files for LVIS plugins (§9)",
   "type": "object",
