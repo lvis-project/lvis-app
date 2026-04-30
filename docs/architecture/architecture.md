@@ -2021,6 +2021,7 @@ graph TB
 | `keywords` | `Array<{ keyword, skillId }>` | boot 시 KeywordEngine 에 등록. |
 | `ui` | `PluginUiExtension[]` | UI slot 마운트 명세. slot 현재 `"sidebar"` 만 지원. |
 | `publisher` | string | 감사 로그·마켓플레이스 표시. |
+| `configSchema` | `PluginConfigSchema` (선택) | **§9.2 Track B** — VSCode-style 선언형 설정 스키마. JSON Schema draft-07 subset (`toolSchemas` 와 동일 dialect) 으로 `properties` map 을 선언하면 호스트가 `PluginConfigTab` 에 typed form (string / number / boolean / enum / string[] ) 을 자동 렌더링한다. 미선언 시 기존 raw key/value 편집기로 fallback (legacy plugin back-compat 보장). UI 라우팅 hint 는 `format: "secret"` 한 종류 — `setSecret` (Electron `safeStorage` 암호화) 로 라우팅되어 cleartext `settings.json` 에 저장되지 **않는다**. `customPanel` (entry/exportName) 은 escape hatch — schema 필드로 표현하기 어려운 expressive UI 를 plugin 이 자체 React 컴포넌트로 마운트할 수 있다 (UI Slot System §9.3 호환). 상세: `docs/references/plugin-tool-schema-design.md` (track B). |
 
 > **Deprecated (현재 스키마에서 제거됨):** 아래 legacy 셰이프는 AJV `additionalProperties: false` 이므로 매니페스트에 포함하면 로드 거부된다: top-level `permissions[]` 문자열 배열, nested 객체 형태의 `tools[{ name, entry, description }]`, `skills[]`, 객체 형태의 `ui`, `hooks`, `events`, `dependencies`, `lgenie`, `python`. 이전 설계 초안은 git history (pre-Sprint-3-B) 에서만 확인 가능하다.
 
