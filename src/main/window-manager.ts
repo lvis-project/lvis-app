@@ -193,11 +193,34 @@ export class WindowManager {
     // Restore saved bounds if available.
     const saved = loadWindowState().detached.find((d) => d.viewKey === viewKey);
 
+    // Validate saved position against current displays. On multi-monitor
+    // setups a window may be saved to a display that is no longer connected;
+    // without this check the window opens off-screen and the user cannot
+    // interact with it (§354 follow-up, SEV-2).
+    let restoredX = saved?.bounds.x;
+    let restoredY = saved?.bounds.y;
+    if (restoredX !== undefined && restoredY !== undefined) {
+      const displays = screen.getAllDisplays();
+      const fitsAnyDisplay = displays.some(
+        (d) =>
+          restoredX! >= d.bounds.x &&
+          restoredX! < d.bounds.x + d.bounds.width &&
+          restoredY! >= d.bounds.y &&
+          restoredY! < d.bounds.y + d.bounds.height,
+      );
+      if (!fitsAnyDisplay) {
+        // Clamp to primary display work area, preserving size.
+        const primary = screen.getPrimaryDisplay();
+        restoredX = primary.workArea.x + 100;
+        restoredY = primary.workArea.y + 100;
+      }
+    }
+
     const child = new BrowserWindow({
       width: saved?.bounds.width ?? 800,
       height: saved?.bounds.height ?? 600,
-      x: saved?.bounds.x,
-      y: saved?.bounds.y,
+      x: restoredX,
+      y: restoredY,
       show: false,
       title: `LVIS — ${viewKey}`,
       webPreferences: {
