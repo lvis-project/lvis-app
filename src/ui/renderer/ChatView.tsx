@@ -22,6 +22,7 @@ import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
+import { TokenProgressChip } from "./components/TokenProgressChip.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { getApi } from "./api-client.js";
@@ -469,9 +470,6 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
       <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
       <div className="border-t bg-card p-3 space-y-2">
         <div className="flex items-center justify-between gap-3 text-[11px]">
-          <div className={`font-mono ${contextColor}`} title="추정 토큰 사용량 (대화 기반)">
-            {usedTokens.toLocaleString()} / {contextBudget.toLocaleString()} tokens ({contextPercent}%)
-          </div>
           <div className="flex items-center gap-2">
             {/* Sprint B — Role preset dropdown */}
             <DropdownMenu>
@@ -538,6 +536,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
               </label>
             )}
           </div>
+          <TokenProgressChip used={usedTokens} budget={contextBudget} />
         </div>
         {/* Sprint B — attached-doc chips */}
         {attachedDocs.length > 0 && (
