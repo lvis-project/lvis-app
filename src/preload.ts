@@ -88,6 +88,15 @@ const api = {
   setMarketplaceApiKey: async (apiKey: string) => ipcRenderer.invoke("lvis:settings:marketplace:set-api-key", apiKey),
   hasMarketplaceApiKey: async () => ipcRenderer.invoke("lvis:settings:marketplace:has-api-key") as Promise<boolean>,
   deleteMarketplaceApiKey: async () => ipcRenderer.invoke("lvis:settings:marketplace:delete-api-key"),
+  // Open an http(s) URL in the system browser. Main-side validates the
+  // scheme and rejects file://, javascript:, and any other handler.
+  openExternalUrl: async (url: string) =>
+    ipcRenderer.invoke("lvis:shell:open-external", url) as Promise<{
+      ok: boolean;
+      error?: string;
+      protocol?: string;
+      message?: string;
+    }>,
   // #FU259 — MCP marketplace catalog + install
   listMcpCatalog: async () => ipcRenderer.invoke("lvis:mcp:catalog:list"),
   installMcpFromMarketplace: async (slug: string) =>

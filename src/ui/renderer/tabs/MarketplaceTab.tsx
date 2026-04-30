@@ -38,12 +38,29 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
 
       <div className="space-y-2">
         <label className="text-sm font-medium">마켓플레이스 서버 URL</label>
-        <Input
-          type="url"
-          placeholder="https://marketplace.lge.internal"
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-        />
+        <div className="flex items-center gap-2">
+          <Input
+            type="url"
+            placeholder="https://marketplace.lge.internal"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            className="flex-1"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!baseUrl.trim()}
+            onClick={() => {
+              const url = baseUrl.trim();
+              if (url) void api.openExternalUrl(url);
+            }}
+            aria-label="마켓플레이스 웹페이지 열기"
+            title="설정된 마켓플레이스 URL을 시스템 브라우저로 엽니다"
+          >
+            마켓플레이스 열기 ↗
+          </Button>
+        </div>
         <p className="text-[11px] text-muted-foreground">
           lvis-marketplace REST API 엔드포인트. 사내 배포 시 사내 호스트로 변경하세요. 비워두면 마켓플레이스 기능이 비활성화됩니다.
         </p>
