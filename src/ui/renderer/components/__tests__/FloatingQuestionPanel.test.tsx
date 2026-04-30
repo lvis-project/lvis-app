@@ -22,7 +22,7 @@ function makeRequest(
   };
 }
 
-/** Request with no choices and allowFreeText=true — should show generic chips */
+/** Request with no choices and no suggestedAnswers — should show ZERO chips */
 function makeFreeTextRequest(
   overrides: Partial<AskUserQuestionRequest> = {},
 ): AskUserQuestionRequest {
@@ -342,21 +342,18 @@ describe("FloatingQuestionPanel", () => {
     expect(container.firstChild).toMatchSnapshot();
   });
 
-  // ── US-FQP2.2: Default chips ───────────────────────────────────────────────
+  // ── US-FQP2.2: Chips ──────────────────────────────────────────────────────
 
-  it("shows 3 generic chips for free-text requests with no choices", () => {
-    const { getAllByTestId } = render(
+  // Regression: when no choices AND no suggestedAnswers, ZERO chips must render.
+  it("shows NO chips for free-text requests with no choices and no suggestedAnswers", () => {
+    const { queryByTestId } = render(
       <FloatingQuestionPanel
         api={makeApi()}
         requests={[makeFreeTextRequest()]}
         onResolved={vi.fn()}
       />,
     );
-    const chips = getAllByTestId("fqp-chip");
-    expect(chips).toHaveLength(3);
-    expect(chips[0]?.textContent).toBe("네");
-    expect(chips[1]?.textContent).toBe("아니오");
-    expect(chips[2]?.textContent).toBe("잘 모르겠어요");
+    expect(queryByTestId("fqp-chips-row")).toBeNull();
   });
 
   it("does NOT show chips when request already has choice buttons", () => {
@@ -390,7 +387,7 @@ describe("FloatingQuestionPanel", () => {
     const { getAllByTestId } = render(
       <FloatingQuestionPanel
         api={api}
-        requests={[makeFreeTextRequest({ id: "chip-test" })]}
+        requests={[makeSuggestedRequest({ id: "chip-test" })]}
         onResolved={vi.fn()}
       />,
     );
@@ -400,7 +397,7 @@ describe("FloatingQuestionPanel", () => {
     expect(respond).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: "chip-test",
-        answers: [{ choice: "네" }],
+        answers: [{ choice: "A 방식" }],
       }),
     );
   });
@@ -409,7 +406,7 @@ describe("FloatingQuestionPanel", () => {
     const { getAllByTestId, getByTestId } = render(
       <FloatingQuestionPanel
         api={makeApi()}
-        requests={[makeFreeTextRequest({ id: "chip-exit" })]}
+        requests={[makeSuggestedRequest({ id: "chip-exit" })]}
         onResolved={vi.fn()}
       />,
     );
@@ -456,7 +453,7 @@ describe("FloatingQuestionPanel", () => {
     const { getByTestId } = render(
       <FloatingQuestionPanel
         api={makeApi()}
-        requests={[makeFreeTextRequest({ id: "chip-snap", createdAt: 0 })]}
+        requests={[makeSuggestedRequest({ id: "chip-snap", createdAt: 0 })]}
         onResolved={vi.fn()}
       />,
     );

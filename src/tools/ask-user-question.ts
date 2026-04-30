@@ -28,6 +28,7 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
       "사용자에게 1~4개의 관련 질문을 한 카드로 묶어서 묻고 답을 기다립니다. " +
       "사용자가 모든 질문에 답한 뒤 최종 확인 페이지에서 컨펌하면 응답이 한꺼번에 반환됩니다. " +
       "각 질문은 객관식(choices) 또는 자유 입력(allowFreeText) 또는 둘 다 허용 가능. " +
+      "allowFreeText=true 이고 choices 가 비어 있으면 반드시 그 turn 컨텍스트에서 도출한 3개의 suggestedAnswers 를 제공해야 합니다 — 정적 폴백(\"네\"/\"아니오\") 절대 사용 금지. " +
       "5분 안에 확인이 없으면 dismissed=true 로 반환.",
     source: "builtin",
     category: "dangerous",
@@ -58,6 +59,17 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
               allowFreeText: {
                 type: "boolean",
                 description: "자유 텍스트 입력 허용 여부. 기본 true.",
+              },
+              suggestedAnswers: {
+                type: "array",
+                items: { type: "string" },
+                minItems: 3,
+                maxItems: 3,
+                description:
+                  "[allowFreeText=true 이고 choices 가 비어 있을 때 필수] " +
+                  "이 turn 의 컨텍스트에서 모델이 생성한 3개의 contextual 후보 답변. " +
+                  "UI 는 이를 quick-chip 으로 노출해 사용자가 빠르게 선택하거나 직접 입력할 수 있게 한다. " +
+                  "정적 폴백(\"네\"/\"아니오\"/\"잘 모르겠어요\") 절대 사용 금지.",
               },
             },
           },
@@ -126,10 +138,19 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
             isError: true,
           };
         }
+        const filteredSuggestedAnswers = Array.isArray(q.suggestedAnswers)
+          ? (q.suggestedAnswers as unknown[]).filter(
+              (s): s is string => typeof s === "string" && s.trim().length > 0,
+            ).slice(0, 3)
+          : undefined;
         questions.push({
           question,
           choices: filteredChoices && filteredChoices.length > 0 ? filteredChoices : undefined,
           allowFreeText,
+          suggestedAnswers:
+            filteredSuggestedAnswers && filteredSuggestedAnswers.length > 0
+              ? filteredSuggestedAnswers
+              : undefined,
         });
       }
       const urgent = a.urgent === true;

@@ -19,8 +19,11 @@
  *   - When `suggestedAnswers` is set on the first question item (max 3), those
  *     are rendered as quick-response chip buttons BETWEEN the question text and
  *     the free-text input (via `suggestedChipsSlot` prop on AskUserQuestionCard).
- *   - When no suggestedAnswers and the question allows free text but has no
- *     explicit choices, generic chips ("네", "아니오", "잘 모르겠어요") appear.
+ *   - When explicit `choices` are present, those drive the card body buttons —
+ *     no chip row is shown by this panel.
+ *   - When neither suggestedAnswers nor choices are present, NO chips are shown.
+ *     The tool schema and system prompt require the model to always provide
+ *     suggestedAnswers when allowFreeText=true and choices is absent.
  *   - Clicking a chip dispatches the answer immediately, skipping the textarea.
  *
  * Textarea sizing (US-FQP2.3):
@@ -65,9 +68,6 @@ import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import type { LvisApi } from "../types.js";
 
 const MAX_VISIBLE = 3;
-
-/** Generic chips shown when the question allows free text but has no choices/suggestedAnswers. */
-const GENERIC_CHIPS = ["네", "아니오", "잘 모르겠어요"] as const;
 
 export interface FloatingQuestionPanelProps {
   api: LvisApi;
@@ -130,10 +130,10 @@ function AnimatedSlot({
 /**
  * QuickChips — suggestion chips row above the card body.
  *
- * Priority:
- *   1. suggestedAnswers field on the first question (max 3).
- *   2. Generic fallbacks when allowFreeText=true and no choices/suggestedAnswers.
- *   3. Nothing when explicit choice buttons are already present.
+ * Renders ONLY when `suggestedAnswers` is present on the first question (max 3).
+ * When neither suggestedAnswers nor choices are present, no chips are rendered —
+ * the tool schema + system prompt ensure the model always supplies suggestedAnswers
+ * when allowFreeText=true and choices is absent.
  */
 function QuickChips({
   request,
@@ -145,23 +145,12 @@ function QuickChips({
   const firstQ = request.questions[0];
   if (!firstQ) return null;
 
-  // suggestedAnswers is an optional extension on the base type.
-  const suggested = (firstQ as typeof firstQ & { suggestedAnswers?: string[] })
-    .suggestedAnswers;
+  const suggested = firstQ.suggestedAnswers;
 
-  let chips: readonly string[] | string[];
+  // Only render when suggestedAnswers are explicitly provided by the model.
+  if (!suggested || suggested.length === 0) return null;
 
-  if (suggested && suggested.length > 0) {
-    chips = suggested.slice(0, 3);
-  } else if (
-    firstQ.allowFreeText &&
-    (!firstQ.choices || firstQ.choices.length === 0)
-  ) {
-    chips = GENERIC_CHIPS;
-  } else {
-    // Explicit choice buttons rendered by AskUserQuestionCard — skip chips.
-    return null;
-  }
+  const chips = suggested.slice(0, 3);
 
   return (
     <div

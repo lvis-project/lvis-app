@@ -390,6 +390,7 @@ export type LvisApi = {
         question: string;
         choices?: string[];
         allowFreeText: boolean;
+        suggestedAnswers?: string[];
       }>;
       urgent: boolean;
       createdAt: number;
