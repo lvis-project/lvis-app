@@ -40,8 +40,6 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: oven-sh/setup-bun@v2
-
       - name: Install xvfb + Electron runtime deps
         if: runner.os == 'Linux'
         run: |
@@ -53,13 +51,21 @@ jobs:
             libatk-bridge2.0-0 libcups2 libpangocairo-1.0-0 \
             libpango-1.0-0 libcairo2
 
+      # OS deps first, language toolchain second — keeps a corp-proxy
+      # apt outage from wasting the bun install before it fails the job.
+      - uses: oven-sh/setup-bun@v2
+
       - name: Install lvis-app deps
         working-directory: lvis-app
         run: bun install --frozen-lockfile
 
       - name: Install Playwright browsers (none needed for electron, skip deps)
         working-directory: lvis-app
-        run: bunx playwright install --with-deps=false || true
+        # Hard-fail on download errors: a silent install miss surfaces
+        # downstream as a confusing "browser executable not found" during
+        # `playwright test`, hiding the actual cause (registry hiccup,
+        # corp proxy block).
+        run: bunx playwright install --with-deps=false
 
       - name: Build app + plugins
         working-directory: lvis-app

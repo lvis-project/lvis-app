@@ -161,6 +161,12 @@ chcp 65001
 bun run start
 ```
 
+> **PowerShell 5.x (Windows 기본) 주의**: `chcp` 만으로는 `[Console]::OutputEncoding`
+> 캐시가 갱신되지 않아 mojibake 가 남는 경우가 있다.
+> [`windows-setup.md` §5 "한글 로그 깨짐"](./docs/guides/windows-setup.md#5-문제-해결)
+> 의 `[Console]::OutputEncoding` 명령을 함께 실행하거나 PowerShell 7+ / Windows
+> Terminal 사용을 권장.
+
 전체 Windows 설치/실행 가이드는 [`docs/guides/windows-setup.md`](./docs/guides/windows-setup.md) 참고.
 
 ### 사내망 환경변수 요약
