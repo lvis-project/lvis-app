@@ -231,6 +231,126 @@ describe("SessionTodoPanel", () => {
     expect(collapsed!.textContent).toBe("current thing");
     expect(collapsed!.className).toContain("animate-pulse");
   });
+
+  it("shows '이어서' chip when items already exist on mount (resumed session)", async () => {
+    const api = fakeApi({
+      listSessionTodos: () =>
+        Promise.resolve([{ id: "t1", content: "carryover", status: "pending" }]),
+    });
+    const { findByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="session-A" />,
+    );
+    const chip = await findByTestId("session-todo-continuation");
+    expect(chip.textContent).toContain("이어서");
+  });
+
+  it("shows '새 시작' chip when items first arrive in a previously-empty session", async () => {
+    let pushPayload: ((p: {
+      sessionId: string;
+      items: Array<{ id: string; content: string; status: string }>;
+    }) => void) | null = null;
+    const api = fakeApi({
+      // Mount with empty session — the panel itself stays hidden until
+      // the first push arrives, which is when the user actually needs
+      // the "fresh vs resumed" affordance.
+      listSessionTodos: () => Promise.resolve([]),
+      onSessionTodoChanged: ((handler: (p: {
+        sessionId: string;
+        items: Array<{ id: string; content: string; status: string }>;
+      }) => void) => {
+        pushPayload = handler;
+        return () => undefined;
+      }) as never,
+    });
+    const { queryByTestId, findByTestId } = render(
+      <SessionTodoPanel api={api} sessionId="session-B" />,
+    );
+    // Allow the initial empty fetch to resolve. Panel is hidden because
+    // items.length === 0; no chip is queryable yet.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(queryByTestId("session-todo-panel")).toBeNull();
+    // First push lands → panel materializes WITH the "fresh start" chip
+    // because the empty initial fetch flagged the session as not resumed.
+    await act(async () => {
+      pushPayload!({
+        sessionId: "session-B",
+        items: [{ id: "n1", content: "freshly authored", status: "pending" }],
+      });
+    });
+    const chip = await findByTestId("session-todo-fresh");
+    expect(chip.textContent).toContain("새 시작");
+    expect(queryByTestId("session-todo-continuation")).toBeNull();
+  });
+
+  it("ignores push events emitted for a different session id", async () => {
+    let pushPayload: ((p: {
+      sessionId: string;
+      items: Array<{ id: string; content: string; status: string }>;
+    }) => void) | null = null;
+    const api = fakeApi({
+      listSessionTodos: () =>
+        Promise.resolve([{ id: "t1", content: "session-A item", status: "pending" }]),
+      onSessionTodoChanged: ((handler: (p: {
+        sessionId: string;
+        items: Array<{ id: string; content: string; status: string }>;
+      }) => void) => {
+        pushPayload = handler;
+        return () => undefined;
+      }) as never,
+    });
+    const { findByText, queryByText } = render(
+      <SessionTodoPanel api={api} sessionId="session-A" />,
+    );
+    await findByText("session-A item");
+    // A foreign session emits — must NOT clobber the visible list.
+    await act(async () => {
+      pushPayload!({
+        sessionId: "session-OTHER",
+        items: [{ id: "x1", content: "stale ghost", status: "pending" }],
+      });
+    });
+    expect(queryByText("stale ghost")).toBeNull();
+    expect(queryByText("session-A item")).toBeInTheDocument();
+  });
+
+  it("clears items immediately when the chat session id changes", async () => {
+    let resolveList!: (value: Array<{ id: string; content: string; status: string }>) => void;
+    const fetchPromise = new Promise<Array<{ id: string; content: string; status: string }>>((r) => {
+      resolveList = r;
+    });
+    const fetchSpy = vi.fn(() => fetchPromise);
+    const api = fakeApi({ listSessionTodos: fetchSpy as never });
+    const { rerender, findByText, queryByText } = render(
+      <SessionTodoPanel api={api} sessionId="session-A" />,
+    );
+    resolveList([{ id: "t1", content: "first", status: "pending" }]);
+    await findByText("first");
+    // Swap session id — synchronously the panel should clear its visible
+    // items so a stale row never lingers between sessions. The pending
+    // listSessionTodos for the new id will repopulate when it resolves.
+    fetchSpy.mockReturnValueOnce(Promise.resolve([]));
+    rerender(<SessionTodoPanel api={api} sessionId="session-B" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(queryByText("first")).toBeNull();
+  });
+
+  it("applies a transition class to status pills so changes don't snap", async () => {
+    const api = fakeApi({
+      listSessionTodos: () =>
+        Promise.resolve([{ id: "t1", content: "smooth pill", status: "pending" }]),
+    });
+    const { findByText, container } = render(
+      <SessionTodoPanel api={api} sessionId="s" />,
+    );
+    await findByText("smooth pill");
+    const pill = container.querySelector('li[data-status="pending"] span:nth-child(2)');
+    expect(pill).not.toBeNull();
+    expect(pill!.className).toContain("transition-colors");
+  });
 });
 
 describe("SubAgentCard", () => {

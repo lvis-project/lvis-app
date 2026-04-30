@@ -11,7 +11,8 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
   // structural shape and stays in lockstep with ChatContextValue.
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
+    question, setQuestion, chatEndRef, currentSessionId,
+    hasApiKey, onOpenSettings,
     routineResult, routineQueueIndex, routineQueueTotal,
     onDismissRoutineResult, onSnoozeRoutineResult,
     onPrevRoutineResult, onNextRoutineResult, runningRoutines,
@@ -29,7 +30,8 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
 
   return useMemo<ChatContextValue>(() => ({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
+    question, setQuestion, chatEndRef, currentSessionId,
+    hasApiKey, onOpenSettings,
     routineResult, routineQueueIndex, routineQueueTotal,
     onDismissRoutineResult, onSnoozeRoutineResult,
     onPrevRoutineResult, onNextRoutineResult, runningRoutines,
@@ -45,7 +47,8 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     costEstimate, costBadgeClass,
   }), [
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, hasApiKey, onOpenSettings,
+    question, setQuestion, chatEndRef, currentSessionId,
+    hasApiKey, onOpenSettings,
     routineResult, routineQueueIndex, routineQueueTotal,
     onDismissRoutineResult, onSnoozeRoutineResult,
     onPrevRoutineResult, onNextRoutineResult, runningRoutines,
