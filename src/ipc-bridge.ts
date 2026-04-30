@@ -223,7 +223,7 @@ export function validateSender(event: IpcMainInvokeEvent | null | undefined): bo
   }
 }
 
-const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
+export const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
 
 /**
  * #237 Option B — Plugin webview sender validation.
@@ -296,7 +296,7 @@ export function validatePluginFrame(event: IpcMainInvokeEvent | null | undefined
  * untrusted sender frame. Kept as a module-level helper so handlers can call
  * it without duplicating the AuditEntry shape.
  */
-function auditUnauthorized(
+export function auditUnauthorized(
   auditLogger: AuditLogger,
   channel: string,
   event: IpcMainInvokeEvent,
