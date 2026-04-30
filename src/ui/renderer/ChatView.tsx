@@ -17,7 +17,7 @@ import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
 import { ToolGroupCard } from "./components/ToolGroupCard.js";
 import { ChatSearchOverlay } from "./components/ChatSearchOverlay.js";
-import { AskUserQuestionCard } from "./components/AskUserQuestionCard.js";
+import { FloatingQuestionPanel } from "./components/FloatingQuestionPanel.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
@@ -79,14 +79,8 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
 
   const handleAskCurrent = useCallback(() => { void onAsk(question); }, [onAsk, question]);
 
-  // Auto-scroll to the newly-appended ask card. App-level scroll effect
-  // only fires on `entries` changes; ask cards are not entries, so without
-  // this the card can land off-screen if it appears between assistant
-  // turns (e.g. tool execution prompts the user mid-loop).
-  useEffect(() => {
-    if (askQuestions.length === 0) return;
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [askQuestions.length, chatEndRef]);
+  // No auto-scroll needed for floating panel — it is positioned outside
+  // the scroll viewport so it is always visible regardless of scroll position.
 
   // B4: Ctrl/Cmd+C while streaming and no text selected → abort
   useEffect(() => {
@@ -135,6 +129,16 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
       {/* 루틴 floating overlay — 단일 슬롯에 진행 중 / 결과 중 하나만 표시.
           진행 중이면 RoutineRunningIndicator, 아니면 직전 결과 RoutineCard.
           긴 브리핑은 카드 내부에서 스크롤 (max-h-[60vh] + overflow-y-auto). */}
+      {/* FloatingQuestionPanel — anchored at the top of the chat area (z-40),
+          above the routine overlay (z-20). Positioned outside the ScrollArea
+          so it stays visible regardless of scroll position.
+          The routine overlay is suppressed while questions are pending so
+          the two floating surfaces don't compete for attention. */}
+      <FloatingQuestionPanel
+        api={workflowApi}
+        requests={askQuestions}
+        onResolved={dismissAskQuestion}
+      />
       {/* Suppress the floating routine overlay while an ask card is pending —
           a question demanding the user's response shouldn't compete with a
           running-routine indicator for attention. The overlay reappears
@@ -460,14 +464,9 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      {askQuestions.map((req) => (
-        <AskUserQuestionCard
-          key={req.id}
-          api={workflowApi}
-          request={req}
-          onResolved={dismissAskQuestion}
-        />
-      ))}
+      {/* AskUserQuestionCard instances are now rendered inside FloatingQuestionPanel
+          (positioned absolutely at the top of this grid, z-40). Removed from
+          inline stream to eliminate the buried-question UX pain point. */}
       <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
       <div className="border-t bg-card p-3 space-y-2">
         <div className="flex items-center justify-between gap-3 text-[11px]">
