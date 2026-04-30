@@ -103,7 +103,6 @@ export interface VercelProviderExtras {
 
 export class VercelUnifiedProvider implements LLMProvider {
   private static warnedCompatThinking = false;
-  private static warnedReasoningSamplingDrop = false;
   readonly vendor: LLMVendor;
   private readonly vendorSlot: VercelVendor;
   private readonly apiKey: string;
@@ -214,56 +213,11 @@ export class VercelUnifiedProvider implements LLMProvider {
         }
       }
 
-      // Sprint A: vendor-agnostic generation controls. `maxOutputTokens` takes
-      // precedence over legacy `maxTokens` when provided.
-      const effectiveMaxOutputTokens = params.maxOutputTokens ?? params.maxTokens;
+      // CTRL simplification: temperature / seed / responseFormat / stopSequences /
+      // maxOutputTokens removed. Modern frontier models (GPT-5+, Claude 4+)
+      // deprecate fine-grained sampling — vendor SDK defaults govern.
 
-      // OpenAI reasoning models on the **Responses API** reject sampling
-      // controls (temperature, seed) — passing them surfaces an "AI SDK
-      // Warning" AND (depending on SDK version) an APICallError that
-      // terminates the stream mid-turn. Only the native OpenAI slot routes
-      // through `openai.responses()` (see resolveModel:337-339); the Copilot
-      // slot always uses Chat Completions and accepts temperature/seed, so we
-      // must not drop for copilot. stopSequences is kept — Responses API
-      // accepts it.
-      const dropSamplingParams =
-        slot === "openai" && isOpenAIReasoningModel(params.model);
-      if (
-        dropSamplingParams &&
-        (params.temperature !== undefined || params.seed !== undefined) &&
-        !VercelUnifiedProvider.warnedReasoningSamplingDrop
-      ) {
-        VercelUnifiedProvider.warnedReasoningSamplingDrop = true;
-        console.warn(
-          "[VercelUnifiedProvider] OpenAI Responses API does not support " +
-            "temperature/seed on reasoning models — dropping before dispatch.",
-        );
-      }
-
-      // Sprint A: map responseFormat → providerOptions per vendor (JSON mode).
-      if (params.responseFormat) {
-        const rf = params.responseFormat;
-        const isJson =
-          rf === "json" ||
-          (typeof rf === "object" && rf.type === "json-schema");
-        if (isJson) {
-          providerOptions = providerOptions ?? {};
-          if (slot === "openai" || slot === "copilot" || slot === "openai-compatible" || slot === "azure-foundry") {
-            providerOptions.openai = {
-              ...(providerOptions.openai ?? {}),
-              responseFormat: { type: "json_object" },
-            };
-          } else if (slot === "gemini" || slot === "vertex-ai") {
-            providerOptions.google = {
-              ...(providerOptions.google ?? {}),
-              responseMimeType: "application/json",
-            };
-          }
-          // Claude: JSON mode is prompt-driven; no provider flag.
-        }
-      }
-
-      // Sprint A: smoothStream transform (Vercel path only).
+      // smoothStream transform (Vercel path only).
       // `"word"` uses Vercel's built-in word chunker; `"char"` uses a regex
       // that matches one code point per chunk.
       const smoothing = params.streamSmoothing;
@@ -283,16 +237,6 @@ export class VercelUnifiedProvider implements LLMProvider {
           system: params.systemPrompt,
           messages,
           ...(tools ? { tools } : {}),
-          ...(effectiveMaxOutputTokens ? { maxOutputTokens: effectiveMaxOutputTokens } : {}),
-          ...(!dropSamplingParams && params.temperature !== undefined
-            ? { temperature: params.temperature }
-            : {}),
-          ...(!dropSamplingParams && params.seed !== undefined
-            ? { seed: params.seed }
-            : {}),
-          ...(params.stopSequences && params.stopSequences.length > 0
-            ? { stopSequences: params.stopSequences }
-            : {}),
           ...(transform ? { experimental_transform: transform } : {}),
           ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
           ...(providerOptions
@@ -405,41 +349,14 @@ export class VercelUnifiedProvider implements LLMProvider {
       const apiVersion = parsedUrl.searchParams.get("api-version") ?? undefined;
       parsedUrl.search = "";
       const cleanBaseUrl = parsedUrl.toString().replace(/\/chat\/completions\/?$/, "/");
-      // Azure AI Foundry newer models (o1/o3/o4 series, gpt-5.x+) require
-      // max_completion_tokens instead of max_tokens. Always swap for azure-foundry
-      // — all Azure OpenAI models accept max_completion_tokens; only newer ones
-      // reject max_tokens. Unconditional swap is safer than model-name heuristics.
-      const baseFetch = this.customFetch ?? fetch;
-      const azureFetch: typeof fetch = (async (input, init) => {
-            if (init?.body) {
-              if (typeof init.body === "string") {
-                try {
-                  const body = JSON.parse(init.body) as Record<string, unknown>;
-                  if ("max_tokens" in body) {
-                    body.max_completion_tokens = body.max_tokens;
-                    delete body.max_tokens;
-                    init = { ...init, body: JSON.stringify(body) };
-                  }
-                } catch {
-                  // leave body unchanged if JSON parse fails
-                }
-              } else {
-                // Non-string body (ReadableStream/Uint8Array) cannot be rewritten;
-                // max_tokens may still be present and cause a 400.
-                console.warn(
-                  "[azure-foundry] fetch body is not a string — " +
-                    "max_tokens→max_completion_tokens swap skipped",
-                );
-              }
-            }
-            return baseFetch(input, init);
-          });
+      // CTRL simplification: dropped max_tokens→max_completion_tokens fetch
+      // shim; max output tokens is no longer threaded through from settings.
       const azure = createOpenAICompatible({
         name: "azure-foundry",
         baseURL: cleanBaseUrl,
         apiKey: this.apiKey,
         ...(apiVersion ? { queryParams: { "api-version": apiVersion } } : {}),
-        fetch: azureFetch,
+        ...(this.customFetch ? { fetch: this.customFetch } : {}),
       });
       return azure(modelId);
     }

@@ -106,10 +106,6 @@ export interface ChatContextValue {
   docsLoading: boolean;
   refreshIndexedDocs: () => void | Promise<void>;
 
-  // Language lock
-  langLock: "off" | "ko" | "en";
-  setLangLock: React.Dispatch<React.SetStateAction<"off" | "ko" | "en">>;
-
   // Thinking toggle
   vendorSupportsThinking: boolean;
   enableThinkingChat: boolean;
