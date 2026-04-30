@@ -391,6 +391,7 @@ export function App() {
             isEntryStarred={isEntryStarred}
             onAbort={handleAbort}
             onFeedback={handleFeedback}
+            onNavigateToTasks={() => setActiveView("tasks")}
             activePluginView={activePluginView ?? null}
           />
         </main>
