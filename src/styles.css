@@ -83,44 +83,52 @@
   }
 }
 
-||||||| 41d9493
 /*
  * ─────────────────────────────────────────────────────────────────────────────
  *  LVIS theme system — semantic design tokens
  * ─────────────────────────────────────────────────────────────────────────────
  *
- *  Two-tier model:
- *    1. PRIMITIVE tokens (--p-*)   — raw HSL values; the single place a real
- *                                    color exists. Never consumed directly by
- *                                    components.
- *    2. SEMANTIC tokens  (--background, --foreground, --primary, …)
- *                                  — meaning-based references that point at
- *                                    a primitive. Components consume ONLY
- *                                    semantic tokens (via Tailwind shortcuts
- *                                    like `bg-background`, `text-primary`).
+ *  Three-axis model (PR: feat/theme-picker-redesign-two-axis):
+ *    1. data-theme         — global light/dark/high-contrast shell
+ *    2. data-chat-theme    — accent color for chat / UI surfaces
+ *                            (default | purple | orange | blue)
+ *    3. data-code-theme    — code-block surface scheme (light | dark)
  *
- *  A theme variant = a remapping of semantic → primitive. Adding a new theme
- *  is a CSS-only change (see `[data-theme="light"]` / `[data-theme="dark"]`
- *  selectors below). Components do not change.
+ *  Token tiers:
+ *    A. PRIMITIVE tokens (--p-*) — raw HSL triples, single source of truth
+ *    B. SEMANTIC tokens  (--background, --foreground, --primary, …)
+ *                                  — meaning-based references; consumed by
+ *                                    components via Tailwind utilities
+ *    C. CODE-SURFACE tokens (--code-bg, --code-fg, --code-border)
+ *                                  — code-block specific overlay; remaps
+ *                                    independently of the global theme
  *
- *  Theme switching is live (no reload) and is driven by ThemeProvider, which
- *  sets `data-theme` on <html>.
- *
- *  See `docs/development/theme-system.md` for the full pattern + how to add
- *  a new semantic token or theme variant.
+ *  See `docs/development/theme-system.md` for the complete pattern.
  */
 
 @layer base {
-  /* ── Tier 1: primitive palette ─────────────────────────────────────── */
-  /*  These are written as HSL triples (no hsl() wrapper) so Tailwind's
-   *  `hsl(var(--token) / <alpha>)` syntax still works (e.g. `bg-primary/30`).
+  /* ── Tier A: primitive palette ─────────────────────────────────────── */
+  /*  HSL triples (no hsl() wrapper) so Tailwind's `hsl(var(--token) / <alpha>)`
+   *  syntax keeps working (e.g. `bg-primary/30`).
    */
   :root {
-    /* Brand / accent — same in both themes */
+    /* Brand / accent — blue (default accent in dark) */
     --p-blue-400: 217.2 91.2% 67%;
     --p-blue-500: 217.2 91.2% 59.8%;
     --p-blue-600: 224.3 76.3% 48%;
     --p-blue-700: 224.3 76.3% 38%;
+
+    /* Chat-theme accents — purple */
+    --p-purple-400: 270 95% 75%;
+    --p-purple-500: 262 83% 58%;
+    --p-purple-600: 263 70% 50%;
+    --p-purple-700: 263 69% 42%;
+
+    /* Chat-theme accents — orange */
+    --p-orange-400: 27 96% 61%;
+    --p-orange-500: 25 95% 53%;
+    --p-orange-600: 21 90% 48%;
+    --p-orange-700: 17 88% 40%;
 
     /* Neutral grays */
     --p-slate-0:   0 0% 100%;
@@ -145,11 +153,21 @@
     --p-yellow-800: 30 80% 25%;
     --p-green-500: 142 71% 45%;
 
+    /* Code-surface palette — light variant */
+    --p-code-light-bg:     210 40% 98%;
+    --p-code-light-fg:     222 47% 11%;
+    --p-code-light-border: 214 32% 88%;
+
+    /* Code-surface palette — dark variant */
+    --p-code-dark-bg:     222 47% 9%;
+    --p-code-dark-fg:     210 40% 96%;
+    --p-code-dark-border: 217 33% 22%;
+
     /* Shape — does not vary by theme */
     --radius: 0.6rem;
   }
 
-  /* ── Tier 2: semantic mapping — DARK (default) ─────────────────────── */
+  /* ── Tier B: semantic mapping — DARK (default) ─────────────────────── */
   :root,
   :root[data-theme="dark"] {
     --background:           var(--p-slate-950);
@@ -188,7 +206,7 @@
     color-scheme: dark;
   }
 
-  /* ── Tier 2: semantic mapping — LIGHT ──────────────────────────────── */
+  /* ── Tier B: semantic mapping — LIGHT ──────────────────────────────── */
   :root[data-theme="light"] {
     --background:           var(--p-slate-0);
     --foreground:           var(--p-slate-900);
@@ -226,7 +244,7 @@
     color-scheme: light;
   }
 
-  /* ── Tier 2: semantic mapping — HIGH-CONTRAST (optional 3rd) ───────── */
+  /* ── Tier B: semantic mapping — HIGH-CONTRAST ──────────────────────── */
   :root[data-theme="high-contrast"] {
     --background:           0 0% 0%;
     --foreground:           0 0% 100%;
@@ -264,6 +282,81 @@
     color-scheme: dark;
   }
 
+  /* ── Tier B+: chat-theme accent overlays ───────────────────────────────
+   *  These ONLY remap accent semantic tokens (--primary, --ring) on top of
+   *  whatever data-theme is active. They do NOT touch background/foreground
+   *  surfaces, so a "purple chat theme on dark shell" still has slate-950
+   *  background but a purple action button.
+   *
+   *  data-chat-theme="default" is intentionally NOT defined — it means
+   *  "no override; inherit data-theme defaults".
+   * ──────────────────────────────────────────────────────────────────── */
+  :root[data-chat-theme="purple"] {
+    --primary: var(--p-purple-500);
+    --ring:    var(--p-purple-600);
+  }
+  :root[data-theme="light"][data-chat-theme="purple"] {
+    --primary: var(--p-purple-600);
+    --ring:    var(--p-purple-500);
+  }
+
+  :root[data-chat-theme="orange"] {
+    --primary: var(--p-orange-500);
+    --ring:    var(--p-orange-600);
+  }
+  :root[data-theme="light"][data-chat-theme="orange"] {
+    --primary: var(--p-orange-600);
+    --ring:    var(--p-orange-500);
+  }
+
+  :root[data-chat-theme="blue"] {
+    --primary: var(--p-blue-500);
+    --ring:    var(--p-blue-600);
+  }
+  :root[data-theme="light"][data-chat-theme="blue"] {
+    --primary: var(--p-blue-600);
+    --ring:    var(--p-blue-500);
+  }
+
+  /* High-contrast intentionally locks accent to its yellow — chat-theme
+   * overlays MUST NOT defeat the accessibility variant. We achieve this by
+   * placing the high-contrast block AFTER chat-theme overlays in source
+   * order, but to guard against future re-orderings we also redeclare here. */
+  :root[data-theme="high-contrast"][data-chat-theme] {
+    --primary: 60 100% 50%;
+    --ring:    60 100% 50%;
+  }
+
+  /* ── Tier C: code-surface tokens ───────────────────────────────────────
+   *  Default (no data-code-theme) inherits from the active data-theme:
+   *  light shells get the light code panel, dark shells get the dark panel.
+   *  Explicit data-code-theme="..." overrides regardless of shell.
+   * ──────────────────────────────────────────────────────────────────── */
+  :root,
+  :root[data-theme="dark"],
+  :root[data-theme="high-contrast"] {
+    --code-bg:     var(--p-code-dark-bg);
+    --code-fg:     var(--p-code-dark-fg);
+    --code-border: var(--p-code-dark-border);
+  }
+  :root[data-theme="light"] {
+    --code-bg:     var(--p-code-light-bg);
+    --code-fg:     var(--p-code-light-fg);
+    --code-border: var(--p-code-light-border);
+  }
+
+  /* Explicit user override — wins regardless of shell */
+  :root[data-code-theme="light"] {
+    --code-bg:     var(--p-code-light-bg);
+    --code-fg:     var(--p-code-light-fg);
+    --code-border: var(--p-code-light-border);
+  }
+  :root[data-code-theme="dark"] {
+    --code-bg:     var(--p-code-dark-bg);
+    --code-fg:     var(--p-code-dark-fg);
+    --code-border: var(--p-code-dark-border);
+  }
+
   /*
    * Theme transition: keep root background/foreground swap smooth, but
    * respect `prefers-reduced-motion` — users with that preference set must
@@ -285,5 +378,200 @@
     @apply bg-background text-foreground;
     font-family: "Noto Sans KR", "Noto Sans CJK KR", "NanumGothic", "Malgun Gothic", Inter,
       -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+}
+
+/* ─── Theme picker — visual swatch cards ──────────────────────────────────
+   Used by AppearanceTab. Each card is a miniature mock-UI tinted by the
+   theme it represents. Selection is a 2px ring drawn 2px outside the card
+   edge ("engraved frame" feel). Reduced-motion users get only an opacity
+   fade on the ring; no scale or transform animation.
+─────────────────────────────────────────────────────────────────────────── */
+
+@layer components {
+  .lvis-theme-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    cursor: pointer;
+    border-radius: 0.625rem;
+    transition: box-shadow 180ms ease, transform 180ms ease;
+  }
+
+  .lvis-theme-card:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px hsl(var(--background)),
+      0 0 0 4px hsl(var(--ring));
+  }
+
+  .lvis-theme-card-mock {
+    aspect-ratio: 16 / 11;
+    width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid hsl(var(--border));
+    overflow: hidden;
+    box-shadow:
+      0 1px 2px -1px rgb(0 0 0 / 0.16),
+      0 2px 4px -2px rgb(0 0 0 / 0.12);
+    transition: box-shadow 180ms ease, border-color 180ms ease;
+  }
+
+  .lvis-theme-card[data-selected="true"] .lvis-theme-card-mock {
+    border-color: hsl(var(--primary));
+    box-shadow:
+      0 0 0 2px hsl(var(--background)),
+      0 0 0 4px hsl(var(--primary) / 0.85),
+      0 4px 12px -4px hsl(var(--primary) / 0.35);
+  }
+
+  .lvis-theme-card[data-selected="false"]:hover .lvis-theme-card-mock {
+    border-color: hsl(var(--muted-foreground) / 0.5);
+  }
+
+  /* The mock's interior — a tiny chat shell or code split, drawn from
+   * neutral primitives so the SAME mock can be re-tinted by overriding
+   * `--mock-accent` per card. */
+  .lvis-theme-card-mock-inner {
+    width: 100%;
+    height: 100%;
+    background: hsl(var(--p-slate-50));
+    color: hsl(var(--p-slate-900));
+    padding: 0.4rem 0.45rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+  }
+
+  /* Dark-shell variant of the mock — used inside code-theme dark card */
+  .lvis-theme-card-mock-inner.is-dark {
+    background: hsl(var(--p-slate-950));
+    color: hsl(var(--p-slate-50));
+  }
+
+  .lvis-theme-card-mock-bar {
+    height: 0.45rem;
+    border-radius: 0.2rem;
+    background: var(--mock-accent, hsl(var(--p-slate-300)));
+    width: 100%;
+    flex: 0 0 auto;
+  }
+
+  .lvis-theme-card-mock-row {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .lvis-theme-card-mock-bubble {
+    height: 0.55rem;
+    border-radius: 0.45rem;
+    background: hsl(var(--p-slate-200));
+    flex: 1 1 auto;
+  }
+
+  .lvis-theme-card-mock-bubble.is-self {
+    background: var(--mock-accent, hsl(var(--p-blue-500)));
+    flex: 0 0 60%;
+    margin-left: auto;
+  }
+
+  .lvis-theme-card-mock-bubble.is-self-narrow {
+    flex: 0 0 42%;
+  }
+
+  .lvis-theme-card-mock-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    background: var(--mock-accent, hsl(var(--p-slate-300)));
+    flex: 0 0 auto;
+  }
+
+  /* Code-theme split card */
+  .lvis-theme-card-mock-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+    height: 100%;
+  }
+  .lvis-theme-card-mock-split-pane {
+    padding: 0.35rem 0.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    justify-content: center;
+  }
+  .lvis-theme-card-mock-split-pane.is-light {
+    background: hsl(var(--p-code-light-bg));
+    color: hsl(var(--p-code-light-fg));
+  }
+  .lvis-theme-card-mock-split-pane.is-dark {
+    background: hsl(var(--p-code-dark-bg));
+    color: hsl(var(--p-code-dark-fg));
+  }
+  .lvis-theme-card-mock-codeline {
+    height: 0.32rem;
+    border-radius: 0.16rem;
+    background: currentColor;
+    opacity: 0.4;
+  }
+  .lvis-theme-card-mock-codeline.is-short { width: 50%; }
+  .lvis-theme-card-mock-codeline.is-mid   { width: 75%; }
+  .lvis-theme-card-mock-codeline.is-long  { width: 90%; }
+
+  .lvis-theme-card-mock-glyph {
+    align-self: center;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    opacity: 0.78;
+  }
+
+  .lvis-theme-card-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: hsl(var(--muted-foreground));
+    transition: color 180ms ease;
+  }
+  .lvis-theme-card[data-selected="true"] .lvis-theme-card-label {
+    color: hsl(var(--foreground));
+    font-weight: 600;
+  }
+
+  .lvis-theme-card-checkmark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 0.95rem;
+    height: 0.95rem;
+    border-radius: 999px;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    font-size: 0.6rem;
+    line-height: 1;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+  .lvis-theme-card[data-selected="true"] .lvis-theme-card-checkmark {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lvis-theme-card,
+  .lvis-theme-card-mock,
+  .lvis-theme-card-checkmark,
+  .lvis-theme-card-label {
+    transition: none;
   }
 }

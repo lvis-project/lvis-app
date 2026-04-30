@@ -95,21 +95,32 @@ export interface PluginSettings {}
 /**
  * UX Track 3 — visual appearance preferences.
  *
- * `theme` controls which semantic-token mapping is active in the renderer:
- *   - "system":         follow the OS `prefers-color-scheme` (default)
- *   - "light":          force the light variant
- *   - "dark":           force the dark variant
- *   - "high-contrast":  force the high-contrast variant
+ * Three independent axes:
+ *   - `theme`      — global shell light/dark/high-contrast
+ *       "system" | "light" | "dark" | "high-contrast"
+ *       (default "system")
+ *   - `chatTheme`  — accent color overlay for chat / UI surfaces
+ *       "default" | "purple" | "orange" | "blue"
+ *       (default "default" — no override; inherits from `theme`)
+ *   - `codeTheme`  — code-block surface scheme, independent of shell
+ *       "auto" | "light" | "dark"
+ *       (default "auto" — follows `theme`: light shell → light code,
+ *        dark/high-contrast shell → dark code)
  *
- * The renderer's ThemeProvider is the single consumer of this field. A
- * change here is propagated by writing `data-theme` on <html>; no reload.
+ * The renderer's ThemeProvider is the single consumer of these fields.
+ * Changes are propagated by writing `data-theme`, `data-chat-theme`, and
+ * `data-code-theme` on <html>; no reload.
  *
  * See `docs/development/theme-system.md` for the token-tier model.
  */
 export type ThemePreference = "system" | "light" | "dark" | "high-contrast";
+export type ChatThemePreference = "default" | "purple" | "orange" | "blue";
+export type CodeThemePreference = "auto" | "light" | "dark";
 
 export interface AppearanceSettings {
   theme: ThemePreference;
+  chatTheme: ChatThemePreference;
+  codeTheme: CodeThemePreference;
 }
 
 /**
@@ -286,6 +297,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   appearance: {
     theme: "system",
+    chatTheme: "default",
+    codeTheme: "auto",
   },
   plugins: {},
   pluginConfigs: {},
@@ -590,16 +603,34 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
  * boot over a UI-only field.
  */
 const VALID_THEMES: readonly ThemePreference[] = ["system", "light", "dark", "high-contrast"];
+const VALID_CHAT_THEMES: readonly ChatThemePreference[] = ["default", "purple", "orange", "blue"];
+const VALID_CODE_THEMES: readonly CodeThemePreference[] = ["auto", "light", "dark"];
+
 function normalizeAppearance(input: unknown): AppearanceSettings {
   if (!input || typeof input !== "object") {
     return { ...DEFAULT_SETTINGS.appearance };
   }
-  const raw = (input as { theme?: unknown }).theme;
+  const obj = input as { theme?: unknown; chatTheme?: unknown; codeTheme?: unknown };
+
+  const themeRaw = obj.theme;
   const theme: ThemePreference =
-    typeof raw === "string" && (VALID_THEMES as readonly string[]).includes(raw)
-      ? (raw as ThemePreference)
+    typeof themeRaw === "string" && (VALID_THEMES as readonly string[]).includes(themeRaw)
+      ? (themeRaw as ThemePreference)
       : "system";
-  return { theme };
+
+  const chatRaw = obj.chatTheme;
+  const chatTheme: ChatThemePreference =
+    typeof chatRaw === "string" && (VALID_CHAT_THEMES as readonly string[]).includes(chatRaw)
+      ? (chatRaw as ChatThemePreference)
+      : "default";
+
+  const codeRaw = obj.codeTheme;
+  const codeTheme: CodeThemePreference =
+    typeof codeRaw === "string" && (VALID_CODE_THEMES as readonly string[]).includes(codeRaw)
+      ? (codeRaw as CodeThemePreference)
+      : "auto";
+
+  return { theme, chatTheme, codeTheme };
 }
 
 function sanitizeStoredPluginConfigs(input: unknown): Record<string, PluginConfigRecord> {
