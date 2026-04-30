@@ -297,6 +297,20 @@ function createWindow() {
     height: 720,
     show: true,
     autoHideMenuBar: false,
+    // ─── Cross-platform titlebar ─────────────────────────────────────────
+    // macOS: keep native frame so traffic-light buttons render via the OS;
+    //        hiddenInset shifts content area below the traffic lights.
+    // Win/Linux: remove native frame entirely — CustomTitleBar.tsx renders
+    //            our own minimize/maximize/close buttons in the renderer.
+    frame: process.platform !== "darwin" ? false : undefined,
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    trafficLightPosition: process.platform === "darwin" ? { x: 14, y: 14 } : undefined,
+    titleBarOverlay: process.platform !== "darwin" ? {
+      color: "#0b0d10",       // matches --background (dark default); renderer overrides via window:syncTitleBarTheme
+      symbolColor: "#e2e8f0", // matches --foreground (dark default)
+      height: 36,
+    } : undefined,
+    // ─────────────────────────────────────────────────────────────────────
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

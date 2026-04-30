@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── CustomTitleBar (Win/Linux) button hover states ───────────────────────
+   WebkitAppRegion:drag on the parent suppresses hover from the OS layer, so
+   we re-implement hover via :hover pseudo-class on the individual buttons.
+   The .titlebar-btn-close hover uses a destructive red to match OS conventions.
+──────────────────────────────────────────────────────────────────────────── */
+.titlebar-btn:hover {
+  background: hsl(var(--muted));
+  opacity: 1;
+}
+.titlebar-btn-close:hover {
+  background: hsl(var(--destructive));
+  color: hsl(var(--destructive-foreground));
+  opacity: 1;
+}
+
 /* ─── FloatingQuestionPanel animations ─────────────────────────────────────
    Class names are referenced from FloatingQuestionPanel.tsx.
    We use @keyframes outside @layer so they are always available at highest
