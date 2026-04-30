@@ -21,6 +21,8 @@ import type { WebContents } from "electron";
 import { findMethodByCapability } from "./boot/plugins.js";
 import { emitEvent as emitHostEvent } from "./boot/types.js";
 import { requiredCapabilityForEmit } from "./plugins/capabilities.js";
+import { stripSecretFields } from "./plugins/config-schema.js";
+import { emitPluginConfigChange } from "./plugins/config-change-bus.js";
 import {
   REGISTERED_ROUTINES,
   buildRoutineForTrigger,
@@ -312,6 +314,19 @@ function pluginConfigError(
   message: string,
 ): { ok: false; error: string; message: string } {
   return { ok: false, error, message };
+}
+
+/**
+ * Coerce an untrusted IPC payload into a plain `Record<string, unknown>`
+ * shape ahead of `stripSecretFields` / `setPluginConfig` (which already
+ * sanitize internally). Non-objects collapse to an empty record so the
+ * downstream sanitizer surfaces a deterministic error.
+ */
+function asPlainRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
 }
 
 export function registerIpcHandlers(
@@ -994,13 +1009,90 @@ ${input}`;
       return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
     }
     try {
-      const savedConfig = await settingsService.setPluginConfig(pluginId, config);
+      // §9.2 Track B — defence-in-depth: drop `format: "secret"` keys before
+      // they ever reach cleartext settings.json. The renderer is supposed
+      // to route secrets through `lvis:settings:set-api-key` /
+      // `setSecret`; this strip catches a buggy renderer (or a frame that
+      // bypassed the typed form) before the value lands on disk.
+      const manifest = pluginRuntime.getPluginManifest(pluginId);
+      const schema = manifest?.configSchema;
+      const stripped = stripSecretFields(schema, asPlainRecord(config));
+      const savedConfig = await settingsService.setPluginConfig(pluginId, stripped);
       pluginRuntime.setConfigOverride(pluginId, savedConfig);
+      // Emit per-key change events so existing `hostApi.config.onChange`
+      // listeners observe the writes BEFORE the runtime restart tears
+      // them down. Keys removed by the strip pass also need to fire so a
+      // listener treating "key cleared" as a state transition reacts
+      // correctly.
+      const previous = settingsService.getPluginConfig(pluginId) ?? {};
+      const observed = new Set<string>([
+        ...Object.keys(savedConfig ?? {}),
+        ...Object.keys(previous ?? {}),
+      ]);
+      for (const k of observed) {
+        emitPluginConfigChange(pluginId, k, savedConfig?.[k]);
+      }
       await pluginRuntime.restartAll();
       return { ok: true as const, config: savedConfig };
     } catch (err) {
       return pluginConfigError(
         "plugin-config-save-failed",
+        (err as Error).message,
+      );
+    }
+  });
+  ipcMain.handle("lvis:plugins:config:schema:get", (e, pluginId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugins:config:schema:get", e);
+      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
+    }
+    try {
+      const manifest = pluginRuntime.getPluginManifest(pluginId);
+      return { ok: true as const, schema: manifest?.configSchema ?? null };
+    } catch (err) {
+      return pluginConfigError(
+        "plugin-config-schema-load-failed",
+        (err as Error).message,
+      );
+    }
+  });
+  ipcMain.handle("lvis:plugins:config:secret:set", async (e, pluginId: string, key: string, value: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugins:config:secret:set", e);
+      return pluginConfigError("unauthorized-frame", "권한이 없는 프레임입니다.");
+    }
+    try {
+      const manifest = pluginRuntime.getPluginManifest(pluginId);
+      const prop = manifest?.configSchema?.properties?.[key];
+      if (!prop || prop.type !== "string" || prop.format !== "secret") {
+        return pluginConfigError(
+          "plugin-config-secret-invalid-key",
+          `Plugin '${pluginId}' configSchema does not declare a secret field '${key}'.`,
+        );
+      }
+      const safePluginId = pluginId.trim();
+      if (!/^[A-Za-z][A-Za-z0-9._-]{0,127}$/.test(safePluginId)) {
+        return pluginConfigError(
+          "plugin-config-secret-invalid-plugin-id",
+          `Invalid pluginId: ${pluginId}`,
+        );
+      }
+      await settingsService.setSecret(`plugin.${safePluginId}.${key}`, String(value ?? ""));
+      // Defence-in-depth: ensure no stale cleartext value is left under the
+      // same key in pluginConfigs (covers the migration window where a
+      // pre-Track-B manifest exposed the value as a plain string).
+      const current = settingsService.getPluginConfig(safePluginId) ?? {};
+      if (key in current) {
+        const next = { ...current };
+        delete next[key];
+        await settingsService.setPluginConfig(safePluginId, next);
+        pluginRuntime.setConfigOverride(safePluginId, next);
+      }
+      emitPluginConfigChange(safePluginId, key, "[REDACTED]");
+      return { ok: true as const };
+    } catch (err) {
+      return pluginConfigError(
+        "plugin-config-secret-save-failed",
         (err as Error).message,
       );
     }

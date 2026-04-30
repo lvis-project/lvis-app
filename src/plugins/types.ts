@@ -134,6 +134,77 @@ export interface PluginManifest {
       };
     }
   >;
+
+  /**
+   * §9.2 Track B — declarative settings schema. When present, the host
+   * renders a typed configuration form in `PluginConfigTab` (string →
+   * TextInput, number → NumberInput, boolean → Switch, enum → Select,
+   * array of strings → TagInput, `format: "secret"` → masked SecretInput
+   * that lands in the encrypted keychain — never in cleartext
+   * `pluginConfigs`). Plugins without `configSchema` keep the legacy raw
+   * key/value editor (back-compat).
+   */
+  configSchema?: PluginConfigSchema;
+}
+
+/**
+ * §9.2 Track B — declarative settings schema. JSON Schema draft-07 subset
+ * (the same dialect already used by `toolSchemas` at line 113-136 above)
+ * with one UI/storage hint: `format: "secret"` routes the field through
+ * `hostApi.setSecret` / `getSecret` so the cleartext `pluginConfigs`
+ * record never sees the value.
+ */
+export interface PluginConfigSchema {
+  /** Optional `$schema` identifier; informational only. @optional */
+  $schema?: string;
+  /** Property declarations keyed by config key. */
+  properties: Record<string, PluginConfigSchemaProperty>;
+  /** Property keys that must have a value after merging defaults + saved values. @optional */
+  required?: string[];
+  /**
+   * Optional escape hatch — when declared, the host renders a custom React
+   * panel underneath the auto-generated form. `entry` is a path relative
+   * to the plugin root; `exportName` is the named export to mount. The
+   * panel runs inside the same UI Slot System as `manifest.ui[]` (§9.3).
+   * Use sparingly — schema fields cover the common case.
+   * @optional
+   */
+  customPanel?: { entry: string; exportName: string };
+}
+
+/** Schema for a single configuration property. */
+export interface PluginConfigSchemaProperty {
+  /** JSON Schema-compatible value type. */
+  type: "string" | "number" | "integer" | "boolean" | "array";
+  /** Short human-readable label. @optional */
+  title?: string;
+  /** Long-form description rendered as helper text. @optional */
+  description?: string;
+  /** Default value used when the saved config has no entry for this key. @optional */
+  default?: unknown;
+  /** Closed list of allowed values; renders a select. @optional */
+  enum?: Array<string | number | boolean>;
+  /** Minimum value (`number` / `integer`). @optional */
+  minimum?: number;
+  /** Maximum value (`number` / `integer`). @optional */
+  maximum?: number;
+  /** Minimum string length (`string`). @optional */
+  minLength?: number;
+  /** Maximum string length (`string`). @optional */
+  maxLength?: number;
+  /** Regex pattern (`string`). @optional */
+  pattern?: string;
+  /**
+   * UI/storage hint:
+   * - `"secret"` → masked input; saved via `hostApi.setSecret(plugin.<id>.<key>)`
+   *   into `lvis-secrets.json` (Electron `safeStorage`). Never written to
+   *   cleartext `settings.pluginConfigs`. Plugins read via `hostApi.getSecret`.
+   * - other formats are advisory and rendered as plain inputs today.
+   * @optional
+   */
+  format?: "secret" | "uri" | "email" | "date-time";
+  /** Item schema when `type === "array"`. Only string-item arrays are auto-rendered as a tag input. @optional */
+  items?: { type: "string" | "number" | "integer" | "boolean"; enum?: Array<string | number | boolean> };
 }
 
 export interface PluginUiExtension {
@@ -382,6 +453,31 @@ export interface PluginHostApi {
    * protections and is subject to future deprecation.
    */
   storage: PluginStorage;
+  /**
+   * §9.2 Track B — typed access to this plugin's saved config. Reads return
+   * the merged `manifest.config` defaults + saved overrides, scoped strictly
+   * to the calling plugin's id (plugin A cannot read plugin B's config).
+   * Writes persist via the same `setPluginConfig` IPC bridge used by the
+   * settings UI and trigger a plugin reload so handlers see the new values
+   * on next tool call. `format: "secret"` schema entries are rejected from
+   * `set()` — secrets MUST go through `hostApi.setSecret` so they land in
+   * the encrypted keychain, never in cleartext `pluginConfigs`.
+   */
+  config: {
+    /** Read a single config key. Returns `undefined` when unset. */
+    get<T = unknown>(key: string): T | undefined;
+    /**
+     * Persist a config key. Triggers a plugin reload so the new value is
+     * visible to the plugin on next handler invocation.
+     */
+    set<T = unknown>(key: string, value: T): Promise<void>;
+    /**
+     * Subscribe to changes for a single key. Returns an `unsubscribe()`
+     * disposer. The subscription is scoped to the caller's pluginId — a
+     * change in plugin A cannot fire plugin B's listener.
+     */
+    onChange<T = unknown>(key: string, callback: (value: T | undefined) => void): () => void;
+  };
   registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
   emitEvent(eventType: string, data?: unknown): void;
   /**

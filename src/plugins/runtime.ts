@@ -12,6 +12,7 @@ import type { ValidateFunction } from "ajv";
 import type {
   InstallPolicy,
   PluginAccessSpec,
+  PluginConfigSchema,
   PluginManifest,
   PluginToolHandler,
   PluginUiExtension,
@@ -128,6 +129,12 @@ export interface PluginCard {
   loadStatus: "loaded" | "failed" | "disabled";
   version?: string;
   publisher?: string;
+  /**
+   * §9.2 Track B — declarative settings schema (when the manifest declares
+   * one). Renderer reads this to choose between the typed form and the
+   * legacy raw key/value editor.
+   */
+  configSchema?: PluginConfigSchema;
 }
 
 /**
@@ -1483,6 +1490,7 @@ export class PluginRuntime {
       loadStatus,
       version: manifest.version,
       publisher: manifest.publisher,
+      configSchema: manifest.configSchema,
     };
   }
 
@@ -1508,6 +1516,13 @@ export class PluginRuntime {
 function createNoopHostApi(pluginId: string, pluginDataDir: string): PluginHostApi {
   return {
     storage: createPluginStorage(pluginId, pluginDataDir),
+    config: {
+      get: () => undefined,
+      set: async () => {
+        throw new Error("config.set not available in noop context");
+      },
+      onChange: () => () => {},
+    },
     registerKeywords: () => {},
     emitEvent: () => {},
     onEvent: () => () => {},
