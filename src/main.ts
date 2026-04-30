@@ -298,8 +298,10 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 720,
+    width: 560,
+    height: 380,
+    minWidth: 480,
+    minHeight: 320,
     show: true,
     autoHideMenuBar: false,
     // ─── Cross-platform titlebar ─────────────────────────────────────────
