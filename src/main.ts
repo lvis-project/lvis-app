@@ -420,13 +420,16 @@ async function main() {
   // be called synchronously inside createWindow().
   const preloadPath = resolve(__dirname, "preload.cjs");
   windowManager = new WindowManager({ preloadPath, distRoot });
-  windowManager.registerIpc();
 
   // §4.2 Step 8: window 생성 (splash 표시) — bootstrap이 mainWindow를 필요로 함
   createWindow();
 
   // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
   services = await bootstrap(projectRoot, mainWindow!, () => mainWindow);
+
+  // Window IPC handlers registered after bootstrap so auditLogger is available
+  // for validateSender + viewKey security guards added in PR #354 follow-up.
+  windowManager.registerIpc(services.auditLogger);
 
   // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
   registerIpcHandlers(services, () => mainWindow);
