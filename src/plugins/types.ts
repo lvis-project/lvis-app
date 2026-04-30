@@ -156,6 +156,8 @@ export interface PluginRegistryEntry {
   installedBy?: InstallPolicy;
   bundleRefs?: string[];
   approvedPluginAccess?: PluginAccessSpec;
+  /** dev mode only — skip marketplace install receipt check */
+  _devLinked?: boolean;
 }
 
 export interface PluginRegistry {
@@ -422,6 +424,8 @@ export interface PluginHostApi {
    * are logged but do not block quit.
    */
   onShutdown(handler: () => void | Promise<void>): void;
+  /** @deprecated ms-graph 통합 이후 no-op. 구 calendar/email 플러그인 호환용. */
+  onMsGraphAuthChange?(handler: () => void): void;
 
   // ─── 외부 포털 interactive 인증 (쿠키 수집) ──────────────────────────
   /**
