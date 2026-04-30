@@ -1,12 +1,15 @@
 /**
- * UX Track 3 — ThemeProvider unit tests.
+ * UX Track 3 — ThemeProvider unit tests (two-axis redesign).
  *
  * Covers:
  *  - resolveTheme() pure function (system → light/dark fallback)
+ *  - resolveCodeTheme() pure function (auto follows shell)
  *  - applyThemeToDocument() writes data-theme + class
- *  - <ThemeProvider> hydrates from settings
- *  - setPreference() persists through api.updateSettings()
- *  - Persistence roundtrip: set dark → simulate reload → still dark
+ *  - applyChatThemeToDocument() writes/removes data-chat-theme
+ *  - applyCodeThemeToDocument() writes data-code-theme
+ *  - <ThemeProvider> hydrates all three axes from settings
+ *  - setPreference / setChatTheme / setCodeTheme persist via api.updateSettings()
+ *  - Persistence roundtrip: set chat=purple → simulate reload → still purple
  *  - reduced-motion: no transition declared on <html> when media matches
  *  - useTheme outside provider throws (programmer-error guard)
  */
@@ -15,12 +18,24 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { act, render, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { ThemeProvider, useTheme, useOptionalTheme } from "../theme/ThemeProvider.js";
-import { applyThemeToDocument, resolveTheme } from "../theme/resolve-theme.js";
-import { THEME_PREFERENCES } from "../theme/types.js";
+import {
+  applyChatThemeToDocument,
+  applyCodeThemeToDocument,
+  applyThemeToDocument,
+  resolveCodeTheme,
+  resolveTheme,
+} from "../theme/resolve-theme.js";
+import {
+  CHAT_THEME_PREFERENCES,
+  CODE_THEME_PREFERENCES,
+  THEME_PREFERENCES,
+} from "../theme/types.js";
 import { makeMockLvisApi } from "../../../../test/renderer/mock-lvis-api.js";
 
 afterEach(() => {
   document.documentElement.removeAttribute("data-theme");
+  document.documentElement.removeAttribute("data-chat-theme");
+  document.documentElement.removeAttribute("data-code-theme");
   document.documentElement.classList.remove(
     "lvis-theme-light",
     "lvis-theme-dark",
@@ -69,6 +84,59 @@ describe("applyThemeToDocument", () => {
 describe("THEME_PREFERENCES", () => {
   it("includes the four shipped variants", () => {
     expect([...THEME_PREFERENCES]).toEqual(["system", "light", "dark", "high-contrast"]);
+  });
+});
+
+describe("CHAT_THEME_PREFERENCES", () => {
+  it("includes the four chat accent variants", () => {
+    expect([...CHAT_THEME_PREFERENCES]).toEqual(["default", "purple", "orange", "blue"]);
+  });
+});
+
+describe("CODE_THEME_PREFERENCES", () => {
+  it("includes auto + the two explicit code variants", () => {
+    expect([...CODE_THEME_PREFERENCES]).toEqual(["auto", "light", "dark"]);
+  });
+});
+
+describe("resolveCodeTheme", () => {
+  it("returns explicit value when not auto", () => {
+    expect(resolveCodeTheme("light", "dark")).toBe("light");
+    expect(resolveCodeTheme("dark", "light")).toBe("dark");
+  });
+
+  it("auto follows the resolved shell — light shell → light code", () => {
+    expect(resolveCodeTheme("auto", "light")).toBe("light");
+  });
+
+  it("auto follows the resolved shell — dark shell → dark code", () => {
+    expect(resolveCodeTheme("auto", "dark")).toBe("dark");
+  });
+
+  it("auto pairs high-contrast with dark code", () => {
+    expect(resolveCodeTheme("auto", "high-contrast")).toBe("dark");
+  });
+});
+
+describe("applyChatThemeToDocument", () => {
+  it("writes data-chat-theme for non-default values", () => {
+    applyChatThemeToDocument("purple");
+    expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
+  });
+
+  it("removes data-chat-theme for default (no override)", () => {
+    document.documentElement.setAttribute("data-chat-theme", "purple");
+    applyChatThemeToDocument("default");
+    expect(document.documentElement.hasAttribute("data-chat-theme")).toBe(false);
+  });
+});
+
+describe("applyCodeThemeToDocument", () => {
+  it("writes data-code-theme attribute", () => {
+    applyCodeThemeToDocument("light");
+    expect(document.documentElement.getAttribute("data-code-theme")).toBe("light");
+    applyCodeThemeToDocument("dark");
+    expect(document.documentElement.getAttribute("data-code-theme")).toBe("dark");
   });
 });
 
@@ -221,6 +289,173 @@ describe("<ThemeProvider>", () => {
     }
     render(<OptConsumer />);
     expect(observed).toBeNull();
+  });
+
+  it("setChatTheme writes data-chat-theme + persists via api.updateSettings", async () => {
+    const { api } = makeMockLvisApi();
+    let setter: ((v: "default" | "purple" | "orange" | "blue") => void) | null = null;
+    function Capture() {
+      const { setChatTheme } = useTheme();
+      setter = setChatTheme;
+      return null;
+    }
+    render(
+      <ThemeProvider api={api as never}>
+        <Capture />
+      </ThemeProvider>,
+    );
+    await waitFor(() => { expect(setter).not.toBeNull(); });
+    act(() => { setter!("purple"); });
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
+    });
+    expect(api.updateSettings).toHaveBeenCalledWith({ appearance: { chatTheme: "purple" } });
+  });
+
+  it("setChatTheme=default removes data-chat-theme attribute", async () => {
+    const { api } = makeMockLvisApi();
+    let setter: ((v: "default" | "purple" | "orange" | "blue") => void) | null = null;
+    function Capture() {
+      const { setChatTheme } = useTheme();
+      setter = setChatTheme;
+      return null;
+    }
+    render(
+      <ThemeProvider api={api as never} initialChatTheme="purple">
+        <Capture />
+      </ThemeProvider>,
+    );
+    await waitFor(() => { expect(setter).not.toBeNull(); });
+    expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
+    act(() => { setter!("default"); });
+    await waitFor(() => {
+      expect(document.documentElement.hasAttribute("data-chat-theme")).toBe(false);
+    });
+  });
+
+  it("setCodeTheme writes data-code-theme + persists via api.updateSettings", async () => {
+    const { api } = makeMockLvisApi();
+    let setter: ((v: "auto" | "light" | "dark") => void) | null = null;
+    function Capture() {
+      const { setCodeTheme } = useTheme();
+      setter = setCodeTheme;
+      return null;
+    }
+    render(
+      <ThemeProvider api={api as never} initialPreference="dark">
+        <Capture />
+      </ThemeProvider>,
+    );
+    await waitFor(() => { expect(setter).not.toBeNull(); });
+    act(() => { setter!("light"); });
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-code-theme")).toBe("light");
+    });
+    expect(api.updateSettings).toHaveBeenCalledWith({ appearance: { codeTheme: "light" } });
+  });
+
+  it("auto codeTheme tracks shell — switching shell light↔dark updates data-code-theme", async () => {
+    let setter: ((v: "system" | "light" | "dark" | "high-contrast") => void) | null = null;
+    function Capture() {
+      const { setPreference } = useTheme();
+      setter = setPreference;
+      return null;
+    }
+    render(
+      <ThemeProvider initialPreference="dark" initialCodeTheme="auto">
+        <Capture />
+      </ThemeProvider>,
+    );
+    await waitFor(() => { expect(setter).not.toBeNull(); });
+    expect(document.documentElement.getAttribute("data-code-theme")).toBe("dark");
+    act(() => { setter!("light"); });
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-code-theme")).toBe("light");
+    });
+  });
+
+  it("hydrates chatTheme + codeTheme from settings on mount", async () => {
+    const { api } = makeMockLvisApi({
+      settings: {
+        llm: { provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
+        chat: { systemPrompt: "", autoCompact: true },
+        webSearch: { provider: "none" },
+        appearance: { theme: "dark", chatTheme: "orange", codeTheme: "light" },
+      },
+    });
+    let observed: { chatTheme: string; codeTheme: string } | null = null;
+    function Probe() {
+      const { chatTheme, codeTheme } = useTheme();
+      useEffect(() => { observed = { chatTheme, codeTheme }; }, [chatTheme, codeTheme]);
+      return null;
+    }
+    render(
+      <ThemeProvider api={api as never}>
+        <Probe />
+      </ThemeProvider>,
+    );
+    await waitFor(() => {
+      expect(observed?.chatTheme).toBe("orange");
+      expect(observed?.codeTheme).toBe("light");
+    });
+    expect(document.documentElement.getAttribute("data-chat-theme")).toBe("orange");
+    expect(document.documentElement.getAttribute("data-code-theme")).toBe("light");
+  });
+
+  it("persistence roundtrip for chatTheme: set purple → simulated reload → still purple", async () => {
+    let stored: { theme: "system" | "light" | "dark" | "high-contrast"; chatTheme?: string; codeTheme?: string } = {
+      theme: "system",
+      chatTheme: "default",
+      codeTheme: "auto",
+    };
+    const settingsBacking = {
+      llm: { provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
+      chat: { systemPrompt: "", autoCompact: true },
+      webSearch: { provider: "none" },
+      appearance: stored,
+    };
+    const { api: api1 } = makeMockLvisApi({ settings: settingsBacking });
+    api1.updateSettings.mockImplementation(async (patch: any) => {
+      if (patch.appearance) stored = { ...stored, ...patch.appearance };
+      return { ...settingsBacking, appearance: stored };
+    });
+    let setter: ((v: "default" | "purple" | "orange" | "blue") => void) | null = null;
+    function Capture() {
+      const { setChatTheme } = useTheme();
+      setter = setChatTheme;
+      return null;
+    }
+    const first = render(
+      <ThemeProvider api={api1 as never}>
+        <Capture />
+      </ThemeProvider>,
+    );
+    await waitFor(() => { expect(setter).not.toBeNull(); });
+    act(() => { setter!("purple"); });
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
+    });
+    expect(stored.chatTheme).toBe("purple");
+    first.unmount();
+
+    const { api: api2 } = makeMockLvisApi({
+      settings: { ...settingsBacking, appearance: stored },
+    });
+    let observed: string | null = null;
+    function ObserveChat() {
+      const { chatTheme } = useTheme();
+      useEffect(() => { observed = chatTheme; }, [chatTheme]);
+      return null;
+    }
+    render(
+      <ThemeProvider api={api2 as never}>
+        <ObserveChat />
+      </ThemeProvider>,
+    );
+    await waitFor(() => {
+      expect(observed).toBe("purple");
+    });
+    expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
   });
 });
 
