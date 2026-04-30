@@ -26,9 +26,11 @@ import type { AuditLogger } from "../audit/audit-logger.js";
 /**
  * Allowlist for viewKey values accepted by the detach IPC handlers.
  * Built-in view keys are listed explicitly; plugin views use the
- * `plugin:<slug>` format where slug is alphanumeric with dots/underscores/hyphens.
+ * `plugin:<pluginId>:<extensionId>` format (two colon-separated segments)
+ * where each segment is alphanumeric with dots/underscores/hyphens.
+ * toViewKey() in api-client.ts produces exactly this shape.
  */
-export const ALLOWED_VIEW_KEYS = /^(tasks|reminders|routines|memory|starred|plugin:[a-z0-9_.-]+)$/;
+export const ALLOWED_VIEW_KEYS = /^(tasks|reminders|routines|memory|starred|plugin:[a-z0-9_.-]+:[a-z0-9_.-]+)$/;
 
 /** Human-readable window titles for built-in view keys. */
 const BUILTIN_VIEW_LABELS: Record<string, string> = {
@@ -44,9 +46,10 @@ function viewKeyLabel(viewKey: string): string {
   if (Object.prototype.hasOwnProperty.call(BUILTIN_VIEW_LABELS, viewKey)) {
     return BUILTIN_VIEW_LABELS[viewKey];
   }
-  // plugin:<slug> — use the slug portion only
+  // plugin:<pluginId>:<extensionId> — use the pluginId segment only
   if (viewKey.startsWith("plugin:")) {
-    return viewKey.slice("plugin:".length);
+    const pluginId = viewKey.slice("plugin:".length).split(":")[0];
+    return pluginId;
   }
   return viewKey;
 }
