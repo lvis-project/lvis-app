@@ -260,11 +260,13 @@ function QuestionForm({
         </div>
       )}
       {item.allowFreeText && (
+        // US-FQP2.3: reduced min-height; CSS field-sizing:content for auto-expand;
+        // max-h-[200px] prevents unbounded panel growth.
         <Textarea
           value={draft.freeText ?? ""}
           onChange={(e) => onFreeText(e.target.value)}
           placeholder="직접 입력..."
-          className="min-h-[60px] text-sm"
+          className="min-h-[44px] max-h-[200px] resize-none overflow-y-auto text-sm [field-sizing:content]"
           disabled={disabled}
         />
       )}
