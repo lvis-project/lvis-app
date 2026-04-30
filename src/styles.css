@@ -2,6 +2,87 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── FloatingQuestionPanel animations ─────────────────────────────────────
+   Class names are referenced from FloatingQuestionPanel.tsx.
+   We use @keyframes outside @layer so they are always available at highest
+   specificity. The .fqp-* utility classes are placed in @layer components so
+   Tailwind's purge doesn't strip them (they are dynamic class names).
+   prefers-reduced-motion: collapse translate → opacity-only fade.
+──────────────────────────────────────────────────────────────────────────── */
+
+@keyframes fqp-slide-in-top {
+  from { opacity: 0; transform: translateY(-18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fqp-slide-out-top {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-18px); }
+}
+@keyframes fqp-slide-in-bottom {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fqp-slide-out-bottom {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(18px); }
+}
+@keyframes fqp-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes fqp-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@layer components {
+  /* Positioning roots */
+  .fqp-root-top {
+    top: 0.5rem;
+  }
+  .fqp-root-bottom {
+    bottom: 0.5rem;
+    top: auto;
+  }
+
+  /* Card shell — elevation + subtle primary tint */
+  .fqp-card-shell {
+    background-color: hsl(var(--card));
+    box-shadow:
+      0 4px 6px -1px rgb(0 0 0 / 0.4),
+      0 10px 15px -3px rgb(0 0 0 / 0.3),
+      0 0 0 1px hsl(var(--primary) / 0.12);
+  }
+
+  /* Slot enter/exit — top-sheet */
+  .fqp-slot-enter-top {
+    animation: fqp-slide-in-top 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .fqp-slot-exit-top {
+    animation: fqp-slide-out-top 200ms cubic-bezier(0.55, 0, 1, 0.45) both;
+  }
+
+  /* Slot enter/exit — bottom-sheet */
+  .fqp-slot-enter-bottom {
+    animation: fqp-slide-in-bottom 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .fqp-slot-exit-bottom {
+    animation: fqp-slide-out-bottom 200ms cubic-bezier(0.55, 0, 1, 0.45) both;
+  }
+}
+
+/* Reduced motion: replace translate animations with simple fades */
+@media (prefers-reduced-motion: reduce) {
+  .fqp-slot-enter-top,
+  .fqp-slot-enter-bottom {
+    animation: fqp-fade-in 200ms ease both;
+  }
+  .fqp-slot-exit-top,
+  .fqp-slot-exit-bottom {
+    animation: fqp-fade-out 200ms ease both;
+  }
+}
+
 @layer base {
   :root {
     --background: 222.2 84% 4.9%;
