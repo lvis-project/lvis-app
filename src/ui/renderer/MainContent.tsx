@@ -35,8 +35,6 @@ export interface MainContentProps {
   isEntryStarred: (entryIdx: number) => string | null;
   onAbort: () => Promise<void>;
   onFeedback: Parameters<typeof ChatView>[0]["onFeedback"];
-  /** Navigate to the tasks view from the chat TODO panel "+N more" link. */
-  onNavigateToTasks?: () => void;
   // plugin view
   activePluginView: PluginView | null;
 }
@@ -122,7 +120,6 @@ export function MainContent(props: MainContentProps): ReactNode {
             isEntryStarred={props.isEntryStarred}
             onAbort={props.onAbort}
             onFeedback={props.onFeedback}
-            onNavigateToTasks={props.onNavigateToTasks}
           />
         </ChatContextProvider>
       </MainPaneShell>
