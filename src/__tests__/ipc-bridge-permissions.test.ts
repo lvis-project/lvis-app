@@ -75,6 +75,10 @@ function makeServices(pm: ReturnType<typeof makeMockPM>, gate = makeMockGate()) 
       restartAll: vi.fn(),
       setConfigOverride: vi.fn(),
       listUiExtensions: vi.fn(() => []),
+      // §9.2 Track B — config:set IPC handler reads the manifest to detect
+      // `format: "secret"` keys. Default to undefined so the strip pass is
+      // a no-op for legacy tests.
+      getPluginManifest: vi.fn(() => undefined),
     } as any,
     pluginMarketplace: { list: vi.fn(), install: vi.fn(), uninstall: vi.fn() } as any,
     taskService: { add: vi.fn(), update: vi.fn(), get: vi.fn(), delete: vi.fn(), query: vi.fn(), getPendingByPriority: vi.fn(() => []), getOverdue: vi.fn(() => []), getDueToday: vi.fn(() => []) } as any,
@@ -363,6 +367,114 @@ describe("lvis:plugins:config:*", () => {
     expect(services.settingsService.setPluginConfig).toHaveBeenCalledWith("meeting", { apiKey: "secret" });
     expect(services.pluginRuntime.setConfigOverride).toHaveBeenCalledWith("meeting", { apiKey: "secret" });
     expect(services.pluginRuntime.restartAll).toHaveBeenCalledOnce();
+  });
+
+  // §9.2 Track B — US-B5
+  it("strips `format:'secret'` keys from cleartext pluginConfigs at save time", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    // Manifest declares apiKey as a secret. The IPC handler MUST drop
+    // it from the payload before calling setPluginConfig so the
+    // cleartext settings.json never sees it.
+    services.pluginRuntime.getPluginManifest = vi.fn(() => ({
+      id: "meeting",
+      name: "Meeting",
+      version: "1.0.0",
+      entry: "index.js",
+      tools: [],
+      configSchema: {
+        properties: {
+          endpoint: { type: "string" },
+          apiKey: { type: "string", format: "secret" },
+        },
+      },
+    }));
+    registerIpcHandlers(services, () => null);
+
+    const result = await invoke(
+      "lvis:plugins:config:set",
+      "meeting",
+      { endpoint: "https://api.example.com", apiKey: "sk-LEAK" },
+    ) as { ok: boolean; config: unknown };
+
+    expect(result.ok).toBe(true);
+    // setPluginConfig is the only path that lands on disk for cleartext
+    // pluginConfigs — verify it never received the secret key.
+    const savedArg = (services.settingsService.setPluginConfig as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][1] as Record<string, unknown>;
+    expect(savedArg).toEqual({ endpoint: "https://api.example.com" });
+    expect("apiKey" in savedArg).toBe(false);
+    expect(JSON.stringify(savedArg)).not.toContain("sk-LEAK");
+  });
+
+  // §9.2 Track B — US-B5: secret writes go through settingsService.setSecret
+  it("config:secret:set persists via setSecret and never via setPluginConfig", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    services.pluginRuntime.getPluginManifest = vi.fn(() => ({
+      id: "meeting",
+      name: "Meeting",
+      version: "1.0.0",
+      entry: "index.js",
+      tools: [],
+      configSchema: {
+        properties: {
+          apiKey: { type: "string", format: "secret" },
+        },
+      },
+    }));
+    registerIpcHandlers(services, () => null);
+
+    const result = await invoke(
+      "lvis:plugins:config:secret:set",
+      "meeting",
+      "apiKey",
+      "sk-LIVE",
+    ) as { ok: boolean };
+
+    expect(result.ok).toBe(true);
+    expect(services.settingsService.setSecret).toHaveBeenCalledWith(
+      "plugin.meeting.apiKey",
+      "sk-LIVE",
+    );
+    // The secret value must NOT pass through setPluginConfig.
+    const setPluginConfigMock = services.settingsService.setPluginConfig as unknown as { mock: { calls: unknown[][] } };
+    for (const call of setPluginConfigMock.mock.calls) {
+      const arg = call[1];
+      expect(JSON.stringify(arg ?? {})).not.toContain("sk-LIVE");
+    }
+  });
+
+  it("config:secret:set rejects keys not declared as `format:'secret'`", async () => {
+    const pm = makeMockPM();
+    handlers.clear();
+    vi.clearAllMocks();
+    const { registerIpcHandlers } = await import("../ipc-bridge.js");
+    const services = makeServices(pm);
+    services.pluginRuntime.getPluginManifest = vi.fn(() => ({
+      id: "meeting",
+      name: "Meeting",
+      version: "1.0.0",
+      entry: "index.js",
+      tools: [],
+      configSchema: { properties: { endpoint: { type: "string" } } },
+    }));
+    registerIpcHandlers(services, () => null);
+
+    const result = await invoke(
+      "lvis:plugins:config:secret:set",
+      "meeting",
+      "endpoint",
+      "leak",
+    ) as { ok: boolean; error?: string };
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("plugin-config-secret-invalid-key");
+    expect(services.settingsService.setSecret).not.toHaveBeenCalled();
   });
 });
 
