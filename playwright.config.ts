@@ -8,7 +8,8 @@ import { defineConfig } from '@playwright/test';
  * `npx playwright test` to run these.
  */
 export default defineConfig({
-  testDir: './test/e2e/ui',
+  testDir: './test/e2e',
+  testIgnore: ['**/marketplace-e2e.test.ts'],
   testMatch: /.*\.spec\.ts$/,
   timeout: 60_000,
   expect: { timeout: 10_000 },
