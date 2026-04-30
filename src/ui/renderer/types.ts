@@ -115,8 +115,12 @@ export type AppSettings = {
     realCloudBaseUrl?: string;
     realCloudAllowPrivateNetwork?: boolean;
   };
-  /** UX Track 3 — visual theme preference. */
-  appearance?: { theme: "system" | "light" | "dark" | "high-contrast" };
+  /** UX Track 3 — visual theme preferences (three-axis). */
+  appearance?: {
+    theme: "system" | "light" | "dark" | "high-contrast";
+    chatTheme?: "default" | "purple" | "orange" | "blue";
+    codeTheme?: "auto" | "light" | "dark";
+  };
 };
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
