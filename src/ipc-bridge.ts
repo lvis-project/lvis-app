@@ -2102,4 +2102,57 @@ ${input}`;
       }
     });
   }
+
+  // ─── Window controls (custom titlebar) ────────────────────────────────
+  // Exposed only on Win/Linux where frame:false removes native controls.
+  // On macOS these channels are never called — traffic lights are OS-managed.
+  ipcMain.handle("window:minimize", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:minimize", e); return; }
+    getMainWindow()?.minimize();
+  });
+  ipcMain.handle("window:toggleMaximize", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:toggleMaximize", e); return; }
+    const win = getMainWindow();
+    if (!win) return;
+    win.isMaximized() ? win.unmaximize() : win.maximize();
+  });
+  ipcMain.handle("window:close", (e) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:close", e); return; }
+    getMainWindow()?.close();
+  });
+
+  // Broadcast maximize state to renderer so the toggle icon updates.
+  const broadcastMaximized = (maximized: boolean) => {
+    try {
+      getMainWindow()?.webContents.send("window:maximizedChanged", maximized);
+    } catch {
+      // window may be destroyed
+    }
+  };
+  const win = getMainWindow();
+  if (win) {
+    win.on("maximize", () => broadcastMaximized(true));
+    win.on("unmaximize", () => broadcastMaximized(false));
+    // Fullscreen: notify renderer to hide/show the custom titlebar.
+    win.on("enter-full-screen", () => {
+      try { win.webContents.send("window:fullscreenChanged", true); } catch { /* destroyed */ }
+    });
+    win.on("leave-full-screen", () => {
+      try { win.webContents.send("window:fullscreenChanged", false); } catch { /* destroyed */ }
+    });
+  }
+
+  // Theme sync — renderer dispatches this after a theme change so the
+  // native titlebar overlay on Win/Linux keeps visual parity.
+  // No-op on macOS (no overlay to update).
+  ipcMain.handle("window:syncTitleBarTheme", (e, payload: { color: string; symbolColor: string }) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:syncTitleBarTheme", e); return; }
+    if (process.platform === "darwin") return; // traffic lights managed by OS
+    const mainWin = getMainWindow();
+    if (!mainWin || typeof mainWin.setTitleBarOverlay !== "function") return;
+    if (typeof payload?.color !== "string" || typeof payload?.symbolColor !== "string") {
+      throw new Error("[lvis] window:syncTitleBarTheme: invalid payload");
+    }
+    mainWin.setTitleBarOverlay({ color: payload.color, symbolColor: payload.symbolColor, height: 36 });
+  });
 }
