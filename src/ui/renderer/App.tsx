@@ -34,6 +34,7 @@ import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js
 import { BootstrapStatusBanner } from "./components/BootstrapStatusBanner.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { DropZoneOverlay } from "./components/DropZoneOverlay.js";
+import { SnapEdgeHighlight } from "./components/SnapEdgeHighlight.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { useIndexedDocs } from "./hooks/use-indexed-docs.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
@@ -404,6 +405,8 @@ export function App() {
       <CommandPaletteDialog open={commandOpen} onOpenChange={setCommandOpen} actions={commandActions} />
       <DropZoneOverlay />
       <DevConsoleToggle />
+      {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
+      <SnapEdgeHighlight />
     </TooltipProvider>
     </ThemeProvider>
     </ErrorBoundary>

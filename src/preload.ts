@@ -665,6 +665,33 @@ const api = {
       approvalId?: string;
     };
   }) => ipcRenderer.invoke("lvis:notification:clicked", payload),
+
+  // ─── Window management (tab detach + magnetic snap) ──────────────────────
+  window: {
+    /** Open viewKey in a new detached BrowserWindow. */
+    openDetached: async (viewKey: string) =>
+      ipcRenderer.invoke("lvis:window:open-detached", viewKey) as Promise<
+        { ok: true; windowId: number } | { ok: false; error: string }
+      >,
+    /** Close the current detached window (no-op in main window). */
+    closeDetached: async () =>
+      ipcRenderer.invoke("lvis:window:close-detached") as Promise<{ ok: true } | { ok: false; error: string }>,
+    /** List all currently open detached windows. */
+    listDetached: async () =>
+      ipcRenderer.invoke("lvis:window:list-detached") as Promise<
+        Array<{ windowId: number; viewKey: string; snapped: boolean }>
+      >,
+    /**
+     * Subscribe to snap-edge highlight events sent from the main process
+     * when a child window enters/exits the snap zone.
+     * edge: "n"|"s"|"e"|"w" when entering, null when leaving.
+     */
+    onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => {
+      const listener = (_event: unknown, edge: "n" | "s" | "e" | "w" | null) => handler(edge);
+      ipcRenderer.on("lvis:window:snap-edge", listener);
+      return () => ipcRenderer.removeListener("lvis:window:snap-edge", listener);
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld("lvisApi", api);

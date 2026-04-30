@@ -19,11 +19,16 @@ import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { deliverRoutineResult } from "./routines/routine-delivery.js";
+import { WindowManager } from "./main/window-manager.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const distRoot = resolve(__dirname, "..");
 const projectRoot = resolve(distRoot, "..");
+
+// Tab detach + magnetic snap — created before createWindow() so it is ready
+// when the main window is registered.
+let windowManager: WindowManager | null = null;
 
 // WSL 환경 대응
 if (process.platform === "linux" && process.env.WSL_DISTRO_NAME) {
@@ -312,6 +317,12 @@ function createWindow() {
   });
 
   const win = mainWindow;
+
+  // Register with WindowManager so snap logic can track the main window.
+  if (windowManager) {
+    windowManager.registerMainWindow(win);
+  }
+
   // Development debugging is provided by an in-app floating console toggle in
   // the renderer. Avoid docking Chromium DevTools into the main window because
   // it distorts the runtime viewport and causes misleading layout regressions.
@@ -384,6 +395,12 @@ function createWindow() {
 }
 
 async function main() {
+  // Initialise WindowManager before createWindow so registerMainWindow() can
+  // be called synchronously inside createWindow().
+  const preloadPath = resolve(__dirname, "preload.cjs");
+  windowManager = new WindowManager({ preloadPath, distRoot });
+  windowManager.registerIpc();
+
   // §4.2 Step 8: window 생성 (splash 표시) — bootstrap이 mainWindow를 필요로 함
   createWindow();
 
@@ -622,6 +639,7 @@ app.on("before-quit", (event) => {
       }
       await svc.shutdown?.();
       await svc.pluginRuntime.stopAll();
+      windowManager?.persistAll();
     } finally {
       appShutdownCompleted = true;
       app.quit();

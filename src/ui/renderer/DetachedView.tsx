@@ -1,0 +1,192 @@
+/**
+ * DetachedView — shell for a tab opened in a standalone BrowserWindow.
+ *
+ * Mounts when renderer.tsx detects `#detached/<viewKey>` in the URL fragment.
+ * Renders a minimal shell: a stub title bar (TODO: replace with B1's
+ * <CustomTitleBar /> once that PR merges) + the actual content view.
+ *
+ * Supported viewKeys:
+ *   "tasks", "reminders", "routines", "memory", "starred",
+ *   "plugin:<pluginId>:<extensionId>"
+ *
+ * The snap-edge highlight (2px accent border on the main window) is handled
+ * in a separate component <SnapEdgeHighlight /> which subscribes to the
+ * lvis:window:snap-edge IPC event broadcast by WindowManager.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import { ThemeProvider } from "./theme/index.js";
+import { TooltipProvider } from "../../components/ui/tooltip.js";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
+import { getApi, toViewKey } from "./api-client.js";
+import { TaskView } from "./components/TaskView.js";
+import { RemindersList } from "./components/RemindersList.js";
+import { RoutinePanel } from "./components/RoutinePanel.js";
+import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
+import { StarredView } from "./components/StarredView.js";
+import { PluginUiHostView } from "../../plugin-ui-host.js";
+import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
+import { useStarred } from "./hooks/use-starred.js";
+
+// ─── Stub title bar (B1 replacement TODO) ────────────────────────────────────
+// TODO: replace with B1's <CustomTitleBar /> once that PR merges.
+function StubTitleBar({ title }: { title: string }) {
+  return (
+    <div
+      className="flex h-9 shrink-0 items-center border-b bg-background px-3 text-sm font-medium text-foreground"
+      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+    >
+      <span className="select-none">{title}</span>
+    </div>
+  );
+}
+
+// ─── Snap edge highlight overlay ─────────────────────────────────────────────
+
+type SnapEdge = "n" | "s" | "e" | "w";
+
+const EDGE_BORDER_CLASSES: Record<SnapEdge, string> = {
+  n: "top-0 left-0 right-0 h-0.5",
+  s: "bottom-0 left-0 right-0 h-0.5",
+  w: "left-0 top-0 bottom-0 w-0.5",
+  e: "right-0 top-0 bottom-0 w-0.5",
+};
+
+/**
+ * Renders a 2px accent border on the corresponding edge of this window when
+ * a child window enters the snap zone. Only meaningful in the main window.
+ */
+function SnapEdgeHighlight() {
+  const [activeEdge, setActiveEdge] = useState<SnapEdge | null>(null);
+
+  useEffect(() => {
+    const api = window.lvisApi;
+    if (!api?.window?.onSnapEdge) return;
+    const unsub = api.window.onSnapEdge((edge) => setActiveEdge(edge));
+    return unsub;
+  }, []);
+
+  if (!activeEdge) return null;
+
+  return (
+    <div
+      className={`pointer-events-none fixed z-50 bg-primary/80 ${EDGE_BORDER_CLASSES[activeEdge]}`}
+      aria-hidden="true"
+    />
+  );
+}
+
+// ─── View label helper ────────────────────────────────────────────────────────
+
+function viewLabel(viewKey: string): string {
+  const labels: Record<string, string> = {
+    tasks: "태스크",
+    reminders: "리마인더",
+    routines: "루틴",
+    memory: "메모리",
+    starred: "즐겨찾기",
+    home: "홈",
+  };
+  if (labels[viewKey]) return `LVIS — ${labels[viewKey]}`;
+  // plugin:<pluginId>:<ext>
+  const parts = viewKey.split(":");
+  if (parts[0] === "plugin" && parts.length >= 2) return `LVIS — ${parts[1]}`;
+  return `LVIS — ${viewKey}`;
+}
+
+// ─── Content dispatcher ───────────────────────────────────────────────────────
+
+interface ContentProps {
+  viewKey: string;
+}
+
+function DetachedContent({ viewKey }: ContentProps) {
+  const api = useMemo(() => getApi(), []);
+  const { pluginViews } = usePluginMarketplace(api);
+  const { starred, refreshStarred } = useStarred(api);
+
+  if (viewKey === "tasks") {
+    return <TaskView api={api} />;
+  }
+
+  if (viewKey === "reminders") {
+    return <RemindersList api={api} />;
+  }
+
+  if (viewKey === "routines") {
+    return (
+      <RoutinePanel
+        api={api}
+        onActivateHome={() => {
+          // In a detached window there is no "home" — close the detached view.
+          void api.window?.closeDetached();
+        }}
+        onJumpToSession={() => {
+          // Session jump not supported in detached view.
+        }}
+        onStartRoutineSession={async () => {
+          // Routine sessions open in main window.
+        }}
+      />
+    );
+  }
+
+  if (viewKey === "memory") {
+    return <MemorySearchPanel api={api} />;
+  }
+
+  if (viewKey === "starred") {
+    return (
+      <StarredView
+        api={api}
+        starred={starred}
+        currentSessionId=""
+        refreshStarred={refreshStarred}
+        onJumpToSession={() => {
+          // Cross-window session jump not yet implemented.
+        }}
+        onActivateHome={() => {
+          void api.window?.closeDetached();
+        }}
+      />
+    );
+  }
+
+  // Plugin view: viewKey = "plugin:<pluginId>:<extensionId>"
+  if (viewKey.startsWith("plugin:")) {
+    const activePluginView = pluginViews.find((v) => toViewKey(v) === viewKey) ?? null;
+    return <PluginUiHostView view={activePluginView} />;
+  }
+
+  return (
+    <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+      알 수 없는 뷰: {viewKey}
+    </div>
+  );
+}
+
+// ─── DetachedView ─────────────────────────────────────────────────────────────
+
+export interface DetachedViewProps {
+  viewKey: string;
+}
+
+export function DetachedView({ viewKey }: DetachedViewProps) {
+  return (
+    <ThemeProvider>
+      <TooltipProvider>
+        <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+          {/* TODO: replace StubTitleBar with B1's <CustomTitleBar /> once merged */}
+          <StubTitleBar title={viewLabel(viewKey)} />
+          <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+            <ErrorBoundary>
+              <DetachedContent viewKey={viewKey} />
+            </ErrorBoundary>
+          </main>
+          {/* Snap edge highlight — only visible when a child window is near the main window edge */}
+          <SnapEdgeHighlight />
+        </div>
+      </TooltipProvider>
+    </ThemeProvider>
+  );
+}
