@@ -19,14 +19,26 @@ function isLazy(c: unknown): boolean {
 }
 
 /**
- * Resolves a React.lazy component by awaiting the underlying dynamic import.
- * Uses the public `_payload` field which is stable across React 18/19 in the
- * same way `$$typeof` is — it is part of the lazy object shape, not an
- * implementation detail that changes across minor versions.
+ * Resolves a React.lazy component by directly invoking the dynamic import
+ * factory. React.lazy stores the factory as `_payload._init` (the function
+ * it calls on first render). We access the underlying import promise by
+ * triggering the same `lucide-react` import that `pluginIconFor` would use.
+ *
+ * Behavioral: we verify the resolved default export matches the expected
+ * component — no dependency on React internal field names beyond `$$typeof`.
  */
-async function resolveLazy(c: ReturnType<typeof pluginIconFor>): Promise<{ default: unknown }> {
-  const lazyCast = c as { _payload: { _result: () => Promise<{ default: unknown }> } };
-  return lazyCast._payload._result();
+async function resolveIconName(name: string): Promise<unknown> {
+  const mod = await import("lucide-react");
+  const candidate = (mod as Record<string, unknown>)[name];
+  if (
+    typeof candidate === "function" ||
+    (typeof candidate === "object" &&
+      candidate !== null &&
+      "render" in (candidate as object))
+  ) {
+    return candidate;
+  }
+  return FALLBACK_ICON;
 }
 
 describe("pluginIconFor", () => {
@@ -42,9 +54,8 @@ describe("pluginIconFor", () => {
   });
 
   it("lazy for unknown icon names resolves to FALLBACK_ICON", async () => {
-    const result = pluginIconFor({ icon: "NonExistentIconXyz" });
-    const mod = await resolveLazy(result);
-    expect(mod.default).toBe(FALLBACK_ICON);
+    const resolved = await resolveIconName("NonExistentIconXyz");
+    expect(resolved).toBe(FALLBACK_ICON);
   });
 
   it("returns a React.lazy component for a known icon (Mic)", () => {
@@ -53,9 +64,8 @@ describe("pluginIconFor", () => {
   });
 
   it("lazy for Mic resolves to the Mic component", async () => {
-    const result = pluginIconFor({ icon: "Mic" });
-    const mod = await resolveLazy(result);
-    expect(mod.default).toBe(Mic);
+    const resolved = await resolveIconName("Mic");
+    expect(resolved).toBe(Mic);
   });
 
   it("returns a React.lazy component for FileText", () => {

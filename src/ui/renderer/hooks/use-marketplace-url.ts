@@ -2,8 +2,9 @@
  * Returns the marketplace base URL from the persisted settings
  * (`settings.marketplace.realCloudBaseUrl`).
  *
- * The default value in settings-store.ts guarantees the field is always
- * populated — no runtime fallback logic needed here.
+ * The settings store populates a default value, but the async `getSettings()`
+ * call completes after the first render — callers must treat an empty string
+ * as "not yet loaded" and guard against it (e.g. noop or disable the action).
  */
 import { useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";

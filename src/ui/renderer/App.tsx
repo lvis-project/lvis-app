@@ -190,10 +190,12 @@ export function App() {
   const marketplaceUrl = useMarketplaceUrl(api);
 
   // Open marketplace in the system browser.
-  const onOpenMarketplace = useCallback(
-    () => void api.openExternalUrl(marketplaceUrl),
-    [api, marketplaceUrl],
-  );
+  // Guard against an empty URL during the initial settings load — calling
+  // shell.openExternal("") produces undefined behaviour on some platforms.
+  const onOpenMarketplace = useCallback(() => {
+    if (!marketplaceUrl) return;
+    void api.openExternalUrl(marketplaceUrl);
+  }, [api, marketplaceUrl]);
 
   // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
   // click opens it in a separate magnetic-snap BrowserWindow instead of
