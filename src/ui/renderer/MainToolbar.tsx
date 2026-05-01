@@ -1,6 +1,6 @@
 import { Download, History, Menu, Plus, Star } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { Command as CommandIcon, KeyRound, Search } from "lucide-react";
@@ -111,18 +111,16 @@ export function MainToolbar({
             </DropdownMenuItem>
 
             {/* ── Export submenu ── */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                  <Download className="mr-2 h-3.5 w-3.5" />
-                  <span>내보내기</span>
-                </DropdownMenuItem>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="left" align="start">
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Download className="mr-2 h-3.5 w-3.5" />
+                <span>내보내기</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
                 <DropdownMenuItem onClick={() => void onExport("markdown")}>Markdown (.md)</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => void onExport("json")}>JSON (.json)</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
 
             <DropdownMenuSeparator />
 
