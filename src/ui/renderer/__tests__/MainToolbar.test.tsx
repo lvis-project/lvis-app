@@ -106,6 +106,20 @@ describe("MainToolbar", () => {
     expect(onLoadSession).not.toHaveBeenCalled();
   });
 
+  // SEV-2-A regression: 내보내기 trigger must be a DropdownMenuSubTrigger (not a nested DropdownMenu).
+  it("내보내기 is rendered as a DropdownMenuSubTrigger with correct data attributes", async () => {
+    renderWithProvider(defaultProps());
+    await openHamburger();
+
+    // DropdownMenuSubTrigger renders with data-radix-collection-item (it's a menu item)
+    // and has [data-state] managed by Radix Sub. Verify it exists and is the right element type.
+    const subTrigger = screen.getByText("내보내기").closest("[data-radix-collection-item]");
+    expect(subTrigger).toBeTruthy();
+    // It must NOT be a DropdownMenu root (no aria-expanded on the trigger — Sub handles it differently)
+    // The key correctness signal: the element role is "menuitem" not "button"
+    expect(subTrigger?.getAttribute("role")).toBe("menuitem");
+  });
+
   it("starring a history session does not also load it", async () => {
     const onLoadSession = vi.fn();
     const onToggleSessionStar = vi.fn();
