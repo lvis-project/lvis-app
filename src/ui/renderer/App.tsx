@@ -37,6 +37,7 @@ import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { DropZoneOverlay } from "./components/DropZoneOverlay.js";
 import { SnapEdgeHighlight } from "./components/SnapEdgeHighlight.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
+import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
 import { useIndexedDocs } from "./hooks/use-indexed-docs.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
@@ -100,10 +101,19 @@ export function App() {
   // Marketplace + plugin UI extensions
   const {
     pluginViews,
+    pluginCards,
     installInFlight,
     installPlugin,
-    refreshViews, refreshMarketplace,
+    refreshViews, refreshMarketplace, refreshCards,
   } = usePluginMarketplace(api);
+
+  // Auth status for every plugin that declares `manifest.auth`
+  // (architecture.md §9.4a). Drives the 미인증 badge in both Settings →
+  // 플러그인 설정 (PluginConfigTab) and the chat-input plugin grid
+  // (PluginGridButton). Hoisting to App.tsx means a single live-poll
+  // + event-bridge subscription serves both surfaces — no duplicate
+  // listeners, no stale-state divergence between the two views.
+  const { statuses: pluginAuthStatuses } = usePluginAuthStatuses(api, pluginCards);
 
   // Sprint B — role preset, cost preview, attached docs
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets();
@@ -151,14 +161,20 @@ export function App() {
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
 
   // Build flat PluginEntry list for InputActionBar plugin grid.
+  // `unauthed` is set when the owning plugin declares `manifest.auth` AND its
+  // current statusTool result is `kind: "unauthed"`. The grid renders a
+  // small 🔒 indicator on those entries so users see the missing-auth state
+  // without first opening Settings.
   const pluginEntries = useMemo<PluginEntry[]>(
     () =>
       pluginViews.map((view) => ({
         viewKey: toViewKey(view),
+        pluginId: view.pluginId,
         label: getPluginViewLabel(view),
         icon: (view.extension as { icon?: string }).icon,
+        unauthed: pluginAuthStatuses.get(view.pluginId)?.kind === "unauthed",
       })),
-    [pluginViews],
+    [pluginViews, pluginAuthStatuses],
   );
 
   // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
@@ -284,7 +300,7 @@ export function App() {
 
   // ─── Effects ──────────────────────────────────
   useAppBootstrap({
-    api, refreshMarketplace, refreshViews, checkApiKey,
+    api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
     setActiveView,
     openCommandPalette: () => setCommandOpen(true),
   });
@@ -299,9 +315,10 @@ export function App() {
       if (!success) return;
       void refreshViews();
       void refreshMarketplace();
+      void refreshCards();
     });
     return unsubscribe;
-  }, [api, refreshViews, refreshMarketplace]);
+  }, [api, refreshViews, refreshMarketplace, refreshCards]);
 
   // Same lifecycle for uninstall — PluginConfigTab and any other surface
   // drive uninstall through the IPC handler which now broadcasts a result
@@ -313,9 +330,10 @@ export function App() {
       if (!success) return;
       void refreshViews();
       void refreshMarketplace();
+      void refreshCards();
     });
     return unsubscribe;
-  }, [api, refreshViews, refreshMarketplace]);
+  }, [api, refreshViews, refreshMarketplace, refreshCards]);
 
   const commandActions = useMemo(() => [
     { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
