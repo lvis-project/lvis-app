@@ -2478,6 +2478,7 @@ graph TB
   "version": "0.2.0",
   "entry": "dist/index.js",
   "tools": ["index_scan", "chat_preview", "..."],
+  "description": "Document indexing and semantic search plugin.",
   "installPolicy": "admin",
   "publisher": "LG Electronics IT"
 }
