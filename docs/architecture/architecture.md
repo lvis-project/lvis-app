@@ -2124,7 +2124,7 @@ graph TB
 
 **마켓플레이스 검증:** 플러그인 repo는 sidecar signature를 만들지 않는다. Marketplace upload API가 zip/manifest/schema/version/policy/dependency/access를 검증하고 최종 artifact envelope에 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장한다.
 
-**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`schemas/plugin.schema.json`) → cross-field (tool-name regex, `startupTools ⊂ tools`, `uiCallable ⊂ tools`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.4.
+**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → AJV (`schemas/plugin.schema.json`) → cross-field (tool-name regex, `startupTools ⊂ tools`, `uiCallable ⊂ tools`, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop. 에러 포맷 상세는 `docs/references/plugin-tool-schema-design.md` §2.5.
 
 규칙:
 - top-level `"type": "object"` 필수 (OpenAI / Claude / Gemini 공통 요구사항)
@@ -2303,6 +2303,73 @@ PR 3 에서 Microsoft Graph 인증이 호스트에서 플러그인으로 이전�
 **Proactive Brain — `conversation-trigger` capability:** read-only "두뇌" plugin 이 신호 관찰 후 ConversationLoop 를 *능동적*으로 시작하는 surface. 이 capability 가 부여된 plugin 만 `hostApi.triggerConversation()` 호출 가능. 일반 plugin 에 부여하지 말 것 — 사용자가 입력하지 않은 prompt 를 LLM 에 흘리는 권한이므로. 안전 계약 / spec / gate 는 [`conversation-trigger.md`](../references/conversation-trigger.md) 참조.
 
 **HostApi 확장 원칙 ("3+ 플러그인 규칙"):** 새 메서드는 3개 이상의 플러그인이 동일 기능을 필요로 하거나, 보안·감사 제어가 필요한 경우에만 추가한다. 상세: `docs/references/plugin-tool-schema-design.md` §6
+
+**Plugin-Owned OAuth — Host UI Surface (PR #399 후속)**
+
+플러그인이 자체 OAuth 를 소유한다는 원칙은 유지하되, **인증 상태와 로그인 트리거는 호스트가 일관된 surface 로 노출**한다 — 사용자가 매번 플러그인 사이드바 패널까지 들어가지 않고 Settings → 플러그인 설정 목록에서 한눈에 미인증 여부를 보고, 거기서 로그인을 시작할 수 있게.
+
+호스트는 OAuth 코드를 모르며 다만 manifest 의 *선언*에 따라 plugin tool 을 dispatch 하고 standardized event 를 listen 한다.
+
+**Manifest 선언 (`schemas/plugin.schema.json`)**
+
+```jsonc
+{
+  "auth": {
+    "label": "Microsoft 계정",      // optional; 기본은 manifest.name
+    "statusTool": "msgraph_status",  // 필수, uiCallable[] 안
+    "loginTool": "msgraph_auth",     // 필수, uiCallable[] 안
+    "logoutTool": "msgraph_signout"  // optional, uiCallable[] 안 (있으면)
+  }
+}
+```
+
+세 tool 이름은 **모두 `uiCallable[]` 의 부분집합**이어야 하며, `manifest-validation.ts` 의 hand-rolled cross-field validator 가 load-time 에 강제한다 (AJV 단독으로는 cross-array membership 표현 불가).
+
+**StatusTool 반환 형 (recommended)**
+
+```ts
+interface PluginAuthStatusResult {
+  authenticated: boolean;
+  account?: string;  // human-readable 식별자 (이메일, 로그인 ID 등)
+}
+```
+
+호스트는 defensive parse — 추가 필드는 무시. `outputSchema` 강제 검증은 toolSchemas 전반의 별 작업으로 deferred.
+
+**Auth-changed 이벤트 계약**
+
+플러그인은 인증 상태 전이 (로그인 성공 / 로그아웃 / refresh 실패) 시 다음 이벤트를 emit 한다:
+
+```ts
+hostApi.emitEvent(`${pluginId}.auth.changed`);  // 예: "ms-graph.auth.changed"
+```
+
+- `manifest.emittedEvents[]` 에 같은 이름을 등록해야 호스트 event-bridge 가 renderer 로 전달 (`boot/steps/ipc-bridge.ts`).
+- 네임스페이스는 plugin id prefix 라 `classifySubscription` 에서 `neutral` 로 떨어지지만 (private 아님), `boot/steps/ipc-bridge.ts` 가 neutral / public 둘 다 forward.
+- 호스트 `usePluginAuthStatuses` 훅이 이벤트를 받아 statusTool 를 재호출 → 뱃지 갱신. **폴링 안 함** — 폐기된 `onMsGraphAuthChange` host-callback 안티패턴 회귀 방지.
+
+**호스트 UI surface**
+
+`PluginConfigTab` (Settings → 플러그인 설정):
+
+1. **목록 (왼쪽)** — auth 선언 + statusTool 결과 `unauthed` 인 row 에 `🔒 미인증` 빨간 뱃지. happy path (authed) 는 시각적으로 quiet.
+2. **상세 패널 (오른쪽)** — manifest 가 `auth` 선언한 플러그인 선택 시 `PluginAuthSection` 렌더:
+   - 미인증: `🔒 미인증` 빨간 뱃지 + "로그인" 버튼 → `loginTool` 호출
+   - 인증됨: `✓ 인증됨` 초록 뱃지 + 계정명 + (logoutTool 있을 때만) "로그아웃" 버튼 → `logoutTool` 호출
+   - 로딩 / 오류 상태도 명시적 시각 피드백.
+
+**플러그인 PR 연결 (host-plugin-contract-sync)**
+
+호스트 PR landing 후 다음을 같은 sync 사이클에 맞춤:
+- `lvis-plugin-ms-graph`: `auth: { statusTool: "msgraph_status", loginTool: "msgraph_auth", logoutTool: "msgraph_signout" }` + `emittedEvents` 에 `"ms-graph.auth.changed"` + MSAL 상태 전이에서 emit
+- `lvis-plugin-ep-api`: `auth: { statusTool: "lge_status", loginTool: "lge_login" }` + `emittedEvents` 에 `"ep-api.auth.changed"` + 쿠키 auth 흐름에서 emit
+- `agent-hub`, `meeting`, `pageindex`, `work-proactive`: auth 무관 — manifest 변경 없음.
+
+**의도적으로 deferred 된 항목** — 별 PR 로 추적:
+- `auth.statusTool` 의 `outputSchema` 강제 검증 (toolSchemas 전체 outputSchema 인프라 큰 작업)
+- `agent-hub` 의 connection-status 까지 흡수하는 generic `statusBadge` 일반화 (3+ consumer 룰 — 현재는 ms-graph + ep-api 둘만 auth)
+- LayoutGrid 아이콘 자체에 미인증 점 뱃지 (Settings 외 발견성 강화)
+- `registry.json` 캐시 (현재 event-driven refresh 로 충분 — 풀고 싶은 flicker 문제 없음)
 
 ### 9.4b IPC/RPC 범위 — 플러그인 통신 경계
 

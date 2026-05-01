@@ -8,6 +8,7 @@ import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { ScheduleAgentId, ScheduleRoutineSchedule } from "./routines/schedule.js";
+import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
 // `__dirname` here resolves to the host preload's bundled location
@@ -440,6 +441,20 @@ const api = {
     eventType: string,
     handler: (data: unknown) => void,
   ): (() => void) => {
+    // Reject subscriptions to private-namespace events at the preload boundary.
+    // PLUGIN_PRIVATE_NAMESPACES entries are dot-separated prefixes; an event
+    // type matches when it equals a namespace or starts with "<namespace>.".
+    // This prevents renderer code from subscribing to sensitive host state
+    // (memory contents, secrets, audit trails, DLP decisions) even if the IPC
+    // channel delivers them. Mirrors capability enforcement in
+    // plugins/capabilities.ts.
+    const isPrivate = [...PLUGIN_PRIVATE_NAMESPACES].some(
+      (ns) => eventType === ns || eventType.startsWith(`${ns}.`),
+    );
+    if (isPrivate) {
+      // Return a no-op unsubscribe — the subscription is silently rejected.
+      return () => undefined;
+    }
     const listener = (_event: unknown, type: string, data: unknown) => {
       if (type === eventType) handler(data);
     };
