@@ -372,6 +372,9 @@ describe("Phase 1 — plugin trust boundary", () => {
 
   describe("dev: signerKeyId rejected in packaged builds", () => {
     const savedLvisDev = process.env.LVIS_DEV;
+    beforeEach(() => {
+      _resetForTest();
+    });
     afterEach(() => {
       _resetForTest();
       if (savedLvisDev === undefined) delete process.env.LVIS_DEV;
@@ -441,6 +444,48 @@ describe("Phase 1 — plugin trust boundary", () => {
       await runtime.load();
 
       expect(runtime.listPluginIds()).toContain("tb.dev-signer-unpkg");
+    });
+
+    it("packaged build + dev: signerKeyId via restartPlugin → rejected", async () => {
+      process.env.LVIS_DEV = "1";
+      setIsPackaged(false);
+      const pluginDir = join(pluginsRoot, "p-restart-dev-signer");
+      const manifestPath = await writePluginAt(pluginDir, "tb.restart-dev-signer");
+
+      const devReceipt: PluginInstallReceipt = {
+        schemaVersion: 1,
+        pluginId: "tb.restart-dev-signer",
+        version: "1.0.0",
+        artifactSha256: "dev:local-install",
+        signerKeyId: "dev:local-install",
+        installedAt: new Date(0).toISOString(),
+        files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
+      };
+      await writeInstallReceipt(cacheRoot, devReceipt);
+      await writeRegistry([{ id: "tb.restart-dev-signer", manifestPath, installedBy: "user" }]);
+
+      // Load successfully in dev mode
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+      });
+      await runtime.load();
+      expect(runtime.listPluginIds()).toContain("tb.restart-dev-signer");
+
+      // Switch to packaged mode — restart should now reject
+      delete process.env.LVIS_DEV;
+      setIsPackaged(true);
+      const auditCalls: Array<{ level: string; message: string }> = [];
+      (runtime as unknown as { auditLog?: (level: string, msg: string) => void }).auditLog =
+        (level, message) => auditCalls.push({ level, message });
+
+      await runtime.restartPlugin("tb.restart-dev-signer");
+      expect(runtime.listPluginIds()).not.toContain("tb.restart-dev-signer");
+      expect(auditCalls).toContainEqual(
+        expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
+      );
     });
   });
 });

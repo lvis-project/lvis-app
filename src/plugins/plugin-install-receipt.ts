@@ -65,6 +65,9 @@ export async function verifyInstallReceipt(
   if (receipt.schemaVersion !== 1) {
     return { ok: false, reason: `unsupported install receipt schema: ${String(receipt.schemaVersion)}` };
   }
+  if (typeof receipt.signerKeyId !== "string" || receipt.signerKeyId.length === 0) {
+    return { ok: false, reason: "install receipt missing or empty signerKeyId" };
+  }
   if (receipt.pluginId !== pluginId) {
     return { ok: false, reason: `install receipt plugin mismatch: expected ${pluginId}, got ${receipt.pluginId}` };
   }

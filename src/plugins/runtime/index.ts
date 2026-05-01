@@ -23,7 +23,7 @@ import type {
 import { createPluginStorage } from "../storage.js";
 import type { Actor, PluginDeploymentGuard } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
-import { devLinkedEntryAllowed, getIsPackaged } from "../../boot/dev-flags.js";
+import { devLinkedEntryAllowed, DEV_SIGNER_PREFIX, getIsPackaged } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
 
@@ -239,7 +239,7 @@ export class PluginRuntime {
           continue;
         }
         const { signerKeyId } = receiptResult.receipt;
-        if (getIsPackaged() && signerKeyId?.startsWith("dev:")) {
+        if (getIsPackaged() && signerKeyId.startsWith(DEV_SIGNER_PREFIX)) {
           const reason = "dev signer in packaged build";
           log.error(`${plan.pluginIdHint} rejected — ${reason}: ${signerKeyId}`);
           this.auditLog?.("error", "plugin_integrity_rejected", {
@@ -374,6 +374,7 @@ export class PluginRuntime {
         instance,
         methods,
         approvedPluginAccess: plan.approvedPluginAccess,
+        devLinked: plan.devLinked,
       });
       this.failedPluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
@@ -504,6 +505,24 @@ export class PluginRuntime {
     this.onDisable?.(pluginId);
 
     const { pluginRoot } = plugin;
+    const skipReceiptForDevLink = plugin.devLinked === true && devLinkedEntryAllowed();
+    if (this.installReceiptCacheRoot && !skipReceiptForDevLink) {
+      const receiptResult = await verifyInstallReceipt(this.installReceiptCacheRoot, pluginId, pluginRoot);
+      if (!receiptResult.ok) {
+        log.error(`${pluginId} rejected during restart — install receipt integrity failed: ${receiptResult.reason}`);
+        this.auditLog?.("error", "plugin_integrity_rejected", { pluginId, reason: receiptResult.reason });
+        this.markFailed(pluginId);
+        return;
+      }
+      const { signerKeyId } = receiptResult.receipt;
+      if (getIsPackaged() && signerKeyId.startsWith(DEV_SIGNER_PREFIX)) {
+        const reason = "dev signer in packaged build";
+        log.error(`${pluginId} rejected during restart — ${reason}: ${signerKeyId}`);
+        this.auditLog?.("error", "plugin_integrity_rejected", { pluginId, reason, signerKeyId });
+        this.markFailed(pluginId);
+        return;
+      }
+    }
     let manifest: PluginManifest;
     try {
       const manifestPath = resolve(pluginRoot, "plugin.json");
@@ -724,7 +743,7 @@ export class PluginRuntime {
         return;
       }
       const { signerKeyId } = receiptResult.receipt;
-      if (getIsPackaged() && signerKeyId?.startsWith("dev:")) {
+      if (getIsPackaged() && signerKeyId.startsWith(DEV_SIGNER_PREFIX)) {
         const reason = "dev signer in packaged build";
         log.error(`${plan.pluginIdHint} rejected — ${reason}: ${signerKeyId}`);
         this.auditLog?.("error", "plugin_integrity_rejected", {
