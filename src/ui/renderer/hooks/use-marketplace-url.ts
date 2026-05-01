@@ -24,15 +24,21 @@ export function useMarketplaceUrl(api: LvisApi): MarketplaceUrlState {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     api
       .getSettings()
       .then((s) => {
+        if (cancelled) return;
         setMarketplaceUrl(s.marketplace?.realCloudBaseUrl ?? "");
         setLoaded(true);
       })
       .catch(() => {
+        if (cancelled) return;
         setLoaded(true);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [api]);
 
   return { marketplaceUrl, loaded };

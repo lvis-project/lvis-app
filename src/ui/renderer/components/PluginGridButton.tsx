@@ -123,9 +123,9 @@ export function PluginGridButton({
             data-testid="plugin-grid"
           >
             {plugins.map((p) => {
-              // Extract plugin id from viewKey: "plugin:<id>:<extensionId>"
-              const parts = p.viewKey.split(":");
-              const pluginId = parts[1] ?? "";
+              // Use explicit pluginId from PluginEntry when available; fall back
+              // to deriving from viewKey for cases where the caller omits it.
+              const pluginId = p.pluginId ?? p.viewKey.split(":")[1] ?? "";
               const isInstalling = installingPluginIds?.has(pluginId) ?? false;
               const Icon = pluginIconFor({ icon: p.icon });
 
