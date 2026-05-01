@@ -1,6 +1,7 @@
 import { cp, readFile, rename, rm, stat as statAsync, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
+import { buildSideloadCopyFilter, rejectEscapingSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePluginRegistry } from "./registry.js";
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
@@ -1089,33 +1090,19 @@ export class PluginMarketplaceService {
       const stagingDir = resolve(userPluginsRoot, `${pluginId}.tmp-${process.pid}-${Date.now()}`);
       await rm(stagingDir, { recursive: true, force: true });
       try {
-        // Filter: skip dev-only / heavy / asar-bearing trees. Without this
-        // filter, copying a source repo whose `node_modules/` includes the
-        // `electron` package fails because Electron's patched fs intercepts
-        // `default_app.asar` and surfaces "Invalid package" mid-copy. `.git`
-        // is excluded for size + privacy. The check scans every path
-        // segment so monorepo layouts (e.g. `packages/foo/node_modules/electron`)
-        // are also caught. `verbatimSymlinks: true` keeps any source-side
-        // symlinks as symlinks rather than dereferencing into arbitrary
-        // host paths during cp.
         await cp(sourcePath, stagingDir, {
           recursive: true,
           verbatimSymlinks: true,
-          filter: (src) => {
-            const rel = relative(sourcePath, src);
-            if (!rel) return true;
-            const parts = rel.split(/[\\/]/);
-            if (parts[0] === ".git") return false;
-            const nmIdx = parts.indexOf("node_modules");
-            if (nmIdx >= 0) {
-              const next = parts[nmIdx + 1];
-              if (next === "electron" || next === "@electron") return false;
-            }
-            return true;
-          },
+          filter: buildSideloadCopyFilter(sourcePath),
         });
         await rm(installDir, { recursive: true, force: true });
         await rename(stagingDir, installDir);
+        try {
+          await rejectEscapingSymlinks(installDir);
+        } catch (symlinkErr) {
+          await rm(installDir, { recursive: true, force: true });
+          throw symlinkErr;
+        }
       } catch (err) {
         await rm(stagingDir, { recursive: true, force: true });
         throw err;
