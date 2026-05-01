@@ -891,6 +891,7 @@ export class PluginMarketplaceService {
     }
     await this.artifactStore.writeInstallReceipt(plugin.id, {
       version,
+      installSource: "marketplace",
       artifactSha256: verified.artifactSha256,
       signerKeyId: verified.signerKeyId,
       files: extractedFiles,
@@ -1174,8 +1175,9 @@ export class PluginMarketplaceService {
       }
       await this.artifactStore.writeInstallReceipt(pluginId, {
         version: manifestVersion,
-        artifactSha256: "dev:local-install",
-        signerKeyId: "dev:local-install",
+        installSource: "local-dev",
+        artifactSha256: null,
+        signerKeyId: null,
         files: receiptFiles,
       });
 
