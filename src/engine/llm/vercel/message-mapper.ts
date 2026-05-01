@@ -46,10 +46,30 @@ export function genericToModelMessages(
 
   for (const msg of messages) {
     if (msg.role === "user") {
-      out.push({
-        role: "user",
-        content: [{ type: "text", text: msg.content }],
-      });
+      if (typeof msg.content === "string") {
+        out.push({
+          role: "user",
+          content: [{ type: "text", text: msg.content }],
+        });
+      } else {
+        out.push({
+          role: "user",
+          content: msg.content.map((p) => {
+            if (p.type === "text") return { type: "text" as const, text: p.text };
+            if (p.type === "image")
+              return {
+                type: "image" as const,
+                image: p.image,
+                mediaType: p.mimeType,
+              };
+            return {
+              type: "file" as const,
+              data: p.data,
+              mediaType: p.mimeType,
+            };
+          }),
+        } as ModelMessage);
+      }
       continue;
     }
 

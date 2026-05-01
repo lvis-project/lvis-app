@@ -72,10 +72,43 @@ export interface ThinkingBlock {
   signature: string;
 }
 
+/**
+ * Multimodal user-message content. The string form is retained as a fast path
+ * for plain text turns; the array form carries multimodal parts (images, files)
+ * that are mapped to vendor-specific content blocks at send time. Image and
+ * file payloads are passed as data URLs (`data:<mime>;base64,<...>`) — the
+ * renderer/host reads files from disk before populating these parts.
+ */
+export type UserContentPart =
+  | { type: "text"; text: string }
+  | { type: "image"; image: string; mimeType?: string }
+  | { type: "file"; data: string; mimeType: string };
+
 export type GenericMessage =
-  | { role: "user"; content: string; meta?: MessageMeta }
+  | { role: "user"; content: string | UserContentPart[]; meta?: MessageMeta }
   | { role: "assistant"; content: string; thought?: string; thinkingBlocks?: ThinkingBlock[]; toolCalls?: ToolCallBlock[]; meta?: MessageMeta }
   | { role: "tool_result"; toolUseId: string; toolName?: string; content: string; isError?: boolean; meta?: MessageMeta };
+
+/**
+ * Flatten a user-message `content` (string or multimodal parts) into a plain
+ * text string for code paths that operate on textual content only — summary
+ * extraction, exports, search indexing, etc. Image and file parts are
+ * represented by a placeholder so downstream regex/length logic stays sane.
+ */
+export function userContentText(
+  content: string | UserContentPart[],
+): string {
+  if (typeof content === "string") return content;
+  return content
+    .map((p) =>
+      p.type === "text"
+        ? p.text
+        : p.type === "image"
+          ? `[image:${p.mimeType ?? "image"}]`
+          : `[file:${p.mimeType}]`,
+    )
+    .join("\n");
+}
 
 /**
  * Canonical serialized form for message-size / token-estimation logic.
@@ -84,11 +117,18 @@ export type GenericMessage =
  */
 export function serializeMessageForEstimation(message: GenericMessage): string {
   switch (message.role) {
-    case "user":
+    case "user": {
+      const contentForEstimation =
+        typeof message.content === "string"
+          ? message.content
+          : message.content.map((p) =>
+              p.type === "text" ? p.text : `[${p.type}:${p.type === "image" ? p.mimeType ?? "image" : p.mimeType}]`,
+            ).join("\n");
       return JSON.stringify({
         role: message.role,
-        content: message.content,
+        content: contentForEstimation,
       });
+    }
     case "assistant":
       return JSON.stringify({
         role: message.role,

@@ -1,8 +1,7 @@
-import { useCallback, useEffect } from "react";
-import { KeyRound, Loader2, Pencil, Square, Star, GitBranch } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { KeyRound, Pencil, Star, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
-import { Textarea } from "../../components/ui/textarea.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
@@ -23,7 +22,16 @@ import { TurnActionBar } from "./components/TurnActionBar.js";
 import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
 import { useChatContext } from "./context/ChatContext.js";
-import { InputActionBar, AttachedDocChips } from "./components/InputActionBar.js";
+import { InputActionBar } from "./components/InputActionBar.js";
+import { Composer, type ComposerHandle } from "./components/Composer.js";
+import {
+  ATTACH_MAX_COUNT,
+  DENY_EXTENSIONS,
+  type Attachment,
+  type ImageAttachment,
+  type FileAttachment,
+} from "./types/attachments.js";
+import { buildMarkerText } from "./utils/attachment-markers.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
@@ -60,6 +68,7 @@ export interface ChatViewProps {
 export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, plugins, onSelectPlugin }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
+  const composerRef = useRef<ComposerHandle | null>(null);
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
@@ -72,13 +81,11 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
-    indexedDocs, docsLoading, refreshIndexedDocs,
+    attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass,
   } = useChatContext();
 
-  const handleAskCurrent = useCallback(() => { void onAsk(question); }, [onAsk, question]);
 
   // No auto-scroll needed for floating panel — it is positioned outside
   // the scroll viewport so it is always visible regardless of scroll position.
@@ -467,14 +474,69 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           plugins={plugins}
           onSelectPlugin={onSelectPlugin}
           onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
-          attachedDocs={attachedDocs}
-          onToggleAttachment={(d) => setAttachedDocs((prev) => prev.some((a) => a.id === d.id) ? prev.filter((a) => a.id !== d.id) : [...prev, d])}
-          onRemoveAttachment={(id) => setAttachedDocs((prev) => prev.filter((a) => a.id !== id))}
-          indexedDocs={indexedDocs}
-          docsLoading={docsLoading}
-          onRefreshDocs={refreshIndexedDocs}
-          docPopoverOpen={docPopoverOpen}
-          onDocPopoverOpenChange={setDocPopoverOpen}
+          attachDisabled={attachments.length >= ATTACH_MAX_COUNT || hasApiKey === false}
+          onAttach={async () => {
+            const result = await window.lvis.attach.openFile();
+            if (result.canceled) return;
+            if (result.rejected.length > 0) {
+              console.warn("attachment rejected (deny-list):", result.rejected, "deny:", DENY_EXTENSIONS);
+            }
+            const remaining = Math.max(0, ATTACH_MAX_COUNT - attachments.length);
+            const accepted = result.files.slice(0, remaining);
+            const newAtts: Attachment[] = [];
+            let appendedMarkers = "";
+            for (const f of accepted) {
+              const n = ++attachmentNCounter.current;
+              if (f.isImage) {
+                const img = await window.lvis.attach.readImage(f.path);
+                if (
+                  !img.ok ||
+                  !img.dataUrl ||
+                  !img.mimeType ||
+                  img.width === undefined ||
+                  img.height === undefined ||
+                  img.bytes === undefined
+                ) {
+                  console.warn("readImage failed", f.path, img.error);
+                  continue;
+                }
+                const att: ImageAttachment = {
+                  id: `img-${Date.now()}-${n}`,
+                  n,
+                  kind: "image",
+                  path: f.path,
+                  mimeType: img.mimeType,
+                  width: img.width,
+                  height: img.height,
+                  bytes: img.bytes,
+                  dataUrl: img.dataUrl,
+                };
+                newAtts.push(att);
+                appendedMarkers += `${buildMarkerText(att)} `;
+              } else {
+                const att: FileAttachment = {
+                  id: `file-${Date.now()}-${n}`,
+                  n,
+                  kind: "file",
+                  path: f.path,
+                  name: f.name,
+                  ext: f.ext,
+                  bytes: f.bytes,
+                };
+                newAtts.push(att);
+                appendedMarkers += `${buildMarkerText(att)} `;
+              }
+            }
+            if (newAtts.length > 0) {
+              setAttachments([...attachments, ...newAtts]);
+              setQuestion(question + appendedMarkers);
+            }
+            // Return focus to the composer textarea so the user can keep
+            // typing or use Cmd/Ctrl+A immediately after the file dialog
+            // closes — without this, focus stays on the action bar button
+            // and the next keystroke goes nowhere visible.
+            composerRef.current?.focus();
+          }}
           rolePresets={rolePresets}
           activePreset={activePreset}
           activePresetId={activePresetId}
@@ -483,39 +545,41 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           enableThinkingChat={enableThinkingChat}
           onToggleThinking={toggleThinking}
         />
-        <AttachedDocChips
-          attachedDocs={attachedDocs}
-          onRemove={(id) => setAttachedDocs((prev) => prev.filter((a) => a.id !== id))}
+        <Composer
+          ref={composerRef}
+          text={question}
+          onTextChange={setQuestion}
+          attachments={attachments}
+          onAttachmentsChange={setAttachments}
+          allocateN={() => ++attachmentNCounter.current}
+          saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
+          openExternal={(p) => window.lvis.attach.openExternal(p)}
+          onSend={() => void (streaming ? onGuide(question) : onAsk(question))}
+          onAbort={() => void onAbort()}
+          streaming={streaming}
+          disabled={hasApiKey === false || contextOverflowPct >= 0.95}
+          onWarning={(msg) => console.warn(msg)}
+          placeholder={
+            hasApiKey === false
+              ? "API 키를 먼저 설정해 주세요..."
+              : streaming
+                ? "응답 방향 지시 입력 (Enter 힌트 전송 / Shift+Enter 줄바꿈)"
+                : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
+          }
         />
-        <div className="grid grid-cols-[1fr_auto] gap-2 px-3">
-          <Textarea value={question} onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={(e) => {
-               if (e.nativeEvent.isComposing) return;
-               if (e.key === "Enter" && !e.shiftKey) {
-                 e.preventDefault();
-                 void (streaming ? onGuide(question) : onAsk(question));
-               }
-             }}
-            placeholder={hasApiKey === false ? "API 키를 먼저 설정해 주세요..." : streaming ? "응답 방향 지시 입력 (Enter 힌트 전송 / Shift+Enter 줄바꿈)" : "질문 입력 (Enter 전송 / Shift+Enter 줄바꿈) · /command 사용 가능"}
-            className="min-h-[76px]" />
-          <div className="flex flex-col items-stretch gap-1">
-            {streaming
-              ? <Button variant="destructive" onClick={() => void onAbort()} title="스트리밍 중단 (Ctrl/Cmd+C)"><Square className="h-4 w-4 mr-1" />중단</Button>
-              : <Button onClick={handleAskCurrent} disabled={!question.trim() || contextOverflowPct >= 0.95}><Loader2 className="h-4 w-4 mr-1 hidden" />전송</Button>
-            }
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className={`text-center text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
-                  {formatCostBadge(costEstimate.total)}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="text-xs">
-                <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
-                <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
-                <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
-              </TooltipContent>
-            </Tooltip>
-          </div>
+        <div className="px-3">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
+                {formatCostBadge(costEstimate.total)}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs">
+              <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
+              <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
+              <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </div>

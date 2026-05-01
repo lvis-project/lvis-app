@@ -73,9 +73,14 @@ export const test = base.extend<ElectronFixtures>({
   mainWindow: async ({ app }, use) => {
     const win = await app.firstWindow();
     // The app first loads a data: splash URL, then boots and replaces it with
-    // the real index.html. Wait for the toolbar tablist which only appears
-    // after React has mounted — this signals the boot sequence is complete.
-    await win.waitForSelector('[role="tablist"]', { timeout: 60_000 });
+    // the real index.html. Wait for the sidebar (rendered as <aside> with the
+    // "메뉴" header) — it is the first persistent element after React mounts
+    // and survives view changes. The previous tablist-based wait was tied to
+    // a now-removed Tabs component and would silently time out in CI.
+    await win.locator('aside:has-text("메뉴")').first().waitFor({
+      state: 'visible',
+      timeout: 60_000,
+    });
     await use(win);
   },
 });
