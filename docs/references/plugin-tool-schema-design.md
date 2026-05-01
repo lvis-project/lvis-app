@@ -226,6 +226,14 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직
 - `meeting`, `calendar`, `email`, `index`, `task`, `briefing` → public. 조용히 허용. `task.*` namespace 는 host 의 `TaskDeadlinePoller` (`src/main/task-deadline-poller.ts`) 가 owner — 현재 `task.deadline.approaching` 발행 (msUntilDeadline 포함). 추가 task lifecycle 이벤트 는 향후 확장.
 - 그 외 → neutral. 허용하되 namespace drift 추적 warn.
 
+**이벤트 emit 측 host-only 예약** (`HOST_ONLY_EMIT_NAMESPACES` in `src/plugins/capabilities.ts`):
+
+| Namespace | 발행자 | 비고 |
+|----------|-------|------|
+| `plugin.*` | host (`emitEvent` from `boot/types.ts`) | `plugin.installed` / `plugin.uninstalled` lifecycle. plugin 의 `hostApi.emitEvent` 와 plugin webview IPC bridge 양쪽 모두 거부. work-proactive 의 `onPluginsChanged` 가 self-event filter + `source` discriminator 로 구독. 자세한 contract 는 architecture.md §9.4a. |
+
+`task.*` 도 사실상 host-only 지만 별도 set 에 등록하지 않음 — plugin 측 emit 이 owner-mismatch 로 이미 거부되기 때문 (tasks-plugin-split paused 상태에서 plugin 측 emitter 부재).
+
 ### 2.4 AJV 매니페스트 검증 플로우
 
 ```
