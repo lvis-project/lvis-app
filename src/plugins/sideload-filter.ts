@@ -1,4 +1,3 @@
-import { realpathSync } from "node:fs";
 import { readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 
@@ -30,21 +29,20 @@ export function buildSideloadCopyFilter(sourceRoot: string): (src: string) => bo
  */
 export async function rejectEscapingSymlinks(dir: string): Promise<void> {
   if (!isAbsolute(dir)) throw new Error(`rejectEscapingSymlinks: dir must be absolute, got: ${dir}`);
-  const realRoot = realpathSync(dir);
-  // Keep the original dir as displayRoot for error messages — relative() against
-  // a canonicalized realRoot can produce ../ segments if dir itself had symlink
-  // components (unlikely for a staging tmp dir but avoids confusing error paths).
-  await walkForEscapingSymlinks(dir, realRoot, dir);
+  // Use async realpath — consistent with the surrounding async install path;
+  // avoids blocking the event loop on a cold filesystem.
+  const realRoot = await realpath(dir);
+  // Walk from realRoot (canonical) so all paths built via join() inside the
+  // walk are canonical too — this ensures relative(realRoot, full) in error
+  // messages produces clean relative paths without spurious ../ segments.
+  await walkForEscapingSymlinks(realRoot, realRoot);
 }
 
-async function walkForEscapingSymlinks(current: string, realRoot: string, displayRoot: string): Promise<void> {
-  let entries;
-  try {
-    entries = await readdir(current, { withFileTypes: true, encoding: "utf8" });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw err;
-  }
+async function walkForEscapingSymlinks(current: string, realRoot: string): Promise<void> {
+  // Fail-closed: any readdir error (including ENOENT from a race condition
+  // where a directory disappears mid-walk) is propagated — silently skipping
+  // would leave the containment check incomplete.
+  const entries = await readdir(current, { withFileTypes: true, encoding: "utf8" });
   for (const entry of entries) {
     const full = join(current, entry.name);
     if (entry.isSymbolicLink()) {
@@ -57,16 +55,19 @@ async function walkForEscapingSymlinks(current: string, realRoot: string, displa
         // could later be created to point outside the install root, bypassing
         // this containment check (defense-in-depth).
         throw new Error(
-          `[installLocal] unresolvable symlink in install dir: ${relative(displayRoot, full)}`,
+          `[installLocal] unresolvable symlink in install dir: ${relative(realRoot, full)}`,
         );
       }
       if (!isContained(realRoot, realTarget)) {
+        // Canonical paths on both sides: `full` is built by joining from
+        // realRoot (canonical) so relative(realRoot, full) is a clean relative
+        // path. realTarget is the already-resolved canonical path from realpath().
         throw new Error(
-          `[installLocal] symlink escapes install dir: ${relative(displayRoot, full)} → ${realTarget}`,
+          `[installLocal] symlink escapes install dir: ${relative(realRoot, full)} → ${realTarget}`,
         );
       }
     } else if (entry.isDirectory()) {
-      await walkForEscapingSymlinks(full, realRoot, displayRoot);
+      await walkForEscapingSymlinks(full, realRoot);
     }
   }
 }
