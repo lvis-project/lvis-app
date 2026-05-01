@@ -1314,6 +1314,7 @@ export default async function createPlugin() {
 `, "utf-8");
     await writeFile(manifestPath, JSON.stringify({
       id: "p-update", name: "Update", version: "1.0.0",
+      description: "regression fixture",
       entry: "entry-v1.mjs", tools: ["p_update_ping"],
     }), "utf-8");
     await writeFile(
@@ -1342,6 +1343,7 @@ export default async function createPlugin() {
     // Update manifest.entry to point to the new entry file.
     await writeFile(manifestPath, JSON.stringify({
       id: "p-update", name: "Update", version: "2.0.0",
+      description: "regression fixture v2",
       entry: "entry-v2.mjs", tools: ["p_update_ping"],
     }), "utf-8");
 
