@@ -260,7 +260,10 @@ export type LvisApi = {
   >;
   // PR 3c: msGraph* bridge methods removed — ms-graph plugin owns auth.
   chatHasProvider: () => Promise<boolean>;
-  chatSend: (input: string) => Promise<unknown>;
+  chatSend: (
+    input: string,
+    attachments?: import("../../engine/llm/types.js").UserContentPart[],
+  ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
   chatSessions: () => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string }> }>;
@@ -669,6 +672,46 @@ export type RenderHtmlPayload = {
   warnings?: string[];
 };
 
+/**
+ * Composer attachment API. Wired in `src/ipc/domains/attach.ts` (main) and
+ * `src/preload.ts` (renderer bridge). Exposes file picker, image reader,
+ * clipboard-image saver (writes to OS tmp), and shell-open.
+ */
+export interface LvisAttachApi {
+  openFile: () => Promise<{
+    canceled: boolean;
+    files: Array<{
+      path: string;
+      name: string;
+      ext: string;
+      bytes: number;
+      isImage: boolean;
+      mimeType?: string;
+    }>;
+    rejected: string[];
+  }>;
+  readImage: (filePath: string) => Promise<{
+    ok: boolean;
+    dataUrl?: string;
+    mimeType?: string;
+    width?: number;
+    height?: number;
+    bytes?: number;
+    error?: string;
+  }>;
+  saveClipboardImage: (base64: string) => Promise<{
+    ok: boolean;
+    path?: string;
+    width?: number;
+    height?: number;
+    bytes?: number;
+    mimeType?: string;
+    dataUrl?: string;
+    error?: string;
+  }>;
+  openExternal: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
+}
+
 declare global {
   interface Window {
     lvisApi: LvisApi;
@@ -680,6 +723,7 @@ declare global {
       mcp: LvisMcpApi;
       plugins: LvisPluginsApi;
       pluginConfig: LvisPluginConfigApi;
+      attach: LvisAttachApi;
       env: {
         isDev: boolean;
         enableDevConsole: boolean;

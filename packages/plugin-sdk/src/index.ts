@@ -95,7 +95,7 @@ export interface PluginManifest {
   /** Tool names exposed to the host LLM. Each name must match `^[a-zA-Z_][a-zA-Z0-9_]*$` — dots and hyphens are not allowed. */
   tools: string[];
 
-  /** One-line description shown in plugin catalogues and tool pickers. @optional */
+  /** One-line description shown in plugin catalogues and tool pickers. Required as of host schema Phase 1 (PR #389). */
   description: string;
   /** Arbitrary JSON configuration merged into `PluginRuntimeContext.config` at startup. Treat as untrusted user data. @optional */
   config?: Record<string, unknown>;
@@ -140,7 +140,7 @@ export interface PluginManifest {
   toolSchemas?: Record<
     string,
     {
-      /** One-line description shown in plugin catalogues and tool pickers. @optional */
+      /** One-line description shown in plugin catalogues and tool pickers. Required as of host schema Phase 1 (PR #389). */
       description: string;
 
       /** SemVer version string (for example `1.2.3`). Used by the host to detect updates and enforce compatibility. */
