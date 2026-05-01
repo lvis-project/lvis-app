@@ -89,13 +89,13 @@ export class PluginDeploymentGuard {
     // guard. When `installedBy` is missing on a registry entry (legacy data
     // pre-dating the field), fall back to the manifest field — that path
     // is unchanged from the prior behaviour.
-    if (entry.installedBy === "admin") {
+    if (entry.installedBy === "admin" || entry.installSource === "admin") {
       return {
         allowed: false,
         reason: `Admin plugin cannot be uninstalled by user: ${pluginId} (registry installedBy="admin")`,
       };
     }
-    if (entry.installedBy === undefined) {
+    if (entry.installedBy === undefined && entry.installSource === undefined) {
       const manifest = await this.readManifestSafe(manifestAbs);
       if (normalizeInstallPolicy(manifest) === "admin") {
         return {

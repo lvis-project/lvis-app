@@ -179,7 +179,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(registry.plugins[0]._devLinked).toBeUndefined();
   });
 
-  it("rollback preserves installSource from the pre-install state", async () => {
+  it("rollback preserves installSource='user' from the pre-install state", async () => {
     const svc = makeService();
     await svc.installPlugin("com.lge.sample", "1.0.0");
     await svc.installPlugin("com.lge.sample", "1.1.0");
@@ -189,6 +189,37 @@ describe("PluginMarketplaceService install → update → rollback", () => {
 
     await svc.rollbackPlugin("com.lge.sample");
 
+    const restored = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(restored.plugins[0].installSource).toBe("user");
+  });
+
+  it("rollback clears installSource='dev-link' (packaged build guard)", async () => {
+    setIsPackaged(true);
+    const svc = makeService();
+    await svc.installPlugin("com.lge.sample", "1.0.0");
+    await svc.installPlugin("com.lge.sample", "1.1.0");
+    // Manually stamp dev-link state to simulate stale registry.
+    const reg = JSON.parse(await readFile(registryPath, "utf-8"));
+    reg.plugins[0].installSource = "dev-link";
+    reg.plugins[0]._devLinked = true;
+    await writeFile(registryPath, JSON.stringify(reg), "utf-8");
+    await svc.rollbackPlugin("com.lge.sample");
+    const restored = JSON.parse(await readFile(registryPath, "utf-8"));
+    // Rollback re-installs from marketplace, so installSource becomes "user"
+    // (not "dev-link") regardless of packaged/dev mode.
+    expect(restored.plugins[0].installSource).toBe("user");
+    expect(restored.plugins[0]._devLinked).toBeUndefined();
+  });
+
+  it("rollback preserves installSource='local-dev'", async () => {
+    const svc = makeService();
+    await svc.installPlugin("com.lge.sample", "1.0.0");
+    await svc.installPlugin("com.lge.sample", "1.1.0");
+    // Simulate first version having been a local-dev install.
+    const reg = JSON.parse(await readFile(registryPath, "utf-8"));
+    reg.plugins[0].installSource = "local-dev";
+    await writeFile(registryPath, JSON.stringify(reg), "utf-8");
+    await svc.rollbackPlugin("com.lge.sample");
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(restored.plugins[0].installSource).toBe("user");
   });

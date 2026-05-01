@@ -501,7 +501,7 @@ export class PluginMarketplaceService {
         const withoutRoot = (entry.bundleRefs ?? []).filter((bundleId) => bundleId !== pluginId);
         const referencedByRoot = withoutRoot.length !== (entry.bundleRefs ?? []).length;
         if (!referencedByRoot) continue;
-        if (options?.removeBundleMembers && withoutRoot.length === 0 && entry.installedBy !== "admin") {
+        if (options?.removeBundleMembers && withoutRoot.length === 0 && entry.installedBy !== "admin" && entry.installSource !== "admin") {
           idsToRemove.add(entry.id);
           continue;
         }
@@ -633,7 +633,10 @@ export class PluginMarketplaceService {
           existing.manifestPath = manifestPathRel;
           existing.enabled = true;
           existing.installedBy = existing.installedBy ?? "user";
-          existing.installSource = existing.installSource ?? "user";
+          // Rollback re-installs from the marketplace catalog. Normalize any
+          // non-admin source (local-dev, dev-link) back to "user" since this
+          // is now a marketplace-origin install.
+          existing.installSource = existing.installedBy === "admin" ? "admin" : "user";
           existing.bundleRefs = existing.bundleRefs ?? [];
           delete existing._devLinked;
         } else {
@@ -772,7 +775,7 @@ export class PluginMarketplaceService {
       }
       entry.enabled = true;
       entry.installedBy = actor === "it-admin" ? "admin" : entry.installedBy ?? "user";
-      entry.installSource = actor === "it-admin" ? "admin" : "user";
+      entry.installSource = actor === "it-admin" ? "admin" : entry.installSource ?? "user";
       entry.bundleRefs = this.mergeBundleRefs(entry.bundleRefs, bundleRootId, pluginId);
       entry.approvedPluginAccess = approvedPluginAccess;
       delete entry._devLinked;
@@ -815,8 +818,14 @@ export class PluginMarketplaceService {
           entry.installSource = snapshot.installSource;
           delete entry._devLinked;
         } else {
+          // Legacy entry (no installSource): restore _devLinked if it was set,
+          // guarded by devLinkedEntryAllowed() so packaged builds stay clean.
           delete entry.installSource;
-          delete entry._devLinked;
+          if (snapshot._devLinked === true && devLinkedEntryAllowed()) {
+            entry._devLinked = true;
+          } else {
+            delete entry._devLinked;
+          }
         }
       }
       await writePluginRegistry(this.registryPath, registry);

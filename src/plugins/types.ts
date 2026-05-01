@@ -4,9 +4,9 @@ export type InstallPolicy = "admin" | "user";
  * Single source of truth for how a registry entry arrived on this device.
  * Supersedes the legacy combination of `installedBy` + `_devLinked`.
  *
- * - "admin"     — managed bootstrap (installPolicy="admin" in manifest)
+ * - "admin"     — installPolicy="admin" manifest, via marketplace or installLocal
  * - "user"      — marketplace install triggered by the end user
- * - "local-dev" — installLocal (Settings UI "로컬 폴더에서 설치"), dev-mode only
+ * - "local-dev" — installLocal (Settings UI "로컬 폴더에서 설치") with user policy, dev-mode only
  * - "dev-link"  — dev:link symlink registered by scripts/dev-link-plugins.mjs
  */
 export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev" | "dev-link";
