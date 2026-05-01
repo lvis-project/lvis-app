@@ -13,6 +13,8 @@ import { watch, type FSWatcher } from "node:fs";
 import { resolve } from "node:path";
 import type { PluginRuntime } from "./runtime.js";
 import { devPluginReloadEnabled } from "../boot/dev-flags.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("dev-watcher");
 
 export interface PluginDevWatcherOptions {
   pluginRuntime: PluginRuntime;
@@ -42,10 +44,10 @@ export function startPluginDevWatcher(
   }
 
   const debounceMs = opts.debounceMs ?? 500;
-  const log = opts.log ?? ((level, msg) => {
-    if (level === "error") console.error(msg);
-    else if (level === "warn") console.warn(msg);
-    else console.log(msg);
+  const localLog = opts.log ?? ((level: "info" | "warn" | "error", msg: string) => {
+    if (level === "error") log.error(msg);
+    else if (level === "warn") log.warn(msg);
+    else log.info(msg);
   });
 
   const watchers = new Map<string, FSWatcher>();
@@ -58,15 +60,15 @@ export function startPluginDevWatcher(
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       pending.delete(pluginId);
-      log("info", `[plugin-dev-watcher] reloading ${pluginId}`);
+      localLog("info", `[plugin-dev-watcher] reloading ${pluginId}`);
       opts.pluginRuntime
         .reloadPlugin(pluginId)
         .then(() => {
-          log("info", `[plugin-dev-watcher] reloaded ${pluginId}`);
+          localLog("info", `[plugin-dev-watcher] reloaded ${pluginId}`);
           opts.onReloaded?.(pluginId);
         })
         .catch((err: Error) => {
-          log("error", `[plugin-dev-watcher] reload failed for ${pluginId}: ${err.message}`);
+          localLog("error", `[plugin-dev-watcher] reload failed for ${pluginId}: ${err.message}`);
         });
     }, debounceMs);
     pending.set(pluginId, timer);
@@ -84,7 +86,7 @@ export function startPluginDevWatcher(
     // a lookup on plugins. Simpler: watch the directory containing the entry.
     const entryDir = opts.pluginRuntime.getPluginEntryDir(pluginId);
     if (!entryDir) {
-      log("warn", `[plugin-dev-watcher] skip ${pluginId}: no entryDir`);
+      localLog("warn", `[plugin-dev-watcher] skip ${pluginId}: no entryDir`);
       continue;
     }
     try {
@@ -100,12 +102,12 @@ export function startPluginDevWatcher(
         },
       );
       watcher.on("error", (err) => {
-        log("error", `[plugin-dev-watcher] ${pluginId} watcher error: ${err.message}`);
+        localLog("error", `[plugin-dev-watcher] ${pluginId} watcher error: ${err.message}`);
       });
       watchers.set(pluginId, watcher);
-      log("info", `[plugin-dev-watcher] watching ${pluginId} at ${entryDir}`);
+      localLog("info", `[plugin-dev-watcher] watching ${pluginId} at ${entryDir}`);
     } catch (err) {
-      log("warn", `[plugin-dev-watcher] failed to watch ${pluginId}: ${(err as Error).message}`);
+      localLog("warn", `[plugin-dev-watcher] failed to watch ${pluginId}: ${(err as Error).message}`);
     }
   }
 

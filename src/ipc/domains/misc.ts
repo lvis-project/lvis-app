@@ -4,6 +4,8 @@
 import { ipcMain } from "electron";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { createLogger } from "../../lib/logger.js";
+const log = createLogger("lvis");
 
 export function registerMiscHandlers(deps: IpcDeps): void {
   const { taskService, remindersStore, sessionTodoStore, conversationLoop, auditLogger, getMainWindow } = deps;
@@ -78,7 +80,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
           items,
         });
       } catch (err) {
-        console.warn("[lvis] session-todo emit failed:", (err as Error).message);
+        log.warn("session-todo emit failed: %s", (err as Error).message);
       }
     });
   }

@@ -12,6 +12,8 @@
  */
 import { createRequire } from "node:module";
 import type { BrowserWindow } from "electron";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("auto-updater");
 
 const _require = createRequire(import.meta.url);
 
@@ -54,7 +56,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
         : (_require("electron-updater").autoUpdater as UpdaterLike);
       return updater;
     } catch (err) {
-      console.warn("[auto-updater] electron-updater unavailable:", (err as Error).message);
+      log.warn("electron-updater unavailable: %s", (err as Error).message);
       return null;
     }
   };
@@ -74,7 +76,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
       );
     });
     u.on("error", (err) => {
-      console.warn("[auto-updater] error (non-fatal):", err.message);
+      log.warn("error (non-fatal): %s", err.message);
     });
   };
 
@@ -86,7 +88,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
     try {
       await u.checkForUpdates();
     } catch (err) {
-      console.warn("[auto-updater] checkForUpdates failed:", (err as Error).message);
+      log.warn("checkForUpdates failed: %s", (err as Error).message);
     }
   };
 
@@ -115,6 +117,6 @@ function sendToast(
   try {
     win.webContents.send("lvis:update:toast", { message, kind, ...payload });
   } catch (err) {
-    console.warn("[auto-updater] toast send failed:", (err as Error).message);
+    log.warn("toast send failed: %s", (err as Error).message);
   }
 }

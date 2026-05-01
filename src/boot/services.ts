@@ -23,6 +23,8 @@ import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 export interface CoreServices {
   pythonPath: string | undefined;
@@ -43,9 +45,9 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   try {
     const runtimeResult = await pythonRuntime.ensureReady(mainWindow);
     pythonPath = runtimeResult.pythonPath;
-    console.log("[lvis] boot: python runtime ready:", pythonPath);
+    log.info("boot: python runtime ready: %s", pythonPath);
   } catch (err) {
-    console.warn("[lvis] boot: python runtime setup failed (non-fatal):", (err as Error).message);
+    log.warn("boot: python runtime setup failed (non-fatal): %s", (err as Error).message);
   }
 
   // §4.2 Step 0.5: Governance Services (Agent 6)
@@ -67,7 +69,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
       maxBytes: auditCfg.auditRotationMaxBytes,
       retentionDays: auditCfg.auditRetentionDays,
     }).catch((err: unknown) => {
-      console.warn("[audit] rotateAndPrune failed:", err);
+      log.warn({ err }, "rotateAndPrune failed");
     });
   };
   _runAuditMaintenance();
@@ -77,7 +79,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   // §4.2 Step 5: Core Engines
   const memoryManager = new MemoryManager();
   memoryManager.load();
-  console.log("[lvis] boot: memory loaded from", memoryManager.getDir());
+  log.info("boot: memory loaded from %s", memoryManager.getDir());
 
   const keywordEngine = new KeywordEngine();
   const toolRegistry = new ToolRegistry();

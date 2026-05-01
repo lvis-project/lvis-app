@@ -1,3 +1,6 @@
+import { createLogger } from "../../../lib/logger.js";
+const log = createLogger("signature-shim");
+
 /**
  * Anthropic extended-thinking signature extraction shim.
  *
@@ -31,8 +34,8 @@ export function extractSignatureSafely(
   })?.providerMetadata?.anthropic?.signature;
   if (typeof sig !== "string" || sig.length === 0) {
     // eslint-disable-next-line no-console
-    console.warn(
-      "[signature-shim] reasoning block missing signature — skipping (#12433 edge case)",
+    log.warn(
+      "reasoning block missing signature — skipping (#12433 edge case)",
     );
     return null;
   }

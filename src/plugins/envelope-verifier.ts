@@ -21,6 +21,8 @@
  */
 import { createHash, createPublicKey, verify, type KeyObject } from "node:crypto";
 import type { SignatureEnvelope, VerifyResult } from "./types.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("envelope-verifier");
 
 /** Public key inputs may be raw 32-byte ed25519, SPKI DER, or SPKI PEM. */
 export type PublicKeyInput = Buffer | string;
@@ -92,8 +94,8 @@ export function verifyEnvelope(
     try {
       keyObj = toKeyObject(pub);
     } catch (err) {
-      console.warn(
-        `[envelope-verifier] public key "${sig.key_id}" malformed — skipping:`,
+      log.warn(
+        `public key "${sig.key_id}" malformed — skipping: %s`,
         (err as Error).message,
       );
       continue;
@@ -113,8 +115,8 @@ export function verifyEnvelope(
         }
       }
     } catch (err) {
-      console.warn(
-        `[envelope-verifier] verify() threw for key_id=${sig.key_id}:`,
+      log.warn(
+        `verify() threw for key_id=${sig.key_id}: %s`,
         (err as Error).message,
       );
     }

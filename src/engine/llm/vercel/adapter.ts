@@ -18,6 +18,8 @@ import type {
 import { genericToModelMessages } from "./message-mapper.js";
 import { fullStreamToStreamEvent } from "./stream-mapper.js";
 import { mapAiSdkErrorToLvis } from "./error-mapper.js";
+import { createLogger } from "../../../lib/logger.js";
+const log = createLogger("adapter");
 
 /**
  * Vendor slot recognised by VercelUnifiedProvider. Extends LLMVendor with
@@ -166,8 +168,8 @@ export class VercelUnifiedProvider implements LLMProvider {
         !VercelUnifiedProvider.warnedCompatThinking
       ) {
         VercelUnifiedProvider.warnedCompatThinking = true;
-        console.warn(
-          "[VercelUnifiedProvider] enableThinking=true is silently ignored " +
+        log.warn(
+          "enableThinking=true is silently ignored " +
             "for vendor=openai-compatible (endpoint does not expose reasoning_effort).",
         );
       }

@@ -23,6 +23,8 @@ import { loadHooksConfig } from "../hooks/config-loader.js";
 import { ExternalHookExecutor } from "../hooks/external-executor.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 export function createSystemPromptBuilder(opts: {
   memoryManager: MemoryManager;
@@ -122,14 +124,14 @@ export function createHookRunner(): HookRunner {
     hookRunner.setExternalExecutor(externalHookExecutor);
     const preCount = hooksConfig.preToolUse.length;
     const postCount = hooksConfig.postToolUse.length;
-    console.log(
-      "[lvis] boot: external hook executor attached (pre=%d, post=%d)",
+    log.info(
+      "boot: external hook executor attached (pre=%d, post=%d)",
       preCount,
       postCount,
     );
   } catch (err) {
-    console.warn(
-      "[lvis] boot: external hook executor setup failed (non-fatal):",
+    log.warn(
+      "boot: external hook executor setup failed (non-fatal): %s",
       (err as Error).message,
     );
   }

@@ -23,6 +23,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import type { BrowserWindow } from "electron";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("python-runtime");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -427,6 +429,6 @@ export class PythonRuntimeBootstrapper {
     } catch {
       // 로그 실패는 무시 (non-fatal)
     }
-    console.log(msg);
+    log.info(msg);
   }
 }

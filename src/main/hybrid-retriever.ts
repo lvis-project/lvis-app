@@ -31,6 +31,8 @@
  */
 
 import type { CloudIndexAdapter, CloudIndexHit } from "./cloud-index-adapter.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("hybrid-retriever");
 
 // ─── 타입 ────────────────────────────────────────────
 
@@ -231,7 +233,7 @@ export class HybridRetriever {
       const hits = await this.workerClient.searchBm25(query, topK);
       return this.normalizeHits(hits, "bm25");
     } catch (err) {
-      console.warn("[HybridRetriever] bm25 search failed:", (err as Error).message);
+      log.warn("bm25 search failed: %s", (err as Error).message);
       return [];
     }
   }
@@ -241,7 +243,7 @@ export class HybridRetriever {
       const hits = await this.workerClient.searchVector(query, topK);
       return this.normalizeHits(hits, "vec");
     } catch (err) {
-      console.warn("[HybridRetriever] vector search failed:", (err as Error).message);
+      log.warn("vector search failed: %s", (err as Error).message);
       return [];
     }
   }
@@ -271,7 +273,7 @@ export class HybridRetriever {
         score: ch.score,
       }));
     } catch (err) {
-      console.warn("[HybridRetriever] cloud search failed:", (err as Error).message);
+      log.warn("cloud search failed: %s", (err as Error).message);
       return [];
     }
   }

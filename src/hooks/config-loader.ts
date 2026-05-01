@@ -7,6 +7,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { EMPTY_HOOKS_CONFIG, HooksConfigSchema, type HooksConfig } from "./schemas.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("hooks");
 
 function getUserHooksPath(): string {
   return join(homedir(), ".lvis", "hooks.json");
@@ -33,12 +35,12 @@ function parseFile(path: string): HooksConfig | null {
     const parsed = JSON.parse(raw);
     const result = HooksConfigSchema.safeParse(parsed);
     if (!result.success) {
-      console.warn(`[hooks] invalid hooks.json at ${path}:`, result.error.message);
+      log.warn(`invalid hooks.json at ${path}: %s`, result.error.message);
       return null;
     }
     return result.data;
   } catch (err) {
-    console.warn(`[hooks] failed to read ${path}:`, (err as Error).message);
+    log.warn(`failed to read ${path}: %s`, (err as Error).message);
     return null;
   }
 }

@@ -97,6 +97,8 @@ import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireRoutineCoordinator } from "./boot/steps/routine-coordinator.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
 import { runManagedBootstrap } from "./boot/managed-marketplace.js";
+import { createLogger } from "./lib/logger.js";
+const log = createLogger("lvis");
 
 export type { AppServices } from "./boot/types.js";
 
@@ -114,7 +116,7 @@ export async function bootstrap(
   mainWindow: BrowserWindow,
   getMainWindow: () => BrowserWindow | null = () => mainWindow,
 ): Promise<AppServices> {
-  console.log("[lvis] boot: starting...");
+  log.info("boot: starting...");
 
   // §4.2 Step 0-1 + 4-5: Core services.
   const core = await bootstrapCoreServices(mainWindow);
@@ -178,7 +180,7 @@ export async function bootstrap(
   // ConversationLoop / BrowserWindow are available before the tool fires.
   const remindersStore = new RemindersStore();
   await remindersStore.load().catch((err) => {
-    console.warn("[lvis] boot: reminders load failed (non-fatal):", (err as Error).message);
+    log.warn("boot: reminders load failed (non-fatal): %s", (err as Error).message);
   });
   const remindersScheduler = new RemindersScheduler(remindersStore);
   const sessionTodoStore = new SessionTodoStore();
@@ -186,8 +188,8 @@ export async function bootstrap(
   const skillOverlay = new SkillOverlay();
   const skillApprovalsStore = new SkillApprovalsStore();
   await skillApprovalsStore.load().catch((err) => {
-    console.warn(
-      "[lvis] boot: skill-approvals load failed (non-fatal):",
+    log.warn(
+      "boot: skill-approvals load failed (non-fatal): %s",
       (err as Error).message,
     );
   });
@@ -217,14 +219,14 @@ export async function bootstrap(
       try {
         getMainWindow()?.webContents.send("lvis:agent-spawn:event", event);
       } catch (err) {
-        console.warn("[lvis] agent_spawn emit failed:", (err as Error).message);
+        log.warn("agent_spawn emit failed: %s", (err as Error).message);
       }
     },
     emitSkillLoad: (event: SkillLoadEvent) => {
       try {
         getMainWindow()?.webContents.send("lvis:skill-load:event", event);
       } catch (err) {
-        console.warn("[lvis] skill_load emit failed:", (err as Error).message);
+        log.warn("skill_load emit failed: %s", (err as Error).message);
       }
     },
   };
@@ -256,10 +258,10 @@ export async function bootstrap(
       apiKey: settingsService.getSecret("marketplace.apiKey") ?? undefined,
       allowPrivateNetwork: marketplaceSettings.realCloudAllowPrivateNetwork,
     });
-    console.log("[lvis] boot: marketplace backend = real-cloud (%s)", marketplaceSettings.realCloudBaseUrl);
+    log.info("boot: marketplace backend = real-cloud (%s)", marketplaceSettings.realCloudBaseUrl);
   } else {
     marketplaceFetcher = new DisabledMarketplaceFetcher();
-    console.warn("[lvis] boot: marketplace backend disabled (no realCloudBaseUrl configured)");
+    log.warn("boot: marketplace backend disabled (no realCloudBaseUrl configured)");
   }
   const pluginMarketplace = new PluginMarketplaceService(
     pluginPaths,
@@ -375,7 +377,7 @@ export async function bootstrap(
   lateBinding.conversationLoopRef.fn = conversationLoop;
   lateBinding.llmCallerRef.fn = createCallLlm(conversationLoop);
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger);
-  console.log("[lvis] boot: plugin callLlm ready (rate-limited)");
+  log.info("boot: plugin callLlm ready (rate-limited)");
 
   // Workflow system tools — late bindings now that ConversationLoop exists.
   // SubAgentRunner reuses the parent loop's deps (LLM, registry, gates) but
@@ -406,7 +408,7 @@ export async function bootstrap(
     try {
       getMainWindow()?.webContents.send("lvis:reminder:fired", reminder);
     } catch (err) {
-      console.warn("[lvis] reminder fired emit failed:", (err as Error).message);
+      log.warn("reminder fired emit failed: %s", (err as Error).message);
     }
   });
   // L1: NOT started here. Boot order matters — if scheduler.start() runs
@@ -449,7 +451,7 @@ export async function bootstrap(
     getMainWindow,
     auditLogger: bootAuditLogger,
   });
-  console.log("[lvis] boot: trigger executor wired (proactive turns isolated)");
+  log.info("boot: trigger executor wired (proactive turns isolated)");
 
   // §9.5: MCP Server 연결.
   const mcpGovernance = new McpGovernance();
@@ -458,15 +460,15 @@ export async function bootstrap(
     const configs = await mcpManager.loadFromConfig();
     if (configs.length > 0) {
       await mcpManager.connectAll();
-      console.log("[lvis] boot: MCP servers connected");
+      log.info("boot: MCP servers connected");
     }
   } catch (err) {
-    console.warn("[lvis] boot: MCP initialization failed (non-fatal):", (err as Error).message);
+    log.warn("boot: MCP initialization failed (non-fatal): %s", (err as Error).message);
   }
   mcpGovernance.startPolicyRefresh((revokedIds) => {
     for (const serverId of revokedIds) {
       void mcpManager.killSwitch(serverId).catch((err) => {
-        console.error("[lvis] boot: revoked MCP server kill failed:", serverId, (err as Error).message);
+        log.error({ serverId, err }, "boot: revoked MCP server kill failed");
       });
     }
   });
@@ -489,7 +491,7 @@ export async function bootstrap(
     });
   })();
 
-  console.log("[lvis] boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
+  log.info("boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
 
   // Sprint 4.C — starred store + D6 feedback store.
   const starredStore = new StarredStore();

@@ -34,6 +34,8 @@ import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("executor");
 
 export interface ToolCallMeta {
   groupId: string;
@@ -302,7 +304,7 @@ export class ToolExecutor {
         return { tool_use_id: toolUse.id, content: msg, is_error: true };
       }
       if (bashResult.decision === "warn") {
-        console.warn(`[Bash AST 경고] ${bashResult.reason}`);
+        log.warn(`${bashResult.reason}`);
       }
     }
 
@@ -391,7 +393,7 @@ export class ToolExecutor {
         } else {
           // §F4: approvalGate 미연결 시 fail-closed — 모든 ask 결정을 차단
           const msg = `[승인 게이트 미연결] 도구 '${toolUse.name}' (${source}) — ask 결정이지만 승인 게이트가 없어 차단. ${permissionResult.reason}`;
-          console.error(msg);
+          log.error(msg);
           callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
           callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
           this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
@@ -469,8 +471,8 @@ export class ToolExecutor {
     const dlpResult = maskSensitiveData(content);
     if (dlpResult.detections.length > 0) {
       content = dlpResult.masked;
-      console.warn(
-        `[DLP] 민감 데이터 탐지 및 마스킹 — 도구: '${toolUse.name}', 패턴: ${dlpResult.detections.join(", ")}`,
+      log.warn(
+        `민감 데이터 탐지 및 마스킹 — 도구: '${toolUse.name}', 패턴: ${dlpResult.detections.join(", ")}`,
       );
       this.auditLogger.log({
         timestamp: new Date().toISOString(),

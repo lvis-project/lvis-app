@@ -34,6 +34,8 @@ import { HybridRetriever } from "../main/hybrid-retriever.js";
 import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, adaptPowerMonitor, type WorkerClientLite } from "../main/idle-scheduler.js";
 import { fetchPublicHttpResponse } from "../core/network-guard.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 export function registerRequestPluginMetaTool(toolRegistry: ToolRegistry): void {
   // Phase 1.5 Option C — request_plugin 메타 툴 (항상 활성, scope filter 통과)
@@ -124,7 +126,7 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
         toolRegistry.register(tool);
       }
       knowledgeAvailable = true;
-      console.log("[lvis] boot: knowledge tools registered (%d tools)", knowledgeTools.length);
+      log.info("boot: knowledge tools registered (%d tools)", knowledgeTools.length);
 
       // §6.1 IdleScheduler: WorkerClient의 enqueue/processOne/getIndexerState를 WorkerClientLite shape으로 래핑
       const idleWorkerAdapter: WorkerClientLite = {
@@ -144,19 +146,19 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
         // folderIndexer에 stub 주입 (Agent 4의 setIdleScheduler 경로)
         if (typeof pageIndexPlugin?.setIdleScheduler === "function") {
           pageIndexPlugin.setIdleScheduler(idleScheduler);
-          console.log("[lvis] boot: idle-scheduler wired to folderIndexer");
+          log.info("boot: idle-scheduler wired to folderIndexer");
         } else {
-          console.warn("[lvis] boot: worker-client plugin setIdleScheduler() not available");
+          log.warn("boot: worker-client plugin setIdleScheduler() not available");
         }
       } catch (err) {
-        console.warn(
-          "[lvis] boot: idle-scheduler setup failed (non-fatal):",
+        log.warn(
+          "boot: idle-scheduler setup failed (non-fatal): %s",
           (err as Error).message,
         );
       }
     } else {
-      console.warn(
-        "[lvis] boot: worker-client capability missing getWorkerClient() — knowledge tools skipped",
+      log.warn(
+        "boot: worker-client capability missing getWorkerClient() — knowledge tools skipped",
       );
       auditService.log({
         timestamp: new Date().toISOString(),
@@ -169,7 +171,7 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
       });
     }
   } catch (err) {
-    console.warn("[lvis] boot: knowledge tools DI failed (non-fatal):", (err as Error).message);
+    log.warn("boot: knowledge tools DI failed (non-fatal): %s", (err as Error).message);
     auditService.log({
       timestamp: new Date().toISOString(),
       sessionId: "boot",

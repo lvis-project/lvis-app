@@ -13,6 +13,8 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, dirname } from "node:path";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { readPluginRegistry } from "./registry.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("update-detector");
 
 export interface UpdateInfo {
   pluginId: string;
@@ -94,7 +96,7 @@ export class PluginUpdateDetector {
 
       return updates;
     } catch (err) {
-      console.warn("[update-detector] checkForUpdates failed:", (err as Error).message);
+      log.warn("checkForUpdates failed: %s", (err as Error).message);
       return [];
     }
   }
@@ -111,7 +113,7 @@ export class PluginUpdateDetector {
     // `<pluginsRoot>/<id>/plugin.json`). A crafted registry entry like
     // "../../etc/passwd" is rejected.
     if (!isWithin(registryDir, abs)) {
-      console.warn("[update-detector] manifestPath escapes allowed roots, skipping:", manifestPath);
+      log.warn("manifestPath escapes allowed roots, skipping: %s", manifestPath);
       return null;
     }
     try {

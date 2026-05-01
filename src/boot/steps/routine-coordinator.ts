@@ -32,6 +32,8 @@ import {
 import { deliverRoutineResult, notifyRoutineStarted, notifyRoutineFailed } from "../../routines/routine-delivery.js";
 import { REGISTERED_ROUTINES, buildRoutineForTrigger } from "../../routines/registry.js";
 import { RoutineIdleSignaler } from "../../routines/idle-signaler.js";
+import { createLogger } from "../../lib/logger.js";
+const log = createLogger("lvis");
 
 export interface WireRoutineCoordinatorInput {
   routineEngine: RoutineEngine;
@@ -68,7 +70,7 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
   // through explicitly per-call (no module-level singleton).
   const onRoutineCompleted = async (result: RoutineResult): Promise<void> => {
     await deliverRoutineResult(mainWindow, result, { notificationService }).catch((e: Error) => {
-      console.warn("[lvis] boot: routine result persist failed:", e.message);
+      log.warn("boot: routine result persist failed: %s", e.message);
     });
   };
 
@@ -100,7 +102,7 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
         })
         .then((result) => onRoutineCompleted(result))
         .catch((e: Error) => {
-          console.warn("[lvis] boot: schedule routine failed:", e.message);
+          log.warn("boot: schedule routine failed: %s", e.message);
           notifyRoutineFailed(mainWindow, { routineId: entry.id, trigger: "schedule" }, e.message);
         });
     }
@@ -130,7 +132,7 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
           .runRoutine(built.routine)
           .then((result) => onRoutineCompleted(result))
           .catch((e: Error) => {
-            console.warn("[lvis] boot: wakeup routine failed:", e.message);
+            log.warn("boot: wakeup routine failed: %s", e.message);
             notifyRoutineFailed(mainWindow, { routineId: "wakeup", trigger: "wakeup" }, e.message);
           });
       } else if (event === "idle-long-entry") {
@@ -142,7 +144,7 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
           .runRoutine(built.routine)
           .then((result) => onRoutineCompleted(result))
           .catch((e: Error) => {
-            console.warn("[lvis] boot: idle-shutdown routine failed:", e.message);
+            log.warn("boot: idle-shutdown routine failed: %s", e.message);
             notifyRoutineFailed(mainWindow, { routineId: "shutdown", trigger: "shutdown" }, e.message);
           });
       }
@@ -150,8 +152,8 @@ export function wireRoutineCoordinator(input: WireRoutineCoordinatorInput): Wire
 
     idleSignaler.start();
   } else {
-    console.warn(
-      "[lvis] boot: powerMonitor unavailable — RoutineIdleSignaler disabled (wakeup/shutdown by-idle won't fire)",
+    log.warn(
+      "boot: powerMonitor unavailable — RoutineIdleSignaler disabled (wakeup/shutdown by-idle won't fire)",
     );
   }
 

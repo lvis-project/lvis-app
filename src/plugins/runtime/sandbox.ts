@@ -8,6 +8,8 @@ import { pathToFileURL } from "node:url";
 import type { PluginHostApi, PluginManifest } from "../types.js";
 import { createPluginStorage } from "../storage.js";
 import { devLinkedEntryAllowed } from "../../boot/dev-flags.js";
+import { createLogger } from "../../lib/logger.js";
+const log = createLogger("sandbox");
 
 /**
  * M1 — uiCallable safety: inverted model.
@@ -180,10 +182,10 @@ export function buildPluginContext(opts: {
     },
     log: (message: string, meta?: unknown) => {
       if (meta !== undefined) {
-        console.log(`[plugin:${opts.pluginId}] ${message}`, meta);
+        log.info({ pluginId: opts.pluginId, meta }, message);
         return;
       }
-      console.log(`[plugin:${opts.pluginId}] ${message}`);
+      log.info({ pluginId: opts.pluginId }, message);
     },
     hostApi: opts.hostApi,
   };

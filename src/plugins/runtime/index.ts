@@ -46,6 +46,8 @@ import {
   resolveRealEntryPath,
 } from "./sandbox.js";
 import type { LoadedPlugin, ManifestLoadPlan, ManifestSnapshot } from "./types.js";
+import { createLogger } from "../../lib/logger.js";
+const log = createLogger("plugin-runtime");
 
 export type { InstallPolicy };
 export { normalizeInstallPolicy, getDeclaredEmittedEvents };
@@ -226,8 +228,8 @@ export class PluginRuntime {
           pluginRoot,
         );
         if (!receiptResult.ok) {
-          console.error(
-            `[plugin-runtime] ${plan.pluginIdHint} rejected — install receipt integrity failed: ${receiptResult.reason}`,
+          log.error(
+            `${plan.pluginIdHint} rejected — install receipt integrity failed: ${receiptResult.reason}`,
           );
           this.auditLog?.("error", "plugin_integrity_rejected", {
             pluginId: plan.pluginIdHint,
@@ -246,7 +248,7 @@ export class PluginRuntime {
       try {
         manifest = await this.readManifest(manifestPath);
       } catch (err) {
-        console.error(`[plugin-runtime] ${(err as Error).message}`);
+        log.error(`${(err as Error).message}`);
         if (plan.enabled && plan.pluginIdHint) {
           this.markFailed(plan.pluginIdHint, {
             name: plan.pluginIdHint,
@@ -272,7 +274,7 @@ export class PluginRuntime {
         const dependencyResult = resolveDependencies(requiredCapabilities, availableManifests);
         if (!dependencyResult.ok) {
           const reason = `missing required capabilities: ${dependencyResult.missing.join(", ")}`;
-          console.error(`[plugin-runtime] ${manifest.id} rejected — ${reason}`);
+          log.error(`${manifest.id} rejected — ${reason}`);
           this.auditLog?.("error", "plugin_dependency_missing", {
             pluginId: manifest.id,
             missing: dependencyResult.missing,
@@ -289,7 +291,7 @@ export class PluginRuntime {
         entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
       } catch (err) {
         const reason = (err as Error).message;
-        console.error(`[plugin-runtime] ${manifest.id} rejected: ${reason}`);
+        log.error(`${manifest.id} rejected: ${reason}`);
         this.auditLog?.("error", "plugin_entry_path_rejected", {
           pluginId: manifest.id,
           entry: manifest.entry,
@@ -306,7 +308,7 @@ export class PluginRuntime {
           createPlugin?: RuntimePluginFactory;
         };
       } catch (err) {
-        console.error(`[plugin-runtime] ${manifest.id} import failed:`, (err as Error).message);
+        log.error(`${manifest.id} import failed: %s`, (err as Error).message);
         this.auditLog?.("error", "plugin_import_failed", {
           pluginId: manifest.id,
           reason: (err as Error).message,
@@ -316,7 +318,7 @@ export class PluginRuntime {
       }
       const createPlugin = module.default ?? module.createPlugin;
       if (!createPlugin) {
-        console.error(`[plugin-runtime] ${manifest.id} entry does not export default/createPlugin — skipped`);
+        log.error(`${manifest.id} entry does not export default/createPlugin — skipped`);
         this.markFailed(manifest.id);
         continue;
       }
@@ -340,7 +342,7 @@ export class PluginRuntime {
       for (const toolName of manifest.tools) {
         const handler = instance.handlers[toolName];
         if (!handler) {
-          console.warn(`[plugin:${manifest.id}] missing handler '${toolName}' — tool disabled`);
+          log.warn({ pluginId: manifest.id, toolName }, `missing handler '${toolName}' — tool disabled`);
           continue;
         }
         methods.set(toolName, handler);
@@ -376,7 +378,7 @@ export class PluginRuntime {
       const { id } = plugin.manifest;
       const startedAt = Date.now();
       const slowTimer = setTimeout(() => {
-        console.warn(`[plugin-runtime] slow plugin: ${id} (>${SLOW_THRESHOLD_MS}ms)`);
+        log.warn(`slow plugin: ${id} (>${SLOW_THRESHOLD_MS}ms)`);
       }, SLOW_THRESHOLD_MS);
 
       const startPromise = (async () => {
@@ -411,7 +413,7 @@ export class PluginRuntime {
         const stats = this.perfStats.get(id);
         if (stats) stats.startupMs = elapsed;
         if (elapsed > SLOW_THRESHOLD_MS) {
-          console.warn(`[plugin-runtime] slow plugin: ${id} finished in ${elapsed}ms`);
+          log.warn(`slow plugin: ${id} finished in ${elapsed}ms`);
         }
       })();
 
@@ -429,7 +431,7 @@ export class PluginRuntime {
     }
 
     for (const { id, reason } of failed) {
-      console.error(`[plugin:${id}] start failed (non-fatal): ${reason}`);
+      log.error(`start failed (non-fatal): ${reason}`);
       const plugin = this.plugins.get(id);
       if (!plugin) continue;
       this.markFailed(id);
@@ -462,14 +464,14 @@ export class PluginRuntime {
   async restartPlugin(pluginId: string): Promise<void> {
     const plugin = this.plugins.get(pluginId);
     if (!plugin) {
-      console.warn(`[plugin-runtime] restartPlugin: plugin not loaded — ${pluginId}`);
+      log.warn(`restartPlugin: plugin not loaded — ${pluginId}`);
       return;
     }
 
     try {
       await plugin.instance.stop?.();
     } catch (err) {
-      console.error(`[plugin:${pluginId}] stop during restartPlugin failed:`, (err as Error).message);
+      log.error(`stop during restartPlugin failed: %s`, (err as Error).message);
     }
 
     for (const method of plugin.methods.keys()) {
@@ -481,7 +483,7 @@ export class PluginRuntime {
     if (pluginDisposers) {
       for (const d of pluginDisposers) {
         try { d(); } catch (err) {
-          console.error(`[plugin:${pluginId}] disposer failed during restartPlugin:`, (err as Error).message);
+          log.error(`disposer failed during restartPlugin: %s`, (err as Error).message);
         }
       }
       this.disposers.delete(pluginId);
@@ -495,7 +497,7 @@ export class PluginRuntime {
       const manifestPath = resolve(pluginRoot, "plugin.json");
       manifest = await this.readManifest(manifestPath);
     } catch (err) {
-      console.error(`[plugin:${pluginId}] failed to read manifest during restartPlugin:`, (err as Error).message);
+      log.error(`failed to read manifest during restartPlugin: %s`, (err as Error).message);
       this.markFailed(pluginId);
       return;
     }
@@ -510,14 +512,14 @@ export class PluginRuntime {
         createPlugin?: RuntimePluginFactory;
       };
     } catch (err) {
-      console.error(`[plugin:${pluginId}] import failed during restartPlugin:`, (err as Error).message);
+      log.error(`import failed during restartPlugin: %s`, (err as Error).message);
       this.markFailed(pluginId);
       return;
     }
 
     const createPlugin = module.default ?? module.createPlugin;
     if (!createPlugin) {
-      console.error(`[plugin:${pluginId}] entry does not export default/createPlugin after restartPlugin`);
+      log.error(`entry does not export default/createPlugin after restartPlugin`);
       this.markFailed(pluginId);
       return;
     }
@@ -539,7 +541,7 @@ export class PluginRuntime {
         }),
       );
     } catch (err) {
-      console.error(`[plugin:${pluginId}] createPlugin failed during restartPlugin:`, (err as Error).message);
+      log.error(`createPlugin failed during restartPlugin: %s`, (err as Error).message);
       this.markFailed(pluginId);
       return;
     }
@@ -548,7 +550,7 @@ export class PluginRuntime {
     for (const toolName of manifest.tools) {
       const handler = instance.handlers[toolName];
       if (!handler) {
-        console.warn(`[plugin:${pluginId}] missing handler '${toolName}' after restartPlugin — tool disabled`);
+        log.warn(`missing handler '${toolName}' after restartPlugin — tool disabled`);
         continue;
       }
       methods.set(toolName, handler);
@@ -572,7 +574,7 @@ export class PluginRuntime {
     try {
       await instance.start?.();
     } catch (err) {
-      console.error(`[plugin:${pluginId}] start after restartPlugin failed:`, (err as Error).message);
+      log.error(`start after restartPlugin failed: %s`, (err as Error).message);
       this.markFailed(pluginId);
       for (const method of methods.keys()) {
         this.methodMap.delete(method);
@@ -633,14 +635,14 @@ export class PluginRuntime {
   async removePlugin(pluginId: string): Promise<void> {
     const plugin = this.plugins.get(pluginId);
     if (!plugin) {
-      console.warn(`[plugin-runtime] removePlugin: plugin not loaded — ${pluginId}`);
+      log.warn(`removePlugin: plugin not loaded — ${pluginId}`);
       return;
     }
 
     try {
       await plugin.instance.stop?.();
     } catch (err) {
-      console.error(`[plugin:${pluginId}] stop during removePlugin failed:`, (err as Error).message);
+      log.error(`stop during removePlugin failed: %s`, (err as Error).message);
     }
 
     for (const method of plugin.methods.keys()) {
@@ -652,7 +654,7 @@ export class PluginRuntime {
     if (pluginDisposers) {
       for (const d of pluginDisposers) {
         try { d(); } catch (err) {
-          console.error(`[plugin:${pluginId}] disposer failed during removePlugin:`, (err as Error).message);
+          log.error(`disposer failed during removePlugin: %s`, (err as Error).message);
         }
       }
       this.disposers.delete(pluginId);
@@ -699,8 +701,8 @@ export class PluginRuntime {
         pluginRoot,
       );
       if (!receiptResult.ok) {
-        console.error(
-          `[plugin-runtime] ${plan.pluginIdHint} rejected — install receipt integrity failed: ${receiptResult.reason}`,
+        log.error(
+          `${plan.pluginIdHint} rejected — install receipt integrity failed: ${receiptResult.reason}`,
         );
         this.auditLog?.("error", "plugin_integrity_rejected", {
           pluginId: plan.pluginIdHint,
@@ -724,7 +726,7 @@ export class PluginRuntime {
       const dependencyResult = resolveDependencies(requiredCapabilities, availableManifests);
       if (!dependencyResult.ok) {
         const reason = `missing required capabilities: ${dependencyResult.missing.join(", ")}`;
-        console.error(`[plugin-runtime] ${manifest.id} rejected — ${reason}`);
+        log.error(`${manifest.id} rejected — ${reason}`);
         this.auditLog?.("error", "plugin_dependency_missing", {
           pluginId: manifest.id,
           missing: dependencyResult.missing,
@@ -742,7 +744,7 @@ export class PluginRuntime {
       entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
     } catch (err) {
       const reason = (err as Error).message;
-      console.error(`[plugin-runtime] ${manifest.id} rejected: ${reason}`);
+      log.error(`${manifest.id} rejected: ${reason}`);
       this.auditLog?.("error", "plugin_entry_path_rejected", {
         pluginId: manifest.id,
         entry: manifest.entry,
@@ -760,7 +762,7 @@ export class PluginRuntime {
         createPlugin?: RuntimePluginFactory;
       };
     } catch (err) {
-      console.error(`[plugin-runtime] ${manifest.id} import failed:`, (err as Error).message);
+      log.error(`${manifest.id} import failed: %s`, (err as Error).message);
       this.auditLog?.("error", "plugin_import_failed", {
         pluginId: manifest.id,
         reason: (err as Error).message,
@@ -770,7 +772,7 @@ export class PluginRuntime {
     }
     const createPlugin = module.default ?? module.createPlugin;
     if (!createPlugin) {
-      console.error(`[plugin-runtime] ${manifest.id} entry does not export default/createPlugin — skipped`);
+      log.error(`${manifest.id} entry does not export default/createPlugin — skipped`);
       this.markFailed(manifest.id);
       return;
     }
@@ -792,7 +794,7 @@ export class PluginRuntime {
         }),
       );
     } catch (err) {
-      console.error(`[plugin-runtime] ${manifest.id} createPlugin failed:`, (err as Error).message);
+      log.error(`${manifest.id} createPlugin failed: %s`, (err as Error).message);
       this.markFailed(manifest.id);
       return;
     }
@@ -801,7 +803,7 @@ export class PluginRuntime {
     for (const toolName of manifest.tools) {
       const handler = instance.handlers[toolName];
       if (!handler) {
-        console.warn(`[plugin:${manifest.id}] missing handler '${toolName}' — tool disabled`);
+        log.warn(`missing handler '${toolName}' — tool disabled`);
         continue;
       }
       methods.set(toolName, handler);
@@ -848,7 +850,7 @@ export class PluginRuntime {
         }
         this.perfStats.get(manifest.id)!.startupMs = Date.now() - startedAt;
       } catch (err) {
-        console.error(`[plugin:${manifest.id}] start during addPlugin failed:`, (err as Error).message);
+        log.error(`start during addPlugin failed: %s`, (err as Error).message);
         this.markFailed(manifest.id);
         for (const method of methods.keys()) {
           this.methodMap.delete(method);
@@ -871,7 +873,7 @@ export class PluginRuntime {
     try {
       await plugin.instance.stop?.();
     } catch (err) {
-      console.error(`[plugin:${pluginId}] stop during reload failed:`, (err as Error).message);
+      log.error(`stop during reload failed: %s`, (err as Error).message);
     }
 
     for (const method of plugin.methods.keys()) {
@@ -882,7 +884,7 @@ export class PluginRuntime {
     if (pluginDisposers) {
       for (const d of pluginDisposers) {
         try { d(); } catch (err) {
-          console.error(`[plugin:${pluginId}] disposer failed during reload:`, (err as Error).message);
+          log.error(`disposer failed during reload: %s`, (err as Error).message);
         }
       }
       this.disposers.delete(pluginId);
@@ -920,7 +922,7 @@ export class PluginRuntime {
     for (const toolName of manifest.tools) {
       const handler = instance.handlers[toolName];
       if (!handler) {
-        console.warn(`[plugin:${pluginId}] missing handler '${toolName}' after reload — tool disabled`);
+        log.warn(`missing handler '${toolName}' after reload — tool disabled`);
         continue;
       }
       methods.set(toolName, handler);
@@ -942,7 +944,7 @@ export class PluginRuntime {
     try {
       await instance.start?.();
     } catch (err) {
-      console.error(`[plugin:${pluginId}] start after reload failed:`, (err as Error).message);
+      log.error(`start after reload failed: %s`, (err as Error).message);
       throw err;
     }
   }
@@ -966,7 +968,7 @@ export class PluginRuntime {
     try {
       await plugin.instance.stop?.();
     } catch (err) {
-      console.error(`[plugin:${pluginId}] stop during disable failed:`, (err as Error).message);
+      log.error(`stop during disable failed: %s`, (err as Error).message);
     }
 
     for (const method of plugin.methods.keys()) {
@@ -978,7 +980,7 @@ export class PluginRuntime {
     if (pluginDisposers) {
       for (const d of pluginDisposers) {
         try { d(); } catch (err) {
-          console.error(`[plugin:${pluginId}] disposer failed:`, (err as Error).message);
+          log.error(`disposer failed: %s`, (err as Error).message);
         }
       }
       this.disposers.delete(pluginId);
@@ -1213,8 +1215,8 @@ export class PluginRuntime {
   findPluginIdByCapability(capability: string): string | undefined {
     const matches = this.listPluginIdsByCapability(capability);
     if (matches.length > 1) {
-      console.warn(
-        `[plugin-runtime] Multiple plugins declare capability '${capability}': ${matches.join(", ")}. ` +
+      log.warn(
+        `Multiple plugins declare capability '${capability}': ${matches.join(", ")}. ` +
         `Using '${matches[0]}'. Ensure only one plugin provides this capability.`,
       );
     }
@@ -1260,8 +1262,8 @@ export class PluginRuntime {
           try {
             entryPath = this.resolveEntryPathForPlugin(plugin.pluginRoot, entrySource);
           } catch (err) {
-            console.warn(
-              `[plugin-runtime] ui entry rejected for '${pluginId}': ${(err as Error).message}`,
+            log.warn(
+              `ui entry rejected for '${pluginId}': ${(err as Error).message}`,
             );
             this.auditLog?.("error", "plugin_ui_entry_path_rejected", {
               pluginId,
@@ -1287,7 +1289,7 @@ export class PluginRuntime {
     for (const [pluginId, list] of this.disposers) {
       for (const d of list) {
         try { d(); } catch (err) {
-          console.error(`[plugin:${pluginId}] disposer failed:`, (err as Error).message);
+          log.error(`disposer failed: %s`, (err as Error).message);
         }
       }
     }

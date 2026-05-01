@@ -7,6 +7,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("starred-store");
 
 export interface StarredMessage {
   /** unique id (uuid) */
@@ -64,7 +66,7 @@ export class StarredStore {
           ) {
             valid.push(item as StarredMessage);
           } else {
-            console.warn("[starred-store] skipping invalid entry:", item);
+            log.warn({ item }, "skipping invalid entry");
           }
         }
         this.cache = valid;

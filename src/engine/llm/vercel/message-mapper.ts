@@ -21,6 +21,8 @@
  */
 import type { ModelMessage } from "ai";
 import type { GenericMessage, LLMVendor } from "../types.js";
+import { createLogger } from "../../../lib/logger.js";
+const log = createLogger("message-mapper");
 
 type AssistantPart =
   | { type: "text"; text: string }
@@ -67,8 +69,8 @@ export function genericToModelMessages(
             // history where signatures were trimmed. Guard here ensures we never
             // echo a signature-less block to Anthropic (400).
             // eslint-disable-next-line no-console
-            console.warn(
-              "[message-mapper] thinkingBlock missing signature — skipping",
+            log.warn(
+              "thinkingBlock missing signature — skipping",
             );
             continue;
           }
