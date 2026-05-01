@@ -16,6 +16,8 @@ export type StreamEvent = {
   hasToolCalls?: boolean;
   removedMessages?: number;
   freedTokens?: number;
+  /** Set to "command" on `done` events when the turn was a slash command. */
+  route?: "command";
   /** MCP Apps spec §3.2 — optional UI payload emitted with tool_end events. */
   uiPayload?: {
     serverId: string;
@@ -46,7 +48,7 @@ export type ToolEntryItem = {
 export type ChatEntry =
   | { kind: "user"; text: string }
   | { kind: "reasoning"; text: string; streaming?: boolean }
-  | { kind: "assistant"; text: string; streaming?: boolean }
+  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command" }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
   | { kind: "system"; text: string }
   // Brain proactive trigger that the user accepted ("지금 답하기"). The
@@ -283,6 +285,7 @@ export function finalizeStreamingReasoning(
 export function finalizeStreamingAssistant(
   entries: ChatEntry[],
   fallbackText: string,
+  opts?: { route?: "command" },
 ): ChatEntry[] {
   const next = [...entries];
   const assistantIdx = findLastIdx(
@@ -302,6 +305,12 @@ export function finalizeStreamingAssistant(
       ...assistant,
       text,
       streaming: false,
+      // Always write the `route` field (even as `undefined`) so that stale
+      // route values set during streaming intermediate state are explicitly
+      // cleared rather than preserved via the spread. Each finalize call is
+      // a complete state transition — there is no valid case where a
+      // finalized entry should inherit a streaming-era route.
+      route: opts?.route,
     };
     return next;
   }
@@ -314,6 +323,7 @@ export function finalizeStreamingAssistant(
     kind: "assistant",
     text: fallbackText,
     streaming: false,
+    route: opts?.route,
   });
   return next;
 }
