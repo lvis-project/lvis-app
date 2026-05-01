@@ -588,10 +588,20 @@ export class PluginRuntime {
 
     this.onDisable?.(pluginId);
 
-    // Re-import and re-instantiate the plugin with the latest configOverrides.
-    // Unlike reloadPlugin (dev hot-reload), we do NOT cache-bust the import URL —
-    // the on-disk bundle is unchanged; only the config values differ.
-    const { manifest, pluginRoot } = plugin;
+    // Re-import and re-instantiate the plugin with the latest on-disk manifest.
+    // Re-reading the manifest here ensures that addPlugin() / marketplace update
+    // flows pick up any entry-point changes from the newly installed artifact
+    // rather than reusing the stale in-memory manifest.entry from before the update.
+    const { pluginRoot } = plugin;
+    let manifest: PluginManifest;
+    try {
+      const manifestPath = resolve(pluginRoot, "plugin.json");
+      manifest = await this.readManifest(manifestPath);
+    } catch (err) {
+      console.error(`[plugin:${pluginId}] failed to read manifest during restartPlugin:`, (err as Error).message);
+      this.markFailed(pluginId);
+      return;
+    }
     const entryPath = this.resolveEntryPath(pluginRoot, manifest.entry);
     let resolvedEntryPath: string;
     try {
@@ -729,12 +739,18 @@ export class PluginRuntime {
     const loadPlan = await this.resolveManifestLoadPlan();
     const enabledSnapshots = await this.readEnabledManifestSnapshots(loadPlan);
     const snapshot = enabledSnapshots.get(pluginId);
-    if (!snapshot) {
-      throw new Error(`addPlugin: plugin not found in registry or disabled: ${pluginId}`);
-    }
     const targetPlan = loadPlan.find(
       (p) => p.pluginIdHint === pluginId || (p.enabled && this.matchesManifestPath(p.manifestPath, pluginId)),
     );
+    if (!snapshot) {
+      // If a plan entry exists (registry has the plugin enabled) but the snapshot
+      // is missing, readManifest must have thrown — re-read to surface the real
+      // error rather than the misleading "not found in registry" message.
+      if (targetPlan?.enabled) {
+        await this.readManifest(targetPlan.manifestPath); // throws with the actual reason
+      }
+      throw new Error(`addPlugin: plugin not found in registry or disabled: ${pluginId}`);
+    }
     if (!targetPlan) {
       throw new Error(`addPlugin: load plan entry missing for ${pluginId}`);
     }
@@ -1892,11 +1908,20 @@ export class PluginRuntime {
       if (!plan.enabled) continue;
       try {
         const manifest = await this.readManifest(plan.manifestPath);
-        snapshots.set(manifest.id, {
+        // Key by pluginIdHint (registry id) when available so addPlugin() lookups
+        // by registry id remain consistent even if manifest.id diverges (e.g.
+        // catalog id vs local slug). Fall back to manifest.id for manifestPaths
+        // entries that have no pluginIdHint.
+        const key = plan.pluginIdHint ?? manifest.id;
+        snapshots.set(key, {
           manifest,
           approvedPluginAccess: plan.approvedPluginAccess,
         });
-      } catch {
+      } catch (err) {
+        console.warn(
+          `[plugin-runtime] failed to read manifest at ${plan.manifestPath} (plugin: ${plan.pluginIdHint ?? "<unknown>"}) — skipping:`,
+          (err as Error).message,
+        );
         continue;
       }
     }
