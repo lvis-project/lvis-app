@@ -30,6 +30,21 @@ lvis-publish \
 
 `installPolicy: "admin"` 매니페스트는 publisher 키가 admin 역할이거나 admin 승인 필요.
 
+**per-plugin CI** — git tag 가 SoT (lvis-plugin-* 레포 기본)
+
+```bash
+# 1. plugin.json 의 version 을 PR 으로 올림 (마켓플레이스 catalog 가 자동 bump 안 함)
+#    예: "version": "0.1.0" → "0.1.25"
+# 2. 머지 후 main 에서 매칭 SemVer tag 푸시
+git checkout main && git pull
+git tag v0.1.25 -m "release 0.1.25"
+git push origin v0.1.25
+# → 레포의 .github/workflows/publish.yml 가 tag-push 만 듣고 catalog 에 publish
+#   tag semver 와 plugin.json.version 일치 검증 후 zip + POST
+```
+
+**branch push 는 publish 안 함** — 의도된 release tag 만 트리거. 이게 source 의 `plugin.json.version` 과 catalog 의 version 을 항상 일치시키는 결정적 룰. 자세한 것은 [`plugin-tool-schema-design.md` 의 version SoT 박스](../references/plugin-tool-schema-design.md#2-pluginmanifest-필드별-스펙) 참조.
+
 **서명 키 모델**: 런타임 trust root 는 앱 호스트가 소유합니다. SDK 는 타입/소스 계약만 제공하며, 앱의 `src/plugins/marketplace-keys.ts` 와 서버 `MARKETPLACE_SIGNING_PRIVATE_KEY_*` 가 짝을 이룹니다.
 
 상세 흐름 / 검증 / 트러블슈팅은 아래 본문 참고.
@@ -337,6 +352,41 @@ lvis-publish reject <publish-id> --reason <text> [--json]  # admin: 거절
 ### 2-6. 관리형 (managed) 게시
 
 `installPolicy: "admin"` 으로 publish 한 버전은 `pending_review` 상태로 들어가 카탈로그에 노출되지 않습니다. admin 이 `lvis-publish approve <publish-id>` (또는 admin UI) 로 승격해야 사용자에게 보입니다. dev 환경에서 빠르게 테스트하려면 `installPolicy: "user"` 로 publish 하거나 직접 approve.
+
+### 2-7. Per-plugin CI publish (git tag SoT)
+
+`lvis-plugin-*` 레포는 `lvis-publish` CLI 를 직접 호출하는 대신 자체 `.github/workflows/publish.yml` 가 마켓플레이스 API 를 호출하도록 구성되어 있습니다. **트리거는 SemVer git tag (`v*.*.*`) 푸시뿐** — branch push 는 publish 안 함. 워크플로우는:
+
+1. tag 의 semver (`v0.1.25` → `0.1.25`) 와 `plugin.json.version` 일치를 fail-fast 검증
+2. mismatch (e.g. `plugin.json.version: "0.1.0"` + tag `v0.1.25`) → step 실패 + "bump plugin.json on main BEFORE pushing the tag" 에러
+3. 일치하면 `dist/ + plugin.json` zip 으로 묶어 `POST /api/v1/plugins/<slug>/versions` (`-F commit_hash=<sha>`)
+4. 201 → publish 성공, 409 (already exists) → idempotent skip (warning), 그 외 → fail
+
+**version SoT 룰** ([`plugin-tool-schema-design.md` 참조](../references/plugin-tool-schema-design.md#2-pluginmanifest-필드별-스펙)):
+
+- 마켓플레이스 backend 는 version 을 자동 bump 하지 않음
+- 플러그인 저자가 release 의도 시 plugin.json 을 PR 으로 올림 → main 머지 → 매칭 tag 푸시
+- 결과: source manifest 와 catalog version 항상 일치, 사이드로드 (`Settings → 로컬 폴더에서 설치`) 와 마켓플레이스 install 결과 byte-equivalent
+
+**release 절차 예시 (work-proactive 0.1.25)**:
+
+```bash
+cd lvis-plugin-work-proactive
+# (a) plugin.json 의 version 을 0.1.25 로 PR
+git checkout -b release/0.1.25
+node -e 'const m=require("./plugin.json"); m.version="0.1.25"; require("fs").writeFileSync("plugin.json", JSON.stringify(m,null,2)+"\n")'
+git commit -am "chore(release): 0.1.25"
+git push origin release/0.1.25
+# → PR 머지
+
+# (b) main 으로 가서 tag 푸시
+git checkout main && git pull
+git tag v0.1.25 -m "release 0.1.25"
+git push origin v0.1.25
+# → publish.yml 가 tag-push 만 listen 해서 트리거됨
+```
+
+> 이전 동작 (참고용 — deprecated): `bump_version.py` 가 catalog 의 latest version + 1 으로 plugin.json 을 in-place rewrite 한 뒤 publish. CI workdir 안에서만 일어나서 source 는 stale 한 채 catalog 만 진행 → 사이드로드한 플러그인에 false-positive "업데이트 있음" 배너. tag-as-SoT 도입으로 근본 해결.
 
 ---
 
