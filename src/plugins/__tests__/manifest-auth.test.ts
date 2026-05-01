@@ -7,28 +7,50 @@
  * existing `uiCallable ⊂ tools` cross-check pattern in §B-3 of
  * `manifest-validation.ts` so the same gate runs at load time.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import { buildManifestValidator, parsePluginJson } from "../runtime/manifest-validation.js";
+import * as AjvModule from "ajv";
+import * as AddFormatsModule from "ajv-formats";
+import type { ValidateFunction } from "ajv";
+import { parsePluginJson } from "../runtime/manifest-validation.js";
 
 // `buildManifestValidator(hereFileUrl)` resolves `schemas/plugin.schema.json`
-// using path arithmetic anchored at `dirname(hereFileUrl)`. The relative
-// math (../../../schemas + ../../../../schemas) was sized for the production
-// caller (`src/plugins/runtime/manifest-validation.ts`). Calling it with
-// `import.meta.url` from a `__tests__/` file happens to land on the same
-// `<root>/schemas/...` on macOS but flaked on the Linux CI runner — the
-// validator returned `null` and AJV-specific assertions silently became
-// no-ops. Anchoring the URL at the runtime source file location makes the
-// arithmetic identical to production regardless of caller, so AJV-specific
-// rules (required, additionalProperties:false) reject reliably on every
-// platform.
-const RUNTIME_FILE_URL = pathToFileURL(
-  pathResolve(process.cwd(), "src/plugins/runtime/manifest-validation.ts"),
-).toString();
+// using path arithmetic anchored at `dirname(hereFileUrl)`. That math
+// works in production (caller is the runtime module) but proved flaky to
+// reproduce reliably from a `__tests__/` invocation across platforms —
+// the Linux CI runner's nested `_work/lvis-app/lvis-app/lvis-app` cwd +
+// vitest worker `import.meta.url` gave a different `dirname` than the
+// macOS dev run, so the validator silently returned `null` and AJV-
+// specific assertions became no-ops.
+//
+// The fix is path-independent: compile AJV inline against `schemas/
+// plugin.schema.json` resolved from `process.cwd()`, mirror the same
+// AJV options the production builder uses, and pass the compiled
+// validator straight to `parsePluginJson` (which accepts a pre-built
+// validator). Production code is untouched. Tests still exercise the
+// real schema on disk + the real `parsePluginJson` cross-field path.
+let TEST_VALIDATOR: ValidateFunction | null = null;
+beforeAll(() => {
+  const schemaPath = pathResolve(process.cwd(), "schemas/plugin.schema.json");
+  const schema = JSON.parse(readFileSync(schemaPath, "utf-8"));
+  const AjvAny = AjvModule as unknown as { default?: unknown };
+  const AjvCtor = (AjvAny.default ?? AjvModule) as new (opts?: unknown) => {
+    compile: (schema: unknown) => ValidateFunction;
+  };
+  const ajv = new AjvCtor({
+    strict: true,
+    strictRequired: false,
+    allErrors: true,
+    allowUnionTypes: true,
+  });
+  const AddAny = AddFormatsModule as unknown as { default?: unknown };
+  const addFormatsFn = (AddAny.default ?? AddFormatsModule) as (a: unknown) => void;
+  addFormatsFn(ajv);
+  TEST_VALIDATOR = ajv.compile(schema);
+});
 
 describe("manifest validation — auth cross-field", () => {
   let testDir: string;
@@ -68,7 +90,7 @@ describe("manifest validation — auth cross-field", () => {
         logoutTool: "test_signout",
       },
     });
-    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
+    const validator = TEST_VALIDATOR;
     const parsed = await parsePluginJson(manifestPath, validator);
     expect(parsed.auth?.statusTool).toBe("test_status");
     expect(parsed.auth?.loginTool).toBe("test_login");
@@ -82,7 +104,7 @@ describe("manifest validation — auth cross-field", () => {
         loginTool: "test_login",
       },
     });
-    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
+    const validator = TEST_VALIDATOR;
     const parsed = await parsePluginJson(manifestPath, validator);
     expect(parsed.auth?.logoutTool).toBeUndefined();
   });
@@ -96,7 +118,7 @@ describe("manifest validation — auth cross-field", () => {
         logoutTool: "test_signout",
       },
     });
-    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
+    const validator = TEST_VALIDATOR;
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
       /auth\.statusTool.*not declared in uiCallable/,
     );
@@ -111,7 +133,7 @@ describe("manifest validation — auth cross-field", () => {
         logoutTool: "test_signout",
       },
     });
-    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
+    const validator = TEST_VALIDATOR;
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
       /auth\.loginTool.*not declared in uiCallable/,
     );
@@ -126,7 +148,7 @@ describe("manifest validation — auth cross-field", () => {
         logoutTool: "test_signout",
       },
     });
-    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
+    const validator = TEST_VALIDATOR;
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
       /auth\.logoutTool.*not declared in uiCallable/,
     );
@@ -139,7 +161,7 @@ describe("manifest validation — auth cross-field", () => {
         // statusTool missing — schema says required.
       },
     });
-    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
+    const validator = TEST_VALIDATOR;
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
       /schema validation/i,
     );
@@ -153,7 +175,7 @@ describe("manifest validation — auth cross-field", () => {
         nonsenseField: "boom",
       },
     });
-    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
+    const validator = TEST_VALIDATOR;
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
       /schema validation/i,
     );
@@ -177,7 +199,7 @@ describe("manifest validation — auth cross-field", () => {
         loginTool: "test_email_delete",
       },
     });
-    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
+    const validator = TEST_VALIDATOR;
     const parsed = await parsePluginJson(manifestPath, validator);
     expect(parsed.auth?.loginTool).toBe("test_email_delete");
   });
