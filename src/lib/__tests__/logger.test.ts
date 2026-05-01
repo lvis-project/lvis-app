@@ -7,14 +7,6 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-type ProcessOverrides = {
-  env?: Record<string, string | undefined>;
-  /** Simulated process.versions.electron — pass undefined to delete the key */
-  electronVersion?: string | null;
-  /** Simulated process.defaultApp — pass null to delete the key */
-  defaultApp?: boolean | null;
-};
-
 // Sentinel to detect "not passed" vs "passed undefined/null"
 const NOT_SET = Symbol("NOT_SET");
 

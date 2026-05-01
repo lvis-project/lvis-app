@@ -7,7 +7,8 @@
  *   log.info({ key: value }, "Human-readable message");
  *
  * Format selection (evaluated at module load time):
- * - Production (NODE_ENV=production OR LVIS_LOG_FORMAT=json): JSON line output
+ * - Production: NODE_ENV=production OR LVIS_LOG_FORMAT=json OR isPackagedElectron
+ *   (Electron runtime with process.defaultApp absent) → JSON line output
  * - Otherwise (dev / unpackaged Electron / CI): pino-pretty colorized text
  * - Test (NODE_ENV=test or VITEST): delegates to console.* so vitest spies work
  * - LVIS_LOG_FORMAT=json forces JSON regardless of NODE_ENV (useful in CI pipelines)
