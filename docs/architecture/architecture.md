@@ -2344,8 +2344,8 @@ interface PluginAuthStatusResult {
 hostApi.emitEvent(`${pluginId}.auth.changed`);  // 예: "ms-graph.auth.changed"
 ```
 
-- `manifest.emittedEvents[]` 에 같은 이름을 등록해야 호스트 event-bridge 가 renderer 로 전달 (`boot/plugins.ts`).
-- 네임스페이스는 plugin id prefix 라 `classifySubscription` 에서 `neutral` 로 떨어지지만 (private 아님), `boot/plugins.ts` 가 neutral / public 둘 다 forward.
+- `manifest.emittedEvents[]` 에 같은 이름을 등록해야 호스트 event-bridge 가 renderer 로 전달 (`boot/steps/ipc-bridge.ts`).
+- 네임스페이스는 plugin id prefix 라 `classifySubscription` 에서 `neutral` 로 떨어지지만 (private 아님), `boot/steps/ipc-bridge.ts` 가 neutral / public 둘 다 forward.
 - 호스트 `usePluginAuthStatuses` 훅이 이벤트를 받아 statusTool 를 재호출 → 뱃지 갱신. **폴링 안 함** — 폐기된 `onMsGraphAuthChange` host-callback 안티패턴 회귀 방지.
 
 **호스트 UI surface**
@@ -2369,7 +2369,7 @@ hostApi.emitEvent(`${pluginId}.auth.changed`);  // 예: "ms-graph.auth.changed"
 - `auth.statusTool` 의 `outputSchema` 강제 검증 (toolSchemas 전체 outputSchema 인프라 큰 작업)
 - `agent-hub` 의 connection-status 까지 흡수하는 generic `statusBadge` 일반화 (3+ consumer 룰 — 현재는 ms-graph + lge-api 둘만 auth)
 - LayoutGrid 아이콘 자체에 미인증 점 뱃지 (Settings 외 발견성 강화)
-- `registry.json` 캐시 (현 live-poll 로 충분 — 풀고 싶은 flicker 문제 없음)
+- `registry.json` 캐시 (현재 event-driven refresh 로 충분 — 풀고 싶은 flicker 문제 없음)
 
 ### 9.4b IPC/RPC 범위 — 플러그인 통신 경계
 

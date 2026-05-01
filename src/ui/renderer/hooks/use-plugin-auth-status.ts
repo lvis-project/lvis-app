@@ -13,7 +13,7 @@ function parseStatusResult(raw: unknown): PluginAuthState {
   // validation is a separate cross-cutting follow-up.
   if (raw && typeof raw === "object") {
     const r = raw as Partial<PluginAuthStatusResult>;
-    if (r.authenticated === true) {
+    if (Boolean(r.authenticated)) {
       return {
         kind: "authed",
         account: typeof r.account === "string" && r.account.length > 0 ? r.account : undefined,
@@ -25,11 +25,11 @@ function parseStatusResult(raw: unknown): PluginAuthState {
 }
 
 /**
- * Tracks auth status for every loaded plugin that declares `manifest.auth`
- * (architecture.md §9.4a). Fetches statusTool once on mount + on every
- * `<pluginId>.auth.changed` event the plugin emits — no polling timer.
- * Returns a state map keyed by plugin id plus a manual `refresh` for
- * callers that just triggered login/logout.
+ * Event-driven auth-status tracker for every loaded plugin that declares
+ * `manifest.auth` (architecture.md §9.4a). Fetches statusTool once on
+ * mount and re-fetches on each `<pluginId>.auth.changed` event the plugin
+ * emits — **no polling timer**. A manual `refresh` callback is also
+ * returned for callers that just triggered login/logout.
  *
  * Plugins are filtered to `loadStatus === "loaded"` — failed/disabled
  * plugins have no live runtime to invoke, so the hook never dispatches

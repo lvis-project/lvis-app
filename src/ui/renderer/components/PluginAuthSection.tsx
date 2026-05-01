@@ -35,6 +35,7 @@ export function PluginAuthSection({
     setWorking(true);
     try {
       await api.callPluginMethod(auth.loginTool);
+      onRefresh();
     } catch (err) {
       // Generic user-facing copy + log raw error to the console for support
       // triage. Avoids leaking IPC reject internals (e.g.
@@ -43,7 +44,6 @@ export function PluginAuthSection({
       setLocalError("로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setWorking(false);
-      onRefresh();
     }
   }, [api, auth.loginTool, onRefresh, pluginId]);
 
@@ -53,12 +53,12 @@ export function PluginAuthSection({
     setWorking(true);
     try {
       await api.callPluginMethod(auth.logoutTool);
+      onRefresh();
     } catch (err) {
       console.error(`[plugin-auth] ${pluginId} logoutTool ${auth.logoutTool} failed`, err);
       setLocalError("로그아웃에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setWorking(false);
-      onRefresh();
     }
   }, [api, auth.logoutTool, onRefresh, pluginId]);
 

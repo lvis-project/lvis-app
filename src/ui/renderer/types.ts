@@ -291,10 +291,10 @@ export type LvisApi = {
   callPluginMethod: (m: string, p?: unknown) => Promise<unknown>;
   /**
    * Subscribe to plugin-emitted events forwarded by the host event bridge
-   * (`boot/plugins.ts` → `lvis:plugin:event`). Plugin must declare the type
-   * in `manifest.emittedEvents[]` and the type's namespace prefix must not
-   * be in `PLUGIN_PRIVATE_NAMESPACES`. Returns an unsubscribe function.
-   * Used by `usePluginAuthStatuses` for `<pluginId>.auth.changed`.
+   * (`boot/steps/ipc-bridge.ts` → `lvis:plugin:event`). Plugin must declare
+   * the type in `manifest.emittedEvents[]` and the type's namespace prefix
+   * must not be in `PLUGIN_PRIVATE_NAMESPACES`. Returns an unsubscribe
+   * function. Used by `usePluginAuthStatuses` for `<pluginId>.auth.changed`.
    */
   onPluginEvent?: (eventType: string, handler: (data: unknown) => void) => (() => void);
   listPluginCards: () => Promise<PluginCardSummary[]>;
