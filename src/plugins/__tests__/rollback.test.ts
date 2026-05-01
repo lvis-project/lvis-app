@@ -211,7 +211,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(restored.plugins[0]._devLinked).toBeUndefined();
   });
 
-  it("rollback preserves installSource='local-dev'", async () => {
+  it("rollback normalizes installSource='local-dev' back to 'user' (marketplace re-install)", async () => {
     const svc = makeService();
     await svc.installPlugin("com.lge.sample", "1.0.0");
     await svc.installPlugin("com.lge.sample", "1.1.0");
