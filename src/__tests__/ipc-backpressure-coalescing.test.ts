@@ -33,7 +33,7 @@ describe("IPC backpressure — transcript coalescing (Issue 4)", () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it("100 rapid non-final events + 1 final → ≤10 webContents.send calls total", async () => {
+  it("100 rapid non-final events + 1 final → ≤10 webContents.send calls total", () => {
     const fake = makeFakeSend();
     const send = makeCoalescingSend((data) => fake.send("meeting.transcript.updated", data));
 

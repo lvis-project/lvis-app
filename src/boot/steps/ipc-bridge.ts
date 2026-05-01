@@ -23,11 +23,12 @@ export function isTranscriptEvent(type: string): boolean {
 
 /**
  * Core coalescing debounce logic for a single event type.
- * Accepts a raw `sendFn` that performs the actual delivery — callers supply
- * any guard logic (e.g. `win.isDestroyed()`) inside `sendFn`.
+ * Accepts a `sendFn` that performs the actual delivery. Callers are
+ * responsible for any guard logic (e.g. `win.isDestroyed()` check) inside
+ * `sendFn` — see `registerPluginEventBridge` for the production usage.
  *
- * Exported for direct unit testing so tests exercise the production guard
- * path rather than duplicating this function.
+ * Exported so unit tests can import and exercise the production coalescing
+ * behaviour directly rather than duplicating the debounce implementation.
  */
 export function makeCoalescingSend(
   sendFn: (data: unknown) => void,
