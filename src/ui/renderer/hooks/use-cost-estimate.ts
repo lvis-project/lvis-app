@@ -18,7 +18,7 @@ export function useCostEstimate(params: {
   llmVendor: string;
   llmModel: string;
   maxOutputTokens: number;
-  composeOutgoing: (raw: string) => string;
+  composeOutgoing: (raw: string) => { text: string };
 }) {
   const { entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing } = params;
 
@@ -43,7 +43,7 @@ export function useCostEstimate(params: {
 
   const costEstimate = useMemo(() => {
     const pricing = lookupPricing(llmVendor, llmModel);
-    const draft = question ? composeOutgoing(question) : "";
+    const draft = question ? composeOutgoing(question).text : "";
     return estimateTurnCost({ historySerialized, draft, maxOutputTokens, pricing });
   }, [historySerialized, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing]);
 

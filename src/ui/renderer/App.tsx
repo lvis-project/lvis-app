@@ -189,7 +189,7 @@ export function App() {
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
   const vendorSupportsThinking = useMemo(() => vendorSupportsThinkingShared(llmVendor, llmModel), [llmVendor, llmModel]);
   const composeOutgoing = useCallback(
-    (raw: string): string => composeOutgoingUtil({ raw, activePreset, attachedDocs }),
+    (raw: string) => composeOutgoingUtil({ raw, activePreset, attachedDocs, attachments: [] }),
     [activePreset, attachedDocs],
   );
 
@@ -211,7 +211,7 @@ export function App() {
       // doesn't apply to brain-authored prompts. The brain envelope and
       // the system prompt's `<proactive-origin-guidance>` already steer
       // the LLM correctly.
-      const outgoing = mode === "trigger-import" ? t : composeOutgoing(t);
+      const outgoing = mode === "trigger-import" ? t : composeOutgoing(t).text;
       // trigger-import: skip the user-bubble append. The
       // ImportedTriggerCard already represents the brain's question
       // visibly, and rendering the wrapped envelope as a user bubble
