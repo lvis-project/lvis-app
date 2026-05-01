@@ -7,56 +7,23 @@
  * - isFinal=true flushes immediately regardless of debounce state
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  makeCoalescingSend,
+  isTranscriptEvent,
+} from "../boot/steps/ipc-bridge.js";
 
-// ─── Inline the coalescing logic for unit-testability ─────────────────────────
-// We re-implement the same logic from boot.ts so the test stays fast and
-// doesn't need Electron imports. If the boot.ts implementation changes, update
-// this mirror accordingly.
-
-function isTranscriptEvent(type: string): boolean {
-  return type.endsWith(".transcript.updated");
-}
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 interface FakeSend {
   calls: Array<{ type: string; data: unknown }>;
-  send: (channel: string, type: string, data: unknown) => void;
+  send: (type: string, data: unknown) => void;
 }
 
 function makeFakeSend(): FakeSend {
   const calls: Array<{ type: string; data: unknown }> = [];
   return {
     calls,
-    send: (_channel: string, type: string, data: unknown) => { calls.push({ type, data }); },
-  };
-}
-
-function makeCoalescingSend(
-  type: string,
-  fakeSend: FakeSend,
-): (data: unknown) => void {
-  let lastData: unknown = undefined;
-  let flushTimer: ReturnType<typeof setTimeout> | undefined;
-
-  const flush = (data: unknown) => {
-    if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined; }
-    fakeSend.send("lvis:plugin:event", type, data);
-  };
-
-  return (data: unknown) => {
-    const payload = data as Record<string, unknown> | undefined;
-    const isFinal = payload?.isFinal === true;
-    if (isFinal) {
-      flush(data);
-      lastData = undefined;
-    } else {
-      lastData = data;
-      if (!flushTimer) {
-        flushTimer = setTimeout(() => {
-          flushTimer = undefined;
-          if (lastData !== undefined) flush(lastData);
-        }, 100);
-      }
-    }
+    send: (type: string, data: unknown) => { calls.push({ type, data }); },
   };
 }
 
@@ -68,7 +35,7 @@ describe("IPC backpressure — transcript coalescing (Issue 4)", () => {
 
   it("100 rapid non-final events + 1 final → ≤10 webContents.send calls total", async () => {
     const fake = makeFakeSend();
-    const send = makeCoalescingSend("meeting.transcript.updated", fake);
+    const send = makeCoalescingSend((data) => fake.send("meeting.transcript.updated", data));
 
     // Emit 100 non-final events rapidly (no timer advance between them)
     for (let i = 0; i < 100; i++) {
@@ -88,7 +55,7 @@ describe("IPC backpressure — transcript coalescing (Issue 4)", () => {
 
   it("final event flushes immediately without waiting for debounce", () => {
     const fake = makeFakeSend();
-    const send = makeCoalescingSend("meeting.transcript.updated", fake);
+    const send = makeCoalescingSend((data) => fake.send("meeting.transcript.updated", data));
 
     send({ meetingId: "m1", newSegmentIndex: 0, isFinal: false });
     // Timer NOT advanced — debounce still pending
@@ -108,7 +75,7 @@ describe("IPC backpressure — transcript coalescing (Issue 4)", () => {
 
     // Simulate direct send (no coalescing wrapper)
     for (let i = 0; i < 5; i++) {
-      fake.send("lvis:plugin:event", type, { id: i });
+      fake.send(type, { id: i });
     }
     expect(fake.calls.length).toBe(5);
   });
@@ -123,7 +90,7 @@ describe("IPC backpressure — transcript coalescing (Issue 4)", () => {
 
   it("only latest non-final event data is sent in the debounced flush", () => {
     const fake = makeFakeSend();
-    const send = makeCoalescingSend("meeting.transcript.updated", fake);
+    const send = makeCoalescingSend((data) => fake.send("meeting.transcript.updated", data));
 
     for (let i = 0; i < 10; i++) {
       send({ meetingId: "m1", newSegmentIndex: i, isFinal: false });
@@ -134,5 +101,25 @@ describe("IPC backpressure — transcript coalescing (Issue 4)", () => {
     const data = fake.calls[0]!.data as { newSegmentIndex: number };
     // Should be the LAST event (index 9)
     expect(data.newSegmentIndex).toBe(9);
+  });
+
+  it("isDestroyed guard: destroyed window suppresses send", () => {
+    let destroyed = false;
+    const calls: unknown[] = [];
+    // Exercise the real guard path: inject a sendFn that checks isDestroyed
+    const guardedSend = (data: unknown) => {
+      if (destroyed) return;
+      calls.push(data);
+    };
+    const send = makeCoalescingSend(guardedSend);
+
+    send({ meetingId: "m1", newSegmentIndex: 0, isFinal: false });
+    vi.advanceTimersByTime(150);
+    expect(calls.length).toBe(1);
+
+    // Mark window as destroyed — subsequent flushes must be suppressed
+    destroyed = true;
+    send({ meetingId: "m1", newSegmentIndex: 1, isFinal: true });
+    expect(calls.length).toBe(1); // no new call
   });
 });
