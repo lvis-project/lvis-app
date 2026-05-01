@@ -66,7 +66,7 @@ export function MainToolbar({
         {/* ── Global search — opens GlobalSearchDialog ─────────────────── */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onOpenGlobalSearch} title="전체 검색 (메모리·세션·즐겨찾기)">
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onOpenGlobalSearch} title="전체 검색 (메모리·세션·즐겨찾기)" aria-label="전체 검색 (메모리·세션·즐겨찾기)">
               <Search className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>

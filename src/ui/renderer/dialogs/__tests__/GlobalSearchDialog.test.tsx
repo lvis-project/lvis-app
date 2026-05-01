@@ -8,27 +8,23 @@
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent, waitFor, act } from "@testing-library/react";
-import { GlobalSearchDialog } from "../GlobalSearchDialog.js";
-import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { GlobalSearchDialog, type GlobalSearchDialogProps } from "../GlobalSearchDialog.js";
+import { makeMockLvisApi, type MockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import type { LvisApi } from "../../types.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-type Props = {
-  open: boolean;
-  onOpenChange: ReturnType<typeof vi.fn>;
-  api: never;
-  sessions: never[];
-  starred: never[];
-  onLoadSession: ReturnType<typeof vi.fn>;
-  onOpenMemoryView: ReturnType<typeof vi.fn>;
-};
+/** Cast MockLvisApi (Record<string,Mock>) to LvisApi for test props. */
+function asApi(mock: MockLvisApi): LvisApi {
+  return mock as unknown as LvisApi;
+}
 
-function makeProps(apiOverrides?: Parameters<typeof makeMockLvisApi>[0]): Props {
+function makeProps(apiOverrides?: Parameters<typeof makeMockLvisApi>[0]): GlobalSearchDialogProps {
   const { api } = makeMockLvisApi(apiOverrides);
   return {
     open: true,
     onOpenChange: vi.fn(),
-    api: api as never,
+    api: asApi(api),
     sessions: [],
     starred: [],
     onLoadSession: vi.fn(),
@@ -50,10 +46,10 @@ describe("GlobalSearchDialog", () => {
     (api.memoryListEntries as ReturnType<typeof vi.fn>).mockResolvedValue([
       { filename: "note-a.md", title: "Note A", content: "body", updatedAt: "2024-01-01" },
     ]);
-    const props: Props = {
+    const props: GlobalSearchDialogProps = {
       open: true,
       onOpenChange: vi.fn(),
-      api: api as never,
+      api: asApi(api),
       sessions: [],
       starred: [],
       onLoadSession: vi.fn(),
@@ -74,10 +70,10 @@ describe("GlobalSearchDialog", () => {
     (api.memorySearchEntries as ReturnType<typeof vi.fn>).mockResolvedValue([
       { filename: "match.md", title: "Match", excerpt: "...", updatedAt: "2024-01-01" },
     ]);
-    const props: Props = {
+    const props: GlobalSearchDialogProps = {
       open: true,
       onOpenChange: vi.fn(),
-      api: api as never,
+      api: asApi(api),
       sessions: [],
       starred: [],
       onLoadSession: vi.fn(),
@@ -114,11 +110,11 @@ describe("GlobalSearchDialog", () => {
     const { api } = makeMockLvisApi();
     const onLoadSession = vi.fn();
     const onOpenChange = vi.fn();
-    const props: Props = {
+    const props: GlobalSearchDialogProps = {
       open: true,
       onOpenChange,
-      api: api as never,
-      sessions: [{ id: "sess-1", title: "Test Session", modifiedAt: new Date().toISOString() }] as never[],
+      api: asApi(api),
+      sessions: [{ id: "sess-1", title: "Test Session", modifiedAt: new Date().toISOString() }],
       starred: [],
       onLoadSession,
       onOpenMemoryView: vi.fn(),
@@ -142,10 +138,10 @@ describe("GlobalSearchDialog", () => {
   it("does not call IPC before debounce delay elapses", async () => {
     vi.useFakeTimers();
     const { api } = makeMockLvisApi();
-    const props: Props = {
+    const props: GlobalSearchDialogProps = {
       open: true,
       onOpenChange: vi.fn(),
-      api: api as never,
+      api: asApi(api),
       sessions: [],
       starred: [],
       onLoadSession: vi.fn(),
@@ -171,10 +167,10 @@ describe("GlobalSearchDialog", () => {
     (api.memoryListEntries as ReturnType<typeof vi.fn>).mockReturnValue(
       new Promise((res) => { resolveMemory = res; }),
     );
-    const props: Props = {
+    const props: GlobalSearchDialogProps = {
       open: true,
       onOpenChange: vi.fn(),
-      api: api as never,
+      api: asApi(api),
       sessions: [],
       starred: [],
       onLoadSession: vi.fn(),

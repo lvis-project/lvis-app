@@ -153,10 +153,10 @@ export function GlobalSearchDialog({
                     <span className="text-xs text-muted-foreground">로딩 중...</span>
                   </CommandItem>
                 ) : (
-                  memories.map((m) => (
+                  memories.map((m, idx) => (
                     <CommandItem
-                      key={m.filename}
-                      value={`memory:${m.filename}`}
+                      key={`${m.filename ?? "no-file"}::${m.title}::${idx}`}
+                      value={`memory:${m.filename ?? m.title}::${idx}`}
                       onSelect={handleSelectMemory}
                     >
                       <BookMarked className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />

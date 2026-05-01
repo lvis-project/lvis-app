@@ -85,6 +85,7 @@ export function InputActionBar({
               className="h-7 w-7 p-0"
               onClick={onToggleChatSearch}
               title="대화 검색 (Cmd/Ctrl+F)"
+              aria-label="대화 검색 (Cmd/Ctrl+F)"
             >
               <Search className="h-3.5 w-3.5" />
             </Button>
