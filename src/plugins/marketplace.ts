@@ -13,6 +13,7 @@ import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./off
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import { PluginArtifactStore } from "./plugin-artifact-store.js";
+import { listFilesRecursive } from "./plugin-install-receipt.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
@@ -1055,6 +1056,17 @@ export class PluginMarketplaceService {
       );
     }
 
+    // Validate version up front — same throw message as the receipt-write
+    // step, but BEFORE any filesystem mutation (cp / rename / registry
+    // update) so a malformed manifest does not leave a half-installed
+    // plugin dir + registry entry behind requiring manual cleanup.
+    if (typeof manifest.version !== "string" || !manifest.version) {
+      throw new Error(
+        `[installLocal] plugin.json must declare a non-empty 'version' string: ${pluginId}`,
+      );
+    }
+    const manifestVersion = manifest.version;
+
     return this.withPluginLock(pluginId, async () => {
       const userPluginsRoot = this.pluginsRoot;
       const installDir = resolve(userPluginsRoot, pluginId);
@@ -1075,7 +1087,31 @@ export class PluginMarketplaceService {
       const stagingDir = resolve(userPluginsRoot, `${pluginId}.tmp-${process.pid}-${Date.now()}`);
       await rm(stagingDir, { recursive: true, force: true });
       try {
-        await cp(sourcePath, stagingDir, { recursive: true });
+        // Filter: skip dev-only / heavy / asar-bearing trees. Without this
+        // filter, copying a source repo whose `node_modules/` includes the
+        // `electron` package fails because Electron's patched fs intercepts
+        // `default_app.asar` and surfaces "Invalid package" mid-copy. `.git`
+        // is excluded for size + privacy. The check scans every path
+        // segment so monorepo layouts (e.g. `packages/foo/node_modules/electron`)
+        // are also caught. `verbatimSymlinks: true` keeps any source-side
+        // symlinks as symlinks rather than dereferencing into arbitrary
+        // host paths during cp.
+        await cp(sourcePath, stagingDir, {
+          recursive: true,
+          verbatimSymlinks: true,
+          filter: (src) => {
+            const rel = relative(sourcePath, src);
+            if (!rel) return true;
+            const parts = rel.split(/[\\/]/);
+            if (parts[0] === ".git") return false;
+            const nmIdx = parts.indexOf("node_modules");
+            if (nmIdx >= 0) {
+              const next = parts[nmIdx + 1];
+              if (next === "electron" || next === "@electron") return false;
+            }
+            return true;
+          },
+        });
         await rm(installDir, { recursive: true, force: true });
         await rename(stagingDir, installDir);
       } catch (err) {
@@ -1094,6 +1130,11 @@ export class PluginMarketplaceService {
           existing.manifestPath = registryManifestPath;
           existing.enabled = true;
           existing.installedBy = installedBy;
+          // This entry is now a real user install. Strip any stale
+          // `_devLinked` marker so the next `dev-link-plugins.mjs` boot pass
+          // — which drops every `_devLinked` entry before re-registering —
+          // does not clobber it.
+          delete existing._devLinked;
         } else {
           registry.plugins.push({
             id: pluginId,
@@ -1102,6 +1143,43 @@ export class PluginMarketplaceService {
             installedBy,
           });
         }
+      });
+
+      // Write an install receipt so the plugin runtime's integrity gate
+      // (snapshots.ts → verifyInstallReceipt) accepts the entry. Without a
+      // fresh receipt, load is rejected with either "install receipt
+      // missing or unreadable" (no prior install) or "receipt hash
+      // mismatch" (stale receipt from a prior marketplace install). The
+      // receipt deliberately covers only `plugin.json` + every file under
+      // `dist/` — matching what `installArtifact` records for marketplace
+      // installs. Runtime deps under `node_modules/` are NOT integrity-
+      // tracked; the compensating control is `isDevModeUnlocked()` (this
+      // entire path is dev-mode-only), and unifying receipt scope with
+      // installSource enum is tracked as a follow-up architecture task.
+      // signerKeyId / artifactSha256 use a `dev:local-install` sentinel
+      // because there is no signed artifact to validate against; replacing
+      // the sentinel with a first-class `installSource` field is a
+      // schema-v2 follow-up.
+      const receiptFiles: string[] = ["plugin.json"];
+      try {
+        const distFiles = await listFilesRecursive(resolve(installDir, "dist"));
+        for (const f of distFiles) receiptFiles.push(`dist/${f}`);
+      } catch (err) {
+        // Only `dist/` missing entirely is acceptable here (receipt then
+        // covers plugin.json only and load will fail later with a clearer
+        // entry-import error). Permission / IO errors must surface so a
+        // partially-hashed receipt does not silently pass `verifyInstallReceipt`.
+        const code =
+          err && typeof err === "object" && "code" in err
+            ? (err as { code?: unknown }).code
+            : undefined;
+        if (code !== "ENOENT") throw err;
+      }
+      await this.artifactStore.writeInstallReceipt(pluginId, {
+        version: manifestVersion,
+        artifactSha256: "dev:local-install",
+        signerKeyId: "dev:local-install",
+        files: receiptFiles,
       });
 
       return { pluginId, installed: true as const };
