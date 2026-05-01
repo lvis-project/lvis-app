@@ -71,8 +71,18 @@ interface ContentProps {
 
 function DetachedContent({ viewKey }: ContentProps) {
   const api = useMemo(() => getApi(), []);
-  const { pluginViews } = usePluginMarketplace(api);
+  const { pluginViews, refreshViews } = usePluginMarketplace(api);
   const { starred, refreshStarred } = useStarred(api);
+
+  // Eagerly load plugin view list when this component mounts for a plugin key,
+  // and whenever the viewKey changes to a plugin key. Without this call
+  // pluginViews stays empty (the hook never auto-fetches) and PluginUiHostView
+  // receives view=null → "플러그인 뷰를 찾을 수 없습니다." error.
+  useEffect(() => {
+    if (viewKey.startsWith("plugin:")) {
+      void refreshViews();
+    }
+  }, [viewKey, refreshViews]);
 
   if (viewKey === "tasks") {
     return <TaskView api={api} />;
@@ -140,7 +150,18 @@ export interface DetachedViewProps {
   viewKey: string;
 }
 
-export function DetachedView({ viewKey }: DetachedViewProps) {
+export function DetachedView({ viewKey: initialViewKey }: DetachedViewProps) {
+  // Single-instance shell: WindowManager may send lvis:detached:navigate to
+  // replace the displayed content without closing and reopening the window.
+  const [viewKey, setViewKey] = useState(initialViewKey);
+
+  useEffect(() => {
+    const api = window.lvisApi;
+    if (!api?.window?.onDetachedNavigate) return;
+    const unsub = api.window.onDetachedNavigate((nextKey) => setViewKey(nextKey));
+    return unsub;
+  }, []);
+
   return (
     <ThemeProvider>
       <TooltipProvider>
