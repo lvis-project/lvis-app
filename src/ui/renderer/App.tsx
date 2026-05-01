@@ -314,6 +314,7 @@ export function App() {
   ], [pluginViews, handleNewChat]);
 
   const onOpenSettings = useCallback(() => setSettingsOpen(true), []);
+  const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
   const chatContextValue = useChatContextValue({
@@ -389,7 +390,7 @@ export function App() {
             sessions={sessions}
             currentSessionId={currentSessionId}
             isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
-            onNewChat={() => void handleNewChat()}
+            onNewChat={onNewChat}
             onRefreshSessions={refreshSessions}
             onRefreshStarred={refreshStarred}
             onLoadSession={handleLoadSession}
