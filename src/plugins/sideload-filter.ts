@@ -49,8 +49,12 @@ async function walkForEscapingSymlinks(current: string, realRoot: string): Promi
       try {
         realTarget = realpathSync(full);
       } catch {
-        // dangling or circular symlink — Node loader will fail on import
-        continue;
+        // dangling or circular symlink (ENOENT / ELOOP) — reject rather than
+        // silently skip, since the target could later be created to point outside
+        // the install dir after the containment check has already passed.
+        throw new Error(
+          `[installLocal] unresolvable symlink in install dir: ${relative(realRoot, full)}`,
+        );
       }
       if (!isContained(realRoot, realTarget)) {
         throw new Error(
