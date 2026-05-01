@@ -32,6 +32,8 @@
  * means the brain forgets but the poller still suppresses.
  */
 import type { TaskService, Task } from "../taskService.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("task-deadline-poller");
 
 export interface TaskDeadlineApproachingPayload {
   taskId: string;
@@ -160,8 +162,8 @@ export class TaskDeadlinePoller {
         dueBefore: cutoffIso,
       });
     } catch (err) {
-      console.warn(
-        "[task-deadline-poller] query failed:",
+      log.warn(
+        "query failed: %s",
         err instanceof Error ? err.message : String(err),
       );
       return;
@@ -194,8 +196,8 @@ export class TaskDeadlinePoller {
         try {
           h(payload);
         } catch (err) {
-          console.warn(
-            "[task-deadline-poller] handler threw:",
+          log.warn(
+            "handler threw: %s",
             err instanceof Error ? err.message : String(err),
           );
         }

@@ -1,3 +1,6 @@
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("plugin-config-change");
+
 /**
  * §9.2 Track B — strictly plugin-scoped config-change emitter.
  *
@@ -118,8 +121,8 @@ export function emitPluginConfigChange(
         listener(key, value);
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn(
-          `[plugin-config-change] listener failed for plugin=${pluginId} key=${key}:`,
+        log.warn(
+          `listener failed for plugin=${pluginId} key=${key}: %s`,
           (err as Error).message,
         );
       }
@@ -133,8 +136,8 @@ export function emitPluginConfigChange(
         listener(key, value);
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn(
-          `[plugin-config-change] wildcard listener failed for plugin=${pluginId} key=${key}:`,
+        log.warn(
+          `wildcard listener failed for plugin=${pluginId} key=${key}: %s`,
           (err as Error).message,
         );
       }

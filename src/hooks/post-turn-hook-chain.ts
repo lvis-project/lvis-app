@@ -18,6 +18,8 @@ import type { MemoryManager } from "../memory/memory-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { SettingsService } from "../data/settings-store.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("post-turn");
 
 export interface PostTurnHookContext {
   sessionId: string;
@@ -62,8 +64,8 @@ export class PostTurnHookChain {
         let working = afterMicro;
         if (mr.stripped) {
           compactedMessages = afterMicro;
-          console.log(
-            `[post-turn] microcompact: stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars`,
+          log.info(
+            `microcompact: stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars`,
           );
         }
 
@@ -76,14 +78,14 @@ export class PostTurnHookChain {
           const { messages: compacted, result: cr } = compactMessages(working, undefined, "auto");
           if (cr.compacted) {
             compactedMessages = compacted;
-            console.log(
-              `[post-turn] auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`,
+            log.info(
+              `auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`,
             );
           }
         }
       }
     } catch (err) {
-      console.warn("[post-turn] compact failed:", err);
+      log.warn({ err }, "compact failed");
     }
 
     // 2. 세션 영속화 (§4.5.7)
@@ -91,7 +93,7 @@ export class PostTurnHookChain {
       const messagesToSave = compactedMessages ?? ctx.messages;
       await this.deps.memoryManager?.saveSession(ctx.sessionId, messagesToSave);
     } catch (err) {
-      console.warn("[post-turn] saveSession failed:", err);
+      log.warn("saveSession failed: %s", err);
     }
 
     // 3. Memory Extraction — "기억해" 패턴 감지 시 memory/ 자동 저장
@@ -107,13 +109,13 @@ export class PostTurnHookChain {
                 `자동-${title}`,
                 `[사용자 요청]\n${ctx.input}\n\n[어시스턴트 응답]\n${ctx.output.slice(0, 500)}`,
               );
-              console.log(`[post-turn] memory-extraction: auto-saved note "${title}"`);
+              log.info(`memory-extraction: auto-saved note "${title}"`);
             }
           }
         }
       }
     } catch (err) {
-      console.warn("[post-turn] extractMemory failed:", err);
+      log.warn("extractMemory failed: %s", err);
     }
 
     // 4. Audit Log (§14.2)
@@ -127,14 +129,14 @@ export class PostTurnHookChain {
         route: ctx.route,
       });
     } catch (err) {
-      console.warn("[post-turn] audit failed:", err);
+      log.warn("audit failed: %s", err);
     }
 
     // 5. Idle poke (Agent 5 §6.1 신호 흡수)
     try {
       this.deps.idleScheduler?.signalConversation();
     } catch (err) {
-      console.warn("[post-turn] idle poke failed:", err);
+      log.warn("idle poke failed: %s", err);
     }
 
     return compactedMessages;

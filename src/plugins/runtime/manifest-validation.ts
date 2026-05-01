@@ -13,6 +13,8 @@ import * as AjvModule from "ajv";
 import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import type { PluginManifest, InstallPolicy } from "../types.js";
+import { createLogger } from "../../lib/logger.js";
+const log = createLogger("plugin-runtime");
 
 export function normalizeInstallPolicy(
   source: Partial<Pick<PluginManifest, "installPolicy">> | undefined,
@@ -57,7 +59,7 @@ export async function buildManifestValidator(
       }
     }
     if (!schemaBytes) {
-      console.warn("[plugin-runtime] plugin.schema.json not found — AJV validation disabled");
+      log.warn("plugin.schema.json not found — AJV validation disabled");
       return null;
     }
     const schema = JSON.parse(schemaBytes);
@@ -80,8 +82,8 @@ export async function buildManifestValidator(
     addFormatsFn(ajv);
     return ajv.compile(schema);
   } catch (err) {
-    console.warn(
-      "[plugin-runtime] AJV compile failed — falling back to hand-rolled checks:",
+    log.warn(
+      "AJV compile failed — falling back to hand-rolled checks: %s",
       (err as Error).message,
     );
     return null;
@@ -120,14 +122,14 @@ export async function parsePluginJson(
 
   // Phase 5 §4 — ui[] kind-specific required-field soft fallback.
   // Runs BEFORE AJV so a single bad ui entry does not drop the whole
-  // plugin. Each invalid entry is stripped out + console.warn'd; other ui
+  // plugin. Each invalid entry is stripped out + log.warn'd; other ui
   // entries survive.
   if (Array.isArray(parsed.ui)) {
     const keep: typeof parsed.ui = [];
     for (let i = 0; i < parsed.ui.length; i += 1) {
       const ext = parsed.ui[i] as unknown as Record<string, unknown> | undefined;
       if (!ext || typeof ext !== "object" || Array.isArray(ext)) {
-        console.warn(`[manifest:${pid}] ui[${i}] is not an object — dropped`);
+        log.warn(`ui[${i}] is not an object — dropped`);
         continue;
       }
       const kind = ext.kind;
@@ -140,8 +142,8 @@ export async function parsePluginJson(
       }
       if (missing.length > 0) {
         for (const f of missing) {
-          console.warn(
-            `[manifest:${pid}] ui[${i}] kind="${String(kind)}" missing required field "${f}" — dropped`,
+          log.warn(
+            `ui[${i}] kind="${String(kind)}" missing required field "${f}" — dropped`,
           );
         }
         continue;
@@ -181,8 +183,8 @@ export async function parsePluginJson(
     );
   }
   if (typeof parsed.publisher !== "string" || parsed.publisher.length === 0) {
-    console.warn(
-      `[plugin-runtime] plugin '${pid}' at '${path}' is missing publisher field (SHOULD per Phase 1). ` +
+    log.warn(
+      `plugin '${pid}' at '${path}' is missing publisher field (SHOULD per Phase 1). ` +
       `Add: "publisher": "Your Org"`,
     );
   }
@@ -238,8 +240,8 @@ export async function parsePluginJson(
     typeof parsed.config === "object" &&
     (parsed.config as Record<string, unknown>).testMode === true
   ) {
-    console.warn(
-      `[plugin-runtime] protected plugin '${pid}' has config.testMode=true (${path}). ` +
+    log.warn(
+      `protected plugin '${pid}' has config.testMode=true (${path}). ` +
       `testMode is a development flag and must not ship in production installs — please remove it from the installed manifest.`,
     );
   }
@@ -312,8 +314,8 @@ export async function parsePluginJson(
   for (let i = 0; i < notifEvents.length; i += 1) {
     const e = notifEvents[i]?.event;
     if (typeof e === "string" && !subsTypes.has(e)) {
-      console.warn(
-        `[manifest:${pid}] notificationEvents[${i}].event '${e}' not declared in eventSubscriptions — OS notification will still fire, but plugin won't receive the event via hostApi.onEvent`,
+      log.warn(
+        `notificationEvents[${i}].event '${e}' not declared in eventSubscriptions — OS notification will still fire, but plugin won't receive the event via hostApi.onEvent`,
       );
     }
   }

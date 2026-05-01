@@ -15,6 +15,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlink
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
 import { withFileLock } from "../lib/with-file-lock.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("memory");
 
 export interface MemoryManagerOptions {
   /** ~/.lvis 기본, 테스트 시 override */
@@ -251,7 +253,7 @@ export class MemoryManager {
       try {
         messages.push(JSON.parse(line));
       } catch {
-        console.warn("[memory] skipping malformed session line", { sessionId });
+        log.warn({ sessionId }, "skipping malformed session line");
       }
     }
     return messages;
@@ -279,7 +281,7 @@ export class MemoryManager {
       // corrupted .meta.json doesn't silently surface as "no metadata".
       // Error semantics are preserved (still returns null) — only the
       // diagnostic surface is added.
-      console.warn(`[memory] loadSessionMetadata failed for ${sessionId}:`, (err as Error).message);
+      log.warn(`loadSessionMetadata failed for ${sessionId}: %s`, (err as Error).message);
       return null;
     }
   }

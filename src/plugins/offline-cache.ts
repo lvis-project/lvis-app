@@ -11,6 +11,8 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { PluginMarketplaceItem } from "./types.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("offline-cache");
 
 // ---------------------------------------------------------------------------
 // Feature flag
@@ -96,7 +98,7 @@ export async function setCachedCatalog(
     const payload: CatalogCacheFile = { cachedAt: Date.now(), items };
     await atomicWrite(catalogFile, JSON.stringify(payload, null, 2));
   } catch (err) {
-    console.warn("[offline-cache] setCachedCatalog failed:", (err as Error).message);
+    log.warn("setCachedCatalog failed: %s", (err as Error).message);
   }
 }
 
@@ -223,7 +225,7 @@ export async function setCachedTarball(
     await mkdir(resolve(indexFile, ".."), { recursive: true });
     await writeIndex(indexFile, index);
   } catch (err) {
-    console.warn("[offline-cache] setCachedTarball failed:", (err as Error).message);
+    log.warn("setCachedTarball failed: %s", (err as Error).message);
   }
 }
 

@@ -17,6 +17,8 @@ import type { LLMProvider, StreamEvent, StreamTurnParams } from "../types.js";
 import type { LLMVendor } from "../types.js";
 import type { ProviderConfig } from "../types.js";
 import { createProvider as defaultCreateProvider } from "../provider-factory.js";
+import { createLogger } from "../../../lib/logger.js";
+const log = createLogger("fallback-chain");
 
 export interface FallbackEntry {
   provider: LLMVendor;
@@ -155,7 +157,7 @@ export async function* streamWithFallback(
       const nextLabel = nextEntry ? `${nextEntry.provider}/${nextEntry.model}` : "??";
       const reason = err instanceof Error ? err.message : String(err);
       const msg = `fallback: ${label}→${nextLabel} reason=${reason}`;
-      console.warn(`[LLM fallback] ${msg}`);
+      log.warn(`${msg}`);
       try {
         auditLogger?.log({ type: "warn", sessionId: "", input: msg });
       } catch {

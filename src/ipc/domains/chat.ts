@@ -30,6 +30,8 @@ import {
 import { devLinkedEntryAllowed, isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { createLogger } from "../../lib/logger.js";
+const log = createLogger("chat");
 
 type ConversationTurnResult = {
   stopReason?: "end_turn" | "tool_use" | "interrupted";
@@ -185,10 +187,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
           count: r.totalCount,
           byKind: r.counts,
         });
-        console.warn(
-          `[DLP] user draft redacted — count=${r.totalCount}`,
-          r.counts,
-        );
+        log.warn({ counts: r.counts }, `user draft redacted — count=${r.totalCount}`);
       }
     }
     return effective;

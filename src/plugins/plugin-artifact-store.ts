@@ -48,6 +48,8 @@ import {
   writeInstallReceipt,
   type PluginInstallReceipt,
 } from "./plugin-install-receipt.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("plugin-artifact-store");
 
 export interface ArtifactStoreHistoryEntry {
   version: string;
@@ -281,8 +283,8 @@ export class PluginArtifactStore {
       await mkdir(dir, { recursive: true });
       await writeFile(resolve(dir, "plugin.json"), raw, "utf-8");
     } catch (err) {
-      console.warn(
-        `[plugin-artifact-store] cacheVersion failed for ${slug}: ${(err as Error).message}`,
+      log.warn(
+        `cacheVersion failed for ${slug}: ${(err as Error).message}`,
       );
     }
   }
@@ -302,8 +304,8 @@ export class PluginArtifactStore {
       entries.push(entry);
       await writeFile(this.historyPath(slug), `${JSON.stringify({ entries }, null, 2)}\n`, "utf-8");
     } catch (err) {
-      console.warn(
-        `[plugin-artifact-store] appendHistory failed for ${slug}: ${(err as Error).message}`,
+      log.warn(
+        `appendHistory failed for ${slug}: ${(err as Error).message}`,
       );
     }
   }

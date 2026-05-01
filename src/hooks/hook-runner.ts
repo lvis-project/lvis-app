@@ -14,6 +14,8 @@
  */
 
 import type { ExternalHookExecutor } from "./external-executor.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("hook");
 
 // ─── Types ──────────────────────────────────────────
 
@@ -108,7 +110,7 @@ export class HookRunner {
         }
       } catch (err) {
         // 훅 실행 실패 시 경고 로그, 실행은 계속
-        console.warn(`[hook] PreToolUse '${hook.name}' failed:`, (err as Error).message);
+        log.warn(`PreToolUse '${hook.name}' failed: %s`, (err as Error).message);
       }
     }
 
@@ -128,7 +130,7 @@ export class HookRunner {
           };
         }
       } catch (err) {
-        console.warn("[hook] external PreToolUse failed:", (err as Error).message);
+        log.warn("external PreToolUse failed: %s", (err as Error).message);
       }
     }
 
@@ -149,7 +151,7 @@ export class HookRunner {
         const result = await hook.handler(ctx);
         if (result?.feedback) feedbacks.push(result.feedback);
       } catch (err) {
-        console.warn(`[hook] PostToolUse '${hook.name}' failed:`, (err as Error).message);
+        log.warn(`PostToolUse '${hook.name}' failed: %s`, (err as Error).message);
       }
     }
 
@@ -168,7 +170,7 @@ export class HookRunner {
           else if (r.reason) feedbacks.push(`[${r.hookType} hook] ${r.reason}`);
         }
       } catch (err) {
-        console.warn("[hook] external PostToolUse failed:", (err as Error).message);
+        log.warn("external PostToolUse failed: %s", (err as Error).message);
       }
     }
 

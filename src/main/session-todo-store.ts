@@ -8,6 +8,8 @@
  * affordances rather than removing items outright.
  */
 import { randomUUID } from "node:crypto";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 export type SessionTodoStatus =
   | "pending"
@@ -70,7 +72,7 @@ export class SessionTodoStore {
       try {
         l(sessionId, merged.map((i) => ({ ...i })));
       } catch (err) {
-        console.warn("[lvis] session-todo listener threw:", (err as Error).message);
+        log.warn("session-todo listener threw: %s", (err as Error).message);
       }
     }
     return merged.map((i) => ({ ...i }));

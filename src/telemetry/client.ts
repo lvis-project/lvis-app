@@ -27,6 +27,8 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import type { TelemetrySettings } from "../data/settings-store.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("telemetry:plugin");
 
 // ─── Event types ─────────────────────────────────────────────────────────────
 
@@ -90,7 +92,7 @@ export function loadOrCreateDeviceUuid(uuidPath: string): string {
     mkdirSync(dirname(uuidPath), { recursive: true });
     writeFileSync(uuidPath, id, { encoding: "utf-8", mode: 0o600 });
   } catch (err) {
-    console.warn("[telemetry] could not persist device_uuid:", (err as Error).message);
+    log.warn("could not persist device_uuid: %s", (err as Error).message);
   }
   return id;
 }
@@ -214,7 +216,7 @@ export class PluginTelemetryClient {
     // URL (e.g. injected via settings manipulation) must not be able to
     // redirect telemetry to arbitrary internal hosts.
     if (!this.endpointMatchesBase(endpoint, base)) {
-      console.warn("[telemetry:plugin] endpoint failed allowlist check; dropping flush");
+      log.warn("endpoint failed allowlist check; dropping flush");
       return;
     }
     const batch = this.queue.slice(0);
@@ -229,12 +231,12 @@ export class PluginTelemetryClient {
         body: JSON.stringify({ events: batch }),
       });
       if (!res.ok) {
-        console.warn(`[telemetry:plugin] flush non-ok HTTP ${res.status}; re-queued ${batchLen} event(s)`);
+        log.warn(`flush non-ok HTTP ${res.status}; re-queued ${batchLen} event(s)`);
         return;
       }
       this.queue.splice(0, batchLen);
     } catch (err) {
-      console.warn("[telemetry:plugin] flush failed (re-queued):", (err as Error).message);
+      log.warn("flush failed (re-queued): %s", (err as Error).message);
     }
   }
 

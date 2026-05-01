@@ -7,6 +7,8 @@
  * 순수 로직 — 호출자가 side-effect (history append, tool schema rebuild) 을 담당.
  */
 import type { ToolUseBlock } from "../../tools/executor.js";
+import { createLogger } from "../../lib/logger.js";
+const log = createLogger("lvis");
 
 export const REQUEST_PLUGIN_TOOL = "request_plugin";
 /** 턴당 request_plugin 허용 횟수. */
@@ -80,8 +82,8 @@ export function handleRequestPlugin(
         is_error: true,
       });
     } else if (sessionExpansions >= MAX_SESSION_PLUGIN_EXPANSION) {
-      console.warn(
-        `[lvis] request_plugin session cap reached (${MAX_SESSION_PLUGIN_EXPANSION}). ` +
+      log.warn(
+        `request_plugin session cap reached (${MAX_SESSION_PLUGIN_EXPANSION}). ` +
         `Rejecting '${pluginId}'.`,
       );
       results.push({

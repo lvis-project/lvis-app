@@ -21,6 +21,8 @@
 import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("policy-store");
 
 // ─── 기본 경로 ────────────────────────────────────────
 
@@ -101,14 +103,14 @@ async function readPolicyFile(filePath: string): Promise<PolicyFile | null> {
     const parsed = JSON.parse(raw) as PolicyFile;
     if (parsed.version !== 1) {
       // major version 불일치 → fallback (에러 로그만)
-      console.error(`[policy-store] version mismatch in ${filePath}: expected 1, got ${parsed.version} — ignoring`);
+      log.error(`version mismatch in ${filePath}: expected 1, got ${parsed.version} — ignoring`);
       return null;
     }
     return parsed;
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     // JSON parse error 등 — 에러 로그 + fallback
-    console.error(`[policy-store] failed to read ${filePath}:`, (err as Error).message);
+    log.error(`failed to read ${filePath}: %s`, (err as Error).message);
     return null;
   }
 }
