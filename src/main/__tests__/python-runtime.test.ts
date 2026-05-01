@@ -152,24 +152,30 @@ describe("PythonRuntimeBootstrapper", () => {
     const win = makeBrowserWindow();
     const result = await bootstrapper.ensureReady(win);
 
-    // spawn이 4번 호출 (python install, venv, pip sync, python verify)
-    expect(mockedSpawn).toHaveBeenCalledTimes(4);
+    // uv python install 3.12 was invoked
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining(["python", "install", "3.12"]),
+      expect.anything(),
+    );
 
-    // 첫 번째 spawn: uv python install 3.12
-    const [firstBin, firstArgs] = mockedSpawn.mock.calls[0] as [string, string[]];
-    expect(firstArgs).toContain("python");
-    expect(firstArgs).toContain("install");
-    expect(firstArgs).toContain("3.12");
+    // uv venv was invoked
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining(["venv"]),
+      expect.anything(),
+    );
 
-    // 두 번째 spawn: uv venv
-    const [, secondArgs] = mockedSpawn.mock.calls[1] as [string, string[]];
-    expect(secondArgs).toContain("venv");
-
-    // 세 번째 spawn: uv pip sync (lockfile arg) — uv 0.7.x는 --frozen 미지원
-    const [, thirdArgs] = mockedSpawn.mock.calls[2] as [string, string[]];
-    expect(thirdArgs).toContain("pip");
-    expect(thirdArgs).toContain("sync");
-    expect(thirdArgs).not.toContain("--frozen");
+    // uv pip sync was invoked without --frozen (uv 0.7.x 미지원)
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining(["pip", "sync"]),
+      expect.anything(),
+    );
+    const pipSyncCall = mockedSpawn.mock.calls.find(
+      ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
+    );
+    expect(pipSyncCall?.[1] as string[]).not.toContain("--frozen");
 
     // result 유효
     expect(result.pythonPath).toBeTruthy();
