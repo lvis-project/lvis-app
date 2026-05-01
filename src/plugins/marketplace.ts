@@ -1056,6 +1056,17 @@ export class PluginMarketplaceService {
       );
     }
 
+    // Validate version up front — same throw message as the receipt-write
+    // step, but BEFORE any filesystem mutation (cp / rename / registry
+    // update) so a malformed manifest does not leave a half-installed
+    // plugin dir + registry entry behind requiring manual cleanup.
+    if (typeof manifest.version !== "string" || !manifest.version) {
+      throw new Error(
+        `[installLocal] plugin.json must declare a non-empty 'version' string: ${pluginId}`,
+      );
+    }
+    const manifestVersion = manifest.version;
+
     return this.withPluginLock(pluginId, async () => {
       const userPluginsRoot = this.pluginsRoot;
       const installDir = resolve(userPluginsRoot, pluginId);
@@ -1149,12 +1160,6 @@ export class PluginMarketplaceService {
       // because there is no signed artifact to validate against; replacing
       // the sentinel with a first-class `installSource` field is a
       // schema-v2 follow-up.
-      if (typeof manifest.version !== "string" || !manifest.version) {
-        throw new Error(
-          `[installLocal] plugin.json must declare a non-empty 'version' string: ${pluginId}`,
-        );
-      }
-      const manifestVersion = manifest.version;
       const receiptFiles: string[] = ["plugin.json"];
       try {
         const distFiles = await listFilesRecursive(resolve(installDir, "dist"));
@@ -1164,7 +1169,10 @@ export class PluginMarketplaceService {
         // covers plugin.json only and load will fail later with a clearer
         // entry-import error). Permission / IO errors must surface so a
         // partially-hashed receipt does not silently pass `verifyInstallReceipt`.
-        const code = (err as NodeJS.ErrnoException).code;
+        const code =
+          err && typeof err === "object" && "code" in err
+            ? (err as { code?: unknown }).code
+            : undefined;
         if (code !== "ENOENT") throw err;
       }
       await this.artifactStore.writeInstallReceipt(pluginId, {

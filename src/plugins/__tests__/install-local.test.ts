@@ -113,7 +113,7 @@ describe("PluginMarketplaceService.installLocal", () => {
     ).toBe(true);
   });
 
-  it("rejects manifests that lack a string version field", async () => {
+  it("rejects manifests that lack a string version field — and leaves no partial install dir / registry entry", async () => {
     await writeFile(
       join(sourceDir, "plugin.json"),
       JSON.stringify({
@@ -128,6 +128,12 @@ describe("PluginMarketplaceService.installLocal", () => {
 
     const service = makeService();
     await expect(service.installLocal(sourceDir)).rejects.toThrow(/non-empty 'version' string/);
+
+    // The throw fires before any filesystem mutation, so the install
+    // dir must NOT exist and the registry must remain empty.
+    expect(existsSync(join(pluginsDir, "test-plugin"))).toBe(false);
+    const reg = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(reg.plugins).toHaveLength(0);
   });
 
   it("clears stale _devLinked flag when updating an existing entry", async () => {
