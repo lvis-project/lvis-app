@@ -60,7 +60,7 @@ describe("PluginAuthSection", () => {
     expect(screen.queryByTestId("plugin-auth-login-ms-graph")).toBeNull();
   });
 
-  it("hides 로그아웃 button when manifest does not declare logoutTool", () => {
+  it("hides 로그아웃 button + shows hint when manifest does not declare logoutTool", () => {
     render(
       <PluginAuthSection
         api={makeApi()}
@@ -73,6 +73,7 @@ describe("PluginAuthSection", () => {
     );
     expect(screen.getByText("✓ 인증됨")).toBeInTheDocument();
     expect(screen.queryByTestId("plugin-auth-logout-lge-api")).toBeNull();
+    expect(screen.getByTestId("plugin-auth-logout-hint-lge-api")).toBeInTheDocument();
   });
 
   it("invokes loginTool + onRefresh when 로그인 clicked", async () => {
@@ -142,5 +143,36 @@ describe("PluginAuthSection", () => {
     );
     expect(screen.getByText("⚠ 오류")).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
+  });
+
+  it("renders generic Korean error copy on login rejection (does not leak raw IPC message)", async () => {
+    const api = {
+      callPluginMethod: vi.fn(async () => {
+        throw new Error("Method 'msgraph_auth' is not UI-callable for plugin 'ms-graph'");
+      }),
+      onPluginEvent: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+    // Silence the console.error the component emits for triage logging.
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      render(
+        <PluginAuthSection
+          api={api}
+          pluginId="ms-graph"
+          pluginName="ms-graph"
+          auth={baseAuth}
+          state={{ kind: "unauthed" }}
+          onRefresh={() => undefined}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("plugin-auth-login-ms-graph"));
+      await waitFor(() => {
+        expect(screen.getByText(/로그인에 실패했습니다/)).toBeInTheDocument();
+      });
+      // Raw IPC message must NOT appear in the rendered UI.
+      expect(screen.queryByText(/UI-callable/)).toBeNull();
+    } finally {
+      consoleSpy.mockRestore();
+    }
   });
 });

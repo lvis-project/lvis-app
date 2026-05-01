@@ -36,12 +36,16 @@ export function PluginAuthSection({
     try {
       await api.callPluginMethod(auth.loginTool);
     } catch (err) {
-      setLocalError((err as Error).message ?? "login failed");
+      // Generic user-facing copy + log raw error to the console for support
+      // triage. Avoids leaking IPC reject internals (e.g.
+      // "Method 'x' is not UI-callable for plugin 'y'") into the badge UI.
+      console.error(`[plugin-auth] ${pluginId} loginTool ${auth.loginTool} failed`, err);
+      setLocalError("로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setWorking(false);
       onRefresh();
     }
-  }, [api, auth.loginTool, onRefresh]);
+  }, [api, auth.loginTool, onRefresh, pluginId]);
 
   const handleLogout = useCallback(async () => {
     if (!auth.logoutTool) return;
@@ -50,12 +54,13 @@ export function PluginAuthSection({
     try {
       await api.callPluginMethod(auth.logoutTool);
     } catch (err) {
-      setLocalError((err as Error).message ?? "logout failed");
+      console.error(`[plugin-auth] ${pluginId} logoutTool ${auth.logoutTool} failed`, err);
+      setLocalError("로그아웃에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setWorking(false);
       onRefresh();
     }
-  }, [api, auth.logoutTool, onRefresh]);
+  }, [api, auth.logoutTool, onRefresh, pluginId]);
 
   const label = auth.label?.trim() || pluginName;
 
@@ -91,7 +96,14 @@ export function PluginAuthSection({
               >
                 {working ? "처리 중…" : "로그아웃"}
               </Button>
-            ) : null
+            ) : (
+              <span
+                className="text-[10px] text-muted-foreground"
+                data-testid={`plugin-auth-logout-hint-${pluginId}`}
+              >
+                로그아웃은 플러그인 화면에서
+              </span>
+            )
           ) : state.kind === "loading" ? (
             <span className="text-[10px] text-muted-foreground">확인 중…</span>
           ) : (

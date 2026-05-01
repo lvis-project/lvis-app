@@ -138,4 +138,27 @@ describe("manifest validation — auth cross-field", () => {
     const validator = await buildManifestValidator(import.meta.url);
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(/schema validation/i);
   });
+
+  // Defense-in-depth — security review MED #1.
+  // The cross-field validator only enforces `auth.{statusTool,loginTool,
+  // logoutTool} ⊂ uiCallable[]`, which means a manifest could route an
+  // arbitrary uiCallable name (including a destructive one) through the
+  // host-rendered "로그인" button. Today the broader `uiCallable` allow-
+  // list itself does not block destructive verbs (per §2.2 — naming is
+  // plugin-author responsibility, host has no name-based gate). These
+  // tests pin the *current* posture so any future tightening of the
+  // host's destructive-name rule is also surfaced through the auth slot.
+  it("does not currently reject destructive-looking tool names in auth (host posture is plugin-author responsibility per §2.2)", async () => {
+    await writeManifest({
+      tools: ["test_status", "test_email_delete"],
+      uiCallable: ["test_status", "test_email_delete"],
+      auth: {
+        statusTool: "test_status",
+        loginTool: "test_email_delete",
+      },
+    });
+    const validator = await buildManifestValidator(import.meta.url);
+    const parsed = await parsePluginJson(manifestPath, validator);
+    expect(parsed.auth?.loginTool).toBe("test_email_delete");
+  });
 });

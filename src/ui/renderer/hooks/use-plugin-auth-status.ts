@@ -83,12 +83,16 @@ export function usePluginAuthStatuses(
             return next;
           });
         } catch (err) {
+          // `throw null` is legal — `(err as Error).message` would crash. Narrow first.
+          const message =
+            err instanceof Error
+              ? err.message
+              : typeof err === "string"
+                ? err
+                : "auth status invocation failed";
           setStatuses((prev) => {
             const next = new Map(prev);
-            next.set(pluginId, {
-              kind: "error",
-              message: (err as Error).message ?? "auth status invocation failed",
-            });
+            next.set(pluginId, { kind: "error", message });
             return next;
           });
         }

@@ -85,6 +85,33 @@ describe("usePluginAuthStatuses", () => {
     });
   });
 
+  it("survives non-Error throws (null / string) without crashing the catch handler", async () => {
+    let callCount = 0;
+    const api = {
+      callPluginMethod: vi.fn(async () => {
+        callCount += 1;
+        // Two pathological throws that would crash `(err as Error).message`.
+        if (callCount === 1) throw null;
+        throw "raw string";
+      }),
+      onPluginEvent: vi.fn(() => () => undefined),
+    } as unknown as LvisApi;
+    const { result } = renderHook(() =>
+      usePluginAuthStatuses(api, [makePlugin("ms-graph", true)]),
+    );
+    await waitFor(() => {
+      expect(result.current.statuses.get("ms-graph")?.kind).toBe("error");
+    });
+    const first = result.current.statuses.get("ms-graph");
+    if (first?.kind === "error") expect(first.message).toContain("auth status");
+
+    act(() => result.current.refresh("ms-graph"));
+    await waitFor(() => {
+      const s = result.current.statuses.get("ms-graph");
+      if (s?.kind === "error") expect(s.message).toBe("raw string");
+    });
+  });
+
   it("subscribes to <pluginId>.auth.changed and re-invokes statusTool on emit", async () => {
     let onAuthChanged: ((data: unknown) => void) | undefined;
     const callPluginMethod = vi

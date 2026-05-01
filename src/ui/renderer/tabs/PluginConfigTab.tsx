@@ -43,9 +43,13 @@ export function PluginConfigTab() {
   // Test environments do not always inject `window.lvisApi`; fall back to
   // `null` so unrelated PluginConfigTab tests don't crash before they
   // exercise their own code paths. The hook short-circuits when api is null.
-  const apiForAuthHook = (() => {
+  // useMemo([]) — `window.lvisApi` is set once at preload boot and never
+  // reassigned at runtime; recomputing on every render would force the
+  // hook's `refresh` callback to re-bind, tearing down + re-subscribing
+  // every `<pluginId>.auth.changed` listener on each parent render.
+  const apiForAuthHook = useMemo(() => {
     try { return getApi(); } catch { return null; }
-  })();
+  }, []);
   const { statuses: authStatuses, refresh: refreshAuthStatus } = usePluginAuthStatuses(
     apiForAuthHook,
     plugins,
