@@ -15,6 +15,7 @@ import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import { PluginArtifactStore } from "./plugin-artifact-store.js";
 import { listFilesRecursive } from "./plugin-install-receipt.js";
+import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("marketplace");
@@ -948,7 +949,7 @@ export class PluginMarketplaceService {
       // not in zip
     }
     if (!zipHasManifest) {
-      const safeVersion = /^\d+\.\d+\.\d+/.test(version) ? version : "0.0.0";
+      const safeVersion = STABLE_SEMVER_RE.test(version) ? version : "0.0.0";
       const manifest = this.buildInstalledManifest(plugin, {
         version: safeVersion,
         entry: "./dist/hostPlugin.js",
@@ -1027,7 +1028,7 @@ export class PluginMarketplaceService {
         );
       }
 
-      if (/^\d+\.\d+\.\d+/.test(version) && manifest.version !== version) {
+      if (STABLE_SEMVER_RE.test(version) && manifest.version !== version) {
         throw new Error(
           `plugin "${plugin.id}" artifact manifest version mismatch: expected "${version}", got "${String(manifest.version ?? "")}"`,
         );
