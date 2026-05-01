@@ -549,7 +549,14 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       service as unknown as {
         rollbackInstallOperation: (state: {
           installedPluginIds: string[];
-          touchedEntries: Map<string, { enabled?: boolean; bundleRefs?: string[]; installedBy?: "admin" | "user" }>;
+          touchedEntries: Map<string, {
+            enabled?: boolean;
+            bundleRefs?: string[];
+            installedBy?: "admin" | "user";
+            approvedPluginAccess?: unknown;
+            _devLinked?: boolean;
+            installSource?: "admin" | "user" | "local-dev" | "dev-link";
+          }>;
         }) => Promise<void>;
       }
     ).rollbackInstallOperation({
@@ -561,6 +568,9 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             enabled: false,
             bundleRefs: undefined,
             installedBy: "user",
+            installSource: "user" as const,
+            _devLinked: undefined,
+            approvedPluginAccess: undefined,
           },
         ],
       ]),
@@ -575,6 +585,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         manifestPath: "installed/calendar/plugin.json",
         enabled: false,
         installedBy: "user",
+        installSource: "user",
       },
     ]);
   });

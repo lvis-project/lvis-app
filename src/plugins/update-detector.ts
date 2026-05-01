@@ -74,7 +74,7 @@ export class PluginUpdateDetector {
         // escapes allowed roots" warning fired on every poll. Catalog
         // comparison is meaningless for dev-linked entries anyway: the
         // source repo is the authoritative manifest, not the catalog.
-        if (entry._devLinked) continue;
+        if (entry.installSource === "dev-link" || entry._devLinked) continue;
 
         const installedVersion = await this.readInstalledVersion(entry.manifestPath);
         if (!installedVersion) continue;
