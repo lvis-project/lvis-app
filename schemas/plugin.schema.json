@@ -219,6 +219,16 @@
       "additionalProperties": false
     },
     "publisher": { "type": "string" },
+    "python": {
+      "type": "object",
+      "description": "Optional Python runtime co-deployment metadata. Host installs declared requirements when managedBy is lvis-app.",
+      "additionalProperties": false,
+      "properties": {
+        "managedBy": { "type": "string", "enum": ["lvis-app", "self"] },
+        "requirementsLock": { "type": "string", "minLength": 1 },
+        "interpreter": { "type": "string" }
+      }
+    },
     "toolSchemas": {
       "type": "object",
       "description": "LLM이 메서드를 호출할 때 사용하는 JSON Schema (draft-07). 키: method 이름, 값: { description, inputSchema }",
