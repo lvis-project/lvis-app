@@ -2,11 +2,23 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://sdk.lvisai.xyz/schemas/plugin.schema.json",
   "title": "LVIS Plugin Manifest",
-  "description": "Validates plugin.json manifest files for LVIS plugins (§9)",
+  "description": "Validates plugin.json manifest files for LVIS plugins (\u00a79)",
   "type": "object",
-  "required": ["id", "name", "version", "entry", "tools", "description"],
+  "required": [
+    "id",
+    "name",
+    "version",
+    "entry",
+    "tools",
+    "description"
+  ],
   "additionalProperties": false,
   "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "JSON Schema URL identifying the manifest schema version this plugin targets."
+    },
     "id": {
       "type": "string",
       "description": "Plugin unique identifier (dot-format recommended)",
@@ -14,7 +26,10 @@
       "minLength": 3,
       "maxLength": 128
     },
-    "name": { "type": "string", "minLength": 1 },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
     "description": {
       "type": "string",
       "minLength": 1,
@@ -26,7 +41,10 @@
       "pattern": "^\\d+\\.\\d+\\.\\d+(-[\\w.]+)?(\\+[\\w.]+)?$",
       "description": "Anchored semver (MAJOR.MINOR.PATCH with optional -prerelease / +build metadata)"
     },
-    "entry": { "type": "string", "minLength": 1 },
+    "entry": {
+      "type": "string",
+      "minLength": 1
+    },
     "tools": {
       "type": "array",
       "items": {
@@ -34,69 +52,138 @@
         "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
         "maxLength": 64
       },
-      "description": "Tool name list — underscore format required"
+      "description": "Tool name list \u2014 underscore format required"
     },
-    "config": { "type": "object" },
+    "config": {
+      "type": "object"
+    },
     "ui": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "slot", "kind", "title"],
+        "required": [
+          "id",
+          "slot",
+          "kind",
+          "title"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "slot": { "enum": ["sidebar"] },
-          "kind": { "enum": ["embedded-module", "embedded-page", "info-card"] },
-          "displayName": { "type": "string" },
-          "title": { "type": "string" },
-          "description": { "type": "string" },
-          "defaults": { "type": "object" },
-          "entry": { "type": "string" },
-          "exportName": { "type": "string" },
-          "page": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
+          "slot": {
+            "enum": [
+              "sidebar"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "embedded-module",
+              "embedded-page",
+              "info-card"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "defaults": {
+            "type": "object"
+          },
+          "entry": {
+            "type": "string"
+          },
+          "exportName": {
+            "type": "string"
+          },
+          "page": {
+            "type": "string"
+          },
           "window": {
             "type": "object",
             "description": "Optional detachable-window defaults for this UI extension. When present the host creates a detached BrowserWindow for this view using these dimensions / snap hints.",
             "additionalProperties": false,
             "properties": {
-              "width": { "type": "integer", "minimum": 120, "maximum": 3840, "description": "Initial window width in DIP pixels" },
-              "height": { "type": "integer", "minimum": 80, "maximum": 2160, "description": "Initial window height in DIP pixels" },
-              "minWidth": { "type": "integer", "minimum": 80 },
-              "minHeight": { "type": "integer", "minimum": 60 },
-              "resizable": { "type": "boolean" },
-              "alwaysOnTop": { "type": "boolean" },
-              "defaultMode": { "type": "string", "enum": ["embedded", "detached"], "description": "Default window placement mode for the UI extension. 'embedded' renders inside main window; 'detached' opens in floating magnetic-snap window." }
+              "width": {
+                "type": "integer",
+                "minimum": 120,
+                "maximum": 3840,
+                "description": "Initial window width in DIP pixels"
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 80,
+                "maximum": 2160,
+                "description": "Initial window height in DIP pixels"
+              },
+              "minWidth": {
+                "type": "integer",
+                "minimum": 80
+              },
+              "minHeight": {
+                "type": "integer",
+                "minimum": 60
+              },
+              "resizable": {
+                "type": "boolean"
+              },
+              "alwaysOnTop": {
+                "type": "boolean"
+              },
+              "defaultMode": {
+                "type": "string",
+                "enum": [
+                  "embedded",
+                  "detached"
+                ],
+                "description": "Default window placement mode for the UI extension. 'embedded' renders inside main window; 'detached' opens in floating magnetic-snap window."
+              }
             }
           }
         }
       },
-      "description": "UI extensions. Kind-specific required fields (embedded-module: entry+exportName; embedded-page: page) are enforced at runtime with soft-fallback — invalid entries are dropped with a console warning, the plugin continues to load."
+      "description": "UI extensions. Kind-specific required fields (embedded-module: entry+exportName; embedded-page: page) are enforced at runtime with soft-fallback \u2014 invalid entries are dropped with a console warning, the plugin continues to load."
     },
     "keywords": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["keyword", "skillId"],
+        "required": [
+          "keyword",
+          "skillId"
+        ],
         "additionalProperties": false,
         "properties": {
-          "keyword": { "type": "string", "minLength": 1 },
-          "skillId": { "type": "string", "minLength": 1 }
+          "keyword": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skillId": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
     "capabilities": {
       "type": "array",
-      "description": "Closed vocabulary — see src/plugins/capabilities.ts (KNOWN_CAPABILITIES). Unknown values fail validation so typos don't silently grant nothing.",
+      "description": "Closed vocabulary \u2014 see src/plugins/capabilities.ts (KNOWN_CAPABILITIES). Unknown values fail validation so typos don't silently grant nothing.",
       "items": {
         "type": "string",
         "enum": [
           "ms-graph-consumer",
           "external-auth-consumer",
-           "mail-source",
-           "calendar-source",
-           "routine-provider",
-           "meeting-recorder",
-           "knowledge-index",
-           "background-watcher",
+          "mail-source",
+          "calendar-source",
+          "routine-provider",
+          "meeting-recorder",
+          "knowledge-index",
+          "background-watcher",
           "worker-client",
           "document-indexer",
           "conversation-trigger"
@@ -105,27 +192,61 @@
     },
     "startupTools": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "eventSubscriptions": {
       "type": "array",
       "items": {
         "oneOf": [
-          { "type": "string" },
+          {
+            "type": "string"
+          },
           {
             "type": "object",
-            "required": ["type"],
+            "required": [
+              "type"
+            ],
             "additionalProperties": false,
             "properties": {
-              "type": { "type": "string", "minLength": 1 },
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
               "hint": {
                 "type": "object",
-                "required": ["category", "priority", "title"],
+                "required": [
+                  "category",
+                  "priority",
+                  "title"
+                ],
                 "additionalProperties": false,
                 "properties": {
-                  "category": { "type": "string", "enum": ["task", "note", "session", "meeting", "email", "calendar", "system"] },
-                  "priority": { "type": "string", "enum": ["high", "medium", "low"] },
-                  "title": { "type": "string", "minLength": 1 }
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "task",
+                      "note",
+                      "session",
+                      "meeting",
+                      "email",
+                      "calendar",
+                      "system"
+                    ]
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "high",
+                      "medium",
+                      "low"
+                    ]
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               }
             }
@@ -136,7 +257,10 @@
     "emittedEvents": {
       "type": "array",
       "description": "Event types this plugin emits.",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "startupTimeoutMs": {
       "type": "integer",
@@ -157,30 +281,57 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["event"],
+        "required": [
+          "event"
+        ],
         "additionalProperties": false,
         "properties": {
-          "event": { "type": "string", "minLength": 1 },
-          "titleField": { "type": "string" },
-          "bodyField": { "type": "string" }
+          "event": {
+            "type": "string",
+            "minLength": 1
+          },
+          "titleField": {
+            "type": "string"
+          },
+          "bodyField": {
+            "type": "string"
+          }
         }
       }
     },
-    "installPolicy": { "enum": ["admin", "user"] },
+    "installPolicy": {
+      "enum": [
+        "admin",
+        "user"
+      ]
+    },
     "dependencies": {
       "type": "array",
       "description": "Plugin dependencies that should be installed or considered with this plugin. This is not a delivery mode.",
       "items": {
         "oneOf": [
-          { "type": "string", "minLength": 1 },
+          {
+            "type": "string",
+            "minLength": 1
+          },
           {
             "type": "object",
-            "required": ["pluginId"],
+            "required": [
+              "pluginId"
+            ],
             "additionalProperties": false,
             "properties": {
-              "pluginId": { "type": "string", "minLength": 1 },
-              "versionRange": { "type": "string", "minLength": 1 },
-              "required": { "type": "boolean" }
+              "pluginId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "versionRange": {
+                "type": "string",
+                "minLength": 1
+              },
+              "required": {
+                "type": "boolean"
+              }
             }
           }
         ]
@@ -188,25 +339,38 @@
     },
     "pluginAccess": {
       "type": "object",
-      "required": ["plugins"],
+      "required": [
+        "plugins"
+      ],
       "additionalProperties": false,
       "properties": {
         "plugins": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["pluginId"],
+            "required": [
+              "pluginId"
+            ],
             "additionalProperties": false,
             "properties": {
-              "pluginId": { "type": "string", "minLength": 1 },
+              "pluginId": {
+                "type": "string",
+                "minLength": 1
+              },
               "tools": {
                 "type": "array",
-                "items": { "type": "string", "minLength": 1 },
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "uniqueItems": true
               },
               "events": {
                 "type": "array",
-                "items": { "type": "string", "minLength": 1 },
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "uniqueItems": true
               }
             }
@@ -220,12 +384,17 @@
       "properties": {
         "capabilities": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
     },
-    "publisher": { "type": "string", "minLength": 1 },
+    "publisher": {
+      "type": "string",
+      "minLength": 1
+    },
     "packageName": {
       "type": "string",
       "minLength": 1,
@@ -236,34 +405,64 @@
       "description": "Optional Python runtime co-deployment metadata. Host installs declared requirements when managedBy is lvis-app.",
       "additionalProperties": false,
       "properties": {
-        "managedBy": { "type": "string", "enum": ["lvis-app", "self"] },
-        "requirementsLock": { "type": "string", "minLength": 1 },
-        "interpreter": { "type": "string" }
+        "managedBy": {
+          "type": "string",
+          "enum": [
+            "lvis-app",
+            "self"
+          ]
+        },
+        "requirementsLock": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interpreter": {
+          "type": "string"
+        }
       }
     },
     "toolSchemas": {
       "type": "object",
-      "description": "LLM이 메서드를 호출할 때 사용하는 JSON Schema (draft-07). 키: method 이름, 값: { description, inputSchema }",
+      "description": "LLM\uc774 \uba54\uc11c\ub4dc\ub97c \ud638\ucd9c\ud560 \ub54c \uc0ac\uc6a9\ud558\ub294 JSON Schema (draft-07). \ud0a4: method \uc774\ub984, \uac12: { description, inputSchema }",
       "additionalProperties": {
         "type": "object",
-        "required": ["description", "inputSchema"],
+        "required": [
+          "description",
+          "inputSchema"
+        ],
         "additionalProperties": false,
         "properties": {
           "description": {
             "type": "string",
             "minLength": 10,
-            "description": "LLM이 이해할 메서드 설명 (when/what/returns)"
+            "description": "LLM\uc774 \uc774\ud574\ud560 \uba54\uc11c\ub4dc \uc124\uba85 (when/what/returns)"
           },
           "inputSchema": {
             "type": "object",
-            "required": ["type", "properties"],
-            "description": "JSON Schema draft-07 입력 스키마",
+            "required": [
+              "type",
+              "properties"
+            ],
+            "description": "JSON Schema draft-07 \uc785\ub825 \uc2a4\ud0a4\ub9c8",
             "properties": {
-              "$schema": { "type": "string" },
-              "type": { "const": "object" },
-              "properties": { "type": "object" },
-              "required": { "type": "array", "items": { "type": "string" } },
-              "additionalProperties": { "type": "boolean" }
+              "$schema": {
+                "type": "string"
+              },
+              "type": {
+                "const": "object"
+              },
+              "properties": {
+                "type": "object"
+              },
+              "required": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": {
+                "type": "boolean"
+              }
             }
           }
         }
@@ -271,36 +470,89 @@
     },
     "configSchema": {
       "type": "object",
-      "description": "§9.2 Track B — declarative settings schema. JSON Schema draft-07 subset rendered as a typed form in PluginConfigTab. format:'secret' routes the value through the encrypted keychain instead of cleartext pluginConfigs.",
-      "required": ["properties"],
+      "description": "\u00a79.2 Track B \u2014 declarative settings schema. JSON Schema draft-07 subset rendered as a typed form in PluginConfigTab. format:'secret' routes the value through the encrypted keychain instead of cleartext pluginConfigs.",
+      "required": [
+        "properties"
+      ],
       "additionalProperties": false,
       "properties": {
-        "$schema": { "type": "string" },
+        "$schema": {
+          "type": "string"
+        },
         "properties": {
           "type": "object",
           "additionalProperties": {
             "type": "object",
-            "required": ["type"],
+            "required": [
+              "type"
+            ],
             "additionalProperties": false,
             "properties": {
-              "type": { "type": "string", "enum": ["string", "number", "integer", "boolean", "array"] },
-              "title": { "type": "string" },
-              "description": { "type": "string" },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string",
+                  "number",
+                  "integer",
+                  "boolean",
+                  "array"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
               "default": {},
-              "enum": { "type": "array" },
-              "minimum": { "type": "number" },
-              "maximum": { "type": "number" },
-              "minLength": { "type": "integer", "minimum": 0 },
-              "maxLength": { "type": "integer", "minimum": 0 },
-              "pattern": { "type": "string" },
-              "format": { "type": "string", "enum": ["secret", "uri", "email", "date-time"] },
+              "enum": {
+                "type": "array"
+              },
+              "minimum": {
+                "type": "number"
+              },
+              "maximum": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxLength": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pattern": {
+                "type": "string"
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "secret",
+                  "uri",
+                  "email",
+                  "date-time"
+                ]
+              },
               "items": {
                 "type": "object",
-                "required": ["type"],
+                "required": [
+                  "type"
+                ],
                 "additionalProperties": false,
                 "properties": {
-                  "type": { "type": "string", "enum": ["string", "number", "integer", "boolean"] },
-                  "enum": { "type": "array" }
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "string",
+                      "number",
+                      "integer",
+                      "boolean"
+                    ]
+                  },
+                  "enum": {
+                    "type": "array"
+                  }
                 }
               }
             }
@@ -308,16 +560,27 @@
         },
         "required": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "uniqueItems": true
         },
         "customPanel": {
           "type": "object",
-          "required": ["entry", "exportName"],
+          "required": [
+            "entry",
+            "exportName"
+          ],
           "additionalProperties": false,
           "properties": {
-            "entry": { "type": "string", "minLength": 1 },
-            "exportName": { "type": "string", "minLength": 1 }
+            "entry": {
+              "type": "string",
+              "minLength": 1
+            },
+            "exportName": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }
