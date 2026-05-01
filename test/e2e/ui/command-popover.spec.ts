@@ -76,9 +76,15 @@ test('command popover: list has max-h constraint and is scrollable with 16+ item
   expect(cls).toContain('max-h-');
 
   // Verify that all items are present (actions + slash commands) and the list
-  // is scroll-constrained: scrollHeight >= clientHeight when content overflows.
-  const scrollable = await list.evaluate((el) => el.scrollHeight >= el.clientHeight);
-  expect(scrollable).toBe(true);
+  // is scroll-constrained: scrollHeight > clientHeight when content overflows,
+  // and that scrollTop can actually advance (real scroll capability).
+  const overflows = await list.evaluate((el) => el.scrollHeight > el.clientHeight);
+  expect(overflows).toBe(true);
+  const canScroll = await list.evaluate((el) => {
+    el.scrollTop = 100;
+    return el.scrollTop > 0;
+  });
+  expect(canScroll).toBe(true);
 });
 
 test('command popover: slash command click inserts text and closes popover', async ({ mainWindow }) => {

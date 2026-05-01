@@ -226,10 +226,13 @@ export function buildQuickActions({
     { id: "routines",  label: "루틴 보기",     run: () => setActiveView("routines") },
     { id: "settings",  label: "설정 열기",     run: () => setSettingsOpen(true) },
     { id: "new-chat",  label: "새 대화 시작",  run: handleNewChat },
-    ...pluginViews.map((i) => ({
-      id: `v:${toViewKey(i)}`,
-      label: `${getPluginViewLabel(i)} 열기`,
-      run: () => setActiveView(toViewKey(i)),
-    })),
+    ...pluginViews.map((i) => {
+      const viewKey = toViewKey(i);
+      return {
+        id: `v:${viewKey}`,
+        label: `${getPluginViewLabel(i)} 열기`,
+        run: () => setActiveView(viewKey),
+      };
+    }),
   ];
 }
