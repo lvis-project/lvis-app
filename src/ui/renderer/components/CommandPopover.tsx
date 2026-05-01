@@ -17,7 +17,7 @@ import type { PluginUiExtension } from "../types.js";
 export interface QuickAction {
   id: string;
   label: string;
-  run: () => void;
+  run: () => void | Promise<void>;
 }
 
 const SLASH_COMMANDS: { cmd: string; label: string }[] = [
@@ -92,8 +92,9 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
 
   const handleSelectAction = useCallback(
     (action: QuickAction) => {
+      if (composingRef.current) return;
       handleOpenChange(false);
-      action.run();
+      void action.run();
     },
     [handleOpenChange],
   );
@@ -146,7 +147,7 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
         onKeyDown={handleKeyDown}
         onKeyDownCapture={handleKeyDownCapture}
         // Prevent Radix from auto-closing on interaction inside
-        onInteractOutside={() => handleOpenChange(false)}
+        onInteractOutside={() => { setQuery(""); }}
       >
         <Command
           // Disable cmdk's built-in filtering — we filter manually to control group visibility
@@ -221,7 +222,7 @@ export function buildQuickActions({
 }: {
   setActiveView: (key: string) => void;
   setSettingsOpen: (open: boolean) => void;
-  handleNewChat: () => void;
+  handleNewChat: () => void | Promise<void>;
   pluginViews: PluginUiExtension[];
 }): QuickAction[] {
   return [

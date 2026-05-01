@@ -436,7 +436,7 @@ export function App() {
       buildQuickActions({
         setActiveView,
         setSettingsOpen,
-        handleNewChat: () => void handleNewChat(),
+        handleNewChat,
         pluginViews,
       }),
     [pluginViews, handleNewChat],

@@ -17,13 +17,15 @@ test('command popover: Cmd/Ctrl+K opens and closes the popover', async ({ mainWi
     .catch(() => false);
   test.skip(!found, 'CommandPopover trigger not found — skipping E2E.');
 
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+
   // Open via Cmd/Ctrl+K
-  await mainWindow.keyboard.press('Meta+k');
+  await mainWindow.keyboard.press(`${mod}+k`);
   const popover = mainWindow.locator('[data-testid="command-popover"]');
   await expect(popover).toBeVisible({ timeout: 5_000 });
 
   // Close via Cmd/Ctrl+K again (toggle)
-  await mainWindow.keyboard.press('Meta+k');
+  await mainWindow.keyboard.press(`${mod}+k`);
   await expect(popover).not.toBeVisible({ timeout: 5_000 });
 });
 
