@@ -13,6 +13,7 @@ import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./off
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import { PluginArtifactStore } from "./plugin-artifact-store.js";
+import { listFilesRecursive } from "./plugin-install-receipt.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
@@ -1075,7 +1076,26 @@ export class PluginMarketplaceService {
       const stagingDir = resolve(userPluginsRoot, `${pluginId}.tmp-${process.pid}-${Date.now()}`);
       await rm(stagingDir, { recursive: true, force: true });
       try {
-        await cp(sourcePath, stagingDir, { recursive: true });
+        // Filter: skip dev-only / heavy / asar-bearing trees. Without this
+        // filter, copying a source repo whose `node_modules/` includes the
+        // `electron` package fails because Electron's patched fs intercepts
+        // `default_app.asar` and surfaces "Invalid package" mid-copy. `.git`
+        // is excluded for size + privacy. `node_modules/electron` and
+        // `node_modules/@electron/*` are the only practical asar offenders.
+        await cp(sourcePath, stagingDir, {
+          recursive: true,
+          filter: (src) => {
+            const rel = relative(sourcePath, src);
+            if (!rel) return true;
+            const parts = rel.split(/[\\/]/);
+            if (parts[0] === ".git") return false;
+            if (parts[0] === "node_modules") {
+              if (parts[1] === "electron") return false;
+              if (parts[1] === "@electron") return false;
+            }
+            return true;
+          },
+        });
         await rm(installDir, { recursive: true, force: true });
         await rename(stagingDir, installDir);
       } catch (err) {
@@ -1094,6 +1114,11 @@ export class PluginMarketplaceService {
           existing.manifestPath = registryManifestPath;
           existing.enabled = true;
           existing.installedBy = installedBy;
+          // This entry is now a real user install. Strip any stale
+          // `_devLinked` marker so the next `dev-link-plugins.mjs` boot pass
+          // — which drops every `_devLinked` entry before re-registering —
+          // does not clobber it.
+          delete existing._devLinked;
         } else {
           registry.plugins.push({
             id: pluginId,
@@ -1102,6 +1127,33 @@ export class PluginMarketplaceService {
             installedBy,
           });
         }
+      });
+
+      // Write an install receipt so the plugin runtime's integrity gate
+      // (snapshots.ts → verifyInstallReceipt) accepts the entry. Without a
+      // fresh receipt, load is rejected with either "install receipt
+      // missing or unreadable" (no prior install) or "receipt hash
+      // mismatch" (stale receipt from a prior marketplace install). The
+      // receipt covers `plugin.json` + every file under `dist/` — matching
+      // what `installArtifact` records for marketplace installs.
+      // signerKeyId / artifactSha256 use a `dev:local-install` sentinel
+      // because there is no signed artifact to validate against.
+      const manifestVersion =
+        typeof manifest.version === "string" ? manifest.version : "0.0.0";
+      const receiptFiles: string[] = ["plugin.json"];
+      try {
+        const distFiles = await listFilesRecursive(resolve(installDir, "dist"));
+        for (const f of distFiles) receiptFiles.push(`dist/${f}`);
+      } catch {
+        // No dist/ — receipt covers plugin.json only. Plugin load will
+        // likely still fail (no entry to import), but that is the
+        // plugin's responsibility, not the installer's.
+      }
+      await this.artifactStore.writeInstallReceipt(pluginId, {
+        version: manifestVersion,
+        artifactSha256: "dev:local-install",
+        signerKeyId: "dev:local-install",
+        files: receiptFiles,
       });
 
       return { pluginId, installed: true as const };

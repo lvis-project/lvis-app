@@ -1,0 +1,176 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
+import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
+import { makeTestPluginPaths } from "./test-helpers.js";
+
+describe("PluginMarketplaceService.installLocal", () => {
+  let testDir: string;
+  let pluginsDir: string;
+  let registryPath: string;
+  let cacheRoot: string;
+  let sourceDir: string;
+  let priorEnv: string | undefined;
+
+  beforeEach(async () => {
+    setIsPackaged(false);
+    priorEnv = process.env.LVIS_DEV;
+    process.env.LVIS_DEV = "1";
+
+    testDir = mkdtempSync(join(tmpdir(), "lvis-install-local-"));
+    pluginsDir = join(testDir, "plugins");
+    cacheRoot = join(pluginsDir, ".cache");
+    registryPath = join(pluginsDir, "registry.json");
+    sourceDir = join(testDir, "src-plugin");
+    await mkdir(pluginsDir, { recursive: true });
+    await writeFile(
+      registryPath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+
+    // Source plugin: minimal Phase 1-shaped manifest + a dist/ entry.
+    await mkdir(join(sourceDir, "dist"), { recursive: true });
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify(
+        {
+          id: "test-plugin",
+          name: "Test Plugin",
+          version: "1.2.3",
+          description: "fixture",
+          publisher: "tests",
+          entry: "dist/hostPlugin.js",
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    await writeFile(
+      join(sourceDir, "dist", "hostPlugin.js"),
+      "export default {};\n",
+      "utf-8",
+    );
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+    if (priorEnv === undefined) {
+      delete process.env.LVIS_DEV;
+    } else {
+      process.env.LVIS_DEV = priorEnv;
+    }
+    _resetForTest();
+  });
+
+  function makeService(): PluginMarketplaceService {
+    const paths = makeTestPluginPaths({
+      rootDir: testDir,
+      pluginsRoot: pluginsDir,
+      cacheRoot,
+    });
+    const fetcher = new MockMarketplaceFetcher(join(testDir, "marketplace.json"));
+    return new PluginMarketplaceService(paths, fetcher);
+  }
+
+  it("skips node_modules/electron during cp (asar files would otherwise break install)", async () => {
+    // Mimic the failure repro: source plugin repo with node_modules/electron
+    // containing an .asar archive. Without the filter, Electron's patched
+    // fs intercepts default_app.asar and aborts cp with "Invalid package".
+    const electronDir = join(sourceDir, "node_modules", "electron", "dist", "Electron.app", "Contents", "Resources");
+    await mkdir(electronDir, { recursive: true });
+    await writeFile(join(electronDir, "default_app.asar"), Buffer.from([0, 1, 2, 3]));
+    // Also a sibling dep that SHOULD be copied (plugin runtime needs it).
+    await mkdir(join(sourceDir, "node_modules", "node-ical"), { recursive: true });
+    await writeFile(
+      join(sourceDir, "node_modules", "node-ical", "index.js"),
+      "module.exports = {};\n",
+    );
+
+    const service = makeService();
+    await service.installLocal(sourceDir);
+
+    const installDir = join(pluginsDir, "test-plugin");
+    expect(
+      existsSync(join(installDir, "node_modules", "electron")),
+    ).toBe(false);
+    // Non-electron deps must survive.
+    expect(
+      existsSync(join(installDir, "node_modules", "node-ical", "index.js")),
+    ).toBe(true);
+    // .git is also filtered.
+    await mkdir(join(sourceDir, ".git"), { recursive: true });
+    await writeFile(join(sourceDir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    // (.git was added after install for clarity; the prior install already
+    // stripped the dir so re-running here would re-trigger the filter.)
+  });
+
+  it("clears stale _devLinked flag when updating an existing entry", async () => {
+    // Pre-populate registry as if dev:link had registered the plugin.
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "test-plugin",
+            manifestPath: "test-plugin/plugin.json",
+            enabled: true,
+            installedBy: "user",
+            _devLinked: true,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const service = makeService();
+    await service.installLocal(sourceDir);
+
+    const reg = JSON.parse(await readFile(registryPath, "utf-8"));
+    const entry = reg.plugins.find((p: { id: string }) => p.id === "test-plugin");
+    expect(entry).toBeDefined();
+    expect(entry.installedBy).toBe("user");
+    // The flag must be removed — otherwise dev-link's cleanup pass would
+    // strip this user-installed entry on the next boot.
+    expect(entry._devLinked).toBeUndefined();
+  });
+
+  it("writes a fresh install receipt covering plugin.json + dist files", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+
+    const receiptPath = join(cacheRoot, "test-plugin", "install-receipt.json");
+    expect(existsSync(receiptPath)).toBe(true);
+
+    const receipt = JSON.parse(await readFile(receiptPath, "utf-8"));
+    expect(receipt.schemaVersion).toBe(1);
+    expect(receipt.pluginId).toBe("test-plugin");
+    expect(receipt.version).toBe("1.2.3");
+    expect(receipt.signerKeyId).toBe("dev:local-install");
+    expect(receipt.artifactSha256).toBe("dev:local-install");
+
+    const paths = receipt.files.map((f: { path: string }) => f.path).sort();
+    expect(paths).toContain("plugin.json");
+    expect(paths).toContain("dist/hostPlugin.js");
+    // node_modules paths must NOT be in the receipt — those are runtime
+    // deps, not integrity-tracked artifacts.
+    for (const p of paths) {
+      expect(p.startsWith("node_modules/")).toBe(false);
+    }
+  });
+
+  it("install receipt verifies cleanly against installed files", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir);
+
+    const { verifyInstallReceipt } = await import("../plugin-install-receipt.js");
+    const installDir = join(pluginsDir, "test-plugin");
+    const result = await verifyInstallReceipt(cacheRoot, "test-plugin", installDir);
+    expect(result.ok).toBe(true);
+  });
+});
