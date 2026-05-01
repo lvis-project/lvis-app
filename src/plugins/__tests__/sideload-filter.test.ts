@@ -60,14 +60,22 @@ describe("buildSideloadCopyFilter", () => {
 
 describe("rejectEscapingSymlinks", () => {
   let tmpDir: string;
+  // A sibling directory outside tmpDir used as an escape target.
+  // Created here so a real file exists on disk — realpathSync requires the
+  // target to exist for a non-dangling symlink. Using tmpdir() siblings is
+  // platform-neutral (avoids /etc/passwd which does not exist on Windows).
+  let escapeTarget: string;
 
   beforeEach(async () => {
-    tmpDir = join(tmpdir(), `sideload-test-${process.pid}-${Date.now()}`);
+    const base = join(tmpdir(), `sideload-test-${process.pid}-${Date.now()}`);
+    tmpDir = join(base, "install");
+    escapeTarget = join(base, "outside-file.txt");
     await mkdir(tmpDir, { recursive: true });
+    await writeFile(escapeTarget, "escape");
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(join(tmpDir, ".."), { recursive: true, force: true });
   });
 
   it("passes for a directory with no symlinks", async () => {
@@ -83,35 +91,21 @@ describe("rejectEscapingSymlinks", () => {
   });
 
   it("rejects a symlink whose target escapes installDir", async () => {
-    // Use a within-tmpDir target that doesn't exist to create an escaping symlink
-    // without relying on /etc/passwd (unavailable on Windows).
-    const outsideTarget = join(tmpdir(), "outside-file.txt");
-    await writeFile(outsideTarget, "");
     const escaping = join(tmpDir, "escape.txt");
-    await symlink(outsideTarget, escaping);
-    try {
-      await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("symlink escapes install dir");
-    } finally {
-      await rm(outsideTarget, { force: true });
-    }
+    await symlink(escapeTarget, escaping);
+    await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("symlink escapes install dir");
   });
 
   it("rejects nested symlinks in node_modules escaping installDir", async () => {
-    const outsideTarget = join(tmpdir(), "outside-nm.txt");
-    await writeFile(outsideTarget, "");
     const nmDir = join(tmpDir, "node_modules", "evil-pkg");
     await mkdir(nmDir, { recursive: true });
-    await symlink(outsideTarget, join(nmDir, "index.js"));
-    try {
-      await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("symlink escapes install dir");
-    } finally {
-      await rm(outsideTarget, { force: true });
-    }
+    await symlink(escapeTarget, join(nmDir, "index.js"));
+    await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("symlink escapes install dir");
   });
 
-  it("rejects dangling symlinks (target does not exist)", async () => {
+  it("rejects dangling symlinks (target does not exist — unverifiable at install time)", async () => {
     const dangling = join(tmpDir, "dangling.js");
-    await symlink(join(tmpDir, "nonexistent.js"), dangling);
+    await symlink(join(tmpDir, "nonexistent-target.js"), dangling);
     await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("unresolvable symlink");
   });
 
