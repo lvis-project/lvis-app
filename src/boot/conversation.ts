@@ -274,6 +274,21 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
   });
 }
 
+/** Hard upper bound for callLlm maxTokens — prevents runaway cost from large plugin requests. */
+const CALL_LLM_MAX_TOKENS_CEILING = 4096;
+
+/**
+ * Clamp a caller-supplied maxTokens value: accepts only positive finite integers,
+ * caps at CALL_LLM_MAX_TOKENS_CEILING. Returns undefined when the input is invalid
+ * so generateText falls back to its own default (400).
+ */
+function clampMaxTokens(raw: number | undefined): number | undefined {
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return Math.min(Math.floor(raw), CALL_LLM_MAX_TOKENS_CEILING);
+  }
+  return undefined;
+}
+
 /**
  * callLlm의 maxTokens는 플러그인이 실수로 큰 값을 넘겨 지연·비용 폭발이 나지
  * 않도록 호스트에서 sanitize: 유효한 양의 정수만 수용하고 상한(CALL_LLM_MAX_TOKENS_CEILING)
@@ -296,7 +311,6 @@ export function createCallLlmForPlugin(
   auditLogger: AuditLogger,
   options: CallLlmRateLimitOptions = {},
 ): (pluginId: string, prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string> {
-  const CALL_LLM_MAX_TOKENS_CEILING = 4096;
   const maxCalls = options.maxCalls ?? 20;
   const windowMs = options.windowMs ?? 10 * 60 * 1000;
   const buckets = new Map<string, number[]>();
@@ -322,11 +336,7 @@ export function createCallLlmForPlugin(
     fresh.push(now);
     buckets.set(pluginId, fresh);
 
-    let maxTokens: number | undefined;
-    const raw = opts?.maxTokens;
-    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
-      maxTokens = Math.min(Math.floor(raw), CALL_LLM_MAX_TOKENS_CEILING);
-    }
+    const maxTokens = clampMaxTokens(opts?.maxTokens);
 
     try {
       auditLogger.log({
@@ -348,13 +358,8 @@ export function createCallLlmForPlugin(
 export function createCallLlm(
   conversationLoop: ConversationLoop,
 ): (prompt: string, opts?: { maxTokens?: number; systemPrompt?: string }) => Promise<string> {
-  const CALL_LLM_MAX_TOKENS_CEILING = 4096;
   return (prompt, opts) => {
-    let maxTokens: number | undefined;
-    const raw = opts?.maxTokens;
-    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
-      maxTokens = Math.min(Math.floor(raw), CALL_LLM_MAX_TOKENS_CEILING);
-    }
+    const maxTokens = clampMaxTokens(opts?.maxTokens);
     return conversationLoop.generateText(prompt, maxTokens, opts?.systemPrompt);
   };
 }
