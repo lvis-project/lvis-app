@@ -19,7 +19,6 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     onToggleSessionStar: vi.fn(),
     isSessionStarred: vi.fn(() => false),
     onExport: vi.fn(),
-    onSearchToggle: vi.fn(),
     onOpenSettings: vi.fn(),
     onOpenCommand: vi.fn(),
     onOpenGlobalSearch: vi.fn(),

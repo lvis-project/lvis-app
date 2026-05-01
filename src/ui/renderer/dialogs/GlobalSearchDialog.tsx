@@ -48,6 +48,9 @@ export function GlobalSearchDialog({
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(false);
 
+  // Trim once so IPC calls and local filters both use the same value.
+  const trimmedQuery = query.trim();
+
   // Load memories when dialog opens or query changes.
   // Debounce 200 ms to avoid a new IPC request on every keystroke, then use
   // a `cancelled` flag to discard responses from superseded requests (IPC
@@ -57,8 +60,8 @@ export function GlobalSearchDialog({
     let cancelled = false;
     setMemoriesLoading(true);
     const timer = setTimeout(() => {
-      const fetch = query.trim()
-        ? api.memorySearchEntries(query.trim()).then((results) =>
+      const fetch = trimmedQuery
+        ? api.memorySearchEntries(trimmedQuery).then((results) =>
             results.map((r) => ({
               filename: r.filename ?? r.title,
               title: r.title,
@@ -83,11 +86,11 @@ export function GlobalSearchDialog({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [open, query, api]);
+  }, [open, trimmedQuery, api]);
 
   // Filter sessions and starred locally (they are already in-memory).
   const filteredSessions = sessions.filter((s) =>
-    matchesQuery(s.title || "제목 없는 세션", query),
+    matchesQuery(s.title || "제목 없는 세션", trimmedQuery),
   );
 
   // Starred items: deduplicate by sessionId so each session appears at most
@@ -98,7 +101,7 @@ export function GlobalSearchDialog({
   const filteredStarred = (() => {
     const seen = new Map<string, StarredItem>();
     for (const s of starred) {
-      if (matchesQuery(s.text || "", query) && !seen.has(s.sessionId)) {
+      if (matchesQuery(s.text || "", trimmedQuery) && !seen.has(s.sessionId)) {
         seen.set(s.sessionId, s);
       }
     }
