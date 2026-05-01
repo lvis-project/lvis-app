@@ -4,9 +4,10 @@ import { test, expect } from './fixtures';
  * E2E tests for the unified CommandPopover (PR-A: B안).
  *
  * These tests require `bun run build` to have produced dist/src/main.js.
- * They are deliberately lenient: if the UI hasn't fully loaded within the
- * timeout, the test skips rather than fails hard so the suite stays green
- * in offline/CI environments without a vendor API key.
+ * The first test hard-fails if the UI trigger isn't visible within 5 s —
+ * that failure is meaningful (React boot regression).
+ * Subsequent tests skip when the trigger isn't found so the suite stays
+ * green in offline/CI environments without a vendor API key.
  */
 
 test('command popover: Cmd/Ctrl+K opens and closes the popover', async ({ mainWindow }) => {
@@ -59,7 +60,7 @@ test('command popover: search filters items and hides empty group', async ({ mai
   await expect(mainWindow.locator('[data-testid="command-group-slash"]')).not.toBeVisible({ timeout: 3_000 });
 });
 
-test('command popover: list has max-h constraint and is scrollable with 16+ items', async ({ mainWindow }) => {
+test('command popover: list has max-h constraint and is scrollable when items overflow', async ({ mainWindow }) => {
   const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
   const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
     .then(() => true)

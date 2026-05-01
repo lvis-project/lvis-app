@@ -20,9 +20,14 @@ export interface AppBootstrapDeps {
  * Uses a mounted ref to avoid late async resolutions writing to an unmounted
  * component (PR#44 HIGH).
  *
- * isMountedRef cleanup is in a separate [] effect so that re-runs caused by
- * toggleCommandPopover identity changes do not reset the ref to false before
- * the new effect body executes — which would permanently dead the IPC guard.
+ * Three effects are used:
+ *  1. [] — sets isMountedRef lifetime; never re-runs so the ref is never
+ *     reset to false mid-life by unrelated dep changes.
+ *  2. [] — mount-time side-effects (refreshes + IPC subscription); stable
+ *     deps intentionally omitted (eslint-disable comment).
+ *  3. [] — attaches the Cmd/Ctrl+K keydown handler once; reads
+ *     toggleCommandPopover via toggleRef so it always calls the latest
+ *     closure without ever re-attaching the listener.
  */
 export function useAppBootstrap({
   api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
