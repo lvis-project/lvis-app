@@ -1378,7 +1378,6 @@ describe("PluginRuntime lifecycle plog emission", () => {
   let registryPath: string;
 
   beforeEach(async () => {
-    const { mkdtempSync } = await import("node:fs");
     testDir = mkdtempSync(join(tmpdir(), "lvis-plog-"));
     installedDir = join(testDir, "plugins");
     await mkdir(installedDir, { recursive: true });

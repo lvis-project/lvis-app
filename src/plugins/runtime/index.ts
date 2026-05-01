@@ -7,7 +7,7 @@
  *   - sandbox.ts              — entry-path resolution, data-dir, noop HostApi
  */
 
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import type { ValidateFunction } from "ajv";
 import type {
   InstallPolicy,
@@ -224,7 +224,7 @@ export class PluginRuntime {
     for (const plan of loadPlan) {
       const manifestPath = plan.manifestPath;
       const pluginRoot = dirname(manifestPath);
-      const pluginId = plan.pluginIdHint ?? manifestPath;
+      const pluginId = plan.pluginIdHint ?? `<unresolved:${basename(manifestPath)}>`;
       plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
       if (plan.pluginIdHint) {
         const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();

@@ -70,7 +70,7 @@ function buildPluginTool(
     replacedBy: schemaEntry?.replacedBy,
     jsonSchema: typed ?? GENERIC_PAYLOAD_SCHEMA,
     execute: async (rawInput) => {
-      plog("debug", { pluginId, phase: PluginPhase.INVOKE_START, toolName, hasInput: rawInput !== null }, "tool invocation start");
+      plog("debug", { pluginId, phase: PluginPhase.INVOKE_START, toolName, inputType: typeof rawInput, inputKeys: rawInput !== null && typeof rawInput === "object" ? Object.keys(rawInput as object).length : 0 }, "tool invocation start");
       // Both typed and untyped paths accept a JSON-string input (some provider
       // paths deliver tool arguments pre-serialized). Parse once at the entry
       // point so the downstream flat/wrapped split sees a real object.
