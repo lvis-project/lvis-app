@@ -14,6 +14,16 @@ import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import type { PluginManifest, InstallPolicy } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
+
+/**
+ * Stable SemVer pattern (MAJOR.MINOR.PATCH, no leading zeros, no pre-release,
+ * no build metadata). Single source of this regex inside lvis-app — also
+ * mirrored in `lvis-plugin-sdk/schemas/plugin-manifest.schema.json` and the
+ * per-plugin `publish.yml` tag-validation step. Updating any of those copies
+ * MUST update the others (cross-repo, see `host-plugin-contract-sync` rule).
+ */
+export const STABLE_SEMVER_RE =
+  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const log = createLogger("plugin-runtime");
 
 export function normalizeInstallPolicy(
@@ -166,8 +176,13 @@ export async function parsePluginJson(
   if (typeof parsed.id !== "string" || parsed.id.length === 0) {
     fail("id", "must be a non-empty string", `"id": "com.lge.meeting-recorder"`);
   }
-  if (typeof parsed.version !== "string" || !/^\d+\.\d+\.\d+/.test(parsed.version)) {
-    fail("version", "must be a semver string like 'MAJOR.MINOR.PATCH'", `"version": "1.0.0"`);
+  // Stable SemVer only — same regex as the SDK schema and the per-plugin
+  // publish.yml tag-validation step. Anchored on both ends so `1.2.3.4`,
+  // pre-release tags (`1.2.3-rc1`), build metadata (`1.2.3+abc`), and
+  // leading zeros (`01.2.3`) all fail at this gate instead of slipping
+  // through and tripping the publish workflow later.
+  if (typeof parsed.version !== "string" || !STABLE_SEMVER_RE.test(parsed.version)) {
+    fail("version", "must be a stable SemVer string MAJOR.MINOR.PATCH (no pre-release or build metadata, no leading zeros)", `"version": "1.0.0"`);
   }
   if (typeof parsed.entry !== "string" || parsed.entry.length === 0) {
     fail("entry", "must be a non-empty relative path to the plugin ESM entry", `"entry": "dist/index.js"`);
