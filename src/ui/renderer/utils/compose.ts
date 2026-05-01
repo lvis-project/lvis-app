@@ -3,19 +3,15 @@ import { buildPresetPrefix } from "../../../data/role-presets.js";
 
 /**
  * Multimodal attachment marker produced by the Composer component.
- * Represents a single image entry the user added before sending.  File and
- * paste entries are serialised into inline text via the `raw` string, not as
- * `Attachment` objects.  Currently `api.chatSend(text)` only; vision parts
- * wiring will follow with multimodal Composer integration.
+ * Supports three kinds of attachments:
+ * - `image` — base-64 data URI, contributes to `ComposedOutgoing.attachments`
+ * - `file`  — resolved file path (not yet wired; marker stays in `text`)
+ * - `paste` — pasted text block (not yet wired; marker stays in `text`)
  */
-export interface Attachment {
-  /** Stable client-side id for React keying / de-dup. */
-  id: string;
-  /** MIME type, e.g. "image/png", "application/pdf". */
-  mimeType: string;
-  /** Base-64 encoded data URI or a resolved file path. */
-  data: string;
-}
+export type Attachment =
+  | { kind: "image"; id: string; mimeType: string; data: string }
+  | { kind: "file"; id: string; mimeType?: string; path: string }
+  | { kind: "paste"; id: string; text: string; lines: number };
 
 /**
  * Return value of `composeOutgoing`.  Callers use `.text` for the chat
@@ -26,11 +22,10 @@ export interface ComposedOutgoing {
   /** Text portion — preset prefix + attached-doc notice + raw input. */
   text: string;
   /**
-   * Image content parts populated by `composeOutgoing()` from the caller's
-   * `attachments` array.  The `Attachment` type is currently image-only;
-   * file and paste content is delivered via the `raw` text string, not as
-   * attachment objects.  Composer wire-up will supply the `attachments`
-   * array from the textarea state.
+   * Image content parts populated by `composeOutgoing()` from `kind="image"`
+   * attachments only.  Non-image attachments (file/paste) are not yet wired
+   * and their markers remain verbatim in `text`; full substitution will be
+   * added in the Composer integration PR (#440).
    */
   attachments: Array<{ type: "image"; mimeType: string; data: string }>;
 }
@@ -46,10 +41,10 @@ export interface ComposedOutgoing {
  *
  * @param attachedDocs - Paperclip-pinned indexed documents (separate IPC
  *   flow from multimodal `attachments`).
- * @param attachments  - All attachment types (image, file, paste). Image
- *   attachments contribute to `ComposedOutgoing.attachments`; file/paste
- *   are inlined into `text` via marker substitution.  Pass `[]` until
- *   the multimodal wire-up PR connects the Composer component.
+ * @param attachments  - All attachment types (image, file, paste). Only
+ *   `kind="image"` attachments contribute to `ComposedOutgoing.attachments`;
+ *   file/paste markers currently stay verbatim in `text` (substitution
+ *   pending Composer integration PR #440).  Pass `[]` until wired up.
  */
 export function composeOutgoing(params: {
   raw: string;
@@ -68,6 +63,8 @@ export function composeOutgoing(params: {
   parts.push(raw);
   return {
     text: parts.join("\n\n"),
-    attachments: attachments.map((a) => ({ type: "image" as const, mimeType: a.mimeType, data: a.data })),
+    attachments: attachments
+      .filter((a): a is Extract<Attachment, { kind: "image" }> => a.kind === "image")
+      .map((a) => ({ type: "image" as const, mimeType: a.mimeType, data: a.data })),
   };
 }

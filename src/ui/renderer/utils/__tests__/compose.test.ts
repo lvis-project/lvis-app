@@ -53,7 +53,7 @@ describe("composeOutgoing", () => {
   });
 
   it("maps image attachments to attachments with type=image", () => {
-    const att: Attachment = { id: "img-1", mimeType: "image/png", data: "base64data==" };
+    const att: Attachment = { kind: "image", id: "img-1", mimeType: "image/png", data: "base64data==" };
     const result = composeOutgoing({
       raw: "Describe this",
       activePreset: null,
@@ -66,8 +66,8 @@ describe("composeOutgoing", () => {
 
   it("maps multiple image attachments to attachments preserving order", () => {
     const attachments: Attachment[] = [
-      { id: "a1", mimeType: "image/jpeg", data: "jpg1" },
-      { id: "a2", mimeType: "image/webp", data: "webp1" },
+      { kind: "image", id: "a1", mimeType: "image/jpeg", data: "jpg1" },
+      { kind: "image", id: "a2", mimeType: "image/webp", data: "webp1" },
     ];
     const result = composeOutgoing({
       raw: "Compare",
