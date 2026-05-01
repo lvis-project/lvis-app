@@ -175,11 +175,12 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(existsSync(receiptPath)).toBe(true);
 
     const receipt = JSON.parse(await readFile(receiptPath, "utf-8"));
-    expect(receipt.schemaVersion).toBe(1);
+    expect(receipt.schemaVersion).toBe(2);
+    expect(receipt.installSource).toBe("local-dev");
     expect(receipt.pluginId).toBe("test-plugin");
     expect(receipt.version).toBe("1.2.3");
-    expect(receipt.signerKeyId).toBe("dev:local-install");
-    expect(receipt.artifactSha256).toBe("dev:local-install");
+    expect(receipt.signerKeyId).toBeNull();
+    expect(receipt.artifactSha256).toBeNull();
 
     const paths = receipt.files.map((f: { path: string }) => f.path).sort();
     expect(paths).toContain("plugin.json");

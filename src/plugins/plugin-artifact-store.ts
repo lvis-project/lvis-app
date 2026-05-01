@@ -245,17 +245,19 @@ export class PluginArtifactStore {
     slug: string,
     input: {
       version: string;
-      artifactSha256: string;
-      signerKeyId: string;
+      installSource: "marketplace" | "local-dev";
+      artifactSha256: string | null;
+      signerKeyId: string | null;
       files: string[];
       installedAt?: string;
     },
   ): Promise<PluginInstallReceipt> {
     const pluginRoot = this.installDirFor(slug);
     const receipt: PluginInstallReceipt = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       pluginId: slug,
       version: input.version,
+      installSource: input.installSource,
       artifactSha256: input.artifactSha256,
       signerKeyId: input.signerKeyId,
       installedAt: input.installedAt ?? new Date().toISOString(),
