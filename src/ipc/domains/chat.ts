@@ -136,7 +136,8 @@ async function runStreamedTurn(
     options.clearInterruptedTailSuppression?.();
     return result;
   }
-  send({ type: "done" });
+  const turnRoute = (result as { route?: string }).route;
+  send({ type: "done", ...(turnRoute === "command" ? { route: "command" } : {}) });
   return result;
 }
 
