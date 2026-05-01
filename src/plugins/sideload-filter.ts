@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 
 /**
@@ -31,10 +31,13 @@ export function buildSideloadCopyFilter(sourceRoot: string): (src: string) => bo
 export async function rejectEscapingSymlinks(dir: string): Promise<void> {
   if (!isAbsolute(dir)) throw new Error(`rejectEscapingSymlinks: dir must be absolute, got: ${dir}`);
   const realRoot = realpathSync(dir);
-  await walkForEscapingSymlinks(dir, realRoot);
+  // Keep the original dir as displayRoot for error messages — relative() against
+  // a canonicalized realRoot can produce ../ segments if dir itself had symlink
+  // components (unlikely for a staging tmp dir but avoids confusing error paths).
+  await walkForEscapingSymlinks(dir, realRoot, dir);
 }
 
-async function walkForEscapingSymlinks(current: string, realRoot: string): Promise<void> {
+async function walkForEscapingSymlinks(current: string, realRoot: string, displayRoot: string): Promise<void> {
   let entries;
   try {
     entries = await readdir(current, { withFileTypes: true, encoding: "utf8" });
@@ -47,23 +50,23 @@ async function walkForEscapingSymlinks(current: string, realRoot: string): Promi
     if (entry.isSymbolicLink()) {
       let realTarget: string;
       try {
-        realTarget = realpathSync(full);
+        realTarget = await realpath(full);
       } catch {
         // Dangling or circular symlink (ENOENT / ELOOP) — target is unverifiable
         // at install time. Reject rather than silently skip: a dangling target
         // could later be created to point outside the install root, bypassing
         // this containment check (defense-in-depth).
         throw new Error(
-          `[installLocal] unresolvable symlink in install dir: ${relative(realRoot, full)}`,
+          `[installLocal] unresolvable symlink in install dir: ${relative(displayRoot, full)}`,
         );
       }
       if (!isContained(realRoot, realTarget)) {
         throw new Error(
-          `[installLocal] symlink escapes install dir: ${relative(realRoot, full)} → ${realTarget}`,
+          `[installLocal] symlink escapes install dir: ${relative(displayRoot, full)} → ${realTarget}`,
         );
       }
     } else if (entry.isDirectory()) {
-      await walkForEscapingSymlinks(full, realRoot);
+      await walkForEscapingSymlinks(full, realRoot, displayRoot);
     }
   }
 }

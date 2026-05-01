@@ -84,26 +84,29 @@ describe("rejectEscapingSymlinks", () => {
     await expect(rejectEscapingSymlinks(tmpDir)).resolves.toBeUndefined();
   });
 
-  it("passes for internal symlinks (target within installDir)", async () => {
+  // Symlink creation on Windows requires elevated privileges — skip on that platform.
+  const itSymlink = it.skipIf(process.platform === "win32");
+
+  itSymlink("passes for internal symlinks (target within installDir)", async () => {
     await writeFile(join(tmpDir, "real.js"), "");
     await symlink(join(tmpDir, "real.js"), join(tmpDir, "link.js"));
     await expect(rejectEscapingSymlinks(tmpDir)).resolves.toBeUndefined();
   });
 
-  it("rejects a symlink whose target escapes installDir", async () => {
+  itSymlink("rejects a symlink whose target escapes installDir", async () => {
     const escaping = join(tmpDir, "escape.txt");
     await symlink(escapeTarget, escaping);
     await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("symlink escapes install dir");
   });
 
-  it("rejects nested symlinks in node_modules escaping installDir", async () => {
+  itSymlink("rejects nested symlinks in node_modules escaping installDir", async () => {
     const nmDir = join(tmpDir, "node_modules", "evil-pkg");
     await mkdir(nmDir, { recursive: true });
     await symlink(escapeTarget, join(nmDir, "index.js"));
     await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("symlink escapes install dir");
   });
 
-  it("rejects dangling symlinks (target does not exist — unverifiable at install time)", async () => {
+  itSymlink("rejects dangling symlinks (target does not exist — unverifiable at install time)", async () => {
     const dangling = join(tmpDir, "dangling.js");
     await symlink(join(tmpDir, "nonexistent-target.js"), dangling);
     await expect(rejectEscapingSymlinks(tmpDir)).rejects.toThrow("unresolvable symlink");
