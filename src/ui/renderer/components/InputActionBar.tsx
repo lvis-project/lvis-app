@@ -22,6 +22,14 @@ export interface InputActionBarProps {
   // count lives on the in-composer chip)
   onAttach: () => void | Promise<void>;
   attachDisabled: boolean;
+  /**
+   * Why the attach button is disabled, used to surface a context-specific
+   * tooltip. Defaults to "limit" — useful when the caller only wires the
+   * 5-cap path. Pass "no-api-key" or "context-overflow" for the other
+   * gating cases so users see the actual blocker, not a misleading
+   * "한도 도달" message.
+   */
+  attachDisabledReason?: "limit" | "no-api-key" | "context-overflow";
   // Trailing — role preset
   rolePresets: RolePreset[];
   activePreset: RolePreset | null | undefined;
@@ -41,6 +49,7 @@ export function InputActionBar({
   onInsertSlashCommand,
   onAttach,
   attachDisabled,
+  attachDisabledReason = "limit",
   rolePresets,
   activePreset,
   activePresetId,
@@ -70,7 +79,15 @@ export function InputActionBar({
           disabled={attachDisabled}
           data-testid="iab-attach-button"
           className="h-7 w-7 p-0"
-          title={attachDisabled ? "첨부 한도 도달" : "파일/이미지 첨부 (최대 5개)"}
+          title={
+            attachDisabled
+              ? attachDisabledReason === "no-api-key"
+                ? "API 키 설정 후 사용 가능"
+                : attachDisabledReason === "context-overflow"
+                  ? "컨텍스트 한도 — 자동 압축 후 사용 가능"
+                  : "첨부 한도 도달 (5/5)"
+              : "파일/이미지 첨부 (최대 5개)"
+          }
         >
           <Paperclip className="h-3.5 w-3.5" />
         </Button>

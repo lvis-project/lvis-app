@@ -26,7 +26,9 @@ export interface ComposedOutgoing {
  *   • File markers are augmented inline so the model sees the absolute path
  *     and knows it can call the read tool. Body text stays human-readable.
  *   • Paste markers are replaced in-place with the actual pasted text wrapped
- *     in a fenced block so the model sees the full content (no extra round-trip).
+ *     in `----- Pasted text #N (M lines) -----` delimiters so the model sees
+ *     the full content (no extra round-trip). Plain delimiter rather than a
+ *     fenced code block so the inner content cannot accidentally close it.
  */
 export function composeOutgoing(params: {
   raw: string;

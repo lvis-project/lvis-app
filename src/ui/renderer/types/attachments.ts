@@ -14,7 +14,12 @@ export const ATTACH_MAX_COUNT = 5;
 export const PASTE_TEXT_MIN_CHARS = 50;
 export const PASTE_TEXT_MIN_NEWLINES = 3;
 
-/** Path collapse: trigger when basename (without extension) ≥ this many chars. */
+/**
+ * Path-collapse trigger threshold. The check applies to the *stem*: the
+ * substring before the last `.` of the input path, including any parent
+ * directory segments. See `collapsePath()` for why whole-path collapse
+ * (rather than basename-only) is intentional in the overlay UX.
+ */
 export const PATH_COLLAPSE_THRESHOLD = 10;
 
 /**

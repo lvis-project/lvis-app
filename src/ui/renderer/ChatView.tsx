@@ -28,8 +28,6 @@ import {
   ATTACH_MAX_COUNT,
   DENY_EXTENSIONS,
   type Attachment,
-  type ImageAttachment,
-  type FileAttachment,
 } from "./types/attachments.js";
 import { buildMarkerText } from "./utils/attachment-markers.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
@@ -474,18 +472,31 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           plugins={plugins}
           onSelectPlugin={onSelectPlugin}
           onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
-          attachDisabled={attachments.length >= ATTACH_MAX_COUNT || hasApiKey === false}
+          attachDisabled={
+            attachments.length >= ATTACH_MAX_COUNT ||
+            hasApiKey === false ||
+            contextOverflowPct >= 0.95
+          }
+          attachDisabledReason={
+            hasApiKey === false
+              ? "no-api-key"
+              : contextOverflowPct >= 0.95
+                ? "context-overflow"
+                : "limit"
+          }
           onAttach={async () => {
             const result = await window.lvis.attach.openFile();
             if (result.canceled) return;
             if (result.rejected.length > 0) {
               console.warn("attachment rejected (deny-list):", result.rejected, "deny:", DENY_EXTENSIONS);
             }
-            const remaining = Math.max(0, ATTACH_MAX_COUNT - attachments.length);
-            const accepted = result.files.slice(0, remaining);
-            const newAtts: Attachment[] = [];
-            let appendedMarkers = "";
-            for (const f of accepted) {
+            // Build all candidate attachments first. The 5-cap is enforced
+            // at *commit* time inside the setAttachments updater, so a
+            // concurrent clipboard paste during the readImage await cannot
+            // push us past the limit (the updater receives the latest
+            // committed state, not the closure-captured one).
+            const candidates: Attachment[] = [];
+            for (const f of result.files) {
               const n = ++attachmentNCounter.current;
               if (f.isImage) {
                 const img = await window.lvis.attach.readImage(f.path);
@@ -500,7 +511,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                   console.warn("readImage failed", f.path, img.error);
                   continue;
                 }
-                const att: ImageAttachment = {
+                candidates.push({
                   id: `img-${Date.now()}-${n}`,
                   n,
                   kind: "image",
@@ -510,11 +521,9 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                   height: img.height,
                   bytes: img.bytes,
                   dataUrl: img.dataUrl,
-                };
-                newAtts.push(att);
-                appendedMarkers += `${buildMarkerText(att)} `;
+                });
               } else {
-                const att: FileAttachment = {
+                candidates.push({
                   id: `file-${Date.now()}-${n}`,
                   n,
                   kind: "file",
@@ -522,19 +531,32 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                   name: f.name,
                   ext: f.ext,
                   bytes: f.bytes,
-                };
-                newAtts.push(att);
-                appendedMarkers += `${buildMarkerText(att)} `;
+                });
               }
             }
-            if (newAtts.length > 0) {
-              // Functional updaters: the user may have typed or paste-dropped
-              // additional attachments while the file picker / readImage IPC
-              // was awaiting, so the captured `attachments` and `question`
-              // closures are racy. React's setState updater receives the
-              // latest committed state, so concatenation is always correct.
-              setAttachments((prev) => [...prev, ...newAtts]);
-              setQuestion((prev) => prev + appendedMarkers);
+            if (candidates.length === 0) {
+              composerRef.current?.focus();
+              return;
+            }
+            // Two-phase commit: setAttachments updater is the authority on
+            // how many we can keep. We capture the actually-accepted slice
+            // via the updater's return value path (assigning to a let so
+            // the subsequent setQuestion updater inserts only the markers
+            // for items that survived the cap).
+            let acceptedMarkers = "";
+            setAttachments((prev) => {
+              const remaining = Math.max(0, ATTACH_MAX_COUNT - prev.length);
+              const accepted = candidates.slice(0, remaining);
+              if (accepted.length < candidates.length) {
+                console.warn(
+                  `${candidates.length - accepted.length} attachment(s) dropped — ${ATTACH_MAX_COUNT}-cap reached during async open/read`,
+                );
+              }
+              acceptedMarkers = accepted.map((a) => `${buildMarkerText(a)} `).join("");
+              return [...prev, ...accepted];
+            });
+            if (acceptedMarkers) {
+              setQuestion((prev) => prev + acceptedMarkers);
             }
             // Return focus to the composer textarea so the user can keep
             // typing or use Cmd/Ctrl+A immediately after the file dialog
