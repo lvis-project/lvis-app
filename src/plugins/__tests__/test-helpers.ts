@@ -8,6 +8,7 @@
 import { resolve } from "node:path";
 import type { PluginPaths } from "../plugin-paths.js";
 import { resolvePluginPaths } from "../plugin-paths.js";
+import type { PluginManifest } from "../types.js";
 
 export interface TestPluginPathsInput {
   /** A tmp directory; the helper anchors plugin paths under it. */
@@ -28,4 +29,25 @@ export function makeTestPluginPaths(input: TestPluginPathsInput): PluginPaths {
     pluginsRoot: input.pluginsRoot ?? resolve(input.rootDir, "plugins"),
     cacheRoot: input.cacheRoot,
   });
+}
+
+/**
+ * Build a schema-valid PluginManifest for tests. All required fields are
+ * pre-filled with sensible defaults; callers only need to supply an id and
+ * any overrides. Type-checked at build time — if the schema adds a new
+ * required field this factory will surface a TS error at every test that
+ * uses it, rather than a runtime AJV failure with an opaque fixture path.
+ */
+export function makeTestManifest(
+  overrides: Partial<PluginManifest> & Pick<PluginManifest, "id">,
+): PluginManifest {
+  return {
+    name: overrides.id,
+    version: "0.0.0",
+    description: "test fixture",
+    publisher: "tests",
+    entry: "dist/hostPlugin.js",
+    tools: [],
+    ...overrides,
+  };
 }
