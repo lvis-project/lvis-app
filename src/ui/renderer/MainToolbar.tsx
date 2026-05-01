@@ -1,8 +1,7 @@
-import { Download, History, Menu, Plus, Star } from "lucide-react";
+import { Download, Menu, Plus, Star } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
-import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { Command as CommandIcon, KeyRound, Search } from "lucide-react";
 
 export interface MainToolbarProps {
@@ -22,9 +21,6 @@ export interface MainToolbarProps {
   onSearchToggle: () => void;
   onOpenSettings: () => void;
   onOpenCommand: () => void;
-  /** Token context for the progress ring indicator */
-  usedTokens: number;
-  contextBudget: number;
 }
 
 export function MainToolbar({
@@ -44,16 +40,11 @@ export function MainToolbar({
   onSearchToggle,
   onOpenSettings,
   onOpenCommand,
-  usedTokens,
-  contextBudget,
 }: MainToolbarProps) {
   return (
     <div className="border-b bg-card px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
-        {/* ── Leftmost: token progress ring ─────────────────────────── */}
-        <TokenProgressRing used={usedTokens} budget={contextBudget} />
-
-        {/* ── Command palette button — right of ring ─────────────────── */}
+        {/* ── Command palette button ─────────────────────────────────── */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onOpenCommand} title="명령 팔레트 (Ctrl/Cmd+K)">
