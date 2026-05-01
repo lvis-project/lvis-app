@@ -519,6 +519,9 @@ function launchElectron() {
       ...process.env,
       LVIS_DEV: "1",
       LVIS_DEV_CONSOLE: process.env.LVIS_DEV_CONSOLE ?? "1",
+      // Ensure pino logger selects pino-pretty in dev runs. NODE_ENV=production
+      // gates JSON output; dev runs use "development" so colorized text is used.
+      NODE_ENV: process.env.NODE_ENV ?? "development",
       // The launcher already passes --no-sandbox via WINDOWS_SAFE_ELECTRON_FLAGS
       // for the foreground dev process; mirror that into the lvis:// protocol
       // command we register so OS-launched second instances can also boot on
