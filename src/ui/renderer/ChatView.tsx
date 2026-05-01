@@ -77,7 +77,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
     onPrevRoutineResult, onNextRoutineResult, runningRoutines,
     triggerResult, onDismissTrigger, onAcceptTrigger,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
-    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay, searchToggleOverlay,
+    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
