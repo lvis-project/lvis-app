@@ -17,6 +17,7 @@ import {
 } from "../routines/schedule.js";
 import {
   freshVendorBlocks,
+  isLLMVendor,
   LLM_VENDORS,
   type LLMVendor,
   type LLMVendorSettings,
@@ -589,12 +590,13 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
   }
   // Coerce stale on-disk `provider` (e.g. removed vendor "lgenie") to the
   // base provider — `vendors[provider]` would otherwise be undefined and
-  // crash refreshProvider/stream-collector at first turn.
-  const providerValid =
-    partial.provider !== undefined &&
-    (LLM_VENDORS as readonly string[]).includes(partial.provider);
+  // crash refreshProvider/stream-collector at first turn. The type guard
+  // narrows `partial.provider` so the assignment below is cast-free.
+  const provider: LLMVendor = isLLMVendor(partial.provider)
+    ? partial.provider
+    : base.provider;
   return {
-    provider: providerValid ? (partial.provider as LLMVendor) : base.provider,
+    provider,
     vendors,
     streamSmoothing: partial.streamSmoothing ?? base.streamSmoothing,
     fallbackChain: partial.fallbackChain ?? base.fallbackChain,

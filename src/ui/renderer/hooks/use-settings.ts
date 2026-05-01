@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
+import {
+  isLLMVendor,
+  type LLMVendor,
+} from "../../../shared/llm-vendor-defaults.js";
 
 /**
  * Phase 3.1: LLM settings cache hook.
@@ -10,14 +14,14 @@ import type { LvisApi } from "../types.js";
  * saves so the chat bar reflects changes without a restart.
  */
 export interface UseSettingsResult {
-  /** Cached provider (e.g. "claude", "openai", "gemini"). */
-  llmVendor: string;
+  /** Cached provider — narrowed to the LLMVendor union. */
+  llmVendor: LLMVendor;
   /** Cached model id. */
   llmModel: string;
   /** Cached `enableThinking` flag for the active vendor. */
   enableThinkingChat: boolean;
   /** One-shot snapshot of {provider, model} used for context overflow %. */
-  currentLlmSettings: { provider: string; model: string } | null;
+  currentLlmSettings: { provider: LLMVendor; model: string } | null;
   /** Re-read settings from disk (call after SettingsDialog save). */
   refresh: () => Promise<void>;
   /** Persist + optimistically update the thinking toggle. */
@@ -25,11 +29,11 @@ export interface UseSettingsResult {
 }
 
 export function useSettings(api: LvisApi): UseSettingsResult {
-  const [llmVendor, setLlmVendor] = useState<string>("claude");
+  const [llmVendor, setLlmVendor] = useState<LLMVendor>("claude");
   const [llmModel, setLlmModel] = useState<string>("");
   const [enableThinkingChat, setEnableThinkingChat] = useState<boolean>(true);
   const [currentLlmSettings, setCurrentLlmSettings] = useState<
-    { provider: string; model: string } | null
+    { provider: LLMVendor; model: string } | null
   >(null);
 
   // Guard late callbacks firing after unmount (matches pattern in renderer.tsx
@@ -41,12 +45,21 @@ export function useSettings(api: LvisApi): UseSettingsResult {
     };
   }, []);
 
+  // External-boundary validation: settings may arrive over IPC from a
+  // mismatched preload bridge or a corrupt settings.json on disk. Narrow
+  // with the type-guard and fall back to "claude" so the renderer never
+  // holds a vendor string outside the LLMVendor union. Internal code that
+  // already has a typed LLMVendor value should NOT need this guard.
+  const narrowVendor = (raw: unknown): LLMVendor =>
+    isLLMVendor(raw) ? raw : "claude";
+
   const refresh = useCallback(async () => {
     try {
       const s = await api.getSettings();
       if (!isMountedRef.current) return;
-      const block = s.llm.vendors[s.llm.provider];
-      setLlmVendor(s.llm.provider);
+      const provider = narrowVendor(s.llm.provider);
+      const block = s.llm.vendors[provider];
+      setLlmVendor(provider);
       setLlmModel(block.model);
       setEnableThinkingChat(block.enableThinking);
     } catch {
@@ -60,11 +73,12 @@ export function useSettings(api: LvisApi): UseSettingsResult {
       .getSettings()
       .then((s) => {
         if (!isMountedRef.current) return;
-        const block = s.llm.vendors[s.llm.provider];
-        setLlmVendor(s.llm.provider);
+        const provider = narrowVendor(s.llm.provider);
+        const block = s.llm.vendors[provider];
+        setLlmVendor(provider);
         setLlmModel(block.model);
         setEnableThinkingChat(block.enableThinking);
-        setCurrentLlmSettings({ provider: s.llm.provider, model: block.model });
+        setCurrentLlmSettings({ provider, model: block.model });
       })
       .catch(() => {});
   }, [api]);

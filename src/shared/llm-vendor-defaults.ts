@@ -21,6 +21,25 @@ export const LLM_VENDORS = [
 export type LLMVendor = (typeof LLM_VENDORS)[number];
 
 /**
+ * Runtime type guard — narrows `unknown` to `LLMVendor`. Use at every
+ * boundary that accepts vendor strings from outside the type system:
+ * settings.json on disk, IPC payloads, query params, deep-linked URLs,
+ * etc. Internal code that already has a `LLMVendor` typed value should
+ * NOT need this — the type system carries the proof.
+ *
+ * Empty / non-string / unknown-string inputs return false. The set is
+ * the same `LLM_VENDORS` constant used to seed `DEFAULT_SETTINGS.llm.
+ * vendors`, so a `true` return is a hard guarantee that downstream
+ * `vendors[v]` lookups won't hit `undefined`.
+ */
+export function isLLMVendor(v: unknown): v is LLMVendor {
+  return (
+    typeof v === "string" &&
+    (LLM_VENDORS as readonly string[]).includes(v)
+  );
+}
+
+/**
  * Per-vendor configuration block. Every vendor's block in `LLMSettings.vendors`
  * carries its own complete copy of these fields, so switching the active
  * vendor never inherits stale values from the previous one.

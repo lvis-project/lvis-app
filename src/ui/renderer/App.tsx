@@ -3,7 +3,6 @@ import { flushSync } from "react-dom";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { supportsVision } from "../../engine/llm/vendor-capabilities.js";
-import type { LLMVendor } from "../../engine/llm/types.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { ThemeProvider } from "./theme/index.js";
@@ -278,7 +277,7 @@ export function App() {
       // freely; check at send time and confirm before silently dropping
       // image parts on a text-only model.
       const hasImageParts = outgoingAttachments.some((p) => p.type === "image");
-      if (mode !== "trigger-import" && hasImageParts && !supportsVision(llmVendor as LLMVendor, llmModel)) {
+      if (mode !== "trigger-import" && hasImageParts && !supportsVision(llmVendor, llmModel)) {
         const proceed = window.confirm(
           `현재 모델(${llmModel})은 이미지를 지원하지 않습니다.\n` +
             "이미지는 전달되지 않고 파일 경로 / 텍스트만 전송됩니다.\n\n" +

@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { LLMVendor } from "./llm/types.js";
+import { isLLMVendor, type LLMVendor } from "./llm/types.js";
 import { getModelPricing, computeCost } from "./llm/pricing.js";
 
 export interface AuditTurnEntry {
@@ -60,11 +60,15 @@ function emptyTotals(): UsageTotals {
   return { inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0 };
 }
 
-/** Parse a route string "vendor/model" into [vendor, model]. Fallback: ["unknown","unknown"]. */
+/** Parse a route string "vendor/model" into [vendor, model]. Fallback: ["claude","unknown"]. */
 function parseRoute(route: string | undefined): { vendor: LLMVendor; model: string } {
   if (!route) return { vendor: "claude", model: "unknown" };
   const [v, ...rest] = route.split("/");
-  const vendor = (["claude", "openai", "gemini", "copilot"].includes(v) ? v : "claude") as LLMVendor;
+  // Use the runtime type guard rather than a hand-rolled allow-list — the
+  // previous list was missing `azure-foundry` and `vertex-ai`, so usage
+  // logs from those vendors silently coerced to "claude" and got attributed
+  // to the wrong cost bucket. isLLMVendor stays in sync with LLM_VENDORS.
+  const vendor: LLMVendor = isLLMVendor(v) ? v : "claude";
   return { vendor, model: rest.join("/") || "unknown" };
 }
 

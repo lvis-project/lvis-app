@@ -7,13 +7,14 @@
 
 // ─── Vendor ─────────────────────────────────────────
 
-export type LLMVendor =
-  | "claude"
-  | "openai"
-  | "gemini"
-  | "copilot"
-  | "azure-foundry"
-  | "vertex-ai";
+// Single source of truth for the vendor union lives in
+// `src/shared/llm-vendor-defaults.ts` — that's the same module the
+// settings store uses to validate `provider` at IPC boundaries. We
+// re-export here so existing engine-side callers keep their import
+// path while the type definition cannot drift between modules.
+import type { LLMVendor } from "../../shared/llm-vendor-defaults.js";
+export type { LLMVendor };
+export { LLM_VENDORS, isLLMVendor } from "../../shared/llm-vendor-defaults.js";
 
 export const LLM_VENDOR_LABELS: Record<LLMVendor, string> = {
   claude: "Anthropic Claude",
