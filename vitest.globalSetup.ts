@@ -3,39 +3,28 @@ import { glob } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as AjvModule from "ajv";
-import * as AddFormatsModule from "ajv-formats";
+import { buildManifestValidator } from "./src/plugins/runtime/manifest-validation.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Validates all JSON test-fixture files matching the manifest glob pattern
- * against schemas/plugin.schema.json. Throws on the first invalid fixture
- * so CI surfaces which file caused the failure with the AJV error path.
+ * against schemas/plugin.schema.json using the same AJV instance as the
+ * production runtime (buildManifestValidator). Collects all failures before
+ * throwing so CI surfaces every broken fixture in one pass.
  *
  * This runs BEFORE any test file, catching schema drift introduced alongside
  * a schema change without requiring every test to opt in.
+ *
+ * Silently skips if schemas/plugin.schema.json is missing (non-standard build
+ * layout) — this is intentional and logged so the skip is visible in CI.
  */
 async function validateJsonFixtures(): Promise<void> {
-  const schemaPath = resolve(HERE, "schemas/plugin.schema.json");
-  let schema: unknown;
-  try {
-    schema = JSON.parse(readFileSync(schemaPath, "utf-8"));
-  } catch {
-    // schema missing (non-standard build layout) — skip gracefully
+  const validate = await buildManifestValidator(import.meta.url);
+  if (!validate) {
+    console.warn("[fixture-validator] schemas/plugin.schema.json not found — fixture validation skipped");
     return;
   }
-
-  const AjvAny = AjvModule as unknown as { default?: unknown };
-  const AjvCtor = (AjvAny.default ?? AjvModule) as new (opts?: unknown) => {
-    compile: (schema: unknown) => (data: unknown) => boolean;
-    errorsText: (errors: unknown) => string;
-  };
-  const ajv = new AjvCtor({ strict: true, strictRequired: false, allErrors: true, allowUnionTypes: true });
-  const AddAny = AddFormatsModule as unknown as { default?: unknown };
-  const addFormats = (AddAny.default ?? AddFormatsModule) as (ajv: unknown) => void;
-  addFormats(ajv);
-  const validate = ajv.compile(schema);
 
   const patterns = [
     join(HERE, "src/**/__tests__/**/{manifest,plugin}*.json"),
@@ -53,7 +42,7 @@ async function validateJsonFixtures(): Promise<void> {
         continue;
       }
       if (!validate(data)) {
-        failures.push(`${relative(HERE, file)}: ${ajv.errorsText(validate.errors)}`);
+        failures.push(`${relative(HERE, file)}: ${validate.errors?.map((e) => `${e.instancePath} ${e.message}`).join(", ") ?? "unknown error"}`);
       }
     }
   }
