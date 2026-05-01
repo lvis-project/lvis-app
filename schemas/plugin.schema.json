@@ -464,6 +464,18 @@
                 "type": "boolean"
               }
             }
+          },
+          "version": {
+            "type": "string",
+            "description": "\u00a76.4 Tool versioning \u2014 optional semver string for this tool. When omitted, the plugin manifest's top-level version is used."
+          },
+          "deprecatedSince": {
+            "type": "string",
+            "description": "Semver string of the manifest version that deprecated this tool."
+          },
+          "replacedBy": {
+            "type": "string",
+            "description": "Tool name that replaces this deprecated tool."
           }
         }
       }
