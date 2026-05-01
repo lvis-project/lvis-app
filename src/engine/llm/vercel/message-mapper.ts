@@ -46,10 +46,36 @@ export function genericToModelMessages(
 
   for (const msg of messages) {
     if (msg.role === "user") {
-      out.push({
-        role: "user",
-        content: [{ type: "text", text: msg.content }],
-      });
+      if (typeof msg.content === "string") {
+        out.push({
+          role: "user",
+          content: [{ type: "text", text: msg.content }],
+        });
+      } else {
+        out.push({
+          role: "user",
+          content: msg.content.map((p) => {
+            if (p.type === "text") return { type: "text" as const, text: p.text };
+            if (p.type === "image") {
+              // mimeType is optional on UserContentPart for image (the SDK
+              // can sometimes infer from the data URL header). Only forward
+              // mediaType when we actually have one — passing `undefined`
+              // confuses some vendor adapters that probe the field.
+              const part: { type: "image"; image: string; mediaType?: string } = {
+                type: "image",
+                image: p.image,
+              };
+              if (p.mimeType) part.mediaType = p.mimeType;
+              return part;
+            }
+            return {
+              type: "file" as const,
+              data: p.data,
+              mediaType: p.mimeType,
+            };
+          }),
+        } as ModelMessage);
+      }
       continue;
     }
 

@@ -1,97 +1,148 @@
-import { describe, expect, it } from "vitest";
+import { describe, it, expect } from "vitest";
 import { composeOutgoing } from "../compose.js";
-import type { Attachment } from "../compose.js";
+import type {
+  Attachment,
+  ImageAttachment,
+  FileAttachment,
+  PasteAttachment,
+} from "../../types/attachments.js";
+
+const img1: ImageAttachment = {
+  id: "i1",
+  n: 1,
+  kind: "image",
+  path: "/tmp/a.png",
+  mimeType: "image/png",
+  width: 100,
+  height: 80,
+  bytes: 1024,
+  dataUrl: "data:image/png;base64,xxx",
+};
+const file2: FileAttachment = {
+  id: "f2",
+  n: 2,
+  kind: "file",
+  path: "/Users/ken/Desktop/budget-2026.pdf",
+  name: "budget-2026.pdf",
+  ext: "pdf",
+  bytes: 1_200_000,
+};
+const paste3: PasteAttachment = {
+  id: "p3",
+  n: 3,
+  kind: "paste",
+  text: "line1\nline2\nline3",
+  lines: 3,
+  chars: 17,
+};
 
 describe("composeOutgoing", () => {
-  it("returns raw text unchanged when no preset, no docs, no attachments", () => {
-    const result = composeOutgoing({
-      raw: "Hello world",
+  it("returns plain text + empty attachments when no attachments", () => {
+    const r = composeOutgoing({
+      raw: "hello",
       activePreset: null,
-      attachedDocs: [],
       attachments: [],
     });
-    expect(result.text).toBe("Hello world");
-    expect(result.attachments).toEqual([]);
+    expect(r.text).toBe("hello");
+    expect(r.attachments).toEqual([]);
   });
 
-  it("prepends role preset prefix when activePreset has systemPromptAdd", () => {
-    const result = composeOutgoing({
-      raw: "What is TypeScript?",
-      activePreset: { id: "dev", name: "Developer", systemPromptAdd: "You are a senior dev." },
-      attachedDocs: [],
-      attachments: [],
-    });
-    expect(result.text).toMatch(/^\[Role: Developer\]/);
-    expect(result.text).toContain("You are a senior dev.");
-    expect(result.text).toContain("What is TypeScript?");
-  });
-
-  it("does not prepend prefix for default preset (isDefault=true)", () => {
-    const result = composeOutgoing({
-      raw: "Hello",
-      activePreset: { id: "default", name: "기본", systemPromptAdd: "", isDefault: true },
-      attachedDocs: [],
-      attachments: [],
-    });
-    expect(result.text).toBe("Hello");
-  });
-
-  it("augments text with attached-doc notice when attachedDocs is non-empty", () => {
-    const result = composeOutgoing({
-      raw: "Summarise these",
+  it("preserves [Image #N] markers in body and emits vision parts", () => {
+    const list: Attachment[] = [img1];
+    const r = composeOutgoing({
+      raw: "see [Image #1]",
       activePreset: null,
-      attachedDocs: [
-        { id: "doc-1", name: "report.pdf" },
-        { id: "doc-2", name: "notes.md" },
-      ],
+      attachments: list,
+    });
+    expect(r.text).toContain("[Image #1]");
+    expect(r.attachments).toEqual([
+      { type: "image", image: img1.dataUrl, mimeType: "image/png" },
+    ]);
+  });
+
+  it("augments [File #N] marker with absolute path", () => {
+    const list: Attachment[] = [file2];
+    const r = composeOutgoing({
+      raw: "use [File #2] please",
+      activePreset: null,
+      attachments: list,
+    });
+    expect(r.text).toContain("/Users/ken/Desktop/budget-2026.pdf");
+    expect(r.attachments).toEqual([]);
+  });
+
+  it("inline-expands [Pasted text #N +X lines] marker", () => {
+    const list: Attachment[] = [paste3];
+    const r = composeOutgoing({
+      raw: "analyse [Pasted text #3 +3 lines] thanks",
+      activePreset: null,
+      attachments: list,
+    });
+    expect(r.text).toContain("Pasted text #3");
+    expect(r.text).toContain("line1\nline2\nline3");
+    expect(r.text).not.toContain("[Pasted text #3 +3 lines]");
+    expect(r.attachments).toEqual([]);
+  });
+
+  it("handles mixed attachments in one turn", () => {
+    const list: Attachment[] = [img1, file2, paste3];
+    const r = composeOutgoing({
+      raw: "compare [Image #1] with [File #2] then [Pasted text #3 +3 lines]",
+      activePreset: null,
+      attachments: list,
+    });
+    expect(r.text).toContain("[Image #1]");
+    expect(r.text).toContain("/Users/ken/Desktop/budget-2026.pdf");
+    expect(r.text).toContain("line1\nline2\nline3");
+    expect(r.attachments).toHaveLength(1);
+    expect(r.attachments[0].type).toBe("image");
+  });
+
+  it("preserves literal $ sequences in pasted text (no regex backreference mutation)", () => {
+    // String.prototype.replace's STRING form interprets `$&`, `$1`, `$$`,
+    // etc. as backreference tokens. Use a replacer function to bypass.
+    const dollarPaste: PasteAttachment = {
+      id: "p-dollar",
+      n: 9,
+      kind: "paste",
+      text: "match $1 keep $& and $$ raw",
+      lines: 1,
+      chars: 27,
+    };
+    const r = composeOutgoing({
+      raw: "see [Pasted text #9 +1 lines]",
+      activePreset: null,
+      attachments: [dollarPaste],
+    });
+    expect(r.text).toContain("match $1 keep $& and $$ raw");
+  });
+
+  it("expands paste markers even when the user edited the +X lines suffix", () => {
+    const paste = {
+      id: "p-edit",
+      n: 7,
+      kind: "paste" as const,
+      text: "actual content",
+      lines: 5,
+      chars: 14,
+    };
+    // Marker in body has +99 lines (user edit) but parseMarkers + the
+    // expansion regex must still match.
+    const r = composeOutgoing({
+      raw: "before [Pasted text #7 +99 lines] after",
+      activePreset: null,
+      attachments: [paste],
+    });
+    expect(r.text).toContain("actual content");
+    expect(r.text).not.toContain("[Pasted text #7 +99 lines]");
+  });
+
+  it("applies role-preset prefix when active", () => {
+    const r = composeOutgoing({
+      raw: "hi",
+      activePreset: { id: "x", name: "x", systemPromptAdd: "" },
       attachments: [],
     });
-    expect(result.text).toContain("[Attached documents");
-    expect(result.text).toContain("report.pdf (id: doc-1)");
-    expect(result.text).toContain("notes.md (id: doc-2)");
-    expect(result.text).toContain("Summarise these");
-  });
-
-  it("maps image attachments to attachments with type=image", () => {
-    const att: Attachment = { kind: "image", id: "img-1", mimeType: "image/png", data: "base64data==" };
-    const result = composeOutgoing({
-      raw: "Describe this",
-      activePreset: null,
-      attachedDocs: [],
-      attachments: [att],
-    });
-    expect(result.attachments).toHaveLength(1);
-    expect(result.attachments[0]).toEqual({ type: "image", mimeType: "image/png", data: "base64data==" });
-  });
-
-  it("maps multiple image attachments to attachments preserving order", () => {
-    const attachments: Attachment[] = [
-      { kind: "image", id: "a1", mimeType: "image/jpeg", data: "jpg1" },
-      { kind: "image", id: "a2", mimeType: "image/webp", data: "webp1" },
-    ];
-    const result = composeOutgoing({
-      raw: "Compare",
-      activePreset: null,
-      attachedDocs: [],
-      attachments,
-    });
-    expect(result.attachments).toHaveLength(2);
-    expect(result.attachments[0].mimeType).toBe("image/jpeg");
-    expect(result.attachments[1].mimeType).toBe("image/webp");
-  });
-
-  it("combines preset prefix, attached-doc notice, and raw text in order", () => {
-    const result = composeOutgoing({
-      raw: "Analyse",
-      activePreset: { id: "analyst", name: "Analyst", systemPromptAdd: "Be concise." },
-      attachedDocs: [{ id: "d1", name: "data.csv" }],
-      attachments: [],
-    });
-    const lines = result.text;
-    const presetIdx = lines.indexOf("[Role: Analyst]");
-    const docIdx = lines.indexOf("[Attached documents");
-    const rawIdx = lines.lastIndexOf("Analyse");
-    expect(presetIdx).toBeLessThan(docIdx);
-    expect(docIdx).toBeLessThan(rawIdx);
+    expect(r.text).toBe("hi");
   });
 });

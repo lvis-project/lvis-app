@@ -73,7 +73,10 @@ export function Sidebar(props: SidebarProps) {
   ];
 
   return (
-    <aside className="flex min-h-0 w-32 shrink-0 flex-col border-r bg-background px-3 py-4">
+    <aside
+      data-testid="sidebar"
+      className="flex min-h-0 w-32 shrink-0 flex-col border-r bg-background px-3 py-4"
+    >
       <div className="mb-4 px-2 text-xs font-semibold tracking-wide text-muted-foreground">
         메뉴
       </div>

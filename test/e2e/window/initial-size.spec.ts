@@ -14,9 +14,11 @@ import { test, expect } from "@playwright/test";
 import { _electron as electron, ElectronApplication } from "playwright";
 import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const DIST_MAIN = resolve(__dirname, "../../../dist/src/main.cjs");
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DIST_MAIN = resolve(HERE, "../../../dist/src/main.cjs");
 const WINDOW_STATE_PATH = resolve(homedir(), ".lvis", "window-state.json");
 
 test.describe("initial window size", () => {

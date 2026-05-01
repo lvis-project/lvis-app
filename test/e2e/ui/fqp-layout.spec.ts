@@ -1,5 +1,8 @@
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test, expect } from './fixtures';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * fqp-layout.spec.ts — FloatingQuestionPanel layout regression spec
@@ -24,7 +27,7 @@ import { test, expect } from './fixtures';
  */
 
 const SCREENSHOT_DIR = path.resolve(
-  __dirname,
+  HERE,
   '../../__screenshots__',
 );
 
