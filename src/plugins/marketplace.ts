@@ -6,7 +6,7 @@ import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePlugin
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
-import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
+import { assertMockMarketplaceAllowed, devLinkedEntryAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -63,6 +63,7 @@ type InstallOperationState = {
       bundleRefs: string[] | undefined;
       installedBy: "admin" | "user" | undefined;
       approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"];
+      _devLinked: boolean | undefined;
     }
   >;
 };
@@ -408,6 +409,9 @@ export class PluginMarketplaceService {
         existing.installedBy = actor === "it-admin" ? "admin" : "user";
         existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, activeBundleRootId, plugin.id);
         existing.approvedPluginAccess = plugin.pluginAccess;
+        // A marketplace install supersedes any prior dev-link. Clear the
+        // marker so dev-link-plugins.mjs does not clobber it on next boot.
+        delete existing._devLinked;
       } else {
         registry.plugins.push({
           id: plugin.id,
@@ -561,6 +565,7 @@ export class PluginMarketplaceService {
           existing.enabled = true;
           existing.installedBy = "user";
           existing.approvedPluginAccess = plugin.pluginAccess;
+          delete existing._devLinked;
         } else {
           registry.plugins.push({
             id: plugin.id,
@@ -624,6 +629,7 @@ export class PluginMarketplaceService {
           existing.enabled = true;
           existing.installedBy = existing.installedBy ?? "user";
           existing.bundleRefs = existing.bundleRefs ?? [];
+          delete existing._devLinked;
         } else {
           registry.plugins.push({
             id: pluginId,
@@ -753,12 +759,14 @@ export class PluginMarketplaceService {
           bundleRefs: entry.bundleRefs ? [...entry.bundleRefs] : undefined,
           installedBy: entry.installedBy,
           approvedPluginAccess: entry.approvedPluginAccess,
+          _devLinked: entry._devLinked,
         });
       }
       entry.enabled = true;
       entry.installedBy = actor === "it-admin" ? "admin" : entry.installedBy ?? "user";
       entry.bundleRefs = this.mergeBundleRefs(entry.bundleRefs, bundleRootId, pluginId);
       entry.approvedPluginAccess = approvedPluginAccess;
+      delete entry._devLinked;
     });
   }
 
@@ -786,6 +794,15 @@ export class PluginMarketplaceService {
         entry.bundleRefs = snapshot.bundleRefs;
         entry.installedBy = snapshot.installedBy;
         entry.approvedPluginAccess = snapshot.approvedPluginAccess;
+        // Restore _devLinked only if it was set AND dev-link entries are
+        // permitted in this build. In a packaged build devLinkedEntryAllowed()
+        // is false, so rollback never re-introduces a dev-link marker even if
+        // the pre-install snapshot captured one.
+        if (snapshot._devLinked === true && devLinkedEntryAllowed()) {
+          entry._devLinked = true;
+        } else {
+          delete entry._devLinked;
+        }
       }
       await writePluginRegistry(this.registryPath, registry);
     });
@@ -847,6 +864,29 @@ export class PluginMarketplaceService {
   }
 
   /**
+   * Shared post-install finalization called by both installArtifact and
+   * installLocal after the install dir is in place.
+   *
+   * Currently handles the receipt write only; registry update and entry-path
+   * assertion are planned for a future expansion (#402 follow-up). Having a
+   * single call site means receipt schema changes (e.g. adding a field) need
+   * one edit here rather than one per install branch.
+   */
+  private async finalizeInstall(
+    pluginId: string,
+    opts: {
+      version: string;
+      installSource: "marketplace" | "local-dev";
+      artifactSha256: string | null;
+      signerKeyId: string | null;
+      files: string[];
+      installedAt?: string;
+    },
+  ): Promise<void> {
+    await this.artifactStore.writeInstallReceipt(pluginId, opts);
+  }
+
+  /**
    * Phase 2-final install path — single source: download + verify + extract.
    *
    * The historical file:-spec / npm-install branch is gone. Production and
@@ -889,7 +929,7 @@ export class PluginMarketplaceService {
     } else {
       await this.assertInstalledManifestMatchesCatalog(plugin, version, manifestFile, pluginDir);
     }
-    await this.artifactStore.writeInstallReceipt(plugin.id, {
+    await this.finalizeInstall(plugin.id, {
       version,
       installSource: "marketplace",
       artifactSha256: verified.artifactSha256,
@@ -1144,20 +1184,11 @@ export class PluginMarketplaceService {
       });
 
       // Write an install receipt so the plugin runtime's integrity gate
-      // (snapshots.ts → verifyInstallReceipt) accepts the entry. Without a
-      // fresh receipt, load is rejected with either "install receipt
-      // missing or unreadable" (no prior install) or "receipt hash
-      // mismatch" (stale receipt from a prior marketplace install). The
-      // receipt deliberately covers only `plugin.json` + every file under
-      // `dist/` — matching what `installArtifact` records for marketplace
-      // installs. Runtime deps under `node_modules/` are NOT integrity-
-      // tracked; the compensating control is `isDevModeUnlocked()` (this
-      // entire path is dev-mode-only), and unifying receipt scope with
-      // installSource enum is tracked as a follow-up architecture task.
-      // signerKeyId / artifactSha256 use a `dev:local-install` sentinel
-      // because there is no signed artifact to validate against; replacing
-      // the sentinel with a first-class `installSource` field is a
-      // schema-v2 follow-up.
+      // (verifyInstallReceipt) accepts the entry. The receipt covers
+      // `plugin.json` + every file under `dist/` — matching what
+      // installArtifact records for marketplace installs. node_modules/ is
+      // NOT integrity-tracked; the compensating control is isDevModeUnlocked()
+      // (this entire path is dev-mode-only).
       const receiptFiles: string[] = ["plugin.json"];
       try {
         const distFiles = await listFilesRecursive(resolve(installDir, "dist"));
@@ -1173,7 +1204,7 @@ export class PluginMarketplaceService {
             : undefined;
         if (code !== "ENOENT") throw err;
       }
-      await this.artifactStore.writeInstallReceipt(pluginId, {
+      await this.finalizeInstall(pluginId, {
         version: manifestVersion,
         installSource: "local-dev",
         artifactSha256: null,
