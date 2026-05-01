@@ -69,6 +69,7 @@ describe("PluginRuntime — uiCallable suffix-blocking removed", () => {
       name: id,
       version: "1.0.0",
       description: "Test fixture.",
+      publisher: "Test fixture",
       entry: "entry.mjs",
       tools: [`${id}_get`, `${id}_delete`],
       ...manifestOverrides,
