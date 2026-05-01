@@ -37,6 +37,8 @@
  */
 
 import type { PowerMonitorLike } from "../main/idle-scheduler.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("idle-signaler");
 
 export type IdleSignalEvent = "idle-long-entry" | "idle-long-exit";
 
@@ -64,7 +66,7 @@ export interface RoutineIdleSignalerDeps {
   setIntervalImpl?: (cb: () => void, ms: number) => unknown;
   /** Test override for clearInterval. */
   clearIntervalImpl?: (handle: unknown) => void;
-  /** Logger hook (default console.log). */
+  /** Logger hook (default log.info). */
   logger?: (msg: string) => void;
   /** Kill switch override. Default reads DISABLE_ROUTINE_IDLE_SIGNALER env var. */
   disabled?: () => boolean;
@@ -119,7 +121,7 @@ export class RoutineIdleSignaler {
       deps.setIntervalImpl ?? ((cb, ms) => setInterval(cb, ms));
     this.clearIntervalImpl =
       deps.clearIntervalImpl ?? ((handle) => clearInterval(handle as NodeJS.Timeout));
-    this.logger = deps.logger ?? ((m) => console.log(m));
+    this.logger = deps.logger ?? ((m) => log.info(m));
     this.disabled = deps.disabled ?? (() => process.env.DISABLE_ROUTINE_IDLE_SIGNALER === "1");
   }
 

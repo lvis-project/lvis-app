@@ -19,6 +19,8 @@ import type {
   McpToolSchema,
   ValidationResult,
 } from "./types.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("mcp-governance");
 
 const DEFAULT_POLICY: McpGovernancePolicy = {
   version: "1.0",
@@ -48,7 +50,7 @@ export class McpGovernance {
 
   private loadPolicy(): McpGovernancePolicy {
     if (!existsSync(this.policyPath)) {
-      console.log("[mcp-governance] 정책 파일 없음 — deny-by-default 적용");
+      log.info("정책 파일 없음 — deny-by-default 적용");
       return DEFAULT_POLICY;
     }
     try {
@@ -57,16 +59,16 @@ export class McpGovernance {
 
       // 필수 필드 검증
       if (parsed.defaultPolicy !== "deny") {
-        console.warn("[mcp-governance] defaultPolicy는 반드시 'deny'여야 합니다. 강제 적용.");
+        log.warn("defaultPolicy는 반드시 'deny'여야 합니다. 강제 적용.");
         parsed.defaultPolicy = "deny";
       }
       if (!parsed.globalRules) parsed.globalRules = DEFAULT_POLICY.globalRules;
       if (!Array.isArray(parsed.servers)) parsed.servers = [];
 
-      console.log(`[mcp-governance] 정책 로드: ${parsed.servers.length}개 서버 규칙`);
+      log.info(`정책 로드: ${parsed.servers.length}개 서버 규칙`);
       return parsed;
     } catch (err) {
-      console.error("[mcp-governance] 정책 파일 파싱 실패 — deny-by-default 적용:", err);
+      log.error("정책 파일 파싱 실패 — deny-by-default 적용: %s", err);
       return DEFAULT_POLICY;
     }
   }
@@ -85,9 +87,9 @@ export class McpGovernance {
         .map((s) => s.id);
       this.policy = updated;
       if (revokedIds.length > 0) {
-        console.warn(`[mcp-governance] 취소된 서버 감지: ${revokedIds.join(", ")}`);
+        log.warn(`취소된 서버 감지: ${revokedIds.join(", ")}`);
         Promise.resolve(onRevoked?.(revokedIds)).catch((err) => {
-          console.error("[mcp-governance] revoke callback 실패:", err);
+          log.error("revoke callback 실패: %s", err);
         });
       }
     }, interval);

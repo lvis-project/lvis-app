@@ -15,6 +15,8 @@ import { getBundledPublicKeys } from "./publisher-keys.js";
 import { PluginArtifactStore } from "./plugin-artifact-store.js";
 import { listFilesRecursive } from "./plugin-install-receipt.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("marketplace");
 
 export type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 
@@ -243,7 +245,7 @@ export class PluginMarketplaceService {
         // intentionally: any cached data is better than a hard failure offline).
         const stale = useCache ? await getCachedCatalog(cacheBase, { allowStale: true }) : null;
         if (stale) {
-          console.warn("[marketplace] network fetch failed, using stale cache:", (err as Error).message);
+          log.warn("network fetch failed, using stale cache: %s", (err as Error).message);
           catalogPlugins = stale;
         } else {
           throw err;
@@ -439,8 +441,8 @@ export class PluginMarketplaceService {
     try {
       plugins = await this.fetcher.listPlugins();
     } catch (err) {
-      console.warn(
-        `[marketplace] ensureManagedInstalled: catalog unreachable — skipping: ${(err as Error).message}`,
+      log.warn(
+        `ensureManagedInstalled: catalog unreachable — skipping: ${(err as Error).message}`,
       );
       return result;
     }
@@ -460,7 +462,7 @@ export class PluginMarketplaceService {
       } catch (err) {
         const msg = (err as Error).message;
         result.failed.push({ id: plugin.id, error: msg });
-        console.warn(`[marketplace] managed plugin '${plugin.id}' install failed: ${msg}`);
+        log.warn(`managed plugin '${plugin.id}' install failed: ${msg}`);
       }
     }
     return result;
@@ -1003,8 +1005,8 @@ export class PluginMarketplaceService {
         await readFile(manifestPath, "utf-8");
         installedIds.add(entry.id);
       } catch {
-        console.warn(
-          `[marketplace] stale registry entry ignored during managed bootstrap: ${entry.id}`,
+        log.warn(
+          `stale registry entry ignored during managed bootstrap: ${entry.id}`,
         );
       }
     }

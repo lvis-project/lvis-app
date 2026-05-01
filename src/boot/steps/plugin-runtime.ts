@@ -51,6 +51,8 @@ import {
   registerPluginTools,
   runManifestStartupTools,
 } from "../plugins.js";
+import { createLogger } from "../../lib/logger.js";
+const log = createLogger("lvis");
 
 /**
  * In-memory dedupe for `hostApi.triggerConversation()`. A brain plugin can set
@@ -541,7 +543,7 @@ export async function initPluginRuntime(
               }),
             ]);
           } catch (err) {
-            console.warn(`[plugin:${pluginId}] shutdown handler error:`, (err as Error).message);
+            log.warn(`shutdown handler error: %s`, (err as Error).message);
           } finally {
             if (timer) clearTimeout(timer);
           }
@@ -597,7 +599,7 @@ export async function initPluginRuntime(
     // specific names lets operators distinguish a stale launcher
     // (`LVIS_PLUGINS_DIR`) from an active dev tamper (`LVIS_DEV=1`).
     const names = tamperedVarsAtBoot();
-    console.error(`[lvis] LVIS_DEV* ignored in packaged build: ${names.join(", ")}`);
+    log.error(`LVIS_DEV* ignored in packaged build: ${names.join(", ")}`);
   }
 
   // PR 3c: ms-graph 자체 인증으로 이전 후 host 측 MS HostApi 메서드 / capability gate 제거.
@@ -716,7 +718,7 @@ export async function initPluginRuntime(
         keywordEngine.registerKeywords(
           keywords.map((k) => ({ ...k, pluginId })),
         );
-        console.log(`[lvis] plugin:${pluginId} registered ${keywords.length} keywords`);
+        log.info(`plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
         const manifest = pluginRuntime?.getPluginManifest(pluginId);
@@ -731,8 +733,8 @@ export async function initPluginRuntime(
               input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} actual=${manifestCapabilities.join("|")}`,
             });
           } catch { /* audit must not break host */ }
-          console.warn(
-            `[lvis] plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${requiredCap}'`,
+          log.warn(
+            `plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${requiredCap}'`,
           );
           return;
         }
@@ -756,7 +758,7 @@ export async function initPluginRuntime(
           priority: task.priority ?? "medium",
           status: "pending",
         });
-        console.log(`[lvis] plugin:${pluginId} created task: "${task.title.slice(0, 50)}"`);
+        log.info(`plugin:${pluginId} created task: "${task.title.slice(0, 50)}"`);
       },
       getSecret: (key) => {
         return settingsService.getSecret(key);
@@ -782,7 +784,7 @@ export async function initPluginRuntime(
             output: data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
           });
         } catch (err) {
-          console.warn(`[plugin:${pluginId}] logEvent failed:`, (err as Error).message);
+          log.warn(`logEvent failed: %s`, (err as Error).message);
         }
       },
       onShutdown: (handler) => {
@@ -819,8 +821,8 @@ export async function initPluginRuntime(
           );
         }
 
-        console.log(
-          `[lvis] plugin:${pluginId} openAuthWindow url=${safeUrlForLog} cookieHostCount=${cookieHostCount}`,
+        log.info(
+          `plugin:${pluginId} openAuthWindow url=${safeUrlForLog} cookieHostCount=${cookieHostCount}`,
         );
         try {
           bootAuditLogger.log({
@@ -924,7 +926,7 @@ export async function initPluginRuntime(
   });
 
   await pluginRuntime.startAll();
-  console.log("[lvis] boot: plugins loaded:", pluginRuntime.listToolNames());
+  log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
 
   // 선언형 startupTools 자동 실행
   runManifestStartupTools(pluginRuntime);
@@ -939,7 +941,7 @@ export async function initPluginRuntime(
       const manifest = pluginRuntime.getPluginManifest(pluginId);
       if (!manifest) return;
       registerPluginTools(pluginRuntime, toolRegistry);
-      console.log(`[lvis] plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`);
+      log.info(`plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`);
     },
   });
   app.prependOnceListener("before-quit", () => { pluginDevWatcher.stop(); });

@@ -21,6 +21,8 @@ import {
   type LLMVendor,
   type LLMVendorSettings,
 } from "../shared/llm-vendor-defaults.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("settings");
 
 export type { LLMVendor, LLMVendorSettings };
 export { LLM_VENDORS };
@@ -347,7 +349,7 @@ export class SettingsService {
         fchmodSync(fd, 0o600);
       }
     } catch (err) {
-      console.warn("[settings] secrets mode migration failed:", (err as Error).message);
+      log.warn("secrets mode migration failed: %s", (err as Error).message);
     } finally {
       if (fd !== null) {
         try { closeSync(fd); } catch { /* ignore */ }
@@ -462,7 +464,7 @@ export class SettingsService {
       // keychain entry doesn't masquerade as "no value set". Error semantics
       // are preserved (still returns null) — only the diagnostic surface
       // is added.
-      console.warn(`[settings] decryptString failed for key=${key}:`, (err as Error).message);
+      log.warn(`decryptString failed for key=${key}: %s`, (err as Error).message);
       return null;
     }
   }
@@ -649,8 +651,8 @@ function sanitizeStoredPluginConfigs(input: unknown): Record<string, PluginConfi
       const safePluginId = sanitizePluginConfigPluginId(pluginId);
       out[safePluginId] = sanitizePluginConfig(config);
     } catch (err) {
-      console.warn(
-        "[settings] dropping invalid stored plugin config:",
+      log.warn(
+        "dropping invalid stored plugin config: %s",
         (err as Error).message,
       );
     }

@@ -29,6 +29,8 @@ import type { TelemetryService } from "../main/telemetry.js";
 import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { TaskSourceRegistry } from "../plugins/task-source-registry.js";
 import type { NotificationService } from "../main/notification-service.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 export type EventHandler = (data: unknown) => void;
 
@@ -38,7 +40,7 @@ export function emitEvent(type: string, data?: unknown): void {
   const handlers = eventHandlers.get(type);
   if (handlers) {
     for (const handler of handlers) {
-      try { handler(data); } catch (err) { console.error(`[lvis] event handler error (${type}):`, err); }
+      try { handler(data); } catch (err) { log.error(`event handler error (${type}): %s`, err); }
     }
   }
 }

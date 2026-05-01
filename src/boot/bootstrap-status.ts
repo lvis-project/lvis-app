@@ -4,7 +4,7 @@
  * The managed plugin bootstrap (`ensureManagedInstalled`) runs once at boot
  * and is graceful by design: marketplace unreachable, per-plugin install
  * failures, or signature rejections never throw out of `boot()`. Pre-Phase
- * 2d those outcomes were silent — only `console.warn` lines, nothing the
+ * 2d those outcomes were silent — only `log.warn` lines, nothing the
  * user could see — so a first-launch with the marketplace server down or
  * misconfigured looked like the app was working but actually had zero
  * managed plugins loaded.
@@ -22,6 +22,8 @@
  */
 
 import type { BrowserWindow } from "electron";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("bootstrap-status");
 
 export interface BootstrapStatusStart {
   phase: "start";

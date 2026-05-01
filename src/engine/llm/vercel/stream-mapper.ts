@@ -24,6 +24,8 @@
  */
 import type { StreamEvent, ThinkingBlock } from "../types.js";
 import { extractSignatureSafely } from "./signature-shim.js";
+import { createLogger } from "../../../lib/logger.js";
+const log = createLogger("stream-mapper");
 
 type AnyPart = Record<string, unknown> & { type: string };
 
@@ -54,8 +56,8 @@ export async function* fullStreamToStreamEvent(
         const id = (part as { id?: string }).id ?? "";
         if (id && reasoningBuffers.has(id)) {
           // eslint-disable-next-line no-console
-          console.warn(
-            `[stream-mapper] duplicate reasoning-start id ${id} — deltas will merge`,
+          log.warn(
+            `duplicate reasoning-start id ${id} — deltas will merge`,
           );
         } else if (id) {
           reasoningBuffers.set(id, "");
@@ -75,8 +77,8 @@ export async function* fullStreamToStreamEvent(
         const id = (part as { id?: string }).id ?? "";
         if (!reasoningBuffers.has(id)) {
           // eslint-disable-next-line no-console
-          console.warn(
-            `[stream-mapper] reasoning-end for unknown id ${id}`,
+          log.warn(
+            `reasoning-end for unknown id ${id}`,
           );
           break;
         }

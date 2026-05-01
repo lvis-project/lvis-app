@@ -42,6 +42,8 @@
 
 import * as os from "node:os";
 import { clearIntervalSafe, clearTimeoutSafe } from "../lib/clear-timer.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("idle-scheduler");
 
 // ─── Types ──────────────────────────────────────────
 
@@ -134,7 +136,7 @@ export interface IdleSchedulerOptions {
   throttledCooldownMs?: number; // default 2000
   resumeDelayMs?: number; // default 90000
   tickIntervalMs?: number; // default 1000
-  /** 로그 기록 (기본: console.log) */
+  /** 로그 기록 (기본: log.info) */
   logger?: (message: string) => void;
 }
 
@@ -194,7 +196,7 @@ export class IdleSchedulerService {
     this.throttledCooldownMs = opts.throttledCooldownMs ?? 2000;
     this.resumeDelayMs = opts.resumeDelayMs ?? 90_000;
     this.tickIntervalMs = opts.tickIntervalMs ?? 1000;
-    this.logger = opts.logger ?? ((msg) => console.log(msg));
+    this.logger = opts.logger ?? ((msg) => log.info(msg));
     this.prevCpuTimes = os.cpus();
   }
 

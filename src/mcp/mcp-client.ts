@@ -45,6 +45,8 @@ import {
   fetchPublicHttpResponse,
   validateHttpUrl,
 } from "../core/network-guard.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("mcp-client");
 
 // ─── JSON-RPC 2.0 Types ──────────────────────────────
 
@@ -209,10 +211,9 @@ export class McpClient {
         clientInfo: { name: "lvis-app", version: "0.1.0" },
       }, HANDSHAKE_TIMEOUT_MS);
 
-      console.log(
-        `[mcp-client] ${this.config.id} 초기화 완료:`,
-        `protocol=${initResult.protocolVersion}`,
-        `server=${initResult.serverInfo.name}@${initResult.serverInfo.version}`,
+      log.info(
+        { protocol: initResult.protocolVersion, server: `${initResult.serverInfo.name}@${initResult.serverInfo.version}` },
+        `${this.config.id} 초기화 완료`,
       );
 
       // 핸드셰이크: initialized notification
@@ -245,8 +246,8 @@ export class McpClient {
       // Health check 시작
       this.startHealthCheck();
 
-      console.log(
-        `[mcp-client] ${this.config.id} 연결 완료: ${this.state.registeredTools.length}개 도구 등록`,
+      log.info(
+        `${this.config.id} 연결 완료: ${this.state.registeredTools.length}개 도구 등록`,
       );
     } catch (err) {
       this.state.status = "error";
@@ -272,7 +273,7 @@ export class McpClient {
 
     this.state.status = "disconnected";
     this.state.lastError = undefined;
-    console.log(`[mcp-client] ${this.config.id} 연결 해제 완료`);
+    log.info(`${this.config.id} 연결 해제 완료`);
   }
 
   // ─── Tool Execution ─────────────────────────────────
@@ -572,7 +573,7 @@ export class McpClient {
   private checkHealth(): void {
     const transport = this.transport;
     if (!transport || !transport.isAlive()) {
-      console.warn(`[mcp-client] ${this.config.id} health check 실패: transport 비활성`);
+      log.warn(`${this.config.id} health check 실패: transport 비활성`);
       this.handleTransportClose("health check: transport 비활성");
       return;
     }
@@ -687,26 +688,26 @@ class StdioTransport implements McpTransport {
       try {
         this.handleStdout(chunk);
       } catch (err) {
-        console.error(`[mcp-client] ${this.config.id} stdout 처리 오류:`, err);
+        log.error(`${this.config.id} stdout 처리 오류: %s`, err);
       }
     });
 
     this.process.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf-8").trim();
       if (text) {
-        console.warn(`[mcp-client] ${this.config.id} stderr:`, text);
+        log.warn(`${this.config.id} stderr: %s`, text);
       }
     });
 
     this.process.on("exit", (code, signal) => {
-      console.warn(`[mcp-client] ${this.config.id} 프로세스 종료: code=${code}, signal=${signal}`);
+      log.warn(`${this.config.id} 프로세스 종료: code=${code}, signal=${signal}`);
       if (!this.closedExternally) {
         this.closeHandler?.("프로세스가 예기치 않게 종료되었습니다.");
       }
     });
 
     this.process.on("error", (err) => {
-      console.error(`[mcp-client] ${this.config.id} 프로세스 오류:`, err.message);
+      log.error(`${this.config.id} 프로세스 오류: %s`, err.message);
       this.closeHandler?.(`프로세스 오류: ${err.message}`);
     });
   }
@@ -749,7 +750,7 @@ class StdioTransport implements McpTransport {
         const parsed = JSON.parse(messageStr) as JsonRpcResponse;
         this.messageHandler?.(parsed);
       } catch {
-        console.warn(`[mcp-client] ${this.config.id} JSON 파싱 실패:`, messageStr.slice(0, 200));
+        log.warn(`${this.config.id} JSON 파싱 실패: %s`, messageStr.slice(0, 200));
       }
     }
   }
@@ -933,7 +934,7 @@ class HttpTransport implements McpTransport {
       // Fire-and-forget stream reader — messages arrive asynchronously
       // through the normal `onMessage` path, matching stdio semantics.
       void this.consumeSse(response, controller).catch((err) => {
-        console.warn(`[mcp-client] ${this.config.id} SSE 읽기 오류:`, err);
+        log.warn(`${this.config.id} SSE 읽기 오류: %s`, err);
         // A failed SSE stream means the transport is effectively dead;
         // pending requests would otherwise only time out individually.
         // Signal the client so it can reject everything and transition to
@@ -1043,7 +1044,7 @@ class HttpTransport implements McpTransport {
       const parsed = JSON.parse(payload) as JsonRpcResponse;
       this.messageHandler?.(parsed);
     } catch {
-      console.warn(`[mcp-client] ${this.config.id} SSE JSON 파싱 실패:`, payload.slice(0, 200));
+      log.warn(`${this.config.id} SSE JSON 파싱 실패: %s`, payload.slice(0, 200));
     }
   }
 }

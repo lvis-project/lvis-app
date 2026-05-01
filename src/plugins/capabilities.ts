@@ -1,3 +1,6 @@
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("capabilities");
+
 /**
  * Phase 5 — Capability policy + event namespace allowlist.
  *
@@ -155,7 +158,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
 /**
  * Map of event namespace prefix → capability required to EMIT events in that
  * namespace. Plugins without the capability have their emissions dropped
- * (console.warn + no fan-out).
+ * (log.warn + no fan-out).
  *
  * `task` namespace is intentionally absent — `task.*` events are emitted
  * only by the host's `TaskDeadlinePoller` (`src/main/task-deadline-poller.ts`)

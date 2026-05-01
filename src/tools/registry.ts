@@ -18,6 +18,8 @@
  */
 import type { Tool } from "./base.js";
 import type { DenyRule } from "./types.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("tool-registry");
 
 /**
  * §6.4 — observer fired whenever a deprecated tool is resolved via
@@ -245,7 +247,7 @@ export class ToolRegistry {
           // A plugin tool without a pluginId is a registration bug; drop it
           // rather than expose a misconfigured tool as if it were a builtin.
           if (!tool.pluginId) {
-            console.warn(`[tool-registry] plugin tool '${tool.name}' missing pluginId — skipped in scope filter`);
+            log.warn(`plugin tool '${tool.name}' missing pluginId — skipped in scope filter`);
             return false;
           }
           return active.has(tool.pluginId);
@@ -264,7 +266,7 @@ export class ToolRegistry {
             input_schema: tool.toJsonSchema(),
           };
         } catch (err) {
-          console.warn(`[tool-registry] toJsonSchema failed for '${tool.name}':`, (err as Error).message);
+          log.warn(`toJsonSchema failed for '${tool.name}': %s`, (err as Error).message);
           return null;
         }
       })
@@ -324,15 +326,15 @@ export class ToolRegistry {
 
   private emitDeprecation(event: DeprecationEvent): void {
     const redirect = event.replacedBy ? ` → ${event.replacedBy}` : "";
-    console.warn(
-      `[tool-registry] deprecated tool call: ${event.requested}@${event.resolved.version} (deprecatedSince=${event.deprecatedSince})${redirect}`,
+    log.warn(
+      `deprecated tool call: ${event.requested}@${event.resolved.version} (deprecatedSince=${event.deprecatedSince})${redirect}`,
     );
     if (this.deprecationHandler) {
       try {
         this.deprecationHandler(event);
       } catch (err) {
-        console.warn(
-          `[tool-registry] deprecation handler threw:`,
+        log.warn(
+          `deprecation handler threw: %s`,
           (err as Error).message,
         );
       }

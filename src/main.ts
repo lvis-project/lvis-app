@@ -20,6 +20,8 @@ import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { deliverRoutineResult } from "./routines/routine-delivery.js";
 import { WindowManager } from "./main/window-manager.js";
+import { createLogger } from "./lib/logger.js";
+const log = createLogger("lvis");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -83,7 +85,7 @@ async function injectCorporateCa() {
   try {
     const result = await ensureCorporateCa();
     if (!result.pem) {
-      console.warn("[lvis] corporate CA not found — 해외망 사용 중이거나 MDM 미배포. TLS 검증 기본값 유지.");
+      log.warn("corporate CA not found — 해외망 사용 중이거나 MDM 미배포. TLS 검증 기본값 유지.");
       return;
     }
     const ca = [...tls.rootCertificates, result.pem];
@@ -92,10 +94,10 @@ async function injectCorporateCa() {
     // 2) https.globalAgent (legacy https.get / https.request)
     (https.globalAgent.options as Record<string, unknown>).ca = ca;
     // 3) tls.setDefaultCACertificates — Node 24 기준 미존재, 향후 확장 포인트
-    console.log(`[lvis] corporate CA injected: source=${result.source} certs=${result.certCount} path=${result.path}`);
+    log.info(`corporate CA injected: source=${result.source} certs=${result.certCount} path=${result.path}`);
   } catch (e) {
     // 주입 실패해도 앱은 계속 실행 (해외망에서는 기본 CA로 충분)
-    console.error("[lvis] corporate CA 주입 실패 (non-fatal):", (e as Error).message);
+    log.error("corporate CA 주입 실패 (non-fatal): %s", (e as Error).message);
   }
 }
 await injectCorporateCa();
@@ -136,13 +138,15 @@ function parseLvisInstallUri(url: string): { slug: string } | null {
  * The `app.isPackaged` boundary alone is the right level for log-only
  * output (no trust decisions ride on these calls).
  */
-const lvisDevLog: typeof console.log = (...args) => {
+const lvisDevLog = (msg: string, obj?: object) => {
   if (app.isPackaged) return;
-  console.log(...args);
+  if (obj !== undefined) log.info(obj, msg);
+  else log.info(msg);
 };
-const lvisDevWarn: typeof console.warn = (...args) => {
+const lvisDevWarn = (msg: string, obj?: object) => {
   if (app.isPackaged) return;
-  console.warn(...args);
+  if (obj !== undefined) log.warn(obj, msg);
+  else log.warn(msg);
 };
 
 async function handleLvisUri(url: string) {
@@ -167,14 +171,14 @@ async function handleLvisUri(url: string) {
     try {
       if (mainWindow) await (mainWindow as BrowserWindow).loadFile(resolve(__dirname, "index.html"));
     } catch (err) {
-      console.error("[lvis] failed to load index.html for lvis:// URI", err);
+      log.error({ err }, "failed to load index.html for lvis:// URI");
     }
   }
   mainWindow?.focus();
   const win = mainWindow;
   if (!win) {
     // createWindow() failed or was destroyed — abort rather than install silently.
-    console.warn("[lvis] handleLvisUri: no window available, aborting install");
+    log.warn("handleLvisUri: no window available, aborting install");
     return;
   }
   lvisDevLog("[lvis] handleLvisUri: showing confirmation dialog", { slug: params.slug });
@@ -216,12 +220,12 @@ async function handleLvisUri(url: string) {
         await services!.pluginRuntime.addPlugin(params.slug);
         services!.refreshPluginNotifications?.();
       } catch (err) {
-        console.error("[lvis] post-install steps failed for lvis:// install", err);
+        log.error({ err }, "post-install steps failed for lvis:// install");
       }
       mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: true });
     })
     .catch((err: Error) => {
-      console.error("[lvis] lvis:// install failed", { slug: params.slug, error: err.message, stack: err.stack });
+      log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// install failed");
       mainWindow?.webContents.send("lvis:plugins:install-result", { slug: params.slug, success: false, error: err.message });
     });
 }
@@ -269,9 +273,9 @@ async function loadMainInterface(win: BrowserWindow, reason: string) {
   try {
     await win.loadFile(resolve(__dirname, "index.html"));
     pendingRendererReload = false;
-    console.log("[lvis] main interface loaded", { reason });
+    log.info({ reason }, "main interface loaded");
   } catch (err) {
-    console.error("[lvis] failed to load index.html", { reason, err });
+    log.error({ reason, err }, "failed to load index.html");
   }
 }
 
@@ -351,7 +355,7 @@ function createWindow() {
   // it distorts the runtime viewport and causes misleading layout regressions.
 
   win.once("ready-to-show", () => {
-    console.log("[lvis] window ready-to-show");
+    log.info("window ready-to-show");
     win.show();
     win.focus();
   });
@@ -359,16 +363,16 @@ function createWindow() {
     if (mainWindow === win) mainWindow = null;
   });
   win.webContents.on("did-fail-load", (_e, code, desc, url) => {
-    console.error("[lvis] window failed to load", { code, desc, url });
+    log.error({ code, desc, url }, "window failed to load");
   });
   // Recovery: if the renderer crashes (e.g. GPU-lost after GPU utility failure),
   // reload index.html. IPC handlers are registered on the main-process side and
   // survive a renderer restart — the reloaded renderer reconnects automatically.
   win.webContents.on("render-process-gone", (_e, details) => {
-    console.error("[lvis] main window renderer process gone", details);
+    log.error({ details }, "main window renderer process gone");
     if (!rendererReloadReady) {
       pendingRendererReload = true;
-      console.warn("[lvis] renderer reload deferred until bootstrap + IPC registration complete");
+      log.warn("renderer reload deferred until bootstrap + IPC registration complete");
       return;
     }
     const now = Date.now();
@@ -376,7 +380,7 @@ function createWindow() {
       lastRendererReloadAt = now;
       void loadMainInterface(win, "render-process-gone");
     } else if (!win.isDestroyed()) {
-      console.warn("[lvis] render-process-gone reload suppressed to avoid crash loop");
+      log.warn("render-process-gone reload suppressed to avoid crash loop");
     }
   });
 
@@ -389,16 +393,16 @@ function createWindow() {
 
       if (allowedProtocols.has(parsedUrl.protocol)) {
         void shell.openExternal(parsedUrl.toString()).catch((err) => {
-          console.error("[lvis] failed to open external URL", { url: parsedUrl.toString(), err });
+          log.error({ url: parsedUrl.toString(), err }, "failed to open external URL");
         });
       } else {
-        console.warn("[lvis] blocked external URL with disallowed protocol", {
+        log.warn({
           url,
           protocol: parsedUrl.protocol,
-        });
+        }, "blocked external URL with disallowed protocol");
       }
     } catch (err) {
-      console.warn("[lvis] blocked invalid external URL", { url, err });
+      log.warn({ url, err }, "blocked invalid external URL");
     }
     return { action: "deny" };
   });
@@ -414,7 +418,7 @@ function createWindow() {
   // IPC 핸들러 등록 후 수행.
   void win
     .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(BOOTSTRAP_SPLASH)}`)
-    .catch((err) => console.error("[lvis] splash load failed", err));
+    .catch((err) => log.error("splash load failed", err));
 }
 
 async function main() {
@@ -501,7 +505,7 @@ const _protocolRegistered = app.isPackaged
       }),
     );
 if (!_protocolRegistered) {
-  console.warn("[main] setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment");
+  log.warn("setAsDefaultProtocolClient('lvis') failed — deep links may not work in this environment");
 }
 
 // macOS: URI delivered via open-url event (register before whenReady to avoid missing cold-start)
@@ -586,13 +590,13 @@ app.on("web-contents-created", (_event, contents) => {
 });
 
 app.on("child-process-gone", (_event, details) => {
-  console.error("[lvis] child process gone", {
+  log.error({
     type: details.type,
     reason: details.reason,
     exitCode: details.exitCode,
     serviceName: details.serviceName ?? "",
     name: details.name ?? "",
-  });
+  }, "child process gone");
 });
 
 app.on("window-all-closed", () => {
@@ -655,12 +659,12 @@ app.on("before-quit", (event) => {
               });
             } catch (e) {
               const message = e instanceof Error ? e.message : String(e);
-              console.warn("[lvis] before-quit: shutdown routine failed:", message);
+              log.warn("before-quit: shutdown routine failed: %s", message);
               notifyRoutineFailed(mainWindow, { routineId: "shutdown", trigger: "shutdown" }, message);
             }
           }
         } catch (e) {
-          console.warn("[lvis] before-quit: shutdown routine setup failed:", e instanceof Error ? e.message : String(e));
+          log.warn("before-quit: shutdown routine setup failed: %s", e instanceof Error ? e.message : String(e));
         }
       }
       await svc.shutdown?.();
@@ -676,7 +680,7 @@ app.on("before-quit", (event) => {
 app.whenReady().then(() => {
   installHtmlPreviewPartitionBlock();
   void main().catch((error) => {
-    console.error("[lvis] bootstrap failed", error);
+    log.error("bootstrap failed", error);
     app.quit();
   });
 });

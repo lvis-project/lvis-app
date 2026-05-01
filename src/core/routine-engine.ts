@@ -1,5 +1,7 @@
 import type { ConversationLoop } from "../engine/conversation-loop.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("routine-engine");
 
 // ─── Core Routine Types ───────────────────────────────────────────────────────
 
@@ -65,7 +67,7 @@ export class RoutineEngine {
         });
       } catch (err) {
         // Non-fatal — routine result still returns even if metadata persist fails.
-        console.warn("[routine-engine] saveSessionMetadata failed:", err instanceof Error ? err.message : String(err));
+        log.warn("saveSessionMetadata failed: %s", err instanceof Error ? err.message : String(err));
       }
     }
 

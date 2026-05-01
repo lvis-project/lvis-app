@@ -19,6 +19,8 @@ import * as AjvModule from "ajv";
 import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import type { PluginConfigSchema, PluginConfigSchemaProperty } from "./types.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("plugin-config-schema");
 
 interface AjvCtor {
   new (opts?: unknown): {
@@ -101,8 +103,8 @@ export function compileConfigSchemaValidator(
     return ajv.compile(wrapper);
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn(
-      "[plugin-config-schema] AJV compile failed — falling back to permissive sanitizer:",
+    log.warn(
+      "AJV compile failed — falling back to permissive sanitizer: %s",
       (err as Error).message,
     );
     return null;
