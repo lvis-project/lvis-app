@@ -22,6 +22,8 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     onSearchToggle: vi.fn(),
     onOpenSettings: vi.fn(),
     onOpenCommand: vi.fn(),
+    onOpenGlobalSearch: vi.fn(),
+    onOpenStarredView: vi.fn(),
     ...overrides,
   };
 }
@@ -39,7 +41,7 @@ async function openHamburger() {
   const hamburger = screen.getByTitle("더 많은 메뉴");
   fireEvent.pointerDown(hamburger);
   // Wait for dropdown items to appear (rendered into document.body portal)
-  await waitFor(() => expect(screen.queryByText("대화 검색")).toBeTruthy());
+  await waitFor(() => expect(screen.queryByText("설정")).toBeTruthy());
 }
 
 describe("MainToolbar", () => {
@@ -58,12 +60,25 @@ describe("MainToolbar", () => {
     expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onSearchToggle when 대화 검색 menu item clicked", async () => {
-    const onSearchToggle = vi.fn();
-    renderWithProvider(defaultProps({ onSearchToggle }));
+  it("calls onOpenGlobalSearch when global search button clicked", () => {
+    const onOpenGlobalSearch = vi.fn();
+    renderWithProvider(defaultProps({ onOpenGlobalSearch }));
+    fireEvent.click(screen.getByTitle("전체 검색 (메모리·세션·즐겨찾기)"));
+    expect(onOpenGlobalSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it("hamburger does not contain 대화 검색 item (moved to InputActionBar)", async () => {
+    renderWithProvider(defaultProps());
     await openHamburger();
-    fireEvent.click(screen.getByText("대화 검색"));
-    expect(onSearchToggle).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("대화 검색")).toBeNull();
+  });
+
+  it("calls onOpenStarredView when 즐겨찾기 보기 menu item clicked", async () => {
+    const onOpenStarredView = vi.fn();
+    renderWithProvider(defaultProps({ onOpenStarredView }));
+    await openHamburger();
+    fireEvent.click(screen.getByText("즐겨찾기 보기"));
+    expect(onOpenStarredView).toHaveBeenCalledTimes(1);
   });
 
   it("calls onOpenSettings when 설정 menu item clicked", async () => {

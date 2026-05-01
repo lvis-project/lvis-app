@@ -1,8 +1,7 @@
-import { Download, Menu, Plus, Star } from "lucide-react";
+import { Command as CommandIcon, Download, KeyRound, Menu, Plus, Search, Star } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
-import { Command as CommandIcon, KeyRound, Search } from "lucide-react";
 
 export interface MainToolbarProps {
   streaming: boolean;
@@ -21,6 +20,8 @@ export interface MainToolbarProps {
   onSearchToggle: () => void;
   onOpenSettings: () => void;
   onOpenCommand: () => void;
+  onOpenGlobalSearch: () => void;
+  onOpenStarredView: () => void;
 }
 
 export function MainToolbar({
@@ -40,6 +41,8 @@ export function MainToolbar({
   onSearchToggle,
   onOpenSettings,
   onOpenCommand,
+  onOpenGlobalSearch,
+  onOpenStarredView,
 }: MainToolbarProps) {
   return (
     <div className="border-b bg-card px-3 py-2">
@@ -62,6 +65,16 @@ export function MainToolbar({
           <Plus className="h-3.5 w-3.5" />새 대화
         </Button>
 
+        {/* ── Global search — opens GlobalSearchDialog ─────────────────── */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onOpenGlobalSearch} title="전체 검색 (메모리·세션·즐겨찾기)">
+              <Search className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>전체 검색 (메모리·세션·즐겨찾기)</TooltipContent>
+        </Tooltip>
+
         {/* ── Hamburger — wraps infrequent actions ────────────────────── */}
         <DropdownMenu
           onOpenChange={(open) => {
@@ -77,13 +90,6 @@ export function MainToolbar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-[280px]">
-            {/* ── Search ── */}
-            <DropdownMenuItem onClick={onSearchToggle}>
-              <Search className="mr-2 h-3.5 w-3.5" />
-              <span>대화 검색</span>
-              <span className="ml-auto text-[10px] text-muted-foreground">Ctrl/Cmd+F</span>
-            </DropdownMenuItem>
-
             {/* ── Settings ── */}
             <DropdownMenuItem onClick={onOpenSettings}>
               <KeyRound className="mr-2 h-3.5 w-3.5" />
@@ -99,6 +105,12 @@ export function MainToolbar({
             <DropdownMenuItem onClick={() => void onToggleCurrentSessionStar()}>
               <Star className={`mr-2 h-3.5 w-3.5 ${isCurrentSessionStarred ? "fill-yellow-400 text-yellow-400" : ""}`} />
               <span>{isCurrentSessionStarred ? "현재 세션 즐겨찾기 해제" : "현재 세션 즐겨찾기"}</span>
+            </DropdownMenuItem>
+
+            {/* ── Starred view ── */}
+            <DropdownMenuItem onClick={onOpenStarredView}>
+              <Star className="mr-2 h-3.5 w-3.5" />
+              <span>즐겨찾기 보기</span>
             </DropdownMenuItem>
 
             {/* ── Export submenu ── */}
