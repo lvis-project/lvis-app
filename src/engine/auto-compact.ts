@@ -9,8 +9,8 @@
  * - 최근 N개 메시지는 보존 (기본 4)
  * - 요약은 파일 참조, 진행 중인 작업, 핵심 결정을 보존
  */
-import type { GenericMessage, TokenUsage, LLMVendor, ConversationCarryover } from "./llm/types.js";
-import { serializeMessageForEstimation } from "./llm/types.js";
+import type { GenericMessage, TokenUsage, LLMVendor, ConversationCarryover, UserContentPart } from "./llm/types.js";
+import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
 
 /** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
 const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
@@ -508,8 +508,9 @@ export function extractCarryover(messages: GenericMessage[]): ConversationCarryo
 
   for (const msg of messages) {
     if (msg.role === "user") {
-      if (!msg.content.startsWith("[이전 대화 요약]") && goalKeywords.test(msg.content)) {
-        const snippet = msg.content.slice(0, 100).replace(/\n/g, " ").trim();
+      const text = userContentText(msg.content);
+      if (!text.startsWith("[이전 대화 요약]") && goalKeywords.test(text)) {
+        const snippet = text.slice(0, 100).replace(/\n/g, " ").trim();
         if (snippet && !goals.includes(snippet)) {
           goals.push(snippet);
           if (goals.length > 5) goals.shift();
@@ -586,8 +587,8 @@ function generateSummary(messages: GenericMessage[], budgetTokens: number): stri
 
   // 1. 사용자 요청 요약
   const userRequests = messages
-    .filter((m) => m.role === "user" && !m.content.startsWith("[이전 대화 요약]"))
-    .map((m) => m.content.slice(0, 100));
+    .filter((m) => m.role === "user" && !userContentText(m.content).startsWith("[이전 대화 요약]"))
+    .map((m) => userContentText((m as { content: string | UserContentPart[] }).content).slice(0, 100));
   if (userRequests.length > 0) {
     sections.push(`## 사용자 요청\n${userRequests.map((r) => `- ${r}`).join("\n")}`);
   }

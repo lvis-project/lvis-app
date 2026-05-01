@@ -6,7 +6,7 @@ import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { InputActionBar } from "../InputActionBar.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
 
-const mockPreset: RolePreset = { id: "default", name: "기본", systemPrompt: "" };
+const mockPreset: RolePreset = { id: "default", name: "기본", systemPromptAdd: "" };
 
 function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}) {
   const props: Parameters<typeof InputActionBar>[0] = {
@@ -15,14 +15,8 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     plugins: [],
     onSelectPlugin: vi.fn(),
     onInsertSlashCommand: vi.fn(),
-    attachedDocs: [],
-    onToggleAttachment: vi.fn(),
-    onRemoveAttachment: vi.fn(),
-    indexedDocs: [],
-    docsLoading: false,
-    onRefreshDocs: vi.fn(),
-    docPopoverOpen: false,
-    onDocPopoverOpenChange: vi.fn(),
+    onAttach: vi.fn(),
+    attachDisabled: false,
     rolePresets: [mockPreset],
     activePreset: mockPreset,
     activePresetId: "default",
@@ -39,7 +33,7 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
   );
 }
 
-describe("InputActionBar", () => {
+describe("InputActionBar (post indexer-removal)", () => {
   it("renders with data-testid=input-action-bar", () => {
     const { getByTestId } = renderBar();
     expect(getByTestId("input-action-bar")).toBeTruthy();
@@ -53,6 +47,13 @@ describe("InputActionBar", () => {
   it("has trailing cluster with testid=iab-trailing", () => {
     const { getByTestId } = renderBar();
     expect(getByTestId("iab-trailing")).toBeTruthy();
+  });
+
+  it("does NOT render the legacy indexer Paperclip popover trigger", () => {
+    const { container } = renderBar();
+    // The previous Paperclip-with-count trigger had `title="문서 첨부"`. After
+    // removal there is no element bearing that title.
+    expect(container.querySelector('[title="문서 첨부"]')).toBeNull();
   });
 
   it("renders TokenProgressRing inside leading cluster", () => {

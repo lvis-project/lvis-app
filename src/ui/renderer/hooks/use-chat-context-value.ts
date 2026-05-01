@@ -22,8 +22,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
-    indexedDocs, docsLoading, refreshIndexedDocs,
+    attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass,
   } = parts;
@@ -41,8 +40,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
-    indexedDocs, docsLoading, refreshIndexedDocs,
+    attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass,
   }), [
@@ -58,8 +56,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
-    indexedDocs, docsLoading, refreshIndexedDocs,
+    attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass,
   ]);

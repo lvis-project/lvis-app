@@ -209,7 +209,7 @@ const JSDOC_CATALOG = {
       version: `/** SemVer version string (for example \`1.2.3\`). Used by the host to detect updates and enforce compatibility. */`,
       entry: `/** Path (relative to the plugin root) to the JavaScript module whose default export is a \`RuntimePluginFactory\`. */`,
       tools: `/** Tool names exposed to the host LLM. Each name must match \`^[a-zA-Z_][a-zA-Z0-9_]*$\` — dots and hyphens are not allowed. */`,
-      description: `/** One-line description shown in plugin catalogues and tool pickers. @optional */`,
+      description: `/** One-line description shown in plugin catalogues and tool pickers. Required as of host schema Phase 1 (PR #389). */`,
       config: `/** Arbitrary JSON configuration merged into \`PluginRuntimeContext.config\` at startup. Treat as untrusted user data. @optional */`,
       ui: `/** Sidebar / panel UI extensions contributed by this plugin. @optional */`,
       keywords: `/** Skill keywords registered with the host keyword engine. Each entry binds a surface keyword to a \`skillId\` the plugin handles. @optional */`,

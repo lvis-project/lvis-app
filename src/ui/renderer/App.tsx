@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
+import { supportsVision } from "../../engine/llm/vendor-capabilities.js";
+import type { LLMVendor } from "../../engine/llm/types.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { ThemeProvider } from "./theme/index.js";
@@ -38,7 +40,7 @@ import { DropZoneOverlay } from "./components/DropZoneOverlay.js";
 import { SnapEdgeHighlight } from "./components/SnapEdgeHighlight.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
-import { useIndexedDocs } from "./hooks/use-indexed-docs.js";
+import type { Attachment } from "./types/attachments.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useChatActions } from "./hooks/use-chat-actions.js";
@@ -115,11 +117,12 @@ export function App() {
   // listeners, no stale-state divergence between the two views.
   const { statuses: pluginAuthStatuses } = usePluginAuthStatuses(api, pluginCards);
 
-  // Sprint B — role preset, cost preview, attached docs
+  // Sprint B — role preset, cost preview, multimodal attachments
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets();
-  const [attachedDocs, setAttachedDocs] = useState<Array<{ id: string; name: string }>>([]);
-  const [docPopoverOpen, setDocPopoverOpen] = useState(false);
-  const { indexedDocs, docsLoading, refreshIndexedDocs } = useIndexedDocs(api);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  // Strictly increasing N — never reassigned even after attachment removal so
+  // textarea markers ([Image #N]) keep referring to the same payload.
+  const attachmentNCounter = useRef(0);
   const [maxOutputTokens] = useState<number>(4096);
 
   // Search / starred / sessions
@@ -242,8 +245,8 @@ export function App() {
   const checkApiKey = useCallback(async () => { const h = await api.hasApiKey(); setHasApiKey(h); return h; }, [api]);
   const vendorSupportsThinking = useMemo(() => vendorSupportsThinkingShared(llmVendor, llmModel), [llmVendor, llmModel]);
   const composeOutgoing = useCallback(
-    (raw: string) => composeOutgoingUtil({ raw, activePreset, attachedDocs, attachments: [] }),
-    [activePreset, attachedDocs],
+    (raw: string) => composeOutgoingUtil({ raw, activePreset, attachments }),
+    [activePreset, attachments],
   );
 
   const handleAsk = useCallback(
@@ -264,7 +267,35 @@ export function App() {
       // doesn't apply to brain-authored prompts. The brain envelope and
       // the system prompt's `<proactive-origin-guidance>` already steer
       // the LLM correctly.
-      const outgoing = mode === "trigger-import" ? t : composeOutgoing(t).text;
+      const composed =
+        mode === "trigger-import"
+          ? { text: t, attachments: [] }
+          : composeOutgoing(t);
+      const outgoing = composed.text;
+      let outgoingAttachments = composed.attachments;
+      // Vendor vision capability gate. The composer accepts images
+      // regardless of the active model so the user can switch models
+      // freely; check at send time and confirm before silently dropping
+      // image parts on a text-only model.
+      const hasImageParts = outgoingAttachments.some((p) => p.type === "image");
+      if (mode !== "trigger-import" && hasImageParts && !supportsVision(llmVendor as LLMVendor, llmModel)) {
+        const proceed = window.confirm(
+          `현재 모델(${llmModel})은 이미지를 지원하지 않습니다.\n` +
+            "이미지는 전달되지 않고 파일 경로 / 텍스트만 전송됩니다.\n\n" +
+            "그래도 전송하시겠습니까? 취소하면 모델을 바꾼 뒤 다시 시도할 수 있습니다.",
+        );
+        if (!proceed) {
+          // Restore the original (untrimmed) draft text so the user can
+          // switch models and resend without retyping. We use `q` rather
+          // than `t = q.trim()` to preserve any intentional leading /
+          // trailing whitespace or newlines the user typed. setQuestion("")
+          // was called above before we knew about this guard branch.
+          setQuestion(q);
+          if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
+          return;
+        }
+        outgoingAttachments = outgoingAttachments.filter((p) => p.type !== "image");
+      }
       // trigger-import: skip the user-bubble append. The
       // ImportedTriggerCard already represents the brain's question
       // visibly, and rendering the wrapped envelope as a user bubble
@@ -277,7 +308,13 @@ export function App() {
         if (mode === "guidance") {
           await api.chatGuide(outgoing);
         } else {
-          await api.chatSend(outgoing);
+          await api.chatSend(outgoing, outgoingAttachments);
+          // After successful send, clear attachments — the textarea was
+          // already cleared by setQuestion(""). N counter persists across
+          // turns so re-attached items get fresh numbers.
+          if (outgoingAttachments.length > 0 || attachments.length > 0) {
+            setAttachments([]);
+          }
         }
       } catch (err) {
         // chatSend rejection (network fail, abort, etc.) on a
@@ -290,7 +327,27 @@ export function App() {
         if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
       }
     },
-    [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest, setErrorWithThought, handleCompactCommand, closeOpenImportedTrigger],
+    [
+      api,
+      streaming,
+      checkApiKey,
+      composeOutgoing,
+      appendUserEntry,
+      resetStreamAccumulators,
+      beginStreamingRequest,
+      finishStreamingRequest,
+      setErrorWithThought,
+      handleCompactCommand,
+      closeOpenImportedTrigger,
+      // attachments is read directly at the post-send cleanup branch
+      // (line ~260) and is also a transitive dep via composeOutgoing,
+      // but listing it explicitly avoids stale-closure surprises if
+      // composeOutgoing's deps drift. llmVendor/llmModel are read by
+      // the supportsVision gate.
+      attachments,
+      llmVendor,
+      llmModel,
+    ],
   );
 
   // Brain trigger accept → chat takes over. Server emits
@@ -397,8 +454,7 @@ export function App() {
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    attachedDocs, setAttachedDocs, docPopoverOpen, setDocPopoverOpen,
-    indexedDocs, docsLoading, refreshIndexedDocs,
+    attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
   });
 
