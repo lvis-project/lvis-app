@@ -722,7 +722,7 @@ export async function initPluginRuntime(
         log.info(`plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
-        plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, capability: type, eventType: type }, "checking capability");
+        plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
         const manifest = pluginRuntime?.getPluginManifest(pluginId);
         const manifestCapabilities = manifest?.capabilities ?? [];
         if (!canEmitEvent(type, manifestCapabilities)) {

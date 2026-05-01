@@ -243,7 +243,7 @@ export class PluginRuntime {
         manifest = await this.readManifest(manifestPath);
       } catch (err) {
         log.error(`${(err as Error).message}`);
-        plog("error", { pluginId: plan.pluginIdHint ?? manifestPath, phase: PluginPhase.VALIDATION_FAIL, err, reason: "manifest_read" }, "manifest read failed");
+        plog("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason: "manifest_read" }, "manifest read failed");
         if (plan.enabled && plan.pluginIdHint) {
           this.markFailed(plan.pluginIdHint, {
             name: plan.pluginIdHint,
