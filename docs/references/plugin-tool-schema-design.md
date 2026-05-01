@@ -111,6 +111,14 @@ interface PluginManifest {
 > 이 룰의 enforcement 는 **각 plugin repo 의 `publish.yml` 워크플로우 안에서만** 일어난다. 호스트와 마켓플레이스 backend 는 catalog 상태를 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다 (`assertInstalledManifestMatchesCatalog` 는 호스트의 defense-in-depth 일 뿐 정문이 아님). 따라서 이 룰은 `lvis-plugin-*` 레포 전반에 적용되는 contract 이며, 모든 신규 플러그인 repo 의 `publish.yml` 이 이 패턴을 따라야 한다 (work-proactive 가 첫 도입; calendar/meeting/ms-graph/lge-api/pageindex 순차 fan-out).
 >
 > branch push 는 publish 트리거 안 함 (`on.push.tags: ['v*.*.*']` 만 listen). dev 중 main 으로 머지해도 catalog 는 가만히 있음 — 의도된 release 시점에만 tag 로 트리거.
+>
+> **Format strictness — 4 곳에서 동일 regex** `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`:
+> 1. `lvis-plugin-sdk/schemas/plugin-manifest.schema.json` — AJV 가 manifest 작성 시점에 거절
+> 2. `lvis-app/src/plugins/runtime/manifest-validation.ts` (`STABLE_SEMVER_RE`) — 사이드로드 시점에 거절
+> 3. 각 plugin repo 의 `.github/workflows/publish.yml` — tag 푸시 시점에 거절
+> 4. `lvis-plugin-template/.github/workflows/publish.yml` — 새 plugin repo 시작점에 동일 패턴
+>
+> Pre-release (`1.2.3-rc1`) / build-metadata (`1.2.3+abc`) / leading-zero (`01.2.3`) 모두 4 곳에서 거절. 한 곳 풀어주려면 4 곳 같이 풀어야 (`host-plugin-contract-sync` 룰 적용).
 
 **각 필드의 런타임 소비처:**
 
