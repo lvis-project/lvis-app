@@ -6,6 +6,14 @@ import { isAbsolute, join, relative } from "node:path";
  * hostile to recursive copy (Electron's bundled asar archives) and
  * unwanted metadata (.git). Covers monorepo layouts where `node_modules`
  * may be nested under any package path.
+ *
+ * `node_modules/.bin/` is also skipped: it is full of symlinks to package
+ * CLIs (e.g. `.bin/electron → ../electron/cli.js`). Once the `electron`
+ * package itself is filtered out above, those `.bin/*` symlinks become
+ * dangling, and `rejectEscapingSymlinks()` rejects the entire install with
+ * "unresolvable symlink in install dir: node_modules/.bin/electron". The
+ * plugin runtime never invokes `.bin` binaries anyway — they are dev-only
+ * shell shims — so dropping the whole subtree is loss-free.
  */
 export function buildSideloadCopyFilter(sourceRoot: string): (src: string) => boolean {
   return (src: string): boolean => {
@@ -16,7 +24,7 @@ export function buildSideloadCopyFilter(sourceRoot: string): (src: string) => bo
     const nmIdx = parts.indexOf("node_modules");
     if (nmIdx >= 0) {
       const next = parts[nmIdx + 1];
-      if (next === "electron" || next === "@electron") return false;
+      if (next === "electron" || next === "@electron" || next === ".bin") return false;
     }
     return true;
   };

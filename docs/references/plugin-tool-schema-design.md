@@ -181,6 +181,14 @@ interface PluginManifest {
 
 마켓플레이스 trust anchor는 host-owned `src/plugins/marketplace-keys.ts`에 있다. `@lvis/plugin-sdk`는 type/source-only 계약이며 키를 포함하지 않는다.
 
+**`installLocal` (개발자 sideload) 패키징 — host 가 자동 제외하는 경로**: host 의 `buildSideloadCopyFilter` (`src/plugins/sideload-filter.ts`) 는 install 시 다음 subtree 를 건너뛴다 — 플러그인 런타임에 무관하면서 staging 단계에서 깨지는 컨텐츠라 자동 제외:
+
+- `node_modules/electron`, `node_modules/@electron/*` — Electron 번들 `.asar` 가 patched fs 에 의해 "Invalid package" 로 폭사
+- `node_modules/.bin/` — npm/pnpm 이 만드는 dev-only 쉘 shim 들. 위에서 electron 패키지가 제외되면 `.bin/electron` 이 dangling 으로 남고 후속 `rejectEscapingSymlinks` 가 fail-closed 거부
+- `.git/` — VCS 메타데이터, 사이즈/프라이버시
+
+플러그인 런타임은 `.bin/` 쉘 shim 을 spawn 하지 않으므로 (in-process import 만), 위 제외는 손실 없음. 만약 플러그인이 위 경로 안의 파일에 의존한다면 — 예컨대 `dist/` 로 번들링하거나 manifest 가 명시적 자산 선언이 필요한지 다시 검토 필요.
+
 ### 2.2 uiCallable 보안 경계
 
 Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직접 호출할 수 있다. 이 경로는 ConversationLoop 의 permission/scope/expansion cap 을 **우회**하므로 매니페스트 allowlist 로 좁혀야 한다. (AI 가 개시한 도구 호출은 별개로 `ApprovalGate` / `PermissionManager` 확인 UX 를 그대로 거친다.)
