@@ -35,6 +35,7 @@ async function writePlugin(
     id,
     name: id,
     version: "1.0.0",
+    description: "Test fixture.",
     entry: "entry.mjs",
     tools: [`${id}_ping`],
     eventSubscriptions,
