@@ -7,27 +7,90 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-async function importLogger(env: Record<string, string | undefined>) {
+type ProcessOverrides = {
+  env?: Record<string, string | undefined>;
+  /** Simulated process.versions.electron — pass undefined to delete the key */
+  electronVersion?: string | null;
+  /** Simulated process.defaultApp — pass null to delete the key */
+  defaultApp?: boolean | null;
+};
+
+// Sentinel to detect "not passed" vs "passed undefined/null"
+const NOT_SET = Symbol("NOT_SET");
+
+async function importLogger(
+  envOverrides: Record<string, string | undefined> = {},
+  processOverrides: {
+    electronVersion?: string | null | typeof NOT_SET;
+    defaultApp?: boolean | null | typeof NOT_SET;
+  } = {},
+) {
   vi.resetModules();
-  // Apply env overrides then restore after import so other tests aren't affected.
-  const saved: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(env)) {
-    saved[key] = process.env[key];
+
+  const { electronVersion = NOT_SET, defaultApp = NOT_SET } = processOverrides;
+
+  // ── env overrides ──────────────────────────────────────────────────────
+  const savedEnv: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(envOverrides)) {
+    savedEnv[key] = process.env[key];
     if (value === undefined) {
       delete process.env[key];
     } else {
       process.env[key] = value;
     }
   }
+
+  // ── process.versions.electron override ────────────────────────────────
+  const versionsProxy = process.versions as Record<string, string | undefined>;
+  const savedElectron = versionsProxy.electron;
+  const changeElectron = electronVersion !== NOT_SET;
+  if (changeElectron) {
+    if (electronVersion === null || electronVersion === undefined) {
+      delete versionsProxy.electron;
+    } else {
+      versionsProxy.electron = electronVersion;
+    }
+  }
+
+  // ── process.defaultApp override ───────────────────────────────────────
+  const procAny = process as NodeJS.Process & { defaultApp?: boolean };
+  const hadDefaultApp = "defaultApp" in procAny;
+  const savedDefaultApp = procAny.defaultApp;
+  const changeDefaultApp = defaultApp !== NOT_SET;
+  if (changeDefaultApp) {
+    if (defaultApp === null || defaultApp === undefined) {
+      delete procAny.defaultApp;
+    } else {
+      procAny.defaultApp = defaultApp;
+    }
+  }
+
   try {
     const mod = await import("../logger.js");
     return mod;
   } finally {
-    for (const [key, value] of Object.entries(saved)) {
+    // restore env
+    for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) {
         delete process.env[key];
       } else {
         process.env[key] = value;
+      }
+    }
+    // restore versions.electron
+    if (changeElectron) {
+      if (savedElectron === undefined) {
+        delete versionsProxy.electron;
+      } else {
+        versionsProxy.electron = savedElectron;
+      }
+    }
+    // restore defaultApp
+    if (changeDefaultApp) {
+      if (!hadDefaultApp) {
+        delete procAny.defaultApp;
+      } else {
+        procAny.defaultApp = savedDefaultApp;
       }
     }
   }
@@ -39,8 +102,9 @@ describe("logger format selection", () => {
   });
 
   it("uses pino-pretty transport when NODE_ENV=development and LVIS_DEV=1", async () => {
-    // LVIS_DEV=1 prevents isPackagedElectron from firing in test environments
-    // where process.defaultApp is absent (same condition as packaged Electron).
+    // In Vitest, process.versions.electron is undefined → isElectronRuntime=false
+    // → isPackagedElectron=false automatically. LVIS_DEV=1 is belt-and-suspenders
+    // for any environment that may set process.versions.electron.
     const { logger, transport } = await importLogger({
       NODE_ENV: "development",
       LVIS_LOG_FORMAT: undefined,
@@ -113,5 +177,58 @@ describe("logger format selection", () => {
       LVIS_DEV: "1",
     });
     expect(logger.level).toBe("warn");
+  });
+
+  // ── isPackagedElectron branch coverage ────────────────────────────────────
+
+  it("Electron + unpackaged (defaultApp=true) → pino-pretty, not JSON", async () => {
+    // Simulates `electron dist/src/main.js` (unpackaged dev run).
+    // process.versions.electron present, process.defaultApp=true.
+    const { transport } = await importLogger(
+      {
+        NODE_ENV: "development",
+        LVIS_LOG_FORMAT: undefined,
+        VITEST: undefined,
+        LVIS_DEV: undefined,
+      },
+      { electronVersion: "32.0.0", defaultApp: true },
+    );
+    // defaultApp=true → isPackagedElectron=false → pino-pretty
+    expect(transport).toBeDefined();
+    expect((transport as { target: string }).target).toBe("pino-pretty");
+  });
+
+  it("Electron + packaged (defaultApp absent) → JSON (no transport), info level", async () => {
+    // Simulates a packaged production Electron build.
+    // process.versions.electron present, process.defaultApp absent.
+    const { transport, logger } = await importLogger(
+      {
+        NODE_ENV: "development", // packaged Electron does not set NODE_ENV=production
+        LVIS_LOG_FORMAT: undefined,
+        VITEST: undefined,
+        LVIS_DEV: undefined,
+      },
+      { electronVersion: "32.0.0", defaultApp: null }, // null = delete the key
+    );
+    // isPackagedElectron=true → useJsonFormat=true → transport undefined
+    expect(transport).toBeUndefined();
+    // info level in packaged mode
+    expect(logger.level).toBe("info");
+  });
+
+  it("plain Node.js (no process.versions.electron) → isElectronRuntime=false → pino-pretty for dev", async () => {
+    // Explicitly removes process.versions.electron (simulates plain Node / scripts).
+    const { transport } = await importLogger(
+      {
+        NODE_ENV: "development",
+        LVIS_LOG_FORMAT: undefined,
+        VITEST: undefined,
+        LVIS_DEV: "1",
+      },
+      { electronVersion: null }, // null = delete the key
+    );
+    // isElectronRuntime=false → isPackagedElectron=false → pino-pretty
+    expect(transport).toBeDefined();
+    expect((transport as { target: string }).target).toBe("pino-pretty");
   });
 });
