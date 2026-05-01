@@ -486,9 +486,13 @@ export function PluginConfigTab() {
                   </Button>
                 </div>
 
-                {/* Auth section — only when manifest declares `auth` and the
-                    api bridge is available. See architecture.md §9.4a. */}
-                {selectedPlugin.auth && apiForAuthHook && (
+                {/* Auth section — only when manifest declares `auth`, the
+                    plugin is loaded (failed/disabled plugins have no live
+                    runtime to invoke), and the api bridge is available.
+                    See architecture.md §9.4a. */}
+                {selectedPlugin.auth &&
+                  selectedPlugin.loadStatus === "loaded" &&
+                  apiForAuthHook && (
                   <>
                     <Separator />
                     <PluginAuthSection

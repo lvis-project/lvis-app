@@ -46,8 +46,23 @@ beforeAll(() => {
     allErrors: true,
     allowUnionTypes: true,
   });
+  // Sanity — if a future bundler interop change makes the ESM default
+  // resolve weirdly, the cast above could land on the namespace itself
+  // and `compile` would not be a function. Fail loudly here instead of
+  // letting AJV-specific tests silently pass against a non-functional
+  // validator.
+  if (typeof ajv.compile !== "function") {
+    throw new Error(
+      "[manifest-auth.test] Ajv constructor cast did not yield a working ajv instance",
+    );
+  }
   const AddAny = AddFormatsModule as unknown as { default?: unknown };
   const addFormatsFn = (AddAny.default ?? AddFormatsModule) as (a: unknown) => void;
+  if (typeof addFormatsFn !== "function") {
+    throw new Error(
+      "[manifest-auth.test] addFormats default cast did not yield a callable",
+    );
+  }
   addFormatsFn(ajv);
   TEST_VALIDATOR = ajv.compile(schema);
 });
