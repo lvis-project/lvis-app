@@ -186,7 +186,8 @@
           "background-watcher",
           "worker-client",
           "document-indexer",
-          "conversation-trigger"
+          "conversation-trigger",
+          "lifecycle-observer"
         ]
       }
     },
