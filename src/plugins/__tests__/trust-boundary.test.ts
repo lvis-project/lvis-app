@@ -545,11 +545,13 @@ describe("Phase 1 — plugin trust boundary", () => {
       // No receipt — the plugin loads only because dev-link skips the check.
       await writeRegistry([{ id: "tb.devlink-promoted", manifestPath, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0]]);
 
+      const auditCalls: Array<{ level: string; message: string }> = [];
       const runtime = new PluginRuntime({
         hostRoot,
         registryPath,
         pluginsRoot,
         installReceiptCacheRoot: cacheRoot,
+        auditLog: (level, message) => auditCalls.push({ level, message }),
       });
       await runtime.load();
       expect(runtime.listPluginIds()).toContain("tb.devlink-promoted");
@@ -560,13 +562,8 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       // Restart: fresh registry read must derive devLinked=false → receipt check
       // runs → no receipt present → plugin is rejected.
-      const auditCalls: Array<{ level: string; message: string }> = [];
-      (runtime as unknown as { auditLog?: (level: string, msg: string) => void }).auditLog =
-        (level, message) => auditCalls.push({ level, message });
-
       await runtime.restartPlugin("tb.devlink-promoted");
       expect(runtime.listPluginIds()).not.toContain("tb.devlink-promoted");
-      // Verify auditLog injection worked before trusting the calls assertion.
       expect(auditCalls.length).toBeGreaterThan(0);
       expect(auditCalls).toContainEqual(
         expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
