@@ -23,9 +23,14 @@ const isProduction = process.env.NODE_ENV === "production";
 // absent, but those paths are guarded by isTest.
 // Precedence (highest to lowest):
 //   1. LVIS_LOG_FORMAT=json  → always JSON
-//   2. NODE_ENV=production   → JSON (set by run-electron.mjs for packaged paths)
+//   2. NODE_ENV=production   → JSON
 //   3. process.defaultApp absent + not a dev run → packaged Electron → JSON
 //   4. default               → pino-pretty (safe for any unpackaged dev run)
+//
+// Note: scripts/run-electron.mjs sets NODE_ENV=development for `bun run start`;
+// production builds rely on the isPackagedElectron signal (process.defaultApp
+// absence) rather than NODE_ENV, since packaged Electron does not set
+// NODE_ENV=production automatically.
 const isPackagedElectron =
   !(process as NodeJS.Process & { defaultApp?: boolean }).defaultApp &&
   process.env.LVIS_DEV !== "1" &&
@@ -33,7 +38,8 @@ const isPackagedElectron =
 const useJsonFormat =
   process.env.LVIS_LOG_FORMAT === "json" || isProduction || isPackagedElectron;
 
-const transport = !isTest && !useJsonFormat
+/** Exported for testing — the pino transport config chosen at module load. */
+export const transport = !isTest && !useJsonFormat
   ? {
       target: "pino-pretty",
       options: {
@@ -45,7 +51,7 @@ const transport = !isTest && !useJsonFormat
   : undefined;
 
 export const logger = pino({
-  level: process.env.LOG_LEVEL ?? (isProduction ? "info" : "debug"),
+  level: process.env.LOG_LEVEL ?? ((isProduction || isPackagedElectron) ? "info" : "debug"),
   transport,
 });
 

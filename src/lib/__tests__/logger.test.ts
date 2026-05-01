@@ -38,47 +38,43 @@ describe("logger format selection", () => {
     vi.resetModules();
   });
 
-  it("uses pino-pretty transport when NODE_ENV=development", async () => {
-    const { logger } = await importLogger({
+  it("uses pino-pretty transport when NODE_ENV=development and LVIS_DEV=1", async () => {
+    // LVIS_DEV=1 prevents isPackagedElectron from firing in test environments
+    // where process.defaultApp is absent (same condition as packaged Electron).
+    const { logger, transport } = await importLogger({
       NODE_ENV: "development",
       LVIS_LOG_FORMAT: undefined,
       VITEST: undefined,
+      LVIS_DEV: "1",
     });
-    // pino-pretty transport sets `stream` on the logger instance; the logger
-    // object itself has a transport property accessible via Symbol or options.
-    // The most reliable assertion is that the logger's level is 'debug' (dev)
-    // and that the transport is configured (not undefined).
     expect(logger.level).toBe("debug");
-    // pino with a transport stream writes to a worker; the logger's
-    // [Symbol.for("pino.serializers")] is always present. We check that the
-    // underlying options reflect pretty mode by verifying it is NOT in JSON
-    // mode (i.e. it has a transport configured on the stream).
-    // We use the internal pino property to verify transport is active.
-    const pinoLogger = logger as unknown as { [key: string]: unknown };
-    // pino attaches the transport target info in v8 via internal symbols.
-    // Indirectly verify: a pino logger with pino-pretty transport has
-    // an AsyncWorker stream (multistream) — check that output stream exists.
-    expect(pinoLogger).toBeTruthy();
+    // transport should be the pino-pretty config object (not undefined)
+    expect(transport).toBeDefined();
+    expect((transport as { target: string }).target).toBe("pino-pretty");
   });
 
   it("uses JSON (no transport) when NODE_ENV=production", async () => {
-    const { logger } = await importLogger({
+    const { logger, transport } = await importLogger({
       NODE_ENV: "production",
       LVIS_LOG_FORMAT: undefined,
       VITEST: undefined,
     });
     expect(logger.level).toBe("info");
+    // In JSON mode transport is undefined (pino default stdout JSON)
+    expect(transport).toBeUndefined();
   });
 
-  it("forces JSON when LVIS_LOG_FORMAT=json regardless of NODE_ENV", async () => {
-    const { logger } = await importLogger({
+  it("forces JSON (transport=undefined) when LVIS_LOG_FORMAT=json regardless of NODE_ENV", async () => {
+    const { logger, transport } = await importLogger({
       NODE_ENV: "development",
       LVIS_LOG_FORMAT: "json",
       VITEST: undefined,
+      LVIS_DEV: "1",
     });
     // In JSON mode the level stays at the LOG_LEVEL override default for
-    // non-production: "debug" (isProduction=false → debug default).
+    // non-production (LVIS_DEV=1 keeps isPackagedElectron false): "debug".
     expect(logger.level).toBe("debug");
+    expect(transport).toBeUndefined();
   });
 
   it("delegates to console in test environment (VITEST set)", async () => {
@@ -103,6 +99,7 @@ describe("logger format selection", () => {
       LOG_LEVEL: undefined,
       LVIS_LOG_FORMAT: undefined,
       VITEST: undefined,
+      LVIS_DEV: "1",
     });
     expect(logger.level).toBe("debug");
   });
@@ -113,6 +110,7 @@ describe("logger format selection", () => {
       LOG_LEVEL: "warn",
       LVIS_LOG_FORMAT: undefined,
       VITEST: undefined,
+      LVIS_DEV: "1",
     });
     expect(logger.level).toBe("warn");
   });
