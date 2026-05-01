@@ -23,7 +23,7 @@ import type {
 import { createPluginStorage } from "../storage.js";
 import type { Actor, PluginDeploymentGuard } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
-import { devLinkedEntryAllowed } from "../../boot/dev-flags.js";
+import { devLinkedEntryAllowed, getIsPackaged } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
 
@@ -238,10 +238,22 @@ export class PluginRuntime {
           this.markFailed(plan.pluginIdHint);
           continue;
         }
+        const { signerKeyId } = receiptResult.receipt;
+        if (getIsPackaged() && signerKeyId?.startsWith("dev:")) {
+          const reason = "dev signer in packaged build";
+          log.error(`${plan.pluginIdHint} rejected — ${reason}: ${signerKeyId}`);
+          this.auditLog?.("error", "plugin_integrity_rejected", {
+            pluginId: plan.pluginIdHint,
+            reason,
+            signerKeyId,
+          });
+          this.markFailed(plan.pluginIdHint);
+          continue;
+        }
         this.auditLog?.("info", "plugin_integrity_verified", {
           pluginId: plan.pluginIdHint,
           artifactSha256: receiptResult.receipt.artifactSha256,
-          signerKeyId: receiptResult.receipt.signerKeyId,
+          signerKeyId,
         });
       }
       let manifest: PluginManifest;
@@ -711,10 +723,22 @@ export class PluginRuntime {
         this.markFailed(plan.pluginIdHint);
         return;
       }
+      const { signerKeyId } = receiptResult.receipt;
+      if (getIsPackaged() && signerKeyId?.startsWith("dev:")) {
+        const reason = "dev signer in packaged build";
+        log.error(`${plan.pluginIdHint} rejected — ${reason}: ${signerKeyId}`);
+        this.auditLog?.("error", "plugin_integrity_rejected", {
+          pluginId: plan.pluginIdHint,
+          reason,
+          signerKeyId,
+        });
+        this.markFailed(plan.pluginIdHint);
+        return;
+      }
       this.auditLog?.("info", "plugin_integrity_verified", {
         pluginId: plan.pluginIdHint,
         artifactSha256: receiptResult.receipt.artifactSha256,
-        signerKeyId: receiptResult.receipt.signerKeyId,
+        signerKeyId,
       });
     }
 

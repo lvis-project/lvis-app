@@ -209,6 +209,11 @@ export function isConfigured(): boolean {
   return configured;
 }
 
+/** Returns the cached isPackaged value set by boot. Defaults to true until boot wires the gate. */
+export function getIsPackaged(): boolean {
+  return isPackagedCached;
+}
+
 /**
  * Mock fetcher gate — packaged builds must never instantiate
  * `MockMarketplaceFetcher`, which serves catalog from a user-writable
