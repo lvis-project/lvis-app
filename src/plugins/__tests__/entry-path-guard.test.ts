@@ -50,6 +50,7 @@ describe("PluginRuntime — entry path allowlist", () => {
       name: id,
       version: "1.0.0",
       description: "Test fixture.",
+      publisher: "Test fixture",
       entry,
       tools: [`${id}_ping`],
     };
