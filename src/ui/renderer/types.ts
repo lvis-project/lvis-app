@@ -292,9 +292,13 @@ export type LvisApi = {
   /**
    * Subscribe to plugin-emitted events forwarded by the host event bridge
    * (`boot/steps/ipc-bridge.ts` → `lvis:plugin:event`). Plugin must declare
-   * the type in `manifest.emittedEvents[]` and the type's namespace prefix
-   * must not be in `PLUGIN_PRIVATE_NAMESPACES`. Returns an unsubscribe
-   * function. Used by `usePluginAuthStatuses` for `<pluginId>.auth.changed`.
+   * the type in `manifest.emittedEvents[]`. The preload layer rejects
+   * subscriptions whose namespace prefix appears in `PLUGIN_PRIVATE_NAMESPACES`
+   * by returning a no-op unsubscribe without wiring the IPC listener — so
+   * renderer code can never observe sensitive host state (memory contents,
+   * secrets, audit trails, DLP decisions) through this API. Returns an
+   * unsubscribe function. Used by `usePluginAuthStatuses` for
+   * `<pluginId>.auth.changed`.
    */
   onPluginEvent?: (eventType: string, handler: (data: unknown) => void) => (() => void);
   listPluginCards: () => Promise<PluginCardSummary[]>;

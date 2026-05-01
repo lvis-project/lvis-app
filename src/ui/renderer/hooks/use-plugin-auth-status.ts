@@ -13,7 +13,10 @@ function parseStatusResult(raw: unknown): PluginAuthState {
   // validation is a separate cross-cutting follow-up.
   if (raw && typeof raw === "object") {
     const r = raw as Partial<PluginAuthStatusResult>;
-    if (Boolean(r.authenticated)) {
+    // Plugin contract: statusTool MUST return literal `true` (boolean), not
+    // truthy values like 1, "true", or non-empty strings. String "false" is
+    // truthy in JS — Boolean() would misclassify it as authenticated.
+    if (r.authenticated === true) {
       return {
         kind: "authed",
         account: typeof r.account === "string" && r.account.length > 0 ? r.account : undefined,

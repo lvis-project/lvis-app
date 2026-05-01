@@ -34,11 +34,11 @@ export interface PluginAuthSpec {
 }
 
 /**
- * Recommended return shape of `auth.statusTool`. Host parses defensively
- * with `Boolean(result?.authenticated)` — truthy values such as `1` or
- * `"true"` are accepted as authenticated, matching standard JS truthiness
- * semantics and the JSDoc contract. Account is read as
- * `String(result?.account ?? "")`.
+ * Recommended return shape of `auth.statusTool`. Host parses with a strict
+ * identity check: `result?.authenticated === true`. Plugins MUST return the
+ * literal boolean `true` — truthy values such as `1` or the string `"true"`
+ * are NOT accepted (string `"false"` is truthy in JS and would be
+ * misclassified by `Boolean()`). Account is read as a string when present.
  * The shape is documented but not AJV-validated in v1 — outputSchema
  * validation is a separate cross-cutting change. Plugins MAY return
  * additional fields; the host ignores them.
