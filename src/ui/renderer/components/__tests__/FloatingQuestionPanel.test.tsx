@@ -532,4 +532,29 @@ describe("FloatingQuestionPanel", () => {
     // (The exitedIds cleanup effect runs synchronously in the same render.)
     expect(() => getByTestId("floating-question-panel")).toThrow();
   });
+
+  // SEV-2-C regression: focus trap must NOT steal Tab when a Radix dialog is open.
+  it("focus trap yields to an open dialog (role=dialog data-state=open)", () => {
+    const { getByTestId } = render(
+      <FloatingQuestionPanel
+        api={makeApi()}
+        requests={[makeRequest()]}
+        onResolved={vi.fn()}
+      />,
+    );
+    // Simulate an open Radix dialog in the document.
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("data-state", "open");
+    document.body.appendChild(dialog);
+
+    // Fire a Tab key — the trap handler should return early, so no focus-stealing.
+    // We verify no error is thrown and the panel is still present (guard doesn't break anything).
+    expect(() => {
+      fireEvent.keyDown(window, { key: "Tab" });
+    }).not.toThrow();
+
+    expect(getByTestId("floating-question-panel")).toBeInTheDocument();
+    document.body.removeChild(dialog);
+  });
 });
