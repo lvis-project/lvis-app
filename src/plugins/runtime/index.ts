@@ -24,7 +24,7 @@ import type {
 import { createPluginStorage } from "../storage.js";
 import type { Actor, PluginDeploymentGuard } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
-import { devLinkedEntryAllowed, DEV_SIGNER_PREFIX, getIsPackaged } from "../../boot/dev-flags.js";
+import { devLinkedEntryAllowed, isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
 
@@ -714,20 +714,20 @@ export class PluginRuntime {
       });
       return { ok: false };
     }
-    const { signerKeyId } = receiptResult.receipt;
-    if (getIsPackaged() && signerKeyId.startsWith(DEV_SIGNER_PREFIX)) {
-      const reason = "dev signer in packaged build";
-      log.error({ pluginId, reason, signerKeyId }, `${pluginId} rejected — ${reason}`);
-      this.auditLog?.("error", "plugin_integrity_rejected", {
-        pluginId,
-        reason,
-        signerKeyId,
-      });
+    const { installSource, signerKeyId, artifactSha256 } = receiptResult.receipt;
+    // Policy gate: local-dev receipts are only valid in unpackaged dev builds.
+    // verifyInstallReceipt is a pure integrity verifier; environment-based
+    // policy (packaged vs dev) is enforced here in the runtime layer.
+    if (installSource === "local-dev" && !isDevModeUnlocked()) {
+      const reason = "local-dev install rejected in packaged build";
+      log.error({ pluginId, reason }, `${pluginId} rejected — ${reason}`);
+      this.auditLog?.("error", "plugin_integrity_rejected", { pluginId, reason });
       return { ok: false };
     }
     this.auditLog?.("info", "plugin_integrity_verified", {
       pluginId,
-      artifactSha256: receiptResult.receipt.artifactSha256,
+      installSource,
+      artifactSha256,
       signerKeyId,
     });
     return { ok: true };
