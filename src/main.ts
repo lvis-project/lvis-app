@@ -215,7 +215,7 @@ async function handleLvisUri(url: string) {
         // US-A3 — single-plugin lifecycle: only the deep-link-installed
         // plugin starts up. Other plugins keep their in-memory state.
         await services!.pluginRuntime.addPlugin(params.slug);
-        emitHostEvent("plugin.installed", { pluginId: params.slug });
+        emitHostEvent("plugin.installed", { pluginId: params.slug, source: "marketplace" });
         services!.refreshPluginNotifications?.();
       } catch (err) {
         console.error("[lvis] post-install steps failed for lvis:// install", err);

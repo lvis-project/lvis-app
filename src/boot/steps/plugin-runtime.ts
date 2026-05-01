@@ -749,14 +749,20 @@ export async function initPluginRuntime(
         return pluginRuntime.listPluginIds().filter((id) => id !== pluginId);
       },
       onPluginsChanged: (handler) => {
-        const dispatch = (eventType: "plugin.installed" | "plugin.uninstalled") =>
-          (data: unknown) => {
-            const subjectId = (data as { pluginId?: string } | null | undefined)?.pluginId;
-            if (typeof subjectId !== "string" || subjectId === pluginId) return;
-            handler({ type: eventType === "plugin.installed" ? "installed" : "uninstalled", pluginId: subjectId });
-          };
-        const unsubInstalled = onEvent("plugin.installed", dispatch("plugin.installed"));
-        const unsubUninstalled = onEvent("plugin.uninstalled", dispatch("plugin.uninstalled"));
+        const dispatchInstalled = (data: unknown) => {
+          const payload = data as { pluginId?: string; source?: "marketplace" | "local-dev" } | null | undefined;
+          const subjectId = payload?.pluginId;
+          if (typeof subjectId !== "string" || subjectId === pluginId) return;
+          const source = payload?.source === "local-dev" ? "local-dev" : "marketplace";
+          handler({ type: "installed", pluginId: subjectId, source });
+        };
+        const dispatchUninstalled = (data: unknown) => {
+          const subjectId = (data as { pluginId?: string } | null | undefined)?.pluginId;
+          if (typeof subjectId !== "string" || subjectId === pluginId) return;
+          handler({ type: "uninstalled", pluginId: subjectId });
+        };
+        const unsubInstalled = onEvent("plugin.installed", dispatchInstalled);
+        const unsubUninstalled = onEvent("plugin.uninstalled", dispatchUninstalled);
         const unsubscribe = () => { unsubInstalled(); unsubUninstalled(); };
         pluginRuntime.registerDisposer(pluginId, unsubscribe);
         return unsubscribe;

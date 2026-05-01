@@ -1834,6 +1834,8 @@ flowchart LR
 | **task-deadline** | host 의 `TaskDeadlinePoller` (`src/main/task-deadline-poller.ts`) 가 `task.deadline.approaching` 발행 | pending 태스크 dueAt 2시간 내 fire. 60s 폴링, 30분 cooldown 으로 dedupe (judgment 재시도 가능). brain (work-proactive 등) 이 `pluginAccess.events` 로 구독해 `triggerConversation()` 호출 — calendar/email 등 다른 detector 와 동일한 observer/judge 분리 패턴. tasks-plugin-split 이 paused (memory `feedback-tasks-plugin-split-paused`) 라 observer 가 host 에 살지만 wire shape 은 동일. brain subscriber 는 별도 PR. |
 | **post-turn** ✅ | `createPostTurnSignal()` | 대화 턴 완료 후 `PostTurnHookChain` → `coordinator.notify("post-turn")`. 10분 cooldown. (B5 PR #134) |
 
+**Detector lifecycle (reactive registration).** 각 detector 는 `requires?: string[]` 로 의존하는 plugin id 를 선언한다 (예: 메일/캘린더 detector 는 `["ms-graph"]`). work-proactive 는 boot 시 + `hostApi.onPluginsChanged()` 발사 시마다 `partitionByDeps(DEFAULT_DETECTORS, getInstalledPluginIds())` 로 satisfied detector 만 `onEvent(source, ...)` 등록 → ms-graph 미설치 시 메일/캘린더 detector 는 자동으로 잠자고, 사용자가 ms-graph 를 설치하면 host 재시작 없이 detector 가 활성화된다. audit 채널 `work-proactive:detectors:active` 에 `{active, missing, sources}` 로 기록되어 "왜 이 detector 가 조용한가" 를 추적할 수 있다.
+
 | 트리거 유형 | 예시 | 의도 |
 | --- | --- | --- |
 | **설정 값 기반 heartbeat** | 출근 직후, 30분 간격, 점심 이후 재알림 | 사용자가 기대하는 리듬으로 브리핑/리마인드 제공 |
@@ -2249,6 +2251,8 @@ stateDiagram-v2
 | `logEvent(level, message, data?)` | **[Phase 2]** 호스트 감사 로그에 플러그인 이벤트 기록. `level`: `"info"\|"warn"\|"error"` | 전체 |
 | `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
 | `triggerConversation(spec)` | **[Brain P0]** 관찰 신호로부터 ConversationLoop 능동 발사 ("먼저 말 거는 비서" 차별화). `conversation-trigger` capability gated — 일반 plugin 차단. 자세한 사양: [`conversation-trigger.md`](../references/conversation-trigger.md). Brain track 은 §7 Proactive Engine 의 sub-phase 로 P0~P5 진행. | proactive (work-proactive) |
+| `getInstalledPluginIds()` | 현재 로드된 plugin id snapshot (caller 자기 자신 제외, load order). 플러그인 의존성 체크용 (예: work-proactive 가 ms-graph 설치 여부 확인). 무게이트 — 향후 capability-filtered 변종 (`getProvidersFor(capability)`) 으로 진화 예정. | proactive (work-proactive) |
+| `onPluginsChanged(handler)` | 플러그인 install/uninstall 이벤트 구독. handler 는 `PluginLifecycleEvent` 받음 (`{type: "installed", pluginId, source: "marketplace"\|"local-dev"} \| {type: "uninstalled", pluginId}`). Self-event 자동 필터. P0 는 `installed`/`uninstalled` 만 — `updated` 는 별도 spec. | proactive (work-proactive) |
 
 **Plugin-Owned OAuth Authentication (PR 3 — 신 정책)**
 
