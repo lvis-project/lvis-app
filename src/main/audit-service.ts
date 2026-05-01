@@ -11,6 +11,8 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("audit");
 
 export interface AuditEvent {
   timestamp: string;
@@ -72,7 +74,7 @@ export class AuditService {
       await this._maybeRotate();
     } catch (err) {
       // 디스크 실패는 console에만 — 도구 실행 차단 금지
-      console.error("[audit] flush failed:", err);
+      log.error({ err }, "flush failed");
     }
   }
 

@@ -3,6 +3,8 @@ import type { MarketplaceSettings } from "../data/settings-store.js";
 import type { PluginMarketplaceService } from "../plugins/marketplace.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 export function resolveManagedPluginBootstrap(input: {
   marketplace: Pick<MarketplaceSettings, "backend" | "realCloudBaseUrl">;
@@ -85,7 +87,7 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
   const { pluginMarketplace, pluginRuntime, mainWindow, marketplace, isPackaged } = input;
   const decision = resolveManagedPluginBootstrap({ marketplace, isPackaged });
   if (!decision.enabled) {
-    console.warn(`[lvis] boot: managed plugin bootstrap skipped: ${decision.reason}`);
+    log.warn(`boot: managed plugin bootstrap skipped: ${decision.reason}`);
     notifyBootstrapStatus(mainWindow, {
       phase: "complete",
       installed: [],
@@ -98,14 +100,14 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
   try {
     const ensureResult = await pluginMarketplace.ensureManagedInstalled();
     if (ensureResult.installed.length > 0) {
-      console.log(
-        `[lvis] boot: managed plugin bootstrap installed ${ensureResult.installed.length}: ${ensureResult.installed.join(", ")}`,
+      log.info(
+        `boot: managed plugin bootstrap installed ${ensureResult.installed.length}: ${ensureResult.installed.join(", ")}`,
       );
       await pluginRuntime.restartAll();
     }
     if (ensureResult.failed.length > 0) {
-      console.warn(
-        `[lvis] boot: managed plugin bootstrap failed ${ensureResult.failed.length}:`,
+      log.warn(
+        `boot: managed plugin bootstrap failed ${ensureResult.failed.length}: %s`,
         ensureResult.failed,
       );
     }
@@ -116,7 +118,7 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
     });
   } catch (err) {
     const message = (err as Error).message;
-    console.warn(`[lvis] boot: ensureManagedInstalled error:`, message);
+    log.warn(`boot: ensureManagedInstalled error: %s`, message);
     notifyBootstrapStatus(mainWindow, { phase: "error", message });
   }
 }

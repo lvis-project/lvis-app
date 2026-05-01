@@ -21,6 +21,8 @@ import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("corp-ca");
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -75,12 +77,12 @@ function extractMacos(): string | null {
       { encoding: "utf8", timeout: 10_000 },
     );
     if (!pem.includes("-----BEGIN CERTIFICATE-----")) {
-      console.warn("[corp-ca] macOS: LGERootCA not found in System.keychain");
+      log.warn("macOS: LGERootCA not found in System.keychain");
       return null;
     }
     return pem;
   } catch (err) {
-    console.warn("[corp-ca] macOS extraction failed:", (err as Error).message);
+    log.warn("macOS extraction failed: %s", (err as Error).message);
     return null;
   }
 }
@@ -91,7 +93,7 @@ function extractWindows(): string | null {
   // trust store, so TLS usually works without injection; skip silently unless
   // the user wants diagnostics (LVIS_CORP_CA_DEBUG=1).
   if (process.env.LVIS_CORP_CA_DEBUG === "1") {
-    console.log("[corp-ca] Windows runtime extraction skipped (Phase 3 pending)");
+    log.info("Windows runtime extraction skipped (Phase 3 pending)");
   }
   return null;
 }
@@ -100,7 +102,7 @@ function extractLinux(): string | null {
   // Linux runtime extraction is Phase 3 (scan /etc/ssl/certs or
   // update-ca-trust). Silent by default — OS trust store still applies.
   if (process.env.LVIS_CORP_CA_DEBUG === "1") {
-    console.log("[corp-ca] Linux runtime extraction skipped (Phase 3 pending)");
+    log.info("Linux runtime extraction skipped (Phase 3 pending)");
   }
   return null;
 }
@@ -117,7 +119,7 @@ function extractByPlatform(): string | null {
     case "linux":
       return extractLinux();
     default:
-      console.warn(`[corp-ca] Unsupported platform: ${process.platform} — skipping CA extraction`);
+      log.warn(`Unsupported platform: ${process.platform} — skipping CA extraction`);
       return null;
   }
 }
@@ -158,7 +160,7 @@ export async function ensureCorporateCa(): Promise<CorporateCaResult> {
   // 1. cache hit
   const cached = readCacheIfFresh();
   if (cached) {
-    console.log(`[corp-ca] cache hit: ${cachePath} (${countCerts(cached)} cert(s))`);
+    log.info(`cache hit: ${cachePath} (${countCerts(cached)} cert(s))`);
     return { pem: cached, path: cachePath, source: "cache", certCount: countCerts(cached) };
   }
 
@@ -171,9 +173,9 @@ export async function ensureCorporateCa(): Promise<CorporateCaResult> {
   // 3. write cache (async, non-blocking for caller flow)
   try {
     await writeCacheSecure(pem);
-    console.log(`[corp-ca] extracted + cached: ${cachePath} (${countCerts(pem)} cert(s))`);
+    log.info(`extracted + cached: ${cachePath} (${countCerts(pem)} cert(s))`);
   } catch (writeErr) {
-    console.warn("[corp-ca] cache write failed (non-fatal):", (writeErr as Error).message);
+    log.warn("cache write failed (non-fatal): %s", (writeErr as Error).message);
   }
 
   return { pem, path: cachePath, source: "extracted", certCount: countCerts(pem) };

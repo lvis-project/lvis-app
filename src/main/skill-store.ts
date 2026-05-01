@@ -16,6 +16,8 @@ import { readFile, readdir, realpath } from "node:fs/promises";
 import { resolve, join, relative, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { BUILTIN_SKILLS } from "./builtin-skills.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 /**
  * C2(b): allowlist for skill names. Skill files live in
@@ -150,7 +152,7 @@ export class SkillStore {
       // C2(b): allowlist on filename — reject anything with `/`, `..`, NUL,
       // or other disallowed characters before opening the file.
       if (!SKILL_NAME_ALLOWLIST.test(baseName)) {
-        console.warn(`[lvis] skill scan: rejected non-allowlist filename: ${entry}`);
+        log.warn(`skill scan: rejected non-allowlist filename: ${entry}`);
         continue;
       }
       const filePath = join(dir, entry);
@@ -161,16 +163,16 @@ export class SkillStore {
       try {
         realFile = await realpath(filePath);
       } catch (err) {
-        console.warn(
-          `[lvis] skill scan: realpath failed for ${filePath}:`,
+        log.warn(
+          `skill scan: realpath failed for ${filePath}: %s`,
           (err as Error).message,
         );
         continue;
       }
       const rel = relative(realDir, realFile);
       if (rel.startsWith("..") || isAbsolute(rel)) {
-        console.warn(
-          `[lvis] skill scan: rejected traversal — ${filePath} -> ${realFile} escapes ${realDir}`,
+        log.warn(
+          `skill scan: rejected traversal — ${filePath} -> ${realFile} escapes ${realDir}`,
         );
         continue;
       }
@@ -182,8 +184,8 @@ export class SkillStore {
         // allowlist; if a malicious frontmatter sets `name: ../../etc`, we
         // reject the skill rather than carry that ID into the load() lookup.
         if (!SKILL_NAME_ALLOWLIST.test(name)) {
-          console.warn(
-            `[lvis] skill scan: rejected non-allowlist frontmatter name "${name}" in ${realFile}`,
+          log.warn(
+            `skill scan: rejected non-allowlist frontmatter name "${name}" in ${realFile}`,
           );
           continue;
         }
@@ -192,8 +194,8 @@ export class SkillStore {
         // system prompt or chew up tokens. 8 KB is generous for a markdown
         // skill and tight enough that abuse is bounded.
         if (Buffer.byteLength(trimmedBody, "utf-8") > SKILL_MAX_BODY_BYTES) {
-          console.warn(
-            `[lvis] skill scan: rejected oversized body for ${realFile} (>${SKILL_MAX_BODY_BYTES} bytes)`,
+          log.warn(
+            `skill scan: rejected oversized body for ${realFile} (>${SKILL_MAX_BODY_BYTES} bytes)`,
           );
           continue;
         }
@@ -206,8 +208,8 @@ export class SkillStore {
           filePath: realFile,
         });
       } catch (err) {
-        console.warn(
-          `[lvis] skill load failed for ${filePath}:`,
+        log.warn(
+          `skill load failed for ${filePath}: %s`,
           (err as Error).message,
         );
       }

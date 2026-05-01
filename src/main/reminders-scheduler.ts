@@ -5,6 +5,8 @@
  * a previous session survive restart.
  */
 import type { RemindersStore, ReminderRecord } from "./reminders-store.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 export interface ReminderFiredEvent {
   reminder: ReminderRecord;
@@ -77,7 +79,7 @@ export class RemindersScheduler {
         try {
           h({ reminder: updated });
         } catch (err) {
-          console.warn("[lvis] reminder handler threw:", (err as Error).message);
+          log.warn("reminder handler threw: %s", (err as Error).message);
         }
       }
     }

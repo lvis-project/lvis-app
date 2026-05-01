@@ -12,6 +12,8 @@
 import { randomUUID } from "node:crypto";
 import type { WebContents } from "electron";
 import type { NotificationService } from "./notification-service.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 /**
  * One question inside a multi-question request. The card surfaces these as
@@ -224,8 +226,8 @@ export class AskUserQuestionGate {
         wc.send(IPC_ASK_USER_QUESTION_REQUEST, req);
       } catch (err) {
         cleanup();
-        console.warn(
-          "[lvis] ask-user-question send failed:",
+        log.warn(
+          "ask-user-question send failed: %s",
           (err as Error).message,
         );
         resolve({ requestId: req.id, dismissed: true });

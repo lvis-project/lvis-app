@@ -10,6 +10,8 @@
 import { randomUUID, createHash } from "node:crypto";
 import type { TelemetrySettings } from "../data/settings-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("telemetry");
 
 /**
  * Default host allowlist for the telemetry endpoint. Production deployments
@@ -174,7 +176,7 @@ export class TelemetryService {
       } catch {
         // audit failure must not break app
       }
-      console.warn(`[telemetry] endpoint rejected (${result.reason}) — disabling for session`);
+      log.warn(`endpoint rejected (${result.reason}) — disabling for session`);
       return false;
     }
     return true;
@@ -226,12 +228,12 @@ export class TelemetryService {
         body: JSON.stringify({ events: batch }),
       });
       if (!res.ok) {
-        console.warn(`[telemetry] flush non-ok HTTP ${res.status}; re-queued ${batchLen} event(s)`);
+        log.warn(`flush non-ok HTTP ${res.status}; re-queued ${batchLen} event(s)`);
         return;
       }
       this.queue.splice(0, batchLen);
     } catch (err) {
-      console.warn("[telemetry] flush failed (re-queued):", (err as Error).message);
+      log.warn("flush failed (re-queued): %s", (err as Error).message);
     }
   }
 }
