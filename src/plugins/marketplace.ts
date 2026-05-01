@@ -6,7 +6,7 @@ import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
-import type { PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
+import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
@@ -1126,12 +1126,22 @@ export class PluginMarketplaceService {
       // doesn't silently downgrade it to "user".
       const installedBy = manifest.installPolicy === "admin" ? "admin" : "user";
       const registryManifestPath = posix.join(pluginId, "plugin.json");
+      // Mirror the marketplace install path's grant of `manifest.pluginAccess`
+      // into `approvedPluginAccess` (lines 409, 417, 562, 570). Without this,
+      // `assertPluginEventAccess` / `assertPluginToolAccess` find no grant for
+      // a dev-sideloaded plugin and any cross-plugin event subscribe / tool
+      // call from its createPlugin path throws "not allowed to subscribe to
+      // event ... from plugin ...". Dev mode is gated by `isDevModeUnlocked()`
+      // upstream, so this isn't an additional trust delegation — just brings
+      // installLocal to parity with marketplace install.
+      const approvedPluginAccess = (manifest as { pluginAccess?: PluginAccessSpec }).pluginAccess;
       await updatePluginRegistry(this.registryPath, (registry) => {
         const existing = registry.plugins.find((x) => x.id === pluginId);
         if (existing) {
           existing.manifestPath = registryManifestPath;
           existing.enabled = true;
           existing.installedBy = installedBy;
+          existing.approvedPluginAccess = approvedPluginAccess;
           // This entry is now a real user install. Strip any stale
           // `_devLinked` marker so the next `dev-link-plugins.mjs` boot pass
           // — which drops every `_devLinked` entry before re-registering —
@@ -1143,6 +1153,7 @@ export class PluginMarketplaceService {
             manifestPath: registryManifestPath,
             enabled: true,
             installedBy,
+            approvedPluginAccess,
           });
         }
       });
