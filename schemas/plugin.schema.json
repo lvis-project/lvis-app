@@ -225,6 +225,11 @@
       "additionalProperties": false
     },
     "publisher": { "type": "string", "minLength": 1 },
+    "packageName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "npm package name persisted into installed manifests by PluginMarketplaceService for rollback support. Not authored by plugin developers."
+    },
     "python": {
       "type": "object",
       "description": "Optional Python runtime co-deployment metadata. Host installs declared requirements when managedBy is lvis-app.",
