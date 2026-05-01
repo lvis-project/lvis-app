@@ -57,5 +57,12 @@ export function supportsVision(vendor: LLMVendor, model: string): boolean {
       return /^(gpt-4|gpt-5|chatgpt)/i.test(m);
     case "copilot":
       return /^(gpt-4|gpt-5|claude-)/i.test(m);
+    default:
+      // Defense-in-depth: callers occasionally `as LLMVendor`-cast a raw
+      // string (settings load, IPC inputs). An unexpected vendor would
+      // otherwise yield undefined at runtime and violate the declared
+      // boolean return — fall back to "no vision" rather than silently
+      // surfacing as falsey.
+      return false;
   }
 }

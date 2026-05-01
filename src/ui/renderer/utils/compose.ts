@@ -64,7 +64,11 @@ export function composeOutgoing(params: {
     if (att.kind !== "paste") continue;
     const re = new RegExp(`\\[Pasted text #${att.n}(?:\\s+\\+\\d+\\s+lines)?\\]`, "g");
     const replacement = `\n\n----- Pasted text #${att.n} (${att.lines} lines) -----\n${att.text}\n----- end Pasted text #${att.n} -----\n\n`;
-    body = body.replace(re, replacement);
+    // Replacer FUNCTION (not string) — `String.prototype.replace`'s string
+    // form interprets `$&`, `$1`, `$$`, etc. as backreference tokens. The
+    // pasted text could contain literal `$` sequences (regex snippets,
+    // template literals, currency, etc.) and we must not mutate them.
+    body = body.replace(re, () => replacement);
   }
 
   // 3. Compose final text with optional role preset prefix.

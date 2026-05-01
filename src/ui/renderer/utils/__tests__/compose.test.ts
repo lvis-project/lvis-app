@@ -98,6 +98,45 @@ describe("composeOutgoing", () => {
     expect(r.attachments[0].type).toBe("image");
   });
 
+  it("preserves literal $ sequences in pasted text (no regex backreference mutation)", () => {
+    // String.prototype.replace's STRING form interprets `$&`, `$1`, `$$`,
+    // etc. as backreference tokens. Use a replacer function to bypass.
+    const dollarPaste: PasteAttachment = {
+      id: "p-dollar",
+      n: 9,
+      kind: "paste",
+      text: "match $1 keep $& and $$ raw",
+      lines: 1,
+      chars: 27,
+    };
+    const r = composeOutgoing({
+      raw: "see [Pasted text #9 +1 lines]",
+      activePreset: null,
+      attachments: [dollarPaste],
+    });
+    expect(r.text).toContain("match $1 keep $& and $$ raw");
+  });
+
+  it("expands paste markers even when the user edited the +X lines suffix", () => {
+    const paste = {
+      id: "p-edit",
+      n: 7,
+      kind: "paste" as const,
+      text: "actual content",
+      lines: 5,
+      chars: 14,
+    };
+    // Marker in body has +99 lines (user edit) but parseMarkers + the
+    // expansion regex must still match.
+    const r = composeOutgoing({
+      raw: "before [Pasted text #7 +99 lines] after",
+      activePreset: null,
+      attachments: [paste],
+    });
+    expect(r.text).toContain("actual content");
+    expect(r.text).not.toContain("[Pasted text #7 +99 lines]");
+  });
+
   it("applies role-preset prefix when active", () => {
     const r = composeOutgoing({
       raw: "hi",
