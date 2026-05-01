@@ -1,6 +1,6 @@
 import "../../../../test/renderer/setup.js";
-import { describe, it, expect, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useMemorySearch } from "../hooks/use-memory-search.js";
 import type { LvisApi } from "../types.js";
 
@@ -18,8 +18,15 @@ function Harness({ api }: { api: LvisApi }) {
 }
 
 describe("useMemorySearch", () => {
-  it("queries memorySearchEntries for note results", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("queries memorySearchEntries for note results after debounce", async () => {
+    vi.useFakeTimers();
     const api = {
+      memoryListEntries: vi.fn().mockResolvedValue([]),
+      memoryListSessions: vi.fn().mockResolvedValue([]),
       memorySearchEntries: vi.fn().mockResolvedValue([
         { title: "사용자 메모", excerpt: "본문", updatedAt: "2026-04-20T00:00:00Z" },
       ]),
@@ -31,15 +38,49 @@ describe("useMemorySearch", () => {
 
     render(<Harness api={api} />);
 
+    // Initial catalog load runs immediately on mount; subsequent query-driven searches are debounced.
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+    });
+
     await act(async () => {
       fireEvent.change(screen.getByLabelText("query"), { target: { value: "메모" } });
     });
 
-    await waitFor(() => {
-      expect(api.memorySearchEntries).toHaveBeenCalledWith("메모");
+    // Advance past the 200 ms search debounce
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
     });
+
+    expect(api.memorySearchEntries).toHaveBeenCalledWith("메모");
     expect(api.memorySearchNotes).not.toHaveBeenCalled();
     expect(screen.getByTestId("notes").textContent).toContain("사용자 메모");
     expect(screen.getByTestId("sessions").textContent).toContain("session-1");
+  });
+
+  it("does not call memorySearchEntries before debounce delay elapses", async () => {
+    vi.useFakeTimers();
+    const api = {
+      memoryListEntries: vi.fn().mockResolvedValue([]),
+      memoryListSessions: vi.fn().mockResolvedValue([]),
+      memorySearchEntries: vi.fn().mockResolvedValue([]),
+      memorySearchSessions: vi.fn().mockResolvedValue([]),
+      memorySearchNotes: vi.fn(),
+    } as unknown as LvisApi;
+
+    render(<Harness api={api} />);
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("query"), { target: { value: "메모" } });
+    });
+
+    // Advance only 100 ms — before the 200 ms debounce
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(api.memorySearchEntries).not.toHaveBeenCalled();
   });
 });
