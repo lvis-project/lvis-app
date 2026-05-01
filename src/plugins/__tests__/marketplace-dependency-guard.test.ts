@@ -36,6 +36,7 @@ function makeItem(
     id,
     name: id,
     description: "Test fixture.",
+    publisher: "Test fixture",
     packageSpec: `@lvis/${id}@1.0.0`,
     packageName: `@lvis/${id}`,
     tools: [],
@@ -71,6 +72,7 @@ async function setupTestDir(
         entry: "dist/index.js",
         tools: [],
         description: "Test fixture.",
+        publisher: "Test fixture",
         capabilities: p.capabilities
       }),
     );
@@ -174,6 +176,7 @@ describe("marketplace install dependency guard (S14)", () => {
         entry: "dist/index.js",
         tools: [],
         description: "Test fixture.",
+        publisher: "Test fixture",
         capabilities: ["cap-b"]
       }),
     );

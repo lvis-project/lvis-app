@@ -56,6 +56,7 @@ describe("Phase 5 — runtime validation hardening", () => {
       name: id,
       version: "1.0.0",
       description: "Test fixture.",
+      publisher: "Test fixture",
       entry: "entry.mjs",
       tools: [`${id}_hello`, `${id}_bad`, `${id}_good`],
       ...manifestOverrides,

@@ -23,6 +23,7 @@ function makeItem(id: string): PluginMarketplaceItem {
     id,
     name: id,
     description: "test",
+    publisher: "Test fixture",
     packageSpec: `@lvis/${id}@1.0.0`,
     packageName: `@lvis/${id}`,
     tools: []

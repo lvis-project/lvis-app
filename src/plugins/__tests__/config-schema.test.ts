@@ -66,6 +66,7 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
       name: "Test",
       version: "1.0.0",
       description: "Test fixture.",
+      publisher: "Test fixture",
       entry: "index.js",
       tools: ["test_ping"],
       configSchema: {
@@ -206,6 +207,7 @@ describe("US-B1 regression — baseline manifest WITHOUT configSchema still vali
       name: "회의록 녹음",
       version: "1.3.0",
       description: "Test fixture.",
+      publisher: "Test fixture",
       entry: "dist/index.js",
       tools: ["meeting_start", "meeting_stop"],
       uiCallable: ["meeting_start"],
