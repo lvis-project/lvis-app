@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { PluginRuntime } from "../runtime.js";
+import { PluginPhase } from "../lifecycle-log.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { mkdtempSync } from "node:fs";
 
@@ -209,7 +210,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("bad-plugin");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad\.method'|schema validation failed/));
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/manifest read failed/),
+      expect.objectContaining({ phase: PluginPhase.VALIDATION_FAIL }),
+    );
     errSpy.mockRestore();
   });
 
@@ -235,7 +239,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("bad-leading-digit");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name '1bad_name'|schema validation failed/));
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/manifest read failed/),
+      expect.objectContaining({ phase: PluginPhase.VALIDATION_FAIL }),
+    );
     errSpy.mockRestore();
   });
 
@@ -261,7 +268,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("bad-hyphen");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad-name'|schema validation failed/));
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/manifest read failed/),
+      expect.objectContaining({ phase: PluginPhase.VALIDATION_FAIL }),
+    );
     errSpy.mockRestore();
   });
 
@@ -286,7 +296,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("no-description");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/description|must be a non-empty string/i));
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/manifest read failed/),
+      expect.objectContaining({ phase: PluginPhase.VALIDATION_FAIL }),
+    );
     errSpy.mockRestore();
   });
 
@@ -311,7 +324,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("empty-description");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/description|must be a non-empty string/i));
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/manifest read failed/),
+      expect.objectContaining({ phase: PluginPhase.VALIDATION_FAIL }),
+    );
     errSpy.mockRestore();
   });
 
@@ -1366,5 +1382,117 @@ export default async function createPlugin() {
     // Note: ESM module caching means we can't test the v2 handler body here
     // (same URL = cached module), but we verify the plugin is re-started (counter resets).
     expect(runtime.listPluginIds()).toContain("p-update");
+  });
+});
+
+// ─── Lifecycle plog emission smoke tests ─────────────────────────────────────
+
+describe("PluginRuntime lifecycle plog emission", () => {
+  let testDir: string;
+  let installedDir: string;
+  let registryPath: string;
+
+  beforeEach(async () => {
+    testDir = mkdtempSync(join(tmpdir(), "lvis-plog-"));
+    installedDir = join(testDir, "plugins");
+    await mkdir(installedDir, { recursive: true });
+    registryPath = join(installedDir, "registry.json");
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  async function writeFakePlugin(id: string): Promise<string> {
+    const pluginDir = join(installedDir, id);
+    await mkdir(pluginDir, { recursive: true });
+    const methodName = `${id.replace(/[^a-zA-Z0-9_]/g, "_")}_hello`;
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin() {
+  return {
+    handlers: { "${methodName}": async () => "hi" },
+    start: async () => {},
+    stop: async () => {},
+  };
+}`,
+      "utf-8",
+    );
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName], description: "test", publisher: "test" }),
+      "utf-8",
+    );
+    return manifestPath;
+  }
+
+  async function writeRegistry(entries: Array<{ id: string; manifestPath: string; enabled?: boolean }>): Promise<void> {
+    await writeFile(registryPath, JSON.stringify({ version: 1, plugins: entries }), "utf-8");
+  }
+
+  it("emits LOAD_START phase for each plugin entry during load()", async () => {
+    const manifestPath = await writeFakePlugin("plog-test");
+    await writeRegistry([{ id: "plog-test", manifestPath, enabled: true }]);
+    // In test mode, createLogger maps debug→console.log.
+    // The ctx object is passed as 2nd arg; check the message string + ctx via JSON.
+    const calls: unknown[][] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    await runtime.load();
+    const hasLoadStart = calls.some((args) => {
+      const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
+      return flat.includes(PluginPhase.LOAD_START) || flat.includes("loading plugin");
+    });
+    expect(hasLoadStart).toBe(true);
+    spy.mockRestore();
+  });
+
+  it("emits LOAD_OK phase after a plugin successfully loads", async () => {
+    const manifestPath = await writeFakePlugin("plog-ok");
+    await writeRegistry([{ id: "plog-ok", manifestPath, enabled: true }]);
+    const calls: unknown[][] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    await runtime.load();
+    const hasLoadOk = calls.some((args) => {
+      const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
+      return flat.includes(PluginPhase.LOAD_OK) || flat.includes("plugin loaded");
+    });
+    expect(hasLoadOk).toBe(true);
+    spy.mockRestore();
+  });
+
+  it("emits RESTART_REQUEST phase when restartPlugin is called", async () => {
+    const manifestPath = await writeFakePlugin("plog-restart");
+    await writeRegistry([{ id: "plog-restart", manifestPath, enabled: true }]);
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    await runtime.load();
+    const calls: unknown[][] = [];
+    const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
+    await runtime.restartPlugin("plog-restart");
+    const hasRestartRequest = calls.some((args) => {
+      const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
+      return flat.includes(PluginPhase.RESTART_REQUEST) || flat.includes("restart requested");
+    });
+    expect(hasRestartRequest).toBe(true);
+    spyLog.mockRestore();
+  });
+
+  it("emits RESTART_STOP_OK phase after stop succeeds during restart", async () => {
+    const manifestPath = await writeFakePlugin("plog-stop-ok");
+    await writeRegistry([{ id: "plog-stop-ok", manifestPath, enabled: true }]);
+    const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
+    await runtime.load();
+    const calls: unknown[][] = [];
+    const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => { calls.push(args); });
+    await runtime.restartPlugin("plog-stop-ok");
+    const hasStopOk = calls.some((args) => {
+      const flat = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
+      return flat.includes(PluginPhase.RESTART_STOP_OK) || flat.includes("stopped previous instance");
+    });
+    expect(hasStopOk).toBe(true);
+    spyLog.mockRestore();
   });
 });

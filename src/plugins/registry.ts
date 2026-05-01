@@ -1,8 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import type { PluginRegistry, PluginRegistryEntry } from "./types.js";
+import { plog, PluginPhase } from "./lifecycle-log.js";
 
 export async function readPluginRegistry(registryPath: string): Promise<PluginRegistry> {
+  plog("debug", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_START, registryPath }, "registry read");
   let raw: string;
   try {
     raw = await readFile(registryPath, "utf-8");
@@ -12,12 +14,20 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     // — return the empty default so PluginRuntime.startAll can proceed and
     // the registry will be lazily created by the first install/uninstall.
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      plog("info", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_SKIP, reason: "first_boot_no_registry" }, "no registry — first boot");
       return { version: 1, plugins: [] };
     }
     throw err;
   }
-  const parsed = JSON.parse(raw) as PluginRegistry;
+  let parsed: PluginRegistry;
+  try {
+    parsed = JSON.parse(raw) as PluginRegistry;
+  } catch (err) {
+    plog("error", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_FAIL, err, reason: "invalid_json", registryPath }, "registry parse failed");
+    throw err;
+  }
   if (!Array.isArray(parsed.plugins)) {
+    plog("error", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_FAIL, reason: "invalid_format", registryPath }, "registry malformed");
     throw new Error(`Invalid plugin registry: ${registryPath}`);
   }
   return {

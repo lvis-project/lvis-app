@@ -13,6 +13,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../runtime.js";
+import { PluginPhase } from "../lifecycle-log.js";
 import { mkdtempSync } from "node:fs";
 
 describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
@@ -66,16 +67,16 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
   it("B-1: AJV rejects manifests with malformed version", async () => {
     await writePlugin("p_ajv_version", { version: "1.0" });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
-    const errors: string[] = [];
+    const ctxArgs: unknown[] = [];
     const origErr = console.error;
-    console.error = (msg: string) => errors.push(String(msg));
+    console.error = (_msg: string, ctx?: unknown) => { if (ctx) ctxArgs.push(ctx); };
     try {
       await runtime.load();
     } finally {
       console.error = origErr;
     }
     expect(runtime.listPluginIds()).toHaveLength(0);
-    expect(errors.some((e) => /schema validation|must match pattern/.test(e))).toBe(true);
+    expect(ctxArgs.some((c) => (c as Record<string, unknown>)?.phase === PluginPhase.VALIDATION_FAIL)).toBe(true);
   });
 
   it("B-1: AJV rejects manifests with description > 280 chars", async () => {
@@ -96,15 +97,15 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
     await writePlugin("p_ui_missing", { uiCallable: ["p_ui_missing_ghost"] });
     const runtime = new PluginRuntime({ hostRoot: testDir, registryPath, pluginsRoot: installedDir });
     const origErr = console.error;
-    const errors: string[] = [];
-    console.error = (msg: string) => errors.push(String(msg));
+    const ctxArgs: unknown[] = [];
+    console.error = (_msg: string, ctx?: unknown) => { if (ctx) ctxArgs.push(ctx); };
     try {
       await runtime.load();
     } finally {
       console.error = origErr;
     }
     expect(runtime.listPluginIds()).toHaveLength(0);
-    expect(errors.some((e) => /not declared in tools/.test(e))).toBe(true);
+    expect(ctxArgs.some((c) => (c as Record<string, unknown>)?.phase === PluginPhase.VALIDATION_FAIL)).toBe(true);
   });
 
   it("B-3: any suffix in uiCallable accepted when tool is in tools[]", async () => {
