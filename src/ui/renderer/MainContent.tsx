@@ -3,6 +3,7 @@ import { PluginUiHostView } from "../../plugin-ui-host.js";
 import type { getApi } from "./api-client.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { ChatView } from "./ChatView.js";
+import type { PluginEntry } from "./components/PluginGridButton.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
 import { StarredView } from "./components/StarredView.js";
@@ -39,6 +40,9 @@ export interface MainContentProps {
   subAgentSpawns: Parameters<typeof ChatView>[0]["subAgentSpawns"];
   loadedSkills: Parameters<typeof ChatView>[0]["loadedSkills"];
   hasAskQuestions: boolean;
+  // plugin grid for InputActionBar
+  plugins: PluginEntry[];
+  onSelectPlugin: (viewKey: string) => void;
   // plugin view
   activePluginView: PluginView | null;
 }
@@ -127,6 +131,8 @@ export function MainContent(props: MainContentProps): ReactNode {
             subAgentSpawns={props.subAgentSpawns}
             loadedSkills={props.loadedSkills}
             hasAskQuestions={props.hasAskQuestions}
+            plugins={props.plugins}
+            onSelectPlugin={props.onSelectPlugin}
           />
         </ChatContextProvider>
       </MainPaneShell>
