@@ -3135,7 +3135,9 @@ import { MARKETPLACE_PUBLIC_KEYS } from "./marketplace-keys.js";
 export function getBundledPublicKeys(): Record<string, Buffer>  // raw ed25519 키
 ```
 
-**Install receipt scope**: 호스트가 verify 하는 receipt 는 `plugin.json` + `dist/**` 만 커버한다. 플러그인의 `node_modules/` 런타임 의존성은 **integrity 추적 대상이 아니다** — bundling 가정 (esbuild/tsup 으로 hostPlugin.js 가 stand-alone) 또는 dev-mode 설치 (`installLocal`, `LVIS_DEV=1` 게이트) 에 한해서만 unpacked deps 가 허용된다. 패키지된 빌드의 `installArtifact` 는 zip artifact 가 node_modules 를 포함하지 않는 invariant 로 같은 boundary 를 자연 만족한다. 이 scope 결정은 dev-only `installLocal` 에서도 일관되게 유지되며, 향후 `installSource: "marketplace" | "local-dev"` enum 도입 시 receipt scope 의 source 별 분기를 명시화할 계획이다.
+**Install receipt schema (v2)**: `PluginInstallReceipt` (schemaVersion 2) 는 `installSource: "marketplace" | "local-dev"` 필드로 설치 경로를 구분한다. `local-dev` 영수증은 `isDevModeUnlocked()` 게이트가 false 인 환경(packaged 빌드 또는 LVIS_DEV 미설정)에서 `verifyReceiptAndDevGuard` 가 로드를 거부한다. v1 영수증(PR #421 이전 설치분)은 `verifyInstallReceipt` 가 read-time 으로 v2 로 정규화하며, `signerKeyId` 가 `"dev:"` prefix 이면 `local-dev`, 아니면 `marketplace` 로 분류된다.
+
+**Install receipt scope**: 호스트가 verify 하는 receipt 는 `plugin.json` + `dist/**` 만 커버한다. 플러그인의 `node_modules/` 런타임 의존성은 **integrity 추적 대상이 아니다** — bundling 가정 (esbuild/tsup 으로 hostPlugin.js 가 stand-alone) 또는 dev-mode 설치 (`installLocal`, `LVIS_DEV=1` 게이트) 에 한해서만 unpacked deps 가 허용된다. 패키지된 빌드의 `installArtifact` 는 zip artifact 가 node_modules 를 포함하지 않는 invariant 로 같은 boundary 를 자연 만족한다. `verifyInstallReceipt` 는 순수 무결성 검사(파일 해시, pluginId 일치, signerKeyId 유무)만 담당하며, 환경 기반 정책 게이트(packaged vs dev)는 호출 스택의 상위(`runtime/index.ts verifyReceiptAndDevGuard`)에서 분리 적용된다.
 
 ---
 

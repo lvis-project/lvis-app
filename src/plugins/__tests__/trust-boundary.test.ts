@@ -452,6 +452,41 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(runtime.listPluginIds()).not.toContain("tb.v1-dev-signer");
     });
 
+    it("v1 marketplace receipt (non-dev: signerKeyId) → normalised to marketplace → loads in packaged", async () => {
+      // Verifies the v1→v2 normalisation correctly classifies real marketplace
+      // receipts (signerKeyId that doesn't start with "dev:") as marketplace.
+      delete process.env.LVIS_DEV;
+      setIsPackaged(true);
+      const pluginDir = join(pluginsRoot, "p-v1-mkt");
+      const manifestPath = await writePluginAt(pluginDir, "tb.v1-mkt");
+
+      const v1Receipt = {
+        schemaVersion: 1,
+        pluginId: "tb.v1-mkt",
+        version: "1.0.0",
+        artifactSha256: "a".repeat(64),
+        signerKeyId: "poc-v1",
+        installedAt: new Date(0).toISOString(),
+        files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
+      };
+      const { writeFile: wf2, mkdir: mk2 } = await import("node:fs/promises");
+      const { resolve: res2 } = await import("node:path");
+      const receiptPath2 = res2(cacheRoot, "tb.v1-mkt", "install-receipt.json");
+      await mk2(res2(cacheRoot, "tb.v1-mkt"), { recursive: true });
+      await wf2(receiptPath2, `${JSON.stringify(v1Receipt, null, 2)}\n`, "utf-8");
+
+      await writeRegistry([{ id: "tb.v1-mkt", manifestPath, installedBy: "user" }]);
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+      });
+      await runtime.load();
+      // marketplace-normalised v1 receipt should load (hash verification passes)
+      expect(runtime.listPluginIds()).toContain("tb.v1-mkt");
+    });
+
     it("unpackaged build + local-dev receipt → plugin loads normally", async () => {
       process.env.LVIS_DEV = "1";
       setIsPackaged(false);

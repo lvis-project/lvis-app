@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { isDevModeUnlocked } from "../boot/dev-flags.js";
 
 export interface InstallReceiptFile {
   path: string;
@@ -90,20 +89,27 @@ export async function verifyInstallReceipt(
   let receipt: PluginInstallReceipt;
   if (parsed.schemaVersion === 1) {
     const v1 = parsed as PluginInstallReceiptV1;
+    // Guard against corrupted receipts where signerKeyId is missing at runtime.
+    const rawSigner = (v1 as { signerKeyId?: unknown }).signerKeyId;
     const installSource: "marketplace" | "local-dev" =
-      v1.signerKeyId.startsWith("dev:") ? "local-dev" : "marketplace";
+      typeof rawSigner === "string" && rawSigner.startsWith("dev:") ? "local-dev" : "marketplace";
     receipt = {
       schemaVersion: 2,
       pluginId: v1.pluginId,
       version: v1.version,
       installSource,
       artifactSha256: installSource === "local-dev" ? null : v1.artifactSha256,
-      signerKeyId: installSource === "local-dev" ? null : v1.signerKeyId,
+      signerKeyId: installSource === "local-dev" ? null : (typeof rawSigner === "string" ? rawSigner : null),
       installedAt: v1.installedAt,
       files: v1.files,
     };
   } else if (parsed.schemaVersion === 2) {
-    receipt = parsed as PluginInstallReceipt;
+    const v2 = parsed as PluginInstallReceipt;
+    // Runtime enum validation — JSON.parse+as-cast cannot enforce union literals.
+    if (v2.installSource !== "marketplace" && v2.installSource !== "local-dev") {
+      return { ok: false, reason: `invalid receipt installSource: ${String(v2.installSource)}` };
+    }
+    receipt = v2;
   } else {
     return { ok: false, reason: `unsupported install receipt schema: ${String((parsed as { schemaVersion?: unknown }).schemaVersion)}` };
   }
@@ -112,12 +118,10 @@ export async function verifyInstallReceipt(
     return { ok: false, reason: `install receipt plugin mismatch: expected ${pluginId}, got ${receipt.pluginId}` };
   }
 
-  // local-dev installs are only permitted in dev mode.
-  if (receipt.installSource === "local-dev" && !isDevModeUnlocked()) {
-    return { ok: false, reason: "local-dev install receipt rejected in packaged build" };
-  }
-
   // marketplace receipts must carry a real signerKeyId.
+  // The packaged-build gate for local-dev receipts lives in the caller
+  // (runtime/index.ts verifyReceiptAndDevGuard) to keep this function a
+  // pure integrity verifier — policy enforcement stays in the runtime layer.
   if (receipt.installSource === "marketplace") {
     if (typeof receipt.signerKeyId !== "string" || receipt.signerKeyId.length === 0) {
       return { ok: false, reason: "marketplace receipt missing or empty signerKeyId" };
@@ -168,7 +172,7 @@ export async function listFilesRecursive(root: string): Promise<string[]> {
 
 function normalizeReceiptPath(path: string): string {
   const normalized = path.replace(/\\/g, "/").replace(/^\.\/+/, "");
-  if (!normalized || normalized.startsWith("../") || isAbsolute(normalized)) return "";
+  if (!normalized || normalized.startsWith("../") || normalized.includes("/../") || isAbsolute(normalized)) return "";
   return normalized;
 }
 
