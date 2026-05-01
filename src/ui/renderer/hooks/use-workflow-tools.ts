@@ -8,7 +8,7 @@
  * `RemindersList` and `SessionTodoPanel` own their own state since they're
  * simple list views; they live alongside this hook in the App.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
 import type { AskUserQuestionRequest } from "../components/AskUserQuestionCard.js";
 import type { SubAgentSpawn, SubAgentTurn } from "../components/SubAgentCard.js";
@@ -133,20 +133,20 @@ export function useWorkflowTools(api: LvisApi) {
     };
   }, [api]);
 
-  const dismissAskQuestion = (id: string) => {
+  const dismissAskQuestion = useCallback((id: string) => {
     setAskQuestions((prev) => prev.filter((q) => q.id !== id));
-  };
+  }, []);
 
   /**
    * M4: explicit reset hook callable from the App (e.g. when the user
    * clicks "new chat"). Clears the per-session skill badge list so a
    * brand-new conversation does not inherit prior session badges.
    */
-  const resetForNewSession = () => {
+  const resetForNewSession = useCallback(() => {
     setLoadedSkills([]);
     setSubAgentSpawns([]);
     setAskQuestions([]);
-  };
+  }, []);
 
   return {
     askQuestions,
