@@ -63,6 +63,7 @@ type InstallOperationState = {
       bundleRefs: string[] | undefined;
       installedBy: "admin" | "user" | undefined;
       approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"];
+      _devLinked: boolean | undefined;
     }
   >;
 };
@@ -564,6 +565,7 @@ export class PluginMarketplaceService {
           existing.enabled = true;
           existing.installedBy = "user";
           existing.approvedPluginAccess = plugin.pluginAccess;
+          delete existing._devLinked;
         } else {
           registry.plugins.push({
             id: plugin.id,
@@ -627,6 +629,7 @@ export class PluginMarketplaceService {
           existing.enabled = true;
           existing.installedBy = existing.installedBy ?? "user";
           existing.bundleRefs = existing.bundleRefs ?? [];
+          delete existing._devLinked;
         } else {
           registry.plugins.push({
             id: pluginId,
@@ -756,6 +759,7 @@ export class PluginMarketplaceService {
           bundleRefs: entry.bundleRefs ? [...entry.bundleRefs] : undefined,
           installedBy: entry.installedBy,
           approvedPluginAccess: entry.approvedPluginAccess,
+          _devLinked: entry._devLinked,
         });
       }
       entry.enabled = true;
@@ -789,6 +793,11 @@ export class PluginMarketplaceService {
         entry.bundleRefs = snapshot.bundleRefs;
         entry.installedBy = snapshot.installedBy;
         entry.approvedPluginAccess = snapshot.approvedPluginAccess;
+        if (snapshot._devLinked !== undefined) {
+          entry._devLinked = snapshot._devLinked;
+        } else {
+          delete entry._devLinked;
+        }
       }
       await writePluginRegistry(this.registryPath, registry);
     });
@@ -853,10 +862,10 @@ export class PluginMarketplaceService {
    * Shared post-install finalization called by both installArtifact and
    * installLocal after the install dir is in place.
    *
-   * Centralises the receipt write so both paths always produce the same
-   * v2 receipt shape. This is the single call site for
-   * artifactStore.writeInstallReceipt — adding a field to the receipt
-   * schema requires a change here only, not in each install branch.
+   * Currently handles the receipt write only; registry update and entry-path
+   * assertion are planned for a future expansion (#402 follow-up). Having a
+   * single call site means receipt schema changes (e.g. adding a field) need
+   * one edit here rather than one per install branch.
    */
   private async finalizeInstall(
     pluginId: string,
@@ -866,6 +875,7 @@ export class PluginMarketplaceService {
       artifactSha256: string | null;
       signerKeyId: string | null;
       files: string[];
+      installedAt?: string;
     },
   ): Promise<void> {
     await this.artifactStore.writeInstallReceipt(pluginId, opts);
