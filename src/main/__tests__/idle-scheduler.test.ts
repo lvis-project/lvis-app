@@ -279,25 +279,25 @@ describe("SECURITY_GATE: IdleSchedulerService 5-state", () => {
 
   it("case 11: RESUME_DELAY 타이머 만료 → RUNNING", async () => {
     vi.useFakeTimers();
+    const pm = new FakePowerMonitor();
+    const worker = makeMockWorker();
+    const sched = new IdleSchedulerService({
+      workerClient: worker,
+      powerMonitor: pm,
+      tickIntervalMs: 1_000_000,
+      resumeDelayMs: 30,
+      chunkCooldownMs: 0,
+      throttledCooldownMs: 0,
+      logger: () => {},
+    });
     try {
-      const pm = new FakePowerMonitor();
-      const worker = makeMockWorker();
-      const sched = new IdleSchedulerService({
-        workerClient: worker,
-        powerMonitor: pm,
-        tickIntervalMs: 1_000_000,
-        resumeDelayMs: 30,
-        chunkCooldownMs: 0,
-        throttledCooldownMs: 0,
-        logger: () => {},
-      });
       sched.start();
       pm.emit("resume");
       expect(sched.getState()).toBe("RESUME_DELAY");
       await vi.advanceTimersByTimeAsync(60);
       expect(sched.getState()).toBe("RUNNING");
-      sched.stop();
     } finally {
+      sched.stop();
       vi.useRealTimers();
     }
   });
