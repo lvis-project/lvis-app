@@ -25,10 +25,15 @@ function parseStatusResult(raw: unknown): PluginAuthState {
 }
 
 /**
- * Live-polls every plugin that declares `manifest.auth` (architecture.md
- * §9.4a) and listens for `<pluginId>.auth.changed` events. Returns a state
- * map keyed by plugin id plus a manual `refresh` for callers that just
- * triggered login/logout.
+ * Tracks auth status for every loaded plugin that declares `manifest.auth`
+ * (architecture.md §9.4a). Fetches statusTool once on mount + on every
+ * `<pluginId>.auth.changed` event the plugin emits — no polling timer.
+ * Returns a state map keyed by plugin id plus a manual `refresh` for
+ * callers that just triggered login/logout.
+ *
+ * Plugins are filtered to `loadStatus === "loaded"` — failed/disabled
+ * plugins have no live runtime to invoke, so the hook never dispatches
+ * statusTool against them.
  *
  * Implementation note: the effect dep is a JSON cache-key derived from the
  * auth-bearing entries — not the `plugins` array reference — because the
@@ -50,11 +55,13 @@ export function usePluginAuthStatuses(
   const pluginsRef = useRef(plugins);
   pluginsRef.current = plugins;
 
-  // Stable cache key — only changes when the set of auth-bearing plugins or
-  // their auth tool names actually change.
+  // Stable cache key — only changes when the set of auth-bearing+loaded
+  // plugins or their auth tool names actually change. Skipping
+  // failed/disabled plugins here means the effect doesn't re-bind every
+  // time a plugin transitions in/out of `loaded` for unrelated reasons.
   const authCacheKey = useMemo(() => {
     return plugins
-      .filter((p) => p.auth)
+      .filter((p) => p.auth && p.loadStatus === "loaded")
       .map((p) =>
         [
           p.id,
@@ -103,7 +110,9 @@ export function usePluginAuthStatuses(
 
   useEffect(() => {
     if (!api) return;
-    const authPlugins = pluginsRef.current.filter((p) => p.auth);
+    const authPlugins = pluginsRef.current.filter(
+      (p) => p.auth && p.loadStatus === "loaded",
+    );
     if (authPlugins.length === 0) {
       setStatuses(new Map());
       return;

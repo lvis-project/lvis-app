@@ -377,11 +377,12 @@ export function PluginConfigTab() {
                       {p.loadStatus === "disabled" && (
                         <span className="inline-block rounded-full bg-gray-100 px-1.5 py-px text-[9px] font-medium text-gray-600">비활성</span>
                       )}
-                      {/* Auth status — only when manifest declares `auth` and the plugin is
-                          loaded. The list-level badge is a "you need to do something here"
+                      {/* Auth status — only when manifest declares `auth` AND the plugin is
+                          actually loaded (skip failed/disabled rows whose runtime can't be
+                          invoked). The list-level badge is a "you need to do something here"
                           surface; we render only `unauthed` (red) so the row stays visually
                           quiet for the happy-path. Click → detail panel handles login flow. */}
-                      {p.auth && authStatuses.get(p.id)?.kind === "unauthed" && (
+                      {p.auth && p.loadStatus === "loaded" && authStatuses.get(p.id)?.kind === "unauthed" && (
                         <span
                           className="inline-block rounded-full bg-red-100 px-1.5 py-px text-[9px] font-medium text-red-700"
                           title="이 플러그인은 로그인이 필요합니다"

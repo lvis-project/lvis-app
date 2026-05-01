@@ -35,10 +35,12 @@ export interface PluginAuthSpec {
 
 /**
  * Recommended return shape of `auth.statusTool`. Host parses defensively
- * (`Boolean(result?.authenticated)`, `String(result?.account ?? "")`); the
- * shape is documented but not AJV-validated in v1 — outputSchema validation
- * is a separate cross-cutting change. Plugins MAY return additional fields;
- * the host ignores them.
+ * with strict `result?.authenticated === true` (NOT a `Boolean(...)`
+ * coercion — a plugin returning `1` or `"true"` is treated as unauthed
+ * to surface the contract drift) and `String(result?.account ?? "")`.
+ * The shape is documented but not AJV-validated in v1 — outputSchema
+ * validation is a separate cross-cutting change. Plugins MAY return
+ * additional fields; the host ignores them.
  */
 export interface PluginAuthStatus {
   authenticated: boolean;
