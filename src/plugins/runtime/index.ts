@@ -244,8 +244,12 @@ export class PluginRuntime {
       try {
         manifest = await this.readManifest(manifestPath);
       } catch (err) {
-        log.error(`${(err as Error).message}`);
-        plog("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason: "manifest_read" }, "manifest read failed");
+        const reason =
+          err instanceof SyntaxError ? "manifest_parse"
+          : (err as Error).message?.includes("schema validation") ? "manifest_schema"
+          : (err as NodeJS.ErrnoException).code === "ENOENT" ? "manifest_missing"
+          : "manifest_read";
+        plog("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason }, `manifest read failed: ${(err as Error).message}`);
         if (plan.enabled && plan.pluginIdHint) {
           this.markFailed(plan.pluginIdHint, {
             name: plan.pluginIdHint,

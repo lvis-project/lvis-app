@@ -31,7 +31,7 @@ const log = createLogger("plugin-lifecycle");
  *
  * Naming convention: `"lifecycle:<area>[:<sub>]:<verb>"`
  *   - area:  discovery | validation | load | register | start | invoke |
- *            event | webview | restart | stop | config | capability
+ *            event | webview | restart | stop | capability
  *   - sub:   optional sub-area (e.g. `tool`, `keywords` under `register`;
  *            `stop`, `reload`, `start` under `restart`; `load` under `webview`)
  *   - verb:  start | ok | fail | skip | retry | timeout
