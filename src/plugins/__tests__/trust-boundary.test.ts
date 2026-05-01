@@ -534,6 +534,42 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(runtime.listPluginIds()).toContain("tb.dev-signer-unpkg");
     });
 
+    it("restartPlugin re-reads registry: installSource changed from dev-link to user → receipt check NOT skipped", async () => {
+      // Issue #434: restartPlugin used plugin.devLinked (stale in-memory value).
+      // After the fix it re-reads the registry so a promotion from "dev-link" to
+      // "user" between load and restart causes receipt verification to run.
+      process.env.LVIS_DEV = "1";
+      setIsPackaged(false);
+      const pluginDir = join(pluginsRoot, "p-devlink-promoted");
+      const manifestPath = await writePluginAt(pluginDir, "tb.devlink-promoted");
+      // No receipt — the plugin loads only because dev-link skips the check.
+      await writeRegistry([{ id: "tb.devlink-promoted", manifestPath, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0]]);
+
+      const auditCalls: Array<{ level: string; message: string }> = [];
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+        auditLog: (level, message) => auditCalls.push({ level, message }),
+      });
+      await runtime.load();
+      expect(runtime.listPluginIds()).toContain("tb.devlink-promoted");
+
+      // Simulate registry promotion: installSource changed to "user".
+      // The stale in-memory LoadedPlugin still has devLinked=true from load time.
+      await writeRegistry([{ id: "tb.devlink-promoted", manifestPath, installSource: "user" } as Parameters<typeof writeRegistry>[0][0]]);
+
+      // Restart: fresh registry read must derive devLinked=false → receipt check
+      // runs → no receipt present → plugin is rejected.
+      await runtime.restartPlugin("tb.devlink-promoted");
+      expect(runtime.listPluginIds()).not.toContain("tb.devlink-promoted");
+      expect(auditCalls.length).toBeGreaterThan(0);
+      expect(auditCalls).toContainEqual(
+        expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
+      );
+    });
+
     it("packaged build + local-dev receipt via restartPlugin → rejected", async () => {
       process.env.LVIS_DEV = "1";
       setIsPackaged(false);
