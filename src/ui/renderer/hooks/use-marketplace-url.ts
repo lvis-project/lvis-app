@@ -8,10 +8,8 @@
 import { useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
 
-const DEFAULT_MARKETPLACE_URL = "https://marketplace.lvisai.xyz";
-
 export function useMarketplaceUrl(api: LvisApi): string {
-  const [url, setUrl] = useState<string>(DEFAULT_MARKETPLACE_URL);
+  const [url, setUrl] = useState<string>("");
 
   useEffect(() => {
     api
