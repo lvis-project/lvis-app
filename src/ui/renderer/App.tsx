@@ -8,6 +8,7 @@ import { ThemeProvider } from "./theme/index.js";
 
 // ─── Phase 2 split: types / constants / helpers / components / tabs ──
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
+import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { CommandPaletteDialog } from "./dialogs/CommandPaletteDialog.js";
@@ -147,6 +148,17 @@ export function App() {
     useContextBudget({ entries, llmVendor, llmModel });
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
+
+  // Build flat PluginEntry list for InputActionBar plugin grid.
+  const pluginEntries = useMemo<PluginEntry[]>(
+    () =>
+      pluginViews.map((view) => ({
+        viewKey: toViewKey(view),
+        label: getPluginViewLabel(view),
+        icon: (view.extension as { icon?: string }).icon,
+      })),
+    [pluginViews],
+  );
 
   // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
   // click opens it in a separate magnetic-snap BrowserWindow instead of
@@ -403,8 +415,6 @@ export function App() {
             onSearchToggle={searchToggleOverlay}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenCommand={() => setCommandOpen(true)}
-            usedTokens={usedTokens}
-            contextBudget={contextBudget}
           />
 
           <MainContent
@@ -429,6 +439,8 @@ export function App() {
             subAgentSpawns={subAgentSpawns}
             loadedSkills={loadedSkills}
             hasAskQuestions={askQuestions.length > 0}
+            plugins={pluginEntries}
+            onSelectPlugin={handleSidebarSelect}
             activePluginView={activePluginView ?? null}
           />
         </main>
