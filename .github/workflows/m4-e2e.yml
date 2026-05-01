@@ -63,6 +63,11 @@ jobs:
           uv run python scripts/seed_e2e_keys.py \
             --publisher-key "$PUBLISHER_KEY"
 
+      - name: Setup Node (required by postinstall + build scripts)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
