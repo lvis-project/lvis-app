@@ -143,7 +143,7 @@ execute the Electron process.
 bun install            # Install deps (runs electron-rebuild + fetch-uv postinstall)
 bun run build          # TypeScript + esbuild renderer + Tailwind CSS
 bun run start          # prepare:plugins + build + Electron launch (Electron runs on Node)
-bun run prepare:plugins  # Build all 4 packaged plugins (pageindex/meeting/email/calendar)
+bun run prepare:plugins  # Build 6 active plugins (pageindex/meeting/ms-graph/lge-api/work-proactive/agent-hub)
 bunx vitest run        # Run tests
 ```
 
