@@ -305,7 +305,12 @@ export function finalizeStreamingAssistant(
       ...assistant,
       text,
       streaming: false,
-      ...(opts?.route !== undefined ? { route: opts.route } : {}),
+      // Always write the `route` field (even as `undefined`) so that stale
+      // route values set during streaming intermediate state are explicitly
+      // cleared rather than preserved via the spread. Each finalize call is
+      // a complete state transition — there is no valid case where a
+      // finalized entry should inherit a streaming-era route.
+      route: opts?.route,
     };
     return next;
   }
@@ -318,7 +323,7 @@ export function finalizeStreamingAssistant(
     kind: "assistant",
     text: fallbackText,
     streaming: false,
-    ...(opts?.route !== undefined ? { route: opts.route } : {}),
+    route: opts?.route,
   });
   return next;
 }
