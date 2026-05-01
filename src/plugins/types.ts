@@ -453,10 +453,18 @@ export interface PluginStorage {
  * `source: "local-dev"` indicates the install came from the dev-mode
  * "Settings → 로컬 폴더에서 설치" path (LVIS_DEV=1 only); production
  * consumers should ignore it.
+ *
+ * The `_future` sentinel variant is NEVER produced at runtime — it exists
+ * purely to force exhaustive `switch (event.type)` consumers to add a
+ * `default:` branch, so the host can add a new variant (e.g. `"updated"`
+ * for version bumps) without silently breaking subscribers. Plugins that
+ * narrow with `if (event.type === "installed") ... else if (...)` pick up
+ * the same forward-compat for free.
  */
 export type PluginLifecycleEvent =
   | { type: "installed"; pluginId: string; source: "marketplace" | "local-dev" }
-  | { type: "uninstalled"; pluginId: string };
+  | { type: "uninstalled"; pluginId: string }
+  | { type: "_future"; readonly __exhaustive: never };
 
 /**
  * Payload shape for the `plugin.installed` / `plugin.uninstalled` host
