@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
-import { glob } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildManifestValidator } from "./src/plugins/runtime/manifest-validation.js";
 
@@ -26,24 +26,19 @@ async function validateJsonFixtures(): Promise<void> {
     return;
   }
 
-  const patterns = [
-    join(HERE, "src/**/__tests__/**/{manifest,plugin}*.json"),
-    join(HERE, "src/**/__tests__/**/*-fixture.json"),
-  ];
+  const jsonFixtures = await collectJsonFixtures(join(HERE, "src"));
 
   const failures: string[] = [];
-  for (const pattern of patterns) {
-    for await (const file of glob(pattern)) {
-      let data: unknown;
-      try {
-        data = JSON.parse(readFileSync(file, "utf-8"));
-      } catch {
-        failures.push(`${relative(HERE, file)}: not valid JSON`);
-        continue;
-      }
-      if (!validate(data)) {
-        failures.push(`${relative(HERE, file)}: ${validate.errors?.map((e) => `${e.instancePath} ${e.message}`).join(", ") ?? "unknown error"}`);
-      }
+  for (const file of jsonFixtures) {
+    let data: unknown;
+    try {
+      data = JSON.parse(readFileSync(file, "utf-8"));
+    } catch {
+      failures.push(`${relative(HERE, file)}: not valid JSON`);
+      continue;
+    }
+    if (!validate(data)) {
+      failures.push(`${relative(HERE, file)}: ${validate.errors?.map((e) => `${e.instancePath} ${e.message}`).join(", ") ?? "unknown error"}`);
     }
   }
   if (failures.length > 0) {
@@ -61,4 +56,36 @@ async function validateJsonFixtures(): Promise<void> {
 export async function setup(): Promise<void> {
   mkdirSync(join(homedir(), ".lvis", "test-tmp"), { recursive: true });
   await validateJsonFixtures();
+}
+
+/** Recursively collect JSON files matching manifest/plugin/*-fixture naming under __tests__ dirs. */
+async function collectJsonFixtures(root: string): Promise<string[]> {
+  const results: string[] = [];
+  async function walk(dir: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true, encoding: "utf8" });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+      } else if (
+        entry.isFile()
+        && entry.name.endsWith(".json")
+        && dir.includes("__tests__")
+        && (
+          entry.name.startsWith("manifest")
+          || entry.name.startsWith("plugin")
+          || entry.name.endsWith("-fixture.json")
+        )
+      ) {
+        results.push(full);
+      }
+    }
+  }
+  await walk(root);
+  return results;
 }
