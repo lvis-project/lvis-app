@@ -580,15 +580,20 @@ export function App() {
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
       <ApprovalQueueStatus queue={approvalQueue} />
       <CommandPaletteDialog open={commandOpen} onOpenChange={setCommandOpen} actions={commandActions} />
-      <GlobalSearchDialog
-        open={globalSearchOpen}
-        onOpenChange={setGlobalSearchOpen}
-        api={api}
-        sessions={sessions}
-        starred={starred}
-        onLoadSession={handleLoadSession}
-        onOpenMemoryView={() => setActiveView("memory")}
-      />
+      {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.
+          Re-mounts on every open → catalog reloaded each time. If that proves slow,
+          introduce a persistent cache hook in a separate PR. */}
+      {globalSearchOpen && (
+        <GlobalSearchDialog
+          open={globalSearchOpen}
+          onOpenChange={setGlobalSearchOpen}
+          api={api}
+          sessions={sessions}
+          starred={starred}
+          onLoadSession={handleLoadSession}
+          onOpenMemoryView={() => setActiveView("memory")}
+        />
+      )}
       <DropZoneOverlay />
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
