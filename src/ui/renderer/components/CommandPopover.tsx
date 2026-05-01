@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Command as CommandIcon } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
@@ -71,7 +72,7 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
   // IME composition is suppressed so Korean/CJK input doesn't accidentally
   // select an item mid-composition.
   const handleKeyDownCapture = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: ReactKeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
         handleOpenChange(false);

@@ -44,6 +44,5 @@ export function useAppBootstrap({
       dv();
       window.removeEventListener("keydown", onKey);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [toggleCommandPopover]);
 }

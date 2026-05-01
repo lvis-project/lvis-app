@@ -395,17 +395,19 @@ export function App() {
   }, [api, sessionLoad, streaming, applyLoadedSession, refreshSessionId, refreshSessions]);
 
   // ─── Effects ──────────────────────────────────
+  const toggleCommandPopover = useCallback(() => {
+    if (activeView !== "home") {
+      setActiveView("home");
+      setCommandPopoverOpen(true);
+    } else {
+      setCommandPopoverOpen((prev) => !prev);
+    }
+  }, [activeView]);
+
   useAppBootstrap({
     api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
     setActiveView,
-    toggleCommandPopover: () => {
-      if (activeView !== "home") {
-        setActiveView("home");
-        setCommandPopoverOpen(true);
-      } else {
-        setCommandPopoverOpen((prev) => !prev);
-      }
-    },
+    toggleCommandPopover,
   });
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
 
