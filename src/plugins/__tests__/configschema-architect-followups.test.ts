@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
 import { PluginRuntime } from "../runtime.js";
+import { PluginPhase } from "../lifecycle-log.js";
 import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
@@ -200,7 +201,8 @@ describe("US-3c.2 — PluginRuntime.restartPlugin", () => {
     // Should not throw
     await expect(runtime.restartPlugin("no-such-plugin")).resolves.toBeUndefined();
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("no-such-plugin"),
+      expect.stringMatching(/restart no-op/),
+      expect.objectContaining({ pluginId: "no-such-plugin", phase: PluginPhase.RESTART_REQUEST }),
     );
 
     // Existing plugin unaffected

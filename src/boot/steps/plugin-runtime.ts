@@ -52,6 +52,7 @@ import {
   runManifestStartupTools,
 } from "../plugins.js";
 import { createLogger } from "../../lib/logger.js";
+import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 const log = createLogger("lvis");
 
 /**
@@ -721,6 +722,7 @@ export async function initPluginRuntime(
         log.info(`plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
+        plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
         const manifest = pluginRuntime?.getPluginManifest(pluginId);
         const manifestCapabilities = manifest?.capabilities ?? [];
         if (!canEmitEvent(type, manifestCapabilities)) {
@@ -733,18 +735,18 @@ export async function initPluginRuntime(
               input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} actual=${manifestCapabilities.join("|")}`,
             });
           } catch { /* audit must not break host */ }
-          log.warn(
-            `plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${requiredCap}'`,
-          );
+          plog("warn", { pluginId, phase: PluginPhase.CAPABILITY_DENY, capability: requiredCap ?? type, eventType: type, reason: "missing_capability" }, "capability denied");
           return;
         }
         pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
+        plog("debug", { pluginId, phase: PluginPhase.EVENT_EMIT, eventType: type }, "event emitted");
         emitEvent(type, { ...((data as Record<string, unknown>) ?? {}), pluginId });
       },
       onEvent: (type, handler) => {
         pluginRuntime.assertPluginEventAccess(pluginId, type);
         const unsubscribe = onEvent(type, handler);
         pluginRuntime.registerDisposer(pluginId, unsubscribe);
+        plog("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
         return unsubscribe;
       },
       getInstalledPluginIds: () => {
