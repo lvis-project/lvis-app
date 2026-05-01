@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import type { PluginAuthState } from "../hooks/use-plugin-auth-status.js";
 import type { LvisApi, PluginAuthSummary } from "../types.js";
@@ -29,6 +29,15 @@ export function PluginAuthSection({
 }: PluginAuthSectionProps) {
   const [working, setWorking] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // Clear stale `localError` when the auth status transitions externally
+  // (e.g. a `<pluginId>.auth.changed` event arrives after the user clicked
+  // 로그인, the IPC rejected, but a parallel re-auth elsewhere succeeded).
+  // Without this the error banner persists alongside the green ✓ 인증됨
+  // badge, which contradicts the actual state.
+  useEffect(() => {
+    if (state.kind === "authed" && localError) setLocalError(null);
+  }, [state.kind, localError]);
 
   const handleLogin = useCallback(async () => {
     setLocalError(null);
