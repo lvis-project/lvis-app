@@ -5,7 +5,10 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  type Dispatch,
+  type SetStateAction,
 } from "react";
+import { flushSync } from "react-dom";
 import { Loader2, Square } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Textarea } from "../../../components/ui/textarea.js";
@@ -28,7 +31,13 @@ export interface ComposerProps {
   text: string;
   onTextChange: (next: string) => void;
   attachments: Attachment[];
-  onAttachmentsChange: (next: Attachment[]) => void;
+  /**
+   * State setter — accepts a value or a functional updater. The updater
+   * form is the only race-safe way to enforce the 5-cap when concurrent
+   * paste / picker work is in flight. ChatView wires this directly to
+   * `useState`'s setter so both forms work.
+   */
+  onAttachmentsChange: Dispatch<SetStateAction<Attachment[]>>;
   /** Strictly increasing N counter (parent owns the seed). */
   allocateN: () => number;
   /** Saves clipboard image to OS tmp via main process. */
@@ -137,9 +146,32 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       e.preventDefault();
       if (outcome.warning) onWarning?.(outcome.warning);
       if (outcome.newAttachment) {
-        onAttachmentsChange([...liveAttachments, outcome.newAttachment]);
+        const candidate = outcome.newAttachment;
+        // Functional updater + flushSync: re-check the cap against the
+        // latest committed state (a concurrent file picker / second paste
+        // during the IPC saveClipboardImage await may have filled the 5
+        // slots in the meantime). flushSync forces the updater to run
+        // synchronously so we know whether the chip was actually inserted
+        // before deciding whether to also insert the marker text.
+        let inserted = false;
+        flushSync(() => {
+          onAttachmentsChange((prev) => {
+            if (prev.length >= ATTACH_MAX_COUNT) return prev;
+            inserted = true;
+            return [...prev, candidate];
+          });
+        });
+        if (inserted && outcome.insertText) {
+          insertAtCursor(outcome.insertText);
+        } else if (!inserted) {
+          onWarning?.(
+            `첨부 ${ATTACH_MAX_COUNT}개 한도 — 클립보드 paste 가 중간에 차단됨`,
+          );
+        }
+      } else if (outcome.insertText) {
+        // Pure-text insert (no chip) — never blocked by the cap.
+        insertAtCursor(outcome.insertText);
       }
-      if (outcome.insertText) insertAtCursor(outcome.insertText);
     },
     [
       liveAttachments,

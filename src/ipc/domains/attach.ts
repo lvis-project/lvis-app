@@ -102,7 +102,11 @@ export interface ReadImageResult {
 }
 
 export interface SaveClipboardImageInput {
-  /** Base64-encoded PNG data (no data: prefix). */
+  /**
+   * Base64-encoded image bytes (no `data:` prefix). Format is autodetected
+   * from the leading magic bytes — PNG / JPEG / GIF / WebP / BMP all
+   * supported. Renderer does not need to negotiate the format up front.
+   */
   base64: string;
 }
 

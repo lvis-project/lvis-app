@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import { KeyRound, Pencil, Star, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
@@ -539,21 +540,24 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
               return;
             }
             // Two-phase commit: setAttachments updater is the authority on
-            // how many we can keep. We capture the actually-accepted slice
-            // via the updater's return value path (assigning to a let so
-            // the subsequent setQuestion updater inserts only the markers
-            // for items that survived the cap).
+            // how many we can keep. flushSync forces the updater to run
+            // synchronously so the captured `acceptedMarkers` is guaranteed
+            // populated before we call setQuestion. Without flushSync,
+            // React 18 may batch / defer the updater and the marker
+            // insert can fire with an empty string (Copilot round 4 #4).
             let acceptedMarkers = "";
-            setAttachments((prev) => {
-              const remaining = Math.max(0, ATTACH_MAX_COUNT - prev.length);
-              const accepted = candidates.slice(0, remaining);
-              if (accepted.length < candidates.length) {
-                console.warn(
-                  `${candidates.length - accepted.length} attachment(s) dropped — ${ATTACH_MAX_COUNT}-cap reached during async open/read`,
-                );
-              }
-              acceptedMarkers = accepted.map((a) => `${buildMarkerText(a)} `).join("");
-              return [...prev, ...accepted];
+            flushSync(() => {
+              setAttachments((prev) => {
+                const remaining = Math.max(0, ATTACH_MAX_COUNT - prev.length);
+                const accepted = candidates.slice(0, remaining);
+                if (accepted.length < candidates.length) {
+                  console.warn(
+                    `${candidates.length - accepted.length} attachment(s) dropped — ${ATTACH_MAX_COUNT}-cap reached during async open/read`,
+                  );
+                }
+                acceptedMarkers = accepted.map((a) => `${buildMarkerText(a)} `).join("");
+                return [...prev, ...accepted];
+              });
             });
             if (acceptedMarkers) {
               setQuestion((prev) => prev + acceptedMarkers);
