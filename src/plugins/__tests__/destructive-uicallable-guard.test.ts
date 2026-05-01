@@ -38,6 +38,7 @@ async function writeTempPlugin(opts: {
     name: "uiCallable Test",
     version: "1.0.0",
     description: "Test fixture.",
+    publisher: "Test fixture",
     entry: "dist/index.js",
     tools: opts.tools,
     uiCallable: opts.uiCallable,
