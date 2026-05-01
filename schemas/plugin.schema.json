@@ -63,7 +63,8 @@
               "minWidth": { "type": "integer", "minimum": 80 },
               "minHeight": { "type": "integer", "minimum": 60 },
               "resizable": { "type": "boolean" },
-              "alwaysOnTop": { "type": "boolean" }
+              "alwaysOnTop": { "type": "boolean" },
+              "defaultMode": { "type": "string", "enum": ["embedded", "detached"], "description": "Default window placement mode for the UI extension. 'embedded' renders inside main window; 'detached' opens in floating magnetic-snap window." }
             }
           }
         }
