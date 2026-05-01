@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 
@@ -25,7 +25,8 @@ export function buildSideloadCopyFilter(sourceRoot: string): (src: string) => bo
 
 /**
  * Walks all symlinks under `dir` recursively and throws if any symlink's
- * realpath escapes `dir`. Caller should rm `dir` on error to roll back.
+ * realpath escapes `dir`. Call this on the staging directory BEFORE rename
+ * so a failed check never leaves the live install path half-written.
  */
 export async function rejectEscapingSymlinks(dir: string): Promise<void> {
   if (!isAbsolute(dir)) throw new Error(`rejectEscapingSymlinks: dir must be absolute, got: ${dir}`);
@@ -36,18 +37,19 @@ export async function rejectEscapingSymlinks(dir: string): Promise<void> {
 async function walkForEscapingSymlinks(current: string, realRoot: string): Promise<void> {
   let entries;
   try {
-    entries = await readdir(current, { withFileTypes: true });
-  } catch {
-    return;
+    entries = await readdir(current, { withFileTypes: true, encoding: "utf8" });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
   }
   for (const entry of entries) {
-    const full = join(current, entry.name as string);
+    const full = join(current, entry.name);
     if (entry.isSymbolicLink()) {
       let realTarget: string;
       try {
         realTarget = realpathSync(full);
       } catch {
-        // dangling symlink — leave it; Node loader will fail on import
+        // dangling or circular symlink — Node loader will fail on import
         continue;
       }
       if (!isContained(realRoot, realTarget)) {
@@ -63,5 +65,6 @@ async function walkForEscapingSymlinks(current: string, realRoot: string): Promi
 
 function isContained(root: string, target: string): boolean {
   const rel = relative(root, target);
-  return !rel.startsWith("..") && !isAbsolute(rel);
+  // Empty rel means target === root (same path) — treat as contained.
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }

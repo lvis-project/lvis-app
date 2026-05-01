@@ -1095,14 +1095,11 @@ export class PluginMarketplaceService {
           verbatimSymlinks: true,
           filter: buildSideloadCopyFilter(sourcePath),
         });
+        // Check for escaping symlinks in staging before rename so a failed
+        // check never touches the live install path — rollback is just rm(staging).
+        await rejectEscapingSymlinks(stagingDir);
         await rm(installDir, { recursive: true, force: true });
         await rename(stagingDir, installDir);
-        try {
-          await rejectEscapingSymlinks(installDir);
-        } catch (symlinkErr) {
-          await rm(installDir, { recursive: true, force: true });
-          throw symlinkErr;
-        }
       } catch (err) {
         await rm(stagingDir, { recursive: true, force: true });
         throw err;
