@@ -128,10 +128,9 @@ describe("GlobalSearchDialog", () => {
     }, { timeout: 500 });
 
     const sessionItem = document.querySelector("[data-testid='global-search-group-sessions'] [cmdk-item]");
-    if (sessionItem) {
-      fireEvent.click(sessionItem);
-      expect(onLoadSession).toHaveBeenCalledWith("sess-1");
-    }
+    expect(sessionItem).toBeInTheDocument();
+    fireEvent.click(sessionItem!);
+    expect(onLoadSession).toHaveBeenCalledWith("sess-1");
   });
 
   // 5. Debounce — IPC not called before 200 ms have elapsed

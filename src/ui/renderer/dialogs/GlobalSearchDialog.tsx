@@ -225,7 +225,7 @@ export function GlobalSearchDialog({
               filteredSessions.length === 0 &&
               filteredStarred.length === 0 && (
                 <CommandEmpty>
-                  {query ? "검색 결과가 없습니다." : "저장된 항목이 없습니다."}
+                  {trimmedQuery ? "검색 결과가 없습니다." : "저장된 항목이 없습니다."}
                 </CommandEmpty>
               )}
           </CommandList>
