@@ -497,6 +497,8 @@ export type LvisApi = {
     closeDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
     listDetached: () => Promise<Array<{ windowId: number; viewKey: string; snapped: boolean }>>;
     onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => () => void;
+    /** Subscribe to in-place navigation (single-instance shell content swap). */
+    onDetachedNavigate: (handler: (viewKey: string) => void) => () => void;
   };
 };
 
