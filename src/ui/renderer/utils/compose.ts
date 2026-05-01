@@ -39,20 +39,25 @@ export function composeOutgoing(params: {
 
   let body = raw;
 
-  // 1. Inline-replace paste markers with the actual pasted text.
-  for (const att of attachments) {
-    if (att.kind !== "paste") continue;
-    const marker = buildMarkerText(att);
-    const replacement = `\n\n----- Pasted text #${att.n} (${att.lines} lines) -----\n${att.text}\n----- end Pasted text #${att.n} -----\n\n`;
-    body = body.split(marker).join(replacement);
-  }
-
-  // 2. Augment file markers with absolute path so the model can read via tool.
+  // 1. Augment file markers with absolute path so the model can read via tool.
+  //    Order matters: file augmentation runs FIRST so it sees only the user's
+  //    own marker text. If we expanded paste markers first, the pasted body
+  //    might contain a literal "[File #N]" substring (e.g. quoted code snippet)
+  //    and our split/join would unintentionally augment it too.
   for (const att of attachments) {
     if (att.kind !== "file") continue;
     const marker = buildMarkerText(att);
     const augmented = `[File #${att.n} — path: ${att.path}]`;
     body = body.split(marker).join(augmented);
+  }
+
+  // 2. Inline-replace paste markers with the actual pasted text. Now-safe
+  //    because file augmentation already ran on the original body.
+  for (const att of attachments) {
+    if (att.kind !== "paste") continue;
+    const marker = buildMarkerText(att);
+    const replacement = `\n\n----- Pasted text #${att.n} (${att.lines} lines) -----\n${att.text}\n----- end Pasted text #${att.n} -----\n\n`;
+    body = body.split(marker).join(replacement);
   }
 
   // 3. Compose final text with optional role preset prefix.

@@ -133,7 +133,8 @@ export function AttachmentChip({
         <button
           type="button"
           data-testid="attachment-chip"
-          className="flex flex-col items-center gap-1 select-none focus:outline-none"
+          aria-label={`첨부 ${chipLabel(attachment)} — 정보 보기 또는 파일 열기`}
+          className="flex flex-col items-center gap-1 rounded-sm select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           title="첨부 정보 보기 / 파일 열기"
         >
           {attachment.kind === "image" ? (
@@ -189,7 +190,8 @@ export function AttachmentChipCollapsed({
         <button
           type="button"
           data-testid="attachment-chip-collapsed"
-          className="flex flex-col items-center gap-1 select-none focus:outline-none"
+          aria-label={`첨부 ${total}개 — 목록 보기`}
+          className="flex flex-col items-center gap-1 rounded-sm select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           title="첨부 목록 보기"
         >
           <StackVisual layers={total} />

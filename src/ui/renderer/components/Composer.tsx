@@ -136,6 +136,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const handlePaste = useCallback(
     async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      // When the composer is disabled (no API key, context overflow, etc.)
+      // the action-bar attach button is also disabled. Without this
+      // short-circuit, clipboard paste would silently bypass that gate
+      // and grow attachment state while the user cannot send.
+      if (disabled) return;
       const outcome = await handleClipboardPaste(e.nativeEvent, {
         count: liveAttachments.length,
         allocateN,
@@ -174,6 +179,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
     },
     [
+      disabled,
       liveAttachments,
       allocateN,
       saveClipboardImage,

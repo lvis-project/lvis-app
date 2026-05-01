@@ -325,7 +325,27 @@ export function App() {
         if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
       }
     },
-    [api, streaming, checkApiKey, composeOutgoing, appendUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest, setErrorWithThought, handleCompactCommand, closeOpenImportedTrigger],
+    [
+      api,
+      streaming,
+      checkApiKey,
+      composeOutgoing,
+      appendUserEntry,
+      resetStreamAccumulators,
+      beginStreamingRequest,
+      finishStreamingRequest,
+      setErrorWithThought,
+      handleCompactCommand,
+      closeOpenImportedTrigger,
+      // attachments is read directly at the post-send cleanup branch
+      // (line ~260) and is also a transitive dep via composeOutgoing,
+      // but listing it explicitly avoids stale-closure surprises if
+      // composeOutgoing's deps drift. llmVendor/llmModel are read by
+      // the supportsVision gate.
+      attachments,
+      llmVendor,
+      llmModel,
+    ],
   );
 
   // Brain trigger accept → chat takes over. Server emits

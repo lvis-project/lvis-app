@@ -98,9 +98,15 @@ function isRoutineEnabled(
  * we type-narrow each entry here to protect downstream message-mapper code
  * from malformed payloads (missing fields, wrong tags, non-string data).
  *
- * Returns the validated array (possibly empty). Unknown entries are dropped
- * silently rather than rejecting the whole turn — this mirrors how
- * `sanitizeOutgoingInput` handles partial PII redaction.
+ * Returns the validated array when at least one entry survived narrowing,
+ * or `undefined` when nothing valid is present. The `undefined` form lets
+ * the caller drop the `attachments` field from the runTurn options spread
+ * entirely (the conversation loop treats absent and empty as equivalent
+ * "no parts" — emitting an empty array would be technically valid but adds
+ * noise to logs and ruins the option-spread shape).
+ *
+ * Unknown entries are dropped silently rather than rejecting the whole
+ * turn — mirrors how `sanitizeOutgoingInput` handles partial PII redaction.
  */
 function validateUserContentParts(
   raw: unknown,
