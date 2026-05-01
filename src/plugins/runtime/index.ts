@@ -12,6 +12,7 @@ import type { ValidateFunction } from "ajv";
 import type {
   InstallPolicy,
   PluginAccessSpec,
+  PluginAuthSpec,
   PluginConfigSchema,
   PluginHostApi,
   PluginManifest,
@@ -80,6 +81,8 @@ export interface PluginCard {
   version?: string;
   publisher?: string;
   configSchema?: PluginConfigSchema;
+  /** Optional declarative auth contract — see architecture.md §9.4a "Plugin-Owned OAuth — Host UI Surface". */
+  auth?: PluginAuthSpec;
 }
 
 /**
@@ -1401,6 +1404,7 @@ export class PluginRuntime {
       version: manifest.version,
       publisher: manifest.publisher,
       configSchema: manifest.configSchema,
+      auth: manifest.auth,
     };
   }
 

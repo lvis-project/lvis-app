@@ -16,6 +16,39 @@ export interface PluginAccessSpec {
   plugins: PluginAccessTarget[];
 }
 
+/**
+ * Declarative auth contract for plugins that own their OAuth/cookie/session
+ * flow but want the host to render a generic 미인증 / signed-in surface in
+ * Settings → 플러그인 설정. See architecture.md §9.4a "Plugin-Owned OAuth —
+ * Host UI Surface" and `manifest.auth` schema description.
+ */
+export interface PluginAuthSpec {
+  /** Human-readable label shown next to the badge (defaults to plugin `name`). */
+  label?: string;
+  /** uiCallable tool returning {@link PluginAuthStatus}. */
+  statusTool: string;
+  /** uiCallable tool the host invokes when the user clicks 로그인. */
+  loginTool: string;
+  /** Optional uiCallable tool the host invokes when the user clicks 로그아웃. */
+  logoutTool?: string;
+}
+
+/**
+ * Recommended return shape of `auth.statusTool`. Host parses with a strict
+ * identity check: `result?.authenticated === true`. Plugins MUST return the
+ * literal boolean `true` — truthy values such as `1` or the string `"true"`
+ * are NOT accepted (string `"false"` is truthy in JS and would be
+ * misclassified by `Boolean()`). Account is read as a string when present.
+ * The shape is documented but not AJV-validated in v1 — outputSchema
+ * validation is a separate cross-cutting change. Plugins MAY return
+ * additional fields; the host ignores them.
+ */
+export interface PluginAuthStatus {
+  authenticated: boolean;
+  /** Human-readable identity (email, login id) shown next to the green badge. */
+  account?: string;
+}
+
 export interface EventSubscriptionHint {
   category: "task" | "note" | "session" | "meeting" | "email" | "calendar" | "system";
   priority: "high" | "medium" | "low";
@@ -75,6 +108,15 @@ export interface PluginManifest {
    * (ConversationLoop 의 permission/scope/expansion cap 을 우회하는 경로 차단.)
    */
   uiCallable?: string[];
+  /**
+   * Optional declarative auth contract — see architecture.md §9.4a "Plugin-Owned
+   * OAuth — Host UI Surface". Lets the host render a generic 미인증 / signed-in
+   * badge + login/logout button in Settings → 플러그인 설정. The three referenced
+   * tools must also appear in `uiCallable[]` (cross-validated in
+   * `manifest-validation.ts`). On state transitions the plugin SHOULD emit
+   * `<pluginId>.auth.changed` so the host UI can refresh without polling.
+   */
+  auth?: PluginAuthSpec;
   /**
    * 이 플러그인이 호스트 이벤트 버스로 emit 하는 이벤트 타입 목록.
    * classifySubscription("public") 판정을 통과한 이벤트만 renderer로 전달된다.
@@ -331,6 +373,7 @@ export interface PluginMarketplaceItem {
   keywords?: Array<{ keyword: string; skillId: string }>;
   startupTools?: string[];
   uiCallable?: string[];
+  auth?: PluginAuthSpec;
   emittedEvents?: string[];
   notificationEvents?: Array<{
     event: string;
