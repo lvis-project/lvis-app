@@ -66,28 +66,21 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
     }
   }, [open]);
 
-  // Close on Escape (cmdk Command already handles Escape natively, but
-  // wrapping in Popover means we need to intercept at capture phase).
-  // Block Enter during IME composition so Korean/CJK input doesn't
-  // accidentally select an item mid-composition.
-  const handleKeyDown = useCallback(
+  // Both Escape and IME-guard are handled at capture phase so cmdk cannot
+  // consume the event before Popover can act. Escape closes; Enter during
+  // IME composition is suppressed so Korean/CJK input doesn't accidentally
+  // select an item mid-composition.
+  const handleKeyDownCapture = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
         handleOpenChange(false);
-      }
-    },
-    [handleOpenChange],
-  );
-
-  const handleKeyDownCapture = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (composingRef.current && e.key === "Enter") {
+      } else if (composingRef.current && e.key === "Enter") {
         e.stopPropagation();
         e.preventDefault();
       }
     },
-    [],
+    [handleOpenChange],
   );
 
   const handleSelectAction = useCallback(
@@ -144,7 +137,6 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
         align="start"
         className="w-72 p-0"
         data-testid="command-popover"
-        onKeyDown={handleKeyDown}
         onKeyDownCapture={handleKeyDownCapture}
         // onInteractOutside fires for click-outside / focus-outside; we only
         // reset query state here — the actual close is handled by Radix
