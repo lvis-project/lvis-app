@@ -264,6 +264,31 @@ describe("PluginRuntime.disable", () => {
     errSpy.mockRestore();
   });
 
+  it("plugin missing description is dropped with an error (Phase 1 MUST field)", async () => {
+    const pluginDir = join(installedDir, "no-description");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return { handlers: { no_desc_ping: async () => "pong" } };
+}`,
+      "utf-8",
+    );
+
+    const manifest = { id: "no-description", name: "No Desc", version: "1.0.0", entry: "entry.mjs", tools: ["no_desc_ping"] };
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    await writeRegistry([{ id: "no-description", manifestPath, enabled: true }]);
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runtime = makeRuntime();
+    await runtime.load();
+    expect(runtime.listPluginIds()).not.toContain("no-description");
+    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/description|must be a non-empty string/i));
+    errSpy.mockRestore();
+  });
+
   it("callFromUi rejects methods not declared in manifest.uiCallable[]", async () => {
     // H2: renderer-originated plugin calls must only reach methods the plugin
     // explicitly exposes via manifest.uiCallable. Everything else has to go

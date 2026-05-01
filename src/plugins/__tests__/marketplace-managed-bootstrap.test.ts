@@ -505,6 +505,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         version: "1.0.0",
         entry: "dist/index.js",
         tools: [],
+        description: "Test fixture.",
       }),
       "utf-8",
     );
@@ -516,6 +517,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         version: "1.0.0",
         entry: "dist/index.js",
         tools: [],
+        description: "Test fixture.",
       }),
       "utf-8",
     );
@@ -589,6 +591,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
           version: "1.0.0",
           entry: "dist/index.js",
           tools: [],
+          description: "Test fixture.",
         }),
         "utf-8",
       );
