@@ -5,6 +5,8 @@
 
 export type InstallPolicy = "admin" | "user";
 
+export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev" | "dev-link";
+
 export interface DependencySpec {
   pluginId: string;
   versionRange?: string;
@@ -19,6 +21,23 @@ export interface PluginAccessTarget {
 
 export interface PluginAccessSpec {
   plugins: PluginAccessTarget[];
+}
+
+export interface PluginAuthSpec {
+
+  label?: string;
+
+  statusTool: string;
+
+  loginTool: string;
+
+  logoutTool?: string;
+}
+
+export interface PluginAuthStatus {
+  authenticated: boolean;
+
+  account?: string;
 }
 
 /**
@@ -77,7 +96,7 @@ export interface PluginManifest {
   tools: string[];
 
   /** One-line description shown in plugin catalogues and tool pickers. @optional */
-  description?: string;
+  description: string;
   /** Arbitrary JSON configuration merged into `PluginRuntimeContext.config` at startup. Treat as untrusted user data. @optional */
   config?: Record<string, unknown>;
   /** Sidebar / panel UI extensions contributed by this plugin. @optional */
@@ -96,8 +115,8 @@ export interface PluginManifest {
   /** Tools that the UI is permitted to invoke directly (bypassing the LLM). Use sparingly — prefer LLM-mediated calls. @optional */
   uiCallable?: string[];
 
-  /** Event type names this plugin may emit. Hosts can use this for validation and ownership checks. @optional */
-  eventPublishes?: string[];
+  auth?: PluginAuthSpec;
+
   /** Alias of `eventPublishes` accepted by host bridge paths. @optional */
   emittedEvents?: string[];
 
@@ -139,6 +158,46 @@ export interface PluginManifest {
       };
     }
   >;
+
+  configSchema?: PluginConfigSchema;
+}
+
+export interface PluginConfigSchema {
+
+  $schema?: string;
+
+  properties: Record<string, PluginConfigSchemaProperty>;
+
+  required?: string[];
+
+  customPanel?: { entry: string; exportName: string };
+}
+
+export interface PluginConfigSchemaProperty {
+
+  type: "string" | "number" | "integer" | "boolean" | "array";
+
+  title?: string;
+
+  description?: string;
+
+  default?: unknown;
+
+  enum?: Array<string | number | boolean>;
+
+  minimum?: number;
+
+  maximum?: number;
+
+  minLength?: number;
+
+  maxLength?: number;
+
+  pattern?: string;
+
+  format?: "secret" | "uri" | "email" | "date-time";
+
+  items?: { type: "string" | "number" | "integer" | "boolean"; enum?: Array<string | number | boolean> };
 }
 
 /**
@@ -172,6 +231,10 @@ export interface PluginUiExtension {
   exportName?: string;
   /** Path (relative to the plugin root) of the HTML page to load for `embedded-page`. @optional */
   page?: string;
+
+  window?: {
+    defaultMode?: "embedded" | "detached";
+  };
 }
 
 /**
@@ -186,9 +249,13 @@ export interface PluginRegistryEntry {
   manifestPath: string;
   /** Whether the plugin should be loaded at host startup. Defaults to `true` when omitted. @optional */
   enabled?: boolean;
+
   installedBy?: InstallPolicy;
   bundleRefs?: string[];
   approvedPluginAccess?: PluginAccessSpec;
+
+  _devLinked?: boolean;
+  installSource?: PluginRegistryEntryInstallSource;
 }
 
 /**
@@ -284,7 +351,7 @@ export interface PluginMarketplaceItem {
   keywords?: Array<{ keyword: string; skillId: string }>;
   startupTools?: string[];
   uiCallable?: string[];
-  eventPublishes?: string[];
+  auth?: PluginAuthSpec;
   emittedEvents?: string[];
   notificationEvents?: Array<{
     event: string;
@@ -338,6 +405,15 @@ export interface PluginStorage {
   mkdir(relPath: string): Promise<void>;
 }
 
+export type PluginLifecycleEvent =
+  | { type: "installed"; pluginId: string; source: "marketplace" | "local-dev" }
+  | { type: "uninstalled"; pluginId: string }
+  | { type: "_future"; readonly __exhaustive: never };
+
+export type PluginLifecycleEventPayload =
+  | { pluginId: string; source: "marketplace" | "local-dev" }
+  | { pluginId: string };
+
 /**
  * Services exposed by the host to a running plugin. An instance is provided
  * on `PluginRuntimeContext.hostApi` when the host calls the plugin's
@@ -350,10 +426,23 @@ export interface PluginStorage {
 export interface PluginHostApi {
 
   storage: PluginStorage;
+
+  config: {
+
+    get<T = unknown>(key: string): T | undefined;
+
+    set<T = unknown>(key: string, value: T): Promise<void>;
+
+    onChange<T = unknown>(key: string, callback: (value: T | undefined) => void): () => void;
+  };
   registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
   emitEvent(eventType: string, data?: unknown): void;
 
   onEvent(eventType: string, handler: (data: unknown) => void): () => void;
+
+  getInstalledPluginIds(): string[];
+
+  onPluginsChanged(handler: (event: PluginLifecycleEvent) => void): () => void;
   addTask(task: {
     title: string;
     description?: string;
@@ -363,20 +452,15 @@ export interface PluginHostApi {
   }): void;
   getSecret(key: string): string | null;
 
-
   callTool<T = unknown>(toolName: string, payload?: unknown): Promise<T>;
-
-
 
   callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string>;
 
-
   logEvent(level: "info" | "warn" | "error", message: string, data?: unknown): void;
-
 
   onShutdown(handler: () => void | Promise<void>): void;
 
-
+  onMsGraphAuthChange?(handler: () => void): void;
 
   openAuthWindow(options: {
     url: string;
@@ -394,7 +478,6 @@ export interface PluginHostApi {
     httpOnly?: boolean;
     expirationDate?: number;
   }>>;
-
 
   triggerConversation(spec: ConversationTriggerSpec): Promise<ConversationTriggerResult>;
 }
