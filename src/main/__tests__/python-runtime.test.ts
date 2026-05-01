@@ -175,7 +175,8 @@ describe("PythonRuntimeBootstrapper", () => {
     const pipSyncCall = mockedSpawn.mock.calls.find(
       ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
     );
-    expect(pipSyncCall?.[1] as string[]).not.toContain("--frozen");
+    expect(pipSyncCall).toBeDefined();
+    expect(pipSyncCall![1] as string[]).not.toContain("--frozen");
 
     // result 유효
     expect(result.pythonPath).toBeTruthy();
