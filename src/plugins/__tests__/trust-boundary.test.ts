@@ -255,6 +255,23 @@ describe("Phase 1 — plugin trust boundary", () => {
         expect(runtime.listPluginIds()).toContain("tb.devlinked");
       });
 
+      it("packaged + installSource='dev-link' (no _devLinked) → still rejected without a receipt", async () => {
+        delete process.env.LVIS_DEV;
+        setIsPackaged(true);
+        const pluginDir = join(pluginsRoot, "p-devlinked-new");
+        const manifestPath = await writePluginAt(pluginDir, "tb.devlinked.new");
+        await writeRegistry([{ id: "tb.devlinked.new", manifestPath, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0]]);
+
+        const runtime = new PluginRuntime({
+          hostRoot,
+          registryPath,
+          pluginsRoot,
+          installReceiptCacheRoot: cacheRoot,
+        });
+        await runtime.load();
+        expect(runtime.listPluginIds()).not.toContain("tb.devlinked.new");
+      });
+
       it("packaged + _devLinked=true → still rejected without a receipt", async () => {
         delete process.env.LVIS_DEV;
         setIsPackaged(true);

@@ -59,13 +59,13 @@ function forceSymlink(linkPath, target) {
   return true;
 }
 
-// Read existing registry, keep non-devLinked entries (user-installed).
+// Read existing registry, keep non-devLinked entries (user/marketplace-installed).
 // Abort on parse error to avoid silently dropping user-installed entries.
 let existingPlugins = [];
 if (existsSync(registryPath)) {
   try {
     const reg = JSON.parse(readFileSync(registryPath, "utf-8"));
-    existingPlugins = (reg.plugins ?? []).filter(p => !p._devLinked);
+    existingPlugins = (reg.plugins ?? []).filter(p => p.installSource !== "dev-link" && !p._devLinked);
   } catch (err) {
     log(`error: failed to read or parse registry at ${registryPath} — aborting to avoid data loss`);
     throw err;
@@ -107,7 +107,7 @@ for (const repo of repos) {
     continue;
   }
 
-  // Don't clobber a user-installed (non-_devLinked) entry with the same id
+  // Don't clobber a user/marketplace-installed entry with the same id
   if (existingPlugins.some(p => p.id === pluginId)) {
     log(`skip: ${pluginId} (already user-installed; remove it first to dev-link)`);
     continue;
@@ -155,6 +155,7 @@ for (const repo of repos) {
     manifestPath: `${pluginId}/plugin.json`,
     enabled: true,
     installedBy: manifest.installPolicy === "admin" ? "admin" : "user",
+    installSource: "dev-link",
     _devLinked: true,
     ...(manifest.pluginAccess ? { approvedPluginAccess: manifest.pluginAccess } : {}),
   });
