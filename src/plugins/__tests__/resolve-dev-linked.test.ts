@@ -83,6 +83,7 @@ describe("PluginRuntime — resolveDevLinkedPackageEntry (via resolveEntryPath)"
       version: "1.0.0",
       entry,
       tools: ["p_dev_ping"],
+      description: "Test fixture.",
     };
     await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
     await writeFile(

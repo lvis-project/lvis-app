@@ -9,6 +9,7 @@ function makeManifest(caps: string[]): PluginManifest {
     version: "1.0.0",
     entry: "dist/index.js",
     tools: [],
+    description: "Test fixture.",
     capabilities: caps,
   };
 }

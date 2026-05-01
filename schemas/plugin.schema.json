@@ -4,8 +4,8 @@
   "title": "LVIS Plugin Manifest",
   "description": "Validates plugin.json manifest files for LVIS plugins (§9)",
   "type": "object",
-  "required": ["id", "name", "version", "entry", "tools"],
-  "additionalProperties": true,
+  "required": ["id", "name", "version", "entry", "tools", "description"],
+  "additionalProperties": false,
   "properties": {
     "id": {
       "type": "string",
@@ -17,6 +17,7 @@
     "name": { "type": "string", "minLength": 1 },
     "description": {
       "type": "string",
+      "minLength": 1,
       "maxLength": 280,
       "description": "Short human-readable summary used in the inactive-plugin catalog LLM sees in the system prompt."
     },
@@ -131,6 +132,11 @@
         ]
       }
     },
+    "emittedEvents": {
+      "type": "array",
+      "description": "Event types this plugin emits.",
+      "items": { "type": "string", "minLength": 1 }
+    },
     "startupTimeoutMs": {
       "type": "integer",
       "minimum": 1,
@@ -218,7 +224,22 @@
       },
       "additionalProperties": false
     },
-    "publisher": { "type": "string" },
+    "publisher": { "type": "string", "minLength": 1 },
+    "packageName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "npm package name persisted into installed manifests by PluginMarketplaceService for rollback support. Not authored by plugin developers."
+    },
+    "python": {
+      "type": "object",
+      "description": "Optional Python runtime co-deployment metadata. Host installs declared requirements when managedBy is lvis-app.",
+      "additionalProperties": false,
+      "properties": {
+        "managedBy": { "type": "string", "enum": ["lvis-app", "self"] },
+        "requirementsLock": { "type": "string", "minLength": 1 },
+        "interpreter": { "type": "string" }
+      }
+    },
     "toolSchemas": {
       "type": "object",
       "description": "LLM이 메서드를 호출할 때 사용하는 JSON Schema (draft-07). 키: method 이름, 값: { description, inputSchema }",

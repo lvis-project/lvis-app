@@ -45,6 +45,7 @@ describe("Sprint 4-B — AJV + uiCallable + destructive guards", () => {
       id,
       name: id,
       version: "1.0.0",
+      description: "Test fixture.",
       entry: "entry.mjs",
       tools: [`${id}_hello`, `${id}_delete`],
       ...manifestOverrides,
