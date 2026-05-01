@@ -32,7 +32,7 @@ export function TokenProgressRing({ used, budget }: TokenProgressRingProps) {
     <Tooltip>
       <TooltipTrigger asChild>
         <div
-          className="flex items-center justify-center rounded-md p-1 hover:bg-muted/60 transition-colors cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+          className="flex items-center justify-center rounded-md p-1 hover:bg-muted/60 transition-colors cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-1"
           style={{ width: 28, height: 28 }}
           data-testid="token-progress-ring"
           aria-label={`Token usage ${pct} percent`}
