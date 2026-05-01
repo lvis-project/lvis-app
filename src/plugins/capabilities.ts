@@ -48,6 +48,7 @@ export const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set([
   "worker-client",
   "document-indexer",
   "conversation-trigger",
+  "lifecycle-observer",
 ]);
 
 /**
@@ -148,6 +149,15 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
         "Required to call hostApi.triggerConversation(). Lets a (read-only) brain plugin make LVIS speak first when an observed signal warrants action — the differentiating 'proactive assistant' surface. The host runs the trigger on a *fresh, isolated* ConversationLoop with its own sessionId; the user's chat history is NOT mutated unless the user explicitly clicks '지금 답하기' on the resulting TriggerCard. Reserved for plugins curated as proactive brains; granting it to general plugins lets them inject prompts users did not type.",
       enforcement: "enforced",
       gates: ["triggerConversation"],
+    },
+  ],
+  [
+    "lifecycle-observer",
+    {
+      description:
+        "Advisory (v3.x) — signals the plugin uses getInstalledPluginIds() or onPluginsChanged() to observe peer-plugin lifecycle. Not enforced at runtime yet; declare it now for forward-compatibility when enforcement is added.",
+      enforcement: "advisory",
+      gates: [],
     },
   ],
 ]);
