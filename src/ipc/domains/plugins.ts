@@ -137,6 +137,16 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     await pluginRuntime.addPlugin(result.pluginId);
     emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "local-dev" });
     refreshPluginNotifications?.();
+    // Mirror the marketplace install path's renderer broadcast so
+    // `App.tsx` `onPluginInstallResult` listener fires `refreshViews()` —
+    // otherwise `pluginViews` stays stale-empty after a dev sideload and
+    // the InputActionBar plugin grid renders an empty trigger that
+    // appears unclickable to the user (PluginGridButton's
+    // `plugins.length === 0` branch returns the trigger without a Popover).
+    getMainWindow()?.webContents.send("lvis:plugins:install-result", {
+      slug: result.pluginId,
+      success: true,
+    });
     return result;
   });
 

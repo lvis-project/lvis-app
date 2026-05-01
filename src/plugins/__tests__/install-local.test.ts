@@ -200,4 +200,94 @@ describe("PluginMarketplaceService.installLocal", () => {
     const result = await verifyInstallReceipt(cacheRoot, "test-plugin", installDir);
     expect(result.ok).toBe(true);
   });
+
+  it("mirrors manifest.pluginAccess into registry approvedPluginAccess (parity with marketplace install)", async () => {
+    // Without this, assertPluginEventAccess / assertPluginToolAccess find no
+    // grant for a dev-sideloaded plugin and any cross-plugin event subscribe
+    // (e.g. work-proactive listening to ms-graph email.new) throws at startup.
+    const accessSpec = {
+      plugins: [
+        { pluginId: "ms-graph", events: ["email.new", "calendar.event.upcoming"], tools: ["msgraph_calendar_today"] },
+      ],
+    };
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify(
+        {
+          id: "test-plugin",
+          name: "Test Plugin",
+          version: "1.2.3",
+          description: "fixture",
+          publisher: "tests",
+          entry: "dist/hostPlugin.js",
+          pluginAccess: accessSpec,
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    const service = makeService();
+    await service.installLocal(sourceDir);
+
+    const reg = JSON.parse(await readFile(registryPath, "utf-8"));
+    const entry = reg.plugins.find((p: { id: string }) => p.id === "test-plugin");
+    expect(entry).toBeDefined();
+    expect(entry.approvedPluginAccess).toEqual(accessSpec);
+  });
+
+  it("mirrors approvedPluginAccess on UPDATE (existing entry path) — not just on insert", async () => {
+    // Dev re-install: stale `_devLinked` entry already exists, installLocal
+    // converts it into a real user install AND must overwrite
+    // approvedPluginAccess so a later cross-plugin event subscribe is granted.
+    const accessSpec = {
+      plugins: [{ pluginId: "ms-graph", events: ["email.new"] }],
+    };
+    await writeFile(
+      registryPath,
+      JSON.stringify(
+        {
+          version: 1,
+          plugins: [
+            {
+              id: "test-plugin",
+              manifestPath: "test-plugin/plugin.json",
+              enabled: true,
+              installedBy: "user",
+              _devLinked: true,
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify(
+        {
+          id: "test-plugin",
+          name: "Test Plugin",
+          version: "1.2.3",
+          description: "fixture",
+          publisher: "tests",
+          entry: "dist/hostPlugin.js",
+          pluginAccess: accessSpec,
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    const service = makeService();
+    await service.installLocal(sourceDir);
+
+    const reg = JSON.parse(await readFile(registryPath, "utf-8"));
+    const entry = reg.plugins.find((p: { id: string }) => p.id === "test-plugin");
+    expect(entry.approvedPluginAccess).toEqual(accessSpec);
+    expect(entry._devLinked).toBeUndefined();
+  });
 });
