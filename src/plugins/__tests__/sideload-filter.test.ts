@@ -37,6 +37,18 @@ describe("buildSideloadCopyFilter", () => {
     expect(filter(join(root, "node_modules", "node-ical", "index.js"))).toBe(true);
   });
 
+  it("rejects node_modules/.bin (dev-only shell shims that dangle when electron is filtered)", () => {
+    // Without this, electron's filter leaves behind `.bin/electron` as a
+    // dangling symlink and `rejectEscapingSymlinks` aborts the entire install.
+    expect(filter(join(root, "node_modules", ".bin"))).toBe(false);
+    expect(filter(join(root, "node_modules", ".bin", "electron"))).toBe(false);
+    expect(filter(join(root, "node_modules", ".bin", "tsc"))).toBe(false);
+  });
+
+  it("rejects monorepo-nested node_modules/.bin", () => {
+    expect(filter(join(root, "packages", "child", "node_modules", ".bin", "electron"))).toBe(false);
+  });
+
   it("rejects .git directory", () => {
     expect(filter(join(root, ".git"))).toBe(false);
     expect(filter(join(root, ".git", "HEAD"))).toBe(false);
