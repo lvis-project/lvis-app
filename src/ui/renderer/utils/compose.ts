@@ -46,7 +46,9 @@ export interface ComposedOutgoing {
  *
  * @param attachedDocs - Paperclip-pinned indexed documents (separate IPC
  *   flow from multimodal `attachments`).
- * @param attachments  - Composer image/file/paste markers.  Pass `[]` until
+ * @param attachments  - All attachment types (image, file, paste). Image
+ *   attachments contribute to `ComposedOutgoing.attachments`; file/paste
+ *   are inlined into `text` via marker substitution.  Pass `[]` until
  *   the multimodal wire-up PR connects the Composer component.
  */
 export function composeOutgoing(params: {

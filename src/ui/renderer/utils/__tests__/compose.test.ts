@@ -52,7 +52,7 @@ describe("composeOutgoing", () => {
     expect(result.text).toContain("Summarise these");
   });
 
-  it("maps image attachments to imageParts with type=image", () => {
+  it("maps image attachments to attachments with type=image", () => {
     const att: Attachment = { id: "img-1", mimeType: "image/png", data: "base64data==" };
     const result = composeOutgoing({
       raw: "Describe this",
@@ -64,7 +64,7 @@ describe("composeOutgoing", () => {
     expect(result.attachments[0]).toEqual({ type: "image", mimeType: "image/png", data: "base64data==" });
   });
 
-  it("maps multiple image attachments preserving order", () => {
+  it("maps multiple image attachments to attachments preserving order", () => {
     const attachments: Attachment[] = [
       { id: "a1", mimeType: "image/jpeg", data: "jpg1" },
       { id: "a2", mimeType: "image/webp", data: "webp1" },
