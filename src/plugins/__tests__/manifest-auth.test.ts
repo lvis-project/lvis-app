@@ -11,8 +11,24 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as pathResolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { buildManifestValidator, parsePluginJson } from "../runtime/manifest-validation.js";
+
+// `buildManifestValidator(hereFileUrl)` resolves `schemas/plugin.schema.json`
+// using path arithmetic anchored at `dirname(hereFileUrl)`. The relative
+// math (../../../schemas + ../../../../schemas) was sized for the production
+// caller (`src/plugins/runtime/manifest-validation.ts`). Calling it with
+// `import.meta.url` from a `__tests__/` file happens to land on the same
+// `<root>/schemas/...` on macOS but flaked on the Linux CI runner — the
+// validator returned `null` and AJV-specific assertions silently became
+// no-ops. Anchoring the URL at the runtime source file location makes the
+// arithmetic identical to production regardless of caller, so AJV-specific
+// rules (required, additionalProperties:false) reject reliably on every
+// platform.
+const RUNTIME_FILE_URL = pathToFileURL(
+  pathResolve(process.cwd(), "src/plugins/runtime/manifest-validation.ts"),
+).toString();
 
 describe("manifest validation — auth cross-field", () => {
   let testDir: string;
@@ -52,7 +68,7 @@ describe("manifest validation — auth cross-field", () => {
         logoutTool: "test_signout",
       },
     });
-    const validator = await buildManifestValidator(import.meta.url);
+    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
     const parsed = await parsePluginJson(manifestPath, validator);
     expect(parsed.auth?.statusTool).toBe("test_status");
     expect(parsed.auth?.loginTool).toBe("test_login");
@@ -66,7 +82,7 @@ describe("manifest validation — auth cross-field", () => {
         loginTool: "test_login",
       },
     });
-    const validator = await buildManifestValidator(import.meta.url);
+    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
     const parsed = await parsePluginJson(manifestPath, validator);
     expect(parsed.auth?.logoutTool).toBeUndefined();
   });
@@ -80,7 +96,7 @@ describe("manifest validation — auth cross-field", () => {
         logoutTool: "test_signout",
       },
     });
-    const validator = await buildManifestValidator(import.meta.url);
+    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
       /auth\.statusTool.*not declared in uiCallable/,
     );
@@ -95,7 +111,7 @@ describe("manifest validation — auth cross-field", () => {
         logoutTool: "test_signout",
       },
     });
-    const validator = await buildManifestValidator(import.meta.url);
+    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
       /auth\.loginTool.*not declared in uiCallable/,
     );
@@ -110,26 +126,38 @@ describe("manifest validation — auth cross-field", () => {
         logoutTool: "test_signout",
       },
     });
-    const validator = await buildManifestValidator(import.meta.url);
+    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
       /auth\.logoutTool.*not declared in uiCallable/,
     );
   });
 
-  // Note: pure AJV-shape rules (required statusTool/loginTool,
-  // additionalProperties: false) were originally pinned here too, but
-  // those assertions depend on `buildManifestValidator(import.meta.url)`
-  // resolving `schemas/plugin.schema.json` relative to the test file
-  // location. That path math is reliable when called from the runtime
-  // source file (which the production code does) but flaky from a
-  // `__tests__/` invocation across platforms — Linux CI failed where
-  // macOS passed. Coverage is preserved through:
-  //   1. AJV's own test suite (the keywords themselves are not our code)
-  //   2. `phase5-validation.test.ts` integration tests that exercise the
-  //      same schema through PluginRuntime.startAll(), which loads the
-  //      validator from runtime/ source and is path-stable.
-  // The cross-field check below — our actual addition on top of AJV —
-  // remains directly tested above.
+  it("AJV rejects auth missing required statusTool", async () => {
+    await writeManifest({
+      auth: {
+        loginTool: "test_login",
+        // statusTool missing — schema says required.
+      },
+    });
+    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
+    await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
+      /schema validation/i,
+    );
+  });
+
+  it("AJV rejects auth with extra properties (additionalProperties: false)", async () => {
+    await writeManifest({
+      auth: {
+        statusTool: "test_status",
+        loginTool: "test_login",
+        nonsenseField: "boom",
+      },
+    });
+    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
+    await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
+      /schema validation/i,
+    );
+  });
 
   // Defense-in-depth — security review MED #1.
   // The cross-field validator only enforces `auth.{statusTool,loginTool,
@@ -149,7 +177,7 @@ describe("manifest validation — auth cross-field", () => {
         loginTool: "test_email_delete",
       },
     });
-    const validator = await buildManifestValidator(import.meta.url);
+    const validator = await buildManifestValidator(RUNTIME_FILE_URL);
     const parsed = await parsePluginJson(manifestPath, validator);
     expect(parsed.auth?.loginTool).toBe("test_email_delete");
   });
