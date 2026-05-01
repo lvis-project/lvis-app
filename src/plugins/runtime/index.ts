@@ -26,7 +26,7 @@ import type { Actor, PluginDeploymentGuard } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
 import { devLinkedEntryAllowed, isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
-import { updatePluginRegistry } from "../registry.js";
+import { readPluginRegistry, updatePluginRegistry } from "../registry.js";
 
 import {
   buildManifestValidator,
@@ -484,7 +484,19 @@ export class PluginRuntime {
     this.onDisable?.(pluginId);
 
     const { pluginRoot } = plugin;
-    const skipReceiptForDevLink = plugin.devLinked === true && devLinkedEntryAllowed();
+    // Re-derive devLinked from a fresh registry read so a registry change between
+    // initial load and restart (e.g. installSource promotion from "dev-link" to
+    // "user") is reflected rather than using the stale in-memory value.
+    let skipReceiptForDevLink = false;
+    if (this.registryPath) {
+      const freshRegistry = await readPluginRegistry(this.registryPath);
+      const freshEntry = freshRegistry.plugins.find((e) => e.id === pluginId);
+      const freshDevLinked = freshEntry != null &&
+        (freshEntry.installSource === "dev-link" || freshEntry._devLinked === true);
+      skipReceiptForDevLink = freshDevLinked && devLinkedEntryAllowed();
+    } else {
+      skipReceiptForDevLink = plugin.devLinked === true && devLinkedEntryAllowed();
+    }
     const integrityResult = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot, skipReceiptForDevLink);
     if (!integrityResult.ok) {
       this.markFailed(pluginId);
