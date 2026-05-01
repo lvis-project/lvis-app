@@ -106,16 +106,18 @@ interface PluginManifest {
 > 2. 머지 후 main 에서 매칭 git tag 푸시 — `git tag v0.1.25 -m "release 0.1.25" && git push origin v0.1.25`
 > 3. plugin repo 의 `.github/workflows/publish.yml` 이 tag-push 를 트리거로 받아 `plugin.json.version` 과 tag semver 가 일치하는지 fail-fast 검증 후 마켓플레이스 API 로 publish.
 >
-> 이전에는 CI 의 `bump_version.py` 가 `catalog 의 latest + 1` 으로 in-place rewrite 했지만, 결과적으로 source `plugin.json` 과 catalog 가 갈라져서 (catalog 0.1.22 vs source 0.1.0 등) 사이드로드 (`Settings → 로컬 폴더에서 설치`) 한 플러그인에 false-positive "업데이트 있음" 배너가 떴음. **tag-as-SoT** 로 source manifest 와 catalog 가 항상 동일 — 사이드로드와 마켓플레이스 install 결과는 byte-equivalent.
+> 이전에는 CI 의 `bump_version.py` 가 `catalog 의 latest + 1` 으로 in-place rewrite 했지만, source `plugin.json` 과 catalog 가 갈라져서 사이드로드 (`Settings → 로컬 폴더에서 설치`) 한 플러그인에 false-positive "업데이트 있음" 배너가 떴음. **tag-as-SoT** 로 source manifest 와 catalog 가 항상 동일 — 사이드로드와 마켓플레이스 install 결과는 같은 `plugin.json` + `dist/` 레이아웃을 공유한다 (install-receipt 의 `installSource` / `signerKeyId` / `artifactSha256` 은 의도적으로 다르며 trust 표면 분리 목적).
 >
-> branch push 는 publish 트리거 안 함 (path-filter `tags: ['v*.*.*']` 만 listen). dev 중 main 으로 머지해도 catalog 는 가만히 있음 — 의도된 release 시점에만 tag 로 트리거.
+> 이 룰의 enforcement 는 **각 plugin repo 의 `publish.yml` 워크플로우 안에서만** 일어난다. 호스트와 마켓플레이스 backend 는 catalog 상태를 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다 (`assertInstalledManifestMatchesCatalog` 는 호스트의 defense-in-depth 일 뿐 정문이 아님). 따라서 이 룰은 `lvis-plugin-*` 레포 전반에 적용되는 contract 이며, 모든 신규 플러그인 repo 의 `publish.yml` 이 이 패턴을 따라야 한다 (work-proactive 가 첫 도입; calendar/meeting/ms-graph/lge-api/pageindex 순차 fan-out).
+>
+> branch push 는 publish 트리거 안 함 (`on.push.tags: ['v*.*.*']` 만 listen). dev 중 main 으로 머지해도 catalog 는 가만히 있음 — 의도된 release 시점에만 tag 로 트리거.
 
 **각 필드의 런타임 소비처:**
 
 | 필드 | 소비처 | 타이밍 |
 |------|--------|--------|
 | `id` | PluginRegistry, HostApi cleanup | boot + 런타임 전반 |
-| `version` | 마켓플레이스 카탈로그 카드 + update-detector 비교 + install receipt | install + 런타임 표시 |
+| `version` | 마켓플레이스 카탈로그 카드 + update-detector 비교 + install receipt + `assertInstalledManifestMatchesCatalog` (defense-in-depth host check) + Settings UI 카드 | install + 런타임 전반 |
 | `entry` | runtime.ts `require()` | boot |
 | `tools[]` | Tool Registry 등록 | boot |
 | `toolSchemas` | LLM system prompt 에 tool schema 로 삽입 | system prompt 빌드 시 |

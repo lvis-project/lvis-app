@@ -53,10 +53,11 @@ git push origin v0.1.25
 
 ## 한 줄 요약
 
-LVIS 마켓플레이스는 **두 가지 publish 채널**을 운영합니다:
+LVIS 마켓플레이스는 **세 가지 publish 채널**을 운영합니다:
 
 1. **Git-based bootstrap (managed 플러그인 권장)**: 퍼블리셔가 자기 git 레포에 빌드 산출물(`plugin.json` + `dist/`)을 커밋 → 마켓플레이스 서버가 부팅 시 git pull → 서버 사이드에서 deterministic zip 패키징 + ed25519 서명 → DB UPSERT. **퍼블리셔는 zip 도, CLI publish 도 만들 필요 없음**. (Go 모듈 프록시 스타일)
 2. **CLI publish (ad-hoc / non-managed)**: `lvis-publish` 로 사인된 zip 을 직접 업로드. 서버가 envelope 서명 후 카탈로그 등록.
+3. **Per-plugin CI publish (git tag SoT)**: 각 `lvis-plugin-*` 레포의 `publish.yml` 워크플로우가 SemVer git tag (`v*.*.*`) 푸시를 트리거로 받아 `POST /api/v1/plugins/<slug>/versions` 직접 호출. 채널 2 와 같은 엔드포인트지만 **사람이 CLI 를 돌리지 않고**, **마켓플레이스 폴링 없고**, **플러그인 저자가 plugin.json.version 을 통제**한다는 점이 다름. enforcement 는 plugin repo CI 에서만 일어나며 호스트는 catalog 만 trust.
 
 ```
 [퍼블리셔 repo: bun build → version bump → git push (또는 commit only)]
@@ -72,15 +73,16 @@ LVIS 마켓플레이스는 **두 가지 publish 채널**을 운영합니다:
 ## 목차
 
 1. [전제 조건](#전제-조건)
-2. [채널 선택: bootstrap vs CLI](#채널-선택)
+2. [채널 선택](#채널-선택)
 3. [퍼블리셔 API 키와 서버 서명 키](#퍼블리셔-api-키와-서버-서명-키)
 4. [플러그인 매니페스트 작성](#플러그인-매니페스트-작성)
 5. [MCP 서버 매니페스트 작성](#mcp-서버-매니페스트-작성)
 6. [채널 1 — Git-based bootstrap](#채널-1--git-based-bootstrap)
 7. [채널 2 — CLI publish](#채널-2--cli-publish)
-8. [LVIS 앱 사이드 확인](#lvis-앱-사이드-확인)
-9. [개발 환경 셋업](#개발-환경-셋업)
-10. [트러블슈팅](#트러블슈팅)
+8. [채널 3 — Per-plugin CI publish (git tag SoT)](#채널-3--per-plugin-ci-publish-git-tag-sot)
+9. [LVIS 앱 사이드 확인](#lvis-앱-사이드-확인)
+10. [개발 환경 셋업](#개발-환경-셋업)
+11. [트러블슈팅](#트러블슈팅)
 
 ---
 
@@ -89,22 +91,24 @@ LVIS 마켓플레이스는 **두 가지 publish 채널**을 운영합니다:
 - LVIS 마켓플레이스 서버 접근 권한 (사내 prod URL 은 운영팀에 문의 / 로컬 dev 는 `http://127.0.0.1:8000`)
 - Channel 1 (bootstrap) 사용 시: 마켓플레이스 서버가 접근 가능한 git 레포에 산출물 커밋 권한 + `lvis-marketplace` 의 `MANAGED_SOURCES` 등록 PR
 - Channel 2 (CLI publish) 사용 시: 퍼블리셔 API 키 발급 (관리자에게 요청)
+- Channel 3 (per-plugin CI) 사용 시: plugin repo 의 `.github/workflows/publish.yml` 가 마켓플레이스 secret (`MARKETPLACE_API_KEY`) 을 가진 상태 + tag push 권한
 - `lvis-marketplace/cli` 빌드 (CLI 사용 시) — `lvis-publish` 바이너리
 
 ---
 
 ## 채널 선택
 
-| 항목 | Channel 1 — Git Bootstrap | Channel 2 — CLI Publish |
-|------|-------------------------|-------------------------|
-| 권장 시점 | managed 사내 플러그인 (long-lived, 정식 등록) | ad-hoc 외부 플러그인, 단발성 게시, third-party |
-| 등록 절차 | `lvis-marketplace` 서버의 `MANAGED_SOURCES` 에 슬러그 등록 PR + 운영팀 머지/배포 | 퍼블리셔 API 키 발급 → `lvis-publish login` |
-| 매번 publish 작업 | git push + 서버 재배포 (또는 운영팀 트리거) | `lvis-publish publish <zip> --slug <s>` |
-| 매니페스트 서명 (`plugin.json.sig`) | 현재 bootstrap 은 `.sig` 를 zip 에 번들하지 않음 → `installPolicy: "user"` 권장 (`admin` 정책은 별도 서명 파이프라인 필요) | 퍼블리셔가 zip 안에 직접 포함 가능 |
-| `installPolicy: "admin"` | bootstrap 자동 `approved` | `pending_review` → admin approve 필요 |
-| 검증 | 서버 부팅 로그 + LVIS 앱 마켓플레이스 탭 | `lvis-publish list/show` + 앱 탭 |
+| 항목 | Channel 1 — Git Bootstrap | Channel 2 — CLI Publish | Channel 3 — Per-plugin CI |
+|------|-------------------------|-------------------------|---------------------------|
+| 권장 시점 | managed 사내 플러그인 (long-lived, 정식 등록) | ad-hoc 외부 플러그인, 단발성 게시, third-party | `lvis-plugin-*` 레포 (저자가 release version 통제) |
+| 등록 절차 | `lvis-marketplace` 서버의 `MANAGED_SOURCES` 에 슬러그 등록 PR + 운영팀 머지/배포 | 퍼블리셔 API 키 발급 → `lvis-publish login` | repo 에 `MARKETPLACE_API_KEY` secret + `publish.yml` 워크플로우 |
+| 매번 publish 작업 | git push + 서버 재배포 (또는 운영팀 트리거) | `lvis-publish publish <zip> --slug <s>` | plugin.json.version PR + `git tag vX.Y.Z && git push origin vX.Y.Z` |
+| version SoT | git 레포의 plugin.json (서버가 git pull 시점에 읽음) | `lvis-publish publish` 인자 또는 zip 안의 plugin.json | git tag (= plugin.json.version, CI 가 일치 검증) |
+| 매니페스트 서명 (`plugin.json.sig`) | 현재 bootstrap 은 `.sig` 를 zip 에 번들하지 않음 → `installPolicy: "user"` 권장 (`admin` 정책은 별도 서명 파이프라인 필요) | 퍼블리셔가 zip 안에 직접 포함 가능 | 서버 envelope dual-sign (채널 2 와 동일) |
+| `installPolicy: "admin"` | bootstrap 자동 `approved` | `pending_review` → admin approve 필요 | `pending_review` → admin approve 필요 (채널 2 와 동일) |
+| 검증 | 서버 부팅 로그 + LVIS 앱 마켓플레이스 탭 | `lvis-publish list/show` + 앱 탭 | GitHub Actions run + 앱 탭 |
 
-기본 권장: **사내 정식 플러그인은 Channel 1**, **외부/단발성은 Channel 2**.
+기본 권장: **사내 정식 플러그인은 Channel 1**, **`lvis-plugin-*` 레포는 Channel 3**, **외부/단발성은 Channel 2**.
 
 ---
 
@@ -353,27 +357,40 @@ lvis-publish reject <publish-id> --reason <text> [--json]  # admin: 거절
 
 `installPolicy: "admin"` 으로 publish 한 버전은 `pending_review` 상태로 들어가 카탈로그에 노출되지 않습니다. admin 이 `lvis-publish approve <publish-id>` (또는 admin UI) 로 승격해야 사용자에게 보입니다. dev 환경에서 빠르게 테스트하려면 `installPolicy: "user"` 로 publish 하거나 직접 approve.
 
-### 2-7. Per-plugin CI publish (git tag SoT)
+## 채널 3 — Per-plugin CI publish (git tag SoT)
 
-`lvis-plugin-*` 레포는 `lvis-publish` CLI 를 직접 호출하는 대신 자체 `.github/workflows/publish.yml` 가 마켓플레이스 API 를 호출하도록 구성되어 있습니다. **트리거는 SemVer git tag (`v*.*.*`) 푸시뿐** — branch push 는 publish 안 함. 워크플로우는:
+> **요약**: 채널 1/2 와 같은 `POST /api/v1/plugins/<slug>/versions` 엔드포인트를 쓰지만 **트리거 surface 와 SoT 가 다름** — 마켓플레이스 폴링도 없고 사람이 CLI 를 돌리지도 않고, plugin repo 의 tag-push 가 직접 publish 를 일으킨다. 모든 `lvis-plugin-*` 레포에 동일하게 적용되는 contract (work-proactive 가 첫 도입, calendar/meeting/ms-graph/lge-api/pageindex 순차 fan-out).
+>
+> **이 룰의 enforcement 위치**: 각 plugin repo 의 `.github/workflows/publish.yml` 워크플로우. 호스트와 마켓플레이스 backend 는 catalog 만 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다.
 
-1. tag 의 semver (`v0.1.25` → `0.1.25`) 와 `plugin.json.version` 일치를 fail-fast 검증
-2. mismatch (e.g. `plugin.json.version: "0.1.0"` + tag `v0.1.25`) → step 실패 + "bump plugin.json on main BEFORE pushing the tag" 에러
-3. 일치하면 `dist/ + plugin.json` zip 으로 묶어 `POST /api/v1/plugins/<slug>/versions` (`-F commit_hash=<sha>`)
-4. 201 → publish 성공, 409 (already exists) → idempotent skip (warning), 그 외 → fail
+### 3-1. 트리거 + 흐름
 
-**version SoT 룰** ([`plugin-tool-schema-design.md` 참조](../references/plugin-tool-schema-design.md#2-pluginmanifest-필드별-스펙)):
+`lvis-plugin-*` 레포의 `.github/workflows/publish.yml` 은 `on.push.tags: ['v*.*.*']` 만 listen — branch push 는 publish 안 함. 워크플로우 게이트 (PR 머지 후 첫 release 도 동일 순서로 통과해야 함):
 
-- 마켓플레이스 backend 는 version 을 자동 bump 하지 않음
+1. trigger ref 가 `refs/tags/v*` 인지 (workflow_dispatch 에서 non-tag dispatch 거절)
+2. tag 가 strict SemVer (`vMAJOR.MINOR.PATCH`) 인지 — `v1.2-rc1` / `v..` / `v1.2.foo` 거절
+3. `plugin.json.version` 이 non-empty string 인지 (type-strict, 누락 → 명확한 에러)
+4. tag semver 와 `plugin.json.version` 일치 — mismatch → "bump plugin.json on main BEFORE pushing the tag" 에러
+5. tagged commit 이 `origin/main` 에서 reachable — off-main tag (`git tag vX.Y.Z <branch-tip>`) 거절 (defense-in-depth, off-main 우회 차단)
+6. `bun install --frozen-lockfile` + `bun run build` 통과
+7. `POST /api/v1/plugins/<slug>/versions` 가 201 반환
+8. 409 (already exists) 의 경우 catalog 에 stored 된 `commit_hash` 가 `${{ github.sha }}` 와 일치하는지 — 다르면 fail loud (silent re-publish 차단)
+
+상세 룰 박스: [`plugin-tool-schema-design.md` §2 SoT 박스](../references/plugin-tool-schema-design.md#2-pluginmanifest-필드별-스펙).
+
+### 3-2. version SoT 요약
+
+- 마켓플레이스 backend 는 version 을 자동 bump 하지 않음 (이전 `bump_version.py` 는 deprecated, 6 개 plugin repo 에서 순차 제거 중)
 - 플러그인 저자가 release 의도 시 plugin.json 을 PR 으로 올림 → main 머지 → 매칭 tag 푸시
-- 결과: source manifest 와 catalog version 항상 일치, 사이드로드 (`Settings → 로컬 폴더에서 설치`) 와 마켓플레이스 install 결과 byte-equivalent
+- 결과: source manifest 와 catalog version 항상 일치, 사이드로드 (`Settings → 로컬 폴더에서 설치`) 와 마켓플레이스 install 은 같은 `plugin.json` + `dist/` 레이아웃을 공유 (install-receipt 의 `installSource` / `signerKeyId` / `artifactSha256` 은 의도적으로 다르며 trust 표면 분리 목적)
 
-**release 절차 예시 (work-proactive 0.1.25)**:
+### 3-3. release 절차 예시 (work-proactive 0.1.25)
 
 ```bash
 cd lvis-plugin-work-proactive
-# (a) plugin.json 의 version 을 0.1.25 로 PR
+# (a) plugin.json (+ package.json) 의 version 을 0.1.25 로 PR
 git checkout -b release/0.1.25
+# 직접 수정하든, 아래 스니펫이든 무방 — 핵심은 plugin.json.version 이 0.1.25
 node -e 'const m=require("./plugin.json"); m.version="0.1.25"; require("fs").writeFileSync("plugin.json", JSON.stringify(m,null,2)+"\n")'
 git commit -am "chore(release): 0.1.25"
 git push origin release/0.1.25
@@ -386,7 +403,23 @@ git push origin v0.1.25
 # → publish.yml 가 tag-push 만 listen 해서 트리거됨
 ```
 
-> 이전 동작 (참고용 — deprecated): `bump_version.py` 가 catalog 의 latest version + 1 으로 plugin.json 을 in-place rewrite 한 뒤 publish. CI workdir 안에서만 일어나서 source 는 stale 한 채 catalog 만 진행 → 사이드로드한 플러그인에 false-positive "업데이트 있음" 배너. tag-as-SoT 도입으로 근본 해결.
+### 3-4. 시크릿 / 매니페스트 안전 정책
+
+> ⚠️ `plugin.json` 과 `dist/` 산출물은 **공개 채널**이며 마켓플레이스 immutability 로 인해 한 번 publish 되면 회수 불가 (admin yank 만 가능, 이미 다운로드한 사용자에겐 영향 없음). 다음을 매니페스트 / 번들에 절대 포함하지 말 것:
+>
+> - API 키, OAuth client secret, 서버 토큰, 내부 인증서, `.env` 파일
+> - 사내-only URL 이나 internal endpoint hard-code (호스트가 `hostApi.getSecret()` 또는 plugin manifest 의 `auth: "api-key"` 로 주입하게 함)
+> - 사용자 PII / 테스트 데이터
+>
+> 시크릿 처리 패턴은 §시크릿 정책 (MCP 섹션 line 217 근처) 참조 — 일반 플러그인도 동일하게 적용. backend 의 `(plugin_id, version)` 중복 + sha256 immutability 가드 (§2-5) 가 *이미 publish 된* artifact 의 회수를 막는다는 점을 인지할 것.
+
+### 3-5. 버전 점프 / leapfrog
+
+`plugin.json.version` 은 플러그인 저자가 결정하지만 backend 가 `(plugin_id, version)` 중복 + `not strictly greater` 거절을 강제하므로 **monotonic** 만 통과한다. 이론적 leapfrog (예: `0.1.10` → `999.999.999`) 는 backend 가 거절하지 않는다 — 운영팀의 admin yank 또는 pre-publish 리뷰가 유일한 회복 경로이며, dev 환경에선 신중하게 bump 하라.
+
+### 3-6. 이전 동작 (deprecated, 참고용)
+
+`bump_version.py` 가 catalog 의 latest version + 1 으로 plugin.json 을 in-place rewrite 한 뒤 publish. CI workdir 안에서만 일어나서 source 는 stale 한 채 catalog 만 진행 → 사이드로드한 플러그인에 false-positive "업데이트 있음" 배너. tag-as-SoT 도입으로 근본 해결.
 
 ---
 
