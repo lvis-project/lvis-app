@@ -6,7 +6,7 @@ import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePlugin
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
-import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
+import { assertMockMarketplaceAllowed, devLinkedEntryAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -766,6 +766,7 @@ export class PluginMarketplaceService {
       entry.installedBy = actor === "it-admin" ? "admin" : entry.installedBy ?? "user";
       entry.bundleRefs = this.mergeBundleRefs(entry.bundleRefs, bundleRootId, pluginId);
       entry.approvedPluginAccess = approvedPluginAccess;
+      delete entry._devLinked;
     });
   }
 
@@ -793,8 +794,12 @@ export class PluginMarketplaceService {
         entry.bundleRefs = snapshot.bundleRefs;
         entry.installedBy = snapshot.installedBy;
         entry.approvedPluginAccess = snapshot.approvedPluginAccess;
-        if (snapshot._devLinked !== undefined) {
-          entry._devLinked = snapshot._devLinked;
+        // Restore _devLinked only if it was set AND dev-link entries are
+        // permitted in this build. In a packaged build devLinkedEntryAllowed()
+        // is false, so rollback never re-introduces a dev-link marker even if
+        // the pre-install snapshot captured one.
+        if (snapshot._devLinked === true && devLinkedEntryAllowed()) {
+          entry._devLinked = true;
         } else {
           delete entry._devLinked;
         }
