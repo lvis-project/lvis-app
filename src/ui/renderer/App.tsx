@@ -180,18 +180,55 @@ export function App() {
   // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
   // click opens it in a separate magnetic-snap BrowserWindow instead of
   // switching the main window's active view.
+  //
+  // If the owning plugin declares `manifest.auth` AND its current state is
+  // unauthed, click invokes the loginTool first and only navigates to the
+  // view after auth succeeds. Otherwise the user lands on a "먼저 로그인
+  // 해주세요" panel and has to back out + open Settings to log in. The
+  // unauthed cue (🔒 corner badge + red dot on trigger) signals the redirect
+  // intent ahead of click; tooltip backs it up with text.
   const handleSidebarSelect = useCallback(
     (key: string) => {
       if (key.startsWith("plugin:")) {
         const view = pluginViews.find((v) => toViewKey(v) === key);
-        if (view?.extension.window?.defaultMode === "detached") {
+        if (!view) return;
+
+        const status = pluginAuthStatuses.get(view.pluginId);
+        const card = pluginCards.find((c) => c.id === view.pluginId);
+        const loginTool = card?.auth?.loginTool;
+        if (status?.kind === "unauthed" && loginTool) {
+          void (async () => {
+            try {
+              await api.callPluginMethod(loginTool);
+            } catch (err) {
+              // User cancelled / IPC rejected — leave them on the current
+              // view, do NOT navigate to the still-unauthed plugin view.
+              console.error(
+                `[plugin-auth] ${view.pluginId} loginTool ${loginTool} failed from grid click`,
+                err,
+              );
+              return;
+            }
+            // Login resolved — navigate to the view the user originally
+            // wanted. The `<pluginId>.auth.changed` event will flip the
+            // badge separately via the live-poll path.
+            if (view.extension.window?.defaultMode === "detached") {
+              void api.window?.openDetached(key);
+            } else {
+              setActiveView(key);
+            }
+          })();
+          return;
+        }
+
+        if (view.extension.window?.defaultMode === "detached") {
           void api.window?.openDetached(key);
           return;
         }
       }
       setActiveView(key);
     },
-    [api, pluginViews],
+    [api, pluginViews, pluginAuthStatuses, pluginCards],
   );
 
   // If the currently-open sidebar view belongs to a plugin that just got

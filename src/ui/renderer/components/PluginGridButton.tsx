@@ -42,7 +42,7 @@ function PluginGrid({ plugins, onSelect }: { plugins: PluginEntry[]; onSelect: (
           data-viewkey={p.viewKey}
           data-unauthed={p.unauthed ? "true" : undefined}
           aria-describedby={p.unauthed ? `${p.viewKey}-unauthed` : undefined}
-          title={p.unauthed ? `${p.label} — 인증이 필요합니다` : undefined}
+          title={p.unauthed ? `${p.label} — 클릭하여 로그인` : undefined}
         >
           <span className="text-xl leading-none">{p.icon ?? "🔌"}</span>
           <span className="truncate max-w-[80px]">{p.label}</span>
