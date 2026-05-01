@@ -209,6 +209,18 @@ export function isConfigured(): boolean {
   return configured;
 }
 
+/** Returns the cached isPackaged value set by boot. Defaults to true until boot wires the gate. */
+export function getIsPackaged(): boolean {
+  return isPackagedCached;
+}
+
+/**
+ * signerKeyId prefix written by installLocal for dev-sideloaded plugins.
+ * Exported so the runtime's packaged-build gate and the install path share
+ * a single source of truth — changing the sentinel only needs one edit here.
+ */
+export const DEV_SIGNER_PREFIX = "dev:" as const;
+
 /**
  * Mock fetcher gate — packaged builds must never instantiate
  * `MockMarketplaceFetcher`, which serves catalog from a user-writable

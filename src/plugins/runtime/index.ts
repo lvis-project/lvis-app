@@ -23,7 +23,7 @@ import type {
 import { createPluginStorage } from "../storage.js";
 import type { Actor, PluginDeploymentGuard } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
-import { devLinkedEntryAllowed } from "../../boot/dev-flags.js";
+import { devLinkedEntryAllowed, DEV_SIGNER_PREFIX, getIsPackaged } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
 import { updatePluginRegistry } from "../registry.js";
 
@@ -220,29 +220,17 @@ export class PluginRuntime {
     for (const plan of loadPlan) {
       const manifestPath = plan.manifestPath;
       const pluginRoot = dirname(manifestPath);
-      const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
-      if (this.installReceiptCacheRoot && plan.pluginIdHint && !skipReceiptForDevLink) {
-        const receiptResult = await verifyInstallReceipt(
-          this.installReceiptCacheRoot,
+      if (plan.pluginIdHint) {
+        const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
+        const integrityResult = await this.verifyReceiptAndDevGuard(
           plan.pluginIdHint,
           pluginRoot,
+          skipReceiptForDevLink,
         );
-        if (!receiptResult.ok) {
-          log.error(
-            `${plan.pluginIdHint} rejected — install receipt integrity failed: ${receiptResult.reason}`,
-          );
-          this.auditLog?.("error", "plugin_integrity_rejected", {
-            pluginId: plan.pluginIdHint,
-            reason: receiptResult.reason,
-          });
+        if (!integrityResult.ok) {
           this.markFailed(plan.pluginIdHint);
           continue;
         }
-        this.auditLog?.("info", "plugin_integrity_verified", {
-          pluginId: plan.pluginIdHint,
-          artifactSha256: receiptResult.receipt.artifactSha256,
-          signerKeyId: receiptResult.receipt.signerKeyId,
-        });
       }
       let manifest: PluginManifest;
       try {
@@ -362,6 +350,7 @@ export class PluginRuntime {
         instance,
         methods,
         approvedPluginAccess: plan.approvedPluginAccess,
+        devLinked: plan.devLinked,
       });
       this.failedPluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
@@ -492,6 +481,12 @@ export class PluginRuntime {
     this.onDisable?.(pluginId);
 
     const { pluginRoot } = plugin;
+    const skipReceiptForDevLink = plugin.devLinked === true && devLinkedEntryAllowed();
+    const integrityResult = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot, skipReceiptForDevLink);
+    if (!integrityResult.ok) {
+      this.markFailed(pluginId);
+      return;
+    }
     let manifest: PluginManifest;
     try {
       const manifestPath = resolve(pluginRoot, "plugin.json");
@@ -683,6 +678,59 @@ export class PluginRuntime {
   }
 
   /**
+   * Verify the install receipt for `pluginId` under `pluginRoot` and enforce
+   * the dev-signer-in-packaged-build guard. Emits all relevant audit log
+   * entries so callers cannot forget them.
+   *
+   * Returns `{ ok: true }` when verification passes (or is not required).
+   * Returns `{ ok: false }` when the plugin must be rejected — the caller is
+   * responsible for calling `markFailed` and deciding the control-flow
+   * (`continue` vs `return`).
+   *
+   * Skips all checks when `installReceiptCacheRoot` is not configured or
+   * when `skipForDevLink` is true (dev-linked entry in non-packaged build).
+   */
+  private async verifyReceiptAndDevGuard(
+    pluginId: string,
+    pluginRoot: string,
+    skipForDevLink: boolean,
+  ): Promise<{ ok: true } | { ok: false }> {
+    if (!this.installReceiptCacheRoot || skipForDevLink) {
+      return { ok: true };
+    }
+    const receiptResult = await verifyInstallReceipt(
+      this.installReceiptCacheRoot,
+      pluginId,
+      pluginRoot,
+    );
+    if (!receiptResult.ok) {
+      log.error({ pluginId, reason: receiptResult.reason }, `${pluginId} rejected — install receipt integrity failed`);
+      this.auditLog?.("error", "plugin_integrity_rejected", {
+        pluginId,
+        reason: receiptResult.reason,
+      });
+      return { ok: false };
+    }
+    const { signerKeyId } = receiptResult.receipt;
+    if (getIsPackaged() && signerKeyId.startsWith(DEV_SIGNER_PREFIX)) {
+      const reason = "dev signer in packaged build";
+      log.error({ pluginId, reason, signerKeyId }, `${pluginId} rejected — ${reason}`);
+      this.auditLog?.("error", "plugin_integrity_rejected", {
+        pluginId,
+        reason,
+        signerKeyId,
+      });
+      return { ok: false };
+    }
+    this.auditLog?.("info", "plugin_integrity_verified", {
+      pluginId,
+      artifactSha256: receiptResult.receipt.artifactSha256,
+      signerKeyId,
+    });
+    return { ok: true };
+  }
+
+  /**
    * Per-plugin instantiation + start. Extracted from `load()` + `startAll()`
    * so single-plugin install (`addPlugin`) can run the same path without a
    * full restart.
@@ -693,29 +741,17 @@ export class PluginRuntime {
     approvedPluginAccess: PluginAccessSpec | undefined,
   ): Promise<void> {
     const pluginRoot = dirname(plan.manifestPath);
-    const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
-    if (this.installReceiptCacheRoot && plan.pluginIdHint && !skipReceiptForDevLink) {
-      const receiptResult = await verifyInstallReceipt(
-        this.installReceiptCacheRoot,
+    if (plan.pluginIdHint) {
+      const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
+      const integrityResult = await this.verifyReceiptAndDevGuard(
         plan.pluginIdHint,
         pluginRoot,
+        skipReceiptForDevLink,
       );
-      if (!receiptResult.ok) {
-        log.error(
-          `${plan.pluginIdHint} rejected — install receipt integrity failed: ${receiptResult.reason}`,
-        );
-        this.auditLog?.("error", "plugin_integrity_rejected", {
-          pluginId: plan.pluginIdHint,
-          reason: receiptResult.reason,
-        });
+      if (!integrityResult.ok) {
         this.markFailed(plan.pluginIdHint);
         return;
       }
-      this.auditLog?.("info", "plugin_integrity_verified", {
-        pluginId: plan.pluginIdHint,
-        artifactSha256: receiptResult.receipt.artifactSha256,
-        signerKeyId: receiptResult.receipt.signerKeyId,
-      });
     }
 
     const requiredCapabilities = manifest.requires?.capabilities ?? [];

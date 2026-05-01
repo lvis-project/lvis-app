@@ -367,4 +367,125 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(isDevModeUnlocked(true)).toBe(false);
     });
   });
+
+  // ───────────────────────────── §Step 5: dev-signer packaged guard ─────
+
+  describe("dev: signerKeyId rejected in packaged builds", () => {
+    const savedLvisDev = process.env.LVIS_DEV;
+    beforeEach(() => {
+      _resetForTest();
+    });
+    afterEach(() => {
+      _resetForTest();
+      if (savedLvisDev === undefined) delete process.env.LVIS_DEV;
+      else process.env.LVIS_DEV = savedLvisDev;
+    });
+
+    it("packaged build + dev: signerKeyId → plugin marked failed", async () => {
+      delete process.env.LVIS_DEV;
+      setIsPackaged(true);
+      const pluginDir = join(pluginsRoot, "p-dev-signer");
+      const manifestPath = await writePluginAt(pluginDir, "tb.dev-signer");
+
+      const devReceipt: PluginInstallReceipt = {
+        schemaVersion: 1,
+        pluginId: "tb.dev-signer",
+        version: "1.0.0",
+        artifactSha256: "dev:local-install",
+        signerKeyId: "dev:local-install",
+        installedAt: new Date(0).toISOString(),
+        files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
+      };
+      await writeInstallReceipt(cacheRoot, devReceipt);
+      await writeRegistry([{ id: "tb.dev-signer", manifestPath, installedBy: "user" }]);
+
+      const auditCalls: Array<{ level: string; message: string; extras?: Record<string, unknown> }> = [];
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+        auditLog: (level, message, extras) => auditCalls.push({ level, message, extras }),
+      });
+      await runtime.load();
+
+      expect(runtime.listPluginIds()).not.toContain("tb.dev-signer");
+      expect(auditCalls).toContainEqual(
+        expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
+      );
+      const rejection = auditCalls.find((c) => c.message === "plugin_integrity_rejected");
+      expect(rejection?.extras?.["signerKeyId"]).toBe("dev:local-install");
+    });
+
+    it("unpackaged build + dev: signerKeyId → plugin loads normally", async () => {
+      process.env.LVIS_DEV = "1";
+      setIsPackaged(false);
+      const pluginDir = join(pluginsRoot, "p-dev-signer-unpkg");
+      const manifestPath = await writePluginAt(pluginDir, "tb.dev-signer-unpkg");
+
+      const devReceipt: PluginInstallReceipt = {
+        schemaVersion: 1,
+        pluginId: "tb.dev-signer-unpkg",
+        version: "1.0.0",
+        artifactSha256: "dev:local-install",
+        signerKeyId: "dev:local-install",
+        installedAt: new Date(0).toISOString(),
+        files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
+      };
+      await writeInstallReceipt(cacheRoot, devReceipt);
+      await writeRegistry([{ id: "tb.dev-signer-unpkg", manifestPath, installedBy: "user" }]);
+
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+      });
+      await runtime.load();
+
+      expect(runtime.listPluginIds()).toContain("tb.dev-signer-unpkg");
+    });
+
+    it("packaged build + dev: signerKeyId via restartPlugin → rejected", async () => {
+      process.env.LVIS_DEV = "1";
+      setIsPackaged(false);
+      const pluginDir = join(pluginsRoot, "p-restart-dev-signer");
+      const manifestPath = await writePluginAt(pluginDir, "tb.restart-dev-signer");
+
+      const devReceipt: PluginInstallReceipt = {
+        schemaVersion: 1,
+        pluginId: "tb.restart-dev-signer",
+        version: "1.0.0",
+        artifactSha256: "dev:local-install",
+        signerKeyId: "dev:local-install",
+        installedAt: new Date(0).toISOString(),
+        files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
+      };
+      await writeInstallReceipt(cacheRoot, devReceipt);
+      await writeRegistry([{ id: "tb.restart-dev-signer", manifestPath, installedBy: "user" }]);
+
+      // Load successfully in dev mode
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+      });
+      await runtime.load();
+      expect(runtime.listPluginIds()).toContain("tb.restart-dev-signer");
+
+      // Switch to packaged mode — restart should now reject
+      delete process.env.LVIS_DEV;
+      setIsPackaged(true);
+      const auditCalls: Array<{ level: string; message: string }> = [];
+      (runtime as unknown as { auditLog?: (level: string, msg: string) => void }).auditLog =
+        (level, message) => auditCalls.push({ level, message });
+
+      await runtime.restartPlugin("tb.restart-dev-signer");
+      expect(runtime.listPluginIds()).not.toContain("tb.restart-dev-signer");
+      expect(auditCalls).toContainEqual(
+        expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
+      );
+    });
+  });
 });
