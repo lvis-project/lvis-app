@@ -57,4 +57,38 @@ describe("PluginGridButton", () => {
     await act(async () => { await user.click(getByText("Plugin 0")); });
     expect(onSelect).toHaveBeenCalledWith("plugin:test:ext0");
   });
+
+  // architecture.md §9.4a — host UI surface for plugin-owned auth.
+  it("shows red dot on trigger when any plugin entry is unauthed", () => {
+    const plugins: PluginEntry[] = [
+      { viewKey: "plugin:a:v", label: "A", unauthed: false },
+      { viewKey: "plugin:b:v", label: "B", unauthed: true },
+    ];
+    const { getByTestId } = renderButton(plugins);
+    expect(getByTestId("plugin-grid-unauthed-dot")).toBeTruthy();
+  });
+
+  it("hides red dot when all entries are authed (or have no auth)", () => {
+    const plugins: PluginEntry[] = [
+      { viewKey: "plugin:a:v", label: "A", unauthed: false },
+      { viewKey: "plugin:b:v", label: "B" }, // no auth declared
+    ];
+    const { queryByTestId } = renderButton(plugins);
+    expect(queryByTestId("plugin-grid-unauthed-dot")).toBeNull();
+  });
+
+  it("renders 🔒 marker on individual unauthed grid entries", async () => {
+    const user = userEvent.setup();
+    const plugins: PluginEntry[] = [
+      { viewKey: "plugin:a:v", label: "Authed", unauthed: false },
+      { viewKey: "plugin:b:v", label: "Unauthed", unauthed: true },
+    ];
+    const { getByTestId } = renderButton(plugins);
+    await act(async () => { await user.click(getByTestId("plugin-grid-button")); });
+    // Popover renders into a portal — query the document, not the container.
+    const unauthedBtn = document.querySelector('button[data-viewkey="plugin:b:v"]');
+    expect(unauthedBtn?.getAttribute("data-unauthed")).toBe("true");
+    const authedBtn = document.querySelector('button[data-viewkey="plugin:a:v"]');
+    expect(authedBtn?.getAttribute("data-unauthed")).toBeNull();
+  });
 });
