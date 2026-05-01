@@ -99,7 +99,10 @@ function normalizeInstallPolicy(
 }
 
 function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
-  return Array.isArray(manifest.emittedEvents) ? manifest.emittedEvents : [];
+  if (!Array.isArray(manifest.emittedEvents)) return [];
+  return [...new Set(
+    manifest.emittedEvents.filter((e): e is string => typeof e === "string" && e.length > 0)
+  )];
 }
 
 /**

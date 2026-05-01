@@ -2059,7 +2059,7 @@ graph TB
   "description": "마이크 입력을 실시간으로 전사하고 요약해 회의록을 자동 생성합니다.",
   "entry": "dist/index.js",
   "publisher": "LG Electronics DX Platform Team",
-  "deployment": "managed",
+  "installPolicy": "admin",
   "startupTimeoutMs": 8000,
 
   "tools": ["meeting_start", "meeting_push_chunk", "meeting_stop", "meeting_transcript", "meeting_sessions"],
@@ -2478,7 +2478,7 @@ graph TB
   "version": "0.2.0",
   "entry": "dist/index.js",
   "tools": ["index_scan", "chat_preview", "..."],
-  "deployment": "managed",
+  "installPolicy": "admin",
   "publisher": "LG Electronics IT"
 }
 ```

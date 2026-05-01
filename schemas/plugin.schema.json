@@ -224,7 +224,7 @@
       },
       "additionalProperties": false
     },
-    "publisher": { "type": "string" },
+    "publisher": { "type": "string", "minLength": 1 },
     "python": {
       "type": "object",
       "description": "Optional Python runtime co-deployment metadata. Host installs declared requirements when managedBy is lvis-app.",
