@@ -3120,6 +3120,8 @@ import { MARKETPLACE_PUBLIC_KEYS } from "./marketplace-keys.js";
 export function getBundledPublicKeys(): Record<string, Buffer>  // raw ed25519 키
 ```
 
+**Install receipt scope**: 호스트가 verify 하는 receipt 는 `plugin.json` + `dist/**` 만 커버한다. 플러그인의 `node_modules/` 런타임 의존성은 **integrity 추적 대상이 아니다** — bundling 가정 (esbuild/tsup 으로 hostPlugin.js 가 stand-alone) 또는 dev-mode 설치 (`installLocal`, `LVIS_DEV=1` 게이트) 에 한해서만 unpacked deps 가 허용된다. 패키지된 빌드의 `installArtifact` 는 zip artifact 가 node_modules 를 포함하지 않는 invariant 로 같은 boundary 를 자연 만족한다. 이 scope 결정은 dev-only `installLocal` 에서도 일관되게 유지되며, 향후 `installSource: "marketplace" | "local-dev"` enum 도입 시 receipt scope 의 source 별 분기를 명시화할 계획이다.
+
 ---
 
 ### 15.2 Marketplace Admin CSRF 보호 (F3)

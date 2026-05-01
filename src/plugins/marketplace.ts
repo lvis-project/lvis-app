@@ -1080,18 +1080,23 @@ export class PluginMarketplaceService {
         // filter, copying a source repo whose `node_modules/` includes the
         // `electron` package fails because Electron's patched fs intercepts
         // `default_app.asar` and surfaces "Invalid package" mid-copy. `.git`
-        // is excluded for size + privacy. `node_modules/electron` and
-        // `node_modules/@electron/*` are the only practical asar offenders.
+        // is excluded for size + privacy. The check scans every path
+        // segment so monorepo layouts (e.g. `packages/foo/node_modules/electron`)
+        // are also caught. `verbatimSymlinks: true` keeps any source-side
+        // symlinks as symlinks rather than dereferencing into arbitrary
+        // host paths during cp.
         await cp(sourcePath, stagingDir, {
           recursive: true,
+          verbatimSymlinks: true,
           filter: (src) => {
             const rel = relative(sourcePath, src);
             if (!rel) return true;
             const parts = rel.split(/[\\/]/);
             if (parts[0] === ".git") return false;
-            if (parts[0] === "node_modules") {
-              if (parts[1] === "electron") return false;
-              if (parts[1] === "@electron") return false;
+            const nmIdx = parts.indexOf("node_modules");
+            if (nmIdx >= 0) {
+              const next = parts[nmIdx + 1];
+              if (next === "electron" || next === "@electron") return false;
             }
             return true;
           },
@@ -1134,20 +1139,33 @@ export class PluginMarketplaceService {
       // fresh receipt, load is rejected with either "install receipt
       // missing or unreadable" (no prior install) or "receipt hash
       // mismatch" (stale receipt from a prior marketplace install). The
-      // receipt covers `plugin.json` + every file under `dist/` — matching
-      // what `installArtifact` records for marketplace installs.
+      // receipt deliberately covers only `plugin.json` + every file under
+      // `dist/` — matching what `installArtifact` records for marketplace
+      // installs. Runtime deps under `node_modules/` are NOT integrity-
+      // tracked; the compensating control is `isDevModeUnlocked()` (this
+      // entire path is dev-mode-only), and unifying receipt scope with
+      // installSource enum is tracked as a follow-up architecture task.
       // signerKeyId / artifactSha256 use a `dev:local-install` sentinel
-      // because there is no signed artifact to validate against.
-      const manifestVersion =
-        typeof manifest.version === "string" ? manifest.version : "0.0.0";
+      // because there is no signed artifact to validate against; replacing
+      // the sentinel with a first-class `installSource` field is a
+      // schema-v2 follow-up.
+      if (typeof manifest.version !== "string" || !manifest.version) {
+        throw new Error(
+          `[installLocal] plugin.json must declare a non-empty 'version' string: ${pluginId}`,
+        );
+      }
+      const manifestVersion = manifest.version;
       const receiptFiles: string[] = ["plugin.json"];
       try {
         const distFiles = await listFilesRecursive(resolve(installDir, "dist"));
         for (const f of distFiles) receiptFiles.push(`dist/${f}`);
-      } catch {
-        // No dist/ — receipt covers plugin.json only. Plugin load will
-        // likely still fail (no entry to import), but that is the
-        // plugin's responsibility, not the installer's.
+      } catch (err) {
+        // Only `dist/` missing entirely is acceptable here (receipt then
+        // covers plugin.json only and load will fail later with a clearer
+        // entry-import error). Permission / IO errors must surface so a
+        // partially-hashed receipt does not silently pass `verifyInstallReceipt`.
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") throw err;
       }
       await this.artifactStore.writeInstallReceipt(pluginId, {
         version: manifestVersion,

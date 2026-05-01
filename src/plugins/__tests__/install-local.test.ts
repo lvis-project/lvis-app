@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginPaths } from "./test-helpers.js";
@@ -77,36 +77,57 @@ describe("PluginMarketplaceService.installLocal", () => {
     return new PluginMarketplaceService(paths, fetcher);
   }
 
-  it("skips node_modules/electron during cp (asar files would otherwise break install)", async () => {
+  it("skips node_modules/electron, .git, and nested node_modules/electron during cp", async () => {
     // Mimic the failure repro: source plugin repo with node_modules/electron
     // containing an .asar archive. Without the filter, Electron's patched
     // fs intercepts default_app.asar and aborts cp with "Invalid package".
     const electronDir = join(sourceDir, "node_modules", "electron", "dist", "Electron.app", "Contents", "Resources");
     await mkdir(electronDir, { recursive: true });
     await writeFile(join(electronDir, "default_app.asar"), Buffer.from([0, 1, 2, 3]));
-    // Also a sibling dep that SHOULD be copied (plugin runtime needs it).
+    // Sibling dep that SHOULD be copied (plugin runtime needs it).
     await mkdir(join(sourceDir, "node_modules", "node-ical"), { recursive: true });
     await writeFile(
       join(sourceDir, "node_modules", "node-ical", "index.js"),
       "module.exports = {};\n",
     );
+    // Monorepo-style nested node_modules/electron — must also be skipped.
+    const nestedElectron = join(sourceDir, "packages", "child", "node_modules", "electron");
+    await mkdir(nestedElectron, { recursive: true });
+    await writeFile(join(nestedElectron, "package.json"), '{"name":"electron"}\n');
+    // .git tree present at install time so the filter can be observed.
+    await mkdir(join(sourceDir, ".git"), { recursive: true });
+    await writeFile(join(sourceDir, ".git", "HEAD"), "ref: refs/heads/main\n");
 
     const service = makeService();
     await service.installLocal(sourceDir);
 
     const installDir = join(pluginsDir, "test-plugin");
+    expect(existsSync(join(installDir, "node_modules", "electron"))).toBe(false);
+    expect(existsSync(join(installDir, ".git"))).toBe(false);
     expect(
-      existsSync(join(installDir, "node_modules", "electron")),
+      existsSync(join(installDir, "packages", "child", "node_modules", "electron")),
     ).toBe(false);
     // Non-electron deps must survive.
     expect(
       existsSync(join(installDir, "node_modules", "node-ical", "index.js")),
     ).toBe(true);
-    // .git is also filtered.
-    await mkdir(join(sourceDir, ".git"), { recursive: true });
-    await writeFile(join(sourceDir, ".git", "HEAD"), "ref: refs/heads/main\n");
-    // (.git was added after install for clarity; the prior install already
-    // stripped the dir so re-running here would re-trigger the filter.)
+  });
+
+  it("rejects manifests that lack a string version field", async () => {
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify({
+        id: "test-plugin",
+        name: "Test Plugin",
+        description: "fixture",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      }),
+      "utf-8",
+    );
+
+    const service = makeService();
+    await expect(service.installLocal(sourceDir)).rejects.toThrow(/non-empty 'version' string/);
   });
 
   it("clears stale _devLinked flag when updating an existing entry", async () => {
