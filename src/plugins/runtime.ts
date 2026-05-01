@@ -99,12 +99,7 @@ function normalizeInstallPolicy(
 }
 
 function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
-  const declared = Array.isArray(manifest.emittedEvents) ? manifest.emittedEvents : [];
-  const legacyRaw = (manifest as unknown as { eventPublishes?: unknown }).eventPublishes;
-  const legacy = Array.isArray(legacyRaw)
-    ? legacyRaw.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
-    : [];
-  return [...new Set([...declared, ...legacy])];
+  return Array.isArray(manifest.emittedEvents) ? manifest.emittedEvents : [];
 }
 
 /**
@@ -1524,6 +1519,15 @@ export class PluginRuntime {
     }
     if (!Array.isArray(parsed.tools)) {
       fail("tools", "must be an array of tool name strings", `"tools": ["sample_ping"]`);
+    }
+    if (typeof parsed.description !== "string" || parsed.description.length === 0) {
+      fail("description", "must be a non-empty string (used in inactive-plugin catalog)", `"description": "One-line summary of what this plugin does."`);
+    }
+    if (typeof parsed.publisher !== "string" || parsed.publisher.length === 0) {
+      console.warn(
+        `[plugin-runtime] plugin '${pid}' at '${path}' is missing publisher field (SHOULD per Phase 1). ` +
+        `Add: "publisher": "Your Org"`,
+      );
     }
 
     // Tool names exposed to LLMs must satisfy ^[a-zA-Z_][a-zA-Z0-9_]*$ (vendor requirement).

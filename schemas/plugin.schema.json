@@ -4,8 +4,8 @@
   "title": "LVIS Plugin Manifest",
   "description": "Validates plugin.json manifest files for LVIS plugins (§9)",
   "type": "object",
-  "required": ["id", "name", "version", "entry", "tools"],
-  "additionalProperties": true,
+  "required": ["id", "name", "version", "entry", "tools", "description"],
+  "additionalProperties": false,
   "properties": {
     "id": {
       "type": "string",

@@ -70,6 +70,7 @@ async function setupTestDir(
         version: "1.0.0",
         entry: "dist/index.js",
         tools: [],
+        description: "Test fixture.",
         capabilities: p.capabilities
       }),
     );

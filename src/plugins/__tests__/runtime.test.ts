@@ -62,6 +62,7 @@ describe("PluginRuntime.disable", () => {
       version: "1.0.0",
       entry: "entry.mjs",
       tools: [methodName],
+      description: "Test fixture.",
     };
     if (installPolicy) manifest.installPolicy = installPolicy;
     const manifestPath = join(pluginDir, "plugin.json");
@@ -172,7 +173,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", tools: ["com_lge_test_hello"] };
+    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", tools: ["com_lge_test_hello"], description: "Test plugin fixture." };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: pluginId, manifestPath, enabled: true }]);
@@ -198,7 +199,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad.method"] };
+    const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad.method"], description: "Test fixture." };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-plugin", manifestPath, enabled: true }]);
@@ -224,7 +225,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["1bad_name"] };
+    const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["1bad_name"], description: "Test fixture." };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-leading-digit", manifestPath, enabled: true }]);
@@ -250,7 +251,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad-name"] };
+    const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad-name"], description: "Test fixture." };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-hyphen", manifestPath, enabled: true }]);
@@ -383,7 +384,7 @@ describe("PluginRuntime.disable", () => {
       const manifestPath = join(pluginDir, "plugin.json");
       await writeFile(
         manifestPath,
-        JSON.stringify({ id: "calltool-plugin", name: "calltool-plugin", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_ping"] }),
+        JSON.stringify({ id: "calltool-plugin", name: "calltool-plugin", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_ping"], description: "Test fixture." }),
         "utf-8",
       );
       await writeRegistry([{ id: "calltool-plugin", manifestPath, enabled: true }]);
@@ -435,7 +436,7 @@ describe("PluginRuntime.disable", () => {
       const manifestPath = join(pluginDir, "plugin.json");
       await writeFile(
         manifestPath,
-        JSON.stringify({ id: "calltool-delegate", name: "calltool-delegate", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_echo"] }),
+        JSON.stringify({ id: "calltool-delegate", name: "calltool-delegate", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_echo"], description: "Test fixture." }),
         "utf-8",
       );
       await writeRegistry([{ id: "calltool-delegate", manifestPath, enabled: true }]);
@@ -1045,7 +1046,7 @@ export default async function createPlugin(ctx) {
 `,
       "utf-8",
     );
-    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName] };
+    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName], description: "Test fixture." };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return manifestPath;
