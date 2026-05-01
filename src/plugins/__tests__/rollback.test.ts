@@ -24,6 +24,7 @@ const SAMPLE_ITEM: PluginMarketplaceItem = {
   id: "com.lge.sample",
   name: "Sample",
   description: "sample",
+  publisher: "Test fixture",
   packageSpec: "@lvis/sample@1.0.0",
   packageName: "@lvis/sample",
   tools: ["sample_ping"],

@@ -91,6 +91,7 @@ describe("M4 — capability violation audit trail", () => {
       name: id,
       version: "1.0.0",
       description: "Test fixture.",
+      publisher: "Test fixture",
       entry: "entry.mjs",
       tools: [`${id}_ping`],
       ...extra,
