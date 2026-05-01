@@ -5,6 +5,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { highlightText } from "../utils/html-preview.js";
 import type { LvisApi } from "../types.js";
 import type { StarredItem } from "../hooks/use-starred.js";
+import type { SessionSummary } from "../hooks/use-sessions.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -15,17 +16,11 @@ interface MemoryEntry {
   updatedAt: string;
 }
 
-interface SessionEntry {
-  id: string;
-  title: string;
-  modifiedAt: string;
-}
-
 export interface GlobalSearchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   api: LvisApi;
-  sessions: SessionEntry[];
+  sessions: SessionSummary[];
   starred: StarredItem[];
   onLoadSession: (sessionId: string) => void | Promise<void>;
   onOpenMemoryView?: () => void;
@@ -113,6 +108,8 @@ export function GlobalSearchDialog({
   const handleClose = () => {
     onOpenChange(false);
     setQuery("");
+    setMemories([]);
+    setMemoriesLoading(false);
   };
 
   const handleSelectMemory = () => {
