@@ -543,6 +543,37 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   );
 
   // ─── Plugin webview bridge (#237 Option B) ────────────────────────────────
+  // Issue #439: every reject path now logs to audit. Previously these returned
+  // silently and the shell would just see a 500ms timeout from get-entry-url
+  // with no way to tell whether registration itself had failed (and why) or
+  // simply not arrived yet.
+  // Safe-stringify: clamp to 1KB and never throw — a malicious renderer could
+  // pass a BigInt, circular ref, or throwing toJSON, which would otherwise
+  // bubble up and break the IPC sentinel return.
+  const safeStringify = (value: unknown): string => {
+    try {
+      const s = JSON.stringify(value);
+      return typeof s === "string" && s.length > 1024 ? s.slice(0, 1024) + "...<truncated>" : s ?? "<unserializable>";
+    } catch {
+      return "<unserializable>";
+    }
+  };
+  const logRegisterReject = (reason: string, payload: unknown) => {
+    try {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "ipc-guard",
+        type: "warn",
+        input: safeStringify({
+          channel: "lvis:plugin:register-webview",
+          reason,
+          payload,
+        }),
+      });
+    } catch {
+      // Never let audit logging break the IPC sentinel return.
+    }
+  };
   ipcMain.handle("lvis:plugin:register-webview", (e, payload: { webContentsId: number; pluginId: string; entryUrl: string }) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:plugin:register-webview", e);
@@ -550,28 +581,34 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     const { webContentsId, pluginId, entryUrl } = payload ?? {};
     if (typeof webContentsId !== "number" || !Number.isFinite(webContentsId)) {
+      logRegisterReject("invalid-webcontents-id", payload);
       return { ok: false, error: "invalid-webcontents-id" };
     }
     if (typeof pluginId !== "string" || !pluginRuntime.getPluginManifest(pluginId)) {
+      logRegisterReject("unknown-plugin-id", { webContentsId, pluginId });
       return { ok: false, error: "unknown-plugin-id" };
     }
-    if (typeof entryUrl !== "string" || !entryUrl.startsWith("file://")) {
+    if (typeof entryUrl !== "string" || !entryUrl.startsWith("file://") || entryUrl.length <= "file://".length) {
+      logRegisterReject("invalid-entry-url", { webContentsId, pluginId, entryUrl });
       return { ok: false, error: "invalid-entry-url" };
     }
     const rawInstallRoot = pluginRuntime.getPluginRoot(pluginId);
     if (!rawInstallRoot) {
+      logRegisterReject("plugin-not-loaded", { webContentsId, pluginId });
       return { ok: false, error: "plugin-not-loaded" };
     }
     let entryFsPath: string;
     try {
       entryFsPath = fileURLToPath(entryUrl);
     } catch {
+      logRegisterReject("invalid-entry-url", { webContentsId, pluginId, entryUrl });
       return { ok: false, error: "invalid-entry-url" };
     }
     if (devLinkedEntryAllowed()) {
       try {
         realpathSync(entryFsPath);
       } catch {
+        logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, entryFsPath });
         return { ok: false, error: "entry-url-outside-install-root" };
       }
       const binding = { pluginId, entryUrl };
@@ -586,10 +623,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       realRoot = realpathSync(rawInstallRoot);
       realEntry = realpathSync(entryFsPath);
     } catch {
+      logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, entryFsPath, rawInstallRoot });
       return { ok: false, error: "entry-url-outside-install-root" };
     }
     const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
     if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
+      logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, realEntry, realRoot });
       return { ok: false, error: "entry-url-outside-install-root" };
     }
     const binding = { pluginId, entryUrl };
@@ -617,29 +656,40 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const senderId = e.sender?.id;
     if (typeof senderId !== "number") return UNAUTHORIZED_FRAME;
 
-    return new Promise<{ ok: true; entryUrl: string } | typeof UNAUTHORIZED_FRAME>((resolve) => {
+    // Frame is valid (the shell) but no binding yet — register-webview from
+    // the host renderer hasn't landed. Wait for it. Distinguish this
+    // registration-timeout from UNAUTHORIZED_FRAME so the shell can retry on
+    // the recoverable case without conflating it with a real frame violation.
+    return new Promise<{ ok: true; entryUrl: string } | { ok: false; error: "registration-timeout" }>((resolve) => {
+      // Capture the array reference at registration so the timeout cleanup
+      // operates on the same array even if `unregisterPluginWebview` deleted
+      // and a later call re-created the map entry under the same senderId.
       const resolvers = pendingEntryUrlResolvers.get(senderId) ?? [];
       pendingEntryUrlResolvers.set(senderId, resolvers);
       const resolver = (b: PluginWebviewBinding) => { clearTimeout(timer); resolve({ ok: true, entryUrl: b.entryUrl }); };
       resolvers.push(resolver);
       const timer = setTimeout(() => {
-        const arr = pendingEntryUrlResolvers.get(senderId);
-        if (arr) {
-          const idx = arr.indexOf(resolver);
-          if (idx !== -1) arr.splice(idx, 1);
-          if (arr.length === 0) pendingEntryUrlResolvers.delete(senderId);
+        const idx = resolvers.indexOf(resolver);
+        if (idx !== -1) resolvers.splice(idx, 1);
+        if (resolvers.length === 0 && pendingEntryUrlResolvers.get(senderId) === resolvers) {
+          pendingEntryUrlResolvers.delete(senderId);
         }
-        auditLogger.log({
-          timestamp: new Date().toISOString(),
-          sessionId: "ipc-guard",
-          type: "warn",
-          input: JSON.stringify({
-            channel: "lvis:plugin:get-entry-url",
-            reason: "entry-url-timeout",
-            frameUrl: e?.senderFrame?.url ?? "",
-          }),
-        });
-        resolve(UNAUTHORIZED_FRAME);
+        try {
+          auditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "ipc-guard",
+            type: "warn",
+            input: safeStringify({
+              channel: "lvis:plugin:get-entry-url",
+              reason: "registration-timeout",
+              frameUrl: e?.senderFrame?.url ?? "",
+              senderId,
+            }),
+          });
+        } catch {
+          // Audit logging must never break the IPC sentinel return.
+        }
+        resolve({ ok: false, error: "registration-timeout" });
       }, 500);
     });
   });
