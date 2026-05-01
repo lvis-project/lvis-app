@@ -355,7 +355,7 @@ export function App() {
   // notifyClick IPC (which restores+focuses the window) and dismiss the
   // toast. Other toast producers leave `notification` undefined so this
   // handler is a no-op for them.
-  const { persistent: statusPersistent, toasts: statusToasts, removeToast: statusRemoveToast } =
+  const { persistent: statusPersistent, visibleToast: statusVisibleToast, pendingCount: statusPendingCount, removeToast: statusRemoveToast } =
     useStatusBar({ api });
   const handleStatusToastClick = useCallback(
     (toast: { id: string; notification?: NotificationToastMeta }) => {
@@ -450,7 +450,7 @@ export function App() {
           />
         </main>
         </div>
-        <StatusBar persistent={statusPersistent} toasts={statusToasts} onToastClick={handleStatusToastClick} />
+        <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
       </div>
 
       {/* FloatingQuestionPanel — mounted at App level (not inside ChatView) so
