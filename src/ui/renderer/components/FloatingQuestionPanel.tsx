@@ -242,8 +242,8 @@ export function FloatingQuestionPanel({
 
     const trapTab = (e: KeyboardEvent) => {
       if (e.key !== "Tab") return;
-      // Yield to Radix Dialog (or any open dialog) when one is present.
-      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
+      // Yield to Radix Dialog or AlertDialog (both data-state="open") when one is present.
+      if (document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]')) return;
       const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
       if (focusable.length === 0) return;
       const first = focusable[0];
