@@ -27,6 +27,7 @@ import { registerAuditHandlers } from "./domains/audit.js";
 import { registerPermissionsHandlers } from "./domains/permissions.js";
 import { registerWindowHandlers } from "./domains/window.js";
 import { registerMiscHandlers } from "./domains/misc.js";
+import { registerAttachHandlers } from "./domains/attach.js";
 import type { IpcDeps } from "./types.js";
 import type { AppServices } from "../boot/types.js";
 import type { BrowserWindow } from "electron";
@@ -58,4 +59,5 @@ export function registerIpcHandlers(
   registerPermissionsHandlers(deps);
   registerWindowHandlers(deps);
   registerMiscHandlers(deps);
+  registerAttachHandlers(deps);
 }

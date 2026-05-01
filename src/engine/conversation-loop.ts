@@ -452,6 +452,12 @@ export class ConversationLoop {
     callbacks?: TurnCallbacks,
     abortSignal?: AbortSignal,
     options?: {
+      /**
+       * Multimodal user content parts — appended after the text input as
+       * additional content blocks (vision images, files). When omitted the
+       * user message is a plain string (current behavior).
+       */
+      attachments?: import("./llm/types.js").UserContentPart[];
       originSource?: string | null;
       /**
        * C3(a): hard cap on assistant rounds for this turn. When set,
@@ -512,9 +518,14 @@ export class ConversationLoop {
     // §4.5.2 step 4 — TURN_ORCHESTRATE
     this.tracer.step("TURN_ORCHESTRATE", { sessionId: this.sessionId });
 
-    const userContent = routeResult.route === "skill"
+    const baseText = routeResult.route === "skill"
       ? `[스킬: ${routeResult.skillId}] ${input}`
       : input;
+    const attachmentParts = options?.attachments ?? [];
+    const userContent: string | import("./llm/types.js").UserContentPart[] =
+      attachmentParts.length > 0
+        ? [{ type: "text" as const, text: baseText }, ...attachmentParts]
+        : baseText;
 
     this.history.append({ role: "user", content: userContent });
     // §4.5.2 step 5 — HISTORY_APPEND
