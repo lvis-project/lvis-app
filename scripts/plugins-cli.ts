@@ -62,13 +62,7 @@ function usage(): never {
 }
 
 async function loadRegistry(): Promise<PluginRegistry> {
-  try {
-    return await readPluginRegistry(registryPath);
-  } catch {
-    const initial: PluginRegistry = { version: 1, plugins: [] };
-    await writePluginRegistry(registryPath, initial);
-    return initial;
-  }
+  return readPluginRegistry(registryPath);
 }
 
 async function saveRegistry(registry: PluginRegistry): Promise<void> {
