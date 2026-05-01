@@ -1,10 +1,8 @@
 import { useCallback, useEffect } from "react";
-import { ChevronDown, KeyRound, Loader2, Paperclip, Pencil, Square, Star, User, X as XIcon, GitBranch } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
+import { KeyRound, Loader2, Pencil, Square, Star, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
 import { Textarea } from "../../components/ui/textarea.js";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
@@ -25,6 +23,8 @@ import { TurnActionBar } from "./components/TurnActionBar.js";
 import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
 import { useChatContext } from "./context/ChatContext.js";
+import { InputActionBar, AttachedDocChips } from "./components/InputActionBar.js";
+import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
@@ -51,9 +51,13 @@ export interface ChatViewProps {
   loadedSkills: SkillBadgeProps[];
   /** True when FloatingQuestionPanel (mounted in App) has pending questions — used to suppress routine overlay */
   hasAskQuestions: boolean;
+  /** Plugin list for InputActionBar plugin grid */
+  plugins: PluginEntry[];
+  /** Navigate to a plugin view */
+  onSelectPlugin: (viewKey: string) => void;
 }
 
-export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions }: ChatViewProps) {
+export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, plugins, onSelectPlugin }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const {
@@ -456,89 +460,34 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           (positioned absolutely at the top of this grid, z-40). Removed from
           inline stream to eliminate the buried-question UX pain point. */}
       <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
-      <div className="border-t bg-card p-3 space-y-2">
-        <div className="flex items-center gap-2 text-[11px]">
-            {/* Sprint B — Role preset dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-7 gap-1 text-[11px]" title="역할 프리셋 선택">
-                  <User className="h-3 w-3" /> {activePreset?.name ?? "기본"} <ChevronDown className="h-3 w-3 opacity-60" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {rolePresets.map((p) => (
-                  <DropdownMenuItem key={p.id} onClick={() => setActivePresetId(p.id)}>
-                    <span className={activePresetId === p.id ? "font-semibold" : ""}>{p.name}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {/* Sprint B — PageIndex attach */}
-            <Popover open={docPopoverOpen} onOpenChange={(o) => { setDocPopoverOpen(o); if (o) void refreshIndexedDocs(); }}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-7 gap-1 text-[11px]" title="문서 첨부">
-                  <Paperclip className="h-3 w-3" />
-                  {attachedDocs.length > 0 ? <span>{attachedDocs.length}</span> : null}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-72 p-2">
-                <div className="mb-1 flex items-center justify-between">
-                  <span className="text-xs font-medium">인덱싱된 문서</span>
-                  <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => void refreshIndexedDocs()}>새로고침</Button>
-                </div>
-                <div className="max-h-64 overflow-y-auto">
-                  {docsLoading ? (
-                    <div className="py-6 text-center text-xs text-muted-foreground">로딩 중...</div>
-                  ) : indexedDocs.length === 0 ? (
-                    <div className="py-6 text-center text-xs text-muted-foreground">문서가 없습니다. PageIndex 플러그인에서 먼저 인덱싱하세요.</div>
-                  ) : (
-                    <div className="space-y-1">
-                      {indexedDocs.map((d) => {
-                        const attached = attachedDocs.some((a) => a.id === d.id);
-                        return (
-                          <button
-                            key={d.id}
-                            className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-muted ${attached ? "bg-muted" : ""}`}
-                            onClick={() => setAttachedDocs((prev) => attached ? prev.filter((a) => a.id !== d.id) : [...prev, d])}
-                          >
-                            <input type="checkbox" checked={attached} readOnly className="h-3 w-3" />
-                            <span className="truncate">{d.name}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
-            {vendorSupportsThinking && (
-              <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5"
-                  checked={enableThinkingChat}
-                  onChange={(e) => void toggleThinking(e.target.checked)}
-                />
-                <span>Thinking</span>
-              </label>
-            )}
-        </div>
-        {/* Sprint B — attached-doc chips */}
-        {attachedDocs.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {attachedDocs.map((d) => (
-              <span key={d.id} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px]">
-                <span>🗎 {d.name}</span>
-                <button
-                  className="rounded-full p-0.5 hover:bg-background"
-                  onClick={() => setAttachedDocs((prev) => prev.filter((a) => a.id !== d.id))}
-                  title="첨부 해제"
-                ><XIcon className="h-3 w-3" /></button>
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="grid grid-cols-[1fr_auto] gap-2">
+      <div className="border-t bg-card pb-3 space-y-2">
+        <InputActionBar
+          usedTokens={usedTokens}
+          contextBudget={contextBudget}
+          plugins={plugins}
+          onSelectPlugin={onSelectPlugin}
+          onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
+          attachedDocs={attachedDocs}
+          onToggleAttachment={(d) => setAttachedDocs((prev) => prev.some((a) => a.id === d.id) ? prev.filter((a) => a.id !== d.id) : [...prev, d])}
+          onRemoveAttachment={(id) => setAttachedDocs((prev) => prev.filter((a) => a.id !== id))}
+          indexedDocs={indexedDocs}
+          docsLoading={docsLoading}
+          onRefreshDocs={refreshIndexedDocs}
+          docPopoverOpen={docPopoverOpen}
+          onDocPopoverOpenChange={setDocPopoverOpen}
+          rolePresets={rolePresets}
+          activePreset={activePreset}
+          activePresetId={activePresetId}
+          onSelectPreset={setActivePresetId}
+          vendorSupportsThinking={vendorSupportsThinking}
+          enableThinkingChat={enableThinkingChat}
+          onToggleThinking={toggleThinking}
+        />
+        <AttachedDocChips
+          attachedDocs={attachedDocs}
+          onRemove={(id) => setAttachedDocs((prev) => prev.filter((a) => a.id !== id))}
+        />
+        <div className="grid grid-cols-[1fr_auto] gap-2 px-3">
           <Textarea value={question} onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => {
                if (e.nativeEvent.isComposing) return;

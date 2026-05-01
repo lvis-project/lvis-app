@@ -32,21 +32,24 @@ describe("Sidebar", () => {
     expect(getByText("메모리")).toBeTruthy();
   });
 
-  it("renders plugin view label", () => {
-    const { getByText } = render(
+  it("does NOT render plugin view labels (plugins moved to InputActionBar grid)", () => {
+    const { queryByText } = render(
       <Sidebar activeView="home" pluginViews={[makeView("Meeting Recorder")]} setActiveView={vi.fn()} starredCount={0} />,
     );
-    expect(getByText("Meeting Recorder")).toBeTruthy();
+    // Plugin entries no longer appear in the sidebar — they are shown via
+    // the PluginGridButton in InputActionBar.
+    expect(queryByText("Meeting Recorder")).toBeNull();
   });
 
-  it("calls setActiveView when button is clicked", () => {
+  it("does not call setActiveView for plugin views (plugins only accessible via InputActionBar)", () => {
     const view = makeView();
     const setActiveView = vi.fn();
-    const { getByText } = render(
+    const { queryByText } = render(
       <Sidebar activeView="home" pluginViews={[view]} setActiveView={setActiveView} starredCount={0} />,
     );
-    fireEvent.click(getByText("Test Plugin"));
-    expect(setActiveView).toHaveBeenCalled();
+    // "Test Plugin" button should not exist in sidebar
+    expect(queryByText("Test Plugin")).toBeNull();
+    expect(setActiveView).not.toHaveBeenCalled();
   });
 
   it("shows the starred badge count", () => {

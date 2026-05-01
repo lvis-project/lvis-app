@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from "react";
 import { Button } from "../../components/ui/button.js";
-import { getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { InstallInFlight } from "./hooks/use-plugin-marketplace.js";
 import type { PluginUiExtension } from "./types.js";
 
@@ -29,15 +28,15 @@ interface ContextMenuState {
 export function Sidebar(props: SidebarProps) {
   const { activeView, pluginViews, setActiveView, starredCount, installInFlight } = props;
 
-  // Context menu for "Open in new window"
+  // Context menu for "Open in new window" — built-in detachable views only.
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, key: string) => {
-      // Only show "Open in new window" for detachable views or plugin views.
-      const isDetachable = DETACHABLE_KEYS.has(key) || key.startsWith("plugin:");
-      if (!isDetachable) return;
+      // Only show "Open in new window" for built-in detachable views.
+      // Plugin views are now accessed via the InputActionBar plugin grid.
+      if (!DETACHABLE_KEYS.has(key)) return;
       e.preventDefault();
       setContextMenu({ x: e.clientX, y: e.clientY, viewKey: key });
     },
@@ -62,6 +61,8 @@ export function Sidebar(props: SidebarProps) {
   const inFlightEntries = installInFlight
     ? Object.entries(installInFlight).filter(([slug]) => !pluginViews.some((v) => v.pluginId === slug))
     : [];
+
+  // Built-in views only — plugins are now accessed via the InputActionBar plugin grid.
   const navItems = [
     { key: "home", label: "홈" },
     { key: "tasks", label: "태스크" },
@@ -69,10 +70,6 @@ export function Sidebar(props: SidebarProps) {
     { key: "routines", label: "루틴" },
     { key: "starred", label: "즐겨찾기", badge: starredCount > 0 ? `(${starredCount})` : null },
     { key: "memory", label: "메모리" },
-    ...pluginViews.map((view) => ({
-      key: toViewKey(view),
-      label: getPluginViewLabel(view),
-    })),
   ];
 
   return (
