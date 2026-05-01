@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -40,7 +41,7 @@ afterEach(() => {
 
 function readLogLines(): AuditEntry[] {
   const files = existsSync(auditDir)
-    ? require("node:fs").readdirSync(auditDir).filter((f: string) => f.endsWith(".jsonl"))
+    ? readdirSync(auditDir).filter((f) => f.endsWith(".jsonl"))
     : [];
   const lines: AuditEntry[] = [];
   for (const f of files) {
@@ -102,7 +103,7 @@ describe("AuditLogger.log() — format invariants", () => {
     const logger = new AuditLogger();
     logger.log({ timestamp: "2026-04-20T00:00:00Z", sessionId: "a", type: "turn" });
     logger.log({ timestamp: "2026-04-20T00:01:00Z", sessionId: "b", type: "warn" });
-    const files = require("node:fs").readdirSync(auditDir).filter((f: string) => f.endsWith(".jsonl"));
+    const files = readdirSync(auditDir).filter((f) => f.endsWith(".jsonl"));
     const raw = readFileSync(join(auditDir, files[0]), "utf-8");
     const lines = raw.split("\n").filter(Boolean);
     // Each line must be individually parseable
