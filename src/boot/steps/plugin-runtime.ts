@@ -26,7 +26,7 @@ import {
   shouldWarnPackagedFlagsIgnored,
   tamperedVarsAtBoot,
 } from "../dev-flags.js";
-import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
 import {
   emitPluginConfigChange,
@@ -719,23 +719,22 @@ export async function initPluginRuntime(
         console.log(`[lvis] plugin:${pluginId} registered ${keywords.length} keywords`);
       },
       emitEvent: (type, data) => {
-        const requiredCap = requiredCapabilityForEmit(type);
-        if (requiredCap) {
-          const manifest = pluginRuntime?.getPluginManifest(pluginId);
-          if (!manifest?.capabilities?.includes(requiredCap)) {
-            try {
-              bootAuditLogger.log({
-                timestamp: new Date().toISOString(),
-                sessionId: "plugin",
-                type: "error",
-                input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} actual=${(manifest?.capabilities ?? []).join("|")}`,
-              });
-            } catch { /* audit must not break host */ }
-            console.warn(
-              `[lvis] plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${requiredCap}'`,
-            );
-            return;
-          }
+        const manifest = pluginRuntime?.getPluginManifest(pluginId);
+        const manifestCapabilities = manifest?.capabilities ?? [];
+        if (!canEmitEvent(type, manifestCapabilities)) {
+          const requiredCap = requiredCapabilityForEmit(type);
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} actual=${manifestCapabilities.join("|")}`,
+            });
+          } catch { /* audit must not break host */ }
+          console.warn(
+            `[lvis] plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${requiredCap}'`,
+          );
+          return;
         }
         pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
         emitEvent(type, { ...((data as Record<string, unknown>) ?? {}), pluginId });

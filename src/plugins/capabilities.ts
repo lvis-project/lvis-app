@@ -218,6 +218,25 @@ export function requiredCapabilityForEmit(eventType: string): string | undefined
 }
 
 /**
+ * Pure capability-gating predicate for event emission.
+ *
+ * Returns true when the plugin is allowed to emit `eventType`; false when the
+ * event namespace requires a capability the plugin does not declare.
+ *
+ * Extracted as a standalone function so both the production `createHostApi`
+ * and unit tests can import and verify the same logic rather than each
+ * implementing their own guard.
+ */
+export function canEmitEvent(
+  eventType: string,
+  capabilities: readonly string[],
+): boolean {
+  const requiredCap = requiredCapabilityForEmit(eventType);
+  if (!requiredCap) return true;
+  return capabilities.includes(requiredCap);
+}
+
+/**
  * Classify a subscription target:
  * - "private": reject (matches PLUGIN_PRIVATE_NAMESPACES).
  * - "public":  allow silently (matches PUBLIC_EVENT_NAMESPACES).

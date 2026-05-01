@@ -10,14 +10,21 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { emitEvent, onEvent } from "../boot/types.js";
-import { requiredCapabilityForEmit, classifySubscription } from "../plugins/capabilities.js";
+import {
+  requiredCapabilityForEmit,
+  classifySubscription,
+  canEmitEvent,
+} from "../plugins/capabilities.js";
 
-/** Minimal capability-gated emitEvent stub (mirrors boot.ts §createHostApi) */
-function makeStubEmitEvent(pluginId: string, capabilities: string[]) {
+/**
+ * Build a capability-gated emitter using the production `canEmitEvent`
+ * predicate from capabilities.ts. This exercises the same gating logic as
+ * createHostApi without duplicating the implementation.
+ */
+function makeGatedEmitFn(pluginId: string, capabilities: string[]) {
   return (type: string, data?: Record<string, unknown>) => {
-    const requiredCap = requiredCapabilityForEmit(type);
-    if (requiredCap && !capabilities.includes(requiredCap)) {
-      return; // dropped — capability missing
+    if (!canEmitEvent(type, capabilities)) {
+      return; // dropped — capability missing (same as createHostApi)
     }
     emitEvent(type, { pluginId, ...(data ?? {}) });
   };
@@ -50,7 +57,7 @@ describe("meeting.transcript.updated — event bus delivery (3 chunks)", () => {
   });
 
   it("delivers 3 chunk events with increasing chunkIndex", () => {
-    const emit = makeStubEmitEvent("meeting", ["meeting-recorder"]);
+    const emit = makeGatedEmitFn("meeting", ["meeting-recorder"]);
 
     for (let i = 0; i < 3; i++) {
       emit("meeting.transcript.updated", {
@@ -71,7 +78,7 @@ describe("meeting.transcript.updated — event bus delivery (3 chunks)", () => {
   });
 
   it("delivers isFinal: true event on stop", () => {
-    const emit = makeStubEmitEvent("meeting", ["meeting-recorder"]);
+    const emit = makeGatedEmitFn("meeting", ["meeting-recorder"]);
 
     emit("meeting.transcript.updated", {
       meetingId: "sess-final",
@@ -86,7 +93,7 @@ describe("meeting.transcript.updated — event bus delivery (3 chunks)", () => {
   });
 
   it("drops meeting.transcript.updated if plugin lacks meeting-recorder capability", () => {
-    const emit = makeStubEmitEvent("rogue-plugin", []); // no capabilities
+    const emit = makeGatedEmitFn("rogue-plugin", []); // no capabilities
 
     emit("meeting.transcript.updated", {
       meetingId: "sess-rogue",
@@ -116,7 +123,7 @@ describe("meeting.transcript.updated — webContents.send forwarding simulation"
       }
     });
 
-    const emit = makeStubEmitEvent("meeting", ["meeting-recorder"]);
+    const emit = makeGatedEmitFn("meeting", ["meeting-recorder"]);
     emit("meeting.transcript.updated", { meetingId: "sess-ipc", newSegmentIndex: 0, newSegment: { original: "Hello" }, isFinal: false });
     emit("meeting.transcript.updated", { meetingId: "sess-ipc", newSegmentIndex: 1, newSegment: { original: "World" }, isFinal: false });
     emit("meeting.transcript.updated", { meetingId: "sess-ipc", newSegmentIndex: 2, newSegment: { original: "Final" }, isFinal: true });
