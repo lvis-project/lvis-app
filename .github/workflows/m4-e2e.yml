@@ -63,14 +63,17 @@ jobs:
           uv run python scripts/seed_e2e_keys.py \
             --publisher-key "$PUBLISHER_KEY"
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - name: Setup Node (required by postinstall + build scripts)
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Install app deps
         working-directory: lvis-app
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Run M4 E2E test
         working-directory: lvis-app
@@ -78,7 +81,7 @@ jobs:
           M4_E2E: "1"
           MARKETPLACE_URL: http://127.0.0.1:8000
           MARKETPLACE_PUBLISHER_KEY: ${{ env.PUBLISHER_KEY }}
-        run: npx vitest run test/e2e/marketplace-e2e.test.ts
+        run: bunx vitest run test/e2e/marketplace-e2e.test.ts
 
       - name: Stop marketplace
         if: always()
