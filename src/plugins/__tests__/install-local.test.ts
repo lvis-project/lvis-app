@@ -162,6 +162,7 @@ describe("PluginMarketplaceService.installLocal", () => {
     const entry = reg.plugins.find((p: { id: string }) => p.id === "test-plugin");
     expect(entry).toBeDefined();
     expect(entry.installedBy).toBe("user");
+    expect(entry.installSource).toBe("local-dev");
     // The flag must be removed — otherwise dev-link's cleanup pass would
     // strip this user-installed entry on the next boot.
     expect(entry._devLinked).toBeUndefined();
