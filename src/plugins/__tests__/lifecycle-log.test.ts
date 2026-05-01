@@ -44,7 +44,7 @@ describe("PluginPhase constants", () => {
     }
   });
 
-  it("restart area has all four independent failure-mode sub-phases", () => {
+  it("restart area has six independent failure-mode sub-phases (stop/reload/start × ok/fail)", () => {
     const values = Object.values(PluginPhase) as string[];
     const restartPhases = values.filter((v) => v.startsWith("lifecycle:restart:"));
     const requiredSuffixes = ["stop:ok", "stop:fail", "reload:ok", "reload:fail", "start:ok", "start:fail"];
@@ -63,13 +63,18 @@ describe("plog()", () => {
   });
 
   it("passes pluginId, phase, and message through to the logger", () => {
-    // In test mode, createLogger maps debug/info both to console.log
+    // In test mode, createLogger delegates to console — log[level](ctx, msg) →
+    // console.log(prefix + msg, ctx). Assert the context object (2nd arg) carries
+    // pluginId and phase, not just that the message appears somewhere.
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     plog("debug", { pluginId: "test-plugin", phase: PluginPhase.LOAD_START }, "loading plugin");
     expect(consoleSpy).toHaveBeenCalled();
     const callArgs = consoleSpy.mock.calls[0];
-    const argsFlat = callArgs.join(" ");
-    expect(argsFlat).toContain("loading plugin");
+    // callArgs[0] = "[plugin-lifecycle] loading plugin" (prefix + msg)
+    // callArgs[1] = ctx object { pluginId, phase, ... }
+    expect(callArgs[0]).toContain("loading plugin");
+    const ctx = callArgs[1] as Record<string, unknown>;
+    expect(ctx).toMatchObject({ pluginId: "test-plugin", phase: PluginPhase.LOAD_START });
   });
 
   it("routes error level through console.error", () => {

@@ -1,13 +1,14 @@
 /**
  * Plugin Lifecycle Log — structured debug logging for the plugin subsystem.
  *
- * Every plugin-related log line MUST go through `plog()` so all entries share
- * the same shape: `{ pluginId, phase, ...ctx }`. This lets a single
+ * Prefer `plog()` for all new plugin lifecycle logs so entries share a
+ * consistent shape: `{ pluginId, phase, ...ctx }`. This lets a single
  *
  *   grep '"phase":"lifecycle:restart' ~/.lvis/logs/main.jsonl
  *
- * reveal the full restart trace across the plugin subsystem, no matter which
- * file the log originated from.
+ * reveal the full restart trace across the plugin subsystem. Legacy direct
+ * `log.info/warn/error` calls in the plugin area will be migrated to `plog()`
+ * incrementally; new code MUST use `plog()` from the outset.
  *
  * Why this exists:
  *   The plugin area absorbed 50+ patches in 24h with repeated regressions
