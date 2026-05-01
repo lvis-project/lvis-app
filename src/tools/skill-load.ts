@@ -28,6 +28,8 @@ import { SKILL_NAME_ALLOWLIST } from "../main/skill-store.js";
 import type { SkillOverlay } from "../main/skill-overlay.js";
 import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 export interface SkillLoadEvent {
   name: string;
@@ -148,8 +150,8 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
           // R2-CR-3: persist approval BOUND TO the current body's sha256.
           // A subsequent body swap will invalidate this record.
           await deps.approvals.approve(skill.name, skill.body).catch((err) => {
-            console.warn(
-              "[lvis] skill_load: approval persistence failed (non-fatal):",
+            log.warn(
+              "skill_load: approval persistence failed (non-fatal): %s",
               (err as Error).message,
             );
           });

@@ -15,6 +15,8 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import type { TelemetrySettings } from "../data/settings-store.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("crash-reporter");
 
 export interface CrashReporterDeps {
   /**
@@ -52,7 +54,7 @@ export function startCrashReporter(deps: CrashReporterDeps): CrashReporterHandle
   try {
     mkdirSync(dumpDir, { recursive: true });
   } catch (err) {
-    console.warn("[crash-reporter] mkdir dumpDir failed:", (err as Error).message);
+    log.warn("mkdir dumpDir failed: %s", (err as Error).message);
   }
 
   // Override Electron's crashDumps location BEFORE crashReporter.start() so
@@ -62,7 +64,7 @@ export function startCrashReporter(deps: CrashReporterDeps): CrashReporterHandle
     try {
       setPath(dumpDir);
     } catch (err) {
-      console.warn("[crash-reporter] setPath(crashDumps) failed:", (err as Error).message);
+      log.warn("setPath(crashDumps) failed: %s", (err as Error).message);
     }
   }
 
@@ -83,7 +85,7 @@ export function startCrashReporter(deps: CrashReporterDeps): CrashReporterHandle
       });
       started = true;
     } catch (err) {
-      console.warn("[crash-reporter] start failed:", (err as Error).message);
+      log.warn("start failed: %s", (err as Error).message);
     }
   }
 
@@ -96,7 +98,7 @@ export function startCrashReporter(deps: CrashReporterDeps): CrashReporterHandle
         sentry.init({ dsn });
         sentryActive = true;
       } catch (err) {
-        console.warn("[crash-reporter] sentry init failed:", (err as Error).message);
+        log.warn("sentry init failed: %s", (err as Error).message);
       }
     }
   }

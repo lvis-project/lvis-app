@@ -10,6 +10,8 @@ import type { PluginAccessSpec } from "../types.js";
 import type { ManifestLoadPlan, ManifestSnapshot } from "./types.js";
 import { parsePluginJson } from "./manifest-validation.js";
 import { readPluginRegistry } from "../registry.js";
+import { createLogger } from "../../lib/logger.js";
+const log = createLogger("plugin-runtime");
 
 /**
  * Trust-root containment check for registry-recorded manifest paths.
@@ -68,8 +70,8 @@ export async function resolveManifestLoadPlan(opts: {
         ? entry.manifestPath
         : resolve(dirname(opts.registryPath!), entry.manifestPath);
       if (!opts.pluginsRoot || !isTrustedRegistryManifestPath(manifestPath, opts.pluginsRoot)) {
-        console.warn(
-          `[plugin-runtime] ignoring untrusted registry manifest path for ${entry.id}: ${manifestPath}`,
+        log.warn(
+          `ignoring untrusted registry manifest path for ${entry.id}: ${manifestPath}`,
         );
         return [];
       }
@@ -107,8 +109,8 @@ export async function readEnabledManifestSnapshots(
         approvedPluginAccess: plan.approvedPluginAccess,
       });
     } catch (err) {
-      console.warn(
-        `[plugin-runtime] failed to read manifest at ${plan.manifestPath} (plugin: ${plan.pluginIdHint ?? "<unknown>"}) — skipping:`,
+      log.warn(
+        `failed to read manifest at ${plan.manifestPath} (plugin: ${plan.pluginIdHint ?? "<unknown>"}) — skipping: %s`,
         (err as Error).message,
       );
       continue;

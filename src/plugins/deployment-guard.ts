@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { readPluginRegistry } from "./registry.js";
 import type { InstallPolicy } from "./types.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("deployment-guard");
 
 /**
  * Plugin install policy guard — §9.6 / plugin-deployment-model.md §7.2-§7.3
@@ -143,8 +145,8 @@ export class PluginDeploymentGuard {
     } catch (err) {
       // Corrupted / missing manifest. Path check alone may have already
       // decided, so we don't throw — but surface for forensics.
-      console.warn(
-        `[deployment-guard] readManifestSafe failed for ${path}:`,
+      log.warn(
+        `readManifestSafe failed for ${path}: %s`,
         (err as Error).message,
       );
       return null;

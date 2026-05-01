@@ -19,6 +19,8 @@ import { devLinkedEntryAllowed, isDevModeUnlocked } from "../../boot/dev-flags.j
 import { NOTIFICATION_KINDS } from "../../main/notification-service.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { createLogger } from "../../lib/logger.js";
+const log = createLogger("lvis");
 
 function pluginConfigError(
   error: string,
@@ -239,7 +241,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       }
       return { configured: true, online: res.ok } as const;
     } catch (err) {
-      console.warn("[lvis] marketplace ping failed", (err as Error).message);
+      log.warn("marketplace ping failed: %s", (err as Error).message);
       return { configured: true, online: false } as const;
     }
   });
@@ -743,8 +745,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         win.show();
         win.focus();
       } catch (err) {
-        console.warn(
-          "[lvis] notification:clicked focus failed:",
+        log.warn(
+          "notification:clicked focus failed: %s",
           (err as Error).message,
         );
       }
