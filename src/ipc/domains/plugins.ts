@@ -11,7 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findMethodByCapability } from "../../boot/plugins.js";
 import { emitEvent as emitHostEvent } from "../../boot/types.js";
-import { requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { HOST_ONLY_EMIT_NAMESPACES, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { stripSecretFields } from "../../plugins/config-schema.js";
 import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "../../plugins/config-change-bus.js";
 import { runManagedBootstrap } from "../../boot/managed-marketplace.js";
@@ -93,6 +93,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     });
     win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
     await pluginRuntime.addPlugin(pluginId);
+    emitHostEvent("plugin.installed", { pluginId, source: "marketplace" });
     refreshPluginNotifications?.();
     win?.webContents.send("lvis:plugins:install-result", { slug: pluginId, success: true });
     return result;
@@ -113,6 +114,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       throw err;
     }
     await pluginRuntime.removePlugin(pluginId);
+    emitHostEvent("plugin.uninstalled", { pluginId });
     refreshPluginNotifications?.();
     broadcastUninstallResult({ slug: pluginId, success: true });
     return result;
@@ -131,6 +133,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (canceled || !filePaths[0]) return null;
     const result = await pluginMarketplace.installLocal(filePaths[0]);
     await pluginRuntime.addPlugin(result.pluginId);
+    emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "local-dev" });
     refreshPluginNotifications?.();
     return result;
   });
@@ -671,6 +674,15 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const manifest = pluginRuntime.getPluginManifest(binding.pluginId);
     if (!manifest) {
       return { ok: false, error: "unknown-plugin-id" };
+    }
+    // Host-only namespaces (plugin.*, etc.) are reserved for host-side emit
+    // via boot/types.ts:emitEvent — plugin webview/renderer MUST NOT spoof
+    // them. Mirrors the canEmitEvent gate at boot/steps/plugin-runtime.ts
+    // (which covers the SDK hostApi.emitEvent path); this branch covers the
+    // IPC bridge path that webviews use directly.
+    const namespacePrefix = type.split(".")[0] ?? "";
+    if (HOST_ONLY_EMIT_NAMESPACES.has(namespacePrefix)) {
+      return { ok: false, error: `host-only-namespace:${namespacePrefix}` };
     }
     const requiredCap = requiredCapabilityForEmit(type);
     if (requiredCap && !manifest.capabilities?.includes(requiredCap)) {

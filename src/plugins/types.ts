@@ -449,6 +449,34 @@ export interface PluginStorage {
 }
 
 /**
+ * Discriminated event delivered to `PluginHostApi.onPluginsChanged` handlers.
+ * `source: "local-dev"` indicates the install came from the dev-mode
+ * "Settings → 로컬 폴더에서 설치" path (LVIS_DEV=1 only); production
+ * consumers should ignore it.
+ *
+ * The `_future` sentinel variant is NEVER produced at runtime — it exists
+ * purely to force exhaustive `switch (event.type)` consumers to add a
+ * `default:` branch, so the host can add a new variant (e.g. `"updated"`
+ * for version bumps) without silently breaking subscribers. Plugins that
+ * narrow with `if (event.type === "installed") ... else if (...)` pick up
+ * the same forward-compat for free.
+ */
+export type PluginLifecycleEvent =
+  | { type: "installed"; pluginId: string; source: "marketplace" | "local-dev" }
+  | { type: "uninstalled"; pluginId: string }
+  | { type: "_future"; readonly __exhaustive: never };
+
+/**
+ * Payload shape for the `plugin.installed` / `plugin.uninstalled` host
+ * event-bus emissions (consumed internally by `onPluginsChanged` and by
+ * any host-side telemetry subscriber). Mirror of `PluginLifecycleEvent`
+ * minus the `type` field — the event type lives in the event name.
+ */
+export type PluginLifecycleEventPayload =
+  | { pluginId: string; source: "marketplace" | "local-dev" }
+  | { pluginId: string };
+
+/**
  * Host API — 플러그인이 호스트 서비스에 접근하는 인터페이스.
  * 플러그인 제거 시 해당 플러그인이 등록한 모든 것이 자동 정리된다.
  */
@@ -492,6 +520,33 @@ export interface PluginHostApi {
    * (and PluginRuntime.onDisable) can clean up handlers deterministically.
    */
   onEvent(eventType: string, handler: (data: unknown) => void): () => void;
+  /**
+   * Snapshot of plugin IDs currently loaded into the runtime, in load order.
+   * The calling plugin's own id is excluded. Order is insertion-stable but
+   * MUST NOT be treated as priority — use `.includes(id)` for membership
+   * checks. Pair with `onPluginsChanged` to react to plugin lifecycle (e.g.
+   * proactive detectors that depend on a specific plugin being installed).
+   */
+  getInstalledPluginIds(): string[];
+  /**
+   * Subscribe to plugin install / uninstall events. Returns an `unsubscribe()`
+   * disposer (also cleared automatically on plugin disable).
+   *
+   * Fires AFTER the host has finished mounting (install) or unmounting
+   * (uninstall) the plugin — `getInstalledPluginIds()` already reflects the
+   * new state when the handler runs. Self-events (this plugin being the
+   * subject) are filtered out.
+   *
+   * P0 only delivers `installed` / `uninstalled`. Future versions may add
+   * `updated` (version bump) — handlers should branch with a `default:` to
+   * stay forward-compatible.
+   *
+   * `source` distinguishes marketplace install from local-dev install
+   * (LVIS_DEV=1 + Settings → 로컬 폴더에서 설치). Production consumers
+   * SHOULD ignore `source: "local-dev"` events to avoid letting a local
+   * test plugin trigger downstream cascades against marketplace expectations.
+   */
+  onPluginsChanged(handler: (event: PluginLifecycleEvent) => void): () => void;
   addTask(task: {
     title: string;
     description?: string;
