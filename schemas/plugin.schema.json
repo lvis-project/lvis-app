@@ -131,6 +131,11 @@
         ]
       }
     },
+    "emittedEvents": {
+      "type": "array",
+      "description": "Event types this plugin emits.",
+      "items": { "type": "string", "minLength": 1 }
+    },
     "startupTimeoutMs": {
       "type": "integer",
       "minimum": 1,
