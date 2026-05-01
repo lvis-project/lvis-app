@@ -24,6 +24,8 @@
  */
 import type { BrowserWindow } from "electron";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 export type NotificationKind = "turn-end" | "routine" | "ask-user" | "approval";
 
@@ -282,8 +284,8 @@ export class NotificationService {
       } catch (err) {
         // Send race (webContents destroyed mid-fire) — fall back to OS path
         // so the user still sees the cue. Audit reflects the final gate used.
-        console.warn(
-          "[lvis] notification toast send failed, falling back to OS:",
+        log.warn(
+          "notification toast send failed, falling back to OS: %s",
           (err as Error).message,
         );
         this.fireOsNotification(opts, cleanTitle, truncatedBody, urgent);
@@ -319,8 +321,8 @@ export class NotificationService {
             contextRef: opts.contextRef,
           });
         } catch (err) {
-          console.warn(
-            "[lvis] notification click handler failed:",
+          log.warn(
+            "notification click handler failed: %s",
             (err as Error).message,
           );
         }
@@ -330,8 +332,8 @@ export class NotificationService {
       // OS notification can fail on Linux without libnotify, on Windows
       // without AppUserModelId, etc. Never let a failed notification block
       // the lifecycle event that fired it.
-      console.warn(
-        "[lvis] OS notification fire failed:",
+      log.warn(
+        "OS notification fire failed: %s",
         (err as Error).message,
       );
     }

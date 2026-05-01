@@ -16,6 +16,8 @@ import type { AuditLogger } from "../audit/audit-logger.js";
 import { classifySubscription } from "../plugins/capabilities.js";
 import { pluginToolsForRegistration } from "../plugins/plugin-tool-adapter.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 export interface EventCollector {
   collectEvent(type: string, data?: unknown): void;
@@ -77,8 +79,8 @@ export function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
   for (const { pluginId, manifest } of pluginRuntime.listPluginManifests()) {
     for (const tool of manifest.startupTools ?? []) {
       if (!loadedTools.has(tool)) {
-        console.warn(
-          `[lvis] boot: startup tool not loaded (plugin=${pluginId}, tool=${tool})`,
+        log.warn(
+          `boot: startup tool not loaded (plugin=${pluginId}, tool=${tool})`,
         );
         continue;
       }
@@ -86,8 +88,8 @@ export function runManifestStartupTools(pluginRuntime: PluginRuntime): void {
       // startupTools. The loaded plugin list is unaffected.
       pluginRuntime.call(tool, {}).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
-        console.warn(
-          `[lvis] boot: startup-tool-failed (non-fatal, plugin=${pluginId}, tool=${tool}):`,
+        log.warn(
+          `boot: startup-tool-failed (non-fatal, plugin=${pluginId}, tool=${tool}): %s`,
           msg,
         );
       });
@@ -118,14 +120,14 @@ export function registerManifestEventSubscriptions(
             input: `[plugin:${pluginId}] plugin_subscription_private_denied eventType=${eventType}`,
           });
         } catch { /* audit must not break host */ }
-        console.warn(
-          `[lvis] plugin:${pluginId} eventSubscriptions['${eventType}'] dropped — private namespace`,
+        log.warn(
+          `plugin:${pluginId} eventSubscriptions['${eventType}'] dropped — private namespace`,
         );
         continue;
       }
       if (verdict === "neutral") {
-        console.warn(
-          `[lvis] plugin:${pluginId} eventSubscriptions['${eventType}'] — outside public allowlist (allowed with warn)`,
+        log.warn(
+          `plugin:${pluginId} eventSubscriptions['${eventType}'] — outside public allowlist (allowed with warn)`,
         );
       }
       eventTypes.add(eventType);
@@ -173,8 +175,8 @@ export function registerPluginEventBridge(
       if (registeredEvents.has(eventType)) continue;
       const verdict = classifySubscription(eventType);
       if (verdict === "private") {
-        console.warn(
-          `[lvis] boot: emittedEvents["${eventType}"] is private-namespace — bridge skipped`,
+        log.warn(
+          `boot: emittedEvents["${eventType}"] is private-namespace — bridge skipped`,
         );
         continue;
       }
@@ -184,8 +186,8 @@ export function registerPluginEventBridge(
         try {
           mainWindow.webContents.send("lvis:plugin:event", eventType, data);
         } catch (e) {
-          console.warn(
-            `[lvis] boot: plugin-event-bridge send failed (${eventType}):`,
+          log.warn(
+            `boot: plugin-event-bridge send failed (${eventType}): %s`,
             (e as Error).message,
           );
         }
@@ -218,24 +220,24 @@ export function registerPluginNotifications(
       : [];
     for (const spec of notificationEvents) {
       if (!spec || typeof spec !== "object") {
-        console.warn("[lvis] boot: invalid notificationEvents spec (expected object), skipped:", spec);
+        log.warn("boot: invalid notificationEvents spec (expected object), skipped: %s", spec);
         continue;
       }
       const event = typeof spec.event === "string" ? spec.event.trim() : "";
       if (!event) {
-        console.warn("[lvis] boot: notificationEvents spec with missing/empty 'event' skipped:", spec);
+        log.warn("boot: notificationEvents spec with missing/empty 'event' skipped: %s", spec);
         continue;
       }
       if (spec.titleField !== undefined && typeof spec.titleField !== "string") {
-        console.warn(`[lvis] boot: notificationEvents[${event}].titleField must be string, skipped`);
+        log.warn(`boot: notificationEvents[${event}].titleField must be string, skipped`);
         continue;
       }
       if (spec.bodyField !== undefined && typeof spec.bodyField !== "string") {
-        console.warn(`[lvis] boot: notificationEvents[${event}].bodyField must be string, skipped`);
+        log.warn(`boot: notificationEvents[${event}].bodyField must be string, skipped`);
         continue;
       }
       if (registeredEvents.has(event)) {
-        console.warn(`[lvis] boot: duplicate notificationEvents entry for "${event}" — keeping first, skipping rest`);
+        log.warn(`boot: duplicate notificationEvents entry for "${event}" — keeping first, skipping rest`);
         continue;
       }
       registeredEvents.add(event);

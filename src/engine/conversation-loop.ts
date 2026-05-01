@@ -34,6 +34,8 @@ import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ToolCallMeta } from "../tools/executor.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
+import { createLogger } from "../lib/logger.js";
+const log = createLogger("lvis");
 
 // ─── Types ──────────────────────────────────────────
 
@@ -270,7 +272,7 @@ export class ConversationLoop {
   newConversation(): void {
     if (this.history.length > 0) {
       this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages()).catch((err: unknown) => {
-        console.warn("[lvis] newConversation saveSession failed:", (err as Error).message);
+        log.warn("newConversation saveSession failed: %s", (err as Error).message);
       });
     }
     // C2(c): drop the previous session's loaded skills so a fresh chat
@@ -331,7 +333,7 @@ export class ConversationLoop {
     // 현재 세션 저장 후 전환
     if (this.history.length > 0) {
       this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages()).catch((err: unknown) => {
-        console.warn("[lvis] loadSession saveSession failed:", (err as Error).message);
+        log.warn("loadSession saveSession failed: %s", (err as Error).message);
       });
     }
 
@@ -418,7 +420,7 @@ export class ConversationLoop {
       void Promise.resolve(
         this.deps.memoryManager?.saveSession(this.sessionId, this.history.getMessages()),
       ).catch((err: unknown) => {
-        console.warn("[lvis] manualCompact saveSession failed:", (err as Error).message);
+        log.warn("manualCompact saveSession failed: %s", (err as Error).message);
       });
       return {
         compacted: true,
@@ -601,7 +603,7 @@ export class ConversationLoop {
         if (cr.compacted) {
           this.history.clear();
           this.history.restore(compacted);
-          if (process.env.NODE_ENV !== "production") console.log(`[lvis] auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+          if (process.env.NODE_ENV !== "production") log.info(`auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
           callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
         }
       }
@@ -775,8 +777,8 @@ export class ConversationLoop {
       let pendingToolCallsCapped = pendingToolCalls;
       const wasCapped = pendingToolCalls.length > MAX_TOOL_CALLS_PER_ROUND;
       if (wasCapped) {
-        console.warn(
-          `[lvis] conversation-loop: round ${roundIndex} emitted ${pendingToolCalls.length} tool_use blocks, capping to ${MAX_TOOL_CALLS_PER_ROUND}`,
+        log.warn(
+          `conversation-loop: round ${roundIndex} emitted ${pendingToolCalls.length} tool_use blocks, capping to ${MAX_TOOL_CALLS_PER_ROUND}`,
         );
         pendingToolCallsCapped = pendingToolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND);
       }
@@ -949,7 +951,7 @@ export class ConversationLoop {
           inputSchema: s.input_schema as ToolSchema["inputSchema"],
         });
       } catch (err) {
-        console.warn(`[lvis] rebuildToolSchemas: tool '${s.name}' schema 변환 실패, 건너뜀:`, err);
+        log.warn(`rebuildToolSchemas: tool '${s.name}' schema 변환 실패, 건너뜀: %s`, err);
       }
     }
     return result;
@@ -966,12 +968,12 @@ export class ConversationLoop {
       this.history.clear();
       this.history.restore(compactedMsgs);
       if (process.env.NODE_ENV !== "production") {
-        console.log(`[lvis] reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
+        log.info(`reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
       }
       callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
       return true;
     } catch (compactErr) {
-      console.warn("[lvis] reactive-compact: compactMessages threw, skipping retry:", compactErr);
+      log.warn("reactive-compact: compactMessages threw, skipping retry: %s", compactErr);
       return false;
     }
   }
@@ -1064,7 +1066,7 @@ export class ConversationLoop {
           this.history.clear();
           this.history.restore(compacted);
           void this.deps.memoryManager?.saveSession(this.sessionId, this.history.getMessages())
-            .catch((e: Error) => console.warn("[lvis] /compact saveSession:", e.message));
+            .catch((e: Error) => log.warn("/compact saveSession: %s", e.message));
           result = `컴팩트 완료: ${cr.removedMessages}개 메시지 제거, ~${cr.freedTokens} 토큰 확보`;
         } else {
           result = "컴팩트 불필요: 메시지 수가 충분히 적습니다.";
