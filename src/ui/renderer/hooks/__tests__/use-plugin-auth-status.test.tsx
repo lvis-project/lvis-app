@@ -86,29 +86,35 @@ describe("usePluginAuthStatuses", () => {
   });
 
   it("survives non-Error throws (null / string) without crashing the catch handler", async () => {
-    let callCount = 0;
+    const callPluginMethod = vi
+      .fn()
+      .mockRejectedValueOnce(null)              // initial mount poll
+      .mockRejectedValueOnce("raw string");     // manual refresh
     const api = {
-      callPluginMethod: vi.fn(async () => {
-        callCount += 1;
-        // Two pathological throws that would crash `(err as Error).message`.
-        if (callCount === 1) throw null;
-        throw "raw string";
-      }),
+      callPluginMethod,
       onPluginEvent: vi.fn(() => () => undefined),
     } as unknown as LvisApi;
     const { result } = renderHook(() =>
       usePluginAuthStatuses(api, [makePlugin("ms-graph", true)]),
     );
-    await waitFor(() => {
-      expect(result.current.statuses.get("ms-graph")?.kind).toBe("error");
-    });
-    const first = result.current.statuses.get("ms-graph");
-    if (first?.kind === "error") expect(first.message).toContain("auth status");
 
+    // Wait for the initial mount poll to consume the `null` reject AND
+    // surface a fallback message — proves the catch handler did not crash.
+    await waitFor(() => {
+      expect(callPluginMethod).toHaveBeenCalledTimes(1);
+      const s = result.current.statuses.get("ms-graph");
+      expect(s?.kind).toBe("error");
+      expect(s?.kind === "error" && s.message).toBe("auth status invocation failed");
+    });
+
+    // Now trigger the second reject (raw string). This path proves the
+    // string narrow returns the string verbatim.
     act(() => result.current.refresh("ms-graph"));
     await waitFor(() => {
+      expect(callPluginMethod).toHaveBeenCalledTimes(2);
       const s = result.current.statuses.get("ms-graph");
-      if (s?.kind === "error") expect(s.message).toBe("raw string");
+      expect(s?.kind).toBe("error");
+      expect(s?.kind === "error" && s.message).toBe("raw string");
     });
   });
 
