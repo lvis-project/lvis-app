@@ -18,6 +18,7 @@ import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
+import { emitEvent as emitHostEvent } from "./boot/types.js";
 import { deliverRoutineResult } from "./routines/routine-delivery.js";
 import { WindowManager } from "./main/window-manager.js";
 
@@ -214,6 +215,7 @@ async function handleLvisUri(url: string) {
         // US-A3 — single-plugin lifecycle: only the deep-link-installed
         // plugin starts up. Other plugins keep their in-memory state.
         await services!.pluginRuntime.addPlugin(params.slug);
+        emitHostEvent("plugin.installed", { pluginId: params.slug, source: "marketplace" });
         services!.refreshPluginNotifications?.();
       } catch (err) {
         console.error("[lvis] post-install steps failed for lvis:// install", err);

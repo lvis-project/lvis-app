@@ -172,6 +172,24 @@ export const EVENT_NAMESPACE_CAPABILITY: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * Event namespaces reserved for HOST emission — plugins MUST NOT emit these
+ * via `hostApi.emitEvent()` regardless of declared capabilities. The host's
+ * boot event bus (`emitEvent` in `boot/types.ts`) bypasses this gate, so
+ * legitimate host-side emit (e.g. `plugin.installed` from `ipc/domains/plugins.ts`)
+ * still works.
+ *
+ * Why this is separate from `EVENT_NAMESPACE_CAPABILITY`: capability-based
+ * gating lets a plugin emit *its own* events (mail-source plugin emits
+ * `email.new`). Host-only namespaces have no legitimate plugin-side emitter
+ * — letting any plugin spoof `plugin.installed` (or in future `host.*`)
+ * would let one plugin trick subscribers (work-proactive, telemetry) into
+ * reacting to fake lifecycle.
+ */
+export const HOST_ONLY_EMIT_NAMESPACES: ReadonlySet<string> = new Set([
+  "plugin",
+]);
+
+/**
  * Event namespaces a plugin is ALLOWED to subscribe to (via
  * manifest.eventSubscriptions). Anything outside this list is not explicitly
  * published for plugin consumption; subscriptions are allowed with a warn
@@ -231,6 +249,8 @@ export function canEmitEvent(
   eventType: string,
   capabilities: readonly string[],
 ): boolean {
+  const prefix = eventType.split(".")[0] ?? "";
+  if (HOST_ONLY_EMIT_NAMESPACES.has(prefix)) return false;
   const requiredCap = requiredCapabilityForEmit(eventType);
   if (!requiredCap) return true;
   return capabilities.includes(requiredCap);

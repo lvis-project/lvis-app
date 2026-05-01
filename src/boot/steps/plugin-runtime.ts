@@ -745,6 +745,28 @@ export async function initPluginRuntime(
         pluginRuntime.registerDisposer(pluginId, unsubscribe);
         return unsubscribe;
       },
+      getInstalledPluginIds: () => {
+        return pluginRuntime.listPluginIds().filter((id) => id !== pluginId);
+      },
+      onPluginsChanged: (handler) => {
+        const dispatchInstalled = (data: unknown) => {
+          const payload = data as { pluginId?: string; source?: "marketplace" | "local-dev" } | null | undefined;
+          const subjectId = payload?.pluginId;
+          if (typeof subjectId !== "string" || subjectId === pluginId) return;
+          const source = payload?.source === "local-dev" ? "local-dev" : "marketplace";
+          handler({ type: "installed", pluginId: subjectId, source });
+        };
+        const dispatchUninstalled = (data: unknown) => {
+          const subjectId = (data as { pluginId?: string } | null | undefined)?.pluginId;
+          if (typeof subjectId !== "string" || subjectId === pluginId) return;
+          handler({ type: "uninstalled", pluginId: subjectId });
+        };
+        const unsubInstalled = onEvent("plugin.installed", dispatchInstalled);
+        const unsubUninstalled = onEvent("plugin.uninstalled", dispatchUninstalled);
+        const unsubscribe = () => { unsubInstalled(); unsubUninstalled(); };
+        pluginRuntime.registerDisposer(pluginId, unsubscribe);
+        return unsubscribe;
+      },
       addTask: (task) => {
         const categoryId = deriveCategoryId(pluginId, task.source);
         taskSourceRegistry.register({ id: categoryId, origin: "plugin", pluginId });
