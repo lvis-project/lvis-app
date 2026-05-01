@@ -87,9 +87,6 @@ describe("GlobalSearchDialog", () => {
     await waitFor(() => {
       expect(api.memorySearchEntries).toHaveBeenCalledWith("match");
     }, { timeout: 1000 });
-
-    // memoryListEntries should NOT be called when query is non-empty
-    expect(api.memoryListEntries).not.toHaveBeenCalled();
   });
 
   // 3. Sections with zero results are hidden
@@ -133,8 +130,8 @@ describe("GlobalSearchDialog", () => {
     expect(onLoadSession).toHaveBeenCalledWith("sess-1");
   });
 
-  // 5. Debounce — IPC not called before 200 ms have elapsed
-  it("does not call IPC before debounce delay elapses", async () => {
+  // 5. Debounce — memorySearchEntries not called before 200 ms have elapsed for typed query
+  it("does not call memorySearchEntries before debounce delay elapses", async () => {
     vi.useFakeTimers();
     const { api } = makeMockLvisApi();
     const props: GlobalSearchDialogProps = {
@@ -147,14 +144,14 @@ describe("GlobalSearchDialog", () => {
       onOpenMemoryView: vi.fn(),
     };
 
-    render(<GlobalSearchDialog {...props} />);
+    const { getByTestId } = render(<GlobalSearchDialog {...props} />);
 
-    // Advance only 100 ms — before the 200 ms debounce fires
+    // Type a query, then advance only 100 ms — before the 200 ms search debounce fires
     await act(async () => {
+      fireEvent.change(getByTestId("global-search-input"), { target: { value: "test" } });
       vi.advanceTimersByTime(100);
     });
 
-    expect(api.memoryListEntries).not.toHaveBeenCalled();
     expect(api.memorySearchEntries).not.toHaveBeenCalled();
   });
 

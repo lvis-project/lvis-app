@@ -1,20 +1,11 @@
-import { useEffect, useState } from "react";
 import { BookMarked, MessageSquare, Star } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog.js";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../../../components/ui/command.js";
 import { highlightText } from "../utils/html-preview.js";
+import { useMemorySearch } from "../hooks/use-memory-search.js";
 import type { LvisApi } from "../types.js";
 import type { StarredItem } from "../hooks/use-starred.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
-interface MemoryEntry {
-  filename: string;
-  title: string;
-  excerpt: string;
-  updatedAt: string;
-}
 
 export interface GlobalSearchDialogProps {
   open: boolean;
@@ -44,49 +35,11 @@ export function GlobalSearchDialog({
   onLoadSession,
   onOpenMemoryView,
 }: GlobalSearchDialogProps) {
-  const [query, setQuery] = useState("");
-  const [memories, setMemories] = useState<MemoryEntry[]>([]);
-  const [memoriesLoading, setMemoriesLoading] = useState(false);
+  // Delegate memory IPC, debounce, and post-unmount guard to useMemorySearch.
+  const { query, setQuery, noteResults, loading: memoriesLoading, reset } = useMemorySearch(api);
 
-  // Trim once so IPC calls and local filters both use the same value.
+  // Trim once so local filters use the same value as the hook's search.
   const trimmedQuery = query.trim();
-
-  // Load memories when dialog opens or query changes.
-  // Debounce 200 ms to avoid a new IPC request on every keystroke, then use
-  // a `cancelled` flag to discard responses from superseded requests (IPC
-  // calls can resolve out-of-order when the query changes rapidly).
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setMemoriesLoading(true);
-    const timer = setTimeout(() => {
-      const fetch = trimmedQuery
-        ? api.memorySearchEntries(trimmedQuery).then((results) =>
-            results.map((r) => ({
-              filename: r.filename ?? r.title,
-              title: r.title,
-              excerpt: r.excerpt,
-              updatedAt: r.updatedAt,
-            })),
-          )
-        : api.memoryListEntries().then((entries) =>
-            entries.map((e) => ({
-              filename: e.filename,
-              title: e.title,
-              excerpt: e.content?.slice(0, 120) ?? "",
-              updatedAt: e.updatedAt ?? "",
-            })),
-          );
-      fetch
-        .then((entries) => { if (!cancelled) setMemories(entries); })
-        .catch(() => { if (!cancelled) setMemories([]); })
-        .finally(() => { if (!cancelled) setMemoriesLoading(false); });
-    }, 200);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [open, trimmedQuery, api]);
 
   // Filter sessions and starred locally (they are already in-memory).
   const filteredSessions = sessions.filter((s) =>
@@ -110,9 +63,7 @@ export function GlobalSearchDialog({
 
   const handleClose = () => {
     onOpenChange(false);
-    setQuery("");
-    setMemories([]);
-    setMemoriesLoading(false);
+    reset();
   };
 
   const handleSelectMemory = () => {
@@ -143,7 +94,7 @@ export function GlobalSearchDialog({
           />
           <CommandList className="max-h-[420px]">
             {/* ── Memory section ─────────────────────────────────────── */}
-            {(memoriesLoading || memories.length > 0) && (
+            {(memoriesLoading || noteResults.length > 0) && (
               <CommandGroup
                 heading={memoriesLoading ? "메모리 (로딩 중...)" : "메모리"}
                 data-testid="global-search-group-memory"
@@ -153,10 +104,10 @@ export function GlobalSearchDialog({
                     <span className="text-xs text-muted-foreground">로딩 중...</span>
                   </CommandItem>
                 ) : (
-                  memories.map((m, idx) => (
+                  noteResults.map((m, idx) => (
                     <CommandItem
-                      key={`${m.filename ?? "no-file"}::${m.title}::${idx}`}
-                      value={`memory:${m.filename ?? m.title}::${idx}`}
+                      key={`${m.title}::${idx}`}
+                      value={`memory:${m.title}::${idx}`}
                       onSelect={handleSelectMemory}
                     >
                       <BookMarked className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -221,7 +172,7 @@ export function GlobalSearchDialog({
 
             {/* ── Empty state ─────────────────────────────────────────── */}
             {!memoriesLoading &&
-              memories.length === 0 &&
+              noteResults.length === 0 &&
               filteredSessions.length === 0 &&
               filteredStarred.length === 0 && (
                 <CommandEmpty>

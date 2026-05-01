@@ -532,7 +532,7 @@ export function App() {
             onExport={handleExport}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenCommand={() => setCommandOpen(true)}
-            onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
+            onOpenGlobalSearch={() => { refreshSessions(); setGlobalSearchOpen(true); }}
             onOpenStarredView={() => setActiveView("starred")}
           />
 

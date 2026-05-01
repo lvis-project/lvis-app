@@ -38,7 +38,7 @@ describe("useMemorySearch", () => {
 
     render(<Harness api={api} />);
 
-    // Advance past the initial catalog load debounce
+    // Initial catalog load runs immediately on mount; subsequent query-driven searches are debounced.
     await act(async () => {
       vi.advanceTimersByTime(300);
       await Promise.resolve();
