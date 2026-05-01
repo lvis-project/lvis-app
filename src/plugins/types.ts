@@ -492,6 +492,26 @@ export interface PluginHostApi {
    * (and PluginRuntime.onDisable) can clean up handlers deterministically.
    */
   onEvent(eventType: string, handler: (data: unknown) => void): () => void;
+  /**
+   * Snapshot of plugin IDs currently loaded into the runtime, in load order.
+   * The calling plugin's own id is excluded. Pair with `onPluginsChanged` to
+   * react to plugin lifecycle (e.g. proactive detectors that depend on a
+   * specific plugin being installed).
+   */
+  getInstalledPluginIds(): string[];
+  /**
+   * Subscribe to plugin install / uninstall events. Returns an `unsubscribe()`
+   * disposer (also cleared automatically on plugin disable).
+   *
+   * Fires AFTER the host has finished mounting (install) or unmounting
+   * (uninstall) the plugin — `getInstalledPluginIds()` already reflects the
+   * new state when the handler runs. Self-events (this plugin being the
+   * subject) are filtered out.
+   *
+   * P0 only delivers `installed` / `uninstalled`. Version-bump (`updated`)
+   * semantics are pending separate spec work.
+   */
+  onPluginsChanged(handler: (event: { type: "installed" | "uninstalled"; pluginId: string }) => void): () => void;
   addTask(task: {
     title: string;
     description?: string;

@@ -93,6 +93,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     });
     win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
     await pluginRuntime.addPlugin(pluginId);
+    emitHostEvent("plugin.installed", { pluginId });
     refreshPluginNotifications?.();
     win?.webContents.send("lvis:plugins:install-result", { slug: pluginId, success: true });
     return result;
@@ -113,6 +114,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       throw err;
     }
     await pluginRuntime.removePlugin(pluginId);
+    emitHostEvent("plugin.uninstalled", { pluginId });
     refreshPluginNotifications?.();
     broadcastUninstallResult({ slug: pluginId, success: true });
     return result;
@@ -131,6 +133,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (canceled || !filePaths[0]) return null;
     const result = await pluginMarketplace.installLocal(filePaths[0]);
     await pluginRuntime.addPlugin(result.pluginId);
+    emitHostEvent("plugin.installed", { pluginId: result.pluginId });
     refreshPluginNotifications?.();
     return result;
   });
