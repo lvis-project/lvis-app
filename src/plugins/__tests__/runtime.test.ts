@@ -62,6 +62,7 @@ describe("PluginRuntime.disable", () => {
       version: "1.0.0",
       entry: "entry.mjs",
       tools: [methodName],
+      description: "Test fixture.",
     };
     if (installPolicy) manifest.installPolicy = installPolicy;
     const manifestPath = join(pluginDir, "plugin.json");
@@ -172,7 +173,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", tools: ["com_lge_test_hello"] };
+    const manifest = { id: pluginId, name: "Test", version: "1.0.0", entry: "entry.mjs", tools: ["com_lge_test_hello"], description: "Test plugin fixture." };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: pluginId, manifestPath, enabled: true }]);
@@ -198,7 +199,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad.method"] };
+    const manifest = { id: "bad-plugin", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad.method"], description: "Test fixture." };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-plugin", manifestPath, enabled: true }]);
@@ -224,7 +225,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["1bad_name"] };
+    const manifest = { id: "bad-leading-digit", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["1bad_name"], description: "Test fixture." };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-leading-digit", manifestPath, enabled: true }]);
@@ -250,7 +251,7 @@ describe("PluginRuntime.disable", () => {
       "utf-8",
     );
 
-    const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad-name"] };
+    const manifest = { id: "bad-hyphen", name: "Bad", version: "1.0.0", entry: "entry.mjs", tools: ["bad-name"], description: "Test fixture." };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     await writeRegistry([{ id: "bad-hyphen", manifestPath, enabled: true }]);
@@ -260,6 +261,56 @@ describe("PluginRuntime.disable", () => {
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("bad-hyphen");
     expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad-name'|schema validation failed/));
+    errSpy.mockRestore();
+  });
+
+  it("plugin missing description is dropped with an error (Phase 1 MUST field)", async () => {
+    const pluginDir = join(installedDir, "no-description");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return { handlers: { no_desc_ping: async () => "pong" } };
+}`,
+      "utf-8",
+    );
+
+    const manifest = { id: "no-description", name: "No Desc", version: "1.0.0", entry: "entry.mjs", tools: ["no_desc_ping"] };
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    await writeRegistry([{ id: "no-description", manifestPath, enabled: true }]);
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runtime = makeRuntime();
+    await runtime.load();
+    expect(runtime.listPluginIds()).not.toContain("no-description");
+    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/description|must be a non-empty string/i));
+    errSpy.mockRestore();
+  });
+
+  it("plugin with empty-string description is dropped with an error (Phase 1 MUST non-empty)", async () => {
+    const pluginDir = join(installedDir, "empty-description");
+    await mkdir(pluginDir, { recursive: true });
+
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return { handlers: { empty_desc_ping: async () => "pong" } };
+}`,
+      "utf-8",
+    );
+
+    const manifest = { id: "empty-description", name: "Empty Desc", version: "1.0.0", entry: "entry.mjs", tools: ["empty_desc_ping"], description: "" };
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    await writeRegistry([{ id: "empty-description", manifestPath, enabled: true }]);
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runtime = makeRuntime();
+    await runtime.load();
+    expect(runtime.listPluginIds()).not.toContain("empty-description");
+    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/description|must be a non-empty string/i));
     errSpy.mockRestore();
   });
 
@@ -291,6 +342,7 @@ describe("PluginRuntime.disable", () => {
         id: "ui-callable",
         name: "ui-callable",
         version: "1.0.0",
+        description: "Test fixture.",
         entry: "entry.mjs",
         tools: ["uic_get", "uic_private"],
         uiCallable: ["uic_get"],
@@ -348,6 +400,7 @@ describe("PluginRuntime.disable", () => {
         id: "meta-plugin",
         name: "meta-plugin",
         version: "1.0.0",
+        description: "Test fixture.",
         entry: "entry.mjs",
         tools: ["meta_ping"],
         capabilities: ["worker-client"],
@@ -383,7 +436,7 @@ describe("PluginRuntime.disable", () => {
       const manifestPath = join(pluginDir, "plugin.json");
       await writeFile(
         manifestPath,
-        JSON.stringify({ id: "calltool-plugin", name: "calltool-plugin", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_ping"] }),
+        JSON.stringify({ id: "calltool-plugin", name: "calltool-plugin", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_ping"], description: "Test fixture." }),
         "utf-8",
       );
       await writeRegistry([{ id: "calltool-plugin", manifestPath, enabled: true }]);
@@ -435,7 +488,7 @@ describe("PluginRuntime.disable", () => {
       const manifestPath = join(pluginDir, "plugin.json");
       await writeFile(
         manifestPath,
-        JSON.stringify({ id: "calltool-delegate", name: "calltool-delegate", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_echo"] }),
+        JSON.stringify({ id: "calltool-delegate", name: "calltool-delegate", version: "1.0.0", entry: "entry.mjs", tools: ["calltool_echo"], description: "Test fixture." }),
         "utf-8",
       );
       await writeRegistry([{ id: "calltool-delegate", manifestPath, enabled: true }]);
@@ -500,6 +553,7 @@ describe("PluginRuntime.disable", () => {
           id,
           name: id,
           version: "1.0.0",
+          description: "Test fixture.",
           entry: "entry.mjs",
           tools: [methodName],
           ...extraManifest,
@@ -582,6 +636,7 @@ describe("PluginRuntime.disable", () => {
         id,
         name: id,
         version: "1.0.0",
+        description: "Test fixture.",
         installPolicy: "user",
         entry: relative(pluginDir, entryPath),
         tools: [methodName],
@@ -659,6 +714,7 @@ describe("PluginRuntime.disable", () => {
           id,
           name: id,
           version: "1.0.0",
+          description: "Test fixture.",
           entry: "entry.mjs",
           tools: [methodName],
           ...extraManifest,
@@ -746,6 +802,7 @@ describe("PluginRuntime.disable", () => {
           id,
           name: id,
           version: "1.0.0",
+          description: "Test fixture.",
           entry: "entry.mjs",
           tools: [methodName],
           ...extraManifest,
@@ -841,6 +898,7 @@ describe("PluginRuntime.disable", () => {
         id: "cap-provider",
         name: "cap-provider",
         version: "1.0.0",
+        description: "Test fixture.",
         entry: "entry.mjs",
         tools: ["cap_provider_ping"],
         capabilities: ["calendar-source"],
@@ -869,6 +927,7 @@ describe("PluginRuntime.disable", () => {
         id: "needs-calendar",
         name: "needs-calendar",
         version: "1.0.0",
+        description: "Test fixture.",
         entry: "entry.mjs",
         tools: ["needs_calendar_ping"],
         requires: { capabilities: ["calendar-source", "mail-source"] },
@@ -939,6 +998,7 @@ describe("PluginRuntime registry trusted-path", () => {
         id,
         name: id,
         version: "1.0.0",
+        description: "Test fixture.",
         entry: "entry.mjs",
         tools: [`${id.replace(/[^a-zA-Z0-9_]/g, "_")}_ping`],
       }),
@@ -1045,7 +1105,7 @@ export default async function createPlugin(ctx) {
 `,
       "utf-8",
     );
-    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName] };
+    const manifest = { id, name: id, version: "1.0.0", entry: "entry.mjs", tools: [methodName], description: "Test fixture." };
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
     return manifestPath;

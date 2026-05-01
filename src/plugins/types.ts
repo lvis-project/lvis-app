@@ -39,8 +39,8 @@ export interface PluginManifest {
    * 런타임이 이 값을 그대로 tool name으로 사용한다.
    */
   tools: string[];
-  /** 플러그인 한 줄 설명 — LLM 카탈로그 및 UI에 표시 */
-  description?: string;
+  /** 플러그인 한 줄 설명 — LLM 카탈로그 및 UI에 표시. Phase 1 MUST 필드. */
+  description: string;
   config?: Record<string, unknown>;
   ui?: PluginUiExtension[];
   keywords?: Array<{ keyword: string; skillId: string }>;
@@ -80,7 +80,6 @@ export interface PluginManifest {
    * classifySubscription("public") 판정을 통과한 이벤트만 renderer로 전달된다.
    * (host boundary §1: plugin-specific literals forbidden in boot.ts)
    */
-  eventPublishes?: string[];
   emittedEvents?: string[];
   /**
    * OS 네이티브 알림으로 표시할 이벤트 선언.
@@ -332,7 +331,6 @@ export interface PluginMarketplaceItem {
   keywords?: Array<{ keyword: string; skillId: string }>;
   startupTools?: string[];
   uiCallable?: string[];
-  eventPublishes?: string[];
   emittedEvents?: string[];
   notificationEvents?: Array<{
     event: string;
