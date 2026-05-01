@@ -7,7 +7,7 @@ import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
 import { assertMockMarketplaceAllowed, devLinkedEntryAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
-import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginUiExtension } from "./types.js";
+import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
 import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
@@ -64,6 +64,7 @@ type InstallOperationState = {
       installedBy: "admin" | "user" | undefined;
       approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"];
       _devLinked: boolean | undefined;
+      installSource: PluginRegistryEntryInstallSource | undefined;
     }
   >;
 };
@@ -407,6 +408,7 @@ export class PluginMarketplaceService {
         existing.manifestPath = manifestPath;
         existing.enabled = true;
         existing.installedBy = actor === "it-admin" ? "admin" : "user";
+        existing.installSource = actor === "it-admin" ? "admin" : "user";
         existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, activeBundleRootId, plugin.id);
         existing.approvedPluginAccess = plugin.pluginAccess;
         // A marketplace install supersedes any prior dev-link. Clear the
@@ -418,6 +420,7 @@ export class PluginMarketplaceService {
           manifestPath,
           enabled: true,
           installedBy: actor === "it-admin" ? "admin" : "user",
+          installSource: actor === "it-admin" ? "admin" : "user",
           bundleRefs: this.mergeBundleRefs([], activeBundleRootId, plugin.id),
           approvedPluginAccess: plugin.pluginAccess,
         });
@@ -564,6 +567,7 @@ export class PluginMarketplaceService {
           existing.manifestPath = manifestPath;
           existing.enabled = true;
           existing.installedBy = "user";
+          existing.installSource = "user";
           existing.approvedPluginAccess = plugin.pluginAccess;
           delete existing._devLinked;
         } else {
@@ -572,6 +576,7 @@ export class PluginMarketplaceService {
             manifestPath,
             enabled: true,
             installedBy: "user",
+            installSource: "user",
             bundleRefs: [],
             approvedPluginAccess: plugin.pluginAccess,
           });
@@ -628,6 +633,7 @@ export class PluginMarketplaceService {
           existing.manifestPath = manifestPathRel;
           existing.enabled = true;
           existing.installedBy = existing.installedBy ?? "user";
+          existing.installSource = existing.installSource ?? "user";
           existing.bundleRefs = existing.bundleRefs ?? [];
           delete existing._devLinked;
         } else {
@@ -636,6 +642,7 @@ export class PluginMarketplaceService {
             manifestPath: manifestPathRel,
             enabled: true,
             installedBy: "user",
+            installSource: "user",
             bundleRefs: [],
           });
         }
@@ -760,10 +767,12 @@ export class PluginMarketplaceService {
           installedBy: entry.installedBy,
           approvedPluginAccess: entry.approvedPluginAccess,
           _devLinked: entry._devLinked,
+          installSource: entry.installSource,
         });
       }
       entry.enabled = true;
       entry.installedBy = actor === "it-admin" ? "admin" : entry.installedBy ?? "user";
+      entry.installSource = actor === "it-admin" ? "admin" : "user";
       entry.bundleRefs = this.mergeBundleRefs(entry.bundleRefs, bundleRootId, pluginId);
       entry.approvedPluginAccess = approvedPluginAccess;
       delete entry._devLinked;
@@ -794,13 +803,19 @@ export class PluginMarketplaceService {
         entry.bundleRefs = snapshot.bundleRefs;
         entry.installedBy = snapshot.installedBy;
         entry.approvedPluginAccess = snapshot.approvedPluginAccess;
-        // Restore _devLinked only if it was set AND dev-link entries are
-        // permitted in this build. In a packaged build devLinkedEntryAllowed()
-        // is false, so rollback never re-introduces a dev-link marker even if
-        // the pre-install snapshot captured one.
-        if (snapshot._devLinked === true && devLinkedEntryAllowed()) {
-          entry._devLinked = true;
+        // Restore dev-link signals only when dev-link entries are permitted
+        // (non-packaged build). In a packaged build devLinkedEntryAllowed()
+        // returns false, so rollback never re-introduces the dev-link state.
+        const restoreDevLink = snapshot.installSource === "dev-link" && devLinkedEntryAllowed();
+        if (restoreDevLink) {
+          entry.installSource = "dev-link";
+          if (snapshot._devLinked === true) entry._devLinked = true;
+          else delete entry._devLinked;
+        } else if (snapshot.installSource && snapshot.installSource !== "dev-link") {
+          entry.installSource = snapshot.installSource;
+          delete entry._devLinked;
         } else {
+          delete entry.installSource;
           delete entry._devLinked;
         }
       }
@@ -1150,6 +1165,7 @@ export class PluginMarketplaceService {
       // declared installPolicy so dev-sideloading an admin-policy manifest
       // doesn't silently downgrade it to "user".
       const installedBy = manifest.installPolicy === "admin" ? "admin" : "user";
+      const localInstallSource: PluginRegistryEntryInstallSource = installedBy === "admin" ? "admin" : "local-dev";
       const registryManifestPath = posix.join(pluginId, "plugin.json");
       // Mirror the marketplace install path's grant of `manifest.pluginAccess`
       // into `approvedPluginAccess` (lines 409, 417, 562, 570). Without this,
@@ -1166,11 +1182,10 @@ export class PluginMarketplaceService {
           existing.manifestPath = registryManifestPath;
           existing.enabled = true;
           existing.installedBy = installedBy;
+          existing.installSource = localInstallSource;
           existing.approvedPluginAccess = approvedPluginAccess;
-          // This entry is now a real user install. Strip any stale
-          // `_devLinked` marker so the next `dev-link-plugins.mjs` boot pass
-          // — which drops every `_devLinked` entry before re-registering —
-          // does not clobber it.
+          // This entry is now a real install. Strip any stale `_devLinked`
+          // marker so dev-link-plugins.mjs does not clobber it on next boot.
           delete existing._devLinked;
         } else {
           registry.plugins.push({
@@ -1178,6 +1193,7 @@ export class PluginMarketplaceService {
             manifestPath: registryManifestPath,
             enabled: true,
             installedBy,
+            installSource: localInstallSource,
             approvedPluginAccess,
           });
         }

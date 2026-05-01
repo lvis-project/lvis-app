@@ -1,5 +1,16 @@
 export type InstallPolicy = "admin" | "user";
 
+/**
+ * Single source of truth for how a registry entry arrived on this device.
+ * Supersedes the legacy combination of `installedBy` + `_devLinked`.
+ *
+ * - "admin"     — managed bootstrap (installPolicy="admin" in manifest)
+ * - "user"      — marketplace install triggered by the end user
+ * - "local-dev" — installLocal (Settings UI "로컬 폴더에서 설치"), dev-mode only
+ * - "dev-link"  — dev:link symlink registered by scripts/dev-link-plugins.mjs
+ */
+export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev" | "dev-link";
+
 export interface DependencySpec {
   pluginId: string;
   versionRange?: string;
@@ -274,11 +285,13 @@ export interface PluginRegistryEntry {
   id: string;
   manifestPath: string;
   enabled?: boolean;
+  /** @deprecated — use installSource. Kept for JSON back-compat with registries written before v1.4. */
   installedBy?: InstallPolicy;
   bundleRefs?: string[];
   approvedPluginAccess?: PluginAccessSpec;
-  /** dev mode only — skip marketplace install receipt check */
+  /** @deprecated — use installSource === "dev-link". Kept for JSON back-compat. */
   _devLinked?: boolean;
+  installSource?: PluginRegistryEntryInstallSource;
 }
 
 export interface PluginRegistry {

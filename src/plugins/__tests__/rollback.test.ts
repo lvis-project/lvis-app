@@ -156,6 +156,43 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(restored.plugins[0]._devLinked).toBeUndefined();
   });
 
+  it("installPlugin sets installSource='user' on fresh install", async () => {
+    const svc = makeService();
+    await svc.installPlugin("com.lge.sample", "1.0.0");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0].installSource).toBe("user");
+  });
+
+  it("installPlugin sets installSource='user' when overwriting a dev-link entry", async () => {
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "com.lge.sample", manifestPath: "com.lge.sample/plugin.json", enabled: true, installedBy: "user", _devLinked: true, installSource: "dev-link" }],
+      }),
+      "utf-8",
+    );
+    const svc = makeService();
+    await svc.installPlugin("com.lge.sample", "1.0.0");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0].installSource).toBe("user");
+    expect(registry.plugins[0]._devLinked).toBeUndefined();
+  });
+
+  it("rollback preserves installSource from the pre-install state", async () => {
+    const svc = makeService();
+    await svc.installPlugin("com.lge.sample", "1.0.0");
+    await svc.installPlugin("com.lge.sample", "1.1.0");
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0].installSource).toBe("user");
+
+    await svc.rollbackPlugin("com.lge.sample");
+
+    const restored = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(restored.plugins[0].installSource).toBe("user");
+  });
+
   it("rollback preserves installedBy and bundleRefs metadata", async () => {
     const svc = makeService();
     await svc.installPlugin("com.lge.sample", "1.0.0");
