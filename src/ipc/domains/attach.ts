@@ -7,6 +7,7 @@
  */
 import { dialog, ipcMain, nativeImage, shell } from "electron";
 import { promises as fs } from "node:fs";
+import { randomBytes } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import { validateSender, auditUnauthorized } from "../gated.js";
@@ -43,6 +44,38 @@ const MIME_BY_EXT: Record<string, string> = {
 function getExt(p: string): string {
   const i = p.lastIndexOf(".");
   return i >= 0 ? p.slice(i + 1).toLowerCase() : "";
+}
+
+/**
+ * Sniff the image format from the leading bytes of a buffer. Clipboard
+ * payloads are not always PNG (Preview pastes WebP, browsers paste JPEG,
+ * etc.), so we route extension + mimeType from the actual signature
+ * instead of trusting a hard-coded default.
+ */
+function detectImageFormat(buf: Buffer): { ext: string; mimeType: string } {
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return { ext: "png", mimeType: "image/png" };
+  }
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return { ext: "jpg", mimeType: "image/jpeg" };
+  }
+  if (buf.length >= 6 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) {
+    return { ext: "gif", mimeType: "image/gif" };
+  }
+  if (
+    buf.length >= 12 &&
+    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+  ) {
+    return { ext: "webp", mimeType: "image/webp" };
+  }
+  if (buf.length >= 2 && buf[0] === 0x42 && buf[1] === 0x4d) {
+    return { ext: "bmp", mimeType: "image/bmp" };
+  }
+  // Fallback: trust caller intent — most clipboard pastes from screen-
+  // capture utilities are PNG, so we default to PNG rather than
+  // application/octet-stream which most vision APIs reject.
+  return { ext: "png", mimeType: "image/png" };
 }
 
 export interface OpenFileResult {
@@ -172,25 +205,29 @@ export function registerAttachHandlers(deps: IpcDeps): void {
       }
       try {
         const buf = Buffer.from(input.base64, "base64");
+        // Detect actual format from magic bytes — clipboard buffers can be
+        // PNG, JPEG, GIF, or WebP depending on source app, and unconditionally
+        // labelling everything PNG produces a corrupt data URL on round-trip.
+        const detected = detectImageFormat(buf);
         const img = nativeImage.createFromBuffer(buf);
         const { width, height } = img.getSize();
-        const ts = new Date()
-          .toISOString()
-          .replace(/[:.]/g, "")
-          .replace("T", "-")
-          .slice(0, 17);
-        const fileName = `lvis-clip-${ts}.png`;
+        // Collision-resistant filename: ms-precision timestamp + 8 random
+        // hex chars. The previous truncated-to-second ISO format collided
+        // when the user pasted multiple images within the same second
+        // (e.g. dragging a screenshot burst).
+        const ts = Date.now();
+        const rand = randomBytes(4).toString("hex");
+        const fileName = `lvis-clip-${ts}-${rand}.${detected.ext}`;
         const target = path.join(os.tmpdir(), fileName);
         await fs.writeFile(target, buf);
-        const mimeType = "image/png";
-        const dataUrl = `data:${mimeType};base64,${input.base64}`;
+        const dataUrl = `data:${detected.mimeType};base64,${input.base64}`;
         return {
           ok: true,
           path: target,
           width,
           height,
           bytes: buf.length,
-          mimeType,
+          mimeType: detected.mimeType,
           dataUrl,
         };
       } catch (err) {

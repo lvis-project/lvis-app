@@ -528,8 +528,13 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
               }
             }
             if (newAtts.length > 0) {
-              setAttachments([...attachments, ...newAtts]);
-              setQuestion(question + appendedMarkers);
+              // Functional updaters: the user may have typed or paste-dropped
+              // additional attachments while the file picker / readImage IPC
+              // was awaiting, so the captured `attachments` and `question`
+              // closures are racy. React's setState updater receives the
+              // latest committed state, so concatenation is always correct.
+              setAttachments((prev) => [...prev, ...newAtts]);
+              setQuestion((prev) => prev + appendedMarkers);
             }
             // Return focus to the composer textarea so the user can keep
             // typing or use Cmd/Ctrl+A immediately after the file dialog

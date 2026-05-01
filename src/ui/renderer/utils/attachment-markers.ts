@@ -32,10 +32,17 @@ export function parseMarkers(text: string): number[] {
 }
 
 /**
- * Collapse a long path for display: when the basename (extension excluded)
- * is ≥ PATH_COLLAPSE_THRESHOLD chars, return `first5 + "…" + last5 + .ext`.
+ * Collapse a long path for display: when the stem (the substring before the
+ * last `.`, including any parent directory segments) is ≥
+ * PATH_COLLAPSE_THRESHOLD chars, return `first5 + "…" + last5 + .ext`.
  * Otherwise return the original string. The dot in the extension is preserved
  * verbatim — paths without an extension fall back to whole-string collapse.
+ *
+ * Whole-path (not basename-only) collapse is deliberate: in the overlay we
+ * want long absolute paths like `/Users/ken/Desktop/budget-2026.pdf` to
+ * remain recognizable on both ends rather than dropping all directory
+ * context, which would yield a bare `budget-2026.pdf` and lose the user's
+ * mental anchor for *where* the file sits on disk.
  */
 export function collapsePath(path: string): string {
   const dotIdx = path.lastIndexOf(".");

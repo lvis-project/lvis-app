@@ -22,7 +22,6 @@ import { handleClipboardPaste } from "../utils/clipboard-paste.js";
 
 export interface ComposerHandle {
   focus(): void;
-  insertAtCursor(text: string): void;
 }
 
 export interface ComposerProps {
@@ -84,9 +83,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 ) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Empty deps are safe here: the handle methods read live values via
+  // closures over the stable `taRef` only — no per-render React state is
+  // captured, so there is no stale-closure risk.
   useImperativeHandle(ref, () => ({
     focus() { taRef.current?.focus(); },
-    insertAtCursor(insertion: string) { insertAtCursor(insertion); },
   }), []);
 
   // Live-derive attachments from textarea body (single source of truth).

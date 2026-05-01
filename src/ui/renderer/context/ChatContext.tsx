@@ -38,7 +38,7 @@ export interface ChatContextValue {
   setEditingEntryIdx: (i: number | null) => void;
   editBusy: boolean;
   question: string;
-  setQuestion: (q: string) => void;
+  setQuestion: React.Dispatch<React.SetStateAction<string>>;
   chatEndRef: RefObject<HTMLDivElement | null>;
   /**
    * Active chat session id. Lives in the chat context so descendants

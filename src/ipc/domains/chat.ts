@@ -92,6 +92,53 @@ function isRoutineEnabled(
   }
 }
 
+/**
+ * Validate the multimodal content-parts payload that arrives over IPC. The
+ * renderer is trusted but the preload bridge is a `unknown[]` boundary, so
+ * we type-narrow each entry here to protect downstream message-mapper code
+ * from malformed payloads (missing fields, wrong tags, non-string data).
+ *
+ * Returns the validated array (possibly empty). Unknown entries are dropped
+ * silently rather than rejecting the whole turn — this mirrors how
+ * `sanitizeOutgoingInput` handles partial PII redaction.
+ */
+function validateUserContentParts(
+  raw: unknown,
+): import("../../engine/llm/types.js").UserContentPart[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw)) return undefined;
+  const out: import("../../engine/llm/types.js").UserContentPart[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const t = (item as { type?: unknown }).type;
+    if (t === "text") {
+      const text = (item as { text?: unknown }).text;
+      if (typeof text === "string") out.push({ type: "text", text });
+      continue;
+    }
+    if (t === "image") {
+      const image = (item as { image?: unknown }).image;
+      const mimeType = (item as { mimeType?: unknown }).mimeType;
+      if (typeof image !== "string") continue;
+      out.push({
+        type: "image",
+        image,
+        ...(typeof mimeType === "string" ? { mimeType } : {}),
+      });
+      continue;
+    }
+    if (t === "file") {
+      const data = (item as { data?: unknown }).data;
+      const mimeType = (item as { mimeType?: unknown }).mimeType;
+      if (typeof data !== "string" || typeof mimeType !== "string") continue;
+      out.push({ type: "file", data, mimeType });
+      continue;
+    }
+    // Unknown tag → drop
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 async function runStreamedTurn(
   conversationLoop: ConversationLoop,
   input: string,
@@ -207,10 +254,16 @@ ${input}`;
 
   ipcMain.handle("lvis:chat:send", async (
     e,
-    input: string,
-    attachments?: import("../../engine/llm/types.js").UserContentPart[],
+    input: unknown,
+    attachments?: unknown,
   ) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:send", e); return UNAUTHORIZED_FRAME; }
+    if (typeof input !== "string") return { ok: false, error: "invalid-input" };
+    // IPC payload validation — the renderer is trusted but a corrupt
+    // preload bridge or a stray `unknown[]` cast could deliver malformed
+    // parts. We validate the shape here so the conversation loop never
+    // sees garbage.
+    const validated = validateUserContentParts(attachments);
     const win = getMainWindow();
     const effective = sanitizeOutgoingInput(input, win?.webContents);
     const streamId = allocateStreamId();
@@ -220,7 +273,7 @@ ${input}`;
       win?.webContents,
       "lvis:chat:stream",
       streamId,
-      { ...streamTurnOptions, attachments },
+      { ...streamTurnOptions, attachments: validated },
     ));
   });
 
