@@ -9,7 +9,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { TokenProgressRing } from "./TokenProgressRing.js";
 import { PluginGridButton, type PluginEntry } from "./PluginGridButton.js";
-import { SlashCommandButton } from "./SlashCommandButton.js";
+import { CommandPopover, type QuickAction } from "./CommandPopover.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 
 export interface InputActionBarProps {
@@ -20,6 +20,9 @@ export interface InputActionBarProps {
   onSelectPlugin: (viewKey: string) => void;
   onInsertSlashCommand: (cmd: string) => void;
   onToggleChatSearch: () => void;
+  commandActions: QuickAction[];
+  commandPopoverOpen: boolean;
+  onCommandPopoverOpenChange: (open: boolean) => void;
   // Trailing — attachment picker (single unified button, no count badge —
   // count lives on the in-composer chip)
   onAttach: () => void | Promise<void>;
@@ -61,6 +64,9 @@ export function InputActionBar({
   onSelectPlugin,
   onInsertSlashCommand,
   onToggleChatSearch,
+  commandActions,
+  commandPopoverOpen,
+  onCommandPopoverOpenChange,
   onAttach,
   attachDisabled,
   attachDisabledReason = "limit",
@@ -93,7 +99,12 @@ export function InputActionBar({
           <TooltipContent>대화 검색 (Cmd/Ctrl+F)</TooltipContent>
         </Tooltip>
         <PluginGridButton plugins={plugins} onSelect={onSelectPlugin} />
-        <SlashCommandButton onInsert={onInsertSlashCommand} />
+        <CommandPopover
+          actions={commandActions}
+          onInsert={onInsertSlashCommand}
+          open={commandPopoverOpen}
+          onOpenChange={onCommandPopoverOpenChange}
+        />
       </div>
 
       {/* Trailing cluster */}

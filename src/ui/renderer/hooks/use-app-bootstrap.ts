@@ -8,21 +8,21 @@ export interface AppBootstrapDeps {
   refreshCards: () => Promise<void> | void;
   checkApiKey: () => Promise<unknown> | unknown;
   setActiveView: (k: string) => void;
-  openCommandPalette: () => void;
+  toggleCommandPopover: () => void;
 }
 
 /**
  * Mount-time bootstrap:
  *  - kick off marketplace / views / api-key refreshes
  *  - subscribe to plugin view-activate IPC
- *  - register Cmd/Ctrl+K keybinding for the command palette
+ *  - register Cmd/Ctrl+K keybinding for the command popover
  *
  * Uses a mounted ref to avoid late async resolutions writing to an unmounted
  * component (PR#44 HIGH).
  */
 export function useAppBootstrap({
   api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
-  setActiveView, openCommandPalette,
+  setActiveView, toggleCommandPopover,
 }: AppBootstrapDeps) {
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -35,7 +35,7 @@ export function useAppBootstrap({
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        openCommandPalette();
+        toggleCommandPopover();
       }
     };
     window.addEventListener("keydown", onKey);

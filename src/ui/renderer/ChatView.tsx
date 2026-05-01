@@ -32,6 +32,7 @@ import {
 } from "./types/attachments.js";
 import { buildMarkerText } from "./utils/attachment-markers.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
+import type { QuickAction } from "./components/CommandPopover.js";
 import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
@@ -62,9 +63,14 @@ export interface ChatViewProps {
   plugins: PluginEntry[];
   /** Navigate to a plugin view */
   onSelectPlugin: (viewKey: string) => void;
+  /** Quick-action items for CommandPopover (빠른 실행 section) */
+  commandActions: QuickAction[];
+  /** Controlled open state for CommandPopover */
+  commandPopoverOpen: boolean;
+  onCommandPopoverOpenChange: (open: boolean) => void;
 }
 
-export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, plugins, onSelectPlugin }: ChatViewProps) {
+export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -472,8 +478,11 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           contextBudget={contextBudget}
           plugins={plugins}
           onSelectPlugin={onSelectPlugin}
-          onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
+          onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd : cmd)}
           onToggleChatSearch={searchToggleOverlay}
+          commandActions={commandActions}
+          commandPopoverOpen={commandPopoverOpen}
+          onCommandPopoverOpenChange={onCommandPopoverOpenChange}
           attachDisabled={
             attachments.length >= ATTACH_MAX_COUNT ||
             hasApiKey === false ||
