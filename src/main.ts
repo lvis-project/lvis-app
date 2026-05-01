@@ -418,7 +418,7 @@ function createWindow() {
   // IPC 핸들러 등록 후 수행.
   void win
     .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(BOOTSTRAP_SPLASH)}`)
-    .catch((err) => log.error("splash load failed", err));
+    .catch((err) => log.error({ err }, "splash load failed"));
 }
 
 async function main() {
@@ -680,7 +680,7 @@ app.on("before-quit", (event) => {
 app.whenReady().then(() => {
   installHtmlPreviewPartitionBlock();
   void main().catch((error) => {
-    log.error("bootstrap failed", error);
+    log.error({ err: error }, "bootstrap failed");
     app.quit();
   });
 });

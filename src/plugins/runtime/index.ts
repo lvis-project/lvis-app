@@ -342,7 +342,7 @@ export class PluginRuntime {
       for (const toolName of manifest.tools) {
         const handler = instance.handlers[toolName];
         if (!handler) {
-          log.warn(`missing handler '${toolName}' — tool disabled`);
+          log.warn({ pluginId: manifest.id, toolName }, `missing handler '${toolName}' — tool disabled`);
           continue;
         }
         methods.set(toolName, handler);

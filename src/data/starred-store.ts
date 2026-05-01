@@ -66,7 +66,7 @@ export class StarredStore {
           ) {
             valid.push(item as StarredMessage);
           } else {
-            log.warn("skipping invalid entry: %s", item);
+            log.warn({ item }, "skipping invalid entry");
           }
         }
         this.cache = valid;

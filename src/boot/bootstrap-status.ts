@@ -22,8 +22,6 @@
  */
 
 import type { BrowserWindow } from "electron";
-import { createLogger } from "../lib/logger.js";
-const log = createLogger("bootstrap-status");
 
 export interface BootstrapStatusStart {
   phase: "start";

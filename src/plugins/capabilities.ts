@@ -1,6 +1,3 @@
-import { createLogger } from "../lib/logger.js";
-const log = createLogger("capabilities");
-
 /**
  * Phase 5 — Capability policy + event namespace allowlist.
  *

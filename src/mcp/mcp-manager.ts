@@ -105,7 +105,7 @@ export class McpManager {
         log.info(`${servers.length}개 MCP 서버 설정 로드`);
         return servers;
       } catch (err) {
-        log.error("설정 파일 파싱 실패: %s", err);
+        log.error({ err }, "설정 파일 파싱 실패");
       }
     }
 
@@ -384,15 +384,15 @@ export class McpManager {
             await rename(tmpPath, this.configPath);
             // Promote succeeded — erase the backup so secrets don't linger.
             await rm(bakPath, { force: true }).catch((cleanupErr) => {
-              log.warn(`saveConfigs: backup cleanup failed — ${bakPath}`, cleanupErr);
+              log.warn({ err: cleanupErr, bakPath }, `saveConfigs: backup cleanup failed — ${bakPath}`);
             });
           } catch (retryErr) {
             // Restore original config from backup.
             if (existsSync(bakPath)) {
               await rename(bakPath, this.configPath).catch((restoreErr) => {
                 log.error(
+                  { err: restoreErr, bakPath },
                   `saveConfigs: restore failed — stale backup at ${bakPath}`,
-                  restoreErr,
                 );
               });
             }

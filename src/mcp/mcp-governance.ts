@@ -68,7 +68,7 @@ export class McpGovernance {
       log.info(`정책 로드: ${parsed.servers.length}개 서버 규칙`);
       return parsed;
     } catch (err) {
-      log.error("정책 파일 파싱 실패 — deny-by-default 적용: %s", err);
+      log.error({ err }, "정책 파일 파싱 실패 — deny-by-default 적용");
       return DEFAULT_POLICY;
     }
   }

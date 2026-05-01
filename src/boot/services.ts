@@ -69,7 +69,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
       maxBytes: auditCfg.auditRotationMaxBytes,
       retentionDays: auditCfg.auditRetentionDays,
     }).catch((err: unknown) => {
-      log.warn("rotateAndPrune failed: %s", err);
+      log.warn({ err }, "rotateAndPrune failed");
     });
   };
   _runAuditMaintenance();

@@ -40,7 +40,7 @@ export function emitEvent(type: string, data?: unknown): void {
   const handlers = eventHandlers.get(type);
   if (handlers) {
     for (const handler of handlers) {
-      try { handler(data); } catch (err) { log.error(`event handler error (${type}): %s`, err); }
+      try { handler(data); } catch (err) { log.error({ err, eventType: type }, `event handler error (${type})`); }
     }
   }
 }

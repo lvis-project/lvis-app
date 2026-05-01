@@ -85,7 +85,7 @@ export class PostTurnHookChain {
         }
       }
     } catch (err) {
-      log.warn("compact failed: %s", err);
+      log.warn({ err }, "compact failed");
     }
 
     // 2. 세션 영속화 (§4.5.7)

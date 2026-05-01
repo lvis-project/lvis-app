@@ -74,7 +74,7 @@ export class AuditService {
       await this._maybeRotate();
     } catch (err) {
       // 디스크 실패는 console에만 — 도구 실행 차단 금지
-      log.error("flush failed: %s", err);
+      log.error({ err }, "flush failed");
     }
   }
 

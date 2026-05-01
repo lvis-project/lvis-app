@@ -180,10 +180,10 @@ export function buildPluginContext(opts: {
     },
     log: (message: string, meta?: unknown) => {
       if (meta !== undefined) {
-        log.info({ meta }, message);
+        log.info({ pluginId: opts.pluginId, meta }, message);
         return;
       }
-      log.info(message);
+      log.info({ pluginId: opts.pluginId }, message);
     },
     hostApi: opts.hostApi,
   };
