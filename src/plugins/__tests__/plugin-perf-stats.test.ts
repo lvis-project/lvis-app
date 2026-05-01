@@ -10,27 +10,6 @@ function makeRuntime() {
   return new PluginRuntime({ hostRoot: "/tmp/test-host" });
 }
 
-/** Directly inject a plugin + handler into the runtime's private maps. */
-function injectPlugin(
-  runtime: PluginRuntime,
-  pluginId: string,
-  toolName: string,
-  handler: (payload?: unknown) => Promise<unknown>,
-) {
-  // Access private maps via cast for unit-test purposes.
-  const r = runtime as unknown as {
-    plugins: Map<string, unknown>;
-    methodMap: Map<string, { pluginId: string; handler: (p?: unknown) => Promise<unknown> }>;
-  };
-  r.plugins.set(pluginId, {
-    manifest: { id: pluginId, name: pluginId, version: "1.0.0", entry: "index.js", tools: [toolName] },
-    pluginRoot: "/tmp",
-    instance: {},
-    methods: new Map([[toolName, handler]]),
-  });
-  r.methodMap.set(toolName, { pluginId, handler });
-}
-
 describe("PluginRuntime.getPerfStats()", () => {
   it("returns empty record when no plugins are loaded", () => {
     const rt = makeRuntime();
@@ -39,7 +18,7 @@ describe("PluginRuntime.getPerfStats()", () => {
 
   it("records call count and exec time on success", async () => {
     const rt = makeRuntime();
-    injectPlugin(rt, "com.lge.test", "test_ping", async () => "pong");
+    rt._testInjectPlugin("com.lge.test", "test_ping", async () => "pong");
 
     await rt.call("test_ping");
     await rt.call("test_ping");
@@ -54,7 +33,7 @@ describe("PluginRuntime.getPerfStats()", () => {
 
   it("increments errorCount on handler throw", async () => {
     const rt = makeRuntime();
-    injectPlugin(rt, "com.lge.test", "test_fail", async () => {
+    rt._testInjectPlugin("com.lge.test", "test_fail", async () => {
       throw new Error("boom");
     });
 
@@ -68,8 +47,8 @@ describe("PluginRuntime.getPerfStats()", () => {
 
   it("tracks multiple plugins independently", async () => {
     const rt = makeRuntime();
-    injectPlugin(rt, "com.lge.alpha", "alpha_get", async () => "a");
-    injectPlugin(rt, "com.lge.beta", "beta_get", async () => "b");
+    rt._testInjectPlugin("com.lge.alpha", "alpha_get", async () => "a");
+    rt._testInjectPlugin("com.lge.beta", "beta_get", async () => "b");
 
     await rt.call("alpha_get");
     await rt.call("alpha_get");
@@ -82,7 +61,7 @@ describe("PluginRuntime.getPerfStats()", () => {
 
   it("returns a snapshot (mutations do not affect internal state)", async () => {
     const rt = makeRuntime();
-    injectPlugin(rt, "com.lge.snap", "snap_get", async () => null);
+    rt._testInjectPlugin("com.lge.snap", "snap_get", async () => null);
     await rt.call("snap_get");
 
     const snap = rt.getPerfStats();
