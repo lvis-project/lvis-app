@@ -236,7 +236,56 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직
 
 `onPluginsChanged` 의 `PluginLifecycleEvent` union 에는 `_future` sentinel variant (`{type: "_future"; readonly __exhaustive: never}`) 가 포함된다. 런타임에는 절대 발생하지 않으며, 향후 `"updated"` 같은 신규 variant 추가 시 exhaustive `switch (event.type)` consumer 가 silently 누락되지 않도록 `default:` branch 를 강제하는 type-level forward-compat 가드다.
 
-### 2.4 AJV 매니페스트 검증 플로우
+### 2.4 `auth` — Plugin-Owned OAuth 의 Host UI Surface
+
+OAuth-flow 를 소유한 플러그인 (ms-graph, lge-api 등) 이 호스트 Settings UI 에 generic 미인증 / 인증됨 뱃지 + 로그인/로그아웃 버튼을 제공하기 위한 *선언적* 계약. 호스트는 OAuth 코드를 모르고, 단지 manifest 에 적힌 tool 이름을 dispatch + standardized 이벤트를 listen 한다. architecture.md §9.4a "Plugin-Owned OAuth — Host UI Surface" 와 짝.
+
+**Manifest 형**
+
+```jsonc
+{
+  "uiCallable": ["msgraph_status", "msgraph_auth", "msgraph_signout"],
+  "auth": {
+    "label": "Microsoft 계정",      // optional; 기본 manifest.name
+    "statusTool": "msgraph_status",  // 필수, ⊂ uiCallable[]
+    "loginTool": "msgraph_auth",     // 필수, ⊂ uiCallable[]
+    "logoutTool": "msgraph_signout"  // optional, ⊂ uiCallable[]
+  }
+}
+```
+
+**Cross-field 강제** — `manifest-validation.ts` (§B-3 와 같은 hand-rolled 위치) 가 `auth.{statusTool,loginTool,logoutTool} ⊂ uiCallable[]` 를 load-time 에 검증. AJV 단독으로는 cross-array membership 표현 불가.
+
+**StatusTool 반환 (recommended)**
+
+```ts
+interface PluginAuthStatusResult {
+  authenticated: boolean;
+  account?: string;  // 이메일 / 로그인 ID 등 human-readable
+}
+```
+
+호스트 defensive parse — 추가 필드는 무시. `outputSchema` 강제 검증은 별 PR 로 toolSchemas 전체 인프라 작업 후 도입.
+
+**`<pluginId>.auth.changed` 이벤트** — 인증 전이 시 plugin 이 emit. `manifest.emittedEvents[]` 등록 필수. 호스트 `usePluginAuthStatuses` 훅이 받아 statusTool 재호출 → 뱃지 갱신. **폴링 안 함.** `lvis-plugin-ms-graph` / `lvis-plugin-lge-api` 가 PR 와 함께 emit 흐름 추가.
+
+**예시 (ms-graph 플러그인)**
+
+```jsonc
+{
+  "tools": ["msgraph_status", "msgraph_auth", "msgraph_signout", /* ... */],
+  "uiCallable": ["msgraph_status", "msgraph_auth", "msgraph_signout", /* ... */],
+  "emittedEvents": ["ms-graph.auth.changed", /* ... */],
+  "auth": {
+    "label": "Microsoft 계정",
+    "statusTool": "msgraph_status",
+    "loginTool": "msgraph_auth",
+    "logoutTool": "msgraph_signout"
+  }
+}
+```
+
+### 2.5 AJV 매니페스트 검증 플로우
 
 ```
 plugin.json

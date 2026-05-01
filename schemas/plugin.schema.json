@@ -277,6 +277,40 @@
         "maxLength": 64
       }
     },
+    "auth": {
+      "type": "object",
+      "description": "Optional declarative auth contract. Lets the host render a generic 'authentication required / signed in' badge + login/logout button in Settings → 플러그인 설정 without baking plugin-specific auth code into the host. The plugin still owns its OAuth/cookie flow (see architecture.md §9.4a 'Plugin-Owned OAuth Authentication'); the host only invokes the named tools and listens for the auth-changed event. The three tool names referenced here MUST also appear in `uiCallable[]` (cross-field validated in manifest-validation.ts). On state transitions (login success, logout, token refresh failure) the plugin SHOULD emit an event named `<pluginId>.auth.changed` so the host UI can refresh without polling.",
+      "additionalProperties": false,
+      "required": [
+        "statusTool",
+        "loginTool"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Human-readable label for the auth surface, shown next to the badge (e.g. 'Microsoft 계정', 'LGE 포털'). Defaults to the plugin's `name` if omitted.",
+          "maxLength": 64
+        },
+        "statusTool": {
+          "type": "string",
+          "description": "Tool name (must be in `uiCallable[]`) returning `{ authenticated: boolean, account?: string }`. Host invokes on Settings tab mount and after every `<pluginId>.auth.changed` event.",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "maxLength": 64
+        },
+        "loginTool": {
+          "type": "string",
+          "description": "Tool name (must be in `uiCallable[]`) the host invokes when the user clicks the '로그인' button. The plugin owns the actual auth flow (e.g. MSAL interactive, openAuthWindow); the host only triggers it.",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "maxLength": 64
+        },
+        "logoutTool": {
+          "type": "string",
+          "description": "Optional tool name (must be in `uiCallable[]` if present) the host invokes when the user clicks the '로그아웃' button. Omit to render a sign-in-only surface (e.g. plugins that don't support runtime sign-out).",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "maxLength": 64
+        }
+      }
+    },
     "notificationEvents": {
       "type": "array",
       "items": {
