@@ -8,6 +8,8 @@ import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { InstallInFlight } from "../hooks/use-plugin-marketplace.js";
 import type { PluginCardSummary } from "../types.js";
+import { PluginAuthSection } from "../components/PluginAuthSection.js";
+import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
 import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
 
 type KV = { key: string; value: string };
@@ -38,6 +40,20 @@ export function PluginConfigTab() {
   const [plugins, setPlugins] = useState<PluginCardSummary[]>([]);
   const [installInFlight, setInstallInFlight] = useState<InstallInFlight>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Test environments do not always inject `window.lvisApi`; fall back to
+  // `null` so unrelated PluginConfigTab tests don't crash before they
+  // exercise their own code paths. The hook short-circuits when api is null.
+  // useMemo([]) — `window.lvisApi` is set once at preload boot and never
+  // reassigned at runtime; recomputing on every render would force the
+  // hook's `refresh` callback to re-bind, tearing down + re-subscribing
+  // every `<pluginId>.auth.changed` listener on each parent render.
+  const apiForAuthHook = useMemo(() => {
+    try { return getApi(); } catch { return null; }
+  }, []);
+  const { statuses: authStatuses, refresh: refreshAuthStatus } = usePluginAuthStatuses(
+    apiForAuthHook,
+    plugins,
+  );
   const [entries, setEntries] = useState<KV[]>([]);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
@@ -361,6 +377,19 @@ export function PluginConfigTab() {
                       {p.loadStatus === "disabled" && (
                         <span className="inline-block rounded-full bg-gray-100 px-1.5 py-px text-[9px] font-medium text-gray-600">비활성</span>
                       )}
+                      {/* Auth status — only when manifest declares `auth` AND the plugin is
+                          actually loaded (skip failed/disabled rows whose runtime can't be
+                          invoked). The list-level badge is a "you need to do something here"
+                          surface; we render only `unauthed` (red) so the row stays visually
+                          quiet for the happy-path. Click → detail panel handles login flow. */}
+                      {p.auth && p.loadStatus === "loaded" && authStatuses.get(p.id)?.kind === "unauthed" && (
+                        <span
+                          className="inline-block rounded-full bg-red-100 px-1.5 py-px text-[9px] font-medium text-red-700"
+                          title="이 플러그인은 로그인이 필요합니다"
+                        >
+                          🔒 미인증
+                        </span>
+                      )}
                     </div>
                   </button>
                 ))}
@@ -456,6 +485,34 @@ export function PluginConfigTab() {
                     제거
                   </Button>
                 </div>
+
+                {/* Auth section — only when manifest declares `auth`, the
+                    plugin is loaded (failed/disabled plugins have no live
+                    runtime to invoke), and the api bridge is available.
+                    See architecture.md §9.4a. */}
+                {selectedPlugin.auth &&
+                  selectedPlugin.loadStatus === "loaded" &&
+                  apiForAuthHook && (
+                  <>
+                    <Separator />
+                    <PluginAuthSection
+                      // `key` forces React to remount the section when the
+                      // user switches between plugins in the list. Without
+                      // it the same instance is reused across plugin
+                      // selections and stale internal state (`working`,
+                      // `localError`) carries over — e.g. a failed login on
+                      // ms-graph would still display its error banner when
+                      // the user clicks lge-api in the list.
+                      key={selectedPlugin.id}
+                      api={apiForAuthHook}
+                      pluginId={selectedPlugin.id}
+                      pluginName={selectedPlugin.name}
+                      auth={selectedPlugin.auth}
+                      state={authStatuses.get(selectedPlugin.id) ?? { kind: "loading" }}
+                      onRefresh={() => refreshAuthStatus(selectedPlugin.id)}
+                    />
+                  </>
+                )}
 
                 {/* Tools section */}
                 {selectedPlugin.tools.length > 0 && (
