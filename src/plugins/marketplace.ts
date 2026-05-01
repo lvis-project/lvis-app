@@ -408,6 +408,9 @@ export class PluginMarketplaceService {
         existing.installedBy = actor === "it-admin" ? "admin" : "user";
         existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, activeBundleRootId, plugin.id);
         existing.approvedPluginAccess = plugin.pluginAccess;
+        // A marketplace install supersedes any prior dev-link. Clear the
+        // marker so dev-link-plugins.mjs does not clobber it on next boot.
+        delete existing._devLinked;
       } else {
         registry.plugins.push({
           id: plugin.id,
@@ -847,6 +850,28 @@ export class PluginMarketplaceService {
   }
 
   /**
+   * Shared post-install finalization called by both installArtifact and
+   * installLocal after the install dir is in place.
+   *
+   * Centralises the receipt write so both paths always produce the same
+   * v2 receipt shape. This is the single call site for
+   * artifactStore.writeInstallReceipt — adding a field to the receipt
+   * schema requires a change here only, not in each install branch.
+   */
+  private async finalizeInstall(
+    pluginId: string,
+    opts: {
+      version: string;
+      installSource: "marketplace" | "local-dev";
+      artifactSha256: string | null;
+      signerKeyId: string | null;
+      files: string[];
+    },
+  ): Promise<void> {
+    await this.artifactStore.writeInstallReceipt(pluginId, opts);
+  }
+
+  /**
    * Phase 2-final install path — single source: download + verify + extract.
    *
    * The historical file:-spec / npm-install branch is gone. Production and
@@ -889,7 +914,7 @@ export class PluginMarketplaceService {
     } else {
       await this.assertInstalledManifestMatchesCatalog(plugin, version, manifestFile, pluginDir);
     }
-    await this.artifactStore.writeInstallReceipt(plugin.id, {
+    await this.finalizeInstall(plugin.id, {
       version,
       installSource: "marketplace",
       artifactSha256: verified.artifactSha256,
@@ -1144,20 +1169,11 @@ export class PluginMarketplaceService {
       });
 
       // Write an install receipt so the plugin runtime's integrity gate
-      // (snapshots.ts → verifyInstallReceipt) accepts the entry. Without a
-      // fresh receipt, load is rejected with either "install receipt
-      // missing or unreadable" (no prior install) or "receipt hash
-      // mismatch" (stale receipt from a prior marketplace install). The
-      // receipt deliberately covers only `plugin.json` + every file under
-      // `dist/` — matching what `installArtifact` records for marketplace
-      // installs. Runtime deps under `node_modules/` are NOT integrity-
-      // tracked; the compensating control is `isDevModeUnlocked()` (this
-      // entire path is dev-mode-only), and unifying receipt scope with
-      // installSource enum is tracked as a follow-up architecture task.
-      // signerKeyId / artifactSha256 use a `dev:local-install` sentinel
-      // because there is no signed artifact to validate against; replacing
-      // the sentinel with a first-class `installSource` field is a
-      // schema-v2 follow-up.
+      // (verifyInstallReceipt) accepts the entry. The receipt covers
+      // `plugin.json` + every file under `dist/` — matching what
+      // installArtifact records for marketplace installs. node_modules/ is
+      // NOT integrity-tracked; the compensating control is isDevModeUnlocked()
+      // (this entire path is dev-mode-only).
       const receiptFiles: string[] = ["plugin.json"];
       try {
         const distFiles = await listFilesRecursive(resolve(installDir, "dist"));
@@ -1173,7 +1189,7 @@ export class PluginMarketplaceService {
             : undefined;
         if (code !== "ENOENT") throw err;
       }
-      await this.artifactStore.writeInstallReceipt(pluginId, {
+      await this.finalizeInstall(pluginId, {
         version: manifestVersion,
         installSource: "local-dev",
         artifactSha256: null,
