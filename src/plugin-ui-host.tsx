@@ -136,6 +136,14 @@ export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null 
       };
       onDomReadyRef.current = onDomReady;
       node.addEventListener("dom-ready", onDomReady);
+
+      // Race guard: the webview's initial load from `src` can complete before
+      // React's ref callback runs (local file:// URL loads in microseconds).
+      // If `did-finish-load` already fired before we attached the listener,
+      // `loading` would stay `true` forever. Check eagerly and clear if done.
+      if (typeof node.isLoading === "function" && !node.isLoading()) {
+        setLoading(false);
+      }
     }
   }, [view?.pluginId, view?.entryUrl]);
 
@@ -150,8 +158,14 @@ export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null 
       setLoading(false);
       return;
     }
+    // Only show the loading overlay when a webview will actually be rendered.
+    // If entryUrl is missing or pluginShellUrl / pluginPreloadUrl are absent,
+    // the render branch shows an inline error message — no webview, no
+    // `did-finish-load` event, so `loading=true` would stick forever.
+    const { shellUrl, preloadUrl } = readPluginAssetUrls();
+    const willRenderWebview = !!view.entryUrl && !!shellUrl && !!preloadUrl;
     setErrorText(null);
-    setLoading(true);
+    setLoading(willRenderWebview);
   }, [view]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
