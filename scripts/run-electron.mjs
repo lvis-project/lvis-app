@@ -8,6 +8,16 @@ const args = process.argv.slice(2);
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 
+// Ensure NODE_ENV is set so logger.ts can select pino-pretty at module load
+// time. This script handles unpackaged dev runs (`bun run start`); packaged
+// production builds are detected by the absence of process.defaultApp in the
+// Electron runtime (see src/lib/logger.ts). Setting "development" here when
+// not already set keeps the dev-run experience consistent regardless of the
+// shell's NODE_ENV.
+if (!env.NODE_ENV) {
+  env.NODE_ENV = "development";
+}
+
 function ensureWindowsUserDataDir(argsList, envVars, profileName) {
   if (process.platform !== "win32") return argsList;
   if (argsList.some((arg) => arg.startsWith("--user-data-dir="))) return argsList;
