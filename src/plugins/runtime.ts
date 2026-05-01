@@ -1287,7 +1287,7 @@ export class PluginRuntime {
   _testInjectPlugin(
     pluginId: string,
     toolName: string,
-    handler: (payload?: unknown) => Promise<unknown>,
+    handler: PluginToolHandler,
   ): void {
     const manifest: PluginManifest = {
       id: pluginId,
@@ -1301,7 +1301,7 @@ export class PluginRuntime {
     this.plugins.set(pluginId, {
       manifest,
       pluginRoot: "/tmp",
-      instance: {},
+      instance: { handlers: { [toolName]: handler } },
       methods,
     });
     this.methodMap.set(toolName, { pluginId, handler });
