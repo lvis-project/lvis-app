@@ -19,12 +19,27 @@ export interface AppBootstrapDeps {
  *
  * Uses a mounted ref to avoid late async resolutions writing to an unmounted
  * component (PR#44 HIGH).
+ *
+ * isMountedRef cleanup is in a separate [] effect so that re-runs caused by
+ * toggleCommandPopover identity changes do not reset the ref to false before
+ * the new effect body executes — which would permanently dead the IPC guard.
  */
 export function useAppBootstrap({
   api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
   setActiveView, toggleCommandPopover,
 }: AppBootstrapDeps) {
   const isMountedRef = useRef(true);
+
+  // Track component lifetime only — never re-runs, never resets ref mid-life.
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  // Mount-time side-effects + view-activate subscription.
+  // api and the refresh fns are stable references — eslint-disable covers the
+  // intentional omission of non-reactive stable deps.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     void refreshMarketplace();
     void refreshViews();
@@ -32,6 +47,11 @@ export function useAppBootstrap({
     void checkApiKey();
 
     const dv = api.onViewActivate((k) => { if (isMountedRef.current) setActiveView(k); });
+    return () => { dv(); };
+  }, []);
+
+  // Key listener re-wired whenever toggleCommandPopover changes identity.
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -39,10 +59,6 @@ export function useAppBootstrap({
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => {
-      isMountedRef.current = false;
-      dv();
-      window.removeEventListener("keydown", onKey);
-    };
+    return () => { window.removeEventListener("keydown", onKey); };
   }, [toggleCommandPopover]);
 }
