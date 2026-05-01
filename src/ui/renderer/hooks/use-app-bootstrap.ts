@@ -5,6 +5,7 @@ export interface AppBootstrapDeps {
   api: LvisApi;
   refreshMarketplace: () => Promise<void> | void;
   refreshViews: () => Promise<unknown> | unknown;
+  refreshCards: () => Promise<void> | void;
   checkApiKey: () => Promise<unknown> | unknown;
   setActiveView: (k: string) => void;
   openCommandPalette: () => void;
@@ -20,13 +21,14 @@ export interface AppBootstrapDeps {
  * component (PR#44 HIGH).
  */
 export function useAppBootstrap({
-  api, refreshMarketplace, refreshViews, checkApiKey,
+  api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
   setActiveView, openCommandPalette,
 }: AppBootstrapDeps) {
   const isMountedRef = useRef(true);
   useEffect(() => {
     void refreshMarketplace();
     void refreshViews();
+    void refreshCards();
     void checkApiKey();
 
     const dv = api.onViewActivate((k) => { if (isMountedRef.current) setActiveView(k); });

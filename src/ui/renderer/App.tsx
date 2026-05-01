@@ -37,6 +37,7 @@ import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { DropZoneOverlay } from "./components/DropZoneOverlay.js";
 import { SnapEdgeHighlight } from "./components/SnapEdgeHighlight.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
+import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
 import { useIndexedDocs } from "./hooks/use-indexed-docs.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
@@ -100,10 +101,19 @@ export function App() {
   // Marketplace + plugin UI extensions
   const {
     pluginViews,
+    pluginCards,
     installInFlight,
     installPlugin,
-    refreshViews, refreshMarketplace,
+    refreshViews, refreshMarketplace, refreshCards,
   } = usePluginMarketplace(api);
+
+  // Auth status for every plugin that declares `manifest.auth`
+  // (architecture.md §9.4a). Drives the 미인증 badge in both Settings →
+  // 플러그인 설정 (PluginConfigTab) and the chat-input plugin grid
+  // (PluginGridButton). Hoisting to App.tsx means a single live-poll
+  // + event-bridge subscription serves both surfaces — no duplicate
+  // listeners, no stale-state divergence between the two views.
+  const { statuses: pluginAuthStatuses } = usePluginAuthStatuses(api, pluginCards);
 
   // Sprint B — role preset, cost preview, attached docs
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets();
@@ -151,31 +161,74 @@ export function App() {
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
 
   // Build flat PluginEntry list for InputActionBar plugin grid.
+  // `unauthed` is set when the owning plugin declares `manifest.auth` AND its
+  // current statusTool result is `kind: "unauthed"`. The grid renders a
+  // small 🔒 indicator on those entries so users see the missing-auth state
+  // without first opening Settings.
   const pluginEntries = useMemo<PluginEntry[]>(
     () =>
       pluginViews.map((view) => ({
         viewKey: toViewKey(view),
+        pluginId: view.pluginId,
         label: getPluginViewLabel(view),
         icon: (view.extension as { icon?: string }).icon,
+        unauthed: pluginAuthStatuses.get(view.pluginId)?.kind === "unauthed",
       })),
-    [pluginViews],
+    [pluginViews, pluginAuthStatuses],
   );
 
   // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
   // click opens it in a separate magnetic-snap BrowserWindow instead of
   // switching the main window's active view.
+  //
+  // If the owning plugin declares `manifest.auth` AND its current state is
+  // unauthed, click invokes the loginTool first and only navigates to the
+  // view after auth succeeds. Otherwise the user lands on a "먼저 로그인
+  // 해주세요" panel and has to back out + open Settings to log in. The
+  // unauthed cue (🔒 corner badge + red dot on trigger) signals the redirect
+  // intent ahead of click; tooltip backs it up with text.
   const handleSidebarSelect = useCallback(
     (key: string) => {
       if (key.startsWith("plugin:")) {
         const view = pluginViews.find((v) => toViewKey(v) === key);
-        if (view?.extension.window?.defaultMode === "detached") {
+        if (!view) return;
+
+        const status = pluginAuthStatuses.get(view.pluginId);
+        const card = pluginCards.find((c) => c.id === view.pluginId);
+        const loginTool = card?.auth?.loginTool;
+        if (status?.kind === "unauthed" && loginTool) {
+          void (async () => {
+            try {
+              await api.callPluginMethod(loginTool);
+            } catch (err) {
+              // User cancelled / IPC rejected — leave them on the current
+              // view, do NOT navigate to the still-unauthed plugin view.
+              console.error(
+                `[plugin-auth] ${view.pluginId} loginTool ${loginTool} failed from grid click`,
+                err,
+              );
+              return;
+            }
+            // Login resolved — navigate to the view the user originally
+            // wanted. The `<pluginId>.auth.changed` event will flip the
+            // badge separately via the live-poll path.
+            if (view.extension.window?.defaultMode === "detached") {
+              void api.window?.openDetached(key);
+            } else {
+              setActiveView(key);
+            }
+          })();
+          return;
+        }
+
+        if (view.extension.window?.defaultMode === "detached") {
           void api.window?.openDetached(key);
           return;
         }
       }
       setActiveView(key);
     },
-    [api, pluginViews],
+    [api, pluginViews, pluginAuthStatuses, pluginCards],
   );
 
   // If the currently-open sidebar view belongs to a plugin that just got
@@ -284,7 +337,7 @@ export function App() {
 
   // ─── Effects ──────────────────────────────────
   useAppBootstrap({
-    api, refreshMarketplace, refreshViews, checkApiKey,
+    api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
     setActiveView,
     openCommandPalette: () => setCommandOpen(true),
   });
@@ -299,9 +352,10 @@ export function App() {
       if (!success) return;
       void refreshViews();
       void refreshMarketplace();
+      void refreshCards();
     });
     return unsubscribe;
-  }, [api, refreshViews, refreshMarketplace]);
+  }, [api, refreshViews, refreshMarketplace, refreshCards]);
 
   // Same lifecycle for uninstall — PluginConfigTab and any other surface
   // drive uninstall through the IPC handler which now broadcasts a result
@@ -313,9 +367,10 @@ export function App() {
       if (!success) return;
       void refreshViews();
       void refreshMarketplace();
+      void refreshCards();
     });
     return unsubscribe;
-  }, [api, refreshViews, refreshMarketplace]);
+  }, [api, refreshViews, refreshMarketplace, refreshCards]);
 
   const commandActions = useMemo(() => [
     { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
