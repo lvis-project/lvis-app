@@ -10,12 +10,10 @@ import { test, expect } from './fixtures';
  */
 
 test('command popover: Cmd/Ctrl+K opens and closes the popover', async ({ mainWindow }) => {
-  // Wait for the InputActionBar to appear (signals full React boot)
+  // Wait for the InputActionBar to appear (signals full React boot).
+  // 5 s timeout — failure to load is a real regression, not a skip.
   const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
-  const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
-    .then(() => true)
-    .catch(() => false);
-  test.skip(!found, 'CommandPopover trigger not found — skipping E2E.');
+  await expect(trigger).toBeVisible({ timeout: 5_000 });
 
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -61,7 +59,7 @@ test('command popover: search filters items and hides empty group', async ({ mai
   await expect(mainWindow.locator('[data-testid="command-group-slash"]')).not.toBeVisible({ timeout: 3_000 });
 });
 
-test('command popover: list has max-h constraint for scroll when 16+ items', async ({ mainWindow }) => {
+test('command popover: list has max-h constraint and is scrollable with 16+ items', async ({ mainWindow }) => {
   const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
   const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
     .then(() => true)
@@ -76,6 +74,11 @@ test('command popover: list has max-h constraint for scroll when 16+ items', asy
   const cls = await list.getAttribute('class');
   // Verify the scroll constraint class is present
   expect(cls).toContain('max-h-');
+
+  // Verify that all items are present (actions + slash commands) and the list
+  // is scroll-constrained: scrollHeight >= clientHeight when content overflows.
+  const scrollable = await list.evaluate((el) => el.scrollHeight >= el.clientHeight);
+  expect(scrollable).toBe(true);
 });
 
 test('command popover: slash command click inserts text and closes popover', async ({ mainWindow }) => {

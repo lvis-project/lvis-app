@@ -50,15 +50,19 @@ export function useAppBootstrap({
     return () => { dv(); };
   }, []);
 
-  // Key listener re-wired whenever toggleCommandPopover changes identity.
+  // Stable ref so the keydown handler is attached once and never re-attached
+  // when toggleCommandPopover identity changes (e.g. due to activeView updates).
+  const toggleRef = useRef(toggleCommandPopover);
+  useEffect(() => { toggleRef.current = toggleCommandPopover; });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        toggleCommandPopover();
+        toggleRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); };
-  }, [toggleCommandPopover]);
+  }, []);
 }
