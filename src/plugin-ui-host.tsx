@@ -141,8 +141,24 @@ export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null 
       // React's ref callback runs (local file:// URL loads in microseconds).
       // If `did-finish-load` already fired before we attached the listener,
       // `loading` would stay `true` forever. Check eagerly and clear if done.
-      if (typeof node.isLoading === "function" && !node.isLoading()) {
-        setLoading(false);
+      //
+      // Defer to dom-ready: Electron throws "WebView must be attached to the
+      // DOM and the dom-ready event emitted before this method can be called"
+      // if `isLoading()` runs in a window where the host has DOM-attached the
+      // element but the guest's dom-ready event has not yet fired. React 18's
+      // StrictMode mount/unmount/remount and fast ref re-attach (e.g. after
+      // a sidebar tab switch) can land inside this window. The throw bubbles
+      // up to React's ErrorBoundary as "앱 오류가 발생했습니다" with the
+      // entire plugin view replaced by the fallback. Wrap in try/catch so the
+      // eager-clear stays best-effort: if we win the race we clear loading;
+      // if we lose it the `did-finish-load` listener registered above clears
+      // it shortly after.
+      try {
+        if (typeof node.isLoading === "function" && !node.isLoading()) {
+          setLoading(false);
+        }
+      } catch {
+        // Guest not yet dom-ready — `did-finish-load` listener will clear.
       }
     }
   }, [view?.pluginId, view?.entryUrl]);
