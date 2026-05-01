@@ -86,7 +86,6 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
 
   const handleSelectAction = useCallback(
     (action: QuickAction) => {
-      if (composingRef.current) return;
       handleOpenChange(false);
       void action.run();
     },

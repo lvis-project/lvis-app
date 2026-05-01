@@ -57,8 +57,10 @@ export function useAppBootstrap({
 
   // Stable ref so the keydown handler is attached once and never re-attached
   // when toggleCommandPopover identity changes (e.g. due to activeView updates).
+  // Synchronous assignment (not useEffect) ensures the ref is always current
+  // before any paint — avoids stale ref on the render immediately after updates.
   const toggleRef = useRef(toggleCommandPopover);
-  useEffect(() => { toggleRef.current = toggleCommandPopover; });
+  toggleRef.current = toggleCommandPopover;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
