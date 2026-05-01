@@ -285,10 +285,12 @@ export function App() {
             "그래도 전송하시겠습니까? 취소하면 모델을 바꾼 뒤 다시 시도할 수 있습니다.",
         );
         if (!proceed) {
-          // Restore the typed text so the user can switch models and resend
-          // without retyping. setQuestion("") was called above before we
-          // knew about this guard branch.
-          setQuestion(t);
+          // Restore the original (untrimmed) draft text so the user can
+          // switch models and resend without retyping. We use `q` rather
+          // than `t = q.trim()` to preserve any intentional leading /
+          // trailing whitespace or newlines the user typed. setQuestion("")
+          // was called above before we knew about this guard branch.
+          setQuestion(q);
           if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
           return;
         }

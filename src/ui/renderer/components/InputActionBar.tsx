@@ -41,6 +41,17 @@ export interface InputActionBarProps {
   onToggleThinking: (enabled: boolean) => void | Promise<void>;
 }
 
+function attachButtonLabel(
+  disabled: boolean,
+  reason: "limit" | "no-api-key" | "context-overflow",
+): string {
+  if (!disabled) return "파일/이미지 첨부 (최대 5개)";
+  if (reason === "no-api-key") return "첨부 비활성 — API 키 설정 후 사용 가능";
+  if (reason === "context-overflow")
+    return "첨부 비활성 — 컨텍스트 한도, 자동 압축 후 사용 가능";
+  return "첨부 비활성 — 5/5 한도 도달";
+}
+
 export function InputActionBar({
   usedTokens,
   contextBudget,
@@ -79,15 +90,8 @@ export function InputActionBar({
           disabled={attachDisabled}
           data-testid="iab-attach-button"
           className="h-7 w-7 p-0"
-          title={
-            attachDisabled
-              ? attachDisabledReason === "no-api-key"
-                ? "API 키 설정 후 사용 가능"
-                : attachDisabledReason === "context-overflow"
-                  ? "컨텍스트 한도 — 자동 압축 후 사용 가능"
-                  : "첨부 한도 도달 (5/5)"
-              : "파일/이미지 첨부 (최대 5개)"
-          }
+          title={attachButtonLabel(attachDisabled, attachDisabledReason)}
+          aria-label={attachButtonLabel(attachDisabled, attachDisabledReason)}
         >
           <Paperclip className="h-3.5 w-3.5" />
         </Button>

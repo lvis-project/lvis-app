@@ -542,9 +542,9 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
             // Two-phase commit: setAttachments updater is the authority on
             // how many we can keep. flushSync forces the updater to run
             // synchronously so the captured `acceptedMarkers` is guaranteed
-            // populated before we call setQuestion. Without flushSync,
+            // populated before we insert at the caret. Without flushSync,
             // React 18 may batch / defer the updater and the marker
-            // insert can fire with an empty string (Copilot round 4 #4).
+            // insert can fire with an empty string.
             let acceptedMarkers = "";
             flushSync(() => {
               setAttachments((prev) => {
@@ -559,8 +559,15 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                 return [...prev, ...accepted];
               });
             });
+            // Insert at caret (matches the clipboard-paste path) instead of
+            // appending to the end. Falls back to append-at-end only when
+            // the imperative handle isn't yet wired (initial mount race).
             if (acceptedMarkers) {
-              setQuestion((prev) => prev + acceptedMarkers);
+              if (composerRef.current) {
+                composerRef.current.insertAtCursor(acceptedMarkers);
+              } else {
+                setQuestion((prev) => prev + acceptedMarkers);
+              }
             }
             // Return focus to the composer textarea so the user can keep
             // typing or use Cmd/Ctrl+A immediately after the file dialog

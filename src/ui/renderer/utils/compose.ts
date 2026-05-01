@@ -53,11 +53,18 @@ export function composeOutgoing(params: {
 
   // 2. Inline-replace paste markers with the actual pasted text. Now-safe
   //    because file augmentation already ran on the original body.
+  //
+  //    The split target intentionally matches any `[Pasted text #N +X lines]`
+  //    where X is *any* digit string — `parseMarkers()` accepts the same
+  //    loose suffix so the user could have edited the line count manually.
+  //    If we used `buildMarkerText(att)` (which embeds the original `lines`
+  //    value) the split would miss the edited form, leaving the marker
+  //    text in the body and the pasted content unsubstituted.
   for (const att of attachments) {
     if (att.kind !== "paste") continue;
-    const marker = buildMarkerText(att);
+    const re = new RegExp(`\\[Pasted text #${att.n}(?:\\s+\\+\\d+\\s+lines)?\\]`, "g");
     const replacement = `\n\n----- Pasted text #${att.n} (${att.lines} lines) -----\n${att.text}\n----- end Pasted text #${att.n} -----\n\n`;
-    body = body.split(marker).join(replacement);
+    body = body.replace(re, replacement);
   }
 
   // 3. Compose final text with optional role preset prefix.

@@ -25,6 +25,12 @@ import { handleClipboardPaste } from "../utils/clipboard-paste.js";
 
 export interface ComposerHandle {
   focus(): void;
+  /**
+   * Insert text at the current caret position (or replace selection if any).
+   * Used by the action-bar attach flow so file-picker markers land where the
+   * user is typing rather than always appending to the end of the body.
+   */
+  insertAtCursor(insertion: string): void;
 }
 
 export interface ComposerProps {
@@ -92,13 +98,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 ) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Empty deps are safe here: the handle methods read live values via
-  // closures over the stable `taRef` only — no per-render React state is
-  // captured, so there is no stale-closure risk.
-  useImperativeHandle(ref, () => ({
-    focus() { taRef.current?.focus(); },
-  }), []);
-
   // Live-derive attachments from textarea body (single source of truth).
   // Drop any whose N is no longer present in the body.
   const liveAttachments = useMemo(() => {
@@ -132,6 +131,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       });
     },
     [text, onTextChange],
+  );
+
+  // Expose imperative API to parents (focus + caret-aware insertion).
+  // Deps include `insertAtCursor` (which itself depends on `text` /
+  // `onTextChange`), so the handle is recreated whenever the closure's
+  // values change — callers via the ref always see the fresh function.
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus() { taRef.current?.focus(); },
+      insertAtCursor(insertion: string) { insertAtCursor(insertion); },
+    }),
+    [insertAtCursor],
   );
 
   const handlePaste = useCallback(

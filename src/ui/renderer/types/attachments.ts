@@ -26,22 +26,7 @@ export const PATH_COLLAPSE_THRESHOLD = 10;
  * Extensions that are unconditionally rejected by the file picker.
  * Lowercase comparison; users see a non-blocking error toast on attempt.
  */
-export const DENY_EXTENSIONS = [
-  "exe",
-  "bat",
-  "cmd",
-  "com",
-  "scr",
-  "vbs",
-  "msi",
-  "app",
-  "dmg",
-  "pkg",
-  "deb",
-  "rpm",
-  "sh",
-  "ps1",
-] as const;
+export { DENY_EXTENSIONS } from "../../../shared/attachments-deny-list.js";
 
 export type AttachmentKind = "image" | "file" | "paste";
 

@@ -12,23 +12,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { validateSender, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
+import { DENY_EXTENSIONS as DENY_LIST } from "../../shared/attachments-deny-list.js";
 
-const DENY_EXTENSIONS = new Set([
-  "exe",
-  "bat",
-  "cmd",
-  "com",
-  "scr",
-  "vbs",
-  "msi",
-  "app",
-  "dmg",
-  "pkg",
-  "deb",
-  "rpm",
-  "sh",
-  "ps1",
-]);
+// Convert the shared array into a Set once at module load for O(1) lookup
+// in the file-picker hot path. Source of truth lives in the shared module.
+const DENY_EXTENSIONS = new Set<string>(DENY_LIST);
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
 
