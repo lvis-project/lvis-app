@@ -1278,6 +1278,45 @@ export class PluginRuntime {
   }
 
   /**
+   * Test-only: register a plugin and handler directly without loading from disk.
+   * Allows unit tests to exercise `call()` and `getPerfStats()` via the public
+   * API rather than mutating private maps through `as unknown` casts.
+   *
+   * Not intended for production use — name is prefixed `_test` as a signal.
+   */
+  _testInjectPlugin(
+    pluginId: string,
+    toolName: string,
+    handler: (payload?: unknown) => Promise<unknown>,
+  ): void {
+    const manifest: PluginManifest = {
+      id: pluginId,
+      name: pluginId,
+      description: "test plugin",
+      version: "1.0.0",
+      entry: "index.js",
+      tools: [toolName],
+    };
+    const methods = new Map<string, PluginToolHandler>([[toolName, handler]]);
+    this.plugins.set(pluginId, {
+      manifest,
+      pluginRoot: "/tmp",
+      instance: {},
+      methods,
+    });
+    this.methodMap.set(toolName, { pluginId, handler });
+    if (!this.perfStats.has(pluginId)) {
+      this.perfStats.set(pluginId, {
+        startupMs: 0,
+        toolCallCount: 0,
+        errorCount: 0,
+        totalExecMs: 0,
+        lastCallAt: null,
+      });
+    }
+  }
+
+  /**
    * H2: Renderer-originated plugin invocation. Restricted to the method list
    * each plugin declares in manifest.uiCallable. Everything else must go
    * through ConversationLoop so MAX_PLUGIN_EXPANSION / PermissionManager /
