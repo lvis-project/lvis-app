@@ -401,9 +401,6 @@ export function App() {
             onExport={handleExport}
             onSearchToggle={searchToggleOverlay}
             onOpenSettings={() => setSettingsOpen(true)}
-            onOpenCommand={() => setCommandOpen(true)}
-            usedTokens={usedTokens}
-            contextBudget={contextBudget}
           />
 
           <MainContent
@@ -429,6 +426,7 @@ export function App() {
             loadedSkills={loadedSkills}
             hasAskQuestions={askQuestions.length > 0}
             activePluginView={activePluginView ?? null}
+            onOpenCommand={() => setCommandOpen(true)}
           />
         </main>
         </div>

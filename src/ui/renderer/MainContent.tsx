@@ -39,6 +39,7 @@ export interface MainContentProps {
   subAgentSpawns: Parameters<typeof ChatView>[0]["subAgentSpawns"];
   loadedSkills: Parameters<typeof ChatView>[0]["loadedSkills"];
   hasAskQuestions: boolean;
+  onOpenCommand: () => void;
   // plugin view
   activePluginView: PluginView | null;
 }
@@ -127,6 +128,7 @@ export function MainContent(props: MainContentProps): ReactNode {
             subAgentSpawns={props.subAgentSpawns}
             loadedSkills={props.loadedSkills}
             hasAskQuestions={props.hasAskQuestions}
+            onOpenCommand={props.onOpenCommand}
           />
         </ChatContextProvider>
       </MainPaneShell>

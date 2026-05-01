@@ -21,9 +21,6 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     onExport: vi.fn(),
     onSearchToggle: vi.fn(),
     onOpenSettings: vi.fn(),
-    onOpenCommand: vi.fn(),
-    usedTokens: 0,
-    contextBudget: 64000,
     ...overrides,
   };
 }
@@ -49,8 +46,8 @@ describe("MainToolbar", () => {
     renderWithProvider(defaultProps());
     expect(screen.getByText("새 대화")).toBeTruthy();
     expect(screen.getByTitle("더 많은 메뉴")).toBeTruthy();
-    // Token ring is leftmost
-    expect(document.querySelector("[data-testid='token-progress-ring']")).toBeTruthy();
+    // Token ring is now in ChatView input row, not MainToolbar
+    expect(document.querySelector("[data-testid='token-progress-ring']")).toBeNull();
   });
 
   it("calls onNewChat when 새 대화 button clicked", () => {

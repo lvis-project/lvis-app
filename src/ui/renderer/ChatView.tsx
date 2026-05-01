@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from "react";
-import { ChevronDown, KeyRound, Loader2, Paperclip, Pencil, Square, Star, User, X as XIcon, GitBranch } from "lucide-react";
+import { ChevronDown, Command as CommandIcon, KeyRound, Loader2, Paperclip, Pencil, Square, Star, User, X as XIcon, GitBranch } from "lucide-react";
+import { TokenProgressRing } from "./components/TokenProgressRing.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
@@ -51,9 +52,11 @@ export interface ChatViewProps {
   loadedSkills: SkillBadgeProps[];
   /** True when FloatingQuestionPanel (mounted in App) has pending questions — used to suppress routine overlay */
   hasAskQuestions: boolean;
+  /** Open the command palette (Ctrl/Cmd+K) */
+  onOpenCommand: () => void;
 }
 
-export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions }: ChatViewProps) {
+export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, onOpenCommand }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const {
@@ -458,6 +461,21 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
       <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
       <div className="border-t bg-card p-3 space-y-2">
         <div className="flex items-center gap-2 text-[11px]">
+            {/* ── Token progress ring + command button — leftmost in input row ── */}
+            <TokenProgressRing used={usedTokens} budget={contextBudget} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-7 w-7 items-center justify-center rounded p-0 hover:bg-muted text-muted-foreground"
+                  onClick={onOpenCommand}
+                  title="명령 팔레트 (Ctrl/Cmd+K)"
+                >
+                  <CommandIcon className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Ctrl/Cmd + K</TooltipContent>
+            </Tooltip>
             {/* Sprint B — Role preset dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
