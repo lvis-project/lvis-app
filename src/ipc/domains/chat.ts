@@ -8,7 +8,7 @@ import { ipcMain } from "electron";
 import type { WebContents } from "electron";
 import { redactForLLM } from "../../audit/dlp-filter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
-import type { ConversationLoop } from "../../engine/conversation-loop.js";
+import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "../../engine/proactive-source.js";
 import {
   REGISTERED_ROUTINES,
@@ -33,9 +33,6 @@ import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("chat");
 
-type ConversationTurnResult = {
-  stopReason?: "end_turn" | "tool_use" | "interrupted";
-};
 
 function removeOrphanToolUse(messages: GenericMessage[]): GenericMessage[] {
   const result = [...messages];
@@ -104,7 +101,7 @@ async function runStreamedTurn(
     shouldSuppressInterruptedTail?: () => boolean;
     clearInterruptedTailSuppression?: () => void;
   },
-): Promise<unknown> {
+): Promise<TurnResult> {
   const send = (payload: unknown) => webContents?.send(channel, { streamId, ...((payload as Record<string, unknown>) ?? {}) });
   const originSource = parseImportedTriggerEnvelope(input);
   const result = await conversationLoop.runTurn(
@@ -129,15 +126,11 @@ async function runStreamedTurn(
     undefined,
     originSource ? { originSource } : undefined,
   );
-  if (
-    options?.shouldSuppressInterruptedTail?.() &&
-    (result as ConversationTurnResult).stopReason === "interrupted"
-  ) {
+  if (options?.shouldSuppressInterruptedTail?.() && result.stopReason === "interrupted") {
     options.clearInterruptedTailSuppression?.();
     return result;
   }
-  const turnRoute = (result as { route?: string }).route;
-  send({ type: "done", ...(turnRoute === "command" ? { route: "command" } : {}) });
+  send({ type: "done", ...(result.route === "command" ? { route: "command" } : {}) });
   return result;
 }
 
@@ -159,10 +152,10 @@ export function registerChatHandlers(deps: IpcDeps): void {
   // read-only, sender guard optional
   ipcMain.handle("lvis:chat:has-provider", () => conversationLoop.hasProvider());
 
-  let activeStreamTurn: Promise<unknown> | null = null;
+  let activeStreamTurn: Promise<TurnResult> | null = null;
   let suppressInterruptedTail = false;
   let nextStreamId = 0;
-  const trackStreamTurn = (factory: () => Promise<unknown>) => {
+  const trackStreamTurn = (factory: () => Promise<TurnResult>) => {
     const turnPromise = factory().finally(() => {
       if (activeStreamTurn === turnPromise) activeStreamTurn = null;
     });
