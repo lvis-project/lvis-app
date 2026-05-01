@@ -3,9 +3,10 @@ import { buildPresetPrefix } from "../../../data/role-presets.js";
 
 /**
  * Multimodal attachment marker produced by the Composer component.
- * Represents a single image / file / paste entry the user added before
- * sending.  When multimodal wire-up is complete the caller passes
- * `attachments` to `api.chatSend(text, parts)`.
+ * Represents a single image entry (kind === "image") the user added before
+ * sending.  File and paste entries are serialised into inline text via the
+ * `raw` string, not as `Attachment` objects.  When multimodal wire-up is
+ * complete the caller passes `attachments` to `api.chatSend(text, parts)`.
  */
 export interface Attachment {
   /** Stable client-side id for React keying / de-dup. */
@@ -25,8 +26,11 @@ export interface ComposedOutgoing {
   /** Text portion — preset prefix + attached-doc notice + raw input. */
   text: string;
   /**
-   * Multimodal content parts derived from `attachments`.
-   * Currently always empty until the Composer wire-up PR lands.
+   * Image content parts populated by `composeOutgoing()` from the caller's
+   * `attachments` array.  The `Attachment` type is currently image-only;
+   * file and paste content is delivered via the `raw` text string, not as
+   * attachment objects.  Composer wire-up will supply the `attachments`
+   * array from the textarea state.
    */
   attachments: Array<{ type: "image"; mimeType: string; data: string }>;
 }
