@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import {
+  canEmitEvent,
   classifySubscription,
   requiredCapabilityForEmit,
   PLUGIN_PRIVATE_NAMESPACES,
@@ -77,6 +78,19 @@ describe("Phase 5 — capabilities module", () => {
       const prefix = priv.split(".")[0];
       expect(PUBLIC_EVENT_NAMESPACES.has(prefix)).toBe(false);
     }
+  });
+
+  it("HOST-only namespaces reject plugin emit regardless of declared capabilities", () => {
+    // `plugin.*` is reserved for host-side emit (lifecycle: plugin.installed,
+    // plugin.uninstalled). A plugin spoofing `plugin.installed` could trick
+    // work-proactive's onPluginsChanged subscribers into reacting to fake
+    // lifecycle. Gate here.
+    expect(canEmitEvent("plugin.installed", [])).toBe(false);
+    expect(canEmitEvent("plugin.uninstalled", [])).toBe(false);
+    expect(canEmitEvent("plugin.installed", ["mail-source", "calendar-source"])).toBe(false);
+    // Sentinel host-only capability would not unlock either; no capability
+    // declarable in a plugin manifest grants `plugin.*` emit.
+    expect(canEmitEvent("plugin.installed", ["host-internal-cap-that-does-not-exist"])).toBe(false);
   });
 });
 

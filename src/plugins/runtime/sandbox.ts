@@ -137,6 +137,8 @@ export function createNoopHostApi(
     registerKeywords: () => {},
     emitEvent: () => {},
     onEvent: () => () => {},
+    getInstalledPluginIds: () => [],
+    onPluginsChanged: () => () => {},
     addTask: () => {},
     getSecret: () => null,
     callTool: async () => {
