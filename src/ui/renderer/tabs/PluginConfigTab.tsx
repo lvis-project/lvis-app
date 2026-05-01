@@ -8,6 +8,8 @@ import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { InstallInFlight } from "../hooks/use-plugin-marketplace.js";
 import type { PluginCardSummary } from "../types.js";
+import { PluginAuthSection } from "../components/PluginAuthSection.js";
+import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
 import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
 
 type KV = { key: string; value: string };
@@ -38,6 +40,16 @@ export function PluginConfigTab() {
   const [plugins, setPlugins] = useState<PluginCardSummary[]>([]);
   const [installInFlight, setInstallInFlight] = useState<InstallInFlight>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Test environments do not always inject `window.lvisApi`; fall back to
+  // `null` so unrelated PluginConfigTab tests don't crash before they
+  // exercise their own code paths. The hook short-circuits when api is null.
+  const apiForAuthHook = (() => {
+    try { return getApi(); } catch { return null; }
+  })();
+  const { statuses: authStatuses, refresh: refreshAuthStatus } = usePluginAuthStatuses(
+    apiForAuthHook,
+    plugins,
+  );
   const [entries, setEntries] = useState<KV[]>([]);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
@@ -361,6 +373,18 @@ export function PluginConfigTab() {
                       {p.loadStatus === "disabled" && (
                         <span className="inline-block rounded-full bg-gray-100 px-1.5 py-px text-[9px] font-medium text-gray-600">비활성</span>
                       )}
+                      {/* Auth status — only when manifest declares `auth` and the plugin is
+                          loaded. The list-level badge is a "you need to do something here"
+                          surface; we render only `unauthed` (red) so the row stays visually
+                          quiet for the happy-path. Click → detail panel handles login flow. */}
+                      {p.auth && authStatuses.get(p.id)?.kind === "unauthed" && (
+                        <span
+                          className="inline-block rounded-full bg-red-100 px-1.5 py-px text-[9px] font-medium text-red-700"
+                          title="이 플러그인은 로그인이 필요합니다"
+                        >
+                          🔒 미인증
+                        </span>
+                      )}
                     </div>
                   </button>
                 ))}
@@ -456,6 +480,22 @@ export function PluginConfigTab() {
                     제거
                   </Button>
                 </div>
+
+                {/* Auth section — only when manifest declares `auth` and the
+                    api bridge is available. See architecture.md §9.4a. */}
+                {selectedPlugin.auth && apiForAuthHook && (
+                  <>
+                    <Separator />
+                    <PluginAuthSection
+                      api={apiForAuthHook}
+                      pluginId={selectedPlugin.id}
+                      pluginName={selectedPlugin.name}
+                      auth={selectedPlugin.auth}
+                      state={authStatuses.get(selectedPlugin.id) ?? { kind: "loading" }}
+                      onRefresh={() => refreshAuthStatus(selectedPlugin.id)}
+                    />
+                  </>
+                )}
 
                 {/* Tools section */}
                 {selectedPlugin.tools.length > 0 && (

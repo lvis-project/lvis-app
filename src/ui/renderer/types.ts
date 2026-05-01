@@ -72,6 +72,26 @@ export type PluginCardSummary = {
   publisher?: string;
   /** §9.2 Track B — declarative settings schema, when the manifest declares one. */
   configSchema?: PluginConfigSchemaSummary;
+  /** Optional declarative auth contract — see architecture.md §9.4a "Plugin-Owned OAuth — Host UI Surface". */
+  auth?: PluginAuthSummary;
+};
+
+/**
+ * Mirror of host-side `PluginAuthSpec` for renderer consumption — kept as a
+ * separate name to make the renderer/host boundary explicit. Field shape
+ * matches by contract (architect review §9.4a Host UI Surface).
+ */
+export type PluginAuthSummary = {
+  label?: string;
+  statusTool: string;
+  loginTool: string;
+  logoutTool?: string;
+};
+
+/** Recommended return shape of `auth.statusTool`. Host parses defensively. */
+export type PluginAuthStatusResult = {
+  authenticated: boolean;
+  account?: string;
 };
 
 export type LLMVendorSettingsRenderer = {
@@ -269,6 +289,14 @@ export type LvisApi = {
   listPluginUiExtensions: () => Promise<PluginUiExtension[]>;
   readPluginUiModule: (pluginId: string, viewId: string) => Promise<string>;
   callPluginMethod: (m: string, p?: unknown) => Promise<unknown>;
+  /**
+   * Subscribe to plugin-emitted events forwarded by the host event bridge
+   * (`boot/plugins.ts` → `lvis:plugin:event`). Plugin must declare the type
+   * in `manifest.emittedEvents[]` and the type's namespace prefix must not
+   * be in `PLUGIN_PRIVATE_NAMESPACES`. Returns an unsubscribe function.
+   * Used by `usePluginAuthStatuses` for `<pluginId>.auth.changed`.
+   */
+  onPluginEvent?: (eventType: string, handler: (data: unknown) => void) => (() => void);
   listPluginCards: () => Promise<PluginCardSummary[]>;
   addTask: (t: unknown) => Promise<Task>;
   queryTasks: (f?: unknown) => Promise<Task[]>;

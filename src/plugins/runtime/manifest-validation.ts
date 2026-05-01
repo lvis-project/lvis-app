@@ -278,6 +278,36 @@ export async function parsePluginJson(
     }
   }
 
+  // Plugin auth UI surface (architecture.md §9.4a) — auth.{statusTool,
+  // loginTool, logoutTool?} must all be members of uiCallable[]. AJV cannot
+  // express cross-array membership without a custom keyword, so this lives
+  // alongside the other hand-rolled cross-field checks.
+  if (parsed.auth) {
+    const authToolKeys: Array<"statusTool" | "loginTool" | "logoutTool"> = [
+      "statusTool",
+      "loginTool",
+      "logoutTool",
+    ];
+    for (const key of authToolKeys) {
+      const value = parsed.auth[key];
+      if (value === undefined) continue; // logoutTool is optional
+      if (typeof value !== "string") {
+        fail(
+          `auth.${key}`,
+          "must be a string",
+          `"auth": { "statusTool": "ms_status", "loginTool": "ms_login" }`,
+        );
+      }
+      if (!uiCallable.includes(value)) {
+        fail(
+          `auth.${key}`,
+          `tool '${value}' is not declared in uiCallable[]`,
+          `add "${value}" to uiCallable[] (and tools[]) so the host UI surface can invoke it`,
+        );
+      }
+    }
+  }
+
   // Phase 5 §1 — keywords[].skillId must be in tools[].
   const kw = Array.isArray(parsed.keywords) ? parsed.keywords : [];
   for (let i = 0; i < kw.length; i += 1) {
