@@ -566,6 +566,8 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       await runtime.restartPlugin("tb.devlink-promoted");
       expect(runtime.listPluginIds()).not.toContain("tb.devlink-promoted");
+      // Verify auditLog injection worked before trusting the calls assertion.
+      expect(auditCalls.length).toBeGreaterThan(0);
       expect(auditCalls).toContainEqual(
         expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
       );
