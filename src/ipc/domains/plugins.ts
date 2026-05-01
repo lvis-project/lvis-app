@@ -20,6 +20,7 @@ import { NOTIFICATION_KINDS } from "../../main/notification-service.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
+import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -580,21 +581,26 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     const { webContentsId, pluginId, entryUrl } = payload ?? {};
+    plog("debug", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REGISTER, webContentsId, entryUrl }, "webview register requested");
     if (typeof webContentsId !== "number" || !Number.isFinite(webContentsId)) {
       logRegisterReject("invalid-webcontents-id", payload);
+      plog("warn", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-webcontents-id" }, "webview register rejected");
       return { ok: false, error: "invalid-webcontents-id" };
     }
     if (typeof pluginId !== "string" || !pluginRuntime.getPluginManifest(pluginId)) {
       logRegisterReject("unknown-plugin-id", { webContentsId, pluginId });
+      plog("warn", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "unknown-plugin-id" }, "webview register rejected");
       return { ok: false, error: "unknown-plugin-id" };
     }
     if (typeof entryUrl !== "string" || !entryUrl.startsWith("file://") || entryUrl.length <= "file://".length) {
       logRegisterReject("invalid-entry-url", { webContentsId, pluginId, entryUrl });
+      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-entry-url" }, "webview register rejected");
       return { ok: false, error: "invalid-entry-url" };
     }
     const rawInstallRoot = pluginRuntime.getPluginRoot(pluginId);
     if (!rawInstallRoot) {
       logRegisterReject("plugin-not-loaded", { webContentsId, pluginId });
+      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "plugin-not-loaded" }, "webview register rejected");
       return { ok: false, error: "plugin-not-loaded" };
     }
     let entryFsPath: string;
@@ -602,6 +608,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       entryFsPath = fileURLToPath(entryUrl);
     } catch {
       logRegisterReject("invalid-entry-url", { webContentsId, pluginId, entryUrl });
+      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-entry-url" }, "webview register rejected");
       return { ok: false, error: "invalid-entry-url" };
     }
     if (devLinkedEntryAllowed()) {
@@ -609,12 +616,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         realpathSync(entryFsPath);
       } catch {
         logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, entryFsPath });
+        plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
         return { ok: false, error: "entry-url-outside-install-root" };
       }
       const binding = { pluginId, entryUrl };
       pluginWebviewRegistry.set(webContentsId, binding);
       for (const resolve of pendingEntryUrlResolvers.get(webContentsId) ?? []) resolve(binding);
       pendingEntryUrlResolvers.delete(webContentsId);
+      plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
       return { ok: true };
     }
     let realRoot: string;
@@ -624,17 +633,20 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       realEntry = realpathSync(entryFsPath);
     } catch {
       logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, entryFsPath, rawInstallRoot });
+      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
     const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
     if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
       logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, realEntry, realRoot });
+      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
     const binding = { pluginId, entryUrl };
     pluginWebviewRegistry.set(webContentsId, binding);
     for (const resolve of pendingEntryUrlResolvers.get(webContentsId) ?? []) resolve(binding);
     pendingEntryUrlResolvers.delete(webContentsId);
+    plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
     return { ok: true };
   });
 

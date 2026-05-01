@@ -9,6 +9,7 @@
 import { createDynamicTool, type Tool } from "../tools/base.js";
 import type { PluginRuntime } from "./runtime.js";
 import type { PluginManifest } from "./types.js";
+import { plog, PluginPhase } from "./lifecycle-log.js";
 
 const GENERIC_PAYLOAD_SCHEMA = {
   type: "object",
@@ -69,6 +70,7 @@ function buildPluginTool(
     replacedBy: schemaEntry?.replacedBy,
     jsonSchema: typed ?? GENERIC_PAYLOAD_SCHEMA,
     execute: async (rawInput) => {
+      plog("debug", { pluginId, phase: PluginPhase.INVOKE_START, toolName, inputType: typeof rawInput, inputKeys: rawInput !== null && typeof rawInput === "object" ? Object.keys(rawInput as object).length : 0 }, "tool invocation start");
       // Both typed and untyped paths accept a JSON-string input (some provider
       // paths deliver tool arguments pre-serialized). Parse once at the entry
       // point so the downstream flat/wrapped split sees a real object.
@@ -90,11 +92,13 @@ function buildPluginTool(
       }
       try {
         const result = await pluginRuntime.call(toolName, finalPayload);
+        plog("debug", { pluginId, phase: PluginPhase.INVOKE_OK, toolName }, "tool invocation ok");
         return {
           output: typeof result === "string" ? result : JSON.stringify(result, null, 2),
           isError: false,
         };
       } catch (err) {
+        plog("warn", { pluginId, phase: PluginPhase.INVOKE_FAIL, toolName, err }, "tool invocation failed");
         return {
           output: err instanceof Error ? err.message : String(err),
           isError: true,
