@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { costTier, estimateTurnCost } from "../../../lib/cost-estimator.js";
 import { lookupPricing } from "../../../shared/pricing-data.js";
+import type { ComposedOutgoing } from "../utils/compose.js";
 
 /**
  * Phase 5 — cost estimate hook.
@@ -18,7 +19,7 @@ export function useCostEstimate(params: {
   llmVendor: string;
   llmModel: string;
   maxOutputTokens: number;
-  composeOutgoing: (raw: string) => string;
+  composeOutgoing: (raw: string) => Pick<ComposedOutgoing, "text">;
 }) {
   const { entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing } = params;
 
@@ -43,7 +44,7 @@ export function useCostEstimate(params: {
 
   const costEstimate = useMemo(() => {
     const pricing = lookupPricing(llmVendor, llmModel);
-    const draft = question ? composeOutgoing(question) : "";
+    const draft = question ? composeOutgoing(question).text : "";
     return estimateTurnCost({ historySerialized, draft, maxOutputTokens, pricing });
   }, [historySerialized, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing]);
 
