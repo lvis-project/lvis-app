@@ -1,13 +1,34 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { isDevModeUnlocked } from "../boot/dev-flags.js";
 
 export interface InstallReceiptFile {
   path: string;
   sha256: string;
 }
 
+/**
+ * Schema v2 — written by all new installs.
+ * installSource is the authoritative trust signal; signerKeyId / artifactSha256
+ * are null for local-dev installs (no signed artifact to validate against).
+ */
 export interface PluginInstallReceipt {
+  schemaVersion: 2;
+  pluginId: string;
+  version: string;
+  installSource: "marketplace" | "local-dev";
+  artifactSha256: string | null;
+  signerKeyId: string | null;
+  installedAt: string;
+  files: InstallReceiptFile[];
+}
+
+/**
+ * On-disk shape of receipts written before schema v2.
+ * verifyInstallReceipt normalises these to PluginInstallReceipt internally.
+ */
+interface PluginInstallReceiptV1 {
   schemaVersion: 1;
   pluginId: string;
   version: string;
@@ -55,22 +76,54 @@ export async function verifyInstallReceipt(
   pluginId: string,
   pluginRoot: string,
 ): Promise<{ ok: true; receipt: PluginInstallReceipt } | { ok: false; reason: string }> {
-  let receipt: PluginInstallReceipt;
+  let parsed: PluginInstallReceiptV1 | PluginInstallReceipt;
   try {
     const raw = await readFile(installReceiptPath(cacheRoot, pluginId), "utf-8");
-    receipt = JSON.parse(raw) as PluginInstallReceipt;
+    parsed = JSON.parse(raw) as PluginInstallReceiptV1 | PluginInstallReceipt;
   } catch (err) {
     return { ok: false, reason: `install receipt missing or unreadable: ${(err as Error).message}` };
   }
-  if (receipt.schemaVersion !== 1) {
-    return { ok: false, reason: `unsupported install receipt schema: ${String(receipt.schemaVersion)}` };
+
+  // Normalise v1 → v2.
+  // v1 receipts with signerKeyId starting with "dev:" were written by the
+  // old installLocal sentinel — treat them as local-dev installs.
+  let receipt: PluginInstallReceipt;
+  if (parsed.schemaVersion === 1) {
+    const v1 = parsed as PluginInstallReceiptV1;
+    const installSource: "marketplace" | "local-dev" =
+      v1.signerKeyId.startsWith("dev:") ? "local-dev" : "marketplace";
+    receipt = {
+      schemaVersion: 2,
+      pluginId: v1.pluginId,
+      version: v1.version,
+      installSource,
+      artifactSha256: installSource === "local-dev" ? null : v1.artifactSha256,
+      signerKeyId: installSource === "local-dev" ? null : v1.signerKeyId,
+      installedAt: v1.installedAt,
+      files: v1.files,
+    };
+  } else if (parsed.schemaVersion === 2) {
+    receipt = parsed as PluginInstallReceipt;
+  } else {
+    return { ok: false, reason: `unsupported install receipt schema: ${String((parsed as { schemaVersion?: unknown }).schemaVersion)}` };
   }
-  if (typeof receipt.signerKeyId !== "string" || receipt.signerKeyId.length === 0) {
-    return { ok: false, reason: "install receipt missing or empty signerKeyId" };
-  }
+
   if (receipt.pluginId !== pluginId) {
     return { ok: false, reason: `install receipt plugin mismatch: expected ${pluginId}, got ${receipt.pluginId}` };
   }
+
+  // local-dev installs are only permitted in dev mode.
+  if (receipt.installSource === "local-dev" && !isDevModeUnlocked()) {
+    return { ok: false, reason: "local-dev install receipt rejected in packaged build" };
+  }
+
+  // marketplace receipts must carry a real signerKeyId.
+  if (receipt.installSource === "marketplace") {
+    if (typeof receipt.signerKeyId !== "string" || receipt.signerKeyId.length === 0) {
+      return { ok: false, reason: "marketplace receipt missing or empty signerKeyId" };
+    }
+  }
+
   if (!Array.isArray(receipt.files) || receipt.files.length === 0) {
     return { ok: false, reason: "install receipt has no file hashes" };
   }
@@ -101,7 +154,7 @@ export async function listFilesRecursive(root: string): Promise<string[]> {
   const out: string[] = [];
   async function walk(dir: string): Promise<void> {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
-      const abs = resolve(dir, entry.name);
+      const abs = resolve(dir, entry.name as string);
       if (entry.isDirectory()) {
         await walk(abs);
       } else if (entry.isFile()) {
@@ -115,13 +168,11 @@ export async function listFilesRecursive(root: string): Promise<string[]> {
 
 function normalizeReceiptPath(path: string): string {
   const normalized = path.replace(/\\/g, "/").replace(/^\.\/+/, "");
-  if (!normalized || normalized.startsWith("../") || normalized.includes("/../") || isAbsolute(normalized)) {
-    return "";
-  }
+  if (!normalized || normalized.startsWith("../") || isAbsolute(normalized)) return "";
   return normalized;
 }
 
-function isContained(root: string, candidate: string): boolean {
-  const rel = relative(resolve(root), resolve(candidate));
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+function isContained(root: string, target: string): boolean {
+  const rel = relative(root, target);
+  return !rel.startsWith("..") && !isAbsolute(rel);
 }

@@ -86,9 +86,10 @@ describe("Phase 1 — plugin trust boundary", () => {
 
   async function writeReceipt(pluginId: string, pluginDir: string): Promise<void> {
     const receipt: PluginInstallReceipt = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       pluginId,
       version: "1.0.0",
+      installSource: "marketplace",
       artifactSha256: "a".repeat(64),
       signerKeyId: "poc-v1",
       installedAt: new Date(0).toISOString(),
@@ -368,9 +369,9 @@ describe("Phase 1 — plugin trust boundary", () => {
     });
   });
 
-  // ───────────────────────────── §Step 5: dev-signer packaged guard ─────
+  // ───────────────────────────── §Step 5: local-dev installSource guard ─────
 
-  describe("dev: signerKeyId rejected in packaged builds", () => {
+  describe("local-dev installSource rejected in packaged builds", () => {
     const savedLvisDev = process.env.LVIS_DEV;
     beforeEach(() => {
       _resetForTest();
@@ -381,18 +382,19 @@ describe("Phase 1 — plugin trust boundary", () => {
       else process.env.LVIS_DEV = savedLvisDev;
     });
 
-    it("packaged build + dev: signerKeyId → plugin marked failed", async () => {
+    it("packaged build + v2 local-dev receipt → plugin marked failed", async () => {
       delete process.env.LVIS_DEV;
       setIsPackaged(true);
       const pluginDir = join(pluginsRoot, "p-dev-signer");
       const manifestPath = await writePluginAt(pluginDir, "tb.dev-signer");
 
       const devReceipt: PluginInstallReceipt = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         pluginId: "tb.dev-signer",
         version: "1.0.0",
-        artifactSha256: "dev:local-install",
-        signerKeyId: "dev:local-install",
+        installSource: "local-dev",
+        artifactSha256: null,
+        signerKeyId: null,
         installedAt: new Date(0).toISOString(),
         files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
       };
@@ -413,22 +415,56 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(auditCalls).toContainEqual(
         expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
       );
-      const rejection = auditCalls.find((c) => c.message === "plugin_integrity_rejected");
-      expect(rejection?.extras?.["signerKeyId"]).toBe("dev:local-install");
     });
 
-    it("unpackaged build + dev: signerKeyId → plugin loads normally", async () => {
+    it("packaged build + v1 dev: sentinel receipt → normalised to local-dev → rejected", async () => {
+      // v1 receipts with signerKeyId starting with "dev:" are normalised to
+      // installSource:"local-dev" for backward compat with old installLocal.
+      delete process.env.LVIS_DEV;
+      setIsPackaged(true);
+      const pluginDir = join(pluginsRoot, "p-v1-dev-signer");
+      const manifestPath = await writePluginAt(pluginDir, "tb.v1-dev-signer");
+
+      // Write a raw v1 JSON receipt (bypassing writeInstallReceipt which would upgrade)
+      const v1Receipt = {
+        schemaVersion: 1,
+        pluginId: "tb.v1-dev-signer",
+        version: "1.0.0",
+        artifactSha256: "dev:local-install",
+        signerKeyId: "dev:local-install",
+        installedAt: new Date(0).toISOString(),
+        files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
+      };
+      const { writeFile: wf, mkdir: mk } = await import("node:fs/promises");
+      const { resolve: res } = await import("node:path");
+      const receiptPath = res(cacheRoot, "tb.v1-dev-signer", "install-receipt.json");
+      await mk(res(cacheRoot, "tb.v1-dev-signer"), { recursive: true });
+      await wf(receiptPath, `${JSON.stringify(v1Receipt, null, 2)}\n`, "utf-8");
+
+      await writeRegistry([{ id: "tb.v1-dev-signer", manifestPath, installedBy: "user" }]);
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+        installReceiptCacheRoot: cacheRoot,
+      });
+      await runtime.load();
+      expect(runtime.listPluginIds()).not.toContain("tb.v1-dev-signer");
+    });
+
+    it("unpackaged build + local-dev receipt → plugin loads normally", async () => {
       process.env.LVIS_DEV = "1";
       setIsPackaged(false);
       const pluginDir = join(pluginsRoot, "p-dev-signer-unpkg");
       const manifestPath = await writePluginAt(pluginDir, "tb.dev-signer-unpkg");
 
       const devReceipt: PluginInstallReceipt = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         pluginId: "tb.dev-signer-unpkg",
         version: "1.0.0",
-        artifactSha256: "dev:local-install",
-        signerKeyId: "dev:local-install",
+        installSource: "local-dev",
+        artifactSha256: null,
+        signerKeyId: null,
         installedAt: new Date(0).toISOString(),
         files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
       };
@@ -446,18 +482,19 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(runtime.listPluginIds()).toContain("tb.dev-signer-unpkg");
     });
 
-    it("packaged build + dev: signerKeyId via restartPlugin → rejected", async () => {
+    it("packaged build + local-dev receipt via restartPlugin → rejected", async () => {
       process.env.LVIS_DEV = "1";
       setIsPackaged(false);
       const pluginDir = join(pluginsRoot, "p-restart-dev-signer");
       const manifestPath = await writePluginAt(pluginDir, "tb.restart-dev-signer");
 
       const devReceipt: PluginInstallReceipt = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         pluginId: "tb.restart-dev-signer",
         version: "1.0.0",
-        artifactSha256: "dev:local-install",
-        signerKeyId: "dev:local-install",
+        installSource: "local-dev",
+        artifactSha256: null,
+        signerKeyId: null,
         installedAt: new Date(0).toISOString(),
         files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
       };
