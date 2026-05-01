@@ -735,9 +735,6 @@ export async function initPluginRuntime(
               input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} actual=${manifestCapabilities.join("|")}`,
             });
           } catch { /* audit must not break host */ }
-          log.warn(
-            `plugin:${pluginId} emitEvent('${type}') dropped — missing capability '${requiredCap}'`,
-          );
           plog("warn", { pluginId, phase: PluginPhase.CAPABILITY_DENY, capability: requiredCap ?? type, eventType: type, reason: "missing_capability" }, "capability denied");
           return;
         }

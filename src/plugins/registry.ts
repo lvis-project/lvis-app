@@ -19,7 +19,13 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     }
     throw err;
   }
-  const parsed = JSON.parse(raw) as PluginRegistry;
+  let parsed: PluginRegistry;
+  try {
+    parsed = JSON.parse(raw) as PluginRegistry;
+  } catch (err) {
+    plog("error", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_FAIL, err, reason: "invalid_json", registryPath }, "registry parse failed");
+    throw err;
+  }
   if (!Array.isArray(parsed.plugins)) {
     plog("error", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_FAIL, reason: "invalid_format", registryPath }, "registry malformed");
     throw new Error(`Invalid plugin registry: ${registryPath}`);

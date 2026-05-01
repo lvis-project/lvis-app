@@ -224,7 +224,9 @@ export class PluginRuntime {
     for (const plan of loadPlan) {
       const manifestPath = plan.manifestPath;
       const pluginRoot = dirname(manifestPath);
-      const pluginId = plan.pluginIdHint ?? `<unresolved:${basename(manifestPath)}>`;
+      // pluginId starts as hint (may be "<unresolved:basename>"); reassigned to
+      // manifest.id once the manifest is parsed so all post-read phases are consistent.
+      let pluginId = plan.pluginIdHint ?? `<unresolved:${basename(manifestPath)}>`;
       plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
       if (plan.pluginIdHint) {
         const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
@@ -242,7 +244,6 @@ export class PluginRuntime {
       try {
         manifest = await this.readManifest(manifestPath);
       } catch (err) {
-        log.error(`${(err as Error).message}`);
         plog("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason: "manifest_read" }, "manifest read failed");
         if (plan.enabled && plan.pluginIdHint) {
           this.markFailed(plan.pluginIdHint, {
@@ -252,6 +253,8 @@ export class PluginRuntime {
         }
         continue;
       }
+      // Reassign to manifest.id so all subsequent phases use the canonical id.
+      pluginId = manifest.id;
       this.knownPluginManifests.set(manifest.id, manifest);
       this.failedPluginStubs.delete(manifest.id);
       if (!plan.enabled) {
@@ -286,7 +289,6 @@ export class PluginRuntime {
         entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
       } catch (err) {
         const reason = (err as Error).message;
-        log.error(`${manifest.id} rejected: ${reason}`);
         plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "entry_path" }, "entry path rejected");
         this.auditLog?.("error", "plugin_entry_path_rejected", {
           pluginId: manifest.id,
@@ -304,7 +306,6 @@ export class PluginRuntime {
           createPlugin?: RuntimePluginFactory;
         };
       } catch (err) {
-        log.error(`${manifest.id} import failed: %s`, (err as Error).message);
         plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "import" }, "import failed");
         this.auditLog?.("error", "plugin_import_failed", {
           pluginId: manifest.id,
@@ -315,7 +316,6 @@ export class PluginRuntime {
       }
       const createPlugin = module.default ?? module.createPlugin;
       if (!createPlugin) {
-        log.error(`${manifest.id} entry does not export default/createPlugin — skipped`);
         plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin");
         this.markFailed(manifest.id);
         continue;
@@ -340,7 +340,6 @@ export class PluginRuntime {
       for (const toolName of manifest.tools) {
         const handler = instance.handlers[toolName];
         if (!handler) {
-          log.warn({ pluginId: manifest.id, toolName }, `missing handler '${toolName}' — tool disabled`);
           plog("warn", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler");
           continue;
         }
@@ -416,7 +415,6 @@ export class PluginRuntime {
         const stats = this.perfStats.get(id);
         if (stats) stats.startupMs = elapsed;
         if (elapsed > SLOW_THRESHOLD_MS) {
-          log.warn(`slow plugin: ${id} finished in ${elapsed}ms`);
           plog("warn", { pluginId: id, phase: PluginPhase.START_SLOW, elapsedMs: elapsed }, "plugin start slow");
         } else {
           plog("debug", { pluginId: id, phase: PluginPhase.START_OK, elapsedMs: elapsed }, "plugin start ok");
@@ -437,7 +435,6 @@ export class PluginRuntime {
     }
 
     for (const { id, reason } of failed) {
-      log.error(`start failed (non-fatal): ${reason}`);
       plog("error", { pluginId: id, phase: PluginPhase.START_FAIL, reason }, "plugin start failed");
       const plugin = this.plugins.get(id);
       if (!plugin) continue;
@@ -472,7 +469,6 @@ export class PluginRuntime {
     plog("info", { pluginId, phase: PluginPhase.RESTART_REQUEST }, "restart requested");
     const plugin = this.plugins.get(pluginId);
     if (!plugin) {
-      log.warn(`restartPlugin: plugin not loaded — ${pluginId}`);
       plog("warn", { pluginId, phase: PluginPhase.RESTART_REQUEST, reason: "not_loaded" }, "restart no-op — plugin not loaded");
       return;
     }
@@ -481,7 +477,6 @@ export class PluginRuntime {
       await plugin.instance.stop?.();
       plog("debug", { pluginId, phase: PluginPhase.RESTART_STOP_OK }, "stopped previous instance");
     } catch (err) {
-      log.error(`stop during restartPlugin failed: %s`, (err as Error).message);
       plog("error", { pluginId, phase: PluginPhase.RESTART_STOP_FAIL, err }, "stop during restart failed");
     }
 
@@ -537,7 +532,7 @@ export class PluginRuntime {
       const manifestPath = resolve(pluginRoot, "plugin.json");
       manifest = await this.readManifest(manifestPath);
     } catch (err) {
-      log.error(`failed to read manifest during restartPlugin: %s`, (err as Error).message);
+      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "manifest_read" }, "manifest read failed during restart");
       this.markFailed(pluginId);
       return;
     }
@@ -553,7 +548,6 @@ export class PluginRuntime {
       };
       plog("debug", { pluginId, phase: PluginPhase.RESTART_RELOAD_OK }, "module re-imported");
     } catch (err) {
-      log.error(`import failed during restartPlugin: %s`, (err as Error).message);
       plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err }, "module re-import failed");
       this.markFailed(pluginId);
       return;
@@ -561,7 +555,7 @@ export class PluginRuntime {
 
     const createPlugin = module.default ?? module.createPlugin;
     if (!createPlugin) {
-      log.error(`entry does not export default/createPlugin after restartPlugin`);
+      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin after restart");
       this.markFailed(pluginId);
       return;
     }
@@ -583,7 +577,7 @@ export class PluginRuntime {
         }),
       );
     } catch (err) {
-      log.error(`createPlugin failed during restartPlugin: %s`, (err as Error).message);
+      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "createPlugin_failed" }, "createPlugin failed during restart");
       this.markFailed(pluginId);
       return;
     }
@@ -592,7 +586,7 @@ export class PluginRuntime {
     for (const toolName of manifest.tools) {
       const handler = instance.handlers[toolName];
       if (!handler) {
-        log.warn(`missing handler '${toolName}' after restartPlugin — tool disabled`);
+        plog("warn", { pluginId, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler after restart");
         continue;
       }
       methods.set(toolName, handler);
@@ -617,7 +611,6 @@ export class PluginRuntime {
       await instance.start?.();
       plog("debug", { pluginId, phase: PluginPhase.RESTART_START_OK }, "restart complete");
     } catch (err) {
-      log.error(`start after restartPlugin failed: %s`, (err as Error).message);
       plog("error", { pluginId, phase: PluginPhase.RESTART_START_FAIL, err }, "start after restart failed");
       this.markFailed(pluginId);
       for (const method of methods.keys()) {

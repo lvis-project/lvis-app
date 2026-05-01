@@ -210,7 +210,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("bad-plugin");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad\.method'|schema validation failed/));
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/manifest read failed/),
+      expect.objectContaining({ phase: PluginPhase.VALIDATION_FAIL }),
+    );
     errSpy.mockRestore();
   });
 
@@ -236,7 +239,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("bad-leading-digit");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name '1bad_name'|schema validation failed/));
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/manifest read failed/),
+      expect.objectContaining({ phase: PluginPhase.VALIDATION_FAIL }),
+    );
     errSpy.mockRestore();
   });
 
@@ -262,7 +268,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("bad-hyphen");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid tool name 'bad-name'|schema validation failed/));
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/manifest read failed/),
+      expect.objectContaining({ phase: PluginPhase.VALIDATION_FAIL }),
+    );
     errSpy.mockRestore();
   });
 
@@ -287,7 +296,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("no-description");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/description|must be a non-empty string/i));
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/manifest read failed/),
+      expect.objectContaining({ phase: PluginPhase.VALIDATION_FAIL }),
+    );
     errSpy.mockRestore();
   });
 
@@ -312,7 +324,10 @@ describe("PluginRuntime.disable", () => {
     const runtime = makeRuntime();
     await runtime.load();
     expect(runtime.listPluginIds()).not.toContain("empty-description");
-    expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/description|must be a non-empty string/i));
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/manifest read failed/),
+      expect.objectContaining({ phase: PluginPhase.VALIDATION_FAIL }),
+    );
     errSpy.mockRestore();
   });
 

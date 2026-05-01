@@ -29,15 +29,17 @@ const log = createLogger("plugin-lifecycle");
  * phase label, a future regression in one will be indistinguishable from a
  * regression in the other when reading the log stream.
  *
- * Naming convention: `"lifecycle:<area>:<verb>"`
+ * Naming convention: `"lifecycle:<area>[:<sub>]:<verb>"`
  *   - area:  discovery | validation | load | register | start | invoke |
  *            event | webview | restart | stop | config | capability
+ *   - sub:   optional sub-area (e.g. `tool`, `keywords` under `register`;
+ *            `stop`, `reload`, `start` under `restart`; `load` under `webview`)
  *   - verb:  start | ok | fail | skip | retry | timeout
  *     (use `start` for entry, `ok` for success, `fail` for caught error,
  *      `skip` for silent decision branches that previously had no log)
  *
  * Example: "lifecycle:restart:stop:fail" means "restart hit an error while
- * trying to stop the previous instance".
+ * trying to stop the previous instance" (area=restart, sub=stop, verb=fail).
  */
 export const PluginPhase = {
   // discovery — registry hydrate, manifest path resolution
