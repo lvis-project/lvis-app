@@ -30,7 +30,7 @@
  *  19) 전체 전이 시퀀스
  *  20) signalConversation은 RUNNING에서 state 변경 없음
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { strict as assert } from "node:assert";
 
 import {
@@ -216,12 +216,17 @@ describe("SECURITY_GATE: IdleSchedulerService 5-state", () => {
   });
 
   it("case 6: IDLE_SCAN + 빈 큐 → workerClient 미호출", async () => {
-    const { sched, worker } = makeService();
-    sched._testForceTransition("IDLE_SCAN", "test-case");
-    sched._testTick();
-    await new Promise((r) => setTimeout(r, 10));
-    expect(worker.processCount).toBe(0);
-    expect(worker.enqueueCalls.length).toBe(0);
+    vi.useFakeTimers();
+    try {
+      const { sched, worker } = makeService();
+      sched._testForceTransition("IDLE_SCAN", "test-case");
+      sched._testTick();
+      await vi.runAllTimersAsync();
+      expect(worker.processCount).toBe(0);
+      expect(worker.enqueueCalls.length).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("case 7: IDLE_SCAN + 큐 존재 → workerClient.enqueue + processOne 호출", async () => {
@@ -273,23 +278,28 @@ describe("SECURITY_GATE: IdleSchedulerService 5-state", () => {
   });
 
   it("case 11: RESUME_DELAY 타이머 만료 → RUNNING", async () => {
-    const pm = new FakePowerMonitor();
-    const worker = makeMockWorker();
-    const sched = new IdleSchedulerService({
-      workerClient: worker,
-      powerMonitor: pm,
-      tickIntervalMs: 1_000_000,
-      resumeDelayMs: 30,
-      chunkCooldownMs: 0,
-      throttledCooldownMs: 0,
-      logger: () => {},
-    });
-    sched.start();
-    pm.emit("resume");
-    expect(sched.getState()).toBe("RESUME_DELAY");
-    await new Promise((r) => setTimeout(r, 60));
-    expect(sched.getState()).toBe("RUNNING");
-    sched.stop();
+    vi.useFakeTimers();
+    try {
+      const pm = new FakePowerMonitor();
+      const worker = makeMockWorker();
+      const sched = new IdleSchedulerService({
+        workerClient: worker,
+        powerMonitor: pm,
+        tickIntervalMs: 1_000_000,
+        resumeDelayMs: 30,
+        chunkCooldownMs: 0,
+        throttledCooldownMs: 0,
+        logger: () => {},
+      });
+      sched.start();
+      pm.emit("resume");
+      expect(sched.getState()).toBe("RESUME_DELAY");
+      await vi.advanceTimersByTimeAsync(60);
+      expect(sched.getState()).toBe("RUNNING");
+      sched.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("case 12: onBattery + IDLE_SCAN → RUNNING 강등", () => {
