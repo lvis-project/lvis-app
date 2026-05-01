@@ -234,6 +234,8 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직
 
 `task.*` 도 사실상 host-only 지만 별도 set 에 등록하지 않음 — plugin 측 emit 이 owner-mismatch 로 이미 거부되기 때문 (tasks-plugin-split paused 상태에서 plugin 측 emitter 부재).
 
+`onPluginsChanged` 의 `PluginLifecycleEvent` union 에는 `_future` sentinel variant (`{type: "_future"; readonly __exhaustive: never}`) 가 포함된다. 런타임에는 절대 발생하지 않으며, 향후 `"updated"` 같은 신규 variant 추가 시 exhaustive `switch (event.type)` consumer 가 silently 누락되지 않도록 `default:` branch 를 강제하는 type-level forward-compat 가드다.
+
 ### 2.4 AJV 매니페스트 검증 플로우
 
 ```

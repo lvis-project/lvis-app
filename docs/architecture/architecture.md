@@ -2252,7 +2252,18 @@ stateDiagram-v2
 | `onShutdown(handler)` | **[Phase 2]** Electron `before-quit` 체인에 정리 핸들러 등록. 5s timeout. | 전체 |
 | `triggerConversation(spec)` | **[Brain P0]** 관찰 신호로부터 ConversationLoop 능동 발사 ("먼저 말 거는 비서" 차별화). `conversation-trigger` capability gated — 일반 plugin 차단. 자세한 사양: [`conversation-trigger.md`](../references/conversation-trigger.md). Brain track 은 §7 Proactive Engine 의 sub-phase 로 P0~P5 진행. | proactive (work-proactive) |
 | `getInstalledPluginIds()` | 현재 로드된 plugin id snapshot (caller 자기 자신 제외, load order). 플러그인 의존성 체크용 (예: work-proactive 가 ms-graph 설치 여부 확인). 무게이트 — 향후 capability-filtered 변종 (`getProvidersFor(capability)`) 으로 진화 예정. | proactive (work-proactive) |
-| `onPluginsChanged(handler)` | 플러그인 install/uninstall 이벤트 구독. handler 는 `PluginLifecycleEvent` 받음 (`{type: "installed", pluginId, source: "marketplace"\|"local-dev"} \| {type: "uninstalled", pluginId}`). Self-event 자동 필터. P0 는 `installed`/`uninstalled` 만 — `updated` 는 별도 spec. | proactive (work-proactive) |
+| `onPluginsChanged(handler)` | 플러그인 install/uninstall 이벤트 구독. handler 는 `PluginLifecycleEvent` 받음 (`{type: "installed", pluginId, source: "marketplace"\|"local-dev"} \| {type: "uninstalled", pluginId} \| { type: "_future"; readonly __exhaustive: never }`). Self-event 자동 필터. P0 는 `installed`/`uninstalled` 만 — `updated` 는 별도 spec. `_future` sentinel 은 type-level only (런타임에 발생 안 함) — exhaustive `switch` 를 강제하기 위한 forward-compat 가드. | proactive (work-proactive) |
+
+**`plugin.*` host-only event namespace (lifecycle 이벤트 spoof 차단)**
+
+`plugin.installed` / `plugin.uninstalled` 두 이벤트는 호스트가 발행자다. plugin 측에서 spoof 발사하지 못하도록 `plugin.*` namespace 가 **host-only** 로 예약되어 있다 (`src/plugins/capabilities.ts` 의 `HOST_ONLY_EMIT_NAMESPACES`).
+
+- **호스트 emit (허용)**: `boot/types.ts:emitEvent` — install/uninstall 처리 끝난 직후 `ipc/domains/plugins.ts` (`lvis:plugins:install`, `lvis:plugins:uninstall`, `lvis:plugins:install-local`) 와 `main.ts` (`lvis://` deep-link install) 에서 발행. 게이트 우회는 의도된 호스트 권한.
+- **plugin emit (거부)**: `hostApi.emitEvent("plugin.installed", …)` 는 `boot/steps/plugin-runtime.ts` 의 `canEmitEvent` 가 호스트-only namespace 매칭 시 발행 무시 + warn. plugin webview 의 IPC bridge (`lvis:plugin:emit-event`) 도 동일 set 을 체크해서 `host-only-namespace:plugin` 으로 reject.
+- **subscriber**: 일반 plugin 은 `hostApi.onPluginsChanged(handler)` 로만 구독. handler 는 self-event (자기 자신이 subject 인 경우) 가 자동 필터된 상태로 받는다. 현재 work-proactive 의 detector lifecycle 재계산이 유일한 consumer (§7 detector lifecycle 참조).
+- **`source` discriminator**: install 시 `marketplace` / `local-dev` 구분. production consumer 는 `local-dev` 무시 권장 — 개발자의 로컬 테스트 플러그인이 downstream cascade 를 trigger 하지 않도록.
+
+같은 host-only 정신을 갖는 `task.*` namespace 는 별도 set 에 등록하지 않았다 — plugin 측에 emitter 가 없어 owner-mismatch 로 이미 거부되기 때문 (tasks-plugin-split paused 상태). plugin 이 `task.*` 를 emit 하기 시작하면 `tasks-source` capability 도입 또는 host-only set 추가가 필요하다.
 
 **Plugin-Owned OAuth Authentication (PR 3 — 신 정책)**
 
