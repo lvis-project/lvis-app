@@ -530,7 +530,6 @@ export function App() {
             onToggleSessionStar={handleToggleSessionStar}
             isSessionStarred={(sessionId) => Boolean(isSessionStarred(sessionId))}
             onExport={handleExport}
-            onSearchToggle={searchToggleOverlay}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenCommand={() => setCommandOpen(true)}
             onOpenGlobalSearch={() => setGlobalSearchOpen(true)}

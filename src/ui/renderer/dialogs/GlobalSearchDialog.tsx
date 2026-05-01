@@ -54,30 +54,40 @@ export function GlobalSearchDialog({
   const [memoriesLoading, setMemoriesLoading] = useState(false);
 
   // Load memories when dialog opens or query changes.
+  // Debounce 200 ms to avoid a new IPC request on every keystroke, then use
+  // a `cancelled` flag to discard responses from superseded requests (IPC
+  // calls can resolve out-of-order when the query changes rapidly).
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     setMemoriesLoading(true);
-    const fetch = query.trim()
-      ? api.memorySearchEntries(query.trim()).then((results) =>
-          results.map((r) => ({
-            filename: r.filename ?? r.title,
-            title: r.title,
-            excerpt: r.excerpt,
-            updatedAt: r.updatedAt,
-          })),
-        )
-      : api.memoryListEntries().then((entries) =>
-          entries.map((e) => ({
-            filename: e.filename,
-            title: e.title,
-            excerpt: e.content?.slice(0, 120) ?? "",
-            updatedAt: e.updatedAt ?? "",
-          })),
-        );
-    fetch
-      .then((entries) => setMemories(entries))
-      .catch(() => setMemories([]))
-      .finally(() => setMemoriesLoading(false));
+    const timer = setTimeout(() => {
+      const fetch = query.trim()
+        ? api.memorySearchEntries(query.trim()).then((results) =>
+            results.map((r) => ({
+              filename: r.filename ?? r.title,
+              title: r.title,
+              excerpt: r.excerpt,
+              updatedAt: r.updatedAt,
+            })),
+          )
+        : api.memoryListEntries().then((entries) =>
+            entries.map((e) => ({
+              filename: e.filename,
+              title: e.title,
+              excerpt: e.content?.slice(0, 120) ?? "",
+              updatedAt: e.updatedAt ?? "",
+            })),
+          );
+      fetch
+        .then((entries) => { if (!cancelled) setMemories(entries); })
+        .catch(() => { if (!cancelled) setMemories([]); })
+        .finally(() => { if (!cancelled) setMemoriesLoading(false); });
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [open, query, api]);
 
   // Filter sessions and starred locally (they are already in-memory).
@@ -85,10 +95,20 @@ export function GlobalSearchDialog({
     matchesQuery(s.title || "제목 없는 세션", query),
   );
 
-  // Starred items: deduplicate by sessionId (session-level stars have messageIndex === -1).
-  const filteredStarred = starred.filter((s) =>
-    matchesQuery(s.text || "", query),
-  );
+  // Starred items: deduplicate by sessionId so each session appears at most
+  // once. When a session has multiple starred messages the first match wins.
+  // (Session-level stars have messageIndex === -1 and are always unique per
+  // session, but message-level stars can accumulate multiple entries for the
+  // same session across different messageIndexes.)
+  const filteredStarred = (() => {
+    const seen = new Map<string, StarredItem>();
+    for (const s of starred) {
+      if (matchesQuery(s.text || "", query) && !seen.has(s.sessionId)) {
+        seen.set(s.sessionId, s);
+      }
+    }
+    return [...seen.values()];
+  })();
 
   const handleClose = () => {
     onOpenChange(false);
@@ -133,10 +153,10 @@ export function GlobalSearchDialog({
                     <span className="text-xs text-muted-foreground">로딩 중...</span>
                   </CommandItem>
                 ) : (
-                  memories.map((m) => (
+                  memories.map((m, idx) => (
                     <CommandItem
-                      key={m.filename}
-                      value={`memory:${m.filename}`}
+                      key={m.filename || `m-${idx}`}
+                      value={`memory:${m.filename || idx}`}
                       onSelect={handleSelectMemory}
                     >
                       <BookMarked className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />

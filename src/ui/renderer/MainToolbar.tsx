@@ -17,7 +17,6 @@ export interface MainToolbarProps {
   onToggleSessionStar: (sessionId: string, title: string) => void | Promise<void>;
   isSessionStarred: (sessionId: string) => boolean;
   onExport: (format: "markdown" | "json") => void | Promise<void>;
-  onSearchToggle: () => void;
   onOpenSettings: () => void;
   onOpenCommand: () => void;
   onOpenGlobalSearch: () => void;
@@ -38,7 +37,6 @@ export function MainToolbar({
   onToggleSessionStar,
   isSessionStarred,
   onExport,
-  onSearchToggle,
   onOpenSettings,
   onOpenCommand,
   onOpenGlobalSearch,
