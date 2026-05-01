@@ -1104,6 +1104,48 @@ export class PluginRuntime {
     return result;
   }
 
+  /**
+   * Test-only: inject a plugin + method handler directly into the runtime's
+   * internal maps without going through the full load/start lifecycle.
+   *
+   * Populates `plugins`, `methodMap`, and `perfStats` so that `call()`,
+   * `getPerfStats()`, and related queries work without disk fixtures.
+   *
+   * @internal Only call from test files. The leading underscore signals
+   *   test-only usage; tree-shaking removes it from production bundles.
+   */
+  _testInjectPlugin(
+    pluginId: string,
+    toolName: string,
+    handler: (payload?: unknown) => Promise<unknown>,
+  ): void {
+    const stub: LoadedPlugin = {
+      manifest: {
+        id: pluginId,
+        name: pluginId,
+        version: "1.0.0",
+        entry: "index.js",
+        description: "Test fixture",
+        publisher: "Test fixture",
+        tools: [toolName],
+      },
+      pluginRoot: "/tmp/test-inject",
+      instance: {} as import("../types.js").RuntimePlugin,
+      methods: new Map([[toolName, handler as import("../types.js").PluginToolHandler]]),
+    };
+    this.plugins.set(pluginId, stub);
+    this.methodMap.set(toolName, { pluginId, handler: handler as import("../types.js").PluginToolHandler });
+    if (!this.perfStats.has(pluginId)) {
+      this.perfStats.set(pluginId, {
+        startupMs: 0,
+        toolCallCount: 0,
+        errorCount: 0,
+        totalExecMs: 0,
+        lastCallAt: null,
+      });
+    }
+  }
+
   registerDisposer(pluginId: string, dispose: () => void): void {
     let list = this.disposers.get(pluginId);
     if (!list) {
