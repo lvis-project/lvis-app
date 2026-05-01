@@ -109,6 +109,53 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     await expect(svc.rollbackPlugin("com.lge.sample")).rejects.toThrow(/No prior version/);
   });
 
+  it("installPlugin clears _devLinked on same-version fast-path (touchInstalledRegistryEntry)", async () => {
+    // Pre-populate registry with the same version that will be installed.
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "com.lge.sample", manifestPath: "com.lge.sample/plugin.json", enabled: true, installedBy: "user", _devLinked: true }],
+      }),
+      "utf-8",
+    );
+    const svc = makeService();
+    // installPlugin with a version already in registry triggers touchInstalledRegistryEntry.
+    await svc.installPlugin("com.lge.sample", "1.0.0");
+    await svc.installPlugin("com.lge.sample", "1.0.0"); // same version → fast path
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0]._devLinked).toBeUndefined();
+  });
+
+  it("installPlugin clears _devLinked when overwriting an existing dev-link entry", async () => {
+    // Pre-populate registry as if dev:link had registered the plugin.
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "com.lge.sample", manifestPath: "com.lge.sample/plugin.json", enabled: true, installedBy: "user", _devLinked: true }],
+      }),
+      "utf-8",
+    );
+    const svc = makeService();
+    await svc.installPlugin("com.lge.sample", "1.0.0");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0]._devLinked).toBeUndefined();
+  });
+
+  it("rollbackPlugin clears _devLinked on the rolled-back entry", async () => {
+    const svc = makeService();
+    await svc.installPlugin("com.lge.sample", "1.0.0");
+    await svc.installPlugin("com.lge.sample", "1.1.0");
+    // Manually set _devLinked to simulate stale state.
+    const reg = JSON.parse(await readFile(registryPath, "utf-8"));
+    reg.plugins[0]._devLinked = true;
+    await writeFile(registryPath, JSON.stringify(reg), "utf-8");
+    await svc.rollbackPlugin("com.lge.sample");
+    const restored = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(restored.plugins[0]._devLinked).toBeUndefined();
+  });
+
   it("rollback preserves installedBy and bundleRefs metadata", async () => {
     const svc = makeService();
     await svc.installPlugin("com.lge.sample", "1.0.0");
