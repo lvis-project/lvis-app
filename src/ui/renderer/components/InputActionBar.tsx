@@ -1,4 +1,4 @@
-import { ChevronDown, Paperclip, User } from "lucide-react";
+import { ChevronDown, Paperclip, Search, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import {
   DropdownMenu,
@@ -6,6 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu.js";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { TokenProgressRing } from "./TokenProgressRing.js";
 import { PluginGridButton, type PluginEntry } from "./PluginGridButton.js";
 import { SlashCommandButton } from "./SlashCommandButton.js";
@@ -18,6 +19,7 @@ export interface InputActionBarProps {
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
   onInsertSlashCommand: (cmd: string) => void;
+  onToggleChatSearch: () => void;
   // Trailing — attachment picker (single unified button, no count badge —
   // count lives on the in-composer chip)
   onAttach: () => void | Promise<void>;
@@ -58,6 +60,7 @@ export function InputActionBar({
   plugins,
   onSelectPlugin,
   onInsertSlashCommand,
+  onToggleChatSearch,
   onAttach,
   attachDisabled,
   attachDisabledReason = "limit",
@@ -74,6 +77,21 @@ export function InputActionBar({
       {/* Leading cluster */}
       <div className="flex items-center gap-2" data-testid="iab-leading">
         <TokenProgressRing used={usedTokens} budget={contextBudget} />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={onToggleChatSearch}
+              title="대화 검색 (Cmd/Ctrl+F)"
+              aria-label="대화 검색 (Cmd/Ctrl+F)"
+            >
+              <Search className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>대화 검색 (Cmd/Ctrl+F)</TooltipContent>
+        </Tooltip>
         <PluginGridButton plugins={plugins} onSelect={onSelectPlugin} />
         <SlashCommandButton onInsert={onInsertSlashCommand} />
       </div>

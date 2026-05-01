@@ -84,6 +84,7 @@ export interface ChatContextValue {
   searchNext: () => void;
   searchPrev: () => void;
   searchCloseOverlay: () => void;
+  searchToggleOverlay: () => void;
 
   // Context / usage
   contextOverflowPct: number;

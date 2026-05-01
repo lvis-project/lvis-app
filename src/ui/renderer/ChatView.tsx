@@ -77,7 +77,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
     onPrevRoutineResult, onNextRoutineResult, runningRoutines,
     triggerResult, onDismissTrigger, onAcceptTrigger,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
-    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
+    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
@@ -473,6 +473,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           plugins={plugins}
           onSelectPlugin={onSelectPlugin}
           onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
+          onToggleChatSearch={searchToggleOverlay}
           attachDisabled={
             attachments.length >= ATTACH_MAX_COUNT ||
             hasApiKey === false ||

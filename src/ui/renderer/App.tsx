@@ -14,6 +14,7 @@ import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
 import { CommandPaletteDialog } from "./dialogs/CommandPaletteDialog.js";
+import { GlobalSearchDialog } from "./dialogs/GlobalSearchDialog.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { MainContent } from "./MainContent.js";
 import { Sidebar } from "./Sidebar.js";
@@ -85,6 +86,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
   const [commandOpen, setCommandOpen] = useState(false);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const {
     routineResult,
     routineQueueIndex,
@@ -451,7 +453,7 @@ export function App() {
     runningRoutines,
     triggerResult, onDismissTrigger: dismissTrigger, onAcceptTrigger: importTriggerIntoChat,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
-    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay,
+    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
@@ -528,9 +530,10 @@ export function App() {
             onToggleSessionStar={handleToggleSessionStar}
             isSessionStarred={(sessionId) => Boolean(isSessionStarred(sessionId))}
             onExport={handleExport}
-            onSearchToggle={searchToggleOverlay}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenCommand={() => setCommandOpen(true)}
+            onOpenGlobalSearch={() => { refreshSessions(); setGlobalSearchOpen(true); }}
+            onOpenStarredView={() => setActiveView("starred")}
           />
 
           <MainContent
@@ -577,6 +580,20 @@ export function App() {
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
       <ApprovalQueueStatus queue={approvalQueue} />
       <CommandPaletteDialog open={commandOpen} onOpenChange={setCommandOpen} actions={commandActions} />
+      {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.
+          Re-mounts on every open → catalog reloaded each time. If that proves slow,
+          introduce a persistent cache hook in a separate PR. */}
+      {globalSearchOpen && (
+        <GlobalSearchDialog
+          open={globalSearchOpen}
+          onOpenChange={setGlobalSearchOpen}
+          api={api}
+          sessions={sessions}
+          starred={starred}
+          onLoadSession={handleLoadSession}
+          onOpenMemoryView={() => setActiveView("memory")}
+        />
+      )}
       <DropZoneOverlay />
       <DevConsoleToggle />
       {/* Snap edge highlight — shown when a detached child window enters the snap zone */}
