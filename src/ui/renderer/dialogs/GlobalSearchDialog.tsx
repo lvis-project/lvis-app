@@ -162,11 +162,11 @@ export function GlobalSearchDialog({
                       <BookMarked className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm">
-                          {highlightText(m.title, query) ?? m.title}
+                          {highlightText(m.title, trimmedQuery) ?? m.title}
                         </div>
                         {m.excerpt && (
                           <div className="truncate text-[11px] text-muted-foreground">
-                            {highlightText(m.excerpt, query) ?? m.excerpt}
+                            {highlightText(m.excerpt, trimmedQuery) ?? m.excerpt}
                           </div>
                         )}
                       </div>
@@ -188,7 +188,7 @@ export function GlobalSearchDialog({
                     <MessageSquare className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm">
-                        {highlightText(s.title || "제목 없는 세션", query) ?? (s.title || "제목 없는 세션")}
+                        {highlightText(s.title || "제목 없는 세션", trimmedQuery) ?? (s.title || "제목 없는 세션")}
                       </div>
                       <div className="text-[11px] text-muted-foreground">
                         {new Date(s.modifiedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
@@ -211,7 +211,7 @@ export function GlobalSearchDialog({
                     <Star className="mr-2 h-3.5 w-3.5 shrink-0 text-yellow-400" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm">
-                        {highlightText(s.text, query) ?? s.text}
+                        {highlightText(s.text, trimmedQuery) ?? s.text}
                       </div>
                     </div>
                   </CommandItem>
