@@ -35,7 +35,7 @@ const SLASH_COMMANDS: { cmd: string; label: string }[] = [
 export interface CommandPopoverProps {
   /** Quick-action items (홈, 태스크, 루틴, 설정, 새 대화, plugin views …) */
   actions: QuickAction[];
-  /** Called when a slash command is selected; receives the command string e.g. "/help" */
+  /** Called when a slash command is selected; receives the command string with a trailing space e.g. "/help " */
   onInsert: (cmd: string) => void;
   /** Controlled open state — toggled externally (e.g. Cmd/Ctrl+K) */
   open: boolean;
@@ -146,7 +146,9 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
         data-testid="command-popover"
         onKeyDown={handleKeyDown}
         onKeyDownCapture={handleKeyDownCapture}
-        // Prevent Radix from auto-closing on interaction inside
+        // onInteractOutside fires for click-outside / focus-outside; we only
+        // reset query state here — the actual close is handled by Radix
+        // Popover's onOpenChange (via handleOpenChange).
         onInteractOutside={() => { setQuery(""); }}
       >
         <Command

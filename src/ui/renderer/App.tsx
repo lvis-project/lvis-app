@@ -398,7 +398,14 @@ export function App() {
   useAppBootstrap({
     api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
     setActiveView,
-    toggleCommandPopover: () => setCommandPopoverOpen((prev) => !prev),
+    toggleCommandPopover: () => {
+      if (activeView !== "home") {
+        setActiveView("home");
+        setCommandPopoverOpen(true);
+      } else {
+        setCommandPopoverOpen((prev) => !prev);
+      }
+    },
   });
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
 
