@@ -226,7 +226,7 @@ export class PluginRuntime {
       const pluginRoot = dirname(manifestPath);
       // pluginId starts as hint (may be "<unresolved:basename>"); reassigned to
       // manifest.id once the manifest is parsed so all post-read phases are consistent.
-      let pluginId = plan.pluginIdHint ?? `<unresolved:${basename(manifestPath)}>`;
+      let pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(manifestPath))}>`;
       plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
       if (plan.pluginIdHint) {
         const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
@@ -244,6 +244,7 @@ export class PluginRuntime {
       try {
         manifest = await this.readManifest(manifestPath);
       } catch (err) {
+        log.error(`${(err as Error).message}`);
         plog("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason: "manifest_read" }, "manifest read failed");
         if (plan.enabled && plan.pluginIdHint) {
           this.markFailed(plan.pluginIdHint, {
