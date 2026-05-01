@@ -18,6 +18,8 @@ export interface InputActionBarProps {
   contextBudget: number;
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
+  installingPluginIds?: Set<string>;
+  onOpenMarketplace: () => void;
   onInsertSlashCommand: (cmd: string) => void;
   onToggleChatSearch: () => void;
   commandActions: QuickAction[];
@@ -62,6 +64,8 @@ export function InputActionBar({
   contextBudget,
   plugins,
   onSelectPlugin,
+  installingPluginIds,
+  onOpenMarketplace,
   onInsertSlashCommand,
   onToggleChatSearch,
   commandActions,
@@ -98,7 +102,12 @@ export function InputActionBar({
           </TooltipTrigger>
           <TooltipContent>대화 검색 (Cmd/Ctrl+F)</TooltipContent>
         </Tooltip>
-        <PluginGridButton plugins={plugins} onSelect={onSelectPlugin} />
+        <PluginGridButton
+          plugins={plugins}
+          onSelect={onSelectPlugin}
+          installingPluginIds={installingPluginIds}
+          onOpenMarketplace={onOpenMarketplace}
+        />
         <CommandPopover
           actions={commandActions}
           onInsert={onInsertSlashCommand}

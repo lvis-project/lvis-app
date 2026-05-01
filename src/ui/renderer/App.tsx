@@ -48,6 +48,8 @@ import { useChatContextValue } from "./hooks/use-chat-context-value.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { FloatingQuestionPanel } from "./components/FloatingQuestionPanel.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
+import { useInstallingPlugins } from "./hooks/use-installing-plugins.js";
+import { MARKETPLACE_URL } from "./constants.js";
 
 // RoutineCard: new routine result card
 export { RoutineCard } from "./components/RoutineCard.js";
@@ -175,10 +177,19 @@ export function App() {
         viewKey: toViewKey(view),
         pluginId: view.pluginId,
         label: getPluginViewLabel(view),
-        icon: (view.extension as { icon?: string }).icon,
+        icon: view.icon,
         unauthed: pluginAuthStatuses.get(view.pluginId)?.kind === "unauthed",
       })),
     [pluginViews, pluginAuthStatuses],
+  );
+
+  // Track in-flight plugin installs for the grid overlay spinner.
+  const installingPluginIds = useInstallingPlugins(api);
+
+  // Open marketplace in the system browser.
+  const onOpenMarketplace = useCallback(
+    () => void api.openExternalUrl(MARKETPLACE_URL),
+    [api],
   );
 
   // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
@@ -578,6 +589,8 @@ export function App() {
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={setCommandPopoverOpen}
+            installingPluginIds={installingPluginIds}
+            onOpenMarketplace={onOpenMarketplace}
             activePluginView={activePluginView ?? null}
           />
         </main>

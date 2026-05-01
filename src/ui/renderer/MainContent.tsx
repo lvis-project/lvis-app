@@ -48,6 +48,8 @@ export interface MainContentProps {
   commandActions: QuickAction[];
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
+  installingPluginIds?: Set<string>;
+  onOpenMarketplace: () => void;
   // plugin view
   activePluginView: PluginView | null;
 }
@@ -141,6 +143,8 @@ export function MainContent(props: MainContentProps): ReactNode {
             commandActions={props.commandActions}
             commandPopoverOpen={props.commandPopoverOpen}
             onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
+            installingPluginIds={props.installingPluginIds}
+            onOpenMarketplace={props.onOpenMarketplace}
           />
         </ChatContextProvider>
       </MainPaneShell>

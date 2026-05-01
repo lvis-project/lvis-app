@@ -11,14 +11,23 @@ function makePlugins(n: number): PluginEntry[] {
   return Array.from({ length: n }, (_, i) => ({
     viewKey: `plugin:test:ext${i}`,
     label: `Plugin ${i}`,
-    icon: "🔌",
+    // icon is now a Lucide name string, not an emoji
+    icon: i === 0 ? "Mic" : undefined,
   }));
 }
 
-function renderButton(plugins: PluginEntry[], onSelect = vi.fn()) {
+function renderButton(
+  plugins: PluginEntry[],
+  onSelect = vi.fn(),
+  onOpenMarketplace = vi.fn(),
+) {
   return render(
     <TooltipProvider>
-      <PluginGridButton plugins={plugins} onSelect={onSelect} />
+      <PluginGridButton
+        plugins={plugins}
+        onSelect={onSelect}
+        onOpenMarketplace={onOpenMarketplace}
+      />
     </TooltipProvider>,
   );
 }
@@ -29,7 +38,7 @@ describe("PluginGridButton", () => {
     expect(getByTestId("plugin-grid-button")).toBeTruthy();
   });
 
-  it("shows Popover (not Dialog) when fewer than 5 plugins", async () => {
+  it("shows Popover with plugin labels when fewer than 5 plugins", async () => {
     const user = userEvent.setup();
     const plugins = makePlugins(3);
     const { getByTestId, getByText } = renderButton(plugins);
@@ -38,13 +47,14 @@ describe("PluginGridButton", () => {
     expect(document.querySelector("[data-testid='plugin-grid']")).toBeTruthy();
   });
 
-  it("shows Dialog when 5 or more plugins", async () => {
+  it("shows popover (always — no Dialog) for 5 or more plugins", async () => {
     const user = userEvent.setup();
     const plugins = makePlugins(5);
     const { getByTestId, getByText } = renderButton(plugins);
     await act(async () => { await user.click(getByTestId("plugin-grid-button")); });
-    // Dialog header title appears
-    expect(getByText("플러그인")).toBeTruthy();
+    // v3: always popover, no dialog — plugin labels appear directly
+    expect(getByText("Plugin 0")).toBeTruthy();
+    expect(document.querySelector("[data-testid='plugin-grid']")).toBeTruthy();
   });
 
   it("calls onSelect with correct viewKey when cell clicked", async () => {

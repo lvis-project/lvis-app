@@ -17,6 +17,15 @@
   opacity: 1;
 }
 
+/* ─── Plugin grid (PluginGridButton v3) ─────────────────────────────────────
+   .plugin-cell transition + installing overlay pulse. Tailwind's animate-spin
+   covers the spinner; cellPulse dims installing cells so they read as "busy".
+   Plugin icon hover color is handled via Tailwind group/peer — no extra class.
+────────────────────────────────────────────────────────────────────────────── */
+.plugin-cell { transition: all 120ms ease; }
+@keyframes cellPulse { 0%, 100% { opacity: 0.85; } 50% { opacity: 1; } }
+.cell-installing { animation: cellPulse 1.6s ease-in-out infinite; }
+
 /* ─── FloatingQuestionPanel animations ─────────────────────────────────────
    Class names are referenced from FloatingQuestionPanel.tsx.
    We use @keyframes outside @layer so they are always available at highest

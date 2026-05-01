@@ -1335,8 +1335,8 @@ export class PluginRuntime {
     return this.plugins.get(pluginId)?.pluginRoot;
   }
 
-  listUiExtensions(): Array<{ pluginId: string; extension: PluginUiExtension; entryUrl?: string }> {
-    const result: Array<{ pluginId: string; extension: PluginUiExtension; entryUrl?: string }> = [];
+  listUiExtensions(): Array<{ pluginId: string; icon?: string; extension: PluginUiExtension; entryUrl?: string }> {
+    const result: Array<{ pluginId: string; icon?: string; extension: PluginUiExtension; entryUrl?: string }> = [];
     for (const [pluginId, plugin] of this.plugins) {
       for (const extension of plugin.manifest.ui ?? []) {
         const entrySource = extension.entry ?? extension.page;
@@ -1358,6 +1358,7 @@ export class PluginRuntime {
         }
         result.push({
           pluginId,
+          icon: plugin.manifest.icon,
           extension,
           entryUrl: entryPath ? buildImportUrl(entryPath) : undefined,
         });

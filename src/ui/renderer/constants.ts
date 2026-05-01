@@ -115,3 +115,6 @@ export const RENDER_HTML_MAX_HEIGHT = 1200;
 export const RENDER_HTML_DEFAULT_HEIGHT = 400;
 
 export const formatTaskSource = (source: string): string => SOURCE_LABEL[source] ?? source;
+
+/** Default marketplace URL — matches the real-cloud base URL from settings-store defaults. */
+export const MARKETPLACE_URL = "https://marketplace.lvisai.xyz";
