@@ -20,6 +20,7 @@ export interface InputActionBarProps {
   onSelectPlugin: (viewKey: string) => void;
   installingPluginIds?: Set<string>;
   onOpenMarketplace: () => void;
+  marketplaceUrlReady?: boolean;
   onInsertSlashCommand: (cmd: string) => void;
   onToggleChatSearch: () => void;
   commandActions: QuickAction[];
@@ -66,6 +67,7 @@ export function InputActionBar({
   onSelectPlugin,
   installingPluginIds,
   onOpenMarketplace,
+  marketplaceUrlReady,
   onInsertSlashCommand,
   onToggleChatSearch,
   commandActions,
@@ -107,6 +109,7 @@ export function InputActionBar({
           onSelect={onSelectPlugin}
           installingPluginIds={installingPluginIds}
           onOpenMarketplace={onOpenMarketplace}
+          marketplaceUrlReady={marketplaceUrlReady}
         />
         <CommandPopover
           actions={commandActions}

@@ -18,10 +18,13 @@ function renderGrid(
     installingPluginIds?: Set<string>;
     onSelect?: (k: string) => void;
     onOpenMarketplace?: () => void;
+    marketplaceUrlReady?: boolean;
   } = {},
 ) {
   const onSelect = opts.onSelect ?? vi.fn();
   const onOpenMarketplace = opts.onOpenMarketplace ?? vi.fn();
+  // Default to ready so marketplace-interaction tests work without extra boilerplate.
+  const marketplaceUrlReady = opts.marketplaceUrlReady ?? true;
   const result = render(
     <TooltipProvider>
       <PluginGridButton
@@ -29,6 +32,7 @@ function renderGrid(
         installingPluginIds={opts.installingPluginIds}
         onSelect={onSelect}
         onOpenMarketplace={onOpenMarketplace}
+        marketplaceUrlReady={marketplaceUrlReady}
       />
     </TooltipProvider>,
   );

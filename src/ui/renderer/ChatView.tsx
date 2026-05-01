@@ -70,9 +70,10 @@ export interface ChatViewProps {
   onCommandPopoverOpenChange: (open: boolean) => void;
   installingPluginIds?: Set<string>;
   onOpenMarketplace: () => void;
+  marketplaceUrlReady?: boolean;
 }
 
-export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPluginIds, onOpenMarketplace }: ChatViewProps) {
+export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPluginIds, onOpenMarketplace, marketplaceUrlReady }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -482,6 +483,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           onSelectPlugin={onSelectPlugin}
           installingPluginIds={installingPluginIds}
           onOpenMarketplace={onOpenMarketplace}
+          marketplaceUrlReady={marketplaceUrlReady}
           onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
           onToggleChatSearch={searchToggleOverlay}
           commandActions={commandActions}

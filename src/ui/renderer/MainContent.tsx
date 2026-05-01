@@ -50,6 +50,7 @@ export interface MainContentProps {
   onCommandPopoverOpenChange: (open: boolean) => void;
   installingPluginIds?: Set<string>;
   onOpenMarketplace: () => void;
+  marketplaceUrlReady?: boolean;
   // plugin view
   activePluginView: PluginView | null;
 }
@@ -145,6 +146,7 @@ export function MainContent(props: MainContentProps): ReactNode {
             onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
             installingPluginIds={props.installingPluginIds}
             onOpenMarketplace={props.onOpenMarketplace}
+            marketplaceUrlReady={props.marketplaceUrlReady}
           />
         </ChatContextProvider>
       </MainPaneShell>

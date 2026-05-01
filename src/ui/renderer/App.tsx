@@ -187,15 +187,17 @@ export function App() {
   const installingPluginIds = useInstallingPlugins(api);
 
   // Marketplace URL — sourced from settings (marketplace.realCloudBaseUrl).
-  const marketplaceUrl = useMarketplaceUrl(api);
+  const { marketplaceUrl, loaded: marketplaceUrlLoaded } = useMarketplaceUrl(api);
+  // Ready only when settings have been fetched AND the URL is non-empty.
+  const marketplaceUrlReady = marketplaceUrlLoaded && marketplaceUrl.length > 0;
 
   // Open marketplace in the system browser.
   // Guard against an empty URL during the initial settings load — calling
   // shell.openExternal("") produces undefined behaviour on some platforms.
   const onOpenMarketplace = useCallback(() => {
-    if (!marketplaceUrl) return;
+    if (!marketplaceUrlReady) return;
     void api.openExternalUrl(marketplaceUrl);
-  }, [api, marketplaceUrl]);
+  }, [api, marketplaceUrl, marketplaceUrlReady]);
 
   // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
   // click opens it in a separate magnetic-snap BrowserWindow instead of
@@ -596,6 +598,7 @@ export function App() {
             onCommandPopoverOpenChange={setCommandPopoverOpen}
             installingPluginIds={installingPluginIds}
             onOpenMarketplace={onOpenMarketplace}
+            marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}
           />
         </main>
