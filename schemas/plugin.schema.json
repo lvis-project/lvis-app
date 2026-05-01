@@ -51,7 +51,20 @@
           "defaults": { "type": "object" },
           "entry": { "type": "string" },
           "exportName": { "type": "string" },
-          "page": { "type": "string" }
+          "page": { "type": "string" },
+          "window": {
+            "type": "object",
+            "description": "Optional detachable-window defaults for this UI extension. When present the host creates a detached BrowserWindow for this view using these dimensions / snap hints.",
+            "additionalProperties": false,
+            "properties": {
+              "width": { "type": "integer", "minimum": 120, "maximum": 3840, "description": "Initial window width in DIP pixels" },
+              "height": { "type": "integer", "minimum": 80, "maximum": 2160, "description": "Initial window height in DIP pixels" },
+              "minWidth": { "type": "integer", "minimum": 80 },
+              "minHeight": { "type": "integer", "minimum": 60 },
+              "resizable": { "type": "boolean" },
+              "alwaysOnTop": { "type": "boolean" }
+            }
+          }
         }
       },
       "description": "UI extensions. Kind-specific required fields (embedded-module: entry+exportName; embedded-page: page) are enforced at runtime with soft-fallback — invalid entries are dropped with a console warning, the plugin continues to load."
