@@ -636,7 +636,9 @@ export class PluginMarketplaceService {
           // Rollback re-installs from the marketplace catalog. Normalize any
           // non-admin source (local-dev, dev-link) back to "user" since this
           // is now a marketplace-origin install.
-          existing.installSource = existing.installedBy === "admin" ? "admin" : "user";
+          // rollbackPlugin is always a user-actor marketplace re-install.
+          // Admin-managed plugin rollback is blocked upstream by deploymentGuard.
+          existing.installSource = "user";
           existing.bundleRefs = existing.bundleRefs ?? [];
           delete existing._devLinked;
         } else {
@@ -815,6 +817,9 @@ export class PluginMarketplaceService {
           if (snapshot._devLinked === true) entry._devLinked = true;
           else delete entry._devLinked;
         } else if (snapshot.installSource && snapshot.installSource !== "dev-link") {
+          // Restore "user", "admin", or "local-dev" as-is. For "local-dev",
+          // the install receipt written by installLocal remains on disk so
+          // verifyInstallReceipt will still pass after rollback.
           entry.installSource = snapshot.installSource;
           delete entry._devLinked;
         } else {
@@ -1143,7 +1148,7 @@ export class PluginMarketplaceService {
       // dev sideload should not silently downgrade an admin-managed entry.
       const existingRegistry = await readPluginRegistry(this.registryPath);
       const existingEntry = existingRegistry.plugins.find((p) => p.id === pluginId);
-      if (existingEntry?.installedBy === "admin") {
+      if (existingEntry?.installedBy === "admin" || existingEntry?.installSource === "admin") {
         throw new Error(
           `[installLocal] refusing to overwrite admin-installed plugin: ${pluginId}`,
         );
