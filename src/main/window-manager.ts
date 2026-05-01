@@ -179,6 +179,14 @@ function snappedPosition(main: Rect, child: Rect, edge: SnapEdge, dx: number, dy
 export class WindowManager {
   private _mainWindowId: number | null = null;
   private _children = new Map<number, ChildEntry>();
+  /**
+   * Single detached shell slot (Path A single-instance policy).
+   * At most one detached BrowserWindow exists at any time. Clicking a
+   * different plugin/view navigates the existing shell rather than spawning
+   * a new one. Cleared to null when the shell is destroyed.
+   */
+  private _detachedShell: BrowserWindow | null = null;
+  private _detachedShellViewKey: string | null = null;
   private _lastMainMoveAt = 0;
   private _mainMoveTimer: ReturnType<typeof setTimeout> | null = null;
   private _preloadPath: string;
@@ -222,6 +230,22 @@ export class WindowManager {
       throw new Error(`[WindowManager] preload not found: ${this._preloadPath}`);
     }
 
+    // Single-instance policy: if the shell window already exists, navigate it
+    // to the new viewKey in-place rather than spawning a second window.
+    if (this._detachedShell !== null && !this._detachedShell.isDestroyed()) {
+      const shell = this._detachedShell;
+      if (this._detachedShellViewKey !== viewKey) {
+        this._detachedShellViewKey = viewKey;
+        // Update the entry's viewKey so listChildren() reflects the live viewKey.
+        const entry = this._children.get(shell.id);
+        if (entry) entry.viewKey = viewKey;
+        shell.setTitle(`LVIS — ${viewKeyLabel(viewKey)}`);
+        shell.webContents.send("lvis:detached:navigate", { viewKey });
+      }
+      shell.focus();
+      return shell;
+    }
+
     // Restore saved bounds if available.
     const saved = loadWindowState().detached.find((d) => d.viewKey === viewKey);
 
@@ -263,6 +287,9 @@ export class WindowManager {
       },
     });
 
+    this._detachedShell = child;
+    this._detachedShellViewKey = viewKey;
+
     const entry: ChildEntry = { window: child, viewKey };
     this._children.set(child.id, entry);
 
@@ -277,6 +304,10 @@ export class WindowManager {
 
     child.on("closed", () => {
       this._children.delete(child.id);
+      if (this._detachedShell === child) {
+        this._detachedShell = null;
+        this._detachedShellViewKey = null;
+      }
       this._persistState();
     });
 
