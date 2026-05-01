@@ -692,6 +692,19 @@ const api = {
       ipcRenderer.on("lvis:window:snap-edge", listener);
       return () => ipcRenderer.removeListener("lvis:window:snap-edge", listener);
     },
+    /**
+     * Subscribe to in-place navigation events sent by WindowManager when a
+     * second plugin is clicked while the detached shell is already open.
+     * The detached shell calls this to swap its displayed content without
+     * closing and reopening a window.
+     */
+    onDetachedNavigate: (handler: (viewKey: string) => void) => {
+      const listener = (_event: unknown, payload: { viewKey?: string }) => {
+        if (typeof payload?.viewKey === "string") handler(payload.viewKey);
+      };
+      ipcRenderer.on("lvis:detached:navigate", listener);
+      return () => ipcRenderer.removeListener("lvis:detached:navigate", listener);
+    },
   },
 };
 
