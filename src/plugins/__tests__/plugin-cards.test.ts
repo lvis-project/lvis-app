@@ -24,6 +24,7 @@ function writePlugin(root: string, id: string, opts: {
     id,
     name: opts.name,
     version: "1.0.0",
+    description: "Test fixture.",
     entry: "index.mjs",
     tools: opts.tools,
     toolSchemas: opts.toolSchemas,
@@ -77,11 +78,14 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     expect(cards[0].id).toBe("com.lge.meeting");
     expect(cards[0].name).toBe("Meeting");
     expect(cards[0].sampleTools).toEqual(["meeting_start", "meeting_push_chunk", "meeting_stop"]);
-    expect(cards[0].description).toContain("회의 시작");
-    expect(cards[0].description).toContain("오디오 청크 전송");
+    // Schema v3 requires manifest.description; it takes priority over toolSchemas derivation.
+    expect(cards[0].description).toBe("Test fixture.");
+    // Per-tool descriptions from toolSchemas are still accessible via toolDescriptions.
+    expect(cards[0].toolDescriptions?.["meeting_start"]).toContain("회의 시작");
+    expect(cards[0].toolDescriptions?.["meeting_push_chunk"]).toContain("오디오 청크 전송");
   });
 
-  it("falls back to 'Plugin: {name}' when toolSchemas absent", async () => {
+  it("uses manifest description when toolSchemas absent", async () => {
     const manifestA = writePlugin(tmp, "com.lge.plain", {
       name: "Plain",
       tools: ["plain_do"],
@@ -91,7 +95,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     await runtime.load();
 
     const cards = runtime.listPluginCards();
-    expect(cards[0].description).toBe("Plugin: Plain");
+    expect(cards[0].description).toBe("Test fixture.");
     expect(cards[0].sampleTools).toEqual(["plain_do"]);
   });
 
@@ -125,6 +129,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       id: "com.lge.failed",
       name: "Failed",
       version: "1.0.0",
+      description: "Test fixture.",
       entry: "index.mjs",
       tools: ["failed_read"],
     }));
