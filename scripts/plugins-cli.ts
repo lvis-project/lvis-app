@@ -64,7 +64,8 @@ function usage(): never {
 async function loadRegistry(): Promise<PluginRegistry> {
   try {
     return await readPluginRegistry(registryPath);
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     const initial: PluginRegistry = { version: 1, plugins: [] };
     await writePluginRegistry(registryPath, initial);
     return initial;
