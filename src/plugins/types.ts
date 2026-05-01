@@ -638,9 +638,6 @@ export interface PluginHostApi {
    * are logged but do not block quit.
    */
   onShutdown(handler: () => void | Promise<void>): void;
-  /** @deprecated ms-graph 통합 이후 no-op. 구 calendar/email 플러그인 호환용. */
-  onMsGraphAuthChange?(handler: () => void): void;
-
   // ─── 외부 포털 interactive 인증 (쿠키 수집) ──────────────────────────
   /**
    * Electron BrowserWindow로 외부 포털 로그인 페이지를 띄우고,
