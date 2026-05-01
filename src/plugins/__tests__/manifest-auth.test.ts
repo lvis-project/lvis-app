@@ -153,4 +153,20 @@ describe("manifest validation — auth cross-field", () => {
     const parsed = await parsePluginJson(manifestPath, validator);
     expect(parsed.auth?.loginTool).toBe("test_email_delete");
   });
+
+  it("rejects auth object with unknown extra field (nonsenseField)", async () => {
+    await writeManifest({
+      auth: {
+        label: "Test Account",
+        statusTool: "test_status",
+        loginTool: "test_login",
+        logoutTool: "test_signout",
+        nonsenseField: "boom",
+      },
+    });
+    const validator = await buildManifestValidator(import.meta.url);
+    await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(
+      /schema validation failed|additionalProperties|nonsenseField/,
+    );
+  });
 });
