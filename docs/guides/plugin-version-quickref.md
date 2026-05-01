@@ -35,9 +35,15 @@ git push origin v0.2.0
 - main 이 아닌 commit 에 tag — 거절
 - 같은 tag 를 다른 commit 으로 다시 push — 거절 (silent rewrite 차단)
 
+## 드리프트 자동 감지 (PR 시점)
+
+`validate-plugin-manifest.yml` (centralized in `lvis-project/.github`) 가 PR 단계에서 source `plugin.json.version` 을 marketplace catalog 의 `latest_stable_version` 과 비교해서, source 가 catalog **이하**일 때 `::warning::` 으로 surface 합니다. 다음 release 때 어디서 bump 시작해야하는지 PR 단에서 보임 — catalog 수동 조회 불필요.
+
+워크플로 자체는 fail 시키지 않습니다 (실제 release-blocker 는 `publish.yml` 의 tag-vs-source check). 정보 제공 목적.
+
 ## 첫 release 할 때
 
-레포마다 다른데, 보통 `plugin.json` 의 version (예: `0.1.0`) 보다 catalog 가 앞서 가있는 경우가 많습니다. 첫 tag 는 **catalog 의 latest + 1** 이상으로 잡으세요. 정확한 값은 각 plugin repo 의 `RELEASING.md` 참고.
+`plugin.json` 의 version 이 catalog `latest_stable_version` 과 같거나 뒤쳐진 상태면 source bump PR 부터. 위 드리프트 warning 이 PR CI 에 그대로 떠 있어서 어디로 bump 해야하는지 보임 — `catalog latest + 1` 이 안전한 기본값. 정확한 값은 각 plugin repo 의 `RELEASING.md` 참고.
 
 ## 더 알고 싶을 때
 
