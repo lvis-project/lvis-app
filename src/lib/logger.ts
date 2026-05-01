@@ -31,7 +31,11 @@ const isProduction = process.env.NODE_ENV === "production";
 // production builds rely on the isPackagedElectron signal (process.defaultApp
 // absence) rather than NODE_ENV, since packaged Electron does not set
 // NODE_ENV=production automatically.
+// Guard with isElectronRuntime so plain Node / tsx environments (e.g. scripts,
+// unit tests run outside Electron) never get isPackagedElectron=true.
+const isElectronRuntime = !!(process as NodeJS.Process & { versions?: { electron?: string } }).versions?.electron;
 const isPackagedElectron =
+  isElectronRuntime &&
   !(process as NodeJS.Process & { defaultApp?: boolean }).defaultApp &&
   process.env.LVIS_DEV !== "1" &&
   !isTest;
