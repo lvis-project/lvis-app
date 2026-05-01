@@ -28,7 +28,7 @@ interface PluginGridButtonProps {
   onSelect: (viewKey: string) => void;
   /** Called when the user clicks the "+" cell or the empty-state CTA. */
   onOpenMarketplace: () => void;
-  /** `true` while the marketplace URL is being loaded — disables CTA and "+" cell. */
+  /** `true` once the marketplace URL has finished loading and is non-empty; false while loading or when settings provided no URL. */
   marketplaceUrlReady?: boolean;
 }
 

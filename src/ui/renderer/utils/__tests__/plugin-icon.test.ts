@@ -19,13 +19,11 @@ function isLazy(c: unknown): boolean {
 }
 
 /**
- * Resolves a React.lazy component by directly invoking the dynamic import
- * factory. React.lazy stores the factory as `_payload._init` (the function
- * it calls on first render). We access the underlying import promise by
- * triggering the same `lucide-react` import that `pluginIconFor` would use.
- *
- * Behavioral: we verify the resolved default export matches the expected
- * component — no dependency on React internal field names beyond `$$typeof`.
+ * Synchronously imports the resolved icon by name (no React.lazy / payload
+ * internals). We resolve the lucide-react module directly and look up the
+ * named export, then compare it against what `pluginIconFor` resolves to —
+ * verifying the correct component is returned without relying on React
+ * internal field names beyond `$$typeof`.
  */
 async function resolveIconName(name: string): Promise<unknown> {
   const mod = await import("lucide-react");
