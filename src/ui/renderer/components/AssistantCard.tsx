@@ -89,6 +89,8 @@ export function AssistantCard({
       <div className="prose prose-sm lvis-prose max-w-none break-words" data-testid="assistant-message-body">
         {highlightQuery && highlighted ? (
           <div className="whitespace-pre-wrap">{highlighted}</div>
+        ) : entry.route === "command" ? (
+          <div className="whitespace-pre-wrap">{replaceToolNamesInText(entry.text || "")}</div>
         ) : (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {entry.streaming

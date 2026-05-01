@@ -203,11 +203,12 @@ export function useChatState(api: LvisApi) {
         // content to seal.
         setEntries((p) => finalizeImportedTriggerResponse(p));
         if (streamRef.current || thoughtRef.current) {
+          const doneRoute = ev.route;
           setEntries((p) => {
             const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
             guidanceResetPendingRef.current = false;
             let next = finalizeStreamingReasoning(base, thoughtRef.current);
-            next = finalizeStreamingAssistant(next, streamRef.current);
+            next = finalizeStreamingAssistant(next, streamRef.current, doneRoute ? { route: doneRoute } : undefined);
             return next;
           });
           streamRef.current = "";
