@@ -67,6 +67,7 @@ describe("Phase 1 — plugin trust boundary", () => {
       id,
       name: id,
       version: "1.0.0",
+      description: "Test fixture.",
       entry: "entry.mjs",
       tools: ["tb_ping"],
     };

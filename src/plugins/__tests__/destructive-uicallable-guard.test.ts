@@ -37,6 +37,7 @@ async function writeTempPlugin(opts: {
     id: `com.lge.test-${Math.random().toString(36).slice(2, 8)}`,
     name: "uiCallable Test",
     version: "1.0.0",
+    description: "Test fixture.",
     entry: "dist/index.js",
     tools: opts.tools,
     uiCallable: opts.uiCallable,

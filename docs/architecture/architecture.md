@@ -2059,7 +2059,7 @@ graph TB
   "description": "마이크 입력을 실시간으로 전사하고 요약해 회의록을 자동 생성합니다.",
   "entry": "dist/index.js",
   "publisher": "LG Electronics DX Platform Team",
-  "deployment": "managed",
+  "installPolicy": "admin",
   "startupTimeoutMs": 8000,
 
   "tools": ["meeting_start", "meeting_push_chunk", "meeting_stop", "meeting_transcript", "meeting_sessions"],
@@ -2118,7 +2118,7 @@ graph TB
 | `publisher` | string | 감사 로그·마켓플레이스 표시. |
 | `configSchema` | `PluginConfigSchema` (선택) | **§9.2 Track B** — VSCode-style 선언형 설정 스키마. JSON Schema draft-07 subset (`toolSchemas` 와 동일 dialect) 으로 `properties` map 을 선언하면 호스트가 `PluginConfigTab` 에 typed form (string / number / boolean / enum / string[] ) 을 자동 렌더링한다. 미선언 시 기존 raw key/value 편집기로 fallback (legacy plugin back-compat 보장). UI 라우팅 hint 는 `format: "secret"` 한 종류 — `setSecret` (Electron `safeStorage` 암호화) 로 라우팅되어 cleartext `settings.json` 에 저장되지 **않는다**. `customPanel` (entry/exportName) 은 escape hatch — schema 필드로 표현하기 어려운 expressive UI 를 plugin 이 자체 React 컴포넌트로 마운트할 수 있다 (UI Slot System §9.3 호환). 상세: `docs/references/plugin-tool-schema-design.md` (track B). |
 
-> **Deprecated (현재 스키마에서 제거됨):** 아래 legacy 셰이프는 AJV `additionalProperties: false` 이므로 매니페스트에 포함하면 로드 거부된다: top-level `permissions[]` 문자열 배열, nested 객체 형태의 `tools[{ name, entry, description }]`, `skills[]`, 객체 형태의 `ui`, `hooks`, `events`, `dependencies`, `lgenie`, `python`. 이전 설계 초안은 git history (pre-Sprint-3-B) 에서만 확인 가능하다.
+> **Deprecated (Phase 1 스키마에서 제거됨):** `additionalProperties: false` 적용 (Phase 1 결정) 이후 아래 legacy 필드는 매니페스트에 포함하면 로드 거부된다: top-level `permissions[]` 문자열 배열 (host 미사용, Phase 1 제거), `eventPublishes[]` (`emittedEvents`로 교체), nested 객체 형태의 `tools[{ name, entry, description }]`, `skills[]`, 객체 형태의 `ui`, `hooks`, `events`, `dependencies`, `lgenie`. `description` 은 Phase 1 이후 MUST 필드로 승격되었다. 이전 설계 초안은 git history (pre-Sprint-3-B) 에서만 확인 가능하다.
 
 **마켓플레이스 검증:** 플러그인 repo는 sidecar signature를 만들지 않는다. Marketplace upload API가 zip/manifest/schema/version/policy/dependency/access를 검증하고 최종 artifact envelope에 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장한다.
 
@@ -2478,7 +2478,8 @@ graph TB
   "version": "0.2.0",
   "entry": "dist/index.js",
   "tools": ["index_scan", "chat_preview", "..."],
-  "deployment": "managed",
+  "description": "Document indexing and semantic search plugin.",
+  "installPolicy": "admin",
   "publisher": "LG Electronics IT"
 }
 ```
