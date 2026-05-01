@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { LayoutGrid, ExternalLink, Plus, Plug } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
@@ -143,7 +143,9 @@ export function PluginGridButton({
                   title={p.unauthed ? `${p.label} — 클릭하여 로그인` : undefined}
                 >
                   <span className="plugin-icon relative flex h-11 w-11 items-center justify-center rounded-full bg-muted">
-                    <Icon className="h-5 w-5" strokeWidth={1.6} />
+                    <Suspense fallback={<Plug className="h-5 w-5 opacity-30" />}>
+                      <Icon className="h-5 w-5" strokeWidth={1.6} />
+                    </Suspense>
                     {isInstalling && (
                       <>
                         <span

@@ -49,7 +49,7 @@ import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { FloatingQuestionPanel } from "./components/FloatingQuestionPanel.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useInstallingPlugins } from "./hooks/use-installing-plugins.js";
-import { MARKETPLACE_URL } from "./constants.js";
+import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 
 // RoutineCard: new routine result card
 export { RoutineCard } from "./components/RoutineCard.js";
@@ -186,10 +186,13 @@ export function App() {
   // Track in-flight plugin installs for the grid overlay spinner.
   const installingPluginIds = useInstallingPlugins(api);
 
+  // Marketplace URL — sourced from settings (marketplace.realCloudBaseUrl).
+  const marketplaceUrl = useMarketplaceUrl(api);
+
   // Open marketplace in the system browser.
   const onOpenMarketplace = useCallback(
-    () => void api.openExternalUrl(MARKETPLACE_URL),
-    [api],
+    () => void api.openExternalUrl(marketplaceUrl),
+    [api, marketplaceUrl],
   );
 
   // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
