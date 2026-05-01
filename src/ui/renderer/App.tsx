@@ -101,6 +101,7 @@ export function App() {
   const {
     pluginViews,
     installInFlight,
+    installPlugin,
     refreshViews, refreshMarketplace,
   } = usePluginMarketplace(api);
 
@@ -390,7 +391,11 @@ export function App() {
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
-          <MarketplaceUpdateBanner updates={marketplaceUpdates} onDismiss={dismissMarketplaceUpdates} />
+          <MarketplaceUpdateBanner
+            updates={marketplaceUpdates}
+            onDismiss={dismissMarketplaceUpdates}
+            onUpdate={installPlugin}
+          />
           {fallbackToast && (
             <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
               {fallbackToast}
