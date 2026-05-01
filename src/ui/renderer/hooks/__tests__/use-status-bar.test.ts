@@ -66,8 +66,8 @@ describe("useStatusBar — toast TTL eviction", () => {
     // Immediately after push: 1 toast.
     expect(result.current.toasts).toHaveLength(1);
 
-    // Advance 6 s — past the 5 s TTL. The eviction interval fires at ≤1 s
-    // granularity, so the toast is swept by the 6th tick.
+    // Advance 6 s — past the 5 s TTL. The sequential display effect schedules
+    // a setTimeout at exactly the TTL, so the toast is gone after 5 s.
     await act(async () => {
       vi.advanceTimersByTime(6000);
     });
@@ -493,5 +493,137 @@ describe("useStatusBar — marketplace producer configured=false", () => {
     });
 
     hasFocusSpy.mockRestore();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Case 9 — Sequential toast display (visibleToast + pendingCount)
+// ─────────────────────────────────────────────────────────────────────────────
+describe("useStatusBar — sequential toast display", () => {
+  it("visibleToast exposes the queue head, pendingCount reflects the rest", () => {
+    const api = makeApi();
+    const { result } = renderHook(() =>
+      useStatusBar({ api, defaultToastTtlMs: 5000 }),
+    );
+
+    act(() => {
+      result.current.pushToast({ severity: "info", message: "first" });
+      result.current.pushToast({ severity: "success", message: "second" });
+      result.current.pushToast({ severity: "warning", message: "third" });
+    });
+
+    expect(result.current.visibleToast?.message).toBe("first");
+    expect(result.current.pendingCount).toBe(2);
+  });
+
+  it("auto-advances to next toast after the visible one's TTL elapses", async () => {
+    const api = makeApi();
+    const { result } = renderHook(() =>
+      useStatusBar({ api, defaultToastTtlMs: 3000 }),
+    );
+
+    act(() => {
+      result.current.pushToast({ severity: "info", message: "first", ttlMs: 3000 });
+      result.current.pushToast({ severity: "success", message: "second", ttlMs: 3000 });
+    });
+
+    expect(result.current.visibleToast?.message).toBe("first");
+    expect(result.current.pendingCount).toBe(1);
+
+    // Advance past first toast TTL.
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+    });
+
+    expect(result.current.visibleToast?.message).toBe("second");
+    expect(result.current.pendingCount).toBe(0);
+  });
+
+  it("queue drains to null visibleToast after all toasts expire", async () => {
+    const api = makeApi();
+    const { result } = renderHook(() =>
+      useStatusBar({ api, defaultToastTtlMs: 3000 }),
+    );
+
+    act(() => {
+      result.current.pushToast({ severity: "info", message: "only one", ttlMs: 3000 });
+    });
+
+    expect(result.current.visibleToast?.message).toBe("only one");
+
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+    });
+
+    expect(result.current.visibleToast).toBeNull();
+    expect(result.current.pendingCount).toBe(0);
+  });
+
+  it("removeToast on visibleToast immediately advances to next", () => {
+    const api = makeApi();
+    const { result } = renderHook(() =>
+      useStatusBar({ api, defaultToastTtlMs: 30_000 }),
+    );
+
+    act(() => {
+      result.current.pushToast({ severity: "info", message: "first" });
+      result.current.pushToast({ severity: "success", message: "second" });
+    });
+
+    const firstId = result.current.visibleToast?.id;
+    expect(firstId).toBeDefined();
+
+    act(() => {
+      result.current.removeToast(firstId!);
+    });
+
+    expect(result.current.visibleToast?.message).toBe("second");
+    expect(result.current.pendingCount).toBe(0);
+  });
+
+  it("burst of 3 install-result events shows only 1 toast at a time, advancing sequentially", async () => {
+    let capturedHandler: ((payload: { slug: string; success: boolean; error?: string }) => void) | null = null;
+
+    const api = makeApi({
+      onPluginInstallResult: vi.fn((h) => {
+        capturedHandler = h;
+        return () => {};
+      }),
+    });
+
+    const { result } = renderHook(() =>
+      useStatusBar({ api, defaultToastTtlMs: 3000 }),
+    );
+
+    // Burst: 3 install-result events in the same tick.
+    act(() => {
+      capturedHandler!({ slug: "plugin-a", success: true });
+      capturedHandler!({ slug: "plugin-b", success: true });
+      capturedHandler!({ slug: "plugin-c", success: true });
+    });
+
+    // Only 1 visible at a time.
+    expect(result.current.visibleToast?.message).toBe("plugin-a 설치 완료");
+    expect(result.current.pendingCount).toBe(2);
+
+    // Advance past first TTL → second becomes visible.
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+    });
+    expect(result.current.visibleToast?.message).toBe("plugin-b 설치 완료");
+    expect(result.current.pendingCount).toBe(1);
+
+    // Advance past second TTL → third becomes visible.
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+    });
+    expect(result.current.visibleToast?.message).toBe("plugin-c 설치 완료");
+    expect(result.current.pendingCount).toBe(0);
+
+    // Advance past third TTL → queue empty.
+    await act(async () => {
+      vi.advanceTimersByTime(3100);
+    });
+    expect(result.current.visibleToast).toBeNull();
   });
 });

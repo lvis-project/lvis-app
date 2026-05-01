@@ -26,33 +26,40 @@ function toast(overrides: Partial<ToastItem> = {}): ToastItem {
 
 describe("StatusBar", () => {
   it("renders the LVIS placeholder when there are no persistent items", () => {
-    render(<StatusBar persistent={[]} toasts={[]} />);
+    render(<StatusBar persistent={[]} visibleToast={null} />);
     expect(screen.getByText("LVIS")).toBeInTheDocument();
   });
 
   it("renders persistent items with label and value", () => {
-    render(<StatusBar persistent={[persistent()]} toasts={[]} />);
+    render(<StatusBar persistent={[persistent()]} visibleToast={null} />);
     expect(screen.getByText("다음 루틴")).toBeInTheDocument();
     expect(screen.getByText("04:42 KST")).toBeInTheDocument();
   });
 
-  it("renders toast messages on the right slot", () => {
-    render(<StatusBar persistent={[]} toasts={[toast(), toast({ id: "toast:2", message: "agent-hub 설치 완료", severity: "success" })]} />);
+  it("renders only the visible toast message on the right slot", () => {
+    const t1 = toast({ id: "toast:1", message: "agent-hub 설치 중…" });
+    const t2 = toast({ id: "toast:2", message: "agent-hub 설치 완료", severity: "success" });
+    // Only visibleToast (t1) is shown; t2 contributes to pendingCount only.
+    render(<StatusBar persistent={[]} visibleToast={t1} pendingCount={1} />);
     expect(screen.getByText("agent-hub 설치 중…")).toBeInTheDocument();
-    expect(screen.getByText("agent-hub 설치 완료")).toBeInTheDocument();
+    expect(screen.queryByText("agent-hub 설치 완료")).not.toBeInTheDocument();
+    // pending badge shows +1
+    expect(screen.getByText("+1")).toBeInTheDocument();
   });
 
-  it("caps visible toasts at 3 even if more are queued", () => {
-    const many = Array.from({ length: 6 }, (_, i) =>
-      toast({ id: `toast:${i}`, message: `msg-${i}` }),
-    );
-    render(<StatusBar persistent={[]} toasts={many} />);
-    // Only the last 3 (latest) should be rendered.
-    expect(screen.queryByText("msg-0")).not.toBeInTheDocument();
-    expect(screen.queryByText("msg-2")).not.toBeInTheDocument();
-    expect(screen.getByText("msg-3")).toBeInTheDocument();
-    expect(screen.getByText("msg-4")).toBeInTheDocument();
-    expect(screen.getByText("msg-5")).toBeInTheDocument();
+  it("shows no toast when visibleToast is null", () => {
+    render(<StatusBar persistent={[]} visibleToast={null} />);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("shows no pending badge when pendingCount is 0", () => {
+    render(<StatusBar persistent={[]} visibleToast={toast()} pendingCount={0} />);
+    expect(screen.queryByText(/\+\d/)).not.toBeInTheDocument();
+  });
+
+  it("shows pending badge with correct count", () => {
+    render(<StatusBar persistent={[]} visibleToast={toast()} pendingCount={2} />);
+    expect(screen.getByText("+2")).toBeInTheDocument();
   });
 
   it("invokes onToastClick when a notification toast is clicked (#260 M2)", () => {
@@ -63,7 +70,7 @@ describe("StatusBar", () => {
       severity: "info",
       notification: { kind: "ask-user", contextRef: { questionId: "q-9" } },
     });
-    render(<StatusBar persistent={[]} toasts={[notif]} onToastClick={onToastClick} />);
+    render(<StatusBar persistent={[]} visibleToast={notif} onToastClick={onToastClick} />);
     const btn = screen.getByRole("button", {
       name: /질문이 도착했습니다/,
     });
@@ -85,7 +92,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         persistent={[]}
-        toasts={[toast({ id: "toast:i", message: "agent-hub 설치 완료", severity: "success" })]}
+        visibleToast={toast({ id: "toast:i", message: "agent-hub 설치 완료", severity: "success" })}
         onToastClick={onToastClick}
       />,
     );
@@ -95,7 +102,7 @@ describe("StatusBar", () => {
   });
 
   it("uses role=status with aria-live=polite for screen-reader updates", () => {
-    const { container } = render(<StatusBar persistent={[]} toasts={[]} />);
+    const { container } = render(<StatusBar persistent={[]} visibleToast={null} />);
     // Query the footer directly — rendering surfaces it with role="status".
     const footer = container.querySelector("footer");
     expect(footer).not.toBeNull();

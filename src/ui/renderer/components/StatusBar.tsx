@@ -14,10 +14,16 @@ import type { PersistentItem, StatusBarSeverity, ToastItem } from "../hooks/use-
  * caller (App.tsx) wires this to `notifyClick` IPC and `removeToast`. Other
  * toast producers (install progress, lifecycle results) leave the meta
  * undefined and their toasts remain non-clickable cosmetic spans.
+ *
+ * Sequential toast display: only `visibleToast` (the queue head) is rendered
+ * at any time. `pendingCount` shows how many more are waiting.
  */
 export interface StatusBarProps {
   persistent: PersistentItem[];
-  toasts: ToastItem[];
+  /** The single toast currently at the front of the queue (or null). */
+  visibleToast: ToastItem | null;
+  /** Number of toasts queued behind the visible one. */
+  pendingCount?: number;
   /**
    * Click handler invoked when a toast that has `notification` metadata is
    * clicked. The handler receives the full ToastItem so callers can dispatch
@@ -41,7 +47,7 @@ const SEVERITY_TEXT: Record<StatusBarSeverity, string> = {
 };
 
 export function StatusBar(props: StatusBarProps) {
-  const { persistent, toasts, onToastClick } = props;
+  const { persistent, visibleToast, pendingCount = 0, onToastClick } = props;
 
   return (
     <footer
@@ -68,8 +74,9 @@ export function StatusBar(props: StatusBarProps) {
           ))
         )}
       </div>
-      <div className="flex min-w-0 items-center gap-3 truncate">
-        {toasts.slice(-3).map((toast) => {
+      <div className="flex min-w-0 items-center gap-2 truncate">
+        {visibleToast !== null && (() => {
+          const toast = visibleToast;
           const clickable = toast.notification !== undefined && typeof onToastClick === "function";
           const baseClass = `flex min-w-0 items-center gap-1.5 truncate ${SEVERITY_TEXT[toast.severity]}`;
           const dot = (
@@ -78,26 +85,35 @@ export function StatusBar(props: StatusBarProps) {
               aria-hidden="true"
             />
           );
+          const pendingBadge = pendingCount > 0 ? (
+            <span className="shrink-0 opacity-50 tabular-nums">+{pendingCount}</span>
+          ) : null;
           if (clickable) {
             return (
-              <button
-                key={toast.id}
-                type="button"
-                onClick={() => onToastClick?.(toast)}
-                className={`${baseClass} cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring`}
-              >
-                {dot}
-                <span className="truncate">{toast.message}</span>
-              </button>
+              <>
+                <button
+                  key={toast.id}
+                  type="button"
+                  onClick={() => onToastClick?.(toast)}
+                  className={`${baseClass} cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring`}
+                >
+                  {dot}
+                  <span className="truncate">{toast.message}</span>
+                </button>
+                {pendingBadge}
+              </>
             );
           }
           return (
-            <span key={toast.id} className={baseClass}>
-              {dot}
-              <span className="truncate">{toast.message}</span>
-            </span>
+            <>
+              <span key={toast.id} className={baseClass}>
+                {dot}
+                <span className="truncate">{toast.message}</span>
+              </span>
+              {pendingBadge}
+            </>
           );
-        })}
+        })()}
       </div>
     </footer>
   );
