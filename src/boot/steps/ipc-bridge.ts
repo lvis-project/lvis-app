@@ -17,27 +17,28 @@ import type { PluginRuntime } from "../../plugins/runtime.js";
 import { onEvent } from "../types.js";
 
 /** True if the event type is a high-frequency transcript stream event. */
-function isTranscriptEvent(type: string): boolean {
+export function isTranscriptEvent(type: string): boolean {
   return type.endsWith(".transcript.updated");
 }
 
-/** Build a coalescing send wrapper for a given event type + window. */
-function makeCoalescingSend(
-  type: string,
-  getWin: () => BrowserWindow,
+/**
+ * Core coalescing debounce logic for a single event type.
+ * Accepts a `sendFn` that performs the actual delivery. Callers are
+ * responsible for any guard logic (e.g. `win.isDestroyed()` check) inside
+ * `sendFn` — see `registerPluginEventBridge` for the production usage.
+ *
+ * Exported so unit tests can import and exercise the production coalescing
+ * behaviour directly rather than duplicating the debounce implementation.
+ */
+export function makeCoalescingSend(
+  sendFn: (data: unknown) => void,
 ): (data: unknown) => void {
   let lastData: unknown = undefined;
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
   const flush = (data: unknown) => {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined; }
-    const win = getWin();
-    if (win.isDestroyed()) return;
-    try {
-      win.webContents.send("lvis:plugin:event", type, data);
-    } catch (e) {
-      console.warn(`[lvis] boot: ${type} send failed:`, (e as Error).message);
-    }
+    sendFn(data);
   };
 
   return (data: unknown) => {
@@ -84,16 +85,17 @@ export function registerPluginEventBridge(
   const eventTypes = collectPluginEventTypes(pluginRuntime);
 
   for (const type of eventTypes) {
+    const guardedSend = (data: unknown) => {
+      if (win.isDestroyed()) return;
+      try {
+        win.webContents.send("lvis:plugin:event", type, data);
+      } catch (e) {
+        console.warn(`[lvis] boot: ${type} send failed:`, (e as Error).message);
+      }
+    };
     const sendFn = isTranscriptEvent(type)
-      ? makeCoalescingSend(type, () => win)
-      : (data: unknown) => {
-          if (win.isDestroyed()) return;
-          try {
-            win.webContents.send("lvis:plugin:event", type, data);
-          } catch (e) {
-            console.warn(`[lvis] boot: ${type} send failed:`, (e as Error).message);
-          }
-        };
+      ? makeCoalescingSend(guardedSend)
+      : guardedSend;
     unsubs.push(onEvent(type, sendFn));
   }
 
