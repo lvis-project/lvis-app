@@ -5,8 +5,8 @@
  *  1. validateSender() allows trusted frames (file://, localhost) and rejects
  *     untrusted origins.
  *  2. Every channel classified as TIER 1 or TIER 2 in the channel manifest has
- *     a validateSender() guard present in ipc-bridge.ts source text.
- *     TIER 3 (read-only) channels are explicitly excluded from the requirement.
+ *     a validateSender() guard present in the IPC domain source files
+ *     (src/ipc/domains/*). TIER 3 (read-only) channels are excluded.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -141,8 +141,14 @@ describe("validateSender", () => {
 // ─── Source-level guard audit ────────────────────────────────────────────────
 
 describe("ipc-bridge.ts — TIER 1/2 channels have validateSender guard", () => {
-  const bridgePath = join(__dirname, "../../src/ipc-bridge.ts");
-  const source = readFileSync(bridgePath, "utf-8");
+  // ipc-bridge.ts is now a thin re-export shim; all handler source lives in
+  // src/ipc/domains/*. Aggregate the full source so the channel + guard checks
+  // remain valid against the actual implementation files.
+  const domainDir = join(__dirname, "../../src/ipc/domains");
+  const domainFiles = ["settings.ts", "chat.ts", "plugins.ts", "usage.ts", "audit.ts", "permissions.ts", "window.ts", "misc.ts"];
+  const source = domainFiles
+    .map((f) => readFileSync(join(domainDir, f), "utf-8"))
+    .join("\n");
 
   const gatedChannels = Object.entries(CHANNEL_MANIFEST)
     .filter(([, tier]) => tier === "tier1" || tier === "tier2")
