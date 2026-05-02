@@ -19,7 +19,7 @@ export function UserMessageEditor({
 }) {
   const [draft, setDraft] = useState(initialText);
   return (
-    <div className="ml-auto mt-3 w-full max-w-[85%] rounded-md border bg-message-user/10 p-2 text-sm">
+    <div className="ml-auto w-full max-w-[85%] rounded-md border bg-message-user/10 p-2 text-sm">
       <Textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}

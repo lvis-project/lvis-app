@@ -227,7 +227,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           </div>
         </div>
       )}
-      <ScrollArea className="h-full px-3 py-4"><div className="space-y-3">
+      <ScrollArea className="h-full px-3 py-4"><div className="space-y-4">
         <ChatSearchOverlay
           open={searchOpen}
           query={searchQuery}
@@ -343,7 +343,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                 const starId = isEntryStarred(idx);
                 const starActive = !!starId;
                 rendered.push(
-                  <div key={idx} className={`group relative ml-auto mt-3 w-fit max-w-[85%] rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${ringCls}`}>
+                  <div key={idx} className={`group relative ml-auto w-fit max-w-[85%] rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${ringCls}`}>
                     {/* "나" label removed — sender is implicit. Star + hover
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}

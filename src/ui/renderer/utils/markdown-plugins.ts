@@ -9,8 +9,10 @@
 // `<del>` between the tildes.
 
 import remarkGfm from "remark-gfm";
-import type { PluggableList } from "unified";
+import type { Options } from "react-markdown";
 
-export const MARKDOWN_REMARK_PLUGINS: PluggableList = [
+// Use the type from `react-markdown` (a direct dependency) rather than
+// `unified` (a transitive one) so the package boundary stays clean.
+export const MARKDOWN_REMARK_PLUGINS: Options["remarkPlugins"] = [
   [remarkGfm, { singleTilde: false }],
 ];
