@@ -3,6 +3,9 @@
  *
  * PostHook Step 7에서 도구 실행 결과의 민감 데이터를 검사하고 마스킹.
  * 탐지된 패턴 목록은 감사 로그에 기록됨.
+ *
+ * Also exports `redactFsPath` and `redactAuditPayload` for sanitising
+ * filesystem paths before they are written to the audit log (#449).
  */
 import os from "node:os";
 
@@ -168,7 +171,32 @@ export function redactFsPath(p: string): string {
       out = "<home>" + out.slice(_homeDir.length);
     }
   }
-  return out.length > MAX_AUDIT_PATH ? out.slice(0, MAX_AUDIT_PATH) + "…" : out;
+  // Use code-point iteration so a surrogate pair at the boundary is not split.
+  const codePoints = [...out];
+  return codePoints.length > MAX_AUDIT_PATH ? codePoints.slice(0, MAX_AUDIT_PATH).join("") + "…" : out;
+}
+
+/**
+ * Path-like fields in audit log payloads that may contain the user's home
+ * directory. Shallow: nested objects are not walked.
+ */
+const AUDIT_PATH_KEYS = new Set([
+  "entryUrl", "entryFsPath", "rawInstallRoot", "realEntry", "realRoot", "frameUrl",
+]);
+
+/**
+ * Redact home-dir paths in all recognised path fields of a flat audit payload
+ * object. Non-path fields and non-object payloads are returned unchanged.
+ * Exported so IPC domains can share the same sanitisation without duplicating
+ * the field list.
+ */
+export function redactAuditPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  return Object.fromEntries(
+    Object.entries(payload as Record<string, unknown>).map(([k, v]) =>
+      [k, AUDIT_PATH_KEYS.has(k) && typeof v === "string" ? redactFsPath(v) : v],
+    ),
+  );
 }
 
 /**

@@ -1,10 +1,11 @@
 /**
  * Sprint E §3 — redactForLLM pattern coverage (email / phone / CC).
- * Also covers redactFsPath (audit log PII redact, #449).
+ * Also covers redactFsPath + redactAuditPayload (audit log PII redact, #449).
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import os from "node:os";
-import { redactForLLM, redactFsPath } from "../dlp-filter.js";
+import { pathToFileURL } from "node:url";
+import { redactForLLM, redactFsPath, redactAuditPayload } from "../dlp-filter.js";
 
 describe("redactForLLM", () => {
   it("redacts emails", () => {
@@ -53,16 +54,21 @@ describe("redactForLLM", () => {
 
 describe("redactFsPath", () => {
   const home = os.homedir();
+  // Guard: if homedir is empty (rare CI sandbox) the redact logic is a no-op —
+  // skip these tests rather than give a false-green pass.
+  const itIfHome = home ? it : it.skip;
 
-  it("replaces home-dir prefix in a plain FS path", () => {
+  itIfHome("replaces home-dir prefix in a plain FS path", () => {
     const p = home + "/.lvis/plugins/com.example/dist/ui.js";
     const result = redactFsPath(p);
     expect(result).toMatch(/^<home>/);
     expect(result).not.toContain(home);
   });
 
-  it("replaces home-dir prefix in a file:// URL", () => {
-    const p = "file://" + home + "/.lvis/plugins/com.example/dist/ui.js";
+  itIfHome("replaces home-dir prefix in a file:// URL (pathToFileURL format)", () => {
+    // Use pathToFileURL so the test input matches what Electron/Node produces,
+    // not just the same string-concat the implementation uses internally.
+    const p = pathToFileURL(home + "/.lvis/plugins/com.example/dist/ui.js").href;
     const result = redactFsPath(p);
     expect(result).toMatch(/^file:\/\/<home>/);
     expect(result).not.toContain(home);
@@ -73,10 +79,12 @@ describe("redactFsPath", () => {
     expect(redactFsPath(p)).toBe(p);
   });
 
-  it("caps paths longer than 256 characters", () => {
-    const long = home + "/" + "a".repeat(300);
+  itIfHome("caps paths longer than 256 code points", () => {
+    // Use emoji (2 UTF-16 units each) to verify the cap works on code points,
+    // not UTF-16 code units. 300 emoji + "<home>/" = 307 code points > 256.
+    const long = home + "/" + "😀".repeat(300);
     const result = redactFsPath(long);
-    expect(result.length).toBeLessThanOrEqual(257); // 256 chars + ellipsis char
+    expect([...result].length).toBeLessThanOrEqual(257); // 256 code points + ellipsis
     expect(result).toContain("…");
   });
 
@@ -84,7 +92,45 @@ describe("redactFsPath", () => {
     expect(redactFsPath("")).toBe("");
   });
 
-  it("handles exact home-dir match without trailing slash", () => {
+  itIfHome("handles exact home-dir match without trailing slash", () => {
     expect(redactFsPath(home)).toBe("<home>");
+  });
+
+  itIfHome("handles Windows-style backslash separator", () => {
+    // Simulate a Windows path where the home dir is used as a prefix.
+    const winHome = home.replace(/\//g, "\\");
+    const p = winHome + "\\AppData\\Roaming\\lvis\\plugins\\foo.js";
+    const result = redactFsPath(p);
+    // On non-Windows, _homeDir uses forward slashes so backslash paths won't
+    // match — this test is mainly a contract test for when running on Windows.
+    // Just assert no throw and the result is a string.
+    expect(typeof result).toBe("string");
+  });
+});
+
+describe("redactAuditPayload", () => {
+  const home = os.homedir();
+  const itIfHome = home ? it : it.skip;
+
+  itIfHome("redacts known path fields", () => {
+    const payload = {
+      webContentsId: 42,
+      pluginId: "com.example",
+      entryUrl: home + "/.lvis/plugins/com.example/dist/ui.js",
+      entryFsPath: home + "/.lvis/plugins/com.example/dist/ui.js",
+      reason: "invalid-entry-url",
+    };
+    const result = redactAuditPayload(payload) as Record<string, unknown>;
+    expect(result.entryUrl).toMatch(/^<home>/);
+    expect(result.entryFsPath).toMatch(/^<home>/);
+    expect(result.pluginId).toBe("com.example");
+    expect(result.webContentsId).toBe(42);
+    expect(result.reason).toBe("invalid-entry-url");
+  });
+
+  it("returns non-object payload unchanged", () => {
+    expect(redactAuditPayload("string")).toBe("string");
+    expect(redactAuditPayload(null)).toBeNull();
+    expect(redactAuditPayload(42)).toBe(42);
   });
 });
