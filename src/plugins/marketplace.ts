@@ -370,12 +370,25 @@ export class PluginMarketplaceService {
       // advertises a DIFFERENT version we fall through to re-install so that an
       // "install" call can act as an in-place upgrade and stale files from the
       // old release do not survive.
+      //
+      // Exception (issue #468): dev-link installs report the source repo's
+      // version through a `plugin.json` symlink, so once source matches catalog
+      // (e.g. after a backfill bump) the same-version check would short-circuit
+      // and `touchInstalledRegistryEntry` keeps `installSource: "dev-link"` due
+      // to its `?? "user"` fallback. Disk stays symlinked, registry stays
+      // dev-link, and the post-install `addPlugin()` then trips the trust
+      // check ("untrusted registry manifest path") and silently fails. Force a
+      // full re-install when an existing dev-link is being superseded by a
+      // marketplace install — that path extracts the zip (replacing the
+      // symlinks) and the registry write at the end correctly sets
+      // installSource: "user".
       const installedVersion = await this.getInstalledVersion(plugin.id);
       const isSameVersion =
         !plugin.version ||
         !installedVersion ||
         plugin.version === installedVersion;
-      if (isSameVersion) {
+      const isDevLinkSupersede = existingEntry.installSource === "dev-link";
+      if (isSameVersion && !isDevLinkSupersede) {
         await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
         return { pluginId: plugin.id, installed: true };
       }
