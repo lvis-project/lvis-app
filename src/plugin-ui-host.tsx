@@ -94,7 +94,13 @@ function readPluginAssetUrls(): { shellUrl: string; preloadUrl: string } {
   return { shellUrl, preloadUrl };
 }
 
-export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null }) {
+export function PluginUiHostView({
+  view,
+  showChrome = true,
+}: {
+  view: PluginUiExtensionView | null;
+  showChrome?: boolean;
+}) {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -230,6 +236,23 @@ export function PluginUiHostView({ view }: { view: PluginUiExtensionView | null 
     }
   }
 
+  // When showChrome=false, render bare content without CardHeader (for detached views)
+  if (!showChrome) {
+    return (
+      <div className="relative h-full w-full overflow-hidden">
+        <div className="h-full overflow-hidden">
+          {content}
+        </div>
+        {loading ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-card text-xs text-muted-foreground">
+            로딩 중...
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  // Default: render with Card chrome (for inline/sidebar views)
   return (
     <Card className="mx-auto flex min-h-0 min-w-0 flex-1 w-full max-w-6xl flex-col overflow-hidden">
       <CardHeader>
