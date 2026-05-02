@@ -132,9 +132,10 @@ function DetachedContent({ viewKey }: ContentProps) {
   }
 
   // Plugin view: viewKey = "plugin:<pluginId>:<extensionId>"
+  // In detached mode, render without host chrome to avoid title duplication.
   if (viewKey.startsWith("plugin:")) {
     const activePluginView = pluginViews.find((v) => toViewKey(v) === viewKey) ?? null;
-    return <PluginUiHostView view={activePluginView} />;
+    return <PluginUiHostView view={activePluginView} showChrome={false} />;
   }
 
   return (

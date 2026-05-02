@@ -41,13 +41,17 @@ const BUILTIN_VIEW_LABELS: Record<string, string> = {
   starred: "Starred",
 };
 
+function isPluginViewKey(viewKey: string): boolean {
+  return viewKey.startsWith("plugin:");
+}
+
 /** Returns a safe window title for a validated viewKey. */
 function viewKeyLabel(viewKey: string): string {
   if (Object.prototype.hasOwnProperty.call(BUILTIN_VIEW_LABELS, viewKey)) {
     return BUILTIN_VIEW_LABELS[viewKey];
   }
   // plugin:<pluginId>:<extensionId> — use the pluginId segment only
-  if (viewKey.startsWith("plugin:")) {
+  if (isPluginViewKey(viewKey)) {
     const pluginId = viewKey.slice("plugin:".length).split(":")[0];
     return pluginId;
   }
@@ -234,16 +238,23 @@ export class WindowManager {
     // to the new viewKey in-place rather than spawning a second window.
     if (this._detachedShell !== null && !this._detachedShell.isDestroyed()) {
       const shell = this._detachedShell;
-      if (this._detachedShellViewKey !== viewKey) {
-        this._detachedShellViewKey = viewKey;
-        // Update the entry's viewKey so listChildren() reflects the live viewKey.
-        const entry = this._children.get(shell.id);
-        if (entry) entry.viewKey = viewKey;
-        shell.setTitle(`LVIS — ${viewKeyLabel(viewKey)}`);
-        shell.webContents.send("lvis:detached:navigate", { viewKey });
+      if (isPluginViewKey(this._detachedShellViewKey ?? "") !== isPluginViewKey(viewKey)) {
+        this._children.delete(shell.id);
+        this._detachedShell = null;
+        this._detachedShellViewKey = null;
+        if (!shell.isDestroyed()) shell.destroy();
+      } else {
+        if (this._detachedShellViewKey !== viewKey) {
+          this._detachedShellViewKey = viewKey;
+          // Update the entry's viewKey so listChildren() reflects the live viewKey.
+          const entry = this._children.get(shell.id);
+          if (entry) entry.viewKey = viewKey;
+          shell.setTitle(`LVIS — ${viewKeyLabel(viewKey)}`);
+          shell.webContents.send("lvis:detached:navigate", { viewKey });
+        }
+        shell.focus();
+        return shell;
       }
-      shell.focus();
-      return shell;
     }
 
     // Restore saved bounds if available.
@@ -283,6 +294,7 @@ export class WindowManager {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
+        webviewTag: isPluginViewKey(viewKey),
         preload: this._preloadPath,
       },
     });

@@ -94,6 +94,14 @@ describe("PluginUiHostView — loading state", () => {
     expect(getByText(/Plugin webview 자산 URL을 lvisApi에서 찾을 수 없습니다/)).toBeTruthy();
   });
 
+  it("omits host card chrome when showChrome is false", () => {
+    stubLvisApi("", "file:///preload.cjs");
+    const { queryByText, getByText } = render(<PluginUiHostView view={makeView()} showChrome={false} />);
+    expect(queryByText("미팅")).toBeNull();
+    expect(queryByText("회의 세션 테스트")).toBeNull();
+    expect(getByText(/Plugin webview 자산 URL을 lvisApi에서 찾을 수 없습니다/)).toBeTruthy();
+  });
+
   it("does NOT show loading overlay for embedded-page kind (legacy)", () => {
     stubLvisApi();
     const view = makeView();
