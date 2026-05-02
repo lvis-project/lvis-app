@@ -1,13 +1,15 @@
 /**
  * useStackedChat — reverse infinite scroll hook for StackedChatView.
  *
- * Loads sessions for today + yesterday on mount, then prefetches one
+ * Loads sessions for today + yesterday on mount (excluding the current active
+ * session), along with the full message entries for each. Prepends one
  * additional day each time the user scrolls to the top of the list.
  * Scroll position is preserved after prepending older entries.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
-import type { SessionSummary } from "./use-sessions.js";
+import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import { historyToEntries } from "../utils/history.js";
 
 // Lightweight dev console logger — guarded against renderer contexts where
 // `process` is not defined (esbuild --platform=browser without process shim).
@@ -17,9 +19,14 @@ const debugLog = (msg: string, ...args: unknown[]) => {
   }
 };
 
-export type StackedSession = SessionSummary & {
+export type StackedSession = {
+  id: string;
+  modifiedAt: string;
+  title: string;
   /** ISO date string for day grouping, e.g. "2026-04-30" */
   dayKey: string;
+  /** Rendered entries loaded from session history */
+  entries: ChatEntry[];
 };
 
 /** How many days back we've loaded so far (0 = today only, 1 = + yesterday, …) */
@@ -36,8 +43,8 @@ function dateKeyDaysBack(daysBack: number): string {
 }
 
 export interface UseStackedChatReturn {
-  /** All loaded sessions ordered oldest → newest */
-  sessions: StackedSession[];
+  /** Historical sessions ordered oldest → newest (excludes current active session) */
+  historicalSessions: StackedSession[];
   /** True while initial load or prefetch in progress */
   loading: boolean;
   /** True when there are no more historical sessions to load */
@@ -50,8 +57,8 @@ export interface UseStackedChatReturn {
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 }
 
-export function useStackedChat(api: LvisApi): UseStackedChatReturn {
-  const [sessions, setSessions] = useState<StackedSession[]>([]);
+export function useStackedChat(api: LvisApi, currentSessionId: string): UseStackedChatReturn {
+  const [historicalSessions, setHistoricalSessions] = useState<StackedSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [daysLoaded, setDaysLoaded] = useState(INITIAL_DAYS_BACK);
   const [reachedEnd, setReachedEnd] = useState(false);
@@ -60,19 +67,13 @@ export function useStackedChat(api: LvisApi): UseStackedChatReturn {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const loadingRef = useRef(false);
 
-  const fetchSessionsForDayRange = useCallback(
-    async (fromDaysBack: number, toDaysBack: number): Promise<StackedSession[]> => {
-      const fromKey = dateKeyDaysBack(fromDaysBack);
-      const toKey = dateKeyDaysBack(toDaysBack);
+  /** Load entries for a session by id — returns [] on error */
+  const loadSessionEntries = useCallback(
+    async (sessionId: string): Promise<ChatEntry[]> => {
       try {
-        const { sessions: all } = await api.chatSessions();
-        return all
-          .filter((s) => {
-            const dk = toISODateKey(s.modifiedAt);
-            return dk >= fromKey && dk <= toKey;
-          })
-          .map((s) => ({ ...s, dayKey: toISODateKey(s.modifiedAt) }))
-          .sort((a, b) => a.modifiedAt.localeCompare(b.modifiedAt));
+        const result = await api.chatSessionHistory(sessionId);
+        if (!result.ok) return [];
+        return historyToEntries(result.messages);
       } catch {
         return [];
       }
@@ -80,16 +81,50 @@ export function useStackedChat(api: LvisApi): UseStackedChatReturn {
     [api],
   );
 
+  const fetchSessionsForDayRange = useCallback(
+    async (fromDaysBack: number, toDaysBack: number): Promise<StackedSession[]> => {
+      const fromKey = dateKeyDaysBack(fromDaysBack);
+      const toKey = dateKeyDaysBack(toDaysBack);
+      try {
+        const { sessions: all } = await api.chatSessions();
+        const filtered = all
+          .filter((s) => {
+            // Exclude the current active session — it's rendered separately
+            if (s.id === currentSessionId) return false;
+            const dk = toISODateKey(s.modifiedAt);
+            return dk >= fromKey && dk <= toKey;
+          })
+          .sort((a, b) => a.modifiedAt.localeCompare(b.modifiedAt));
+
+        // Load entries for each historical session in parallel
+        const withEntries = await Promise.all(
+          filtered.map(async (s) => {
+            const entries = await loadSessionEntries(s.id);
+            return {
+              ...s,
+              dayKey: toISODateKey(s.modifiedAt),
+              entries,
+            };
+          }),
+        );
+        return withEntries;
+      } catch {
+        return [];
+      }
+    },
+    [api, currentSessionId, loadSessionEntries],
+  );
+
   // Initial load: today (0) + yesterday (1)
   useEffect(() => {
     let cancelled = false;
-    debugLog("mount — loading initial sessions (today + yesterday)");
+    debugLog("mount — loading initial historical sessions (today + yesterday)");
     void (async () => {
       setLoading(true);
       const loaded = await fetchSessionsForDayRange(0, INITIAL_DAYS_BACK);
       if (cancelled) return;
       debugLog("initial load complete, session count:", loaded.length, loaded.map((s) => s.id.slice(0, 8)));
-      setSessions(loaded);
+      setHistoricalSessions(loaded);
       setLoading(false);
     })();
     return () => {
@@ -110,7 +145,7 @@ export function useStackedChat(api: LvisApi): UseStackedChatReturn {
     const prevScrollHeight = container?.scrollHeight ?? 0;
     const prevScrollTop = container?.scrollTop ?? 0;
 
-    setSessions((prev) => {
+    setHistoricalSessions((prev) => {
       if (older.length === 0) {
         return prev;
       }
@@ -142,6 +177,8 @@ export function useStackedChat(api: LvisApi): UseStackedChatReturn {
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
+    // Guard: jsdom and some test environments don't provide IntersectionObserver
+    if (typeof IntersectionObserver === "undefined") return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -158,7 +195,7 @@ export function useStackedChat(api: LvisApi): UseStackedChatReturn {
   }, [loadMore, reachedEnd]);
 
   return {
-    sessions,
+    historicalSessions,
     loading,
     reachedEnd,
     loadMore,

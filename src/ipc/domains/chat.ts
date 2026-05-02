@@ -368,6 +368,25 @@ ${input}`;
     };
   });
 
+  // read-only: load messages for any session by id (does NOT change active session)
+  ipcMain.handle("lvis:chat:session-history", (_e, sessionId: string) => {
+    if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+      return { ok: false, messages: [] };
+    }
+    const raw = memoryManager.loadSession(sessionId) as GenericMessage[] | null;
+    if (!raw) return { ok: false, messages: [] };
+    return {
+      ok: true,
+      messages: raw.map((m, i) => ({
+        index: i,
+        role: m.role,
+        content: m.role === "tool_result" ? m.content : (m as { content: string }).content,
+        toolName: m.role === "tool_result" ? m.toolName : undefined,
+        isError: m.role === "tool_result" ? m.isError : undefined,
+      })),
+    };
+  });
+
   ipcMain.handle("lvis:chat:edit-resend", async (e, messageIndex: number, newText: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:edit-resend", e); return UNAUTHORIZED_FRAME; }
     if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };

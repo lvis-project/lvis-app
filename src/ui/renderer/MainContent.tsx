@@ -3,9 +3,8 @@ import { PluginUiHostView } from "../../plugin-ui-host.js";
 import type { getApi } from "./api-client.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { ChatView } from "./ChatView.js";
-// StackedChatView is preserved but not activated — see HomeChatPane comment.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { StackedChatView } from "./components/StackedChatView.js";
+import { useStackedChat } from "./hooks/use-stacked-chat.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
@@ -69,20 +68,51 @@ function MainPaneShell({ children, padded = true }: { children: ReactNode; padde
 }
 
 /**
- * HomeChatPane — always uses ChatView.
- *
- * StackedChatView (PR #473) is incomplete: it lacks entry-type rendering for
- * `imported_trigger`, `hint`, `briefing`, and other entry kinds, which causes
- * all unrecognised messages to appear as plain `[bracket]` text in production.
- * StackedChatView is preserved in the codebase for future completion but MUST
- * NOT be activated until the rendering gap is closed in a dedicated follow-up PR.
- *
- * The `useStackedChatView` prop is kept in the interface for API compatibility
- * but is intentionally ignored here. When StackedChatView is fully implemented,
- * restore the conditional branch below and remove this comment.
+ * HomeChatPane — wraps ChatView or StackedChatView depending on the feature flag.
+ * Owns useStackedChat hook (only instantiated when stacked view is active).
  */
 function HomeChatPane(props: MainContentProps) {
-  const { chatContextValue } = props;
+  const { chatContextValue, api } = props;
+  const useStacked = props.useStackedChatView ?? false;
+
+  // useStackedChat is always called (rules of hooks) but only used when stacked is active
+  const stackedChatHook = useStackedChat(
+    api as Parameters<typeof useStackedChat>[0],
+    props.currentSessionId,
+  );
+
+  if (useStacked) {
+    return (
+      <ChatContextProvider value={chatContextValue}>
+        <StackedChatView
+          historicalSessions={stackedChatHook.historicalSessions}
+          currentSessionId={props.currentSessionId}
+          entries={chatContextValue.entries}
+          streaming={chatContextValue.streaming}
+          onAsk={props.onAsk}
+          onGuide={props.onGuide}
+          onAbort={props.onAbort}
+          loading={stackedChatHook.loading}
+          reachedEnd={stackedChatHook.reachedEnd}
+          sentinelRef={stackedChatHook.sentinelRef}
+          scrollContainerRef={stackedChatHook.scrollContainerRef}
+          plugins={props.plugins}
+          onSelectPlugin={props.onSelectPlugin}
+          commandActions={props.commandActions}
+          commandPopoverOpen={props.commandPopoverOpen}
+          onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
+          installingPluginIds={props.installingPluginIds}
+          onOpenMarketplace={props.onOpenMarketplace}
+          marketplaceUrlReady={props.marketplaceUrlReady}
+          onRetryEffort={props.onRetryEffort}
+          onFork={props.onFork}
+          onToggleStar={props.onToggleStar}
+          isEntryStarred={props.isEntryStarred}
+          onFeedback={props.onFeedback}
+        />
+      </ChatContextProvider>
+    );
+  }
 
   return (
     <ChatContextProvider value={chatContextValue}>
