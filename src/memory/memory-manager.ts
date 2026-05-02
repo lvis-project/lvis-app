@@ -60,7 +60,7 @@ export type CheckpointTrigger = "hard-token" | "semantic-llm" | "soft-time" | "m
  * Stores enough information to reconstruct the chain and resume with prior context.
  */
 export interface Checkpoint {
-  /** Unique checkpoint ID (UUID) */
+  /** Unique checkpoint identifier (any non-empty string; typically a UUID) */
   id: string;
   /** ISO timestamp when the checkpoint was created */
   triggeredAt: string;
@@ -381,6 +381,9 @@ export class MemoryManager {
   }
 
   async saveSessionMetadata(sessionId: string, metadata: SessionMetadata): Promise<void> {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`saveSessionMetadata: invalid sessionId "${sessionId}"`);
+    }
     const targetPath = join(this.sessionsDir, `${sessionId}.meta.json`);
     // Enforce the summaryPreamble length invariant on write, regardless of how the
     // caller assembled the metadata (i.e., whether setSummaryPreamble was used or not).
@@ -394,6 +397,9 @@ export class MemoryManager {
   }
 
   loadSessionMetadata(sessionId: string): SessionMetadata | null {
+    if (!isValidSessionId(sessionId)) {
+      throw new Error(`loadSessionMetadata: invalid sessionId "${sessionId}"`);
+    }
     const path = join(this.sessionsDir, `${sessionId}.meta.json`);
     if (!existsSync(path)) return null;
     try {

@@ -253,7 +253,7 @@ describe("backward compatibility — loading old-format metadata", () => {
   });
 });
 
-// ── 5b. normalizeCheckpoint range validation (Copilot fix #3) ────────────────
+// ── 5b. normalizeCheckpoint range validation ──────────────────────────────────
 
 describe("normalizeCheckpoint range validation", () => {
   it("drops checkpoint with ctxUsageAtTrigger below 0", async () => {
@@ -378,7 +378,7 @@ describe("normalizeCheckpoint range validation", () => {
   });
 });
 
-// ── 5c. getCheckpointChain O(n) order + path traversal (Copilot fix #1 & #4) ─
+// ── 5c. getCheckpointChain O(n) order + path-traversal safety ────────────────
 
 describe("getCheckpointChain — O(n) order + path traversal guard", () => {
   it("returns root-first order for a 100-node chain", async () => {
@@ -472,7 +472,7 @@ describe("normalizeSessionMetadata — parentSessionId regex validation", () => 
   });
 });
 
-// ── 5d. saveSessionMetadata truncation invariant (Copilot fix #2) ─────────────
+// ── 5d. saveSessionMetadata truncation enforcement ────────────────────────────
 
 describe("saveSessionMetadata — summaryPreamble truncation invariant", () => {
   it("truncates summaryPreamble exceeding 8000 chars even when setSummaryPreamble was bypassed", async () => {
@@ -603,6 +603,38 @@ describe("normalizeSessionMetadata — read-side summaryPreamble truncation (def
     );
     const meta = mm.loadSessionMetadata(sessionId);
     expect(meta!.summaryPreamble!.length).toBe(8_000);
+  });
+});
+
+// ── 5h. saveSessionMetadata / loadSessionMetadata — IPC input validation ──────
+
+describe("saveSessionMetadata — invalid sessionId throws", () => {
+  it("throws for path-traversal sessionId (../etc/passwd)", async () => {
+    await expect(mm.saveSessionMetadata("../etc/passwd", {})).rejects.toThrow(
+      /invalid sessionId/,
+    );
+  });
+
+  it("throws for sessionId with a slash", async () => {
+    await expect(mm.saveSessionMetadata("a/b", {})).rejects.toThrow(/invalid sessionId/);
+  });
+
+  it("throws for empty string sessionId", async () => {
+    await expect(mm.saveSessionMetadata("", {})).rejects.toThrow(/invalid sessionId/);
+  });
+});
+
+describe("loadSessionMetadata — invalid sessionId throws", () => {
+  it("throws for path-traversal sessionId (../etc/passwd)", () => {
+    expect(() => mm.loadSessionMetadata("../etc/passwd")).toThrow(/invalid sessionId/);
+  });
+
+  it("throws for sessionId with a slash", () => {
+    expect(() => mm.loadSessionMetadata("a/b")).toThrow(/invalid sessionId/);
+  });
+
+  it("throws for empty string sessionId", () => {
+    expect(() => mm.loadSessionMetadata("")).toThrow(/invalid sessionId/);
   });
 });
 
