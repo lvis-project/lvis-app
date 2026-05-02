@@ -120,7 +120,7 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               className="h-7 w-7 p-0"
               aria-label="명령 팔레트 (Ctrl/Cmd+K)"
