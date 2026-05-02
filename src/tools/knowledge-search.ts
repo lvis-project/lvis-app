@@ -34,7 +34,7 @@ import type { HybridRetriever, HybridResult } from "../main/hybrid-retriever.js"
 
 /**
  * knowledge-search-tool이 요구하는 문서 메타 조회 클라이언트.
- * Agent 4의 `lvis-plugin-pageindex/src/workerClient.ts`가 이 shape을
+ * Local Indexer worker client가 이 shape을
  * 만족해야 한다 (16 엔드포인트 중 /documents, /structure, /page-content).
  */
 export interface KnowledgeWorkerClient {

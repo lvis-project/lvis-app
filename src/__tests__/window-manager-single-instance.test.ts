@@ -125,7 +125,7 @@ describe("WindowManager — single-instance detached shell", () => {
 
   it("different viewKey: sends lvis:detached:navigate, no second BrowserWindow created", () => {
     const w1 = wm.openDetachedTab("plugin:meeting:meeting-control");
-    const w2 = wm.openDetachedTab("plugin:pageindex:search");
+    const w2 = wm.openDetachedTab("plugin:local-indexer:search");
 
     expect(w1).toBe(w2);
     expect(mockWindowInstances).toHaveLength(1);
@@ -133,16 +133,16 @@ describe("WindowManager — single-instance detached shell", () => {
     const sent = mockWindowInstances[0].sentMessages;
     expect(sent).toHaveLength(1);
     expect(sent[0][0]).toBe("lvis:detached:navigate");
-    expect((sent[0][1] as { viewKey: string }).viewKey).toBe("plugin:pageindex:search");
+    expect((sent[0][1] as { viewKey: string }).viewKey).toBe("plugin:local-indexer:search");
   });
 
   it("listChildren reflects updated viewKey after in-place navigation", () => {
     wm.openDetachedTab("plugin:meeting:meeting-control");
-    wm.openDetachedTab("plugin:pageindex:search");
+    wm.openDetachedTab("plugin:local-indexer:search");
 
     const listed = wm.listChildren();
     expect(listed).toHaveLength(1);
-    expect(listed[0].viewKey).toBe("plugin:pageindex:search");
+    expect(listed[0].viewKey).toBe("plugin:local-indexer:search");
   });
 
   it("after shell closed, next call spawns a fresh window", () => {
@@ -150,7 +150,7 @@ describe("WindowManager — single-instance detached shell", () => {
     // Simulate window close.
     mockWindowInstances[0].close();
 
-    const w2 = wm.openDetachedTab("plugin:pageindex:search");
+    const w2 = wm.openDetachedTab("plugin:local-indexer:search");
     expect(w2).not.toBe(w1);
     expect(mockWindowInstances).toHaveLength(2);
   });
