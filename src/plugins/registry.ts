@@ -12,10 +12,26 @@ import { plog, PluginPhase } from "./lifecycle-log.js";
  * {@link readPluginRegistry} persists the migrated form back to disk
  * the first time it sees a legacy entry — making the migration
  * one-shot and idempotent.
+ *
+ * Post-2026-05 dev-link removal: the `"dev-link"` value (whether stored
+ * directly in `installSource` or implied by the legacy `_devLinked: true`
+ * boolean) is rewritten to `"local-dev"` on read with a loud audit
+ * warning. There is no in-flight dev-link runtime any longer — the
+ * receipt-check bypass is gone and any entry created by the old
+ * `bun run dev:link` script can no longer load. Treating it as
+ * `"local-dev"` is the closest still-valid sibling so the operator
+ * sees a clear failure (missing receipt) instead of a silent skip.
  */
-interface LegacyRegistryEntry extends PluginRegistryEntry {
+interface LegacyRegistryEntry extends Omit<PluginRegistryEntry, "installSource"> {
   installedBy?: InstallPolicy;
   _devLinked?: boolean;
+  /**
+   * Pre-2026-05 registries may carry `installSource: "dev-link"`. The
+   * union no longer accepts this value at compile time, so the legacy
+   * shape is widened with a string here. {@link migrateLegacyEntry}
+   * normalises it to `"local-dev"`.
+   */
+  installSource?: PluginRegistryEntryInstallSource | "dev-link";
 }
 
 /**
@@ -23,10 +39,11 @@ interface LegacyRegistryEntry extends PluginRegistryEntry {
  * enum. Returns `null` when the entry already conforms (no migration
  * needed).
  *
- * Mapping (matches the disjunction other call sites used pre-cleanup):
- *   - `_devLinked === true`        → `installSource: "dev-link"`
- *   - else `installedBy === "admin"` → `installSource: "admin"`
- *   - else `installedBy === "user"` → `installSource: "user"`
+ * Mapping:
+ *   - `_devLinked === true`              → `installSource: "local-dev"`  (post-purge: was "dev-link")
+ *   - else `installedBy === "admin"`     → `installSource: "admin"`
+ *   - else `installedBy === "user"`      → `installSource: "user"`
+ *   - existing `installSource: "dev-link"` → rewritten to `"local-dev"`
  *
  * Entries with neither legacy field (and no `installSource`) are migrated
  * by stripping the deprecated fields but leaving `installSource` undefined
@@ -34,23 +51,31 @@ interface LegacyRegistryEntry extends PluginRegistryEntry {
  * registries that pre-date both fields.
  *
  * The deprecated fields are always stripped from the returned entry.
+ *
+ * `out.devLinkRewritten` is set to `true` when the migration crossed the
+ * dev-link → local-dev boundary so the caller can emit a single-shot
+ * audit warning. NO silent fallback — the operator must see the rewrite.
  */
-function migrateLegacyEntry(entry: LegacyRegistryEntry): PluginRegistryEntry | null {
+function migrateLegacyEntry(
+  entry: LegacyRegistryEntry,
+  out: { devLinkRewritten: boolean },
+): PluginRegistryEntry | null {
   const hasLegacy = entry.installedBy !== undefined || entry._devLinked !== undefined;
-  if (!hasLegacy && entry.installSource !== undefined) return null;
-  let installSource: PluginRegistryEntryInstallSource | undefined = entry.installSource;
-  if (installSource === undefined) {
-    if (entry._devLinked === true) {
-      installSource = "dev-link";
-    } else if (entry.installedBy === "admin") {
-      installSource = "admin";
-    } else if (entry.installedBy === "user") {
-      installSource = "user";
-    }
-    // No legacy signal at all → leave installSource undefined so the
-    // deployment-guard manifest-fallback path still fires.
+  const hasDevLinkInstallSource = entry.installSource === "dev-link";
+  // Already-conformant entries (new shape, no dev-link, no legacy fields)
+  // require no migration.
+  if (!hasLegacy && !hasDevLinkInstallSource && entry.installSource !== undefined) return null;
+  let installSource: PluginRegistryEntryInstallSource | undefined;
+  if (hasDevLinkInstallSource || entry._devLinked === true) {
+    installSource = "local-dev";
+    out.devLinkRewritten = true;
+  } else if (entry.installSource !== undefined) {
+    installSource = entry.installSource as PluginRegistryEntryInstallSource;
+  } else if (entry.installedBy === "admin") {
+    installSource = "admin";
+  } else if (entry.installedBy === "user") {
+    installSource = "user";
   }
-  if (!hasLegacy && installSource === entry.installSource) return null;
   // Build a fresh object that preserves only the supported fields.
   const migrated: PluginRegistryEntry = {
     id: entry.id,
@@ -95,8 +120,9 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
   // no-ops. This is idempotent: an already-migrated entry returns
   // `null` from migrateLegacyEntry and is left alone.
   let migratedCount = 0;
+  const out = { devLinkRewritten: false };
   const plugins: PluginRegistryEntry[] = parsed.plugins.map((entry) => {
-    const migrated = migrateLegacyEntry(entry);
+    const migrated = migrateLegacyEntry(entry, out);
     if (migrated !== null) {
       migratedCount += 1;
       return migrated;
@@ -107,6 +133,23 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     version: parsed.version ?? 1,
     plugins,
   };
+  if (out.devLinkRewritten) {
+    // Loud one-shot audit warning. Existing dev-link entries cannot load
+    // any longer (receipt verification now applies unconditionally) so
+    // the operator MUST notice this rewrite — there is no silent fallback.
+    plog(
+      "warn",
+      {
+        pluginId: "<registry>",
+        phase: PluginPhase.DISCOVERY_START,
+        reason: "dev_link_install_source_removed",
+        registryPath,
+      },
+      `registry contained dev-link entries — rewritten to installSource:"local-dev". `
+        + `These plugins will fail to load until reinstalled via the marketplace `
+        + `or 'lvis-cli install file://<path-to-dist.zip>'.`,
+    );
+  }
   if (migratedCount > 0) {
     plog(
       "info",

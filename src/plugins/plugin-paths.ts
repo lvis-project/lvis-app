@@ -26,8 +26,8 @@ export interface PluginPaths {
   registryPath: string;
   /**
    * Directory where every plugin lives — `<pluginsRoot>/<id>/plugin.json`.
-   * `installSource` is metadata only; admin / user / local-dev / dev-link
-   * entries all share this root (no physical user/managed split).
+   * `installSource` is metadata only; admin / user / local-dev entries
+   * all share this root (no physical user/managed split).
    */
   pluginsRoot: string;
   /** Per-plugin version cache for rollback (Sprint 3-B §9.6). */

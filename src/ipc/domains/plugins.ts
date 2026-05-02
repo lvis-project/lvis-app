@@ -15,7 +15,7 @@ import { HOST_ONLY_EMIT_NAMESPACES, requiredCapabilityForEmit } from "../../plug
 import { stripSecretFields } from "../../plugins/config-schema.js";
 import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "../../plugins/config-change-bus.js";
 import { runManagedBootstrap } from "../../boot/managed-marketplace.js";
-import { devLinkedEntryAllowed, isDevModeUnlocked } from "../../boot/dev-flags.js";
+import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { NOTIFICATION_KINDS } from "../../main/notification-service.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
 import type { IpcDeps } from "../types.js";
@@ -176,16 +176,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
 
     const entryPath = fileURLToPath(view.entryUrl);
-
-    if (devLinkedEntryAllowed()) {
-      let target: string;
-      try {
-        target = realpathSync(entryPath);
-      } catch {
-        throw new Error(`Plugin UI entry path could not be resolved (plugin=${pluginId}).`);
-      }
-      return readFile(target, "utf-8");
-    }
 
     const rawPluginRoot = pluginRuntime.getPluginRoot(pluginId);
     if (!rawPluginRoot) {
@@ -609,19 +599,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       logRegisterReject("invalid-entry-url", { webContentsId, pluginId, entryUrl });
       plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-entry-url" }, "webview register rejected");
       return { ok: false, error: "invalid-entry-url" };
-    }
-    if (devLinkedEntryAllowed()) {
-      try {
-        realpathSync(entryFsPath);
-      } catch {
-        logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, entryFsPath });
-        plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
-        return { ok: false, error: "entry-url-outside-install-root" };
-      }
-      const binding = { pluginId, entryUrl };
-      pluginWebviewRegistry.set(webContentsId, binding);
-      plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
-      return { ok: true };
     }
     let realRoot: string;
     let realEntry: string;

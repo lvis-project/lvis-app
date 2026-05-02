@@ -28,6 +28,11 @@
  *  - `LVIS_DEV_NO_SANDBOX` → `LVIS_WIN_NO_SANDBOX` (separated from the dev
  *    mask; it's a Windows-only sandbox bypass for corp/VDI boxes, not a
  *    dev-mode flag).
+ *  - `devLinkedEntryAllowed()` and `devLinkedInstallAllowed()` removed
+ *    along with the dev:link script. There is no longer a "linked entry"
+ *    concept — every plugin install (admin / user / local-dev) lives
+ *    physically under `pluginsRoot/<id>/` and the entry-path containment
+ *    check is unconditional.
  */
 
 let isPackagedCached = true;
@@ -107,32 +112,6 @@ export function isDevModeUnlocked(packaged: boolean = isPackagedCached): boolean
     envEquals("LVIS_DEV", "1")
     || envEquals("LVIS_DEV_RELOAD", "1")
   );
-}
-
-/**
- * Allow a plugin manifest's `entry` to traverse outside the plugin directory
- * (e.g. `../../../node_modules/@lvis/plugin-NAME/dist/hostPlugin.js`). Used
- * by runtime.ts and ipc-bridge.ts.
- */
-export function devLinkedEntryAllowed(packaged: boolean = isPackagedCached): boolean {
-  if (packaged) return false;
-  return envEquals("LVIS_DEV", "1");
-}
-
-/**
- * Allow marketplace `install()` to take the file:-spec / npm-install branch.
- * That branch resolves a sibling repo (e.g. `file:../lvis-plugin-meeting`),
- * spawns `npm install` against `<appRoot>/node_modules`, and writes a manifest
- * entry pointing at the npm-installed package. Useful for fast dev-iterate
- * but must NEVER fire in a packaged build:
- *   1. `<appRoot>/node_modules` is read-only inside Electron's `app.asar`,
- *      so the install hard-fails (Architect B1).
- *   2. The branch bypasses signature envelope verification (Security H-2).
- * Production installs always go through the signed-zip download path.
- */
-export function devLinkedInstallAllowed(packaged: boolean = isPackagedCached): boolean {
-  if (packaged) return false;
-  return envEquals("LVIS_DEV", "1");
 }
 
 /**

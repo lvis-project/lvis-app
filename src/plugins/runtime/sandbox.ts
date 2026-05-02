@@ -2,12 +2,11 @@
  * Sandbox — plugin entry-path resolution, data-dir provisioning, noop HostApi.
  */
 
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { PluginHostApi, PluginManifest } from "../types.js";
 import { createPluginStorage } from "../storage.js";
-import { devLinkedEntryAllowed } from "../../boot/dev-flags.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("sandbox");
 
@@ -52,33 +51,20 @@ export function resolvePluginEntryPath(pluginRoot: string, entry: string): strin
   return resolved;
 }
 
-function resolveDevLinkedPackageEntry(entry: string, hostRoot: string): string | undefined {
-  const normalized = entry.replaceAll("\\", "/");
-  const match = normalized.match(/(?:^|\/+)node_modules\/@lvis\/(plugin-[^/]+)\/(.+)$/);
-  if (!match) return undefined;
-  const [, packageName, packageSubpath] = match;
-  const siblingRepoEntry = resolve(hostRoot, "..", `lvis-${packageName}`, packageSubpath);
-  if (!existsSync(siblingRepoEntry)) return undefined;
-  return siblingRepoEntry;
-}
-
 /**
- * Resolve a plugin entry path with dev-mode awareness.
+ * Resolve a plugin entry path.
  *
- * In packaged builds, delegates directly to resolvePluginEntryPath (strict
- * containment check). In dev mode with LVIS_DEV=1, resolves symlinked
- * node_modules entries from sibling repos.
+ * Always strict containment — every plugin install (admin / user /
+ * local-dev) lives physically inside `pluginRoot`. The pre-2026-05
+ * `LVIS_DEV=1` sibling-repo escape (used by the now-removed `dev:link`
+ * script) is gone. `hostRoot` is retained as a parameter for API
+ * symmetry with the caller in `runtime/index.ts` but is no longer used.
  */
 export function resolveEntryPath(
   pluginRoot: string,
   entry: string,
-  hostRoot: string,
+  _hostRoot: string,
 ): string {
-  if (devLinkedEntryAllowed() && !isAbsolute(entry)) {
-    const resolved = resolve(pluginRoot, entry);
-    if (existsSync(resolved)) return resolved;
-    return resolveDevLinkedPackageEntry(entry, hostRoot) ?? resolved;
-  }
   return resolvePluginEntryPath(pluginRoot, entry);
 }
 

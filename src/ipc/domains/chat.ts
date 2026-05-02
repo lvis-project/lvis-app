@@ -28,7 +28,7 @@ import {
   clearLatestRoutineResult,
   getLatestRoutineResult,
 } from "../../routines/routine-delivery.js";
-import { devLinkedEntryAllowed, isDevModeUnlocked } from "../../boot/dev-flags.js";
+import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
