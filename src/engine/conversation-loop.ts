@@ -491,6 +491,17 @@ export class ConversationLoop {
       throw new Error(err);
     }
 
+    // Snapshot the LLM provider/model that will serve this turn so the
+    // post-turn audit hook attributes cost to the model that actually
+    // ran, not to whatever settings happen to be live when the hook
+    // fires. retry-effort temporarily patches settings then reverts in
+    // finally; without this snapshot, the audit log would briefly see
+    // the patched (or post-revert) values instead of the streaming
+    // turn's real attribution.
+    const turnLlmSnapshot = this.deps.settingsService.get("llm");
+    const turnVendorProvider = turnLlmSnapshot.provider;
+    const turnVendorModel = turnLlmSnapshot.vendors[turnLlmSnapshot.provider].model;
+
     // B4: set up abort controller for this turn
     const ac = new AbortController();
     this.currentAbortController = ac;
@@ -596,6 +607,8 @@ export class ConversationLoop {
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
         tokenUsage: result.usage,
         route: routeResult.route,
+        vendorProvider: turnVendorProvider,
+        vendorModel: turnVendorModel,
       });
       // compact가 발생했으면 history 교체
       if (compactedMessages) {

@@ -411,14 +411,18 @@ ${input}`;
     }
     if (lastUserIdx < 0) return { ok: false, error: "no-user-message" };
     const lastUser = messages[lastUserIdx] as Extract<GenericMessage, { role: "user" }>;
-    // Multimodal-safe extraction: when the user retried a turn that
-    // contained images/files, `lastUser.content` is a UserContentPart[]
-    // and the previous `as { content: string }` cast would silently
-    // re-send "[object Object]"-stringified text. Split into the text
-    // body (forwarded to streamTurn as the prompt) and the non-text
-    // parts (forwarded as the attachments tuple so the engine re-emits
-    // them as vision/file blocks).
-    const lastUserText = userContentText(lastUser.content);
+    // Multimodal-safe extraction: split content into the prompt text
+    // and the attachment parts. Use text-only parts for the prompt —
+    // `userContentText()` would also emit `[image:...]` / `[file:...]`
+    // placeholder lines, which combined with `lastUserAttachments`
+    // below would re-send each attachment twice (once as placeholder
+    // text, once as a real vision/file block).
+    const lastUserText = Array.isArray(lastUser.content)
+      ? lastUser.content
+          .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
+          .map((p) => p.text)
+          .join("\n")
+      : lastUser.content;
     const lastUserAttachments = Array.isArray(lastUser.content)
       ? lastUser.content.filter((p) => p.type !== "text")
       : undefined;

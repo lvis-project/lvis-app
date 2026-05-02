@@ -216,5 +216,31 @@ describe("PostTurnHookChain", () => {
       const call = logTurn.mock.calls[0]![0] as { route: string };
       expect(call.route).toBe("skill");
     });
+
+    it("prefers ctx.vendorProvider/vendorModel snapshot over current settings", async () => {
+      // Regression: when the user mutates settings mid-flight (retry-effort
+      // patches thinking config; user switches vendor while streaming),
+      // the audit log must attribute to the model that actually served
+      // the turn, not to whatever settings happen to be live when the
+      // hook fires. The snapshot is captured at runTurn entry.
+      const logTurn = vi.fn();
+      const chain = makeChain({ autoCompact: false, logTurn });
+
+      await chain.run({
+        sessionId: "session-snapshot",
+        messages: createMessages(),
+        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+        input: "안녕",
+        output: "반갑습니다",
+        toolCalls: [],
+        tokenUsage: { inputTokens: 100, outputTokens: 50 },
+        route: "llm",
+        vendorProvider: "claude",
+        vendorModel: "claude-3-5-sonnet-20241022",
+      });
+
+      const call = logTurn.mock.calls[0]![0] as { route: string };
+      expect(call.route).toBe("claude/claude-3-5-sonnet-20241022");
+    });
   });
 });

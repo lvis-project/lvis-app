@@ -32,6 +32,17 @@ export interface PostTurnHookContext {
   toolCalls: Array<{ name: string; isError: boolean }>;
   tokenUsage?: TokenUsage;
   route: string;
+  /**
+   * Snapshot of the LLM vendor/model that actually served this turn —
+   * captured at runTurn entry so that post-turn audit attribution is
+   * stable even if the user mutates settings mid-flight (e.g. retry-effort
+   * temporarily patches thinking config and reverts in finally). The audit
+   * step uses these to emit `${provider}/${model}` for "llm" routes; usage
+   * stats then attribute cost to the model that actually consumed tokens.
+   * Optional so non-LLM-route callers (skill / command) can omit them.
+   */
+  vendorProvider?: string;
+  vendorModel?: string;
 }
 
 export interface PostTurnHookChainDeps {
@@ -124,11 +135,22 @@ export class PostTurnHookChain {
     //    cost per vendor/model. For non-LLM routes (skill / command /
     //    agent-hub), keep the classification verbatim — those turns
     //    don't consume vendor tokens, so cost attribution doesn't apply.
+    //
+    //    Prefer the turn-start snapshot (ctx.vendorProvider/vendorModel)
+    //    over the current settings read: the current settings can drift
+    //    mid-turn (retry-effort temporarily patches thinking config; the
+    //    user can switch vendor while a turn is streaming). The snapshot
+    //    captured at runTurn entry attributes the turn to whatever model
+    //    actually served it.
     try {
       const llmSettings = this.deps.settingsService?.get("llm");
+      const provider = ctx.vendorProvider ?? llmSettings?.provider;
+      const model =
+        ctx.vendorModel ??
+        (llmSettings ? llmSettings.vendors[llmSettings.provider].model : undefined);
       const auditRoute =
-        ctx.route === "llm" && llmSettings
-          ? `${llmSettings.provider}/${llmSettings.vendors[llmSettings.provider].model}`
+        ctx.route === "llm" && provider && model
+          ? `${provider}/${model}`
           : ctx.route;
       this.deps.auditLogger?.logTurn({
         sessionId: ctx.sessionId,

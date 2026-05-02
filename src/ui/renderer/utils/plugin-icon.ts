@@ -39,23 +39,32 @@ export function pluginIconFor(manifest: { icon?: string }): ComponentType<Lucide
   const cached = iconCache.get(name);
   if (cached) return cached;
   const Icon = lazy(() =>
-    import("lucide-react").then((mod) => {
-      const candidate = (mod as Record<string, unknown>)[name];
-      const isValid =
-        typeof candidate === "function" ||
-        (typeof candidate === "object" &&
-          candidate !== null &&
-          "render" in (candidate as object));
-      if (!isValid) {
-        // Evict the cached wrapper so a future call (e.g. after the
-        // plugin manifest is corrected, or after a transient
-        // lucide-react chunk-load failure recovers) gets to retry
-        // resolution rather than being permanently pinned to FALLBACK.
+    import("lucide-react")
+      .then((mod) => {
+        const candidate = (mod as Record<string, unknown>)[name];
+        const isValid =
+          typeof candidate === "function" ||
+          (typeof candidate === "object" &&
+            candidate !== null &&
+            "render" in (candidate as object));
+        if (!isValid) {
+          // Evict the cached wrapper so a future call (e.g. after the
+          // plugin manifest is corrected) gets to retry resolution
+          // rather than being permanently pinned to FALLBACK.
+          iconCache.delete(name);
+          return { default: FALLBACK_ICON };
+        }
+        return { default: candidate as ComponentType<LucideProps> };
+      })
+      .catch(() => {
+        // Dynamic import itself failed (transient chunk-load error,
+        // network blip, etc.). The lazy wrapper would otherwise stay
+        // cached in a permanently-rejected state and every subsequent
+        // render for this icon would surface the same error.
+        // Evict so the next call re-attempts the import.
         iconCache.delete(name);
         return { default: FALLBACK_ICON };
-      }
-      return { default: candidate as ComponentType<LucideProps> };
-    }),
+      }),
   );
   iconCache.set(name, Icon);
   return Icon;
