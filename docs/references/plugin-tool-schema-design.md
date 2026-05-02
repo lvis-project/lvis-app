@@ -28,7 +28,7 @@ interface PluginManifest {
   /**
    * 플러그인 고유 식별자. flat form 을 권장한다 —
    * 영문 소문자/숫자/`-`/`_`/`.` 허용 (`^[a-zA-Z][a-zA-Z0-9._-]*$`, 3~128자).
-   * 실제 번들 플러그인(meeting / pageindex / ms-graph) 은 모두 flat id
+   * 실제 번들 플러그인(meeting / local-indexer / ms-graph) 은 모두 flat id
    * 를 사용한다. dot-form (`com.ep.meeting-recorder`) 도 허용하지만 강제하지
    * 않는다.
    */
@@ -108,7 +108,7 @@ interface PluginManifest {
 >
 > 이전에는 CI 의 `bump_version.py` 가 `catalog 의 latest + 1` 으로 in-place rewrite 했지만, source `plugin.json` 과 catalog 가 갈라져서 사이드로드 (`Settings → 로컬 폴더에서 설치`) 한 플러그인에 false-positive "업데이트 있음" 배너가 떴음. **tag-as-SoT** 로 source manifest 와 catalog 가 항상 동일 — 사이드로드와 마켓플레이스 install 결과는 같은 `plugin.json` + `dist/` 레이아웃을 공유한다 (install-receipt 의 `installSource` / `signerKeyId` / `artifactSha256` 은 의도적으로 다르며 trust 표면 분리 목적).
 >
-> 이 룰의 enforcement 는 **각 plugin repo 의 `publish.yml` 워크플로우 안에서만** 일어난다. 호스트와 마켓플레이스 backend 는 catalog 상태를 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다 (`assertInstalledManifestMatchesCatalog` 는 호스트의 defense-in-depth 일 뿐 정문이 아님). 따라서 이 룰은 `lvis-plugin-*` 레포 전반에 적용되는 contract 이며, 모든 신규 플러그인 repo 의 `publish.yml` 이 이 패턴을 따라야 한다 (work-proactive 가 첫 도입; calendar/meeting/ms-graph/ep-api/pageindex 순차 fan-out).
+> 이 룰의 enforcement 는 **각 plugin repo 의 `publish.yml` 워크플로우 안에서만** 일어난다. 호스트와 마켓플레이스 backend 는 catalog 상태를 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다 (`assertInstalledManifestMatchesCatalog` 는 호스트의 defense-in-depth 일 뿐 정문이 아님). 따라서 이 룰은 `lvis-plugin-*` 레포 전반에 적용되는 contract 이며, 모든 신규 플러그인 repo 의 `publish.yml` 이 이 패턴을 따라야 한다 (work-proactive 가 첫 도입; calendar/meeting/ms-graph/ep-api/local-indexer 순차 fan-out).
 >
 > branch push 는 publish 트리거 안 함 (`on.push.tags: ['v*.*.*']` 만 listen). dev 중 main 으로 머지해도 catalog 는 가만히 있음 — 의도된 release 시점에만 tag 로 트리거.
 >
@@ -614,9 +614,9 @@ LVIS 는 IPC/RPC 를 **시스템 레벨 전용**으로 확정한다. 플러그�
 - `toolSchemas` 는 `meeting_push_chunk` 에 추가 (PCM `number[]` 추론 실패 방지).
 - `meeting_stop` 반환값이 크므로 LLM context 소비 주의 — 요약만 반환.
 
-### 5.2 PageIndex (`lvis-plugin-pageindex`)
+### 5.2 Local Indexer (`lvis-plugin-local-indexer`)
 
-**파일:** `lvis-plugin-pageindex/src/hostPlugin.ts:210-303`
+**파일:** `lvis-plugin-local-indexer/src/hostPlugin.ts:210-303`
 
 - `capabilities: ["knowledge-index", "worker-client"]`.
 - Python subprocess (30s 폴링) 로 FileWatcher 대신 운영 — `index_scan` 은 멱등 설계.
@@ -670,7 +670,7 @@ HostApi 에 새 메서드를 추가하려면:
 | **marketplace artifact 검증** | ✅ **승인** | 플러그인 저자가 sidecar 서명을 만들지 않고 marketplace가 artifact envelope을 서명합니다. 호스트는 설치 시 envelope을 검증하고 로드 시 install receipt 해시를 확인합니다. §2.1. |
 | **`permissions[]` 선언형 필드** | ⚠️ **부분 승인** | full permission 문자열 배열은 기각되었지만, 다음 3종의 선언형 게이트가 대체 도입됨: (1) `uiCallable[]` — renderer→plugin allowlist (구조적 `⊂ tools[]` 제약만 강제, 파괴적 도구의 확인 UX 는 플러그인이 책임), (2) `capabilities[]` — `ms-graph-consumer` HostApi gate + event-emit namespace gate, (3) `PLUGIN_PRIVATE_NAMESPACES` — subscription deny-list. §2.2, §2.3. |
 | **LLM invoke HostApi 추상화 (full surface)** | ❌ 기각 (callLlm 만 채택) | 단발 텍스트 생성 `callLlm()` 만 Phase 1에서 채택 (§4). streaming·tool_choice·thinking·multi-turn 등 vendor 편차 큰 surface 는 여전히 기각. |
-| **파일 watcher HostApi (`watchFiles`)** | ❌ 기각 | pageindex 1개 플러그인만 필요. "3+ 플러그인 규칙" 미충족. |
+| **파일 watcher HostApi (`watchFiles`)** | ❌ 기각 | local-indexer 1개 플러그인만 필요. "3+ 플러그인 규칙" 미충족. |
 | **zod 자동 schema 추출** | ❌ 기각 | 번들 크기 증가, zod 버전 충돌. 수기 작성이 LLM 최적화 면에서도 우수. |
 | **`toolSchemas` output schema (Phase 1)** | ❌ 기각 | 응답은 LLM 이 string 으로 재소비 가능. Phase 2 에서 재검토. |
 | **Full capability grant system** | ❌ 기각 | 현행 capability taxonomy (§2.3) + HostApi boundary 로 충분. |
@@ -790,7 +790,7 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
 
 ### @lvis/plugin-sdk (현행)
 
-번들 플러그인 (`lvis-plugin-meeting` / `lvis-plugin-pageindex` / `lvis-plugin-email` / `lvis-plugin-calendar`) 은 이미 `node_modules/@lvis/plugin-sdk` 경유로 타입/팩토리 시그니처를 공유한다. SDK 는 `src/plugins/types.ts` 의 공개 타입을 재배포한다. npm publish 파이프라인은 4개 번들 플러그인 안정화 후 확정 예정이지만, 로컬 workspace 링크는 이미 운영 중이다.
+번들 플러그인 (`lvis-plugin-meeting` / `lvis-plugin-local-indexer` / `lvis-plugin-email` / `lvis-plugin-calendar`) 은 이미 `node_modules/@lvis/plugin-sdk` 경유로 타입/팩토리 시그니처를 공유한다. SDK 는 `src/plugins/types.ts` 의 공개 타입을 재배포한다. npm publish 파이프라인은 4개 번들 플러그인 안정화 후 확정 예정이지만, 로컬 workspace 링크는 이미 운영 중이다.
 
 ```jsonc
 // tsconfig.json (플러그인)

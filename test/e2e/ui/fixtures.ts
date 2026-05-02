@@ -8,8 +8,8 @@ import { execSync } from 'node:child_process';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-/** Kill any processes occupying the pageindex worker port so E2E runs cleanly. */
-function killPageindexWorkers(): void {
+/** Kill any processes occupying the local-indexer worker port so E2E runs cleanly. */
+function killLocalIndexerWorkers(): void {
   try {
     const raw = execSync('lsof -ti :43129 2>/dev/null || true').toString().trim();
     const pids = raw.split('\n').filter(Boolean);
@@ -48,8 +48,8 @@ export const test = base.extend<ElectronFixtures>({
         `Electron main entry not found at ${mainEntry}. Run 'bun run build' before 'playwright test'.`,
       );
     }
-    // Kill any leftover pageindex worker from a previous run before launching
-    killPageindexWorkers();
+    // Kill any leftover local-indexer worker from a previous run before launching
+    killLocalIndexerWorkers();
     const app = await electron.launch({
       args: [mainEntry, `--user-data-dir=${userDataDir}`, '--no-sandbox'],
       env: {
@@ -66,8 +66,8 @@ export const test = base.extend<ElectronFixtures>({
     app.process().stderr?.on('data', (d: Buffer) => process.stdout.write(`[electron:stderr] ${d}`));
     await use(app);
     await app.close().catch(() => {});
-    // Ensure child Python workers spawned by pageindex are cleaned up
-    killPageindexWorkers();
+    // Ensure child Python workers spawned by local-indexer are cleaned up
+    killLocalIndexerWorkers();
   },
 
   mainWindow: async ({ app }, use) => {

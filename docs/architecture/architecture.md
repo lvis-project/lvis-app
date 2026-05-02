@@ -48,7 +48,7 @@ mindmap
     설치형·로컬 기반 (온라인 전제)
       내 PC에 상주하는 퍼스널 AI
       로컬 문서·파일 인덱싱 (Internal search 연동)
-      Local Index Engine (PageIndex)
+      Local Index Engine (local-indexer)
       Client Core Engines
     기억 중심 개인화
       LVIS.md — 조직·프로젝트 컨텍스트
@@ -488,7 +488,7 @@ graph LR
         PARSER["Document Parser<br/>(PDF · DOCX · PPTX · XLSX · Image)"]
     end
 
-    subgraph "Layer B — 지능형 인덱싱 (PageIndex)"
+    subgraph "Layer B — 지능형 인덱싱 (local-indexer)"
         TREE_BUILD["TOC Tree Builder<br/>(LLM 기반 목차 트리 구축)"]
         TREE_SUMMARY["Hierarchical Summary<br/>(계층별 요약 생성)"]
         TREE_JSON["Tree Cache<br/>(JSON — 로컬 보관)"]
@@ -529,7 +529,7 @@ graph LR
 Layer A — 기본 파싱 (텍스트 추출)
   File Watcher → Document Parser → 원문 텍스트 + 메타데이터
 
-Layer B — 지능형 인덱싱 (PageIndex)
+Layer B — 지능형 인덱싱 (local-indexer)
   원문 텍스트 → LLM 기반 목차 트리 구축 → 계층적 요약 → 추론 기반 검색
 ```
 
@@ -614,7 +614,7 @@ Phase 1에서 §4.4 Layer A·B 명세를 production 수준으로 끌어올리는
 | `지원` | hit | PASS |
 | `품의` | hit | PASS |
 
-구현 위치: `lvis-plugin-pageindex/worker/korean_tokenizer.py`
+구현 위치: `lvis-plugin-local-indexer/worker/korean_tokenizer.py`
 
 #### 4.4.3 HybridRetriever — RRF `k=60`
 
@@ -2393,7 +2393,7 @@ hostApi.emitEvent(`${pluginId}.auth.changed`);  // 예: "ms-graph.auth.changed"
 호스트 PR landing 후 다음을 같은 sync 사이클에 맞춤:
 - `lvis-plugin-ms-graph`: `auth: { statusTool: "msgraph_status", loginTool: "msgraph_auth", logoutTool: "msgraph_signout" }` + `emittedEvents` 에 `"ms-graph.auth.changed"` + MSAL 상태 전이에서 emit
 - `lvis-plugin-ep-api`: `auth: { statusTool: "lge_status", loginTool: "lge_login" }` + `emittedEvents` 에 `"ep-api.auth.changed"` + 쿠키 auth 흐름에서 emit
-- `agent-hub`, `meeting`, `pageindex`, `work-proactive`: auth 무관 — manifest 변경 없음.
+- `agent-hub`, `meeting`, `local-indexer`, `work-proactive`: auth 무관 — manifest 변경 없음.
 
 **의도적으로 deferred 된 항목** — 별 PR 로 추적:
 - `auth.statusTool` 의 `outputSchema` 강제 검증 (toolSchemas 전체 outputSchema 인프라 큰 작업)
@@ -2589,8 +2589,8 @@ graph TB
 
 ```json
 {
-  "id": "lvis-plugin-pageindex",
-  "name": "LVIS PageIndex",
+  "id": "lvis-plugin-local-indexer",
+  "name": "LVIS Local Indexer",
   "version": "0.2.0",
   "entry": "dist/index.js",
   "tools": ["index_scan", "chat_preview", "..."],
@@ -2642,9 +2642,9 @@ Step 1-8:  기존 boot sequence
   "enforcements": {
     "managedPlugins": [
       {
-        "id": "lvis-plugin-pageindex",
+        "id": "lvis-plugin-local-indexer",
         "version": "0.2.0",
-        "source": "https://internal.your-corp.example/lvis/marketplace/api/v1/plugins/lvis-plugin-pageindex/0.2.0",
+        "source": "https://internal.your-corp.example/lvis/marketplace/api/v1/plugins/lvis-plugin-local-indexer/0.2.0",
         "sha256": "...",
         "forceInstall": true,
         "autoUpdate": true
@@ -3074,7 +3074,7 @@ flowchart LR
         S3["이메일 아카이브"]
     end
 
-    subgraph "Local Index Engine (PageIndex 기반)"
+    subgraph "Local Index Engine (local-indexer 기반)"
         L_WATCH["File Watcher"]
         L_PARSE["Parser<br/>(PDF·DOCX·PPTX·XLSX·Image)"]
         L_TREE["PageIndex Tree Builder<br/>(Internal search 연동)"]
@@ -3536,7 +3536,7 @@ v5 는 v4 Final 의 설계를 그대로 유지한 상태에서, **실구현 머�
 
 v4 §4.2 의 8-step 부팅 시퀀스는 그대로 유지된다. v5 에서는 다음 두 가지 운영 보강을 덧붙인다.
 
-1. **`ensure-submodules` postinstall 훅**: 루트 `package.json`의 `postinstall` 에서 필수 플러그인 서브모듈(`lvis-plugin-meeting`, `lvis-plugin-pageindex`, `lvis-plugin-email`)의 초기화 상태를 검증하고, 누락 시 `git submodule update --init --recursive` 를 실행한다. 누락 상태로 부팅하면 플러그인 로드 단계(§4.2 Step 6)가 침묵 실패할 수 있던 문제를 부팅 이전에 차단한다.
+1. **`ensure-submodules` postinstall 훅**: 루트 `package.json`의 `postinstall` 에서 필수 플러그인 서브모듈(`lvis-plugin-meeting`, `lvis-plugin-local-indexer`, `lvis-plugin-email`)의 초기화 상태를 검증하고, 누락 시 `git submodule update --init --recursive` 를 실행한다. 누락 상태로 부팅하면 플러그인 로드 단계(§4.2 Step 6)가 침묵 실패할 수 있던 문제를 부팅 이전에 차단한다.
 2. **Dev 모드 플러그인 live-reload**: 개발 환경(`NODE_ENV !== 'production'`)에서 각 플러그인 `dist/` 를 감시하여, 빌드 산출물이 변경되면 PluginManager 에 `reloadPlugin(slug)` 이벤트를 전송한다. 프로덕션 경로는 변경 없음(매니페스트 버전 변경시에만 업데이트, §9 참조).
 
 #### §4.5.X Conversation Trace Logger (K4, 신규 v5)
