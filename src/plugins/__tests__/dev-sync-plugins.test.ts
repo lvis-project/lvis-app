@@ -29,10 +29,12 @@ import { join } from "node:path";
 import {
   buildCopyFilter,
   buildDevRegistryEntry,
+  copyManifestEntryFromContainedSource,
   copyFileAsRealFile,
   countEntries,
   isSafePluginId,
   isSafeRelativeManifestEntry,
+  resolveContainedManifestEntry,
   isDevRegistryEntry,
   normalizePreservedNonDevRegistryEntry,
   removeAny,
@@ -80,6 +82,57 @@ describe("dev-sync-plugins — isSafeRelativeManifestEntry", () => {
     expect(isSafeRelativeManifestEntry("dist/../../escape.js")).toBe(false);
     expect(isSafeRelativeManifestEntry("dist\\..\\escape.js")).toBe(false);
     expect(isSafeRelativeManifestEntry(".")).toBe(false);
+  });
+});
+
+describe("dev-sync-plugins — resolveContainedManifestEntry", () => {
+  const pluginRepoDir = join(tmpdir(), "dev-sync-manifest-entry-root");
+
+  it("rejects absolute manifest.entry paths", () => {
+    expect(resolveContainedManifestEntry(pluginRepoDir, "/abs/index.js")).toBeNull();
+  });
+
+  it("rejects traversal manifest.entry paths", () => {
+    expect(resolveContainedManifestEntry(pluginRepoDir, "../dist/index.js")).toBeNull();
+  });
+
+  it("rejects Windows drive manifest.entry paths", () => {
+    expect(resolveContainedManifestEntry(pluginRepoDir, "C:\\plugin\\index.js")).toBeNull();
+  });
+
+  it("rejects UNC manifest.entry paths", () => {
+    expect(resolveContainedManifestEntry(pluginRepoDir, "\\\\server\\share\\index.js")).toBeNull();
+  });
+
+  it("resolves a safe relative manifest.entry inside the plugin repo", () => {
+    expect(resolveContainedManifestEntry(pluginRepoDir, "dist/index.js")).toBe(
+      join(pluginRepoDir, "dist", "index.js"),
+    );
+  });
+});
+
+describe("dev-sync-plugins — copyManifestEntryFromContainedSource", () => {
+  it("copies a safe contained manifest.entry outside dist as a real file", () => {
+    const root = join(
+      tmpdir(),
+      `dev-sync-entry-copy-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    const pluginRepoDir = join(root, "repo");
+    const installDir = join(root, "install");
+    const sourceEntry = join(pluginRepoDir, "build", "entry.js");
+    const destEntry = join(installDir, "build", "entry.js");
+
+    try {
+      mkdirSync(join(pluginRepoDir, "build"), { recursive: true });
+      writeFileSync(sourceEntry, "export default 1;\n", "utf-8");
+
+      copyManifestEntryFromContainedSource(sourceEntry, destEntry);
+
+      expect(readFileSync(destEntry, "utf-8")).toBe("export default 1;\n");
+      expect(lstatSync(destEntry).isSymbolicLink()).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

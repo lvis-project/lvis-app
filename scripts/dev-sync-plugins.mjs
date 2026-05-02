@@ -32,8 +32,8 @@
  *     trust-bypass signal; only `installSource: "dev"` is.
  *
  * Existing non-dev entries are preserved. If a preserved entry still carries
- * the legacy cleanup-only `_devLinked` flag, dev-sync strips it while keeping
- * the authoritative non-dev `installSource`.
+ * the stale legacy `_devLinked` field, dev-sync strips it while keeping the
+ * authoritative non-dev `installSource`.
  *
  * Usage: node scripts/dev-sync-plugins.mjs [--dry-run]
  */
@@ -45,6 +45,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -93,13 +94,34 @@ export function isSafeRelativeManifestEntry(entry) {
   if (typeof entry !== "string") return false;
   if (entry !== entry.trim() || entry.length === 0) return false;
   // Reject both platform-native absolutes and obvious cross-platform forms.
-  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("\\") || /^[A-Za-z]:[\\/]/.test(entry)) {
+  // Drive-letter prefixes (including Windows drive-relative `C:foo`) and UNC
+  // forms are never valid plugin-relative entry paths.
+  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("\\") || /^[A-Za-z]:/.test(entry)) {
     return false;
   }
   const parts = entry.split(/[\\/]+/).filter(Boolean);
   if (parts.length === 0) return false;
   if (parts.every((part) => part === ".")) return false;
   return !parts.includes("..");
+}
+
+export function isContainedPath(root, target) {
+  const rel = relative(root, target);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * Resolve `manifest.entry` only after validating that it is a safe relative
+ * path and that the resolved artifact stays inside the plugin repo root.
+ */
+export function resolveContainedManifestEntry(pluginRepoDir, entry) {
+  const repoRoot = resolve(pluginRepoDir);
+  if (!isSafeRelativeManifestEntry(entry)) return null;
+  const resolvedEntry = resolve(repoRoot, entry);
+  if (!isContainedPath(repoRoot, resolvedEntry) || resolvedEntry === repoRoot) {
+    return null;
+  }
+  return resolvedEntry;
 }
 
 /**
@@ -171,8 +193,8 @@ export function normalizePreservedNonDevRegistryEntry(entry) {
     return null;
   }
   const preserved = { ...entry };
-  // `_devLinked` is a cleanup-only legacy hint. When a non-dev entry still
-  // carries it, strip it here so later consumers don't misclassify the entry.
+  // `_devLinked` is a stale legacy field. When a non-dev entry still carries
+  // it, strip it here so later consumers only see the authoritative fields.
   delete preserved._devLinked;
   return preserved;
 }
@@ -251,6 +273,22 @@ export function copyFileAsRealFile(src, dest) {
   writeFileSync(dest, readFileSync(src));
 }
 
+/**
+ * Materialise the resolved manifest entry under the install dir when it does
+ * not live beneath dist/. This keeps dev-sync honest for plugins whose entry
+ * points at another contained build artifact instead of assuming dist/ covers
+ * every safe manifest.entry shape.
+ */
+export function copyManifestEntryFromContainedSource(src, dest) {
+  const target = statSync(src);
+  mkdirSync(dirname(dest), { recursive: true });
+  if (target.isDirectory()) {
+    cpSync(src, dest, { recursive: true, dereference: true });
+    return;
+  }
+  writeFileSync(dest, readFileSync(src));
+}
+
 export function syncDevPlugins() {
   const existingPlugins = loadExistingNonDevPlugins();
   const devPlugins = [];
@@ -302,11 +340,11 @@ export function syncDevPlugins() {
       continue;
     }
     const entryRelative = manifest.entry;
-    if (!isSafeRelativeManifestEntry(entryRelative)) {
+    const builtEntry = resolveContainedManifestEntry(pluginRepoDir, entryRelative);
+    if (builtEntry === null) {
       log(`skip: ${pluginId} (unsafe manifest.entry: ${entryRelative})`);
       continue;
     }
-    const builtEntry = resolve(pluginRepoDir, entryRelative);
     if (!existsSync(builtEntry)) {
       log(`skip: ${pluginId} (not built: ${entryRelative})`);
       continue;
@@ -318,9 +356,15 @@ export function syncDevPlugins() {
     const manifestDest = resolve(installDir, "plugin.json");
     const nodeModulesSrc = resolve(pluginRepoDir, "node_modules");
     const nodeModulesDest = resolve(installDir, "node_modules");
+    const entryDest = resolveContainedManifestEntry(installDir, entryRelative);
+    const entryLivesUnderDist = isContainedPath(distSrc, builtEntry);
 
     if (!existsSync(distSrc)) {
       log(`warn: ${pluginId} dist/ not found at ${distSrc} — skipping registration`);
+      continue;
+    }
+    if (entryDest === null) {
+      log(`skip: ${pluginId} (unsafe install target for manifest.entry: ${entryRelative})`);
       continue;
     }
 
@@ -344,11 +388,18 @@ export function syncDevPlugins() {
       removeAny(manifestDest);
       removeAny(distDest);
       removeAny(nodeModulesDest);
+      if (!entryLivesUnderDist) {
+        removeAny(entryDest);
+      }
 
       copyFileAsRealFile(manifestSrc, manifestDest);
       log(`synced: ${pluginId}  plugin.json (real file)`);
       cpSync(distSrc, distDest, { recursive: true, dereference: true });
       log(`synced: ${pluginId}  dist/ (${countEntries(distDest)} entries)`);
+      if (!entryLivesUnderDist) {
+        copyManifestEntryFromContainedSource(builtEntry, entryDest);
+        log(`synced: ${pluginId}  manifest.entry (${entryRelative})`);
+      }
       if (existsSync(nodeModulesSrc)) {
         cpSync(nodeModulesSrc, nodeModulesDest, {
           recursive: true,

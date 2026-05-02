@@ -7,10 +7,11 @@ import { plog, PluginPhase } from "./lifecycle-log.js";
  * Pre-PR #430 registry shape — `installedBy` ("admin"|"user") and
  * `_devLinked` (boolean) carried install provenance in two orthogonal
  * fields. `installedBy` is migrated onto `installSource` on read.
- * The deprecated `_devLinked` boolean is parsed only to normalize legacy
- * registries on read: legacy dev-link-only entries become
- * `installSource: "dev-link"`, while stale flags on non-dev entries are
- * cleared. It must NEVER become a trust-bypass signal.
+ * The deprecated `_devLinked` boolean is read only as migration input:
+ * legacy dev-link-only entries become `installSource: "dev-link"`, while
+ * stale flags on non-dev entries are dropped. `_devLinked` is never kept in
+ * the returned or persisted entry shape and must NEVER become a
+ * trust-bypass signal.
  */
 interface LegacyRegistryEntry extends PluginRegistryEntry {
   installedBy?: InstallPolicy;
@@ -35,12 +36,12 @@ interface LegacyRegistryEntry extends PluginRegistryEntry {
  * `_devLinked` is always normalized away once an entry is read:
  *   - if it was the only legacy dev marker, it normalizes to the legacy
  *     installSource literal `"dev-link"` for read-only back-compat
- *   - otherwise it is cleared so non-dev entries do not retain ambiguous
- *     cleanup hints
+ *   - otherwise it is removed so non-dev entries do not retain any legacy
+ *     `_devLinked` field
  *
  * That makes the on-read migration deterministic: after the first successful
- * read+persist cycle there is no `_devLinked` residue left to interpret, so
- * subsequent reads are idempotent no-ops.
+ * read+persist cycle the persisted registry contains no `_devLinked` fields,
+ * so subsequent reads are idempotent no-ops.
  */
 function migrateLegacyEntry(entry: LegacyRegistryEntry): PluginRegistryEntry | null {
   const hasLegacy = entry.installedBy !== undefined || entry._devLinked !== undefined;
@@ -60,7 +61,7 @@ function migrateLegacyEntry(entry: LegacyRegistryEntry): PluginRegistryEntry | n
   if (!hasLegacy && installSource === entry.installSource) return null;
   // Build a fresh object that preserves only the supported fields. This
   // deterministically strips `_devLinked` from every persisted shape so the
-  // registry never retains an ambiguous cleanup-only hint after migration.
+  // registry never retains the deprecated field after migration.
   const migrated: PluginRegistryEntry = {
     id: entry.id,
     manifestPath: entry.manifestPath,
@@ -101,8 +102,8 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
   }
   // Apply legacy → installSource migration on read. We persist the
   // normalized form back to disk in one shot so subsequent reads are
-  // deterministic no-ops and `_devLinked` never lingers in registry.json as
-  // an ambiguous cleanup-only hint after the first successful read.
+  // deterministic no-ops and registry.json contains no `_devLinked` fields
+  // after the first successful read+persist cycle.
   let migratedCount = 0;
   const plugins: PluginRegistryEntry[] = parsed.plugins.map((entry) => {
     const migrated = migrateLegacyEntry(entry);
@@ -126,7 +127,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
         migratedCount,
         registryPath,
       },
-      `registry normalized ${migratedCount} legacy entries (installedBy/_devLinked → installSource; persisted _devLinked stripped deterministically so future reads are idempotent)`,
+      `registry normalized ${migratedCount} legacy entries (installedBy/_devLinked → installSource; persisted registry now omits _devLinked entirely so future reads are idempotent)`,
     );
     try {
       await writePluginRegistry(registryPath, registry);
