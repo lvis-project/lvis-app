@@ -147,4 +147,17 @@ describe("PluginGridButton v3", () => {
     expect(grid.className).toContain("max-h-[220px]");
     expect(grid.className).toContain("overflow-y-auto");
   });
+
+  it("disables + cell and shows loading label when marketplaceUrlReady is false", () => {
+    const plugins = makePlugins(2);
+    const onOpenMarketplace = vi.fn();
+    renderGrid(plugins, { onOpenMarketplace, marketplaceUrlReady: false });
+    fireEvent.click(screen.getByTestId("plugin-grid-button"));
+    const addCell = screen.getByTestId("plugin-cell-add");
+    expect(addCell).toBeDisabled();
+    expect(addCell.className).toContain("cursor-default");
+    expect(screen.getByText("로딩 중")).toBeInTheDocument();
+    fireEvent.click(addCell);
+    expect(onOpenMarketplace).not.toHaveBeenCalled();
+  });
 });
