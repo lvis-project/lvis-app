@@ -21,6 +21,7 @@ import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFr
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
+import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -566,7 +567,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         input: safeStringify({
           channel: "lvis:plugin:register-webview",
           reason,
-          payload,
+          payload: redactAuditPayload(payload),
         }),
       });
     } catch {
@@ -579,7 +580,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     const { webContentsId, pluginId, entryUrl } = payload ?? {};
-    plog("debug", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REGISTER, webContentsId, entryUrl }, "webview register requested");
+    plog("debug", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REGISTER, webContentsId, entryUrl: typeof entryUrl === "string" ? redactFsPath(entryUrl) : entryUrl }, "webview register requested");
     if (typeof webContentsId !== "number" || !Number.isFinite(webContentsId)) {
       logRegisterReject("invalid-webcontents-id", payload);
       plog("warn", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-webcontents-id" }, "webview register rejected");
@@ -670,7 +671,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         input: safeStringify({
           channel: "lvis:plugin:get-entry-url",
           reason: "not-registered",
-          frameUrl: e?.senderFrame?.url ?? "",
+          frameUrl: redactFsPath(e?.senderFrame?.url ?? ""),
           senderId: e.sender?.id,
         }),
       });
