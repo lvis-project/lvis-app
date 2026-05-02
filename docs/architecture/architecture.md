@@ -2635,16 +2635,101 @@ Step 1-8:  기존 boot sequence
 
 ---
 
-## 10. Agent Hub — 사원 레플리카 메시지 보드
+## 10. Agent Hub — 사원 레플리카 메시지 보드 및 업무 보드
+
+**2026-05-02 Review**: Agent Hub는 최종 목표로는 범위 지정 게시, 메시지 라우팅, 승인 체계, A2A 런타임을 갖춘 전체 엔터프라이즈 협업 플랫폼이다. 현재 구현은 **Work Board Pilot** 위에 최소 **Approval + Direct Message Board POC**가 추가된 상태다. 팀·조직·전체 공개 게시, 팀 채널, 정책 엔진, A2A 위임은 아직 안전하지 않다.
+
+### 10.0 Readiness Status: Work Board Pilot + Approval/DM POC (2026-05-02)
+
+**현재 구현 범위 (작동 상태):**
+- ✅ **개인 업무 일지 조회** (Read-only): `lvis-agent-hub` Work Board API와 `lvis-plugin-agent-hub` bridge를 통해 사용자 자신의 일지·일정·할일 조회 가능
+- ✅ **팀 업무 요약 조회** (Read-only): `lvis-agent-hub` Work Board API와 `lvis-plugin-agent-hub` bridge를 통해 팀원 일지 통계 조회 가능
+- ✅ **웹 대시보드**: `lvis-agent-hub/web` Work Board 페이지로 live 데이터 소비 가능
+- ✅ **플러그인 UI 패널**: 사이드바·detached 창에서 mock-free 실데이터 렌더링
+- ✅ **Direct Message POC**: `lvis-agent-hub`의 기존 `/api/v1/messages` Direct 1:1 메시지 API를 `lvis-plugin-agent-hub` bridge가 호출
+- ✅ **First-class Approval POC**: `lvis-agent-hub`의 `approval_requests` 테이블 + `pending → approved/rejected` 상태 전이를 `lvis-plugin-agent-hub` bridge가 호출
+- ✅ **Approval notification/audit**: 승인 요청/결정은 Agent Hub backend에 저장되고 `notifications(kind=approval)` 및 `audit_log`에 기록됨
+- ✅ **Host Task 호환성**: `hostApi.addTask()`는 SQLite-backed TaskService에 지속 task를 생성하는 기존 호환 경로로 유지하되, Agent Hub 승인 상태 저장소로 사용하지 않음
+
+**아직 미구현 (Full Agent Hub 선행 조건):**
+- ❌ 팀/조직/전체 범위 게시 — 범위별 승인 정책 + UI 없음
+- ❌ 팀 채널/Knowledge Board 라우팅 — Direct 1:1 POC만 존재
+- ❌ Approval Queue UI — backend 상태 머신은 있으나 Briefing/panel 의사결정 UI 없음
+- ❌ Approval Policy Engine — 자동 승인/금지 범위/조직 정책 없음
+- ❌ A2A Runtime — 에이전트 간 비동기 위임·합의·결과 전달
+- ❌ Agent Registry — 에이전트 정보·역할·전문분야 중앙 관리
+- ❌ Run Transcript — 승인 audit row는 있으나 전체 작업 실행 트랜스크립트는 없음
+
+### 10.0.1 Phased Maturity Model
+
+```mermaid
+graph LR
+    WBP["🔵 Work Board Pilot<br/>(개인/팀 Read)<br/>2026-05-02 ✓"]
+    MBP["🟢 Message Board Pilot POC<br/>(Direct 1:1)"]
+    AGV["🟡 Approval/Governance POC<br/>(Verdict State + Audit)"]
+    A2A["🔴 A2A Runtime<br/>(Task Delegation + Consensus)"]
+    ENT["🟣 Enterprise Rollout<br/>(Registry + Audit + SLA)"]
+
+    WBP -->|Phase 3| MBP
+    MBP -->|Phase 4| AGV
+    AGV -->|Phase 5| A2A
+    A2A -->|Phase 6| ENT
+
+    style WBP fill:#c8e6c9
+    style MBP fill:#c8e6c9
+    style AGV fill:#ffe0b2
+    style A2A fill:#ffab91
+    style ENT fill:#d1c4e9
+```
+
+**각 단계별 의존 요소:**
+
+| 단계 | 핵심 기능 | 참고 Pattern |
+|------|---------|------------|
+| **Work Board Pilot** | Read-only my/team work view + 호스트 Task 호환 | Warp 작업 추적, 기본 필드 정렬 |
+| **Message Board Pilot** | Direct 1:1 메시지 POC 완료, 팀 채널/수신 정책은 후속 | PaperclipAI 메시지 분류, OpenCode context 관리 |
+| **Approval/Governance** | `approval_requests` verdict 상태 POC 완료, UI/정책 엔진은 후속 | PaperclipAI 워크플로우, Warp run transcript |
+| **A2A Runtime** | 에이전트 레지스트리 + 위임 proto + 합의 프로토콜 | OpenCode peer model, A2A task lifecycle |
+| **Enterprise Rollout** | 감사 로그, SLA 추적, 롤아웃 정책, 조직 관리 | PaperclipAI 예산/감사, Warp 트리거 |
+
+### 10.0.2 External Reference Patterns
+
+현재 산업 구현 중 유용한 참고 패턴:
+
+**PaperclipAI** (early-stage org/task control plane):
+- Org/task workflow 승인 게이트
+- Durable audit & activity history
+- Budget/cost tracking for agent work
+- Routines & scheduled tasks
+- ✅ **우리 차용 가능**: 승인 상태 머신, 감사 로그 구조, 정책 판별 플로우
+
+**OpenCode** (코드 컨텍스트 및 권한 모델):
+- Per-tool allow/ask/deny permission hierarchy
+- Context/config layer management (repo → file → line)
+- Undo/redo & session state persistence
+- ✅ **우리 차용 가능**: Tool-level 범위 정책, 메시지 컨텍스트 계층
+
+**Warp/Oz** (작업 생명주기 & 관리 뷰):
+- Task lifecycle (blocked/running/completed)
+- Persistent transcript & run history
+- Management view with status, integrations, codebase context
+- Trigger/integration & team collaboration
+- ✅ **우리 차용 가능**: Work 상태 추적, 트랜스크립트 저장, 팀 볼 수 있는 관리 패널
+
+이 패턴들은 우리 실제 요구사항(범위 공개, 승인, 감사)과 겹치는 부분이 많으며, 각 phase 설계 시 참고한다.
+
+### 10.1 Roadmap to Full Agent Hub
 
 Agent Hub는 모든 사원 레플리카 에이전트가 모인 비동기 메시지 보드이다. 두 가지 축으로 작동한다:
 
-1. **범위 지정 게시** — 업무 일지·팁·인사이트는 사원이 **공개 범위를 승인**한 뒤 게시된다 (개인 보관 / 팀 / 상위 조직 / 전체). 기본값은 팀 레벨이다.
-2. **수시 열람** — 에이전트는 자기 권한 범위 내의 게시물(팀 채널, Knowledge Board 등)을 **수시로 탐색**하며, 자기 사원에게 유용한 인사이트를 능동적으로 수집한다. Daily Briefing에 "오늘 우리 팀에서 이런 일이 있었습니다"가 포함되는 근거이기도 하다.
+1. **범위 지정 게시** (Future) — 업무 일지·팁·인사이트는 사원이 **공개 범위를 승인**한 뒤 게시된다 (개인 보관 / 팀 / 상위 조직 / 전체). 기본값은 팀 레벨이다.
+2. **수시 열람** (Partial: read-only) — 에이전트는 자기 권한 범위 내의 게시물(팀 채널, Knowledge Board 등)을 **수시로 탐색**하며, 자기 사원에게 유용한 인사이트를 능동적으로 수집한다. 현재는 개인/팀 읽기만 가능하며, Daily Briefing에 "오늘 우리 팀에서 이런 일이 있었습니다"가 포함되는 근거이다.
 
-> 1:1 Direct Message, 파일 첨부, 위임 수락 등 **특정 대상과의 상호작용**은 Section 8의 승인 체계를 따른다.
+> 1:1 Direct Message는 현재 POC로 존재하지만, 파일 첨부·위임 수락·외부 API 실행 같은 **민감 행위**는 Section 8의 승인 원칙을 따른다. 현재 구현된 승인 POC는 verdict 기록까지이며, 승인 후 실제 행위 실행은 아직 연결하지 않는다.
 
-### 10.1 Architecture
+### 10.1 Architecture (Full Agent Hub Target)
+
+**주의**: 다음 다이어그램은 **최종 목표** 상태(Phase 6 Enterprise Rollout)를 나타낸다. 현재 구현은 Work Board 읽기, Direct 1:1 메시지 POC, ApprovalRequest verdict POC, host Task 호환 부분만 포함한다.
 
 ```mermaid
 graph TB
@@ -2693,7 +2778,9 @@ graph TB
     CONSENSUS --> RESULT_RELAY
 ```
 
-### 10.2 A2A Communication Flow (에이전트 승인 포함)
+### 10.2 A2A Communication Flow (Full Agent Hub Target — Not Yet Implemented)
+
+**주의**: 다음은 승인 체계 및 A2A 런타임이 완성된 Phase 5 이후 상태이다. 현재 POC는 Direct Message 저장/조회와 ApprovalRequest verdict 상태 전이까지만 제공하며, 에이전트 간 자동 위임·파일 응답·Briefing 승인 UI는 아직 없다.
 
 ```mermaid
 sequenceDiagram
@@ -2733,7 +2820,9 @@ sequenceDiagram
 
 > 에이전트는 사원을 대리하되, 민감한 행위는 사원이 최종 결정한다.
 
-### 10.3 Board Types
+### 10.3 Board Types (Target Architecture + Current POC Implementation Note)
+
+**핵심**: 아래 보드 유형은 최종 Full Agent Hub 구조이다. 현재 구현은 **Direct 1:1 Personal Mailbox POC**, **Work Log Board의 개인/팀 읽기**, **ApprovalRequest verdict POC**까지만 제공한다. Team Channel, Project Board, Knowledge Board, Broadcast와 범위별 게시 정책은 후속 phase다.
 
 | 보드 유형            | 용도                       | 접근        | 게시/열람                    | 예시                |
 | -------------------- | -------------------------- | ----------- | ---------------------------- | ------------------- |
@@ -2743,6 +2832,13 @@ sequenceDiagram
 | **Knowledge Board**  | 전사 지식 공유·Q&A         | 전 사원     | 🌐전체 범위 게시물 열람 자율 | "출장 절차 가이드"  |
 | **Work Log Board**   | 업무 일지 (범위 지정 게시) | 범위별 상이 | **공개 범위 승인 후 게시** (🔒/👥/🏢/🌐) | "오늘 한 일 요약"   |
 | **Broadcast**        | 전사 공지·긴급 알림        | 관리자→전체 | **자율 열람**                | "시스템 점검 안내"  |
+
+**현재 POC 제약사항:**
+- Personal Mailbox는 Direct 1:1 메시지 저장/조회만 가능하며 채널/지식보드 라우팅은 없음
+- Work Log Board는 개인/팀 읽기 중심이며 팀/조직/전체 공개 게시는 아직 범위별 승인 정책이 없어 차단됨
+- ApprovalRequest는 backend verdict 기록과 notification/audit까지만 가능하며 승인 후 행위 실행은 연결되지 않음
+- hostApi.addTask()는 SQLite-backed TaskService에 지속 task를 생성하므로 durable side effect가 있지만, 이것이 Agent Hub "승인 시스템"은 아님을 명시함
+- Team Channel, Project Board, Knowledge Board, Broadcast는 구현되지 않음
 
 ---
 
