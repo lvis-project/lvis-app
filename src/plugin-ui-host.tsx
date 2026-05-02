@@ -135,8 +135,12 @@ export function PluginUiHostView({
     if (node) {
       node.addEventListener("did-finish-load", onFinishRef.current);
       node.addEventListener("did-fail-load", onFailRef.current);
-      const onDidAttach = (e: Event) => {
-        const wcId = (e as unknown as { webContentsId?: number }).webContentsId;
+      const onDidAttach = () => {
+        // `did-attach` event has no documented payload — use the webview-tag
+        // method `getWebContentsId()` (canonical Electron API) instead of
+        // reading a non-standard `e.webContentsId` property which returns
+        // undefined and silently aborts the registration handshake.
+        const wcId = node.getWebContentsId();
         if (!Number.isFinite(wcId) || !view?.pluginId || !view?.entryUrl) return;
         const { shellUrl: url } = readPluginAssetUrls();
         if (!url) return;
@@ -230,12 +234,27 @@ export function PluginUiHostView({
       // 전환 시 webview 가 reuse 되면서 이전 entry 의 IPC 매핑이 남거나
       // 이전 frame 이 잠시 보이는 문제 → key 를 extension.id 까지 포함시켜
       // extension 단위로 fresh attach 보장.
+      // `<webview preload>` runs ONLY at the first guest attach — subsequent
+      // navigations (e.g. about:blank → file:///plugin-ui-shell.html) do
+      // NOT re-execute preload, so the `lvisPlugin` contextBridge is gone in
+      // the new main world and the shell aborts with "lvisPlugin bridge
+      // missing".
+      //
+      // Therefore the initial `src` must already be the real shell URL so
+      // preload runs once for the right origin. The race between the host's
+      // did-attach → registerPluginWebview handshake and the shell's
+      // immediate `getEntryUrl` call is absorbed by the host's
+      // `pendingEntryUrlResolvers` wait queue + the shell's 6s retry
+      // budget (issue #439 / PR #441). The did-attach listener still
+      // populates `shellSrcBinding` for parity with the old contract;
+      // `shellSrc` may already equal `shellUrl` here, in which case it's a
+      // no-op.
       content = (
         <webview
           key={`${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}`}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={handleWebviewRef as any}
-          src={shellSrc || undefined}
+          src={shellSrc || shellUrl}
           partition={partition}
           preload={preloadUrl}
           webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"

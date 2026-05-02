@@ -16,6 +16,21 @@
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
+import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
+
+/**
+ * Plugin partition hash — must mirror the renderer's `pluginPartitionHash`
+ * in `plugin-ui-host.tsx` so main and renderer agree on the partition name
+ * for each plugin's webview. 32-bit FNV-1a → 8 hex chars.
+ */
+function pluginPartitionHashFor(pluginId: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < pluginId.length; i++) {
+    h ^= pluginId.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
@@ -948,6 +963,23 @@ export async function initPluginRuntime(
 
   await pluginRuntime.startAll();
   log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
+
+  // Pre-register the per-partition `setPreloads(...)` policy for every
+  // loaded plugin (#498). Electron's `<webview partition="persist:plugin:..."
+  // preload="...">` honors `preload=` only when sandbox=no; with sandbox=yes
+  // the preload script must be registered on the partition's Session via
+  // `session.setPreloads()`. The previous attach-time hook in main.ts
+  // tries to read `contents.session.partition` to decide which partition
+  // got attached, but that property is undocumented and returns
+  // `undefined` on current Electron — so the hook never fires `setPreloads`
+  // and plugin webviews load without the `lvisPlugin` contextBridge,
+  // surfacing as "lvisPlugin bridge missing" in the shell. Pre-registering
+  // by walking the loaded-plugin set sidesteps the partition-name read
+  // entirely.
+  for (const pluginId of pluginRuntime.listPluginIds()) {
+    const partitionName = `persist:plugin:${pluginPartitionHashFor(pluginId)}`;
+    installPluginPartitionPolicy(partitionName);
+  }
 
   // 선언형 startupTools 자동 실행
   runManifestStartupTools(pluginRuntime);
