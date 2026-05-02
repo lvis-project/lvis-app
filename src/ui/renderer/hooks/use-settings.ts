@@ -1,5 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
+import {
+  DEFAULT_LLM_VENDOR,
+  isLLMVendor,
+  type LLMVendor,
+} from "../../../shared/llm-vendor-defaults.js";
+
+/**
+ * External-boundary narrowing helper. Lives at module scope so its
+ * identity is stable — `useCallback` / `useEffect` closures that call
+ * this never change identity because of render churn, which keeps the
+ * `react-hooks/exhaustive-deps` lint happy and prevents false-positive
+ * stale-closure churn. Pure: depends only on the module-level
+ * `isLLMVendor` import.
+ */
+function narrowVendor(raw: unknown): LLMVendor {
+  return isLLMVendor(raw) ? raw : DEFAULT_LLM_VENDOR;
+}
 
 /**
  * Phase 3.1: LLM settings cache hook.
@@ -10,14 +27,14 @@ import type { LvisApi } from "../types.js";
  * saves so the chat bar reflects changes without a restart.
  */
 export interface UseSettingsResult {
-  /** Cached provider (e.g. "claude", "openai", "gemini"). */
-  llmVendor: string;
+  /** Cached provider — narrowed to the LLMVendor union. */
+  llmVendor: LLMVendor;
   /** Cached model id. */
   llmModel: string;
   /** Cached `enableThinking` flag for the active vendor. */
   enableThinkingChat: boolean;
   /** One-shot snapshot of {provider, model} used for context overflow %. */
-  currentLlmSettings: { provider: string; model: string } | null;
+  currentLlmSettings: { provider: LLMVendor; model: string } | null;
   /** Re-read settings from disk (call after SettingsDialog save). */
   refresh: () => Promise<void>;
   /** Persist + optimistically update the thinking toggle. */
@@ -25,11 +42,11 @@ export interface UseSettingsResult {
 }
 
 export function useSettings(api: LvisApi): UseSettingsResult {
-  const [llmVendor, setLlmVendor] = useState<string>("claude");
+  const [llmVendor, setLlmVendor] = useState<LLMVendor>(DEFAULT_LLM_VENDOR);
   const [llmModel, setLlmModel] = useState<string>("");
   const [enableThinkingChat, setEnableThinkingChat] = useState<boolean>(true);
   const [currentLlmSettings, setCurrentLlmSettings] = useState<
-    { provider: string; model: string } | null
+    { provider: LLMVendor; model: string } | null
   >(null);
 
   // Guard late callbacks firing after unmount (matches pattern in renderer.tsx
@@ -41,12 +58,17 @@ export function useSettings(api: LvisApi): UseSettingsResult {
     };
   }, []);
 
+  // External-boundary validation lives in the module-scope `narrowVendor`
+  // helper above. Each call site below applies it to the IPC-loaded
+  // `s.llm.provider` so the renderer never holds a vendor outside the
+  // LLMVendor union.
   const refresh = useCallback(async () => {
     try {
       const s = await api.getSettings();
       if (!isMountedRef.current) return;
-      const block = s.llm.vendors[s.llm.provider];
-      setLlmVendor(s.llm.provider);
+      const provider = narrowVendor(s.llm.provider);
+      const block = s.llm.vendors[provider];
+      setLlmVendor(provider);
       setLlmModel(block.model);
       setEnableThinkingChat(block.enableThinking);
     } catch {
@@ -56,15 +78,16 @@ export function useSettings(api: LvisApi): UseSettingsResult {
 
   // Mount: load vendor/model/thinking cache + context overflow snapshot in one call.
   useEffect(() => {
-    api
+    void api
       .getSettings()
       .then((s) => {
         if (!isMountedRef.current) return;
-        const block = s.llm.vendors[s.llm.provider];
-        setLlmVendor(s.llm.provider);
+        const provider = narrowVendor(s.llm.provider);
+        const block = s.llm.vendors[provider];
+        setLlmVendor(provider);
         setLlmModel(block.model);
         setEnableThinkingChat(block.enableThinking);
-        setCurrentLlmSettings({ provider: s.llm.provider, model: block.model });
+        setCurrentLlmSettings({ provider, model: block.model });
       })
       .catch(() => {});
   }, [api]);
@@ -74,8 +97,16 @@ export function useSettings(api: LvisApi): UseSettingsResult {
       setEnableThinkingChat(next);
       try {
         const s = await api.getSettings();
+        // Narrow before constructing the patch key. If `s.llm.provider`
+        // is stale/corrupt (`"lgenie"`-style), `mergeLlmPatch` would skip
+        // the unknown vendor entry and the toggle would silently no-op.
+        // The narrower's `DEFAULT_LLM_VENDOR` fallback guarantees the
+        // update lands somewhere valid; if the user is actively on a
+        // different vendor, the next settings load will re-narrow and
+        // the toggle re-targets correctly.
+        const provider = narrowVendor(s.llm.provider);
         await api.updateSettings({
-          llm: { vendors: { [s.llm.provider]: { enableThinking: next } } },
+          llm: { vendors: { [provider]: { enableThinking: next } } },
         });
       } catch {
         /* ignore */
