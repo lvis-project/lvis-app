@@ -4,12 +4,12 @@
  * Kakao-style continuous message stream:
  * - Day separator between calendar-day boundaries.
  * - Inline checkpoint divider + summary toast after each compaction.
- * - User messages right-aligned (max 75%), assistant left (max 80%).
+ * - Historical sessions (loaded from disk) rendered above active session.
+ * - Active session entries ALWAYS rendered at the bottom (live streaming).
  * - Reverse infinite scroll: scroll to top → prefetches previous day.
  * - Input bar delegates to existing InputActionBar + Composer.
- * - No session card / collapsible — continuous flow only.
  */
-import { useRef, useEffect } from "react";
+import { Fragment, useRef, useEffect, useMemo } from "react";
 import { flushSync } from "react-dom";
 import type { LvisApi } from "../types.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
@@ -20,6 +20,8 @@ import { AssistantCard } from "./AssistantCard.js";
 import { TurnActionBar } from "./TurnActionBar.js";
 import { ToolGroupCard } from "./ToolGroupCard.js";
 import { ReasoningCard } from "./ReasoningCard.js";
+import { WorkGroup } from "./WorkGroup.js";
+import { ImportedTriggerCard } from "./ImportedTriggerCard.js";
 import { SessionTodoPanel } from "./SessionTodoPanel.js";
 import { getApi } from "../api-client.js";
 import { useChatContext } from "../context/ChatContext.js";
@@ -29,8 +31,8 @@ import type { PluginEntry } from "./PluginGridButton.js";
 import type { QuickAction } from "./CommandPopover.js";
 
 export interface StackedChatViewProps {
-  /** Loaded sessions (oldest → newest) */
-  sessions: StackedSession[];
+  /** Historical sessions (oldest → newest), loaded by useStackedChat — excludes current active */
+  historicalSessions: StackedSession[];
   /** Current (active) session id */
   currentSessionId: string;
   /** Current session entries from useChatState */
@@ -135,24 +137,273 @@ function SummaryToast({ summary }: { summary: string }) {
   );
 }
 
-// ─── User bubble ──────────────────────────────────────────────────────────────
+// ─── Session title marker ─────────────────────────────────────────────────────
 
-function UserBubble({ text }: { text: string }) {
+function SessionMarker({ title, sessionId }: { title: string; sessionId: string }) {
   return (
     <div
-      data-testid="user-message"
-      className="ml-auto max-w-[75%] rounded-md border bg-primary px-3 py-2 text-sm text-primary-foreground"
+      className="mx-auto text-center text-[11px] text-muted-foreground/40 py-0.5 px-3"
+      data-testid="session-marker"
     >
-      <div className="mb-1 text-[11px] text-muted-foreground/60">나</div>
-      <div className="whitespace-pre-wrap">{text}</div>
+      — {title || sessionId.slice(0, 8)} —
     </div>
   );
+}
+
+// ─── Renders a list of entries with WorkGroup support (mirrors ChatView logic) ─
+
+interface EntriesListProps {
+  entries: ChatEntry[];
+  streaming: boolean;
+  isEntryStarred: (entryIdx: number) => string | null;
+  /** Active session only — undefined for read-only historical sessions */
+  onRetryEffort?: () => void | Promise<void>;
+  /** Active session only — undefined for read-only historical sessions */
+  onFork?: (entryIdx: number) => void | Promise<void>;
+  /** Active session only — undefined for read-only historical sessions */
+  onToggleStar?: (entryIdx: number) => void;
+  onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
+  /** Base index offset for entry star/fork callbacks (for historical sessions) */
+  idxOffset?: number;
+}
+
+function EntriesList({
+  entries,
+  streaming,
+  isEntryStarred,
+  onRetryEffort,
+  onFork,
+  onToggleStar,
+  onFeedback,
+  idxOffset = 0,
+}: EntriesListProps) {
+  // O(n) single forward pass: classify entries into "intermediate" | "live" | "final".
+  // Strategy: scan forward, track per-turn non-user entries; once the turn ends (next
+  // user entry or end-of-list), the last non-user entry is "live"/"final" and all
+  // preceding non-user entries in the turn are "intermediate".
+  type EntryClass = "intermediate" | "live" | "final";
+  const entryClassMap = new Map<number, EntryClass>();
+  const entryTurnStartMap = new Map<number, number>();
+
+  let lastUserIdx = -1;
+  for (let k = entries.length - 1; k >= 0; k--) {
+    if (entries[k]?.kind === "user") { lastUserIdx = k; break; }
+  }
+
+  let turnStart = -1;
+  // Indices of non-user entries in the current turn (assistant/reasoning/tool_group).
+  const turnWorkEntries: number[] = [];
+
+  const flushTurn = () => {
+    const last = turnWorkEntries.length - 1;
+    for (let k = 0; k < turnWorkEntries.length; k++) {
+      const idx = turnWorkEntries[k] as number;
+      entryTurnStartMap.set(idx, turnStart >= 0 ? turnStart : 0);
+      if (k < last) {
+        entryClassMap.set(idx, "intermediate");
+      } else {
+        const e = entries[idx];
+        entryClassMap.set(
+          idx,
+          e?.kind === "assistant" && !streaming ? "final" : "live",
+        );
+      }
+    }
+    turnWorkEntries.length = 0;
+  };
+
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (!e) continue;
+    if (e.kind === "user") {
+      flushTurn();
+      turnStart = i;
+    } else if (e.kind === "assistant" || e.kind === "reasoning" || e.kind === "tool_group") {
+      turnWorkEntries.push(i);
+    }
+  }
+  flushTurn();
+
+  const rendered: React.ReactNode[] = [];
+  let i = 0;
+  while (i < entries.length) {
+    const entry = entries[i];
+    if (!entry) { i++; continue; }
+    const idx = i + idxOffset;
+
+    if (entry.kind === "user") {
+      rendered.push(
+        <div
+          key={idx}
+          data-testid="user-message"
+          className="ml-auto max-w-[75%] rounded-full bg-message-user px-3 py-1.5 text-sm text-message-user-foreground"
+        >
+          <div className="whitespace-pre-wrap">{entry.text}</div>
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "system") {
+      if (entry.text.includes("checkpoint") || entry.text.includes("체크포인트")) {
+        const summaryMatch = entry.text.match(/요약:\s*(.+)/);
+        const countMatch = entry.text.match(/(\d+)\s*messages?/);
+        rendered.push(
+          <CheckpointDivider
+            key={`cp-${idx}`}
+            label="자동 정리"
+            messageCount={countMatch ? parseInt(countMatch[1] ?? "0", 10) : 0}
+          />,
+        );
+        if (summaryMatch?.[1]) {
+          rendered.push(<SummaryToast key={`st-${idx}`} summary={summaryMatch[1]} />);
+        }
+      } else {
+        rendered.push(
+          <div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">
+            {entry.text}
+          </div>,
+        );
+      }
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "imported_trigger") {
+      rendered.push(
+        <ImportedTriggerCard
+          key={`trigger:${entry.sessionId}`}
+          source={entry.source}
+          prompt={entry.prompt}
+          summary={entry.summary}
+          toolCallCount={entry.toolCallCount}
+          importedAt={entry.importedAt}
+          response={entry.response}
+          responseStreaming={entry.responseStreaming}
+        />,
+      );
+      i++;
+      continue;
+    }
+
+    // ── Intermediate: collect consecutive intermediate entries into one WorkGroup ──
+    if (entryClassMap.get(i) === "intermediate") {
+      const groupStart = i;
+      const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
+      const groupIsActiveTurn = groupTurnStart === lastUserIdx && streaming;
+      const groupEntries: { idx: number; node: React.ReactNode }[] = [];
+
+      while (i < entries.length && entryClassMap.get(i) === "intermediate") {
+        const e = entries[i];
+        if (!e) { i++; continue; }
+        if (e.kind === "reasoning") {
+          groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
+        } else if (e.kind === "tool_group") {
+          groupEntries.push({ idx: i, node: <ToolGroupCard key={e.groupId} group={e} /> });
+        } else if (e.kind === "assistant") {
+          groupEntries.push({ idx: i, node: (
+            <AssistantCard
+              key={i}
+              entry={e}
+              highlightQuery=""
+              isStarred={false}
+              isFinal={false}
+            />
+          )});
+        }
+        i++;
+      }
+
+      rendered.push(
+        <WorkGroup key={`wg-${groupStart + idxOffset}`} stepCount={groupEntries.length} streaming={groupIsActiveTurn}>
+          {groupEntries.map((ge) => ge.node)}
+        </WorkGroup>,
+      );
+      continue;
+    }
+
+    // ── Live: last entry in turn while streaming — no TurnActionBar ──
+    if (entryClassMap.get(i) === "live") {
+      if (entry.kind === "reasoning") {
+        rendered.push(<ReasoningCard key={idx} entry={entry} />);
+      } else if (entry.kind === "tool_group") {
+        rendered.push(<ToolGroupCard key={entry.groupId} group={entry} />);
+      } else if (entry.kind === "assistant") {
+        rendered.push(
+          <div key={idx}>
+            <AssistantCard
+              entry={entry}
+              highlightQuery=""
+              isStarred={!!isEntryStarred(idx)}
+              isFinal={true}
+            />
+          </div>,
+        );
+      }
+      i++;
+      continue;
+    }
+
+    // ── Final: turn complete, last assistant — show TurnActionBar ──
+    if (entryClassMap.get(i) === "final" && entry.kind === "assistant") {
+      const starred = !!isEntryStarred(idx);
+      const turnStartIdx = entryTurnStartMap.get(i) ?? 0;
+      const turnTokens = entries.slice(turnStartIdx, i + 1).reduce((sum, e) => {
+        if (e.kind === "assistant" || e.kind === "reasoning" || e.kind === "user") {
+          return sum + Math.ceil(((e as { text?: string }).text?.length ?? 0) / 4);
+        }
+        if (e.kind === "tool_group") {
+          const tools = (e as { tools?: Array<{ input?: unknown; result?: string }> }).tools ?? [];
+          return sum + tools.reduce(
+            (ts, t) => ts + Math.ceil((JSON.stringify(t.input ?? {}).length + (t.result?.length ?? 0)) / 4),
+            0,
+          );
+        }
+        return sum;
+      }, 0);
+
+      rendered.push(
+        <div key={idx} className="rounded-md">
+          <AssistantCard
+            entry={entry}
+            highlightQuery=""
+            isStarred={starred}
+            isFinal={true}
+            turnTokens={turnTokens}
+          />
+          <TurnActionBar
+            turnTokens={turnTokens}
+            isStarred={starred}
+            actions={{
+              onRetry: onRetryEffort ? () => void onRetryEffort() : undefined,
+              onFork: onFork ? () => void onFork(idx) : undefined,
+              onToggleStar: onToggleStar ? () => onToggleStar(idx) : undefined,
+            }}
+            onFeedback={onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
+          />
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    // ── Fallback: unclassified edge-case entries ──
+    if (entry.kind === "reasoning") {
+      rendered.push(<ReasoningCard key={idx} entry={entry} />);
+    } else if (entry.kind === "tool_group") {
+      rendered.push(<ToolGroupCard key={entry.groupId} group={entry} />);
+    }
+    i++;
+  }
+
+  return <>{rendered}</>;
 }
 
 // ─── StackedChatView ──────────────────────────────────────────────────────────
 
 export function StackedChatView({
-  sessions,
+  historicalSessions,
   currentSessionId,
   entries,
   streaming,
@@ -181,16 +432,25 @@ export function StackedChatView({
   const composerRef = useRef<ComposerHandle | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll to bottom whenever entries are added or the last message's
-  // content changes (streaming updates). Uses "smooth" for new messages and
-  // instant on mount.
+  // Auto-scroll to bottom when active entries are added or last entry's content changes.
+  // "isAtTop" guard: don't force-scroll while user is reading history at the top.
   const lastEntryContent =
     entries.length > 0
-      ? (entries[entries.length - 1] as { text?: string; content?: string } | undefined)?.text ?? ""
+      ? (entries[entries.length - 1] as { text?: string } | undefined)?.text ?? ""
       : "";
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [entries.length, lastEntryContent]);
+    const container = scrollContainerRef.current;
+    if (!container) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      return;
+    }
+    // Only auto-scroll if user is near the bottom (within 200px)
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom < 200) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [entries.length, lastEntryContent, scrollContainerRef]);
+
   const {
     question,
     setQuestion,
@@ -210,11 +470,38 @@ export function StackedChatView({
     setActivePresetId,
   } = useChatContext();
 
-  // Build day → entries map from current session (active day messages)
-  // Historical sessions are represented by their metadata only
-  const groupedSessions = groupSessionsByDay(sessions);
+  // Compute today's date key for the active session's day separator
   const todayKey = new Date().toISOString().split("T")[0] as string;
-  const currentDayKey = sessions.find((s) => s.id === currentSessionId)?.dayKey ?? todayKey;
+
+  // Group historical sessions by day. Skip sessions with no entries so we
+  // never emit a DaySeparator for a day that has nothing to show.
+  const historicalByDay = useMemo(() => {
+    const map = new Map<string, StackedSession[]>();
+    for (const s of historicalSessions) {
+      if (s.entries.length === 0) continue;
+      const existing = map.get(s.dayKey);
+      if (existing) {
+        existing.push(s);
+      } else {
+        map.set(s.dayKey, [s]);
+      }
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [historicalSessions]);
+
+  // Compute the active session's day key based on entries or today
+  const activeDayKey = useMemo(() => {
+    // Use today as default — entries don't carry per-entry timestamps yet
+    return todayKey;
+  }, [todayKey]);
+
+  // Determine if today's historical data is already present (to avoid duplicate DaySeparator)
+  const todayHasHistorical = historicalByDay.some(([dayKey]) => dayKey === activeDayKey);
+
+  // Count historical entries (not just sessions) so the empty state still
+  // renders when sessions exist but failed to load any messages.
+  const hasAnyContent =
+    entries.length > 0 || historicalSessions.some((s) => s.entries.length > 0);
 
   return (
     <div className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] mx-auto w-full max-w-3xl">
@@ -237,56 +524,66 @@ export function StackedChatView({
           </div>
         )}
 
-        {reachedEnd && sessions.length > 0 && (
+        {reachedEnd && hasAnyContent && (
           <div className="py-2 text-center text-[10px] text-muted-foreground/50">
             — 대화 시작 —
           </div>
         )}
 
-        {/* Empty state */}
-        {sessions.length === 0 && !loading && (
+        {/* Empty state — shown only when no historical and no active entries */}
+        {!hasAnyContent && !loading && (
           <div className="py-12 text-center text-sm text-muted-foreground" data-testid="stacked-empty">
             LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.
           </div>
         )}
 
-        {/* Historical session summaries grouped by day */}
-        {Array.from(groupedSessions.entries()).map(([dayKey, daySessions]) => (
-          <div key={dayKey}>
+        {/* Historical sessions grouped by day */}
+        {historicalByDay.map(([dayKey, daySessions]) => (
+          <Fragment key={dayKey}>
             <DaySeparator dateKey={dayKey} />
-            {daySessions.map((sess) => {
-              const isActive = sess.id === currentSessionId;
-              if (isActive) {
-                // Active session: render live entries
-                return (
-                  <div key={sess.id} className="space-y-3">
-                    {renderSessionEntries(entries, streaming, onRetryEffort, onFork, onToggleStar, isEntryStarred, onFeedback)}
-                  </div>
-                );
-              }
-              // Historical session: show title as a system note
+            {daySessions.map((sess, sIdx) => {
+              if (sess.entries.length === 0) return null;
               return (
-                <div
-                  key={sess.id}
-                  className="mx-auto text-center text-xs text-muted-foreground/50 py-1 px-3"
-                  data-testid="session-marker"
-                >
-                  [{sess.title || sess.id.slice(0, 8)}]
-                </div>
+              <Fragment key={sess.id}>
+                {/* Show session title marker only between multiple sessions in the same day */}
+                {daySessions.length > 1 && sIdx > 0 && (
+                  <SessionMarker title={sess.title} sessionId={sess.id} />
+                )}
+                <EntriesList
+                  entries={sess.entries}
+                  streaming={false}
+                  isEntryStarred={() => null}
+                />
+              </Fragment>
               );
             })}
-          </div>
+          </Fragment>
         ))}
 
-        {/* If active session has no historical entries in sessions list, render current entries */}
-        {sessions.length === 0 && entries.length > 0 && (
-          <div className="space-y-3">
-            {renderSessionEntries(entries, streaming, onRetryEffort, onFork, onToggleStar, isEntryStarred, onFeedback)}
+        {/* Active session section — ALWAYS rendered, lives at the bottom of the stack */}
+        {/* Only add DaySeparator for today if not already shown by historical grouping */}
+        {!todayHasHistorical && entries.length > 0 && (
+          <DaySeparator dateKey={activeDayKey} />
+        )}
+        {todayHasHistorical && entries.length > 0 && (
+          <div className="my-1 flex items-center gap-2">
+            <span className="h-px flex-1 bg-border/30" />
+            <span className="text-[10px] text-muted-foreground/40">현재 대화</span>
+            <span className="h-px flex-1 bg-border/30" />
           </div>
         )}
 
-        {/* Day separator for today if we have entries but sessions not loaded yet */}
-        {sessions.length === 0 && entries.length === 0 && !loading && null}
+        {entries.length > 0 && (
+          <EntriesList
+            entries={entries}
+            streaming={streaming}
+            isEntryStarred={isEntryStarred}
+            onRetryEffort={onRetryEffort}
+            onFork={onFork}
+            onToggleStar={onToggleStar}
+            onFeedback={onFeedback}
+          />
+        )}
 
         {/* Scroll anchor — kept at bottom so auto-scroll lands past the last message */}
         <div ref={chatEndRef} data-testid="chat-end-anchor" />
@@ -414,119 +711,6 @@ export function StackedChatView({
       </div>
     </div>
   );
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function groupSessionsByDay(sessions: StackedSession[]): Map<string, StackedSession[]> {
-  const map = new Map<string, StackedSession[]>();
-  for (const s of sessions) {
-    const existing = map.get(s.dayKey);
-    if (existing) {
-      existing.push(s);
-    } else {
-      map.set(s.dayKey, [s]);
-    }
-  }
-  return map;
-}
-
-function renderSessionEntries(
-  entries: ChatEntry[],
-  streaming: boolean,
-  onRetryEffort: () => void | Promise<void>,
-  onFork: (entryIdx: number) => void | Promise<void>,
-  onToggleStar: (entryIdx: number) => void,
-  isEntryStarred: (entryIdx: number) => string | null,
-  onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>,
-): React.ReactNode[] {
-  // Find the last assistant entry index to correctly determine isFinal
-  let lastAssistantIdx = -1;
-  for (let k = entries.length - 1; k >= 0; k--) {
-    if (entries[k]?.kind === "assistant") { lastAssistantIdx = k; break; }
-  }
-
-  const nodes: React.ReactNode[] = [];
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    if (!entry) continue;
-    const key = i;
-
-    if (entry.kind === "user") {
-      nodes.push(<UserBubble key={key} text={entry.text} />);
-      continue;
-    }
-    if (entry.kind === "system") {
-      // Checkpoint divider: system messages from compaction include a summary marker
-      if (entry.text.includes("checkpoint") || entry.text.includes("체크포인트")) {
-        const summaryMatch = entry.text.match(/요약:\s*(.+)/);
-        const countMatch = entry.text.match(/(\d+)\s*messages?/);
-        nodes.push(
-          <CheckpointDivider
-            key={`cp-${key}`}
-            label="자동 정리"
-            messageCount={countMatch ? parseInt(countMatch[1] ?? "0", 10) : 0}
-          />,
-        );
-        if (summaryMatch?.[1]) {
-          nodes.push(<SummaryToast key={`st-${key}`} summary={summaryMatch[1]} />);
-        }
-      } else {
-        nodes.push(
-          <div key={key} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">
-            {entry.text}
-          </div>,
-        );
-      }
-      continue;
-    }
-    if (entry.kind === "assistant") {
-      // isFinal: only the last assistant entry AND global streaming is done.
-      // This prevents TurnActionBar from flashing during reasoning/tool steps
-      // that precede the final assistant message.
-      const isFinal = !streaming && i === lastAssistantIdx;
-      const starred = !!isEntryStarred(i);
-
-      // Estimate turn tokens from this entry (same rough heuristic as ChatView)
-      const turnTokens = isFinal
-        ? Math.ceil(((entry as { text?: string }).text?.length ?? 0) / 4)
-        : 0;
-
-      nodes.push(
-        <div key={key} className="max-w-[80%]">
-          <AssistantCard
-            entry={entry}
-            highlightQuery=""
-            isStarred={starred}
-            isFinal={isFinal}
-            turnTokens={isFinal ? turnTokens : undefined}
-          />
-          {isFinal && (
-            <TurnActionBar
-              turnTokens={turnTokens > 0 ? turnTokens : undefined}
-              isStarred={starred}
-              actions={{
-                onRetry: () => void onRetryEffort(),
-                onFork: () => void onFork(i),
-                onToggleStar: () => onToggleStar(i),
-              }}
-              onFeedback={onFeedback ? (rating, reason) => void onFeedback(i, rating, reason) : undefined}
-            />
-          )}
-        </div>,
-      );
-      continue;
-    }
-    if (entry.kind === "reasoning") {
-      nodes.push(<ReasoningCard key={key} entry={entry} />);
-      continue;
-    }
-    if (entry.kind === "tool_group") {
-      nodes.push(<ToolGroupCard key={entry.groupId} group={entry} />);
-      continue;
-    }
-  }
-  return nodes;
 }
 
 // Re-export these for use in test/assertions
