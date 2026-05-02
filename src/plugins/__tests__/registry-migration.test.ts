@@ -6,11 +6,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../registry.js";
+import { readPluginRegistry } from "../registry.js";
 
 describe("readPluginRegistry — legacy installedBy/_devLinked migration", () => {
   let tmpDir: string;
@@ -244,84 +244,6 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     });
   });
 
-  it("migrates old-only pageindex registry entry to local-indexer and persists default manifest path rename", async () => {
-    await mkdir(join(tmpDir, "pageindex"), { recursive: true });
-    await writeFile(join(tmpDir, "pageindex", "plugin.json"), JSON.stringify({ id: "pageindex" }), "utf-8");
-
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          {
-            id: "pageindex",
-            manifestPath: "pageindex/plugin.json",
-            enabled: true,
-            installSource: "user",
-          },
-        ],
-      }),
-      "utf-8",
-    );
-
-    const registry = await readPluginRegistry(registryPath);
-    expect(registry.plugins).toEqual([
-      {
-        id: "local-indexer",
-        manifestPath: "local-indexer/plugin.json",
-        enabled: true,
-        installSource: "user",
-      },
-    ]);
-
-    const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(onDisk.plugins).toEqual(registry.plugins);
-    const resolvedManifestPaths = resolveManifestPathsFromRegistry(registryPath, registry.plugins);
-    expect(resolvedManifestPaths).toEqual([join(tmpDir, "local-indexer", "plugin.json")]);
-    await expect(stat(join(tmpDir, "local-indexer", "plugin.json"))).resolves.toBeTruthy();
-    await expect(stat(join(tmpDir, "pageindex"))).rejects.toThrow();
-  });
-
-  it("does not overwrite an existing local-indexer directory when migrating duplicate old and new entries", async () => {
-    await mkdir(join(tmpDir, "pageindex"), { recursive: true });
-    await mkdir(join(tmpDir, "local-indexer"), { recursive: true });
-    await writeFile(join(tmpDir, "pageindex", "marker.txt"), "legacy", "utf-8");
-    await writeFile(join(tmpDir, "local-indexer", "marker.txt"), "canonical", "utf-8");
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          {
-            id: "pageindex",
-            manifestPath: "pageindex/plugin.json",
-            enabled: true,
-            installSource: "user",
-          },
-          {
-            id: "local-indexer",
-            manifestPath: "local-indexer/plugin.json",
-            enabled: false,
-            installSource: "admin",
-          },
-        ],
-      }),
-      "utf-8",
-    );
-
-    const registry = await readPluginRegistry(registryPath);
-    expect(registry.plugins).toEqual([
-      {
-        id: "local-indexer",
-        manifestPath: "local-indexer/plugin.json",
-        enabled: false,
-        installSource: "admin",
-      },
-    ]);
-    await expect(readFile(join(tmpDir, "local-indexer", "marker.txt"), "utf-8")).resolves.toBe("canonical");
-    await expect(readFile(join(tmpDir, "pageindex", "marker.txt"), "utf-8")).resolves.toBe("legacy");
-  });
-
   it("leaves an already-canonical local-indexer registry entry unchanged", async () => {
     await writeFile(
       registryPath,
@@ -351,59 +273,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     expect(after).toEqual(before);
   });
 
-  it("canonicalizes duplicate pageindex and local-indexer entries, preferring local-indexer and filling missing metadata", async () => {
-    const approvedPluginAccess = { plugins: [{ pluginId: "ms-graph", tools: ["mail.search"] }] };
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          {
-            id: "pageindex",
-            manifestPath: "pageindex/plugin.json",
-            enabled: true,
-            installSource: "user",
-            bundleRefs: ["legacy-bundle"],
-            approvedPluginAccess,
-          },
-          {
-            id: "calendar",
-            manifestPath: "calendar/plugin.json",
-            enabled: true,
-          },
-          {
-            id: "local-indexer",
-            manifestPath: "local-indexer/plugin.json",
-          },
-        ],
-      }),
-      "utf-8",
-    );
-
-    const registry = await readPluginRegistry(registryPath);
-    expect(registry.plugins).toEqual([
-      {
-        id: "calendar",
-        manifestPath: "calendar/plugin.json",
-        enabled: true,
-      },
-      {
-        id: "local-indexer",
-        manifestPath: "local-indexer/plugin.json",
-        enabled: true,
-        installSource: "user",
-        bundleRefs: ["legacy-bundle"],
-        approvedPluginAccess,
-      },
-    ]);
-
-    const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(onDisk.plugins).toEqual(registry.plugins);
-    expect(onDisk.plugins.filter((entry: { id: string }) => entry.id === "pageindex")).toHaveLength(0);
-    expect(onDisk.plugins.filter((entry: { id: string }) => entry.id === "local-indexer")).toHaveLength(1);
-  });
-
-  it("preserves pageindex fields and custom manifest paths during rename", async () => {
+  it("does not rewrite pageindex registry entries to local-indexer", async () => {
     const approvedPluginAccess = { plugins: [{ pluginId: "agent-hub", events: ["agent.ready"] }] };
     await writeFile(
       registryPath,
@@ -423,10 +293,12 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
       "utf-8",
     );
 
+    const before = await readFile(registryPath, "utf-8");
     const registry = await readPluginRegistry(registryPath);
+    const after = await readFile(registryPath, "utf-8");
     expect(registry.plugins).toEqual([
       {
-        id: "local-indexer",
+        id: "pageindex",
         manifestPath: "/opt/lvis/custom-pageindex/plugin.json",
         enabled: false,
         installSource: "local-dev",
@@ -434,6 +306,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
         approvedPluginAccess,
       },
     ]);
+    expect(after).toEqual(before);
   });
 
   it("returns the empty default and does not write anything for a missing registry (first boot)", async () => {

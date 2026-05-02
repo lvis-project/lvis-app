@@ -1,7 +1,7 @@
 /**
  * Plugins domain IPC handlers.
  * Covers: lvis:plugins:*, lvis:bootstrap:*, lvis:runtime:*, lvis:marketplace:*,
- *         lvis:mcp:*, lvis:plugin:* (webview bridge), lvis:pageindex:*,
+ *         lvis:mcp:*, lvis:plugin:* (webview bridge), lvis:file:*,
  *         lvis:notification:clicked
  */
 import { app, dialog, ipcMain, webContents } from "electron";
