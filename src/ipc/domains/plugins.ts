@@ -9,7 +9,7 @@ import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { findMethodByCapability } from "../../boot/plugins.js";
+import { findPreferredMethodByCapability } from "../../boot/plugins.js";
 import { emitEvent as emitHostEvent } from "../../boot/types.js";
 import { HOST_ONLY_EMIT_NAMESPACES, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
 import { stripSecretFields } from "../../plugins/config-schema.js";
@@ -762,10 +762,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     return { ok: true };
   });
 
-  // ─── PageIndex ──────────────────────────────────────────────────────────
-  ipcMain.handle("lvis:pageindex:scan-paths", async (e, payload: { paths: string[] }) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:pageindex:scan-paths", e); return UNAUTHORIZED_FRAME; }
-    const method = findMethodByCapability(pluginRuntime, "document-indexer", (m) => m.endsWith("_scan"));
+  // ─── File-path indexing ────────────────────────────────────────────────
+  ipcMain.handle("lvis:file:scan-paths", async (e, payload: { paths: string[] }) => {
+    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:file:scan-paths", e); return UNAUTHORIZED_FRAME; }
+    const method = findPreferredMethodByCapability(
+      pluginRuntime,
+      "document-indexer",
+      ["document_index_scan"],
+    );
     if (!method) {
       return { ok: false, error: "no-indexer" };
     }

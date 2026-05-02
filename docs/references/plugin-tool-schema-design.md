@@ -715,7 +715,7 @@ HostApi 에 새 메서드를 추가하려면:
 | Deployment 가드 | `src/plugins/deployment-guard.ts` |
 | callLlm rate-limit | `src/boot/conversation.ts` (`createCallLlmForPlugin`) |
 | 등록 진입점 | `src/boot.ts` |
-| 번들 플러그인 빌드 | `package.json` `prepare:plugins` |
+| 플러그인 배포 | Marketplace artifact install 경로 (`src/plugins/runtime.ts`) |
 
 ---
 
