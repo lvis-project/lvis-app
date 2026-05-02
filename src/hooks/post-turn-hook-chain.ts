@@ -13,7 +13,7 @@
  */
 
 import { shouldCompact, compactMessages, microcompactMessages, getModelContextWindow } from "../engine/auto-compact.js";
-import type { GenericMessage, TokenUsage, LLMVendor } from "../engine/llm/types.js";
+import type { GenericMessage, TokenUsage } from "../engine/llm/types.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
@@ -72,7 +72,7 @@ export class PostTurnHookChain {
         // Stage 1b: threshold-triggered full compact
         const llmSettings = this.deps.settingsService?.get("llm");
         const contextWindow = llmSettings
-          ? getModelContextWindow(llmSettings.provider as LLMVendor, llmSettings.vendors[llmSettings.provider].model)
+          ? getModelContextWindow(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model)
           : undefined;
         if (shouldCompact(ctx.cumulativeUsage, contextWindow)) {
           const { messages: compacted, result: cr } = compactMessages(working, undefined, "auto");
