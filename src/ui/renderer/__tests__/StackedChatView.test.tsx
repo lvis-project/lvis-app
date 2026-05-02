@@ -147,9 +147,9 @@ describe("StackedChatView empty state", () => {
   });
 });
 
-// ─── 7. Scroll sentinel ───────────────────────────────────────────────────────
-describe("StackedChatView scroll sentinel", () => {
-  it("renders scroll sentinel when stacked view is active", async () => {
+// ─── 7. Disabled stacked-view guard ───────────────────────────────────────────
+describe("StackedChatView disabled guard", () => {
+  it("keeps ChatView active even when the stacked flag is present", async () => {
     const mockSettings = {
       llm: {
         provider: "openai",
@@ -173,14 +173,15 @@ describe("StackedChatView scroll sentinel", () => {
 
     await waitFor(() => {
       const sentinel = container.querySelector("[data-testid='scroll-sentinel']");
-      expect(sentinel).toBeTruthy();
+      expect(sentinel).toBeNull();
+      expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다");
     });
   });
 });
 
-// ─── 7b. Chat-end scroll anchor ──────────────────────────────────────────────
-describe("StackedChatView scroll-to-bottom anchor", () => {
-  it("renders chat-end anchor when stacked view is active", async () => {
+// ─── 7b. Chat-end scroll anchor disabled guard ────────────────────────────────
+describe("StackedChatView scroll-to-bottom anchor disabled guard", () => {
+  it("does not render the stacked chat-end anchor while stacked view is disabled", async () => {
     const mockSettings = {
       llm: {
         provider: "openai",
@@ -201,7 +202,8 @@ describe("StackedChatView scroll-to-bottom anchor", () => {
 
     await waitFor(() => {
       const anchor = container.querySelector("[data-testid='chat-end-anchor']");
-      expect(anchor).toBeTruthy();
+      expect(anchor).toBeNull();
+      expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다");
     });
   });
 });

@@ -49,7 +49,6 @@ describe("dev-sync-plugins — isSafePluginId", () => {
     expect(isSafePluginId("ms_graph")).toBe(true);
     expect(isSafePluginId("pageindex")).toBe(true);
     expect(isSafePluginId("com.lge.sample_v2")).toBe(true);
-    expect(isSafePluginId("9plugin")).toBe(true);
     expect(isSafePluginId("agent..hub")).toBe(true);
     expect(isSafePluginId("agent--hub")).toBe(true);
     expect(isSafePluginId("agent__hub")).toBe(true);
@@ -65,6 +64,7 @@ describe("dev-sync-plugins — isSafePluginId", () => {
     expect(isSafePluginId("with space")).toBe(false);
     expect(isSafePluginId("   ")).toBe(false);
     expect(isSafePluginId("")).toBe(false);
+    expect(isSafePluginId("9plugin")).toBe(false);
     expect(isSafePluginId(undefined as unknown as string)).toBe(false);
   });
 });
