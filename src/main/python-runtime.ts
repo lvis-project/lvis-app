@@ -77,6 +77,11 @@ export interface PythonRuntimeBootstrapperOptions {
   lockFileName?: string;
 }
 
+function isWithinDirectory(candidatePath: string, directoryPath: string): boolean {
+  const relativePath = path.relative(directoryPath, candidatePath);
+  return relativePath === "" || (!!relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
 // ─── PythonRuntimeBootstrapper ───────────────────────
 
 export class PythonRuntimeBootstrapper {
@@ -105,6 +110,42 @@ export class PythonRuntimeBootstrapper {
     // 첫 부팅 셋업
     await this.setup();
     return result;
+  }
+
+  /**
+   * Prepare the runtime after a plugin is installed in the current session.
+   * Returns null when the manifest has no accessible lockfile so non-Python
+   * plugins do not turn install into a Python bootstrap attempt.
+   */
+  async ensureReadyForPluginManifest(
+    manifestPath: string,
+    mainWindow: BrowserWindow,
+  ): Promise<RuntimeResult | null> {
+    const lockFileName = this.options.lockFileName ?? LOCK_FILE_RESOURCE_NAME;
+    const candidates = await this.lockCandidatesFromManifest(manifestPath, lockFileName);
+    let hasLockFile = false;
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate);
+        hasLockFile = true;
+        break;
+      } catch {
+        // try next candidate
+      }
+    }
+    if (!hasLockFile) {
+      await this.log(`[python-runtime] plugin has no accessible Python lockfile — skip runtime prepare (${manifestPath})`);
+      return null;
+    }
+
+    const bootstrapper = new PythonRuntimeBootstrapper({
+      ...this.options,
+      pluginManifestPaths: [
+        manifestPath,
+        ...(this.options.pluginManifestPaths ?? []).filter((p) => p !== manifestPath),
+      ],
+    });
+    return bootstrapper.ensureReady(mainWindow);
   }
 
   // ─── private: sentinel ────────────────────────────
@@ -260,7 +301,16 @@ export class PythonRuntimeBootstrapper {
               ? manifest.config.pythonRequirementsLock
               : undefined;
       if (declared && declared.length > 0) {
-        candidates.push(path.isAbsolute(declared) ? declared : path.resolve(manifestDir, declared));
+        if (path.isAbsolute(declared)) {
+          await this.log(`[python-runtime] plugin manifest lockfile declaration rejected (absolute path): ${manifestPath}`);
+        } else {
+          const resolved = path.resolve(manifestDir, declared);
+          if (isWithinDirectory(resolved, manifestDir)) {
+            candidates.push(resolved);
+          } else {
+            await this.log(`[python-runtime] plugin manifest lockfile declaration rejected (outside plugin directory): ${manifestPath}`);
+          }
+        }
       }
     } catch (err) {
       await this.log(`[python-runtime] plugin manifest lockfile declaration unreadable (${manifestPath}): ${(err as Error).message}`);
