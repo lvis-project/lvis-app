@@ -159,14 +159,13 @@ describe("plugin-preload bridge", () => {
     await expect(bridge.getEntryUrl()).rejects.toThrow(/unauthorized-frame/);
   });
 
-  // Issue #439: registration-timeout is a recoverable variant the shell can
-  // retry. Both error codes flow through the same throw path, but the message
-  // text must be preserved so the shell's retry filter sees the right code.
-  it("getEntryUrl surfaces the registration-timeout error verbatim", async () => {
+  // register-before-attach (#447): main now returns "not-registered" instead of
+  // the old "registration-timeout" sentinel. Shell never retries — it just throws.
+  it("getEntryUrl surfaces the not-registered error verbatim", async () => {
     const bridge = exposed.get("lvisPlugin") as { getEntryUrl: () => Promise<string> };
-    mockInvoke.mockResolvedValueOnce({ ok: false, error: "registration-timeout" });
+    mockInvoke.mockResolvedValueOnce({ ok: false, error: "not-registered" });
 
-    await expect(bridge.getEntryUrl()).rejects.toThrow(/registration-timeout/);
+    await expect(bridge.getEntryUrl()).rejects.toThrow(/not-registered/);
   });
 
   it("onEvent registers listener on lvis:plugin:event IPC channel and returns unsubscribe", () => {
