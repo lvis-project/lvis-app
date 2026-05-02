@@ -52,13 +52,15 @@ describe("PluginGridButton v3", () => {
     expect(screen.getByTestId("plugin-grid-popover")).toBeInTheDocument();
   });
 
-  it("renders plugins in a 5-col grid", () => {
+  it("renders plugins in a fluid auto-fill grid", () => {
     const plugins = makePlugins(5);
     renderGrid(plugins);
     fireEvent.click(screen.getByTestId("plugin-grid-button"));
     const grid = screen.getByTestId("plugin-grid");
     expect(grid).toBeInTheDocument();
-    expect(grid.className).toContain("grid-cols-5");
+    // Column count is fluid (`repeat(auto-fill, minmax(80px, 1fr))`) so it
+    // tracks the chat panel width — no hard-coded grid-cols-N.
+    expect(grid.className).toMatch(/grid-cols-\[repeat\(auto-fill/);
   });
 
   it("renders plugin cells with labels", () => {
