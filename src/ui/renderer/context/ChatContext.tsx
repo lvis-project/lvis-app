@@ -101,7 +101,7 @@ export interface ChatContextValue {
 
   // Composer attachments — single source of truth lives in textarea body
   // (markers like [Image #N], [File #N], [Pasted text #N +X lines]). The
-  // attachment metadata store hangs off this state. PageIndex inline-attach
+  // attachment metadata store hangs off this state. Local Indexer inline-attach
   // was removed in favor of automatic context loading at conversation time.
   attachments: Attachment[];
   setAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>;

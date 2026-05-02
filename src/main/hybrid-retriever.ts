@@ -1,5 +1,5 @@
 /**
- * HybridRetriever — Local PageIndex (BM25 + Vector) + Cloud 결합
+ * HybridRetriever — Local Indexer (BM25 + Vector) + Cloud 결합
  *
  * 청사진 §1 C4: RRF k=60, weights {bm25:0.5, vec:0.5, cloud:0.0} (Phase 1)
  * 청사진 §6.1: `lvis-app/src/main/hybrid-retriever.ts`
@@ -20,7 +20,7 @@
  *   import { MockCloudIndexAdapter } from "./main/cloud-index-adapter.js";
  *
  *   const cloudAdapter = new MockCloudIndexAdapter();
- *   const workerClient = pageIndexPlugin.getWorkerClient();  // Agent 4가 추가
+ *   const workerClient = localIndexerPlugin.getWorkerClient();  // Agent 4가 추가
  *   const hybridRetriever = new HybridRetriever({
  *     workerClient,
  *     cloudAdapter,
