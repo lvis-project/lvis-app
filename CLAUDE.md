@@ -151,3 +151,12 @@ bunx vitest run        # Run tests
 
 Always update `../TODO.md` when completing or discovering work items.
 Relevant sections: 1 (Boot), 2 (ConversationLoop), 6 (Core Engines), 9 (Plugin System), 10 (LLM), 11 (Memory), 12 (UI).
+
+## Team Discipline (Multi-Worker)
+
+멀티 워커 환경에서 textual conflict 없이 발생하는 semantic regression 방어 — 자세한 사례/체크리스트/플레이북은 `docs/development/multi-worker-discipline.md` 참조.
+
+- **Main 항상 green**: rebase-then-merge + branch protection + post-merge smoke. 깨지면 즉시 revert PR (책임자 = 마지막 머지자).
+- **SoT 이동은 한 PR 안에서 sweep**: validator + 파생 TS const + 테스트 fixture lockstep. `grep -rn "<old>"` 0건 + `bun run test` pass 확인 후 머지.
+- **State-A↔B sync race 는 한 flushSync**: derived-state cleanup useEffect 가 있으면 두 state 의 모든 call site 가 한 commit 안에 batch 되었는지 확인 (anti-pattern: `flushSync(setA); B();`).
+- **Cross-repo contract sync**: host ↔ SDK ↔ plugin repos ↔ template ↔ marketplace 변경은 같은 세션 안에 모든 dependent repo sweep. PR description 에 companion PR 명시.
