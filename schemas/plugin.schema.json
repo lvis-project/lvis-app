@@ -435,6 +435,12 @@
       "minLength": 1,
       "description": "npm package name persisted into installed manifests by PluginMarketplaceService for rollback support. Not authored by plugin developers."
     },
+    "icon": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Optional Lucide icon name (PascalCase, e.g. 'Mic', 'FileText'). Host dynamically looks up the named export from lucide-react and renders it as a monochrome stroke icon in the plugin grid popover. Unknown names fall back to the 'Plug' icon. Full list: https://lucide.dev/icons/"
+    },
     "python": {
       "type": "object",
       "description": "Optional Python runtime co-deployment metadata. Host installs declared requirements when managedBy is lvis-app.",
