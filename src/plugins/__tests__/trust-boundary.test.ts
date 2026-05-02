@@ -5,7 +5,7 @@
  *
  *   1. (CRITICAL §Step 1) `isTrustedRegistryManifestPath` accepts BOTH
  *      hostRoot and pluginsRoot; rejects symlink escape.
- *   2. (HIGH §Step 2) `installedBy` recorded on the registry entry is
+ *   2. (HIGH §Step 2) `installSource` recorded on the registry entry is
  *      authoritative; manifest `installPolicy` is advisory only.
  *   3. (MEDIUM §Step 3) `dev-flags.ts` helpers hard-gate on `app.isPackaged`.
  */
@@ -79,7 +79,16 @@ describe("Phase 1 — plugin trust boundary", () => {
   }
 
   async function writeRegistry(
-    entries: Array<{ id: string; manifestPath: string; installedBy?: "admin" | "user"; _devLinked?: boolean }>,
+    entries: Array<{
+      id: string;
+      manifestPath: string;
+      installSource?: "admin" | "user" | "local-dev" | "dev-link";
+      // Legacy fields kept on the helper signature so tests can write
+      // pre-PR #430 registry shapes and verify readPluginRegistry's
+      // on-read migration. Production code never sets these.
+      installedBy?: "admin" | "user";
+      _devLinked?: boolean;
+    }>,
   ): Promise<void> {
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: entries }), "utf-8");
   }
@@ -293,18 +302,18 @@ describe("Phase 1 — plugin trust boundary", () => {
 
   // ───────────────────────────── §Step 3 ─────────────────────────────
 
-  describe("installedBy authoritative over manifest installPolicy", () => {
-    it("rejects user uninstall when registry installedBy=admin even if manifest installPolicy=user (tampered)", async () => {
+  describe("installSource authoritative over manifest installPolicy", () => {
+    it("rejects user uninstall when registry installSource=admin even if manifest installPolicy=user (tampered)", async () => {
       // Plugin physically lives under pluginsRoot but the manifest is
       // stamped `installPolicy: "user"` (the tamper). The registry was
-      // recorded with installedBy="admin" at install time — that record is
+      // recorded with installSource="admin" at install time — that record is
       // authoritative.
       const userDir = join(pluginsRoot, "p-tampered");
       const manifestPath = await writePluginAt(userDir, "tb.tampered", {
         installPolicy: "user",
       });
       await writeRegistry([
-        { id: "tb.tampered", manifestPath, installedBy: "admin" },
+        { id: "tb.tampered", manifestPath, installSource: "admin" },
       ]);
 
       const guard = new PluginDeploymentGuard({
@@ -314,10 +323,33 @@ describe("Phase 1 — plugin trust boundary", () => {
       const result = await guard.canUninstall("tb.tampered", "user");
 
       expect(result.allowed).toBe(false);
-      expect(result.reason).toMatch(/registry installedBy="admin"/);
+      expect(result.reason).toMatch(/registry installSource="admin"/);
     });
 
-    it("falls back to manifest installPolicy when registry has no installedBy (legacy data)", async () => {
+    it("legacy installedBy='admin' migrates to installSource='admin' on read and is enforced", async () => {
+      // Pre-PR #430 entries with `installedBy: "admin"` are migrated to
+      // `installSource: "admin"` on read by readPluginRegistry. The guard
+      // sees the migrated value and treats it as authoritative. This pins
+      // the migration mapping for the admin-classification path.
+      const userDir = join(pluginsRoot, "p-legacy-admin");
+      const manifestPath = await writePluginAt(userDir, "tb.legacy.admin", {
+        installPolicy: "user",
+      });
+      await writeRegistry([
+        { id: "tb.legacy.admin", manifestPath, installedBy: "admin" },
+      ]);
+
+      const guard = new PluginDeploymentGuard({
+        registryPath,
+        pluginsRoot,
+      });
+      const result = await guard.canUninstall("tb.legacy.admin", "user");
+
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(/registry installSource="admin"/);
+    });
+
+    it("falls back to manifest installPolicy when registry has no installSource (legacy data with neither signal)", async () => {
       // Legacy entry with no `installedBy` recorded — guard must not break;
       // the manifest field is the only signal so it's used.
       const userDir = join(pluginsRoot, "p-legacy");

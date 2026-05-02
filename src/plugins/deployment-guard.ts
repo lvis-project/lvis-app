@@ -14,7 +14,7 @@ const log = createLogger("deployment-guard");
  *      `pluginsRoot` 하위가 아니면 거부. registry.json 위변조로 외부 경로가
  *      등록되는 경우를 차단하는 가드 — managed 분류 신호가 아님 (모든 정상
  *      install 은 pluginsRoot 안에 거주).
- *   2. **Managed 분류**: registry 의 `installedBy === "admin"` 또는
+ *   2. **Managed 분류**: registry 의 `installSource === "admin"` 또는
  *      manifest 의 `installPolicy === "admin"` 이면 managed. user actor 거부.
  *
  * Trust boundary (§7.3): main process 고정. `actor`는 main 내부 호출자만 결정.
@@ -44,7 +44,7 @@ export interface DeploymentGuardOptions {
   /**
    * Absolute path to the directory where every plugin lives — the single
    * root `~/.lvis/plugins/`. user-installed and admin-injected plugins
-   * share this dir; classification is by metadata (`installedBy`,
+   * share this dir; classification is by metadata (`installSource`,
    * `installPolicy`), not by path.
    */
   pluginsRoot: string;
@@ -82,20 +82,21 @@ export class PluginDeploymentGuard {
     }
 
     // Phase 1 §Step 3 — Trust precedence:
-    //   registry-recorded `installedBy` (set at install time, verified
+    //   registry-recorded `installSource` (set at install time, verified
     //   actor) ≫ manifest `installPolicy` (advisory, user-writable).
     // Without this anchoring a user with write access to plugin.json could
     // flip `"installPolicy":"user"` and bypass the managed-plugin uninstall
-    // guard. When `installedBy` is missing on a registry entry (legacy data
-    // pre-dating the field), fall back to the manifest field — that path
-    // is unchanged from the prior behaviour.
-    if (entry.installedBy === "admin" || entry.installSource === "admin") {
+    // guard. When `installSource` is missing on a registry entry (legacy
+    // data pre-dating the field — readPluginRegistry migrates it on read,
+    // but a defensive fallback keeps the guard correct even if the
+    // migration ever fails to persist), fall back to the manifest field.
+    if (entry.installSource === "admin") {
       return {
         allowed: false,
-        reason: `Admin plugin cannot be uninstalled by user: ${pluginId} (registry installedBy="admin")`,
+        reason: `Admin plugin cannot be uninstalled by user: ${pluginId} (registry installSource="admin")`,
       };
     }
-    if (entry.installedBy === undefined && entry.installSource === undefined) {
+    if (entry.installSource === undefined) {
       const manifest = await this.readManifestSafe(manifestAbs);
       if (normalizeInstallPolicy(manifest) === "admin") {
         return {
