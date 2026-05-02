@@ -595,6 +595,12 @@ describe("useStatusBar — sequential toast display", () => {
       useStatusBar({ api, defaultToastTtlMs: 3000 }),
     );
 
+    // Pin the fake clock to a known epoch before pushing toasts so that
+    // expiresAt values are deterministic regardless of real CI wall-clock
+    // drift (shouldAdvanceTime: true can cause extra advancement on slow
+    // runners, draining the queue prematurely).
+    vi.setSystemTime(0);
+
     // Burst: 3 install-result events in the same tick.
     act(() => {
       capturedHandler!({ slug: "plugin-a", success: true });
@@ -608,21 +614,21 @@ describe("useStatusBar — sequential toast display", () => {
 
     // Advance past first TTL → second becomes visible.
     await act(async () => {
-      vi.advanceTimersByTime(3100);
+      await vi.advanceTimersByTimeAsync(3100);
     });
     expect(result.current.visibleToast?.message).toBe("plugin-b 설치 완료");
     expect(result.current.pendingCount).toBe(1);
 
     // Advance past second TTL → third becomes visible.
     await act(async () => {
-      vi.advanceTimersByTime(3100);
+      await vi.advanceTimersByTimeAsync(3100);
     });
     expect(result.current.visibleToast?.message).toBe("plugin-c 설치 완료");
     expect(result.current.pendingCount).toBe(0);
 
     // Advance past third TTL → queue empty.
     await act(async () => {
-      vi.advanceTimersByTime(3100);
+      await vi.advanceTimersByTimeAsync(3100);
     });
     expect(result.current.visibleToast).toBeNull();
   });
