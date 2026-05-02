@@ -27,8 +27,11 @@ import { join } from "node:path";
 // Vite resolves the .mjs through node's normal module loader.
 import {
   buildCopyFilter,
+  buildDevRegistryEntry,
   countEntries,
   isSafePluginId,
+  isDevRegistryEntry,
+  normalizePreservedNonDevRegistryEntry,
   removeAny,
   neutralizeLegacyInstallDirSymlink,
 } from "../../../scripts/dev-sync-plugins.mjs";
@@ -121,6 +124,58 @@ describe("dev-sync-plugins — buildCopyFilter", () => {
     } finally {
       rmSync(repoRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("dev-sync-plugins — registry helpers", () => {
+  it("builds dev registry entries with canonical installSource only", () => {
+    const entry = buildDevRegistryEntry("com.example.dev", {
+      installPolicy: "admin",
+      pluginAccess: { plugins: [{ pluginId: "ms-graph" }] },
+    } as {
+      installPolicy?: string;
+      pluginAccess?: unknown;
+    });
+
+    expect(entry).toEqual({
+      id: "com.example.dev",
+      manifestPath: "com.example.dev/plugin.json",
+      enabled: true,
+      installSource: "dev",
+      approvedPluginAccess: { plugins: [{ pluginId: "ms-graph" }] },
+    });
+    expect(entry).not.toHaveProperty("installedBy");
+  });
+
+  it("treats only canonical/legacy dev markers as dev entries", () => {
+    expect(isDevRegistryEntry({ installSource: "dev" })).toBe(true);
+    expect(isDevRegistryEntry({ installSource: "dev-link" })).toBe(true);
+    expect(isDevRegistryEntry({ _devLinked: true })).toBe(true);
+    expect(isDevRegistryEntry({ installSource: "user", _devLinked: true })).toBe(false);
+    expect(isDevRegistryEntry({ installSource: "admin", _devLinked: true })).toBe(false);
+  });
+
+  it("preserves non-dev entries while stripping cleanup-only _devLinked", () => {
+    expect(
+      normalizePreservedNonDevRegistryEntry({
+        id: "pageindex",
+        manifestPath: "pageindex/plugin.json",
+        installSource: "user",
+        _devLinked: true,
+      }),
+    ).toEqual({
+      id: "pageindex",
+      manifestPath: "pageindex/plugin.json",
+      installSource: "user",
+    });
+
+    expect(
+      normalizePreservedNonDevRegistryEntry({
+        id: "agent-hub",
+        manifestPath: "agent-hub/plugin.json",
+        installSource: "dev",
+      }),
+    ).toBeNull();
   });
 });
 

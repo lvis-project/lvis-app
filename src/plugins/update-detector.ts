@@ -14,6 +14,7 @@ import { isAbsolute, relative, resolve, dirname } from "node:path";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { readPluginRegistry } from "./registry.js";
 import { createLogger } from "../lib/logger.js";
+import type { PluginRegistryEntry } from "./types.js";
 const log = createLogger("update-detector");
 
 export interface UpdateInfo {
@@ -72,14 +73,10 @@ export class PluginUpdateDetector {
         // the source workspace is the authoritative manifest, not the
         // marketplace catalog. Skip both the current marker (`"dev"`)
         // and the legacy literal (`"dev-link"`). The deprecated
-        // `_devLinked` boolean is also skipped here as a cleanup hint so a
-        // stale legacy registry does not spam path-escape warnings; it still
-        // grants NO trust bypass in the runtime.
-        if (
-          entry.installSource === "dev" ||
-          entry.installSource === "dev-link" ||
-          entry._devLinked
-        ) continue;
+        // `_devLinked` boolean only counts as a dev marker when no
+        // authoritative non-dev installSource was recorded; stale cleanup
+        // flags on marketplace/user/admin entries must not suppress updates.
+        if (isDevCatalogEntry(entry)) continue;
 
         const installedVersion = await this.readInstalledVersion(entry.manifestPath);
         if (!installedVersion) continue;
@@ -129,6 +126,14 @@ export class PluginUpdateDetector {
       return null;
     }
   }
+}
+
+function isDevCatalogEntry(entry: PluginRegistryEntry): boolean {
+  return (
+    entry.installSource === "dev" ||
+    entry.installSource === "dev-link" ||
+    (entry._devLinked === true && entry.installSource === undefined)
+  );
 }
 
 function canonicalizeExistingPath(path: string): string {

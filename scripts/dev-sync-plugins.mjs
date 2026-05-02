@@ -31,7 +31,9 @@
  *     The legacy boolean `_devLinked` flag is no longer honored as a
  *     trust-bypass signal; only `installSource: "dev"` is.
  *
- * Existing user-installed entries (no installSource="dev") are preserved.
+ * Existing non-dev entries are preserved. If a preserved entry still carries
+ * the legacy cleanup-only `_devLinked` flag, dev-sync strips it while keeping
+ * the authoritative non-dev `installSource`.
  *
  * Usage: node scripts/dev-sync-plugins.mjs [--dry-run]
  */
@@ -136,22 +138,34 @@ export function removeAny(target) {
   }
 }
 
+export function isDevRegistryEntry(entry) {
+  return (
+    entry?.installSource === "dev" ||
+    entry?.installSource === "dev-link" ||
+    (entry?._devLinked === true && entry?.installSource === undefined)
+  );
+}
+
+export function normalizePreservedNonDevRegistryEntry(entry) {
+  if (isDevRegistryEntry(entry)) {
+    return null;
+  }
+  const preserved = { ...entry };
+  // `_devLinked` is a cleanup-only legacy hint. When a non-dev entry still
+  // carries it, strip it here so later consumers don't misclassify the entry.
+  delete preserved._devLinked;
+  return preserved;
+}
+
 // Read existing registry, keep non-dev entries (user/marketplace-installed).
 // Abort on parse error to avoid silently dropping user-installed entries.
-function loadExistingNonDevPlugins() {
+export function loadExistingNonDevPlugins() {
   if (!existsSync(registryPath)) return [];
   try {
     const reg = JSON.parse(readFileSync(registryPath, "utf-8"));
-    return (reg.plugins ?? []).filter(
-      // Treat both the new single marker `installSource: "dev"` and the
-      // legacy literal `"dev-link"` as dev entries to drop on re-sync. The
-      // legacy `_devLinked` boolean is also recognized for one-shot cleanup
-      // of registries written before the rename.
-      (p) =>
-        p.installSource !== "dev" &&
-        p.installSource !== "dev-link" &&
-        !p._devLinked,
-    );
+    return (reg.plugins ?? [])
+      .map((entry) => normalizePreservedNonDevRegistryEntry(entry))
+      .filter(Boolean);
   } catch (err) {
     log(
       `error: failed to read or parse registry at ${registryPath} — aborting to avoid data loss`,
@@ -182,6 +196,29 @@ export function neutralizeLegacyInstallDirSymlink(installDir) {
     return true;
   }
   return false;
+}
+
+export function buildDevRegistryEntry(pluginId, manifest) {
+  return {
+    id: pluginId,
+    // Registry-relative manifest path — same shape as marketplace installs.
+    // dirname(registryPath) === userPluginsRoot, so the runtime resolves
+    // this to <userPluginsRoot>/<id>/plugin.json, whose realpath stays
+    // contained under realpath(pluginsRoot). No symlink escape.
+    manifestPath: `${pluginId}/plugin.json`,
+    enabled: true,
+    // installSource:"dev" is the single registry signal that the
+    // install-receipt check may be skipped — but ONLY when
+    // `devLinkedEntryAllowed()` is true (LVIS_DEV=1 + non-packaged build,
+    // see src/boot/dev-flags.ts). The trust-boundary check is NOT
+    // bypassed by this flag in any build. The legacy `_devLinked`
+    // boolean is no longer written and is no longer honored as a
+    // trust-bypass signal anywhere in the runtime.
+    installSource: "dev",
+    ...(manifest.pluginAccess
+      ? { approvedPluginAccess: manifest.pluginAccess }
+      : {}),
+  };
 }
 
 export function syncDevPlugins() {
@@ -295,27 +332,7 @@ export function syncDevPlugins() {
       }
     }
 
-    devPlugins.push({
-      id: pluginId,
-      // Registry-relative manifest path — same shape as marketplace installs.
-      // dirname(registryPath) === userPluginsRoot, so the runtime resolves
-      // this to <userPluginsRoot>/<id>/plugin.json, whose realpath stays
-      // contained under realpath(pluginsRoot). No symlink escape.
-      manifestPath: `${pluginId}/plugin.json`,
-      enabled: true,
-      installedBy: manifest.installPolicy === "admin" ? "admin" : "user",
-      // installSource:"dev" is the single registry signal that the
-      // install-receipt check may be skipped — but ONLY when
-      // `devLinkedEntryAllowed()` is true (LVIS_DEV=1 + non-packaged build,
-      // see src/boot/dev-flags.ts). The trust-boundary check is NOT
-      // bypassed by this flag in any build. The legacy `_devLinked`
-      // boolean is no longer written and is no longer honored as a
-      // trust-bypass signal anywhere in the runtime.
-      installSource: "dev",
-      ...(manifest.pluginAccess
-        ? { approvedPluginAccess: manifest.pluginAccess }
-        : {}),
-    });
+    devPlugins.push(buildDevRegistryEntry(pluginId, manifest));
     log(`${dryRun ? "[dry-run] " : ""}registered: ${pluginId}`);
   }
 

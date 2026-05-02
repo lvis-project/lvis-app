@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
-import { writeFile, mkdir, symlink } from "node:fs/promises";
+import { readFile, writeFile, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {resolve, join} from "node:path";
 import { PluginUpdateDetector, isNewer, isUpdateCheckEnabled } from "../update-detector.js";
@@ -191,10 +191,10 @@ describe("PluginUpdateDetector", () => {
     expect(updates).toHaveLength(0);
   });
 
-  it("skips legacy _devLinked entries as cleanup-only hints", async () => {
-    // Pre-PR #430 dev-link installs wrote `_devLinked: true`. Runtime trust
-    // no longer honors that flag, but update polling still skips it so a
-    // stale legacy registry does not spam path-escape warnings on every poll.
+  it("skips legacy _devLinked-only entries when installSource is missing", async () => {
+    // Pre-PR #430 dev-link installs could write `_devLinked: true` without an
+    // installSource. Treat that missing-installSource shape as legacy dev so a
+    // stale registry does not spam path-escape warnings on every poll.
     const registryPath = resolve(tmpDir, "registry.json");
     await writeFile(
       registryPath,
@@ -242,6 +242,29 @@ describe("PluginUpdateDetector", () => {
 
     expect(updates).toHaveLength(0);
     warnSpy.mockRestore();
+  });
+
+  it("does not skip non-dev entries solely because stale _devLinked is present", async () => {
+    const registryPath = await setupRegistry([{ id: "pageindex", version: "1.0.0" }]);
+    const parsed = JSON.parse(await readFile(registryPath, "utf-8")) as {
+      version: number;
+      plugins: Array<{ id: string; manifestPath: string; installSource?: string; _devLinked?: boolean }>;
+    };
+    parsed.plugins[0].installSource = "user";
+    parsed.plugins[0]._devLinked = true;
+    await writeFile(registryPath, JSON.stringify(parsed), "utf-8");
+    const fetcher = makeFetcher([makeCatalogPlugin("pageindex", "1.1.0")]);
+    const detector = new PluginUpdateDetector(registryPath, fetcher);
+
+    const updates = await detector.checkForUpdates();
+
+    expect(updates).toEqual([
+      {
+        pluginId: "pageindex",
+        installedVersion: "1.0.0",
+        latestVersion: "1.1.0",
+      },
+    ]);
   });
 
   it("ignores catalog plugins without a version field", async () => {
