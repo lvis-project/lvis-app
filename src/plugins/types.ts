@@ -320,9 +320,10 @@ export interface PluginRegistryEntry {
    * No longer written by the current dev-sync workflow and NO LONGER honored
    * as a trust-bypass signal anywhere in the runtime. Kept in the type
    * solely for JSON back-compat: a registry written by an older build that
-   * carries `_devLinked: true` will still parse, but the next registry read
-   * will normalize it to a supported `installSource` (or drop the stale flag
-   * on non-dev entries). `_devLinked` itself is not rewritten.
+   * carries `_devLinked: true` will still parse, but the next registry
+   * read+persist cycle will normalize it to a supported `installSource` (or
+   * drop the stale flag on non-dev entries). The legacy field is not retained
+   * going forward.
    */
   _devLinked?: boolean;
   installSource?: PluginRegistryEntryInstallSource;
