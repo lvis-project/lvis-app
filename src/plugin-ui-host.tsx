@@ -253,7 +253,7 @@ export function PluginUiHostView({
           {content}
         </div>
         {loading ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-card text-xs text-muted-foreground">
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-input-bar text-xs text-muted-foreground">
             로딩 중...
           </div>
         ) : null}
@@ -269,12 +269,12 @@ export function PluginUiHostView({
         <CardDescription>{view?.extension.description ?? "플러그인 화면을 로딩합니다."}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
-        <div className="relative h-full w-full overflow-hidden rounded-md border bg-card">
+        <div className="relative h-full w-full overflow-hidden rounded-md border bg-input-bar">
           <div className="h-full overflow-hidden">
             {content}
           </div>
           {loading ? (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-card text-xs text-muted-foreground">
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-input-bar text-xs text-muted-foreground">
               로딩 중...
             </div>
           ) : null}

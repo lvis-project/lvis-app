@@ -132,7 +132,7 @@ export function PluginGridButton({
         align="start"
         alignOffset={alignOffset}
         side="top"
-        className="px-4 py-3 border-0 shadow-none bg-[#CBC8C2]"
+        className="px-4 py-3 border border-border shadow-lg bg-input-bar text-foreground"
         style={popoverWidth ? { width: popoverWidth, maxWidth: "none" } : undefined}
         data-testid="plugin-grid-popover"
       >
@@ -144,7 +144,7 @@ export function PluginGridButton({
         <PopoverPrimitive.Arrow
           width={14}
           height={7}
-          className="fill-[#CBC8C2]"
+          className="fill-input-bar"
         />
         {isEmpty ? (
           <div className="py-6 text-center" data-testid="plugin-grid-empty">
