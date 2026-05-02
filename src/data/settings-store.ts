@@ -131,10 +131,12 @@ export interface PluginSettings {}
  *       "system" | "light" | "dark" | "high-contrast"
  *       (default "system")
  *   - `chatTheme`  — accent color overlay for chat / UI surfaces
- *       "default" | "purple" | "orange" | "blue"
- *       (default "purple" — light shell + warm-grey chat surface +
- *        lilac user bubble + vivid SEND button. "default" means no
- *        accent override; inherits from `theme`.)
+ *       "default" | "lg" | "purple" | "orange" | "blue"
+ *       (default "lg" — LG brand identity: warm-grey chat surface
+ *        with lilac user bubble + vivid SEND button + LG red.
+ *        "purple"/"orange"/"blue" are pure accent overlays that only
+ *        repaint the action color. "default" means no override —
+ *        inherits surface and accent from `theme`.)
  *   - `codeTheme`  — code-block surface scheme, independent of shell
  *       "auto" | "light" | "dark"
  *       (default "auto" — follows `theme`: light shell → light code,
@@ -147,7 +149,7 @@ export interface PluginSettings {}
  * See `docs/development/theme-system.md` for the token-tier model.
  */
 export type ThemePreference = "system" | "light" | "dark" | "high-contrast";
-export type ChatThemePreference = "default" | "purple" | "orange" | "blue";
+export type ChatThemePreference = "default" | "lg" | "purple" | "orange" | "blue";
 export type CodeThemePreference = "auto" | "light" | "dark";
 
 export interface AppearanceSettings {
@@ -330,7 +332,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   appearance: {
     theme: "system",
-    chatTheme: "purple",
+    chatTheme: "lg",
     codeTheme: "auto",
   },
   plugins: {},
@@ -645,7 +647,7 @@ function mergeLlmPatch(base: LLMSettings, partial: LLMSettingsPatch): LLMSetting
  * boot over a UI-only field.
  */
 const VALID_THEMES: readonly ThemePreference[] = ["system", "light", "dark", "high-contrast"];
-const VALID_CHAT_THEMES: readonly ChatThemePreference[] = ["default", "purple", "orange", "blue"];
+const VALID_CHAT_THEMES: readonly ChatThemePreference[] = ["default", "lg", "purple", "orange", "blue"];
 const VALID_CODE_THEMES: readonly CodeThemePreference[] = ["auto", "light", "dark"];
 
 function normalizeAppearance(input: unknown): AppearanceSettings {
@@ -660,11 +662,16 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
       ? (themeRaw as ThemePreference)
       : "system";
 
-  const chatRaw = obj.chatTheme;
+  // Migration: prior to the LG brand split, "purple" was both the LG
+  // identity (warm-grey + lilac) and a generic accent. Existing users
+  // on "purple" picked it because it was the LG default; map them to
+  // the new "lg" theme. Future users who want a pure purple accent can
+  // re-select "purple" explicitly.
+  const chatRaw = obj.chatTheme === "purple" ? "lg" : obj.chatTheme;
   const chatTheme: ChatThemePreference =
     typeof chatRaw === "string" && (VALID_CHAT_THEMES as readonly string[]).includes(chatRaw)
       ? (chatRaw as ChatThemePreference)
-      : "purple";
+      : "lg";
 
   const codeRaw = obj.codeTheme;
   const codeTheme: CodeThemePreference =

@@ -339,44 +339,53 @@
    *  "no override; inherit data-theme defaults".
    * ──────────────────────────────────────────────────────────────────── */
   :root[data-chat-theme="purple"] {
-    /* Reference design — purple chat theme:
-       SEND button vivid purple (#734dff), user message bubble softer
-       lilac (#c497ef). These accent tokens apply on every shell — light
-       and dark — so the bubble + button always read as the same purple
-       family regardless of background. */
-    --primary:            253 100% 65%;      /* #734dff — SEND button */
+    /* Pure purple accent — only the action color (SEND, focus ring)
+       is repainted. Surface tokens stay inherited from the active
+       data-theme (light/dark/HC) so this remains a generic accent
+       overlay, identical in spirit to "blue" / "orange" below. */
+    --primary:            262 83% 58%;
     --primary-foreground:  0   0% 100%;
-    --message-user-bg:    271  76% 76%;      /* #c497ef — user bubble */
-    --message-user-fg:     0   0% 100%;
     --ring:               var(--p-purple-600);
   }
-  :root[data-theme="light"][data-chat-theme="purple"] {
-    /* Light shell + purple chat — additionally repaints surface tokens
-       with the warm-grey palette so the chat panel reads as the
-       reference image (Grey 1/3/4/5/7/7.5). Accent tokens above
-       (--primary, --message-user-*) are inherited from the base
-       purple chat theme. */
-    --background:         40 25% 92%;        /* Grey 6  #F0ECE4 — chat surface */
-    --foreground:          0  0% 15%;        /* Grey 1  #262626 — assistant text */
-    /* Cards / popovers blend into the background so only the message
-       composer (input bar) reads as white. The composer references its
-       own `--input-bar-bg` token below. */
-    --card:               40 25% 92%;        /* same as background */
-    --card-foreground:     0  0% 15%;
-    --popover:             0  0% 100%;       /* dropdowns stay light for legibility */
-    --input-bar-bg:        0  0% 100%;       /* white — composer only */
-    --popover-foreground:  0  0% 15%;
-    --muted:              44 37% 94%;        /* Grey 7  #F6F3EB */
-    --muted-foreground:   43  3% 43%;        /* Grey 3  #716F6A — timestamp */
-    --secondary:          44 37% 94%;
-    --secondary-foreground: 0 0% 15%;
-    --accent:             44 37% 94%;
-    --accent-foreground:   0  0% 15%;
-    --border:             40 10% 78%;        /* Grey 4  #CBC8C2 */
-    --input:              40 10% 78%;
 
-    --destructive:         1 98% 59%;        /* #FD312E — STOP, errors */
-    --destructive-foreground: 0 0% 100%;
+  :root[data-chat-theme="lg"] {
+    /* LG brand chat theme — self-contained identity that repaints
+       BOTH accent tokens and surface tokens regardless of the active
+       shell theme. Reference design: lilac user bubble (#c497ef) on
+       warm-grey chat surface (#F0ECE4) with vivid-purple SEND button
+       (#734dff) and LG red destructive (#FD312E).
+
+       Pairs naturally with data-theme="light" but still works on dark
+       shells (LG surface tokens win by selector order). High-contrast
+       shell intentionally overrides --primary/--ring back to yellow
+       via the [data-theme="high-contrast"][data-chat-theme] block
+       below — accessibility wins over brand. */
+    --primary:                253 100% 65%;       /* #734dff — SEND */
+    --primary-foreground:       0   0% 100%;
+    --message-user-bg:        271  76% 76%;       /* #c497ef — user bubble */
+    --message-user-fg:          0   0% 100%;
+    --ring:                   var(--p-purple-600);
+
+    --background:              40 25% 92%;        /* Grey 6  #F0ECE4 */
+    --foreground:               0  0% 15%;        /* Grey 1  #262626 */
+    --card:                    40 25% 92%;
+    --card-foreground:          0  0% 15%;
+    --popover:                  0  0% 100%;
+    --popover-foreground:       0  0% 15%;
+    --input-bar-bg:             0  0% 100%;       /* white — composer only */
+    --muted:                   44 37% 94%;        /* Grey 7  #F6F3EB */
+    --muted-foreground:        43  3% 43%;        /* Grey 3  #716F6A */
+    --secondary:               44 37% 94%;
+    --secondary-foreground:     0  0% 15%;
+    --accent:                  44 37% 94%;
+    --accent-foreground:        0  0% 15%;
+    --border:                  40 10% 78%;        /* Grey 4  #CBC8C2 */
+    --input:                   40 10% 78%;
+
+    --destructive:              1 98% 59%;        /* #FD312E — STOP */
+    --destructive-foreground:   0  0% 100%;
+
+    color-scheme: light;
   }
 
   :root[data-chat-theme="orange"] {

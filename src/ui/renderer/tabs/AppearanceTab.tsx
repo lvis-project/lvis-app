@@ -38,6 +38,10 @@ const CHAT_OPTIONS: ReadonlyArray<ChatOption> = [
   // we use in the dark default. We render this with the literal blue accent
   // so the card stays visually distinct from the explicit "blue" card below.
   { value: "default", label: "기본", accentVar: "hsl(215 16% 47%)" },
+  // "lg" is a self-contained brand identity (warm-grey + lilac + LG red),
+  // distinct from the pure-accent overlays below. Card preview uses the
+  // lilac user-bubble color so users can recognize it at a glance.
+  { value: "lg", label: "LG", accentVar: "hsl(271 76% 76%)" },
   { value: "purple", label: "퍼플", accentVar: "hsl(262 83% 58%)" },
   { value: "orange", label: "오렌지", accentVar: "hsl(25 95% 53%)" },
   { value: "blue", label: "블루", accentVar: "hsl(217.2 91.2% 59.8%)" },
