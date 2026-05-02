@@ -108,7 +108,7 @@ export function PluginUiHostView({
   // Shell src is empty until did-attach + registration complete for the current
   // view. Derived at render time — "" for any view key that hasn't registered.
   const [shellSrcBinding, setShellSrcBinding] = useState<{ viewKey: string; url: string } | null>(null);
-  const currentViewKey = view ? `${view.pluginId}:${view.extension.id}` : "";
+  const currentViewKey = view ? `${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}` : "";
   const shellSrc = shellSrcBinding?.viewKey === currentViewKey ? shellSrcBinding.url : "";
 
   // Electron <webview> is a custom element — React's synthetic onLoad /
@@ -140,9 +140,9 @@ export function PluginUiHostView({
         if (!Number.isFinite(wcId) || !view?.pluginId || !view?.entryUrl) return;
         const { shellUrl: url } = readPluginAssetUrls();
         if (!url) return;
-        const vk = `${view.pluginId}:${view.extension.id}`;
         const capturedPluginId = view.pluginId;
         const capturedEntryUrl = view.entryUrl;
+        const vk = `${capturedPluginId}:${view.extension.id}:${capturedEntryUrl}`;
         const api = (window as unknown as {
           lvisApi?: {
             registerPluginWebview?: (p: {
