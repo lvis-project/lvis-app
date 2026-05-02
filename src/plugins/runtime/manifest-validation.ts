@@ -53,8 +53,13 @@ export async function buildManifestValidator(): Promise<ValidateFunction | null>
     // Phase-2 SDK-as-SoT: schema is sourced from the `@lvis/plugin-sdk`
     // npm package (file: dependency in the monorepo). The host stopped
     // maintaining its own copy — there is no schemas/ directory on the
-    // host side anymore. `import.meta.resolve` handles dist + source-mode
-    // runs uniformly; no path math, no fallback chain.
+    // host side anymore. We use `createRequire(import.meta.url).resolve`
+    // (not `import.meta.resolve`) because vitest's SSR runtime does not
+    // implement `import.meta.resolve` — `createRequire` works in both
+    // production Node and the test runner. Single resolution path; no
+    // fallback chain — if `@lvis/plugin-sdk` cannot be resolved, the
+    // outer try/catch returns `null` and `parsePluginJson` falls back to
+    // hand-rolled MUST/SHOULD checks (degraded but still operational).
     const candidates = [
       createRequire(import.meta.url).resolve(
         "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
