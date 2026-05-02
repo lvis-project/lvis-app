@@ -210,7 +210,7 @@ bun run start
 cd lvis-app
 git pull --recurse-submodules
 
-cd ..\lvis-plugin-pageindex      ; git pull
+cd ..\lvis-plugin-local-indexer      ; git pull
 cd ..\lvis-plugin-meeting        ; git pull
 cd ..\lvis-plugin-ms-graph       ; git pull
 cd ..\lvis-plugin-lge-api        ; git pull
