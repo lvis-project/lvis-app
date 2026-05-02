@@ -123,6 +123,16 @@ export function ThemeProvider({
     applyCodeThemeToDocument(resolvedCodeTheme);
   }, [resolvedCodeTheme]);
 
+  // Propagate theme to plugin webviews whenever any axis changes.
+  // Must be after resolvedCodeTheme declaration.
+  useEffect(() => {
+    if (!api) return;
+    void api.notifyPluginTheme({ theme: resolved, chatTheme, codeTheme: resolvedCodeTheme })
+      .catch((err: unknown) => {
+        if (typeof process !== "undefined" && process.env?.LVIS_DEV === "1") console.warn("[theme-propagation] notifyPluginTheme failed:", err);
+      });
+  }, [api, resolved, chatTheme, resolvedCodeTheme]);
+
   // Re-resolve the shell theme whenever the preference changes.
   useEffect(() => {
     setResolved(resolveTheme(preference));

@@ -4,7 +4,7 @@
  *         lvis:mcp:*, lvis:plugin:* (webview bridge), lvis:pageindex:*,
  *         lvis:notification:clicked
  */
-import { app, dialog, ipcMain } from "electron";
+import { app, dialog, ipcMain, webContents } from "electron";
 import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -43,6 +43,21 @@ interface PluginWebviewBinding {
   entryUrl: string;
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
+
+const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
+const ALLOWED_CHAT_THEMES = new Set(["default", "purple", "orange", "blue"]);
+const ALLOWED_CODE_THEMES = new Set(["light", "dark"]);
+
+export function validateThemePayload(payload: unknown):
+  | { ok: true; safe: { theme: string; chatTheme: string; codeTheme: string } }
+  | { ok: false; error: string } {
+  if (!payload || typeof payload !== "object") return { ok: false, error: "invalid-payload" };
+  const p = payload as Record<string, unknown>;
+  if (typeof p.theme !== "string" || !ALLOWED_THEMES.has(p.theme)) return { ok: false, error: "invalid-theme" };
+  if (typeof p.chatTheme !== "string" || !ALLOWED_CHAT_THEMES.has(p.chatTheme)) return { ok: false, error: "invalid-chat-theme" };
+  if (typeof p.codeTheme !== "string" || !ALLOWED_CODE_THEMES.has(p.codeTheme)) return { ok: false, error: "invalid-code-theme" };
+  return { ok: true, safe: { theme: p.theme, chatTheme: p.chatTheme, codeTheme: p.codeTheme } };
+}
 
 export function unregisterPluginWebview(webContentsId: number): void {
   pluginWebviewRegistry.delete(webContentsId);
@@ -723,6 +738,28 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
+  });
+
+  // ─── Theme propagation ─────────────────────────────────────────────────
+  // Host renderer calls this when any theme axis changes; main fans out to
+  // every registered plugin webview via the existing lvis:plugin:event channel.
+  ipcMain.handle("lvis:host:plugin-theme-notify", (e, payload: unknown) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:host:plugin-theme-notify", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const validated = validateThemePayload(payload);
+    if (!validated.ok) return validated;
+    const { safe } = validated;
+    for (const [wcId] of pluginWebviewRegistry) {
+      try {
+        const wc = webContents.fromId(wcId);
+        if (wc && !wc.isDestroyed()) {
+          wc.send("lvis:plugin:event", "host.theme.changed", safe);
+        }
+      } catch { /* webview destroyed between registry read and send */ }
+    }
+    return { ok: true };
   });
 
   // ─── PageIndex ──────────────────────────────────────────────────────────
