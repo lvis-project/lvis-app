@@ -60,22 +60,19 @@ export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStrea
             <p className="text-[11px] text-muted-foreground">기본값 OFF — 설정 후 앱 재시작 없이 전환됩니다.</p>
           </div>
           {setExperimentalStackedChat !== undefined && (
-            <div className="flex items-center gap-3 rounded-md border px-3 py-3">
+            <div className="flex items-center gap-3 rounded-md border px-3 py-3 opacity-50" aria-disabled="true">
               <button
                 type="button"
                 role="checkbox"
-                aria-checked={experimentalStackedChat ?? false}
+                aria-checked={false}
+                aria-disabled="true"
+                disabled
                 data-testid="stacked-chat-toggle"
-                className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${experimentalStackedChat ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}
-                onClick={() => setExperimentalStackedChat(!(experimentalStackedChat ?? false))}
-              >
-                {experimentalStackedChat && (
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
-                )}
-              </button>
+                className="relative h-5 w-5 flex-shrink-0 rounded border-2 border-muted-foreground cursor-not-allowed"
+              />
               <div className="space-y-0.5">
                 <p className="text-sm font-medium">Experimental: 연속 채팅 기록 (stacked view)</p>
-                <p className="text-[11px] text-muted-foreground">카카오톡 스타일로 여러 세션을 끊김 없이 이어서 보여줍니다. 토글 시 즉시 전환됩니다.</p>
+                <p className="text-[11px] text-muted-foreground">미구현 — 일부 메시지 유형 렌더링 없음. 다음 릴리스에서 완성 예정.</p>
               </div>
             </div>
           )}
