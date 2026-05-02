@@ -73,6 +73,12 @@ export class SystemPromptBuilder {
    * scope to the right session without leaking skills across sessions.
    */
   private overlaySessionId: string | null = null;
+  /**
+   * PR-2: current session title injected into the Conversation Meta Output
+   * section so the LLM can produce evolved titles grounded in the existing
+   * session context. Null when no title has been assigned yet (first turn).
+   */
+  private sessionTitle: string | null = null;
 
   constructor(deps: SystemPromptBuilderDeps) {
     this.initSources(deps);
@@ -141,6 +147,31 @@ export class SystemPromptBuilder {
    */
   setActiveSessionId(sessionId: string | null): void {
     this.overlaySessionId = sessionId && sessionId.length > 0 ? sessionId : null;
+  }
+
+  /**
+   * PR-2: per-turn session title. ConversationLoop sets this before
+   * `build()` so the LLM can produce an evolved title grounded in the
+   * existing session context. Pass `null` to clear (no title yet — first
+   * turn of a new session).
+   */
+  setSessionTitle(title: string | null): void {
+    if (title === null) {
+      this.sessionTitle = null;
+      return;
+    }
+    const sanitized = this.sanitizeTitle(title);
+    this.sessionTitle = sanitized.length > 0 ? sanitized : null;
+  }
+
+  /**
+   * Strips characters that could break the prompt template or enable prompt
+   * injection: CR, LF, double-quotes, backslashes, and angle brackets
+   * (which could mutate prompt-template XML tags). Caps at 50 chars so
+   * an abnormally long user-renamed title cannot bloat the prompt.
+   */
+  private sanitizeTitle(t: string): string {
+    return t.replace(/[\r\n"\\<>]/g, " ").slice(0, 50).trim();
   }
 
   // ─── Private ──────────────────────────────────────
@@ -352,6 +383,26 @@ export class SystemPromptBuilder {
       },
     });
 
+    // ⑨-b Conversation Meta Output (per-turn)
+    //
+    // PR-2: Instructs the LLM to emit <title>…</title> and optional
+    // [checkpoint-suggested] at the end of every final answer.
+    // The session title (if set) is injected so the LLM can produce an
+    // evolved, cumulative title grounded in the existing context.
+    // Extraction of the markers from the rendered stream is handled in PR-3
+    // (renderer stream parser) — this source only emits the instructions.
+    this.sources.push({
+      id: 9.9,
+      name: "Conversation Meta Output",
+      refresh: "per-turn",
+      build: () => {
+        const titleLine = this.sessionTitle
+          ? `현재 세션 제목: "${this.sessionTitle}"\n\n`
+          : "";
+        return `${titleLine}${CONVERSATION_META_OUTPUT}`;
+      },
+    });
+
     // ⑩ Active Session Context — Phase 4
     // ⑪ Proactive Context — Phase 4
     // ⑫ Feature Flags — Phase 4
@@ -381,6 +432,27 @@ const ROLE_DEFINITION = `당신은 LVIS — 사원 개인을 위한 초지능형
 - <lvis-context>에 조직 맥락이 있습니다.
 - <user-memory>에 사용자가 수동으로 기록한 메모 목록이 포함될 수 있습니다.
 - 사외 지식 탐색을 위해 web_search 도구를 적극 활용하세요.`;
+
+const CONVERSATION_META_OUTPUT = `## 대화 메타 출력 (final answer 끝에 추가)
+
+매 final answer 의 가장 마지막에 다음 형식으로 메타 정보를 출력하세요:
+
+<title>10-20자 한국어 제목</title>
+[checkpoint-suggested]
+
+(위 예시에서 \`[checkpoint-suggested]\` 는 선택적 — topic 이 크게 바뀌었을 때만 포함. topic 이 이어지는 경우 생략.)
+
+### Title 정책
+- 길이: 10-20자 (한국어 기준)
+- 내용: 기존 세션 제목 + 이번 답변을 종합한 누적 진화 제목
+- 토픽 전환 시 새 토픽 반영
+- 메타 정보 — 후속 처리에서 stripped 될 예정 (PR-3)
+
+### Checkpoint suggestion
+- 사용자가 명백히 새 주제로 전환했을 때만 \`[checkpoint-suggested]\` 마커 추가
+- 예: "이제 다른 얘기 하자", 완전히 다른 도메인 질문
+- 단순 follow-up question 은 checkpoint X
+- 마커 있으면 시스템이 자동으로 새 세션 spawn + summary 진행`;
 
 const TOOL_USE_STRATEGY = `## 도구 사용 전략
 
