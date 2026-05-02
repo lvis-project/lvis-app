@@ -62,9 +62,7 @@ type InstallOperationState = {
     {
       enabled: boolean | undefined;
       bundleRefs: string[] | undefined;
-      installedBy: "admin" | "user" | undefined;
       approvedPluginAccess: PluginRegistryEntry["approvedPluginAccess"];
-      _devLinked: boolean | undefined;
       installSource: PluginRegistryEntryInstallSource | undefined;
     }
   >;
@@ -383,17 +381,16 @@ export class PluginMarketplaceService {
       // symlinks) and the registry write at the end correctly sets
       // installSource: "user".
       //
-      // Legacy back-compat: pre-PR #430 dev-link entries can have
-      // `_devLinked: true` with `installSource === undefined`. Match the
-      // disjunction other call sites use (runtime/index.ts, update-detector.ts,
-      // runtime/snapshots.ts) so legacy users hit the supersede path too.
+      // Pre-PR #430 dev-link entries used `_devLinked: true` instead of
+      // `installSource: "dev-link"`. `readPluginRegistry()` migrates legacy
+      // entries on read so by the time we reach this check `installSource`
+      // is the only signal we need to consult.
       const installedVersion = await this.getInstalledVersion(plugin.id);
       const isSameVersion =
         !plugin.version ||
         !installedVersion ||
         plugin.version === installedVersion;
-      const isDevLinkSupersede =
-        existingEntry.installSource === "dev-link" || existingEntry._devLinked === true;
+      const isDevLinkSupersede = existingEntry.installSource === "dev-link";
       if (isSameVersion && !isDevLinkSupersede) {
         await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
         return { pluginId: plugin.id, installed: true };
@@ -427,19 +424,16 @@ export class PluginMarketplaceService {
       if (existing) {
         existing.manifestPath = manifestPath;
         existing.enabled = true;
-        existing.installedBy = actor === "it-admin" ? "admin" : "user";
+        // A marketplace install always supersedes any prior install
+        // source (dev-link, local-dev, ...).
         existing.installSource = actor === "it-admin" ? "admin" : "user";
         existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, activeBundleRootId, plugin.id);
         existing.approvedPluginAccess = plugin.pluginAccess;
-        // A marketplace install supersedes any prior dev-link. Clear the
-        // marker so dev-link-plugins.mjs does not clobber it on next boot.
-        delete existing._devLinked;
       } else {
         registry.plugins.push({
           id: plugin.id,
           manifestPath,
           enabled: true,
-          installedBy: actor === "it-admin" ? "admin" : "user",
           installSource: actor === "it-admin" ? "admin" : "user",
           bundleRefs: this.mergeBundleRefs([], activeBundleRootId, plugin.id),
           approvedPluginAccess: plugin.pluginAccess,
@@ -521,7 +515,7 @@ export class PluginMarketplaceService {
         const withoutRoot = (entry.bundleRefs ?? []).filter((bundleId) => bundleId !== pluginId);
         const referencedByRoot = withoutRoot.length !== (entry.bundleRefs ?? []).length;
         if (!referencedByRoot) continue;
-        if (options?.removeBundleMembers && withoutRoot.length === 0 && entry.installedBy !== "admin" && entry.installSource !== "admin") {
+        if (options?.removeBundleMembers && withoutRoot.length === 0 && entry.installSource !== "admin") {
           idsToRemove.add(entry.id);
           continue;
         }
@@ -586,16 +580,13 @@ export class PluginMarketplaceService {
         if (existing) {
           existing.manifestPath = manifestPath;
           existing.enabled = true;
-          existing.installedBy = "user";
           existing.installSource = "user";
           existing.approvedPluginAccess = plugin.pluginAccess;
-          delete existing._devLinked;
         } else {
           registry.plugins.push({
             id: plugin.id,
             manifestPath,
             enabled: true,
-            installedBy: "user",
             installSource: "user",
             bundleRefs: [],
             approvedPluginAccess: plugin.pluginAccess,
@@ -652,7 +643,6 @@ export class PluginMarketplaceService {
         if (existing) {
           existing.manifestPath = manifestPathRel;
           existing.enabled = true;
-          existing.installedBy = existing.installedBy ?? "user";
           // Rollback re-installs from the marketplace catalog. Normalize any
           // non-admin source (local-dev, dev-link) back to "user" since this
           // is now a marketplace-origin install.
@@ -660,13 +650,11 @@ export class PluginMarketplaceService {
           // Admin-managed plugin rollback is blocked upstream by deploymentGuard.
           existing.installSource = "user";
           existing.bundleRefs = existing.bundleRefs ?? [];
-          delete existing._devLinked;
         } else {
           registry.plugins.push({
             id: pluginId,
             manifestPath: manifestPathRel,
             enabled: true,
-            installedBy: "user",
             installSource: "user",
             bundleRefs: [],
           });
@@ -789,18 +777,14 @@ export class PluginMarketplaceService {
         state.touchedEntries.set(pluginId, {
           enabled: entry.enabled,
           bundleRefs: entry.bundleRefs ? [...entry.bundleRefs] : undefined,
-          installedBy: entry.installedBy,
           approvedPluginAccess: entry.approvedPluginAccess,
-          _devLinked: entry._devLinked,
           installSource: entry.installSource,
         });
       }
       entry.enabled = true;
-      entry.installedBy = actor === "it-admin" ? "admin" : entry.installedBy ?? "user";
       entry.installSource = actor === "it-admin" ? "admin" : entry.installSource ?? "user";
       entry.bundleRefs = this.mergeBundleRefs(entry.bundleRefs, bundleRootId, pluginId);
       entry.approvedPluginAccess = approvedPluginAccess;
-      delete entry._devLinked;
     });
   }
 
@@ -826,31 +810,24 @@ export class PluginMarketplaceService {
         if (!entry) continue;
         entry.enabled = snapshot.enabled;
         entry.bundleRefs = snapshot.bundleRefs;
-        entry.installedBy = snapshot.installedBy;
         entry.approvedPluginAccess = snapshot.approvedPluginAccess;
-        // Restore dev-link signals only when dev-link entries are permitted
+        // Restore dev-link only when dev-link entries are permitted
         // (non-packaged build). In a packaged build devLinkedEntryAllowed()
         // returns false, so rollback never re-introduces the dev-link state.
         const restoreDevLink = snapshot.installSource === "dev-link" && devLinkedEntryAllowed();
         if (restoreDevLink) {
           entry.installSource = "dev-link";
-          if (snapshot._devLinked === true) entry._devLinked = true;
-          else delete entry._devLinked;
         } else if (snapshot.installSource && snapshot.installSource !== "dev-link") {
           // Restore "user", "admin", or "local-dev" as-is. For "local-dev",
           // the install receipt written by installLocal remains on disk so
           // verifyInstallReceipt will still pass after rollback.
           entry.installSource = snapshot.installSource;
-          delete entry._devLinked;
         } else {
-          // Legacy entry (no installSource): restore _devLinked if it was set,
-          // guarded by devLinkedEntryAllowed() so packaged builds stay clean.
+          // Snapshot had no installSource (or it was "dev-link" and the
+          // packaged-build guard refuses to restore it). Drop the field so
+          // the entry behaves like a fresh user install on next read; a
+          // subsequent install will re-stamp the correct value.
           delete entry.installSource;
-          if (snapshot._devLinked === true && devLinkedEntryAllowed()) {
-            entry._devLinked = true;
-          } else {
-            delete entry._devLinked;
-          }
         }
       }
       await writePluginRegistry(this.registryPath, registry);
@@ -1168,7 +1145,7 @@ export class PluginMarketplaceService {
       // dev sideload should not silently downgrade an admin-managed entry.
       const existingRegistry = await readPluginRegistry(this.registryPath);
       const existingEntry = existingRegistry.plugins.find((p) => p.id === pluginId);
-      if (existingEntry?.installedBy === "admin" || existingEntry?.installSource === "admin") {
+      if (existingEntry?.installSource === "admin") {
         throw new Error(
           `[installLocal] refusing to overwrite admin-installed plugin: ${pluginId}`,
         );
@@ -1195,14 +1172,14 @@ export class PluginMarketplaceService {
         throw err;
       }
 
-      // Register in the plugin registry. installedBy follows the manifest's
-      // declared installPolicy so dev-sideloading an admin-policy manifest
-      // doesn't silently downgrade it to "user".
-      const installedBy = manifest.installPolicy === "admin" ? "admin" : "user";
-      const localInstallSource: PluginRegistryEntryInstallSource = installedBy === "admin" ? "admin" : "local-dev";
+      // Register in the plugin registry. installSource follows the
+      // manifest's declared installPolicy so dev-sideloading an admin-policy
+      // manifest doesn't silently downgrade it to a user install.
+      const localInstallSource: PluginRegistryEntryInstallSource =
+        manifest.installPolicy === "admin" ? "admin" : "local-dev";
       const registryManifestPath = posix.join(pluginId, "plugin.json");
       // Mirror the marketplace install path's grant of `manifest.pluginAccess`
-      // into `approvedPluginAccess` (lines 409, 417, 562, 570). Without this,
+      // into `approvedPluginAccess`. Without this,
       // `assertPluginEventAccess` / `assertPluginToolAccess` find no grant for
       // a dev-sideloaded plugin and any cross-plugin event subscribe / tool
       // call from its createPlugin path throws "not allowed to subscribe to
@@ -1215,18 +1192,13 @@ export class PluginMarketplaceService {
         if (existing) {
           existing.manifestPath = registryManifestPath;
           existing.enabled = true;
-          existing.installedBy = installedBy;
           existing.installSource = localInstallSource;
           existing.approvedPluginAccess = approvedPluginAccess;
-          // This entry is now a real install. Strip any stale `_devLinked`
-          // marker so dev-link-plugins.mjs does not clobber it on next boot.
-          delete existing._devLinked;
         } else {
           registry.plugins.push({
             id: pluginId,
             manifestPath: registryManifestPath,
             enabled: true,
-            installedBy,
             installSource: localInstallSource,
             approvedPluginAccess,
           });
