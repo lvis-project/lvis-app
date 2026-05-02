@@ -8,13 +8,15 @@
  * gate ever runs — i.e., the feature looks broken with no useful error.
  */
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { KNOWN_CAPABILITIES } from "../capabilities.js";
 
 describe("capability schema/runtime sync", () => {
   it("schema enum equals KNOWN_CAPABILITIES", async () => {
-    const schemaPath = resolve(__dirname, "../../../schemas/plugin.schema.json");
+    const schemaPath = createRequire(import.meta.url).resolve(
+      "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
+    );
     const raw = await readFile(schemaPath, "utf-8");
     const schema = JSON.parse(raw) as {
       properties: { capabilities: { items: { enum: string[] } } };

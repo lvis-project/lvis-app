@@ -5,8 +5,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 // ajv + ajv-formats ship a CJS default export; ESM interop requires the
 // `.default ?? module` dance below.
 import * as AjvModule from "ajv";
@@ -49,15 +48,22 @@ export function getDeclaredEmittedEvents(manifest: PluginManifest): string[] {
  * returns `null`; readManifest falls back to hand-rolled checks to stay
  * operational.
  */
-export async function buildManifestValidator(
-  hereFileUrl: string,
-): Promise<ValidateFunction | null> {
+export async function buildManifestValidator(): Promise<ValidateFunction | null> {
   try {
-    const hereDir = dirname(fileURLToPath(hereFileUrl));
-    // dist/src/plugins/runtime -> ../../../../schemas, src/plugins/runtime -> ../../../schemas
+    // Phase-2 SDK-as-SoT: schema is sourced from the `@lvis/plugin-sdk`
+    // npm package (file: dependency in the monorepo). The host stopped
+    // maintaining its own copy — there is no schemas/ directory on the
+    // host side anymore. We use `createRequire(import.meta.url).resolve`
+    // (not `import.meta.resolve`) because vitest's SSR runtime does not
+    // implement `import.meta.resolve` — `createRequire` works in both
+    // production Node and the test runner. Single resolution path; no
+    // fallback chain — if `@lvis/plugin-sdk` cannot be resolved, the
+    // outer try/catch returns `null` and `parsePluginJson` falls back to
+    // hand-rolled MUST/SHOULD checks (degraded but still operational).
     const candidates = [
-      resolve(hereDir, "../../../../schemas/plugin.schema.json"),
-      resolve(hereDir, "../../../schemas/plugin.schema.json"),
+      createRequire(import.meta.url).resolve(
+        "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
+      ),
     ];
     let schemaBytes: string | null = null;
     for (const candidate of candidates) {

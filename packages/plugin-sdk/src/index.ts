@@ -5,8 +5,6 @@
 
 export type InstallPolicy = "admin" | "user";
 
-export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev" | "dev-link";
-
 export interface DependencySpec {
   pluginId: string;
   versionRange?: string;
@@ -23,20 +21,45 @@ export interface PluginAccessSpec {
   plugins: PluginAccessTarget[];
 }
 
+/**
+ * Optional declarative auth contract for plugins that own their OAuth /
+ * cookie / session flow but want the host to render a generic 미인증 /
+ * signed-in surface in Settings → 플러그인 설정. See lvis-app
+ * `architecture.md` §9.4a "Plugin-Owned OAuth — Host UI Surface".
+ *
+ * The three referenced tool names (`statusTool`, `loginTool`,
+ * `logoutTool`) MUST also appear in `PluginManifest.uiCallable[]`;
+ * the host validates this cross-field at load time. On state
+ * transitions the plugin SHOULD emit `<pluginId>.auth.changed` so
+ * the host UI refreshes without polling.
+ */
 export interface PluginAuthSpec {
 
+  /** Human-readable label shown next to the badge (defaults to plugin `name`). @optional */
   label?: string;
 
+  /** Name of a uiCallable tool returning {@link PluginAuthStatus}. */
   statusTool: string;
 
+  /** Name of a uiCallable tool the host invokes when the user clicks "로그인". The plugin owns the actual auth flow (e.g. MSAL interactive, openAuthWindow). */
   loginTool: string;
 
+  /** Optional uiCallable tool the host invokes when the user clicks "로그아웃". Omit when the plugin has no programmatic sign-out path. @optional */
   logoutTool?: string;
 }
 
+/**
+ * Recommended return shape of `auth.statusTool`. Plugins MAY return
+ * additional fields and the host ignores them. The host parses with a
+ * strict `=== true` check on `authenticated` — values like `1` or
+ * `"true"` are deliberately treated as unauthenticated to surface
+ * contract drift.
+ */
 export interface PluginAuthStatus {
+  /** Strict literal `true` when the plugin has a usable session; otherwise `false`. */
   authenticated: boolean;
 
+  /** Optional human-readable identity (email, login id) shown next to the green badge. Display only — not a stable id. @optional */
   account?: string;
 }
 
@@ -79,6 +102,7 @@ export interface EventSubscription {
  *   version: "1.0.0",
  *   entry: "dist/index.js",
  *   tools: ["my_plugin_ping"],
+ *   description: "One-line summary shown to the host LLM and in plugin catalogues.",
  * };
  */
 export interface PluginManifest {
@@ -95,7 +119,7 @@ export interface PluginManifest {
   /** Tool names exposed to the host LLM. Each name must match `^[a-zA-Z_][a-zA-Z0-9_]*$` — dots and hyphens are not allowed. */
   tools: string[];
 
-  /** One-line description shown in plugin catalogues and tool pickers. Required as of host schema Phase 1 (PR #389). */
+  /** One-line summary (1-280 chars) of what the plugin does. **Required** since v3.0.0 — the LLM uses this in the inactive-plugin catalogue to decide whether to surface the plugin to the user. */
   description: string;
   /** Arbitrary JSON configuration merged into `PluginRuntimeContext.config` at startup. Treat as untrusted user data. @optional */
   config?: Record<string, unknown>;
@@ -115,9 +139,10 @@ export interface PluginManifest {
   /** Tools that the UI is permitted to invoke directly (bypassing the LLM). Use sparingly — prefer LLM-mediated calls. @optional */
   uiCallable?: string[];
 
+  /** Declarative auth contract — see {@link PluginAuthSpec}. When present, the host renders a generic 미인증 / signed-in badge + login/logout button in Settings. @optional */
   auth?: PluginAuthSpec;
 
-  /** Alias of `eventPublishes` accepted by host bridge paths. @optional */
+  /** Event type names this plugin may emit on the host event bus. Used by the host for validation and ownership checks. @optional */
   emittedEvents?: string[];
 
   /** Events that should be surfaced as host notifications. Each entry names the event and maps fields of its payload to notification title and body. @optional */
@@ -140,14 +165,16 @@ export interface PluginManifest {
   toolSchemas?: Record<
     string,
     {
-      /** One-line description shown in plugin catalogues and tool pickers. Required as of host schema Phase 1 (PR #389). */
+      /** LLM-facing tool description (when/what/returns). Minimum 10 characters per JSON Schema. */
       description: string;
 
-      /** SemVer version string (for example `1.2.3`). Used by the host to detect updates and enforce compatibility. */
+      /** Optional stable SemVer (MAJOR.MINOR.PATCH) for this tool — §6.4 Tool versioning. Falls back to the manifest top-level `version` when omitted. @optional */
       version?: string;
 
+      /** Stable SemVer marking the manifest version that deprecated this tool. Triggers a runtime warn on call. @optional */
       deprecatedSince?: string;
 
+      /** Tool name that supersedes this deprecated tool — host transparently redirects calls. @optional */
       replacedBy?: string;
       inputSchema: {
         $schema?: string;
@@ -162,43 +189,76 @@ export interface PluginManifest {
   configSchema?: PluginConfigSchema;
 
   icon?: string;
+  python?: {
+    managedBy?: "lvis-app" | "self";
+    requirementsLock?: string;
+    interpreter?: string;
+  };
+  packageName?: string;
+  /** Plugin author — individual maintainer name or contact (distinct from `publisher`). */
+  author?: string;
+  /** Top-level advertisement of UI slot names this plugin participates in. Marketplace metadata only — actual extension binding lives in `ui[].slot`. */
+  uiSlots?: string[];
 }
 
+/**
+ * §9.2 Track B — declarative settings schema. JSON Schema draft-07 subset
+ * rendered as a typed form in the host's `PluginConfigTab`.
+ * `format: "secret"` routes values through the encrypted keychain instead
+ * of the cleartext `pluginConfigs` map.
+ */
 export interface PluginConfigSchema {
 
+  /** Optional `$schema` identifier; informational only. @optional */
   $schema?: string;
 
+  /** Property declarations keyed by config key. */
   properties: Record<string, PluginConfigSchemaProperty>;
 
+  /** Property keys that must have a value after merging defaults + saved values. @optional */
   required?: string[];
 
+  /** Optional escape hatch — when declared the host renders a custom React panel underneath the auto-generated form. `entry` is a path relative to the plugin root; `exportName` is the named export to mount. Use sparingly — schema fields cover the common case. @optional */
   customPanel?: { entry: string; exportName: string };
 }
 
+/** Schema for a single configuration property. */
 export interface PluginConfigSchemaProperty {
 
+  /** JSON Schema-compatible value type. */
   type: "string" | "number" | "integer" | "boolean" | "array";
 
+  /** Short human-readable label. @optional */
   title?: string;
 
+  /** Long-form description rendered as helper text. @optional */
   description?: string;
 
+  /** Default value seeded into the form when no saved value exists. @optional */
   default?: unknown;
 
+  /** Closed list of valid values (renders as Select). @optional */
   enum?: Array<string | number | boolean>;
 
+  /** Inclusive lower bound for numeric / integer types. @optional */
   minimum?: number;
 
+  /** Inclusive upper bound for numeric / integer types. @optional */
   maximum?: number;
 
+  /** Minimum string length. @optional */
   minLength?: number;
 
+  /** Maximum string length. @optional */
   maxLength?: number;
 
+  /** Regex the string value must match. @optional */
   pattern?: string;
 
+  /** UI/storage hint. `"secret"` routes the value through `hostApi.setSecret` / `getSecret` instead of cleartext config. `"uri"`, `"email"`, `"date-time"` enable typed inputs. @optional */
   format?: "secret" | "uri" | "email" | "date-time";
 
+  /** Item schema for `type: "array"` properties. @optional */
   items?: { type: "string" | "number" | "integer" | "boolean"; enum?: Array<string | number | boolean> };
 }
 
@@ -243,6 +303,11 @@ export interface PluginUiExtension {
  * Entry in the host's local plugin registry. The registry records which
  * plugins are installed, where their manifests live, and whether they are
  * currently enabled.
+ *
+ * Note: host-internal install-source bookkeeping (`_devLinked`,
+ * `installSource`) is intentionally stripped from the SDK public surface —
+ * see `stripHostInternalRegistryFields()` in `scripts/sync-from-host.mjs`.
+ * Plugins should not branch on those fields.
  */
 export interface PluginRegistryEntry {
   /** Plugin identifier, matching `PluginManifest.id`. */
@@ -251,9 +316,10 @@ export interface PluginRegistryEntry {
   manifestPath: string;
   /** Whether the plugin should be loaded at host startup. Defaults to `true` when omitted. @optional */
   enabled?: boolean;
+
   bundleRefs?: string[];
   approvedPluginAccess?: PluginAccessSpec;
-  installSource?: PluginRegistryEntryInstallSource;
+
 }
 
 /**
@@ -340,7 +406,7 @@ export interface PluginMarketplaceItem {
 
   version?: string;
 
-  channel?: "stable" | "canary";
+  channel?: "stable";
   /** Default configuration seeded into the plugin on first install. Users may override this. @optional */
   defaultConfig?: Record<string, unknown>;
   /** UI extensions the plugin will contribute once installed. @optional */
@@ -408,10 +474,6 @@ export type PluginLifecycleEvent =
   | { type: "uninstalled"; pluginId: string }
   | { type: "_future"; readonly __exhaustive: never };
 
-export type PluginLifecycleEventPayload =
-  | { pluginId: string; source: "marketplace" | "local-dev" }
-  | { pluginId: string };
-
 /**
  * Services exposed by the host to a running plugin. An instance is provided
  * on `PluginRuntimeContext.hostApi` when the host calls the plugin's
@@ -433,14 +495,83 @@ export interface PluginHostApi {
 
     onChange<T = unknown>(key: string, callback: (value: T | undefined) => void): () => void;
   };
+  /**
+   * Register skill keywords with the host's keyword engine. When the user
+   * types or says one of the registered keywords the host routes the request
+   * to the associated `skillId`, which the plugin must handle via a tool
+   * dispatch.
+   *
+   * @param keywords - Keyword/skill pairs to register. Calling again appends;
+   *                   duplicate keywords are deduplicated by the host.
+   * @example
+   * hostApi.registerKeywords([
+   *   { keyword: "weather", skillId: "forecast.today" },
+   * ]);
+   */
   registerKeywords(keywords: Array<{ keyword: string; skillId: string }>): void;
+  /**
+   * Emit a host-wide event. Other plugins subscribed to `eventType` via
+   * `onEvent` receive the payload. The host also bridges events to its own
+   * internal listeners.
+   *
+   * @param eventType - Dot-delimited event name (for example `"calendar.updated"`).
+   * @param data - JSON-serializable payload. @optional
+   */
   emitEvent(eventType: string, data?: unknown): void;
 
+  /**
+   * Subscribe to host events. The returned function removes the subscription
+   * when invoked. Call it during `RuntimePlugin.stop` to avoid leaking
+   * handlers.
+   *
+   * @param eventType - Event name to listen for.
+   * @param handler - Invoked with the emitted payload.
+   * @returns Unsubscribe function.
+   */
   onEvent(eventType: string, handler: (data: unknown) => void): () => void;
 
+  /**
+   * Snapshot of plugin ids currently loaded into the host runtime, in insertion
+   * (load) order. The calling plugin's own id is excluded. Treat the result as
+   * a SET (`includes()`); insertion order is NOT priority and is subject to
+   * change. Pair with `onPluginsChanged` to react to lifecycle.
+   *
+   * Capability-gated by `lifecycle-observer` in the plugin manifest (advisory
+   * in v3.x — not enforced yet, but declare it to stay forward-compatible).
+   *
+   * @returns Plugin ids of all currently-loaded plugins except the caller.
+   */
   getInstalledPluginIds(): string[];
 
+  /**
+   * Subscribe to plugin install / uninstall lifecycle events. Returns an
+   * `unsubscribe()` disposer; the host also auto-clears the subscription when
+   * the calling plugin is disabled.
+   *
+   * Fires AFTER the host has finished mounting (install) or unmounting
+   * (uninstall) the subject plugin — `getInstalledPluginIds()` already
+   * reflects the new state when the handler runs. Self-events (this plugin
+   * being the subject) are filtered out.
+   *
+   * P0 only delivers `installed` and `uninstalled`. Future versions may add
+   * `updated` (version bump). Handlers SHOULD branch with a `default:` to
+   * stay forward-compatible.
+   *
+   * The `installed` event carries `source: "marketplace" | "local-dev"`.
+   * Production consumers SHOULD ignore `source: "local-dev"` to avoid
+   * letting a developer's local test plugin trigger downstream cascades.
+   *
+   * Capability-gated by `lifecycle-observer` in the plugin manifest (advisory
+   * in v3.x — not enforced yet, but declare it to stay forward-compatible).
+   */
   onPluginsChanged(handler: (event: PluginLifecycleEvent) => void): () => void;
+  /**
+   * Create a task in the host's task list.
+   *
+   * @param task - Task metadata. `source` identifies the originating plugin
+   *               or feature; `sourceRef` is an optional stable pointer back
+   *               to the originating entity (for example an email id).
+   */
   addTask(task: {
     title: string;
     description?: string;
@@ -448,14 +579,41 @@ export interface PluginHostApi {
     sourceRef?: string;
     priority?: "high" | "medium" | "low";
   }): void;
+  /**
+   * Retrieve an encrypted secret previously stored by the host or the user
+   * (for example an API key).
+   *
+   * @param key - Secret key.
+   * @returns The secret value, or `null` if no secret exists for `key`.
+   */
   getSecret(key: string): string | null;
 
   callTool<T = unknown>(toolName: string, payload?: unknown): Promise<T>;
 
+  /**
+   * Invoke the host's configured language model.
+   *
+   * @param prompt - User prompt string.
+   * @param options.maxTokens - Upper bound on completion tokens. @optional
+   * @param options.systemPrompt - System instructions prepended to the call. @optional
+   * @returns The model's completion text.
+   */
   callLlm(prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string>;
 
+  /**
+   * Emit a structured log entry to the host log pipeline.
+   *
+   * @param level - Severity.
+   * @param message - Human-readable message.
+   * @param data - Arbitrary structured payload. @optional
+   */
   logEvent(level: "info" | "warn" | "error", message: string, data?: unknown): void;
 
+  /**
+   * Register a handler invoked when the host is shutting down. The host waits
+   * for returned promises to resolve before exiting, giving the plugin a
+   * chance to flush state.
+   */
   onShutdown(handler: () => void | Promise<void>): void;
 
   openAuthWindow(options: {
@@ -475,6 +633,15 @@ export interface PluginHostApi {
     expirationDate?: number;
   }>>;
 
+  /**
+   * Start a conversation turn from a proactive plugin signal.
+   *
+   * Capability-gated by `conversation-trigger` in the plugin manifest; missing
+   * capability returns `{ accepted: false, reason: "capability_denied" }` (no
+   * exception). `spec.prompt` MUST be a templated, plugin-owned message — NOT
+   * raw third-party content (mail body, transcript). `spec.source` MUST match
+   * `^proactive:[a-z][a-z0-9-]*$`.
+   */
   triggerConversation(spec: ConversationTriggerSpec): Promise<ConversationTriggerResult>;
 }
 
@@ -526,12 +693,6 @@ export interface ConversationTriggerResult {
   /** Echoed from the request so callers can correlate logs. */
   source: string;
 }
-
-/**
- * Alias of `PluginToolHandler` retained for older call sites that describe
- * the same function in method-style terminology.
- */
-export type PluginMethodHandler = PluginToolHandler;
 
 /**
  * Execution context supplied by the host when instantiating a plugin through

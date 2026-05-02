@@ -11,7 +11,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve as pathResolve } from "node:path";
+import { join } from "node:path";
+import { createRequire } from "node:module";
 import * as AjvModule from "ajv";
 import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
@@ -34,7 +35,9 @@ import { parsePluginJson } from "../runtime/manifest-validation.js";
 // real schema on disk + the real `parsePluginJson` cross-field path.
 let TEST_VALIDATOR: ValidateFunction | null = null;
 beforeAll(() => {
-  const schemaPath = pathResolve(process.cwd(), "schemas/plugin.schema.json");
+  const schemaPath = createRequire(import.meta.url).resolve(
+    "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
+  );
   const schema = JSON.parse(readFileSync(schemaPath, "utf-8"));
   const AjvAny = AjvModule as unknown as { default?: unknown };
   const AjvCtor = (AjvAny.default ?? AjvModule) as new (opts?: unknown) => {
