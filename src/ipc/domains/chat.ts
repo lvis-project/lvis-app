@@ -374,8 +374,12 @@ ${input}`;
     if (typeof sessionId !== "string" || !/^[a-zA-Z0-9_\-]+$/.test(sessionId)) {
       return { ok: false, messages: [] };
     }
-    const raw = memoryManager.loadSession(sessionId) as GenericMessage[] | null;
-    if (!raw) return { ok: false, messages: [] };
+    const loaded = memoryManager.loadSession(sessionId);
+    if (!Array.isArray(loaded)) return { ok: false, messages: [] };
+    const raw = loaded.filter(
+      (m): m is GenericMessage =>
+        m != null && typeof m === "object" && "role" in m && "content" in m,
+    );
     return {
       ok: true,
       messages: raw.map((m, i) => ({

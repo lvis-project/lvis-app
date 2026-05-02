@@ -524,23 +524,22 @@ export function StackedChatView({
         {historicalByDay.map(([dayKey, daySessions]) => (
           <Fragment key={dayKey}>
             <DaySeparator dateKey={dayKey} />
-            {daySessions.map((sess, sIdx) => (
+            {daySessions.map((sess, sIdx) => {
+              if (sess.entries.length === 0) return null;
+              return (
               <Fragment key={sess.id}>
                 {/* Show session title marker only between multiple sessions in the same day */}
                 {daySessions.length > 1 && sIdx > 0 && (
                   <SessionMarker title={sess.title} sessionId={sess.id} />
                 )}
-                {sess.entries.length > 0 ? (
-                  <EntriesList
-                    entries={sess.entries}
-                    streaming={false}
-                    isEntryStarred={() => null}
-                  />
-                ) : (
-                  <SessionMarker title={sess.title} sessionId={sess.id} />
-                )}
+                <EntriesList
+                  entries={sess.entries}
+                  streaming={false}
+                  isEntryStarred={() => null}
+                />
               </Fragment>
-            ))}
+              );
+            })}
           </Fragment>
         ))}
 

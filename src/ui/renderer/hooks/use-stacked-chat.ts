@@ -83,8 +83,11 @@ export function useStackedChat(api: LvisApi, currentSessionId: string): UseStack
 
   const fetchSessionsForDayRange = useCallback(
     async (fromDaysBack: number, toDaysBack: number): Promise<StackedSession[]> => {
-      const fromKey = dateKeyDaysBack(fromDaysBack);
-      const toKey = dateKeyDaysBack(toDaysBack);
+      // fromDaysBack is the older bound (larger number = earlier date string),
+      // toDaysBack is the newer bound (smaller number = later date string).
+      // Swap so fromKey <= toKey for the dk >= fromKey && dk <= toKey filter.
+      const fromKey = dateKeyDaysBack(toDaysBack);
+      const toKey = dateKeyDaysBack(fromDaysBack);
       try {
         const { sessions: all } = await api.chatSessions();
         const filtered = all
