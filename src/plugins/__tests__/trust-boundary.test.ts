@@ -23,7 +23,6 @@ import {
 } from "../plugin-install-receipt.js";
 import {
   _resetForTest,
-  devLinkedEntryAllowed,
   isDevModeUnlocked,
   setIsPackaged,
 } from "../../boot/dev-flags.js";
@@ -82,7 +81,7 @@ describe("Phase 1 — plugin trust boundary", () => {
     entries: Array<{
       id: string;
       manifestPath: string;
-      installSource?: "admin" | "user" | "local-dev" | "dev-link";
+      installSource?: "admin" | "user" | "local-dev";
       // Legacy fields kept on the helper signature so tests can write
       // pre-PR #430 registry shapes and verify readPluginRegistry's
       // on-read migration. Production code never sets these.
@@ -234,70 +233,11 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(auditCalls).toContainEqual({ level: "error", message: "plugin_integrity_rejected" });
     });
 
-    // dev-link receipt skip — bypass MUST be gated on dev mode, not just on
-    // the registry flag. Otherwise a malicious actor who can write to
-    // registry.json on a packaged install could plant `_devLinked: true`
-    // and skip integrity verification entirely.
-    describe("dev-link receipt skip is gated on dev mode", () => {
-      const savedLvisDev = process.env.LVIS_DEV;
-      afterEach(() => {
-        _resetForTest();
-        if (savedLvisDev === undefined) delete process.env.LVIS_DEV;
-        else process.env.LVIS_DEV = savedLvisDev;
-      });
-
-      it("dev mode + _devLinked=true → loads without a receipt", async () => {
-        process.env.LVIS_DEV = "1";
-        setIsPackaged(false);
-        const pluginDir = join(pluginsRoot, "p-devlinked");
-        const manifestPath = await writePluginAt(pluginDir, "tb.devlinked");
-        // No receipt written — the skip path is the only way this can load.
-        await writeRegistry([{ id: "tb.devlinked", manifestPath, _devLinked: true }]);
-
-        const runtime = new PluginRuntime({
-          hostRoot,
-          registryPath,
-          pluginsRoot,
-          installReceiptCacheRoot: cacheRoot,
-        });
-        await runtime.load();
-        expect(runtime.listPluginIds()).toContain("tb.devlinked");
-      });
-
-      it("packaged + installSource='dev-link' (no _devLinked) → still rejected without a receipt", async () => {
-        delete process.env.LVIS_DEV;
-        setIsPackaged(true);
-        const pluginDir = join(pluginsRoot, "p-devlinked-new");
-        const manifestPath = await writePluginAt(pluginDir, "tb.devlinked.new");
-        await writeRegistry([{ id: "tb.devlinked.new", manifestPath, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0]]);
-
-        const runtime = new PluginRuntime({
-          hostRoot,
-          registryPath,
-          pluginsRoot,
-          installReceiptCacheRoot: cacheRoot,
-        });
-        await runtime.load();
-        expect(runtime.listPluginIds()).not.toContain("tb.devlinked.new");
-      });
-
-      it("packaged + _devLinked=true → still rejected without a receipt", async () => {
-        delete process.env.LVIS_DEV;
-        setIsPackaged(true);
-        const pluginDir = join(pluginsRoot, "p-devlinked-packaged");
-        const manifestPath = await writePluginAt(pluginDir, "tb.devlinked.packaged");
-        await writeRegistry([{ id: "tb.devlinked.packaged", manifestPath, _devLinked: true }]);
-
-        const runtime = new PluginRuntime({
-          hostRoot,
-          registryPath,
-          pluginsRoot,
-          installReceiptCacheRoot: cacheRoot,
-        });
-        await runtime.load();
-        expect(runtime.listPluginIds()).not.toContain("tb.devlinked.packaged");
-      });
-    });
+    // Dev-link receipt-skip removed in 2026-05 dev-link purge: the legacy
+    // `_devLinked: true` registry flag now migrates to `installSource:
+    // "local-dev"` on read, and receipt verification applies unconditionally.
+    // The dev-only skip path no longer exists, so there's nothing to gate.
+    // Tests asserting that bypass have been deleted.
   });
 
   // ───────────────────────────── §Step 3 ─────────────────────────────
@@ -397,7 +337,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       for (const name of ENV_NAMES) process.env[name] = "1";
       setIsPackaged(true);
       expect(isDevModeUnlocked()).toBe(false);
-      expect(devLinkedEntryAllowed()).toBe(false);
     });
 
     it("returns true when isPackaged=false and the matching flag is set", () => {
@@ -407,7 +346,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(isDevModeUnlocked()).toBe(false); // no flag set yet
       process.env.LVIS_DEV = "1";
       expect(isDevModeUnlocked()).toBe(true);
-      expect(devLinkedEntryAllowed()).toBe(true);
     });
 
     it("explicit packaged parameter overrides cached state for testability", () => {
@@ -564,42 +502,6 @@ describe("Phase 1 — plugin trust boundary", () => {
       await runtime.load();
 
       expect(runtime.listPluginIds()).toContain("tb.dev-signer-unpkg");
-    });
-
-    it("restartPlugin re-reads registry: installSource changed from dev-link to user → receipt check NOT skipped", async () => {
-      // Issue #434: restartPlugin used plugin.devLinked (stale in-memory value).
-      // After the fix it re-reads the registry so a promotion from "dev-link" to
-      // "user" between load and restart causes receipt verification to run.
-      process.env.LVIS_DEV = "1";
-      setIsPackaged(false);
-      const pluginDir = join(pluginsRoot, "p-devlink-promoted");
-      const manifestPath = await writePluginAt(pluginDir, "tb.devlink-promoted");
-      // No receipt — the plugin loads only because dev-link skips the check.
-      await writeRegistry([{ id: "tb.devlink-promoted", manifestPath, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0]]);
-
-      const auditCalls: Array<{ level: string; message: string }> = [];
-      const runtime = new PluginRuntime({
-        hostRoot,
-        registryPath,
-        pluginsRoot,
-        installReceiptCacheRoot: cacheRoot,
-        auditLog: (level, message) => auditCalls.push({ level, message }),
-      });
-      await runtime.load();
-      expect(runtime.listPluginIds()).toContain("tb.devlink-promoted");
-
-      // Simulate registry promotion: installSource changed to "user".
-      // The stale in-memory LoadedPlugin still has devLinked=true from load time.
-      await writeRegistry([{ id: "tb.devlink-promoted", manifestPath, installSource: "user" } as Parameters<typeof writeRegistry>[0][0]]);
-
-      // Restart: fresh registry read must derive devLinked=false → receipt check
-      // runs → no receipt present → plugin is rejected.
-      await runtime.restartPlugin("tb.devlink-promoted");
-      expect(runtime.listPluginIds()).not.toContain("tb.devlink-promoted");
-      expect(auditCalls.length).toBeGreaterThan(0);
-      expect(auditCalls).toContainEqual(
-        expect.objectContaining({ level: "error", message: "plugin_integrity_rejected" }),
-      );
     });
 
     it("packaged build + local-dev receipt via restartPlugin → rejected", async () => {
