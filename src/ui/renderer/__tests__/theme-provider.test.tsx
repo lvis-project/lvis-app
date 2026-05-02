@@ -88,8 +88,8 @@ describe("THEME_PREFERENCES", () => {
 });
 
 describe("CHAT_THEME_PREFERENCES", () => {
-  it("includes the four chat accent variants", () => {
-    expect([...CHAT_THEME_PREFERENCES]).toEqual(["default", "purple", "orange", "blue"]);
+  it("includes the chat accent variants and the LG brand identity", () => {
+    expect([...CHAT_THEME_PREFERENCES]).toEqual(["default", "lg", "purple", "orange", "blue"]);
   });
 });
 
@@ -293,7 +293,7 @@ describe("<ThemeProvider>", () => {
 
   it("setChatTheme writes data-chat-theme + persists via api.updateSettings", async () => {
     const { api } = makeMockLvisApi();
-    let setter: ((v: "default" | "purple" | "orange" | "blue") => void) | null = null;
+    let setter: ((v: "default" | "lg" | "purple" | "orange" | "blue") => void) | null = null;
     function Capture() {
       const { setChatTheme } = useTheme();
       setter = setChatTheme;
@@ -323,7 +323,7 @@ describe("<ThemeProvider>", () => {
     const { api } = makeMockLvisApi({
       settings: { appearance: { chatTheme: "purple" } } as never,
     });
-    let setter: ((v: "default" | "purple" | "orange" | "blue") => void) | null = null;
+    let setter: ((v: "default" | "lg" | "purple" | "orange" | "blue") => void) | null = null;
     function Capture() {
       const { setChatTheme } = useTheme();
       setter = setChatTheme;
@@ -432,7 +432,7 @@ describe("<ThemeProvider>", () => {
       if (patch.appearance) stored = { ...stored, ...patch.appearance };
       return { ...settingsBacking, appearance: stored };
     });
-    let setter: ((v: "default" | "purple" | "orange" | "blue") => void) | null = null;
+    let setter: ((v: "default" | "lg" | "purple" | "orange" | "blue") => void) | null = null;
     function Capture() {
       const { setChatTheme } = useTheme();
       setter = setChatTheme;
