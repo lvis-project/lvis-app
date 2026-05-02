@@ -22,6 +22,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./com
 
 export type PluginUiExtensionView = {
   pluginId: string;
+  /** Optional Lucide icon name declared in the plugin manifest. */
+  icon?: string;
   extension: {
     id: string;
     slot: "sidebar";
