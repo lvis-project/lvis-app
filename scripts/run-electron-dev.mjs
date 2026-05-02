@@ -692,25 +692,32 @@ async function main() {
   // Main (tsc --watch)
   spawnWatcher("main", resolveLocalBin("tsc"), ["-p", "tsconfig.json", "--watch", "--preserveWatchOutput"]);
 
-  // Preload (esbuild --watch)
+  // Preload (esbuild --watch) — must write `.cjs` so Electron's main
+  // process loads the freshly built file. `main.ts` resolves the preload
+  // by literal filename `preload.cjs`; outputting to `preload.js` here
+  // produced a stale-preload regression — dev mode never updated the
+  // file Electron actually loads, so renderer crashed with
+  // `api.<methodAddedThisSession> is not a function` (e.g. `notifyPluginTheme`
+  // from PR #489) until a manual `bun run build:preload` regenerated the .cjs.
   spawnWatcher("preload", resolveLocalBin("esbuild"), [
     "src/preload.ts",
     "--bundle",
     "--platform=node",
     "--format=cjs",
     "--external:electron",
-    "--outfile=dist/src/preload.js",
+    "--outfile=dist/src/preload.cjs",
     "--watch=forever",
   ]);
 
-  // Plugin webview preload (esbuild --watch, CJS)
+  // Plugin webview preload (esbuild --watch, CJS) — same `.cjs` target
+  // requirement: plugin webviews load this by literal filename in main.ts.
   spawnWatcher("plugin-preload", resolveLocalBin("esbuild"), [
     "src/plugin-preload.ts",
     "--bundle",
     "--platform=node",
     "--format=cjs",
     "--external:electron",
-    "--outfile=dist/src/plugin-preload.js",
+    "--outfile=dist/src/plugin-preload.cjs",
     "--watch=forever",
   ]);
 
