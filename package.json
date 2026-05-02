@@ -7,7 +7,6 @@
   "main": "dist/src/main.js",
   "scripts": {
     "postinstall": "electron-rebuild && node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs",
-    "prepare:plugins": "bun run --cwd ../lvis-plugin-pageindex build && bun run --cwd ../lvis-plugin-meeting build && bun run --cwd ../lvis-plugin-ms-graph build && bun run --cwd ../lvis-plugin-lge-api build && bun run --cwd ../lvis-plugin-work-proactive build && bun run --cwd ../lvis-plugin-agent-hub build",
     "build:main": "tsc -p tsconfig.json",
     "build:renderer": "esbuild src/renderer.tsx --bundle --platform=browser --format=esm --splitting --outdir=dist/src --out-extension:.js=.js",
     "build:styles": "tailwindcss -i src/styles.css -o dist/src/styles.css --minify",
@@ -15,7 +14,7 @@
     "build:plugin-preload": "esbuild src/plugin-preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/src/plugin-preload.cjs",
     "build": "bun run build:main && bun run build:renderer && bun run build:styles && bun run build:preload && bun run build:plugin-preload && node scripts/copy-build-assets.mjs src/index.html dist/src/index.html src/plugin-ui-shell.html dist/src/plugin-ui-shell.html scripts/electron-flags.mjs dist/scripts/electron-flags.mjs && node scripts/check-no-tls-bypass.mjs",
     "typecheck": "tsc --noEmit",
-    "start": "bun run prepare:plugins && bun run build && node scripts/run-electron.mjs dist/src/main.js",
+    "start": "bun run build && node scripts/run-electron.mjs dist/src/main.js",
     "dev": "node scripts/run-electron-dev.mjs",
     "plugins:list": "tsx scripts/plugins-cli.ts list",
     "plugins:add": "tsx scripts/plugins-cli.ts add",
@@ -26,7 +25,7 @@
     "test:watch": "vitest",
     "test:ui-e2e": "playwright test",
     "test:electron-smoke": "node scripts/run-electron.mjs --version",
-    "test:main-flow": "bun run prepare:plugins && tsx scripts/test-main-flow.ts",
+    "test:main-flow": "tsx scripts/test-main-flow.ts",
     "release": "node scripts/release.mjs",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
@@ -130,10 +129,6 @@
       {
         "from": "resources/uv/${os}${arch}",
         "to": "uv"
-      },
-      {
-        "from": "../lvis-plugin-pageindex/python-requirements.lock",
-        "to": "python-requirements.lock"
       }
     ],
     "mac": {

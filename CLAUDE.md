@@ -142,8 +142,7 @@ execute the Electron process.
 ```bash
 bun install            # Install deps (runs electron-rebuild + fetch-uv postinstall)
 bun run build          # TypeScript + esbuild renderer + Tailwind CSS
-bun run start          # prepare:plugins + build + Electron launch (Electron runs on Node)
-bun run prepare:plugins  # Build 6 active plugins (pageindex/meeting/ms-graph/lge-api/work-proactive/agent-hub)
+bun run start          # build + Electron launch (Electron runs on Node)
 bunx vitest run        # Run tests
 ```
 
