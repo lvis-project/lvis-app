@@ -122,6 +122,7 @@ export async function bootstrap(
   const core = await bootstrapCoreServices(mainWindow);
   const {
     pythonPath,
+    pythonRuntime,
     bashAstValidator,
     auditService,
     settingsService,
@@ -525,6 +526,7 @@ export async function bootstrap(
   let shutdownPromise: Promise<void> | null = null;
 
   return {
+    pythonRuntime, pythonPath,
     pluginRuntime, pluginMarketplace, taskService, taskSourceRegistry, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore,
