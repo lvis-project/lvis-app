@@ -2,20 +2,21 @@
  * PR-2 — Conversation Meta Output section (id 9.9).
  *
  * Verifies:
- *   - Title + checkpoint instructions are always present in the prompt
+ *   - Title + checkpoint instructions are emitted when experimentalContinuousBackend is ON
  *   - Session title is injected when set
  *   - No session title line emitted when title is null
  *   - setSessionTitle("") normalises to null (no injection)
  *   - sanitizeTitle() strips dangerous characters (newline, quote, backslash, angle brackets)
  *   - sanitizeTitle() + setSessionTitle() whitespace-only → normalised to null
+ *   - Section 9.9 is absent when experimentalContinuousBackend is OFF (safety flag)
  */
 import { describe, it, expect } from "vitest";
 
 import { SystemPromptBuilder } from "../system-prompt-builder.js";
 import { ToolRegistry } from "../../tools/registry.js";
 
-function makeBuilder(): SystemPromptBuilder {
-  return new SystemPromptBuilder({
+function makeBuilder({ continuousBackend = true }: { continuousBackend?: boolean } = {}): SystemPromptBuilder {
+  const builder = new SystemPromptBuilder({
     memoryManager: {
       getLvisMd: () => "",
       getUserPreferences: () => "",
@@ -23,6 +24,8 @@ function makeBuilder(): SystemPromptBuilder {
     } as never,
     toolRegistry: new ToolRegistry(),
   });
+  builder.setContinuousBackendEnabled(continuousBackend);
+  return builder;
 }
 
 describe("SystemPromptBuilder — Conversation Meta Output", () => {
@@ -146,5 +149,38 @@ describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
     builder.setSessionTitle("<>\r\n<>");
     const prompt = builder.build();
     expect(prompt).not.toContain("현재 세션 제목:");
+  });
+});
+
+describe("SystemPromptBuilder — safety flag (experimentalContinuousBackend)", () => {
+  it("Section 9.9 is absent when flag is OFF (default)", () => {
+    const builder = makeBuilder({ continuousBackend: false });
+    const prompt = builder.build();
+    expect(prompt).not.toContain("## 대화 메타 출력 (final answer 끝에 추가)");
+    expect(prompt).not.toContain("<title>10-20자 한국어 제목</title>");
+    expect(prompt).not.toContain("[checkpoint-suggested]");
+  });
+
+  it("Section 8 (Rolling Summary Preamble) is absent when flag is OFF even with preamble set", () => {
+    const builder = makeBuilder({ continuousBackend: false });
+    builder.setSummaryPreamble("이전 세션 요약 내용입니다.");
+    const prompt = builder.build();
+    expect(prompt).not.toContain("<prior-context-summary>");
+    expect(prompt).not.toContain("이전 세션 요약 내용입니다.");
+  });
+
+  it("Section 9.9 appears when flag is turned ON", () => {
+    const builder = makeBuilder({ continuousBackend: true });
+    const prompt = builder.build();
+    expect(prompt).toContain("## 대화 메타 출력 (final answer 끝에 추가)");
+    expect(prompt).toContain("<title>10-20자 한국어 제목</title>");
+  });
+
+  it("Section 8 appears when flag is ON and preamble is set", () => {
+    const builder = makeBuilder({ continuousBackend: true });
+    builder.setSummaryPreamble("이전 세션 요약 내용입니다.");
+    const prompt = builder.build();
+    expect(prompt).toContain("<prior-context-summary>");
+    expect(prompt).toContain("이전 세션 요약 내용입니다.");
   });
 });

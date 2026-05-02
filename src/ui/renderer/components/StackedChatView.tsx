@@ -9,7 +9,7 @@
  * - Input bar delegates to existing InputActionBar + Composer.
  * - No session card / collapsible — continuous flow only.
  */
-import { useRef } from "react";
+import { useRef, useEffect } from "react";
 import { flushSync } from "react-dom";
 import type { LvisApi } from "../types.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
@@ -17,6 +17,7 @@ import type { StackedSession } from "../hooks/use-stacked-chat.js";
 import { InputActionBar } from "./InputActionBar.js";
 import { Composer, type ComposerHandle } from "./Composer.js";
 import { AssistantCard } from "./AssistantCard.js";
+import { TurnActionBar } from "./TurnActionBar.js";
 import { ToolGroupCard } from "./ToolGroupCard.js";
 import { ReasoningCard } from "./ReasoningCard.js";
 import { SessionTodoPanel } from "./SessionTodoPanel.js";
@@ -163,6 +164,18 @@ export function StackedChatView({
 }: StackedChatViewProps) {
   const workflowApi = getApi() as LvisApi;
   const composerRef = useRef<ComposerHandle | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll to bottom whenever entries are added or the last message's
+  // content changes (streaming updates). Uses "smooth" for new messages and
+  // instant on mount.
+  const lastEntryContent =
+    entries.length > 0
+      ? (entries[entries.length - 1] as { text?: string; content?: string } | undefined)?.text ?? ""
+      : "";
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [entries.length, lastEntryContent]);
   const {
     question,
     setQuestion,
@@ -260,6 +273,8 @@ export function StackedChatView({
         {/* Day separator for today if we have entries but sessions not loaded yet */}
         {sessions.length === 0 && entries.length === 0 && !loading && null}
 
+        {/* Scroll anchor — kept at bottom so auto-scroll lands past the last message */}
+        <div ref={chatEndRef} data-testid="chat-end-anchor" />
         <div className="shrink-0 pb-2" />
       </div>
 
@@ -437,14 +452,16 @@ function renderSessionEntries(entries: ChatEntry[], streaming: boolean): React.R
       continue;
     }
     if (entry.kind === "assistant") {
+      const isFinal = !streaming || i < entries.length - 1;
       nodes.push(
         <div key={key} className="max-w-[80%]">
           <AssistantCard
             entry={entry}
             highlightQuery=""
             isStarred={false}
-            isFinal={!streaming || i < entries.length - 1}
+            isFinal={isFinal}
           />
+          {isFinal && <TurnActionBar />}
         </div>,
       );
       continue;

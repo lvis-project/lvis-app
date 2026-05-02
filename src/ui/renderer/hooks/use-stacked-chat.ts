@@ -9,6 +9,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 import type { SessionSummary } from "./use-sessions.js";
 
+// Lightweight dev console logger — omitted in production builds that
+// strip unreachable code, but harmless if left in since it only logs
+// in renderer context where console is available.
+const debugLog = (msg: string, ...args: unknown[]) => {
+  if (process.env.NODE_ENV !== "production") {
+    console.debug("[useStackedChat]", msg, ...args);
+  }
+};
+
 export type StackedSession = SessionSummary & {
   /** ISO date string for day grouping, e.g. "2026-04-30" */
   dayKey: string;
@@ -75,10 +84,12 @@ export function useStackedChat(api: LvisApi): UseStackedChatReturn {
   // Initial load: today (0) + yesterday (1)
   useEffect(() => {
     let cancelled = false;
+    debugLog("mount — loading initial sessions (today + yesterday)");
     void (async () => {
       setLoading(true);
       const loaded = await fetchSessionsForDayRange(0, INITIAL_DAYS_BACK);
       if (cancelled) return;
+      debugLog("initial load complete, session count:", loaded.length, loaded.map((s) => s.id.slice(0, 8)));
       setSessions(loaded);
       setLoading(false);
     })();
