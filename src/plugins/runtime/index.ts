@@ -158,7 +158,7 @@ export class PluginRuntime {
   private async getManifestValidator(): Promise<ValidateFunction | null> {
     if (this.manifestValidatorLoaded) return this.manifestValidator;
     this.manifestValidatorLoaded = true;
-    this.manifestValidator = await buildManifestValidator(import.meta.url);
+    this.manifestValidator = await buildManifestValidator();
     return this.manifestValidator;
   }
 
