@@ -240,11 +240,18 @@ function EntriesList({
     const idx = i + idxOffset;
 
     if (entry.kind === "user") {
+      // Only add the top gap when the previous rendered entry is a
+      // completed assistant turn (whose action bar is the visual
+      // anchor we're separating from). Day/session markers and the
+      // first user turn of a session shouldn't get an unwanted gap
+      // tucked under them.
+      const prevWasAssistant = i > 0 && entries[i - 1]?.kind === "assistant";
+      const userGapCls = prevWasAssistant ? "mt-3" : "";
       rendered.push(
         <div
           key={idx}
           data-testid="user-message"
-          className="ml-auto mt-3 max-w-[75%] rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground"
+          className={`ml-auto max-w-[75%] rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls}`.trim()}
         >
           <div className="whitespace-pre-wrap">{entry.text}</div>
         </div>,
