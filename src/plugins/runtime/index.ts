@@ -658,31 +658,52 @@ export class PluginRuntime {
    * US-A3 — Targeted single-plugin remove for uninstall paths.
    */
   async removePlugin(pluginId: string): Promise<void> {
+    // Plugin may be in one of three states when uninstall is requested:
+    //   - loaded (`this.plugins` has it) → run stop + dispose, then clean
+    //     all tracking maps below
+    //   - failed-load (in `failedPluginIds` / `failedPluginStubs` /
+    //     `knownPluginManifests` but NOT in `this.plugins`) → skip the
+    //     stop/dispose path but still clean tracking so `listPluginCards`
+    //     stops surfacing a stale entry after marketplace registry purge
+    //   - not tracked at all (no-op)
+    //
+    // Pre-fix: an early `return` when `this.plugins` lacked the entry
+    // left failed-load plugins in `failedPluginStubs` / `knownPluginManifests`
+    // forever — UI showed the ghost card and a second uninstall click hit
+    // `Plugin not found` from the deployment guard against the already-purged
+    // marketplace registry.
     const plugin = this.plugins.get(pluginId);
-    if (!plugin) {
-      log.warn(`removePlugin: plugin not loaded — ${pluginId}`);
-      return;
-    }
-
-    try {
-      await plugin.instance.stop?.();
-    } catch (err) {
-      log.error(`stop during removePlugin failed: %s`, (err as Error).message);
-    }
-
-    for (const method of plugin.methods.keys()) {
-      this.methodMap.delete(method);
-    }
-    this.plugins.delete(pluginId);
-
-    const pluginDisposers = this.disposers.get(pluginId);
-    if (pluginDisposers) {
-      for (const d of pluginDisposers) {
-        try { d(); } catch (err) {
-          log.error(`disposer failed during removePlugin: %s`, (err as Error).message);
-        }
+    if (plugin) {
+      try {
+        await plugin.instance.stop?.();
+      } catch (err) {
+        log.error(`stop during removePlugin failed: %s`, (err as Error).message);
       }
-      this.disposers.delete(pluginId);
+
+      for (const method of plugin.methods.keys()) {
+        this.methodMap.delete(method);
+      }
+      this.plugins.delete(pluginId);
+
+      const pluginDisposers = this.disposers.get(pluginId);
+      if (pluginDisposers) {
+        for (const d of pluginDisposers) {
+          try { d(); } catch (err) {
+            log.error(`disposer failed during removePlugin: %s`, (err as Error).message);
+          }
+        }
+        this.disposers.delete(pluginId);
+      }
+    } else if (
+      !this.knownPluginManifests.has(pluginId) &&
+      !this.failedPluginIds.has(pluginId) &&
+      !this.failedPluginStubs.has(pluginId) &&
+      !this.disabledPluginIds.has(pluginId)
+    ) {
+      log.warn(`removePlugin: plugin not tracked — ${pluginId}`);
+      return;
+    } else {
+      log.info(`removePlugin: plugin in non-loaded state (failed/disabled), purging tracking — ${pluginId}`);
     }
 
     this.knownPluginManifests.delete(pluginId);
