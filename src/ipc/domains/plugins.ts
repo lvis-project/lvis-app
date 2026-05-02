@@ -580,7 +580,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     const { webContentsId, pluginId, entryUrl } = payload ?? {};
-    plog("debug", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REGISTER, webContentsId, entryUrl: redactFsPath(entryUrl) }, "webview register requested");
+    plog("debug", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REGISTER, webContentsId, entryUrl: typeof entryUrl === "string" ? redactFsPath(entryUrl) : entryUrl }, "webview register requested");
     if (typeof webContentsId !== "number" || !Number.isFinite(webContentsId)) {
       logRegisterReject("invalid-webcontents-id", payload);
       plog("warn", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-webcontents-id" }, "webview register rejected");

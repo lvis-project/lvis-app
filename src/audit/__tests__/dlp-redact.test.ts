@@ -2,7 +2,7 @@
  * Sprint E §3 — redactForLLM pattern coverage (email / phone / CC).
  * Also covers redactFsPath + redactAuditPayload (audit log PII redact, #449).
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { redactForLLM, redactFsPath, redactAuditPayload } from "../dlp-filter.js";
