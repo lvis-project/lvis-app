@@ -41,6 +41,10 @@ const BUILTIN_VIEW_LABELS: Record<string, string> = {
   starred: "Starred",
 };
 
+function isPluginViewKey(viewKey: string): boolean {
+  return viewKey.startsWith("plugin:");
+}
+
 /** Returns a safe window title for a validated viewKey. */
 function viewKeyLabel(viewKey: string): string {
   if (Object.prototype.hasOwnProperty.call(BUILTIN_VIEW_LABELS, viewKey)) {
@@ -234,16 +238,20 @@ export class WindowManager {
     // to the new viewKey in-place rather than spawning a second window.
     if (this._detachedShell !== null && !this._detachedShell.isDestroyed()) {
       const shell = this._detachedShell;
-      if (this._detachedShellViewKey !== viewKey) {
-        this._detachedShellViewKey = viewKey;
-        // Update the entry's viewKey so listChildren() reflects the live viewKey.
-        const entry = this._children.get(shell.id);
-        if (entry) entry.viewKey = viewKey;
-        shell.setTitle(`LVIS — ${viewKeyLabel(viewKey)}`);
-        shell.webContents.send("lvis:detached:navigate", { viewKey });
+      if (isPluginViewKey(this._detachedShellViewKey ?? "") !== isPluginViewKey(viewKey)) {
+        shell.close();
+      } else {
+        if (this._detachedShellViewKey !== viewKey) {
+          this._detachedShellViewKey = viewKey;
+          // Update the entry's viewKey so listChildren() reflects the live viewKey.
+          const entry = this._children.get(shell.id);
+          if (entry) entry.viewKey = viewKey;
+          shell.setTitle(`LVIS — ${viewKeyLabel(viewKey)}`);
+          shell.webContents.send("lvis:detached:navigate", { viewKey });
+        }
+        shell.focus();
+        return shell;
       }
-      shell.focus();
-      return shell;
     }
 
     // Restore saved bounds if available.
@@ -283,7 +291,7 @@ export class WindowManager {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
-        webviewTag: true,
+        webviewTag: isPluginViewKey(viewKey),
         preload: this._preloadPath,
       },
     });
