@@ -4,17 +4,16 @@ import { test, expect } from './fixtures';
  * E2E tests for the unified CommandPopover (PR-A: B안).
  *
  * These tests require `bun run build` to have produced dist/src/main.js.
- * The first test hard-fails if the UI trigger isn't visible within 5 s —
- * that failure is meaningful (React boot regression).
- * Subsequent tests skip when the trigger isn't found so the suite stays
- * green in offline/CI environments without a vendor API key.
+ * All tests hard-fail when the UI trigger is not visible — a missing trigger
+ * is a real regression, not a skip. The fixture waits up to 60 s for React
+ * to boot before handing control to tests.
  */
 
 test('command popover: Cmd/Ctrl+K opens and closes the popover', async ({ mainWindow }) => {
   // Wait for the InputActionBar to appear (signals full React boot).
-  // 5 s timeout — failure to load is a real regression, not a skip.
+  // 60 s timeout matches CI worst-case boot — failure to load is a real regression.
   const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
-  await expect(trigger).toBeVisible({ timeout: 5_000 });
+  await expect(trigger).toBeVisible({ timeout: 60_000 });
 
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -30,10 +29,7 @@ test('command popover: Cmd/Ctrl+K opens and closes the popover', async ({ mainWi
 
 test('command popover: two section headings visible when open', async ({ mainWindow }) => {
   const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
-  const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
-    .then(() => true)
-    .catch(() => false);
-  test.skip(!found, 'CommandPopover trigger not found — skipping E2E.');
+  await expect(trigger).toBeVisible({ timeout: 20_000 });
 
   await trigger.click();
   await mainWindow.locator('[data-testid="command-popover"]').waitFor({ state: 'visible', timeout: 5_000 });
@@ -62,23 +58,14 @@ test('command popover: search filters items and hides empty group', async ({ mai
 
 test('command popover: list has max-h constraint and is scrollable when items overflow', async ({ mainWindow }) => {
   const trigger = mainWindow.locator('[data-testid="command-popover-trigger"]');
-  const found = await trigger.waitFor({ state: 'visible', timeout: 20_000 })
-    .then(() => true)
-    .catch(() => false);
-  test.skip(!found, 'CommandPopover trigger not found — skipping E2E.');
+  await expect(trigger).toBeVisible({ timeout: 20_000 });
 
   await trigger.click();
   await mainWindow.locator('[data-testid="command-popover"]').waitFor({ state: 'visible', timeout: 5_000 });
 
-  // CommandList has max-h-[320px] class
+  // Verify real scroll behaviour: content must overflow the constrained list,
+  // and scrollTop must actually advance when set (genuine scroll capability).
   const list = mainWindow.locator('[data-testid="command-popover"] [cmdk-list]');
-  const cls = await list.getAttribute('class');
-  // Verify the scroll constraint class is present
-  expect(cls).toContain('max-h-');
-
-  // Verify that all items are present (actions + slash commands) and the list
-  // is scroll-constrained: scrollHeight > clientHeight when content overflows,
-  // and that scrollTop can actually advance (real scroll capability).
   const overflows = await list.evaluate((el) => el.scrollHeight > el.clientHeight);
   expect(overflows).toBe(true);
   const canScroll = await list.evaluate((el) => {
