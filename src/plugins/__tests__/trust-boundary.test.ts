@@ -262,15 +262,13 @@ describe("Phase 1 — plugin trust boundary", () => {
     // workflow targets — confirms that the trust-boundary check passes
     // cleanly without any dev-link exception when the manifest physically
     // lives under pluginsRoot.
-    it("accepts a dev-synced plugin (real files under pluginsRoot) with installSource='dev-link'", async () => {
+    it("accepts a dev-synced plugin (real files under pluginsRoot) with installSource='dev'", async () => {
       process.env.LVIS_DEV = "1";
       setIsPackaged(false);
       try {
         const pluginDir = join(pluginsRoot, "tb.devsync");
         const manifestPath = await writePluginAt(pluginDir, "tb.devsync");
-        await writeRegistry([
-          { id: "tb.devsync", manifestPath, installSource: "dev-link" },
-        ]);
+        await writeRegistry([{ id: "tb.devsync", manifestPath, installSource: "dev" }]);
 
         const runtime = new PluginRuntime({
           hostRoot,
@@ -331,11 +329,11 @@ describe("Phase 1 — plugin trust boundary", () => {
       expect(auditCalls).toContainEqual({ level: "error", message: "plugin_integrity_rejected" });
     });
 
-    // dev-link receipt skip — bypass MUST be gated on dev mode, not just on
+    // Dev-entry receipt skip — bypass MUST be gated on dev mode, not just on
     // the registry flag. Otherwise a malicious actor who can write to
     // registry.json on a packaged install could plant `_devLinked: true`
     // and skip integrity verification entirely.
-    describe("dev-link receipt skip is gated on dev mode", () => {
+    describe("dev entry receipt skip is gated on dev mode", () => {
       const savedLvisDev = process.env.LVIS_DEV;
       afterEach(() => {
         _resetForTest();
@@ -399,7 +397,24 @@ describe("Phase 1 — plugin trust boundary", () => {
         expect(runtime.listPluginIds()).not.toContain("tb.devlinked.bool");
       });
 
-      it("packaged + installSource='dev-link' (no _devLinked) → still rejected without a receipt", async () => {
+      it("packaged + installSource='dev' → still rejected without a receipt", async () => {
+        delete process.env.LVIS_DEV;
+        setIsPackaged(true);
+        const pluginDir = join(pluginsRoot, "p-devsync-packaged");
+        const manifestPath = await writePluginAt(pluginDir, "tb.devsync.packaged");
+        await writeRegistry([{ id: "tb.devsync.packaged", manifestPath, installSource: "dev" }]);
+
+        const runtime = new PluginRuntime({
+          hostRoot,
+          registryPath,
+          pluginsRoot,
+          installReceiptCacheRoot: cacheRoot,
+        });
+        await runtime.load();
+        expect(runtime.listPluginIds()).not.toContain("tb.devsync.packaged");
+      });
+
+      it("packaged + legacy installSource='dev-link' (no _devLinked) → still rejected without a receipt", async () => {
         delete process.env.LVIS_DEV;
         setIsPackaged(true);
         const pluginDir = join(pluginsRoot, "p-devlinked-new");

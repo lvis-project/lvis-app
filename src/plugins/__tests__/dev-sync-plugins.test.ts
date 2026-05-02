@@ -27,6 +27,7 @@ import { join } from "node:path";
 // Vite resolves the .mjs through node's normal module loader.
 import {
   buildCopyFilter,
+  countEntries,
   isSafePluginId,
   removeAny,
   neutralizeLegacyInstallDirSymlink,
@@ -83,7 +84,7 @@ describe("dev-sync-plugins — buildCopyFilter", () => {
   // actually excludes electron during a real cpSync(), not just at the
   // unit level. We synthesize <repo>/node_modules/{electron,lodash} and
   // run cpSync exactly as scripts/dev-sync-plugins.mjs does.
-  it("integrates with cpSync to physically skip electron during real copy", async () => {
+  it("integrates with cpSync to physically skip electron and materialise symlinked deps", async () => {
     const { cpSync } = await import("node:fs");
     const repoRoot = join(
       tmpdir(),
@@ -100,16 +101,21 @@ describe("dev-sync-plugins — buildCopyFilter", () => {
       writeFileSync(join(nmSrc, ".bin", "tsc"), "#!/bin/sh\n", "utf-8");
       mkdirSync(join(nmSrc, "lodash"), { recursive: true });
       writeFileSync(join(nmSrc, "lodash", "index.js"), "// lodash", "utf-8");
+      mkdirSync(join(repoRoot, "shared"), { recursive: true });
+      writeFileSync(join(repoRoot, "shared", "shared.js"), "// shared", "utf-8");
+      symlinkSync(join(repoRoot, "shared"), join(nmSrc, "linked-pkg"), "dir");
 
       // Same call shape used by dev-sync-plugins.mjs after the fix:
       // filter is constructed with the *repo root*, copy goes node_modules → dest.
       cpSync(nmSrc, nmDest, {
         recursive: true,
-        dereference: false,
+        dereference: true,
         filter: buildCopyFilter(repoRoot),
       });
 
       expect(existsSync(join(nmDest, "lodash", "index.js"))).toBe(true);
+      expect(existsSync(join(nmDest, "linked-pkg", "shared.js"))).toBe(true);
+      expect(lstatSync(join(nmDest, "linked-pkg")).isSymbolicLink()).toBe(false);
       expect(existsSync(join(nmDest, "electron"))).toBe(false);
       expect(existsSync(join(nmDest, "@electron"))).toBe(false);
       expect(existsSync(join(nmDest, ".bin"))).toBe(false);
@@ -230,5 +236,24 @@ describe("dev-sync-plugins — neutralizeLegacyInstallDirSymlink", () => {
     expect(
       neutralizeLegacyInstallDirSymlink(join(tmpdir(), `nonexistent-${Math.random()}`)),
     ).toBe(false);
+  });
+});
+
+describe("dev-sync-plugins — countEntries", () => {
+  it("counts nested files and directories without Node 20 recursive readdir support", () => {
+    const root = join(
+      tmpdir(),
+      `dev-sync-countEntries-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    try {
+      mkdirSync(join(root, "dist", "nested"), { recursive: true });
+      writeFileSync(join(root, "plugin.json"), "{}", "utf-8");
+      writeFileSync(join(root, "dist", "index.js"), "// entry", "utf-8");
+      writeFileSync(join(root, "dist", "nested", "chunk.js"), "// chunk", "utf-8");
+
+      expect(countEntries(root)).toBe(5);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

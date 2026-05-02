@@ -20,7 +20,9 @@
  *   - Copies <repo>/dist/         → ~/.lvis/plugins/<id>/dist/         (real dir)
  *   - Copies <repo>/node_modules/ → ~/.lvis/plugins/<id>/node_modules/ (filtered)
  *     (skips electron / @electron / .bin / .git — same filter
- *      as marketplace installLocal in src/plugins/sideload-filter.ts)
+ *      as marketplace installLocal in src/plugins/sideload-filter.ts).
+ *      Any symlinked dependencies are dereferenced during copy so the
+ *      runtime install tree stays real-file only.
  *   - Registers in ~/.lvis/plugins/registry.json with `installSource: "dev"`.
  *     The literal "dev" is the single registry signal that this entry was
  *     placed by the dev-sync workflow and is allowed to skip the
@@ -279,7 +281,11 @@ export function syncDevPlugins() {
       if (existsSync(nodeModulesSrc)) {
         cpSync(nodeModulesSrc, nodeModulesDest, {
           recursive: true,
-          dereference: false,
+          // Materialise any package-manager symlinks as real files/dirs inside
+          // the install tree. This keeps dev-sync output aligned with the
+          // "real files under ~/.lvis/plugins/<id>" contract and avoids leaving
+          // runtime-visible symlinks behind in node_modules.
+          dereference: true,
           // Build the filter against the plugin **repo root** so the
           // relative path includes the literal `node_modules` segment,
           // making the electron/@electron/.bin exclusions actually fire.
@@ -333,12 +339,23 @@ export function syncDevPlugins() {
   return devPlugins;
 }
 
-function countEntries(dir) {
+export function countEntries(dir) {
   try {
-    return readdirSync(dir, { recursive: true }).length;
+    return countEntriesRecursive(dir);
   } catch {
     return 0;
   }
+}
+
+function countEntriesRecursive(dir) {
+  let total = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    total += 1;
+    if (entry.isDirectory()) {
+      total += countEntriesRecursive(resolve(dir, entry.name));
+    }
+  }
+  return total;
 }
 
 // Run only when invoked as a script (`node scripts/dev-sync-plugins.mjs`).
