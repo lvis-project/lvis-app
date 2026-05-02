@@ -378,4 +378,72 @@ describe("decideRotation — 3-tier rotation decision tree", () => {
     expect(r.shouldRotate).toBe(false);
     expect(r.shouldSkipSummary).toBe(false);
   });
+
+  // ── Safety gate: continuousBackendEnabled ─────────
+
+  it("safety gate OFF: always returns { shouldRotate: false } regardless of inputs", () => {
+    // Even with hard-token threshold exceeded and semantic hint, OFF gate wins.
+    const r = decideRotation({
+      ctxUsage: 0.90,
+      sessionAgeMs: DAY_MS * 2,
+      messageCount: 50,
+      semanticHint: true,
+      continuousBackendEnabled: false,
+    });
+    expect(r.shouldRotate).toBe(false);
+    expect(r.trigger).toBeUndefined();
+  });
+
+  it("safety gate ON (explicit): hard-token still triggers rotation", () => {
+    const r = decideRotation({
+      ctxUsage: 0.85,
+      sessionAgeMs: 0,
+      messageCount: 0,
+      semanticHint: false,
+      continuousBackendEnabled: true,
+    });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("hard-token");
+  });
+
+  // ── Dev mode thresholds ───────────────────────────
+
+  it("devMode: soft-time triggers at 5 messages (vs 30 in prod)", () => {
+    const r = decideRotation({
+      ctxUsage: 0.05,
+      sessionAgeMs: 0,
+      messageCount: 5,
+      semanticHint: false,
+      continuousBackendEnabled: true,
+      devMode: true,
+    });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("soft-time");
+  });
+
+  it("devMode: 4 messages does NOT trigger soft-time", () => {
+    const r = decideRotation({
+      ctxUsage: 0.05,
+      sessionAgeMs: 0,
+      messageCount: 4,
+      semanticHint: false,
+      continuousBackendEnabled: true,
+      devMode: true,
+    });
+    expect(r.shouldRotate).toBe(false);
+  });
+
+  it("devMode: soft-time triggers at 1h (vs 24h in prod)", () => {
+    const ONE_HOUR_MS = 60 * 60 * 1_000;
+    const r = decideRotation({
+      ctxUsage: 0.05,
+      sessionAgeMs: ONE_HOUR_MS,
+      messageCount: 0,
+      semanticHint: false,
+      continuousBackendEnabled: true,
+      devMode: true,
+    });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("soft-time");
+  });
 });
