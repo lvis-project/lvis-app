@@ -150,133 +150,18 @@ function SessionMarker({ title, sessionId }: { title: string; sessionId: string 
   );
 }
 
-// ─── EntryRenderer: renders a single ChatEntry using the same logic as ChatView ─
-
-interface EntryRendererProps {
-  entry: ChatEntry;
-  idx: number;
-  streaming: boolean;
-  isLastAssistant: boolean;
-  isActiveTurn: boolean;
-  isEntryStarred: (entryIdx: number) => string | null;
-  onRetryEffort: () => void | Promise<void>;
-  onFork: (entryIdx: number) => void | Promise<void>;
-  onToggleStar: (entryIdx: number) => void;
-  onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
-}
-
-function EntryRenderer({
-  entry,
-  idx,
-  streaming,
-  isLastAssistant,
-  isActiveTurn,
-  isEntryStarred,
-  onRetryEffort,
-  onFork,
-  onToggleStar,
-  onFeedback,
-}: EntryRendererProps) {
-  if (entry.kind === "user") {
-    return (
-      <div
-        data-testid="user-message"
-        className="ml-auto max-w-[75%] rounded-full bg-message-user px-3 py-1.5 text-sm text-message-user-foreground"
-      >
-        <div className="whitespace-pre-wrap">{entry.text}</div>
-      </div>
-    );
-  }
-
-  if (entry.kind === "system") {
-    if (entry.text.includes("checkpoint") || entry.text.includes("체크포인트")) {
-      const summaryMatch = entry.text.match(/요약:\s*(.+)/);
-      const countMatch = entry.text.match(/(\d+)\s*messages?/);
-      return (
-        <>
-          <CheckpointDivider
-            label="자동 정리"
-            messageCount={countMatch ? parseInt(countMatch[1] ?? "0", 10) : 0}
-          />
-          {summaryMatch?.[1] && <SummaryToast summary={summaryMatch[1]} />}
-        </>
-      );
-    }
-    return (
-      <div className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">
-        {entry.text}
-      </div>
-    );
-  }
-
-  if (entry.kind === "imported_trigger") {
-    return (
-      <ImportedTriggerCard
-        source={entry.source}
-        prompt={entry.prompt}
-        summary={entry.summary}
-        toolCallCount={entry.toolCallCount}
-        importedAt={entry.importedAt}
-        response={entry.response}
-        responseStreaming={entry.responseStreaming}
-      />
-    );
-  }
-
-  if (entry.kind === "reasoning") {
-    return <ReasoningCard entry={entry} />;
-  }
-
-  if (entry.kind === "tool_group") {
-    return <ToolGroupCard group={entry} />;
-  }
-
-  if (entry.kind === "assistant") {
-    // isFinal: only the last assistant entry AND global streaming is done.
-    const isFinal = !streaming && isLastAssistant;
-    const starred = !!isEntryStarred(idx);
-
-    const turnTokens = isFinal
-      ? Math.ceil(((entry as { text?: string }).text?.length ?? 0) / 4)
-      : 0;
-
-    return (
-      <div className="max-w-[80%]">
-        <AssistantCard
-          entry={entry}
-          highlightQuery=""
-          isStarred={starred}
-          isFinal={isFinal}
-          turnTokens={isFinal ? turnTokens : undefined}
-        />
-        {isFinal && (
-          <TurnActionBar
-            turnTokens={turnTokens > 0 ? turnTokens : undefined}
-            isStarred={starred}
-            actions={{
-              onRetry: () => void onRetryEffort(),
-              onFork: () => void onFork(idx),
-              onToggleStar: () => onToggleStar(idx),
-            }}
-            onFeedback={onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
-          />
-        )}
-      </div>
-    );
-  }
-
-  return null;
-}
-
 // ─── Renders a list of entries with WorkGroup support (mirrors ChatView logic) ─
 
 interface EntriesListProps {
   entries: ChatEntry[];
   streaming: boolean;
   isEntryStarred: (entryIdx: number) => string | null;
-  onRetryEffort: () => void | Promise<void>;
-  onFork: (entryIdx: number) => void | Promise<void>;
-  onToggleStar: (entryIdx: number) => void;
+  /** Active session only — undefined for read-only historical sessions */
+  onRetryEffort?: () => void | Promise<void>;
+  /** Active session only — undefined for read-only historical sessions */
+  onFork?: (entryIdx: number) => void | Promise<void>;
+  /** Active session only — undefined for read-only historical sessions */
+  onToggleStar?: (entryIdx: number) => void;
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
   /** Base index offset for entry star/fork callbacks (for historical sessions) */
   idxOffset?: number;
@@ -292,8 +177,10 @@ function EntriesList({
   onFeedback,
   idxOffset = 0,
 }: EntriesListProps) {
-  // Classify entries identically to ChatView three-way classification:
-  // "intermediate" → lives in WorkGroup, "live" → no TurnActionBar, "final" → with TurnActionBar
+  // O(n) single forward pass: classify entries into "intermediate" | "live" | "final".
+  // Strategy: scan forward, track per-turn non-user entries; once the turn ends (next
+  // user entry or end-of-list), the last non-user entry is "live"/"final" and all
+  // preceding non-user entries in the turn are "intermediate".
   type EntryClass = "intermediate" | "live" | "final";
   const entryClassMap = new Map<number, EntryClass>();
   const entryTurnStartMap = new Map<number, number>();
@@ -304,32 +191,38 @@ function EntriesList({
   }
 
   let turnStart = -1;
+  // Indices of non-user entries in the current turn (assistant/reasoning/tool_group).
+  const turnWorkEntries: number[] = [];
+
+  const flushTurn = () => {
+    const last = turnWorkEntries.length - 1;
+    for (let k = 0; k < turnWorkEntries.length; k++) {
+      const idx = turnWorkEntries[k] as number;
+      entryTurnStartMap.set(idx, turnStart >= 0 ? turnStart : 0);
+      if (k < last) {
+        entryClassMap.set(idx, "intermediate");
+      } else {
+        const e = entries[idx];
+        entryClassMap.set(
+          idx,
+          e?.kind === "assistant" && !streaming ? "final" : "live",
+        );
+      }
+    }
+    turnWorkEntries.length = 0;
+  };
+
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
     if (!e) continue;
-    if (e.kind === "user") { turnStart = i; continue; }
-    if (e.kind !== "assistant" && e.kind !== "reasoning" && e.kind !== "tool_group") continue;
-
-    let nextUserIdx = entries.length;
-    for (let j = i + 1; j < entries.length; j++) {
-      if (entries[j]?.kind === "user") { nextUserIdx = j; break; }
-    }
-
-    const hasSubsequent = entries.slice(i + 1, nextUserIdx).some(
-      (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning",
-    );
-
-    const myTurnStart = turnStart >= 0 ? turnStart : 0;
-    entryTurnStartMap.set(i, myTurnStart);
-
-    if (hasSubsequent) {
-      entryClassMap.set(i, "intermediate");
-    } else if (e.kind === "assistant" && !streaming) {
-      entryClassMap.set(i, "final");
-    } else {
-      entryClassMap.set(i, "live");
+    if (e.kind === "user") {
+      flushTurn();
+      turnStart = i;
+    } else if (e.kind === "assistant" || e.kind === "reasoning" || e.kind === "tool_group") {
+      turnWorkEntries.push(i);
     }
   }
+  flushTurn();
 
   const rendered: React.ReactNode[] = [];
   let i = 0;
@@ -470,9 +363,9 @@ function EntriesList({
             turnTokens={turnTokens}
             isStarred={starred}
             actions={{
-              onRetry: () => void onRetryEffort(),
-              onFork: () => void onFork(idx),
-              onToggleStar: () => onToggleStar(idx),
+              onRetry: onRetryEffort ? () => void onRetryEffort() : undefined,
+              onFork: onFork ? () => void onFork(idx) : undefined,
+              onToggleStar: onToggleStar ? () => onToggleStar(idx) : undefined,
             }}
             onFeedback={onFeedback ? (rating, reason) => void onFeedback(idx, rating, reason) : undefined}
           />
@@ -642,10 +535,6 @@ export function StackedChatView({
                     entries={sess.entries}
                     streaming={false}
                     isEntryStarred={() => null}
-                    onRetryEffort={onRetryEffort}
-                    onFork={onFork}
-                    onToggleStar={onToggleStar}
-                    onFeedback={undefined}
                   />
                 ) : (
                   <SessionMarker title={sess.title} sessionId={sess.id} />
