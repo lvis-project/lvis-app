@@ -1,4 +1,5 @@
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { LayoutGrid, ExternalLink, Plus, Plug } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
@@ -40,6 +41,47 @@ export function PluginGridButton({
   marketplaceUrlReady = false,
 }: PluginGridButtonProps) {
   const [open, setOpen] = useState(false);
+  // Match popover width to the chat composer's INNER input-bar and shift
+  // it left via `alignOffset` so the popover's left edge aligns with the
+  // input-bar's left edge — otherwise `align="start"` anchors at the
+  // trigger and the popover visually slides off-center to the right.
+  // ResizeObserver keeps both values in sync as the chat panel resizes.
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [popoverWidth, setPopoverWidth] = useState<number | null>(null);
+  const [alignOffset, setAlignOffset] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const triggerEl = triggerRef.current;
+    if (!triggerEl) return;
+    // Scope DOM lookup to the trigger's nearest ancestor that contains
+    // the composer — keeps this robust against multi-pane layouts where
+    // a document-global query could grab the wrong panel's composer.
+    let scope: Element | null = triggerEl.parentElement;
+    while (scope && !scope.querySelector('[data-testid="composer"]')) {
+      scope = scope.parentElement;
+    }
+    const composer = scope?.querySelector('[data-testid="composer"]') as HTMLElement | null;
+    if (!composer) return;
+    const measure = () => {
+      // Re-query the input-bar each tick by its stable testid — keeps
+      // sizing correct if the composer's children swap (warning row
+      // appearing on attach-cap, future siblings, etc.).
+      const innerBar = composer.querySelector(
+        '[data-testid="composer-input-bar"]',
+      ) as HTMLElement | null;
+      if (!innerBar) return;
+      const innerRect = innerBar.getBoundingClientRect();
+      const triggerRect = triggerEl.getBoundingClientRect();
+      setPopoverWidth(innerRect.width);
+      setAlignOffset(-(triggerRect.left - innerRect.left));
+    };
+    measure();
+    // Observe the composer wrapper itself (stable parent) so any
+    // child-swap or chip-mounted resize re-fires `measure`.
+    const ro = new ResizeObserver(measure);
+    ro.observe(composer);
+    return () => ro.disconnect();
+  }, [open]);
   const anyUnauthed = plugins.some((p) => p.unauthed);
   const tooltipLabel = anyUnauthed ? "플러그인 — 인증 필요" : "플러그인";
 
@@ -72,7 +114,8 @@ export function PluginGridButton({
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <Button
-              variant="outline"
+              ref={triggerRef}
+              variant="ghost"
               size="sm"
               className="h-7 w-7 p-0"
               aria-label="플러그인 열기"
@@ -87,10 +130,22 @@ export function PluginGridButton({
 
       <PopoverContent
         align="start"
+        alignOffset={alignOffset}
         side="top"
-        className="w-[460px] p-4"
+        className="px-4 py-3 border-0 shadow-none bg-[#CBC8C2]"
+        style={popoverWidth ? { width: popoverWidth, maxWidth: "none" } : undefined}
         data-testid="plugin-grid-popover"
       >
+        {/* Speech-bubble tail pointing back at the plugin grid trigger.
+            Positioned via Radix's auto-aligned arrow primitive — sits at
+            the popover's bottom (because side="top") and tracks the
+            trigger's center horizontally. fill matches popover bg so the
+            tail looks contiguous with the bubble. */}
+        <PopoverPrimitive.Arrow
+          width={14}
+          height={7}
+          className="fill-[#CBC8C2]"
+        />
         {isEmpty ? (
           <div className="py-6 text-center" data-testid="plugin-grid-empty">
             <div className="mb-3 flex justify-center">
@@ -119,7 +174,7 @@ export function PluginGridButton({
           </div>
         ) : (
           <div
-            className="grid grid-cols-5 gap-3 max-h-[220px] overflow-y-auto scrollbar-thin pr-1"
+            className="grid grid-cols-[repeat(auto-fill,minmax(80px,1fr))] gap-x-3 gap-y-1 max-h-[220px] overflow-y-auto scrollbar-thin pr-1"
             data-testid="plugin-grid"
           >
             {plugins.map((p) => {
@@ -132,7 +187,7 @@ export function PluginGridButton({
               return (
                 <button
                   key={p.viewKey}
-                  className={`plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2 transition-all${isInstalling ? " cell-installing cursor-default" : " hover:bg-muted hover:-translate-y-0.5"}`}
+                  className={`plugin-cell flex flex-col items-center gap-1 rounded-lg px-2 py-1 transition-all${isInstalling ? " cell-installing cursor-default" : " hover:bg-muted hover:-translate-y-0.5"}`}
                   disabled={isInstalling}
                   onClick={() => !isInstalling && handleSelect(p.viewKey)}
                   data-viewkey={p.viewKey}
@@ -143,8 +198,8 @@ export function PluginGridButton({
                   title={p.unauthed ? `${p.label} — 클릭하여 로그인` : undefined}
                 >
                   <span className="plugin-icon relative flex h-11 w-11 items-center justify-center rounded-full bg-muted">
-                    <Suspense fallback={<Plug className="h-5 w-5 opacity-30" />}>
-                      <Icon className="h-5 w-5" strokeWidth={1.6} />
+                    <Suspense fallback={<Plug className="h-7 w-7 opacity-30" />}>
+                      <Icon className="h-7 w-7" strokeWidth={1.6} />
                     </Suspense>
                     {isInstalling && (
                       <>
@@ -168,14 +223,14 @@ export function PluginGridButton({
                       </span>
                     )}
                   </span>
-                  <span className="text-[11px] truncate max-w-[64px]">{p.label}</span>
+                  <span className="text-[11px] font-bold truncate max-w-[64px]">{p.label}</span>
                 </button>
               );
             })}
 
             {/* "+" cell — open marketplace */}
             <button
-              className={`plugin-cell flex flex-col items-center gap-1.5 rounded-lg p-2${marketplaceUrlReady ? " hover:bg-muted hover:-translate-y-0.5" : " cursor-default opacity-50"}`}
+              className={`plugin-cell flex flex-col items-center gap-1 rounded-lg px-2 py-1${marketplaceUrlReady ? " hover:bg-muted hover:-translate-y-0.5" : " cursor-default opacity-50"}`}
               disabled={!marketplaceUrlReady}
               onClick={() => {
                 if (!marketplaceUrlReady) return;
