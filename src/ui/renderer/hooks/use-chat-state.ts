@@ -15,7 +15,7 @@ import {
   upsertStreamingReasoning,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
-import { detectFromStream } from "../../../engine/checkpoint-detector.js";
+import { detectFromStream } from "../../../lib/stream-markers.js";
 import type { LvisApi } from "../types.js";
 
 /**

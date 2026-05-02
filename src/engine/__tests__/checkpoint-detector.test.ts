@@ -20,11 +20,15 @@ describe("detectFromStream", () => {
     expect(result.cleanedText).toBe("답변 내용입니다.<title>불완전한 태그");
   });
 
-  it("uses the last <title> when multiple occurrences exist", () => {
+  it("uses the last <title> when multiple occurrences exist; only last is stripped", () => {
+    // The last <title> block is the LLM-generated marker — strip it.
+    // Earlier <title> blocks are treated as user-authored inline content — preserve them.
     const raw = "첫 번째<title>처음에 쓴 제목</title> 중간 내용<title>두 번째 최종 제목</title>";
     const result = detectFromStream(raw);
     expect(result.newTitle).toBe("두 번째 최종 제목");
-    expect(result.cleanedText).not.toContain("<title>");
+    // Last <title>...</title> block removed; first block (user content) preserved.
+    expect(result.cleanedText).toContain("<title>처음에 쓴 제목</title>");
+    expect(result.cleanedText).not.toContain("두 번째 최종 제목");
   });
 
   it("detects [checkpoint-suggested] marker and sets checkpointSuggested true", () => {

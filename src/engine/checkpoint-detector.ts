@@ -24,7 +24,8 @@ const TITLE_MAX = 20;
  * rawText 에서 `<title>...</title>` (마지막 occurrence) 과
  * `[checkpoint-suggested]` 를 추출하고 제거한 cleaned text 를 반환한다.
  *
- * - 다중 `<title>` 태그가 있으면 마지막 것을 사용한다.
+ * - 다중 `<title>` 태그가 있으면 마지막 것만 strip/extract 한다.
+ *   앞쪽 `<title>` 블록은 사용자가 inline으로 작성한 내용일 수 있으므로 보존.
  * - title 내용이 TITLE_MIN 미만이거나 불완전한 태그면 null.
  * - TITLE_MAX 초과 시 TITLE_MAX 자로 truncate.
  */
@@ -57,8 +58,17 @@ export function detectFromStream(rawText: string): DetectorResult {
     return { cleanedText: rawText, newTitle: null, checkpointSuggested: false };
   }
 
-  // cleaned text: 마커 발견 시에만 <title>...</title> + [checkpoint-suggested] 제거
-  let cleaned = rawText.replace(/<title>[\s\S]*?<\/title>/gi, "");
+  // cleaned text: 마지막 <title>...</title> 블록만 strip (앞쪽 블록은 사용자 콘텐츠로 보존).
+  // [checkpoint-suggested] 는 전체 텍스트에서 제거.
+  let cleaned: string;
+  if (lastMatch) {
+    // lastMatch.index + lastMatch[0].length 로 마지막 블록의 위치를 특정해 제거
+    cleaned =
+      rawText.slice(0, lastMatch.index) +
+      rawText.slice(lastMatch.index + lastMatch[0].length);
+  } else {
+    cleaned = rawText;
+  }
   cleaned = cleaned.split(CHECKPOINT_MARKER).join("");
   // 연속 공백/빈줄 정리
   cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();

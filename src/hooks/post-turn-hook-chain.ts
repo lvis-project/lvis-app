@@ -175,17 +175,18 @@ export class PostTurnHookChain {
       if (this.deps.memoryManager) {
         let titleToStore: string | null = detector.newTitle;
 
+        // Load metadata once and reuse for both chainTitle input and saveSessionMetadata.
+        const sessionMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId) ?? {};
+
         if (!titleToStore && this.deps.llmProvider) {
           // chainTitle fallback: 현재 세션 메타데이터에서 직접 제목 조회 (listSessions I/O 비용 회피)
-          const currentMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId);
-          const existingTitle = currentMeta?.title ?? `세션 ${ctx.sessionId.slice(0, 8)}`;
+          const existingTitle = sessionMeta.title ?? `세션 ${ctx.sessionId.slice(0, 8)}`;
           titleToStore = await chainTitle(this.deps.llmProvider, existingTitle, detector.cleanedText);
         }
 
         if (titleToStore) {
-          const existingMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId) ?? {};
           await this.deps.memoryManager.saveSessionMetadata(ctx.sessionId, {
-            ...existingMeta,
+            ...sessionMeta,
             title: titleToStore,
           });
           log.info(`update-title: session ${ctx.sessionId} title set to "${titleToStore}"`);

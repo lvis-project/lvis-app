@@ -2,7 +2,8 @@
  * Title Chainer — §PR-3
  *
  * 기존 세션 제목 + 이번 답변을 조합하여 LLM mini-call 로 새 제목을 생성한다.
- * max 30 tokens 제한. 결과가 10-20자 범위 밖이면 null 반환.
+ * 출력 길이는 max-tokens 설정이 아닌 결과 문자열 길이로 제어된다 (10-20자 체크).
+ * 범위 밖이면 null 반환.
  */
 
 import type { LLMProvider } from "./llm/types.js";
@@ -40,6 +41,8 @@ export async function chainTitle(
 
   try {
     const model = MINI_MODEL_BY_VENDOR[llm.vendor];
+    /** Hard cap on accumulated stream text — prevents runaway accumulation. */
+    const STREAM_CAP = 200;
     let text = "";
     for await (const ev of llm.streamTurn({
       model,
@@ -47,7 +50,10 @@ export async function chainTitle(
       messages: [{ role: "user", content: prompt }],
       tools: [],
     })) {
-      if (ev.type === "text_delta" && ev.text) text += ev.text;
+      if (ev.type === "text_delta" && ev.text) {
+        text += ev.text;
+        if (text.length >= STREAM_CAP) break;
+      }
       if (ev.type === "message_complete") break;
       if (ev.type === "error") {
         log.warn("chainTitle: LLM stream error: %s", ev.error);
