@@ -197,6 +197,16 @@ export interface PluginManifest {
    * key/value editor (back-compat).
    */
   configSchema?: PluginConfigSchema;
+  /**
+   * Optional Lucide icon name for the plugin grid UI. When present, the host
+   * dynamically looks up the named icon from `lucide-react` and renders it as
+   * a monochrome stroke icon in the plugin grid popover. Falls back to `Plug`
+   * when omitted or when the name doesn't match any Lucide export.
+   *
+   * Example values: `"Mic"`, `"FileText"`, `"Share2"`.
+   * Full list: https://lucide.dev/icons/
+   */
+  icon?: string;
 }
 
 /**
