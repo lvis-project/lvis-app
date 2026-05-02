@@ -29,6 +29,7 @@ import {
   buildCopyFilter,
   isSafePluginId,
   removeAny,
+  neutralizeLegacyInstallDirSymlink,
   // @ts-ignore — JS file, no .d.ts
 } from "../../../scripts/dev-sync-plugins.mjs";
 
@@ -49,7 +50,7 @@ describe("dev-sync-plugins — isSafePluginId", () => {
 });
 
 describe("dev-sync-plugins — buildCopyFilter", () => {
-  it("excludes electron / @electron / .bin / .git", () => {
+  it("excludes electron / @electron / .bin / .git when constructed with repo root", () => {
     const root = "/tmp/plugin";
     const filter = buildCopyFilter(root);
     expect(filter("/tmp/plugin/.git/HEAD")).toBe(false);
@@ -57,12 +58,64 @@ describe("dev-sync-plugins — buildCopyFilter", () => {
     expect(filter("/tmp/plugin/node_modules/@electron/remote/index.js")).toBe(false);
     expect(filter("/tmp/plugin/node_modules/.bin/tsc")).toBe(false);
   });
-  it("includes ordinary plugin files", () => {
+  it("includes ordinary plugin files when constructed with repo root", () => {
     const root = "/tmp/plugin";
     const filter = buildCopyFilter(root);
     expect(filter("/tmp/plugin/dist/index.js")).toBe(true);
     expect(filter("/tmp/plugin/plugin.json")).toBe(true);
     expect(filter("/tmp/plugin/node_modules/lodash/index.js")).toBe(true);
+  });
+
+  // Robustness: the filter must also work if a future caller hands it the
+  // node_modules/ directory as the source root. Earlier the filter assumed
+  // a node_modules segment somewhere in the relative path; that broke when
+  // sourceRoot was node_modules itself (the segment never appears in rel).
+  it("excludes electron / @electron / .bin when constructed with node_modules root", () => {
+    const root = "/tmp/plugin/node_modules";
+    const filter = buildCopyFilter(root);
+    expect(filter("/tmp/plugin/node_modules/electron/cli.js")).toBe(false);
+    expect(filter("/tmp/plugin/node_modules/@electron/remote/index.js")).toBe(false);
+    expect(filter("/tmp/plugin/node_modules/.bin/tsc")).toBe(false);
+    expect(filter("/tmp/plugin/node_modules/lodash/index.js")).toBe(true);
+  });
+
+  // Integration regression for Copilot review on PR #466: prove the filter
+  // actually excludes electron during a real cpSync(), not just at the
+  // unit level. We synthesize <repo>/node_modules/{electron,lodash} and
+  // run cpSync exactly as scripts/dev-sync-plugins.mjs does.
+  it("integrates with cpSync to physically skip electron during real copy", async () => {
+    const { cpSync } = await import("node:fs");
+    const repoRoot = join(
+      tmpdir(),
+      `dev-sync-cpSync-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    const nmSrc = join(repoRoot, "node_modules");
+    const nmDest = join(repoRoot, "_install", "node_modules");
+    try {
+      mkdirSync(join(nmSrc, "electron"), { recursive: true });
+      writeFileSync(join(nmSrc, "electron", "cli.js"), "// electron", "utf-8");
+      mkdirSync(join(nmSrc, "@electron", "remote"), { recursive: true });
+      writeFileSync(join(nmSrc, "@electron", "remote", "index.js"), "// @electron", "utf-8");
+      mkdirSync(join(nmSrc, ".bin"), { recursive: true });
+      writeFileSync(join(nmSrc, ".bin", "tsc"), "#!/bin/sh\n", "utf-8");
+      mkdirSync(join(nmSrc, "lodash"), { recursive: true });
+      writeFileSync(join(nmSrc, "lodash", "index.js"), "// lodash", "utf-8");
+
+      // Same call shape used by dev-sync-plugins.mjs after the fix:
+      // filter is constructed with the *repo root*, copy goes node_modules → dest.
+      cpSync(nmSrc, nmDest, {
+        recursive: true,
+        dereference: false,
+        filter: buildCopyFilter(repoRoot),
+      });
+
+      expect(existsSync(join(nmDest, "lodash", "index.js"))).toBe(true);
+      expect(existsSync(join(nmDest, "electron"))).toBe(false);
+      expect(existsSync(join(nmDest, "@electron"))).toBe(false);
+      expect(existsSync(join(nmDest, ".bin"))).toBe(false);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
   });
 });
 
@@ -107,5 +160,75 @@ describe("dev-sync-plugins — removeAny", () => {
   });
   it("is a no-op for missing paths", () => {
     expect(() => removeAny(join(tmpdir(), `nonexistent-${Math.random()}`))).not.toThrow();
+  });
+});
+
+describe("dev-sync-plugins — neutralizeLegacyInstallDirSymlink", () => {
+  // Critical safety regression for Copilot review on PR #466.
+  //
+  // Legacy layout: ~/.lvis/plugins/<id> is itself a symlink that points at
+  // the developer's workspace (e.g. ~/workspace/lvis-plugin-foo). Without a
+  // guard, the dev-sync script would call removeAny(installDir/dist) which
+  // resolves through the symlink and deletes <workspace>/dist — destroying
+  // the developer's repo contents.
+  //
+  // After the fix, neutralizeLegacyInstallDirSymlink() detects the symlink
+  // and unlinks it BEFORE any child-path mutation. The workspace target
+  // must remain pristine.
+  it("unlinks a symlinked installDir without touching the workspace target", () => {
+    const root = join(
+      tmpdir(),
+      `dev-sync-symlink-installdir-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    const workspace = join(root, "workspace", "lvis-plugin-foo");
+    const userPluginsRoot = join(root, ".lvis", "plugins");
+    const installDir = join(userPluginsRoot, "com.example.foo");
+    try {
+      // Workspace contents the developer must NOT lose
+      mkdirSync(join(workspace, "dist"), { recursive: true });
+      writeFileSync(join(workspace, "dist", "index.js"), "// real source", "utf-8");
+      writeFileSync(join(workspace, "plugin.json"), '{"id":"com.example.foo"}', "utf-8");
+      mkdirSync(userPluginsRoot, { recursive: true });
+      // Legacy: installDir IS a symlink to the workspace
+      symlinkSync(workspace, installDir, "dir");
+      expect(lstatSync(installDir).isSymbolicLink()).toBe(true);
+
+      const wasLegacy = neutralizeLegacyInstallDirSymlink(installDir);
+
+      expect(wasLegacy).toBe(true);
+      expect(existsSync(installDir)).toBe(false);
+      // Workspace must be entirely untouched.
+      expect(existsSync(join(workspace, "dist", "index.js"))).toBe(true);
+      expect(existsSync(join(workspace, "plugin.json"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false and leaves a real install directory alone", () => {
+    const root = join(
+      tmpdir(),
+      `dev-sync-real-installdir-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    const installDir = join(root, "com.example.real");
+    try {
+      mkdirSync(installDir, { recursive: true });
+      // Sibling plugin data file — must be preserved across neutralize.
+      writeFileSync(join(installDir, "data.json"), '{"k":"v"}', "utf-8");
+
+      const wasLegacy = neutralizeLegacyInstallDirSymlink(installDir);
+
+      expect(wasLegacy).toBe(false);
+      expect(existsSync(installDir)).toBe(true);
+      expect(existsSync(join(installDir, "data.json"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false for a missing path (no-op)", () => {
+    expect(
+      neutralizeLegacyInstallDirSymlink(join(tmpdir(), `nonexistent-${Math.random()}`)),
+    ).toBe(false);
   });
 });

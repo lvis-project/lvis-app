@@ -7,9 +7,25 @@ export type InstallPolicy = "admin" | "user";
  * - "admin"     — installPolicy="admin" manifest, via marketplace or installLocal
  * - "user"      — marketplace install triggered by the end user
  * - "local-dev" — installLocal (Settings UI "로컬 폴더에서 설치") with user policy, dev-mode only
- * - "dev-link"  — dev:link symlink registered by scripts/dev-link-plugins.mjs
+ * - "dev"       — entry placed by scripts/dev-sync-plugins.mjs (dev workspace
+ *                 → ~/.lvis/plugins/<id>/ real-file copy). May skip the
+ *                 install-receipt check when `devLinkedEntryAllowed()` is
+ *                 true; trust-boundary check still runs.
+ *
+ * The legacy literal `"dev-link"` (PR #430 era) and the boolean `_devLinked`
+ * field are still parsed for one-shot read back-compat (so a registry written
+ * by an older build still loads), but are NEVER written by the current code
+ * and NEVER grant a trust-bypass on their own — only `installSource: "dev"`
+ * (combined with `devLinkedEntryAllowed()`) gates the receipt-skip path.
  */
-export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev" | "dev-link";
+export type PluginRegistryEntryInstallSource =
+  | "admin"
+  | "user"
+  | "local-dev"
+  | "dev"
+  // Legacy: read-only back-compat. Treated equivalent to "dev" by snapshot
+  // building; never produced by the current dev-sync workflow.
+  | "dev-link";
 
 export interface DependencySpec {
   pluginId: string;
@@ -299,7 +315,15 @@ export interface PluginRegistryEntry {
   installedBy?: InstallPolicy;
   bundleRefs?: string[];
   approvedPluginAccess?: PluginAccessSpec;
-  /** @deprecated — use installSource === "dev-link". Kept for JSON back-compat with registries written before PR #430. */
+  /**
+   * @deprecated — legacy boolean marker for the old dev-link symlink workflow.
+   * No longer written by the current dev-sync workflow and NO LONGER honored
+   * as a trust-bypass signal anywhere in the runtime. Kept in the type
+   * solely for JSON back-compat: a registry written by an older build that
+   * carries `_devLinked: true` will still parse, but the entry will be
+   * cleaned up by the next dev-sync run (and treated as a normal entry until
+   * then — meaning it must pass the install-receipt check).
+   */
   _devLinked?: boolean;
   installSource?: PluginRegistryEntryInstallSource;
 }

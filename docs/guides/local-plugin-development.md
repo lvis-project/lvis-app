@@ -320,7 +320,13 @@ bun run dev
 
 > 플러그인 디렉토리 요건: `plugin.json` 의 `id` 가 `^[a-zA-Z0-9._-]+$` 매치, `dist/` 빌드 산출물 존재. `installPolicy: "admin"` 으로 이미 설치된 같은 id 는 덮어쓰기 거부됨.
 >
-> 복사 시 `node_modules/electron` · `node_modules/@electron/*` · `.git` 은 자동 제외됩니다 (Electron 번들 asar 가 패치된 fs 에서 "Invalid package" 로 폭사하는 사례 회피). 플러그인 런타임이 필요한 다른 npm 의존성은 그대로 복사되어 install dir 에서 import 됩니다. 같은 id 의 dev-link entry 가 registry 에 남아 있으면 `_devLinked` 플래그가 자동으로 제거되어 다음 `bun run dev` 부팅의 dev-sync cleanup 으로부터 보호됩니다. install 시점에 `plugin.json` + `dist/` 의 sha256 receipt 가 `~/.lvis/plugins/.cache/<id>/install-receipt.json` 에 기록되어 호스트 integrity 게이트(`runtime/snapshots.ts`)를 통과합니다.
+> 복사 시 `node_modules/electron` · `node_modules/@electron/*` · `.bin` · `.git` 은 자동 제외됩니다 (Electron 번들 asar 가 패치된 fs 에서 "Invalid package" 로 폭사하는 사례 회피). 플러그인 런타임이 필요한 다른 npm 의존성은 그대로 복사되어 install dir 에서 import 됩니다.
+>
+> **dev:sync 무결성 모델.** dev:sync 스크립트는 install-receipt 를 *기록하지 않습니다*. 대신 registry entry 가 `installSource: "dev"` 로 표시되고, 런타임은 `LVIS_DEV=1` + 비-패키지 빌드 (즉 `devLinkedEntryAllowed()` 가 `true`) 일 때만 dev entry 의 receipt 검증을 건너뜁니다. **trust-boundary 검사 (`isTrustedRegistryManifestPath`) 는 절대 우회되지 않으며**, 모든 dev entry 의 manifest realpath 가 `~/.lvis/plugins/` realpath 안에 포함되어야 합니다. dev:sync 가 모든 파일을 `~/.lvis/plugins/<id>/` 안으로 실제 복사하기 때문에 이 조건이 자연스럽게 충족됩니다.
+>
+> 패키지 빌드(`devLinkedEntryAllowed() === false`)에서는 dev entry 도 일반 install 과 동일하게 install-receipt 검증을 통과해야 하며, 따라서 dev entry 는 사실상 패키지 빌드에서 로드되지 않습니다.
+>
+> 같은 id 의 dev entry 가 registry 에 남아 있는 상태에서 marketplace install 또는 sideload 가 실행되면 `installSource` 가 `"user"` / `"admin"` / `"local-dev"` 로 갱신되고, 레거시 `_devLinked` 부울 플래그(있을 경우)가 자동으로 제거되어 다음 `bun run dev` 부팅의 dev:sync cleanup 으로부터 보호됩니다.
 
 ### 7-3. 마이그레이션 후 자가 진단
 

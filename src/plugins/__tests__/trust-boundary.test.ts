@@ -79,7 +79,20 @@ describe("Phase 1 — plugin trust boundary", () => {
   }
 
   async function writeRegistry(
-    entries: Array<{ id: string; manifestPath: string; installedBy?: "admin" | "user"; _devLinked?: boolean }>,
+    entries: Array<{
+      id: string;
+      manifestPath: string;
+      enabled?: boolean;
+      installedBy?: "admin" | "user";
+      installSource?:
+        | "admin"
+        | "user"
+        | "local-dev"
+        | "dev"
+        | "dev-link";
+      /** @deprecated legacy back-compat field; no longer a trust signal */
+      _devLinked?: boolean;
+    }>,
   ): Promise<void> {
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: entries }), "utf-8");
   }
@@ -227,7 +240,7 @@ describe("Phase 1 — plugin trust boundary", () => {
           await symlink(realDir, linkDir, "dir");
           const linkedManifest = join(linkDir, "plugin.json");
           await writeRegistry([
-            { id: "tb.devlink.evil.new", manifestPath: linkedManifest, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0],
+            { id: "tb.devlink.evil.new", manifestPath: linkedManifest, installSource: "dev-link" },
           ]);
 
           const runtime = new PluginRuntime({
@@ -256,7 +269,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         const pluginDir = join(pluginsRoot, "tb.devsync");
         const manifestPath = await writePluginAt(pluginDir, "tb.devsync");
         await writeRegistry([
-          { id: "tb.devsync", manifestPath, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0],
+          { id: "tb.devsync", manifestPath, installSource: "dev-link" },
         ]);
 
         const runtime = new PluginRuntime({
@@ -330,13 +343,13 @@ describe("Phase 1 — plugin trust boundary", () => {
         else process.env.LVIS_DEV = savedLvisDev;
       });
 
-      it("dev mode + _devLinked=true → loads without a receipt", async () => {
+      it("dev mode + installSource='dev' → loads without a receipt", async () => {
         process.env.LVIS_DEV = "1";
         setIsPackaged(false);
-        const pluginDir = join(pluginsRoot, "p-devlinked");
-        const manifestPath = await writePluginAt(pluginDir, "tb.devlinked");
-        // No receipt written — the skip path is the only way this can load.
-        await writeRegistry([{ id: "tb.devlinked", manifestPath, _devLinked: true }]);
+        const pluginDir = join(pluginsRoot, "p-devsync");
+        const manifestPath = await writePluginAt(pluginDir, "tb.devsync.skip");
+        // No receipt written — the dev skip path is the only way this can load.
+        await writeRegistry([{ id: "tb.devsync.skip", manifestPath, installSource: "dev" }]);
 
         const runtime = new PluginRuntime({
           hostRoot,
@@ -345,7 +358,45 @@ describe("Phase 1 — plugin trust boundary", () => {
           installReceiptCacheRoot: cacheRoot,
         });
         await runtime.load();
-        expect(runtime.listPluginIds()).toContain("tb.devlinked");
+        expect(runtime.listPluginIds()).toContain("tb.devsync.skip");
+      });
+
+      it("dev mode + legacy installSource='dev-link' → loads without a receipt (back-compat read)", async () => {
+        process.env.LVIS_DEV = "1";
+        setIsPackaged(false);
+        const pluginDir = join(pluginsRoot, "p-devlink-legacy");
+        const manifestPath = await writePluginAt(pluginDir, "tb.devlink.legacy");
+        await writeRegistry([{ id: "tb.devlink.legacy", manifestPath, installSource: "dev-link" }]);
+
+        const runtime = new PluginRuntime({
+          hostRoot,
+          registryPath,
+          pluginsRoot,
+          installReceiptCacheRoot: cacheRoot,
+        });
+        await runtime.load();
+        expect(runtime.listPluginIds()).toContain("tb.devlink.legacy");
+      });
+
+      it("dev mode + legacy `_devLinked: true` (no installSource) → REJECTED without a receipt", async () => {
+        // Regression for architect guidance: the legacy boolean
+        // `_devLinked` is no longer honored as a trust-bypass signal.
+        // Only `installSource: "dev"` (or its legacy literal "dev-link")
+        // gates the install-receipt skip path.
+        process.env.LVIS_DEV = "1";
+        setIsPackaged(false);
+        const pluginDir = join(pluginsRoot, "p-devlinked-bool-only");
+        const manifestPath = await writePluginAt(pluginDir, "tb.devlinked.bool");
+        await writeRegistry([{ id: "tb.devlinked.bool", manifestPath, _devLinked: true }]);
+
+        const runtime = new PluginRuntime({
+          hostRoot,
+          registryPath,
+          pluginsRoot,
+          installReceiptCacheRoot: cacheRoot,
+        });
+        await runtime.load();
+        expect(runtime.listPluginIds()).not.toContain("tb.devlinked.bool");
       });
 
       it("packaged + installSource='dev-link' (no _devLinked) → still rejected without a receipt", async () => {
@@ -353,7 +404,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         setIsPackaged(true);
         const pluginDir = join(pluginsRoot, "p-devlinked-new");
         const manifestPath = await writePluginAt(pluginDir, "tb.devlinked.new");
-        await writeRegistry([{ id: "tb.devlinked.new", manifestPath, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0]]);
+        await writeRegistry([{ id: "tb.devlinked.new", manifestPath, installSource: "dev-link" }]);
 
         const runtime = new PluginRuntime({
           hostRoot,
@@ -636,7 +687,7 @@ describe("Phase 1 — plugin trust boundary", () => {
       const pluginDir = join(pluginsRoot, "p-devlink-promoted");
       const manifestPath = await writePluginAt(pluginDir, "tb.devlink-promoted");
       // No receipt — the plugin loads only because dev-link skips the check.
-      await writeRegistry([{ id: "tb.devlink-promoted", manifestPath, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0]]);
+      await writeRegistry([{ id: "tb.devlink-promoted", manifestPath, installSource: "dev-link" }]);
 
       const auditCalls: Array<{ level: string; message: string }> = [];
       const runtime = new PluginRuntime({
@@ -651,7 +702,7 @@ describe("Phase 1 — plugin trust boundary", () => {
 
       // Simulate registry promotion: installSource changed to "user".
       // The stale in-memory LoadedPlugin still has devLinked=true from load time.
-      await writeRegistry([{ id: "tb.devlink-promoted", manifestPath, installSource: "user" } as Parameters<typeof writeRegistry>[0][0]]);
+      await writeRegistry([{ id: "tb.devlink-promoted", manifestPath, installSource: "user" }]);
 
       // Restart: fresh registry read must derive devLinked=false → receipt check
       // runs → no receipt present → plugin is rejected.

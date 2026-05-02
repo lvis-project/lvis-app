@@ -67,14 +67,19 @@ export class PluginUpdateDetector {
       const catalogById = new Map(catalogPlugins.map((p) => [p.id, p]));
 
       for (const entry of registry.plugins) {
-        // Dev-linked installs symlink plugin.json out to the source repo
-        // (`bun run dev:link`). The source manifest lives outside
-        // pluginsRoot, so readInstalledVersion's path-traversal guard
-        // refuses to follow the symlink — the resulting "manifestPath
-        // escapes allowed roots" warning fired on every poll. Catalog
-        // comparison is meaningless for dev-linked entries anyway: the
-        // source repo is the authoritative manifest, not the catalog.
-        if (entry.installSource === "dev-link" || entry._devLinked) continue;
+        // Dev-synced installs (`bun run dev:sync`) copy real files into
+        // pluginsRoot but should not be compared against the catalog —
+        // the source workspace is the authoritative manifest, not the
+        // marketplace catalog. Both the current marker (`"dev"`) and the
+        // legacy literal (`"dev-link"`) are skipped. The legacy
+        // `_devLinked` boolean is no longer consulted as a trust signal,
+        // but is still honored here as a benign cleanup hint so the next
+        // catalog poll on a stale registry does not produce noise.
+        if (
+          entry.installSource === "dev" ||
+          entry.installSource === "dev-link" ||
+          entry._devLinked
+        ) continue;
 
         const installedVersion = await this.readInstalledVersion(entry.manifestPath);
         if (!installedVersion) continue;

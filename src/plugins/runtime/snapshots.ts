@@ -80,7 +80,10 @@ export async function resolveManifestLoadPlan(opts: {
         manifestPath,
         enabled: entry.enabled !== false,
         approvedPluginAccess: entry.approvedPluginAccess as PluginAccessSpec | undefined,
-        devLinked: entry.installSource === "dev-link" || entry._devLinked === true,
+        // Both the current marker (`"dev"`) and the legacy literal
+        // (`"dev-link"`) are accepted; the legacy `_devLinked` boolean
+        // is intentionally NOT consulted — it never grants a trust bypass.
+        devLinked: entry.installSource === "dev" || entry.installSource === "dev-link",
       }];
     }),
   );

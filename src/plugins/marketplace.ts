@@ -809,29 +809,32 @@ export class PluginMarketplaceService {
         entry.bundleRefs = snapshot.bundleRefs;
         entry.installedBy = snapshot.installedBy;
         entry.approvedPluginAccess = snapshot.approvedPluginAccess;
-        // Restore dev-link signals only when dev-link entries are permitted
+        // Restore dev-marker signals only when dev entries are permitted
         // (non-packaged build). In a packaged build devLinkedEntryAllowed()
-        // returns false, so rollback never re-introduces the dev-link state.
-        const restoreDevLink = snapshot.installSource === "dev-link" && devLinkedEntryAllowed();
-        if (restoreDevLink) {
-          entry.installSource = "dev-link";
-          if (snapshot._devLinked === true) entry._devLinked = true;
-          else delete entry._devLinked;
-        } else if (snapshot.installSource && snapshot.installSource !== "dev-link") {
+        // returns false, so rollback never re-introduces the dev state.
+        // Both the current marker ("dev") and the legacy literal
+        // ("dev-link") are recognized; "dev-link" is normalized to "dev"
+        // on restore so the rolled-back registry uses the current marker.
+        const snapshotIsDev =
+          snapshot.installSource === "dev" || snapshot.installSource === "dev-link";
+        const restoreDev = snapshotIsDev && devLinkedEntryAllowed();
+        if (restoreDev) {
+          entry.installSource = "dev";
+          // The legacy `_devLinked` boolean is no longer a trust signal and
+          // is no longer written by the current dev-sync workflow. Always
+          // strip it on restore so rollback produces a clean entry.
+          delete entry._devLinked;
+        } else if (snapshot.installSource && !snapshotIsDev) {
           // Restore "user", "admin", or "local-dev" as-is. For "local-dev",
           // the install receipt written by installLocal remains on disk so
           // verifyInstallReceipt will still pass after rollback.
           entry.installSource = snapshot.installSource;
           delete entry._devLinked;
         } else {
-          // Legacy entry (no installSource): restore _devLinked if it was set,
-          // guarded by devLinkedEntryAllowed() so packaged builds stay clean.
+          // Legacy entry (no installSource): never re-introduce `_devLinked`
+          // — it is no longer honored as a trust-bypass signal anywhere.
           delete entry.installSource;
-          if (snapshot._devLinked === true && devLinkedEntryAllowed()) {
-            entry._devLinked = true;
-          } else {
-            delete entry._devLinked;
-          }
+          delete entry._devLinked;
         }
       }
       await writePluginRegistry(this.registryPath, registry);

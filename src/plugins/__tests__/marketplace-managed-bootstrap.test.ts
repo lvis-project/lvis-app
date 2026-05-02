@@ -555,7 +555,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             installedBy?: "admin" | "user";
             approvedPluginAccess?: unknown;
             _devLinked?: boolean;
-            installSource?: "admin" | "user" | "local-dev" | "dev-link";
+            installSource?: "admin" | "user" | "local-dev" | "dev" | "dev-link";
           }>;
         }) => Promise<void>;
       }

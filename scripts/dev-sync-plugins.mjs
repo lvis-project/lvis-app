@@ -21,14 +21,15 @@
  *   - Copies <repo>/node_modules/ → ~/.lvis/plugins/<id>/node_modules/ (filtered)
  *     (skips electron / @electron / .bin / .git — same filter
  *      as marketplace installLocal in src/plugins/sideload-filter.ts)
- *   - Registers in ~/.lvis/plugins/registry.json with `installSource: "dev-link"`.
- *     The literal "dev-link" remains the registry signal that this entry
- *     was placed by the dev-sync workflow and is allowed to skip the
+ *   - Registers in ~/.lvis/plugins/registry.json with `installSource: "dev"`.
+ *     The literal "dev" is the single registry signal that this entry was
+ *     placed by the dev-sync workflow and is allowed to skip the
  *     install-receipt check ONLY when `devLinkedEntryAllowed()` is true
  *     (dev mode + non-packaged build). The trust-boundary check still runs.
+ *     The legacy boolean `_devLinked` flag is no longer honored as a
+ *     trust-bypass signal; only `installSource: "dev"` is.
  *
- * Existing user-installed entries (no installSource="dev-link" / `_devLinked`)
- * are preserved.
+ * Existing user-installed entries (no installSource="dev") are preserved.
  *
  * Usage: node scripts/dev-sync-plugins.mjs [--dry-run]
  */
@@ -83,6 +84,15 @@ export function isSafePluginId(id) {
  * .bin symlinks) and unwanted metadata. Keeping this in sync with the TS
  * filter is important: dev-synced plugins must look the same on disk as
  * a marketplace `installLocal` would have produced.
+ *
+ * The filter is built relative to the plugin **repo root**, not the
+ * `node_modules/` directory. When `cpSync(node_modules → dest)` runs, the
+ * filter sees absolute paths under `<repo>/node_modules/...`; computing
+ * `relative(repoRoot, src)` yields `node_modules/<pkg>/...` so the check
+ * for `electron`/`@electron`/`.bin` immediately after `node_modules` works.
+ * (Earlier the filter was constructed with `nodeModulesSrc` as the root,
+ * which made the relative path start at the package name and the
+ * `node_modules` segment was never seen — exclusions silently no-op'd.)
  */
 export function buildCopyFilter(sourceRoot) {
   return (src) => {
@@ -90,11 +100,14 @@ export function buildCopyFilter(sourceRoot) {
     if (!rel) return true;
     const parts = rel.split(/[\\/]/);
     if (parts[0] === ".git") return false;
-    const nmIdx = parts.indexOf("node_modules");
-    if (nmIdx >= 0) {
-      const next = parts[nmIdx + 1];
-      if (next === "electron" || next === "@electron" || next === ".bin") return false;
-    }
+    // Two valid call shapes:
+    //   1. sourceRoot = repoRoot          → parts = ["node_modules", "<pkg>", ...]
+    //   2. sourceRoot = node_modules root → parts = ["<pkg>", ...]
+    // Handle both so the filter is robust regardless of how the caller wires it.
+    let nmIdx = parts.indexOf("node_modules");
+    let pkgIdx = nmIdx >= 0 ? nmIdx + 1 : 0;
+    const pkg = parts[pkgIdx];
+    if (pkg === "electron" || pkg === "@electron" || pkg === ".bin") return false;
     return true;
   };
 }
@@ -121,14 +134,21 @@ export function removeAny(target) {
   }
 }
 
-// Read existing registry, keep non-devLinked entries (user/marketplace-installed).
+// Read existing registry, keep non-dev entries (user/marketplace-installed).
 // Abort on parse error to avoid silently dropping user-installed entries.
 function loadExistingNonDevPlugins() {
   if (!existsSync(registryPath)) return [];
   try {
     const reg = JSON.parse(readFileSync(registryPath, "utf-8"));
     return (reg.plugins ?? []).filter(
-      (p) => p.installSource !== "dev-link" && !p._devLinked,
+      // Treat both the new single marker `installSource: "dev"` and the
+      // legacy literal `"dev-link"` as dev entries to drop on re-sync. The
+      // legacy `_devLinked` boolean is also recognized for one-shot cleanup
+      // of registries written before the rename.
+      (p) =>
+        p.installSource !== "dev" &&
+        p.installSource !== "dev-link" &&
+        !p._devLinked,
     );
   } catch (err) {
     log(
@@ -136,6 +156,30 @@ function loadExistingNonDevPlugins() {
     );
     throw err;
   }
+}
+
+/**
+ * If `installDir` itself is a symlink (legacy `~/.lvis/plugins/<id> -> <workspace>`
+ * dev-link layout), unlink the symlink so subsequent child-path deletions
+ * (`removeAny(distDest)` etc.) operate on a fresh empty install dir, NOT
+ * inside the developer's workspace. Real directories are left untouched —
+ * the caller will then call removeAny on individual children to preserve
+ * sibling artifacts (e.g. plugin data) that live alongside dist/plugin.json.
+ *
+ * Returns true when a legacy symlink was unlinked.
+ */
+export function neutralizeLegacyInstallDirSymlink(installDir) {
+  let st;
+  try {
+    st = lstatSync(installDir);
+  } catch {
+    return false;
+  }
+  if (st.isSymbolicLink()) {
+    rmSync(installDir, { force: true });
+    return true;
+  }
+  return false;
 }
 
 export function syncDevPlugins() {
@@ -208,12 +252,22 @@ export function syncDevPlugins() {
     }
 
     if (!dryRun) {
+      // CRITICAL: Before removing any *child* path under installDir, detect
+      // and unlink a legacy symlinked installDir. Without this guard, if a
+      // user is migrating from the old `~/.lvis/plugins/<id> -> <workspace>`
+      // dev-link layout, `removeAny(distDest)` would resolve through the
+      // symlink and recursively delete `<workspace>/dist`, destroying the
+      // developer's repo contents. After unlinking the symlink we recreate
+      // an empty real directory so subsequent cpSync targets a clean dir.
+      const wasLegacySymlink = neutralizeLegacyInstallDirSymlink(installDir);
+      if (wasLegacySymlink) {
+        log(`migrate: ${pluginId} unlinked legacy symlinked installDir`);
+      }
       mkdirSync(installDir, { recursive: true });
       // Wipe any pre-existing entries (legacy symlinks or stale real files) so
-      // the install path is a clean copy of the workspace artifacts. This is
-      // what makes "build → sync" deterministic and avoids the failure mode
-      // that triggered this rewrite (stale plugin.json missing tools/window
-      // fields, dist/ symlinks pointing at unbuilt workspace).
+      // the install path is a clean copy of the workspace artifacts. Only
+      // child paths the script writes are removed — sibling files such as
+      // plugin data directories under installDir are preserved.
       removeAny(manifestDest);
       removeAny(distDest);
       removeAny(nodeModulesDest);
@@ -226,7 +280,10 @@ export function syncDevPlugins() {
         cpSync(nodeModulesSrc, nodeModulesDest, {
           recursive: true,
           dereference: false,
-          filter: buildCopyFilter(nodeModulesSrc),
+          // Build the filter against the plugin **repo root** so the
+          // relative path includes the literal `node_modules` segment,
+          // making the electron/@electron/.bin exclusions actually fire.
+          filter: buildCopyFilter(pluginRepoDir),
         });
         log(`synced: ${pluginId}  node_modules/ (filtered)`);
       }
@@ -241,11 +298,14 @@ export function syncDevPlugins() {
       manifestPath: `${pluginId}/plugin.json`,
       enabled: true,
       installedBy: manifest.installPolicy === "admin" ? "admin" : "user",
-      // installSource:"dev-link" is the registry signal that the install-receipt
-      // check may be skipped — but ONLY when `devLinkedEntryAllowed()` is true
-      // (LVIS_DEV=1 + non-packaged build, see src/boot/dev-flags.ts). The
-      // trust-boundary check is NOT bypassed by this flag in any build.
-      installSource: "dev-link",
+      // installSource:"dev" is the single registry signal that the
+      // install-receipt check may be skipped — but ONLY when
+      // `devLinkedEntryAllowed()` is true (LVIS_DEV=1 + non-packaged build,
+      // see src/boot/dev-flags.ts). The trust-boundary check is NOT
+      // bypassed by this flag in any build. The legacy `_devLinked`
+      // boolean is no longer written and is no longer honored as a
+      // trust-bypass signal anywhere in the runtime.
+      installSource: "dev",
       ...(manifest.pluginAccess
         ? { approvedPluginAccess: manifest.pluginAccess }
         : {}),
