@@ -148,8 +148,14 @@ describe("StackedChatView empty state", () => {
 });
 
 // ─── 7. Scroll sentinel ───────────────────────────────────────────────────────
+// PR #480 disabled `HomeChatPane → StackedChatView` routing while keeping
+// the component itself in the tree for future completion. The two
+// `experimentalStackedChat: true` tests in §7 + §7b assert StackedChatView-only
+// DOM (`scroll-sentinel`, `chat-end-anchor`) which no longer renders, so
+// they're skipped until the feature is re-enabled. Cleanup follow-up to
+// #480 / #477.
 describe("StackedChatView scroll sentinel", () => {
-  it("renders scroll sentinel when stacked view is active", async () => {
+  it.skip("renders scroll sentinel when stacked view is active (skipped — feature disabled per #480)", async () => {
     const mockSettings = {
       llm: {
         provider: "openai",
@@ -180,7 +186,7 @@ describe("StackedChatView scroll sentinel", () => {
 
 // ─── 7b. Chat-end scroll anchor ──────────────────────────────────────────────
 describe("StackedChatView scroll-to-bottom anchor", () => {
-  it("renders chat-end anchor when stacked view is active", async () => {
+  it.skip("renders chat-end anchor when stacked view is active (skipped — feature disabled per #480)", async () => {
     const mockSettings = {
       llm: {
         provider: "openai",
