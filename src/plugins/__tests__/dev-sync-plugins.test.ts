@@ -29,6 +29,7 @@ import { join } from "node:path";
 import {
   buildCopyFilter,
   buildDevRegistryEntry,
+  buildUpdatedRegistryDocument,
   copyManifestEntryFromContainedSource,
   copyFileAsRealFile,
   countEntries,
@@ -48,6 +49,11 @@ describe("dev-sync-plugins — isSafePluginId", () => {
     expect(isSafePluginId("ms_graph")).toBe(true);
     expect(isSafePluginId("pageindex")).toBe(true);
     expect(isSafePluginId("com.lge.sample_v2")).toBe(true);
+    expect(isSafePluginId("9plugin")).toBe(true);
+    expect(isSafePluginId("agent..hub")).toBe(true);
+    expect(isSafePluginId("agent--hub")).toBe(true);
+    expect(isSafePluginId("agent__hub")).toBe(true);
+    expect(isSafePluginId("agent-hub.")).toBe(true);
   });
   it("rejects path-traversal, separators, and blank/ambiguous ids", () => {
     expect(isSafePluginId(".")).toBe(false);
@@ -59,8 +65,6 @@ describe("dev-sync-plugins — isSafePluginId", () => {
     expect(isSafePluginId("with space")).toBe(false);
     expect(isSafePluginId("   ")).toBe(false);
     expect(isSafePluginId("")).toBe(false);
-    expect(isSafePluginId("agent..hub")).toBe(false);
-    expect(isSafePluginId("agent-hub.")).toBe(false);
     expect(isSafePluginId(undefined as unknown as string)).toBe(false);
   });
 });
@@ -68,14 +72,18 @@ describe("dev-sync-plugins — isSafePluginId", () => {
 describe("dev-sync-plugins — isSafeRelativeManifestEntry", () => {
   it("accepts ordinary relative entry paths", () => {
     expect(isSafeRelativeManifestEntry("dist/index.js")).toBe(true);
-    expect(isSafeRelativeManifestEntry("./dist/index.js")).toBe(true);
-    expect(isSafeRelativeManifestEntry("dist\\index.js")).toBe(true);
+    expect(isSafeRelativeManifestEntry("dist/nested/index.js")).toBe(true);
+    expect(isSafeRelativeManifestEntry("dist")).toBe(true);
   });
 
-  it("rejects absolute and escaping manifest.entry paths", () => {
+  it("rejects absolute, dot-segment, and escaping manifest.entry paths", () => {
     expect(isSafeRelativeManifestEntry("")).toBe(false);
     expect(isSafeRelativeManifestEntry("   ")).toBe(false);
     expect(isSafeRelativeManifestEntry("/abs/index.js")).toBe(false);
+    expect(isSafeRelativeManifestEntry("./dist/index.js")).toBe(false);
+    expect(isSafeRelativeManifestEntry("dist/./index.js")).toBe(false);
+    expect(isSafeRelativeManifestEntry("dist//index.js")).toBe(false);
+    expect(isSafeRelativeManifestEntry("dist\\index.js")).toBe(false);
     expect(isSafeRelativeManifestEntry("\\\\server\\share\\index.js")).toBe(false);
     expect(isSafeRelativeManifestEntry("C:\\\\plugin\\\\index.js")).toBe(false);
     expect(isSafeRelativeManifestEntry("../dist/index.js")).toBe(false);
@@ -94,6 +102,15 @@ describe("dev-sync-plugins — resolveContainedManifestEntry", () => {
 
   it("rejects traversal manifest.entry paths", () => {
     expect(resolveContainedManifestEntry(pluginRepoDir, "../dist/index.js")).toBeNull();
+  });
+
+  it("rejects dot-segment manifest.entry paths before resolution", () => {
+    expect(resolveContainedManifestEntry(pluginRepoDir, "./dist/index.js")).toBeNull();
+    expect(resolveContainedManifestEntry(pluginRepoDir, "dist/./index.js")).toBeNull();
+  });
+
+  it("rejects backslash-separated manifest.entry paths before resolution", () => {
+    expect(resolveContainedManifestEntry(pluginRepoDir, "dist\\index.js")).toBeNull();
   });
 
   it("rejects Windows drive manifest.entry paths", () => {
@@ -276,6 +293,35 @@ describe("dev-sync-plugins — registry helpers", () => {
       manifestPath: "calendar/plugin.json",
       installSource: "user",
       enabled: true,
+    });
+  });
+
+  it("preserves existing registry version and metadata when rewriting plugins", () => {
+    expect(
+      buildUpdatedRegistryDocument(
+        {
+          version: 7,
+          updatedAt: "2026-05-02T00:00:00.000Z",
+          plugins: [{ id: "old-dev", manifestPath: "old-dev/plugin.json", installSource: "dev" }],
+        },
+        [{ id: "user-plugin", manifestPath: "user-plugin/plugin.json", installSource: "user" }],
+      ),
+    ).toEqual({
+      version: 7,
+      updatedAt: "2026-05-02T00:00:00.000Z",
+      plugins: [{ id: "user-plugin", manifestPath: "user-plugin/plugin.json", installSource: "user" }],
+    });
+  });
+
+  it("defaults missing registry version to 1 when creating a rewritten document", () => {
+    expect(
+      buildUpdatedRegistryDocument(
+        { plugins: [{ id: "stale", manifestPath: "stale/plugin.json" }] },
+        [{ id: "fresh", manifestPath: "fresh/plugin.json", installSource: "dev" }],
+      ),
+    ).toEqual({
+      version: 1,
+      plugins: [{ id: "fresh", manifestPath: "fresh/plugin.json", installSource: "dev" }],
     });
   });
 });

@@ -48,6 +48,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,9 +69,27 @@ const disabledPluginIds = (process.env.LVIS_DEV_DISABLED_PLUGINS ?? "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+const requireFromHere = createRequire(import.meta.url);
+const FALLBACK_SAFE_PLUGIN_ID_RE = /^[A-Za-z0-9._-]+$/;
+const manifestSchemaPluginIdPattern = loadManifestSchemaPluginIdPattern();
 
 function log(msg) {
   console.log(`[dev:sync] ${msg}`);
+}
+
+function loadManifestSchemaPluginIdPattern() {
+  try {
+    const schemaPath = requireFromHere.resolve(
+      "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
+    );
+    const schema = JSON.parse(readFileSync(schemaPath, "utf-8"));
+    const rawPattern = schema?.properties?.id?.pattern;
+    return typeof rawPattern === "string" && rawPattern.length > 0
+      ? new RegExp(rawPattern)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Validate that pluginId is a safe directory name (no path traversal). */
@@ -78,11 +97,15 @@ export function isSafePluginId(id) {
   if (typeof id !== "string") return false;
   // Registry/install paths are derived directly from pluginId, so require a
   // canonical single-line token: no empty/trimmed variants, no "."/"..", no
-  // path separators, and only the separators used by existing plugin ids.
+  // path separators. When the SDK schema declares an explicit id pattern, use
+  // it directly so dev-sync stays aligned with manifest validation. Until
+  // then, match installLocal's safe-directory character set; consecutive
+  // separators are allowed because they are valid single path segments.
   if (id !== id.trim() || id.length === 0) return false;
   if (id === "." || id === "..") return false;
   if (/[\\/]/.test(id)) return false;
-  return /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/.test(id);
+  const idPattern = manifestSchemaPluginIdPattern ?? FALLBACK_SAFE_PLUGIN_ID_RE;
+  return idPattern.test(id);
 }
 
 /**
@@ -93,16 +116,18 @@ export function isSafePluginId(id) {
 export function isSafeRelativeManifestEntry(entry) {
   if (typeof entry !== "string") return false;
   if (entry !== entry.trim() || entry.length === 0) return false;
+  // This dev script runs on macOS/POSIX; reject Windows-style separators
+  // instead of silently normalizing them into a different path shape.
+  if (entry.includes("\\")) return false;
   // Reject both platform-native absolutes and obvious cross-platform forms.
   // Drive-letter prefixes (including Windows drive-relative `C:foo`) and UNC
   // forms are never valid plugin-relative entry paths.
-  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("\\") || /^[A-Za-z]:/.test(entry)) {
+  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("//") || /^[A-Za-z]:/.test(entry)) {
     return false;
   }
-  const parts = entry.split(/[\\/]+/).filter(Boolean);
+  const parts = entry.split("/");
   if (parts.length === 0) return false;
-  if (parts.every((part) => part === ".")) return false;
-  return !parts.includes("..");
+  return parts.every((part) => part.length > 0 && part !== "." && part !== "..");
 }
 
 export function isContainedPath(root, target) {
@@ -199,15 +224,38 @@ export function normalizePreservedNonDevRegistryEntry(entry) {
   return preserved;
 }
 
+export function buildUpdatedRegistryDocument(existingRegistry, plugins) {
+  const base =
+    existingRegistry && typeof existingRegistry === "object" && !Array.isArray(existingRegistry)
+      ? { ...existingRegistry }
+      : {};
+  // Preserve any future top-level registry metadata and keep the existing
+  // schema version instead of hard-stamping `1` on every dev-sync rewrite.
+  const version = Number.isInteger(base.version) ? base.version : 1;
+  return {
+    ...base,
+    version,
+    plugins,
+  };
+}
+
 // Read existing registry, keep non-dev entries (user/marketplace-installed).
 // Abort on parse error to avoid silently dropping user-installed entries.
-export function loadExistingNonDevPlugins() {
-  if (!existsSync(registryPath)) return [];
+export function loadExistingRegistryState() {
+  if (!existsSync(registryPath)) {
+    return {
+      registryDocument: { version: 1, plugins: [] },
+      existingPlugins: [],
+    };
+  }
   try {
     const reg = JSON.parse(readFileSync(registryPath, "utf-8"));
-    return (reg.plugins ?? [])
-      .map((entry) => normalizePreservedNonDevRegistryEntry(entry))
-      .filter(Boolean);
+    return {
+      registryDocument: reg,
+      existingPlugins: (reg.plugins ?? [])
+        .map((entry) => normalizePreservedNonDevRegistryEntry(entry))
+        .filter(Boolean),
+    };
   } catch (err) {
     log(
       `error: failed to read or parse registry at ${registryPath} — aborting to avoid data loss`,
@@ -290,7 +338,7 @@ export function copyManifestEntryFromContainedSource(src, dest) {
 }
 
 export function syncDevPlugins() {
-  const existingPlugins = loadExistingNonDevPlugins();
+  const { registryDocument, existingPlugins } = loadExistingRegistryState();
   const devPlugins = [];
   const repos = readdirSync(workspaceRoot, { withFileTypes: true }).filter(
     (e) => e.isDirectory() && e.name.startsWith("lvis-plugin-"),
@@ -426,7 +474,7 @@ export function syncDevPlugins() {
     writeFileSync(
       registryPath,
       JSON.stringify(
-        { version: 1, plugins: [...existingPlugins, ...devPlugins] },
+        buildUpdatedRegistryDocument(registryDocument, [...existingPlugins, ...devPlugins]),
         null,
         2,
       ) + "\n",
