@@ -68,6 +68,13 @@ export interface AskUserQuestionRequest {
 
 interface DraftAnswer {
   choice?: string;
+  /**
+   * Index in the question's `choices` array of the selected chip. Carried
+   * alongside `choice` so the UI can disambiguate duplicate choice labels —
+   * comparing selection by string would visually mark every same-label
+   * chip as selected at once.
+   */
+  choiceIndex?: number;
   freeText?: string;
 }
 
@@ -218,8 +225,8 @@ export function AskUserQuestionCard({
             item={currentItem}
             draft={currentDraft}
             disabled={submitting}
-            onChoose={(choice) => {
-              setAnswer(step, { choice });
+            onChoose={(choice, choiceIndex) => {
+              setAnswer(step, { choice, choiceIndex });
               if (!isMulti) {
                 void respondAndClose({ answers: [{ choice }] });
               }
@@ -324,7 +331,7 @@ function QuestionForm({
   item: AskUserQuestionItem;
   draft: DraftAnswer;
   disabled: boolean;
-  onChoose: (choice: string) => void;
+  onChoose: (choice: string, choiceIndex: number) => void;
   onFreeText: (text: string) => void;
 }) {
   const choices = effectiveChoices(item);
@@ -334,27 +341,27 @@ function QuestionForm({
     <>
       <div
         className="whitespace-pre-wrap text-[13px]"
-        data-testid="fqp-question-text"
+        data-testid="ask-question-text"
       >
         {item.question}
       </div>
       {choices.length > 0 && (
         <div className="flex flex-col gap-1">
           {choices.map((c, i) => {
-            const selected = draft.choice === c;
+            // Selection compares by index, not by label — duplicate
+            // choice strings would otherwise mark every same-label chip
+            // as selected at once. The index-prefixed React key below is
+            // the same defense applied to reconciliation.
+            const selected = draft.choiceIndex === i;
             const showRecommend = recommend === i;
             const showAlt = alts.has(i);
             return (
               <Button
-                // Index-prefixed key — using `c` alone would collide if the
-                // model emits duplicate choice strings (or legacy
-                // `suggestedAnswers` carries duplicates), and React would
-                // reconcile state across the wrong rows.
                 key={`${i}:${c}`}
                 size="sm"
                 variant={selected ? "default" : "outline"}
                 disabled={disabled}
-                onClick={() => onChoose(c)}
+                onClick={() => onChoose(c, i)}
                 className="h-auto justify-start gap-2 px-2.5 py-1.5 text-[12px]"
               >
                 {showRecommend && <ChoiceBadge kind="recommend" />}

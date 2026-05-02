@@ -65,18 +65,21 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
               recommendedIndex: {
                 type: "integer",
                 minimum: 0,
+                maximum: 2,
                 description:
-                  "choices 중 모델이 가장 권장하는 항목의 인덱스. " +
+                  "choices 중 모델이 가장 권장하는 항목의 인덱스 (0~2, choices 가 최대 3개이므로). " +
                   "컨텍스트로 명확히 한 답에 weight 가 있을 때만 0개 또는 1개 항목에 부여. " +
-                  "사용자의 사적/외부 사실(거주지·취향 등)이 답이면 비워두세요.",
+                  "사용자의 사적/외부 사실(거주지·취향 등)이 답이면 비워두세요. " +
+                  "choices 길이를 벗어난 값은 런타임에서 무시됩니다.",
               },
               altIndices: {
                 type: "array",
-                items: { type: "integer", minimum: 0 },
+                maxItems: 3,
+                items: { type: "integer", minimum: 0, maximum: 2 },
                 description:
-                  "choices 중 보조 권장 항목의 인덱스 배열 (0~N). " +
+                  "choices 중 보조 권장 항목의 인덱스 배열 (0~N, choices 길이까지). " +
                   "UI 가 칩 앞쪽에 회색 '대안' 배지를 자동 부착합니다. " +
-                  "recommendedIndex 와 중복되는 값은 무시됩니다.",
+                  "recommendedIndex 와 중복되거나 choices 길이를 벗어난 값은 런타임에서 무시됩니다.",
               },
               allowFreeText: {
                 type: "boolean",
