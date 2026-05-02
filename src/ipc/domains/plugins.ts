@@ -4,7 +4,7 @@
  *         lvis:mcp:*, lvis:plugin:* (webview bridge), lvis:pageindex:*,
  *         lvis:notification:clicked
  */
-import { app, dialog, ipcMain } from "electron";
+import { app, dialog, ipcMain, webContents } from "electron";
 import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -723,6 +723,25 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
+  });
+
+  // ─── Theme propagation ─────────────────────────────────────────────────
+  // Host renderer calls this when any theme axis changes; main fans out to
+  // every registered plugin webview via the existing lvis:plugin:event channel.
+  ipcMain.handle("lvis:host:plugin-theme-notify", (e, payload: unknown) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:host:plugin-theme-notify", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    for (const [wcId] of pluginWebviewRegistry) {
+      try {
+        const wc = webContents.fromId(wcId);
+        if (wc && !wc.isDestroyed()) {
+          wc.send("lvis:plugin:event", "host.theme.changed", payload);
+        }
+      } catch { /* webview destroyed between registry read and send */ }
+    }
+    return { ok: true };
   });
 
   // ─── PageIndex ──────────────────────────────────────────────────────────

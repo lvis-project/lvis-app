@@ -99,6 +99,12 @@ export function ThemeProvider({
     return () => { cancelled = true; };
   }, [api]);
 
+  // Propagate theme to plugin webviews whenever any axis changes.
+  useEffect(() => {
+    if (!api) return;
+    void api.notifyPluginTheme({ theme: resolved, chatTheme, codeTheme: resolvedCodeTheme }).catch(() => {});
+  }, [api, resolved, chatTheme, resolvedCodeTheme]);
+
   // Apply shell theme to the DOM whenever the resolved theme changes. Wrapped
   // in an effect so SSR / non-DOM unit tests can render without crashing.
   useEffect(() => {
