@@ -86,7 +86,7 @@ describe("PluginGridButton v3", () => {
     const onSelect = vi.fn();
     renderGrid(plugins, { onSelect });
     fireEvent.click(screen.getByTestId("plugin-grid-button"));
-    fireEvent.click(screen.getByTestId("plugin-cell-test-0"));
+    fireEvent.click(screen.getByTestId("plugin-cell-plugin-test-0-main"));
     expect(onSelect).toHaveBeenCalledWith("plugin:test-0:main");
   });
 
@@ -95,12 +95,12 @@ describe("PluginGridButton v3", () => {
     const installingPlugins = new Map<string, InstallPhase>([["test-1", "restarting"]]);
     renderGrid(plugins, { installingPlugins });
     fireEvent.click(screen.getByTestId("plugin-grid-button"));
-    const installingCell = screen.getByTestId("plugin-cell-test-1");
+    const installingCell = screen.getByTestId("plugin-cell-plugin-test-1-main");
     expect(installingCell).toHaveAttribute("aria-busy", "true");
     expect(installingCell.className).toContain("cell-installing");
     expect(installingCell.className).toContain("cursor-default");
     // Phase label sits inside the spinner ring.
-    expect(screen.getByTestId("plugin-cell-test-1-phase").textContent).toBe("재시작");
+    expect(screen.getByTestId("plugin-cell-plugin-test-1-main-phase").textContent).toBe("재시작");
   });
 
   it("disables click on installing plugin cells", () => {
@@ -109,7 +109,7 @@ describe("PluginGridButton v3", () => {
     const installingPlugins = new Map<string, InstallPhase>([["test-1", "restarting"]]);
     renderGrid(plugins, { onSelect, installingPlugins });
     fireEvent.click(screen.getByTestId("plugin-grid-button"));
-    fireEvent.click(screen.getByTestId("plugin-cell-test-1"));
+    fireEvent.click(screen.getByTestId("plugin-cell-plugin-test-1-main"));
     expect(onSelect).not.toHaveBeenCalledWith("plugin:test-1:main");
   });
 
@@ -140,7 +140,7 @@ describe("PluginGridButton v3", () => {
     renderGrid(plugins, { installingPlugins });
     fireEvent.click(screen.getByTestId("plugin-grid-button"));
     // Registered cell exists; no duplicate placeholder cell.
-    expect(screen.getByTestId("plugin-cell-test-0")).toBeInTheDocument();
+    expect(screen.getByTestId("plugin-cell-plugin-test-0-main")).toBeInTheDocument();
     expect(screen.queryByTestId("plugin-cell-installing-test-0")).not.toBeInTheDocument();
   });
 

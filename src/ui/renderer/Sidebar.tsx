@@ -1,10 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { Button } from "../../components/ui/button.js";
-import type { PluginUiExtension } from "./types.js";
 
 export interface SidebarProps {
   activeView: string;
-  pluginViews: PluginUiExtension[];
   setActiveView: (key: string) => void;
   starredCount: number;
 }

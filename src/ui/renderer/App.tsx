@@ -551,7 +551,6 @@ export function App() {
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Sidebar
             activeView={activeView}
-            pluginViews={pluginViews}
             setActiveView={handleSidebarSelect}
             starredCount={starred.length}
           />

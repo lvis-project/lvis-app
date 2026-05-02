@@ -42,7 +42,7 @@ interface PluginGridButtonProps {
    */
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onSelect: (viewKey: string) => void;
-  /** Called when the user clicks the "+" cell or the empty-state CTA. */
+  /** Called when the user clicks the marketplace cell or the empty-state CTA. */
   onOpenMarketplace: () => void;
   /** `true` once the marketplace URL has finished loading and is non-empty; false while loading or when settings provided no URL. */
   marketplaceUrlReady?: boolean;
@@ -205,7 +205,11 @@ export function PluginGridButton({
             {plugins.map((p) => {
               // Use explicit pluginId from PluginEntry when available; fall back
               // to deriving from viewKey for cases where the caller omits it.
+              // pluginId drives the install-phase lookup; viewKey drives the
+              // testid so a single plugin exposing multiple sidebar UI
+              // extensions still gets unique cells.
               const pluginId = p.pluginId ?? p.viewKey.split(":")[1] ?? "";
+              const cellTestId = p.viewKey.replace(/:/g, "-");
               const phase = installingPlugins?.get(pluginId);
               const isInstalling = phase !== undefined;
               const Icon = pluginIconFor({ icon: p.icon });
@@ -217,7 +221,7 @@ export function PluginGridButton({
                   disabled={isInstalling}
                   onClick={() => !isInstalling && handleSelect(p.viewKey)}
                   data-viewkey={p.viewKey}
-                  data-testid={`plugin-cell-${pluginId}`}
+                  data-testid={`plugin-cell-${cellTestId}`}
                   data-unauthed={p.unauthed ? "true" : undefined}
                   aria-busy={isInstalling}
                   aria-describedby={p.unauthed ? `${p.viewKey}-unauthed` : undefined}
@@ -245,7 +249,7 @@ export function PluginGridButton({
                         />
                         <span
                           className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-foreground leading-none z-10 pointer-events-none"
-                          data-testid={`plugin-cell-${pluginId}-phase`}
+                          data-testid={`plugin-cell-${cellTestId}-phase`}
                         >
                           {PHASE_LABEL[phase]}
                         </span>
