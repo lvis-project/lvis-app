@@ -127,7 +127,7 @@ interface PluginManifest {
 #### id
 
 - 플러그인 패키지 식별자. **시스템이 플러그인을 추적하는 유일한 키**.
-- 현재 출시된 플러그인은 모두 flat 형식 (`meeting`, `pageindex`, `email`, `calendar`).
+- 현재 출시된 플러그인은 모두 flat 형식 (`meeting`, `local-indexer`, `email`, `calendar`).
 - 도트 형식 (`com.ep.meeting-recorder`) 도 허용되지만 **필수 아님**.
 - UI 슬롯 ID, 이벤트 네임스페이스의 프리픽스로 사용 가능.
 - ⚠️ **LLM tool name 과 별개** — `id` 에 도트가 있어도 `tools[]` 는 언더스코어만 허용.
@@ -531,8 +531,8 @@ capability 는 호스트가 특정 pluginId 를 몰라도 통합 지점을 결�
 | `mail-source` | 이메일 소스 연결 | advisory | email |
 | `calendar-source` | 캘린더 소스 연결 | advisory | calendar |
 | `background-watcher` | `startupTools` 로 폴러/워처 기동 | advisory | email, calendar |
-| `worker-client` | 외부 프로세스(Python 등) 워커 래퍼 | advisory | pageindex |
-| `knowledge-index` | 문서 인덱스/검색 제공 | advisory | pageindex |
+| `worker-client` | 외부 프로세스(Python 등) 워커 래퍼 | advisory | local-indexer |
+| `knowledge-index` | 문서 인덱스/검색 제공 | advisory | local-indexer |
 | `ms-graph-consumer` | HostApi 의 MS Graph 메서드 사용 | **강제** (§B-5) | email, calendar |
 
 현재 **런타임이 강제하는 capability 는 `ms-graph-consumer` 하나뿐**입니다. 미선언 플러그인이 `getMsGraphToken` / `startMsGraphAuth` / `isMsGraphAuthenticated` / `getMsGraphAccount` 중 하나라도 호출하면 `capability not declared: ms-graph-consumer` 예외가 발생합니다.
@@ -709,7 +709,7 @@ lvis-app/plugins/installed/{plugin-id}/
   "plugins": [
     { "id": "meeting",   "manifestPath": "plugins/installed/meeting/plugin.json",   "enabled": true },
     { "id": "ms-graph",  "manifestPath": "plugins/installed/ms-graph/plugin.json",  "enabled": true },
-    { "id": "pageindex", "manifestPath": "plugins/installed/pageindex/plugin.json", "enabled": true }
+    { "id": "local-indexer", "manifestPath": "plugins/installed/local-indexer/plugin.json", "enabled": true }
   ]
 }
 ```
@@ -733,7 +733,7 @@ Meeting / Microsoft 365 (Outlook 메일+캘린더) / PageIndex 의 실제 플러
 
 - `lvis-plugin-meeting`
 - `lvis-plugin-ms-graph` (구 `lvis-plugin-email` + `lvis-plugin-calendar` 통합)
-- `lvis-plugin-pageindex`
+- `lvis-plugin-local-indexer`
 
 각 저장소의 `src/hostPlugin.ts` 를 현행 HostApi 사용 패턴 레퍼런스로 삼으세요.
 

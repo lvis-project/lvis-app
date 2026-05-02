@@ -3418,12 +3418,12 @@ interface FeedbackEntry {
 
 **파일**: `src/ui/renderer/components/DropZoneOverlay.tsx`
 
-Electron 윈도우 전체에 드래그 앤 드롭 오버레이를 제공한다. 파일을 드롭하면 `document-indexer` capability를 가진 플러그인(PageIndex)에 경로를 전달하여 즉시 인덱싱한다.
+Electron 윈도우 전체에 드래그 앤 드롭 오버레이를 제공한다. 파일을 드롭하면 `document-indexer` capability를 가진 플러그인에 경로를 전달하여 즉시 인덱싱한다.
 
 **동작 흐름**:
 1. `dragenter` 이벤트에서 `dataTransfer.types.includes("Files")` 확인 → 파일 드래그일 때만 오버레이 표시
 2. Electron 렌더러의 `File.path` 비표준 속성으로 절대 경로 추출
-3. `window.lvisApi.pageindexScanPaths(paths)` → IPC → `document-indexer` capability 플러그인
+3. `window.lvisApi.fileScanPaths(paths)` → `lvis:file:scan-paths` IPC → `document-indexer` capability 플러그인
 4. 결과(`indexed`, `failed`)를 토스트로 표시 (3초 후 자동 소멸)
 
 **설계 제약**:

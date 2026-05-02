@@ -101,8 +101,8 @@ export interface PluginManifest {
    * - `mail-source` — 이메일 소스 연결 (email)
    * - `calendar-source` — 캘린더 소스 연결 (calendar)
    * - `background-watcher` — `startupTools` 로 백그라운드 폴러/감시자 기동 (ms-graph)
-   * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼 (pageindex)
-   * - `knowledge-index` — 문서 인덱스/검색 기능 제공 (pageindex)
+   * - `worker-client` — 외부 프로세스(Python 등) 워커 래퍼 (local-indexer)
+   * - `knowledge-index` — 문서 인덱스/검색 기능 제공 (local-indexer)
    * - `ms-graph-consumer` — Microsoft Graph 를 사용하는 플러그인의 자기-식별
    *   라벨 (advisory). PR 3 이후 host 측 MS Graph HostApi 메서드는 모두 제거되어
    *   강제할 게이트가 없음 — ms-graph 플러그인이 자체 MSAL + safeStorage 로
