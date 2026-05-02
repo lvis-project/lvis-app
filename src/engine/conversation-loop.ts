@@ -1166,11 +1166,16 @@ export class ConversationLoop {
       : 0;
 
     const messages = this.history.getMessages();
+    const features = this.deps.settingsService.get("features");
+    const continuousBackendEnabled = features?.experimentalContinuousBackend ?? false;
+    const devMode = process.env.LVIS_DEV === "1";
     const decision = decideRotation({
       ctxUsage,
       sessionAgeMs: Date.now() - this.sessionStartedAt,
       messageCount: messages.length,
       semanticHint: lastAssistantText.includes("[checkpoint-suggested]"),
+      continuousBackendEnabled,
+      devMode,
     });
 
     if (!decision.shouldRotate) return;

@@ -188,18 +188,29 @@ export interface RotationDecision {
  * Tier 2 (semantic-llm): LLM이 [checkpoint-suggested] 마커 삽입 → rotation, 요약은 ctxUsage 판단
  * Tier 3 (soft-time): 24h 경과 OR 30개 메시지 → rotation, 요약은 ctxUsage 판단
  *
- * @param args.ctxUsage      0.0–1.0 컨텍스트 사용률
- * @param args.sessionAgeMs  세션 시작 이후 경과 ms
- * @param args.messageCount  현재 세션의 메시지 수
- * @param args.semanticHint  [checkpoint-suggested] 마커 발견 여부
+ * @param args.ctxUsage        0.0–1.0 컨텍스트 사용률
+ * @param args.sessionAgeMs    세션 시작 이후 경과 ms
+ * @param args.messageCount    현재 세션의 메시지 수
+ * @param args.semanticHint    [checkpoint-suggested] 마커 발견 여부
+ * @param args.continuousBackendEnabled  Safety gate: when false, always returns { shouldRotate: false }.
+ * @param args.devMode         Developer mode: reduces soft-time threshold to 1h / 5 messages for easier testing.
  */
 export function decideRotation(args: {
   ctxUsage: number;
   sessionAgeMs: number;
   messageCount: number;
   semanticHint: boolean;
+  continuousBackendEnabled?: boolean;
+  devMode?: boolean;
 }): RotationDecision {
   const { ctxUsage, sessionAgeMs, messageCount, semanticHint } = args;
+  const continuousBackendEnabled = args.continuousBackendEnabled ?? true;
+  const devMode = args.devMode ?? false;
+
+  // Safety gate: when experimentalContinuousBackend is OFF, rotation is disabled.
+  if (!continuousBackendEnabled) {
+    return { shouldRotate: false, shouldSkipSummary: false };
+  }
 
   // Tier 1: hard-token (85% 이상 → 즉시 rotation, 요약 항상 생성)
   if (ctxUsage >= 0.85) {
@@ -211,9 +222,12 @@ export function decideRotation(args: {
     return { shouldRotate: true, trigger: "semantic-llm", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
   }
 
-  // Tier 3: soft-time (24h 또는 30 메시지)
-  const DAY_MS = 24 * 60 * 60 * 1_000;
-  if (sessionAgeMs >= DAY_MS || messageCount >= 30) {
+  // Tier 3: soft-time
+  // devMode: 1h / 5 messages (낮은 threshold — 테스트 편의)
+  // prod: 24h / 30 messages
+  const dayMs = devMode ? 60 * 60 * 1_000 : 24 * 60 * 60 * 1_000;
+  const msgThreshold = devMode ? 5 : 30;
+  if (sessionAgeMs >= dayMs || messageCount >= msgThreshold) {
     return { shouldRotate: true, trigger: "soft-time", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
   }
 
