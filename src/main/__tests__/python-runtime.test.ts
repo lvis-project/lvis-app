@@ -193,7 +193,7 @@ describe("PythonRuntimeBootstrapper", () => {
     const manifestPath = "/installed/local-indexer/plugin.json";
     const declaredLockFilePath = "/installed/local-indexer/requirements/python.lock";
     mockedReadFile.mockResolvedValueOnce(JSON.stringify({
-      runtime: { python: { requirementsLock: "requirements/python.lock" } },
+      python: { managedBy: "lvis-app", requirementsLock: "requirements/python.lock" },
     }));
     mockedAccess
       .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" })) // sentinel 없음
@@ -213,6 +213,59 @@ describe("PythonRuntimeBootstrapper", () => {
     );
     expect(pipSyncCall).toBeDefined();
     expect(pipSyncCall![1] as string[]).toContain(declaredLockFilePath);
+  });
+
+  it("registry discovery ignores Python lockfiles from non-document-indexer plugins", async () => {
+    const registryPath = "/registry/plugins.json";
+    mockedReadFile.mockImplementation(async (filePath) => {
+      const path = String(filePath);
+      if (path === registryPath) {
+        return JSON.stringify({
+          plugins: [
+            { id: "other-python", manifestPath: "/installed/other/plugin.json", enabled: true },
+            { id: "local-indexer", manifestPath: "/installed/local-indexer/plugin.json", enabled: true },
+          ],
+        });
+      }
+      if (path === "/installed/other/plugin.json") {
+        return JSON.stringify({
+          id: "other-python",
+          python: { managedBy: "lvis-app", requirementsLock: "python-requirements.lock" },
+          capabilities: ["some-other-python-capability"],
+        });
+      }
+      if (path === "/installed/local-indexer/plugin.json") {
+        return JSON.stringify({
+          id: "local-indexer",
+          python: { managedBy: "lvis-app", requirementsLock: "python-requirements.lock" },
+          capabilities: ["document-indexer"],
+        });
+      }
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    mockedAccess.mockImplementation(async (filePath) => {
+      const path = String(filePath);
+      if (path.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (path.endsWith("/uv")) return undefined;
+      if (path === "/installed/local-indexer/python-requirements.lock") return undefined;
+      if (path === "/installed/other/python-requirements.lock") return undefined;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    mockedSpawn
+      .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+
+    const bootstrapper = new PythonRuntimeBootstrapper({ registryPath });
+    await bootstrapper.ensureReady(makeBrowserWindow());
+
+    const pipSyncCall = mockedSpawn.mock.calls.find(
+      ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
+    );
+    expect(pipSyncCall).toBeDefined();
+    expect(pipSyncCall![1] as string[]).toContain("/installed/local-indexer/python-requirements.lock");
+    expect(pipSyncCall![1] as string[]).not.toContain("/installed/other/python-requirements.lock");
   });
 
   it("plugin.json이 선언한 절대 lockfile 경로는 거부하고 plugin 디렉토리 기본 lockfile만 사용한다", async () => {

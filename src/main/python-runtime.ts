@@ -282,18 +282,32 @@ export class PythonRuntimeBootstrapper {
 
   // ─── private: lock file 위치 ──────────────────────
 
-  private async lockCandidatesFromManifest(manifestPath: string, lockFileName: string): Promise<string[]> {
+  private async lockCandidatesFromManifest(
+    manifestPath: string,
+    lockFileName: string,
+    requiredCapability?: string,
+  ): Promise<string[]> {
     const manifestDir = path.dirname(manifestPath);
     const candidates: string[] = [];
     try {
       const raw = await fs.readFile(manifestPath, "utf-8");
       const manifest = JSON.parse(raw) as {
+        capabilities?: unknown;
+        python?: { requirementsLock?: unknown };
         pythonRequirementsLock?: unknown;
         runtime?: { python?: { requirementsLock?: unknown } };
         config?: { pythonRequirementsLock?: unknown };
       };
+      if (requiredCapability) {
+        const capabilities = Array.isArray(manifest.capabilities) ? manifest.capabilities : [];
+        if (!capabilities.includes(requiredCapability)) {
+          return candidates;
+        }
+      }
       const declared =
-        typeof manifest.pythonRequirementsLock === "string"
+        typeof manifest.python?.requirementsLock === "string"
+          ? manifest.python.requirementsLock
+          : typeof manifest.pythonRequirementsLock === "string"
           ? manifest.pythonRequirementsLock
           : typeof manifest.runtime?.python?.requirementsLock === "string"
             ? manifest.runtime.python.requirementsLock
@@ -334,7 +348,7 @@ export class PythonRuntimeBootstrapper {
     try {
       const registry = await readPluginRegistry(registryPath);
       for (const manifestPath of resolveManifestPathsFromRegistry(registryPath, registry.plugins)) {
-        candidates.push(...await this.lockCandidatesFromManifest(manifestPath, lockFileName));
+        candidates.push(...await this.lockCandidatesFromManifest(manifestPath, lockFileName, "document-indexer"));
       }
     } catch (err) {
       await this.log(`[python-runtime] registry lockfile discovery skipped (${registryPath}): ${(err as Error).message}`);
