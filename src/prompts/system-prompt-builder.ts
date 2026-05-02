@@ -79,6 +79,12 @@ export class SystemPromptBuilder {
    * session context. Null when no title has been assigned yet (first turn).
    */
   private sessionTitle: string | null = null;
+  /**
+   * PR-4: rolling summary preamble from parent session checkpoint.
+   * Set once on session load/rotation so the LLM sees accumulated prior context.
+   * Cleared by clearSummaryPreamble().
+   */
+  private summaryPreamble: string | null = null;
 
   constructor(deps: SystemPromptBuilderDeps) {
     this.initSources(deps);
@@ -173,6 +179,15 @@ export class SystemPromptBuilder {
   private sanitizeTitle(t: string): string {
     return t.replace(/[\r\n"\\<>]/g, " ").slice(0, 50).trim();
   }
+
+  /**
+   * PR-4: sets the rolling summary preamble injected between system prompt and
+   * recent turns. Call after session rotation with the parent checkpoint summary.
+   */
+  setSummaryPreamble(preamble: string | null): void {
+    this.summaryPreamble = preamble && preamble.length > 0 ? preamble : null;
+  }
+
 
   // ─── Private ──────────────────────────────────────
 
@@ -353,7 +368,25 @@ export class SystemPromptBuilder {
       },
     });
 
-    // ⑧ Conversation Summary — ConversationLoop에서 Auto-Compact 시 동적 추가
+    // ⑧ Rolling Summary Preamble (PR-4: per-session, set on rotation)
+    // LLM context 구조: [system prompt] → [rolling summary preamble] → [recent N turns] → [current input]
+    this.sources.push({
+      id: 8,
+      name: "Rolling Summary Preamble",
+      refresh: "on-change",
+      build: () => {
+        const preamble = this.summaryPreamble;
+        if (!preamble) return "";
+        return [
+          "<prior-context-summary>",
+          "이전 세션에서 이어진 대화 요약입니다. 아래 내용을 바탕으로 대화를 이어가세요:",
+          "",
+          preamble,
+          "</prior-context-summary>",
+        ].join("\n");
+      },
+    });
+
     // ⑨ OS / Environment (매 턴)
     this.sources.push({
       id: 9,
