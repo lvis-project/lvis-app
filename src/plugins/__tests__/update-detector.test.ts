@@ -191,11 +191,10 @@ describe("PluginUpdateDetector", () => {
     expect(updates).toHaveLength(0);
   });
 
-  it("skips _devLinked entries (source repo is authoritative, catalog meaningless)", async () => {
-    // Dev-linked installs symlink plugin.json out to the source repo —
-    // path-traversal guard would refuse to follow it and emit
-    // "manifestPath escapes allowed roots" on every poll. Detector now
-    // continues past _devLinked entries before that check fires.
+  it("skips legacy _devLinked entries as cleanup-only hints", async () => {
+    // Pre-PR #430 dev-link installs wrote `_devLinked: true`. Runtime trust
+    // no longer honors that flag, but update polling still skips it so a
+    // stale legacy registry does not spam path-escape warnings on every poll.
     const registryPath = resolve(tmpDir, "registry.json");
     await writeFile(
       registryPath,

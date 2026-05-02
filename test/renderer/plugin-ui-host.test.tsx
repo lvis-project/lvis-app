@@ -1,16 +1,15 @@
 /**
- * Plugin UI Host — webview asset URL wiring (fix/plugin-webview-preload-bridge)
+ * Plugin UI Host — webview registration flow (#447 register-before-attach)
  *
- * Verifies that PluginUiHostView reads the deterministic plugin shell +
- * preload URLs from `window.lvisApi.pluginShellUrl` / `pluginPreloadUrl`
- * and threads them onto the rendered <webview src=... preload=...>.
+ * Verifies that PluginUiHostView:
+ *   1. Mounts <webview> with src="" (empty) initially.
+ *   2. On did-attach, calls registerPluginWebview IPC and sets src to the
+ *      shell URL only after registration succeeds.
+ *   3. Falls back to error text when asset URLs are missing.
+ *   4. Shows error text when registration fails.
  *
- * Regression: previously the host derived these via
- * `new URL("plugin-ui-shell.html", window.location.href)`, which broke
- * during the splash phase when `window.location.href` was a `data:text/html`
- * URL — the resolved preload path then pointed nowhere and Electron silently
- * skipped the preload, leaving `window.lvisPlugin` undefined inside the
- * plugin webview.
+ * JSDOM has no real Electron webview — tests assert JSX shape and event
+ * handling only, not actual Electron IPC or preload execution.
  */
 import "./setup.js";
 import { describe, it, expect, afterEach, vi } from "vitest";
@@ -47,6 +46,13 @@ function mountHost(view: PluginUiExtensionView | null): HTMLElement {
   return container;
 }
 
+/** Fire a synthetic did-attach event (mirrors Electron's shape). */
+function fireDidAttach(webview: Element, webContentsId: number) {
+  const e = new Event("did-attach");
+  Object.assign(e, { webContentsId });
+  webview.dispatchEvent(e);
+}
+
 afterEach(() => {
   if (activeRoot) {
     act(() => activeRoot!.unmount());
@@ -58,22 +64,59 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("PluginUiHostView — deterministic webview asset URLs", () => {
-  it("renders <webview> with src and preload from window.lvisApi", () => {
+describe("PluginUiHostView — register-before-attach flow", () => {
+  it("mounts webview with src='' then sets src after did-attach + registration", async () => {
+    const registerPluginWebview = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("lvisApi", {
       pluginShellUrl: SHELL_URL,
       pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview,
     });
 
     const container = mountHost(VIEW);
+    const webview = container.querySelector("webview");
 
-    // querySelector("webview") works in JSDOM because Electron's <webview> is
-    // just a custom element name; these tests assert JSX shape only, not actual
-    // Electron webview behavior (preload execution, IPC wiring, etc.).
+    expect(webview).not.toBeNull();
+    // Before did-attach: src attribute absent (shell cannot load before registration).
+    expect(webview?.getAttribute("src")).toBeNull();
+    expect(webview?.getAttribute("preload")).toBe(PRELOAD_URL);
+
+    // Simulate did-attach + await async IPC resolution.
+    await act(async () => {
+      fireDidAttach(webview!, 42);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(registerPluginWebview).toHaveBeenCalledWith({
+      webContentsId: 42,
+      pluginId: VIEW.pluginId,
+      entryUrl: VIEW.entryUrl,
+    });
+    expect(webview?.getAttribute("src")).toBe(SHELL_URL);
+  });
+
+  it("shows error text and removes webview when registration returns ok=false", async () => {
+    const registerPluginWebview = vi.fn().mockResolvedValue({ ok: false, error: "unknown-plugin-id" });
+    vi.stubGlobal("lvisApi", {
+      pluginShellUrl: SHELL_URL,
+      pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview,
+    });
+
+    const container = mountHost(VIEW);
     const webview = container.querySelector("webview");
     expect(webview).not.toBeNull();
-    expect(webview?.getAttribute("src")).toBe(SHELL_URL);
-    expect(webview?.getAttribute("preload")).toBe(PRELOAD_URL);
+    // Before did-attach: src attribute absent (shell not yet loaded).
+    expect(webview?.getAttribute("src")).toBeNull();
+
+    await act(async () => {
+      fireDidAttach(webview!, 7);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // After failed registration: error text replaces the webview.
+    expect(container.querySelector("webview")).toBeNull();
+    expect(container.textContent).toMatch(/unknown-plugin-id/);
   });
 
   it("falls back to error text when lvisApi.pluginShellUrl is missing", () => {

@@ -311,8 +311,6 @@ export interface PluginRegistryEntry {
   id: string;
   manifestPath: string;
   enabled?: boolean;
-  /** @deprecated — use installSource. Kept for JSON back-compat with registries written before PR #430. */
-  installedBy?: InstallPolicy;
   bundleRefs?: string[];
   approvedPluginAccess?: PluginAccessSpec;
   /**

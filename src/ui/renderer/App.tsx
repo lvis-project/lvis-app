@@ -161,6 +161,14 @@ export function App() {
 
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
+
+  // Feature flags — loaded once at mount and refreshed after each settings save.
+  const [experimentalStackedChat, setExperimentalStackedChat] = useState(false);
+  useEffect(() => {
+    void api.getSettings().then((s) => {
+      setExperimentalStackedChat(s.features?.experimentalStackedChat ?? false);
+    }).catch(() => {});
+  }, [api]);
   const { usedTokens, contextBudget, contextPercent, contextColor, contextOverflowPct } =
     useContextBudget({ entries, llmVendor, llmModel });
 
@@ -218,6 +226,18 @@ export function App() {
         const status = pluginAuthStatuses.get(view.pluginId);
         const card = pluginCards.find((c) => c.id === view.pluginId);
         const loginTool = card?.auth?.loginTool;
+        // Race guard: status arrives via one IPC, pluginCards via another.
+        // If status says "unauthed" but the cards haven't populated yet
+        // (`card` undefined → `loginTool` undefined), navigating now would
+        // strand the user on the broken-unauthed view — exactly what the
+        // PR aimed to prevent. Abort silently; the user can click again
+        // once the cards arrive (badge keeps prompting them).
+        if (status?.kind === "unauthed" && !loginTool) {
+          console.warn(
+            `[plugin-auth] ${view.pluginId} unauthed but pluginCards not yet loaded — aborting click`,
+          );
+          return;
+        }
         if (status?.kind === "unauthed" && loginTool) {
           void (async () => {
             try {
@@ -225,8 +245,10 @@ export function App() {
             } catch (err) {
               // User cancelled / IPC rejected — leave them on the current
               // view, do NOT navigate to the still-unauthed plugin view.
-              console.error(
-                `[plugin-auth] ${view.pluginId} loginTool ${loginTool} failed from grid click`,
+              // Cancellation is a normal user choice, not an error: log
+              // at warn so renderer DevTools doesn't paint it red.
+              console.warn(
+                `[plugin-auth] ${view.pluginId} loginTool ${loginTool} did not complete (cancelled or IPC rejected)`,
                 err,
               );
               return;
@@ -600,6 +622,7 @@ export function App() {
             onOpenMarketplace={onOpenMarketplace}
             marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}
+            useStackedChatView={experimentalStackedChat}
           />
         </main>
         </div>
@@ -615,7 +638,7 @@ export function App() {
         onResolved={dismissAskQuestion}
         fixed
       />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); void api.getSettings().then((s) => setExperimentalStackedChat(s.features?.experimentalStackedChat ?? false)).catch(() => {}); }} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
       <ApprovalQueueStatus queue={approvalQueue} />
       {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.

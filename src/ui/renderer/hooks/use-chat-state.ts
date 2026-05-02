@@ -15,6 +15,7 @@ import {
   upsertStreamingReasoning,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
+import { detectFromStream } from "../../../lib/stream-markers.js";
 import type { LvisApi } from "../types.js";
 
 /**
@@ -204,11 +205,14 @@ export function useChatState(api: LvisApi) {
         setEntries((p) => finalizeImportedTriggerResponse(p));
         if (streamRef.current || thoughtRef.current) {
           const doneRoute = ev.route;
+          // §PR-3: strip <title>...</title> and [checkpoint-suggested] markers
+          // that may have been streamed as raw deltas before post-turn cleanup.
+          const finalText = detectFromStream(streamRef.current).cleanedText;
           setEntries((p) => {
             const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
             guidanceResetPendingRef.current = false;
             let next = finalizeStreamingReasoning(base, thoughtRef.current);
-            next = finalizeStreamingAssistant(next, streamRef.current, doneRoute ? { route: doneRoute } : undefined);
+            next = finalizeStreamingAssistant(next, finalText, doneRoute ? { route: doneRoute } : undefined);
             return next;
           });
           streamRef.current = "";

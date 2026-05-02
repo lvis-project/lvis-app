@@ -109,8 +109,11 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     await expect(svc.rollbackPlugin("com.lge.sample")).rejects.toThrow(/No prior version/);
   });
 
-  it("installPlugin clears _devLinked on same-version fast-path (touchInstalledRegistryEntry)", async () => {
-    // Pre-populate registry with the same version that will be installed.
+  it("installPlugin promotes a legacy dev-link entry to user on same-version fast-path", async () => {
+    // Pre-populate registry with the legacy `_devLinked: true` shape that
+    // pre-PR #430 dev-link installs wrote. readPluginRegistry migrates it
+    // on first read; installPlugin must then re-stamp installSource="user"
+    // so the touch fast-path doesn't keep the entry on dev-link.
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -124,36 +127,39 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     await svc.installPlugin("com.lge.sample", "1.0.0");
     await svc.installPlugin("com.lge.sample", "1.0.0"); // same version → fast path
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(registry.plugins[0].installSource).toBe("user");
+    // Deprecated fields must not survive the migration round-trip.
     expect(registry.plugins[0]._devLinked).toBeUndefined();
+    expect(registry.plugins[0].installedBy).toBeUndefined();
   });
 
-  it("installPlugin clears _devLinked when overwriting an existing dev-link entry", async () => {
+  it("installPlugin overrides a dev-link entry with installSource='user'", async () => {
     // Pre-populate registry as if dev:link had registered the plugin.
     await writeFile(
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "com.lge.sample", manifestPath: "com.lge.sample/plugin.json", enabled: true, installedBy: "user", _devLinked: true }],
+        plugins: [{ id: "com.lge.sample", manifestPath: "com.lge.sample/plugin.json", enabled: true, installSource: "dev-link" }],
       }),
       "utf-8",
     );
     const svc = makeService();
     await svc.installPlugin("com.lge.sample", "1.0.0");
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(registry.plugins[0]._devLinked).toBeUndefined();
+    expect(registry.plugins[0].installSource).toBe("user");
   });
 
-  it("rollbackPlugin clears _devLinked on the rolled-back entry", async () => {
+  it("rollbackPlugin re-stamps installSource='user' on the rolled-back entry", async () => {
     const svc = makeService();
     await svc.installPlugin("com.lge.sample", "1.0.0");
     await svc.installPlugin("com.lge.sample", "1.1.0");
-    // Manually set _devLinked to simulate stale state.
+    // Manually flip installSource to dev-link to simulate a stale state.
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
-    reg.plugins[0]._devLinked = true;
+    reg.plugins[0].installSource = "dev-link";
     await writeFile(registryPath, JSON.stringify(reg), "utf-8");
     await svc.rollbackPlugin("com.lge.sample");
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(restored.plugins[0]._devLinked).toBeUndefined();
+    expect(restored.plugins[0].installSource).toBe("user");
   });
 
   it("installPlugin sets installSource='user' on fresh install", async () => {
@@ -168,7 +174,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "com.lge.sample", manifestPath: "com.lge.sample/plugin.json", enabled: true, installedBy: "user", _devLinked: true, installSource: "dev-link" }],
+        plugins: [{ id: "com.lge.sample", manifestPath: "com.lge.sample/plugin.json", enabled: true, installSource: "dev-link" }],
       }),
       "utf-8",
     );
@@ -176,7 +182,6 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     await svc.installPlugin("com.lge.sample", "1.0.0");
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(registry.plugins[0].installSource).toBe("user");
-    expect(registry.plugins[0]._devLinked).toBeUndefined();
   });
 
   it("rollback preserves installSource='user' from the pre-install state", async () => {
@@ -201,14 +206,12 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     // Manually stamp dev-link state to simulate stale registry.
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
     reg.plugins[0].installSource = "dev-link";
-    reg.plugins[0]._devLinked = true;
     await writeFile(registryPath, JSON.stringify(reg), "utf-8");
     await svc.rollbackPlugin("com.lge.sample");
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
     // Rollback re-installs from marketplace, so installSource becomes "user"
     // (not "dev-link") regardless of packaged/dev mode.
     expect(restored.plugins[0].installSource).toBe("user");
-    expect(restored.plugins[0]._devLinked).toBeUndefined();
   });
 
   it("rollback normalizes installSource='local-dev' back to 'user' (marketplace re-install)", async () => {
@@ -224,20 +227,22 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(restored.plugins[0].installSource).toBe("user");
   });
 
-  it("rollback preserves installedBy and bundleRefs metadata", async () => {
+  it("rollback preserves bundleRefs metadata (and re-stamps installSource='user')", async () => {
     const svc = makeService();
     await svc.installPlugin("com.lge.sample", "1.0.0");
     await svc.installPlugin("com.lge.sample", "1.1.0");
 
     const registry = JSON.parse(await readFile(registryPath, "utf-8"));
-    registry.plugins[0].installedBy = "admin";
     registry.plugins[0].bundleRefs = ["work-proactive"];
     await writeFile(registryPath, JSON.stringify(registry), "utf-8");
 
     await svc.rollbackPlugin("com.lge.sample");
 
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
-    expect(restored.plugins[0].installedBy).toBe("admin");
+    // rollbackPlugin is always a user-actor marketplace re-install — admin
+    // rollback is blocked upstream by deploymentGuard, so the rolled-back
+    // entry always lands on installSource="user".
+    expect(restored.plugins[0].installSource).toBe("user");
     expect(restored.plugins[0].bundleRefs).toEqual(["work-proactive"]);
   });
 

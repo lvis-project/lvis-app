@@ -44,6 +44,9 @@ export interface SettingsOrchestrationState {
   setEnableWakeupRoutine: (updater: boolean | ((prev: boolean) => boolean)) => void;
   piiRedactEnabled: boolean;
   setPiiRedactEnabled: (v: boolean) => void;
+  // Experimental feature flags
+  experimentalStackedChat: boolean;
+  setExperimentalStackedChat: (v: boolean) => void;
   // Marketplace
   marketplaceBaseUrl: string;
   setMarketplaceBaseUrl: (v: string) => void;
@@ -85,6 +88,7 @@ export function useSettingsOrchestration(
   const [hasWebKey, setHasWebKey] = useState(false);
   const [enableWakeupRoutine, setEnableWakeupRoutine] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
+  const [experimentalStackedChat, setExperimentalStackedChat] = useState(false);
   const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
   const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
   const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
@@ -115,6 +119,7 @@ export function useSettingsOrchestration(
       setHasWebKey(webApiKeySet);
       setEnableWakeupRoutine(s.routine?.enableWakeupRoutine ?? false);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
+      setExperimentalStackedChat(s.features?.experimentalStackedChat ?? false);
       setMarketplaceBaseUrl(s.marketplace?.realCloudBaseUrl ?? "");
       setMarketplaceAllowPrivateNetwork(s.marketplace?.realCloudAllowPrivateNetwork ?? false);
       const marketplaceKeySet = await api.hasMarketplaceApiKey();
@@ -202,6 +207,7 @@ export function useSettingsOrchestration(
             realCloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
             realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
           },
+          features: { experimentalStackedChat },
         } as any);
       }
       if (tab !== "permissions") { onSaved(); onOpenChange(false); }
@@ -228,6 +234,7 @@ export function useSettingsOrchestration(
     hasWebKey, setHasWebKey,
     enableWakeupRoutine, setEnableWakeupRoutine,
     piiRedactEnabled, setPiiRedactEnabled,
+    experimentalStackedChat, setExperimentalStackedChat,
     marketplaceBaseUrl, setMarketplaceBaseUrl,
     marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,
     hasMarketplaceApiKey, setHasMarketplaceApiKey,

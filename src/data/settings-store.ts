@@ -81,6 +81,16 @@ export interface AuditSettings {
   auditRetentionDays: number;
 }
 
+/**
+ * Experimental feature flags — UI-toggleable, persisted to settings.json.
+ * All fields default to false (opt-in). Safe to add new fields without
+ * migration — missing keys are treated as false at load time.
+ */
+export interface FeatureFlags {
+  /** PR-5 Phase 2: Kakao-style continuous chat history (stacked view). Default false. */
+  experimentalStackedChat?: boolean;
+}
+
 export interface AppSettings {
   llm: LLMSettings;
   chat: ChatSettings;
@@ -98,6 +108,8 @@ export interface AppSettings {
   plugins: PluginSettings;
   /** 플러그인별 설정값 — pluginId → key/value 맵 */
   pluginConfigs: Record<string, PluginConfigRecord>;
+  /** Experimental feature flags. All default false. */
+  features?: FeatureFlags;
 }
 
 export interface PluginSettings {}
@@ -111,7 +123,9 @@ export interface PluginSettings {}
  *       (default "system")
  *   - `chatTheme`  — accent color overlay for chat / UI surfaces
  *       "default" | "purple" | "orange" | "blue"
- *       (default "default" — no override; inherits from `theme`)
+ *       (default "purple" — light shell + warm-grey chat surface +
+ *        lilac user bubble + vivid SEND button. "default" means no
+ *        accent override; inherits from `theme`.)
  *   - `codeTheme`  — code-block surface scheme, independent of shell
  *       "auto" | "light" | "dark"
  *       (default "auto" — follows `theme`: light shell → light code,
@@ -307,11 +321,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   appearance: {
     theme: "system",
-    chatTheme: "default",
+    chatTheme: "purple",
     codeTheme: "auto",
   },
   plugins: {},
   pluginConfigs: {},
+  features: {
+    experimentalStackedChat: false,
+  },
 };
 
 export class SettingsService {
@@ -412,6 +429,9 @@ export class SettingsService {
         sanitized[safePluginId] = sanitizePluginConfig(config);
       }
       this.settings.pluginConfigs = { ...this.settings.pluginConfigs, ...sanitized };
+    }
+    if (partial.features) {
+      this.settings.features = { ...this.settings.features, ...partial.features };
     }
     await this.saveSettings();
     return this.getAll();
@@ -535,6 +555,7 @@ export class SettingsService {
         appearance: normalizeAppearance(parsed.appearance),
         plugins: {},
         pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
+        features: { ...DEFAULT_SETTINGS.features, ...normalizeFeatureFlags(parsed.features) },
       };
     } catch {
       return structuredClone(DEFAULT_SETTINGS);
@@ -633,7 +654,7 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
   const chatTheme: ChatThemePreference =
     typeof chatRaw === "string" && (VALID_CHAT_THEMES as readonly string[]).includes(chatRaw)
       ? (chatRaw as ChatThemePreference)
-      : "default";
+      : "purple";
 
   const codeRaw = obj.codeTheme;
   const codeTheme: CodeThemePreference =
@@ -642,6 +663,22 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
       : "auto";
 
   return { theme, chatTheme, codeTheme };
+}
+
+/**
+ * Coerce on-disk `features` block to FeatureFlags shape.
+ * Missing or invalid fields are silently dropped — all flags default to false.
+ */
+function normalizeFeatureFlags(input: unknown): FeatureFlags {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return {};
+  }
+  const obj = input as Record<string, unknown>;
+  const result: FeatureFlags = {};
+  if (typeof obj.experimentalStackedChat === "boolean") {
+    result.experimentalStackedChat = obj.experimentalStackedChat;
+  }
+  return result;
 }
 
 function sanitizeStoredPluginConfigs(input: unknown): Record<string, PluginConfigRecord> {

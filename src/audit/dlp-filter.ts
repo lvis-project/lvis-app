@@ -3,7 +3,11 @@
  *
  * PostHook Step 7에서 도구 실행 결과의 민감 데이터를 검사하고 마스킹.
  * 탐지된 패턴 목록은 감사 로그에 기록됨.
+ *
+ * Also exports `redactFsPath` and `redactAuditPayload` for sanitising
+ * filesystem paths before they are written to the audit log (#449).
  */
+import os from "node:os";
 
 export interface DlpResult {
   masked: string;
@@ -137,6 +141,62 @@ export function redactForLLM(text: string, turnId?: string): RedactResult {
     });
   }
   return { redacted: out, counts, totalCount };
+}
+
+// Resolved once at module load; fallback to empty string in test environments
+// where os.homedir() may throw or return unexpected values.
+const _homeDir = (() => { try { return os.homedir(); } catch { return ""; } })();
+
+const MAX_AUDIT_PATH = 256;
+
+/**
+ * Replace the current user's home directory in a filesystem path or
+ * file:// URL with the literal "<home>" so audit logs don't leak
+ * /Users/<username>/ (or Windows equivalent). Also caps the result at
+ * MAX_AUDIT_PATH characters — defence against a crafted long string
+ * bloating the audit log (safeStringify's 1 KB cap applies at the JSON
+ * level; this cap applies per-field before serialisation).
+ *
+ * Safe to call on non-path strings: if no home-dir prefix is found the
+ * string is returned unchanged (only the length cap applies).
+ */
+export function redactFsPath(p: string): string {
+  if (!p) return p;
+  let out = p;
+  if (_homeDir) {
+    const fileUrlHome = "file://" + _homeDir;
+    if (out === fileUrlHome || out.startsWith(fileUrlHome + "/")) {
+      out = "file://<home>" + out.slice(fileUrlHome.length);
+    } else if (out === _homeDir || out.startsWith(_homeDir + "/") || out.startsWith(_homeDir + "\\")) {
+      out = "<home>" + out.slice(_homeDir.length);
+    }
+  }
+  // Use code-point iteration so a surrogate pair at the boundary is not split.
+  const codePoints = [...out];
+  return codePoints.length > MAX_AUDIT_PATH ? codePoints.slice(0, MAX_AUDIT_PATH).join("") + "…" : out;
+}
+
+/**
+ * Path-like fields in audit log payloads that may contain the user's home
+ * directory. Shallow: nested objects are not walked.
+ */
+const AUDIT_PATH_KEYS = new Set([
+  "entryUrl", "entryFsPath", "rawInstallRoot", "realEntry", "realRoot", "frameUrl",
+]);
+
+/**
+ * Redact home-dir paths in all recognised path fields of a flat audit payload
+ * object. Non-path fields and non-object payloads are returned unchanged.
+ * Exported so IPC domains can share the same sanitisation without duplicating
+ * the field list.
+ */
+export function redactAuditPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  return Object.fromEntries(
+    Object.entries(payload as Record<string, unknown>).map(([k, v]) =>
+      [k, AUDIT_PATH_KEYS.has(k) && typeof v === "string" ? redactFsPath(v) : v],
+    ),
+  );
 }
 
 /**

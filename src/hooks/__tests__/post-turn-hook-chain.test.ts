@@ -44,7 +44,7 @@ describe("PostTurnHookChain", () => {
       route: "chat",
     });
 
-    expect(result).toBeNull();
+    expect(result.compactedMessages).toBeNull();
     expect(saveSession).toHaveBeenCalledWith("session-disabled", messages);
   });
 
@@ -52,7 +52,11 @@ describe("PostTurnHookChain", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     const saveSession = vi.fn();
-    const memoryManager = { saveSession } as unknown as MemoryManager;
+    const memoryManager = {
+      saveSession,
+      listSessions: vi.fn().mockReturnValue([]),
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return fakeLlmSettings();
@@ -72,19 +76,23 @@ describe("PostTurnHookChain", () => {
       route: "chat",
     });
 
-    expect(result).not.toBeNull();
+    expect(result.compactedMessages).not.toBeNull();
     // 요약 marker는 배열 어딘가에 존재
-    const marker = result?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
+    const marker = result.compactedMessages?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
     expect(marker).toBeDefined();
     expect(marker?.content).toContain("[이전 대화 요약]");
-    expect(saveSession).toHaveBeenCalledWith("session-enabled", result);
+    expect(saveSession).toHaveBeenCalledWith("session-enabled", result.compactedMessages);
   });
 
   it("runs microcompact alone (no full compact) when threshold is not met", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     const saveSession = vi.fn();
-    const memoryManager = { saveSession } as unknown as MemoryManager;
+    const memoryManager = {
+      saveSession,
+      listSessions: vi.fn().mockReturnValue([]),
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return fakeLlmSettings();
@@ -120,14 +128,108 @@ describe("PostTurnHookChain", () => {
       route: "chat",
     });
 
-    expect(result).not.toBeNull();
+    expect(result.compactedMessages).not.toBeNull();
     // full-compact 요약 marker는 없어야 함
-    const marker = result?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
+    const marker = result.compactedMessages?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
     expect(marker).toBeUndefined();
     // 하지만 stripped 메시지는 존재
-    const strippedCount = result?.filter((m) => m.role === "tool_result" && m.meta?.stripped === true).length ?? 0;
+    const strippedCount = result.compactedMessages?.filter((m) => m.role === "tool_result" && m.meta?.stripped === true).length ?? 0;
     expect(strippedCount).toBeGreaterThan(0);
-    expect(saveSession).toHaveBeenCalledWith("session-micro", result);
+    expect(saveSession).toHaveBeenCalledWith("session-micro", result.compactedMessages);
+  });
+
+  it("detect-checkpoint: returns detector result with newTitle and checkpointSuggested", async () => {
+    const saveSession = vi.fn();
+    const saveSessionMetadata = vi.fn();
+    const memoryManager = {
+      saveSession,
+      saveSessionMetadata,
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        return { systemPrompt: "", autoCompact: false };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({ memoryManager, settingsService });
+
+    const result = await chain.run({
+      sessionId: "session-detect",
+      messages: createMessages(),
+      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+      input: "회의 정리해줘",
+      output: "정리 완료입니다.<title>회의 결과 요약 정리본</title>[checkpoint-suggested]",
+      toolCalls: [],
+      route: "chat",
+    });
+
+    expect(result.detector.checkpointSuggested).toBe(true);
+    expect(result.detector.newTitle).toBe("회의 결과 요약 정리본");
+    expect(result.detector.cleanedText).not.toContain("<title>");
+    expect(result.detector.cleanedText).not.toContain("[checkpoint-suggested]");
+    expect(result.detector.cleanedText).toContain("정리 완료입니다.");
+  });
+
+  it("detect-checkpoint: onCheckpointSuggested callback is invoked when marker present", async () => {
+    const saveSession = vi.fn();
+    const saveSessionMetadata = vi.fn();
+    const onCheckpointSuggested = vi.fn();
+    const memoryManager = {
+      saveSession,
+      saveSessionMetadata,
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        return { systemPrompt: "", autoCompact: false };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({ memoryManager, settingsService, onCheckpointSuggested });
+
+    const result = await chain.run({
+      sessionId: "session-checkpoint-cb",
+      messages: createMessages(),
+      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+      input: "마무리",
+      output: "완료.[checkpoint-suggested]",
+      toolCalls: [],
+      route: "chat",
+    });
+
+    expect(onCheckpointSuggested).toHaveBeenCalledOnce();
+    expect(onCheckpointSuggested).toHaveBeenCalledWith("session-checkpoint-cb", result.detector.cleanedText);
+  });
+
+  it("detect-checkpoint: checkpointSuggested is false and cleanedText unchanged when no markers", async () => {
+    const saveSession = vi.fn();
+    const memoryManager = {
+      saveSession,
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        return { systemPrompt: "", autoCompact: false };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({ memoryManager, settingsService });
+
+    const output = "일반 응답입니다.";
+    const result = await chain.run({
+      sessionId: "session-no-markers",
+      messages: createMessages(),
+      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+      input: "질문",
+      output,
+      toolCalls: [],
+      route: "chat",
+    });
+
+    expect(result.detector.checkpointSuggested).toBe(false);
+    expect(result.detector.newTitle).toBeNull();
+    expect(result.detector.cleanedText).toBe(output);
   });
 
   it("auto-extracts user memory into saveMemory when the user asks to remember something", async () => {
@@ -139,7 +241,12 @@ describe("PostTurnHookChain", () => {
       title: "자동-이거 기억해줘",
       content: "# 자동-이거 기억해줘\n\n...",
     });
-    const memoryManager = { saveSession, saveMemory } as unknown as MemoryManager;
+    const memoryManager = {
+      saveSession,
+      saveMemory,
+      listSessions: vi.fn().mockReturnValue([]),
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return fakeLlmSettings();
@@ -159,5 +266,88 @@ describe("PostTurnHookChain", () => {
     });
 
     expect(saveMemory).toHaveBeenCalledOnce();
+  });
+
+  describe("audit route emission", () => {
+    function makeChain(opts: { autoCompact: boolean; logTurn: ReturnType<typeof vi.fn> }) {
+      const auditLogger = { logTurn: opts.logTurn } as unknown as import("../../audit/audit-logger.js").AuditLogger;
+      const settingsService = {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return fakeLlmSettings();
+          return { systemPrompt: "", autoCompact: opts.autoCompact };
+        }),
+      } as unknown as SettingsService;
+      return new PostTurnHookChain({ auditLogger, settingsService });
+    }
+
+    it("emits `${provider}/${model}` for llm-route turns", async () => {
+      const logTurn = vi.fn();
+      const chain = makeChain({ autoCompact: false, logTurn });
+
+      await chain.run({
+        sessionId: "session-llm",
+        messages: createMessages(),
+        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+        input: "안녕",
+        output: "반갑습니다",
+        toolCalls: [],
+        tokenUsage: { inputTokens: 100, outputTokens: 50 },
+        route: "llm",
+      });
+
+      // Audit route should be transformed from the bare classification
+      // "llm" into the `${provider}/${model}` form so usage-stats.parseRoute
+      // can attribute cost per vendor/model. The exact provider/model
+      // depends on what `fakeLlmSettings()` seeds — assert structural
+      // shape (`vendor/model`) rather than a specific vendor.
+      expect(logTurn).toHaveBeenCalledOnce();
+      const call = logTurn.mock.calls[0]![0] as { route: string };
+      expect(call.route).toMatch(/^[a-z][\w-]*\/[\w.-]+$/);
+      expect(call.route).not.toBe("llm");
+    });
+
+    it("emits the bare classification for non-llm routes", async () => {
+      const logTurn = vi.fn();
+      const chain = makeChain({ autoCompact: false, logTurn });
+
+      await chain.run({
+        sessionId: "session-skill",
+        messages: createMessages(),
+        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+        input: "/help",
+        output: "...",
+        toolCalls: [],
+        route: "skill",
+      });
+
+      const call = logTurn.mock.calls[0]![0] as { route: string };
+      expect(call.route).toBe("skill");
+    });
+
+    it("prefers ctx.vendorProvider/vendorModel snapshot over current settings", async () => {
+      // Regression: when the user mutates settings mid-flight (retry-effort
+      // patches thinking config; user switches vendor while streaming),
+      // the audit log must attribute to the model that actually served
+      // the turn, not to whatever settings happen to be live when the
+      // hook fires. The snapshot is captured at runTurn entry.
+      const logTurn = vi.fn();
+      const chain = makeChain({ autoCompact: false, logTurn });
+
+      await chain.run({
+        sessionId: "session-snapshot",
+        messages: createMessages(),
+        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+        input: "안녕",
+        output: "반갑습니다",
+        toolCalls: [],
+        tokenUsage: { inputTokens: 100, outputTokens: 50 },
+        route: "llm",
+        vendorProvider: "claude",
+        vendorModel: "claude-3-5-sonnet-20241022",
+      });
+
+      const call = logTurn.mock.calls[0]![0] as { route: string };
+      expect(call.route).toBe("claude/claude-3-5-sonnet-20241022");
+    });
   });
 });

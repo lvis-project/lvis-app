@@ -247,7 +247,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   return (
     <div data-testid="composer" className="px-3">
-      <div className="flex items-stretch gap-2 rounded-xl border bg-card overflow-hidden">
+      <div
+        data-testid="composer-input-bar"
+        className="flex items-stretch gap-2 rounded-xl bg-input-bar overflow-hidden shadow-md"
+      >
         {/* Strip is rendered ONLY when there is at least one attachment so
             the empty state does not reserve horizontal space. Single chip
             inline; 2+ collapse into a stacked card with an overlay. */}
@@ -282,7 +285,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
           placeholder={placeholder ?? "질문을 입력하세요... (Cmd/Ctrl+V 로 클립보드 붙여넣기)"}
-          className="flex-1 min-h-[80px] border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none"
+          className="flex-1 min-h-[64px] border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-2.5"
         />
 
         {streaming ? (
@@ -290,19 +293,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             variant="destructive"
             onClick={() => onAbort?.()}
             data-testid="composer-abort-button"
-            className="rounded-none"
+            className="rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"
             title="스트리밍 중단 (Ctrl/Cmd+C)"
           >
-            <Square className="h-4 w-4 mr-1" />중단
+            <Square className="h-4 w-4 mr-1" />STOP
           </Button>
         ) : (
           <Button
             onClick={onSend}
             disabled={disabled || (text.trim().length === 0 && liveAttachments.length === 0)}
             data-testid="composer-send-button"
-            className="rounded-none"
+            className="rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"
           >
-            <Loader2 className="h-4 w-4 mr-1 hidden" />전송
+            <Loader2 className="h-4 w-4 mr-1 hidden" />SEND
           </Button>
         )}
       </div>

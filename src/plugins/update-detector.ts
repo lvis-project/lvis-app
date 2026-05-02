@@ -70,11 +70,11 @@ export class PluginUpdateDetector {
         // Dev-synced installs (`bun run dev:sync`) copy real files into
         // pluginsRoot but should not be compared against the catalog —
         // the source workspace is the authoritative manifest, not the
-        // marketplace catalog. Both the current marker (`"dev"`) and the
-        // legacy literal (`"dev-link"`) are skipped. The legacy
-        // `_devLinked` boolean is no longer consulted as a trust signal,
-        // but is still honored here as a benign cleanup hint so the next
-        // catalog poll on a stale registry does not produce noise.
+        // marketplace catalog. Skip both the current marker (`"dev"`)
+        // and the legacy literal (`"dev-link"`). The deprecated
+        // `_devLinked` boolean is also skipped here as a cleanup hint so a
+        // stale legacy registry does not spam path-escape warnings; it still
+        // grants NO trust bypass in the runtime.
         if (
           entry.installSource === "dev" ||
           entry.installSource === "dev-link" ||

@@ -21,6 +21,7 @@ import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFr
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
+import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -42,11 +43,9 @@ interface PluginWebviewBinding {
   entryUrl: string;
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
-const pendingEntryUrlResolvers = new Map<number, Array<(b: PluginWebviewBinding) => void>>();
 
 export function unregisterPluginWebview(webContentsId: number): void {
   pluginWebviewRegistry.delete(webContentsId);
-  pendingEntryUrlResolvers.delete(webContentsId);
 }
 
 export function registerPluginsHandlers(deps: IpcDeps): void {
@@ -568,7 +567,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         input: safeStringify({
           channel: "lvis:plugin:register-webview",
           reason,
-          payload,
+          payload: redactAuditPayload(payload),
         }),
       });
     } catch {
@@ -581,7 +580,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     const { webContentsId, pluginId, entryUrl } = payload ?? {};
-    plog("debug", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REGISTER, webContentsId, entryUrl }, "webview register requested");
+    plog("debug", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REGISTER, webContentsId, entryUrl: typeof entryUrl === "string" ? redactFsPath(entryUrl) : entryUrl }, "webview register requested");
     if (typeof webContentsId !== "number" || !Number.isFinite(webContentsId)) {
       logRegisterReject("invalid-webcontents-id", payload);
       plog("warn", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-webcontents-id" }, "webview register rejected");
@@ -621,8 +620,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       }
       const binding = { pluginId, entryUrl };
       pluginWebviewRegistry.set(webContentsId, binding);
-      for (const resolve of pendingEntryUrlResolvers.get(webContentsId) ?? []) resolve(binding);
-      pendingEntryUrlResolvers.delete(webContentsId);
       plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
       return { ok: true };
     }
@@ -644,8 +641,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     const binding = { pluginId, entryUrl };
     pluginWebviewRegistry.set(webContentsId, binding);
-    for (const resolve of pendingEntryUrlResolvers.get(webContentsId) ?? []) resolve(binding);
-    pendingEntryUrlResolvers.delete(webContentsId);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
     return { ok: true };
   });
@@ -665,45 +660,23 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
       return UNAUTHORIZED_FRAME;
     }
-    const senderId = e.sender?.id;
-    if (typeof senderId !== "number") return UNAUTHORIZED_FRAME;
-
-    // Frame is valid (the shell) but no binding yet — register-webview from
-    // the host renderer hasn't landed. Wait for it. Distinguish this
-    // registration-timeout from UNAUTHORIZED_FRAME so the shell can retry on
-    // the recoverable case without conflating it with a real frame violation.
-    return new Promise<{ ok: true; entryUrl: string } | { ok: false; error: "registration-timeout" }>((resolve) => {
-      // Capture the array reference at registration so the timeout cleanup
-      // operates on the same array even if `unregisterPluginWebview` deleted
-      // and a later call re-created the map entry under the same senderId.
-      const resolvers = pendingEntryUrlResolvers.get(senderId) ?? [];
-      pendingEntryUrlResolvers.set(senderId, resolvers);
-      const resolver = (b: PluginWebviewBinding) => { clearTimeout(timer); resolve({ ok: true, entryUrl: b.entryUrl }); };
-      resolvers.push(resolver);
-      const timer = setTimeout(() => {
-        const idx = resolvers.indexOf(resolver);
-        if (idx !== -1) resolvers.splice(idx, 1);
-        if (resolvers.length === 0 && pendingEntryUrlResolvers.get(senderId) === resolvers) {
-          pendingEntryUrlResolvers.delete(senderId);
-        }
-        try {
-          auditLogger.log({
-            timestamp: new Date().toISOString(),
-            sessionId: "ipc-guard",
-            type: "warn",
-            input: safeStringify({
-              channel: "lvis:plugin:get-entry-url",
-              reason: "registration-timeout",
-              frameUrl: e?.senderFrame?.url ?? "",
-              senderId,
-            }),
-          });
-        } catch {
-          // Audit logging must never break the IPC sentinel return.
-        }
-        resolve({ ok: false, error: "registration-timeout" });
-      }, 500);
-    });
+    // register-before-attach (#447): shell src is set only after
+    // registerPluginWebview completes, so this path should be unreachable in
+    // normal operation. Log as a warning so regressions surface in audit trail.
+    try {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "ipc-guard",
+        type: "warn",
+        input: safeStringify({
+          channel: "lvis:plugin:get-entry-url",
+          reason: "not-registered",
+          frameUrl: redactFsPath(e?.senderFrame?.url ?? ""),
+          senderId: e.sender?.id,
+        }),
+      });
+    } catch { /* audit must never break the sentinel return */ }
+    return { ok: false as const, error: "not-registered" };
   });
 
   ipcMain.handle("lvis:plugin:call-tool", async (e, method: string, payload?: unknown) => {

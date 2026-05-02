@@ -6,7 +6,7 @@
 - `~/.lvis/plugins/registry.json` 기반 manifestPath 동적 로딩
 - `@lvis/plugin-pageindex`, `@lvis/plugin-meeting`, `@lvis/plugin-ms-graph`,
   `@lvis/plugin-lge-api`, `@lvis/plugin-work-proactive`, `@lvis/plugin-agent-hub`
-  마켓플레이스 install 또는 `bun run dev:link` 으로 사이드로드
+  마켓플레이스 install 또는 `bun run dev:sync` 로 dev copy-sync
 - 앱 시작 시 PageIndex 워커 + 자동 인덱서 구동
 - 실제 채팅 UI(렌더러) + preload IPC 브리지
 - IPC 핸들러
@@ -31,7 +31,7 @@ bun run plugins:enable -- <plugin-id>
 bun run plugins:disable -- <plugin-id>
 ```
 
-설치는 더 이상 이 CLI 가 다루지 않습니다. 마켓플레이스 카드 / `lvis://install/<slug>` 딥링크 / `bun run dev:link` (사이드 레포 dev) 가 현재 install 진입점입니다.
+설치는 더 이상 이 CLI 가 다루지 않습니다. 마켓플레이스 카드 / `lvis://install/<slug>` 딥링크 / `bun run dev:sync` (사이드 레포 dev copy-sync) 가 현재 install 진입점입니다.
 
 예시:
 ```bash
