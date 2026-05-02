@@ -10,6 +10,7 @@ import {
   microcompactMessages,
   compactMessages,
   extractCarryover,
+  decideRotation,
 } from "../auto-compact.js";
 import type { GenericMessage } from "../llm/types.js";
 
@@ -266,5 +267,115 @@ describe("extractCarryover", () => {
     expect(Array.isArray(carryover?.goals)).toBe(true);
     expect(Array.isArray(carryover?.artifacts)).toBe(true);
     expect(Array.isArray(carryover?.decisions)).toBe(true);
+  });
+});
+
+// ─── decideRotation ───────────────────────────────────
+
+const DAY_MS = 24 * 60 * 60 * 1_000;
+
+describe("decideRotation — 3-tier rotation decision tree", () => {
+  // ── Tier 1: hard-token ────────────────────────────
+
+  it("tier-1: ctxUsage=0.85 triggers hard-token rotation", () => {
+    const r = decideRotation({ ctxUsage: 0.85, sessionAgeMs: 0, messageCount: 0, semanticHint: false });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("hard-token");
+    expect(r.shouldSkipSummary).toBe(false);
+  });
+
+  it("tier-1: ctxUsage=1.0 triggers hard-token rotation with shouldSkipSummary=false", () => {
+    const r = decideRotation({ ctxUsage: 1.0, sessionAgeMs: 0, messageCount: 0, semanticHint: false });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("hard-token");
+    expect(r.shouldSkipSummary).toBe(false);
+  });
+
+  it("tier-1: ctxUsage=0.84 does NOT trigger hard-token", () => {
+    const r = decideRotation({ ctxUsage: 0.84, sessionAgeMs: 0, messageCount: 0, semanticHint: false });
+    // no tier-2 or tier-3 hints → no rotation
+    expect(r.shouldRotate).toBe(false);
+    expect(r.trigger).toBeUndefined();
+  });
+
+  // ── Tier 2: semantic-llm ──────────────────────────
+
+  it("tier-2: semanticHint=true triggers semantic-llm rotation", () => {
+    const r = decideRotation({ ctxUsage: 0.5, sessionAgeMs: 0, messageCount: 5, semanticHint: true });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("semantic-llm");
+  });
+
+  it("tier-2: semanticHint at low ctx (0.05) skips summary", () => {
+    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: 0, messageCount: 5, semanticHint: true });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("semantic-llm");
+    expect(r.shouldSkipSummary).toBe(true); // ctxUsage 0.05 < 0.10
+  });
+
+  it("tier-2: semanticHint at 0.10 ctx generates summary", () => {
+    const r = decideRotation({ ctxUsage: 0.10, sessionAgeMs: 0, messageCount: 5, semanticHint: true });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("semantic-llm");
+    expect(r.shouldSkipSummary).toBe(false); // ctxUsage 0.10 is NOT < 0.10
+  });
+
+  it("tier-2: hard-token takes precedence over semantic hint", () => {
+    const r = decideRotation({ ctxUsage: 0.90, sessionAgeMs: 0, messageCount: 5, semanticHint: true });
+    expect(r.trigger).toBe("hard-token"); // tier-1 wins
+    expect(r.shouldSkipSummary).toBe(false);
+  });
+
+  // ── Tier 3: soft-time ─────────────────────────────
+
+  it("tier-3: sessionAgeMs >= 24h triggers soft-time rotation", () => {
+    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: DAY_MS, messageCount: 5, semanticHint: false });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("soft-time");
+  });
+
+  it("tier-3: sessionAgeMs < 24h does NOT trigger by time alone", () => {
+    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: DAY_MS - 1, messageCount: 5, semanticHint: false });
+    expect(r.shouldRotate).toBe(false);
+  });
+
+  it("tier-3: messageCount >= 30 triggers soft-time rotation", () => {
+    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: 0, messageCount: 30, semanticHint: false });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("soft-time");
+  });
+
+  it("tier-3: messageCount=29 does NOT trigger by count alone", () => {
+    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: 0, messageCount: 29, semanticHint: false });
+    expect(r.shouldRotate).toBe(false);
+  });
+
+  it("tier-3: low ctx (0.09) with 30 msgs skips summary", () => {
+    const r = decideRotation({ ctxUsage: 0.09, sessionAgeMs: 0, messageCount: 30, semanticHint: false });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("soft-time");
+    expect(r.shouldSkipSummary).toBe(true);
+  });
+
+  it("tier-3: high ctx (0.50) with 24h generates summary", () => {
+    const r = decideRotation({ ctxUsage: 0.50, sessionAgeMs: DAY_MS, messageCount: 1, semanticHint: false });
+    expect(r.shouldRotate).toBe(true);
+    expect(r.trigger).toBe("soft-time");
+    expect(r.shouldSkipSummary).toBe(false);
+  });
+
+  // ── No rotation ───────────────────────────────────
+
+  it("no rotation when none of the conditions met", () => {
+    const r = decideRotation({ ctxUsage: 0.50, sessionAgeMs: DAY_MS - 1, messageCount: 29, semanticHint: false });
+    expect(r.shouldRotate).toBe(false);
+    expect(r.trigger).toBeUndefined();
+    expect(r.shouldSkipSummary).toBe(false);
+  });
+
+  it("shouldSkipSummary is always false when shouldRotate is false", () => {
+    const r = decideRotation({ ctxUsage: 0.0, sessionAgeMs: 0, messageCount: 0, semanticHint: false });
+    expect(r.shouldRotate).toBe(false);
+    expect(r.shouldSkipSummary).toBe(false);
   });
 });
