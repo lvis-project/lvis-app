@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { LvisApi } from "../types.js";
 import type { MarketplaceItem, PluginCardSummary, PluginUiExtension } from "../types.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
@@ -24,7 +24,6 @@ export function usePluginMarketplace(api: LvisApi) {
   const [pluginCards, setPluginCards] = useState<PluginCardSummary[]>([]);
   const [marketStatus, setMarketStatus] = useState("로딩 중...");
   const [working, setWorking] = useState(false);
-  const [installInFlight, setInstallInFlight] = useState<InstallInFlight>({});
 
   const refreshViews = useCallback(async () => {
     const v = (await api.listPluginUiExtensions()).filter((i) => i.extension.slot === "sidebar");
@@ -89,35 +88,11 @@ export function usePluginMarketplace(api: LvisApi) {
     }
   }, [api, refreshMarketplace, refreshViews, refreshCards]);
 
-  // Track in-flight installs so the renderer can render a skeleton card +
-  // sidebar placeholder while the main-process pipeline runs. Cleared on
-  // both the success and failure result events so a transient slug never
-  // sticks around as a permanent placeholder.
-  useEffect(() => {
-    const unsubs: Array<() => void> = [];
-    if (typeof api.onPluginInstallProgress === "function") {
-      unsubs.push(
-        api.onPluginInstallProgress((payload) => {
-          setInstallInFlight((prev) => ({ ...prev, [payload.slug]: payload.phase }));
-        }),
-      );
-    }
-    if (typeof api.onPluginInstallResult === "function") {
-      unsubs.push(
-        api.onPluginInstallResult(({ slug }) => {
-          setInstallInFlight((prev) => {
-            if (!(slug in prev)) return prev;
-            const next = { ...prev };
-            delete next[slug];
-            return next;
-          });
-        }),
-      );
-    }
-    return () => {
-      for (const u of unsubs) u();
-    };
-  }, [api]);
+  // In-flight install tracking moved to dedicated hooks at the call site.
+  // - PluginGridButton (popover placeholder cell + spinner): useInstallingPlugins
+  // - PluginConfigTab (Settings install/restart progress card): subscribes
+  //   to the same IPC events directly so the marketplace hook stays
+  //   focused on install/uninstall actions + view/card refresh.
 
   return {
     marketplace,
@@ -125,7 +100,6 @@ export function usePluginMarketplace(api: LvisApi) {
     pluginCards,
     marketStatus,
     working,
-    installInFlight,
     refreshViews,
     refreshCards,
     refreshMarketplace,
