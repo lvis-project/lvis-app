@@ -38,7 +38,7 @@ describe("SystemPromptBuilder — inactive plugin catalog (Option C)", () => {
         sampleTools: ["meeting_start", "meeting_stop"],
       },
       {
-        id: "com.lge.pageindex",
+        id: "local-indexer",
         name: "PageIndex",
         description: "문서 인덱스/검색",
         sampleTools: ["index_scan", "index_search"],
@@ -53,7 +53,7 @@ describe("SystemPromptBuilder — inactive plugin catalog (Option C)", () => {
     expect(prompt).toContain("## 사용 가능한 플러그인 (현재 비활성 — request_plugin 으로 활성화)");
     expect(prompt).toContain("**com.lge.meeting**");
     expect(prompt).toContain("meeting_start, meeting_stop");
-    expect(prompt).toContain("**com.lge.pageindex**");
+    expect(prompt).toContain("**local-indexer**");
   });
 
   it("omits active plugin from catalog", () => {

@@ -46,7 +46,7 @@ export function buildPluginConfigOverrides(settings: SettingsService): Record<st
     overrides["*"] = {
       llmApiKey: resolvedApiKey,
       llmProvider: llm.provider,
-      apiKey: resolvedApiKey,         // pageindex가 사용하는 키 이름
+      apiKey: resolvedApiKey,         // Local Indexer 등 플러그인이 사용하는 키 이름
       openaiApiKey: resolvedApiKey,   // meeting이 사용하는 키 이름
     };
   }

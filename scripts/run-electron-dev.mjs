@@ -81,7 +81,7 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
     return;
   }
   const normalizedUserDataDir = String(userDataDir || "").trim();
-  const pageIndexWorkspace = resolve(repoRoot, ".pageindex-workspace");
+  const localIndexerWorkspace = resolve(repoRoot, ".local-indexer-workspace");
   const launcherScriptPath = resolve(repoRoot, "scripts", "run-electron-dev.mjs");
   const mainEntryPath = mainOutput;
   if (!normalizedUserDataDir) return;
@@ -90,7 +90,7 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
     "$ErrorActionPreference = 'SilentlyContinue'",
     `$currentPid = ${process.pid}`,
     `$userDataDir = '${escapePowerShellSingleQuoted(normalizedUserDataDir)}'`,
-    `$pageIndexWorkspace = '${escapePowerShellSingleQuoted(pageIndexWorkspace)}'`,
+    `$localIndexerWorkspace = '${escapePowerShellSingleQuoted(localIndexerWorkspace)}'`,
     `$launcherScriptPath = '${escapePowerShellSingleQuoted(launcherScriptPath)}'`,
     `$mainEntryPath = '${escapePowerShellSingleQuoted(mainEntryPath)}'`,
     "$killedPids = @()",
@@ -107,14 +107,14 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
     "  $killedPids += \"node:$($launcher.ProcessId)\"",
     "}",
     "$targets = @()",
-    // Electron / pageindex worker 는 resolved userDataDir / workspace 의
+    // Electron / Local Indexer worker 는 resolved userDataDir / workspace 의
     // 전체 경로로 매칭 — `Electron-LVIS-Dev` substring 은 다른 dev profile
     // prefix 와 collide 가능. profile hash suffix + path 매칭의 이중 가드.
     "if ($userDataDir.Length -gt 0) {",
     "  $targets += Get-CimInstance Win32_Process -Filter \"Name = 'electron.exe'\" | Where-Object { $_.CommandLine -like \"*$mainEntryPath*\" -and $_.CommandLine -like \"*$userDataDir*\" }",
     "}",
-    "if ($pageIndexWorkspace.Length -gt 0) {",
-    "  $targets += Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*pageindex_worker.py*' -and $_.CommandLine -like \"*$pageIndexWorkspace*\" }",
+    "if ($localIndexerWorkspace.Length -gt 0) {",
+    "  $targets += Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*pageindex_worker.py*' -and $_.CommandLine -like \"*$localIndexerWorkspace*\" }",
     "}",
     "$targets = @($targets | Group-Object ProcessId | ForEach-Object { $_.Group[0] })",
     "foreach ($target in $targets) {",

@@ -171,13 +171,13 @@ describe("useInstallingPlugins — simultaneous installs", () => {
     act(() => {
       emit.progress({ slug: "agent-hub", phase: "installing" });
       emit.progress({ slug: "meeting", phase: "downloading", bytesDownloaded: 1000, bytesTotal: null });
-      emit.progress({ slug: "pageindex", phase: "verifying" });
+      emit.progress({ slug: "local-indexer", phase: "verifying" });
     });
 
     expect(result.current.size).toBe(3);
     expect(result.current.has("agent-hub")).toBe(true);
     expect(result.current.has("meeting")).toBe(true);
-    expect(result.current.has("pageindex")).toBe(true);
+    expect(result.current.has("local-indexer")).toBe(true);
   });
 
   it("removes only the completed slug when one of multiple concurrent installs finishes", () => {

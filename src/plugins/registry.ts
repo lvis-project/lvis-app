@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import type { InstallPolicy, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
@@ -32,152 +32,6 @@ interface LegacyRegistryEntry extends Omit<PluginRegistryEntry, "installSource">
    * normalises it to `"local-dev"`.
    */
   installSource?: PluginRegistryEntryInstallSource | "dev-link";
-}
-
-const PAGEINDEX_LEGACY_PLUGIN_ID = "pageindex";
-const LOCAL_INDEXER_PLUGIN_ID = "local-indexer";
-const PAGEINDEX_LEGACY_DEFAULT_MANIFEST_PATH = "pageindex/plugin.json";
-const LOCAL_INDEXER_DEFAULT_MANIFEST_PATH = "local-indexer/plugin.json";
-
-function renamePageindexDefaultManifestPath(manifestPath: string): string {
-  return manifestPath === PAGEINDEX_LEGACY_DEFAULT_MANIFEST_PATH
-    ? LOCAL_INDEXER_DEFAULT_MANIFEST_PATH
-    : manifestPath;
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function withLocalIndexerIdentity(entry: PluginRegistryEntry): PluginRegistryEntry {
-  return {
-    ...entry,
-    id: LOCAL_INDEXER_PLUGIN_ID,
-    manifestPath: renamePageindexDefaultManifestPath(entry.manifestPath),
-  };
-}
-
-function mergeMissingPageindexMetadata(
-  canonical: PluginRegistryEntry,
-  source: PluginRegistryEntry,
-): void {
-  if (canonical.enabled === undefined && source.enabled !== undefined) canonical.enabled = source.enabled;
-  if (canonical.installSource === undefined && source.installSource !== undefined) canonical.installSource = source.installSource;
-  if (canonical.bundleRefs === undefined && source.bundleRefs !== undefined) canonical.bundleRefs = source.bundleRefs;
-  if (canonical.approvedPluginAccess === undefined && source.approvedPluginAccess !== undefined) {
-    canonical.approvedPluginAccess = source.approvedPluginAccess;
-  }
-}
-
-function migratePageindexRegistryEntries(
-  entries: PluginRegistryEntry[],
-): {
-  plugins: PluginRegistryEntry[];
-  migratedCount: number;
-  removedDuplicateCount: number;
-  defaultManifestPathMigrated: boolean;
-} {
-  const canonicalIndex = entries.findIndex((entry) => entry.id === LOCAL_INDEXER_PLUGIN_ID);
-  const firstLegacyIndex = entries.findIndex((entry) => entry.id === PAGEINDEX_LEGACY_PLUGIN_ID);
-  if (canonicalIndex === -1 && firstLegacyIndex === -1) {
-    return { plugins: entries, migratedCount: 0, removedDuplicateCount: 0, defaultManifestPathMigrated: false };
-  }
-
-  const targetIndex = canonicalIndex === -1 ? firstLegacyIndex : canonicalIndex;
-  const canonical = withLocalIndexerIdentity(entries[targetIndex]);
-  let migratedCount = entries[targetIndex].id === PAGEINDEX_LEGACY_PLUGIN_ID ? 1 : 0;
-  let defaultManifestPathMigrated =
-    entries[targetIndex].manifestPath === PAGEINDEX_LEGACY_DEFAULT_MANIFEST_PATH
-    && canonical.manifestPath === LOCAL_INDEXER_DEFAULT_MANIFEST_PATH;
-  if (canonical.manifestPath !== entries[targetIndex].manifestPath) migratedCount += 1;
-  let removedDuplicateCount = 0;
-
-  for (let index = 0; index < entries.length; index += 1) {
-    if (index === targetIndex) continue;
-    const entry = entries[index];
-    if (entry.id !== PAGEINDEX_LEGACY_PLUGIN_ID && entry.id !== LOCAL_INDEXER_PLUGIN_ID) continue;
-    mergeMissingPageindexMetadata(canonical, entry);
-    removedDuplicateCount += 1;
-    if (entry.id === PAGEINDEX_LEGACY_PLUGIN_ID) migratedCount += 1;
-    if (entry.manifestPath === PAGEINDEX_LEGACY_DEFAULT_MANIFEST_PATH) defaultManifestPathMigrated = true;
-  }
-
-  const plugins: PluginRegistryEntry[] = [];
-  for (let index = 0; index < entries.length; index += 1) {
-    const entry = entries[index];
-    if (index === targetIndex) {
-      plugins.push(canonical);
-      continue;
-    }
-    if (entry.id === PAGEINDEX_LEGACY_PLUGIN_ID || entry.id === LOCAL_INDEXER_PLUGIN_ID) continue;
-    plugins.push(entry);
-  }
-
-  return { plugins, migratedCount, removedDuplicateCount, defaultManifestPathMigrated };
-}
-
-async function migratePageindexInstalledDirectory(
-  registryPath: string,
-  shouldAttemptMove: boolean,
-): Promise<void> {
-  if (!shouldAttemptMove) return;
-
-  const registryDir = dirname(registryPath);
-  const legacyDir = resolve(registryDir, PAGEINDEX_LEGACY_PLUGIN_ID);
-  const canonicalDir = resolve(registryDir, LOCAL_INDEXER_PLUGIN_ID);
-
-  if (!(await pathExists(legacyDir))) return;
-
-  if (await pathExists(canonicalDir)) {
-    plog(
-      "warn",
-      {
-        pluginId: "<registry>",
-        phase: PluginPhase.DISCOVERY_START,
-        reason: "pageindex_plugin_dir_conflict",
-        registryPath,
-        legacyDir,
-        canonicalDir,
-      },
-      "registry migrated pageindex default manifest to local-indexer but both plugin directories exist; keeping local-indexer and leaving pageindex untouched",
-    );
-    return;
-  }
-
-  try {
-    await rename(legacyDir, canonicalDir);
-    plog(
-      "info",
-      {
-        pluginId: "<registry>",
-        phase: PluginPhase.DISCOVERY_START,
-        reason: "pageindex_plugin_dir_moved",
-        registryPath,
-        legacyDir,
-        canonicalDir,
-      },
-      "moved installed pageindex plugin directory to local-indexer during registry migration",
-    );
-  } catch (err) {
-    plog(
-      "warn",
-      {
-        pluginId: "<registry>",
-        phase: PluginPhase.DISCOVERY_FAIL,
-        err,
-        reason: "pageindex_plugin_dir_move_failed",
-        registryPath,
-        legacyDir,
-        canonicalDir,
-      },
-      "failed to move pageindex plugin directory during registry migration",
-    );
-  }
 }
 
 /**
@@ -275,12 +129,10 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     }
     return entry as PluginRegistryEntry;
   });
-  const pageindexMigration = migratePageindexRegistryEntries(plugins);
   const registry: PluginRegistry = {
     version: parsed.version ?? 1,
-    plugins: pageindexMigration.plugins,
+    plugins,
   };
-  await migratePageindexInstalledDirectory(registryPath, pageindexMigration.defaultManifestPathMigrated);
   if (out.devLinkRewritten) {
     // Loud one-shot audit warning. Existing dev-link entries cannot load
     // any longer (receipt verification now applies unconditionally) so
@@ -298,20 +150,6 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
         + `or 'lvis-cli install file://<path-to-dist.zip>'.`,
     );
   }
-  if (pageindexMigration.migratedCount > 0 || pageindexMigration.removedDuplicateCount > 0) {
-    plog(
-      "info",
-      {
-        pluginId: "<registry>",
-        phase: PluginPhase.DISCOVERY_START,
-        reason: "pageindex_registry_entry_migrated",
-        migratedCount: pageindexMigration.migratedCount,
-        removedDuplicateCount: pageindexMigration.removedDuplicateCount,
-        registryPath,
-      },
-      `registry migrated pageindex entries to local-indexer (migrated=${pageindexMigration.migratedCount}, removedDuplicates=${pageindexMigration.removedDuplicateCount})`,
-    );
-  }
   if (migratedCount > 0) {
     plog(
       "info",
@@ -325,7 +163,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
       `registry migrated ${migratedCount} legacy entries (installedBy/_devLinked → installSource)`,
     );
   }
-  if (migratedCount > 0 || pageindexMigration.migratedCount > 0 || pageindexMigration.removedDuplicateCount > 0) {
+  if (migratedCount > 0) {
     try {
       await writePluginRegistry(registryPath, registry);
     } catch (err) {
