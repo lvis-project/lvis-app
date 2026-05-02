@@ -1,8 +1,8 @@
 /**
  * registry.json migration — pre-PR #430 entries with `installedBy` +
- * `installedBy` is mapped onto `installSource` on first read. The legacy
- * `_devLinked` boolean is retained only as a deprecated cleanup hint so it
- * can never silently re-enable the old dev-link trust bypass.
+ * `_devLinked` are normalized onto `installSource` on first read. The legacy
+ * boolean never persists as an ambiguous cleanup hint, so it cannot silently
+ * re-enable the old dev-link trust bypass.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
@@ -25,7 +25,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("retains `_devLinked: true` as a cleanup hint without promoting installSource", async () => {
+  it("normalizes `_devLinked: true` legacy dev entries to installSource='dev-link' and clears the boolean", async () => {
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -35,7 +35,6 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
             id: "agent-hub",
             manifestPath: "agent-hub/plugin.json",
             enabled: true,
-            installedBy: "user",
             _devLinked: true,
           },
         ],
@@ -48,15 +47,14 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
       id: "agent-hub",
       manifestPath: "agent-hub/plugin.json",
       enabled: true,
-      _devLinked: true,
+      installSource: "dev-link",
     });
 
-    // Persisted: the boolean remains only as a cleanup hint. Runtime
-    // trust decisions must still ignore it.
+    // Persisted: the supported installSource remains, the legacy boolean does not.
     const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(onDisk.plugins[0].installedBy).toBeUndefined();
-    expect(onDisk.plugins[0]._devLinked).toBe(true);
-    expect(onDisk.plugins[0].installSource).toBeUndefined();
+    expect(onDisk.plugins[0]._devLinked).toBeUndefined();
+    expect(onDisk.plugins[0].installSource).toBe("dev-link");
   });
 
   it("maps `installedBy: \"user\"` → `installSource: \"user\"`", async () => {
@@ -109,7 +107,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     expect(onDisk.plugins[0].installSource).toBe("admin");
   });
 
-  it("preserves `_devLinked: true` as a hint while still migrating `installedBy`", async () => {
+  it("clears stale `_devLinked: true` while still migrating `installedBy`", async () => {
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -131,8 +129,11 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
       id: "x",
       manifestPath: "x/plugin.json",
       installSource: "admin",
-      _devLinked: true,
     });
+
+    const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(onDisk.plugins[0]._devLinked).toBeUndefined();
+    expect(onDisk.plugins[0].installSource).toBe("admin");
   });
 
   it("entries with neither legacy field nor installSource keep installSource undefined", async () => {
@@ -159,7 +160,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     expect(registry.plugins[0].installSource).toBeUndefined();
   });
 
-  it("is idempotent: a second read does not rewrite an already-migrated registry", async () => {
+  it("is idempotent after clearing stale `_devLinked` from an already-typed non-dev entry", async () => {
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -170,16 +171,20 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
             manifestPath: "calendar/plugin.json",
             enabled: true,
             installSource: "user",
+            _devLinked: true,
           },
         ],
       }),
       "utf-8",
     );
 
-    const before = await readFile(registryPath, "utf-8");
     await readPluginRegistry(registryPath);
-    const after = await readFile(registryPath, "utf-8");
-    expect(after).toEqual(before);
+    const afterFirstRead = await readFile(registryPath, "utf-8");
+    expect(JSON.parse(afterFirstRead).plugins[0]._devLinked).toBeUndefined();
+
+    await readPluginRegistry(registryPath);
+    const afterSecondRead = await readFile(registryPath, "utf-8");
+    expect(afterSecondRead).toEqual(afterFirstRead);
   });
 
   it("preserves bundleRefs and approvedPluginAccess across migration", async () => {

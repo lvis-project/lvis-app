@@ -192,7 +192,6 @@ describe("PluginMarketplaceService — dev-link supersede on marketplace install
             id: "pageindex",
             manifestPath: "pageindex/plugin.json",
             enabled: true,
-            installedBy: "user",
             // installSource omitted — legacy shape from before PR #430
             _devLinked: true,
           },

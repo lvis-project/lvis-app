@@ -13,12 +13,12 @@ export type InstallPolicy = "admin" | "user";
  *                 true; trust-boundary check still runs.
  *
  * The canonical dev marker is `installSource: "dev"`. The legacy literal
- * `"dev-link"` (PR #430 era) and the boolean `_devLinked` field are still
- * parsed for back-compat so older registries still load. Runtime dev-mode
- * handling currently treats `"dev"` and legacy `"dev-link"` equivalently for
- * the receipt-skip gate, while current write paths normalize restored dev
- * entries back to the canonical `"dev"` marker. `_devLinked` never grants a
- * trust-bypass on its own.
+ * `"dev-link"` (PR #430 era) and the boolean `_devLinked` field are parsed
+ * only for read-side back-compat so older registries still load. Current
+ * write paths normalize active dev installs back to the canonical `"dev"`
+ * marker; `"dev-link"` is legacy read-only compatibility, not the retained
+ * canonical receipt-skip marker. `_devLinked` never grants a trust-bypass on
+ * its own.
  */
 export type PluginRegistryEntryInstallSource =
   | "admin"
@@ -320,9 +320,9 @@ export interface PluginRegistryEntry {
    * No longer written by the current dev-sync workflow and NO LONGER honored
    * as a trust-bypass signal anywhere in the runtime. Kept in the type
    * solely for JSON back-compat: a registry written by an older build that
-   * carries `_devLinked: true` will still parse, but the entry will be
-   * cleaned up by the next dev-sync run (and treated as a normal entry until
-   * then — meaning it must pass the install-receipt check).
+   * carries `_devLinked: true` will still parse, but the next registry read
+   * will normalize it to a supported `installSource` (or drop the stale flag
+   * on non-dev entries). `_devLinked` itself is not rewritten.
    */
   _devLinked?: boolean;
   installSource?: PluginRegistryEntryInstallSource;

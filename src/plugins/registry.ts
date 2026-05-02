@@ -7,9 +7,10 @@ import { plog, PluginPhase } from "./lifecycle-log.js";
  * Pre-PR #430 registry shape — `installedBy` ("admin"|"user") and
  * `_devLinked` (boolean) carried install provenance in two orthogonal
  * fields. `installedBy` is migrated onto `installSource` on read.
- * The deprecated `_devLinked` boolean is intentionally retained only
- * as a cleanup hint for legacy registries: it must NEVER become a
- * trust-bypass signal. Current write paths clear it.
+ * The deprecated `_devLinked` boolean is parsed only to normalize legacy
+ * registries on read: legacy dev-link-only entries become
+ * `installSource: "dev-link"`, while stale flags on non-dev entries are
+ * cleared. It must NEVER become a trust-bypass signal.
  */
 interface LegacyRegistryEntry extends PluginRegistryEntry {
   installedBy?: InstallPolicy;
@@ -31,21 +32,23 @@ interface LegacyRegistryEntry extends PluginRegistryEntry {
  * — that preserves the deployment-guard's manifest-fallback behaviour for
  * registries that pre-date both fields.
  *
- * `_devLinked` is preserved only when it existed on the legacy entry and
- * there was no explicit `installSource` yet. That keeps enough signal for
- * dev-sync cleanup / marketplace supersede logic without ever upgrading the
- * entry into a trusted dev receipt-skip path.
+ * `_devLinked` no longer persists once an entry is read:
+ *   - if it was the only legacy dev marker, it normalizes to the legacy
+ *     installSource literal `"dev-link"` for read-only back-compat
+ *   - otherwise it is cleared so non-dev entries do not retain ambiguous
+ *     cleanup hints
  */
 function migrateLegacyEntry(entry: LegacyRegistryEntry): PluginRegistryEntry | null {
   const hasLegacy = entry.installedBy !== undefined || entry._devLinked !== undefined;
   if (!hasLegacy && entry.installSource !== undefined) return null;
-  const hadExplicitInstallSource = entry.installSource !== undefined;
   let installSource: PluginRegistryEntryInstallSource | undefined = entry.installSource;
   if (installSource === undefined) {
     if (entry.installedBy === "admin") {
       installSource = "admin";
     } else if (entry.installedBy === "user") {
       installSource = "user";
+    } else if (entry._devLinked === true) {
+      installSource = "dev-link";
     }
     // No legacy signal at all → leave installSource undefined so the
     // deployment-guard manifest-fallback path still fires.
@@ -60,7 +63,6 @@ function migrateLegacyEntry(entry: LegacyRegistryEntry): PluginRegistryEntry | n
   if (entry.bundleRefs !== undefined) migrated.bundleRefs = entry.bundleRefs;
   if (entry.approvedPluginAccess !== undefined) migrated.approvedPluginAccess = entry.approvedPluginAccess;
   if (installSource !== undefined) migrated.installSource = installSource;
-  if (entry._devLinked === true && !hadExplicitInstallSource) migrated._devLinked = true;
   return migrated;
 }
 
@@ -118,7 +120,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
         migratedCount,
         registryPath,
       },
-      `registry normalized ${migratedCount} legacy entries (installedBy → installSource, _devLinked kept as cleanup hint only)`,
+      `registry normalized ${migratedCount} legacy entries (installedBy/_devLinked → installSource; stale _devLinked cleared)`,
     );
     try {
       await writePluginRegistry(registryPath, registry);

@@ -381,10 +381,11 @@ export class PluginMarketplaceService {
       // symlinks) and the registry write at the end correctly sets
       // installSource: "user".
       //
-      // Pre-PR #430 dev-link entries used `_devLinked: true` instead of
-      // `installSource: "dev-link"`. `_devLinked` is now only a cleanup
-      // hint (never a runtime trust signal), but marketplace install still
-      // treats it as "supersede the stale dev-link layout".
+      // Pre-PR #430 dev-link entries could use `_devLinked: true` without an
+      // `installSource` field. readPluginRegistry now normalizes that shape to
+      // `installSource: "dev-link"` on read, but keep the boolean fallback as
+      // a defensive back-compat guard here too. `_devLinked` never acts as a
+      // runtime trust signal.
       const installedVersion = await this.getInstalledVersion(plugin.id);
       const isSameVersion =
         !plugin.version ||

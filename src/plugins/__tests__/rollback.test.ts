@@ -109,11 +109,11 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     await expect(svc.rollbackPlugin("com.lge.sample")).rejects.toThrow(/No prior version/);
   });
 
-  it("installPlugin promotes a legacy dev-link entry to user on same-version fast-path", async () => {
-    // Pre-populate registry with the legacy `_devLinked: true` shape that
-    // pre-PR #430 dev-link installs wrote. readPluginRegistry migrates it
-    // on first read; installPlugin must then re-stamp installSource="user"
-    // so the touch fast-path doesn't keep the entry on dev-link.
+  it("installPlugin preserves a non-dev entry when a stale legacy `_devLinked` flag is present", async () => {
+    // Pre-populate registry with an old mixed shape: authoritative
+    // installedBy="user" plus a stale `_devLinked: true` flag. On first
+    // read the registry migration must clear the boolean and keep the entry
+    // non-dev, so the same-version fast path still re-stamps "user".
     await writeFile(
       registryPath,
       JSON.stringify({

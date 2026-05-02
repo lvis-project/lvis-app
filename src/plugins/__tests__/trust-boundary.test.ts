@@ -374,11 +374,12 @@ describe("Phase 1 — plugin trust boundary", () => {
         expect(runtime.listPluginIds()).toContain("tb.devlink.legacy");
       });
 
-      it("dev mode + legacy `_devLinked: true` (no installSource) → REJECTED without a receipt", async () => {
-        // Regression for architect guidance: the legacy boolean
-        // `_devLinked` is no longer honored as a trust-bypass signal.
-        // Only `installSource: "dev"` (or its legacy literal "dev-link")
-        // gates the install-receipt skip path.
+      it("dev mode + legacy `_devLinked: true` (no installSource) → loads via read-side dev-link back-compat", async () => {
+        // `_devLinked` alone is no longer a runtime trust signal. But on read
+        // the registry migration normalizes this legacy shape to the explicit
+        // legacy installSource literal `"dev-link"`, so old registries still
+        // get the same dev-mode receipt-skip behavior until a current write
+        // path rewrites them to the canonical `"dev"` marker.
         process.env.LVIS_DEV = "1";
         setIsPackaged(false);
         const pluginDir = join(pluginsRoot, "p-devlinked-bool-only");
@@ -392,7 +393,7 @@ describe("Phase 1 — plugin trust boundary", () => {
           installReceiptCacheRoot: cacheRoot,
         });
         await runtime.load();
-        expect(runtime.listPluginIds()).not.toContain("tb.devlinked.bool");
+        expect(runtime.listPluginIds()).toContain("tb.devlinked.bool");
       });
 
       it("packaged + installSource='dev' → still rejected without a receipt", async () => {
