@@ -346,7 +346,11 @@ function QuestionForm({
             const showAlt = alts.has(i);
             return (
               <Button
-                key={c}
+                // Index-prefixed key — using `c` alone would collide if the
+                // model emits duplicate choice strings (or legacy
+                // `suggestedAnswers` carries duplicates), and React would
+                // reconcile state across the wrong rows.
+                key={`${i}:${c}`}
                 size="sm"
                 variant={selected ? "default" : "outline"}
                 disabled={disabled}
