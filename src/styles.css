@@ -339,44 +339,78 @@
    *  "no override; inherit data-theme defaults".
    * ──────────────────────────────────────────────────────────────────── */
   :root[data-chat-theme="purple"] {
-    /* Reference design — purple chat theme:
-       SEND button vivid purple (#734dff), user message bubble softer
-       lilac (#c497ef). These accent tokens apply on every shell — light
-       and dark — so the bubble + button always read as the same purple
-       family regardless of background. */
-    --primary:            253 100% 65%;      /* #734dff — SEND button */
+    /* Pure purple accent — only the action color (SEND, focus ring)
+       is repainted. Surface tokens stay inherited from the active
+       data-theme (light/dark/HC) so this remains a generic accent
+       overlay, identical in spirit to "blue" / "orange" below. */
+    --primary:            262 83% 58%;
     --primary-foreground:  0   0% 100%;
-    --message-user-bg:    271  76% 76%;      /* #c497ef — user bubble */
-    --message-user-fg:     0   0% 100%;
     --ring:               var(--p-purple-600);
   }
-  :root[data-theme="light"][data-chat-theme="purple"] {
-    /* Light shell + purple chat — additionally repaints surface tokens
-       with the warm-grey palette so the chat panel reads as the
-       reference image (Grey 1/3/4/5/7/7.5). Accent tokens above
-       (--primary, --message-user-*) are inherited from the base
-       purple chat theme. */
-    --background:         40 25% 92%;        /* Grey 6  #F0ECE4 — chat surface */
-    --foreground:          0  0% 15%;        /* Grey 1  #262626 — assistant text */
-    /* Cards / popovers blend into the background so only the message
-       composer (input bar) reads as white. The composer references its
-       own `--input-bar-bg` token below. */
-    --card:               40 25% 92%;        /* same as background */
-    --card-foreground:     0  0% 15%;
-    --popover:             0  0% 100%;       /* dropdowns stay light for legibility */
-    --input-bar-bg:        0  0% 100%;       /* white — composer only */
-    --popover-foreground:  0  0% 15%;
-    --muted:              44 37% 94%;        /* Grey 7  #F6F3EB */
-    --muted-foreground:   43  3% 43%;        /* Grey 3  #716F6A — timestamp */
-    --secondary:          44 37% 94%;
-    --secondary-foreground: 0 0% 15%;
-    --accent:             44 37% 94%;
-    --accent-foreground:   0  0% 15%;
-    --border:             40 10% 78%;        /* Grey 4  #CBC8C2 */
-    --input:              40 10% 78%;
 
-    --destructive:         1 98% 59%;        /* #FD312E — STOP, errors */
-    --destructive-foreground: 0 0% 100%;
+  :root[data-chat-theme="lg"] {
+    /* LG brand chat theme — light variant.
+       Lilac user bubble (#c497ef) on warm-grey chat surface (#F0ECE4)
+       with vivid-purple SEND button (#734dff) and LG red destructive
+       (#FD312E). Accent tokens stay constant across light/dark variants
+       so the brand reads consistently. Surface tokens here are the
+       light-mode set; dark overlay below repaints surfaces only.
+
+       Pairs with data-theme="light" or "system" (when system resolves
+       to light). High-contrast shell overrides --primary/--ring back
+       to yellow via the [data-theme="high-contrast"][data-chat-theme]
+       block — accessibility wins over brand. */
+    --primary:                253 100% 65%;       /* #734dff — SEND */
+    --primary-foreground:       0   0% 100%;
+    --message-user-bg:        271  76% 76%;       /* #c497ef — user bubble */
+    --message-user-fg:          0   0% 100%;
+    --ring:                   var(--p-purple-600);
+
+    --background:              40 25% 92%;        /* Grey 6  #F0ECE4 */
+    --foreground:               0  0% 15%;        /* Grey 1  #262626 */
+    --card:                    40 25% 92%;
+    --card-foreground:          0  0% 15%;
+    --popover:                  0  0% 100%;
+    --popover-foreground:       0  0% 15%;
+    --input-bar-bg:             0  0% 100%;       /* white — composer only */
+    --muted:                   44 37% 94%;        /* Grey 7  #F6F3EB */
+    --muted-foreground:        43  3% 43%;        /* Grey 3  #716F6A */
+    --secondary:               44 37% 94%;
+    --secondary-foreground:     0  0% 15%;
+    --accent:                  44 37% 94%;
+    --accent-foreground:        0  0% 15%;
+    --border:                  40 10% 78%;        /* Grey 4  #CBC8C2 */
+    --input:                   40 10% 78%;
+
+    --destructive:              1 98% 59%;        /* #FD312E — STOP */
+    --destructive-foreground:   0  0% 100%;
+
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"][data-chat-theme="lg"] {
+    /* LG brand chat theme — dark variant. Repaints surface tokens
+       only; accent tokens (lilac bubble, vivid SEND, LG red destructive)
+       are inherited from the base lg block above so the brand reads
+       consistently across shells. Surface palette is the warm-neutral
+       inversion of the light variant — Grey-1 base, Grey-7 text. */
+    --background:               0  0% 15%;        /* Grey 1  #262626 — chat surface */
+    --foreground:              44 37% 94%;        /* Grey 7  #F6F3EB — text on dark */
+    --card:                     0  0% 18%;        /* slight elevation above surface */
+    --card-foreground:         44 37% 94%;
+    --popover:                  0  0% 22%;        /* dropdowns / popovers */
+    --popover-foreground:      44 37% 94%;
+    --input-bar-bg:             0  0% 22%;        /* composer reads as elevated card */
+    --muted:                    0  0% 20%;
+    --muted-foreground:        40  5% 60%;        /* warm light gray — timestamps */
+    --secondary:                0  0% 20%;
+    --secondary-foreground:    44 37% 94%;
+    --accent:                   0  0% 20%;
+    --accent-foreground:       44 37% 94%;
+    --border:                   0  0% 28%;
+    --input:                    0  0% 28%;
+
+    color-scheme: dark;
   }
 
   :root[data-chat-theme="orange"] {
@@ -516,8 +550,12 @@
   .lvis-theme-card-mock-inner {
     width: 100%;
     height: 100%;
-    background: hsl(var(--p-slate-50));
-    color: hsl(var(--p-slate-900));
+    /* `--mock-bg`/`--mock-text` are optional per-card overrides so a
+       theme with its own surface palette (e.g. LG warm-grey) shows
+       its real surface, not a generic slate-50. Falls back to slate
+       defaults when not set. */
+    background: var(--mock-bg, hsl(var(--p-slate-50)));
+    color: var(--mock-text, hsl(var(--p-slate-900)));
     padding: 0.4rem 0.45rem;
     display: flex;
     flex-direction: column;
@@ -526,8 +564,8 @@
 
   /* Dark-shell variant of the mock — used inside code-theme dark card */
   .lvis-theme-card-mock-inner.is-dark {
-    background: hsl(var(--p-slate-950));
-    color: hsl(var(--p-slate-50));
+    background: var(--mock-bg, hsl(var(--p-slate-950)));
+    color: var(--mock-text, hsl(var(--p-slate-50)));
   }
 
   .lvis-theme-card-mock-bar {
@@ -547,7 +585,10 @@
   .lvis-theme-card-mock-bubble {
     height: 0.55rem;
     border-radius: 0.45rem;
-    background: hsl(var(--p-slate-200));
+    /* Default (other-side) bubble. Per-card override via `--mock-bubble-other`
+       lets a theme paint the assistant bubble with its own muted color
+       (e.g. LG's warm-grey-7) instead of generic slate-200. */
+    background: var(--mock-bubble-other, hsl(var(--p-slate-200)));
     flex: 1 1 auto;
   }
 

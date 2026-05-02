@@ -61,7 +61,7 @@ export interface ThemeProviderProps {
 export function ThemeProvider({
   api,
   initialPreference = "system",
-  initialChatTheme = "purple",
+  initialChatTheme = "lg",
   initialCodeTheme = "auto",
   children,
 }: ThemeProviderProps) {
@@ -87,7 +87,7 @@ export function ThemeProvider({
         const settings = await api.getSettings();
         if (cancelled || userTouchedRef.current || !mountedRef.current) return;
         const next = settings.appearance?.theme ?? "system";
-        const nextChat = (settings.appearance?.chatTheme as ChatThemePreference | undefined) ?? "purple";
+        const nextChat = (settings.appearance?.chatTheme as ChatThemePreference | undefined) ?? "lg";
         const nextCode = (settings.appearance?.codeTheme as CodeThemePreference | undefined) ?? "auto";
         setPreferenceState(next);
         setChatThemeState(nextChat);

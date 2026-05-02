@@ -45,7 +45,7 @@ interface PluginWebviewBinding {
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
 const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
-const ALLOWED_CHAT_THEMES = new Set(["default", "purple", "orange", "blue"]);
+const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
 const ALLOWED_CODE_THEMES = new Set(["light", "dark"]);
 
 export function validateThemePayload(payload: unknown):

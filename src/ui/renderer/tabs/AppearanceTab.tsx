@@ -31,6 +31,17 @@ interface ChatOption {
   label: string;
   /** CSS color expression injected as `--mock-accent` on the inner mock. */
   accentVar: string;
+  /**
+   * Optional surface override for cards whose theme repaints background /
+   * text / assistant-bubble (e.g. LG). When omitted the mock keeps the
+   * generic slate defaults from styles.css. Each entry is a CSS color
+   * expression — the keys map 1:1 to mock CSS variables.
+   */
+  surface?: {
+    bg?: string;
+    text?: string;
+    bubbleOther?: string;
+  };
 }
 
 const CHAT_OPTIONS: ReadonlyArray<ChatOption> = [
@@ -38,6 +49,21 @@ const CHAT_OPTIONS: ReadonlyArray<ChatOption> = [
   // we use in the dark default. We render this with the literal blue accent
   // so the card stays visually distinct from the explicit "blue" card below.
   { value: "default", label: "기본", accentVar: "hsl(215 16% 47%)" },
+  // "lg" is a self-contained brand identity (warm-grey + lilac + LG red).
+  // Card preview shows the warm-grey background + Grey-7 muted bubble +
+  // lilac user bubble so users can recognize the full LG identity at a
+  // glance, not just the accent. (Other accent-only themes below keep
+  // generic slate surface — that matches their actual runtime behavior.)
+  {
+    value: "lg",
+    label: "LG",
+    accentVar: "hsl(271 76% 76%)",
+    surface: {
+      bg: "hsl(40 25% 92%)",       // Grey 6  #F0ECE4
+      text: "hsl(0 0% 15%)",        // Grey 1  #262626
+      bubbleOther: "hsl(44 37% 94%)", // Grey 7  #F6F3EB
+    },
+  },
   { value: "purple", label: "퍼플", accentVar: "hsl(262 83% 58%)" },
   { value: "orange", label: "오렌지", accentVar: "hsl(25 95% 53%)" },
   { value: "blue", label: "블루", accentVar: "hsl(217.2 91.2% 59.8%)" },
@@ -65,15 +91,23 @@ const SHELL_OPTIONS: ReadonlyArray<{ value: ThemePreference; label: string }> = 
   { value: "high-contrast", label: "고대비" },
 ];
 
-/* ─── inline accent CSS-var helper ───────────────────────────────────── */
-function accentStyle(accent: string): CSSProperties {
-  return { ["--mock-accent" as string]: accent } as CSSProperties;
+/* ─── inline mock CSS-var helper ───────────────────────────────────────
+ * Builds the inline style object that exposes per-card variables to the
+ * mock CSS. Only `accent` is mandatory; surface fields are wired only
+ * when the theme has its own surface palette (avoids overriding the
+ * mock's generic light defaults for accent-only themes). */
+function mockStyle(accent: string, surface?: ChatOption["surface"]): CSSProperties {
+  const style: Record<string, string> = { "--mock-accent": accent };
+  if (surface?.bg) style["--mock-bg"] = surface.bg;
+  if (surface?.text) style["--mock-text"] = surface.text;
+  if (surface?.bubbleOther) style["--mock-bubble-other"] = surface.bubbleOther;
+  return style as CSSProperties;
 }
 
 /* ─── chat-theme card mock — generic chat shell ──────────────────────── */
-function ChatThemeMock({ accent }: { accent: string }) {
+function ChatThemeMock({ accent, surface }: { accent: string; surface?: ChatOption["surface"] }) {
   return (
-    <div className="lvis-theme-card-mock-inner" style={accentStyle(accent)}>
+    <div className="lvis-theme-card-mock-inner" style={mockStyle(accent, surface)}>
       <div className="lvis-theme-card-mock-bar" />
       <div className="lvis-theme-card-mock-row">
         <span className="lvis-theme-card-mock-dot" />
@@ -198,7 +232,7 @@ export function AppearanceTab() {
               accessibleName={`채팅 테마: ${opt.label}`}
               onSelect={() => setChatTheme(opt.value)}
             >
-              <ChatThemeMock accent={opt.accentVar} />
+              <ChatThemeMock accent={opt.accentVar} surface={opt.surface} />
             </SwatchCard>
           ))}
         </div>
