@@ -16,6 +16,9 @@
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
+import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
+import { pluginPartitionName } from "../../shared/plugin-partition.js";
+import { onEvent as onHostEvent } from "../types.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
@@ -948,6 +951,34 @@ export async function initPluginRuntime(
 
   await pluginRuntime.startAll();
   log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
+
+  // Pre-register the per-partition `setPreloads(...)` policy for every
+  // loaded plugin (#498). Electron's `<webview partition="persist:plugin:..."
+  // preload="...">` honors `preload=` only when sandbox=no; with sandbox=yes
+  // the preload script must be registered on the partition's Session via
+  // `session.setPreloads()`. The previous attach-time hook in main.ts
+  // tries to read `contents.session.partition` to decide which partition
+  // got attached, but that property is undocumented and returns
+  // `undefined` on current Electron — so the hook never fires `setPreloads`
+  // and plugin webviews load without the `lvisPlugin` contextBridge,
+  // surfacing as "lvisPlugin bridge missing" in the shell. Pre-registering
+  // by walking the loaded-plugin set sidesteps the partition-name read
+  // entirely.
+  for (const pluginId of pluginRuntime.listPluginIds()) {
+    installPluginPartitionPolicy(pluginPartitionName(pluginId));
+  }
+  // Cover plugins added AFTER startAll() — deep-link install
+  // (`lvis://install/<slug>` → `addPlugin`), dev hot-reload watcher
+  // (LVIS_DEV_RELOAD=1), Settings sideload. The boot loop above only sees
+  // `startAll`-era plugins; the attach-time hook in main.ts is dead code
+  // for these (it reads `contents.session.partition` which is undocumented
+  // and returns `undefined`), so the partition policy must be installed at
+  // plugin-install time.
+  onHostEvent("plugin.installed", (data) => {
+    const pluginId = (data as { pluginId?: string } | undefined)?.pluginId;
+    if (typeof pluginId !== "string") return;
+    installPluginPartitionPolicy(pluginPartitionName(pluginId));
+  });
 
   // 선언형 startupTools 자동 실행
   runManifestStartupTools(pluginRuntime);

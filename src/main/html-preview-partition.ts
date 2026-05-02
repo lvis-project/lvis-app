@@ -17,7 +17,14 @@
  * All other https hosts and all non-https schemes remain blocked.
  */
 import { session } from "electron";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// ESM equivalent of CommonJS `__dirname`. The original code referenced
+// `__dirname` directly, which is undefined under `"type": "module"` and
+// crashed when `installPluginPartitionPolicy` was first reached at runtime
+// (#498). Resolve once at module load.
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const CDN_ALLOWLIST = new Set([
   "cdn.jsdelivr.net",

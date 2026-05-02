@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
+import { pluginPartitionName } from "./shared/plugin-partition.js";
 
 export type PluginUiExtensionView = {
   pluginId: string;
@@ -63,24 +64,10 @@ function getPluginViewLabel(item: PluginUiExtensionView): string {
   return item.extension.displayName?.trim() || item.extension.title || item.pluginId;
 }
 
-/**
- * Stable, collision-resistant per-plugin partition slug. Two pluginIds
- * that normalize to the same `[a-z0-9-]` slug would otherwise share the
- * `persist:plugin:` storage silo. Hash the raw pluginId so plugin authors
- * cannot pre-meditate a slug collision via marketplace upload.
- *
- * 32-bit FNV-1a → 8 hex chars. Synchronous (renderer can't use SubtleCrypto
- * inline) and good enough for collision resistance on a per-user plugin
- * set < ~10k.
- */
-function pluginPartitionHash(pluginId: string): string {
-  let h = 2166136261;
-  for (let i = 0; i < pluginId.length; i++) {
-    h ^= pluginId.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
+// Partition naming moved to `shared/plugin-partition.ts` so main + renderer
+// stay byte-identical (#498). Drift between the two would silently route a
+// webview to a partition the main process never policy-registered, killing
+// the lvisPlugin contextBridge.
 
 /**
  * Read the deterministic plugin shell + preload URLs from `window.lvisApi`.
@@ -135,8 +122,12 @@ export function PluginUiHostView({
     if (node) {
       node.addEventListener("did-finish-load", onFinishRef.current);
       node.addEventListener("did-fail-load", onFailRef.current);
-      const onDidAttach = (e: Event) => {
-        const wcId = (e as unknown as { webContentsId?: number }).webContentsId;
+      const onDidAttach = () => {
+        // `did-attach` event has no documented payload — use the webview-tag
+        // method `getWebContentsId()` (canonical Electron API) instead of
+        // reading a non-standard `e.webContentsId` property which returns
+        // undefined and silently aborts the registration handshake.
+        const wcId = node.getWebContentsId();
         if (!Number.isFinite(wcId) || !view?.pluginId || !view?.entryUrl) return;
         const { shellUrl: url } = readPluginAssetUrls();
         if (!url) return;
@@ -215,7 +206,7 @@ export function PluginUiHostView({
         </div>
       );
     } else {
-      const partition = `persist:plugin:${pluginPartitionHash(view.pluginId)}`;
+      const partition = pluginPartitionName(view.pluginId);
       // `key={view.pluginId}` 가 결정적. Electron `<webview>` 는 처음
       // attach 시점에만 partition / src 를 바인딩하고 이후 prop 변경을
       // 완전히 적용하지 못한다 (mojo: "Message N rejected by interface
@@ -230,12 +221,27 @@ export function PluginUiHostView({
       // 전환 시 webview 가 reuse 되면서 이전 entry 의 IPC 매핑이 남거나
       // 이전 frame 이 잠시 보이는 문제 → key 를 extension.id 까지 포함시켜
       // extension 단위로 fresh attach 보장.
+      // `<webview preload>` runs ONLY at the first guest attach — subsequent
+      // navigations (e.g. about:blank → file:///plugin-ui-shell.html) do
+      // NOT re-execute preload, so the `lvisPlugin` contextBridge is gone in
+      // the new main world and the shell aborts with "lvisPlugin bridge
+      // missing".
+      //
+      // Therefore the initial `src` must already be the real shell URL so
+      // preload runs once for the right origin. The race between the host's
+      // did-attach → registerPluginWebview handshake and the shell's
+      // immediate `getEntryUrl` call is absorbed by the host's
+      // `pendingEntryUrlResolvers` wait queue + the shell's 6s retry
+      // budget (issue #439 / PR #441). The did-attach listener still
+      // populates `shellSrcBinding` for parity with the old contract;
+      // `shellSrc` may already equal `shellUrl` here, in which case it's a
+      // no-op.
       content = (
         <webview
           key={`${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}`}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={handleWebviewRef as any}
-          src={shellSrc || undefined}
+          src={shellSrc || shellUrl}
           partition={partition}
           preload={preloadUrl}
           webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"

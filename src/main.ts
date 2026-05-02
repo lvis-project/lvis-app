@@ -560,6 +560,15 @@ app.on("web-contents-created", (_event, contents) => {
   // the plugin shell document itself escaped the file://-only allow
   // list. `installPluginPartitionPolicy` is idempotent so re-installs
   // on the same partition are no-ops.
+  //
+  // BUG (#498): `contents.session.partition` is undocumented and returns
+  // `undefined` on current Electron, so this guard never matches and
+  // `setPreloads` is never called → plugin webviews load without the
+  // `lvisPlugin` contextBridge → shell aborts with "lvisPlugin bridge
+  // missing". The proper fix pre-registers the policy at boot for every
+  // known plugin partition (see `boot/steps/plugin-runtime.ts`); the
+  // attach-time hook here is kept for the case where the partition wasn't
+  // pre-registered (defensive only).
   const partitionName = (contents.session as unknown as { partition?: string }).partition;
   if (typeof partitionName === "string" && partitionName.startsWith("persist:plugin:")) {
     installPluginPartitionPolicy(partitionName);
