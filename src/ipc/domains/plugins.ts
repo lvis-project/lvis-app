@@ -17,6 +17,8 @@ import { emitPluginConfigChange, SECRET_REDACTED_SENTINEL } from "../../plugins/
 import { runManagedBootstrap } from "../../boot/managed-marketplace.js";
 import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { NOTIFICATION_KINDS } from "../../main/notification-service.js";
+import { resolvePluginPaths } from "../../plugins/plugin-paths.js";
+import { readPluginRegistry } from "../../plugins/registry.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -47,6 +49,30 @@ const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
 const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
 const ALLOWED_CODE_THEMES = new Set(["light", "dark"]);
+
+async function resolveInstalledManifestPath(pluginId: string): Promise<string | undefined> {
+  const pluginPaths = resolvePluginPaths();
+  const registry = await readPluginRegistry(pluginPaths.registryPath);
+  const entry = registry.plugins.find((candidate) => candidate.id === pluginId && candidate.enabled !== false);
+  if (!entry) return undefined;
+  return path.isAbsolute(entry.manifestPath)
+    ? entry.manifestPath
+    : path.resolve(path.dirname(pluginPaths.registryPath), entry.manifestPath);
+}
+
+async function preparePythonRuntimeForInstalledPlugin(
+  pluginId: string,
+  deps: Pick<IpcDeps, "pythonRuntime" | "pluginRuntime" | "getMainWindow">,
+): Promise<void> {
+  if (!deps.pythonRuntime) return;
+  const manifestPath = await resolveInstalledManifestPath(pluginId);
+  if (!manifestPath) return;
+  const win = deps.getMainWindow();
+  if (!win) return;
+  const runtime = await deps.pythonRuntime.ensureReadyForPluginManifest(manifestPath, win);
+  if (!runtime) return;
+  deps.pluginRuntime.mergeConfigOverride("*", { pythonExecutable: runtime.pythonPath });
+}
 
 export function validateThemePayload(payload: unknown):
   | { ok: true; safe: { theme: string; chatTheme: string; codeTheme: string } }
@@ -109,8 +135,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       }
     });
     win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
-    await pluginRuntime.addPlugin(pluginId);
-    emitHostEvent("plugin.installed", { pluginId, source: "marketplace" });
+    await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
+    await pluginRuntime.addPlugin(result.pluginId);
+    emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "marketplace" });
     refreshPluginNotifications?.();
     win?.webContents.send("lvis:plugins:install-result", { slug: pluginId, success: true });
     return result;
@@ -149,6 +176,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     });
     if (canceled || !filePaths[0]) return null;
     const result = await pluginMarketplace.installLocal(filePaths[0]);
+    await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
     await pluginRuntime.addPlugin(result.pluginId);
     emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "local-dev" });
     refreshPluginNotifications?.();

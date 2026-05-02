@@ -616,6 +616,14 @@ export class PluginRuntime {
     this.configOverrides[pluginId] = { ...config };
   }
 
+  mergeConfigOverride(pluginId: string, config: Record<string, unknown>): void {
+    if (Object.keys(config).length === 0) return;
+    this.configOverrides[pluginId] = {
+      ...(this.configOverrides[pluginId] ?? {}),
+      ...config,
+    };
+  }
+
   /**
    * US-A3 — Targeted single-plugin add for install / install-local paths.
    */

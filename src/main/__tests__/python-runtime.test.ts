@@ -215,6 +215,61 @@ describe("PythonRuntimeBootstrapper", () => {
     expect(pipSyncCall![1] as string[]).toContain(declaredLockFilePath);
   });
 
+  it("plugin.json이 선언한 절대 lockfile 경로는 거부하고 plugin 디렉토리 기본 lockfile만 사용한다", async () => {
+    const manifestPath = "/installed/local-indexer/plugin.json";
+    const defaultLockFilePath = "/installed/local-indexer/python-requirements.lock";
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      runtime: { python: { requirementsLock: "/outside/python.lock" } },
+    }));
+    mockedAccess
+      .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined);
+    mockedSpawn
+      .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+
+    const bootstrapper = new PythonRuntimeBootstrapper({ pluginManifestPaths: [manifestPath] });
+    await bootstrapper.ensureReady(makeBrowserWindow());
+
+    const pipSyncCall = mockedSpawn.mock.calls.find(
+      ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
+    );
+    expect(pipSyncCall).toBeDefined();
+    expect(pipSyncCall![1] as string[]).toContain(defaultLockFilePath);
+    expect(pipSyncCall![1] as string[]).not.toContain("/outside/python.lock");
+  });
+
+  it("first-session plugin install can prepare runtime from the newly installed manifest", async () => {
+    const manifestPath = "/installed/local-indexer/plugin.json";
+    const declaredLockFilePath = "/installed/local-indexer/requirements/python.lock";
+    mockedReadFile.mockResolvedValue(JSON.stringify({
+      runtime: { python: { requirementsLock: "requirements/python.lock" } },
+    }));
+    mockedAccess
+      .mockResolvedValueOnce(undefined) // preflight declared lock exists
+      .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" })) // sentinel 없음
+      .mockResolvedValueOnce(undefined) // uv binary 존재
+      .mockResolvedValueOnce(undefined); // declared lock file 존재
+    mockedSpawn
+      .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+
+    const bootstrapper = new PythonRuntimeBootstrapper();
+    const result = await bootstrapper.ensureReadyForPluginManifest(manifestPath, makeBrowserWindow());
+
+    expect(result?.pythonPath).toBeTruthy();
+    const pipSyncCall = mockedSpawn.mock.calls.find(
+      ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
+    );
+    expect(pipSyncCall).toBeDefined();
+    expect(pipSyncCall![1] as string[]).toContain(declaredLockFilePath);
+  });
+
   // ─── 3. spawn non-zero exit → throws ─────────────────────────────────────
 
   it("uv spawn이 non-zero exit code를 반환하면 throws한다", async () => {

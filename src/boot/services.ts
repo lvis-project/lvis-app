@@ -28,6 +28,7 @@ const log = createLogger("lvis");
 
 export interface CoreServices {
   pythonPath: string | undefined;
+  pythonRuntime: PythonRuntimeBootstrapper;
   bashAstValidator: BashAstValidator;
   auditService: AuditService;
   settingsService: SettingsService;
@@ -100,6 +101,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
 
   return {
     pythonPath,
+    pythonRuntime,
     bashAstValidator,
     auditService,
     settingsService,
