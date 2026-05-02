@@ -9,6 +9,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { TokenProgressRing } from "./TokenProgressRing.js";
 import { PluginGridButton, type PluginEntry } from "./PluginGridButton.js";
+import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import { CommandPopover, type QuickAction } from "./CommandPopover.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 
@@ -18,7 +19,7 @@ export interface InputActionBarProps {
   contextBudget: number;
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
-  installingPluginIds?: ReadonlySet<string>;
+  installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
   onInsertSlashCommand: (cmd: string) => void;
@@ -65,7 +66,7 @@ export function InputActionBar({
   contextBudget,
   plugins,
   onSelectPlugin,
-  installingPluginIds,
+  installingPlugins,
   onOpenMarketplace,
   marketplaceUrlReady,
   onInsertSlashCommand,
@@ -107,7 +108,7 @@ export function InputActionBar({
         <PluginGridButton
           plugins={plugins}
           onSelect={onSelectPlugin}
-          installingPluginIds={installingPluginIds}
+          installingPlugins={installingPlugins}
           onOpenMarketplace={onOpenMarketplace}
           marketplaceUrlReady={marketplaceUrlReady}
         />

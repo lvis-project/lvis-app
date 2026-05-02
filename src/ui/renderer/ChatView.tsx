@@ -59,6 +59,7 @@ import {
 } from "./types/attachments.js";
 import { buildMarkerText } from "./utils/attachment-markers.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
+import type { InstallPhase } from "./hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
@@ -95,12 +96,12 @@ export interface ChatViewProps {
   /** Controlled open state for CommandPopover */
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
-  installingPluginIds?: ReadonlySet<string>;
+  installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
 }
 
-export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPluginIds, onOpenMarketplace, marketplaceUrlReady }: ChatViewProps) {
+export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -521,7 +522,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           contextBudget={contextBudget}
           plugins={plugins}
           onSelectPlugin={onSelectPlugin}
-          installingPluginIds={installingPluginIds}
+          installingPlugins={installingPlugins}
           onOpenMarketplace={onOpenMarketplace}
           marketplaceUrlReady={marketplaceUrlReady}
           onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
