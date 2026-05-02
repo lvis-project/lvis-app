@@ -190,9 +190,15 @@ bunx vitest run
 
 ## 실행
 ```bash
-# 실제 Local Indexer 모드 (설치/키 필요)
-# Local Indexer plugin 은 marketplace/sideload 로 먼저 설치해야 하며,
-# host 는 sibling plugin source checkout 을 사용하지 않습니다.
-# OPENAI_API_KEY=... bun run start
+# 기본 실행
 bun run start
+
+# Local Indexer 기능까지 사용/검증하려면:
+#   1) marketplace/sideload 로 plugin 을 먼저 설치
+#   2) OPENAI_API_KEY 설정 후 실행
+OPENAI_API_KEY=... bun run start
 ```
+
+> `scripts/e2e-phase1.ts` 는 retire 되었습니다. 현재 host-side 검증의 source of truth 는
+> `bun run test:main-flow`, `bun run test:electron-smoke`, `bun run build` 입니다.
+> `docs/blueprints/*` 의 해당 스크립트 언급은 과거 Phase 1 기록입니다.
