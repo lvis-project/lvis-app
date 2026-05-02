@@ -89,6 +89,15 @@ export interface AuditSettings {
 export interface FeatureFlags {
   /** PR-5 Phase 2: Kakao-style continuous chat history (stacked view). Default false. */
   experimentalStackedChat?: boolean;
+  /**
+   * Phase 1 continuous-backend behaviors (checkpoint detection, title chaining,
+   * rolling summary preamble in system prompt, session rotation).
+   * Default false — OFF until explicitly verified by user.
+   * When OFF: Section 8 + 9.9 system prompt sources are skipped, post-turn
+   * detect-checkpoint / update-title steps are skipped, decideRotation always
+   * returns { shouldRotate: false }.
+   */
+  experimentalContinuousBackend?: boolean;
 }
 
 export interface AppSettings {
@@ -328,6 +337,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   pluginConfigs: {},
   features: {
     experimentalStackedChat: false,
+    experimentalContinuousBackend: false,
   },
 };
 
@@ -677,6 +687,9 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   const result: FeatureFlags = {};
   if (typeof obj.experimentalStackedChat === "boolean") {
     result.experimentalStackedChat = obj.experimentalStackedChat;
+  }
+  if (typeof obj.experimentalContinuousBackend === "boolean") {
+    result.experimentalContinuousBackend = obj.experimentalContinuousBackend;
   }
   return result;
 }

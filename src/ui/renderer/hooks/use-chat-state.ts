@@ -207,7 +207,9 @@ export function useChatState(api: LvisApi) {
           const doneRoute = ev.route;
           // §PR-3: strip <title>...</title> and [checkpoint-suggested] markers
           // that may have been streamed as raw deltas before post-turn cleanup.
-          const finalText = detectFromStream(streamRef.current).cleanedText;
+          // Safety: if cleanedText is empty (e.g. entire stream was markers), use raw.
+          const detected = detectFromStream(streamRef.current);
+          const finalText = detected.cleanedText || streamRef.current;
           setEntries((p) => {
             const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
             guidanceResetPendingRef.current = false;

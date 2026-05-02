@@ -47,6 +47,8 @@ export interface SettingsOrchestrationState {
   // Experimental feature flags
   experimentalStackedChat: boolean;
   setExperimentalStackedChat: (v: boolean) => void;
+  experimentalContinuousBackend: boolean;
+  setExperimentalContinuousBackend: (v: boolean) => void;
   // Marketplace
   marketplaceBaseUrl: string;
   setMarketplaceBaseUrl: (v: string) => void;
@@ -89,6 +91,7 @@ export function useSettingsOrchestration(
   const [enableWakeupRoutine, setEnableWakeupRoutine] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
   const [experimentalStackedChat, setExperimentalStackedChat] = useState(false);
+  const [experimentalContinuousBackend, setExperimentalContinuousBackend] = useState(false);
   const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
   const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
   const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
@@ -120,6 +123,7 @@ export function useSettingsOrchestration(
       setEnableWakeupRoutine(s.routine?.enableWakeupRoutine ?? false);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
       setExperimentalStackedChat(s.features?.experimentalStackedChat ?? false);
+      setExperimentalContinuousBackend(s.features?.experimentalContinuousBackend ?? false);
       setMarketplaceBaseUrl(s.marketplace?.realCloudBaseUrl ?? "");
       setMarketplaceAllowPrivateNetwork(s.marketplace?.realCloudAllowPrivateNetwork ?? false);
       const marketplaceKeySet = await api.hasMarketplaceApiKey();
@@ -207,7 +211,7 @@ export function useSettingsOrchestration(
             realCloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
             realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
           },
-          features: { experimentalStackedChat },
+          features: { experimentalStackedChat, experimentalContinuousBackend },
         } as any);
       }
       if (tab !== "permissions") { onSaved(); onOpenChange(false); }
@@ -235,6 +239,7 @@ export function useSettingsOrchestration(
     enableWakeupRoutine, setEnableWakeupRoutine,
     piiRedactEnabled, setPiiRedactEnabled,
     experimentalStackedChat, setExperimentalStackedChat,
+    experimentalContinuousBackend, setExperimentalContinuousBackend,
     marketplaceBaseUrl, setMarketplaceBaseUrl,
     marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,
     hasMarketplaceApiKey, setHasMarketplaceApiKey,
