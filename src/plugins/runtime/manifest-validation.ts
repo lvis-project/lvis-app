@@ -170,6 +170,15 @@ export async function parsePluginJson(
   }
 
   // Sprint 4-B §B-1 — AJV validation against schemas/plugin.schema.json.
+  // Backlog #3: surface degraded-mode entry per-manifest so operators can
+  // detect that AJV was unavailable at load time.
+  if (!validator) {
+    log.warn(
+      { event: "plugin_validator_degraded", pluginId: pid, path },
+      "plugin '%s' loaded under degraded validation (AJV unavailable — hand-rolled checks only)",
+      pid,
+    );
+  }
   if (validator && !validator(parsed)) {
     const errs = (validator.errors ?? [])
       .map((e) => `${e.instancePath || "/"} ${e.message ?? ""}`.trim())
