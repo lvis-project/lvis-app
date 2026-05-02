@@ -71,11 +71,10 @@ export class PluginUpdateDetector {
         // Dev-synced installs (`bun run dev:sync`) copy real files into
         // pluginsRoot but should not be compared against the catalog —
         // the source workspace is the authoritative manifest, not the
-        // marketplace catalog. Skip both the current marker (`"dev"`)
-        // and the legacy literal (`"dev-link"`). The deprecated
-        // `_devLinked` boolean only counts as a dev marker when no
-        // authoritative non-dev installSource was recorded; stale cleanup
-        // flags on marketplace/user/admin entries must not suppress updates.
+        // marketplace catalog. `readPluginRegistry()` normalizes legacy
+        // `_devLinked` registry entries into `installSource: "dev-link"`
+        // before update detection sees them, so this check only needs the
+        // supported installSource values.
         if (isDevCatalogEntry(entry)) continue;
 
         const installedVersion = await this.readInstalledVersion(entry.manifestPath);
@@ -129,11 +128,7 @@ export class PluginUpdateDetector {
 }
 
 function isDevCatalogEntry(entry: PluginRegistryEntry): boolean {
-  return (
-    entry.installSource === "dev" ||
-    entry.installSource === "dev-link" ||
-    (entry._devLinked === true && entry.installSource === undefined)
-  );
+  return entry.installSource === "dev" || entry.installSource === "dev-link";
 }
 
 function canonicalizeExistingPath(path: string): string {
