@@ -102,7 +102,10 @@ export function ThemeProvider({
   // Propagate theme to plugin webviews whenever any axis changes.
   useEffect(() => {
     if (!api) return;
-    void api.notifyPluginTheme({ theme: resolved, chatTheme, codeTheme: resolvedCodeTheme }).catch(() => {});
+    void api.notifyPluginTheme({ theme: resolved, chatTheme, codeTheme: resolvedCodeTheme })
+      .catch((err: unknown) => {
+        if (process.env.LVIS_DEV === "1") console.warn("[theme-propagation] notifyPluginTheme failed:", err);
+      });
   }, [api, resolved, chatTheme, resolvedCodeTheme]);
 
   // Apply shell theme to the DOM whenever the resolved theme changes. Wrapped
