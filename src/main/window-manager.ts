@@ -51,7 +51,7 @@ function viewKeyLabel(viewKey: string): string {
     return BUILTIN_VIEW_LABELS[viewKey];
   }
   // plugin:<pluginId>:<extensionId> — use the pluginId segment only
-  if (viewKey.startsWith("plugin:")) {
+  if (isPluginViewKey(viewKey)) {
     const pluginId = viewKey.slice("plugin:".length).split(":")[0];
     return pluginId;
   }
@@ -239,7 +239,10 @@ export class WindowManager {
     if (this._detachedShell !== null && !this._detachedShell.isDestroyed()) {
       const shell = this._detachedShell;
       if (isPluginViewKey(this._detachedShellViewKey ?? "") !== isPluginViewKey(viewKey)) {
-        shell.close();
+        this._children.delete(shell.id);
+        this._detachedShell = null;
+        this._detachedShellViewKey = null;
+        if (!shell.isDestroyed()) shell.destroy();
       } else {
         if (this._detachedShellViewKey !== viewKey) {
           this._detachedShellViewKey = viewKey;

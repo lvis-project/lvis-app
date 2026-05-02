@@ -26,6 +26,8 @@ const mockWindowInstances: Array<{
   opts: Record<string, unknown>;
   loadedUrl: string | null;
   events: Map<string, Array<() => void>>;
+  isDestroyed: () => boolean;
+  destroy: () => void;
   show: () => void;
 }> = [];
 
@@ -38,8 +40,14 @@ vi.mock("electron", () => {
     const instance = {
       id,
       opts,
+      destroyed: false,
       loadedUrl: null as string | null,
       events,
+      isDestroyed: vi.fn(() => instance.destroyed),
+      destroy: vi.fn(() => {
+        instance.destroyed = true;
+        for (const cb of events.get("closed") ?? []) cb();
+      }),
       show: vi.fn(),
       loadURL: vi.fn((url: string) => {
         instance.loadedUrl = url;

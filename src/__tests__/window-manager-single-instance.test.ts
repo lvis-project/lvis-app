@@ -62,6 +62,10 @@ vi.mock("electron", () => {
         // Trigger "closed" listeners
         for (const cb of events.get("closed") ?? []) cb();
       }),
+      destroy: vi.fn(() => {
+        instance.destroyed = true;
+        for (const cb of events.get("closed") ?? []) cb();
+      }),
       loadURL: vi.fn((url: string) => {
         instance.loadedUrl = url;
         return Promise.resolve();
