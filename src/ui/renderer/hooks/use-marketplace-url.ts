@@ -29,7 +29,7 @@ export function useMarketplaceUrl(api: LvisApi): MarketplaceUrlState {
       .getSettings()
       .then((s) => {
         if (cancelled) return;
-        setMarketplaceUrl(s.marketplace?.realCloudBaseUrl ?? "");
+        setMarketplaceUrl((s.marketplace?.realCloudBaseUrl ?? "").trim());
         setLoaded(true);
       })
       .catch(() => {

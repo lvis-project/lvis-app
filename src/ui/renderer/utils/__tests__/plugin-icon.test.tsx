@@ -9,6 +9,8 @@
  *   - The same component reference on repeated calls (cache stability).
  */
 import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { Suspense } from "react";
 import { pluginIconFor, FALLBACK_ICON } from "../plugin-icon.js";
 import { Plug, Mic } from "lucide-react";
 
@@ -87,5 +89,16 @@ describe("pluginIconFor", () => {
     const second = pluginIconFor({});
     expect(first).toBe(second);
     expect(first).toBe(FALLBACK_ICON);
+  });
+
+  it("lazy-resolves icon component end-to-end (behavioral)", async () => {
+    const Icon = pluginIconFor({ icon: "Calendar" });
+    render(
+      <Suspense fallback={<span data-testid="fallback" />}>
+        <Icon data-testid="icon" />
+      </Suspense>,
+    );
+    await screen.findByTestId("icon");
+    expect(screen.queryByTestId("fallback")).toBeNull();
   });
 });
