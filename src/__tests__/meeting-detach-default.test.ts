@@ -23,21 +23,31 @@ vi.mock("node:fs", async (importOriginal) => {
 
 const mockWindowInstances: Array<{
   id: number;
+  opts: Record<string, unknown>;
   loadedUrl: string | null;
   events: Map<string, Array<() => void>>;
+  isDestroyed: () => boolean;
+  destroy: () => void;
   show: () => void;
 }> = [];
 
 let nextWindowId = 1;
 
 vi.mock("electron", () => {
-  const BrowserWindow = vi.fn().mockImplementation(() => {
+  const BrowserWindow = vi.fn().mockImplementation((opts: Record<string, unknown>) => {
     const id = nextWindowId++;
     const events = new Map<string, Array<() => void>>();
     const instance = {
       id,
+      opts,
+      destroyed: false,
       loadedUrl: null as string | null,
       events,
+      isDestroyed: vi.fn(() => instance.destroyed),
+      destroy: vi.fn(() => {
+        instance.destroyed = true;
+        for (const cb of events.get("closed") ?? []) cb();
+      }),
       show: vi.fn(),
       loadURL: vi.fn((url: string) => {
         instance.loadedUrl = url;
@@ -100,6 +110,12 @@ describe("meeting:detach-default — WindowManager.openDetachedTab", () => {
 
     expect(win).toBeDefined();
     expect(mockWindowInstances).toHaveLength(1);
+  });
+
+  it("enables webviewTag for plugin detached windows", () => {
+    wm.openDetachedTab("plugin:meeting:meeting-control");
+    const prefs = mockWindowInstances[0].opts["webPreferences"] as Record<string, unknown>;
+    expect(prefs["webviewTag"]).toBe(true);
   });
 
   it("loads the correct detached URL fragment for the meeting viewKey", () => {
