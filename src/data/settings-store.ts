@@ -16,6 +16,7 @@ import {
   type ScheduleRoutineEntry,
 } from "../routines/schedule.js";
 import {
+  DEFAULT_LLM_VENDOR,
   freshVendorBlocks,
   isLLMVendor,
   LLM_VENDORS,
@@ -252,7 +253,7 @@ export interface SettingsServiceOptions {
 
 const DEFAULT_SETTINGS: AppSettings = {
   llm: {
-    provider: "claude",
+    provider: DEFAULT_LLM_VENDOR,
     vendors: freshVendorBlocks(),
     streamSmoothing: "none",
     fallbackChain: [],

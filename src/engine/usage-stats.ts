@@ -8,6 +8,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { isLLMVendor, type LLMVendor } from "./llm/types.js";
+import { DEFAULT_LLM_VENDOR } from "../shared/llm-vendor-defaults.js";
 import { getModelPricing, computeCost } from "./llm/pricing.js";
 
 export interface AuditTurnEntry {
@@ -60,15 +61,26 @@ function emptyTotals(): UsageTotals {
   return { inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0 };
 }
 
-/** Parse a route string "vendor/model" into `{ vendor, model }`. Fallback: `{ vendor: "claude", model: "unknown" }`. */
+/**
+ * Parse a route string `"vendor/model"` into `{ vendor, model }`.
+ * Fallback: `{ vendor: DEFAULT_LLM_VENDOR, model: "unknown" }`.
+ *
+ * NOTE (audit-log shape mismatch — pre-existing): `AuditTurnEntry.route`
+ * is currently logged as the route classification ("llm" / "skill" /
+ * "command") by `AuditLogger.logTurn`, NOT as a `vendor/model` pair.
+ * This function therefore falls through to the default for the majority
+ * of audit entries — per-vendor / per-model cost breakdown is inaccurate
+ * until the logger is updated to emit `${vendor}/${model}` (out of scope
+ * for this PR, which only tightens the LLMVendor *type* contract).
+ */
 function parseRoute(route: string | undefined): { vendor: LLMVendor; model: string } {
-  if (!route) return { vendor: "claude", model: "unknown" };
+  if (!route) return { vendor: DEFAULT_LLM_VENDOR, model: "unknown" };
   const [v, ...rest] = route.split("/");
   // Use the runtime type guard rather than a hand-rolled allow-list — the
   // previous list was missing `azure-foundry` and `vertex-ai`, so usage
   // logs from those vendors silently coerced to "claude" and got attributed
   // to the wrong cost bucket. isLLMVendor stays in sync with LLM_VENDORS.
-  const vendor: LLMVendor = isLLMVendor(v) ? v : "claude";
+  const vendor: LLMVendor = isLLMVendor(v) ? v : DEFAULT_LLM_VENDOR;
   return { vendor, model: rest.join("/") || "unknown" };
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 import {
+  DEFAULT_LLM_VENDOR,
   isLLMVendor,
   type LLMVendor,
 } from "../../../shared/llm-vendor-defaults.js";
@@ -14,7 +15,7 @@ import {
  * `isLLMVendor` import.
  */
 function narrowVendor(raw: unknown): LLMVendor {
-  return isLLMVendor(raw) ? raw : "claude";
+  return isLLMVendor(raw) ? raw : DEFAULT_LLM_VENDOR;
 }
 
 /**
@@ -41,7 +42,7 @@ export interface UseSettingsResult {
 }
 
 export function useSettings(api: LvisApi): UseSettingsResult {
-  const [llmVendor, setLlmVendor] = useState<LLMVendor>("claude");
+  const [llmVendor, setLlmVendor] = useState<LLMVendor>(DEFAULT_LLM_VENDOR);
   const [llmModel, setLlmModel] = useState<string>("");
   const [enableThinkingChat, setEnableThinkingChat] = useState<boolean>(true);
   const [currentLlmSettings, setCurrentLlmSettings] = useState<

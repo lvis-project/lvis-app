@@ -21,6 +21,16 @@ export const LLM_VENDORS = [
 export type LLMVendor = (typeof LLM_VENDORS)[number];
 
 /**
+ * Canonical fallback vendor — used both as the seed for
+ * `DEFAULT_SETTINGS.llm.provider` and as the boundary-narrowing fallback
+ * when a corrupt settings.json or IPC payload delivers an out-of-union
+ * value. Centralizing here keeps the two in lockstep; flipping the
+ * default elsewhere without updating the narrower would otherwise drift
+ * silently.
+ */
+export const DEFAULT_LLM_VENDOR: LLMVendor = "claude";
+
+/**
  * Runtime type guard — narrows `unknown` to `LLMVendor`. Use at every
  * boundary that accepts vendor strings from outside the type system:
  * settings.json on disk, IPC payloads, query params, deep-linked URLs,
