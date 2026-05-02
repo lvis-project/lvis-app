@@ -61,7 +61,8 @@ import { buildMarkerText } from "./utils/attachment-markers.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { InstallPhase } from "./hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./components/CommandPopover.js";
-import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
+import { AskUserQuestionCard, type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
+import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 
@@ -71,6 +72,7 @@ import type { SkillBadgeProps } from "./components/SkillBadge.js";
  * remains explicit at the App level.
  */
 export interface ChatViewProps {
+  api: LvisApi;
   onAsk: (q: string) => void | Promise<void>;
   onGuide: (q: string) => void | Promise<void>;
   onEditSave: (idx: number, text: string) => void | Promise<void>;
@@ -85,8 +87,12 @@ export interface ChatViewProps {
   /** Workflow tool state — lifted to App level so panel survives view navigation */
   subAgentSpawns: SubAgentSpawn[];
   loadedSkills: SkillBadgeProps[];
-  /** True when FloatingQuestionPanel (mounted in App) has pending questions — used to suppress routine overlay */
+  /** True when there are pending ask_user_question requests — used to suppress routine overlay */
   hasAskQuestions: boolean;
+  /** Pending ask_user_question requests, rendered inline at the end of the entries stream. */
+  askQuestions: AskUserQuestionRequest[];
+  /** Called when a card submits or is dismissed; removes it from `askQuestions`. */
+  onResolveAskQuestion: (id: string) => void;
   /** Plugin list for InputActionBar plugin grid */
   plugins: PluginEntry[];
   /** Navigate to a plugin view */
@@ -101,7 +107,7 @@ export interface ChatViewProps {
   marketplaceUrlReady?: boolean;
 }
 
-export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady }: ChatViewProps) {
+export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -337,7 +343,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                 const starId = isEntryStarred(idx);
                 const starActive = !!starId;
                 rendered.push(
-                  <div key={idx} className={`group relative ml-auto w-fit max-w-[85%] rounded-full bg-message-user px-3 py-1.5 text-sm text-message-user-foreground ${ringCls}`}>
+                  <div key={idx} className={`group relative ml-auto w-fit max-w-[85%] rounded-2xl bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${ringCls}`}>
                     {/* "나" label removed — sender is implicit. Star + hover
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
@@ -493,6 +499,18 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           }
           return rendered;
         })()}
+        {/* Inline ask_user_question cards — rendered at the tail of the
+            entries stream so the question sits naturally in conversation
+            order. Replaces the previous App-level FloatingQuestionPanel
+            popup; conversation_loop wiring is unchanged. */}
+        {askQuestions.map((req) => (
+          <AskUserQuestionCard
+            key={req.id}
+            api={api}
+            request={req}
+            onResolved={onResolveAskQuestion}
+          />
+        ))}
         <div ref={chatEndRef} />
       </div></ScrollArea>
       {contextOverflowPct >= 0.95 && (
@@ -512,9 +530,6 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      {/* AskUserQuestionCard instances are now rendered inside FloatingQuestionPanel
-          (positioned absolutely at the top of this grid, z-40). Removed from
-          inline stream to eliminate the buried-question UX pain point. */}
       <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
       <div className="bg-background pb-1 space-y-2">
         <InputActionBar
