@@ -66,12 +66,13 @@ function emptyTotals(): UsageTotals {
  * Fallback: `{ vendor: DEFAULT_LLM_VENDOR, model: "unknown" }`.
  *
  * TODO(usage-stats): `AuditTurnEntry.route` is currently logged as the
- * route classification ("llm" / "skill" / "command") by
- * `AuditLogger.logTurn`, NOT as a `vendor/model` pair. This parser
- * therefore falls through to the default for most audit entries, so
- * per-vendor / per-model cost breakdown is inaccurate until the logger
- * is updated to emit `${vendor}/${model}`. The fix touches the audit
- * emission site in `engine/conversation-loop.ts`, not this parser.
+ * `RouteResult.route` discriminator ("llm" / "skill" / "command" /
+ * "agent-hub") by `AuditLogger.logTurn`, NOT as a `vendor/model` pair.
+ * This parser therefore falls through to the default for most audit
+ * entries, so per-vendor / per-model cost breakdown is inaccurate
+ * until the logger is updated to emit `${vendor}/${model}`. The fix
+ * touches the audit emission site in `engine/conversation-loop.ts`,
+ * not this parser.
  */
 function parseRoute(route: string | undefined): { vendor: LLMVendor; model: string } {
   if (!route) return { vendor: DEFAULT_LLM_VENDOR, model: "unknown" };
