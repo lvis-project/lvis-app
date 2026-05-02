@@ -22,7 +22,6 @@ export type LoadedPlugin = {
   instance: RuntimePlugin;
   methods: Map<string, PluginToolHandler>;
   approvedPluginAccess?: PluginAccessSpec;
-  devLinked?: boolean;
 };
 
 /**
@@ -34,7 +33,6 @@ export type ManifestLoadPlan = {
   manifestPath: string;
   enabled: boolean;
   approvedPluginAccess?: PluginAccessSpec;
-  devLinked?: boolean;
 };
 
 /**

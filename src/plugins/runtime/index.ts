@@ -24,9 +24,9 @@ import type {
 import { createPluginStorage } from "../storage.js";
 import type { Actor, PluginDeploymentGuard } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
-import { devLinkedEntryAllowed, isDevModeUnlocked } from "../../boot/dev-flags.js";
+import { isDevModeUnlocked } from "../../boot/dev-flags.js";
 import { verifyInstallReceipt } from "../plugin-install-receipt.js";
-import { readPluginRegistry, updatePluginRegistry } from "../registry.js";
+import { updatePluginRegistry } from "../registry.js";
 
 import {
   buildManifestValidator,
@@ -239,11 +239,9 @@ export class PluginRuntime {
       let pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(manifestPath))}>`;
       plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
       if (plan.pluginIdHint) {
-        const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
         const integrityResult = await this.verifyReceiptAndDevGuard(
           plan.pluginIdHint,
           pluginRoot,
-          skipReceiptForDevLink,
         );
         if (!integrityResult.ok) {
           this.markFailed(plan.pluginIdHint);
@@ -377,7 +375,6 @@ export class PluginRuntime {
         instance,
         methods,
         approvedPluginAccess: plan.approvedPluginAccess,
-        devLinked: plan.devLinked,
       });
       this.failedPluginIds.delete(manifest.id);
       this.disabledPluginIds.delete(manifest.id);
@@ -513,30 +510,7 @@ export class PluginRuntime {
     this.onDisable?.(pluginId);
 
     const { pluginRoot } = plugin;
-    // Re-derive devLinked from a fresh registry read so a registry change between
-    // initial load and restart (e.g. installSource promotion from "dev-link" to
-    // "user") is reflected rather than using the stale in-memory value.
-    // registryPath is always set in production boot (plugin-runtime.ts:615).
-    if (!this.registryPath) {
-      log.error(`restartPlugin: no registryPath configured for %s — aborting`, pluginId);
-      this.markFailed(pluginId);
-      return;
-    }
-    let skipReceiptForDevLink = false;
-    try {
-      const freshRegistry = await readPluginRegistry(this.registryPath);
-      const freshEntry = freshRegistry.plugins.find((e) => e.id === pluginId);
-      if (freshEntry == null) {
-        log.warn(`restartPlugin: %s not found in fresh registry, treating as non-dev-link`, pluginId);
-      }
-      const freshDevLinked = freshEntry != null && freshEntry.installSource === "dev-link";
-      skipReceiptForDevLink = freshDevLinked && devLinkedEntryAllowed();
-    } catch (err) {
-      log.error(`restartPlugin: failed to read registry for %s: %s`, pluginId, (err as Error).message);
-      this.markFailed(pluginId);
-      return;
-    }
-    const integrityResult = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot, skipReceiptForDevLink);
+    const integrityResult = await this.verifyReceiptAndDevGuard(pluginId, pluginRoot);
     if (!integrityResult.ok) {
       this.markFailed(pluginId);
       return;
@@ -743,15 +717,16 @@ export class PluginRuntime {
    * responsible for calling `markFailed` and deciding the control-flow
    * (`continue` vs `return`).
    *
-   * Skips all checks when `installReceiptCacheRoot` is not configured or
-   * when `skipForDevLink` is true (dev-linked entry in non-packaged build).
+   * Skips all checks when `installReceiptCacheRoot` is not configured.
+   * Receipt verification now applies to every install source (admin / user /
+   * local-dev) — the legacy dev-link bypass was removed when the dev:link
+   * script was deleted.
    */
   private async verifyReceiptAndDevGuard(
     pluginId: string,
     pluginRoot: string,
-    skipForDevLink: boolean,
   ): Promise<{ ok: true } | { ok: false }> {
-    if (!this.installReceiptCacheRoot || skipForDevLink) {
+    if (!this.installReceiptCacheRoot) {
       return { ok: true };
     }
     const receiptResult = await verifyInstallReceipt(
@@ -798,11 +773,9 @@ export class PluginRuntime {
   ): Promise<void> {
     const pluginRoot = dirname(plan.manifestPath);
     if (plan.pluginIdHint) {
-      const skipReceiptForDevLink = plan.devLinked === true && devLinkedEntryAllowed();
       const integrityResult = await this.verifyReceiptAndDevGuard(
         plan.pluginIdHint,
         pluginRoot,
-        skipReceiptForDevLink,
       );
       if (!integrityResult.ok) {
         this.markFailed(plan.pluginIdHint);

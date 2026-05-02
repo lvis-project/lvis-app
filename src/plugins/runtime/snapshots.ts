@@ -80,7 +80,6 @@ export async function resolveManifestLoadPlan(opts: {
         manifestPath,
         enabled: entry.enabled !== false,
         approvedPluginAccess: entry.approvedPluginAccess as PluginAccessSpec | undefined,
-        devLinked: entry.installSource === "dev-link",
       }];
     }),
   );
