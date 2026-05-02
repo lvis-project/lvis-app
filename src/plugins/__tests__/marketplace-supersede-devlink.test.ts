@@ -294,4 +294,92 @@ describe("PluginMarketplaceService — dev-link supersede on marketplace install
     expect(touchSpy).toHaveBeenCalledTimes(1);
     expect(installSpy).not.toHaveBeenCalled();
   });
+
+  // Issue #472 — touch invariant. PR #470's `isDevLinkSupersede` guard
+  // ensures touchInstalledRegistryEntry is never called on a dev-link
+  // entry, but if a future caller bypasses the guard, the touch path's
+  // `?? "user"` fallback would silently preserve `installSource:
+  // "dev-link"` — same root cause as #468. The throw makes that
+  // invariant violation loud rather than silent.
+  it("throws when called directly on a dev-link entry (defense-in-depth)", async () => {
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "pageindex",
+            manifestPath: "pageindex/plugin.json",
+            enabled: true,
+            installedBy: "user",
+            installSource: "dev-link",
+            _devLinked: true,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const service = makeService(testDir, marketplacePath);
+    const touch = (
+      service as unknown as {
+        touchInstalledRegistryEntry: (
+          pluginId: string,
+          bundleRootId: string | null,
+          actor: "user" | "it-admin",
+          approvedPluginAccess: unknown,
+        ) => Promise<void>;
+      }
+    ).touchInstalledRegistryEntry.bind(service);
+
+    await expect(touch("pageindex", null, "user", undefined)).rejects.toThrow(
+      /touchInstalledRegistryEntry called on dev-link entry/,
+    );
+  });
+
+  it("throws on legacy entries with _devLinked=true and no installSource", async () => {
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({ version: 1, plugins: [] }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "pageindex",
+            manifestPath: "pageindex/plugin.json",
+            enabled: true,
+            installedBy: "user",
+            // No installSource — legacy pre-PR #430 shape.
+            _devLinked: true,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const service = makeService(testDir, marketplacePath);
+    const touch = (
+      service as unknown as {
+        touchInstalledRegistryEntry: (
+          pluginId: string,
+          bundleRootId: string | null,
+          actor: "user" | "it-admin",
+          approvedPluginAccess: unknown,
+        ) => Promise<void>;
+      }
+    ).touchInstalledRegistryEntry.bind(service);
+
+    await expect(touch("pageindex", null, "user", undefined)).rejects.toThrow(
+      /invariant violation/,
+    );
+  });
 });

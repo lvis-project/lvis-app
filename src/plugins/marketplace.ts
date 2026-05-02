@@ -773,6 +773,22 @@ export class PluginMarketplaceService {
     await updatePluginRegistry(this.registryPath, (registry) => {
       const entry = registry.plugins.find((candidate) => candidate.id === pluginId);
       if (!entry) return;
+      // Issue #472 — invariant: this method is only safe to call on a
+      // user/admin/local-dev entry. dev-link supersede must take the full
+      // re-install path (`install()`'s `isDevLinkSupersede` guard) so the
+      // disk symlinks get replaced and the new registry write sets
+      // `installSource: "user"`. If a future caller bypasses that guard
+      // and reaches us with a dev-link entry, the `?? "user"` fallback
+      // below would silently preserve `installSource: "dev-link"` — same
+      // root cause as issue #468. Throw loudly so the broken invariant
+      // can't regress unnoticed.
+      if (entry.installSource === "dev-link" || entry._devLinked === true) {
+        throw new Error(
+          `touchInstalledRegistryEntry called on dev-link entry "${pluginId}" — ` +
+          `invariant violation. dev-link supersede must go through install()'s ` +
+          `full re-install path (see issue #468 / PR #470).`,
+        );
+      }
       if (state && !state.touchedEntries.has(pluginId)) {
         state.touchedEntries.set(pluginId, {
           enabled: entry.enabled,
