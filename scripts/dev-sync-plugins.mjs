@@ -48,7 +48,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -82,6 +82,24 @@ export function isSafePluginId(id) {
   if (id === "." || id === "..") return false;
   if (/[\\/]/.test(id)) return false;
   return /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/.test(id);
+}
+
+/**
+ * Validate `manifest.entry` before resolving it against the repo root.
+ * `resolve(pluginRepoDir, entry)` alone is insufficient because absolute or
+ * traversal-heavy inputs would silently escape the plugin workspace.
+ */
+export function isSafeRelativeManifestEntry(entry) {
+  if (typeof entry !== "string") return false;
+  if (entry !== entry.trim() || entry.length === 0) return false;
+  // Reject both platform-native absolutes and obvious cross-platform forms.
+  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("\\") || /^[A-Za-z]:[\\/]/.test(entry)) {
+    return false;
+  }
+  const parts = entry.split(/[\\/]+/).filter(Boolean);
+  if (parts.length === 0) return false;
+  if (parts.every((part) => part === ".")) return false;
+  return !parts.includes("..");
 }
 
 /**
@@ -284,6 +302,10 @@ export function syncDevPlugins() {
       continue;
     }
     const entryRelative = manifest.entry;
+    if (!isSafeRelativeManifestEntry(entryRelative)) {
+      log(`skip: ${pluginId} (unsafe manifest.entry: ${entryRelative})`);
+      continue;
+    }
     const builtEntry = resolve(pluginRepoDir, entryRelative);
     if (!existsSync(builtEntry)) {
       log(`skip: ${pluginId} (not built: ${entryRelative})`);

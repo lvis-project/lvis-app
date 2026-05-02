@@ -32,6 +32,7 @@ import {
   copyFileAsRealFile,
   countEntries,
   isSafePluginId,
+  isSafeRelativeManifestEntry,
   isDevRegistryEntry,
   normalizePreservedNonDevRegistryEntry,
   removeAny,
@@ -59,6 +60,26 @@ describe("dev-sync-plugins — isSafePluginId", () => {
     expect(isSafePluginId("agent..hub")).toBe(false);
     expect(isSafePluginId("agent-hub.")).toBe(false);
     expect(isSafePluginId(undefined as unknown as string)).toBe(false);
+  });
+});
+
+describe("dev-sync-plugins — isSafeRelativeManifestEntry", () => {
+  it("accepts ordinary relative entry paths", () => {
+    expect(isSafeRelativeManifestEntry("dist/index.js")).toBe(true);
+    expect(isSafeRelativeManifestEntry("./dist/index.js")).toBe(true);
+    expect(isSafeRelativeManifestEntry("dist\\index.js")).toBe(true);
+  });
+
+  it("rejects absolute and escaping manifest.entry paths", () => {
+    expect(isSafeRelativeManifestEntry("")).toBe(false);
+    expect(isSafeRelativeManifestEntry("   ")).toBe(false);
+    expect(isSafeRelativeManifestEntry("/abs/index.js")).toBe(false);
+    expect(isSafeRelativeManifestEntry("\\\\server\\share\\index.js")).toBe(false);
+    expect(isSafeRelativeManifestEntry("C:\\\\plugin\\\\index.js")).toBe(false);
+    expect(isSafeRelativeManifestEntry("../dist/index.js")).toBe(false);
+    expect(isSafeRelativeManifestEntry("dist/../../escape.js")).toBe(false);
+    expect(isSafeRelativeManifestEntry("dist\\..\\escape.js")).toBe(false);
+    expect(isSafeRelativeManifestEntry(".")).toBe(false);
   });
 });
 
@@ -186,6 +207,23 @@ describe("dev-sync-plugins — registry helpers", () => {
         installSource: "dev",
       }),
     ).toBeNull();
+  });
+
+  it("keeps canonical installSource while stripping stale `_devLinked` deterministically", () => {
+    expect(
+      normalizePreservedNonDevRegistryEntry({
+        id: "calendar",
+        manifestPath: "calendar/plugin.json",
+        installSource: "user",
+        enabled: true,
+        _devLinked: true,
+      }),
+    ).toEqual({
+      id: "calendar",
+      manifestPath: "calendar/plugin.json",
+      installSource: "user",
+      enabled: true,
+    });
   });
 });
 

@@ -32,11 +32,15 @@ interface LegacyRegistryEntry extends PluginRegistryEntry {
  * — that preserves the deployment-guard's manifest-fallback behaviour for
  * registries that pre-date both fields.
  *
- * `_devLinked` no longer persists once an entry is read:
+ * `_devLinked` is always normalized away once an entry is read:
  *   - if it was the only legacy dev marker, it normalizes to the legacy
  *     installSource literal `"dev-link"` for read-only back-compat
  *   - otherwise it is cleared so non-dev entries do not retain ambiguous
  *     cleanup hints
+ *
+ * That makes the on-read migration deterministic: after the first successful
+ * read+persist cycle there is no `_devLinked` residue left to interpret, so
+ * subsequent reads are idempotent no-ops.
  */
 function migrateLegacyEntry(entry: LegacyRegistryEntry): PluginRegistryEntry | null {
   const hasLegacy = entry.installedBy !== undefined || entry._devLinked !== undefined;
@@ -54,7 +58,9 @@ function migrateLegacyEntry(entry: LegacyRegistryEntry): PluginRegistryEntry | n
     // deployment-guard manifest-fallback path still fires.
   }
   if (!hasLegacy && installSource === entry.installSource) return null;
-  // Build a fresh object that preserves only the supported fields.
+  // Build a fresh object that preserves only the supported fields. This
+  // deterministically strips `_devLinked` from every persisted shape so the
+  // registry never retains an ambiguous cleanup-only hint after migration.
   const migrated: PluginRegistryEntry = {
     id: entry.id,
     manifestPath: entry.manifestPath,
@@ -95,8 +101,8 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
   }
   // Apply legacy → installSource migration on read. We persist the
   // normalized form back to disk in one shot so subsequent reads are
-  // deterministic no-ops and deprecated `_devLinked` cleanup hints do not
-  // linger in registry.json after the first successful read.
+  // deterministic no-ops and `_devLinked` never lingers in registry.json as
+  // an ambiguous cleanup-only hint after the first successful read.
   let migratedCount = 0;
   const plugins: PluginRegistryEntry[] = parsed.plugins.map((entry) => {
     const migrated = migrateLegacyEntry(entry);
@@ -120,7 +126,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
         migratedCount,
         registryPath,
       },
-      `registry normalized ${migratedCount} legacy entries (installedBy/_devLinked → installSource; deprecated _devLinked stripped on persist)`,
+      `registry normalized ${migratedCount} legacy entries (installedBy/_devLinked → installSource; persisted _devLinked stripped deterministically so future reads are idempotent)`,
     );
     try {
       await writePluginRegistry(registryPath, registry);

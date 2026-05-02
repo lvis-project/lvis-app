@@ -86,6 +86,8 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
               setStreamSmoothing={s.setStreamSmoothing}
               experimentalStackedChat={s.experimentalStackedChat}
               setExperimentalStackedChat={s.setExperimentalStackedChat}
+              experimentalContinuousBackend={s.experimentalContinuousBackend}
+              setExperimentalContinuousBackend={s.setExperimentalContinuousBackend}
             />
           </TabsContent>
 
