@@ -44,7 +44,7 @@ describe("PostTurnHookChain", () => {
       route: "chat",
     });
 
-    expect(result).toBeNull();
+    expect(result.compactedMessages).toBeNull();
     expect(saveSession).toHaveBeenCalledWith("session-disabled", messages);
   });
 
@@ -52,7 +52,11 @@ describe("PostTurnHookChain", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     const saveSession = vi.fn();
-    const memoryManager = { saveSession } as unknown as MemoryManager;
+    const memoryManager = {
+      saveSession,
+      listSessions: vi.fn().mockReturnValue([]),
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return fakeLlmSettings();
@@ -72,19 +76,23 @@ describe("PostTurnHookChain", () => {
       route: "chat",
     });
 
-    expect(result).not.toBeNull();
+    expect(result.compactedMessages).not.toBeNull();
     // 요약 marker는 배열 어딘가에 존재
-    const marker = result?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
+    const marker = result.compactedMessages?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
     expect(marker).toBeDefined();
     expect(marker?.content).toContain("[이전 대화 요약]");
-    expect(saveSession).toHaveBeenCalledWith("session-enabled", result);
+    expect(saveSession).toHaveBeenCalledWith("session-enabled", result.compactedMessages);
   });
 
   it("runs microcompact alone (no full compact) when threshold is not met", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     const saveSession = vi.fn();
-    const memoryManager = { saveSession } as unknown as MemoryManager;
+    const memoryManager = {
+      saveSession,
+      listSessions: vi.fn().mockReturnValue([]),
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return fakeLlmSettings();
@@ -120,14 +128,14 @@ describe("PostTurnHookChain", () => {
       route: "chat",
     });
 
-    expect(result).not.toBeNull();
+    expect(result.compactedMessages).not.toBeNull();
     // full-compact 요약 marker는 없어야 함
-    const marker = result?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
+    const marker = result.compactedMessages?.find((m) => m.role === "user" && m.meta?.compactBoundary === true);
     expect(marker).toBeUndefined();
     // 하지만 stripped 메시지는 존재
-    const strippedCount = result?.filter((m) => m.role === "tool_result" && m.meta?.stripped === true).length ?? 0;
+    const strippedCount = result.compactedMessages?.filter((m) => m.role === "tool_result" && m.meta?.stripped === true).length ?? 0;
     expect(strippedCount).toBeGreaterThan(0);
-    expect(saveSession).toHaveBeenCalledWith("session-micro", result);
+    expect(saveSession).toHaveBeenCalledWith("session-micro", result.compactedMessages);
   });
 
   it("auto-extracts user memory into saveMemory when the user asks to remember something", async () => {
@@ -139,7 +147,12 @@ describe("PostTurnHookChain", () => {
       title: "자동-이거 기억해줘",
       content: "# 자동-이거 기억해줘\n\n...",
     });
-    const memoryManager = { saveSession, saveMemory } as unknown as MemoryManager;
+    const memoryManager = {
+      saveSession,
+      saveMemory,
+      listSessions: vi.fn().mockReturnValue([]),
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
     const settingsService = {
       get: vi.fn((key: string) => {
         if (key === "llm") return fakeLlmSettings();

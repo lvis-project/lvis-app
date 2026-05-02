@@ -1,8 +1,12 @@
 /**
  * Post-Turn Hook Chain — §4.5 11단계 후 실행
  *
- * compact → saveSession → extractMemory → auditLog → idle-poke 순차 실행.
+ * compact → saveSession → extractMemory → detect-checkpoint → update-title → auditLog → idle-poke 순차 실행.
  * 각 단계는 독립적이며 한 단계 실패가 다음을 차단하지 않음.
+ *
+ * §PR-3 확장:
+ *   4. detect-checkpoint — detectFromStream() 호출, [checkpoint-suggested] 발견 시 checkpoint-suggested 이벤트 emit
+ *   5. update-title — newTitle 있으면 session metadata 업데이트, 없으면 chainTitle LLM fallback (옵션)
  *
  * conversation-loop.ts의 기존 5개 post-turn 로직을 흡수:
  *   1. shouldCompact / compactMessages (§4.5.4)
@@ -13,7 +17,9 @@
  */
 
 import { shouldCompact, compactMessages, microcompactMessages, getModelContextWindow } from "../engine/auto-compact.js";
-import type { GenericMessage, TokenUsage } from "../engine/llm/types.js";
+import { detectFromStream, type DetectorResult } from "../engine/checkpoint-detector.js";
+import { chainTitle } from "../engine/title-chainer.js";
+import type { GenericMessage, TokenUsage, LLMProvider } from "../engine/llm/types.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
@@ -50,18 +56,36 @@ export interface PostTurnHookChainDeps {
   auditLogger?: AuditLogger;
   idleScheduler?: IdleSchedulerService;
   settingsService?: SettingsService;
+  /**
+   * §PR-3: optional LLM provider for chainTitle fallback.
+   * When supplied and detectFromStream returns no newTitle, chainTitle is
+   * called as a mini-call to generate a session title from existing title +
+   * final answer. Omit in tests / lightweight setups to skip the fallback.
+   */
+  llmProvider?: LLMProvider;
+  /**
+   * §PR-3: optional callback invoked when [checkpoint-suggested] is detected.
+   * Caller (typically conversation-loop or IPC bridge) can trigger PR-4 summary.
+   */
+  onCheckpointSuggested?: (sessionId: string, cleanedOutput: string) => void;
+}
+
+export interface PostTurnHookResult {
+  /** 컴팩션이 발생한 경우 새 메시지 배열. 없으면 null. */
+  compactedMessages: GenericMessage[] | null;
+  /** §PR-3: detect-checkpoint 결과. output에 마커가 없으면 default 값. */
+  detector: DetectorResult;
 }
 
 export class PostTurnHookChain {
   constructor(private readonly deps: PostTurnHookChainDeps) {}
 
   /**
-   * 5단계 순차 실행. 각 단계는 독립적 try/catch.
+   * 7단계 순차 실행. 각 단계는 독립적 try/catch.
    *
-   * @returns 컴팩션이 발생한 경우 새 메시지 배열 (호출자가 history.restore()에 사용),
-   *          컴팩션 없으면 null
+   * @returns PostTurnHookResult — compactedMessages (nullable) + detector result
    */
-  async run(ctx: PostTurnHookContext): Promise<GenericMessage[] | null> {
+  async run(ctx: PostTurnHookContext): Promise<PostTurnHookResult> {
     let compactedMessages: GenericMessage[] | null = null;
 
     // 1. Auto-Compact (§4.5.4) — 2-stage
@@ -129,7 +153,50 @@ export class PostTurnHookChain {
       log.warn("extractMemory failed: %s", err);
     }
 
-    // 4. Audit Log (§14.2)
+    // 4. §PR-3: Detect Checkpoint — detectFromStream 호출
+    let detector: DetectorResult = { cleanedText: ctx.output, newTitle: null, checkpointSuggested: false };
+    try {
+      detector = detectFromStream(ctx.output);
+      if (detector.checkpointSuggested) {
+        log.info(`detect-checkpoint: [checkpoint-suggested] detected for session ${ctx.sessionId}`);
+        try {
+          this.deps.onCheckpointSuggested?.(ctx.sessionId, detector.cleanedText);
+        } catch (cbErr) {
+          log.warn("onCheckpointSuggested callback failed: %s", cbErr);
+        }
+      }
+    } catch (err) {
+      log.warn("detect-checkpoint failed: %s", err);
+    }
+
+    // 5. §PR-3: Update Title — newTitle 있으면 session metadata 업데이트
+    //    없으면 chainTitle LLM fallback (llmProvider 주입된 경우에만)
+    try {
+      if (this.deps.memoryManager) {
+        let titleToStore: string | null = detector.newTitle;
+
+        if (!titleToStore && this.deps.llmProvider) {
+          // chainTitle fallback: 기존 제목 조회 후 mini-call
+          const sessions = this.deps.memoryManager.listSessions(1000);
+          const current = sessions.find((s) => s.id === ctx.sessionId);
+          const existingTitle = current?.title ?? `세션 ${ctx.sessionId.slice(0, 8)}`;
+          titleToStore = await chainTitle(this.deps.llmProvider, existingTitle, detector.cleanedText);
+        }
+
+        if (titleToStore) {
+          const existingMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId) ?? {};
+          await this.deps.memoryManager.saveSessionMetadata(ctx.sessionId, {
+            ...existingMeta,
+            title: titleToStore,
+          });
+          log.info(`update-title: session ${ctx.sessionId} title set to "${titleToStore}"`);
+        }
+      }
+    } catch (err) {
+      log.warn("update-title failed: %s", err);
+    }
+
+    // 6. Audit Log (§14.2)
     //    Emit `${provider}/${model}` for "llm" routes (usage-stats.parseRoute
     //    splits on `/`); non-LLM routes (skill/command/agent-hub) keep the
     //    classification verbatim. Snapshot fields on ctx win over live
@@ -156,13 +223,13 @@ export class PostTurnHookChain {
       log.warn("audit failed: %s", err);
     }
 
-    // 5. Idle poke (Agent 5 §6.1 신호 흡수)
+    // 7. Idle poke (Agent 5 §6.1 신호 흡수)
     try {
       this.deps.idleScheduler?.signalConversation();
     } catch (err) {
       log.warn("idle poke failed: %s", err);
     }
 
-    return compactedMessages;
+    return { compactedMessages, detector };
   }
 }
