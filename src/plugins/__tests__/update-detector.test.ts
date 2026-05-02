@@ -191,14 +191,23 @@ describe("PluginUpdateDetector", () => {
     expect(updates).toHaveLength(0);
   });
 
-  it("skips legacy _devLinked entries via the on-read migration", async () => {
-    // Pre-PR #430 dev-link installs wrote `_devLinked: true` instead of
-    // `installSource: "dev-link"`. readPluginRegistry migrates the legacy
-    // shape on first read, so the detector still treats them as dev-link
-    // and skips the catalog comparison. The path-escape warning must not
-    // fire — that was the symptom we observed in production for every
-    // dev-linked plugin on every poll.
+  it("legacy `_devLinked: true` entries are rewritten to local-dev on read and treated like normal installs", async () => {
+    // Post-2026-05 dev-link purge: legacy `_devLinked: true` is rewritten
+    // to `installSource: "local-dev"` by readPluginRegistry. There is no
+    // longer a "skip catalog comparison for dev-link" branch — the entry
+    // participates in the normal update detection. The path-escape
+    // warning that used to fire for symlinked dev-link manifests is no
+    // longer relevant: dev-link installs do not exist any more (they
+    // would fail receipt verification at runtime).
     const registryPath = resolve(tmpDir, "registry.json");
+    // Write a real installed manifest so readInstalledVersion succeeds.
+    const installedDir = resolve(tmpDir, "agent-hub");
+    await mkdir(installedDir, { recursive: true });
+    await writeFile(
+      resolve(installedDir, "plugin.json"),
+      JSON.stringify({ id: "agent-hub", version: "1.0.0", name: "agent-hub", entry: "dist/index.js", tools: [] }),
+      "utf-8",
+    );
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -210,41 +219,16 @@ describe("PluginUpdateDetector", () => {
       "utf-8",
     );
     const fetcher = makeFetcher([makeCatalogPlugin("agent-hub", "9.9.9")]);
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
     const updates = await detector.checkForUpdates();
 
-    expect(updates).toHaveLength(0);
-    // The path-escape warning must not fire — that was the symptom we
-    // observed in production for every dev-linked plugin on every poll.
-    expect(warnSpy).not.toHaveBeenCalledWith(
-      "[update-detector] manifestPath escapes allowed roots, skipping:",
-      expect.anything(),
-    );
-    warnSpy.mockRestore();
-  });
-
-  it("skips entries with installSource='dev-link' (new field, no legacy _devLinked)", async () => {
-    const registryPath = resolve(tmpDir, "registry.json");
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          { id: "agent-hub", manifestPath: "agent-hub/plugin.json", installSource: "dev-link" },
-        ],
-      }),
-      "utf-8",
-    );
-    const fetcher = makeFetcher([makeCatalogPlugin("agent-hub", "9.9.9")]);
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const detector = new PluginUpdateDetector(registryPath, fetcher);
-
-    const updates = await detector.checkForUpdates();
-
-    expect(updates).toHaveLength(0);
-    warnSpy.mockRestore();
+    // The catalog reports a newer version, so the entry now appears as an
+    // available update (no dev-link skip).
+    expect(updates).toHaveLength(1);
+    expect(updates[0].pluginId).toBe("agent-hub");
+    expect(updates[0].installedVersion).toBe("1.0.0");
+    expect(updates[0].latestVersion).toBe("9.9.9");
   });
 
   it("ignores catalog plugins without a version field", async () => {

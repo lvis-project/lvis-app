@@ -7,9 +7,13 @@ export type InstallPolicy = "admin" | "user";
  * - "admin"     — installPolicy="admin" manifest, via marketplace or installLocal
  * - "user"      — marketplace install triggered by the end user
  * - "local-dev" — installLocal (Settings UI "로컬 폴더에서 설치") with user policy, dev-mode only
- * - "dev-link"  — dev:link symlink registered by scripts/dev-link-plugins.mjs
+ *
+ * The pre-2026-05 `"dev-link"` value (created by the now-removed
+ * `bun run dev:link`) is no longer accepted. Existing registries with
+ * `installSource: "dev-link"` are migrated to `"local-dev"` on read with
+ * a loud audit warning — see `readPluginRegistry`.
  */
-export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev" | "dev-link";
+export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev";
 
 export interface DependencySpec {
   pluginId: string;
