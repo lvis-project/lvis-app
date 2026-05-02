@@ -11,6 +11,7 @@
  */
 import type { GenericMessage, TokenUsage, LLMVendor, ConversationCarryover, UserContentPart } from "./llm/types.js";
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
+import { shouldSkipSummary as _shouldSkipSummary } from "./summary-generator.js";
 
 /** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
 const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
@@ -217,15 +218,6 @@ export function decideRotation(args: {
   }
 
   return { shouldRotate: false, shouldSkipSummary: false };
-}
-
-/**
- * 컨텍스트 사용률이 낮을 때 요약을 건너뛸지 판단 (내부 헬퍼).
- * summary-generator.ts의 shouldSkipSummary()와 동일한 임계치 (0.10).
- * auto-compact.ts에서 독립적으로도 사용 가능하도록 별도 정의.
- */
-function _shouldSkipSummary(ctxUsage: number): boolean {
-  return ctxUsage < 0.10;
 }
 
 // ─── Types ──────────────────────────────────────────

@@ -1,7 +1,7 @@
 /**
  * Summary Generator — generateSummary + shouldSkipSummary
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import type { LLMProvider, StreamEvent } from "../llm/types.js";
 import { generateSummary, shouldSkipSummary } from "../summary-generator.js";
 import type { GenericMessage } from "../llm/types.js";

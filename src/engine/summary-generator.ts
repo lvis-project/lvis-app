@@ -11,13 +11,13 @@ import { userContentText } from "./llm/types.js";
 /**
  * LLM을 사용하여 메시지 배열에서 rolling summary를 생성한다.
  * - OpenCode 패턴: 별도 단발 LLM call (specialized agent style)
- * - 결과: rolling summary preamble (max ~2000 chars / ~500 tokens)
+ * - 결과: rolling summary preamble (max ~3200 chars / ~800 tokens)
  * - 빈 messages → "" 반환
  */
 export async function generateSummary(
   llm: LLMProvider,
   messages: GenericMessage[],
-  options?: { maxTokens?: number },
+  options?: { maxTokens?: number; model?: string },
 ): Promise<string> {
   if (messages.length === 0) return "";
 
@@ -42,7 +42,7 @@ export async function generateSummary(
 
   let text = "";
   for await (const ev of llm.streamTurn({
-    model: await resolveModel(llm),
+    model: options?.model ?? await resolveModel(llm),
     systemPrompt: "당신은 대화 요약 전문가입니다. 핵심 정보를 간결하게 보존하는 요약을 작성하세요.",
     messages: [{ role: "user", content: prompt }],
     tools: [],

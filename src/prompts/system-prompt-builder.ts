@@ -188,6 +188,13 @@ export class SystemPromptBuilder {
     this.summaryPreamble = preamble && preamble.length > 0 ? preamble : null;
   }
 
+  /**
+   * PR-4: clears the rolling summary preamble (equivalent to setSummaryPreamble(null)).
+   * Call when starting a fresh session without a parent checkpoint.
+   */
+  clearSummaryPreamble(): void {
+    this.setSummaryPreamble(null);
+  }
 
   // ─── Private ──────────────────────────────────────
 
