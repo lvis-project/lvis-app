@@ -3,6 +3,8 @@ import { PluginUiHostView } from "../../plugin-ui-host.js";
 import type { getApi } from "./api-client.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { ChatView } from "./ChatView.js";
+import { StackedChatView } from "./components/StackedChatView.js";
+import { useStackedChat } from "./hooks/use-stacked-chat.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
@@ -53,6 +55,8 @@ export interface MainContentProps {
   marketplaceUrlReady?: boolean;
   // plugin view
   activePluginView: PluginView | null;
+  /** Feature flag: use StackedChatView instead of ChatView. Default false. */
+  useStackedChatView?: boolean;
 }
 
 function MainPaneShell({ children, padded = true }: { children: ReactNode; padded?: boolean }) {
@@ -60,6 +64,73 @@ function MainPaneShell({ children, padded = true }: { children: ReactNode; padde
     <div className={padded ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-4" : "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"}>
       {children}
     </div>
+  );
+}
+
+/**
+ * HomeChatPane — wraps ChatView or StackedChatView depending on the feature flag.
+ * Owns useStackedChat hook (only instantiated when stacked view is active).
+ */
+function HomeChatPane(props: MainContentProps) {
+  const { chatContextValue, api } = props;
+  const useStacked = props.useStackedChatView ?? false;
+
+  // useStackedChat is always called (rules of hooks) but only used when stacked is active
+  const stackedChatHook = useStackedChat(api as Parameters<typeof useStackedChat>[0]);
+
+  if (useStacked) {
+    return (
+      <ChatContextProvider value={chatContextValue}>
+        <StackedChatView
+          sessions={stackedChatHook.sessions}
+          currentSessionId={props.currentSessionId}
+          entries={chatContextValue.entries}
+          streaming={chatContextValue.streaming}
+          onAsk={props.onAsk}
+          onGuide={props.onGuide}
+          onAbort={props.onAbort}
+          loading={stackedChatHook.loading}
+          reachedEnd={stackedChatHook.reachedEnd}
+          sentinelRef={stackedChatHook.sentinelRef}
+          scrollContainerRef={stackedChatHook.scrollContainerRef}
+          plugins={props.plugins}
+          onSelectPlugin={props.onSelectPlugin}
+          commandActions={props.commandActions}
+          commandPopoverOpen={props.commandPopoverOpen}
+          onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
+          installingPluginIds={props.installingPluginIds}
+          onOpenMarketplace={props.onOpenMarketplace}
+          marketplaceUrlReady={props.marketplaceUrlReady}
+        />
+      </ChatContextProvider>
+    );
+  }
+
+  return (
+    <ChatContextProvider value={chatContextValue}>
+      <ChatView
+        onAsk={props.onAsk}
+        onGuide={props.onGuide}
+        onEditSave={props.onEditSave}
+        onFork={props.onFork}
+        onToggleStar={props.onToggleStar}
+        onRetryEffort={props.onRetryEffort}
+        isEntryStarred={props.isEntryStarred}
+        onAbort={props.onAbort}
+        onFeedback={props.onFeedback}
+        subAgentSpawns={props.subAgentSpawns}
+        loadedSkills={props.loadedSkills}
+        hasAskQuestions={props.hasAskQuestions}
+        plugins={props.plugins}
+        onSelectPlugin={props.onSelectPlugin}
+        commandActions={props.commandActions}
+        commandPopoverOpen={props.commandPopoverOpen}
+        onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
+        installingPluginIds={props.installingPluginIds}
+        onOpenMarketplace={props.onOpenMarketplace}
+        marketplaceUrlReady={props.marketplaceUrlReady}
+      />
+    </ChatContextProvider>
   );
 }
 
@@ -125,30 +196,7 @@ export function MainContent(props: MainContentProps): ReactNode {
   if (activeView === "home") {
     return (
       <MainPaneShell padded={false}>
-        <ChatContextProvider value={props.chatContextValue}>
-          <ChatView
-            onAsk={props.onAsk}
-            onGuide={props.onGuide}
-            onEditSave={props.onEditSave}
-            onFork={props.onFork}
-            onToggleStar={props.onToggleStar}
-            onRetryEffort={props.onRetryEffort}
-            isEntryStarred={props.isEntryStarred}
-            onAbort={props.onAbort}
-            onFeedback={props.onFeedback}
-            subAgentSpawns={props.subAgentSpawns}
-            loadedSkills={props.loadedSkills}
-            hasAskQuestions={props.hasAskQuestions}
-            plugins={props.plugins}
-            onSelectPlugin={props.onSelectPlugin}
-            commandActions={props.commandActions}
-            commandPopoverOpen={props.commandPopoverOpen}
-            onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
-            installingPluginIds={props.installingPluginIds}
-            onOpenMarketplace={props.onOpenMarketplace}
-            marketplaceUrlReady={props.marketplaceUrlReady}
-          />
-        </ChatContextProvider>
+        <HomeChatPane {...props} />
       </MainPaneShell>
     );
   }
