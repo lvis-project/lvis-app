@@ -190,7 +190,9 @@ bunx vitest run
 
 ## 실행
 ```bash
-# 실제 PageIndex 모드 (설치/키 필요)
-# LOCAL_INDEXER_ROOT=/absolute/path/to/local-indexer OPENAI_API_KEY=... bun run start
+# 실제 Local Indexer 모드 (설치/키 필요)
+# OPENAI_API_KEY=... bun run start
+# Phase 1 E2E source checkout override:
+# LVIS_E2E_INDEXER_PLUGIN_ROOT=/absolute/path/to/lvis-plugin-local-indexer bunx tsx scripts/e2e-phase1.ts
 bun run start
 ```
