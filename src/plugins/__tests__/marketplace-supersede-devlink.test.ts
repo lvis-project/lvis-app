@@ -150,6 +150,86 @@ describe("PluginMarketplaceService — dev-link supersede on marketplace install
     expect(entry?._devLinked).toBeUndefined();
   });
 
+  it("forces full re-install for legacy registry entries with _devLinked=true and no installSource", async () => {
+    // Pre-PR #430 dev-link entries can have `_devLinked: true` without an
+    // `installSource` field. The supersede guard must match the same disjunction
+    // other call sites use so legacy users hit the fix too.
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "pageindex",
+            name: "Pageindex",
+            description: "fixture",
+            version: "0.1.15",
+            installPolicy: "user",
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const installRoot = join(pluginsDir, "pageindex");
+    await mkdir(installRoot, { recursive: true });
+    const installedManifestPath = join(installRoot, "plugin.json");
+    await writeFile(
+      installedManifestPath,
+      JSON.stringify({
+        id: "pageindex",
+        name: "Pageindex",
+        version: "0.1.15",
+        entry: "dist/index.js",
+        tools: [],
+        description: "fixture",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "pageindex",
+            manifestPath: "pageindex/plugin.json",
+            enabled: true,
+            installedBy: "user",
+            // installSource omitted — legacy shape from before PR #430
+            _devLinked: true,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const service = makeService(testDir, marketplacePath);
+
+    const touchSpy = vi.spyOn(
+      service as unknown as { touchInstalledRegistryEntry: (...args: unknown[]) => Promise<void> },
+      "touchInstalledRegistryEntry",
+    );
+    const installSpy = vi
+      .spyOn(
+        service as unknown as { installArtifact: (...args: unknown[]) => Promise<string> },
+        "installArtifact",
+      )
+      .mockResolvedValue(installedManifestPath);
+    vi
+      .spyOn(
+        (service as unknown as { artifactStore: { cacheVersionFromManifest: (...args: unknown[]) => Promise<void> } })
+          .artifactStore,
+        "cacheVersionFromManifest",
+      )
+      .mockResolvedValue();
+
+    await service.install("pageindex", "user");
+
+    expect(installSpy).toHaveBeenCalledTimes(1);
+    expect(touchSpy).not.toHaveBeenCalled();
+  });
+
   it("preserves the no-op early-exit for non-dev-link entries with matching version", async () => {
     // Same catalog as above.
     await writeFile(

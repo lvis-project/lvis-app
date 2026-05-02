@@ -382,12 +382,18 @@ export class PluginMarketplaceService {
       // marketplace install — that path extracts the zip (replacing the
       // symlinks) and the registry write at the end correctly sets
       // installSource: "user".
+      //
+      // Legacy back-compat: pre-PR #430 dev-link entries can have
+      // `_devLinked: true` with `installSource === undefined`. Match the
+      // disjunction other call sites use (runtime/index.ts, update-detector.ts,
+      // runtime/snapshots.ts) so legacy users hit the supersede path too.
       const installedVersion = await this.getInstalledVersion(plugin.id);
       const isSameVersion =
         !plugin.version ||
         !installedVersion ||
         plugin.version === installedVersion;
-      const isDevLinkSupersede = existingEntry.installSource === "dev-link";
+      const isDevLinkSupersede =
+        existingEntry.installSource === "dev-link" || existingEntry._devLinked === true;
       if (isSameVersion && !isDevLinkSupersede) {
         await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
         return { pluginId: plugin.id, installed: true };
