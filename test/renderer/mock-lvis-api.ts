@@ -102,6 +102,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatSessionResume: vi.fn(async (id: string) => ({ ok: true, compacted: false, compactedAt: null, removedMessageCount: 0 })),
     chatCompact: vi.fn(async () => ({ compacted: false, compactedAt: null, summary: "불필요", removedMessageCount: 0 })),
     chatGetHistory: vi.fn(async () => history),
+    chatSessionHistory: vi.fn(async (_sessionId: string) => ({ ok: false, messages: [] })),
     chatEditResend: vi.fn(async () => ({ ok: true })),
     chatFork: vi.fn(async () => ({ ok: true, sessionId: currentSession })),
     chatRetryEffort: vi.fn(async () => ({ ok: true })),
