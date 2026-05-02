@@ -77,7 +77,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
 
   // Mount: load vendor/model/thinking cache + context overflow snapshot in one call.
   useEffect(() => {
-    api
+    void api
       .getSettings()
       .then((s) => {
         if (!isMountedRef.current) return;

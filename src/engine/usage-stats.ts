@@ -60,7 +60,7 @@ function emptyTotals(): UsageTotals {
   return { inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0 };
 }
 
-/** Parse a route string "vendor/model" into [vendor, model]. Fallback: ["claude","unknown"]. */
+/** Parse a route string "vendor/model" into `{ vendor, model }`. Fallback: `{ vendor: "claude", model: "unknown" }`. */
 function parseRoute(route: string | undefined): { vendor: LLMVendor; model: string } {
   if (!route) return { vendor: "claude", model: "unknown" };
   const [v, ...rest] = route.split("/");
