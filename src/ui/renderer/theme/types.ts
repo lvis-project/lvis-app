@@ -17,7 +17,7 @@
 export type ThemePreference = "system" | "light" | "dark" | "high-contrast";
 export type ResolvedTheme = "light" | "dark" | "high-contrast";
 
-export type ChatThemePreference = "default" | "purple" | "orange" | "blue";
+export type ChatThemePreference = "default" | "lg" | "purple" | "orange" | "blue";
 
 export type CodeThemePreference = "auto" | "light" | "dark";
 export type ResolvedCodeTheme = "light" | "dark";
@@ -54,6 +54,7 @@ export const THEME_PREFERENCES: readonly ThemePreference[] = [
 
 export const CHAT_THEME_PREFERENCES: readonly ChatThemePreference[] = [
   "default",
+  "lg",
   "purple",
   "orange",
   "blue",
