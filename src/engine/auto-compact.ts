@@ -11,6 +11,7 @@
  */
 import type { GenericMessage, TokenUsage, LLMVendor, ConversationCarryover, UserContentPart } from "./llm/types.js";
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
+import { shouldSkipSummary as _shouldSkipSummary } from "./summary-generator.js";
 
 /** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
 const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
@@ -162,6 +163,61 @@ export function getModelContextWindow(vendor: LLMVendor, model: string): number 
     if (bestKey !== undefined) return vendorMap[bestKey];
   }
   return DEFAULT_CONTEXT_WINDOW;
+}
+
+// ─── 3-Tier Rotation Types ────────────────────────────
+
+/**
+ * 체크포인트 트리거 종류 (3-tier rotation 결정 트리).
+ * - "hard-token":  컨텍스트 윈도우 85% 도달 → 즉시 rotation 필요
+ * - "semantic-llm": LLM이 [checkpoint-suggested] 마커를 삽입 → 토픽 전환 감지
+ * - "soft-time":  24h 경과 또는 30개 메시지 → 자연 체크포인트
+ */
+export type CheckpointTriggerType = "hard-token" | "semantic-llm" | "soft-time";
+
+export interface RotationDecision {
+  shouldRotate: boolean;
+  trigger?: CheckpointTriggerType;
+  shouldSkipSummary: boolean;
+}
+
+/**
+ * 3-tier rotation 결정 트리.
+ *
+ * Tier 1 (hard-token): ctxUsage >= 0.85 → 무조건 rotation + 요약 생성
+ * Tier 2 (semantic-llm): LLM이 [checkpoint-suggested] 마커 삽입 → rotation, 요약은 ctxUsage 판단
+ * Tier 3 (soft-time): 24h 경과 OR 30개 메시지 → rotation, 요약은 ctxUsage 판단
+ *
+ * @param args.ctxUsage      0.0–1.0 컨텍스트 사용률
+ * @param args.sessionAgeMs  세션 시작 이후 경과 ms
+ * @param args.messageCount  현재 세션의 메시지 수
+ * @param args.semanticHint  [checkpoint-suggested] 마커 발견 여부
+ */
+export function decideRotation(args: {
+  ctxUsage: number;
+  sessionAgeMs: number;
+  messageCount: number;
+  semanticHint: boolean;
+}): RotationDecision {
+  const { ctxUsage, sessionAgeMs, messageCount, semanticHint } = args;
+
+  // Tier 1: hard-token (85% 이상 → 즉시 rotation, 요약 항상 생성)
+  if (ctxUsage >= 0.85) {
+    return { shouldRotate: true, trigger: "hard-token", shouldSkipSummary: false };
+  }
+
+  // Tier 2: semantic (LLM 마커 감지)
+  if (semanticHint) {
+    return { shouldRotate: true, trigger: "semantic-llm", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
+  }
+
+  // Tier 3: soft-time (24h 또는 30 메시지)
+  const DAY_MS = 24 * 60 * 60 * 1_000;
+  if (sessionAgeMs >= DAY_MS || messageCount >= 30) {
+    return { shouldRotate: true, trigger: "soft-time", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
+  }
+
+  return { shouldRotate: false, shouldSkipSummary: false };
 }
 
 // ─── Types ──────────────────────────────────────────
