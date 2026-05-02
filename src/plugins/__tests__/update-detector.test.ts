@@ -191,11 +191,13 @@ describe("PluginUpdateDetector", () => {
     expect(updates).toHaveLength(0);
   });
 
-  it("skips _devLinked entries (source repo is authoritative, catalog meaningless)", async () => {
-    // Dev-linked installs symlink plugin.json out to the source repo —
-    // path-traversal guard would refuse to follow it and emit
-    // "manifestPath escapes allowed roots" on every poll. Detector now
-    // continues past _devLinked entries before that check fires.
+  it("skips legacy _devLinked entries via the on-read migration", async () => {
+    // Pre-PR #430 dev-link installs wrote `_devLinked: true` instead of
+    // `installSource: "dev-link"`. readPluginRegistry migrates the legacy
+    // shape on first read, so the detector still treats them as dev-link
+    // and skips the catalog comparison. The path-escape warning must not
+    // fire — that was the symptom we observed in production for every
+    // dev-linked plugin on every poll.
     const registryPath = resolve(tmpDir, "registry.json");
     await writeFile(
       registryPath,

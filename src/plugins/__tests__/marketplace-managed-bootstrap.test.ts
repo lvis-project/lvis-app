@@ -530,13 +530,13 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             id: "calendar",
             manifestPath: "installed/calendar/plugin.json",
             enabled: false,
-            installedBy: "user",
+            installSource: "user",
           },
           {
             id: "email",
             manifestPath: "installed/email/plugin.json",
             enabled: true,
-            installedBy: "user",
+            installSource: "user",
             bundleRefs: ["work-proactive"],
           },
         ],
@@ -552,9 +552,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
           touchedEntries: Map<string, {
             enabled?: boolean;
             bundleRefs?: string[];
-            installedBy?: "admin" | "user";
             approvedPluginAccess?: unknown;
-            _devLinked?: boolean;
             installSource?: "admin" | "user" | "local-dev" | "dev-link";
           }>;
         }) => Promise<void>;
@@ -567,9 +565,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
           {
             enabled: false,
             bundleRefs: undefined,
-            installedBy: "user",
             installSource: "user" as const,
-            _devLinked: undefined,
             approvedPluginAccess: undefined,
           },
         ],
@@ -584,7 +580,6 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         id: "calendar",
         manifestPath: "installed/calendar/plugin.json",
         enabled: false,
-        installedBy: "user",
         installSource: "user",
       },
     ]);
@@ -616,27 +611,27 @@ describe("PluginMarketplaceService managed bootstrap", () => {
             id: "work-proactive",
             manifestPath: "installed/work-proactive/plugin.json",
             enabled: true,
-            installedBy: "user",
+            installSource: "user",
           },
           {
             id: "email",
             manifestPath: "installed/email/plugin.json",
             enabled: true,
-            installedBy: "user",
+            installSource: "user",
             bundleRefs: ["work-proactive"],
           },
           {
             id: "meeting",
             manifestPath: "installed/meeting/plugin.json",
             enabled: true,
-            installedBy: "user",
+            installSource: "user",
             bundleRefs: ["work-proactive", "other-bundle"],
           },
           {
             id: "calendar",
             manifestPath: "installed/calendar/plugin.json",
             enabled: true,
-            installedBy: "admin",
+            installSource: "admin",
             bundleRefs: ["work-proactive"],
           },
         ],
@@ -658,14 +653,14 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         id: "meeting",
         manifestPath: "installed/meeting/plugin.json",
         enabled: true,
-        installedBy: "user",
+        installSource: "user",
         bundleRefs: ["other-bundle"],
       },
       {
         id: "calendar",
         manifestPath: "installed/calendar/plugin.json",
         enabled: true,
-        installedBy: "admin",
+        installSource: "admin",
         bundleRefs: [],
       },
     ]);

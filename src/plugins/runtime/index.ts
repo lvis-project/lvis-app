@@ -519,8 +519,7 @@ export class PluginRuntime {
       if (freshEntry == null) {
         log.warn(`restartPlugin: %s not found in fresh registry, treating as non-dev-link`, pluginId);
       }
-      const freshDevLinked = freshEntry != null &&
-        (freshEntry.installSource === "dev-link" || freshEntry._devLinked === true);
+      const freshDevLinked = freshEntry != null && freshEntry.installSource === "dev-link";
       skipReceiptForDevLink = freshDevLinked && devLinkedEntryAllowed();
     } catch (err) {
       log.error(`restartPlugin: failed to read registry for %s: %s`, pluginId, (err as Error).message);
