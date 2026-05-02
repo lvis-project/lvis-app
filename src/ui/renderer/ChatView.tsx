@@ -329,21 +329,35 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             const ringCls = isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
 
             if (entry.kind === "user") {
+              // Add extra breathing room only after a *completed* assistant
+              // turn (whose action bar sits at the bottom of the card).
+              // Skip the gap for day/session markers, session-opening user
+              // turns, and mid-stream onGuide() messages where the previous
+              // assistant entry is still streaming and has no action bar
+              // yet. `!mt-4` uses Tailwind's important prefix to outweigh
+              // the parent's `space-y-3` specificity (the descendant
+              // selector `> :not([hidden]) ~ :not([hidden])` otherwise
+              // wins).
+              const prevEntry = i > 0 ? entries[i - 1] : undefined;
+              const prevAssistantComplete =
+                prevEntry?.kind === "assistant" && prevEntry.streaming !== true;
+              const userGapCls = prevAssistantComplete ? "!mt-4" : "";
               if (editingEntryIdx === i) {
                 rendered.push(
-                  <UserMessageEditor
-                    key={idx}
-                    initialText={entry.text}
-                    busy={editBusy}
-                    onCancel={() => setEditingEntryIdx(null)}
-                    onSave={(next) => void onEditSave(idx, next)}
-                  />
+                  <div key={idx} className={userGapCls}>
+                    <UserMessageEditor
+                      initialText={entry.text}
+                      busy={editBusy}
+                      onCancel={() => setEditingEntryIdx(null)}
+                      onSave={(next) => void onEditSave(idx, next)}
+                    />
+                  </div>
                 );
               } else {
                 const starId = isEntryStarred(idx);
                 const starActive = !!starId;
                 rendered.push(
-                  <div key={idx} className={`group relative ml-auto w-fit max-w-[85%] rounded-2xl bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${ringCls}`}>
+                  <div key={idx} className={`group relative ml-auto w-fit max-w-[85%] rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
                     {/* "나" label removed — sender is implicit. Star + hover
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
