@@ -440,6 +440,12 @@ export function App() {
     return unsubscribe;
   }, [api, refreshViews, refreshMarketplace, refreshCards]);
 
+  // Auto-close CommandPopover when navigating away from home — the popover
+  // is only mounted on the home view so leaving it open causes stuck state.
+  useEffect(() => {
+    if (activeView !== "home") setCommandPopoverOpen(false);
+  }, [activeView]);
+
   const commandActions = useMemo(
     () =>
       buildQuickActions({
