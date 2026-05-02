@@ -156,16 +156,22 @@ export class SystemPromptBuilder {
    * turn of a new session).
    */
   setSessionTitle(title: string | null): void {
-    this.sessionTitle = title && title.length > 0 ? this.sanitizeTitle(title) : null;
+    if (title === null) {
+      this.sessionTitle = null;
+      return;
+    }
+    const sanitized = this.sanitizeTitle(title);
+    this.sessionTitle = sanitized.length > 0 ? sanitized : null;
   }
 
   /**
    * Strips characters that could break the prompt template or enable prompt
-   * injection: CR, LF, double-quotes, and backslashes. Caps at 50 chars so
+   * injection: CR, LF, double-quotes, backslashes, and angle brackets
+   * (which could mutate prompt-template XML tags). Caps at 50 chars so
    * an abnormally long user-renamed title cannot bloat the prompt.
    */
   private sanitizeTitle(t: string): string {
-    return t.replace(/[\r\n"\\]/g, " ").slice(0, 50).trim();
+    return t.replace(/[\r\n"\\<>]/g, " ").slice(0, 50).trim();
   }
 
   // ─── Private ──────────────────────────────────────

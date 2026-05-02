@@ -6,6 +6,8 @@
  *   - Session title is injected when set
  *   - No session title line emitted when title is null
  *   - setSessionTitle("") normalises to null (no injection)
+ *   - sanitizeTitle() strips dangerous characters (newline, quote, backslash, angle brackets)
+ *   - sanitizeTitle() + setSessionTitle() whitespace-only → normalised to null
  */
 import { describe, it, expect } from "vitest";
 
@@ -79,5 +81,70 @@ describe("SystemPromptBuilder — Conversation Meta Output", () => {
     expect(builder.build()).not.toContain("현재 세션 제목:");
     // Meta output instructions must still be present after clearing
     expect(builder.build()).toContain("## 대화 메타 출력 (final answer 끝에 추가)");
+  });
+});
+
+describe("SystemPromptBuilder — sanitizeTitle via setSessionTitle", () => {
+  it("strips newline characters (\\n, \\r) from title", () => {
+    const builder = makeBuilder();
+    builder.setSessionTitle("제목\n주입\r시도");
+    const prompt = builder.build();
+    // newlines replaced by spaces and trimmed — result should not contain raw newlines inside quotes
+    expect(prompt).not.toContain("제목\n주입");
+    expect(prompt).not.toContain("제목\r주입");
+    expect(prompt).toContain("현재 세션 제목:");
+  });
+
+  it("strips double-quote characters from title", () => {
+    const builder = makeBuilder();
+    builder.setSessionTitle('MS Graph "이메일" 조회');
+    const prompt = builder.build();
+    // double quotes inside title are replaced with spaces
+    expect(prompt).not.toContain('"MS Graph "이메일"');
+    expect(prompt).toContain("현재 세션 제목:");
+  });
+
+  it("strips backslash characters from title", () => {
+    const builder = makeBuilder();
+    builder.setSessionTitle("C:\\Users\\test 파일");
+    const prompt = builder.build();
+    expect(prompt).not.toContain("C:\\Users");
+    expect(prompt).toContain("현재 세션 제목:");
+  });
+
+  it("strips angle brackets (<>) to prevent prompt-template injection", () => {
+    const builder = makeBuilder();
+    builder.setSessionTitle("<script>악의적 태그</script>");
+    const prompt = builder.build();
+    expect(prompt).not.toContain("<script>");
+    expect(prompt).not.toContain("</script>");
+    // content is preserved but angle brackets removed
+    expect(prompt).toContain("현재 세션 제목:");
+  });
+
+  it("caps title at 50 characters", () => {
+    const builder = makeBuilder();
+    const longTitle = "가".repeat(60);
+    builder.setSessionTitle(longTitle);
+    const prompt = builder.build();
+    // 50-char cap: the stored title must not exceed 50 chars
+    expect(prompt).toContain("현재 세션 제목:");
+    expect(prompt).not.toContain("가".repeat(51));
+  });
+
+  it("whitespace-only title after sanitize is normalised to null (no injection)", () => {
+    const builder = makeBuilder();
+    // A title that is all spaces should become empty after trim → treated as null
+    builder.setSessionTitle("   ");
+    const prompt = builder.build();
+    expect(prompt).not.toContain("현재 세션 제목:");
+  });
+
+  it("title with only dangerous chars normalised to null after strip+trim", () => {
+    const builder = makeBuilder();
+    // Only angle brackets and newlines — after strip all that remains is spaces → null
+    builder.setSessionTitle("<>\r\n<>");
+    const prompt = builder.build();
+    expect(prompt).not.toContain("현재 세션 제목:");
   });
 });
