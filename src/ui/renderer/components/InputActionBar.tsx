@@ -18,7 +18,7 @@ export interface InputActionBarProps {
   contextBudget: number;
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
-  installingPluginIds?: Set<string>;
+  installingPluginIds?: ReadonlySet<string>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
   onInsertSlashCommand: (cmd: string) => void;

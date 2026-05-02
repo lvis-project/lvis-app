@@ -24,7 +24,7 @@ export interface PluginEntry {
 interface PluginGridButtonProps {
   plugins: PluginEntry[];
   /** Set of plugin slugs (IDs) currently being installed. */
-  installingPluginIds?: Set<string>;
+  installingPluginIds?: ReadonlySet<string>;
   onSelect: (viewKey: string) => void;
   /** Called when the user clicks the "+" cell or the empty-state CTA. */
   onOpenMarketplace: () => void;

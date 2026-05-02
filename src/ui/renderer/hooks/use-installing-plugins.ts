@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import type { LvisApi } from "../types.js";
 
-export function useInstallingPlugins(api: LvisApi): Set<string> {
+export function useInstallingPlugins(api: LvisApi): ReadonlySet<string> {
   const [ids, setIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {

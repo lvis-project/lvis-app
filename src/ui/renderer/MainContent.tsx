@@ -48,7 +48,7 @@ export interface MainContentProps {
   commandActions: QuickAction[];
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
-  installingPluginIds?: Set<string>;
+  installingPluginIds?: ReadonlySet<string>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
   // plugin view

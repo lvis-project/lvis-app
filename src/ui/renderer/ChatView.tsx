@@ -68,7 +68,7 @@ export interface ChatViewProps {
   /** Controlled open state for CommandPopover */
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
-  installingPluginIds?: Set<string>;
+  installingPluginIds?: ReadonlySet<string>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
 }
