@@ -252,10 +252,22 @@ export function registerChatHandlers(deps: IpcDeps): void {
 [추가 방향 지시]
 ${input}`;
 
-  const streamTurn = async (input: string) => {
+  const streamTurn = async (
+    input: string,
+    attachments?: import("../../engine/llm/types.js").UserContentPart[],
+  ) => {
     const win = getMainWindow();
     const streamId = allocateStreamId();
-    return trackStreamTurn(() => runStreamedTurn(conversationLoop, input, win?.webContents, "lvis:chat:stream", streamId, streamTurnOptions));
+    return trackStreamTurn(() => runStreamedTurn(
+      conversationLoop,
+      input,
+      win?.webContents,
+      "lvis:chat:stream",
+      streamId,
+      attachments && attachments.length > 0
+        ? { ...streamTurnOptions, attachments }
+        : streamTurnOptions,
+    ));
   };
 
   ipcMain.handle("lvis:chat:send", async (
@@ -398,7 +410,19 @@ ${input}`;
       if (messages[i].role === "user") { lastUserIdx = i; break; }
     }
     if (lastUserIdx < 0) return { ok: false, error: "no-user-message" };
-    const lastUser = messages[lastUserIdx] as { role: "user"; content: string };
+    const lastUser = messages[lastUserIdx] as Extract<GenericMessage, { role: "user" }>;
+    // Disjoint split: text parts → prompt body, non-text parts → attachments.
+    // `userContentText()` is wrong here — its `[image:...]` placeholder would
+    // re-send each attachment twice once paired with `lastUserAttachments`.
+    const lastUserText = Array.isArray(lastUser.content)
+      ? lastUser.content
+          .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
+          .map((p) => p.text)
+          .join("\n")
+      : lastUser.content;
+    const lastUserAttachments = Array.isArray(lastUser.content)
+      ? lastUser.content.filter((p) => p.type !== "text")
+      : undefined;
     conversationLoop.getHistory().truncate(lastUserIdx);
 
     const prevLlm = settingsService.get("llm");
@@ -417,7 +441,7 @@ ${input}`;
     });
     conversationLoop.refreshProvider();
     try {
-      const result = await streamTurn(lastUser.content);
+      const result = await streamTurn(lastUserText, lastUserAttachments);
       return { ok: true, result };
     } finally {
       await settingsService.patch({
