@@ -87,9 +87,12 @@ function readUrlTypes() {
     ["-extract", "CFBundleURLTypes", "json", "-o", "-", realPlist],
     { encoding: "utf8" },
   );
-  // status === null means spawn itself failed (plutil missing on PATH).
-  // Surface that loudly so a stripped CI image isn't an invisible regression.
-  if (r.status === null) {
+  // `r.error` is the canonical spawn-time failure signal (ENOENT, EACCES) —
+  // surface that loudly so a stripped CI image isn't an invisible regression.
+  // `r.error` set ⇒ `r.status === null`, but the converse isn't true (a
+  // signal-killed plutil also gives `r.status === null` with `r.signal` set
+  // and `r.error == null`), so prefer the explicit `r.error` check.
+  if (r.error) {
     reportSpawnFailure("plutil -extract", r);
     return null;
   }
