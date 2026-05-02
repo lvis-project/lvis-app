@@ -20,7 +20,7 @@
  * 사전 조건:
  *   - OPENAI_API_KEY 환경변수 (S3~S4 실제 인덱싱/검색 시)
  *   - lvis-app npm run build 완료
- *   - lvis-plugin-pageindex npm run build 완료
+ *   - document indexer plugin installed under ~/.lvis/plugins
  */
 
 import { promises as fs } from "node:fs";
@@ -41,7 +41,8 @@ const RUNTIME_DIR = join(LVIS_HOME, "runtime");
 const VENV_DIR = join(RUNTIME_DIR, "venv");
 const READY_SENTINEL = join(VENV_DIR, ".ready");
 const REPO_ROOT = join(__dirname, "..");
-const PLUGIN_ROOT = join(REPO_ROOT, "..", "lvis-plugin-pageindex");
+const PLUGIN_ROOT = process.env.LVIS_E2E_INDEXER_PLUGIN_ROOT
+  ?? join(LVIS_HOME, "plugins", "local-indexer");
 const WORKER_DIR = join(PLUGIN_ROOT, "worker");
 const FIXTURE_MD = join(PLUGIN_ROOT, "test", "indexer.ko.fixture.md");
 

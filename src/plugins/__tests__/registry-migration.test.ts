@@ -6,11 +6,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { readPluginRegistry } from "../registry.js";
+import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../registry.js";
 
 describe("readPluginRegistry — legacy installedBy/_devLinked migration", () => {
   let tmpDir: string;
@@ -245,6 +245,9 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
   });
 
   it("migrates old-only pageindex registry entry to local-indexer and persists default manifest path rename", async () => {
+    await mkdir(join(tmpDir, "pageindex"), { recursive: true });
+    await writeFile(join(tmpDir, "pageindex", "plugin.json"), JSON.stringify({ id: "pageindex" }), "utf-8");
+
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -273,6 +276,50 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
 
     const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(onDisk.plugins).toEqual(registry.plugins);
+    const resolvedManifestPaths = resolveManifestPathsFromRegistry(registryPath, registry.plugins);
+    expect(resolvedManifestPaths).toEqual([join(tmpDir, "local-indexer", "plugin.json")]);
+    await expect(stat(join(tmpDir, "local-indexer", "plugin.json"))).resolves.toBeTruthy();
+    await expect(stat(join(tmpDir, "pageindex"))).rejects.toThrow();
+  });
+
+  it("does not overwrite an existing local-indexer directory when migrating duplicate old and new entries", async () => {
+    await mkdir(join(tmpDir, "pageindex"), { recursive: true });
+    await mkdir(join(tmpDir, "local-indexer"), { recursive: true });
+    await writeFile(join(tmpDir, "pageindex", "marker.txt"), "legacy", "utf-8");
+    await writeFile(join(tmpDir, "local-indexer", "marker.txt"), "canonical", "utf-8");
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "pageindex",
+            manifestPath: "pageindex/plugin.json",
+            enabled: true,
+            installSource: "user",
+          },
+          {
+            id: "local-indexer",
+            manifestPath: "local-indexer/plugin.json",
+            enabled: false,
+            installSource: "admin",
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const registry = await readPluginRegistry(registryPath);
+    expect(registry.plugins).toEqual([
+      {
+        id: "local-indexer",
+        manifestPath: "local-indexer/plugin.json",
+        enabled: false,
+        installSource: "admin",
+      },
+    ]);
+    await expect(readFile(join(tmpDir, "local-indexer", "marker.txt"), "utf-8")).resolves.toBe("canonical");
+    await expect(readFile(join(tmpDir, "pageindex", "marker.txt"), "utf-8")).resolves.toBe("legacy");
   });
 
   it("leaves an already-canonical local-indexer registry entry unchanged", async () => {
