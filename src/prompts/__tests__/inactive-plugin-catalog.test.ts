@@ -39,7 +39,7 @@ describe("SystemPromptBuilder — inactive plugin catalog (Option C)", () => {
       },
       {
         id: "local-indexer",
-        name: "PageIndex",
+        name: "Local Indexer",
         description: "문서 인덱스/검색",
         sampleTools: ["index_scan", "index_search"],
       },
