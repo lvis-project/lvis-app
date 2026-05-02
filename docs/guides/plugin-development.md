@@ -729,7 +729,7 @@ lvis-app/plugins/installed/{plugin-id}/
 
 ## 완전한 예제
 
-Meeting / Microsoft 365 (Outlook 메일+캘린더) / PageIndex 의 실제 플러그인 소스는 모두 `lvis-project/` 아래 형제 저장소에 있습니다:
+Meeting / Microsoft 365 (Outlook 메일+캘린더) / Local Indexer 의 실제 플러그인 소스는 모두 `lvis-project/` 아래 형제 저장소에 있습니다:
 
 - `lvis-plugin-meeting`
 - `lvis-plugin-ms-graph` (구 `lvis-plugin-email` + `lvis-plugin-calendar` 통합)
@@ -786,4 +786,4 @@ Meeting / Microsoft 365 (Outlook 메일+캘린더) / PageIndex 의 실제 플러
 - `src/plugins/types.ts`, `src/plugins/runtime.ts`, `src/plugins/marketplace.ts`, `src/plugins/plugin-install-receipt.ts`, `src/plugins/publisher-keys.ts`
 - `src/boot.ts`, `src/boot/conversation.ts` (callLlm 레이트리밋), `src/boot/plugins.ts` (notification / eventSubscriptions)
 - `schemas/plugin.schema.json`
-- Meeting / Email / Calendar / PageIndex 플러그인 저장소 (현행 사용 예제)
+- Meeting / Email / Calendar / Local Indexer 플러그인 저장소 (현행 사용 예제)

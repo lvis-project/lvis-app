@@ -31,7 +31,7 @@ LVIS의 전체 아키텍처는 [architecture.md](../architecture/architecture.md
 
 - Electron 런타임 환경 (추후 버전 확정)
 - Rust toolchain (NAPI-RS 빌드용)
-- Python 3.x (PageIndex 인덱싱 엔진)
+- Python 3.x (Local Indexer 인덱싱 엔진)
 - 사내 네트워크 접근 (Lgenie 연동 — 온라인 전제)
 
 ---
