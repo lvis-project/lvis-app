@@ -38,8 +38,8 @@
     },
     "version": {
       "type": "string",
-      "pattern": "^\\d+\\.\\d+\\.\\d+(-[\\w.]+)?(\\+[\\w.]+)?$",
-      "description": "Anchored semver (MAJOR.MINOR.PATCH with optional -prerelease / +build metadata)"
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "description": "Stable SemVer (MAJOR.MINOR.PATCH, no leading zeros). Pre-release / build-metadata suffixes are not supported on the marketplace publish channel — the per-plugin publish.yml rejects them at tag time. Aligning the schema with that gate so AJV fails earlier."
     },
     "entry": {
       "type": "string",
@@ -508,11 +508,13 @@
           },
           "version": {
             "type": "string",
-            "description": "\u00a76.4 Tool versioning \u2014 optional semver string for this tool. When omitted, the plugin manifest's top-level version is used."
+            "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+            "description": "\u00a76.4 Tool versioning \u2014 optional stable SemVer (MAJOR.MINOR.PATCH, no leading zeros) for this tool. When omitted, the plugin manifest's top-level version is used. Same strictness as the top-level version field."
           },
           "deprecatedSince": {
             "type": "string",
-            "description": "Semver string of the manifest version that deprecated this tool."
+            "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+            "description": "Stable SemVer (MAJOR.MINOR.PATCH) of the manifest version that deprecated this tool."
           },
           "replacedBy": {
             "type": "string",
