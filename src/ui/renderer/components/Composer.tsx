@@ -167,9 +167,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         // Functional updater + flushSync: re-check the cap against the
         // latest committed state (a concurrent file picker / second paste
         // during the IPC saveClipboardImage await may have filled the 5
-        // slots in the meantime). flushSync forces the updater to run
-        // synchronously so we know whether the chip was actually inserted
-        // before deciding whether to also insert the marker text.
+        // slots in the meantime).
+        //
+        // Atomic commit: text-insert MUST be inside the same flushSync
+        // as onAttachmentsChange so the marker-sync useEffect never sees
+        // a transient mismatch (attachments=[chip] + text="" without
+        // marker → would destructively cleanup the chip before the text
+        // catches up).
         let inserted = false;
         flushSync(() => {
           onAttachmentsChange((prev) => {
@@ -177,10 +181,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             inserted = true;
             return [...prev, candidate];
           });
+          if (inserted && outcome.insertText) {
+            insertAtCursor(outcome.insertText);
+          }
         });
-        if (inserted && outcome.insertText) {
-          insertAtCursor(outcome.insertText);
-        } else if (!inserted) {
+        if (!inserted) {
           onWarning?.(
             `첨부 ${ATTACH_MAX_COUNT}개 한도 — 클립보드 paste 가 중간에 차단됨`,
           );
@@ -249,7 +254,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     <div data-testid="composer" className="px-3">
       <div
         data-testid="composer-input-bar"
-        className="flex items-stretch gap-2 rounded-xl bg-input-bar overflow-hidden shadow-md"
+        className="flex items-stretch gap-0 rounded-xl bg-input-bar overflow-hidden shadow-md"
       >
         {/* Strip is rendered ONLY when there is at least one attachment so
             the empty state does not reserve horizontal space. Single chip
@@ -257,7 +262,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {liveAttachments.length === 1 ? (
           <div
             data-testid="composer-strip"
-            className="flex items-center pl-3 pr-1"
+            className="flex items-center pl-3 pr-0"
           >
             <AttachmentChip
               attachment={liveAttachments[0]}
@@ -268,7 +273,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         ) : liveAttachments.length >= 2 ? (
           <div
             data-testid="composer-strip"
-            className="flex items-center pl-3 pr-1"
+            className="flex items-center pl-3 pr-0"
           >
             <AttachmentChipCollapsed
               attachments={liveAttachments}
@@ -285,7 +290,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
           placeholder={placeholder ?? "질문을 입력하세요... (Cmd/Ctrl+V 로 클립보드 붙여넣기)"}
-          className="flex-1 min-h-[64px] border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-2.5"
+          className="flex-1 min-h-[88px] border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-3"
         />
 
         {streaming ? (
