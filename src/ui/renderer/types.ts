@@ -139,6 +139,10 @@ export type AppSettings = {
     chatTheme?: "default" | "purple" | "orange" | "blue";
     codeTheme?: "auto" | "light" | "dark";
   };
+  /** Experimental feature flags — all default false. */
+  features?: {
+    experimentalStackedChat?: boolean;
+  };
 };
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
