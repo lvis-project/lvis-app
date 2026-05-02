@@ -136,7 +136,7 @@ export type AppSettings = {
   /** UX Track 3 — visual theme preferences (three-axis). */
   appearance?: {
     theme: "system" | "light" | "dark" | "high-contrast";
-    chatTheme?: "default" | "purple" | "orange" | "blue";
+    chatTheme?: "default" | "lg" | "purple" | "orange" | "blue";
     codeTheme?: "auto" | "light" | "dark";
   };
   /** Experimental feature flags — all default false. */
