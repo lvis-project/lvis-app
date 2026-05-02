@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { KeyRound, Pencil, Star, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
@@ -15,6 +15,33 @@ import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
 import { ToolGroupCard } from "./components/ToolGroupCard.js";
 import { ChatSearchOverlay } from "./components/ChatSearchOverlay.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
+import { Calendar } from "../../components/ui/calendar.js";
+
+/**
+ * Today-date badge in the chat scroll header. Click opens a Popover with
+ * the LVIS-styled calendar (shadcn/react-day-picker, palette-tuned). UI-only
+ * for now — selected date isn't wired to history navigation yet.
+ */
+function DateBadge() {
+  const [pickedDate, setPickedDate] = useState<Date | undefined>(undefined);
+  const label = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="rounded-full bg-card border px-3 py-1 text-[11px] text-foreground/70 cursor-pointer hover:bg-muted"
+        >
+          {label}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="center" className="w-auto p-2 shadow-none border border-[#E6E1D6] bg-[#F9F7F3]">
+        <Calendar mode="single" selected={pickedDate} onSelect={setPickedDate} />
+      </PopoverContent>
+    </Popover>
+  );
+}
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
@@ -123,18 +150,8 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
 
   return (
     <div className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] mx-auto w-full max-w-3xl">
-      <ChatSearchOverlay
-        open={searchOpen}
-        query={searchQuery}
-        caseSensitive={searchCase}
-        matchCount={searchMatches.length}
-        currentIdx={searchIdx}
-        onChangeQuery={searchChangeQuery}
-        onToggleCase={searchToggleCase}
-        onNext={searchNext}
-        onPrev={searchPrev}
-        onClose={searchCloseOverlay}
-      />
+      {/* ChatSearchOverlay moved INSIDE ScrollArea below so its sticky top-0
+          attaches to the chat scroll viewport instead of floating above it. */}
       {hasApiKey === false && (
         <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
           <Card className="w-[400px]"><CardHeader className="text-center"><KeyRound className="mx-auto mb-2 h-10 w-10 text-muted-foreground" /><CardTitle>API 키 설정 필요</CardTitle><CardDescription>채팅을 시작하려면 Claude API 키를 설정해 주세요.</CardDescription></CardHeader>
@@ -203,7 +220,28 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           </div>
         </div>
       )}
-      <ScrollArea className="h-full p-4"><div className="space-y-3">
+      <ScrollArea className="h-full px-3 py-4"><div className="space-y-3">
+        <ChatSearchOverlay
+          open={searchOpen}
+          query={searchQuery}
+          caseSensitive={searchCase}
+          matchCount={searchMatches.length}
+          currentIdx={searchIdx}
+          onChangeQuery={searchChangeQuery}
+          onToggleCase={searchToggleCase}
+          onNext={searchNext}
+          onPrev={searchPrev}
+          onClose={searchCloseOverlay}
+        />
+        {/* Today's date badge — always shown above the conversation. Per-day
+            session grouping (one badge per day-boundary inside a long
+            conversation) requires a timestamp on each ChatEntry, which the
+            current type doesn't carry; that's a follow-up. For now the badge
+            represents "today" — auto-refreshes to the current locale date
+            on render. */}
+        <div className="flex justify-center">
+          <DateBadge />
+        </div>
         {/* Workflow tools (S1+S2): skill badges + sub-agents + ask-user inline.
             SessionTodoPanel is intentionally NOT here — it sits above the input
             cluster (see below the ScrollArea) so it stays visible regardless of
@@ -298,17 +336,19 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                 const starId = isEntryStarred(idx);
                 const starActive = !!starId;
                 rendered.push(
-                  <div key={idx} className={`group relative ml-auto max-w-[85%] rounded-md border bg-primary px-3 py-2 text-sm text-primary-foreground ${ringCls}`}>
-                    <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <span>나</span>
-                      {starActive ? <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> : null}
-                      <div className="ml-auto hidden gap-1 group-hover:flex">
-                        <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
-                        <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
-                        <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
-                          <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
-                        </button>
-                      </div>
+                  <div key={idx} className={`group relative ml-auto w-fit max-w-[85%] rounded-full bg-message-user px-3 py-1.5 text-sm text-message-user-foreground ${ringCls}`}>
+                    {/* "나" label removed — sender is implicit. Star + hover
+                        actions float top-right via absolute positioning so
+                        the bubble has no header chrome. */}
+                    {starActive ? (
+                      <Star className="absolute right-2 top-2 h-3 w-3 fill-yellow-400 text-yellow-400" />
+                    ) : null}
+                    <div className="absolute right-2 top-2 hidden gap-1 group-hover:flex bg-message-user/95 rounded">
+                      <button className="rounded p-0.5 hover:bg-black/20" title="편집" onClick={() => setEditingEntryIdx(idx)}><Pencil className="h-3 w-3" /></button>
+                      <button className="rounded p-0.5 hover:bg-black/20" title="분기" onClick={() => void onFork(idx)}><GitBranch className="h-3 w-3" /></button>
+                      <button className="rounded p-0.5 hover:bg-black/20" title="즐겨찾기" onClick={() => void onToggleStar(idx)}>
+                        <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
+                      </button>
                     </div>
                     <div className="whitespace-pre-wrap">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
                   </div>
@@ -475,7 +515,7 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
           (positioned absolutely at the top of this grid, z-40). Removed from
           inline stream to eliminate the buried-question UX pain point. */}
       <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
-      <div className="border-t bg-card pb-3 space-y-2">
+      <div className="bg-background pb-1 space-y-2">
         <InputActionBar
           usedTokens={usedTokens}
           contextBudget={contextBudget}

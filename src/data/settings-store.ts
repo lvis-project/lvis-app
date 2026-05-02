@@ -123,7 +123,9 @@ export interface PluginSettings {}
  *       (default "system")
  *   - `chatTheme`  — accent color overlay for chat / UI surfaces
  *       "default" | "purple" | "orange" | "blue"
- *       (default "default" — no override; inherits from `theme`)
+ *       (default "purple" — light shell + warm-grey chat surface +
+ *        lilac user bubble + vivid SEND button. "default" means no
+ *        accent override; inherits from `theme`.)
  *   - `codeTheme`  — code-block surface scheme, independent of shell
  *       "auto" | "light" | "dark"
  *       (default "auto" — follows `theme`: light shell → light code,
@@ -319,7 +321,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   appearance: {
     theme: "system",
-    chatTheme: "default",
+    chatTheme: "purple",
     codeTheme: "auto",
   },
   plugins: {},
@@ -652,7 +654,7 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
   const chatTheme: ChatThemePreference =
     typeof chatRaw === "string" && (VALID_CHAT_THEMES as readonly string[]).includes(chatRaw)
       ? (chatRaw as ChatThemePreference)
-      : "default";
+      : "purple";
 
   const codeRaw = obj.codeTheme;
   const codeTheme: CodeThemePreference =
