@@ -34,9 +34,23 @@ describe("AppearanceTab — chat-theme picker", () => {
   it("renders one card per chat-theme variant", () => {
     const { getByRole } = renderWithTheme();
     expect(getByRole("radio", { name: /채팅 테마: 기본/ })).toBeTruthy();
+    expect(getByRole("radio", { name: /채팅 테마: LG/ })).toBeTruthy();
     expect(getByRole("radio", { name: /채팅 테마: 퍼플/ })).toBeTruthy();
     expect(getByRole("radio", { name: /채팅 테마: 오렌지/ })).toBeTruthy();
     expect(getByRole("radio", { name: /채팅 테마: 블루/ })).toBeTruthy();
+  });
+
+  it("clicking LG writes data-chat-theme=lg to <html>", async () => {
+    const { getByRole } = renderWithTheme("dark");
+    // First switch away from the LG default, then back.
+    fireEvent.click(getByRole("radio", { name: /채팅 테마: 퍼플/ }));
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
+    });
+    fireEvent.click(getByRole("radio", { name: /채팅 테마: LG/ }));
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("lg");
+    });
   });
 
   it("clicking 퍼플 writes data-chat-theme=purple to <html>", async () => {
@@ -49,10 +63,10 @@ describe("AppearanceTab — chat-theme picker", () => {
 
   it("clicking 기본 removes data-chat-theme (no override)", async () => {
     const { getByRole } = renderWithTheme("dark");
-    // first set purple, then back to default
-    fireEvent.click(getByRole("radio", { name: /채팅 테마: 퍼플/ }));
+    // The provider defaults to chatTheme="lg" so the data-chat-theme
+    // attribute is already set on mount; "기본" must clear it.
     await waitFor(() => {
-      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("purple");
+      expect(document.documentElement.getAttribute("data-chat-theme")).toBe("lg");
     });
     fireEvent.click(getByRole("radio", { name: /채팅 테마: 기본/ }));
     await waitFor(() => {
