@@ -154,19 +154,14 @@ describe("PluginUpdateDetector", () => {
     });
   });
 
-  it("compares migrated pageindex registry entries against local-indexer catalog entries", async () => {
+  it("does not compare legacy pageindex registry entries against local-indexer catalog entries", async () => {
     const registryPath = await setupRegistry([{ id: "pageindex", version: "1.0.0" }]);
     const fetcher = makeFetcher([makeCatalogPlugin("local-indexer", "1.1.0")]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
     const updates = await detector.checkForUpdates();
 
-    expect(updates).toHaveLength(1);
-    expect(updates[0]).toEqual({
-      pluginId: "local-indexer",
-      installedVersion: "1.0.0",
-      latestVersion: "1.1.0"
-    });
+    expect(updates).toEqual([]);
   });
 
   it("returns empty when all plugins are up-to-date", async () => {

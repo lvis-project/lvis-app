@@ -4,7 +4,7 @@
 ## 포함 내용
 - Plugin Runtime + Manifest 기반 동적 로딩
 - `~/.lvis/plugins/registry.json` 기반 manifestPath 동적 로딩
-- `@lvis/plugin-pageindex`, `@lvis/plugin-meeting`, `@lvis/plugin-ms-graph`,
+- `@lvis/plugin-local-indexer`, `@lvis/plugin-meeting`, `@lvis/plugin-ms-graph`,
   `@lvis/plugin-lge-api`, `@lvis/plugin-work-proactive`, `@lvis/plugin-agent-hub`
   마켓플레이스 install 또는 `lvis-cli install file://<path-to-dist.zip>` 으로 사이드로드
 - 앱 시작 시 PageIndex 워커 + 자동 인덱서 구동
@@ -191,6 +191,6 @@ bunx vitest run
 ## 실행
 ```bash
 # 실제 PageIndex 모드 (설치/키 필요)
-# PAGEINDEX_ROOT=/absolute/path/to/PageIndex OPENAI_API_KEY=... bun run start
+# LOCAL_INDEXER_ROOT=/absolute/path/to/local-indexer OPENAI_API_KEY=... bun run start
 bun run start
 ```
