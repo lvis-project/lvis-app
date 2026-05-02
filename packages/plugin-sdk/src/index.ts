@@ -251,12 +251,8 @@ export interface PluginRegistryEntry {
   manifestPath: string;
   /** Whether the plugin should be loaded at host startup. Defaults to `true` when omitted. @optional */
   enabled?: boolean;
-
-  installedBy?: InstallPolicy;
   bundleRefs?: string[];
   approvedPluginAccess?: PluginAccessSpec;
-
-  _devLinked?: boolean;
   installSource?: PluginRegistryEntryInstallSource;
 }
 
