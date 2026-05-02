@@ -283,6 +283,7 @@ export class WindowManager {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
+        webviewTag: true,
         preload: this._preloadPath,
       },
     });
