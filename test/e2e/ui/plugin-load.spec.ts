@@ -33,7 +33,7 @@ const PLUGIN_TABS = [
  * of whether they have a UI extension.
  */
 const ALL_PLUGIN_NAMES = [
-  'LVIS PageIndex',
+  'LVIS Local Indexer',
   'LVIS Meeting',
   'LVIS Microsoft 365',
 ] as const;

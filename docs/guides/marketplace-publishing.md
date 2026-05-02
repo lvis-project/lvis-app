@@ -359,7 +359,7 @@ lvis-publish reject <publish-id> --reason <text> [--json]  # admin: 거절
 
 ## 채널 3 — Per-plugin CI publish (git tag SoT)
 
-> **요약**: 채널 1/2 와 같은 `POST /api/v1/plugins/<slug>/versions` 엔드포인트를 쓰지만 **트리거 surface 와 SoT 가 다름** — 마켓플레이스 폴링도 없고 사람이 CLI 를 돌리지도 않고, plugin repo 의 tag-push 가 직접 publish 를 일으킨다. 모든 `lvis-plugin-*` 레포에 동일하게 적용되는 contract (work-proactive 가 첫 도입, calendar/meeting/ms-graph/lge-api/pageindex 순차 fan-out).
+> **요약**: 채널 1/2 와 같은 `POST /api/v1/plugins/<slug>/versions` 엔드포인트를 쓰지만 **트리거 surface 와 SoT 가 다름** — 마켓플레이스 폴링도 없고 사람이 CLI 를 돌리지도 않고, plugin repo 의 tag-push 가 직접 publish 를 일으킨다. 모든 `lvis-plugin-*` 레포에 동일하게 적용되는 contract (work-proactive 가 첫 도입, calendar/meeting/ms-graph/lge-api/local-indexer 순차 fan-out).
 >
 > **이 룰의 enforcement 위치**: 각 plugin repo 의 `.github/workflows/publish.yml` 워크플로우. 호스트와 마켓플레이스 backend 는 catalog 만 trust 할 뿐 tag↔manifest 일치를 직접 강제하지 않는다 — discipline 은 publisher CI 에 있다.
 

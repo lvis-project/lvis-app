@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import type { LvisApi } from "../types.js";
 
 /**
- * PageIndex document list loader. Extracted from App.tsx — finds the
+ * Local Indexer document list loader. Extracted from App.tsx — finds the
  * `knowledge-index` capable plugin and calls its list tool, normalising the
  * shape into `{ id, name }[]`.
  */
