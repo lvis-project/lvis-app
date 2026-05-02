@@ -69,7 +69,15 @@ export async function resolveManifestLoadPlan(opts: {
       const manifestPath = isAbsolute(entry.manifestPath)
         ? entry.manifestPath
         : resolve(dirname(opts.registryPath!), entry.manifestPath);
-      if (!opts.pluginsRoot || !isTrustedRegistryManifestPath(manifestPath, opts.pluginsRoot)) {
+      const devLinked = entry.installSource === "dev-link" || entry._devLinked === true;
+      // dev-link entries intentionally escape `pluginsRoot` via a workspace
+      // symlink (`~/.lvis/plugins/<slug>` → `<repo>/lvis-plugin-<slug>`),
+      // explicitly recorded by `bun run dev:link`. The trust check must
+      // distinguish that signed-up escape from an attacker-planted symlink.
+      // For non-dev-linked entries, the realpath-containment rule still
+      // applies — those came from marketplace install / sideload and any
+      // out-of-root realpath is suspicious.
+      if (!devLinked && (!opts.pluginsRoot || !isTrustedRegistryManifestPath(manifestPath, opts.pluginsRoot))) {
         log.warn(
           `ignoring untrusted registry manifest path for ${entry.id}: ${manifestPath}`,
         );
@@ -80,7 +88,7 @@ export async function resolveManifestLoadPlan(opts: {
         manifestPath,
         enabled: entry.enabled !== false,
         approvedPluginAccess: entry.approvedPluginAccess as PluginAccessSpec | undefined,
-        devLinked: entry.installSource === "dev-link" || entry._devLinked === true,
+        devLinked,
       }];
     }),
   );

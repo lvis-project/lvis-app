@@ -179,6 +179,38 @@ describe("Phase 1 — plugin trust boundary", () => {
         expect(runtime.listPluginIds()).not.toContain("tb.evil");
       },
     );
+
+    // Counterpart to the symlink-escape rejection above: a dev-link entry
+    // (registered by `bun run dev:link`) intentionally points at a workspace
+    // path outside `pluginsRoot`. The realpath-containment rule MUST yield
+    // to that explicit `installSource: "dev-link"` flag — otherwise dev mode
+    // can't load any of the developer's checked-out plugins, regressing the
+    // "ignoring untrusted registry manifest path" wave seen on 2026-05-02.
+    it.skipIf(symlinkSkip)(
+      "loads a dev-linked plugin even when its symlink escapes pluginsRoot",
+      async () => {
+        const realDir = join(testDir, "workspace", "lvis-plugin-tb-dev");
+        await writePluginAt(realDir, "tb.dev");
+        const linkDir = join(pluginsRoot, "tb.dev");
+        await symlink(realDir, linkDir, "dir");
+        const linkedManifest = join(linkDir, "plugin.json");
+        await writeRegistry([
+          {
+            id: "tb.dev",
+            manifestPath: linkedManifest,
+            installSource: "dev-link",
+          } as Parameters<typeof writeRegistry>[0][0],
+        ]);
+
+        const runtime = new PluginRuntime({
+          hostRoot,
+          registryPath,
+          pluginsRoot,
+        });
+        await runtime.load();
+        expect(runtime.listPluginIds()).toContain("tb.dev");
+      },
+    );
   });
 
   // ───────────────────────────── §Step 2 ─────────────────────────────
