@@ -67,14 +67,14 @@ LVIS 마켓플레이스는 **git-based publish** (Go 모듈 프록시 스타일)
 | slug | 레포 디렉토리명 | install policy | 비고 |
 |------|------------------|----------------|------|
 | `meeting` | `lvis-plugin-meeting` | user (명시) | |
-| `pageindex` | `lvis-plugin-pageindex` | admin (fallback) | `install_policy`/`deployment` 키 생략 → fallback 룰로 admin |
+| `local-indexer` | `lvis-plugin-local-indexer` | admin (fallback) | `install_policy`/`deployment` 키 생략 → fallback 룰로 admin |
 | `ms-graph` | `lvis-plugin-ms-graph` | user (명시) | 구 email + calendar 플러그인 합본 |
-| `lge-api` | `lvis-plugin-lge-api` | admin (fallback) | 위 pageindex 와 동일 |
+| `lge-api` | `lvis-plugin-lge-api` | admin (fallback) | 위 local-indexer 와 동일 |
 | `work-proactive` | `lvis-plugin-work-proactive` | user (명시) | |
 | `agent-hub` | `lvis-plugin-agent-hub` | user (명시) | |
 | `hello-world` (합성) | (코드 안에 dummy zip) | free | 부팅 시 자동 publish — install-flow 테스트용 |
 
-> ⚠️ **fallback 룰 주의**: `MANAGED_SOURCES` 항목에서 `install_policy` / `deployment` 를 둘 다 생략하면 `admin`/`managed` 로 간주됩니다 (`bootstrap.py:651-655`). 새 user-policy 플러그인은 반드시 둘 다 명시(`install_policy="user", deployment="user"`)하세요. pageindex/lge-api 가 admin 인 것은 두 필드를 모두 생략한 결과지 의도된 admin 정책이라는 보장은 코드 차원입니다.
+> ⚠️ **fallback 룰 주의**: `MANAGED_SOURCES` 항목에서 `install_policy` / `deployment` 를 둘 다 생략하면 `admin`/`managed` 로 간주됩니다 (`bootstrap.py:651-655`). 새 user-policy 플러그인은 반드시 둘 다 명시(`install_policy="user", deployment="user"`)하세요. local-indexer/lge-api 가 admin 인 것은 두 필드를 모두 생략한 결과지 의도된 admin 정책이라는 보장은 코드 차원입니다.
 
 이 6개 중 하나를 수정하고 있다면 §3 의 dev 루프로 바로 진입. 새 플러그인은 §6 참고.
 
@@ -95,7 +95,7 @@ lvis-project/
 ├── lvis-app/
 ├── lvis-marketplace/         ← 서버
 ├── lvis-plugin-meeting/      ← bootstrap 이 git pull 대상으로 인식
-├── lvis-plugin-pageindex/
+├── lvis-plugin-local-indexer/
 ├── lvis-plugin-email/
 ├── lvis-plugin-calendar/
 ├── lvis-plugin-lge-api/
@@ -140,7 +140,7 @@ docker compose up
 ```
 bootstrap: meeting@1.0.0 unchanged — preserving existing artifact
 bootstrap: lge-api@0.1.1 published (123456 bytes, abcdef012345…)
-bootstrap: repo missing, skipped: /path/to/lvis-plugin-pageindex
+bootstrap: repo missing, skipped: /path/to/lvis-plugin-local-indexer
 ```
 
 > log 의 "skipped" 줄은 slug prefix 가 없는 풀 경로 형태입니다.

@@ -2,7 +2,7 @@
 // Dev runner: watches main/preload/renderer/styles and restarts Electron on main changes.
 // Production entrypoint remains scripts/run-electron.mjs (via `bun run start`).
 //
-// Usage: node scripts/run-electron-dev.mjs [--no-plugins]
+// Usage: node scripts/run-electron-dev.mjs
 //
 // Env:
 //   LVIS_DEV=1 (forced)
@@ -20,7 +20,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, watch, copyFileSync, mkdirSync, rmSync, cpSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, watch, copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,7 +81,7 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
     return;
   }
   const normalizedUserDataDir = String(userDataDir || "").trim();
-  const pageIndexWorkspace = resolve(repoRoot, ".pageindex-workspace");
+  const localIndexerWorkspace = resolve(repoRoot, ".local-indexer-workspace");
   const launcherScriptPath = resolve(repoRoot, "scripts", "run-electron-dev.mjs");
   const mainEntryPath = mainOutput;
   if (!normalizedUserDataDir) return;
@@ -90,7 +90,7 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
     "$ErrorActionPreference = 'SilentlyContinue'",
     `$currentPid = ${process.pid}`,
     `$userDataDir = '${escapePowerShellSingleQuoted(normalizedUserDataDir)}'`,
-    `$pageIndexWorkspace = '${escapePowerShellSingleQuoted(pageIndexWorkspace)}'`,
+    `$localIndexerWorkspace = '${escapePowerShellSingleQuoted(localIndexerWorkspace)}'`,
     `$launcherScriptPath = '${escapePowerShellSingleQuoted(launcherScriptPath)}'`,
     `$mainEntryPath = '${escapePowerShellSingleQuoted(mainEntryPath)}'`,
     "$killedPids = @()",
@@ -107,14 +107,14 @@ function cleanupStaleWindowsDevProcesses(userDataDir) {
     "  $killedPids += \"node:$($launcher.ProcessId)\"",
     "}",
     "$targets = @()",
-    // Electron / pageindex worker 는 resolved userDataDir / workspace 의
+    // Electron / Local Indexer worker 는 resolved userDataDir / workspace 의
     // 전체 경로로 매칭 — `Electron-LVIS-Dev` substring 은 다른 dev profile
     // prefix 와 collide 가능. profile hash suffix + path 매칭의 이중 가드.
     "if ($userDataDir.Length -gt 0) {",
     "  $targets += Get-CimInstance Win32_Process -Filter \"Name = 'electron.exe'\" | Where-Object { $_.CommandLine -like \"*$mainEntryPath*\" -and $_.CommandLine -like \"*$userDataDir*\" }",
     "}",
-    "if ($pageIndexWorkspace.Length -gt 0) {",
-    "  $targets += Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*pageindex_worker.py*' -and $_.CommandLine -like \"*$pageIndexWorkspace*\" }",
+    "if ($localIndexerWorkspace.Length -gt 0) {",
+    "  $targets += Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*pageindex_worker.py*' -and $_.CommandLine -like \"*$localIndexerWorkspace*\" }",
     "}",
     "$targets = @($targets | Group-Object ProcessId | ForEach-Object { $_.Group[0] })",
     "foreach ($target in $targets) {",
@@ -215,108 +215,6 @@ function applyUtf8Env(env) {
   return env;
 }
 
-function getBunInstallEnv() {
-  const localAppData = process.env.LOCALAPPDATA || resolve(homedir(), "AppData", "Local");
-  const bunRoot = resolve(localAppData, "lvis-bun");
-  const bunCacheDir = resolve(bunRoot, "install", "cache");
-  const bunTmpDir = resolve(bunRoot, "tmp");
-  mkdirSync(bunCacheDir, { recursive: true });
-  mkdirSync(bunTmpDir, { recursive: true });
-  return {
-    ...process.env,
-    BUN_INSTALL_CACHE_DIR: bunCacheDir,
-    TMP: bunTmpDir,
-    TEMP: bunTmpDir,
-    TMPDIR: bunTmpDir,
-  };
-}
-
-function seedPluginSdk(pluginDir) {
-  const sdkSrc = resolve(repoRoot, "packages/plugin-sdk");
-  const sdkDest = resolve(pluginDir, "node_modules/@lvis/plugin-sdk");
-  const sdkDestParent = dirname(sdkDest);
-  mkdirSync(sdkDestParent, { recursive: true });
-  rmSync(sdkDest, { recursive: true, force: true });
-  mkdirSync(sdkDest, { recursive: true });
-
-  const sdkPackageJson = resolve(sdkSrc, "package.json");
-  const sdkDist = resolve(sdkSrc, "dist");
-  const sdkSchemas = resolve(sdkSrc, "schemas");
-  const sdkKeys = resolve(sdkSrc, "src/keys.ts");
-
-  copyFileSync(sdkPackageJson, resolve(sdkDest, "package.json"));
-  if (existsSync(sdkDist)) cpSync(sdkDist, resolve(sdkDest, "dist"), { recursive: true, force: true });
-  if (existsSync(sdkSchemas)) cpSync(sdkSchemas, resolve(sdkDest, "schemas"), { recursive: true, force: true });
-  if (existsSync(sdkKeys)) {
-    mkdirSync(resolve(sdkDest, "src"), { recursive: true });
-    copyFileSync(sdkKeys, resolve(sdkDest, "src/keys.ts"));
-  }
-}
-
-function parseDisabledPluginIds() {
-  const defaults = ["work-proactive"];
-  const envRaw = process.env.LVIS_DEV_DISABLED_PLUGINS || "";
-  const envItems = envRaw
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return new Set([...defaults, ...envItems]);
-}
-
-function shouldSkipPluginBuild(pluginDir) {
-  // Fast dev path: skip costly install/build only when artifacts are already
-  // present AND source/config inputs have not changed since last build.
-  if (process.env.LVIS_DEV_FORCE_PLUGIN_BUILD === "1") return false;
-  const hasDeps = existsSync(resolve(pluginDir, "node_modules"));
-  const distDir = resolve(pluginDir, "dist");
-  if (!hasDeps || !existsSync(distDir)) return false;
-
-  const latestDist = latestMtimeMs(distDir);
-  const srcDir = resolve(pluginDir, "src");
-  const workerDir = resolve(pluginDir, "worker");
-  const latestInputs = Math.max(
-    existsSync(srcDir) ? latestMtimeMs(srcDir) : 0,
-    existsSync(workerDir) ? latestMtimeMs(workerDir) : 0,
-    fileMtimeMs(resolve(pluginDir, "plugin.json")),
-    fileMtimeMs(resolve(pluginDir, "package.json")),
-    fileMtimeMs(resolve(pluginDir, "tsconfig.json")),
-  );
-  return latestDist >= latestInputs;
-}
-
-function fileMtimeMs(filePath) {
-  // statSync 만으로 mtime 을 얻을 수 있는데 기존 코드는 readFileSync 로
-  // 파일 전체를 메모리에 올린 뒤 truthy 체크용으로만 썼음. 플러그인 빌드
-  // 게이트가 자주 호출하는 hot path 라 큰 파일에서 비용이 누적된다.
-  try {
-    return Number(statSync(filePath).mtimeMs);
-  } catch {
-    return 0;
-  }
-}
-
-function latestMtimeMs(dirPath) {
-  let latest = 0;
-  try {
-    const entries = readdirSync(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.name === "node_modules" || entry.name === ".git") continue;
-      const full = resolve(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        latest = Math.max(latest, latestMtimeMs(full));
-      } else {
-        try {
-          const mtimeMs = statSync(full).mtimeMs;
-          if (mtimeMs > latest) latest = mtimeMs;
-        } catch {}
-      }
-    }
-  } catch {}
-  return latest;
-}
-
-const disabledPluginIds = parseDisabledPluginIds();
-
 function parseMsEnv(name, fallbackMs) {
   const raw = process.env[name];
   if (!raw) return fallbackMs;
@@ -359,8 +257,6 @@ const mainOutput = resolve(repoRoot, "dist/src/main.js");
 const htmlSrc = resolve(repoRoot, "src/index.html");
 const htmlOut = resolve(repoRoot, "dist/src/index.html");
 
-const argv = new Set(process.argv.slice(2));
-const skipPlugins = argv.has("--no-plugins");
 const RESTART_DELAY_MS = parseMsEnv("LVIS_DEV_RESTART_DELAY_MS", 2500);
 const RESTART_FORCE_KILL_MS = parseMsEnv("LVIS_DEV_RESTART_FORCE_KILL_MS", 3000);
 
@@ -638,48 +534,7 @@ process.on("exit", () => {
 });
 
 async function main() {
-  log("dev", `LVIS_DEV=1 skipPlugins=${skipPlugins}`);
-
-  if (!skipPlugins) {
-    log("plugins", "building plugins (one-shot)");
-    const pluginRoots = [
-      "../lvis-plugin-pageindex",
-      "../lvis-plugin-meeting",
-      "../lvis-plugin-ms-graph",
-      "../lvis-plugin-lge-api",
-      "../lvis-plugin-work-proactive",
-      "../lvis-plugin-agent-hub",
-    ].filter((relPath) => !disabledPluginIds.has(relPath.replace("../lvis-plugin-", "")));
-
-    const bunEnv = getBunInstallEnv();
-
-    try {
-      for (const relPath of pluginRoots) {
-        const pluginDir = resolve(repoRoot, relPath);
-        if (shouldSkipPluginBuild(pluginDir)) {
-          log("plugins", `skip install+build (already prepared): ${relPath}`);
-          continue;
-        }
-        log("plugins", `install+build: ${relPath}`);
-        try {
-          await runStep("plugins:install", "bun", ["install", "--cwd", pluginDir], { env: bunEnv });
-          await runStep("plugins:build", "bun", ["run", "--cwd", pluginDir, "build"], { env: bunEnv });
-        } catch (bunErr) {
-          // Retry once with an explicit SDK seed — covers `bun install`
-          // racing against the symlinked `@lvis/plugin-sdk` not yet
-          // materialised. Persistent failure falls through to the outer
-          // catch and shuts the runner down.
-          log("plugins", `bun failed for ${relPath}; retrying with SDK seed (${bunErr.message})`);
-          seedPluginSdk(pluginDir);
-          await runStep("plugins:build:bun-retry", "bun", ["run", "--cwd", pluginDir, "build"], { env: bunEnv });
-        }
-      }
-    } catch (err) {
-      log("plugins", `prepare failed: ${err.message}`);
-      await shutdown(1);
-      return;
-    }
-  }
+  log("dev", "LVIS_DEV=1");
 
   // Initial html copy
   copyHtml();

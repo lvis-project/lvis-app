@@ -15,35 +15,23 @@
 터미널은 **PowerShell**, **Windows Terminal**, **cmd** 모두 OK.
 Bun 은 macOS/Windows/Linux 동일하게 동작 — Windows 별 우회 스크립트 없음.
 
-## 1. 저장소 clone (6개 레포)
+## 1. 저장소 clone
 
-LVIS 는 host 1개 + 플러그인 5개가 **같은 부모 디렉터리에 나란히** 있어야 한다
-(`file:../lvis-plugin-*` 참조 때문).
+LVIS app 은 sibling plugin repo 경로에 의존하지 않는다. 플러그인은 marketplace
+또는 `lvis-cli install file://.../dist.zip` 경로로 설치한다.
 
 ```powershell
 mkdir lvis-project
 cd lvis-project
 
 git clone --recurse-submodules https://github.com/lvis-project/lvis-app.git
-git clone https://github.com/lvis-project/lvis-plugin-pageindex.git
-git clone https://github.com/lvis-project/lvis-plugin-meeting.git
-git clone https://github.com/lvis-project/lvis-plugin-ms-graph.git
-git clone https://github.com/lvis-project/lvis-plugin-lge-api.git
-git clone https://github.com/lvis-project/lvis-plugin-work-proactive.git
-git clone https://github.com/lvis-project/lvis-plugin-agent-hub.git
 ```
 
 완성된 구조:
 
 ```
 lvis-project/
-├── lvis-app/                  ← host (여기서 빌드·실행)
-├── lvis-plugin-pageindex/
-├── lvis-plugin-meeting/
-├── lvis-plugin-ms-graph/
-├── lvis-plugin-lge-api/
-├── lvis-plugin-work-proactive/
-└── lvis-plugin-agent-hub/
+└── lvis-app/                  ← host (여기서 빌드·실행)
 ```
 
 > `lvis-app` 은 `--recurse-submodules` 플래그 필수.
@@ -56,8 +44,7 @@ cd lvis-app
 bun install
 ```
 
-`packages/plugin-sdk` 는 source/type-only 패키지라 별도 빌드 불필요. `bun install`
-이 sibling plugin repos 의 `file:../lvis-plugin-*` 경로를 자동으로 처리한다.
+`packages/plugin-sdk` 는 source/type-only 패키지라 별도 빌드 불필요.
 
 > **CI 와의 차이**: CI 는 `bun install --frozen-lockfile` 로 잠금 상태 그대로 재현한다.
 > 로컬에서 잘 빌드되는데 CI 가 "lockfile mismatch" 로 실패하면 `bun install --frozen-lockfile`
@@ -86,9 +73,8 @@ bun run start
 
 ### `bun run start` 가 순차적으로 하는 일
 
-1. **`bun run prepare:plugins`** — 플러그인 6개 각자 `bun run build`
-2. **`bun run build`** — host TypeScript (tsc) + esbuild (renderer/preload) + Tailwind
-3. **`node scripts/run-electron.mjs dist/src/main.js`** — Electron 실행
+1. **`bun run build`** — host TypeScript (tsc) + esbuild (renderer/preload) + Tailwind
+2. **`node scripts/run-electron.mjs dist/src/main.js`** — Electron 실행
 
 ### `scripts/run-electron.mjs` 가 자동으로 주입하는 것들
 
@@ -224,7 +210,7 @@ bun run start
 cd lvis-app
 git pull --recurse-submodules
 
-cd ..\lvis-plugin-pageindex      ; git pull
+cd ..\lvis-plugin-local-indexer      ; git pull
 cd ..\lvis-plugin-meeting        ; git pull
 cd ..\lvis-plugin-ms-graph       ; git pull
 cd ..\lvis-plugin-lge-api        ; git pull

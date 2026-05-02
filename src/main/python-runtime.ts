@@ -5,16 +5,9 @@
  * 사용자 PC에 Python을 직접 설치하지 않음.
  * 첫 부팅에만 실행 (sentinel 확인 → 이후 즉시 skip).
  *
- * INTEGRATION NOTE for Agent 4 (Plugin Integrator):
- *
- * In /Users/ken/workspace/GIT/github/lvis-project/lvis-app/src/boot.ts bootstrap():
- *   1. Import: import { PythonRuntimeBootstrapper } from "./main/python-runtime.js";
- *   2. As the FIRST step (before SettingsService init), add:
- *        const pythonRuntime = new PythonRuntimeBootstrapper();
- *        const { pythonPath, venvPath } = await pythonRuntime.ensureReady(mainWindow);
- *   3. Pass `pythonPath` to LvisPageIndexPlugin via configOverrides:
- *        configOverrides["lvis-plugin-pageindex"] = { pythonExecutable: pythonPath, ... };
- *   4. The PageIndexPlugin's pageIndexPlugin.ts must use this path instead of "python3".
+ * Plugins that need Python dependencies must ship their lockfile in the
+ * installed plugin/manifest directory (or declare a relative lockfile path in
+ * plugin.json). The host must not reach into sibling plugin source checkouts.
  */
 
 import { spawn } from "node:child_process";
@@ -24,6 +17,8 @@ import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import type { BrowserWindow } from "electron";
 import { createLogger } from "../lib/logger.js";
+import { resolvePluginPaths } from "../plugins/plugin-paths.js";
+import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins/registry.js";
 const log = createLogger("python-runtime");
 
 const __filename = fileURLToPath(import.meta.url);
@@ -65,13 +60,34 @@ const LOGS_DIR = path.join(LVIS_RUNTIME_DIR, "logs");
 const SETUP_LOG = path.join(LOGS_DIR, "setup.log");
 const READY_SENTINEL = path.join(VENV_DIR, ".ready");
 
-// requirements.lock 위치: 번들된 경우 Resources/, 개발 환경은 플러그인 repo
+// requirements.lock 위치: 설치된 플러그인 manifest 디렉토리 또는 명시 선언.
 const LOCK_FILE_RESOURCE_NAME = "python-requirements.lock";
+
+export interface PythonRuntimeBootstrapperOptions {
+  /**
+   * Test/embedding injection: absolute plugin.json paths whose directory may
+   * contain the Python requirements lockfile.
+   */
+  pluginManifestPaths?: string[];
+  /** Test/embedding injection: plugin root directories to scan directly. */
+  pluginRoots?: string[];
+  /** Registry to inspect for installed plugin manifest paths. */
+  registryPath?: string;
+  /** Mostly for tests; defaults to python-requirements.lock. */
+  lockFileName?: string;
+}
+
+function isWithinDirectory(candidatePath: string, directoryPath: string): boolean {
+  const relativePath = path.relative(directoryPath, candidatePath);
+  return relativePath === "" || (!!relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
 
 // ─── PythonRuntimeBootstrapper ───────────────────────
 
 export class PythonRuntimeBootstrapper {
   private mainWindow: BrowserWindow | null = null;
+
+  constructor(private readonly options: PythonRuntimeBootstrapperOptions = {}) {}
 
   /**
    * Python 런타임이 준비될 때까지 기다린다.
@@ -94,6 +110,42 @@ export class PythonRuntimeBootstrapper {
     // 첫 부팅 셋업
     await this.setup();
     return result;
+  }
+
+  /**
+   * Prepare the runtime after a plugin is installed in the current session.
+   * Returns null when the manifest has no accessible lockfile so non-Python
+   * plugins do not turn install into a Python bootstrap attempt.
+   */
+  async ensureReadyForPluginManifest(
+    manifestPath: string,
+    mainWindow: BrowserWindow,
+  ): Promise<RuntimeResult | null> {
+    const lockFileName = this.options.lockFileName ?? LOCK_FILE_RESOURCE_NAME;
+    const candidates = await this.lockCandidatesFromManifest(manifestPath, lockFileName);
+    let hasLockFile = false;
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate);
+        hasLockFile = true;
+        break;
+      } catch {
+        // try next candidate
+      }
+    }
+    if (!hasLockFile) {
+      await this.log(`[python-runtime] plugin has no accessible Python lockfile — skip runtime prepare (${manifestPath})`);
+      return null;
+    }
+
+    const bootstrapper = new PythonRuntimeBootstrapper({
+      ...this.options,
+      pluginManifestPaths: [
+        manifestPath,
+        ...(this.options.pluginManifestPaths ?? []).filter((p) => p !== manifestPath),
+      ],
+    });
+    return bootstrapper.ensureReady(mainWindow);
   }
 
   // ─── private: sentinel ────────────────────────────
@@ -230,33 +282,101 @@ export class PythonRuntimeBootstrapper {
 
   // ─── private: lock file 위치 ──────────────────────
 
-  private async findLockFile(): Promise<string> {
-    // 프로덕션: Electron Resources 번들
-    const resourcesPath = process.resourcesPath;
-    if (resourcesPath) {
-      const packaged = path.join(resourcesPath, LOCK_FILE_RESOURCE_NAME);
-      try {
-        await fs.access(packaged);
-        return packaged;
-      } catch {
-        // fall through to dev path
+  private async lockCandidatesFromManifest(
+    manifestPath: string,
+    lockFileName: string,
+    requiredCapability?: string,
+  ): Promise<string[]> {
+    const manifestDir = path.dirname(manifestPath);
+    const candidates: string[] = [];
+    try {
+      const raw = await fs.readFile(manifestPath, "utf-8");
+      const manifest = JSON.parse(raw) as {
+        capabilities?: unknown;
+        python?: { requirementsLock?: unknown };
+        pythonRequirementsLock?: unknown;
+        runtime?: { python?: { requirementsLock?: unknown } };
+        config?: { pythonRequirementsLock?: unknown };
+      };
+      if (requiredCapability) {
+        const capabilities = Array.isArray(manifest.capabilities) ? manifest.capabilities : [];
+        if (!capabilities.includes(requiredCapability)) {
+          return candidates;
+        }
       }
+      const declared =
+        typeof manifest.python?.requirementsLock === "string"
+          ? manifest.python.requirementsLock
+          : typeof manifest.pythonRequirementsLock === "string"
+          ? manifest.pythonRequirementsLock
+          : typeof manifest.runtime?.python?.requirementsLock === "string"
+            ? manifest.runtime.python.requirementsLock
+            : typeof manifest.config?.pythonRequirementsLock === "string"
+              ? manifest.config.pythonRequirementsLock
+              : undefined;
+      if (declared && declared.length > 0) {
+        if (path.isAbsolute(declared)) {
+          await this.log(`[python-runtime] plugin manifest lockfile declaration rejected (absolute path): ${manifestPath}`);
+        } else {
+          const resolved = path.resolve(manifestDir, declared);
+          if (isWithinDirectory(resolved, manifestDir)) {
+            candidates.push(resolved);
+          } else {
+            await this.log(`[python-runtime] plugin manifest lockfile declaration rejected (outside plugin directory): ${manifestPath}`);
+          }
+        }
+      }
+    } catch (err) {
+      await this.log(`[python-runtime] plugin manifest lockfile declaration unreadable (${manifestPath}): ${(err as Error).message}`);
+    }
+    candidates.push(path.join(manifestDir, lockFileName));
+    return candidates;
+  }
+
+  private async collectLockFileCandidates(): Promise<string[]> {
+    const lockFileName = this.options.lockFileName ?? LOCK_FILE_RESOURCE_NAME;
+    const candidates: string[] = [];
+
+    for (const manifestPath of this.options.pluginManifestPaths ?? []) {
+      candidates.push(...await this.lockCandidatesFromManifest(manifestPath, lockFileName));
+    }
+    for (const pluginRoot of this.options.pluginRoots ?? []) {
+      candidates.push(path.join(pluginRoot, lockFileName));
     }
 
-    // 개발 환경: lvis-plugin-pageindex/python-requirements.lock
-    const devPath = path.join(
-      __dirname, "..", "..", "..", "..", "lvis-plugin-pageindex", "python-requirements.lock"
-    );
+    const registryPath = this.options.registryPath ?? resolvePluginPaths().registryPath;
     try {
-      await fs.access(devPath);
-      return devPath;
-    } catch {
-      throw new Error(
-        `python-requirements.lock 파일을 찾을 수 없습니다.\n` +
-        `번들 경로: ${resourcesPath ? path.join(resourcesPath, LOCK_FILE_RESOURCE_NAME) : "(없음)"}\n` +
-        `개발 경로: ${devPath}`
-      );
+      const registry = await readPluginRegistry(registryPath);
+      for (const manifestPath of resolveManifestPathsFromRegistry(registryPath, registry.plugins)) {
+        candidates.push(...await this.lockCandidatesFromManifest(manifestPath, lockFileName, "document-indexer"));
+      }
+    } catch (err) {
+      await this.log(`[python-runtime] registry lockfile discovery skipped (${registryPath}): ${(err as Error).message}`);
     }
+
+    // Last resort for older packaged builds that still included this resource.
+    const resourcesPath = process.resourcesPath;
+    if (resourcesPath) {
+      candidates.push(path.join(resourcesPath, lockFileName));
+    }
+
+    return [...new Set(candidates)];
+  }
+
+  private async findLockFile(): Promise<string> {
+    const candidates = await this.collectLockFileCandidates();
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate);
+        return candidate;
+      } catch {
+        // try next candidate
+      }
+    }
+    throw new Error(
+      `python-requirements.lock 파일을 찾을 수 없습니다.\n` +
+      `검색 경로:\n${candidates.length > 0 ? candidates.map((candidate) => `- ${candidate}`).join("\n") : "- (없음)"}`
+    );
   }
 
   // ─── private: 실행 헬퍼 ──────────────────────────
