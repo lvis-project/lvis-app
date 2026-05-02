@@ -136,7 +136,7 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(reg.plugins).toHaveLength(0);
   });
 
-  it("clears stale _devLinked flag when updating an existing entry", async () => {
+  it("promotes an existing dev-link entry to installSource='local-dev'", async () => {
     // Pre-populate registry as if dev:link had registered the plugin.
     await writeFile(
       registryPath,
@@ -147,8 +147,7 @@ describe("PluginMarketplaceService.installLocal", () => {
             id: "test-plugin",
             manifestPath: "test-plugin/plugin.json",
             enabled: true,
-            installedBy: "user",
-            _devLinked: true,
+            installSource: "dev-link",
           },
         ],
       }),
@@ -161,11 +160,7 @@ describe("PluginMarketplaceService.installLocal", () => {
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
     const entry = reg.plugins.find((p: { id: string }) => p.id === "test-plugin");
     expect(entry).toBeDefined();
-    expect(entry.installedBy).toBe("user");
     expect(entry.installSource).toBe("local-dev");
-    // The flag must be removed — otherwise dev-link's cleanup pass would
-    // strip this user-installed entry on the next boot.
-    expect(entry._devLinked).toBeUndefined();
   });
 
   it("writes a fresh install receipt covering plugin.json + dist files", async () => {
@@ -240,9 +235,9 @@ describe("PluginMarketplaceService.installLocal", () => {
   });
 
   it("mirrors approvedPluginAccess on UPDATE (existing entry path) — not just on insert", async () => {
-    // Dev re-install: stale `_devLinked` entry already exists, installLocal
-    // converts it into a real user install AND must overwrite
-    // approvedPluginAccess so a later cross-plugin event subscribe is granted.
+    // Dev re-install: a pre-existing dev-link entry is promoted into a real
+    // local-dev install AND approvedPluginAccess must be overwritten so a
+    // later cross-plugin event subscribe is granted.
     const accessSpec = {
       plugins: [{ pluginId: "ms-graph", events: ["email.new"] }],
     };
@@ -256,8 +251,7 @@ describe("PluginMarketplaceService.installLocal", () => {
               id: "test-plugin",
               manifestPath: "test-plugin/plugin.json",
               enabled: true,
-              installedBy: "user",
-              _devLinked: true,
+              installSource: "dev-link",
             },
           ],
         },
@@ -290,6 +284,6 @@ describe("PluginMarketplaceService.installLocal", () => {
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
     const entry = reg.plugins.find((p: { id: string }) => p.id === "test-plugin");
     expect(entry.approvedPluginAccess).toEqual(accessSpec);
-    expect(entry._devLinked).toBeUndefined();
+    expect(entry.installSource).toBe("local-dev");
   });
 });
