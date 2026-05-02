@@ -32,6 +32,17 @@ export interface PostTurnHookContext {
   toolCalls: Array<{ name: string; isError: boolean }>;
   tokenUsage?: TokenUsage;
   route: string;
+  /**
+   * Snapshot of the LLM vendor/model that actually served this turn —
+   * captured at runTurn entry so that post-turn audit attribution is
+   * stable even if the user mutates settings mid-flight (e.g. retry-effort
+   * temporarily patches thinking config and reverts in finally). The audit
+   * step uses these to emit `${provider}/${model}` for "llm" routes; usage
+   * stats then attribute cost to the model that actually consumed tokens.
+   * Optional so non-LLM-route callers (skill / command) can omit them.
+   */
+  vendorProvider?: string;
+  vendorModel?: string;
 }
 
 export interface PostTurnHookChainDeps {
@@ -119,14 +130,27 @@ export class PostTurnHookChain {
     }
 
     // 4. Audit Log (§14.2)
+    //    Emit `${provider}/${model}` for "llm" routes (usage-stats.parseRoute
+    //    splits on `/`); non-LLM routes (skill/command/agent-hub) keep the
+    //    classification verbatim. Snapshot fields on ctx win over live
+    //    settings — see PostTurnHookContext docs for the drift rationale.
     try {
+      const llmSettings = this.deps.settingsService?.get("llm");
+      const provider = ctx.vendorProvider ?? llmSettings?.provider;
+      const model =
+        ctx.vendorModel ??
+        (llmSettings ? llmSettings.vendors[llmSettings.provider].model : undefined);
+      const auditRoute =
+        ctx.route === "llm" && provider && model
+          ? `${provider}/${model}`
+          : ctx.route;
       this.deps.auditLogger?.logTurn({
         sessionId: ctx.sessionId,
         input: ctx.input,
         output: ctx.output,
         toolCalls: ctx.toolCalls,
         tokenUsage: ctx.tokenUsage,
-        route: ctx.route,
+        route: auditRoute,
       });
     } catch (err) {
       log.warn("audit failed: %s", err);

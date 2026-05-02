@@ -160,6 +160,8 @@ export interface PluginManifest {
   >;
 
   configSchema?: PluginConfigSchema;
+
+  icon?: string;
 }
 
 export interface PluginConfigSchema {
