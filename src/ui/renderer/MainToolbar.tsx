@@ -1,4 +1,4 @@
-import { Command as CommandIcon, Download, KeyRound, Menu, Plus, Search, Star } from "lucide-react";
+import { Download, KeyRound, Menu, Plus, Search, Star } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../components/ui/dropdown-menu.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -18,7 +18,6 @@ export interface MainToolbarProps {
   isSessionStarred: (sessionId: string) => boolean;
   onExport: (format: "markdown" | "json") => void | Promise<void>;
   onOpenSettings: () => void;
-  onOpenCommand: () => void;
   onOpenGlobalSearch: () => void;
   onOpenStarredView: () => void;
 }
@@ -38,23 +37,12 @@ export function MainToolbar({
   isSessionStarred,
   onExport,
   onOpenSettings,
-  onOpenCommand,
   onOpenGlobalSearch,
   onOpenStarredView,
 }: MainToolbarProps) {
   return (
     <div className="border-b bg-card px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
-        {/* ── Command palette button ─────────────────────────────────── */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onOpenCommand} title="명령 팔레트 (Ctrl/Cmd+K)">
-              <CommandIcon className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Ctrl/Cmd + K</TooltipContent>
-        </Tooltip>
-
         {/* ── Spacer pushes remaining items to the right ─────────────── */}
         <div className="flex-1" />
 
