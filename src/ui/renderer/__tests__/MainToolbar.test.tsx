@@ -20,7 +20,6 @@ function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}
     isSessionStarred: vi.fn(() => false),
     onExport: vi.fn(),
     onOpenSettings: vi.fn(),
-    onOpenCommand: vi.fn(),
     onOpenGlobalSearch: vi.fn(),
     onOpenStarredView: vi.fn(),
     ...overrides,
