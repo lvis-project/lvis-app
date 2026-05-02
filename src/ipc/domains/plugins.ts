@@ -659,9 +659,22 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
       return UNAUTHORIZED_FRAME;
     }
-    // Frame is a valid plugin shell but registration hasn't arrived. With
-    // register-before-attach (#447), src is set only after registerPluginWebview
-    // completes, so the shell cannot reach this point before registration.
+    // register-before-attach (#447): shell src is set only after
+    // registerPluginWebview completes, so this path should be unreachable in
+    // normal operation. Log as a warning so regressions surface in audit trail.
+    try {
+      auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "ipc-guard",
+        type: "warn",
+        input: safeStringify({
+          channel: "lvis:plugin:get-entry-url",
+          reason: "not-registered",
+          frameUrl: e?.senderFrame?.url ?? "",
+          senderId: e.sender?.id,
+        }),
+      });
+    } catch { /* audit must never break the sentinel return */ }
     return { ok: false as const, error: "not-registered" };
   });
 

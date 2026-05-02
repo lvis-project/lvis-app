@@ -41,10 +41,6 @@
           root.textContent = "[lvis] entry 조회 실패: " + (err?.message ?? String(err));
           return;
         }
-        if (!entry) {
-          root.textContent = "[lvis] plugin-ui-shell: entry URL을 찾을 수 없습니다.";
-          return;
-        }
         try {
           const mod = await import(/* @vite-ignore */ entry);
           const mountFn =

@@ -137,10 +137,12 @@ export function PluginUiHostView({
       node.addEventListener("did-fail-load", onFailRef.current);
       const onDidAttach = (e: Event) => {
         const wcId = (e as unknown as { webContentsId?: number }).webContentsId;
-        if (typeof wcId !== "number" || !view?.pluginId || !view?.entryUrl) return;
+        if (!Number.isFinite(wcId) || !view?.pluginId || !view?.entryUrl) return;
         const { shellUrl: url } = readPluginAssetUrls();
         if (!url) return;
         const vk = `${view.pluginId}:${view.extension.id}`;
+        const capturedPluginId = view.pluginId;
+        const capturedEntryUrl = view.entryUrl;
         const api = (window as unknown as {
           lvisApi?: {
             registerPluginWebview?: (p: {
@@ -151,13 +153,19 @@ export function PluginUiHostView({
           };
         }).lvisApi;
         void (async () => {
-          const result = await api?.registerPluginWebview?.({
-            webContentsId: wcId,
-            pluginId: view.pluginId,
-            entryUrl: view.entryUrl!,
-          });
-          if (result && (result as { ok: boolean }).ok === false) {
-            setErrorText(`Plugin webview 등록 실패: ${(result as { error?: string }).error ?? "unknown"}`);
+          try {
+            const result = await api?.registerPluginWebview?.({
+              webContentsId: wcId as number,
+              pluginId: capturedPluginId,
+              entryUrl: capturedEntryUrl,
+            });
+            if (result && (result as { ok: boolean }).ok === false) {
+              setErrorText(`Plugin webview 등록 실패: ${(result as { error?: string }).error ?? "unknown"}`);
+              setLoading(false);
+              return;
+            }
+          } catch (err) {
+            setErrorText(`Plugin webview 등록 실패: ${(err as Error).message ?? "unknown"}`);
             setLoading(false);
             return;
           }
@@ -224,7 +232,7 @@ export function PluginUiHostView({
       // extension 단위로 fresh attach 보장.
       content = (
         <webview
-          key={`${view.pluginId}:${view.extension.id}`}
+          key={`${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}`}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={handleWebviewRef as any}
           src={shellSrc}
