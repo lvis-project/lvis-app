@@ -302,6 +302,33 @@ export class WindowManager {
     this._detachedShell = child;
     this._detachedShellViewKey = viewKey;
 
+    // Lock down any <webview> the plugin shell tries to attach. Without
+    // this handler, plugin code running in the shell DOM could inject
+    // `<webview src="https://attacker.com" nodeintegration preload="…">`
+    // and gain Node access in the rendered context. The handler strips
+    // dangerous webPreferences before the child webview's webContents
+    // is constructed.
+    //
+    // Wrapped in `typeof === "function"` so that test fakes which mock
+    // BrowserWindow without a real `webContents.on` API still work —
+    // the production-only attack surface (real Electron webContents)
+    // always exposes the listener API.
+    if (
+      isPluginViewKey(viewKey) &&
+      typeof child.webContents?.on === "function"
+    ) {
+      child.webContents.on("will-attach-webview", (_event, webPreferences) => {
+        const prefs = webPreferences as Record<string, unknown>;
+        delete prefs.preload;
+        delete prefs.preloadURL;
+        prefs.nodeIntegration = false;
+        prefs.nodeIntegrationInWorker = false;
+        prefs.nodeIntegrationInSubFrames = false;
+        prefs.contextIsolation = true;
+        prefs.webSecurity = true;
+      });
+    }
+
     const entry: ChildEntry = { window: child, viewKey };
     this._children.set(child.id, entry);
 

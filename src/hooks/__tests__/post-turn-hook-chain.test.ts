@@ -160,4 +160,61 @@ describe("PostTurnHookChain", () => {
 
     expect(saveMemory).toHaveBeenCalledOnce();
   });
+
+  describe("audit route emission", () => {
+    function makeChain(opts: { autoCompact: boolean; logTurn: ReturnType<typeof vi.fn> }) {
+      const auditLogger = { logTurn: opts.logTurn } as unknown as import("../../audit/audit-logger.js").AuditLogger;
+      const settingsService = {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return fakeLlmSettings();
+          return { systemPrompt: "", autoCompact: opts.autoCompact };
+        }),
+      } as unknown as SettingsService;
+      return new PostTurnHookChain({ auditLogger, settingsService });
+    }
+
+    it("emits `${provider}/${model}` for llm-route turns", async () => {
+      const logTurn = vi.fn();
+      const chain = makeChain({ autoCompact: false, logTurn });
+
+      await chain.run({
+        sessionId: "session-llm",
+        messages: createMessages(),
+        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+        input: "안녕",
+        output: "반갑습니다",
+        toolCalls: [],
+        tokenUsage: { inputTokens: 100, outputTokens: 50 },
+        route: "llm",
+      });
+
+      // Audit route should be transformed from the bare classification
+      // "llm" into the `${provider}/${model}` form so usage-stats.parseRoute
+      // can attribute cost per vendor/model. The exact provider/model
+      // depends on what `fakeLlmSettings()` seeds — assert structural
+      // shape (`vendor/model`) rather than a specific vendor.
+      expect(logTurn).toHaveBeenCalledOnce();
+      const call = logTurn.mock.calls[0]![0] as { route: string };
+      expect(call.route).toMatch(/^[a-z][\w-]*\/[\w.-]+$/);
+      expect(call.route).not.toBe("llm");
+    });
+
+    it("emits the bare classification for non-llm routes", async () => {
+      const logTurn = vi.fn();
+      const chain = makeChain({ autoCompact: false, logTurn });
+
+      await chain.run({
+        sessionId: "session-skill",
+        messages: createMessages(),
+        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+        input: "/help",
+        output: "...",
+        toolCalls: [],
+        route: "skill",
+      });
+
+      const call = logTurn.mock.calls[0]![0] as { route: string };
+      expect(call.route).toBe("skill");
+    });
+  });
 });

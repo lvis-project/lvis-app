@@ -119,14 +119,24 @@ export class PostTurnHookChain {
     }
 
     // 4. Audit Log (§14.2)
+    //    Audit route emission contract: for "llm" turns we emit
+    //    `${provider}/${model}` so usage-stats.parseRoute can attribute
+    //    cost per vendor/model. For non-LLM routes (skill / command /
+    //    agent-hub), keep the classification verbatim — those turns
+    //    don't consume vendor tokens, so cost attribution doesn't apply.
     try {
+      const llmSettings = this.deps.settingsService?.get("llm");
+      const auditRoute =
+        ctx.route === "llm" && llmSettings
+          ? `${llmSettings.provider}/${llmSettings.vendors[llmSettings.provider].model}`
+          : ctx.route;
       this.deps.auditLogger?.logTurn({
         sessionId: ctx.sessionId,
         input: ctx.input,
         output: ctx.output,
         toolCalls: ctx.toolCalls,
         tokenUsage: ctx.tokenUsage,
-        route: ctx.route,
+        route: auditRoute,
       });
     } catch (err) {
       log.warn("audit failed: %s", err);
