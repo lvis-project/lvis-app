@@ -46,9 +46,57 @@ export interface SessionListEntry {
   routineTitle?: string;
 }
 
+/**
+ * Checkpoint trigger reasons.
+ * - "hard-token":  context window reached hard token threshold
+ * - "semantic-llm": LLM detected a topic shift
+ * - "soft-time":   time-based soft trigger (e.g. session idle)
+ * - "manual":      user explicitly triggered a checkpoint
+ */
+export type CheckpointTrigger = "hard-token" | "semantic-llm" | "soft-time" | "manual";
+
+/**
+ * A checkpoint record written into a session's metadata when context is compacted.
+ * Stores enough information to reconstruct the chain and resume with prior context.
+ */
+export interface Checkpoint {
+  /** Unique checkpoint ID (UUID) */
+  id: string;
+  /** ISO timestamp when the checkpoint was created */
+  triggeredAt: string;
+  /** What caused the checkpoint */
+  trigger: CheckpointTrigger;
+  /**
+   * Token usage ratio at the moment of trigger (0.0–1.0).
+   * Used by the checkpoint engine to decide summary depth.
+   */
+  ctxUsageAtTrigger: number;
+  /**
+   * Rolling summary text generated at checkpoint time.
+   * null when context was below the 10% minimum — no summary needed.
+   */
+  summary: string | null;
+  /** Number of messages in the session at trigger time */
+  messageCountAtTrigger: number;
+}
+
+/**
+ * Metadata stored alongside a session's JSONL message file.
+ * All fields are optional to preserve backward compatibility with
+ * sessions written before the checkpoint chain feature was introduced.
+ */
 export interface SessionMetadata {
   routineId?: string;
   routineTitle?: string;
+  /** ID of the previous session in this checkpoint chain (if any) */
+  parentSessionId?: string;
+  /**
+   * Rolling summary carried forward from the parent session.
+   * Max 8000 chars (approx. 2000 tokens). Truncated on write if exceeded.
+   */
+  summaryPreamble?: string;
+  /** Checkpoints recorded inside this session (normally 0 or 1) */
+  checkpoints?: Checkpoint[];
 }
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
@@ -82,6 +130,59 @@ const DEFAULT_USER_PREFS = `# 사용자 선호
 `;
 
 const MAX_SESSION_FILE_BYTES = 5_000_000;
+/** Max length of summaryPreamble stored in session metadata (~2000 tokens). */
+const MAX_SUMMARY_PREAMBLE_CHARS = 8_000;
+
+/** Valid trigger values for strict narrowing. */
+const VALID_CHECKPOINT_TRIGGERS = new Set<CheckpointTrigger>([
+  "hard-token",
+  "semantic-llm",
+  "soft-time",
+  "manual",
+]);
+
+/**
+ * Normalizes a raw parsed Checkpoint record — rejects entries with invalid
+ * trigger values or missing required fields so corrupted data is never surfaced.
+ */
+function normalizeCheckpoint(raw: unknown): Checkpoint | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string" || r.id.length === 0) return null;
+  if (typeof r.triggeredAt !== "string") return null;
+  if (!VALID_CHECKPOINT_TRIGGERS.has(r.trigger as CheckpointTrigger)) return null;
+  if (typeof r.ctxUsageAtTrigger !== "number") return null;
+  if (r.summary !== null && typeof r.summary !== "string") return null;
+  if (typeof r.messageCountAtTrigger !== "number") return null;
+  return {
+    id: r.id,
+    triggeredAt: r.triggeredAt,
+    trigger: r.trigger as CheckpointTrigger,
+    ctxUsageAtTrigger: r.ctxUsageAtTrigger,
+    summary: r.summary as string | null,
+    messageCountAtTrigger: r.messageCountAtTrigger,
+  };
+}
+
+/**
+ * Normalizes a raw parsed SessionMetadata object.
+ * All new fields are optional — absent fields are left undefined (backward compat).
+ * Invalid checkpoint entries are silently dropped rather than failing the whole load.
+ */
+function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata {
+  const checkpointsRaw = Array.isArray(raw.checkpoints) ? raw.checkpoints : undefined;
+  const checkpoints: Checkpoint[] | undefined = checkpointsRaw
+    ? (checkpointsRaw.map(normalizeCheckpoint).filter((c): c is Checkpoint => c !== null))
+    : undefined;
+
+  return {
+    routineId: typeof raw.routineId === "string" ? raw.routineId : undefined,
+    routineTitle: typeof raw.routineTitle === "string" ? raw.routineTitle : undefined,
+    parentSessionId: typeof raw.parentSessionId === "string" ? raw.parentSessionId : undefined,
+    summaryPreamble: typeof raw.summaryPreamble === "string" ? raw.summaryPreamble : undefined,
+    checkpoints: checkpoints && checkpoints.length > 0 ? checkpoints : undefined,
+  };
+}
 
 export class MemoryManager {
   private readonly lvisDir: string;
@@ -270,12 +371,9 @@ export class MemoryManager {
     const path = join(this.sessionsDir, `${sessionId}.meta.json`);
     if (!existsSync(path)) return null;
     try {
-      const parsed = JSON.parse(readFileSync(path, "utf-8")) as SessionMetadata;
+      const parsed = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
       if (!parsed || typeof parsed !== "object") return null;
-      return {
-        routineId: typeof parsed.routineId === "string" ? parsed.routineId : undefined,
-        routineTitle: typeof parsed.routineTitle === "string" ? parsed.routineTitle : undefined,
-      };
+      return normalizeSessionMetadata(parsed);
     } catch (err) {
       // Round-3 §7: surface metadata parse/IO failures as a warning so a
       // corrupted .meta.json doesn't silently surface as "no metadata".
@@ -326,6 +424,55 @@ export class MemoryManager {
     return this.listSessions()
       .filter((session) => session.routineId === routineId)
       .slice(0, Number.isFinite(limit) ? Math.max(0, limit) : undefined);
+  }
+
+  // ─── Checkpoint Chain Helpers ─────────────────────
+
+  /**
+   * Appends a checkpoint to the session's metadata.
+   * Returns the updated metadata (does NOT persist — caller must call saveSessionMetadata).
+   */
+  appendCheckpoint(metadata: SessionMetadata, checkpoint: Checkpoint): SessionMetadata {
+    const existing = Array.isArray(metadata.checkpoints) ? metadata.checkpoints : [];
+    return { ...metadata, checkpoints: [...existing, checkpoint] };
+  }
+
+  /**
+   * Sets (or replaces) the summaryPreamble in session metadata.
+   * Truncates to MAX_SUMMARY_PREAMBLE_CHARS if the value exceeds the limit.
+   * Returns the updated metadata (does NOT persist — caller must call saveSessionMetadata).
+   */
+  setSummaryPreamble(metadata: SessionMetadata, preamble: string): SessionMetadata {
+    const truncated = preamble.length > MAX_SUMMARY_PREAMBLE_CHARS
+      ? preamble.slice(0, MAX_SUMMARY_PREAMBLE_CHARS)
+      : preamble;
+    return { ...metadata, summaryPreamble: truncated };
+  }
+
+  /**
+   * Walks the parentSessionId chain starting from `sessionId` and returns all
+   * ancestor sessions in order from oldest (root) to newest (given sessionId).
+   * Stops when a session has no parentSessionId or its metadata is missing.
+   * Guards against cycles by tracking visited IDs.
+   */
+  async getCheckpointChain(sessionId: string): Promise<SessionMetadata[]> {
+    const chain: SessionMetadata[] = [];
+    const visited = new Set<string>();
+    let currentId: string | undefined = sessionId;
+
+    while (currentId !== undefined) {
+      if (visited.has(currentId)) {
+        log.warn({ sessionId: currentId }, "cycle detected in checkpoint chain — stopping traversal");
+        break;
+      }
+      visited.add(currentId);
+      const meta = this.loadSessionMetadata(currentId);
+      if (meta === null) break;
+      chain.unshift(meta);
+      currentId = meta.parentSessionId;
+    }
+
+    return chain;
   }
 
   /** 세션 삭제 */
