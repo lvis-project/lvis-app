@@ -700,7 +700,7 @@ export class PluginRuntime {
       !this.failedPluginStubs.has(pluginId) &&
       !this.disabledPluginIds.has(pluginId)
     ) {
-      log.warn(`removePlugin: plugin not tracked — ${pluginId}`);
+      log.warn(`removePlugin: plugin not loaded — ${pluginId}`);
       return;
     } else {
       log.info(`removePlugin: plugin in non-loaded state (failed/disabled), purging tracking — ${pluginId}`);
