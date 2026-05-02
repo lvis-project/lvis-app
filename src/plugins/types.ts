@@ -12,19 +12,21 @@ export type InstallPolicy = "admin" | "user";
  *                 install-receipt check when `devLinkedEntryAllowed()` is
  *                 true; trust-boundary check still runs.
  *
- * The legacy literal `"dev-link"` (PR #430 era) and the boolean `_devLinked`
- * field are still parsed for one-shot read back-compat (so a registry written
- * by an older build still loads), but are NEVER written by the current code
- * and NEVER grant a trust-bypass on their own — only `installSource: "dev"`
- * (combined with `devLinkedEntryAllowed()`) gates the receipt-skip path.
+ * The canonical dev marker is `installSource: "dev"`. The legacy literal
+ * `"dev-link"` (PR #430 era) and the boolean `_devLinked` field are still
+ * parsed for back-compat so older registries still load. Runtime dev-mode
+ * handling currently treats `"dev"` and legacy `"dev-link"` equivalently for
+ * the receipt-skip gate, while current write paths normalize restored dev
+ * entries back to the canonical `"dev"` marker. `_devLinked` never grants a
+ * trust-bypass on its own.
  */
 export type PluginRegistryEntryInstallSource =
   | "admin"
   | "user"
   | "local-dev"
   | "dev"
-  // Legacy: read-only back-compat. Treated equivalent to "dev" by snapshot
-  // building; never produced by the current dev-sync workflow.
+  // Legacy back-compat on read. Runtime still recognizes it as a dev marker,
+  // but current write paths normalize restored entries to the canonical "dev".
   | "dev-link";
 
 export interface DependencySpec {

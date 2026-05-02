@@ -6,7 +6,7 @@ import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePlugin
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
-import { assertMockMarketplaceAllowed, devLinkedEntryAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
+import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -816,16 +816,14 @@ export class PluginMarketplaceService {
         entry.enabled = snapshot.enabled;
         entry.bundleRefs = snapshot.bundleRefs;
         entry.approvedPluginAccess = snapshot.approvedPluginAccess;
-        // Restore dev-marker signals only when dev entries are permitted
-        // (non-packaged build). In a packaged build devLinkedEntryAllowed()
-        // returns false, so rollback never re-introduces the dev state.
-        // Both the current marker ("dev") and the legacy literal
-        // ("dev-link") are recognized; "dev-link" is normalized to "dev"
-        // on restore so the rolled-back registry uses the current marker.
+        // Roll back to the same provenance marker we started from. Receipt
+        // skipping is gated later by devLinkedEntryAllowed() in the runtime, so
+        // clearing the dev marker here would strand the entry as legacy/no-source
+        // state that dev-sync refuses to overwrite. Normalize legacy "dev-link"
+        // snapshots to the current canonical "dev" marker on restore.
         const snapshotIsDev =
           snapshot.installSource === "dev" || snapshot.installSource === "dev-link";
-        const restoreDev = snapshotIsDev && devLinkedEntryAllowed();
-        if (restoreDev) {
+        if (snapshotIsDev) {
           entry.installSource = "dev";
           // The legacy `_devLinked` boolean is no longer a trust signal and
           // is no longer written by the current dev-sync workflow. Always

@@ -198,6 +198,48 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(restored.plugins[0].installSource).toBe("user");
   });
 
+  it("rollbackInstallOperation preserves the canonical dev marker even when dev mode is gated off", async () => {
+    setIsPackaged(true);
+    const svc = makeService();
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "com.lge.sample", manifestPath: "com.lge.sample/plugin.json", enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    await (
+      svc as unknown as {
+        rollbackInstallOperation: (state: {
+          installedPluginIds: string[];
+          touchedEntries: Map<string, {
+            enabled?: boolean;
+            bundleRefs?: string[];
+            approvedPluginAccess?: unknown;
+            installSource?: "admin" | "user" | "local-dev" | "dev" | "dev-link";
+          }>;
+        }) => Promise<void>;
+      }
+    ).rollbackInstallOperation({
+      installedPluginIds: [],
+      touchedEntries: new Map([
+        [
+          "com.lge.sample",
+          {
+            enabled: true,
+            installSource: "dev-link",
+            approvedPluginAccess: undefined,
+          },
+        ],
+      ]),
+    });
+
+    const restored = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(restored.plugins[0].installSource).toBe("dev");
+  });
+
   it("rollback clears installSource='dev-link' (packaged build guard)", async () => {
     setIsPackaged(true);
     const svc = makeService();

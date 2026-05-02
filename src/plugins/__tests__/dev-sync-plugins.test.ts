@@ -31,7 +31,6 @@ import {
   isSafePluginId,
   removeAny,
   neutralizeLegacyInstallDirSymlink,
-  // @ts-ignore — JS file, no .d.ts
 } from "../../../scripts/dev-sync-plugins.mjs";
 
 describe("dev-sync-plugins — isSafePluginId", () => {
