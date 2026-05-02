@@ -53,7 +53,7 @@ function usage(): never {
       "",
       "Note: 'install' is no longer offered here — installs flow through the",
       "marketplace API (Settings UI, lvis://install/<slug>, or the managed",
-      "bootstrap). Local sibling-repo dev installs use 'bun run dev:link'.",
+      "bootstrap). Local sibling-repo dev installs use 'bun run dev:sync'.",
       "",
       "Optional:",
       "  --plugins-root <path>   Override the canonical ~/.lvis/plugins/ root",

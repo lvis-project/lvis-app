@@ -6,7 +6,7 @@
 //
 // Env:
 //   LVIS_DEV=1 (forced)
-//   Plugins are installed into ~/.lvis/plugins/ via dev:link (single source of truth)
+//   Plugins are installed into ~/.lvis/plugins/ via dev:sync (single source of truth)
 //
 // Behavior:
 //   - tsc --watch for main (src -> dist/src)
@@ -680,26 +680,30 @@ async function main() {
     }
   }
 
-  // Install dev-built sibling plugins into ~/.lvis/plugins/ via real plugin.json
-  // + symlinked dist/. The runtime always reads from ~/.lvis/plugins/
-  // (single source of truth — Round-3 removed the env-tier override).
-  // Skip when --no-plugins is passed so the dev runner can start without touching
-  // the user plugin directory (useful for CI and plugin-free debug sessions).
+  // Sync dev-built sibling plugins into ~/.lvis/plugins/ as REAL files
+  // (no symlinks). The runtime always reads from ~/.lvis/plugins/ — single
+  // source of truth, no env-tier override, no workspace fallback. Because
+  // the install path is a real copy, `realpathSync(manifestPath)` stays
+  // contained under `realpathSync(pluginsRoot)` and the trust-boundary
+  // check in src/plugins/runtime/snapshots.ts passes without exception.
+  // Skip when --no-plugins is passed so the dev runner can start without
+  // touching the user plugin directory (useful for CI and plugin-free
+  // debug sessions).
   if (!skipPlugins) {
-    const devLinkScript = resolve(repoRoot, "scripts/dev-link-plugins.mjs");
-    const devLinkResult = spawnSync(process.execPath, [devLinkScript], {
+    const devSyncScript = resolve(repoRoot, "scripts/dev-sync-plugins.mjs");
+    const devSyncResult = spawnSync(process.execPath, [devSyncScript], {
       cwd: repoRoot,
       stdio: "inherit",
     });
-    if (devLinkResult.status !== 0) {
-      const errMsg = devLinkResult.error?.message ? `; error=${devLinkResult.error.message}` : "";
-      log("plugins", `dev:link failed (exit=${devLinkResult.status ?? "null"}${errMsg})`);
+    if (devSyncResult.status !== 0) {
+      const errMsg = devSyncResult.error?.message ? `; error=${devSyncResult.error.message}` : "";
+      log("plugins", `dev:sync failed (exit=${devSyncResult.status ?? "null"}${errMsg})`);
       await shutdown(1);
       return;
     }
-    log("plugins", `dev:link installed plugins into ~/.lvis/plugins/`);
+    log("plugins", `dev:sync installed plugins into ~/.lvis/plugins/`);
   } else {
-    log("plugins", "dev:link skipped (--no-plugins)");
+    log("plugins", "dev:sync skipped (--no-plugins)");
   }
 
   // Initial html copy

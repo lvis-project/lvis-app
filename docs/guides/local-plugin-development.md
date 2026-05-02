@@ -13,7 +13,7 @@
 ```bash
 cd lvis-app
 bun run prepare:plugins   # 형제 lvis-plugin-* 빌드
-bun run dev               # 자동: dev:link → ~/.lvis/plugins/<id>/ → Electron 기동
+bun run dev               # 자동: dev:sync → ~/.lvis/plugins/<id>/ → Electron 기동
 ```
 
 **B. 외부 빌드 폴더 sideload — UI (PR #306 신기능)**
@@ -82,7 +82,7 @@ submodule 누락 시: `git submodule update --init --recursive`.
 **이 검사에는 `LVIS_DEV` 등의 우회 env 가 없습니다.** 다음은 **모두 거부**됩니다:
 
 - `../lvis-plugin-foo/plugin.json` 같은 형제-레포 절대경로
-- 형제 레포를 `~/.lvis/plugins/foo` 로 symlink 한 것 — `realpathSync` 가 원본 경로를 반환해서 검사에 걸림
+- 형제 레포를 `~/.lvis/plugins/foo` 로 symlink 한 것 — `realpathSync` 가 원본 경로를 반환해서 검사에 걸림 (legacy `dev:link` 방식 — 이제 폐지. `dev:sync` 가 실제 파일을 복사함)
 
 거부 시 호스트 콘솔에 `[plugin-runtime] ignoring untrusted registry manifest path for <id>: <path>` 가 출력되고, 해당 플러그인은 **조용히 빠집니다** (앱은 정상 부팅).
 
@@ -229,7 +229,7 @@ watch 빌드가 `dist/*.js` 를 갱신하면 호스트 watcher 가 디바운스 
 | 증상 | 원인 / 해결 |
 |------|-------------|
 | 부팅 후 플러그인이 안 보이고 `[plugin-runtime] ignoring untrusted registry manifest path for <id>` 로그 | manifest 가 trust-root 밖. §3-1 참고 — `~/.lvis/plugins/<id>/` 안으로 복사하거나 [local-marketplace-testing.md](./local-marketplace-testing.md) 사용. symlink 도 안 됨 (`realpathSync` 검사). |
-| `bun run plugins:list` 결과가 기대와 다름 | CLI 와 Electron 모두 `~/.lvis/plugins/` 를 플러그인 루트로 사용합니다. 오래된 `.lvis-dev` 잔재나 직접 편집한 registry 를 확인하고 `bun run dev:link` 를 다시 실행하세요. |
+| `bun run plugins:list` 결과가 기대와 다름 | CLI 와 Electron 모두 `~/.lvis/plugins/` 를 플러그인 루트로 사용합니다. 오래된 `.lvis-dev` 잔재나 직접 편집한 registry 를 확인하고 `bun run dev:sync` 를 다시 실행하세요. |
 | `[manifest:<id>] schema validation failed (<jsonpath>): ...` | AJV 검증 실패. `plugin.json` 의 해당 필드 확인. SDK 빌드시 `bun run validate:hostapi` 로 미리 잡힘. |
 | `plugin signature required` 또는 `plugin signature verification failed` (packaged 빌드에서) | §4 참고 — packaged 빌드는 dev skip flag 무시. 정식 publish 또는 사용자 토글 필요. |
 | `Plugin already exists: <id>` (`plugins:add`) | 같은 id 가 registry 에 이미 있음. `bun run plugins:remove -- <id>` 후 재등록. |
@@ -241,14 +241,14 @@ watch 빌드가 `dist/*.js` 를 갱신하면 호스트 watcher 가 디바운스 
 ## 7. 기존 dev 환경에서 단일 루트(`~/.lvis/plugins/`)로 마이그레이션
 
 > **대상**: 이전 세대 dev 환경에서 `LVIS_PLUGINS_DIR` 환경변수, `lvis-app/.lvis-dev/plugins/` 등을 사용하던 기존 LVIS 개발자.
-> **목표**: 충돌 없이 새 단일 루트 + `dev:link` 워크플로우로 전환.
+> **목표**: 충돌 없이 새 단일 루트 + `dev:sync` 워크플로우로 전환.
 
 ### 7-1. 무엇이 바뀌었나
 
 | 변경 전 (deprecated) | 변경 후 (canonical) |
 |---|---|
 | `LVIS_PLUGINS_DIR` 가 dev runner 에서 자동 세팅 | dev runner 는 `LVIS_PLUGINS_DIR` 를 더 이상 사용하지 않음 — 런타임은 항상 `~/.lvis/plugins/` 사용 |
-| `lvis-app/.lvis-dev/plugins/` 에 sibling repo 별 등록 | 단일 루트 `~/.lvis/plugins/` + `dev-link-plugins.mjs` 가 sibling repo `dist/` 를 symlink |
+| `lvis-app/.lvis-dev/plugins/` 에 sibling repo 별 등록 | 단일 루트 `~/.lvis/plugins/` + `dev-sync-plugins.mjs` 가 sibling repo `plugin.json` / `dist/` / `node_modules/` 를 **실제 파일로 복사** (symlink 없음) |
 | 마켓플레이스 서명 키: SDK 또는 플러그인 패키지가 키 소유 | 앱 호스트 `marketplace-keys.ts` + 서버 env 가 trust root 를 소유 |
 | 외부 개발자 sideload: 수동 파일 복사만 | UI: Settings → Plugin Config → "로컬 폴더에서 설치" 버튼 |
 
@@ -304,8 +304,8 @@ cd lvis-app
 # sibling 플러그인 빌드
 bun run prepare:plugins
 
-# ~/.lvis/plugins/<id>/{plugin.json, dist→symlink} 등록
-bun run dev:link
+# ~/.lvis/plugins/<id>/{plugin.json, dist/, node_modules/} 실제 파일 복사 (symlink 없음)
+bun run dev:sync
 
 # 또는 한 번에 (Electron 까지 기동):
 bun run dev
@@ -320,7 +320,7 @@ bun run dev
 
 > 플러그인 디렉토리 요건: `plugin.json` 의 `id` 가 `^[a-zA-Z0-9._-]+$` 매치, `dist/` 빌드 산출물 존재. `installPolicy: "admin"` 으로 이미 설치된 같은 id 는 덮어쓰기 거부됨.
 >
-> 복사 시 `node_modules/electron` · `node_modules/@electron/*` · `.git` 은 자동 제외됩니다 (Electron 번들 asar 가 패치된 fs 에서 "Invalid package" 로 폭사하는 사례 회피). 플러그인 런타임이 필요한 다른 npm 의존성은 그대로 복사되어 install dir 에서 import 됩니다. 같은 id 의 dev-link entry 가 registry 에 남아 있으면 `_devLinked` 플래그가 자동으로 제거되어 다음 `bun run dev` 부팅의 dev-link cleanup 으로부터 보호됩니다. install 시점에 `plugin.json` + `dist/` 의 sha256 receipt 가 `~/.lvis/plugins/.cache/<id>/install-receipt.json` 에 기록되어 호스트 integrity 게이트(`runtime/snapshots.ts`)를 통과합니다.
+> 복사 시 `node_modules/electron` · `node_modules/@electron/*` · `.git` 은 자동 제외됩니다 (Electron 번들 asar 가 패치된 fs 에서 "Invalid package" 로 폭사하는 사례 회피). 플러그인 런타임이 필요한 다른 npm 의존성은 그대로 복사되어 install dir 에서 import 됩니다. 같은 id 의 dev-link entry 가 registry 에 남아 있으면 `_devLinked` 플래그가 자동으로 제거되어 다음 `bun run dev` 부팅의 dev-sync cleanup 으로부터 보호됩니다. install 시점에 `plugin.json` + `dist/` 의 sha256 receipt 가 `~/.lvis/plugins/.cache/<id>/install-receipt.json` 에 기록되어 호스트 integrity 게이트(`runtime/snapshots.ts`)를 통과합니다.
 
 ### 7-3. 마이그레이션 후 자가 진단
 
@@ -328,8 +328,8 @@ bun run dev
 |------|-------------|
 | `Cannot find module '@lvis/plugin-sdk/keys'` 또는 관련 keys export 오류 | 로컬 working copy / SDK 서브모듈 stale 또는 오래된 코드가 SDK 키 소유 모델을 참조 중. `git pull && git submodule update --recursive` 후 앱 호스트의 `src/plugins/marketplace-keys.ts` 경로를 사용하세요. |
 | `bun install --frozen-lockfile` 실패 | bun.lock 갱신 필요 → `bun install` (frozen 없이) 후 커밋 |
-| 플러그인이 안 보임 | `~/.lvis/plugins/registry.json` 확인 + `bun run dev:link` 재실행 |
-| 두 위치에서 플러그인 충돌 | `.lvis-dev` 잔재 삭제 + `~/.lvis/plugins/registry.json` 정리 후 `bun run dev:link` 재실행 |
+| 플러그인이 안 보임 | `~/.lvis/plugins/registry.json` 확인 + `bun run dev:sync` 재실행 |
+| 두 위치에서 플러그인 충돌 | `.lvis-dev` 잔재 삭제 + `~/.lvis/plugins/registry.json` 정리 후 `bun run dev:sync` 재실행 |
 | 서명 검증 실패 (dev) | `LVIS_DEV=1 LVIS_DEV_SKIP_SIG=1` (이미 `bun run dev` 기본값) |
 | sideload 패널이 안 보임 | `LVIS_DEV=1` 환경변수 적용 확인. packaged 빌드는 dev 패널 비활성 |
 

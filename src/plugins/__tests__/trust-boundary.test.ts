@@ -179,6 +179,99 @@ describe("Phase 1 — plugin trust boundary", () => {
         expect(runtime.listPluginIds()).not.toContain("tb.evil");
       },
     );
+
+    // Regression: PR #458 (superseded) tried to bypass the trust-boundary
+    // check when a registry entry carried `installSource: "dev-link"` /
+    // `_devLinked: true`. That is the wrong direction — the legacy dev:link
+    // workflow that planted those symlinks has been replaced by dev:sync
+    // (real-file copies under pluginsRoot). The trust boundary must still
+    // reject any symlink-escape regardless of the dev-link marker.
+    it.skipIf(symlinkSkip)(
+      "rejects a dev-link-marked symlink that escapes pluginsRoot (legacy _devLinked)",
+      async () => {
+        process.env.LVIS_DEV = "1";
+        setIsPackaged(false);
+        try {
+          const realDir = join(testDir, "outside", "p-devlink-evil-legacy");
+          await writePluginAt(realDir, "tb.devlink.evil.legacy");
+          const linkDir = join(pluginsRoot, "p-devlink-evil-legacy");
+          await symlink(realDir, linkDir, "dir");
+          const linkedManifest = join(linkDir, "plugin.json");
+          await writeRegistry([
+            { id: "tb.devlink.evil.legacy", manifestPath: linkedManifest, _devLinked: true },
+          ]);
+
+          const runtime = new PluginRuntime({
+            hostRoot,
+            registryPath,
+            pluginsRoot,
+          });
+          await runtime.load();
+          expect(runtime.listPluginIds()).not.toContain("tb.devlink.evil.legacy");
+        } finally {
+          _resetForTest();
+          delete process.env.LVIS_DEV;
+        }
+      },
+    );
+
+    it.skipIf(symlinkSkip)(
+      "rejects a dev-link-marked symlink that escapes pluginsRoot (installSource='dev-link')",
+      async () => {
+        process.env.LVIS_DEV = "1";
+        setIsPackaged(false);
+        try {
+          const realDir = join(testDir, "outside", "p-devlink-evil-new");
+          await writePluginAt(realDir, "tb.devlink.evil.new");
+          const linkDir = join(pluginsRoot, "p-devlink-evil-new");
+          await symlink(realDir, linkDir, "dir");
+          const linkedManifest = join(linkDir, "plugin.json");
+          await writeRegistry([
+            { id: "tb.devlink.evil.new", manifestPath: linkedManifest, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0],
+          ]);
+
+          const runtime = new PluginRuntime({
+            hostRoot,
+            registryPath,
+            pluginsRoot,
+          });
+          await runtime.load();
+          expect(runtime.listPluginIds()).not.toContain("tb.devlink.evil.new");
+        } finally {
+          _resetForTest();
+          delete process.env.LVIS_DEV;
+        }
+      },
+    );
+
+    // Regression: a dev-synced plugin (real files copied under pluginsRoot
+    // by `bun run dev:sync`) MUST load. This is the happy path the dev:sync
+    // workflow targets — confirms that the trust-boundary check passes
+    // cleanly without any dev-link exception when the manifest physically
+    // lives under pluginsRoot.
+    it("accepts a dev-synced plugin (real files under pluginsRoot) with installSource='dev-link'", async () => {
+      process.env.LVIS_DEV = "1";
+      setIsPackaged(false);
+      try {
+        const pluginDir = join(pluginsRoot, "tb.devsync");
+        const manifestPath = await writePluginAt(pluginDir, "tb.devsync");
+        await writeRegistry([
+          { id: "tb.devsync", manifestPath, installSource: "dev-link" } as Parameters<typeof writeRegistry>[0][0],
+        ]);
+
+        const runtime = new PluginRuntime({
+          hostRoot,
+          registryPath,
+          pluginsRoot,
+          installReceiptCacheRoot: cacheRoot,
+        });
+        await runtime.load();
+        expect(runtime.listPluginIds()).toContain("tb.devsync");
+      } finally {
+        _resetForTest();
+        delete process.env.LVIS_DEV;
+      }
+    });
   });
 
   // ───────────────────────────── §Step 2 ─────────────────────────────
