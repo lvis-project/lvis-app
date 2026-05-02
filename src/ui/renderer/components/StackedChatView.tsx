@@ -22,6 +22,7 @@ import { ToolGroupCard } from "./ToolGroupCard.js";
 import { ReasoningCard } from "./ReasoningCard.js";
 import { WorkGroup } from "./WorkGroup.js";
 import { ImportedTriggerCard } from "./ImportedTriggerCard.js";
+import { AskUserQuestionCard, type AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import { SessionTodoPanel } from "./SessionTodoPanel.js";
 import { getApi } from "../api-client.js";
 import { useChatContext } from "../context/ChatContext.js";
@@ -32,12 +33,18 @@ import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./CommandPopover.js";
 
 export interface StackedChatViewProps {
+  /** Renderer API — needed by inline AskUserQuestionCard for response IPC */
+  api: LvisApi;
   /** Historical sessions (oldest → newest), loaded by useStackedChat — excludes current active */
   historicalSessions: StackedSession[];
   /** Current (active) session id */
   currentSessionId: string;
   /** Current session entries from useChatState */
   entries: ChatEntry[];
+  /** Pending ask_user_question requests; rendered inline at the end of the active session. */
+  askQuestions: AskUserQuestionRequest[];
+  /** Removes a request once user submits or dismisses it. */
+  onResolveAskQuestion: (id: string) => void;
   /** True when streaming is in progress */
   streaming: boolean;
   /** Send question to active session */
@@ -237,7 +244,7 @@ function EntriesList({
         <div
           key={idx}
           data-testid="user-message"
-          className="ml-auto max-w-[75%] rounded-full bg-message-user px-3 py-1.5 text-sm text-message-user-foreground"
+          className="ml-auto max-w-[75%] rounded-2xl bg-message-user px-3.5 py-2 text-sm text-message-user-foreground"
         >
           <div className="whitespace-pre-wrap">{entry.text}</div>
         </div>,
@@ -404,10 +411,13 @@ function EntriesList({
 // ─── StackedChatView ──────────────────────────────────────────────────────────
 
 export function StackedChatView({
+  api,
   historicalSessions,
   currentSessionId,
   entries,
   streaming,
+  askQuestions,
+  onResolveAskQuestion,
   onAsk,
   onGuide,
   onAbort,
@@ -585,6 +595,18 @@ export function StackedChatView({
             onFeedback={onFeedback}
           />
         )}
+
+        {/* Inline ask_user_question cards — sit immediately after the
+            active session's entries, so the question follows the turn
+            in conversational order (replaces the App-level popup). */}
+        {askQuestions.map((req) => (
+          <AskUserQuestionCard
+            key={req.id}
+            api={api}
+            request={req}
+            onResolved={onResolveAskQuestion}
+          />
+        ))}
 
         {/* Scroll anchor — kept at bottom so auto-scroll lands past the last message */}
         <div ref={chatEndRef} data-testid="chat-end-anchor" />

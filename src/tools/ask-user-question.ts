@@ -27,8 +27,10 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
     description:
       "사용자에게 1~4개의 관련 질문을 한 카드로 묶어서 묻고 답을 기다립니다. " +
       "사용자가 모든 질문에 답한 뒤 최종 확인 페이지에서 컨펌하면 응답이 한꺼번에 반환됩니다. " +
-      "각 질문은 객관식(choices) 또는 자유 입력(allowFreeText) 또는 둘 다 허용 가능. " +
-      "allowFreeText=true 이고 choices 가 비어 있으면 반드시 그 turn 컨텍스트에서 도출한 3개의 suggestedAnswers 를 제공해야 합니다 — 정적 폴백(\"네\"/\"아니오\") 절대 사용 금지. " +
+      "각 질문은 객관식(choices, 최대 3개, 항목당 한국어 ≤ 20자) + 자유 입력(allowFreeText, single-line) 조합. " +
+      "컨텍스트로 명확히 한 답에 weight 가 있을 때만 그 인덱스를 recommendedIndex 로 표기 (전체 0 또는 1개). 그 외에 추가로 권장하고 싶은 답은 altIndices 에 0~N 개 — UI 가 칩 앞쪽에 'Recommend' / '대안' 배지를 자동 부착합니다. " +
+      "사용자의 사적/외부 사실(거주지·취향 등)이 답이라면 recommendedIndex 와 altIndices 모두 비워두세요. " +
+      "placeholder 는 자유입력 단서(한국어 ≤ 20자), summaryHint 는 confirm 단계 표 row label (≤ 10자). " +
       "5분 안에 확인이 없으면 dismissed=true 로 반환.",
     source: "builtin",
     category: "dangerous",
@@ -54,24 +56,51 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
               choices: {
                 type: "array",
                 items: { type: "string" },
-                description: "버튼으로 보여줄 선택지. 빈 배열 또는 생략 시 자유 입력만.",
+                maxItems: 3,
+                description:
+                  "버튼으로 보여줄 선택지. 최대 3개, 항목당 한국어 ≤ 20자. " +
+                  "그 외 답은 자유 입력으로 사용자가 보완하므로 4개 이상 후보가 있어도 가장 가능성 높은 3개만 두세요. " +
+                  "비어 있거나 생략 시 자유 입력만 표시.",
+              },
+              recommendedIndex: {
+                type: "integer",
+                minimum: 0,
+                description:
+                  "choices 중 모델이 가장 권장하는 항목의 인덱스. " +
+                  "컨텍스트로 명확히 한 답에 weight 가 있을 때만 0개 또는 1개 항목에 부여. " +
+                  "사용자의 사적/외부 사실(거주지·취향 등)이 답이면 비워두세요.",
+              },
+              altIndices: {
+                type: "array",
+                items: { type: "integer", minimum: 0 },
+                description:
+                  "choices 중 보조 권장 항목의 인덱스 배열 (0~N). " +
+                  "UI 가 칩 앞쪽에 회색 '대안' 배지를 자동 부착합니다. " +
+                  "recommendedIndex 와 중복되는 값은 무시됩니다.",
               },
               allowFreeText: {
                 type: "boolean",
-                description: "자유 텍스트 입력 허용 여부. 기본 true.",
+                description: "자유 텍스트 입력 허용 여부. 기본 true (single-line input).",
+              },
+              placeholder: {
+                type: "string",
+                description:
+                  "자유입력 input 의 placeholder 단서 (한국어 ≤ 20자). " +
+                  "예: '다른 방향을 한 줄로'. 'Recommend'/'(대안)' 같은 메타 표기는 UI 가 부착하므로 텍스트에 직접 박지 마세요.",
+              },
+              summaryHint: {
+                type: "string",
+                description:
+                  "다중 질문 카드의 confirm 단계에서 답변 옆에 보일 row label (한국어 ≤ 10자). " +
+                  "예: '수정 방향', '대상 자료'. 생략 시 question 자체를 짧게 잘라 사용.",
               },
               suggestedAnswers: {
                 type: "array",
                 items: { type: "string" },
-                minItems: 3,
-                maxItems: 3,
                 description:
-                  "[allowFreeText=true 이고 choices 가 비어 있을 때 필수] " +
-                  "이 turn 의 컨텍스트에서 모델이 생성한 3개의 contextual 후보 답변. " +
-                  "UI 는 이를 quick-chip 으로 노출해 사용자가 빠르게 선택하거나 직접 입력할 수 있게 한다. " +
-                  "정적 폴백(\"네\"/\"아니오\"/\"잘 모르겠어요\") 절대 사용 금지. " +
-                  "choices 와 suggestedAnswers 는 상호 배타적: choices 가 있으면 객관식 질문으로 suggestedAnswers 를 함께 제공하지 말 것 — " +
-                  "choices 는 닫힌 선택지(사용자가 반드시 하나를 골라야 함), suggestedAnswers 는 자유 입력 질문의 3개 빠른 힌트. 절대 둘 다 넣지 말 것.",
+                  "[deprecated — choices + recommendedIndex/altIndices 를 사용하세요] " +
+                  "구버전 호환을 위해 받지만, choices 가 있으면 무시됩니다. " +
+                  "신규 호출에서는 사용하지 마세요.",
               },
             },
           },
@@ -122,10 +151,11 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
             isError: true,
           };
         }
+        // Cap choices at 3 per spec; the rest is covered by free-text.
         const filteredChoices = Array.isArray(q.choices)
           ? (q.choices as unknown[]).filter(
               (c): c is string => typeof c === "string" && c.trim().length > 0,
-            )
+            ).slice(0, 3)
           : undefined;
         const allowFreeText = q.allowFreeText !== false;
         // Refuse an unanswerable shape: no choices AND no free-text
@@ -140,6 +170,41 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
             isError: true,
           };
         }
+        // recommendedIndex: keep only when it points inside `filteredChoices`.
+        // 2개 이상 true 가 되어버리는 케이스는 schema 가 integer 하나만 받게 강제하므로
+        // 추가 dedup 불필요.
+        const recIdxRaw = q.recommendedIndex;
+        const recommendedIndex =
+          typeof recIdxRaw === "number" &&
+          Number.isInteger(recIdxRaw) &&
+          recIdxRaw >= 0 &&
+          filteredChoices &&
+          recIdxRaw < filteredChoices.length
+            ? recIdxRaw
+            : undefined;
+        // altIndices: dedupe, drop the recommend slot, keep in-range only.
+        const altIndices = (() => {
+          if (!Array.isArray(q.altIndices) || !filteredChoices) return undefined;
+          const seen = new Set<number>();
+          for (const v of q.altIndices) {
+            if (typeof v !== "number") continue;
+            if (!Number.isInteger(v)) continue;
+            if (v < 0 || v >= filteredChoices.length) continue;
+            if (v === recommendedIndex) continue;
+            seen.add(v);
+          }
+          return seen.size > 0 ? [...seen] : undefined;
+        })();
+        const placeholder =
+          typeof q.placeholder === "string" && q.placeholder.trim().length > 0
+            ? q.placeholder.trim()
+            : undefined;
+        const summaryHint =
+          typeof q.summaryHint === "string" && q.summaryHint.trim().length > 0
+            ? q.summaryHint.trim()
+            : undefined;
+        // Legacy `suggestedAnswers` kept for backward compat — only honored
+        // when `choices` is absent so new callers don't accidentally double-list.
         const filteredSuggestedAnswers = Array.isArray(q.suggestedAnswers)
           ? (q.suggestedAnswers as unknown[]).filter(
               (s): s is string => typeof s === "string" && s.trim().length > 0,
@@ -148,9 +213,15 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
         questions.push({
           question,
           choices: filteredChoices && filteredChoices.length > 0 ? filteredChoices : undefined,
+          recommendedIndex,
+          altIndices,
           allowFreeText,
+          placeholder,
+          summaryHint,
           suggestedAnswers:
-            filteredSuggestedAnswers && filteredSuggestedAnswers.length > 0
+            (!filteredChoices || filteredChoices.length === 0) &&
+            filteredSuggestedAnswers &&
+            filteredSuggestedAnswers.length > 0
               ? filteredSuggestedAnswers
               : undefined,
         });

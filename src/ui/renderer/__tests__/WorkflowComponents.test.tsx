@@ -109,7 +109,7 @@ describe("AskUserQuestionCard — multi-question", () => {
       />,
     );
     // Step label shows pagination on multi.
-    expect(getByTestId("ask-step-label").textContent).toBe("1 / 2");
+    expect(getByTestId("ask-step-label").textContent).toBe("· 1 / 2");
     expect(container.textContent).toContain("Where?");
     // Picking a choice on a multi-question card does NOT auto-submit;
     // user must hit 다음/검토.
@@ -121,7 +121,7 @@ describe("AskUserQuestionCard — multi-question", () => {
     await act(async () => {
       fireEvent.click(getByText("다음"));
     });
-    expect(getByTestId("ask-step-label").textContent).toBe("2 / 2");
+    expect(getByTestId("ask-step-label").textContent).toBe("· 2 / 2");
     await act(async () => {
       fireEvent.click(getByText("내일"));
     });
@@ -131,7 +131,7 @@ describe("AskUserQuestionCard — multi-question", () => {
     });
     // Now on the confirm page — review surface present.
     expect(queryByTestId("ask-confirm-review")).not.toBeNull();
-    expect(getByTestId("ask-step-label").textContent).toBe("최종 확인");
+    expect(getByTestId("ask-step-label").textContent).toBe("· 검토");
     await act(async () => {
       fireEvent.click(getByText("보내기"));
     });
