@@ -595,12 +595,13 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
               composerRef.current?.focus();
               return;
             }
-            // Two-phase commit: setAttachments updater is the authority on
-            // how many we can keep. flushSync forces the updater to run
-            // synchronously so the captured `acceptedMarkers` is guaranteed
-            // populated before we insert at the caret. Without flushSync,
-            // React 18 may batch / defer the updater and the marker
-            // insert can fire with an empty string.
+            // Atomic commit: setAttachments AND text-insert MUST land in
+            // the same render commit, otherwise Composer's marker-sync
+            // useEffect runs between the two and clears `attachments`
+            // (because text still has no marker → liveAttachments=[] →
+            // mismatch → destructive cleanup). Putting both inside one
+            // flushSync batches them so the next render sees attachments
+            // and marker text consistent.
             let acceptedMarkers = "";
             flushSync(() => {
               setAttachments((prev) => {
@@ -614,17 +615,17 @@ export function ChatView({ onAsk, onGuide, onEditSave, onFork, onToggleStar, onR
                 acceptedMarkers = accepted.map((a) => `${buildMarkerText(a)} `).join("");
                 return [...prev, ...accepted];
               });
-            });
-            // Insert at caret (matches the clipboard-paste path) instead of
-            // appending to the end. Falls back to append-at-end only when
-            // the imperative handle isn't yet wired (initial mount race).
-            if (acceptedMarkers) {
-              if (composerRef.current) {
-                composerRef.current.insertAtCursor(acceptedMarkers);
-              } else {
-                setQuestion((prev) => prev + acceptedMarkers);
+              // Insert at caret in the SAME flushSync — batched with
+              // setAttachments into one render so the destructive sync
+              // useEffect never sees a mismatch.
+              if (acceptedMarkers) {
+                if (composerRef.current) {
+                  composerRef.current.insertAtCursor(acceptedMarkers);
+                } else {
+                  setQuestion((prev) => prev + acceptedMarkers);
+                }
               }
-            }
+            });
             // Return focus to the composer textarea so the user can keep
             // typing or use Cmd/Ctrl+A immediately after the file dialog
             // closes — without this, focus stays on the action bar button

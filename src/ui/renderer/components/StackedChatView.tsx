@@ -660,6 +660,10 @@ export function StackedChatView({
               composerRef.current?.focus();
               return;
             }
+            // Atomic commit: setAttachments + text-insert batched in one
+            // flushSync so Composer's marker-sync useEffect never sees a
+            // transient mismatch that would destructively clear the new
+            // attachment.
             let acceptedMarkers = "";
             flushSync(() => {
               setAttachments((prev) => {
@@ -668,14 +672,14 @@ export function StackedChatView({
                 acceptedMarkers = accepted.map((a) => `${buildMarkerText(a)} `).join("");
                 return [...prev, ...accepted];
               });
-            });
-            if (acceptedMarkers) {
-              if (composerRef.current) {
-                composerRef.current.insertAtCursor(acceptedMarkers);
-              } else {
-                setQuestion((prev) => prev + acceptedMarkers);
+              if (acceptedMarkers) {
+                if (composerRef.current) {
+                  composerRef.current.insertAtCursor(acceptedMarkers);
+                } else {
+                  setQuestion((prev) => prev + acceptedMarkers);
+                }
               }
-            }
+            });
             composerRef.current?.focus();
           }}
           rolePresets={rolePresets}
