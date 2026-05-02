@@ -86,6 +86,14 @@ export class SystemPromptBuilder {
    */
   private summaryPreamble: string | null = null;
 
+  /**
+   * Safety flag: experimentalContinuousBackend (default false).
+   * When false, Section 8 (Rolling Summary Preamble) and Section 9.9
+   * (Conversation Meta Output) are omitted from the built prompt to prevent
+   * system prompt contamination and silent LLM instruction issues.
+   */
+  private continuousBackendEnabled: boolean = false;
+
   constructor(deps: SystemPromptBuilderDeps) {
     this.initSources(deps);
   }
@@ -194,6 +202,15 @@ export class SystemPromptBuilder {
    */
   clearSummaryPreamble(): void {
     this.setSummaryPreamble(null);
+  }
+
+  /**
+   * Safety gate: sets whether the continuous-backend prompt sections
+   * (Section 8 Rolling Summary Preamble and Section 9.9 Conversation Meta Output)
+   * are included. Default false — caller must explicitly enable.
+   */
+  setContinuousBackendEnabled(enabled: boolean): void {
+    this.continuousBackendEnabled = enabled;
   }
 
   // ─── Private ──────────────────────────────────────
@@ -377,11 +394,13 @@ export class SystemPromptBuilder {
 
     // ⑧ Rolling Summary Preamble (PR-4: per-session, set on rotation)
     // LLM context 구조: [system prompt] → [rolling summary preamble] → [recent N turns] → [current input]
+    // Gated by experimentalContinuousBackend flag — skipped when false to prevent context contamination.
     this.sources.push({
       id: 8,
       name: "Rolling Summary Preamble",
       refresh: "on-change",
       build: () => {
+        if (!this.continuousBackendEnabled) return "";
         const preamble = this.summaryPreamble;
         if (!preamble) return "";
         return [
@@ -431,11 +450,14 @@ export class SystemPromptBuilder {
     // evolved, cumulative title grounded in the existing context.
     // Extraction of the markers from the rendered stream is handled in PR-3
     // (renderer stream parser) — this source only emits the instructions.
+    // Gated by experimentalContinuousBackend flag — skipped when false to prevent
+    // LLM instructions that produce markers which can contaminate UI output.
     this.sources.push({
       id: 9.9,
       name: "Conversation Meta Output",
       refresh: "per-turn",
       build: () => {
+        if (!this.continuousBackendEnabled) return "";
         const titleLine = this.sessionTitle
           ? `현재 세션 제목: "${this.sessionTitle}"\n\n`
           : "";

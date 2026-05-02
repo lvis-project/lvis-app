@@ -178,6 +178,34 @@ describe("StackedChatView scroll sentinel", () => {
   });
 });
 
+// ─── 7b. Chat-end scroll anchor ──────────────────────────────────────────────
+describe("StackedChatView scroll-to-bottom anchor", () => {
+  it("renders chat-end anchor when stacked view is active", async () => {
+    const mockSettings = {
+      llm: {
+        provider: "openai",
+        vendors: {
+          openai: { model: "gpt-4o", enableThinking: false, thinkingBudgetTokens: 0 },
+        },
+        streamSmoothing: "none",
+        fallbackChain: [],
+      },
+      chat: { systemPrompt: "", autoCompact: true },
+      webSearch: { provider: "none" },
+      routine: { enableWakeupRoutine: false },
+      privacy: { piiRedactEnabled: false },
+      features: { experimentalStackedChat: true },
+    };
+
+    const { container } = await renderApp({ hasApiKey: true, settings: mockSettings });
+
+    await waitFor(() => {
+      const anchor = container.querySelector("[data-testid='chat-end-anchor']");
+      expect(anchor).toBeTruthy();
+    });
+  });
+});
+
 // ─── 8. Feature flag OFF → ChatView (regression guard) ────────────────────────
 describe("Feature flag OFF regression guard", () => {
   it("renders existing ChatView when feature flag is off (default)", async () => {
