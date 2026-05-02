@@ -497,7 +497,10 @@ export function StackedChatView({
   // Determine if today's historical data is already present (to avoid duplicate DaySeparator)
   const todayHasHistorical = historicalByDay.some(([dayKey]) => dayKey === activeDayKey);
 
-  const hasAnyContent = historicalSessions.length > 0 || entries.length > 0;
+  // Count historical entries (not just sessions) so the empty state still
+  // renders when sessions exist but failed to load any messages.
+  const hasAnyContent =
+    entries.length > 0 || historicalSessions.some((s) => s.entries.length > 0);
 
   return (
     <div className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] mx-auto w-full max-w-3xl">

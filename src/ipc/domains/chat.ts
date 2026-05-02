@@ -370,7 +370,14 @@ ${input}`;
 
   // read-only: load messages for any session by id (does NOT change active session)
   ipcMain.handle("lvis:chat:session-history", (e, sessionId: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:session-history", e); return UNAUTHORIZED_FRAME; }
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:chat:session-history", e);
+      // Keep the shape consistent with the success path — renderer always
+      // reads `result.messages` and `result.ok`. Returning the bare
+      // UNAUTHORIZED_FRAME (which omits `messages`) would force every caller
+      // to widen the type and check before reading.
+      return { ok: false, messages: [], error: "unauthorized-frame" as const };
+    }
     if (typeof sessionId !== "string" || !/^[a-zA-Z0-9_\-]+$/.test(sessionId)) {
       return { ok: false, messages: [] };
     }
