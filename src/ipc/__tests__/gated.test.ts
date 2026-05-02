@@ -69,6 +69,20 @@ describe("auditUnauthorized", () => {
     expect(parsed.channel).toBe("lvis:test:channel");
     expect(parsed.frameUrl).toBe("https://evil.example.com/");
   });
+
+  // Issue #471 — auditUnauthorized is the single shared call site for ~50
+  // IPC handlers, so the redact lands everywhere a frame URL is captured.
+  it("redacts the user's home directory in file:// frame URLs", () => {
+    const mockLogger = { log: vi.fn() };
+    const home = (require("node:os") as typeof import("node:os")).homedir();
+    const event = ev(`file://${home}/Documents/lvis-project/lvis-app/dist/src/plugin-ui-shell.html`) as IpcMainInvokeEvent;
+    auditUnauthorized(mockLogger as never, "lvis:test:channel", event);
+    const parsed = JSON.parse(
+      mockLogger.log.mock.calls[0][0].input as string,
+    );
+    expect(parsed.frameUrl).toBe("file://<home>/Documents/lvis-project/lvis-app/dist/src/plugin-ui-shell.html");
+    expect(parsed.frameUrl).not.toContain(home);
+  });
 });
 
 describe("validatePluginFrame", () => {
