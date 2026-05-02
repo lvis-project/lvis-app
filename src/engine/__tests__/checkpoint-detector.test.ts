@@ -78,9 +78,9 @@ describe("detectFromStream", () => {
     expect(result.checkpointSuggested).toBe(false);
   });
 
-  it("cleanedText equals trimmed input when no markers present", () => {
+  it("cleanedText equals raw input unchanged when no markers present", () => {
     const raw = "   일반 답변입니다.   ";
     const result = detectFromStream(raw);
-    expect(result.cleanedText).toBe("일반 답변입니다.");
+    expect(result.cleanedText).toBe(raw);
   });
 });

@@ -176,10 +176,9 @@ export class PostTurnHookChain {
         let titleToStore: string | null = detector.newTitle;
 
         if (!titleToStore && this.deps.llmProvider) {
-          // chainTitle fallback: 기존 제목 조회 후 mini-call
-          const sessions = this.deps.memoryManager.listSessions(1000);
-          const current = sessions.find((s) => s.id === ctx.sessionId);
-          const existingTitle = current?.title ?? `세션 ${ctx.sessionId.slice(0, 8)}`;
+          // chainTitle fallback: 현재 세션 메타데이터에서 직접 제목 조회 (listSessions I/O 비용 회피)
+          const currentMeta = this.deps.memoryManager.loadSessionMetadata(ctx.sessionId);
+          const existingTitle = currentMeta?.title ?? `세션 ${ctx.sessionId.slice(0, 8)}`;
           titleToStore = await chainTitle(this.deps.llmProvider, existingTitle, detector.cleanedText);
         }
 

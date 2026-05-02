@@ -6,12 +6,23 @@
  */
 
 import type { LLMProvider } from "./llm/types.js";
+import type { LLMVendor } from "../shared/llm-vendor-defaults.js";
 import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("title-chainer");
 
 const TITLE_MIN = 10;
 const TITLE_MAX = 20;
+
+/** vendor별 mini-model 선택. 각 vendor의 저렴한 소형 모델을 사용한다. */
+const MINI_MODEL_BY_VENDOR: Record<LLMVendor, string> = {
+  claude: "claude-haiku-4-5",
+  openai: "gpt-4o-mini",
+  gemini: "gemini-2.0-flash",
+  copilot: "gpt-4o-mini",
+  "azure-foundry": "gpt-4o-mini",
+  "vertex-ai": "gemini-2.0-flash",
+};
 
 /**
  * mini-call: 기존 제목 + 최신 답변 앞 500자로 10-20자 제목 생성.
@@ -28,9 +39,10 @@ export async function chainTitle(
   const prompt = `기존 제목 '${existingTitle}' + 이번 답변 '${excerpt}' 종합한 10-20자 제목:`;
 
   try {
+    const model = MINI_MODEL_BY_VENDOR[llm.vendor];
     let text = "";
     for await (const ev of llm.streamTurn({
-      model: "gpt-4o-mini", // mini-call — caller may override via wrapper
+      model,
       systemPrompt: "당신은 대화 제목 생성 도우미입니다. 10-20자의 짧은 제목만 출력하세요.",
       messages: [{ role: "user", content: prompt }],
       tools: [],

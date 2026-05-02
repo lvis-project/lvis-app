@@ -138,6 +138,100 @@ describe("PostTurnHookChain", () => {
     expect(saveSession).toHaveBeenCalledWith("session-micro", result.compactedMessages);
   });
 
+  it("detect-checkpoint: returns detector result with newTitle and checkpointSuggested", async () => {
+    const saveSession = vi.fn();
+    const saveSessionMetadata = vi.fn();
+    const memoryManager = {
+      saveSession,
+      saveSessionMetadata,
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        return { systemPrompt: "", autoCompact: false };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({ memoryManager, settingsService });
+
+    const result = await chain.run({
+      sessionId: "session-detect",
+      messages: createMessages(),
+      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+      input: "회의 정리해줘",
+      output: "정리 완료입니다.<title>회의 결과 요약 정리본</title>[checkpoint-suggested]",
+      toolCalls: [],
+      route: "chat",
+    });
+
+    expect(result.detector.checkpointSuggested).toBe(true);
+    expect(result.detector.newTitle).toBe("회의 결과 요약 정리본");
+    expect(result.detector.cleanedText).not.toContain("<title>");
+    expect(result.detector.cleanedText).not.toContain("[checkpoint-suggested]");
+    expect(result.detector.cleanedText).toContain("정리 완료입니다.");
+  });
+
+  it("detect-checkpoint: onCheckpointSuggested callback is invoked when marker present", async () => {
+    const saveSession = vi.fn();
+    const saveSessionMetadata = vi.fn();
+    const onCheckpointSuggested = vi.fn();
+    const memoryManager = {
+      saveSession,
+      saveSessionMetadata,
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        return { systemPrompt: "", autoCompact: false };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({ memoryManager, settingsService, onCheckpointSuggested });
+
+    const result = await chain.run({
+      sessionId: "session-checkpoint-cb",
+      messages: createMessages(),
+      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+      input: "마무리",
+      output: "완료.[checkpoint-suggested]",
+      toolCalls: [],
+      route: "chat",
+    });
+
+    expect(onCheckpointSuggested).toHaveBeenCalledOnce();
+    expect(onCheckpointSuggested).toHaveBeenCalledWith("session-checkpoint-cb", result.detector.cleanedText);
+  });
+
+  it("detect-checkpoint: checkpointSuggested is false and cleanedText unchanged when no markers", async () => {
+    const saveSession = vi.fn();
+    const memoryManager = {
+      saveSession,
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        return { systemPrompt: "", autoCompact: false };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({ memoryManager, settingsService });
+
+    const output = "일반 응답입니다.";
+    const result = await chain.run({
+      sessionId: "session-no-markers",
+      messages: createMessages(),
+      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+      input: "질문",
+      output,
+      toolCalls: [],
+      route: "chat",
+    });
+
+    expect(result.detector.checkpointSuggested).toBe(false);
+    expect(result.detector.newTitle).toBeNull();
+    expect(result.detector.cleanedText).toBe(output);
+  });
+
   it("auto-extracts user memory into saveMemory when the user asks to remember something", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 

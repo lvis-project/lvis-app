@@ -52,7 +52,12 @@ export function detectFromStream(rawText: string): DetectorResult {
     }
   }
 
-  // cleaned text: 모든 <title>...</title> 태그 + [checkpoint-suggested] 제거
+  // 마커가 없으면 원문 그대로 반환 — 불필요한 텍스트 변형 방지
+  if (!lastMatch && !checkpointSuggested) {
+    return { cleanedText: rawText, newTitle: null, checkpointSuggested: false };
+  }
+
+  // cleaned text: 마커 발견 시에만 <title>...</title> + [checkpoint-suggested] 제거
   let cleaned = rawText.replace(/<title>[\s\S]*?<\/title>/gi, "");
   cleaned = cleaned.split(CHECKPOINT_MARKER).join("");
   // 연속 공백/빈줄 정리
