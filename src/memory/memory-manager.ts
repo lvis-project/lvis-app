@@ -97,6 +97,11 @@ export interface SessionMetadata {
   summaryPreamble?: string;
   /** Checkpoints recorded inside this session (normally 0 or 1) */
   checkpoints?: Checkpoint[];
+  /**
+   * §PR-3: LLM-generated session title. When set, takes precedence over the
+   * auto-derived title from session content. Max 20 chars enforced on write.
+   */
+  title?: string;
 }
 
 const MEMORY_MARKER = "<!-- lvis:kind=memory -->";
@@ -192,6 +197,7 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     : undefined;
 
   const rawPreamble = typeof raw.summaryPreamble === "string" ? raw.summaryPreamble : undefined;
+  const rawTitle = typeof raw.title === "string" ? raw.title.trim() : undefined;
   return {
     routineId: typeof raw.routineId === "string" ? raw.routineId : undefined,
     routineTitle: typeof raw.routineTitle === "string" ? raw.routineTitle : undefined,
@@ -201,6 +207,8 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
       ? rawPreamble.slice(0, MAX_SUMMARY_PREAMBLE_CHARS)
       : undefined,
     checkpoints: checkpoints && checkpoints.length > 0 ? checkpoints : undefined,
+    // §PR-3: stored title (max 20 chars enforced on write; cap defensively on read too)
+    title: rawTitle && rawTitle.length > 0 ? rawTitle.slice(0, 20) : undefined,
   };
 }
 
@@ -385,12 +393,15 @@ export class MemoryManager {
       throw new Error(`saveSessionMetadata: invalid sessionId "${sessionId}"`);
     }
     const targetPath = join(this.sessionsDir, `${sessionId}.meta.json`);
-    // Enforce the summaryPreamble length invariant on write, regardless of how the
-    // caller assembled the metadata (i.e., whether setSummaryPreamble was used or not).
-    const safe: SessionMetadata = metadata.summaryPreamble !== undefined &&
+    // Enforce length invariants on write.
+    let safe: SessionMetadata = metadata.summaryPreamble !== undefined &&
       metadata.summaryPreamble.length > MAX_SUMMARY_PREAMBLE_CHARS
       ? { ...metadata, summaryPreamble: metadata.summaryPreamble.slice(0, MAX_SUMMARY_PREAMBLE_CHARS) }
       : metadata;
+    // §PR-3: cap stored title to 20 chars.
+    if (safe.title !== undefined && safe.title.length > 20) {
+      safe = { ...safe, title: safe.title.slice(0, 20) };
+    }
     await withFileLock(targetPath, async () => {
       writeFileSync(targetPath, JSON.stringify(safe, null, 2), "utf-8");
     });
@@ -444,7 +455,7 @@ export class MemoryManager {
         return {
           id: session.id,
           modifiedAt: session.modifiedAt,
-          title: summary.title || metadata?.routineTitle || `세션 ${session.id.slice(0, 8)}`,
+          title: metadata?.title || summary.title || metadata?.routineTitle || `세션 ${session.id.slice(0, 8)}`,
           preview: summary.preview,
           routineId: metadata?.routineId,
           routineTitle: metadata?.routineTitle,
