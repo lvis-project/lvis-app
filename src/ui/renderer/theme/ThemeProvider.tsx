@@ -104,7 +104,7 @@ export function ThemeProvider({
     if (!api) return;
     void api.notifyPluginTheme({ theme: resolved, chatTheme, codeTheme: resolvedCodeTheme })
       .catch((err: unknown) => {
-        if (process.env.LVIS_DEV === "1") console.warn("[theme-propagation] notifyPluginTheme failed:", err);
+        if (typeof process !== "undefined" && process.env?.LVIS_DEV === "1") console.warn("[theme-propagation] notifyPluginTheme failed:", err);
       });
   }, [api, resolved, chatTheme, resolvedCodeTheme]);
 
