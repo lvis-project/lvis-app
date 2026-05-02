@@ -10,7 +10,8 @@
 import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, getModelContextWindow } from "./auto-compact.js";
+import { shouldCompact, compactMessages, getModelContextWindow, decideRotation } from "./auto-compact.js";
+import { generateSummary } from "./summary-generator.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
 import type { LLMProvider, ToolSchema, TokenUsage } from "./llm/types.js";
@@ -145,6 +146,10 @@ export class ConversationLoop {
   /** K4: §4.5 11-step trace — dev 모드 활성, 프로덕션 no-op */
   private tracer: ConversationTracer = createTracer(this.sessionId);
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  /** PR-4: timestamp when the current session started (ms since epoch) — used by decideRotation */
+  private sessionStartedAt: number = Date.now();
+  /** PR-4: index into history marking where the last checkpoint rotation occurred */
+  private lastCheckpointMessageIndex: number = 0;
   /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
   /**
@@ -282,8 +287,12 @@ export class ConversationLoop {
     this.sessionRoutineId = null;
     this.history.clear();
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
+    this.sessionStartedAt = Date.now();
+    this.lastCheckpointMessageIndex = 0;
     this.sessionPluginExpansions = 0;
     this.tracer = createTracer(this.sessionId);
+    // PR-4: clear rolling summary preamble for fresh session
+    this.deps.systemPromptBuilder.setSummaryPreamble?.(null);
   }
 
   getHistory(): ConversationHistory {
@@ -338,12 +347,18 @@ export class ConversationLoop {
     }
 
     this.sessionId = sessionId;
-    this.sessionRoutineId = this.deps.memoryManager.loadSessionMetadata(sessionId)?.routineId ?? null;
+    const sessionMeta = this.deps.memoryManager.loadSessionMetadata(sessionId);
+    this.sessionRoutineId = sessionMeta?.routineId ?? null;
     this.history.clear();
     this.history.restore(messages as import("./llm/types.js").GenericMessage[]);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
+    this.sessionStartedAt = Date.now();
+    this.lastCheckpointMessageIndex = 0;
     this.sessionPluginExpansions = 0;
     this.tracer = createTracer(this.sessionId);
+    // PR-4: inject rolling summary preamble from loaded session metadata
+    const preamble = sessionMeta?.summaryPreamble ?? null;
+    this.deps.systemPromptBuilder.setSummaryPreamble?.(preamble);
     return true;
   }
 
@@ -647,6 +662,9 @@ export class ConversationLoop {
       });
       this.deps.idleScheduler?.signalConversation();
     }
+
+    // PR-4: 3-tier rotation orchestration
+    await this.runRotationCheck(result.text);
 
     callbacks?.onTurnComplete?.(result.text);
 
@@ -1126,5 +1144,114 @@ export class ConversationLoop {
     callbacks?.onTextDelta?.(result);
     callbacks?.onTurnComplete?.(result);
     return { text: result, toolCalls: [], route: "command" };
+  }
+
+  // ─── PR-4: 3-Tier Rotation ────────────────────────
+
+  /**
+   * 매 턴 종료 후 호출. 3-tier rotation 결정 트리를 평가하고
+   * 필요 시 summary 생성 → checkpoint 기록 → child session으로 전환.
+   */
+  private async runRotationCheck(lastAssistantText: string): Promise<void> {
+    if (!this.provider) return;
+
+    const llmSettings = this.deps.settingsService.get("llm");
+    const contextWindow = getModelContextWindow(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model);
+    const ctxUsage = contextWindow > 0
+      ? Math.min(1.0, this.cumulativeUsage.inputTokens / contextWindow)
+      : 0;
+
+    const messages = this.history.getMessages();
+    const decision = decideRotation({
+      ctxUsage,
+      sessionAgeMs: Date.now() - this.sessionStartedAt,
+      messageCount: messages.length,
+      semanticHint: lastAssistantText.includes("[checkpoint-suggested]"),
+    });
+
+    if (!decision.shouldRotate) return;
+
+    try {
+      // 마지막 체크포인트 이후 메시지만 요약
+      const messagesSinceCheckpoint = messages.slice(this.lastCheckpointMessageIndex);
+
+      const userModel = llmSettings.vendors[llmSettings.provider].model;
+      const summary = decision.shouldSkipSummary
+        ? null
+        : await generateSummary(this.provider, messagesSinceCheckpoint, { model: userModel });
+
+      // 현재 세션 메타데이터에 checkpoint 기록
+      const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
+      const checkpointEntry = {
+        id: crypto.randomUUID(),
+        triggeredAt: new Date().toISOString(),
+        trigger: decision.trigger!,
+        ctxUsageAtTrigger: ctxUsage,
+        summary,
+        messageCountAtTrigger: messages.length,
+      };
+      const updatedMeta = this.deps.memoryManager.appendCheckpoint(existingMeta, checkpointEntry);
+      await this.deps.memoryManager.saveSessionMetadata(this.sessionId, updatedMeta);
+
+      // child session으로 전환
+      const childId = await this.createChildSession(this.sessionId, summary);
+      this.rotateActive(childId, summary);
+
+      if (process.env.NODE_ENV !== "production") {
+        log.info(`rotation: trigger=${decision.trigger} ctxUsage=${ctxUsage.toFixed(2)} childSession=${childId.slice(0, 8)}`);
+      }
+    } catch (err) {
+      // rotation 실패는 대화를 차단하지 않음 — 로그만 남기고 계속
+      log.warn("rotation failed: %s", (err as Error).message);
+    }
+  }
+
+  /**
+   * 부모 세션을 기반으로 새 child session을 생성하고 ID를 반환.
+   * child session의 metadata에 parentSessionId, summaryPreamble,
+   * 그리고 부모의 routineId/routineTitle을 propagate한다.
+   */
+  private async createChildSession(parentSessionId: string, summary: string | null): Promise<string> {
+    const childId = crypto.randomUUID();
+    await this.deps.memoryManager.saveSession(childId, []);
+
+    // Propagate routine context from parent so the child session remains
+    // associated with the same routine (if any).
+    const parentMeta = this.deps.memoryManager.loadSessionMetadata(parentSessionId) ?? {};
+    const routineFields: { routineId?: string; routineTitle?: string } = {};
+    if (parentMeta.routineId) routineFields.routineId = parentMeta.routineId;
+    if (parentMeta.routineTitle) routineFields.routineTitle = parentMeta.routineTitle;
+
+    const baseMeta = { parentSessionId, ...routineFields };
+    const childMeta = summary
+      ? this.deps.memoryManager.setSummaryPreamble(baseMeta, summary)
+      : baseMeta;
+    await this.deps.memoryManager.saveSessionMetadata(childId, childMeta);
+
+    return childId;
+  }
+
+  /**
+   * 현재 활성 세션을 child session으로 전환.
+   * - sessionId 교체
+   * - history 클리어 (이전 세션은 이미 영속화됨)
+   * - cumulativeUsage 리셋
+   * - sessionStartedAt 리셋
+   * - lastCheckpointMessageIndex 리셋
+   * - tracer 리셋 (session-scoped observability state)
+   * - sessionPluginExpansions 리셋
+   * - summaryPreamble 주입
+   */
+  private rotateActive(childSessionId: string, summary: string | null): void {
+    this.sessionId = childSessionId;
+    this.history.clear();
+    this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
+    this.sessionStartedAt = Date.now();
+    this.lastCheckpointMessageIndex = 0;
+    // Reset all session-scoped helpers so the new session starts clean.
+    this.tracer = createTracer(childSessionId);
+    this.sessionPluginExpansions = 0;
+    // rolling summary preamble 주입 — 다음 턴부터 LLM context에 포함됨
+    this.deps.systemPromptBuilder.setSummaryPreamble?.(summary);
   }
 }
