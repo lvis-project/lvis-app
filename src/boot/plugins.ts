@@ -283,3 +283,18 @@ export function findMethodByCapability(
   if (!manifest) return undefined;
   return manifest.tools.find(matcher);
 }
+
+export function findPreferredMethodByCapability(
+  pluginRuntime: PluginRuntime,
+  capability: string,
+  preferredTools: readonly string[],
+): string | undefined {
+  const pluginId = pluginRuntime.findPluginIdByCapability(capability);
+  if (!pluginId) return undefined;
+  const manifest = pluginRuntime.getPluginManifest(pluginId);
+  if (!manifest) return undefined;
+  // Capability-driven callers that know a protocol payload should choose from
+  // an explicit allow-list instead of accepting every *_scan alias exposed by a
+  // provider. This keeps host routing stable across plugin/product renames.
+  return preferredTools.find((tool) => manifest.tools.includes(tool));
+}
