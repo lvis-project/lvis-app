@@ -29,6 +29,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 const mockWindowInstances: Array<{
   id: number;
+  opts: Record<string, unknown>;
   destroyed: boolean;
   focused: boolean;
   title: string;
@@ -40,11 +41,12 @@ const mockWindowInstances: Array<{
 let nextWindowId = 1;
 
 vi.mock("electron", () => {
-  const BrowserWindow = vi.fn().mockImplementation(() => {
+  const BrowserWindow = vi.fn().mockImplementation((opts: Record<string, unknown>) => {
     const id = nextWindowId++;
     const events = new Map<string, Array<() => void>>();
     const instance = {
       id,
+      opts,
       destroyed: false,
       focused: false,
       title: "",
@@ -58,6 +60,10 @@ vi.mock("electron", () => {
       close: vi.fn(() => {
         instance.destroyed = true;
         // Trigger "closed" listeners
+        for (const cb of events.get("closed") ?? []) cb();
+      }),
+      destroy: vi.fn(() => {
+        instance.destroyed = true;
         for (const cb of events.get("closed") ?? []) cb();
       }),
       loadURL: vi.fn((url: string) => {
@@ -155,5 +161,18 @@ describe("WindowManager — single-instance detached shell", () => {
 
     // Should not have sent any navigate messages.
     expect(mockWindowInstances[0].sentMessages).toHaveLength(0);
+  });
+
+  it("recreates shell when switching between built-in and plugin views so webviewTag stays scoped", () => {
+    const builtIn = wm.openDetachedTab("tasks");
+    const builtInPrefs = mockWindowInstances[0].opts["webPreferences"] as Record<string, unknown>;
+    expect(builtInPrefs["webviewTag"]).toBe(false);
+
+    const plugin = wm.openDetachedTab("plugin:meeting:meeting-control");
+    const pluginPrefs = mockWindowInstances[1].opts["webPreferences"] as Record<string, unknown>;
+    expect(plugin).not.toBe(builtIn);
+    expect(mockWindowInstances).toHaveLength(2);
+    expect(mockWindowInstances[0].destroyed).toBe(true);
+    expect(pluginPrefs["webviewTag"]).toBe(true);
   });
 });
