@@ -21,6 +21,7 @@ import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFr
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
+import { redactFsPath } from "../../audit/dlp-filter.js";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -557,6 +558,16 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return "<unserializable>";
     }
   };
+  // Path-like fields that may contain /Users/<username>/ — redact before audit.
+  const PATH_AUDIT_KEYS = new Set(["entryUrl", "entryFsPath", "rawInstallRoot", "realEntry", "realRoot"]);
+  const redactPayload = (payload: unknown): unknown => {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+    return Object.fromEntries(
+      Object.entries(payload as Record<string, unknown>).map(([k, v]) =>
+        [k, PATH_AUDIT_KEYS.has(k) && typeof v === "string" ? redactFsPath(v) : v],
+      ),
+    );
+  };
   const logRegisterReject = (reason: string, payload: unknown) => {
     try {
       auditLogger.log({
@@ -566,7 +577,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         input: safeStringify({
           channel: "lvis:plugin:register-webview",
           reason,
-          payload,
+          payload: redactPayload(payload),
         }),
       });
     } catch {
@@ -670,7 +681,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         input: safeStringify({
           channel: "lvis:plugin:get-entry-url",
           reason: "not-registered",
-          frameUrl: e?.senderFrame?.url ?? "",
+          frameUrl: redactFsPath(e?.senderFrame?.url ?? ""),
           senderId: e.sender?.id,
         }),
       });
