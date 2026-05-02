@@ -411,12 +411,9 @@ ${input}`;
     }
     if (lastUserIdx < 0) return { ok: false, error: "no-user-message" };
     const lastUser = messages[lastUserIdx] as Extract<GenericMessage, { role: "user" }>;
-    // Multimodal-safe extraction: split content into the prompt text
-    // and the attachment parts. Use text-only parts for the prompt —
-    // `userContentText()` would also emit `[image:...]` / `[file:...]`
-    // placeholder lines, which combined with `lastUserAttachments`
-    // below would re-send each attachment twice (once as placeholder
-    // text, once as a real vision/file block).
+    // Disjoint split: text parts → prompt body, non-text parts → attachments.
+    // `userContentText()` is wrong here — its `[image:...]` placeholder would
+    // re-send each attachment twice once paired with `lastUserAttachments`.
     const lastUserText = Array.isArray(lastUser.content)
       ? lastUser.content
           .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")

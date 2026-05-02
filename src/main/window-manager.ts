@@ -326,11 +326,8 @@ export class WindowManager {
         prefs.nodeIntegrationInSubFrames = false;
         prefs.contextIsolation = true;
         prefs.webSecurity = true;
-        // Force-sandbox the guest renderer. Without this, a plugin shell
-        // could attach `<webview webpreferences="sandbox=no">` and the
-        // attacker-supplied value would survive — the rest of the
-        // codebase treats plugin/MCP/HTML guests as sandboxed, so
-        // omitting this would make the lockdown handler bypassable.
+        // Force-set: a `<webview webpreferences="sandbox=no">` injection
+        // would otherwise survive and run unsandboxed.
         prefs.sandbox = true;
       });
     }

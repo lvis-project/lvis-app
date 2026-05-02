@@ -38,6 +38,14 @@ export function pluginIconFor(manifest: { icon?: string }): ComponentType<Lucide
   const name = manifest.icon;
   const cached = iconCache.get(name);
   if (cached) return cached;
+  // Both branches evict the cached lazy on failure so a future call retries:
+  // `.then` invalid → manifest may get corrected; `.catch` reject → transient
+  // chunk-load failure may recover. Without eviction the lazy stays rejected
+  // forever for that name.
+  const evictAndFallback = () => {
+    iconCache.delete(name);
+    return { default: FALLBACK_ICON };
+  };
   const Icon = lazy(() =>
     import("lucide-react")
       .then((mod) => {
@@ -47,24 +55,10 @@ export function pluginIconFor(manifest: { icon?: string }): ComponentType<Lucide
           (typeof candidate === "object" &&
             candidate !== null &&
             "render" in (candidate as object));
-        if (!isValid) {
-          // Evict the cached wrapper so a future call (e.g. after the
-          // plugin manifest is corrected) gets to retry resolution
-          // rather than being permanently pinned to FALLBACK.
-          iconCache.delete(name);
-          return { default: FALLBACK_ICON };
-        }
+        if (!isValid) return evictAndFallback();
         return { default: candidate as ComponentType<LucideProps> };
       })
-      .catch(() => {
-        // Dynamic import itself failed (transient chunk-load error,
-        // network blip, etc.). The lazy wrapper would otherwise stay
-        // cached in a permanently-rejected state and every subsequent
-        // render for this icon would surface the same error.
-        // Evict so the next call re-attempts the import.
-        iconCache.delete(name);
-        return { default: FALLBACK_ICON };
-      }),
+      .catch(evictAndFallback),
   );
   iconCache.set(name, Icon);
   return Icon;

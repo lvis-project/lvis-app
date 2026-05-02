@@ -491,16 +491,12 @@ export class ConversationLoop {
       throw new Error(err);
     }
 
-    // Snapshot the LLM provider/model that will serve this turn so the
-    // post-turn audit hook attributes cost to the model that actually
-    // ran, not to whatever settings happen to be live when the hook
-    // fires. retry-effort temporarily patches settings then reverts in
-    // finally; without this snapshot, the audit log would briefly see
-    // the patched (or post-revert) values instead of the streaming
-    // turn's real attribution.
-    const turnLlmSnapshot = this.deps.settingsService.get("llm");
-    const turnVendorProvider = turnLlmSnapshot.provider;
-    const turnVendorModel = turnLlmSnapshot.vendors[turnLlmSnapshot.provider].model;
+    // Snapshot vendor/model now so audit attribution survives mid-turn
+    // settings mutation (retry-effort patches thinking config and reverts
+    // in finally; user can switch vendor while a turn is streaming).
+    const llm = this.deps.settingsService.get("llm");
+    const turnVendorProvider = llm.provider;
+    const turnVendorModel = llm.vendors[llm.provider].model;
 
     // B4: set up abort controller for this turn
     const ac = new AbortController();

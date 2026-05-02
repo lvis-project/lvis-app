@@ -130,18 +130,10 @@ export class PostTurnHookChain {
     }
 
     // 4. Audit Log (§14.2)
-    //    Audit route emission contract: for "llm" turns we emit
-    //    `${provider}/${model}` so usage-stats.parseRoute can attribute
-    //    cost per vendor/model. For non-LLM routes (skill / command /
-    //    agent-hub), keep the classification verbatim — those turns
-    //    don't consume vendor tokens, so cost attribution doesn't apply.
-    //
-    //    Prefer the turn-start snapshot (ctx.vendorProvider/vendorModel)
-    //    over the current settings read: the current settings can drift
-    //    mid-turn (retry-effort temporarily patches thinking config; the
-    //    user can switch vendor while a turn is streaming). The snapshot
-    //    captured at runTurn entry attributes the turn to whatever model
-    //    actually served it.
+    //    Emit `${provider}/${model}` for "llm" routes (usage-stats.parseRoute
+    //    splits on `/`); non-LLM routes (skill/command/agent-hub) keep the
+    //    classification verbatim. Snapshot fields on ctx win over live
+    //    settings — see PostTurnHookContext docs for the drift rationale.
     try {
       const llmSettings = this.deps.settingsService?.get("llm");
       const provider = ctx.vendorProvider ?? llmSettings?.provider;
