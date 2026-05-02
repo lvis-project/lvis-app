@@ -6,6 +6,18 @@ import {
 } from "../../../shared/llm-vendor-defaults.js";
 
 /**
+ * External-boundary narrowing helper. Lives at module scope so its
+ * identity is stable — `useCallback` / `useEffect` closures that call
+ * this never change identity because of render churn, which keeps the
+ * `react-hooks/exhaustive-deps` lint happy and prevents false-positive
+ * stale-closure churn. Pure: depends only on the module-level
+ * `isLLMVendor` import.
+ */
+function narrowVendor(raw: unknown): LLMVendor {
+  return isLLMVendor(raw) ? raw : "claude";
+}
+
+/**
  * Phase 3.1: LLM settings cache hook.
  *
  * Centralises the chat-input-bar's read-through cache of LLM provider/model/
@@ -45,14 +57,10 @@ export function useSettings(api: LvisApi): UseSettingsResult {
     };
   }, []);
 
-  // External-boundary validation: settings may arrive over IPC from a
-  // mismatched preload bridge or a corrupt settings.json on disk. Narrow
-  // with the type-guard and fall back to "claude" so the renderer never
-  // holds a vendor string outside the LLMVendor union. Internal code that
-  // already has a typed LLMVendor value should NOT need this guard.
-  const narrowVendor = (raw: unknown): LLMVendor =>
-    isLLMVendor(raw) ? raw : "claude";
-
+  // External-boundary validation lives in the module-scope `narrowVendor`
+  // helper above. Each call site below applies it to the IPC-loaded
+  // `s.llm.provider` so the renderer never holds a vendor outside the
+  // LLMVendor union.
   const refresh = useCallback(async () => {
     try {
       const s = await api.getSettings();
