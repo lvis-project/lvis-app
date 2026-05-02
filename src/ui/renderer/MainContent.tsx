@@ -6,6 +6,7 @@ import { ChatView } from "./ChatView.js";
 import { StackedChatView } from "./components/StackedChatView.js";
 import { useStackedChat } from "./hooks/use-stacked-chat.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
+import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { InstallPhase } from "./hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
@@ -44,6 +45,10 @@ export interface MainContentProps {
   subAgentSpawns: Parameters<typeof ChatView>[0]["subAgentSpawns"];
   loadedSkills: Parameters<typeof ChatView>[0]["loadedSkills"];
   hasAskQuestions: boolean;
+  /** Pending ask_user_question requests rendered inline at the end of the chat stream. */
+  askQuestions: AskUserQuestionRequest[];
+  /** Removes a request once the user submits or dismisses it. */
+  onResolveAskQuestion: (id: string) => void;
   // plugin grid for InputActionBar
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
@@ -85,10 +90,13 @@ function HomeChatPane(props: MainContentProps) {
     return (
       <ChatContextProvider value={chatContextValue}>
         <StackedChatView
+          api={props.api}
           historicalSessions={stackedChatHook.historicalSessions}
           currentSessionId={props.currentSessionId}
           entries={chatContextValue.entries}
           streaming={chatContextValue.streaming}
+          askQuestions={props.askQuestions}
+          onResolveAskQuestion={props.onResolveAskQuestion}
           onAsk={props.onAsk}
           onGuide={props.onGuide}
           onAbort={props.onAbort}
@@ -117,6 +125,7 @@ function HomeChatPane(props: MainContentProps) {
   return (
     <ChatContextProvider value={chatContextValue}>
       <ChatView
+        api={props.api}
         onAsk={props.onAsk}
         onGuide={props.onGuide}
         onEditSave={props.onEditSave}
@@ -129,6 +138,8 @@ function HomeChatPane(props: MainContentProps) {
         subAgentSpawns={props.subAgentSpawns}
         loadedSkills={props.loadedSkills}
         hasAskQuestions={props.hasAskQuestions}
+        askQuestions={props.askQuestions}
+        onResolveAskQuestion={props.onResolveAskQuestion}
         plugins={props.plugins}
         onSelectPlugin={props.onSelectPlugin}
         commandActions={props.commandActions}
