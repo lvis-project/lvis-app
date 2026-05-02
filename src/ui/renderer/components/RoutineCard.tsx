@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import {
@@ -130,7 +130,7 @@ export function RoutineCard({
       <CardContent className="min-h-0 flex-1 overflow-y-auto pt-0">
         {result.summary ? (
           <div className="prose prose-sm lvis-prose max-w-none break-words">
-            <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>{result.summary}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{result.summary}</ReactMarkdown>
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">루틴 결과가 없습니다.</p>

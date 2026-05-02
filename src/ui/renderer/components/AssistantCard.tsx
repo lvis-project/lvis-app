@@ -1,11 +1,11 @@
 import { Loader2, Star, RefreshCw, GitBranch, ThumbsUp, ThumbsDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { highlightText } from "../utils/html-preview.js";
 import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
+import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { replaceToolNamesInText } from "../utils/tool-display.js";
 
 export function AssistantCard({
@@ -92,7 +92,7 @@ export function AssistantCard({
         ) : entry.route === "command" ? (
           <div className="whitespace-pre-wrap">{replaceToolNamesInText(entry.text || "")}</div>
         ) : (
-          <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>
+          <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
             {entry.streaming
               ? clampDanglingMarkdownLink(replaceToolNamesInText(entry.text)) || "응답을 작성하는 중..."
               : replaceToolNamesInText(entry.text || "")}

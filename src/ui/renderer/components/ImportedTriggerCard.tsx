@@ -19,8 +19,8 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
+import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 
 /**
  * Strip lines whose only purpose is to feed an opaque base64 entry id
@@ -100,7 +100,7 @@ export function ImportedTriggerCard({
             surfaces a clickable webLink instead when one is
             available (calendar events).
           */}
-          <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>{stripOpaqueIdLines(summary)}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{stripOpaqueIdLines(summary)}</ReactMarkdown>
         </div>
       ) : null}
       {/*
@@ -125,7 +125,7 @@ export function ImportedTriggerCard({
         </div>
         {response && response.length > 0 ? (
           <div className="prose prose-sm lvis-prose max-w-none break-words">
-            <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>
+            <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
               {responseStreaming ? clampDanglingMarkdownLink(response) : response}
             </ReactMarkdown>
           </div>
