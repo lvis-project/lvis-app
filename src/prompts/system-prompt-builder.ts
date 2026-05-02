@@ -156,7 +156,16 @@ export class SystemPromptBuilder {
    * turn of a new session).
    */
   setSessionTitle(title: string | null): void {
-    this.sessionTitle = title && title.length > 0 ? title : null;
+    this.sessionTitle = title && title.length > 0 ? this.sanitizeTitle(title) : null;
+  }
+
+  /**
+   * Strips characters that could break the prompt template or enable prompt
+   * injection: CR, LF, double-quotes, and backslashes. Caps at 50 chars so
+   * an abnormally long user-renamed title cannot bloat the prompt.
+   */
+  private sanitizeTitle(t: string): string {
+    return t.replace(/[\r\n"\\]/g, " ").slice(0, 50).trim();
   }
 
   // ─── Private ──────────────────────────────────────
@@ -423,13 +432,15 @@ const CONVERSATION_META_OUTPUT = `## 대화 메타 출력 (final answer 끝에 �
 매 final answer 의 가장 마지막에 다음 형식으로 메타 정보를 출력하세요:
 
 <title>10-20자 한국어 제목</title>
-[checkpoint-suggested]  // 선택적, topic 이 크게 바뀌었을 때만
+[checkpoint-suggested]
+
+(위 예시에서 \`[checkpoint-suggested]\` 는 선택적 — topic 이 크게 바뀌었을 때만 포함. topic 이 이어지는 경우 생략.)
 
 ### Title 정책
 - 길이: 10-20자 (한국어 기준)
 - 내용: 기존 세션 제목 + 이번 답변을 종합한 누적 진화 제목
 - 토픽 전환 시 새 토픽 반영
-- 사용자에게 노출되지 않음 (메타 정보)
+- 메타 정보 — 후속 처리에서 stripped 될 예정 (PR-3)
 
 ### Checkpoint suggestion
 - 사용자가 명백히 새 주제로 전환했을 때만 \`[checkpoint-suggested]\` 마커 추가
