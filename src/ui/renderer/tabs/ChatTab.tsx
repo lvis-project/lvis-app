@@ -3,13 +3,11 @@ export interface ChatTabProps {
   setAutoCompact: (updater: boolean | ((prev: boolean) => boolean)) => void;
   streamSmoothing: "none" | "word" | "char";
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
-  experimentalStackedChat?: boolean;
-  setExperimentalStackedChat?: (v: boolean) => void;
   experimentalContinuousBackend?: boolean;
   setExperimentalContinuousBackend?: (v: boolean) => void;
 }
 
-export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStreamSmoothing, experimentalStackedChat, setExperimentalStackedChat, experimentalContinuousBackend, setExperimentalContinuousBackend }: ChatTabProps) {
+export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStreamSmoothing, experimentalContinuousBackend, setExperimentalContinuousBackend }: ChatTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
@@ -53,52 +51,30 @@ export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStrea
         </div>
         <p className="text-[11px] text-muted-foreground">출력 스트림을 단어 또는 글자 단위로 부드럽게 표시합니다.</p>
       </div>
-      {(setExperimentalStackedChat !== undefined || setExperimentalContinuousBackend !== undefined) && (
+      {setExperimentalContinuousBackend !== undefined && (
         <div className="space-y-2">
           <div>
             <p className="text-sm font-medium">실험적 기능</p>
             <p className="text-[11px] text-muted-foreground">기본값 OFF — 설정 후 앱 재시작 없이 전환됩니다.</p>
           </div>
-          {setExperimentalStackedChat !== undefined && (
-            <div className="flex items-center gap-3 rounded-md border px-3 py-3">
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={experimentalStackedChat ?? false}
-                data-testid="stacked-chat-toggle"
-                className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${experimentalStackedChat ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}
-                onClick={() => setExperimentalStackedChat(!(experimentalStackedChat ?? false))}
-              >
-                {experimentalStackedChat && (
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
-                )}
-              </button>
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium">Experimental: 연속 채팅 기록 (stacked view)</p>
-                <p className="text-[11px] text-muted-foreground">카카오톡 스타일로 여러 세션을 끊김 없이 이어서 보여줍니다. 토글 시 즉시 전환됩니다.</p>
-              </div>
+          <div className="flex items-center gap-3 rounded-md border px-3 py-3">
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={experimentalContinuousBackend ?? false}
+              data-testid="continuous-backend-toggle"
+              className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${experimentalContinuousBackend ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}
+              onClick={() => setExperimentalContinuousBackend(!(experimentalContinuousBackend ?? false))}
+            >
+              {experimentalContinuousBackend && (
+                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
+              )}
+            </button>
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium">Experimental: 연속 백엔드 (continuous backend)</p>
+              <p className="text-[11px] text-muted-foreground">타이틀 자동 생성 + 체크포인트 압축을 활성화합니다. 기본값 OFF — 프로덕션에서 검증 중.</p>
             </div>
-          )}
-          {setExperimentalContinuousBackend !== undefined && (
-            <div className="flex items-center gap-3 rounded-md border px-3 py-3">
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={experimentalContinuousBackend ?? false}
-                data-testid="continuous-backend-toggle"
-                className={`relative h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${experimentalContinuousBackend ? "border-primary bg-primary" : "border-muted-foreground"} cursor-pointer hover:border-primary/60`}
-                onClick={() => setExperimentalContinuousBackend(!(experimentalContinuousBackend ?? false))}
-              >
-                {experimentalContinuousBackend && (
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-primary-foreground">✓</span>
-                )}
-              </button>
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium">Experimental: 연속 백엔드 (continuous backend)</p>
-                <p className="text-[11px] text-muted-foreground">타이틀 자동 생성 + 체크포인트 압축을 활성화합니다. 기본값 OFF — 프로덕션에서 검증 중.</p>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
       )}
     </div>
