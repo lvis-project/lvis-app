@@ -8,6 +8,7 @@
  */
 import type { IpcMainInvokeEvent } from "electron";
 import type { AuditLogger } from "../audit/audit-logger.js";
+import { redactFsPath } from "../audit/dlp-filter.js";
 
 // ─── Sender validation ────────────────────────────────────────────────────────
 
@@ -35,6 +36,11 @@ export const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as co
 
 /**
  * Emit a warn-level audit entry for rejected IPC calls.
+ *
+ * `frameUrl` is run through `redactFsPath` so the username from
+ * `file:///Users/<name>/...` paths doesn't leak into the audit log. This
+ * function is the single shared call site for ~50 IPC handlers, so the
+ * redact lands everywhere a frame URL is captured (issue #471).
  */
 export function auditUnauthorized(
   auditLogger: AuditLogger,
@@ -45,7 +51,10 @@ export function auditUnauthorized(
     timestamp: new Date().toISOString(),
     sessionId: "ipc-guard",
     type: "warn",
-    input: JSON.stringify({ channel, frameUrl: event?.senderFrame?.url ?? "" }),
+    input: JSON.stringify({
+      channel,
+      frameUrl: redactFsPath(event?.senderFrame?.url ?? ""),
+    }),
   });
 }
 
