@@ -57,9 +57,13 @@ export interface UseStackedChatReturn {
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 }
 
-export function useStackedChat(api: LvisApi, currentSessionId: string): UseStackedChatReturn {
+export function useStackedChat(
+  api: LvisApi,
+  currentSessionId: string,
+  enabled: boolean = true,
+): UseStackedChatReturn {
   const [historicalSessions, setHistoricalSessions] = useState<StackedSession[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [daysLoaded, setDaysLoaded] = useState(INITIAL_DAYS_BACK);
   const [reachedEnd, setReachedEnd] = useState(false);
 
@@ -120,6 +124,7 @@ export function useStackedChat(api: LvisApi, currentSessionId: string): UseStack
 
   // Initial load: today (0) + yesterday (1)
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     debugLog("mount — loading initial historical sessions (today + yesterday)");
     void (async () => {
@@ -133,7 +138,7 @@ export function useStackedChat(api: LvisApi, currentSessionId: string): UseStack
     return () => {
       cancelled = true;
     };
-  }, [fetchSessionsForDayRange]);
+  }, [enabled, fetchSessionsForDayRange]);
 
   const loadMore = useCallback(async () => {
     if (loadingRef.current || reachedEnd) return;

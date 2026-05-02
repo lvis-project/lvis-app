@@ -348,7 +348,20 @@ function EntriesList({
     // ── Final: turn complete, last assistant — show TurnActionBar ──
     if (entryClassMap.get(i) === "final" && entry.kind === "assistant") {
       const starred = !!isEntryStarred(idx);
-      const turnTokens = Math.ceil(((entry as { text?: string }).text?.length ?? 0) / 4);
+      const turnStartIdx = entryTurnStartMap.get(i) ?? 0;
+      const turnTokens = entries.slice(turnStartIdx, i + 1).reduce((sum, e) => {
+        if (e.kind === "assistant" || e.kind === "reasoning" || e.kind === "user") {
+          return sum + Math.ceil(((e as { text?: string }).text?.length ?? 0) / 4);
+        }
+        if (e.kind === "tool_group") {
+          const tools = (e as { tools?: Array<{ input?: unknown; result?: string }> }).tools ?? [];
+          return sum + tools.reduce(
+            (ts, t) => ts + Math.ceil((JSON.stringify(t.input ?? {}).length + (t.result?.length ?? 0)) / 4),
+            0,
+          );
+        }
+        return sum;
+      }, 0);
 
       rendered.push(
         <div key={idx} className="rounded-md">

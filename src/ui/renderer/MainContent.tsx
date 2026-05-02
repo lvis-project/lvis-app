@@ -75,10 +75,13 @@ function HomeChatPane(props: MainContentProps) {
   const { chatContextValue, api } = props;
   const useStacked = props.useStackedChatView ?? false;
 
-  // useStackedChat is always called (rules of hooks) but only used when stacked is active
+  // useStackedChat is always called (rules of hooks). The `enabled` flag gates
+  // its IPC effects so we don't pay for session-listing + per-session-history
+  // calls when the legacy ChatView is rendered.
   const stackedChatHook = useStackedChat(
     api as Parameters<typeof useStackedChat>[0],
     props.currentSessionId,
+    useStacked,
   );
 
   if (useStacked) {
