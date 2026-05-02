@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const projectRoot = resolve(__dirname, "..");
 const fixturesDir = resolve(projectRoot, "fixtures");
-const workspace = resolve(projectRoot, ".pageindex-workspace-main-flow");
+const workspace = resolve(projectRoot, ".local-indexer-workspace-main-flow");
 
 async function main() {
   await rm(workspace, { recursive: true, force: true });
@@ -20,9 +20,9 @@ async function main() {
     hostRoot: projectRoot,
     registryPath: resolve(projectRoot, "plugins/registry.json"),
     configOverrides: {
-      pageindex: {
+      "local-indexer": {
         scanFolders: ["fixtures"],
-        workspace: ".pageindex-workspace-main-flow",
+        workspace: ".local-indexer-workspace-main-flow",
         testMode: true,
       },
     },
@@ -61,7 +61,7 @@ async function main() {
       JSON.stringify(
         {
           ok: true,
-          pageindex: {
+          localIndexer: {
             scan,
             documentCount: docs.length,
             preview: preview.preview.slice(0, 120),

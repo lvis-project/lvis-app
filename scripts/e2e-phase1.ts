@@ -20,7 +20,8 @@
  * 사전 조건:
  *   - OPENAI_API_KEY 환경변수 (S3~S4 실제 인덱싱/검색 시)
  *   - lvis-app npm run build 완료
- *   - lvis-plugin-pageindex npm run build 완료
+ *   - lvis-plugin-local-indexer source checkout next to lvis-app, or
+ *     LVIS_E2E_INDEXER_PLUGIN_ROOT pointing at that source checkout
  */
 
 import { promises as fs } from "node:fs";
@@ -41,7 +42,8 @@ const RUNTIME_DIR = join(LVIS_HOME, "runtime");
 const VENV_DIR = join(RUNTIME_DIR, "venv");
 const READY_SENTINEL = join(VENV_DIR, ".ready");
 const REPO_ROOT = join(__dirname, "..");
-const PLUGIN_ROOT = join(REPO_ROOT, "..", "lvis-plugin-pageindex");
+const PLUGIN_ROOT = process.env.LVIS_E2E_INDEXER_PLUGIN_ROOT
+  ?? join(REPO_ROOT, "..", "lvis-plugin-local-indexer");
 const WORKER_DIR = join(PLUGIN_ROOT, "worker");
 const FIXTURE_MD = join(PLUGIN_ROOT, "test", "indexer.ko.fixture.md");
 
@@ -104,6 +106,13 @@ async function spawnWorker(): Promise<WorkerHandle> {
   const dbPath = join(e2eDir, "fts5.sqlite");
   const lancePath = join(e2eDir, "vectors.lance");
   const wsPath = join(e2eDir, "workspace");
+
+  await fs.access(workerPy).catch(() => {
+    throw new Error(
+      `Local Indexer source checkout is required for Phase 1 E2E. ` +
+      `Set LVIS_E2E_INDEXER_PLUGIN_ROOT to a lvis-plugin-local-indexer checkout; missing ${workerPy}`,
+    );
+  });
 
   // 테스트용 디렉터리 준비
   await fs.mkdir(e2eDir, { recursive: true });

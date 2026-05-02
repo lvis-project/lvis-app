@@ -23,18 +23,6 @@ jobs:
         with:
           path: lvis-app
 
-      # Sibling plugin repos are required because lvis-app declares
-      # file:../lvis-plugin-* dependencies in package.json. Self-hosted runner
-      # uses host gh CLI auth (repo scope) instead of a GitHub App token.
-      - name: Clone sibling plugin repos
-        run: |
-          set -euo pipefail
-          GH_TOKEN=$(gh auth token)
-          for slug in lvis-plugin-pageindex lvis-plugin-meeting lvis-plugin-lge-api lvis-plugin-work-proactive lvis-plugin-agent-hub lvis-plugin-ms-graph; do
-            if [ -d "$slug" ]; then rm -rf "$slug"; fi
-            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/lvis-project/${slug}.git" "$slug"
-          done
-
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -67,11 +55,9 @@ jobs:
         # corp proxy block).
         run: bunx playwright install --with-deps=false
 
-      - name: Build app + plugins
+      - name: Build app
         working-directory: lvis-app
-        run: |
-          bun run prepare:plugins
-          bun run build
+        run: bun run build
 
       - name: Run Playwright UI E2E (Linux)
         working-directory: lvis-app

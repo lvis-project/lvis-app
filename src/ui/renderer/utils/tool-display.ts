@@ -9,7 +9,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   render_html: "HTML 렌더링",
   search_memory: "기억 검색",
 
-  // Index / PageIndex
+  // Index / document indexing
   index_scan: "인덱스 스캔",
   index_scan_status: "스캔 상태 확인",
   index_scan_cancel: "스캔 취소",
@@ -19,7 +19,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   index_documents: "문서 목록",
   index_refresh_folder: "폴더 새로고침",
   index_folders_purge_orphans: "고아 폴더 정리",
-  pageindex_scan: "파일 인덱싱",
+  document_index_scan: "파일 인덱싱",
 
   // Meeting
   meeting_start: "회의 녹음 시작",
