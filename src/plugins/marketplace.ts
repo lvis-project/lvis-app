@@ -6,7 +6,7 @@ import { readPluginRegistry, updatePluginRegistry, withRegistryLock, writePlugin
 import type { PluginDeploymentGuard } from "./deployment-guard.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
-import { assertMockMarketplaceAllowed, devLinkedEntryAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
+import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource, PluginUiExtension } from "./types.js";
 import { MissingDependenciesError } from "./types.js";
 import { resolveDependencies } from "./dependency-resolver.js";
@@ -368,30 +368,12 @@ export class PluginMarketplaceService {
       // advertises a DIFFERENT version we fall through to re-install so that an
       // "install" call can act as an in-place upgrade and stale files from the
       // old release do not survive.
-      //
-      // Exception (issue #468): dev-link installs report the source repo's
-      // version through a `plugin.json` symlink, so once source matches catalog
-      // (e.g. after a backfill bump) the same-version check would short-circuit
-      // and `touchInstalledRegistryEntry` keeps `installSource: "dev-link"` due
-      // to its `?? "user"` fallback. Disk stays symlinked, registry stays
-      // dev-link, and the post-install `addPlugin()` then trips the trust
-      // check ("untrusted registry manifest path") and silently fails. Force a
-      // full re-install when an existing dev-link is being superseded by a
-      // marketplace install — that path extracts the zip (replacing the
-      // symlinks) and the registry write at the end correctly sets
-      // installSource: "user".
-      //
-      // Pre-PR #430 dev-link entries used `_devLinked: true` instead of
-      // `installSource: "dev-link"`. `readPluginRegistry()` migrates legacy
-      // entries on read so by the time we reach this check `installSource`
-      // is the only signal we need to consult.
       const installedVersion = await this.getInstalledVersion(plugin.id);
       const isSameVersion =
         !plugin.version ||
         !installedVersion ||
         plugin.version === installedVersion;
-      const isDevLinkSupersede = existingEntry.installSource === "dev-link";
-      if (isSameVersion && !isDevLinkSupersede) {
+      if (isSameVersion) {
         await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
         return { pluginId: plugin.id, installed: true };
       }
@@ -425,7 +407,7 @@ export class PluginMarketplaceService {
         existing.manifestPath = manifestPath;
         existing.enabled = true;
         // A marketplace install always supersedes any prior install
-        // source (dev-link, local-dev, ...).
+        // source (local-dev, ...).
         existing.installSource = actor === "it-admin" ? "admin" : "user";
         existing.bundleRefs = this.mergeBundleRefs(existing.bundleRefs, activeBundleRootId, plugin.id);
         existing.approvedPluginAccess = plugin.pluginAccess;
@@ -644,8 +626,8 @@ export class PluginMarketplaceService {
           existing.manifestPath = manifestPathRel;
           existing.enabled = true;
           // Rollback re-installs from the marketplace catalog. Normalize any
-          // non-admin source (local-dev, dev-link) back to "user" since this
-          // is now a marketplace-origin install.
+          // non-admin source (local-dev) back to "user" since this is now a
+          // marketplace-origin install.
           // rollbackPlugin is always a user-actor marketplace re-install.
           // Admin-managed plugin rollback is blocked upstream by deploymentGuard.
           existing.installSource = "user";
@@ -811,22 +793,15 @@ export class PluginMarketplaceService {
         entry.enabled = snapshot.enabled;
         entry.bundleRefs = snapshot.bundleRefs;
         entry.approvedPluginAccess = snapshot.approvedPluginAccess;
-        // Restore dev-link only when dev-link entries are permitted
-        // (non-packaged build). In a packaged build devLinkedEntryAllowed()
-        // returns false, so rollback never re-introduces the dev-link state.
-        const restoreDevLink = snapshot.installSource === "dev-link" && devLinkedEntryAllowed();
-        if (restoreDevLink) {
-          entry.installSource = "dev-link";
-        } else if (snapshot.installSource && snapshot.installSource !== "dev-link") {
+        if (snapshot.installSource) {
           // Restore "user", "admin", or "local-dev" as-is. For "local-dev",
           // the install receipt written by installLocal remains on disk so
           // verifyInstallReceipt will still pass after rollback.
           entry.installSource = snapshot.installSource;
         } else {
-          // Snapshot had no installSource (or it was "dev-link" and the
-          // packaged-build guard refuses to restore it). Drop the field so
-          // the entry behaves like a fresh user install on next read; a
-          // subsequent install will re-stamp the correct value.
+          // Snapshot had no installSource. Drop the field so the entry
+          // behaves like a fresh user install on next read; a subsequent
+          // install will re-stamp the correct value.
           delete entry.installSource;
         }
       }
