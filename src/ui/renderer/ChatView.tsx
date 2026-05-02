@@ -329,15 +329,19 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             const ringCls = isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
 
             if (entry.kind === "user") {
-              // Add extra breathing room only between a completed assistant
-              // turn (whose action bar lives at the bottom of the card) and
-              // the user's next message — not between day badges/session
-              // markers and a session-opening user turn. `!mt-4` uses
-              // Tailwind's important prefix to outweigh the parent's
-              // `space-y-3` specificity (the descendant selector
-              // `> :not([hidden]) ~ :not([hidden])` otherwise wins).
-              const prevWasAssistant = i > 0 && entries[i - 1]?.kind === "assistant";
-              const userGapCls = prevWasAssistant ? "!mt-4" : "";
+              // Add extra breathing room only after a *completed* assistant
+              // turn (whose action bar sits at the bottom of the card).
+              // Skip the gap for day/session markers, session-opening user
+              // turns, and mid-stream onGuide() messages where the previous
+              // assistant entry is still streaming and has no action bar
+              // yet. `!mt-4` uses Tailwind's important prefix to outweigh
+              // the parent's `space-y-3` specificity (the descendant
+              // selector `> :not([hidden]) ~ :not([hidden])` otherwise
+              // wins).
+              const prevEntry = i > 0 ? entries[i - 1] : undefined;
+              const prevAssistantComplete =
+                prevEntry?.kind === "assistant" && prevEntry.streaming !== true;
+              const userGapCls = prevAssistantComplete ? "!mt-4" : "";
               if (editingEntryIdx === i) {
                 rendered.push(
                   <div key={idx} className={userGapCls}>
