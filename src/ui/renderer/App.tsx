@@ -48,6 +48,8 @@ import { useChatContextValue } from "./hooks/use-chat-context-value.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { FloatingQuestionPanel } from "./components/FloatingQuestionPanel.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
+import { useInstallingPlugins } from "./hooks/use-installing-plugins.js";
+import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 
 // RoutineCard: new routine result card
 export { RoutineCard } from "./components/RoutineCard.js";
@@ -175,11 +177,27 @@ export function App() {
         viewKey: toViewKey(view),
         pluginId: view.pluginId,
         label: getPluginViewLabel(view),
-        icon: (view.extension as { icon?: string }).icon,
+        icon: view.icon,
         unauthed: pluginAuthStatuses.get(view.pluginId)?.kind === "unauthed",
       })),
     [pluginViews, pluginAuthStatuses],
   );
+
+  // Track in-flight plugin installs for the grid overlay spinner.
+  const installingPluginIds = useInstallingPlugins(api);
+
+  // Marketplace URL — sourced from settings (marketplace.realCloudBaseUrl).
+  const { marketplaceUrl, loaded: marketplaceUrlLoaded } = useMarketplaceUrl(api);
+  // Ready only when settings have been fetched AND the URL is non-empty.
+  const marketplaceUrlReady = marketplaceUrlLoaded && marketplaceUrl.length > 0;
+
+  // Open marketplace in the system browser.
+  // Guard against an empty URL during the initial settings load — calling
+  // shell.openExternal("") produces undefined behaviour on some platforms.
+  const onOpenMarketplace = useCallback(() => {
+    if (!marketplaceUrlReady) return;
+    void api.openExternalUrl(marketplaceUrl);
+  }, [api, marketplaceUrl, marketplaceUrlReady]);
 
   // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
   // click opens it in a separate magnetic-snap BrowserWindow instead of
@@ -578,6 +596,9 @@ export function App() {
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={setCommandPopoverOpen}
+            installingPluginIds={installingPluginIds}
+            onOpenMarketplace={onOpenMarketplace}
+            marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}
           />
         </main>

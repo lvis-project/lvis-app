@@ -9,7 +9,7 @@
     "postinstall": "electron-rebuild && node scripts/fetch-uv.mjs",
     "prepare:plugins": "bun run --cwd ../lvis-plugin-pageindex build && bun run --cwd ../lvis-plugin-meeting build && bun run --cwd ../lvis-plugin-ms-graph build && bun run --cwd ../lvis-plugin-lge-api build && bun run --cwd ../lvis-plugin-work-proactive build && bun run --cwd ../lvis-plugin-agent-hub build",
     "build:main": "tsc -p tsconfig.json",
-    "build:renderer": "esbuild src/renderer.tsx --bundle --platform=browser --format=esm --outfile=dist/src/renderer.js",
+    "build:renderer": "esbuild src/renderer.tsx --bundle --platform=browser --format=esm --splitting --outdir=dist/src --out-extension:.js=.js",
     "build:styles": "tailwindcss -i src/styles.css -o dist/src/styles.css --minify",
     "build:preload": "esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/src/preload.cjs",
     "build:plugin-preload": "esbuild src/plugin-preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/src/plugin-preload.cjs",
