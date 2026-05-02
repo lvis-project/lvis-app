@@ -8,12 +8,12 @@
 
 ## ⚡ 빠른 시작 (TL;DR)
 
-**A. dev 빌드에서 형제 레포 sideload (5초)**
+**A. dev 빌드에서 로컬 artifact sideload**
 
 ```bash
 cd lvis-app
-bun run prepare:plugins                                      # 형제 lvis-plugin-* 빌드
-lvis-cli install file://../lvis-plugin-<id>/dist.zip        # 로컬 marketplace install
+<plugin-repo에서 dist.zip 빌드>
+lvis-cli install file:///absolute/path/to/plugin/dist.zip    # 로컬 marketplace install
 bun run dev                                                  # ~/.lvis/plugins/ 만 읽음
 ```
 
@@ -304,16 +304,8 @@ mv ~/.lvis/plugins ~/.lvis/plugins.bak.$(date +%s)
 ```bash
 cd lvis-app
 
-# sibling 플러그인 빌드
-bun run prepare:plugins
-
-# 각 플러그인을 marketplace CLI 로 설치 (zip 만들어서 file:// install)
-for r in ../lvis-plugin-pageindex ../lvis-plugin-meeting \
-         ../lvis-plugin-ms-graph ../lvis-plugin-lge-api \
-         ../lvis-plugin-work-proactive ../lvis-plugin-agent-hub; do
-  (cd "$r" && bun run pack)  # dist.zip 생성 (lvis-marketplace pack 스크립트)
-  lvis-cli install "file://$r/dist.zip"
-done
+# 플러그인 repo 안에서 dist.zip 을 만든 뒤 app 에 artifact 로 설치
+lvis-cli install file:///absolute/path/to/plugin/dist.zip
 
 # Electron 기동 (~/.lvis/plugins/ 만 읽음)
 bun run dev
