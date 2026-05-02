@@ -10,6 +10,9 @@ import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
 export type { McpServerConfig, McpServerConfigDto, McpServerState };
 
+// Re-export checkpoint chain types for renderer-side consumers (type-only, no main-process runtime)
+export type { CheckpointTrigger, Checkpoint, SessionMetadata } from "../../memory/memory-manager.js";
+
 export type MarketplaceItem = {
   id: string;
   name: string;
