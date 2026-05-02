@@ -127,6 +127,22 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       result = await pluginMarketplace.uninstall(pluginId);
     } catch (err) {
       const message = (err as Error).message ?? "uninstall failed";
+      // Idempotent path: a double-click whose first uninstall already
+      // purged the marketplace registry should NOT surface as a user
+      // error. Run the runtime cleanup anyway so any stale failed-plugin
+      // tracking flushes and the UI's plugin-card list catches up.
+      // Both error strings come from marketplace.uninstall /
+      // deployment-guard precondition checks.
+      if (
+        message.startsWith("Plugin not found:") ||
+        message.startsWith("Plugin not installed:")
+      ) {
+        await pluginRuntime.removePlugin(pluginId);
+        emitHostEvent("plugin.uninstalled", { pluginId });
+        refreshPluginNotifications?.();
+        broadcastUninstallResult({ slug: pluginId, success: true });
+        return { pluginId, uninstalled: true as const };
+      }
       broadcastUninstallResult({ slug: pluginId, success: false, error: message });
       throw err;
     }
