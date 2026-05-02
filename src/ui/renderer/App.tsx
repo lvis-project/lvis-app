@@ -107,7 +107,6 @@ export function App() {
   const {
     pluginViews,
     pluginCards,
-    installInFlight,
     installPlugin,
     refreshViews, refreshMarketplace, refreshCards,
   } = usePluginMarketplace(api);
@@ -192,7 +191,7 @@ export function App() {
   );
 
   // Track in-flight plugin installs for the grid overlay spinner.
-  const installingPluginIds = useInstallingPlugins(api);
+  const installingPlugins = useInstallingPlugins(api);
 
   // Marketplace URL — sourced from settings (marketplace.realCloudBaseUrl).
   const { marketplaceUrl, loaded: marketplaceUrlLoaded } = useMarketplaceUrl(api);
@@ -552,10 +551,8 @@ export function App() {
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Sidebar
             activeView={activeView}
-            pluginViews={pluginViews}
             setActiveView={handleSidebarSelect}
             starredCount={starred.length}
-            installInFlight={installInFlight}
           />
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -618,7 +615,7 @@ export function App() {
             commandActions={commandActions}
             commandPopoverOpen={commandPopoverOpen}
             onCommandPopoverOpenChange={setCommandPopoverOpen}
-            installingPluginIds={installingPluginIds}
+            installingPlugins={installingPlugins}
             onOpenMarketplace={onOpenMarketplace}
             marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}

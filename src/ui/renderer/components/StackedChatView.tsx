@@ -28,6 +28,7 @@ import { useChatContext } from "../context/ChatContext.js";
 import { buildMarkerText } from "../utils/attachment-markers.js";
 import { ATTACH_MAX_COUNT, DENY_EXTENSIONS, type Attachment } from "../types/attachments.js";
 import type { PluginEntry } from "./PluginGridButton.js";
+import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./CommandPopover.js";
 
 export interface StackedChatViewProps {
@@ -59,7 +60,7 @@ export interface StackedChatViewProps {
   commandActions: QuickAction[];
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
-  installingPluginIds?: ReadonlySet<string>;
+  installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
   /** Retry the last turn at high effort */
@@ -419,7 +420,7 @@ export function StackedChatView({
   commandActions,
   commandPopoverOpen,
   onCommandPopoverOpenChange,
-  installingPluginIds,
+  installingPlugins,
   onOpenMarketplace,
   marketplaceUrlReady,
   onRetryEffort,
@@ -598,7 +599,7 @@ export function StackedChatView({
           contextBudget={contextBudget}
           plugins={plugins}
           onSelectPlugin={onSelectPlugin}
-          installingPluginIds={installingPluginIds}
+          installingPlugins={installingPlugins}
           onOpenMarketplace={onOpenMarketplace}
           marketplaceUrlReady={marketplaceUrlReady}
           onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
