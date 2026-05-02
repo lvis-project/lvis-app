@@ -100,9 +100,7 @@ describe("PluginMarketplaceService — dev-link supersede on marketplace install
             id: "pageindex",
             manifestPath: "pageindex/plugin.json",
             enabled: true,
-            installedBy: "user",
             installSource: "dev-link",
-            _devLinked: true,
           },
         ],
       }),
@@ -139,21 +137,20 @@ describe("PluginMarketplaceService — dev-link supersede on marketplace install
     expect(installSpy).toHaveBeenCalledTimes(1);
     expect(touchSpy).not.toHaveBeenCalled();
 
-    // Registry entry must be promoted from dev-link → user, and _devLinked
-    // marker stripped, so the next boot's trust check accepts the
-    // (now-extracted, real) install path.
+    // Registry entry must be promoted from dev-link → user so the next
+    // boot's trust check accepts the (now-extracted, real) install path.
     const finalRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<{ id: string; installSource?: string; _devLinked?: boolean }>;
+      plugins: Array<{ id: string; installSource?: string }>;
     };
     const entry = finalRegistry.plugins.find((p) => p.id === "pageindex");
     expect(entry?.installSource).toBe("user");
-    expect(entry?._devLinked).toBeUndefined();
   });
 
   it("forces full re-install for legacy registry entries with _devLinked=true and no installSource", async () => {
     // Pre-PR #430 dev-link entries can have `_devLinked: true` without an
-    // `installSource` field. The supersede guard must match the same disjunction
-    // other call sites use so legacy users hit the fix too.
+    // `installSource` field. readPluginRegistry migrates them to
+    // installSource="dev-link" on first read; this test asserts the
+    // supersede guard accepts the migrated shape.
     await writeFile(
       marketplacePath,
       JSON.stringify({
@@ -273,7 +270,6 @@ describe("PluginMarketplaceService — dev-link supersede on marketplace install
             id: "pageindex",
             manifestPath: "pageindex/plugin.json",
             enabled: true,
-            installedBy: "user",
             installSource: "user",
           },
         ],
