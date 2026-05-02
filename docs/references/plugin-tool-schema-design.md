@@ -112,13 +112,16 @@ interface PluginManifest {
 >
 > branch push 는 publish 트리거 안 함 (`on.push.tags: ['v*.*.*']` 만 listen). dev 중 main 으로 머지해도 catalog 는 가만히 있음 — 의도된 release 시점에만 tag 로 트리거.
 >
-> **Format strictness — 4 곳에서 동일 regex** `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`:
+> **Format strictness — 5 곳에서 동일 regex** `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`:
 > 1. `lvis-plugin-sdk/schemas/plugin-manifest.schema.json` — AJV 가 manifest 작성 시점에 거절
-> 2. `lvis-app/src/plugins/runtime/manifest-validation.ts` (`STABLE_SEMVER_RE`) — 사이드로드 시점에 거절
-> 3. 각 plugin repo 의 `.github/workflows/publish.yml` — tag 푸시 시점에 거절
-> 4. `lvis-plugin-template/.github/workflows/publish.yml` — 새 plugin repo 시작점에 동일 패턴
+> 2. `lvis-app/schemas/plugin.schema.json` — 호스트 AJV 가 사이드로드 시점에 거절 (SDK schema 의 byte-mirror, sync-from-host 로 자동 동기화)
+> 3. `lvis-app/src/plugins/runtime/manifest-validation.ts` (`STABLE_SEMVER_RE`) — TS validator fallback (AJV schema 가 missing 일 때만 동작; 실 운영에선 AJV 가 정문)
+> 4. 각 plugin repo (6 개) + `lvis-plugin-template` 의 `.github/workflows/publish.yml` — tag 푸시 시점에 거절
+> 5. `lvis-marketplace/server/.../publisher.py` (`_SEMVER_RE`) + `schemas/plugin.schema.template.json` — POST `/api/v1/plugins/{slug}/versions` 거절
 >
-> Pre-release (`1.2.3-rc1`) / build-metadata (`1.2.3+abc`) / leading-zero (`01.2.3`) 모두 4 곳에서 거절. 한 곳 풀어주려면 4 곳 같이 풀어야 (`host-plugin-contract-sync` 룰 적용).
+> Pre-release (`1.2.3-rc1`) / build-metadata (`1.2.3+abc`) / leading-zero (`01.2.3`) 모두 5 곳에서 거절. 한 곳 풀어주려면 5 곳 같이 풀어야 (`host-plugin-contract-sync` 룰 적용).
+>
+> 같은 strictness 가 `tools[].version` 과 `tools[].deprecatedSince` 에도 적용 (SDK + host AJV schema). publish.yml 의 tag-validation gate 는 top-level `version` 만 보므로 tool-level version 의 enforcement 정문은 AJV.
 
 **각 필드의 런타임 소비처:**
 
@@ -126,6 +129,7 @@ interface PluginManifest {
 |------|--------|--------|
 | `id` | PluginRegistry, HostApi cleanup | boot + 런타임 전반 |
 | `version` | 마켓플레이스 카탈로그 카드 + update-detector 비교 + install receipt + `assertInstalledManifestMatchesCatalog` (defense-in-depth host check) + Settings UI 카드 | install + 런타임 전반 |
+| `icon` | plugin grid v3 popover (Lucide named-export 동적 lookup, 누락/매치 실패 시 `Plug` fallback). 옵션 필드 — 없으면 default 아이콘 | UI 렌더 |
 | `entry` | runtime.ts `require()` | boot |
 | `tools[]` | Tool Registry 등록 | boot |
 | `toolSchemas` | LLM system prompt 에 tool schema 로 삽입 | system prompt 빌드 시 |
