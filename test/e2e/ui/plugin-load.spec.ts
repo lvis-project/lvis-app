@@ -11,7 +11,7 @@ import { test, expect } from './fixtures';
  * marketplace card disappears — this test catches that immediately.
  *
  * Plugin UI tab mapping (from each plugin.json `ui[].displayName`):
- *   pageindex → "인덱서"
+ *   local-indexer → "인덱서"
  *   meeting   → "미팅"
  *   ms-graph  → "이메일" + "캘린더" (single plugin provides two sidebar UIs)
  */
@@ -22,7 +22,7 @@ import { test, expect } from './fixtures';
  * registers two extensions (email + calendar) — both must appear.
  */
 const PLUGIN_TABS = [
-  { id: 'pageindex', label: '인덱서' },
+  { id: 'local-indexer', label: '인덱서' },
   { id: 'meeting', label: '미팅' },
   { id: 'ms-graph', label: '이메일' },
   { id: 'ms-graph', label: '캘린더' },
@@ -84,6 +84,6 @@ test('managed plugins show installed status in sidebar', async ({ mainWindow }) 
   // Bundled plugins should all show "설치됨" badge.
   const installedBadges = sidebar.locator('text=설치됨');
 
-  // 3 bundled plugins should be installed (pageindex / meeting / ms-graph).
+  // 3 bundled plugins should be installed (local-indexer / meeting / ms-graph).
   await expect(installedBadges).toHaveCount(3, { timeout: 30_000 });
 });

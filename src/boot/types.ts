@@ -29,6 +29,7 @@ import type { TelemetryService } from "../main/telemetry.js";
 import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { TaskSourceRegistry } from "../plugins/task-source-registry.js";
 import type { NotificationService } from "../main/notification-service.js";
+import type { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
 
@@ -63,6 +64,8 @@ export function offEvent(type: string, handler: EventHandler): void {
 }
 
 export interface AppServices {
+  pythonRuntime?: PythonRuntimeBootstrapper;
+  pythonPath?: string;
   pluginRuntime: PluginRuntime;
   pluginMarketplace: PluginMarketplaceService;
   taskService: TaskService;

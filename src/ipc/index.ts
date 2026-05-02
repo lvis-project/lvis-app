@@ -11,7 +11,7 @@
  *   chat         lvis:chat:*, lvis:routines:*, lvis:routine:*, lvis:trigger:*,
  *                lvis:memory:*, lvis:starred:*, lvis:feedback:*, lvis:ask-user-question:*
  *   plugins      lvis:plugins:*, lvis:bootstrap:*, lvis:runtime:*, lvis:marketplace:*,
- *                lvis:mcp:*, lvis:plugin:*, lvis:pageindex:*, lvis:notification:clicked
+ *                lvis:mcp:*, lvis:plugin:*, lvis:file:*, lvis:notification:clicked
  *   usage        lvis:usage:*
  *   audit        lvis:audit:*, lvis:dlp:*
  *   permissions  lvis:permission:*, lvis:approval:*, lvis:policy:*

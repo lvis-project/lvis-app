@@ -137,7 +137,7 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
     "document-indexer",
     {
       description:
-        "Advisory — signals the plugin can accept on-demand file paths for indexing via pageindex_scan. Used by host capability resolver for drag & drop IPC routing.",
+        "Advisory — signals the plugin can accept on-demand file paths for indexing via a supported scan tool. Used by host capability resolver for drag & drop IPC routing.",
       enforcement: "advisory",
       gates: [],
     },

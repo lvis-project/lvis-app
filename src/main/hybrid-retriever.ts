@@ -84,7 +84,7 @@ export interface HybridResult {
 
 /**
  * Agent 2의 Python worker HTTP API를 감싸는 TS 클라이언트 인터페이스.
- * Agent 4의 `lvis-plugin-pageindex/src/workerClient.ts`가 16 엔드포인트 중
+ * Document-indexer plugin worker client가 worker 엔드포인트 중
  * /search/bm25, /search/vector 두 개를 이 shape로 노출한다.
  *
  * HybridRetriever는 이 인터페이스에만 의존 — 실클라이언트/Mock 모두 주입 가능.

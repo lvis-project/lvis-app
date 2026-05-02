@@ -162,6 +162,8 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
       },
       `registry migrated ${migratedCount} legacy entries (installedBy/_devLinked → installSource)`,
     );
+  }
+  if (migratedCount > 0) {
     try {
       await writePluginRegistry(registryPath, registry);
     } catch (err) {
@@ -171,7 +173,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
           pluginId: "<registry>",
           phase: PluginPhase.DISCOVERY_FAIL,
           err,
-          reason: "legacy_migration_persist_failed",
+          reason: "registry_migration_persist_failed",
           registryPath,
         },
         "failed to persist migrated registry — will retry on next read",

@@ -140,23 +140,33 @@ describe("PluginUpdateDetector", () => {
   }
 
   it("returns update when catalog version is newer", async () => {
-    const registryPath = await setupRegistry([{ id: "pageindex", version: "1.0.0" }]);
-    const fetcher = makeFetcher([makeCatalogPlugin("pageindex", "1.1.0")]);
+    const registryPath = await setupRegistry([{ id: "local-indexer", version: "1.0.0" }]);
+    const fetcher = makeFetcher([makeCatalogPlugin("local-indexer", "1.1.0")]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
     const updates = await detector.checkForUpdates();
 
     expect(updates).toHaveLength(1);
     expect(updates[0]).toEqual({
-      pluginId: "pageindex",
+      pluginId: "local-indexer",
       installedVersion: "1.0.0",
       latestVersion: "1.1.0"
     });
   });
 
+  it("does not compare legacy pageindex registry entries against local-indexer catalog entries", async () => {
+    const registryPath = await setupRegistry([{ id: "pageindex", version: "1.0.0" }]);
+    const fetcher = makeFetcher([makeCatalogPlugin("local-indexer", "1.1.0")]);
+    const detector = new PluginUpdateDetector(registryPath, fetcher);
+
+    const updates = await detector.checkForUpdates();
+
+    expect(updates).toEqual([]);
+  });
+
   it("returns empty when all plugins are up-to-date", async () => {
-    const registryPath = await setupRegistry([{ id: "pageindex", version: "1.1.0" }]);
-    const fetcher = makeFetcher([makeCatalogPlugin("pageindex", "1.1.0")]);
+    const registryPath = await setupRegistry([{ id: "local-indexer", version: "1.1.0" }]);
+    const fetcher = makeFetcher([makeCatalogPlugin("local-indexer", "1.1.0")]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
     const updates = await detector.checkForUpdates();
@@ -232,8 +242,8 @@ describe("PluginUpdateDetector", () => {
   });
 
   it("ignores catalog plugins without a version field", async () => {
-    const registryPath = await setupRegistry([{ id: "pageindex", version: "1.0.0" }]);
-    const catalogPlugin = makeCatalogPlugin("pageindex", "1.1.0");
+    const registryPath = await setupRegistry([{ id: "local-indexer", version: "1.0.0" }]);
+    const catalogPlugin = makeCatalogPlugin("local-indexer", "1.1.0");
     delete (catalogPlugin as { version?: string }).version; // strip version
     const fetcher = makeFetcher([catalogPlugin]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
@@ -245,7 +255,7 @@ describe("PluginUpdateDetector", () => {
 
   it("returns empty array (never throws) when registry is missing", async () => {
     const missingRegistry = resolve(tmpDir, "does-not-exist.json");
-    const fetcher = makeFetcher([makeCatalogPlugin("pageindex", "2.0.0")]);
+    const fetcher = makeFetcher([makeCatalogPlugin("local-indexer", "2.0.0")]);
     const detector = new PluginUpdateDetector(missingRegistry, fetcher);
 
     const updates = await detector.checkForUpdates();
@@ -254,8 +264,8 @@ describe("PluginUpdateDetector", () => {
   });
 
   it("skips canary catalog entries by default (stable rollout only)", async () => {
-    const registryPath = await setupRegistry([{ id: "pageindex", version: "1.0.0" }]);
-    const canaryPlugin = { ...makeCatalogPlugin("pageindex", "2.0.0"), channel: "canary" as const };
+    const registryPath = await setupRegistry([{ id: "local-indexer", version: "1.0.0" }]);
+    const canaryPlugin = { ...makeCatalogPlugin("local-indexer", "2.0.0"), channel: "canary" as const };
     const fetcher = makeFetcher([canaryPlugin]);
     const detector = new PluginUpdateDetector(registryPath, fetcher);
 
@@ -265,8 +275,8 @@ describe("PluginUpdateDetector", () => {
   });
 
   it("includes canary entries when canaryOptIn is true", async () => {
-    const registryPath = await setupRegistry([{ id: "pageindex", version: "1.0.0" }]);
-    const canaryPlugin = { ...makeCatalogPlugin("pageindex", "2.0.0"), channel: "canary" as const };
+    const registryPath = await setupRegistry([{ id: "local-indexer", version: "1.0.0" }]);
+    const canaryPlugin = { ...makeCatalogPlugin("local-indexer", "2.0.0"), channel: "canary" as const };
     const fetcher = makeFetcher([canaryPlugin]);
     const detector = new PluginUpdateDetector(registryPath, fetcher, { canaryOptIn: true });
 
@@ -281,27 +291,27 @@ describe("PluginUpdateDetector", () => {
     await mkdir(outsideDir, { recursive: true });
     await writeFile(
       resolve(outsideDir, "plugin.json"),
-      JSON.stringify({ id: "pageindex", version: "1.0.0", name: "pageindex", entry: "dist/index.js", tools: [] }),
+      JSON.stringify({ id: "local-indexer", version: "1.0.0", name: "local-indexer", entry: "dist/index.js", tools: [] }),
       "utf-8",
     );
 
     const installedDir = resolve(tmpDir, "installed");
     await mkdir(installedDir, { recursive: true });
-    await symlink(outsideDir, resolve(installedDir, "pageindex"), "dir");
+    await symlink(outsideDir, resolve(installedDir, "local-indexer"), "dir");
 
     const registryPath = resolve(tmpDir, "registry.json");
     await writeFile(
       registryPath,
       JSON.stringify({
         version: 1,
-        plugins: [{ id: "pageindex", manifestPath: "installed/pageindex/plugin.json" }],
+        plugins: [{ id: "local-indexer", manifestPath: "installed/local-indexer/plugin.json" }],
       }),
       "utf-8",
     );
 
     const detector = new PluginUpdateDetector(
       registryPath,
-      makeFetcher([makeCatalogPlugin("pageindex", "1.1.0")]),
+      makeFetcher([makeCatalogPlugin("local-indexer", "1.1.0")]),
     );
 
     await expect(detector.checkForUpdates()).resolves.toEqual([]);

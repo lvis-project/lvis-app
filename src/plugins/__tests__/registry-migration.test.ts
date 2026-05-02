@@ -244,6 +244,71 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     });
   });
 
+  it("leaves an already-canonical local-indexer registry entry unchanged", async () => {
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "local-indexer",
+            manifestPath: "local-indexer/plugin.json",
+            enabled: false,
+            installSource: "admin",
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const before = await readFile(registryPath, "utf-8");
+    const registry = await readPluginRegistry(registryPath);
+    const after = await readFile(registryPath, "utf-8");
+    expect(registry.plugins[0]).toEqual({
+      id: "local-indexer",
+      manifestPath: "local-indexer/plugin.json",
+      enabled: false,
+      installSource: "admin",
+    });
+    expect(after).toEqual(before);
+  });
+
+  it("does not rewrite pageindex registry entries to local-indexer", async () => {
+    const approvedPluginAccess = { plugins: [{ pluginId: "agent-hub", events: ["agent.ready"] }] };
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "pageindex",
+            manifestPath: "/opt/lvis/custom-pageindex/plugin.json",
+            enabled: false,
+            installSource: "local-dev",
+            bundleRefs: ["custom-bundle"],
+            approvedPluginAccess,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const before = await readFile(registryPath, "utf-8");
+    const registry = await readPluginRegistry(registryPath);
+    const after = await readFile(registryPath, "utf-8");
+    expect(registry.plugins).toEqual([
+      {
+        id: "pageindex",
+        manifestPath: "/opt/lvis/custom-pageindex/plugin.json",
+        enabled: false,
+        installSource: "local-dev",
+        bundleRefs: ["custom-bundle"],
+        approvedPluginAccess,
+      },
+    ]);
+    expect(after).toEqual(before);
+  });
+
   it("returns the empty default and does not write anything for a missing registry (first boot)", async () => {
     const missingPath = join(tmpDir, "does-not-exist.json");
     const registry = await readPluginRegistry(missingPath);
