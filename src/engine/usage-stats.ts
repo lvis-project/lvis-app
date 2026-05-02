@@ -65,13 +65,13 @@ function emptyTotals(): UsageTotals {
  * Parse a route string `"vendor/model"` into `{ vendor, model }`.
  * Fallback: `{ vendor: DEFAULT_LLM_VENDOR, model: "unknown" }`.
  *
- * NOTE (audit-log shape mismatch — pre-existing): `AuditTurnEntry.route`
- * is currently logged as the route classification ("llm" / "skill" /
- * "command") by `AuditLogger.logTurn`, NOT as a `vendor/model` pair.
- * This function therefore falls through to the default for the majority
- * of audit entries — per-vendor / per-model cost breakdown is inaccurate
- * until the logger is updated to emit `${vendor}/${model}` (out of scope
- * for this PR, which only tightens the LLMVendor *type* contract).
+ * TODO(usage-stats): `AuditTurnEntry.route` is currently logged as the
+ * route classification ("llm" / "skill" / "command") by
+ * `AuditLogger.logTurn`, NOT as a `vendor/model` pair. This parser
+ * therefore falls through to the default for most audit entries, so
+ * per-vendor / per-model cost breakdown is inaccurate until the logger
+ * is updated to emit `${vendor}/${model}`. The fix touches the audit
+ * emission site in `engine/conversation-loop.ts`, not this parser.
  */
 function parseRoute(route: string | undefined): { vendor: LLMVendor; model: string } {
   if (!route) return { vendor: DEFAULT_LLM_VENDOR, model: "unknown" };

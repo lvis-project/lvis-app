@@ -100,9 +100,10 @@ export function useSettings(api: LvisApi): UseSettingsResult {
         // Narrow before constructing the patch key. If `s.llm.provider`
         // is stale/corrupt (`"lgenie"`-style), `mergeLlmPatch` would skip
         // the unknown vendor entry and the toggle would silently no-op.
-        // Falling back to "claude" guarantees the update lands somewhere
-        // valid; if the user is actively on a different vendor, the next
-        // settings load will re-narrow and the toggle re-targets correctly.
+        // The narrower's `DEFAULT_LLM_VENDOR` fallback guarantees the
+        // update lands somewhere valid; if the user is actively on a
+        // different vendor, the next settings load will re-narrow and
+        // the toggle re-targets correctly.
         const provider = narrowVendor(s.llm.provider);
         await api.updateSettings({
           llm: { vendors: { [provider]: { enableThinking: next } } },
