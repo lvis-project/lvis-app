@@ -342,44 +342,9 @@ describe("PluginMarketplaceService — dev-link supersede on marketplace install
     );
   });
 
-  it("throws on legacy entries with _devLinked=true and no installSource", async () => {
-    await writeFile(
-      marketplacePath,
-      JSON.stringify({ version: 1, plugins: [] }),
-      "utf-8",
-    );
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          {
-            id: "pageindex",
-            manifestPath: "pageindex/plugin.json",
-            enabled: true,
-            installedBy: "user",
-            // No installSource — legacy pre-PR #430 shape.
-            _devLinked: true,
-          },
-        ],
-      }),
-      "utf-8",
-    );
-
-    const service = makeService(testDir, marketplacePath);
-    const touch = (
-      service as unknown as {
-        touchInstalledRegistryEntry: (
-          pluginId: string,
-          bundleRootId: string | null,
-          actor: "user" | "it-admin",
-          approvedPluginAccess: unknown,
-        ) => Promise<void>;
-      }
-    ).touchInstalledRegistryEntry.bind(service);
-
-    await expect(touch("pageindex", null, "user", undefined)).rejects.toThrow(
-      /invariant violation/,
-    );
-  });
+  // Legacy pre-PR #430 shape (`_devLinked: true` only, no `installSource`)
+  // is migrated to `installSource: "dev-link"` by `readPluginRegistry`'s
+  // `migrateLegacyEntry` before any registry mutation reaches
+  // `touchInstalledRegistryEntry`, so the modern-shape assertion above
+  // covers both. No separate legacy-shape test needed.
 });

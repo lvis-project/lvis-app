@@ -782,7 +782,12 @@ export class PluginMarketplaceService {
       // below would silently preserve `installSource: "dev-link"` — same
       // root cause as issue #468. Throw loudly so the broken invariant
       // can't regress unnoticed.
-      if (entry.installSource === "dev-link" || entry._devLinked === true) {
+      //
+      // The legacy `_devLinked: true` shape (pre-PR #430) is migrated to
+      // `installSource: "dev-link"` in `readPluginRegistry`'s
+      // `migrateLegacyEntry` before any registry mutation reaches this
+      // method, so checking `installSource` alone is sufficient.
+      if (entry.installSource === "dev-link") {
         throw new Error(
           `touchInstalledRegistryEntry called on dev-link entry "${pluginId}" — ` +
           `invariant violation. dev-link supersede must go through install()'s ` +
