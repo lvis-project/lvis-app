@@ -31,6 +31,11 @@ module.exports = {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
         },
+        "message-user": {
+          DEFAULT: "hsl(var(--message-user-bg))",
+          foreground: "hsl(var(--message-user-fg))",
+        },
+        "input-bar": "hsl(var(--input-bar-bg))",
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",

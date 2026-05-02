@@ -1,5 +1,8 @@
-import { Search, ChevronRight, X as XIcon } from "lucide-react";
+import { useState } from "react";
+import { Search, ChevronRight, X as XIcon, Calendar as CalendarIcon } from "lucide-react";
 import { Input } from "../../../components/ui/input.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
+import { Calendar } from "../../../components/ui/calendar.js";
 
 /**
  * Sprint 4.C: Ctrl/Cmd+F overlay for in-conversation search. Scans
@@ -29,9 +32,12 @@ export function ChatSearchOverlay({
   onPrev: () => void;
   onClose: () => void;
 }) {
+  // Local-only state for the calendar popover; selecting a date is UI-only
+  // for now (no history navigation wired yet).
+  const [pickedDate, setPickedDate] = useState<Date | undefined>(undefined);
   if (!open) return null;
   return (
-    <div className="absolute right-4 top-2 z-20 flex items-center gap-2 rounded-md border bg-card px-2 py-1 shadow-md">
+    <div className="sticky top-0 z-10 -mx-3 -mt-4 mb-2 flex items-center gap-2 bg-card px-3 py-1 shadow-sm">
       <Search className="h-3.5 w-3.5 text-muted-foreground" />
       <Input
         autoFocus
@@ -42,7 +48,7 @@ export function ChatSearchOverlay({
           if (e.key === "Escape") { e.preventDefault(); onClose(); }
         }}
         placeholder="대화 검색..."
-        className="h-7 w-48 text-xs"
+        className="h-7 w-48 text-xs bg-white"
       />
       <span className="text-[10px] text-muted-foreground tabular-nums">{matchCount === 0 ? "0/0" : `${currentIdx + 1}/${matchCount}`}</span>
       <button
@@ -52,6 +58,21 @@ export function ChatSearchOverlay({
       >Aa</button>
       <button className="rounded p-0.5 hover:bg-muted" onClick={onPrev} title="이전"><ChevronRight className="h-3 w-3 rotate-180" /></button>
       <button className="rounded p-0.5 hover:bg-muted" onClick={onNext} title="다음"><ChevronRight className="h-3 w-3" /></button>
+      {/* Spacer pushes the calendar + close cluster to the far right. */}
+      <div className="flex-1" />
+      {/* Calendar shortcut — Popover + react-day-picker (shadcn Calendar)
+          styled to the LVIS palette. UI-only for now (selecting a date
+          updates `pickedDate` but doesn't navigate history yet). */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <button className="rounded p-0.5 hover:bg-muted" title="날짜로 이동" aria-label="날짜 선택">
+            <CalendarIcon className="h-3 w-3" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-auto p-2 shadow-none border border-[#E6E1D6] bg-[#F9F7F3]">
+          <Calendar mode="single" selected={pickedDate} onSelect={setPickedDate} />
+        </PopoverContent>
+      </Popover>
       <button className="rounded p-0.5 hover:bg-muted" onClick={onClose} title="닫기"><XIcon className="h-3 w-3" /></button>
     </div>
   );

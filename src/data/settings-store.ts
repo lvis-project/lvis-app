@@ -307,7 +307,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   appearance: {
     theme: "system",
-    chatTheme: "default",
+    chatTheme: "purple",
     codeTheme: "auto",
   },
   plugins: {},
@@ -633,7 +633,7 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
   const chatTheme: ChatThemePreference =
     typeof chatRaw === "string" && (VALID_CHAT_THEMES as readonly string[]).includes(chatRaw)
       ? (chatRaw as ChatThemePreference)
-      : "default";
+      : "purple";
 
   const codeRaw = obj.codeTheme;
   const codeTheme: CodeThemePreference =
