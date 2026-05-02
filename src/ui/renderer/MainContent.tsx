@@ -101,6 +101,11 @@ function HomeChatPane(props: MainContentProps) {
           installingPluginIds={props.installingPluginIds}
           onOpenMarketplace={props.onOpenMarketplace}
           marketplaceUrlReady={props.marketplaceUrlReady}
+          onRetryEffort={props.onRetryEffort}
+          onFork={props.onFork}
+          onToggleStar={props.onToggleStar}
+          isEntryStarred={props.isEntryStarred}
+          onFeedback={props.onFeedback}
         />
       </ChatContextProvider>
     );

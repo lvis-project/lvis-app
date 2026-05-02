@@ -60,6 +60,16 @@ export interface StackedChatViewProps {
   installingPluginIds?: ReadonlySet<string>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
+  /** Retry the last turn at high effort */
+  onRetryEffort: () => void | Promise<void>;
+  /** Fork conversation from a given entry index */
+  onFork: (entryIdx: number) => void | Promise<void>;
+  /** Toggle star on a given entry index */
+  onToggleStar: (entryIdx: number) => void;
+  /** Returns star id if entry is starred, else null */
+  isEntryStarred: (entryIdx: number) => string | null;
+  /** Submit thumbs up/down feedback for an assistant message */
+  onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
 }
 
 // ─── Day separator ───────────────────────────────────────────────────────────
@@ -161,6 +171,11 @@ export function StackedChatView({
   installingPluginIds,
   onOpenMarketplace,
   marketplaceUrlReady,
+  onRetryEffort,
+  onFork,
+  onToggleStar,
+  isEntryStarred,
+  onFeedback,
 }: StackedChatViewProps) {
   const workflowApi = getApi() as LvisApi;
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -245,7 +260,7 @@ export function StackedChatView({
                 // Active session: render live entries
                 return (
                   <div key={sess.id} className="space-y-3">
-                    {renderSessionEntries(entries, streaming)}
+                    {renderSessionEntries(entries, streaming, onRetryEffort, onFork, onToggleStar, isEntryStarred, onFeedback)}
                   </div>
                 );
               }
@@ -266,7 +281,7 @@ export function StackedChatView({
         {/* If active session has no historical entries in sessions list, render current entries */}
         {sessions.length === 0 && entries.length > 0 && (
           <div className="space-y-3">
-            {renderSessionEntries(entries, streaming)}
+            {renderSessionEntries(entries, streaming, onRetryEffort, onFork, onToggleStar, isEntryStarred, onFeedback)}
           </div>
         )}
 
@@ -416,7 +431,21 @@ function groupSessionsByDay(sessions: StackedSession[]): Map<string, StackedSess
   return map;
 }
 
-function renderSessionEntries(entries: ChatEntry[], streaming: boolean): React.ReactNode[] {
+function renderSessionEntries(
+  entries: ChatEntry[],
+  streaming: boolean,
+  onRetryEffort: () => void | Promise<void>,
+  onFork: (entryIdx: number) => void | Promise<void>,
+  onToggleStar: (entryIdx: number) => void,
+  isEntryStarred: (entryIdx: number) => string | null,
+  onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>,
+): React.ReactNode[] {
+  // Find the last assistant entry index to correctly determine isFinal
+  let lastAssistantIdx = -1;
+  for (let k = entries.length - 1; k >= 0; k--) {
+    if (entries[k]?.kind === "assistant") { lastAssistantIdx = k; break; }
+  }
+
   const nodes: React.ReactNode[] = [];
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
@@ -452,16 +481,38 @@ function renderSessionEntries(entries: ChatEntry[], streaming: boolean): React.R
       continue;
     }
     if (entry.kind === "assistant") {
-      const isFinal = !streaming || i < entries.length - 1;
+      // isFinal: only the last assistant entry AND global streaming is done.
+      // This prevents TurnActionBar from flashing during reasoning/tool steps
+      // that precede the final assistant message.
+      const isFinal = !streaming && i === lastAssistantIdx;
+      const starred = !!isEntryStarred(i);
+
+      // Estimate turn tokens from this entry (same rough heuristic as ChatView)
+      const turnTokens = isFinal
+        ? Math.ceil(((entry as { text?: string }).text?.length ?? 0) / 4)
+        : 0;
+
       nodes.push(
         <div key={key} className="max-w-[80%]">
           <AssistantCard
             entry={entry}
             highlightQuery=""
-            isStarred={false}
+            isStarred={starred}
             isFinal={isFinal}
+            turnTokens={isFinal ? turnTokens : undefined}
           />
-          {isFinal && <TurnActionBar />}
+          {isFinal && (
+            <TurnActionBar
+              turnTokens={turnTokens > 0 ? turnTokens : undefined}
+              isStarred={starred}
+              actions={{
+                onRetry: () => void onRetryEffort(),
+                onFork: () => void onFork(i),
+                onToggleStar: () => onToggleStar(i),
+              }}
+              onFeedback={onFeedback ? (rating, reason) => void onFeedback(i, rating, reason) : undefined}
+            />
+          )}
         </div>,
       );
       continue;

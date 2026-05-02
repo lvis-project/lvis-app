@@ -9,11 +9,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LvisApi } from "../types.js";
 import type { SessionSummary } from "./use-sessions.js";
 
-// Lightweight dev console logger — omitted in production builds that
-// strip unreachable code, but harmless if left in since it only logs
-// in renderer context where console is available.
+// Lightweight dev console logger — guarded against renderer contexts where
+// `process` is not defined (esbuild --platform=browser without process shim).
 const debugLog = (msg: string, ...args: unknown[]) => {
-  if (process.env.NODE_ENV !== "production") {
+  if (typeof process !== "undefined" && process.env?.NODE_ENV !== "production") {
     console.debug("[useStackedChat]", msg, ...args);
   }
 };
