@@ -32,32 +32,17 @@
           root.textContent = "[lvis] plugin-ui-shell: lvisPlugin bridge missing.";
           return;
         }
-        // Race guard: 호스트 renderer 가 webview did-attach 시점에 main 에
-        // pluginId↔webContentsId 매핑을 등록한다. shell 의 getEntryUrl 이 그
-        // 등록보다 먼저 도착하면 main 이 registration-timeout 으로 응답한다.
-        // 회복 가능한 race 이므로 backoff 로 최대 ~6초까지 재시도. 그 외
-        // 에러 (실제 frame violation = unauthorized-frame) 는 즉시 break.
-        // Issue #439: 1.5초 budget 은 slow boot / dev hot-reload 환경에서
-        // 부족했음.
-        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-        const isRecoverable = (msg) => /registration-timeout/i.test(msg);
+        // Registration is guaranteed before src is set (#447), so
+        // getEntryUrl() is a synchronous lookup — no retry needed.
         let entry;
-        let lastErr;
-        for (const delay of [0, 100, 200, 400, 800, 1500, 3000]) {
-          if (delay) await sleep(delay);
-          try {
-            entry = await window.lvisPlugin.getEntryUrl();
-            if (entry) break;
-          } catch (err) {
-            lastErr = err;
-            const msg = err?.message ?? String(err);
-            if (!isRecoverable(msg)) break;
-          }
+        try {
+          entry = await window.lvisPlugin.getEntryUrl();
+        } catch (err) {
+          root.textContent = "[lvis] entry 조회 실패: " + (err?.message ?? String(err));
+          return;
         }
         if (!entry) {
-          root.textContent = lastErr
-            ? "[lvis] entry 조회 실패: " + (lastErr?.message ?? String(lastErr))
-            : "[lvis] plugin-ui-shell: entry URL을 찾을 수 없습니다.";
+          root.textContent = "[lvis] plugin-ui-shell: entry URL을 찾을 수 없습니다.";
           return;
         }
         try {

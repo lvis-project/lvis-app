@@ -10,12 +10,12 @@
  *
  * pluginId is NOT carried in the webview src query string. Instead, the
  * host renderer registers (webContents.id → pluginId) with main on the
- * `dom-ready` event (not `did-attach` — Electron requires dom-ready before
- * getWebContentsId() is callable). Main
- * resolves pluginId from `event.sender.id` on every plugin IPC. This
- * removes the spoofing vector from history.pushState / re-navigation /
- * URL crafting and lets us drop `entry` from the URL entirely (the shell
- * fetches it via `lvisPlugin.getEntryUrl()`).
+ * `did-attach` event. The `did-attach` event fires when the webview is
+ * attached to the DOM — before any content loads — and carries webContentsId
+ * directly on the event object (no getWebContentsId() call needed). After
+ * registration succeeds, `src` is set on the webview so the shell loads only
+ * once the binding is in place. Main resolves get-entry-url as a synchronous
+ * lookup — no wait queue, no retry, no timeout (#447).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
@@ -105,6 +105,11 @@ export function PluginUiHostView({
 }) {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Shell src is empty until did-attach + registration complete for the current
+  // view. Derived at render time — "" for any view key that hasn't registered.
+  const [shellSrcBinding, setShellSrcBinding] = useState<{ viewKey: string; url: string } | null>(null);
+  const currentViewKey = view ? `${view.pluginId}:${view.extension.id}` : "";
+  const shellSrc = shellSrcBinding?.viewKey === currentViewKey ? shellSrcBinding.url : "";
 
   // Electron <webview> is a custom element — React's synthetic onLoad /
   // onError do not fire. Wire native DOM listeners via the ref callback
@@ -115,11 +120,7 @@ export function PluginUiHostView({
     setErrorText("Plugin webview 로딩 실패.");
   });
 
-  // On dom-ready, register the (webContents.id → pluginId, entryUrl)
-  // mapping with main. dom-ready is required — Electron throws if
-  // getWebContentsId() is called before the guest renderer is fully
-  // initialized (did-attach fires earlier and is insufficient).
-  const onDomReadyRef = useRef<(() => void) | null>(null);
+  const onDidAttachRef = useRef<((e: Event) => void) | null>(null);
   const webviewRef = useRef<Electron.WebviewTag | null>(null);
 
   const handleWebviewRef = useCallback((node: Electron.WebviewTag | null) => {
@@ -127,51 +128,49 @@ export function PluginUiHostView({
     if (prev) {
       prev.removeEventListener("did-finish-load", onFinishRef.current);
       prev.removeEventListener("did-fail-load", onFailRef.current);
-      const onDomReady = onDomReadyRef.current;
-      if (onDomReady) prev.removeEventListener("dom-ready", onDomReady);
+      const onDidAttach = onDidAttachRef.current;
+      if (onDidAttach) prev.removeEventListener("did-attach", onDidAttach);
     }
     webviewRef.current = node;
     if (node) {
       node.addEventListener("did-finish-load", onFinishRef.current);
       node.addEventListener("did-fail-load", onFailRef.current);
-      const onDomReady = () => {
-        const wcId = node.getWebContentsId();
-        const pluginId = view?.pluginId;
-        const entryUrl = view?.entryUrl;
-        if (typeof wcId !== "number" || !pluginId || !entryUrl) return;
-        const api = (window as unknown as { lvisApi?: { registerPluginWebview?: (p: { webContentsId: number; pluginId: string; entryUrl: string }) => Promise<unknown> } }).lvisApi;
-        void api?.registerPluginWebview?.({ webContentsId: wcId, pluginId, entryUrl });
+      const onDidAttach = (e: Event) => {
+        const wcId = (e as unknown as { webContentsId?: number }).webContentsId;
+        if (typeof wcId !== "number" || !view?.pluginId || !view?.entryUrl) return;
+        const { shellUrl: url } = readPluginAssetUrls();
+        if (!url) return;
+        const vk = `${view.pluginId}:${view.extension.id}`;
+        const api = (window as unknown as {
+          lvisApi?: {
+            registerPluginWebview?: (p: {
+              webContentsId: number;
+              pluginId: string;
+              entryUrl: string;
+            }) => Promise<{ ok: boolean; error?: string } | null | undefined>;
+          };
+        }).lvisApi;
+        void (async () => {
+          const result = await api?.registerPluginWebview?.({
+            webContentsId: wcId,
+            pluginId: view.pluginId,
+            entryUrl: view.entryUrl!,
+          });
+          if (result && (result as { ok: boolean }).ok === false) {
+            setErrorText(`Plugin webview 등록 실패: ${(result as { error?: string }).error ?? "unknown"}`);
+            setLoading(false);
+            return;
+          }
+          setShellSrcBinding({ viewKey: vk, url });
+        })();
       };
-      onDomReadyRef.current = onDomReady;
-      node.addEventListener("dom-ready", onDomReady);
-
-      // Race guard: the webview's initial load from `src` can complete before
-      // React's ref callback runs (local file:// URL loads in microseconds).
-      // If `did-finish-load` already fired before we attached the listener,
-      // `loading` would stay `true` forever. Check eagerly and clear if done.
-      //
-      // Defer to dom-ready: Electron throws "WebView must be attached to the
-      // DOM and the dom-ready event emitted before this method can be called"
-      // if `isLoading()` runs in a window where the host has DOM-attached the
-      // element but the guest's dom-ready event has not yet fired. React 18's
-      // StrictMode mount/unmount/remount and fast ref re-attach (e.g. after
-      // a sidebar tab switch) can land inside this window. The throw bubbles
-      // up to React's ErrorBoundary as "앱 오류가 발생했습니다" with the
-      // entire plugin view replaced by the fallback. Wrap in try/catch so the
-      // eager-clear stays best-effort: if we win the race we clear loading;
-      // if we lose it the `did-finish-load` listener registered above clears
-      // it shortly after.
-      try {
-        if (typeof node.isLoading === "function" && !node.isLoading()) {
-          setLoading(false);
-        }
-      } catch {
-        // Guest not yet dom-ready — `did-finish-load` listener will clear.
-      }
+      onDidAttachRef.current = onDidAttach;
+      node.addEventListener("did-attach", onDidAttach);
     }
-  }, [view?.pluginId, view?.entryUrl]);
+  }, [view?.pluginId, view?.entryUrl, view?.extension.id]);
 
   useEffect(() => {
+    setShellSrcBinding(null);
     if (!view) {
       setErrorText("플러그인 뷰를 찾을 수 없습니다.");
       setLoading(false);
@@ -228,7 +227,7 @@ export function PluginUiHostView({
           key={`${view.pluginId}:${view.extension.id}`}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={handleWebviewRef as any}
-          src={shellUrl}
+          src={shellSrc}
           partition={partition}
           preload={preloadUrl}
           webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
