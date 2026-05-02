@@ -381,7 +381,16 @@ ${input}`;
     if (typeof sessionId !== "string" || !/^[a-zA-Z0-9_\-]+$/.test(sessionId)) {
       return { ok: false, messages: [] };
     }
-    const loaded = memoryManager.loadSession(sessionId);
+    // loadSession() reads the session JSONL via readFileSync; IO/parse errors
+    // propagate as throws. Catch them here so a corrupted session file or
+    // missing path doesn't reject the IPC call (which would surface as a
+    // renderer-side rejection rather than an empty result).
+    let loaded: unknown;
+    try {
+      loaded = memoryManager.loadSession(sessionId);
+    } catch {
+      return { ok: false, messages: [] };
+    }
     if (!Array.isArray(loaded)) return { ok: false, messages: [] };
     const raw = loaded.filter(
       (m): m is GenericMessage =>

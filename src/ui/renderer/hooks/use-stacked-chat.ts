@@ -122,9 +122,17 @@ export function useStackedChat(
     [api, currentSessionId, loadSessionEntries],
   );
 
-  // Initial load: today (0) + yesterday (1)
+  // Initial load: today (0) + yesterday (1).
+  // When `enabled` flips false → reset internal state so a later re-enable
+  // starts from a clean slate (no stale sessions, no stuck reachedEnd).
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setHistoricalSessions([]);
+      setDaysLoaded(INITIAL_DAYS_BACK);
+      setReachedEnd(false);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     debugLog("mount — loading initial historical sessions (today + yesterday)");
     void (async () => {

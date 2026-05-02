@@ -473,10 +473,12 @@ export function StackedChatView({
   // Compute today's date key for the active session's day separator
   const todayKey = new Date().toISOString().split("T")[0] as string;
 
-  // Group historical sessions by day
+  // Group historical sessions by day. Skip sessions with no entries so we
+  // never emit a DaySeparator for a day that has nothing to show.
   const historicalByDay = useMemo(() => {
     const map = new Map<string, StackedSession[]>();
     for (const s of historicalSessions) {
+      if (s.entries.length === 0) continue;
       const existing = map.get(s.dayKey);
       if (existing) {
         existing.push(s);
@@ -484,7 +486,6 @@ export function StackedChatView({
         map.set(s.dayKey, [s]);
       }
     }
-    // Sort by day ascending (oldest first)
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [historicalSessions]);
 
