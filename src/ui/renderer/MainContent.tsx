@@ -6,6 +6,7 @@ import { ChatView } from "./ChatView.js";
 import { StackedChatView } from "./components/StackedChatView.js";
 import { useStackedChat } from "./hooks/use-stacked-chat.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
+import type { InstallPhase } from "./hooks/use-plugin-marketplace.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
@@ -50,7 +51,7 @@ export interface MainContentProps {
   commandActions: QuickAction[];
   commandPopoverOpen: boolean;
   onCommandPopoverOpenChange: (open: boolean) => void;
-  installingPluginIds?: ReadonlySet<string>;
+  installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
   // plugin view
@@ -100,7 +101,7 @@ function HomeChatPane(props: MainContentProps) {
           commandActions={props.commandActions}
           commandPopoverOpen={props.commandPopoverOpen}
           onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
-          installingPluginIds={props.installingPluginIds}
+          installingPlugins={props.installingPlugins}
           onOpenMarketplace={props.onOpenMarketplace}
           marketplaceUrlReady={props.marketplaceUrlReady}
           onRetryEffort={props.onRetryEffort}
@@ -133,7 +134,7 @@ function HomeChatPane(props: MainContentProps) {
         commandActions={props.commandActions}
         commandPopoverOpen={props.commandPopoverOpen}
         onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
-        installingPluginIds={props.installingPluginIds}
+        installingPlugins={props.installingPlugins}
         onOpenMarketplace={props.onOpenMarketplace}
         marketplaceUrlReady={props.marketplaceUrlReady}
       />
