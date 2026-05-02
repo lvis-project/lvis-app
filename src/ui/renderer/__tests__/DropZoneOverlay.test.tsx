@@ -4,7 +4,7 @@
  * Verifies:
  * 1. Overlay is hidden initially.
  * 2. Overlay appears on dragenter with Files type.
- * 3. On drop with file paths, api.pageindexScanPaths is called with correct paths.
+ * 3. On drop with file paths, api.fileScanPaths is called with correct paths.
  * 4. Toast message is shown after successful scan result.
  */
 import "../../../../test/renderer/setup.js";
@@ -14,11 +14,11 @@ import { DropZoneOverlay } from "../components/DropZoneOverlay.js";
 
 // ─── Mock window.lvisApi ────────────────────────────────────────────────────
 
-const mockPageindexScanPaths = vi.fn(async (_paths: string[]) => ({ ok: true, indexed: 2, failed: 0 }));
+const mockFileScanPaths = vi.fn(async (_paths: string[]) => ({ ok: true, indexed: 2, failed: 0 }));
 
 beforeEach(() => {
   Object.defineProperty(window, "lvisApi", {
-    value: { pageindexScanPaths: mockPageindexScanPaths },
+    value: { fileScanPaths: mockFileScanPaths },
     writable: true,
     configurable: true,
   });
@@ -58,7 +58,7 @@ describe("DropZoneOverlay", () => {
     expect(getByText("파일을 드롭하여 인덱싱")).toBeDefined();
   });
 
-  it("calls pageindexScanPaths with file paths on drop", async () => {
+  it("calls fileScanPaths with file paths on drop", async () => {
     render(<DropZoneOverlay />);
     act(() => { fireDragEvent("dragenter"); });
 
@@ -77,7 +77,7 @@ describe("DropZoneOverlay", () => {
       await Promise.resolve();
     });
 
-    expect(mockPageindexScanPaths).toHaveBeenCalledWith(["/tmp/test.pdf"]);
+    expect(mockFileScanPaths).toHaveBeenCalledWith(["/tmp/test.pdf"]);
   });
 
   it("shows success toast after scan result", async () => {
