@@ -506,6 +506,106 @@ describe("saveSessionMetadata — summaryPreamble truncation invariant", () => {
   });
 });
 
+// ── 5f. isValidSessionId helper (3rd-pass: unified helper) ───────────────────
+
+describe("isValidSessionId helper — valid/invalid boundaries", () => {
+  // Access the helper indirectly via normalizeSessionMetadata by using loadSessionMetadata
+  // with injected parentSessionId values.
+
+  it("accepts a standard UUID-format parentSessionId", async () => {
+    const sessionsDir = join(dir, "sessions");
+    await mm.saveSession(SESSION_A, [{ role: "user", content: "msg" }]);
+    writeFileSync(
+      join(sessionsDir, `${SESSION_A}.meta.json`),
+      JSON.stringify({ parentSessionId: SESSION_B }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(SESSION_A);
+    expect(meta!.parentSessionId).toBe(SESSION_B);
+  });
+
+  it("accepts alphanumeric-plus-dash ID (non-UUID-shaped)", async () => {
+    const sessionsDir = join(dir, "sessions");
+    await mm.saveSession(SESSION_A, [{ role: "user", content: "msg" }]);
+    writeFileSync(
+      join(sessionsDir, `${SESSION_A}.meta.json`),
+      JSON.stringify({ parentSessionId: "test-chain-000-aaaa-bbbb" }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(SESSION_A);
+    expect(meta!.parentSessionId).toBe("test-chain-000-aaaa-bbbb");
+  });
+
+  it("rejects parentSessionId with slash (path-traversal)", async () => {
+    const sessionsDir = join(dir, "sessions");
+    await mm.saveSession(SESSION_A, [{ role: "user", content: "msg" }]);
+    writeFileSync(
+      join(sessionsDir, `${SESSION_A}.meta.json`),
+      JSON.stringify({ parentSessionId: "../evil" }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(SESSION_A);
+    expect(meta!.parentSessionId).toBeUndefined();
+  });
+
+  it("rejects parentSessionId with space", async () => {
+    const sessionsDir = join(dir, "sessions");
+    await mm.saveSession(SESSION_B, [{ role: "user", content: "msg" }]);
+    writeFileSync(
+      join(sessionsDir, `${SESSION_B}.meta.json`),
+      JSON.stringify({ parentSessionId: "session id" }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(SESSION_B);
+    expect(meta!.parentSessionId).toBeUndefined();
+  });
+
+  it("rejects empty string parentSessionId", async () => {
+    const sessionsDir = join(dir, "sessions");
+    await mm.saveSession(SESSION_C, [{ role: "user", content: "msg" }]);
+    writeFileSync(
+      join(sessionsDir, `${SESSION_C}.meta.json`),
+      JSON.stringify({ parentSessionId: "" }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(SESSION_C);
+    expect(meta!.parentSessionId).toBeUndefined();
+  });
+});
+
+// ── 5g. normalizeSessionMetadata read-side preamble truncation ────────────────
+
+describe("normalizeSessionMetadata — read-side summaryPreamble truncation (defense-in-depth)", () => {
+  it("truncates summaryPreamble exceeding 8000 chars on read (corrupted file)", async () => {
+    const sessionId = SESSION_A;
+    await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
+    const sessionsDir = join(dir, "sessions");
+    // Write a meta file with an overlong preamble directly — simulates a corrupted/externally-written file
+    const overlong = "x".repeat(10_000);
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.meta.json`),
+      JSON.stringify({ summaryPreamble: overlong }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(sessionId);
+    expect(meta!.summaryPreamble!.length).toBe(8_000);
+  });
+
+  it("does not alter preamble at exactly 8000 chars on read", async () => {
+    const sessionId = SESSION_B;
+    await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
+    const sessionsDir = join(dir, "sessions");
+    const exact = "y".repeat(8_000);
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.meta.json`),
+      JSON.stringify({ summaryPreamble: exact }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(sessionId);
+    expect(meta!.summaryPreamble!.length).toBe(8_000);
+  });
+});
+
 // ── 5. Round-trip ─────────────────────────────────────────────────────────────
 
 describe("round-trip — write then read preserves all new fields", () => {

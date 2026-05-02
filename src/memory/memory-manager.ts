@@ -133,6 +133,20 @@ const MAX_SESSION_FILE_BYTES = 5_000_000;
 /** Max length of summaryPreamble stored in session metadata (~2000 tokens). */
 const MAX_SUMMARY_PREAMBLE_CHARS = 8_000;
 
+/**
+ * Regex for session IDs used in file paths.
+ * Allows alphanumerics, underscores, and hyphens — rejects path-traversal chars.
+ */
+const SESSION_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
+
+/**
+ * Returns true when `id` is a valid session ID safe to use as a filename component.
+ * Single source of truth for session ID validation across all call sites.
+ */
+function isValidSessionId(id: unknown): id is string {
+  return typeof id === "string" && SESSION_ID_REGEX.test(id);
+}
+
 /** Valid trigger values for strict narrowing. */
 const VALID_CHECKPOINT_TRIGGERS = new Set<CheckpointTrigger>([
   "hard-token",
@@ -177,13 +191,15 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
     ? (checkpointsRaw.map(normalizeCheckpoint).filter((c): c is Checkpoint => c !== null))
     : undefined;
 
+  const rawPreamble = typeof raw.summaryPreamble === "string" ? raw.summaryPreamble : undefined;
   return {
     routineId: typeof raw.routineId === "string" ? raw.routineId : undefined,
     routineTitle: typeof raw.routineTitle === "string" ? raw.routineTitle : undefined,
-    parentSessionId: typeof raw.parentSessionId === "string" && /^[a-zA-Z0-9_\-]+$/.test(raw.parentSessionId)
-      ? raw.parentSessionId
+    parentSessionId: isValidSessionId(raw.parentSessionId) ? raw.parentSessionId : undefined,
+    // Defense-in-depth: cap on read in case file was written without truncation.
+    summaryPreamble: rawPreamble !== undefined
+      ? rawPreamble.slice(0, MAX_SUMMARY_PREAMBLE_CHARS)
       : undefined,
-    summaryPreamble: typeof raw.summaryPreamble === "string" ? raw.summaryPreamble : undefined,
     checkpoints: checkpoints && checkpoints.length > 0 ? checkpoints : undefined,
   };
 }
@@ -467,7 +483,7 @@ export class MemoryManager {
    */
   async getCheckpointChain(sessionId: string): Promise<SessionMetadata[]> {
     // Reject caller-provided IDs that contain path-traversal characters before any file I/O.
-    if (!/^[a-zA-Z0-9_\-]+$/.test(sessionId)) {
+    if (!isValidSessionId(sessionId)) {
       log.warn({ sessionId }, "unsafe caller-provided sessionId rejected in getCheckpointChain");
       return [];
     }
@@ -485,7 +501,7 @@ export class MemoryManager {
       if (meta === null) break;
       chain.push(meta);
       const nextId = meta.parentSessionId;
-      if (nextId !== undefined && !/^[a-zA-Z0-9_\-]+$/.test(nextId)) {
+      if (nextId !== undefined && !isValidSessionId(nextId)) {
         log.warn({ sessionId: currentId, parentSessionId: nextId }, "unsafe parentSessionId rejected — stopping traversal");
         break;
       }
