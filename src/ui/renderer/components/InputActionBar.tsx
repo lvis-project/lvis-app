@@ -87,7 +87,7 @@ export function InputActionBar({
   return (
     <div data-testid="input-action-bar" className="flex items-center justify-between gap-2 px-3 pt-2">
       {/* Leading cluster */}
-      <div className="flex items-center gap-2" data-testid="iab-leading">
+      <div className="flex items-center gap-0.5" data-testid="iab-leading">
         <TokenProgressRing used={usedTokens} budget={contextBudget} />
         <Tooltip>
           <TooltipTrigger asChild>
@@ -120,12 +120,12 @@ export function InputActionBar({
       </div>
 
       {/* Trailing cluster */}
-      <div className="flex items-center gap-2" data-testid="iab-trailing">
+      <div className="flex items-center gap-1 pr-2" data-testid="iab-trailing">
         {/* Single unified attach button — images, files, anything except the
             deny-listed dangerous extensions. The chip count badge lives on
             the inline composer chip (n/5), not here. */}
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
           onClick={() => void onAttach()}
           disabled={attachDisabled}
@@ -143,7 +143,7 @@ export function InputActionBar({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 gap-1 text-[11px]"
+              className="h-7 gap-1 text-[11px] bg-input-bar"
               title="역할 프리셋 선택"
             >
               <User className="h-3 w-3" />
@@ -160,18 +160,19 @@ export function InputActionBar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Thinking checkbox */}
-        {vendorSupportsThinking && (
-          <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5"
-              checked={enableThinkingChat}
-              onChange={(e) => void onToggleThinking(e.target.checked)}
-            />
-            <span className="text-[11px]">Thinking</span>
-          </label>
-        )}
+        {/* Thinking checkbox — UI-only for now (vendorSupports gate removed
+            so the toggle is always visible regardless of LLM model). Toggle
+            wires through to existing onToggleThinking; on vendors that
+            don't support thinking the engine simply ignores the flag. */}
+        <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 appearance-none rounded-sm border-0 bg-white checked:appearance-auto checked:accent-[#FD312E]"
+            checked={enableThinkingChat}
+            onChange={(e) => void onToggleThinking(e.target.checked)}
+          />
+          <span className="text-[11px]">Thinking</span>
+        </label>
       </div>
     </div>
   );

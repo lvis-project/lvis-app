@@ -83,8 +83,12 @@ describe("InputActionBar (post indexer-removal)", () => {
     expect(getByText("Thinking")).toBeTruthy();
   });
 
-  it("does not render thinking checkbox when vendorSupportsThinking=false", () => {
-    const { queryByText } = renderBar({ vendorSupportsThinking: false });
-    expect(queryByText("Thinking")).toBeNull();
+  it("renders thinking checkbox even when vendor does not support thinking — engine ignores the flag", () => {
+    // Previously gated by `vendorSupportsThinking`. The toggle is now
+    // always visible: vendors that don't support thinking simply ignore
+    // the flag at the engine layer, but the UI surface is consistent
+    // across LLM models.
+    const { getByText } = renderBar({ vendorSupportsThinking: false });
+    expect(getByText("Thinking")).toBeTruthy();
   });
 });
