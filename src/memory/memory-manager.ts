@@ -180,7 +180,9 @@ function normalizeSessionMetadata(raw: Record<string, unknown>): SessionMetadata
   return {
     routineId: typeof raw.routineId === "string" ? raw.routineId : undefined,
     routineTitle: typeof raw.routineTitle === "string" ? raw.routineTitle : undefined,
-    parentSessionId: typeof raw.parentSessionId === "string" ? raw.parentSessionId : undefined,
+    parentSessionId: typeof raw.parentSessionId === "string" && /^[a-zA-Z0-9_\-]+$/.test(raw.parentSessionId)
+      ? raw.parentSessionId
+      : undefined,
     summaryPreamble: typeof raw.summaryPreamble === "string" ? raw.summaryPreamble : undefined,
     checkpoints: checkpoints && checkpoints.length > 0 ? checkpoints : undefined,
   };
@@ -464,6 +466,11 @@ export class MemoryManager {
    * Guards against cycles by tracking visited IDs.
    */
   async getCheckpointChain(sessionId: string): Promise<SessionMetadata[]> {
+    // Reject caller-provided IDs that contain path-traversal characters before any file I/O.
+    if (!/^[a-zA-Z0-9_\-]+$/.test(sessionId)) {
+      log.warn({ sessionId }, "unsafe caller-provided sessionId rejected in getCheckpointChain");
+      return [];
+    }
     const chain: SessionMetadata[] = [];
     const visited = new Set<string>();
     let currentId: string | undefined = sessionId;

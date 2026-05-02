@@ -308,7 +308,7 @@ describe("normalizeCheckpoint range validation", () => {
     const sessionId = SESSION_C;
     await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
     const sessionsDir = join(dir, "sessions");
-    // JSON.stringify(NaN) produces "null" — write raw JSON to embed NaN-equivalent
+    // Test JSON-encoded null (representing NaN that was JSON.stringify'd, since JSON has no NaN literal)
     writeFileSync(
       join(sessionsDir, `${sessionId}.meta.json`),
       JSON.stringify({
@@ -414,9 +414,10 @@ describe("getCheckpointChain — O(n) order + path traversal guard", () => {
       "utf-8",
     );
     const chain = await mm.getCheckpointChain(SESSION_A);
-    // SESSION_A itself is included, but traversal stops — no external file read attempted
+    // SESSION_A itself is included, but traversal stops — no external file read attempted.
+    // normalizeSessionMetadata drops the malicious parentSessionId so it is undefined here.
     expect(chain).toHaveLength(1);
-    expect(chain[0].parentSessionId).toBe("../../../etc/passwd");
+    expect(chain[0].parentSessionId).toBeUndefined();
   });
 
   it("stops traversal when parentSessionId contains a slash-only segment", async () => {
@@ -429,6 +430,45 @@ describe("getCheckpointChain — O(n) order + path traversal guard", () => {
     );
     const chain = await mm.getCheckpointChain(SESSION_B);
     expect(chain).toHaveLength(1);
+  });
+
+  it("returns empty array when caller-provided sessionId contains path-traversal characters", async () => {
+    // Fix 1: caller-provided sessionId must be validated before any file I/O.
+    const chain = await mm.getCheckpointChain("../etc/passwd");
+    expect(chain).toEqual([]);
+  });
+});
+
+// ── 5e. normalizeSessionMetadata parentSessionId validation ──────────────────
+
+describe("normalizeSessionMetadata — parentSessionId regex validation", () => {
+  it("drops parentSessionId with path-traversal characters during normalize", async () => {
+    const sessionId = SESSION_A;
+    await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
+    const sessionsDir = join(dir, "sessions");
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.meta.json`),
+      JSON.stringify({ routineId: "r1", parentSessionId: "../../../etc/passwd" }),
+      "utf-8",
+    );
+    // normalizeSessionMetadata must drop the invalid parentSessionId
+    const meta = mm.loadSessionMetadata(sessionId);
+    expect(meta).not.toBeNull();
+    expect(meta!.routineId).toBe("r1");
+    expect(meta!.parentSessionId).toBeUndefined();
+  });
+
+  it("preserves a valid parentSessionId through normalize", async () => {
+    const sessionId = SESSION_B;
+    await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
+    const sessionsDir = join(dir, "sessions");
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.meta.json`),
+      JSON.stringify({ parentSessionId: SESSION_A }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(sessionId);
+    expect(meta!.parentSessionId).toBe(SESSION_A);
   });
 });
 
