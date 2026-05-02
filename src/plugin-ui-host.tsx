@@ -235,7 +235,7 @@ export function PluginUiHostView({
           key={`${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}`}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={handleWebviewRef as any}
-          src={shellSrc}
+          src={shellSrc || undefined}
           partition={partition}
           preload={preloadUrl}
           webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
