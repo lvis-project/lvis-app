@@ -1175,9 +1175,10 @@ export class ConversationLoop {
       // 마지막 체크포인트 이후 메시지만 요약
       const messagesSinceCheckpoint = messages.slice(this.lastCheckpointMessageIndex);
 
+      const userModel = llmSettings.vendors[llmSettings.provider].model;
       const summary = decision.shouldSkipSummary
         ? null
-        : await generateSummary(this.provider, messagesSinceCheckpoint);
+        : await generateSummary(this.provider, messagesSinceCheckpoint, { model: userModel });
 
       // 현재 세션 메타데이터에 checkpoint 기록
       const existingMeta = this.deps.memoryManager.loadSessionMetadata(this.sessionId) ?? {};
@@ -1207,15 +1208,24 @@ export class ConversationLoop {
 
   /**
    * 부모 세션을 기반으로 새 child session을 생성하고 ID를 반환.
-   * child session의 metadata에 parentSessionId와 summaryPreamble을 설정.
+   * child session의 metadata에 parentSessionId, summaryPreamble,
+   * 그리고 부모의 routineId/routineTitle을 propagate한다.
    */
   private async createChildSession(parentSessionId: string, summary: string | null): Promise<string> {
     const childId = crypto.randomUUID();
     await this.deps.memoryManager.saveSession(childId, []);
 
+    // Propagate routine context from parent so the child session remains
+    // associated with the same routine (if any).
+    const parentMeta = this.deps.memoryManager.loadSessionMetadata(parentSessionId) ?? {};
+    const routineFields: { routineId?: string; routineTitle?: string } = {};
+    if (parentMeta.routineId) routineFields.routineId = parentMeta.routineId;
+    if (parentMeta.routineTitle) routineFields.routineTitle = parentMeta.routineTitle;
+
+    const baseMeta = { parentSessionId, ...routineFields };
     const childMeta = summary
-      ? this.deps.memoryManager.setSummaryPreamble({ parentSessionId }, summary)
-      : { parentSessionId };
+      ? this.deps.memoryManager.setSummaryPreamble(baseMeta, summary)
+      : baseMeta;
     await this.deps.memoryManager.saveSessionMetadata(childId, childMeta);
 
     return childId;
@@ -1228,6 +1238,8 @@ export class ConversationLoop {
    * - cumulativeUsage 리셋
    * - sessionStartedAt 리셋
    * - lastCheckpointMessageIndex 리셋
+   * - tracer 리셋 (session-scoped observability state)
+   * - sessionPluginExpansions 리셋
    * - summaryPreamble 주입
    */
   private rotateActive(childSessionId: string, summary: string | null): void {
@@ -1236,6 +1248,9 @@ export class ConversationLoop {
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionStartedAt = Date.now();
     this.lastCheckpointMessageIndex = 0;
+    // Reset all session-scoped helpers so the new session starts clean.
+    this.tracer = createTracer(childSessionId);
+    this.sessionPluginExpansions = 0;
     // rolling summary preamble 주입 — 다음 턴부터 LLM context에 포함됨
     this.deps.systemPromptBuilder.setSummaryPreamble?.(summary);
   }

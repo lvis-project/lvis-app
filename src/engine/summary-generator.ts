@@ -63,12 +63,13 @@ export async function generateSummary(
 }
 
 /**
- * Provider의 현재 모델명 추론.
- * LLMProvider 인터페이스에는 getModel()이 없으므로 vendor 기본값 사용.
- * ConversationLoop.generateText()와 동일한 패턴.
+ * Provider의 vendor로 기본 모델명 결정.
+ * options.model 이 제공된 경우 이 함수는 호출되지 않는다.
+ * 호출자(ConversationLoop)는 항상 user-configured model 을 options.model 로 전달해야 하며,
+ * 이 함수는 model 이 생략된 테스트/하위 호환 경로에서만 실행된다.
  */
 async function resolveModel(llm: LLMProvider): Promise<string> {
-  // LLMProvider.vendor로 기본 모델 선택
+  // LLMProvider.vendor로 vendor 기본 모델 선택 (LLM_DEFAULT_MODELS 정의 기준)
   const { LLM_DEFAULT_MODELS } = await import("./llm/types.js");
   return LLM_DEFAULT_MODELS[llm.vendor] ?? "claude-sonnet-4-6";
 }
