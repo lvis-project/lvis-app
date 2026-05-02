@@ -662,12 +662,13 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
       ? (themeRaw as ThemePreference)
       : "system";
 
-  // Migration: prior to the LG brand split, "purple" was both the LG
-  // identity (warm-grey + lilac) and a generic accent. Existing users
-  // on "purple" picked it because it was the LG default; map them to
-  // the new "lg" theme. Future users who want a pure purple accent can
-  // re-select "purple" explicitly.
-  const chatRaw = obj.chatTheme === "purple" ? "lg" : obj.chatTheme;
+  // No migration — `normalizeAppearance` runs on every settings read,
+  // so coercing "purple" → "lg" here would prevent users from ever
+  // picking pure-purple again (every load would flip their explicit
+  // choice back to "lg"). The cohort affected is small (only PR #476's
+  // ~1-day window where "purple" was the LG default), so we accept a
+  // one-time manual repick over a buggy auto-migration.
+  const chatRaw = obj.chatTheme;
   const chatTheme: ChatThemePreference =
     typeof chatRaw === "string" && (VALID_CHAT_THEMES as readonly string[]).includes(chatRaw)
       ? (chatRaw as ChatThemePreference)
