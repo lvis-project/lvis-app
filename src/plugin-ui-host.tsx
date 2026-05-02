@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
+import { pluginPartitionName } from "./shared/plugin-partition.js";
 
 export type PluginUiExtensionView = {
   pluginId: string;
@@ -63,24 +64,10 @@ function getPluginViewLabel(item: PluginUiExtensionView): string {
   return item.extension.displayName?.trim() || item.extension.title || item.pluginId;
 }
 
-/**
- * Stable, collision-resistant per-plugin partition slug. Two pluginIds
- * that normalize to the same `[a-z0-9-]` slug would otherwise share the
- * `persist:plugin:` storage silo. Hash the raw pluginId so plugin authors
- * cannot pre-meditate a slug collision via marketplace upload.
- *
- * 32-bit FNV-1a → 8 hex chars. Synchronous (renderer can't use SubtleCrypto
- * inline) and good enough for collision resistance on a per-user plugin
- * set < ~10k.
- */
-function pluginPartitionHash(pluginId: string): string {
-  let h = 2166136261;
-  for (let i = 0; i < pluginId.length; i++) {
-    h ^= pluginId.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
+// Partition naming moved to `shared/plugin-partition.ts` so main + renderer
+// stay byte-identical (#498). Drift between the two would silently route a
+// webview to a partition the main process never policy-registered, killing
+// the lvisPlugin contextBridge.
 
 /**
  * Read the deterministic plugin shell + preload URLs from `window.lvisApi`.
@@ -219,7 +206,7 @@ export function PluginUiHostView({
         </div>
       );
     } else {
-      const partition = `persist:plugin:${pluginPartitionHash(view.pluginId)}`;
+      const partition = pluginPartitionName(view.pluginId);
       // `key={view.pluginId}` 가 결정적. Electron `<webview>` 는 처음
       // attach 시점에만 partition / src 를 바인딩하고 이후 prop 변경을
       // 완전히 적용하지 못한다 (mojo: "Message N rejected by interface

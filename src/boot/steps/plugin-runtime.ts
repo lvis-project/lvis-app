@@ -17,20 +17,8 @@ import { app } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
-
-/**
- * Plugin partition hash — must mirror the renderer's `pluginPartitionHash`
- * in `plugin-ui-host.tsx` so main and renderer agree on the partition name
- * for each plugin's webview. 32-bit FNV-1a → 8 hex chars.
- */
-function pluginPartitionHashFor(pluginId: string): string {
-  let h = 2166136261;
-  for (let i = 0; i < pluginId.length; i++) {
-    h ^= pluginId.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
+import { pluginPartitionName } from "../../shared/plugin-partition.js";
+import { onEvent as onHostEvent } from "../types.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
 import { PluginRuntime } from "../../plugins/runtime.js";
 import { startPluginDevWatcher } from "../../plugins/dev-watcher.js";
@@ -977,9 +965,20 @@ export async function initPluginRuntime(
   // by walking the loaded-plugin set sidesteps the partition-name read
   // entirely.
   for (const pluginId of pluginRuntime.listPluginIds()) {
-    const partitionName = `persist:plugin:${pluginPartitionHashFor(pluginId)}`;
-    installPluginPartitionPolicy(partitionName);
+    installPluginPartitionPolicy(pluginPartitionName(pluginId));
   }
+  // Cover plugins added AFTER startAll() — deep-link install
+  // (`lvis://install/<slug>` → `addPlugin`), dev hot-reload watcher
+  // (LVIS_DEV_RELOAD=1), Settings sideload. The boot loop above only sees
+  // `startAll`-era plugins; the attach-time hook in main.ts is dead code
+  // for these (it reads `contents.session.partition` which is undocumented
+  // and returns `undefined`), so the partition policy must be installed at
+  // plugin-install time.
+  onHostEvent("plugin.installed", (data) => {
+    const pluginId = (data as { pluginId?: string } | undefined)?.pluginId;
+    if (typeof pluginId !== "string") return;
+    installPluginPartitionPolicy(pluginPartitionName(pluginId));
+  });
 
   // 선언형 startupTools 자동 실행
   runManifestStartupTools(pluginRuntime);
