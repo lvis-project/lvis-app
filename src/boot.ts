@@ -496,7 +496,10 @@ export async function bootstrap(
     });
   })();
 
-  log.info("boot: ready (%d tools, %d plugins, %d mcp)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length);
+  // Backlog #3: surface degraded-validator state at boot-ready so it's
+  // prominent in the operator log alongside the tool/plugin/mcp counts.
+  const validationStatus = pluginRuntime.isValidatorDegraded() ? " validation:degraded" : "";
+  log.info("boot: ready (%d tools, %d plugins, %d mcp%s)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length, validationStatus);
 
   // Sprint 4.C — starred store + D6 feedback store.
   const starredStore = new StarredStore();

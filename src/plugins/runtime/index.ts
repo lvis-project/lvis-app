@@ -159,7 +159,17 @@ export class PluginRuntime {
     if (this.manifestValidatorLoaded) return this.manifestValidator;
     this.manifestValidatorLoaded = true;
     this.manifestValidator = await buildManifestValidator();
+    // Backlog #3: emit one-per-boot audit event so operators can detect that
+    // all plugins loaded this session were validated under degraded mode.
+    if (!this.manifestValidator) {
+      this.auditLog?.("warn", "plugin_validator_degraded: AJV schema unavailable — all plugins this boot use hand-rolled checks only");
+    }
     return this.manifestValidator;
+  }
+
+  /** Returns true when AJV schema validation is unavailable this boot (degraded mode). */
+  isValidatorDegraded(): boolean {
+    return this.manifestValidatorLoaded && this.manifestValidator === null;
   }
 
   private async readManifest(path: string): Promise<PluginManifest> {
