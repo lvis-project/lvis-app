@@ -136,8 +136,11 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(reg.plugins).toHaveLength(0);
   });
 
-  it("promotes an existing dev-link entry to installSource='local-dev'", async () => {
-    // Pre-populate registry as if dev:link had registered the plugin.
+  it("promotes an existing legacy dev-link entry (rewritten to local-dev on read) and re-stamps installSource='local-dev'", async () => {
+    // Pre-populate registry with a legacy dev-link entry. readPluginRegistry
+    // rewrites it to "local-dev" on read; installLocal then re-stamps the
+    // entry, leaving installSource on "local-dev" (its declared policy is
+    // not admin).
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -235,9 +238,11 @@ describe("PluginMarketplaceService.installLocal", () => {
   });
 
   it("mirrors approvedPluginAccess on UPDATE (existing entry path) — not just on insert", async () => {
-    // Dev re-install: a pre-existing dev-link entry is promoted into a real
-    // local-dev install AND approvedPluginAccess must be overwritten so a
-    // later cross-plugin event subscribe is granted.
+    // Dev re-install: a pre-existing local-dev entry is overwritten by the
+    // new installLocal call AND approvedPluginAccess must be overwritten so
+    // a later cross-plugin event subscribe is granted. Using "local-dev"
+    // here (rather than the now-removed "dev-link") since both produce the
+    // same code path after the read-time migration.
     const accessSpec = {
       plugins: [{ pluginId: "ms-graph", events: ["email.new"] }],
     };
@@ -251,7 +256,7 @@ describe("PluginMarketplaceService.installLocal", () => {
               id: "test-plugin",
               manifestPath: "test-plugin/plugin.json",
               enabled: true,
-              installSource: "dev-link",
+              installSource: "local-dev",
             },
           ],
         },

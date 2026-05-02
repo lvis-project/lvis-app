@@ -109,11 +109,12 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     await expect(svc.rollbackPlugin("com.lge.sample")).rejects.toThrow(/No prior version/);
   });
 
-  it("installPlugin promotes a legacy dev-link entry to user on same-version fast-path", async () => {
+  it("installPlugin migrates a legacy `_devLinked: true` entry to local-dev then re-stamps to user on install", async () => {
     // Pre-populate registry with the legacy `_devLinked: true` shape that
-    // pre-PR #430 dev-link installs wrote. readPluginRegistry migrates it
-    // on first read; installPlugin must then re-stamp installSource="user"
-    // so the touch fast-path doesn't keep the entry on dev-link.
+    // the now-removed dev:link script wrote. readPluginRegistry migrates
+    // dev-link/`_devLinked` to "local-dev" on first read; installPlugin
+    // then re-stamps installSource="user" since the marketplace install
+    // supersedes the prior source.
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -133,8 +134,9 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(registry.plugins[0].installedBy).toBeUndefined();
   });
 
-  it("installPlugin overrides a dev-link entry with installSource='user'", async () => {
-    // Pre-populate registry as if dev:link had registered the plugin.
+  it("installPlugin overrides a legacy dev-link entry (rewritten to local-dev) with installSource='user'", async () => {
+    // Pre-populate registry with a legacy dev-link entry. readPluginRegistry
+    // rewrites it to "local-dev"; installPlugin then re-stamps to "user".
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -149,11 +151,13 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(registry.plugins[0].installSource).toBe("user");
   });
 
-  it("rollbackPlugin re-stamps installSource='user' on the rolled-back entry", async () => {
+  it("rollbackPlugin re-stamps installSource='user' on a rolled-back entry whose registry was tampered with a legacy dev-link value", async () => {
     const svc = makeService();
     await svc.installPlugin("com.lge.sample", "1.0.0");
     await svc.installPlugin("com.lge.sample", "1.1.0");
-    // Manually flip installSource to dev-link to simulate a stale state.
+    // Manually flip installSource to a legacy dev-link to simulate a stale
+    // state. The next registry read rewrites it to "local-dev"; rollback
+    // then normalises any non-admin source back to "user".
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
     reg.plugins[0].installSource = "dev-link";
     await writeFile(registryPath, JSON.stringify(reg), "utf-8");
@@ -169,7 +173,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(registry.plugins[0].installSource).toBe("user");
   });
 
-  it("installPlugin sets installSource='user' when overwriting a dev-link entry", async () => {
+  it("installPlugin sets installSource='user' when overwriting a legacy dev-link (now local-dev) entry", async () => {
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -198,19 +202,22 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     expect(restored.plugins[0].installSource).toBe("user");
   });
 
-  it("rollback clears installSource='dev-link' (packaged build guard)", async () => {
+  it("rollback normalises a legacy dev-link registry value to 'user' regardless of packaged/dev mode", async () => {
+    // Pre-2026-05 a "dev-link" installSource on a packaged build was
+    // explicitly cleared by a build guard. After the dev-link purge there
+    // is no separate guard — readPluginRegistry rewrites dev-link to
+    // local-dev on read, and the rollback normaliser then re-stamps any
+    // non-admin source as "user" since rollback is always a marketplace
+    // re-install (see marketplace.ts rollbackPlugin).
     setIsPackaged(true);
     const svc = makeService();
     await svc.installPlugin("com.lge.sample", "1.0.0");
     await svc.installPlugin("com.lge.sample", "1.1.0");
-    // Manually stamp dev-link state to simulate stale registry.
     const reg = JSON.parse(await readFile(registryPath, "utf-8"));
     reg.plugins[0].installSource = "dev-link";
     await writeFile(registryPath, JSON.stringify(reg), "utf-8");
     await svc.rollbackPlugin("com.lge.sample");
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
-    // Rollback re-installs from marketplace, so installSource becomes "user"
-    // (not "dev-link") regardless of packaged/dev mode.
     expect(restored.plugins[0].installSource).toBe("user");
   });
 

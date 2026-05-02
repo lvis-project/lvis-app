@@ -25,7 +25,12 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("maps `_devLinked: true` → `installSource: \"dev-link\"` and persists the migration", async () => {
+  it("maps `_devLinked: true` → `installSource: \"local-dev\"` (post-purge rewrite) and persists the migration", async () => {
+    // Post-2026-05 dev-link purge: legacy `_devLinked: true` and any
+    // existing `installSource: "dev-link"` are rewritten to "local-dev"
+    // (the closest still-valid sibling). Receipt verification then
+    // applies normally — the operator will see a clear failure if the
+    // entry was a dev-link install with no receipt on disk.
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -48,7 +53,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
       id: "agent-hub",
       manifestPath: "agent-hub/plugin.json",
       enabled: true,
-      installSource: "dev-link",
+      installSource: "local-dev",
     });
 
     // Persisted: a fresh read should return the same shape with no
@@ -56,7 +61,7 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(onDisk.plugins[0].installedBy).toBeUndefined();
     expect(onDisk.plugins[0]._devLinked).toBeUndefined();
-    expect(onDisk.plugins[0].installSource).toBe("dev-link");
+    expect(onDisk.plugins[0].installSource).toBe("local-dev");
   });
 
   it("maps `installedBy: \"user\"` → `installSource: \"user\"`", async () => {
@@ -109,10 +114,13 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     expect(onDisk.plugins[0].installSource).toBe("admin");
   });
 
-  it("`_devLinked: true` wins over `installedBy: \"admin\"`", async () => {
+  it("`_devLinked: true` wins over `installedBy: \"admin\"` (rewritten to local-dev post-purge)", async () => {
     // Pre-PR #430 dev-link installs co-existed with admin signals on the
     // same entry only by accident; the disjunction call sites used was
-    // "_devLinked first, then installedBy", so the migration matches.
+    // "_devLinked first, then installedBy". After the 2026-05 dev-link
+    // purge, the result is "local-dev" rather than "dev-link" — the
+    // _devLinked precedence over installedBy is preserved, but the value
+    // produced is the still-valid sibling.
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -130,7 +138,32 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     );
 
     const registry = await readPluginRegistry(registryPath);
-    expect(registry.plugins[0].installSource).toBe("dev-link");
+    expect(registry.plugins[0].installSource).toBe("local-dev");
+  });
+
+  it("rewrites pre-existing `installSource: \"dev-link\"` to `\"local-dev\"`", async () => {
+    // Post-2026-05: any dev-link-typed install source on disk is normalised
+    // to local-dev on read, with a one-shot loud audit warning.
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "agent-hub",
+            manifestPath: "agent-hub/plugin.json",
+            enabled: true,
+            installSource: "dev-link",
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const registry = await readPluginRegistry(registryPath);
+    expect(registry.plugins[0].installSource).toBe("local-dev");
+    const onDisk = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(onDisk.plugins[0].installSource).toBe("local-dev");
   });
 
   it("entries with neither legacy field nor installSource keep installSource undefined", async () => {
