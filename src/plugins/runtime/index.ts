@@ -517,7 +517,7 @@ export class PluginRuntime {
       const freshRegistry = await readPluginRegistry(this.registryPath);
       const freshEntry = freshRegistry.plugins.find((e) => e.id === pluginId);
       if (freshEntry == null) {
-        log.warn(`restartPlugin: %s not found in fresh registry, treating as non-dev-link`, pluginId);
+        log.warn(`restartPlugin: %s not found in fresh registry, treating as non-dev entry`, pluginId);
       }
       const freshDevLinked = freshEntry != null &&
         // Only `installSource: "dev"` (current) or legacy `"dev-link"`

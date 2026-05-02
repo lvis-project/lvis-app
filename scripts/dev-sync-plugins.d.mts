@@ -19,6 +19,7 @@ export function buildDevRegistryEntry(pluginId: string, manifest: {
   installSource: "dev";
   approvedPluginAccess?: unknown;
 };
+export function copyFileAsRealFile(src: string, dest: string): void;
 export function syncDevPlugins(): Array<{
   id: string;
   manifestPath: string;

@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import {
   mkdirSync,
+  readFileSync,
   writeFileSync,
   symlinkSync,
   existsSync,
@@ -28,6 +29,7 @@ import { join } from "node:path";
 import {
   buildCopyFilter,
   buildDevRegistryEntry,
+  copyFileAsRealFile,
   countEntries,
   isSafePluginId,
   isDevRegistryEntry,
@@ -41,13 +43,21 @@ describe("dev-sync-plugins — isSafePluginId", () => {
     expect(isSafePluginId("agent-hub")).toBe(true);
     expect(isSafePluginId("com.lge.sample")).toBe(true);
     expect(isSafePluginId("ms_graph")).toBe(true);
+    expect(isSafePluginId("pageindex")).toBe(true);
+    expect(isSafePluginId("com.lge.sample_v2")).toBe(true);
   });
-  it("rejects path-traversal and unsafe characters", () => {
+  it("rejects path-traversal, separators, and blank/ambiguous ids", () => {
+    expect(isSafePluginId(".")).toBe(false);
     expect(isSafePluginId("..")).toBe(false);
     expect(isSafePluginId("../escape")).toBe(false);
     expect(isSafePluginId("evil/../x")).toBe(false);
+    expect(isSafePluginId("evil\\x")).toBe(false);
+    expect(isSafePluginId(" with-space")).toBe(false);
     expect(isSafePluginId("with space")).toBe(false);
+    expect(isSafePluginId("   ")).toBe(false);
     expect(isSafePluginId("")).toBe(false);
+    expect(isSafePluginId("agent..hub")).toBe(false);
+    expect(isSafePluginId("agent-hub.")).toBe(false);
     expect(isSafePluginId(undefined as unknown as string)).toBe(false);
   });
 });
@@ -220,6 +230,34 @@ describe("dev-sync-plugins — removeAny", () => {
   });
   it("is a no-op for missing paths", () => {
     expect(() => removeAny(join(tmpdir(), `nonexistent-${Math.random()}`))).not.toThrow();
+  });
+});
+
+describe("dev-sync-plugins — copyFileAsRealFile", () => {
+  it("materializes a symlinked manifest as a real file in the install tree", () => {
+    const root = join(
+      tmpdir(),
+      `dev-sync-copy-manifest-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    const workspaceDir = join(root, "workspace");
+    const installDir = join(root, "install");
+    const realManifest = join(workspaceDir, "plugin.real.json");
+    const symlinkedManifest = join(workspaceDir, "plugin.json");
+    const installedManifest = join(installDir, "plugin.json");
+    try {
+      mkdirSync(workspaceDir, { recursive: true });
+      mkdirSync(installDir, { recursive: true });
+      writeFileSync(realManifest, '{"id":"com.example.copy-only"}', "utf-8");
+      symlinkSync(realManifest, symlinkedManifest, "file");
+
+      copyFileAsRealFile(symlinkedManifest, installedManifest);
+
+      expect(existsSync(installedManifest)).toBe(true);
+      expect(lstatSync(installedManifest).isSymbolicLink()).toBe(false);
+      expect(readFileSync(installedManifest, "utf-8")).toBe('{"id":"com.example.copy-only"}');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

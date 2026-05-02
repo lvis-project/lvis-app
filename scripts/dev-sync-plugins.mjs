@@ -74,12 +74,14 @@ function log(msg) {
 
 /** Validate that pluginId is a safe directory name (no path traversal). */
 export function isSafePluginId(id) {
-  return (
-    typeof id === "string" &&
-    id.length > 0 &&
-    /^[a-zA-Z0-9_.\-]+$/.test(id) &&
-    !id.includes("..")
-  );
+  if (typeof id !== "string") return false;
+  // Registry/install paths are derived directly from pluginId, so require a
+  // canonical single-line token: no empty/trimmed variants, no "."/"..", no
+  // path separators, and only the separators used by existing plugin ids.
+  if (id !== id.trim() || id.length === 0) return false;
+  if (id === "." || id === "..") return false;
+  if (/[\\/]/.test(id)) return false;
+  return /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/.test(id);
 }
 
 /**
@@ -221,6 +223,16 @@ export function buildDevRegistryEntry(pluginId, manifest) {
   };
 }
 
+/**
+ * Materialise `src` at `dest` as a real file even when the source manifest is
+ * itself a symlink in the developer workspace. dev:sync's contract is "real
+ * files under ~/.lvis/plugins" — leaving a symlinked plugin.json behind would
+ * reintroduce the legacy trust-boundary escape.
+ */
+export function copyFileAsRealFile(src, dest) {
+  writeFileSync(dest, readFileSync(src));
+}
+
 export function syncDevPlugins() {
   const existingPlugins = loadExistingNonDevPlugins();
   const devPlugins = [];
@@ -311,7 +323,7 @@ export function syncDevPlugins() {
       removeAny(distDest);
       removeAny(nodeModulesDest);
 
-      cpSync(manifestSrc, manifestDest);
+      copyFileAsRealFile(manifestSrc, manifestDest);
       log(`synced: ${pluginId}  plugin.json (real file)`);
       cpSync(distSrc, distDest, { recursive: true, dereference: true });
       log(`synced: ${pluginId}  dist/ (${countEntries(distDest)} entries)`);

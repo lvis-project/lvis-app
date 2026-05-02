@@ -94,9 +94,9 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     throw new Error(`Invalid plugin registry: ${registryPath}`);
   }
   // Apply legacy → installSource migration on read. We persist the
-  // migrated form back to disk in one shot so subsequent reads are
-  // no-ops. This is idempotent: an already-migrated entry returns
-  // `null` from migrateLegacyEntry and is left alone.
+  // normalized form back to disk in one shot so subsequent reads are
+  // deterministic no-ops and deprecated `_devLinked` cleanup hints do not
+  // linger in registry.json after the first successful read.
   let migratedCount = 0;
   const plugins: PluginRegistryEntry[] = parsed.plugins.map((entry) => {
     const migrated = migrateLegacyEntry(entry);
@@ -120,7 +120,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
         migratedCount,
         registryPath,
       },
-      `registry normalized ${migratedCount} legacy entries (installedBy/_devLinked → installSource; stale _devLinked cleared)`,
+      `registry normalized ${migratedCount} legacy entries (installedBy/_devLinked → installSource; deprecated _devLinked stripped on persist)`,
     );
     try {
       await writePluginRegistry(registryPath, registry);

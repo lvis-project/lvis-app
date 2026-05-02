@@ -187,6 +187,40 @@ describe("readPluginRegistry — legacy installedBy/_devLinked migration", () =>
     expect(afterSecondRead).toEqual(afterFirstRead);
   });
 
+  it("persists canonical installSource while stripping `_devLinked` from an already-typed dev entry", async () => {
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "agent-hub",
+            manifestPath: "agent-hub/plugin.json",
+            enabled: true,
+            installSource: "dev",
+            _devLinked: true,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const registry = await readPluginRegistry(registryPath);
+    expect(registry.plugins[0]).toEqual({
+      id: "agent-hub",
+      manifestPath: "agent-hub/plugin.json",
+      enabled: true,
+      installSource: "dev",
+    });
+
+    const afterFirstRead = await readFile(registryPath, "utf-8");
+    expect(JSON.parse(afterFirstRead).plugins[0]._devLinked).toBeUndefined();
+
+    await readPluginRegistry(registryPath);
+    const afterSecondRead = await readFile(registryPath, "utf-8");
+    expect(afterSecondRead).toEqual(afterFirstRead);
+  });
+
   it("preserves bundleRefs and approvedPluginAccess across migration", async () => {
     const accessSpec = { plugins: [{ pluginId: "ms-graph", events: ["email.new"] }] };
     await writeFile(
