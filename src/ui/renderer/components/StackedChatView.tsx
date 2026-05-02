@@ -244,7 +244,7 @@ function EntriesList({
         <div
           key={idx}
           data-testid="user-message"
-          className="ml-auto max-w-[75%] rounded-2xl bg-message-user px-3.5 py-2 text-sm text-message-user-foreground"
+          className="ml-auto mt-3 max-w-[75%] rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground"
         >
           <div className="whitespace-pre-wrap">{entry.text}</div>
         </div>,

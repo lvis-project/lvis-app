@@ -158,7 +158,7 @@ export function TriggerCard({
                 : "prose prose-sm lvis-prose max-w-none break-words"
             }
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>{result.summary}</ReactMarkdown>
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">아직 응답이 없습니다.</p>

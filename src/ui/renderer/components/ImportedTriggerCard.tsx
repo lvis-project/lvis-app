@@ -100,7 +100,7 @@ export function ImportedTriggerCard({
             surfaces a clickable webLink instead when one is
             available (calendar events).
           */}
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripOpaqueIdLines(summary)}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>{stripOpaqueIdLines(summary)}</ReactMarkdown>
         </div>
       ) : null}
       {/*
@@ -125,7 +125,7 @@ export function ImportedTriggerCard({
         </div>
         {response && response.length > 0 ? (
           <div className="prose prose-sm lvis-prose max-w-none break-words">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>
               {responseStreaming ? clampDanglingMarkdownLink(response) : response}
             </ReactMarkdown>
           </div>

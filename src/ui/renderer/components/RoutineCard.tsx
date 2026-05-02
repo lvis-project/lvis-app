@@ -130,7 +130,7 @@ export function RoutineCard({
       <CardContent className="min-h-0 flex-1 overflow-y-auto pt-0">
         {result.summary ? (
           <div className="prose prose-sm lvis-prose max-w-none break-words">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>{result.summary}</ReactMarkdown>
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">루틴 결과가 없습니다.</p>

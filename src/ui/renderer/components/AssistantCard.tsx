@@ -92,7 +92,7 @@ export function AssistantCard({
         ) : entry.route === "command" ? (
           <div className="whitespace-pre-wrap">{replaceToolNamesInText(entry.text || "")}</div>
         ) : (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>
             {entry.streaming
               ? clampDanglingMarkdownLink(replaceToolNamesInText(entry.text)) || "응답을 작성하는 중..."
               : replaceToolNamesInText(entry.text || "")}

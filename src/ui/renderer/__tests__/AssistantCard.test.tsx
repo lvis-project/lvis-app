@@ -77,6 +77,23 @@ describe("AssistantCard — slash command newline fix", () => {
     const prewrap = body!.querySelector(".whitespace-pre-wrap");
     expect(prewrap).not.toBeNull();
   });
+
+  it("does NOT strikethrough single-tilde ranges like 7~12℃ (singleTilde:false)", () => {
+    const text = "최저 7~12℃ / 최고 14~19℃";
+    const { container } = renderCard(makeEntry({ text }));
+    expect(container.querySelector("del")).toBeNull();
+    expect(container.querySelector("s")).toBeNull();
+    expect(container.textContent).toContain("7~12℃");
+    expect(container.textContent).toContain("14~19℃");
+  });
+
+  it("still renders double-tilde strikethrough ~~text~~ (GFM standard)", () => {
+    const text = "this is ~~struck~~ text";
+    const { container } = renderCard(makeEntry({ text }));
+    const del = container.querySelector("del");
+    expect(del).not.toBeNull();
+    expect(del!.textContent).toBe("struck");
+  });
 });
 
 afterEach(() => {
