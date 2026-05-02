@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import type { InstallPolicy, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
@@ -45,6 +45,15 @@ function renamePageindexDefaultManifestPath(manifestPath: string): string {
     : manifestPath;
 }
 
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function withLocalIndexerIdentity(entry: PluginRegistryEntry): PluginRegistryEntry {
   return {
     ...entry,
@@ -67,16 +76,24 @@ function mergeMissingPageindexMetadata(
 
 function migratePageindexRegistryEntries(
   entries: PluginRegistryEntry[],
-): { plugins: PluginRegistryEntry[]; migratedCount: number; removedDuplicateCount: number } {
+): {
+  plugins: PluginRegistryEntry[];
+  migratedCount: number;
+  removedDuplicateCount: number;
+  defaultManifestPathMigrated: boolean;
+} {
   const canonicalIndex = entries.findIndex((entry) => entry.id === LOCAL_INDEXER_PLUGIN_ID);
   const firstLegacyIndex = entries.findIndex((entry) => entry.id === PAGEINDEX_LEGACY_PLUGIN_ID);
   if (canonicalIndex === -1 && firstLegacyIndex === -1) {
-    return { plugins: entries, migratedCount: 0, removedDuplicateCount: 0 };
+    return { plugins: entries, migratedCount: 0, removedDuplicateCount: 0, defaultManifestPathMigrated: false };
   }
 
   const targetIndex = canonicalIndex === -1 ? firstLegacyIndex : canonicalIndex;
   const canonical = withLocalIndexerIdentity(entries[targetIndex]);
   let migratedCount = entries[targetIndex].id === PAGEINDEX_LEGACY_PLUGIN_ID ? 1 : 0;
+  let defaultManifestPathMigrated =
+    entries[targetIndex].manifestPath === PAGEINDEX_LEGACY_DEFAULT_MANIFEST_PATH
+    && canonical.manifestPath === LOCAL_INDEXER_DEFAULT_MANIFEST_PATH;
   if (canonical.manifestPath !== entries[targetIndex].manifestPath) migratedCount += 1;
   let removedDuplicateCount = 0;
 
@@ -87,6 +104,7 @@ function migratePageindexRegistryEntries(
     mergeMissingPageindexMetadata(canonical, entry);
     removedDuplicateCount += 1;
     if (entry.id === PAGEINDEX_LEGACY_PLUGIN_ID) migratedCount += 1;
+    if (entry.manifestPath === PAGEINDEX_LEGACY_DEFAULT_MANIFEST_PATH) defaultManifestPathMigrated = true;
   }
 
   const plugins: PluginRegistryEntry[] = [];
@@ -100,7 +118,66 @@ function migratePageindexRegistryEntries(
     plugins.push(entry);
   }
 
-  return { plugins, migratedCount, removedDuplicateCount };
+  return { plugins, migratedCount, removedDuplicateCount, defaultManifestPathMigrated };
+}
+
+async function migratePageindexInstalledDirectory(
+  registryPath: string,
+  shouldAttemptMove: boolean,
+): Promise<void> {
+  if (!shouldAttemptMove) return;
+
+  const registryDir = dirname(registryPath);
+  const legacyDir = resolve(registryDir, PAGEINDEX_LEGACY_PLUGIN_ID);
+  const canonicalDir = resolve(registryDir, LOCAL_INDEXER_PLUGIN_ID);
+
+  if (!(await pathExists(legacyDir))) return;
+
+  if (await pathExists(canonicalDir)) {
+    plog(
+      "warn",
+      {
+        pluginId: "<registry>",
+        phase: PluginPhase.DISCOVERY_START,
+        reason: "pageindex_plugin_dir_conflict",
+        registryPath,
+        legacyDir,
+        canonicalDir,
+      },
+      "registry migrated pageindex default manifest to local-indexer but both plugin directories exist; keeping local-indexer and leaving pageindex untouched",
+    );
+    return;
+  }
+
+  try {
+    await rename(legacyDir, canonicalDir);
+    plog(
+      "info",
+      {
+        pluginId: "<registry>",
+        phase: PluginPhase.DISCOVERY_START,
+        reason: "pageindex_plugin_dir_moved",
+        registryPath,
+        legacyDir,
+        canonicalDir,
+      },
+      "moved installed pageindex plugin directory to local-indexer during registry migration",
+    );
+  } catch (err) {
+    plog(
+      "warn",
+      {
+        pluginId: "<registry>",
+        phase: PluginPhase.DISCOVERY_FAIL,
+        err,
+        reason: "pageindex_plugin_dir_move_failed",
+        registryPath,
+        legacyDir,
+        canonicalDir,
+      },
+      "failed to move pageindex plugin directory during registry migration",
+    );
+  }
 }
 
 /**
@@ -203,6 +280,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     version: parsed.version ?? 1,
     plugins: pageindexMigration.plugins,
   };
+  await migratePageindexInstalledDirectory(registryPath, pageindexMigration.defaultManifestPathMigrated);
   if (out.devLinkRewritten) {
     // Loud one-shot audit warning. Existing dev-link entries cannot load
     // any longer (receipt verification now applies unconditionally) so

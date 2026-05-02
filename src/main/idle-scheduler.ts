@@ -2,7 +2,7 @@
  * IdleScheduler — 5-state 머신 + powerMonitor + P0~P4 우선순위 큐
  *
  * 청사진 §6.1 R5 차용 (claw-code + Spotlight + Windows Indexer Backoff).
- * Agent 4의 IdleSchedulerStub 인터페이스 (lvis-plugin-pageindex/src/folderIndexer.ts)와 호환.
+ * Document-indexer plugin idle-scheduler interface와 호환.
  *
  * ## 5-state 머신
  *   RUNNING        — 사용자 활동 중. 큐만 적재, 인덱싱 미실행.
