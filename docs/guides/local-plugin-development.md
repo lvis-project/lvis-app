@@ -83,10 +83,19 @@ submodule 누락 시: `git submodule update --init --recursive`.
 
 - `../lvis-plugin-foo/plugin.json` 같은 형제-레포 절대경로
 - 형제 레포를 `~/.lvis/plugins/foo` 로 symlink 한 것 — `realpathSync` 가 원본 경로를 반환해서 검사에 걸림
+- `~/.lvis/plugins/<id>/plugin.json` 자체를 형제 워크스페이스로 symlink 한 것 (구버전 `dev:link` 가 만든 형태)
 
 거부 시 호스트 콘솔에 `[plugin-runtime] ignoring untrusted registry manifest path for <id>: <path>` 가 출력되고, 해당 플러그인은 **조용히 빠집니다** (앱은 정상 부팅).
 
-따라서 마켓플레이스 없이 dev 사이드로드를 하려면 **플러그인을 `~/.lvis/plugins/<id>/` 트리 안에 물리적으로 복사**해야 합니다.
+> ⚠️ **`installSource: "dev-link"` / `_devLinked: true` 만으로 trust 검사를 우회할 수 없습니다** (PR #460, supersedes #458). registry 가 자기 자신을 dev-link 라고 표시한다고 해서 임의의 `../` 경로를 신뢰하면, 등록만 손대도 우회가 가능해지므로 트러스트 모델이 무너집니다. 이 케이스는 "**legacy dev-link 격리(quarantine)**" 경로로 처리되며 다음 형태의 명시적 경고가 나옵니다:
+>
+> ```
+> [plugin-runtime] quarantining legacy dev-link entry for <id>: manifestPath … escapes pluginsRoot — re-run `bun run dev:link` to migrate (artifacts must live under <pluginsRoot>)
+> ```
+>
+> 마이그레이션 절차: **`bun run dev:link` 재실행**. 새 구현은 `plugin.json` 을 워크스페이스 → `~/.lvis/plugins/<id>/plugin.json` 로 **실제 파일로 복사**하므로 realpath 가 pluginsRoot 안에 머무릅니다. `dist/` 만 symlink 로 남겨두어 `bun run build:watch` + `LVIS_DEV_RELOAD=1` 의 hot reload 는 그대로 동작합니다 (manifest 만 re-copy 가 필요하므로 manifest 변경 시 `bun run dev:link` 재실행).
+
+따라서 마켓플레이스 없이 dev 사이드로드를 하려면 **플러그인을 `~/.lvis/plugins/<id>/` 트리 안에 물리적으로 복사**해야 합니다 (`bun run dev:link` 자동화).
 
 > 일상적 dev 루프에는 [local-marketplace-testing.md](./local-marketplace-testing.md) 의 로컬 마켓플레이스 서버(git-based 부트스트랩)가 더 빠릅니다 — 플러그인을 형제 디렉토리로 두고 `bun run build` + 서버 재시작만 하면 자동 publish 됩니다. 이 §3 경로는 그 서버 띄우기조차 부담스러운 단발성 prototype 시나리오에 한정됩니다.
 

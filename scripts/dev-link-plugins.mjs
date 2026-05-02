@@ -2,10 +2,31 @@
 /**
  * dev-link-plugins.mjs — Install dev-built sibling plugins into ~/.lvis/plugins/
  *
+ * Trust-boundary convergence (PR #460, supersedes the regression in PR #458):
+ *   The plugin runtime's `isTrustedRegistryManifestPath` check resolves
+ *   `manifestPath` via `realpathSync()` and rejects anything whose realpath
+ *   escapes `pluginsRoot`. Earlier revisions of this script symlinked
+ *   `~/.lvis/plugins/<id>/plugin.json` directly at the workspace
+ *   `<repo>/plugin.json`; that symlink's realpath escapes pluginsRoot and
+ *   the registry entry was correctly filtered with
+ *   "ignoring untrusted registry manifest path for <id>".
+ *
+ *   The convergence rule is: developer installs MUST also live under
+ *   `~/.lvis/plugins/<id>/`. We achieve that by copying `plugin.json`
+ *   (small, edited rarely) into pluginsRoot as a real file, and keeping
+ *   `dist/` as a symlink so plugin build:watch + host LVIS_DEV_RELOAD hot
+ *   reload still sees fresh bytes without copy-on-rebuild churn. The
+ *   manifest's realpath now stays inside pluginsRoot, so the trust check
+ *   passes WITHOUT any dev-link bypass — see snapshots.ts and the
+ *   trust-boundary tests for the strict containment rule.
+ *
+ *   Manifest staleness: re-run `bun run dev:link` (or just `bun run dev`,
+ *   which auto-runs this script) after editing the workspace plugin.json.
+ *
  * For each lvis-plugin-* sibling repo that has a built dist/:
- *   - Creates ~/.lvis/plugins/<id>/plugin.json  (real file, entry untouched)
+ *   - Creates ~/.lvis/plugins/<id>/plugin.json  (real file, copied each run)
  *   - Creates ~/.lvis/plugins/<id>/dist/        (symlink → <repo>/dist/)
- *   - Registers in ~/.lvis/plugins/registry.json with _devLinked: true
+ *   - Registers in ~/.lvis/plugins/registry.json with installSource:"dev-link"
  *
  * Existing user-installed entries (no _devLinked flag) are preserved.
  * Run after `bun run prepare:plugins` to refresh.
@@ -13,7 +34,7 @@
  * Usage: node scripts/dev-link-plugins.mjs [--dry-run] [--force]
  *   --force  Replace real dist/ directories with symlinks (destructive)
  */
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +60,32 @@ function log(msg) { console.log(`[dev:link] ${msg}`); }
 /** Validate that pluginId is a safe directory name (no path traversal). */
 function isSafePluginId(id) {
   return typeof id === "string" && id.length > 0 && /^[a-zA-Z0-9_.\-]+$/.test(id) && !id.includes("..");
+}
+
+/**
+ * Copy a file into pluginsRoot, replacing any prior file/symlink at the
+ * destination. We DON'T allow replacing a real directory (caller error).
+ *
+ * Why copy instead of symlink: the host's `isTrustedRegistryManifestPath`
+ * resolves `realpathSync(manifestPath)` and rejects anything whose realpath
+ * escapes `pluginsRoot`. A symlink at `<id>/plugin.json` pointing into the
+ * workspace would be filtered as "untrusted registry manifest path" — that
+ * is the regression PR #458 tried to paper over by adding a dev-link
+ * trust-bypass; the correct fix (per the convergence rule) is to keep the
+ * artifact inside pluginsRoot as a real file.
+ */
+function forceCopy(destPath, srcPath) {
+  try {
+    const st = lstatSync(destPath);
+    if (st.isSymbolicLink() || st.isFile()) {
+      unlinkSync(destPath);
+    } else if (st.isDirectory()) {
+      log(`warn: ${destPath} is a real directory — refusing to overwrite with copy`);
+      return false;
+    }
+  } catch { /* doesn't exist — fine */ }
+  copyFileSync(srcPath, destPath);
+  return true;
 }
 
 function forceSymlink(linkPath, target) {
@@ -127,18 +174,19 @@ for (const repo of repos) {
 
   if (!dryRun) {
     mkdirSync(installDir, { recursive: true });
-    // Symlink plugin.json → source manifest. Used to be a one-time file copy,
-    // which left ~/.lvis stale whenever the source manifest changed (version
-    // bumps, tools/permissions/keywords edits) until the user re-ran dev:link.
-    // Host treats plugin.json as read-only, so a symlink is safe and gives the
-    // same single-source-of-truth guarantee that dist/ already has.
-    const manifestLink = resolve(installDir, "plugin.json");
-    const okManifest = forceSymlink(manifestLink, manifestPath);
+    // plugin.json: copy as a real file. Was previously symlinked back to the
+    // workspace manifest, but `realpathSync(<id>/plugin.json)` then escaped
+    // pluginsRoot and the trust-root check filtered the entry. Copying
+    // converges the install under pluginsRoot (matching the marketplace /
+    // user-install layout) and the trust check passes without a dev-link
+    // bypass. Re-running `bun run dev:link` (or `bun run dev`) re-syncs.
+    const manifestCopy = resolve(installDir, "plugin.json");
+    const okManifest = forceCopy(manifestCopy, manifestPath);
     if (!okManifest) {
-      log(`skip registry: ${pluginId} (plugin.json symlink failed — run with --force to replace real file)`);
+      log(`skip registry: ${pluginId} (plugin.json copy failed — refusing to clobber a real directory at ${manifestCopy})`);
       continue;
     }
-    log(`linked: ${pluginId}  plugin.json → ${manifestPath}`);
+    log(`copied: ${pluginId}  plugin.json ← ${manifestPath}`);
     // Symlink dist/ directory — skip registration when symlink cannot be created
     if (existsSync(distTarget)) {
       const ok = forceSymlink(distLink, distTarget);

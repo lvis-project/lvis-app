@@ -9,7 +9,7 @@
  *      authoritative; manifest `installPolicy` is advisory only.
  *   3. (MEDIUM §Step 3) `dev-flags.ts` helpers hard-gate on `app.isPackaged`.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
@@ -79,7 +79,7 @@ describe("Phase 1 — plugin trust boundary", () => {
   }
 
   async function writeRegistry(
-    entries: Array<{ id: string; manifestPath: string; installedBy?: "admin" | "user"; _devLinked?: boolean }>,
+    entries: Array<{ id: string; manifestPath: string; installedBy?: "admin" | "user"; _devLinked?: boolean; installSource?: string }>,
   ): Promise<void> {
     await writeFile(registryPath, JSON.stringify({ version: 1, plugins: entries }), "utf-8");
   }
@@ -177,6 +177,109 @@ describe("Phase 1 — plugin trust boundary", () => {
         });
         await runtime.load();
         expect(runtime.listPluginIds()).not.toContain("tb.evil");
+      },
+    );
+
+    // ── PR #460 (supersedes PR #458) — dev-link convergence ──────────
+    // PR #458 proposed bypassing the trust check whenever the registry
+    // entry was self-flagged `installSource:"dev-link"`. That bypass let
+    // a poisoned registry load arbitrary `../` paths just by setting that
+    // flag; the convergence rule (developer installs live under
+    // pluginsRoot just like marketplace installs) keeps the trust boundary
+    // strict and instead changes `bun run dev:link` to copy plugin.json
+    // into pluginsRoot. These tests pin both halves of that contract.
+
+    it("loads a dev-linked plugin whose manifest is COPIED into pluginsRoot (convergence path)", async () => {
+      // The new dev-link-plugins.mjs writes plugin.json as a real file at
+      // `~/.lvis/plugins/<id>/plugin.json` (workspace dist/ is symlinked
+      // separately, but only the manifest is realpath-checked). The
+      // registry entry has `installSource:"dev-link"` for telemetry but
+      // does NOT need a trust bypass — its realpath is inside pluginsRoot.
+      const installDir = join(pluginsRoot, "tb.devcopy");
+      const manifestPath = await writePluginAt(installDir, "tb.devcopy");
+      await writeRegistry([
+        { id: "tb.devcopy", manifestPath, installSource: "dev-link", _devLinked: true },
+      ]);
+
+      const runtime = new PluginRuntime({
+        hostRoot,
+        registryPath,
+        pluginsRoot,
+      });
+      await runtime.load();
+      expect(runtime.listPluginIds()).toContain("tb.devcopy");
+    });
+
+    it.skipIf(symlinkSkip)(
+      "QUARANTINES a legacy dev-link entry whose manifest symlink escapes pluginsRoot — does NOT bypass trust on installSource:'dev-link'",
+      async () => {
+        // Reproduces the regression PR #458 tried to allow: an old
+        // dev-link-plugins.mjs revision symlinked plugin.json at the
+        // workspace manifest, so realpath escapes pluginsRoot. The new
+        // strict rule rejects this even with `installSource:"dev-link"`
+        // — operators must re-run `bun run dev:link` so the manifest is
+        // re-copied (real file inside pluginsRoot).
+        const realDir = join(testDir, "workspace", "lvis-plugin-tb-legacy");
+        await writePluginAt(realDir, "tb.legacy");
+        const linkDir = join(pluginsRoot, "tb.legacy");
+        await symlink(realDir, linkDir, "dir");
+        const linkedManifest = join(linkDir, "plugin.json");
+        await writeRegistry([
+          { id: "tb.legacy", manifestPath: linkedManifest, installSource: "dev-link" },
+        ]);
+
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+          const runtime = new PluginRuntime({
+            hostRoot,
+            registryPath,
+            pluginsRoot,
+          });
+          await runtime.load();
+          expect(runtime.listPluginIds()).not.toContain("tb.legacy");
+          // Quarantine warning must be specific to dev-link so operators
+          // know to re-run `bun run dev:link` — a generic "untrusted
+          // manifest path" warning would hide the migration step.
+          const warnText = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+          expect(warnText).toMatch(/quarantining legacy dev-link entry for tb\.legacy/);
+          expect(warnText).toMatch(/bun run dev:link/);
+        } finally {
+          warnSpy.mockRestore();
+        }
+      },
+    );
+
+    it.skipIf(symlinkSkip)(
+      "QUARANTINES a legacy _devLinked entry (pre-installSource registries) without trust bypass",
+      async () => {
+        // Pre-PR #430 registries used the `_devLinked: true` JSON flag
+        // instead of the `installSource` enum. The quarantine path must
+        // honor both shapes — otherwise a legacy registry would silently
+        // fall through to the generic "untrusted manifest path" log and
+        // operators would miss the migration hint.
+        const realDir = join(testDir, "workspace", "lvis-plugin-tb-legacy2");
+        await writePluginAt(realDir, "tb.legacy2");
+        const linkDir = join(pluginsRoot, "tb.legacy2");
+        await symlink(realDir, linkDir, "dir");
+        const linkedManifest = join(linkDir, "plugin.json");
+        await writeRegistry([
+          { id: "tb.legacy2", manifestPath: linkedManifest, _devLinked: true },
+        ]);
+
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+          const runtime = new PluginRuntime({
+            hostRoot,
+            registryPath,
+            pluginsRoot,
+          });
+          await runtime.load();
+          expect(runtime.listPluginIds()).not.toContain("tb.legacy2");
+          const warnText = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+          expect(warnText).toMatch(/quarantining legacy dev-link entry for tb\.legacy2/);
+        } finally {
+          warnSpy.mockRestore();
+        }
       },
     );
   });
