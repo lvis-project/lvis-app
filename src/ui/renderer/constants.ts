@@ -1,7 +1,11 @@
 // Phase 2: React-free constants extracted from src/renderer.tsx.
 
 import type { ExecMode, Task } from "./types.js";
-import { LLM_VENDOR_DEFAULTS } from "../../shared/llm-vendor-defaults.js";
+import {
+  LLM_VENDOR_DEFAULTS,
+  LLM_VENDORS,
+  type LLMVendor,
+} from "../../shared/llm-vendor-defaults.js";
 
 export const PRIORITY_CLASS: Record<Task["priority"], string> = {
   high: "text-red-400",
@@ -29,16 +33,41 @@ export const SOURCE_BADGE: Record<string, string> = {
   mcp: "MCP",
 };
 
-// `defaultModel` mirrors LLM_VENDOR_DEFAULTS so the settings dialog
+// Settings-dialog UI metadata per vendor. Typed as `Record<LLMVendor, ...>`
+// so adding a new entry to `LLM_VENDORS` without updating this object is
+// a compile error — keeps the dropdown in lockstep with the canonical
+// vendor list. `defaultModel` derives from LLM_VENDOR_DEFAULTS so the
 // placeholder stays in sync with the data layer's seed values.
-export const VENDORS = [
-  { id: "claude", label: "Anthropic Claude", placeholder: "sk-ant-...", defaultModel: LLM_VENDOR_DEFAULTS.claude.model, needsBaseUrl: false },
-  { id: "openai", label: "OpenAI", placeholder: "sk-...", defaultModel: LLM_VENDOR_DEFAULTS.openai.model, needsBaseUrl: false },
-  { id: "gemini", label: "Google Gemini", placeholder: "AIza...", defaultModel: LLM_VENDOR_DEFAULTS.gemini.model, needsBaseUrl: false },
-  { id: "copilot", label: "GitHub Copilot", placeholder: "ghp_...", defaultModel: LLM_VENDOR_DEFAULTS.copilot.model, needsBaseUrl: false },
-  { id: "azure-foundry", label: "Azure AI Foundry", placeholder: "Azure API key...", defaultModel: LLM_VENDOR_DEFAULTS["azure-foundry"].model, needsBaseUrl: true, baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/deployments/{deployment}/" },
-  { id: "vertex-ai", label: "Google Vertex AI", placeholder: "service account (unused — uses ADC)", defaultModel: LLM_VENDOR_DEFAULTS["vertex-ai"].model, needsBaseUrl: false },
-] as const;
+interface VendorUiMeta {
+  label: string;
+  placeholder: string;
+  needsBaseUrl: boolean;
+  baseUrlPlaceholder?: string;
+}
+
+const VENDOR_UI: Record<LLMVendor, VendorUiMeta> = {
+  claude: { label: "Anthropic Claude", placeholder: "sk-ant-...", needsBaseUrl: false },
+  openai: { label: "OpenAI", placeholder: "sk-...", needsBaseUrl: false },
+  gemini: { label: "Google Gemini", placeholder: "AIza...", needsBaseUrl: false },
+  copilot: { label: "GitHub Copilot", placeholder: "ghp_...", needsBaseUrl: false },
+  "azure-foundry": {
+    label: "Azure AI Foundry",
+    placeholder: "Azure API key...",
+    needsBaseUrl: true,
+    baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/deployments/{deployment}/",
+  },
+  "vertex-ai": {
+    label: "Google Vertex AI",
+    placeholder: "service account (unused — uses ADC)",
+    needsBaseUrl: false,
+  },
+};
+
+export const VENDORS = LLM_VENDORS.map((id) => ({
+  id,
+  ...VENDOR_UI[id],
+  defaultModel: LLM_VENDOR_DEFAULTS[id].model,
+}));
 
 export const WEB_PROVIDERS = [
   { id: "duckduckgo", label: "DuckDuckGo", placeholder: "키 불필요", needsKey: false },
