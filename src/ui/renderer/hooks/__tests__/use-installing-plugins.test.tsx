@@ -1,8 +1,11 @@
 /**
  * useInstallingPlugins — unit tests
  *
- * Verifies the Set<string> lifecycle driven by onPluginInstallProgress
- * and onPluginInstallResult IPC events, plus cleanup on unmount.
+ * Verifies the Map<slug, InstallPhase> lifecycle driven by
+ * onPluginInstallProgress and onPluginInstallResult IPC events, plus
+ * cleanup on unmount. The map's value preserves the latest phase per
+ * slug so the popover can render the current pipeline step (다운로드 →
+ * 검증 → 설치 → 등록 → 재시작) inside the install spinner.
  */
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
@@ -54,10 +57,46 @@ function makeApi(handlers: Partial<FakeHandlers> = {}): { api: LvisApi; emit: Fa
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("useInstallingPlugins — initial state", () => {
-  it("returns an empty Set on mount", () => {
+  it("returns an empty Map on mount", () => {
     const { api } = makeApi();
     const { result } = renderHook(() => useInstallingPlugins(api));
     expect(result.current.size).toBe(0);
+    expect(result.current.get("anything")).toBeUndefined();
+  });
+});
+
+describe("useInstallingPlugins — phase tracking", () => {
+  it("stores the latest phase per slug", () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useInstallingPlugins(api));
+
+    act(() => emit.progress({ slug: "agent-hub", phase: "downloading", bytesDownloaded: 0, bytesTotal: null }));
+    expect(result.current.get("agent-hub")).toBe("downloading");
+
+    act(() => emit.progress({ slug: "agent-hub", phase: "verifying" }));
+    expect(result.current.get("agent-hub")).toBe("verifying");
+
+    act(() => emit.progress({ slug: "agent-hub", phase: "installing" }));
+    expect(result.current.get("agent-hub")).toBe("installing");
+
+    act(() => emit.progress({ slug: "agent-hub", phase: "registering" }));
+    expect(result.current.get("agent-hub")).toBe("registering");
+
+    act(() => emit.progress({ slug: "agent-hub", phase: "restarting" }));
+    expect(result.current.get("agent-hub")).toBe("restarting");
+
+    expect(result.current.size).toBe(1);
+  });
+
+  it("preserves identity when the same phase is re-emitted", () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useInstallingPlugins(api));
+
+    act(() => emit.progress({ slug: "agent-hub", phase: "installing" }));
+    const firstMap = result.current;
+
+    act(() => emit.progress({ slug: "agent-hub", phase: "installing" }));
+    expect(result.current).toBe(firstMap);
   });
 });
 

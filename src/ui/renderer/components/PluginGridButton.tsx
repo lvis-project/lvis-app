@@ -1,10 +1,19 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { LayoutGrid, ExternalLink, Plus, Plug } from "lucide-react";
+import { LayoutGrid, ExternalLink, Plug } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
+import type { InstallPhase } from "../hooks/use-plugin-marketplace.js";
+
+const PHASE_LABEL: Record<InstallPhase, string> = {
+  downloading: "다운로드",
+  verifying: "검증",
+  installing: "설치",
+  registering: "등록",
+  restarting: "재시작",
+};
 
 export interface PluginEntry {
   viewKey: string;
@@ -24,10 +33,16 @@ export interface PluginEntry {
 
 interface PluginGridButtonProps {
   plugins: PluginEntry[];
-  /** Set of plugin slugs (IDs) currently being installed. */
-  installingPluginIds?: ReadonlySet<string>;
+  /**
+   * Plugin slugs currently being installed mapped to their pipeline phase.
+   * Drives both: the spinner overlay on already-registered cells (e.g. a
+   * restart pass on an updating plugin) and a fresh placeholder cell for
+   * slugs that aren't yet in `plugins` (a brand-new install before the
+   * runtime registers it).
+   */
+  installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onSelect: (viewKey: string) => void;
-  /** Called when the user clicks the "+" cell or the empty-state CTA. */
+  /** Called when the user clicks the marketplace cell or the empty-state CTA. */
   onOpenMarketplace: () => void;
   /** `true` once the marketplace URL has finished loading and is non-empty; false while loading or when settings provided no URL. */
   marketplaceUrlReady?: boolean;
@@ -35,7 +50,7 @@ interface PluginGridButtonProps {
 
 export function PluginGridButton({
   plugins,
-  installingPluginIds,
+  installingPlugins,
   onSelect,
   onOpenMarketplace,
   marketplaceUrlReady = false,
@@ -90,7 +105,17 @@ export function PluginGridButton({
     onSelect(viewKey);
   };
 
-  const isEmpty = plugins.length === 0 && (!installingPluginIds || installingPluginIds.size === 0);
+  const isEmpty = plugins.length === 0 && (!installingPlugins || installingPlugins.size === 0);
+
+  // Slugs that are installing but not yet registered as PluginEntry — render
+  // them as placeholder cells so the user sees their click registered the
+  // moment the install pipeline starts, before the runtime emits a view.
+  const registeredIds = new Set(
+    plugins.map((p) => p.pluginId ?? p.viewKey.split(":")[1] ?? ""),
+  );
+  const placeholderInstalls: Array<[string, InstallPhase]> = installingPlugins
+    ? Array.from(installingPlugins.entries()).filter(([slug]) => !registeredIds.has(slug))
+    : [];
 
   // Small red dot on the LayoutGrid trigger when any plugin in the popover
   // is unauthenticated. Without this users only see the missing-auth state
@@ -180,8 +205,13 @@ export function PluginGridButton({
             {plugins.map((p) => {
               // Use explicit pluginId from PluginEntry when available; fall back
               // to deriving from viewKey for cases where the caller omits it.
+              // pluginId drives the install-phase lookup; viewKey drives the
+              // testid so a single plugin exposing multiple sidebar UI
+              // extensions still gets unique cells.
               const pluginId = p.pluginId ?? p.viewKey.split(":")[1] ?? "";
-              const isInstalling = installingPluginIds?.has(pluginId) ?? false;
+              const cellTestId = p.viewKey.replace(/:/g, "-");
+              const phase = installingPlugins?.get(pluginId);
+              const isInstalling = phase !== undefined;
               const Icon = pluginIconFor({ icon: p.icon });
 
               return (
@@ -191,11 +221,17 @@ export function PluginGridButton({
                   disabled={isInstalling}
                   onClick={() => !isInstalling && handleSelect(p.viewKey)}
                   data-viewkey={p.viewKey}
-                  data-testid={`plugin-cell-${pluginId}`}
+                  data-testid={`plugin-cell-${cellTestId}`}
                   data-unauthed={p.unauthed ? "true" : undefined}
                   aria-busy={isInstalling}
                   aria-describedby={p.unauthed ? `${p.viewKey}-unauthed` : undefined}
-                  title={p.unauthed ? `${p.label} — 클릭하여 로그인` : undefined}
+                  title={
+                    isInstalling
+                      ? `${p.label} ${PHASE_LABEL[phase]} 중...`
+                      : p.unauthed
+                        ? `${p.label} — 클릭하여 로그인`
+                        : undefined
+                  }
                 >
                   <span className="plugin-icon relative flex h-11 w-11 items-center justify-center rounded-full bg-muted">
                     <Suspense fallback={<Plug className="h-7 w-7 opacity-30" />}>
@@ -211,6 +247,12 @@ export function PluginGridButton({
                           className="install-spinner absolute inset-0 rounded-full border-2 border-transparent border-t-primary border-r-primary animate-spin"
                           aria-hidden="true"
                         />
+                        <span
+                          className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-foreground leading-none z-10 pointer-events-none"
+                          data-testid={`plugin-cell-${cellTestId}-phase`}
+                        >
+                          {PHASE_LABEL[phase]}
+                        </span>
                       </>
                     )}
                     {p.unauthed && (
@@ -228,7 +270,47 @@ export function PluginGridButton({
               );
             })}
 
-            {/* "+" cell — open marketplace */}
+            {/* Placeholder cells for in-flight plugins not yet registered as
+                PluginEntry. Brand-new installs land here while download →
+                verify → install → register → restart drives the pipeline; once
+                the runtime registers a view, the slug moves into `plugins`
+                and the placeholder disappears in the same render. */}
+            {placeholderInstalls.map(([slug, phase]) => (
+              <div
+                key={`installing:${slug}`}
+                className="plugin-cell cell-installing flex flex-col items-center gap-1 rounded-lg px-2 py-1 cursor-default"
+                data-testid={`plugin-cell-installing-${slug}`}
+                aria-busy="true"
+                aria-label={`${slug} ${PHASE_LABEL[phase]} 중`}
+                title={`${slug} ${PHASE_LABEL[phase]} 중...`}
+              >
+                <span className="plugin-icon relative flex h-11 w-11 items-center justify-center rounded-full bg-muted">
+                  <Plug className="h-7 w-7 opacity-40" strokeWidth={1.6} />
+                  <span
+                    className="install-overlay absolute inset-0 rounded-full bg-background/60"
+                    aria-hidden="true"
+                  />
+                  <span
+                    className="install-spinner absolute inset-0 rounded-full border-2 border-transparent border-t-primary border-r-primary animate-spin"
+                    aria-hidden="true"
+                  />
+                  <span
+                    className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-foreground leading-none z-10 pointer-events-none"
+                    data-testid={`plugin-cell-installing-${slug}-phase`}
+                  >
+                    {PHASE_LABEL[phase]}
+                  </span>
+                </span>
+                <span className="text-[11px] font-bold truncate max-w-[64px] text-muted-foreground">
+                  {slug}
+                </span>
+              </div>
+            ))}
+
+            {/* Marketplace cell — sits at the end of the grid in scenario
+                1/2 (with registered plugins) so users always have an entry
+                point to install more. The empty-state branch above handles
+                scenario 3 with a centered marketplace CTA instead. */}
             <button
               className={`plugin-cell flex flex-col items-center gap-1 rounded-lg px-2 py-1${marketplaceUrlReady ? " hover:bg-muted hover:-translate-y-0.5" : " cursor-default opacity-50"}`}
               disabled={!marketplaceUrlReady}
@@ -238,16 +320,18 @@ export function PluginGridButton({
                 onOpenMarketplace();
               }}
               data-testid="plugin-cell-add"
+              title="마켓플레이스 열기"
+              aria-label="마켓플레이스 열기"
             >
               <span className="plugin-icon flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-muted-foreground/40 text-muted-foreground">
                 {marketplaceUrlReady ? (
-                  <Plus className="h-[18px] w-[18px]" />
+                  <ExternalLink className="h-[18px] w-[18px]" />
                 ) : (
                   <span className="text-[10px]">...</span>
                 )}
               </span>
               <span className="text-[11px] text-muted-foreground truncate max-w-[64px]">
-                {marketplaceUrlReady ? "추가" : "로딩 중"}
+                {marketplaceUrlReady ? "마켓" : "로딩 중"}
               </span>
             </button>
           </div>
