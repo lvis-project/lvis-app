@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
 import { InputActionBar } from "../InputActionBar.js";
 import type { RolePreset } from "../../../../data/role-presets.js";
@@ -90,5 +90,24 @@ describe("InputActionBar (post indexer-removal)", () => {
     // across LLM models.
     const { getByText } = renderBar({ vendorSupportsThinking: false });
     expect(getByText("Thinking")).toBeTruthy();
+  });
+
+  it("paperclip attach button calls onAttach when clicked and not disabled", () => {
+    const onAttach = vi.fn();
+    const { getByTestId } = renderBar({ onAttach, attachDisabled: false });
+    const btn = getByTestId("iab-attach-button");
+    expect(btn).toBeTruthy();
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(btn);
+    expect(onAttach).toHaveBeenCalledTimes(1);
+  });
+
+  it("paperclip attach button is disabled and does not call onAttach when attachDisabled=true", () => {
+    const onAttach = vi.fn();
+    const { getByTestId } = renderBar({ onAttach, attachDisabled: true });
+    const btn = getByTestId("iab-attach-button");
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(btn);
+    expect(onAttach).not.toHaveBeenCalled();
   });
 });
