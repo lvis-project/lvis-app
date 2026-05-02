@@ -67,6 +67,118 @@ describe("AskUserQuestionCard — single question", () => {
     await waitFor(() => expect(onResolved).toHaveBeenCalledWith("q1"));
   });
 
+  it("renders Recommend badge only on the recommendedIndex chip", async () => {
+    const api = fakeApi();
+    const { getAllByTestId } = render(
+      <AskUserQuestionCard
+        api={api}
+        request={{
+          id: "q-recommend",
+          questions: [
+            {
+              question: "수정 방향?",
+              choices: ["A안", "B안", "C안"],
+              recommendedIndex: 1,
+              allowFreeText: true,
+            },
+          ],
+          urgent: false,
+          createdAt: 0,
+        }}
+        onResolved={vi.fn()}
+      />,
+    );
+    const recommendBadges = getAllByTestId("ask-badge-recommend");
+    expect(recommendBadges).toHaveLength(1);
+    // Badge should sit alongside the second choice ("B안") — assert by
+    // walking up to the surrounding button text.
+    const button = recommendBadges[0]?.closest("button");
+    expect(button?.textContent).toContain("B안");
+  });
+
+  it("renders 대안 badges only on altIndices chips and skips the recommend slot", async () => {
+    const api = fakeApi();
+    const { getAllByTestId, queryAllByTestId } = render(
+      <AskUserQuestionCard
+        api={api}
+        request={{
+          id: "q-alt",
+          questions: [
+            {
+              question: "방향?",
+              choices: ["A", "B", "C"],
+              recommendedIndex: 0,
+              // 0 is the recommend slot — UI must dedupe and not double-tag.
+              altIndices: [0, 2],
+              allowFreeText: true,
+            },
+          ],
+          urgent: false,
+          createdAt: 0,
+        }}
+        onResolved={vi.fn()}
+      />,
+    );
+    expect(getAllByTestId("ask-badge-recommend")).toHaveLength(1);
+    const altBadges = queryAllByTestId("ask-badge-alt");
+    expect(altBadges).toHaveLength(1);
+    expect(altBadges[0]?.closest("button")?.textContent).toContain("C");
+  });
+
+  it("renders duplicate choice strings without React key collisions", async () => {
+    const api = fakeApi();
+    // Reusing the same label is a defensive case — model output should be
+    // unique but the UI must not mis-reconcile if it isn't.
+    const { container } = render(
+      <AskUserQuestionCard
+        api={api}
+        request={{
+          id: "q-dup",
+          questions: [
+            {
+              question: "?",
+              choices: ["같음", "같음", "같음"],
+              allowFreeText: false,
+            },
+          ],
+          urgent: false,
+          createdAt: 0,
+        }}
+        onResolved={vi.fn()}
+      />,
+    );
+    const buttons = container.querySelectorAll("button");
+    // 3 choice buttons + 1 dismiss button
+    const choiceButtons = Array.from(buttons).filter(
+      (b) => b.textContent?.trim() === "같음",
+    );
+    expect(choiceButtons).toHaveLength(3);
+  });
+
+  it("uses placeholder when provided on the free-text input", async () => {
+    const api = fakeApi();
+    const { getByTestId } = render(
+      <AskUserQuestionCard
+        api={api}
+        request={{
+          id: "q-ph",
+          questions: [
+            {
+              question: "?",
+              allowFreeText: true,
+              placeholder: "다른 방향을 한 줄로",
+            },
+          ],
+          urgent: false,
+          createdAt: 0,
+        }}
+        onResolved={vi.fn()}
+      />,
+    );
+    const input = getByTestId("ask-freetext-input") as HTMLInputElement;
+    expect(input.placeholder).toBe("다른 방향을 한 줄로");
+  });
+
   it("dismiss surfaces dismissed:true with no answers", async () => {
     const respond = vi.fn().mockResolvedValue({ ok: true });
     const api = fakeApi({ respondAskUserQuestion: respond as never });
@@ -109,7 +221,7 @@ describe("AskUserQuestionCard — multi-question", () => {
       />,
     );
     // Step label shows pagination on multi.
-    expect(getByTestId("ask-step-label").textContent).toBe("1 / 2");
+    expect(getByTestId("ask-step-label").textContent).toBe("· 1 / 2");
     expect(container.textContent).toContain("Where?");
     // Picking a choice on a multi-question card does NOT auto-submit;
     // user must hit 다음/검토.
@@ -121,7 +233,7 @@ describe("AskUserQuestionCard — multi-question", () => {
     await act(async () => {
       fireEvent.click(getByText("다음"));
     });
-    expect(getByTestId("ask-step-label").textContent).toBe("2 / 2");
+    expect(getByTestId("ask-step-label").textContent).toBe("· 2 / 2");
     await act(async () => {
       fireEvent.click(getByText("내일"));
     });
@@ -131,7 +243,7 @@ describe("AskUserQuestionCard — multi-question", () => {
     });
     // Now on the confirm page — review surface present.
     expect(queryByTestId("ask-confirm-review")).not.toBeNull();
-    expect(getByTestId("ask-step-label").textContent).toBe("최종 확인");
+    expect(getByTestId("ask-step-label").textContent).toBe("· 검토");
     await act(async () => {
       fireEvent.click(getByText("보내기"));
     });

@@ -46,7 +46,6 @@ import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useChatActions } from "./hooks/use-chat-actions.js";
 import { useChatContextValue } from "./hooks/use-chat-context-value.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
-import { FloatingQuestionPanel } from "./components/FloatingQuestionPanel.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useInstallingPlugins } from "./hooks/use-installing-plugins.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
@@ -610,6 +609,8 @@ export function App() {
             subAgentSpawns={subAgentSpawns}
             loadedSkills={loadedSkills}
             hasAskQuestions={askQuestions.length > 0}
+            askQuestions={askQuestions}
+            onResolveAskQuestion={dismissAskQuestion}
             plugins={pluginEntries}
             onSelectPlugin={handleSidebarSelect}
             commandActions={commandActions}
@@ -626,15 +627,10 @@ export function App() {
         <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
       </div>
 
-      {/* FloatingQuestionPanel — mounted at App level (not inside ChatView) so
-          ask_user_question requests survive sidebar navigation. Uses fixed
-          positioning to overlay the entire window regardless of active view. */}
-      <FloatingQuestionPanel
-        api={api}
-        requests={askQuestions}
-        onResolved={dismissAskQuestion}
-        fixed
-      />
+      {/* ask_user_question cards now render inline inside ChatView /
+          StackedChatView (immediately after the active turn's entries),
+          so the previous App-level FloatingQuestionPanel mount is gone.
+          See <AskUserQuestionCard> + ChatView ask-question slot. */}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); void api.getSettings().then((s) => setExperimentalStackedChat(s.features?.experimentalStackedChat ?? false)).catch(() => {}); }} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
       <ApprovalQueueStatus queue={approvalQueue} />

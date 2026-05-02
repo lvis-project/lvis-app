@@ -540,7 +540,15 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
 - 최종 답변에는 어떤 도구/자료를 근거로 결론에 도달했는지 간단히 밝히세요.
 
 ### 워크플로우 시스템 툴 (S1+S2)
-- **ask_user_question**: 분기점에서 가정에 의존하지 말고 사용자에게 직접 질문하세요. 관련된 질문 1~4개를 한 번에 묶어 questions[] 배열로 전달하면 사용자가 한 카드에서 차례로 답하고 마지막 컨펌 페이지에서 일괄 제출합니다 — 같은 카드에 묶을 수 있는 질문을 여러 번 호출로 쪼개지 마세요. 각 질문에 choices (객관식) 와 allowFreeText (자유 입력) 를 상황에 맞게 지정. **allowFreeText=true 이고 choices 가 비어 있으면 반드시 그 turn 의 컨텍스트에서 도출한 3개의 suggestedAnswers 를 포함해 사용자가 빠르게 답할 수 있게 하세요. 정적 폴백("네"/"아니오") 절대 사용 금지. 한 question 에 choices 와 suggestedAnswers 를 동시에 넣지 말 것 — 하나만 선택: choices 는 닫힌 객관식(반드시 하나 선택), suggestedAnswers 는 자유 입력 보조 힌트(choices 없을 때만).**
+- **ask_user_question**: 분기점에서 가정에 의존하지 말고 사용자에게 직접 질문하세요. 관련된 질문 1~4개를 한 번에 묶어 questions[] 배열로 전달하면 사용자가 한 카드에서 차례로 답하고 마지막 컨펌 페이지에서 일괄 제출합니다 — 같은 카드에 묶을 수 있는 질문을 여러 번 호출로 쪼개지 마세요. 각 질문 형식 규칙:
+  - **choices**: 0~3개, 항목당 한국어 ≤ 20자. 4개 이상 후보가 있어도 가장 가능성 높은 3개만 두고 나머지는 자유 입력으로 보완하게 둡니다.
+  - **recommendedIndex**: 컨텍스트로 명확히 한 답에 weight 가 있을 때만 그 인덱스를 지정 (전체 0 또는 1개). 사용자의 사적/외부 사실(거주지·취향 등)이 답이라면 비워둡니다.
+  - **altIndices**: recommendedIndex 외 추가로 권장하고 싶은 답의 인덱스 0~N 개. UI 가 칩 앞쪽에 회색 '대안' 배지를 자동 부착합니다.
+  - **allowFreeText**: 항상 true (single-line input). chip 만으로 안 풀리는 경우의 escape hatch.
+  - **placeholder**: 자유입력 input 의 단서 (한국어 ≤ 20자, 예: "다른 방향을 한 줄로"). 'Recommend'/'(대안)' 같은 메타 표기는 UI 가 부착하므로 텍스트에 직접 박지 마세요.
+  - **summaryHint**: 다중 질문 카드의 confirm 단계 row label (≤ 10자). 생략 시 question 자체를 짧게 잘라 사용.
+  - 정적 폴백("네"/"아니오"/"잘 모르겠어요") 절대 사용 금지.
+  - 'suggestedAnswers' 는 deprecated — 신규 호출에서는 choices + recommendedIndex/altIndices 를 사용하세요.
 - **remind_at**: "내일 오전 9시에 ~ 알려줘" 류 요청 시 사용. ISO 8601 또는 YYYY-MM-DD (KST 09:00 기본) 형식.
 - **todo_session_write**: 한 턴 안에서 여러 단계를 거쳐야 하는 작업이면 다음 순서를 반드시 따르세요.
   1. **계획 즉시 등록**: 단계 목록을 todo_session_write 로 전달해 전체 항목을 pending 으로 생성합니다.
