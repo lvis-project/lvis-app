@@ -46,11 +46,16 @@ function mountHost(view: PluginUiExtensionView | null): HTMLElement {
   return container;
 }
 
-/** Fire a synthetic did-attach event (mirrors Electron's shape). */
+/**
+ * Fire a synthetic did-attach event. The host reads the webContentsId via
+ * the canonical `node.getWebContentsId()` accessor (#498), not via an
+ * `e.webContentsId` payload (which the real Electron event doesn't carry),
+ * so the helper stubs the method on the webview element.
+ */
 function fireDidAttach(webview: Element, webContentsId: number) {
-  const e = new Event("did-attach");
-  Object.assign(e, { webContentsId });
-  webview.dispatchEvent(e);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (webview as any).getWebContentsId = () => webContentsId;
+  webview.dispatchEvent(new Event("did-attach"));
 }
 
 afterEach(() => {
@@ -64,8 +69,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("PluginUiHostView — register-before-attach flow", () => {
-  it("mounts webview with src='' then sets src after did-attach + registration", async () => {
+describe("PluginUiHostView — webview attach flow", () => {
+  it("mounts webview with src=shellUrl from the start (preload only runs at first attach)", async () => {
+    // #498: `<webview preload>` runs ONLY at first guest attach — subsequent
+    // navigations do NOT re-execute preload, so the shell src must already
+    // be the real shell URL on initial mount or `lvisPlugin` will be missing
+    // in the new main world. The race vs registerPluginWebview is absorbed
+    // by the host's `pendingEntryUrlResolvers` queue + the shell's 6s retry
+    // budget.
     const registerPluginWebview = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("lvisApi", {
       pluginShellUrl: SHELL_URL,
@@ -77,11 +88,11 @@ describe("PluginUiHostView — register-before-attach flow", () => {
     const webview = container.querySelector("webview");
 
     expect(webview).not.toBeNull();
-    // Before did-attach: src attribute absent (shell cannot load before registration).
-    expect(webview?.getAttribute("src")).toBeNull();
+    expect(webview?.getAttribute("src")).toBe(SHELL_URL);
     expect(webview?.getAttribute("preload")).toBe(PRELOAD_URL);
 
-    // Simulate did-attach + await async IPC resolution.
+    // did-attach still fires registerPluginWebview so the host can resolve
+    // the shell's getEntryUrl request once the binding lands.
     await act(async () => {
       fireDidAttach(webview!, 42);
       await new Promise((r) => setTimeout(r, 0));
@@ -106,8 +117,6 @@ describe("PluginUiHostView — register-before-attach flow", () => {
     const container = mountHost(VIEW);
     const webview = container.querySelector("webview");
     expect(webview).not.toBeNull();
-    // Before did-attach: src attribute absent (shell not yet loaded).
-    expect(webview?.getAttribute("src")).toBeNull();
 
     await act(async () => {
       fireDidAttach(webview!, 7);
