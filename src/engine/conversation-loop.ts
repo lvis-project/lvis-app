@@ -491,6 +491,13 @@ export class ConversationLoop {
       throw new Error(err);
     }
 
+    // Snapshot vendor/model now so audit attribution survives mid-turn
+    // settings mutation (retry-effort patches thinking config and reverts
+    // in finally; user can switch vendor while a turn is streaming).
+    const llm = this.deps.settingsService.get("llm");
+    const turnVendorProvider = llm.provider;
+    const turnVendorModel = llm.vendors[llm.provider].model;
+
     // B4: set up abort controller for this turn
     const ac = new AbortController();
     this.currentAbortController = ac;
@@ -596,6 +603,8 @@ export class ConversationLoop {
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
         tokenUsage: result.usage,
         route: routeResult.route,
+        vendorProvider: turnVendorProvider,
+        vendorModel: turnVendorModel,
       });
       // compact가 발생했으면 history 교체
       if (compactedMessages) {
@@ -619,13 +628,22 @@ export class ConversationLoop {
         }
       }
       await this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+      // Mirror PostTurnHookChain's audit-route format so usage attribution
+      // stays consistent across both code paths. SubAgentRunner constructs
+      // child loops with `postTurnHookChain: undefined`, which would
+      // otherwise log every sub-agent LLM turn as the bare `"llm"` route
+      // and lose vendor/model granularity in `~/.lvis/audit.jsonl`.
+      const auditRoute =
+        routeResult.route === "llm"
+          ? `${turnVendorProvider}/${turnVendorModel}`
+          : routeResult.route;
       this.auditLogger.logTurn({
         sessionId: this.sessionId,
         input,
         output: result.text,
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
         tokenUsage: result.usage,
-        route: routeResult.route,
+        route: auditRoute,
       });
       this.deps.idleScheduler?.signalConversation();
     }

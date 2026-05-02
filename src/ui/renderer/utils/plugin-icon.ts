@@ -38,14 +38,33 @@ export function pluginIconFor(manifest: { icon?: string }): ComponentType<Lucide
   const name = manifest.icon;
   const cached = iconCache.get(name);
   if (cached) return cached;
+  // Eviction policy:
+  //   • `.then` "invalid name" → DO NOT evict. The cache exists to keep the
+  //     same React.lazy reference across renders so PluginGridButton does
+  //     not unmount/remount + re-Suspense on every paint. Evicting on a
+  //     stable manifest-input failure (icon name simply does not exist in
+  //     lucide-react) reintroduces that churn and re-imports lucide-react
+  //     for every render until the manifest changes.
+  //   • `.catch` reject (chunk-load failure, transient network) → DO evict.
+  //     The lazy resolves to a permanently-rejected promise so any cached
+  //     reference would render an error boundary forever; the next call
+  //     should get a fresh lazy that retries the import.
   const Icon = lazy(() =>
-    import("lucide-react").then((mod) => {
-      const candidate = (mod as Record<string, unknown>)[name];
-      if (typeof candidate === "function" || (typeof candidate === "object" && candidate !== null && "render" in (candidate as object))) {
+    import("lucide-react")
+      .then((mod) => {
+        const candidate = (mod as Record<string, unknown>)[name];
+        const isValid =
+          typeof candidate === "function" ||
+          (typeof candidate === "object" &&
+            candidate !== null &&
+            "render" in (candidate as object));
+        if (!isValid) return { default: FALLBACK_ICON };
         return { default: candidate as ComponentType<LucideProps> };
-      }
-      return { default: FALLBACK_ICON };
-    }),
+      })
+      .catch(() => {
+        iconCache.delete(name);
+        return { default: FALLBACK_ICON };
+      }),
   );
   iconCache.set(name, Icon);
   return Icon;
