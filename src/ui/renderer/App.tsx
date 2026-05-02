@@ -12,8 +12,8 @@ import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { ApprovalQueueStatus } from "./components/ApprovalQueueStatus.js";
-import { CommandPaletteDialog } from "./dialogs/CommandPaletteDialog.js";
 import { GlobalSearchDialog } from "./dialogs/GlobalSearchDialog.js";
+import { buildQuickActions } from "./components/CommandPopover.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { MainContent } from "./MainContent.js";
 import { Sidebar } from "./Sidebar.js";
@@ -84,8 +84,8 @@ export function App() {
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
-  const [commandOpen, setCommandOpen] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [commandPopoverOpen, setCommandPopoverOpen] = useState(false);
   const {
     routineResult,
     routineQueueIndex,
@@ -394,10 +394,19 @@ export function App() {
   }, [api, sessionLoad, streaming, applyLoadedSession, refreshSessionId, refreshSessions]);
 
   // ─── Effects ──────────────────────────────────
+  const toggleCommandPopover = useCallback(() => {
+    if (activeView !== "home") {
+      setActiveView("home");
+      setCommandPopoverOpen(true);
+    } else {
+      setCommandPopoverOpen((prev) => !prev);
+    }
+  }, [activeView]);
+
   useAppBootstrap({
     api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
     setActiveView,
-    openCommandPalette: () => setCommandOpen(true),
+    toggleCommandPopover,
   });
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
 
@@ -430,14 +439,22 @@ export function App() {
     return unsubscribe;
   }, [api, refreshViews, refreshMarketplace, refreshCards]);
 
-  const commandActions = useMemo(() => [
-    { id: "home", label: "홈으로 이동", run: () => setActiveView("home") },
-    { id: "tasks", label: "태스크 보기", run: () => setActiveView("tasks") },
-    { id: "routines", label: "루틴 보기", run: () => setActiveView("routines") },
-    { id: "settings", label: "설정 열기", run: () => setSettingsOpen(true) },
-    { id: "new-chat", label: "새 대화 시작", run: () => void handleNewChat() },
-    ...pluginViews.map((i) => ({ id: `v:${toViewKey(i)}`, label: `${getPluginViewLabel(i)} 열기`, run: () => setActiveView(toViewKey(i)) })),
-  ], [pluginViews, handleNewChat]);
+  // Auto-close CommandPopover when navigating away from home — the popover
+  // is only mounted on the home view so leaving it open causes stuck state.
+  useEffect(() => {
+    if (activeView !== "home") setCommandPopoverOpen(false);
+  }, [activeView]);
+
+  const commandActions = useMemo(
+    () =>
+      buildQuickActions({
+        setActiveView,
+        setSettingsOpen,
+        handleNewChat,
+        pluginViews,
+      }),
+    [pluginViews, handleNewChat],
+  );
 
   const onOpenSettings = useCallback(() => setSettingsOpen(true), []);
   const onNewChat = useCallback(() => { void handleNewChat(); }, [handleNewChat]);
@@ -530,7 +547,6 @@ export function App() {
             isSessionStarred={(sessionId) => Boolean(isSessionStarred(sessionId))}
             onExport={handleExport}
             onOpenSettings={() => setSettingsOpen(true)}
-            onOpenCommand={() => setCommandOpen(true)}
             onOpenGlobalSearch={() => { refreshSessions(); setGlobalSearchOpen(true); }}
             onOpenStarredView={() => setActiveView("starred")}
           />
@@ -559,6 +575,9 @@ export function App() {
             hasAskQuestions={askQuestions.length > 0}
             plugins={pluginEntries}
             onSelectPlugin={handleSidebarSelect}
+            commandActions={commandActions}
+            commandPopoverOpen={commandPopoverOpen}
+            onCommandPopoverOpenChange={setCommandPopoverOpen}
             activePluginView={activePluginView ?? null}
           />
         </main>
@@ -578,7 +597,6 @@ export function App() {
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
       <ApprovalQueueStatus queue={approvalQueue} />
-      <CommandPaletteDialog open={commandOpen} onOpenChange={setCommandOpen} actions={commandActions} />
       {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.
           Re-mounts on every open → catalog reloaded each time. If that proves slow,
           introduce a persistent cache hook in a separate PR. */}
