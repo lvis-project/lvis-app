@@ -31,8 +31,27 @@ const DENY_EXTENSIONS = new Set<string>(DENY_LIST);
  * across navigations, and re-prompting the user every chat would be
  * hostile UX. The threat model only requires that paths are
  * user-acknowledged at LEAST ONCE in this app run.
+ *
+ * Bounded by {@link ATTACH_ALLOWLIST_MAX} with insertion-order LRU
+ * eviction (Set iteration order = insertion order; oldest evicted first).
+ * Prevents unbounded memory growth in long-lived sessions where a power
+ * user might attach thousands of files. Eviction risk is benign — if the
+ * user re-attaches a previously evicted path, the OS picker re-authorizes
+ * it. The cap is high enough (10k) that normal usage never trips it.
  */
+const ATTACH_ALLOWLIST_MAX = 10_000;
 const ATTACH_PATH_ALLOWLIST = new Set<string>();
+function authorizePath(p: string): void {
+  // Re-add to move existing entries to the tail (Set iteration is
+  // insertion-order, so deleting + re-adding refreshes recency).
+  if (ATTACH_PATH_ALLOWLIST.has(p)) ATTACH_PATH_ALLOWLIST.delete(p);
+  ATTACH_PATH_ALLOWLIST.add(p);
+  while (ATTACH_PATH_ALLOWLIST.size > ATTACH_ALLOWLIST_MAX) {
+    const oldest = ATTACH_PATH_ALLOWLIST.values().next().value;
+    if (oldest === undefined) break;
+    ATTACH_PATH_ALLOWLIST.delete(oldest);
+  }
+}
 
 /** Max bytes for a single image read — vision APIs reject larger anyway. */
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -172,7 +191,7 @@ export function registerAttachHandlers(deps: IpcDeps): void {
         // Authorize this exact path for downstream readImage / openExternal.
         // The user just acknowledged it via the OS picker, so subsequent
         // reads are no longer blind-trusting renderer-supplied paths.
-        ATTACH_PATH_ALLOWLIST.add(p);
+        authorizePath(p);
       } catch {
         rejected.push(p);
       }
@@ -279,7 +298,7 @@ export function registerAttachHandlers(deps: IpcDeps): void {
         await fs.writeFile(target, buf);
         // Authorize for downstream readImage / openExternal — we just
         // wrote this file ourselves so it's safe to read back.
-        ATTACH_PATH_ALLOWLIST.add(target);
+        authorizePath(target);
         const dataUrl = `data:${detected.mimeType};base64,${input.base64}`;
         return {
           ok: true,

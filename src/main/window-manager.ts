@@ -317,7 +317,7 @@ export class WindowManager {
       isPluginViewKey(viewKey) &&
       typeof child.webContents?.on === "function"
     ) {
-      child.webContents.on("will-attach-webview", (_event, webPreferences) => {
+      child.webContents.on("will-attach-webview", (event, webPreferences, params) => {
         const prefs = webPreferences as Record<string, unknown>;
         delete prefs.preload;
         delete prefs.preloadURL;
@@ -329,6 +329,17 @@ export class WindowManager {
         // Force-set: a `<webview webpreferences="sandbox=no">` injection
         // would otherwise survive and run unsandboxed.
         prefs.sandbox = true;
+        // Partition-allowlist gate. Only `persist:plugin:<slug>` partitions
+        // pass through `installPluginPartitionPolicy()` in main.ts (which
+        // sets the preload + http/https network block). A guest with any
+        // other `partition=` value would skip that policy and regain
+        // unrestricted initial navigation/network access. Block the attach
+        // entirely rather than rewriting the partition — silently changing
+        // it would yield an attached webview with no storage isolation.
+        const requested = (params as { partition?: unknown } | undefined)?.partition;
+        if (typeof requested !== "string" || !requested.startsWith("persist:plugin:")) {
+          if (typeof event.preventDefault === "function") event.preventDefault();
+        }
       });
     }
 

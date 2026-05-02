@@ -628,13 +628,22 @@ export class ConversationLoop {
         }
       }
       await this.deps.memoryManager.saveSession(this.sessionId, this.history.getMessages());
+      // Mirror PostTurnHookChain's audit-route format so usage attribution
+      // stays consistent across both code paths. SubAgentRunner constructs
+      // child loops with `postTurnHookChain: undefined`, which would
+      // otherwise log every sub-agent LLM turn as the bare `"llm"` route
+      // and lose vendor/model granularity in `~/.lvis/audit.jsonl`.
+      const auditRoute =
+        routeResult.route === "llm"
+          ? `${turnVendorProvider}/${turnVendorModel}`
+          : routeResult.route;
       this.auditLogger.logTurn({
         sessionId: this.sessionId,
         input,
         output: result.text,
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, isError: false })),
         tokenUsage: result.usage,
-        route: routeResult.route,
+        route: auditRoute,
       });
       this.deps.idleScheduler?.signalConversation();
     }
