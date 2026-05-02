@@ -209,6 +209,7 @@ export type LvisApi = {
    * renderer instead of resolving against `window.location.href`.
    */
   pluginShellUrl: string;
+  notifyPluginTheme: (payload: { theme: string; chatTheme: string; codeTheme: string }) => Promise<{ ok: boolean; error?: string }>;
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<AppSettings>;
   setApiKey: (vendor: string, k: string) => Promise<{ ok: true }>;
