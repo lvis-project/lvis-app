@@ -253,6 +253,219 @@ describe("backward compatibility — loading old-format metadata", () => {
   });
 });
 
+// ── 5b. normalizeCheckpoint range validation (Copilot fix #3) ────────────────
+
+describe("normalizeCheckpoint range validation", () => {
+  it("drops checkpoint with ctxUsageAtTrigger below 0", async () => {
+    const sessionId = SESSION_A;
+    await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
+    const sessionsDir = join(dir, "sessions");
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.meta.json`),
+      JSON.stringify({
+        checkpoints: [
+          {
+            id: "ckpt-neg-ctx",
+            triggeredAt: "2026-05-01T10:00:00.000Z",
+            trigger: "hard-token",
+            ctxUsageAtTrigger: -0.5,
+            summary: null,
+            messageCountAtTrigger: 10,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(sessionId);
+    expect(meta!.checkpoints).toBeUndefined();
+  });
+
+  it("drops checkpoint with ctxUsageAtTrigger above 1", async () => {
+    const sessionId = SESSION_B;
+    await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
+    const sessionsDir = join(dir, "sessions");
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.meta.json`),
+      JSON.stringify({
+        checkpoints: [
+          {
+            id: "ckpt-over-ctx",
+            triggeredAt: "2026-05-01T10:00:00.000Z",
+            trigger: "hard-token",
+            ctxUsageAtTrigger: 1.5,
+            summary: null,
+            messageCountAtTrigger: 10,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(sessionId);
+    expect(meta!.checkpoints).toBeUndefined();
+  });
+
+  it("drops checkpoint with ctxUsageAtTrigger = NaN", async () => {
+    const sessionId = SESSION_C;
+    await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
+    const sessionsDir = join(dir, "sessions");
+    // JSON.stringify(NaN) produces "null" — write raw JSON to embed NaN-equivalent
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.meta.json`),
+      JSON.stringify({
+        checkpoints: [
+          {
+            id: "ckpt-nan-ctx",
+            triggeredAt: "2026-05-01T10:00:00.000Z",
+            trigger: "hard-token",
+            ctxUsageAtTrigger: null,
+            summary: null,
+            messageCountAtTrigger: 10,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(sessionId);
+    expect(meta!.checkpoints).toBeUndefined();
+  });
+
+  it("drops checkpoint with negative messageCountAtTrigger", async () => {
+    const sessionId = SESSION_A;
+    await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
+    const sessionsDir = join(dir, "sessions");
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.meta.json`),
+      JSON.stringify({
+        checkpoints: [
+          {
+            id: "ckpt-neg-msg",
+            triggeredAt: "2026-05-01T10:00:00.000Z",
+            trigger: "hard-token",
+            ctxUsageAtTrigger: 0.5,
+            summary: null,
+            messageCountAtTrigger: -1,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(sessionId);
+    expect(meta!.checkpoints).toBeUndefined();
+  });
+
+  it("drops checkpoint with fractional messageCountAtTrigger", async () => {
+    const sessionId = SESSION_B;
+    await mm.saveSession(sessionId, [{ role: "user", content: "msg" }]);
+    const sessionsDir = join(dir, "sessions");
+    writeFileSync(
+      join(sessionsDir, `${sessionId}.meta.json`),
+      JSON.stringify({
+        checkpoints: [
+          {
+            id: "ckpt-float-msg",
+            triggeredAt: "2026-05-01T10:00:00.000Z",
+            trigger: "hard-token",
+            ctxUsageAtTrigger: 0.5,
+            summary: null,
+            messageCountAtTrigger: 1.5,
+          },
+        ],
+      }),
+      "utf-8",
+    );
+    const meta = mm.loadSessionMetadata(sessionId);
+    expect(meta!.checkpoints).toBeUndefined();
+  });
+});
+
+// ── 5c. getCheckpointChain O(n) order + path traversal (Copilot fix #1 & #4) ─
+
+describe("getCheckpointChain — O(n) order + path traversal guard", () => {
+  it("returns root-first order for a 100-node chain", async () => {
+    // Build a chain of 100 sessions: s0 (root) → s1 → … → s99 (leaf).
+    // Then call getCheckpointChain(s99) and verify the result is ordered s0..s99.
+    const ids: string[] = Array.from({ length: 100 }, (_, i) =>
+      `test-chain-${String(i).padStart(3, "0")}-aaaa-bbbb-cccc-dddddddddddd`,
+    );
+    for (let i = 0; i < ids.length; i++) {
+      await mm.saveSession(ids[i], [{ role: "user", content: `msg ${i}` }]);
+      const meta: SessionMetadata = {
+        summaryPreamble: `summary-${i}`,
+        ...(i > 0 ? { parentSessionId: ids[i - 1] } : {}),
+      };
+      await mm.saveSessionMetadata(ids[i], meta);
+    }
+    const chain = await mm.getCheckpointChain(ids[99]);
+    expect(chain).toHaveLength(100);
+    // Root first, leaf last
+    expect(chain[0].summaryPreamble).toBe("summary-0");
+    expect(chain[99].summaryPreamble).toBe("summary-99");
+    // Spot-check middle
+    expect(chain[50].summaryPreamble).toBe("summary-50");
+  });
+
+  it("stops traversal when parentSessionId contains path-traversal characters", async () => {
+    const sessionsDir = join(dir, "sessions");
+    await mm.saveSession(SESSION_A, [{ role: "user", content: "leaf" }]);
+    // Write metadata directly with a malicious parentSessionId
+    writeFileSync(
+      join(sessionsDir, `${SESSION_A}.meta.json`),
+      JSON.stringify({ parentSessionId: "../../../etc/passwd" }),
+      "utf-8",
+    );
+    const chain = await mm.getCheckpointChain(SESSION_A);
+    // SESSION_A itself is included, but traversal stops — no external file read attempted
+    expect(chain).toHaveLength(1);
+    expect(chain[0].parentSessionId).toBe("../../../etc/passwd");
+  });
+
+  it("stops traversal when parentSessionId contains a slash-only segment", async () => {
+    const sessionsDir = join(dir, "sessions");
+    await mm.saveSession(SESSION_B, [{ role: "user", content: "leaf" }]);
+    writeFileSync(
+      join(sessionsDir, `${SESSION_B}.meta.json`),
+      JSON.stringify({ parentSessionId: "../etc" }),
+      "utf-8",
+    );
+    const chain = await mm.getCheckpointChain(SESSION_B);
+    expect(chain).toHaveLength(1);
+  });
+});
+
+// ── 5d. saveSessionMetadata truncation invariant (Copilot fix #2) ─────────────
+
+describe("saveSessionMetadata — summaryPreamble truncation invariant", () => {
+  it("truncates summaryPreamble exceeding 8000 chars even when setSummaryPreamble was bypassed", async () => {
+    const sessionId = SESSION_C;
+    await mm.saveSession(sessionId, [{ role: "user", content: "hello" }]);
+    // Bypass setSummaryPreamble by setting summaryPreamble directly in the metadata object
+    const overlong = "z".repeat(12_000);
+    await mm.saveSessionMetadata(sessionId, { summaryPreamble: overlong });
+
+    const loaded = mm.loadSessionMetadata(sessionId);
+    expect(loaded!.summaryPreamble!.length).toBe(8_000);
+  });
+
+  it("does not mutate original metadata passed to saveSessionMetadata", async () => {
+    const sessionId = SESSION_A;
+    await mm.saveSession(sessionId, [{ role: "user", content: "hello" }]);
+    const overlong = "z".repeat(12_000);
+    const original: SessionMetadata = { summaryPreamble: overlong };
+    await mm.saveSessionMetadata(sessionId, original);
+    // The original object must not be mutated
+    expect(original.summaryPreamble!.length).toBe(12_000);
+  });
+
+  it("does not alter summaryPreamble that is exactly at the limit", async () => {
+    const sessionId = SESSION_B;
+    await mm.saveSession(sessionId, [{ role: "user", content: "hello" }]);
+    const exact = "a".repeat(8_000);
+    await mm.saveSessionMetadata(sessionId, { summaryPreamble: exact });
+    const loaded = mm.loadSessionMetadata(sessionId);
+    expect(loaded!.summaryPreamble!.length).toBe(8_000);
+  });
+});
+
 // ── 5. Round-trip ─────────────────────────────────────────────────────────────
 
 describe("round-trip — write then read preserves all new fields", () => {

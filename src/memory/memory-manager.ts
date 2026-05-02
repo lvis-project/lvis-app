@@ -151,16 +151,18 @@ function normalizeCheckpoint(raw: unknown): Checkpoint | null {
   if (typeof r.id !== "string" || r.id.length === 0) return null;
   if (typeof r.triggeredAt !== "string") return null;
   if (!VALID_CHECKPOINT_TRIGGERS.has(r.trigger as CheckpointTrigger)) return null;
-  if (typeof r.ctxUsageAtTrigger !== "number") return null;
+  const ctxUsage = r.ctxUsageAtTrigger;
+  if (typeof ctxUsage !== "number" || ctxUsage < 0 || ctxUsage > 1) return null;
   if (r.summary !== null && typeof r.summary !== "string") return null;
-  if (typeof r.messageCountAtTrigger !== "number") return null;
+  const msgCount = r.messageCountAtTrigger;
+  if (typeof msgCount !== "number" || msgCount < 0 || !Number.isInteger(msgCount)) return null;
   return {
     id: r.id,
     triggeredAt: r.triggeredAt,
     trigger: r.trigger as CheckpointTrigger,
-    ctxUsageAtTrigger: r.ctxUsageAtTrigger,
+    ctxUsageAtTrigger: ctxUsage,
     summary: r.summary as string | null,
-    messageCountAtTrigger: r.messageCountAtTrigger,
+    messageCountAtTrigger: msgCount,
   };
 }
 
@@ -362,8 +364,14 @@ export class MemoryManager {
 
   async saveSessionMetadata(sessionId: string, metadata: SessionMetadata): Promise<void> {
     const targetPath = join(this.sessionsDir, `${sessionId}.meta.json`);
+    // Enforce the summaryPreamble length invariant on write, regardless of how the
+    // caller assembled the metadata (i.e., whether setSummaryPreamble was used or not).
+    const safe: SessionMetadata = metadata.summaryPreamble !== undefined &&
+      metadata.summaryPreamble.length > MAX_SUMMARY_PREAMBLE_CHARS
+      ? { ...metadata, summaryPreamble: metadata.summaryPreamble.slice(0, MAX_SUMMARY_PREAMBLE_CHARS) }
+      : metadata;
     await withFileLock(targetPath, async () => {
-      writeFileSync(targetPath, JSON.stringify(metadata, null, 2), "utf-8");
+      writeFileSync(targetPath, JSON.stringify(safe, null, 2), "utf-8");
     });
   }
 
@@ -468,10 +476,16 @@ export class MemoryManager {
       visited.add(currentId);
       const meta = this.loadSessionMetadata(currentId);
       if (meta === null) break;
-      chain.unshift(meta);
-      currentId = meta.parentSessionId;
+      chain.push(meta);
+      const nextId = meta.parentSessionId;
+      if (nextId !== undefined && !/^[a-zA-Z0-9_\-]+$/.test(nextId)) {
+        log.warn({ sessionId: currentId, parentSessionId: nextId }, "unsafe parentSessionId rejected — stopping traversal");
+        break;
+      }
+      currentId = nextId;
     }
 
+    chain.reverse();
     return chain;
   }
 
