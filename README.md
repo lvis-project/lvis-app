@@ -191,8 +191,8 @@ bunx vitest run
 ## 실행
 ```bash
 # 실제 Local Indexer 모드 (설치/키 필요)
+# Local Indexer plugin 은 marketplace/sideload 로 먼저 설치해야 하며,
+# host 는 sibling plugin source checkout 을 사용하지 않습니다.
 # OPENAI_API_KEY=... bun run start
-# Phase 1 E2E source checkout override:
-# LVIS_E2E_INDEXER_PLUGIN_ROOT=/absolute/path/to/lvis-plugin-local-indexer bunx tsx scripts/e2e-phase1.ts
 bun run start
 ```
