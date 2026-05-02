@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { LayoutGrid, ExternalLink, Plus, Plug } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
@@ -41,29 +41,45 @@ export function PluginGridButton({
   marketplaceUrlReady = false,
 }: PluginGridButtonProps) {
   const [open, setOpen] = useState(false);
-  // Match popover width to the chat composer's INNER input-bar (the white
-  // box, not its outer padded wrapper) and shift it left via `alignOffset`
-  // so the popover's left edge aligns with the input-bar's left edge —
-  // otherwise `align="start"` anchors at the trigger and the popover
-  // visually slides off-center to the right.
+  // Match popover width to the chat composer's INNER input-bar and shift
+  // it left via `alignOffset` so the popover's left edge aligns with the
+  // input-bar's left edge — otherwise `align="start"` anchors at the
+  // trigger and the popover visually slides off-center to the right.
   // ResizeObserver keeps both values in sync as the chat panel resizes.
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [popoverWidth, setPopoverWidth] = useState<number | null>(null);
   const [alignOffset, setAlignOffset] = useState(0);
   useEffect(() => {
     if (!open) return;
-    const composer = document.querySelector('[data-testid="composer"]') as HTMLElement | null;
-    const innerBar = composer?.querySelector(":scope > div") as HTMLElement | null;
-    const triggerEl = document.querySelector('[data-testid="plugin-grid-button"]') as HTMLElement | null;
-    if (!innerBar || !triggerEl) return;
+    const triggerEl = triggerRef.current;
+    if (!triggerEl) return;
+    // Scope DOM lookup to the trigger's nearest ancestor that contains
+    // the composer — keeps this robust against multi-pane layouts where
+    // a document-global query could grab the wrong panel's composer.
+    let scope: Element | null = triggerEl.parentElement;
+    while (scope && !scope.querySelector('[data-testid="composer"]')) {
+      scope = scope.parentElement;
+    }
+    const composer = scope?.querySelector('[data-testid="composer"]') as HTMLElement | null;
+    if (!composer) return;
     const measure = () => {
+      // Re-query the input-bar each tick by its stable testid — keeps
+      // sizing correct if the composer's children swap (warning row
+      // appearing on attach-cap, future siblings, etc.).
+      const innerBar = composer.querySelector(
+        '[data-testid="composer-input-bar"]',
+      ) as HTMLElement | null;
+      if (!innerBar) return;
       const innerRect = innerBar.getBoundingClientRect();
       const triggerRect = triggerEl.getBoundingClientRect();
       setPopoverWidth(innerRect.width);
       setAlignOffset(-(triggerRect.left - innerRect.left));
     };
     measure();
+    // Observe the composer wrapper itself (stable parent) so any
+    // child-swap or chip-mounted resize re-fires `measure`.
     const ro = new ResizeObserver(measure);
-    ro.observe(innerBar);
+    ro.observe(composer);
     return () => ro.disconnect();
   }, [open]);
   const anyUnauthed = plugins.some((p) => p.unauthed);
@@ -98,6 +114,7 @@ export function PluginGridButton({
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <Button
+              ref={triggerRef}
               variant="ghost"
               size="sm"
               className="h-7 w-7 p-0"

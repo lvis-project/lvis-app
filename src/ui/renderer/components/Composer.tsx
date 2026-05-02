@@ -247,7 +247,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   return (
     <div data-testid="composer" className="px-3">
-      <div className="flex items-stretch gap-2 rounded-xl bg-input-bar overflow-hidden shadow-md">
+      <div
+        data-testid="composer-input-bar"
+        className="flex items-stretch gap-2 rounded-xl bg-input-bar overflow-hidden shadow-md"
+      >
         {/* Strip is rendered ONLY when there is at least one attachment so
             the empty state does not reserve horizontal space. Single chip
             inline; 2+ collapse into a stacked card with an overlay. */}

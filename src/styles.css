@@ -213,6 +213,12 @@
     --message-user-bg:      var(--p-blue-500);
     --message-user-fg:      var(--p-slate-50);
 
+    /* Composer (input-bar) surface — every shell needs a fallback so
+       `bg-input-bar` doesn't resolve to invalid `hsl()` outside the
+       light+purple overlay. Dark surface uses card-dark; light shell
+       and HC override below. */
+    --input-bar-bg:         var(--p-slate-card-dark);
+
     --secondary:            var(--p-slate-800);
     --secondary-foreground: var(--p-slate-50);
 
@@ -254,6 +260,8 @@
     --message-user-bg:      var(--p-blue-600);
     --message-user-fg:      var(--p-slate-50);
 
+    --input-bar-bg:         var(--p-slate-0);
+
     --secondary:            var(--p-slate-100);
     --secondary-foreground: var(--p-slate-900);
 
@@ -294,6 +302,8 @@
 
     --message-user-bg:      60 100% 50%;
     --message-user-fg:      0 0% 0%;
+
+    --input-bar-bg:         0 0% 0%;
 
     --secondary:            0 0% 15%;
     --secondary-foreground: 0 0% 100%;

@@ -32,10 +32,10 @@ module.exports = {
           foreground: "hsl(var(--primary-foreground))",
         },
         "message-user": {
-          DEFAULT: "hsl(var(--message-user-bg))",
-          foreground: "hsl(var(--message-user-fg))",
+          DEFAULT: "hsl(var(--message-user-bg) / <alpha-value>)",
+          foreground: "hsl(var(--message-user-fg) / <alpha-value>)",
         },
-        "input-bar": "hsl(var(--input-bar-bg))",
+        "input-bar": "hsl(var(--input-bar-bg) / <alpha-value>)",
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",
