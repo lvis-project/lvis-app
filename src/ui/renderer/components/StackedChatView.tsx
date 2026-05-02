@@ -240,11 +240,23 @@ function EntriesList({
     const idx = i + idxOffset;
 
     if (entry.kind === "user") {
+      // Only add the top gap when the previous rendered entry is a
+      // *completed* assistant turn (whose action bar is the visual
+      // anchor we're separating from). Day/session markers, the
+      // first user turn of a session, and mid-stream onGuide()
+      // messages following a still-streaming assistant entry should
+      // not get the gap. Uses `mt-4` to match ChatView's `!mt-4`
+      // (16px), so both chat views render identical assistant→user
+      // spacing.
+      const prevEntry = i > 0 ? entries[i - 1] : undefined;
+      const prevAssistantComplete =
+        prevEntry?.kind === "assistant" && prevEntry.streaming !== true;
+      const userGapCls = prevAssistantComplete ? "mt-4" : "";
       rendered.push(
         <div
           key={idx}
           data-testid="user-message"
-          className="ml-auto max-w-[75%] rounded-2xl bg-message-user px-3.5 py-2 text-sm text-message-user-foreground"
+          className={`ml-auto max-w-[75%] rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls}`.trim()}
         >
           <div className="whitespace-pre-wrap">{entry.text}</div>
         </div>,

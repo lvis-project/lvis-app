@@ -26,7 +26,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import type { TriggerResult } from "../hooks/use-trigger-result.js";
@@ -158,7 +158,7 @@ export function TriggerCard({
                 : "prose prose-sm lvis-prose max-w-none break-words"
             }
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{result.summary}</ReactMarkdown>
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">아직 응답이 없습니다.</p>
