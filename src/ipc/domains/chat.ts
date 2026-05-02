@@ -368,6 +368,50 @@ ${input}`;
     };
   });
 
+  // read-only: load messages for any session by id (does NOT change active session)
+  ipcMain.handle("lvis:chat:session-history", (e, sessionId: string) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:chat:session-history", e);
+      // Keep the shape consistent with the success path — renderer always
+      // reads `result.messages` and `result.ok`. Returning the bare
+      // UNAUTHORIZED_FRAME (which omits `messages`) would force every caller
+      // to widen the type and check before reading.
+      return { ok: false, messages: [], error: "unauthorized-frame" as const };
+    }
+    if (typeof sessionId !== "string" || !/^[a-zA-Z0-9_\-]+$/.test(sessionId)) {
+      return { ok: false, messages: [] };
+    }
+    // loadSession() reads the session JSONL via readFileSync; IO/parse errors
+    // propagate as throws. Catch them here so a corrupted session file or
+    // missing path doesn't reject the IPC call (which would surface as a
+    // renderer-side rejection rather than an empty result).
+    let loaded: unknown;
+    try {
+      loaded = memoryManager.loadSession(sessionId);
+    } catch {
+      return { ok: false, messages: [] };
+    }
+    if (!Array.isArray(loaded)) return { ok: false, messages: [] };
+    const raw = loaded.filter(
+      (m): m is GenericMessage =>
+        m != null && typeof m === "object" && "role" in m && "content" in m,
+    );
+    return {
+      ok: true,
+      messages: raw.map((m, i) => ({
+        index: i,
+        role: m.role,
+        content: m.role === "user"
+          ? userContentText(m.content)
+          : m.role === "tool_result"
+            ? m.content
+            : m.content,
+        toolName: m.role === "tool_result" ? m.toolName : undefined,
+        isError: m.role === "tool_result" ? m.isError : undefined,
+      })),
+    };
+  });
+
   ipcMain.handle("lvis:chat:edit-resend", async (e, messageIndex: number, newText: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:edit-resend", e); return UNAUTHORIZED_FRAME; }
     if (typeof messageIndex !== "number" || messageIndex < 0) return { ok: false, error: "invalid-index" };
