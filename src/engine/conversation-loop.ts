@@ -607,9 +607,9 @@ export class ConversationLoop {
       toolCallCount: result.toolCalls.length,
       stopReason: result.stopReason,
     });
-    // §4.5.5 Post-Turn Hook Chain (Agent 6: compact → saveSession → extractMemory → audit → idle-poke)
+    // §4.5.5 Post-Turn Hook Chain (Agent 6: compact → saveSession → extractMemory → detect-checkpoint → update-title → audit → idle-poke)
     if (this.deps.postTurnHookChain) {
-      const compactedMessages = await this.deps.postTurnHookChain.run({
+      const hookResult = await this.deps.postTurnHookChain.run({
         sessionId: this.sessionId,
         messages: this.history.getMessages(),
         cumulativeUsage: this.cumulativeUsage,
@@ -622,9 +622,13 @@ export class ConversationLoop {
         vendorModel: turnVendorModel,
       });
       // compact가 발생했으면 history 교체
-      if (compactedMessages) {
+      if (hookResult.compactedMessages) {
         this.history.clear();
-        this.history.restore(compactedMessages);
+        this.history.restore(hookResult.compactedMessages);
+      }
+      // §PR-3: cleaned text (markers stripped) replaces raw output for caller
+      if (hookResult.detector.cleanedText !== result.text) {
+        result = { ...result, text: hookResult.detector.cleanedText };
       }
     } else {
       // fallback: PostTurnHookChain 미주입 시 기존 inline 로직 유지.
