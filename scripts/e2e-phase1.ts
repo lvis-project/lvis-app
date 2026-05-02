@@ -107,6 +107,13 @@ async function spawnWorker(): Promise<WorkerHandle> {
   const lancePath = join(e2eDir, "vectors.lance");
   const wsPath = join(e2eDir, "workspace");
 
+  await fs.access(workerPy).catch(() => {
+    throw new Error(
+      `Local Indexer source checkout is required for Phase 1 E2E. ` +
+      `Set LVIS_E2E_INDEXER_PLUGIN_ROOT to a lvis-plugin-local-indexer checkout; missing ${workerPy}`,
+    );
+  });
+
   // 테스트용 디렉터리 준비
   await fs.mkdir(e2eDir, { recursive: true });
 
