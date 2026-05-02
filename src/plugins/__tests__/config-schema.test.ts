@@ -13,8 +13,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import * as AjvModule from "ajv";
 import * as AddFormatsModule from "ajv-formats";
 import { readFile } from "node:fs/promises";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import {
   applyConfigDefaults,
   isSecretProperty,
@@ -30,9 +29,8 @@ import {
 } from "../config-change-bus.js";
 import type { PluginConfigSchema } from "../types.js";
 
-const SCHEMA_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../schemas/plugin.schema.json",
+const SCHEMA_PATH = createRequire(import.meta.url).resolve(
+  "@lvis/plugin-sdk/schemas/plugin-manifest.schema.json",
 );
 
 function buildAjv() {
