@@ -16,6 +16,9 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     onSelectPlugin: vi.fn(),
     onInsertSlashCommand: vi.fn(),
     onToggleChatSearch: vi.fn(),
+    commandActions: [],
+    commandPopoverOpen: false,
+    onCommandPopoverOpenChange: vi.fn(),
     onAttach: vi.fn(),
     attachDisabled: false,
     rolePresets: [mockPreset],
@@ -69,10 +72,10 @@ describe("InputActionBar (post indexer-removal)", () => {
     expect(leading.querySelector("[data-testid='plugin-grid-button']")).toBeTruthy();
   });
 
-  it("renders SlashCommandButton inside leading cluster", () => {
+  it("renders CommandPopover trigger inside leading cluster", () => {
     const { getByTestId } = renderBar();
     const leading = getByTestId("iab-leading");
-    expect(leading.querySelector("[data-testid='slash-command-button']")).toBeTruthy();
+    expect(leading.querySelector("[data-testid='command-popover-trigger']")).toBeTruthy();
   });
 
   it("renders thinking checkbox when vendorSupportsThinking=true", () => {

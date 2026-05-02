@@ -4,6 +4,7 @@ import type { getApi } from "./api-client.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { ChatView } from "./ChatView.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
+import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
 import { StarredView } from "./components/StarredView.js";
@@ -43,6 +44,10 @@ export interface MainContentProps {
   // plugin grid for InputActionBar
   plugins: PluginEntry[];
   onSelectPlugin: (viewKey: string) => void;
+  // command popover
+  commandActions: QuickAction[];
+  commandPopoverOpen: boolean;
+  onCommandPopoverOpenChange: (open: boolean) => void;
   // plugin view
   activePluginView: PluginView | null;
 }
@@ -133,6 +138,9 @@ export function MainContent(props: MainContentProps): ReactNode {
             hasAskQuestions={props.hasAskQuestions}
             plugins={props.plugins}
             onSelectPlugin={props.onSelectPlugin}
+            commandActions={props.commandActions}
+            commandPopoverOpen={props.commandPopoverOpen}
+            onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
           />
         </ChatContextProvider>
       </MainPaneShell>

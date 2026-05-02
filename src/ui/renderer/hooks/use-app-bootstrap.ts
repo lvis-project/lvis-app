@@ -8,23 +8,43 @@ export interface AppBootstrapDeps {
   refreshCards: () => Promise<void> | void;
   checkApiKey: () => Promise<unknown> | unknown;
   setActiveView: (k: string) => void;
-  openCommandPalette: () => void;
+  toggleCommandPopover: () => void;
 }
 
 /**
  * Mount-time bootstrap:
  *  - kick off marketplace / views / api-key refreshes
  *  - subscribe to plugin view-activate IPC
- *  - register Cmd/Ctrl+K keybinding for the command palette
+ *  - register Cmd/Ctrl+K keybinding for the command popover
  *
  * Uses a mounted ref to avoid late async resolutions writing to an unmounted
  * component (PR#44 HIGH).
+ *
+ * Three effects are used:
+ *  1. [] — sets isMountedRef lifetime; never re-runs so the ref is never
+ *     reset to false mid-life by unrelated dep changes.
+ *  2. [] — mount-time side-effects (refreshes + IPC subscription); stable
+ *     deps intentionally omitted (eslint-disable comment).
+ *  3. [] — attaches the Cmd/Ctrl+K keydown handler once; reads
+ *     toggleCommandPopover via toggleRef so it always calls the latest
+ *     closure without ever re-attaching the listener.
  */
 export function useAppBootstrap({
   api, refreshMarketplace, refreshViews, refreshCards, checkApiKey,
-  setActiveView, openCommandPalette,
+  setActiveView, toggleCommandPopover,
 }: AppBootstrapDeps) {
   const isMountedRef = useRef(true);
+
+  // Track component lifetime only — never re-runs, never resets ref mid-life.
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  // Mount-time side-effects + view-activate subscription.
+  // api and the refresh fns are stable references — eslint-disable covers the
+  // intentional omission of non-reactive stable deps.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     void refreshMarketplace();
     void refreshViews();
@@ -32,18 +52,24 @@ export function useAppBootstrap({
     void checkApiKey();
 
     const dv = api.onViewActivate((k) => { if (isMountedRef.current) setActiveView(k); });
+    return () => { dv(); };
+  }, []);
+
+  // Stable ref so the keydown handler is attached once and never re-attached
+  // when toggleCommandPopover identity changes (e.g. due to activeView updates).
+  // Synchronous assignment (not useEffect) ensures the ref is always current
+  // before any paint — avoids stale ref on the render immediately after updates.
+  const toggleRef = useRef(toggleCommandPopover);
+  toggleRef.current = toggleCommandPopover;
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        openCommandPalette();
+        toggleRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => {
-      isMountedRef.current = false;
-      dv();
-      window.removeEventListener("keydown", onKey);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { window.removeEventListener("keydown", onKey); };
   }, []);
 }
