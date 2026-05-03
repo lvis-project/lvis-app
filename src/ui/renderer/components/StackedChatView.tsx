@@ -454,25 +454,55 @@ export function StackedChatView({
   const workflowApi = getApi() as LvisApi;
   const composerRef = useRef<ComposerHandle | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  // First-paint scroll-to-bottom is gated per session id. Without this, the
+  // historical-stack mode would land the user at the *top* of the scroll
+  // container on mount: scrollHeight is inflated by all the historical
+  // sessions, so `distanceFromBottom > 200` always passes the near-bottom
+  // guard below and the smooth-scroll never fires. Reset on session change
+  // so opening a different session also lands at its bottom.
+  const initialScrollSessionRef = useRef<string | null>(null);
 
-  // Auto-scroll to bottom when active entries are added or last entry's content changes.
-  // "isAtTop" guard: don't force-scroll while user is reading history at the top.
+  // Auto-scroll to bottom — two phases:
+  // 1. First paint (or session change) → unconditional `behavior: "auto"` so
+  //    the active turn is on screen when the user opens the chat.
+  // 2. Subsequent entry/content updates → only when the user is near the
+  //    bottom (within 200px). This preserves "I'm reading history above"
+  //    intent: live deltas don't yank the viewport away from the user.
   const lastEntryContent =
     entries.length > 0
       ? (entries[entries.length - 1] as { text?: string } | undefined)?.text ?? ""
       : "";
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const anchor = chatEndRef.current;
+
+    if (initialScrollSessionRef.current !== currentSessionId) {
+      // Phase 1 — wait until at least one of (active entries, historical
+      // entries) is in the DOM. Without this guard the anchor scrolls into
+      // an empty container and the next paint moves it back up.
+      const hasContent = entries.length > 0 || historicalSessions.length > 0;
+      if (!hasContent || !anchor) return;
+      initialScrollSessionRef.current = currentSessionId;
+      anchor.scrollIntoView({ behavior: "auto", block: "end" });
       return;
     }
-    // Only auto-scroll if user is near the bottom (within 200px)
+
+    if (!container) {
+      anchor?.scrollIntoView({ behavior: "smooth", block: "end" });
+      return;
+    }
+    // Phase 2 — only auto-scroll if user is near the bottom (within 200px).
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     if (distanceFromBottom < 200) {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      anchor?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [entries.length, lastEntryContent, scrollContainerRef]);
+  }, [
+    entries.length,
+    lastEntryContent,
+    scrollContainerRef,
+    currentSessionId,
+    historicalSessions.length,
+  ]);
 
   const {
     question,
