@@ -10,7 +10,7 @@
 import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, getModelContextWindow, decideRotation } from "./auto-compact.js";
+import { shouldCompact, compactMessages, getModelContextWindow, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
 import { generateSummary } from "./summary-generator.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
@@ -54,7 +54,16 @@ export interface TurnCallbacks {
   }) => void;
   onTurnComplete?: (fullText: string) => void;
   onError?: (error: string) => void;
-  onCompactOccurred?: (result: { removedMessages: number; freedTokens: number }) => void;
+  onCompactOccurred?: (result: {
+    removedMessages: number;
+    freedTokens: number;
+    /**
+     * 3-tier rotation tier when the compact was driven by `runRotationCheck`.
+     * Absent for plain auto/reactive compaction (no rotation occurred).
+     * Lets the renderer differentiate emergency vs voluntary checkpoints.
+     */
+    tier?: CheckpointTriggerType;
+  }) => void;
   onFallback?: (from: string, to: string) => void;
 }
 
@@ -668,7 +677,7 @@ export class ConversationLoop {
     }
 
     // PR-4: 3-tier rotation orchestration
-    await this.runRotationCheck(result.text);
+    await this.runRotationCheck(result.text, callbacks);
 
     callbacks?.onTurnComplete?.(result.text);
 
@@ -1156,7 +1165,7 @@ export class ConversationLoop {
    * 매 턴 종료 후 호출. 3-tier rotation 결정 트리를 평가하고
    * 필요 시 summary 생성 → checkpoint 기록 → child session으로 전환.
    */
-  private async runRotationCheck(lastAssistantText: string): Promise<void> {
+  private async runRotationCheck(lastAssistantText: string, callbacks?: TurnCallbacks): Promise<void> {
     if (!this.provider) return;
 
     const llmSettings = this.deps.settingsService.get("llm");
@@ -1204,7 +1213,26 @@ export class ConversationLoop {
 
       // child session으로 전환
       const childId = await this.createChildSession(this.sessionId, summary);
+      const removedMessageCount = messages.length;
       this.rotateActive(childId, summary);
+
+      // Notify renderer so the chat surface can render a CheckpointDivider with
+      // tier-aware label/color. Reuses `compact_notice` since the user-facing
+      // semantic is identical: "older messages were rolled into a summary".
+      // freedTokens is best-effort estimated using the same length/4 + 1 formula
+      // as estimateTokens() in auto-compact.ts; we keep it inline to avoid an
+      // import cycle and to keep this rotation path independent of the
+      // serialization layer.
+      const freedTokens = messagesSinceCheckpoint.reduce((sum, m) => {
+        const c = (m as { content?: unknown }).content;
+        const len = typeof c === "string" ? c.length : 0;
+        return sum + Math.ceil(len / 4) + 1;
+      }, 0);
+      callbacks?.onCompactOccurred?.({
+        removedMessages: removedMessageCount,
+        freedTokens,
+        tier: decision.trigger,
+      });
 
       if (process.env.NODE_ENV !== "production") {
         log.info(`rotation: trigger=${decision.trigger} ctxUsage=${ctxUsage.toFixed(2)} childSession=${childId.slice(0, 8)}`);
