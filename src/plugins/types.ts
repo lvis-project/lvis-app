@@ -681,6 +681,7 @@ export interface PluginHostApi {
     timeoutMs?: number;
     windowTitle?: string;
     persistPartition?: string;
+    returnFinalUrl?: boolean;
   }): Promise<Array<{
     name: string;
     value: string;
@@ -689,7 +690,18 @@ export interface PluginHostApi {
     secure?: boolean;
     httpOnly?: boolean;
     expirationDate?: number;
-  }>>;
+  }> | {
+    cookies: Array<{
+      name: string;
+      value: string;
+      domain?: string;
+      path?: string;
+      secure?: boolean;
+      httpOnly?: boolean;
+      expirationDate?: number;
+    }>;
+    finalUrl: string;
+  }>;
 
   /**
    * Proactive Brain — start a host ConversationLoop turn from a plugin-observed

@@ -96,6 +96,31 @@ describe("PluginAuthSection", () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
+  it("opens provided login UI instead of invoking loginTool", async () => {
+    const api = makeApi();
+    const onOpenLoginUi = vi.fn(async () => ({ ok: true }));
+    const onRefresh = vi.fn();
+    render(
+      <PluginAuthSection
+        api={api}
+        pluginId="detached-plugin"
+        pluginName="Detached Plugin"
+        auth={{ ...baseAuth, loginTool: "detached_login" }}
+        state={{ kind: "unauthed" }}
+        onOpenLoginUi={onOpenLoginUi}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    expect(screen.getByTestId("plugin-auth-login-detached-plugin")).toHaveTextContent("로그인 창 열기");
+    fireEvent.click(screen.getByTestId("plugin-auth-login-detached-plugin"));
+    await waitFor(() => {
+      expect(onOpenLoginUi).toHaveBeenCalledOnce();
+    });
+    expect(api.callPluginMethod).not.toHaveBeenCalledWith("detached_login");
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
   it("invokes logoutTool + onRefresh when 로그아웃 clicked", async () => {
     const api = makeApi();
     const onRefresh = vi.fn();
