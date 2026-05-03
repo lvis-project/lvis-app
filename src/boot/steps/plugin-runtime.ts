@@ -38,6 +38,7 @@ import {
 import { PROACTIVE_SOURCE_PATTERN } from "../../engine/proactive-source.js";
 import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
 import type {
+  ApprovalChoice,
   AuthWindowCookie,
   ConversationTriggerResult,
   ConversationTriggerSpec,
@@ -497,6 +498,13 @@ export interface InitPluginRuntimeInput {
     parent: BrowserWindow,
     opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean },
   ) => Promise<AuthWindowCookie[] | OpenAuthWindowFinalUrlResult>;
+  /**
+   * §8 — optional ApprovalGate instance. When provided, the `agentApproval`
+   * namespace on every plugin's HostApi is wired to this gate so main-process
+   * plugin handlers can respond to pending approvals without going through the
+   * renderer-only preload bridge.
+   */
+  approvalGate?: import("../../permissions/approval-gate.js").ApprovalGate;
 }
 
 export interface InitPluginRuntimeOutput {
@@ -528,6 +536,7 @@ export async function initPluginRuntime(
     bootAuditLogger,
     mainWindow,
     openAuthWindowService,
+    approvalGate,
   } = input;
 
   // Plugin shutdown handler registry — fires on before-quit (see Sprint 1-A A3).
@@ -902,6 +911,27 @@ export async function initPluginRuntime(
           : { ...opts, persistPartition: defaultPartition };
         return openAuthWindowService(mainWindow, effectiveOpts);
       }) as PluginHostApi["openAuthWindow"],
+
+      // ─── §8 Agent Approval — hostApi.agentApproval ────────────────────
+      // Exposes the main-process ApprovalGate to plugins so they can list
+      // or resolve pending approval entries from handler code (NOT from the
+      // renderer-only preload bridge). When no approvalGate is injected
+      // (test harness without full boot), list() returns [] and respond()
+      // is a no-op — both are safe to call unconditionally.
+      agentApproval: {
+        list: async () => {
+          return approvalGate?.listPending() ?? [];
+        },
+        respond: async (
+          requestId: string,
+          choice: ApprovalChoice,
+          nonce?: string,
+          hmac?: string,
+        ): Promise<void> => {
+          if (!approvalGate) return;
+          approvalGate.resolve(requestId, { requestId, choice, nonce, hmac });
+        },
+      },
 
       // ─── Proactive Brain — hostApi.triggerConversation() ───────────────
       // Gate body lives in evaluateTriggerSpec() so prod and tests share

@@ -732,7 +732,65 @@ export interface PluginHostApi {
    *   second call within a short window.
    */
   triggerConversation(spec: ConversationTriggerSpec): Promise<ConversationTriggerResult>;
+
+  /**
+   * §8 Agent Approval System — main-process–side approval management.
+   *
+   * Plugins use this namespace to interact with the host's §8 ApprovalGate
+   * from the main process. This is the correct path for plugin→host approval
+   * responses. The renderer-only preload bridge (`context.bridge.approval`)
+   * is NOT accessible from plugin handlers running in the main process.
+   *
+   * Usage pattern (lvis-plugin-agent-hub decide-approval-with-host):
+   *   await context.hostApi.agentApproval.respond(approvalId, choice, nonce, hmac)
+   */
+  agentApproval: {
+    /**
+     * List all currently pending ApprovalRequests as a snapshot.
+     * Returns minimal public fields (id, category, requireExplicit, createdAt,
+     * nonce, hmac). Full toolName/args remain in the renderer-side ApprovalRequest
+     * that was dispatched via IPC.
+     */
+    list(): Promise<ApprovalGateEntry[]>;
+
+    /**
+     * Resolve a pending ApprovalGate entry from the main process.
+     *
+     * Equivalent to `approvalGate.resolve(requestId, { requestId, choice, nonce, hmac })`.
+     * §D2: nonce + hmac MUST be echoed back verbatim as issued by the host with
+     * the original ApprovalRequest — the gate re-verifies them before honoring
+     * the decision. A mismatch forces deny-once (confused-deputy defense).
+     *
+     * If no pending entry matches `requestId`, this is a no-op (safe to call
+     * after timeout).
+     */
+    respond(requestId: string, choice: ApprovalChoice, nonce?: string, hmac?: string): Promise<void>;
+  };
 }
+
+/**
+ * §8 minimal public shape of a pending approval as returned by
+ * `hostApi.agentApproval.list()`.
+ */
+export interface ApprovalGateEntry {
+  id: string;
+  category: "tool";
+  requireExplicit: boolean;
+  createdAt: number;
+  nonce?: string;
+  hmac?: string;
+}
+
+/**
+ * §8 ApprovalChoice — mirrors `approval-gate.ts` ApprovalChoice.
+ * Duplicated here so the plugin SDK surface does not need to import
+ * from `permissions/approval-gate.ts` directly.
+ */
+export type ApprovalChoice =
+  | "allow-once"
+  | "allow-always"
+  | "deny-once"
+  | "deny-always";
 
 /**
  * Spec for `hostApi.triggerConversation()`. Passed by a brain plugin when it
