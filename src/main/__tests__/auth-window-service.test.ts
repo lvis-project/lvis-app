@@ -13,7 +13,7 @@ vi.mock("electron", () => ({
   ipcMain: {},
 }));
 
-const { filterCookiesByHost, isCompletionUrl, sanitizeUrlForLog } = await import(
+const { filterCookiesByHost, isCompletionUrl, sanitizeUrlForLog, buildAuthResult } = await import(
   "../auth-window-service.js"
 );
 
@@ -134,5 +134,24 @@ describe("sanitizeUrlForLog", () => {
       sanitizeUrlForLog("https://hub.example.com/login/callback?code=secret#access_token=token"),
     ).toBe("https://hub.example.com/login/callback");
     expect(sanitizeUrlForLog("not-a-url?token=secret#hash")).toBe("not-a-url");
+  });
+});
+
+describe("buildAuthResult", () => {
+  const cookies = [
+    { name: "session", value: "v", domain: ".example.com", path: "/" },
+  ];
+
+  it("returnFinalUrl=false: returns the cookies array directly (legacy contract)", () => {
+    const result = buildAuthResult(cookies, "https://hub.example.com/login/callback#access_token=t", false);
+    expect(result).toEqual(cookies);
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("returnFinalUrl=true: returns the {cookies, finalUrl} envelope so OAuth fragments survive", () => {
+    const finalUrl = "https://hub.example.com/login/callback#access_token=t&token_type=Bearer";
+    const result = buildAuthResult(cookies, finalUrl, true);
+    expect(result).toEqual({ cookies, finalUrl });
+    expect(Array.isArray(result)).toBe(false);
   });
 });
