@@ -56,6 +56,26 @@ export type PluginUiMountContext = {
     emitEvent: (type: string, data?: unknown) => Promise<void>;
     onEvent: (type: string, handler: (data: unknown) => void) => () => void;
     getEntryUrl: () => Promise<string>;
+    /**
+     * Per-plugin config field accessors (#B1). Backed by the same plugin
+     * config record as PluginConfigTab; secret fields are stripped at the
+     * IPC boundary. Cross-plugin writes are refused — pluginId is resolved
+     * from `event.sender.id`.
+     */
+    config: {
+      get: <T = unknown>(key: string) => Promise<T | undefined>;
+      set: <T = unknown>(key: string, value: T) => Promise<void>;
+    };
+    /**
+     * Per-plugin sandboxed key/value JSON store (#B1). Each key maps to
+     * `<pluginDataDir>/ui-storage/<key>.json`; keys are restricted to
+     * `[A-Za-z0-9._-]{1,128}`. Use for UI-side state that must survive a
+     * webview reload.
+     */
+    storage: {
+      get: <T = unknown>(key: string) => Promise<T | undefined>;
+      set: <T = unknown>(key: string, value: T) => Promise<void>;
+    };
   };
   extension: PluginUiExtensionView["extension"];
 };
