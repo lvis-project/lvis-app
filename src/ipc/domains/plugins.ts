@@ -49,6 +49,8 @@ const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
 const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
 const ALLOWED_CODE_THEMES = new Set(["light", "dark"]);
+// CSS exfil / injection patterns — same regex as lvis-plugin-sdk inject.ts
+const _UNSAFE_TOKEN_VALUE = /url\s*\(|expression\s*\(|<[a-zA-Z]/i;
 
 async function resolveInstalledManifestPath(pluginId: string): Promise<string | undefined> {
   const pluginPaths = resolvePluginPaths();
@@ -74,15 +76,33 @@ async function preparePythonRuntimeForInstalledPlugin(
   deps.pluginRuntime.mergeConfigOverride("*", { pythonExecutable: runtime.pythonPath });
 }
 
+export type SafeThemePayload = {
+  theme: string;
+  chatTheme: string;
+  codeTheme: string;
+  tokens?: Record<string, string>;
+};
+
 export function validateThemePayload(payload: unknown):
-  | { ok: true; safe: { theme: string; chatTheme: string; codeTheme: string } }
+  | { ok: true; safe: SafeThemePayload }
   | { ok: false; error: string } {
   if (!payload || typeof payload !== "object") return { ok: false, error: "invalid-payload" };
   const p = payload as Record<string, unknown>;
   if (typeof p.theme !== "string" || !ALLOWED_THEMES.has(p.theme)) return { ok: false, error: "invalid-theme" };
   if (typeof p.chatTheme !== "string" || !ALLOWED_CHAT_THEMES.has(p.chatTheme)) return { ok: false, error: "invalid-chat-theme" };
   if (typeof p.codeTheme !== "string" || !ALLOWED_CODE_THEMES.has(p.codeTheme)) return { ok: false, error: "invalid-code-theme" };
-  return { ok: true, safe: { theme: p.theme, chatTheme: p.chatTheme, codeTheme: p.codeTheme } };
+  const safe: SafeThemePayload = { theme: p.theme, chatTheme: p.chatTheme, codeTheme: p.codeTheme };
+  if (p.tokens && typeof p.tokens === "object" && !Array.isArray(p.tokens)) {
+    const safeTokens: Record<string, string> = {};
+    for (const [k, v] of Object.entries(p.tokens as Record<string, unknown>)) {
+      if (typeof k === "string" && k.startsWith("--lvis-") &&
+          typeof v === "string" && !_UNSAFE_TOKEN_VALUE.test(v)) {
+        safeTokens[k] = v;
+      }
+    }
+    if (Object.keys(safeTokens).length > 0) safe.tokens = safeTokens;
+  }
+  return { ok: true, safe };
 }
 
 export function unregisterPluginWebview(webContentsId: number): void {
