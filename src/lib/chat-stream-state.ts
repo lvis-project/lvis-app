@@ -32,6 +32,13 @@ export type StreamEvent = {
   freedTokens?: number;
   /** Rotation tier on `compact_notice` (rotation-driven only). */
   tier?: CheckpointTier;
+  /**
+   * §457 Phase 3: parent session id from which a rotation forked. Present
+   * on `compact_notice` events when the compact was rotation-driven, so
+   * the renderer can offer a revert-to-parent action on the matching
+   * CheckpointDivider.
+   */
+  revertSessionId?: string;
   /** Set to "command" on `done` events when the turn was a slash command. */
   route?: "command";
   /** MCP Apps spec §3.2 — optional UI payload emitted with tool_end events. */
@@ -80,6 +87,13 @@ export type ChatEntry =
       removedMessages: number;
       freedTokens: number;
       summary?: string;
+      /**
+       * §457 Phase 3: when set, the CheckpointDivider renders a "여기로
+       * 되돌아가기" action that resumes the parent session via
+       * `lvis:chat:session-resume`. Absent for non-rotation checkpoints
+       * (legacy auto/reactive compact) where there is no fork to return to.
+       */
+      revertSessionId?: string;
     }
   // §457 PR-A: marker placed at the head of a resumed child session's
   // historical entry list when the parent session left a rolling

@@ -41,6 +41,13 @@ export interface MainContentProps {
   isEntryStarred: (entryIdx: number) => string | null;
   onAbort: () => Promise<void>;
   onFeedback: Parameters<typeof ChatView>[0]["onFeedback"];
+  /**
+   * §457 Phase 3: revert active session to the parent of a rotation
+   * checkpoint. Surfaces the "여기로 되돌아가기" action on
+   * StackedChatView's CheckpointDivider. Optional — when absent the
+   * button is hidden even on rotation checkpoints.
+   */
+  onRevertCheckpoint?: (parentSessionId: string) => Promise<void>;
   // workflow tool state (lifted from ChatView to survive navigation)
   subAgentSpawns: Parameters<typeof ChatView>[0]["subAgentSpawns"];
   loadedSkills: Parameters<typeof ChatView>[0]["loadedSkills"];
@@ -117,6 +124,7 @@ function HomeChatPane(props: MainContentProps) {
           onToggleStar={props.onToggleStar}
           isEntryStarred={props.isEntryStarred}
           onFeedback={props.onFeedback}
+          {...(props.onRevertCheckpoint ? { onRevertCheckpoint: props.onRevertCheckpoint } : {})}
         />
       </ChatContextProvider>
     );
