@@ -54,7 +54,8 @@ import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
 import { openAuthWindow as openAuthWindowService } from "./main/auth-window-service.js";
 
-import { type AppServices, emitEvent } from "./boot/types.js";
+import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
+import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
 import { registerPluginNotifications } from "./boot/plugins.js";
 import {
@@ -509,6 +510,19 @@ export async function bootstrap(
   // prominent in the operator log alongside the tool/plugin/mcp counts.
   const validationStatus = pluginRuntime.isValidatorDegraded() ? " validation:degraded" : "";
   log.info("boot: ready (%d tools, %d plugins, %d mcp%s)", toolRegistry.size, pluginRuntime.listPluginIds().length, mcpManager.listServers().filter(s => s.status === "connected").length, validationStatus);
+
+  // Watcher telemetry consumer — ms-graph (v0.1.27+) 가 발행하는
+  // `email.watcher.poll.completed` 이벤트를 ~/.lvis/logs/watcher-poll.jsonl
+  // 에 적재. 정식 metrics pipeline 도입 전 단계 — 사용자 머신의 cold-seed
+  // latency / payload 분포를 raw 로 모아 사후 jq 분석. 향후 ms-graph 의
+  // chunked-seed / interval 튜닝 의사결정 데이터 소스.
+  const watcherTelemetryLogPath = resolve(homedir(), ".lvis", "logs", "watcher-poll.jsonl");
+  const watcherTelemetryCollector = startWatcherTelemetryCollector({
+    filePath: watcherTelemetryLogPath,
+    subscribe: (type, handler) => onEvent(type, handler),
+    log: (msg, meta) => log.warn({ meta }, msg),
+  });
+  app.on("before-quit", () => watcherTelemetryCollector.stop());
 
   // Sprint 4.C — starred store + D6 feedback store.
   const starredStore = new StarredStore();
