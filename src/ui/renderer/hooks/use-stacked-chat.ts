@@ -77,7 +77,26 @@ export function useStackedChat(
       try {
         const result = await api.chatSessionHistory(sessionId);
         if (!result.ok) return [];
-        return historyToEntries(result.messages);
+        const base = historyToEntries(result.messages);
+        // §457 PR-A: prepend a session_resume marker when the loaded session
+        // inherited a rolling summary preamble from its parent. The renderer
+        // (StackedChatView) decides how to surface it; ChatView falls back
+        // to a single-line system pill. We only render the marker when both
+        // preambleChars > 0 AND there is at least one historical entry, so
+        // an empty just-rotated session doesn't show "이어서 시작" without
+        // any visible context.
+        const preambleChars = result.preambleChars ?? 0;
+        if (preambleChars > 0 && base.length > 0) {
+          return [
+            {
+              kind: "session_resume" as const,
+              preambleChars,
+              ...(result.parentSessionId ? { parentSessionId: result.parentSessionId } : {}),
+            },
+            ...base,
+          ];
+        }
+        return base;
       } catch {
         return [];
       }
