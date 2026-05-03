@@ -80,6 +80,13 @@ export interface StackedChatViewProps {
   isEntryStarred: (entryIdx: number) => string | null;
   /** Submit thumbs up/down feedback for an assistant message */
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
+  /**
+   * §457 Phase 3: revert active session to the parent of a rotation
+   * checkpoint. Renderer wires this to `api.chatSessionResume` followed
+   * by a chat-history reload. Optional — when omitted, the
+   * "여기로 되돌아가기" button is hidden even on rotation checkpoints.
+   */
+  onRevertCheckpoint?: (parentSessionId: string) => void | Promise<void>;
 }
 
 // ─── Day separator ───────────────────────────────────────────────────────────
@@ -153,7 +160,21 @@ const TIER_VARIANTS: Record<CheckpointTier | "default", { label: string; icon: s
   },
 };
 
-function CheckpointDivider({ tier, messageCount }: { tier?: CheckpointTier; messageCount: number }) {
+function CheckpointDivider({
+  tier,
+  messageCount,
+  onRevert,
+}: {
+  tier?: CheckpointTier;
+  messageCount: number;
+  /**
+   * §457 Phase 3: when supplied, render a compact action button next to the
+   * divider that resumes the pre-rotation parent session. Omitted for
+   * non-rotation checkpoints (plain auto/reactive compact) where there is
+   * no fork to return to.
+   */
+  onRevert?: () => void | Promise<void>;
+}) {
   const variant = TIER_VARIANTS[tier ?? "default"];
   return (
     <div
@@ -165,6 +186,17 @@ function CheckpointDivider({ tier, messageCount }: { tier?: CheckpointTier; mess
       <span className={`text-[10px] ${variant.textCls} font-medium`}>
         {"───"} {variant.icon} 체크포인트 · {variant.label} ({messageCount} messages) {"───"}
       </span>
+      {onRevert && (
+        <button
+          type="button"
+          data-testid="checkpoint-revert-btn"
+          onClick={() => { void onRevert(); }}
+          className={`text-[10px] ${variant.textCls} font-medium underline-offset-2 hover:underline cursor-pointer`}
+          aria-label="이 체크포인트 이전 세션으로 되돌아가기"
+        >
+          ↩ 여기로 되돌아가기
+        </button>
+      )}
       <span className={`h-px flex-1 ${variant.lineCls}`} />
     </div>
   );
@@ -233,6 +265,12 @@ interface EntriesListProps {
   /** Active session only — undefined for read-only historical sessions */
   onToggleStar?: (entryIdx: number) => void;
   onFeedback?: (messageIdx: number, rating: "up" | "down", reason?: string) => void | Promise<void>;
+  /**
+   * §457 Phase 3: revert active session to the parent session that produced
+   * the rotation checkpoint. Active session only — historical sessions
+   * are read-only and never expose the action.
+   */
+  onRevertCheckpoint?: (parentSessionId: string) => void | Promise<void>;
   /** Base index offset for entry star/fork callbacks (for historical sessions) */
   idxOffset?: number;
 }
@@ -245,6 +283,7 @@ function EntriesList({
   onFork,
   onToggleStar,
   onFeedback,
+  onRevertCheckpoint,
   idxOffset = 0,
 }: EntriesListProps) {
   // O(n) single forward pass: classify entries into "intermediate" | "live" | "final".
@@ -341,11 +380,15 @@ function EntriesList({
     }
 
     if (entry.kind === "checkpoint") {
+      const revertId = entry.revertSessionId;
       rendered.push(
         <CheckpointDivider
           key={`cp-${idx}`}
           tier={entry.tier}
           messageCount={entry.removedMessages}
+          {...(onRevertCheckpoint && revertId
+            ? { onRevert: () => onRevertCheckpoint(revertId) }
+            : {})}
         />,
       );
       if (entry.summary) {
@@ -526,6 +569,7 @@ export function StackedChatView({
   onFork,
   onToggleStar,
   isEntryStarred,
+  onRevertCheckpoint,
   onFeedback,
 }: StackedChatViewProps) {
   const workflowApi = getApi() as LvisApi;
@@ -712,6 +756,7 @@ export function StackedChatView({
             onFork={onFork}
             onToggleStar={onToggleStar}
             onFeedback={onFeedback}
+            onRevertCheckpoint={onRevertCheckpoint}
           />
         )}
 
