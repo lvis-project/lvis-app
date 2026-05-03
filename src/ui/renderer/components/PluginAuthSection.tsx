@@ -10,6 +10,13 @@ interface PluginAuthSectionProps {
   auth: PluginAuthSummary;
   state: PluginAuthState;
   /**
+   * Optional opener for plugins whose login surface lives inside a declared
+   * detached plugin UI. When present, the login button opens that UI instead
+   * of invoking loginTool without the payload the plugin UI is meant to
+   * collect.
+   */
+  onOpenLoginUi?: () => Promise<unknown> | unknown;
+  /**
    * Called after a successful login/logout invocation. Owner is expected to
    * re-fetch the auth status — typically a thin wrapper around the
    * `usePluginAuthStatuses` hook's `refresh(pluginId)`. The plugin SHOULD
@@ -25,6 +32,7 @@ export function PluginAuthSection({
   pluginName,
   auth,
   state,
+  onOpenLoginUi,
   onRefresh,
 }: PluginAuthSectionProps) {
   const [working, setWorking] = useState(false);
@@ -43,8 +51,12 @@ export function PluginAuthSection({
     setLocalError(null);
     setWorking(true);
     try {
-      await api.callPluginMethod(auth.loginTool);
-      onRefresh();
+      if (onOpenLoginUi) {
+        await onOpenLoginUi();
+      } else {
+        await api.callPluginMethod(auth.loginTool);
+        onRefresh();
+      }
     } catch (err) {
       // Generic user-facing copy + log raw error to the console for support
       // triage. Avoids leaking IPC reject internals (e.g.
@@ -54,7 +66,7 @@ export function PluginAuthSection({
     } finally {
       setWorking(false);
     }
-  }, [api, auth.loginTool, onRefresh, pluginId]);
+  }, [api, auth.loginTool, onOpenLoginUi, onRefresh, pluginId]);
 
   const handleLogout = useCallback(async () => {
     if (!auth.logoutTool) return;
@@ -124,7 +136,7 @@ export function PluginAuthSection({
               disabled={working}
               data-testid={`plugin-auth-login-${pluginId}`}
             >
-              {working ? "로그인 중…" : "로그인"}
+              {working ? "로그인 중…" : onOpenLoginUi ? "로그인 창 열기" : "로그인"}
             </Button>
           )}
         </div>

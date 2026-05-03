@@ -13,7 +13,7 @@ vi.mock("electron", () => ({
   ipcMain: {},
 }));
 
-const { filterCookiesByHost, isCompletionUrl } = await import(
+const { filterCookiesByHost, isCompletionUrl, sanitizeUrlForLog } = await import(
   "../auth-window-service.js"
 );
 
@@ -125,5 +125,14 @@ describe("isCompletionUrl", () => {
     expect(isCompletionUrl("https://anywhere.example.com", [""])).toBe(true);
     // normalize 후 빈 배열이 되면 false.
     expect(isCompletionUrl("https://anywhere.example.com", [])).toBe(false);
+  });
+});
+
+describe("sanitizeUrlForLog", () => {
+  it("strips query and hash so callback tokens are never surfaced", () => {
+    expect(
+      sanitizeUrlForLog("https://hub.example.com/login/callback?code=secret#access_token=token"),
+    ).toBe("https://hub.example.com/login/callback");
+    expect(sanitizeUrlForLog("not-a-url?token=secret#hash")).toBe("not-a-url");
   });
 });
