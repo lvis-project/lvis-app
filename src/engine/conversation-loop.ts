@@ -1213,7 +1213,13 @@ export class ConversationLoop {
 
       // child session으로 전환
       const childId = await this.createChildSession(this.sessionId, summary);
-      const removedMessageCount = messages.length;
+      // §457 PR-A: notify the renderer with `messagesSinceCheckpoint.length`,
+      // not `messages.length`. Only the slice since the previous checkpoint
+      // was rolled into this rotation's summary; the older portion was
+      // already summarized in a prior checkpoint and is not being "removed"
+      // again. Showing the full parent count would inflate the displayed
+      // figure on multi-rotation sessions.
+      const removedMessageCount = messagesSinceCheckpoint.length;
       this.rotateActive(childId, summary);
 
       // Notify renderer so the chat surface can render a CheckpointDivider with
