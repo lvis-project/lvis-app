@@ -32,8 +32,12 @@
           root.textContent = "[lvis] plugin-ui-shell: lvisPlugin bridge missing.";
           return;
         }
-        // Registration is guaranteed before src is set (#447), so
-        // getEntryUrl() is a synchronous lookup — no retry needed.
+        // The host's `did-attach → registerPluginWebview` round-trip can lose
+        // a race against this script when the plugin is updated and the
+        // sidebar webview is re-attached with a fresh wcId. Main absorbs that
+        // race with a 5s wait queue (pendingEntryUrlResolvers) so getEntryUrl
+        // resolves once the binding lands; the queue's deadline returns the
+        // same `not-registered` sentinel for genuinely missing registrations.
         let entry;
         try {
           entry = await window.lvisPlugin.getEntryUrl();
