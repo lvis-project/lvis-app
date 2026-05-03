@@ -40,6 +40,63 @@ function asPlainRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
+/**
+ * Normalize unknown thrown values to a string message — `instantiateAndStart`
+ * / userland `createPlugin` callbacks may `throw "string"` or
+ * `throw { code, … }` rather than `Error`. `(err as Error).message` would
+ * print `undefined` in those cases. Used by the install rollback paths
+ * where the message goes to both the renderer toast and the IPC error.
+ */
+function errMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
+
+/**
+ * Per-pluginId in-flight install mutex — serializes
+ * `lvis:plugins:install` and `lvis:plugins:install-local` for the same
+ * pluginId so a second user click during a slow `addPlugin` can't race
+ * with the first call's rollback uninstall (which would otherwise wipe
+ * the second click's just-installed registry entry).
+ *
+ * Lives at the IPC-handler layer (not inside `PluginMarketplace`)
+ * because `marketplace.withPluginLock` is held only across
+ * install/uninstall — not the addPlugin between them. Wrapping the
+ * whole install→addPlugin→(rollback if needed) sequence here closes
+ * that gap without restructuring the marketplace lock model.
+ */
+const inflightInstallLocks = new Map<string, Promise<unknown>>();
+async function withInstallLock<T>(
+  pluginId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prev = inflightInstallLocks.get(pluginId) ?? Promise.resolve();
+  let release: () => void = () => {};
+  const next = new Promise<void>((resolveNext) => {
+    release = resolveNext;
+  });
+  // `prev.then(() => next)` returns a NEW Promise object on each call; if we
+  // call it twice (set + cleanup identity-check) the references won't match
+  // and the Map entry leaks forever. Hoist into a local so the same
+  // reference is stored and compared.
+  const tail = prev.then(() => next);
+  inflightInstallLocks.set(pluginId, tail);
+  try {
+    await prev;
+    return await fn();
+  } finally {
+    release();
+    if (inflightInstallLocks.get(pluginId) === tail) {
+      inflightInstallLocks.delete(pluginId);
+    }
+  }
+}
+
 interface PluginWebviewBinding {
   pluginId: string;
   entryUrl: string;
@@ -154,27 +211,55 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:plugins:install", async (e, pluginId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:plugins:install", e); return UNAUTHORIZED_FRAME; }
-    const win = getMainWindow();
-    win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "installing" });
-    const result = await pluginMarketplace.install(pluginId, "user", (evt) => {
-      if (evt.phase === "downloading") {
-        win?.webContents.send("lvis:plugins:install-progress", {
-          slug: pluginId,
-          phase: "downloading",
-          bytesDownloaded: evt.bytesDownloaded,
-          bytesTotal: evt.bytesTotal,
+    return withInstallLock(pluginId, async () => {
+      const win = getMainWindow();
+      win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "installing" });
+      const result = await pluginMarketplace.install(pluginId, "user", (evt) => {
+        if (evt.phase === "downloading") {
+          win?.webContents.send("lvis:plugins:install-progress", {
+            slug: pluginId,
+            phase: "downloading",
+            bytesDownloaded: evt.bytesDownloaded,
+            bytesTotal: evt.bytesTotal,
+          });
+        } else {
+          win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: evt.phase });
+        }
+      });
+      win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
+      // Atomic install — marketplace.install() has already extracted the
+      // artifact + written the registry entry. If addPlugin throws (import
+      // smoke fail, capability mismatch, start exception, …), roll back
+      // via marketplace.uninstall() so the user sees the real error
+      // instead of a ghost plugin in their list. The whole install → addPlugin
+      // → (rollback if needed) sequence is wrapped in `withInstallLock` so
+      // a second click on the same pluginId can't race the rollback.
+      try {
+        await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
+        await pluginRuntime.addPlugin(result.pluginId);
+      } catch (err) {
+        const message = errMessage(err) || "addPlugin failed";
+        try {
+          await pluginMarketplace.uninstall(result.pluginId);
+        } catch (rollbackErr) {
+          // Rollback failure is logged; original error still surfaces
+          // — the user needs the actual install error, not the rollback noise.
+          log.warn(
+            `install rollback uninstall failed for ${result.pluginId}: ${errMessage(rollbackErr)}`,
+          );
+        }
+        win?.webContents.send("lvis:plugins:install-result", {
+          slug: result.pluginId,
+          success: false,
+          error: message,
         });
-      } else {
-        win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: evt.phase });
+        throw err;
       }
+      emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "marketplace" });
+      refreshPluginNotifications?.();
+      win?.webContents.send("lvis:plugins:install-result", { slug: result.pluginId, success: true });
+      return result;
     });
-    win?.webContents.send("lvis:plugins:install-progress", { slug: pluginId, phase: "restarting" });
-    await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
-    await pluginRuntime.addPlugin(result.pluginId);
-    emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "marketplace" });
-    refreshPluginNotifications?.();
-    win?.webContents.send("lvis:plugins:install-result", { slug: pluginId, success: true });
-    return result;
   });
 
   ipcMain.handle("lvis:plugins:uninstall", async (e, pluginId: string) => {
@@ -226,21 +311,45 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     });
     if (canceled || !filePaths[0]) return null;
     const result = await pluginMarketplace.installLocal(filePaths[0]);
-    await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
-    await pluginRuntime.addPlugin(result.pluginId);
-    emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "local-dev" });
-    refreshPluginNotifications?.();
-    // Mirror the marketplace install path's renderer broadcast so
-    // `App.tsx` `onPluginInstallResult` listener fires `refreshViews()` —
-    // otherwise `pluginViews` stays stale-empty after a dev sideload and
-    // the InputActionBar plugin grid renders an empty trigger that
-    // appears unclickable to the user (PluginGridButton's
-    // `plugins.length === 0` branch returns the trigger without a Popover).
-    getMainWindow()?.webContents.send("lvis:plugins:install-result", {
-      slug: result.pluginId,
-      success: true,
+    // Atomic install — same rollback-on-addPlugin-fail contract as the
+    // marketplace install path above. local-dev installs are dev-mode
+    // only but a failed import (e.g. forgot to `bun run build` before
+    // selecting the dir) still left a dangling registry entry pre-fix.
+    //
+    // Lock scope is post-extract because the pluginId is only known
+    // after `installLocal` reads the on-disk plugin.json; the IPC entry
+    // itself doesn't carry an id. Race window is narrow (single dev
+    // double-clicking the dialog button) but the lock costs nothing.
+    return await withInstallLock(result.pluginId, async () => {
+      try {
+        await preparePythonRuntimeForInstalledPlugin(result.pluginId, deps);
+        await pluginRuntime.addPlugin(result.pluginId);
+      } catch (err) {
+        const message = errMessage(err) || "addPlugin failed";
+        try {
+          await pluginMarketplace.uninstall(result.pluginId);
+        } catch (rollbackErr) {
+          log.warn(
+            `install-local rollback uninstall failed for ${result.pluginId}: ${errMessage(rollbackErr)}`,
+          );
+        }
+        getMainWindow()?.webContents.send("lvis:plugins:install-result", {
+          slug: result.pluginId,
+          success: false,
+          error: message,
+        });
+        throw err;
+      }
+      emitHostEvent("plugin.installed", { pluginId: result.pluginId, source: "local-dev" });
+      refreshPluginNotifications?.();
+      // Mirror the marketplace install path's renderer broadcast so
+      // `App.tsx` `onPluginInstallResult` listener fires `refreshViews()`.
+      getMainWindow()?.webContents.send("lvis:plugins:install-result", {
+        slug: result.pluginId,
+        success: true,
+      });
+      return result;
     });
-    return result;
   });
 
   // read-only, sender guard optional

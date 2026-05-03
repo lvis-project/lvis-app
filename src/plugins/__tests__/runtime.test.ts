@@ -1320,6 +1320,51 @@ export default async function createPlugin(ctx) {
     await expect(runtime.addPlugin("p-broken")).rejects.toThrow(/schema validation failed|Invalid tool name/);
   });
 
+  it("addPlugin throws when the entry module fails to import (atomic-install rollback signal)", async () => {
+    // Regression test for Phase 5: pre-fix, an entry that throws at import
+    // time was silently markFailed-then-return — install-IPC handler had no
+    // way to know the install half-committed. Now addPlugin throws so the
+    // handler can roll back the registry/dir state via marketplace.uninstall().
+    //
+    // Reproduces by writing an entry that throws at the top level, which
+    // surfaces through esbuild-style "Dynamic require of …" / generic
+    // ReferenceError patterns observed for ms-graph 0.1.18 / pageindex 0.1.16
+    // pre-SDK-v3.4.2.
+    const pluginDir = join(installedDir, "p-broken-entry");
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `throw new Error("simulated dynamic-require fallback shim throw");
+export default async function createPlugin() { return {}; }`,
+      "utf-8",
+    );
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "p-broken-entry",
+        name: "Broken Entry",
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: ["broken_entry_hello"],
+        description: "test fixture for addPlugin import-fail rollback signal",
+        publisher: "test",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "p-broken-entry", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = makeRuntime();
+
+    await expect(runtime.addPlugin("p-broken-entry")).rejects.toThrow(/addPlugin failed/);
+  });
+
   it("addPlugin on a running plugin re-reads manifest from disk (update entry-point regression)", async () => {
     // Regression: restartPlugin() used the old in-memory manifest.entry after an
     // update that changed the entry-point path. Now it re-reads from disk.
