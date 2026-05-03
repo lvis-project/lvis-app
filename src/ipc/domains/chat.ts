@@ -174,8 +174,13 @@ async function runStreamedTurn(
       onToolEnd: (name, toolResult, isError, meta, uiPayload) =>
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }) }),
       onError: (error) => send({ type: "error", error }),
-      onCompactOccurred: ({ removedMessages, freedTokens }) =>
-        send({ type: "compact_notice", removedMessages, freedTokens }),
+      onCompactOccurred: ({ removedMessages, freedTokens, tier }) =>
+        send({
+          type: "compact_notice",
+          removedMessages,
+          freedTokens,
+          ...(tier !== undefined ? { tier } : {}),
+        }),
       onFallback: (from, to) => webContents?.send("lvis:chat:fallback", { from, to }),
     },
     undefined,
@@ -396,6 +401,22 @@ ${input}`;
       (m): m is GenericMessage =>
         m != null && typeof m === "object" && "role" in m && "content" in m,
     );
+    // §457 PR-A: surface the rolling-summary preamble length so the renderer
+    // can prepend a `kind: "session_resume"` marker. We do not return the
+    // preamble text — it is system-prompt material, not chat history, and
+    // returning it would leak it into a UI surface that should only show a
+    // disclosure ("요약 N자 적용") rather than the verbatim summary.
+    let preambleChars = 0;
+    let parentSessionId: string | undefined;
+    try {
+      const meta = memoryManager.loadSessionMetadata(sessionId);
+      if (meta) {
+        preambleChars = typeof meta.summaryPreamble === "string" ? meta.summaryPreamble.length : 0;
+        if (typeof meta.parentSessionId === "string") parentSessionId = meta.parentSessionId;
+      }
+    } catch {
+      // Metadata file missing/corrupt — fall through with empty session-resume hint.
+    }
     return {
       ok: true,
       messages: raw.map((m, i) => ({
@@ -409,6 +430,8 @@ ${input}`;
         toolName: m.role === "tool_result" ? m.toolName : undefined,
         isError: m.role === "tool_result" ? m.isError : undefined,
       })),
+      preambleChars,
+      ...(parentSessionId !== undefined ? { parentSessionId } : {}),
     };
   });
 

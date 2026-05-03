@@ -116,17 +116,56 @@ function formatDayLabel(dateKey: string): string {
 
 // ─── Checkpoint divider ────────────────────────────────────────────────────────
 
-function CheckpointDivider({ label, messageCount }: { label: string; messageCount: number }) {
+/**
+ * §457 PR-A: tier → label/color/icon mapping. The same UI element marks
+ * three semantically different events:
+ *   - hard-token   → "긴급 정리"  (red/orange) — emergency, ctxUsage ≥ 85%
+ *   - semantic-llm → "주제 전환"  (violet)     — LLM hinted topic shift
+ *   - soft-time    → "이전 세션 정리" (slate)  — natural rest checkpoint
+ * Falls back to "자동 정리" (blue) when tier is absent (plain auto/reactive
+ * compaction outside the rotation pipeline).
+ */
+type CheckpointTier = "hard-token" | "semantic-llm" | "soft-time";
+const TIER_VARIANTS: Record<CheckpointTier | "default", { label: string; icon: string; lineCls: string; textCls: string }> = {
+  "hard-token": {
+    label: "긴급 정리",
+    icon: "🚨",
+    lineCls: "bg-orange-500/40",
+    textCls: "text-orange-400/80",
+  },
+  "semantic-llm": {
+    label: "주제 전환",
+    icon: "🔀",
+    lineCls: "bg-violet-500/35",
+    textCls: "text-violet-300/80",
+  },
+  "soft-time": {
+    label: "이전 세션 정리",
+    icon: "🌙",
+    lineCls: "bg-slate-500/35",
+    textCls: "text-slate-300/80",
+  },
+  default: {
+    label: "자동 정리",
+    icon: "📌",
+    lineCls: "bg-blue-500/30",
+    textCls: "text-blue-400/65",
+  },
+};
+
+function CheckpointDivider({ tier, messageCount }: { tier?: CheckpointTier; messageCount: number }) {
+  const variant = TIER_VARIANTS[tier ?? "default"];
   return (
     <div
       data-testid="checkpoint-divider"
+      data-tier={tier ?? "default"}
       className="flex items-center gap-2 py-2 my-2"
     >
-      <span className="h-px flex-1 bg-blue-500/30" />
-      <span className="text-[10px] text-blue-400/65 font-medium">
-        {"───"} {"📌"} 체크포인트 · {label} ({messageCount} messages) {"───"}
+      <span className={`h-px flex-1 ${variant.lineCls}`} />
+      <span className={`text-[10px] ${variant.textCls} font-medium`}>
+        {"───"} {variant.icon} 체크포인트 · {variant.label} ({messageCount} messages) {"───"}
       </span>
-      <span className="h-px flex-1 bg-blue-500/30" />
+      <span className={`h-px flex-1 ${variant.lineCls}`} />
     </div>
   );
 }
@@ -141,6 +180,29 @@ function SummaryToast({ summary }: { summary: string }) {
       className="mx-auto max-w-[70%] border-l-2 border-blue-500/40 bg-card/50 px-3 py-1.5 mb-3 rounded-r text-[11px] text-muted-foreground/70"
     >
       {"📝"} 이전 요약: {trimmed}
+    </div>
+  );
+}
+
+// ─── Session resume divider ────────────────────────────────────────────────────
+// §457 PR-A: marker placed at the head of a resumed child session's entry list
+// when the parent session left a rolling summary preamble. We deliberately do
+// NOT show the preamble text — that material lives in the system prompt and
+// surfacing it inline would leak summarization content into a chat surface
+// where the user reads turn-by-turn dialog. The disclosure mirrors what the
+// LLM sees ("이전 대화 요약 N자 적용") without revealing the actual summary.
+
+function SessionResumeDivider({ preambleChars }: { preambleChars: number; parentSessionId?: string }) {
+  return (
+    <div
+      data-testid="session-resume-divider"
+      className="flex items-center gap-2 py-2 my-2"
+    >
+      <span className="h-px flex-1 bg-emerald-500/30" />
+      <span className="text-[10px] text-emerald-400/75 font-medium">
+        {"↩"} 이전 대화 이어서 시작 (요약 {preambleChars}자 적용)
+      </span>
+      <span className="h-px flex-1 bg-emerald-500/30" />
     </div>
   );
 }
@@ -266,26 +328,41 @@ function EntriesList({
     }
 
     if (entry.kind === "system") {
-      if (entry.text.includes("checkpoint") || entry.text.includes("체크포인트")) {
-        const summaryMatch = entry.text.match(/요약:\s*(.+)/);
-        const countMatch = entry.text.match(/(\d+)\s*messages?/);
-        rendered.push(
-          <CheckpointDivider
-            key={`cp-${idx}`}
-            label="자동 정리"
-            messageCount={countMatch ? parseInt(countMatch[1] ?? "0", 10) : 0}
-          />,
-        );
-        if (summaryMatch?.[1]) {
-          rendered.push(<SummaryToast key={`st-${idx}`} summary={summaryMatch[1]} />);
-        }
-      } else {
-        rendered.push(
-          <div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">
-            {entry.text}
-          </div>,
-        );
+      // §457 PR-A: legacy free-text system pill. Checkpoint/session-resume
+      // signaling now flows through structured `kind: "checkpoint"` and
+      // `kind: "session_resume"` entries (see below) — no string matching.
+      rendered.push(
+        <div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">
+          {entry.text}
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "checkpoint") {
+      rendered.push(
+        <CheckpointDivider
+          key={`cp-${idx}`}
+          tier={entry.tier}
+          messageCount={entry.removedMessages}
+        />,
+      );
+      if (entry.summary) {
+        rendered.push(<SummaryToast key={`st-${idx}`} summary={entry.summary} />);
       }
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "session_resume") {
+      rendered.push(
+        <SessionResumeDivider
+          key={`sr-${idx}`}
+          preambleChars={entry.preambleChars}
+          {...(entry.parentSessionId ? { parentSessionId: entry.parentSessionId } : {})}
+        />,
+      );
       i++;
       continue;
     }
@@ -783,4 +860,4 @@ export function StackedChatView({
 }
 
 // Re-export these for use in test/assertions
-export { DaySeparator, CheckpointDivider, SummaryToast };
+export { DaySeparator, CheckpointDivider, SummaryToast, SessionResumeDivider };

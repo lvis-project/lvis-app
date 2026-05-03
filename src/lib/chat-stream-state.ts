@@ -1,3 +1,17 @@
+/**
+ * 3-tier checkpoint trigger that classifies *why* a rotation/compact happened.
+ * Mirrors `CheckpointTriggerType` in `engine/auto-compact.ts` but kept as a
+ * string-literal union here so the renderer side has zero engine imports.
+ *
+ * - "hard-token":   ctxUsage ≥ 85% → emergency rotation
+ * - "semantic-llm": LLM emitted [checkpoint-suggested] marker → topic shift
+ * - "soft-time":    24h / 30 messages → natural rest checkpoint
+ *
+ * Absent from `compact_notice` events triggered by plain auto/reactive
+ * compaction outside the rotation path.
+ */
+export type CheckpointTier = "hard-token" | "semantic-llm" | "soft-time";
+
 export type StreamEvent = {
   type: string;
   streamId?: number;
@@ -16,6 +30,8 @@ export type StreamEvent = {
   hasToolCalls?: boolean;
   removedMessages?: number;
   freedTokens?: number;
+  /** Rotation tier on `compact_notice` (rotation-driven only). */
+  tier?: CheckpointTier;
   /** Set to "command" on `done` events when the turn was a slash command. */
   route?: "command";
   /** MCP Apps spec §3.2 — optional UI payload emitted with tool_end events. */
@@ -51,6 +67,31 @@ export type ChatEntry =
   | { kind: "assistant"; text: string; streaming?: boolean; route?: "command" }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
   | { kind: "system"; text: string }
+  // §457 PR-A: structured replacement for the legacy
+  // "💾 이전 N개 대화를 요약했습니다" system bubble. Carries the rotation
+  // tier so the StackedChatView's CheckpointDivider can render
+  // tier-aware label/color (emergency vs topic-shift vs natural rest)
+  // without parsing prose. Plain auto/reactive compaction (no rotation)
+  // emits an entry with `tier` undefined, in which case the renderer
+  // falls back to the generic "자동 정리" label.
+  | {
+      kind: "checkpoint";
+      tier?: CheckpointTier;
+      removedMessages: number;
+      freedTokens: number;
+      summary?: string;
+    }
+  // §457 PR-A: marker placed at the head of a resumed child session's
+  // historical entry list when the parent session left a rolling
+  // summaryPreamble. Lets the user see "이전 대화 이어서 시작 (요약 N자
+  // 적용)" rather than silently inheriting context from the prompt
+  // builder. `preambleChars` is the actual character count after the
+  // 8 000-char cap; renderer formats the label.
+  | {
+      kind: "session_resume";
+      preambleChars: number;
+      parentSessionId?: string;
+    }
   // Brain proactive trigger that the user accepted ("지금 답하기"). The
   // trigger session ran in an isolated ConversationLoop; once imported,
   // its messages live in the chat loop's history (so the LLM has

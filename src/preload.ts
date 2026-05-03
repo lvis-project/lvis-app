@@ -136,6 +136,10 @@ const api = {
     ipcRenderer.invoke("lvis:chat:session-history", sessionId) as Promise<{
       ok: boolean;
       messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }>;
+      /** §457 PR-A: chars in the rolling summary preamble inherited from parent. 0 = no preamble. */
+      preambleChars?: number;
+      /** §457 PR-A: parent session id when this session is a rotation child. */
+      parentSessionId?: string;
     }>,
   chatEditResend: async (messageIndex: number, newText: string) =>
     ipcRenderer.invoke("lvis:chat:edit-resend", messageIndex, newText),
