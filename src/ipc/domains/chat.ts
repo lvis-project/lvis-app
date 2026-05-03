@@ -174,12 +174,13 @@ async function runStreamedTurn(
       onToolEnd: (name, toolResult, isError, meta, uiPayload) =>
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }) }),
       onError: (error) => send({ type: "error", error }),
-      onCompactOccurred: ({ removedMessages, freedTokens, tier }) =>
+      onCompactOccurred: ({ removedMessages, freedTokens, tier, revertSessionId }) =>
         send({
           type: "compact_notice",
           removedMessages,
           freedTokens,
           ...(tier !== undefined ? { tier } : {}),
+          ...(revertSessionId !== undefined ? { revertSessionId } : {}),
         }),
       onFallback: (from, to) => webContents?.send("lvis:chat:fallback", { from, to }),
     },

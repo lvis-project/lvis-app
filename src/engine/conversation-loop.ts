@@ -63,6 +63,13 @@ export interface TurnCallbacks {
      * Lets the renderer differentiate emergency vs voluntary checkpoints.
      */
     tier?: CheckpointTriggerType;
+    /**
+     * §457 Phase 3: parent session id from which the rotation forked. Allows
+     * the renderer to surface a "여기로 되돌아가기" action that resumes the
+     * pre-rotation session. Only set on rotation-driven compacts; absent for
+     * plain auto/reactive compaction (no fork occurred).
+     */
+    revertSessionId?: string;
   }) => void;
   onFallback?: (from: string, to: string) => void;
 }
@@ -1211,6 +1218,10 @@ export class ConversationLoop {
       const updatedMeta = this.deps.memoryManager.appendCheckpoint(existingMeta, checkpointEntry);
       await this.deps.memoryManager.saveSessionMetadata(this.sessionId, updatedMeta);
 
+      // §457 Phase 3: capture the parent session id BEFORE rotateActive
+      // swaps `this.sessionId` to the child. The renderer's revert action
+      // resumes the parent — i.e., the pre-rotation conversation surface.
+      const parentSessionId = this.sessionId;
       // child session으로 전환
       const childId = await this.createChildSession(this.sessionId, summary);
       // §457 PR-A: notify the renderer with `messagesSinceCheckpoint.length`,
@@ -1238,6 +1249,7 @@ export class ConversationLoop {
         removedMessages: removedMessageCount,
         freedTokens,
         tier: decision.trigger,
+        revertSessionId: parentSessionId,
       });
 
       if (process.env.NODE_ENV !== "production") {
