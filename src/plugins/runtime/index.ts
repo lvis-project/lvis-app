@@ -1355,6 +1355,22 @@ export class PluginRuntime {
     return this.plugins.get(pluginId)?.pluginRoot;
   }
 
+  /**
+   * Resolve the per-plugin sandboxed `PluginStorage` instance for `pluginId`.
+   *
+   * Used by the plugin webview bridge (`lvis:plugin:storage:*` IPC) so a UI
+   * panel running in an isolated webview can read/write its own plugin data
+   * dir through the same containment-checked path validation enforced for
+   * the host plugin (createPluginStorage). Returns `undefined` for unknown
+   * pluginIds — the IPC handler maps that to `unknown-plugin-id`.
+   */
+  getPluginStorage(pluginId: string): import("../types.js").PluginStorage | undefined {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) return undefined;
+    const pluginDataDir = this.ensureDataDir(pluginId, plugin.pluginRoot);
+    return createPluginStorage(pluginId, pluginDataDir);
+  }
+
   listUiExtensions(): Array<{ pluginId: string; icon?: string; extension: PluginUiExtension; entryUrl?: string }> {
     const result: Array<{ pluginId: string; icon?: string; extension: PluginUiExtension; entryUrl?: string }> = [];
     for (const [pluginId, plugin] of this.plugins) {
