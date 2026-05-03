@@ -194,8 +194,24 @@ export function useChatState(api: LvisApi) {
           { kind: "system", text: `🔒 전송 전 PII ${count}건 리댁트됨${kindLabel ? ` (${kindLabel})` : ""}` },
         ]);
       } else if (ev.type === "compact_notice") {
-        const n = ev.removedMessages ?? 0;
-        setEntries((p) => [...p, { kind: "system", text: `💾 이전 ${n}개 대화를 요약했습니다 (목표·결정사항 보존)` }]);
+        // §457 PR-A: emit a structured `kind: "checkpoint"` entry instead of
+        // a free-text system bubble. StackedChatView reads `tier` to pick a
+        // tier-aware label/color in CheckpointDivider; ChatView falls back
+        // to a single-line system pill. Keeping the old prose route would
+        // force a brittle string-match (`entry.text.includes("checkpoint")`)
+        // that never fired in production because the legacy text didn't
+        // contain that token. See Issue #457 Phase 1+2 cleanup.
+        const removed = ev.removedMessages ?? 0;
+        const freed = ev.freedTokens ?? 0;
+        setEntries((p) => [
+          ...p,
+          {
+            kind: "checkpoint",
+            removedMessages: removed,
+            freedTokens: freed,
+            ...(ev.tier ? { tier: ev.tier } : {}),
+          },
+        ]);
       } else if (ev.type === "done") {
         // Brain trigger flow — close the card's streaming indicator.
         // Independent of the regular streaming-assistant finalize; the

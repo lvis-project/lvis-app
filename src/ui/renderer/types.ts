@@ -281,7 +281,14 @@ export type LvisApi = {
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
   chatGetHistory: () => Promise<{ sessionId: string; messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }> }>;
-  chatSessionHistory: (sessionId: string) => Promise<{ ok: boolean; messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }> }>;
+  chatSessionHistory: (sessionId: string) => Promise<{
+    ok: boolean;
+    messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }>;
+    /** §457 PR-A: chars in the rolling summary preamble inherited from parent. 0 = no preamble. */
+    preambleChars?: number;
+    /** §457 PR-A: parent session id when this session is a rotation child. */
+    parentSessionId?: string;
+  }>;
   chatEditResend: (messageIndex: number, newText: string) => Promise<{ ok: boolean; error?: string }>;
   chatFork: (messageIndex: number) => Promise<{ ok: boolean; sessionId: string | null }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
