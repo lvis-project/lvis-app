@@ -499,12 +499,14 @@ export interface InitPluginRuntimeInput {
     opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean },
   ) => Promise<AuthWindowCookie[] | OpenAuthWindowFinalUrlResult>;
   /**
-   * §8 — optional ApprovalGate instance. When provided, the `agentApproval`
-   * namespace on every plugin's HostApi is wired to this gate so main-process
-   * plugin handlers can respond to pending approvals without going through the
-   * renderer-only preload bridge.
+   * §8 — required ApprovalGate instance. The `agentApproval` namespace on
+   * every plugin's HostApi is wired to this gate so main-process plugin
+   * handlers can respond to pending approvals without going through the
+   * renderer-only preload bridge. Required (not optional) so that boot
+   * sequence inversion is impossible — if approvalGate is not yet built,
+   * initPluginRuntime cannot be called.
    */
-  approvalGate?: import("../../permissions/approval-gate.js").ApprovalGate;
+  approvalGate: import("../../permissions/approval-gate.js").ApprovalGate;
 }
 
 export interface InitPluginRuntimeOutput {
@@ -913,22 +915,19 @@ export async function initPluginRuntime(
       }) as PluginHostApi["openAuthWindow"],
 
       // ─── §8 Agent Approval — hostApi.agentApproval ────────────────────
-      // Exposes the main-process ApprovalGate to plugins so they can list
-      // or resolve pending approval entries from handler code (NOT from the
-      // renderer-only preload bridge). When no approvalGate is injected
-      // (test harness without full boot), list() returns [] and respond()
-      // is a no-op — both are safe to call unconditionally.
+      // Exposes the main-process ApprovalGate to plugins so they can resolve
+      // pending approval entries from handler code (NOT from the renderer-only
+      // preload bridge). approvalGate is REQUIRED at construction time —
+      // there is no noop fallback. A missing gate would mean the boot order
+      // is wrong, which is a programming error to surface loudly rather than
+      // silently swallow.
       agentApproval: {
-        list: async () => {
-          return approvalGate?.listPending() ?? [];
-        },
         respond: async (
           requestId: string,
           choice: ApprovalChoice,
           nonce?: string,
           hmac?: string,
         ): Promise<void> => {
-          if (!approvalGate) return;
           approvalGate.resolve(requestId, { requestId, choice, nonce, hmac });
         },
       },
