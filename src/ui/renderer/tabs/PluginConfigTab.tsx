@@ -129,14 +129,18 @@ export function PluginConfigTab() {
             delete next[slug];
             return next;
           });
-          if (success) void refreshPlugins();
+          if (success) {
+            void refreshPlugins();
+          }
         }),
       );
     }
     if (typeof api.onPluginUninstallResult === "function") {
       unsubs.push(
         api.onPluginUninstallResult(({ success }) => {
-          if (success) void refreshPlugins();
+          if (success) {
+            void refreshPlugins();
+          }
         }),
       );
     }

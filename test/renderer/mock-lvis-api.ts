@@ -136,6 +136,13 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     listPluginUiExtensions: vi.fn(async () => pluginUiExtensions),
     listPluginCards: vi.fn(async () => pluginCards),
     callPluginMethod: vi.fn(async () => ({ ok: true })),
+    window: {
+      openDetached: vi.fn(async () => ({ ok: true, windowId: 1 })),
+      closeDetached: vi.fn(async () => ({ ok: true })),
+      listDetached: vi.fn(async () => []),
+      onSnapEdge: vi.fn(() => () => {}),
+      onDetachedNavigate: vi.fn(() => () => {}),
+    },
 
     addTask: vi.fn(async (t: unknown) => t),
     queryTasks: vi.fn(async () => tasks),
