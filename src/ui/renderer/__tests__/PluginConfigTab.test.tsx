@@ -215,8 +215,8 @@ describe("PluginConfigTab — §9.2 Track B configSchema rendering", () => {
   });
 });
 
-describe("PluginConfigTab — detached auth UI", () => {
-  it("opens detached plugin UI instead of invoking loginTool when selected plugin declares one", async () => {
+describe("PluginConfigTab — auth UI", () => {
+  it("uses loginTool even when a plugin also declares detached UI views", async () => {
     const cards = vi.fn(async () => [
       {
         id: "token-plugin",
@@ -237,7 +237,6 @@ describe("PluginConfigTab — detached auth UI", () => {
     const callPluginMethod = vi.fn(async (tool: string) =>
       tool === "token_status" ? { authenticated: false } : { ok: true },
     );
-    const openDetached = vi.fn(async () => ({ ok: true as const, windowId: 7 }));
 
     Object.defineProperty(window, "lvis", {
       value: {
@@ -255,110 +254,8 @@ describe("PluginConfigTab — detached auth UI", () => {
       value: {
         callPluginMethod,
         onPluginEvent: vi.fn(() => () => undefined),
-        listPluginUiExtensions: vi.fn(async () => [
-          {
-            pluginId: "token-plugin",
-            extension: {
-              id: "main",
-              slot: "sidebar",
-              kind: "embedded-module",
-              title: "Token Plugin",
-              entry: "dist/ui.js",
-              window: { defaultMode: "detached" },
-            },
-            entryUrl: "file:///token-plugin/dist/ui.js",
-          },
-        ]),
-        window: { openDetached },
-      },
-      writable: true,
-      configurable: true,
-    });
-    Object.defineProperty(window, "lvisHost", {
-      value: { takePluginMarketplaceApi: () => null },
-      writable: true,
-      configurable: true,
-    });
-
-    render(<PluginConfigTab />);
-
-    const loginButton = await screen.findByTestId("plugin-auth-login-token-plugin");
-    expect(loginButton).toHaveTextContent("로그인 창 열기");
-    fireEvent.click(loginButton);
-
-    await waitFor(() => {
-      expect(openDetached).toHaveBeenCalledWith("plugin:token-plugin:main");
-    });
-    expect(callPluginMethod).toHaveBeenCalledWith("token_status");
-    expect(callPluginMethod).not.toHaveBeenCalledWith("token_login");
-  });
-
-  it("uses loginTool when selected plugin declares multiple detached UI views", async () => {
-    const cards = vi.fn(async () => [
-      {
-        id: "token-plugin",
-        name: "Token Plugin",
-        description: "Uses plugin UI auth",
-        sampleTools: [],
-        capabilities: [],
-        tools: [],
-        loadStatus: "loaded" as const,
-        auth: {
-          label: "Token auth",
-          statusTool: "token_status",
-          loginTool: "token_login",
-          logoutTool: "token_logout",
-        },
-      },
-    ]);
-    const callPluginMethod = vi.fn(async (tool: string) =>
-      tool === "token_status" ? { authenticated: false } : { ok: true },
-    );
-    const openDetached = vi.fn(async () => ({ ok: true as const, windowId: 7 }));
-
-    Object.defineProperty(window, "lvis", {
-      value: {
-        plugins: { cards },
-        pluginConfig: {
-          get: vi.fn(async () => ({ ok: true as const, config: {} })),
-          set: vi.fn(async () => ({ ok: true as const, config: {} })),
-          listSecretKeys: vi.fn(async () => ({ ok: true as const, keys: [] })),
-        },
-      },
-      writable: true,
-      configurable: true,
-    });
-    Object.defineProperty(window, "lvisApi", {
-      value: {
-        callPluginMethod,
-        onPluginEvent: vi.fn(() => () => undefined),
-        listPluginUiExtensions: vi.fn(async () => [
-          {
-            pluginId: "token-plugin",
-            extension: {
-              id: "main",
-              slot: "sidebar",
-              kind: "embedded-module",
-              title: "Token Plugin",
-              entry: "dist/ui.js",
-              window: { defaultMode: "detached" },
-            },
-            entryUrl: "file:///token-plugin/dist/ui.js",
-          },
-          {
-            pluginId: "token-plugin",
-            extension: {
-              id: "secondary",
-              slot: "sidebar",
-              kind: "embedded-module",
-              title: "Token Plugin Secondary",
-              entry: "dist/secondary-ui.js",
-              window: { defaultMode: "detached" },
-            },
-            entryUrl: "file:///token-plugin/dist/secondary-ui.js",
-          },
-        ]),
-        window: { openDetached },
+        listPluginUiExtensions: vi.fn(async () => []),
+        window: { openDetached: vi.fn(async () => ({ ok: true as const, windowId: 7 })) },
       },
       writable: true,
       configurable: true,
@@ -378,91 +275,6 @@ describe("PluginConfigTab — detached auth UI", () => {
     await waitFor(() => {
       expect(callPluginMethod).toHaveBeenCalledWith("token_login");
     });
-    expect(openDetached).not.toHaveBeenCalled();
-  });
-
-  it("refreshes detached auth view metadata after plugin install events", async () => {
-    let installHandler: ((payload: { slug: string; success: boolean }) => void) | undefined;
-    const cards = vi.fn(async () => [
-      {
-        id: "token-plugin",
-        name: "Token Plugin",
-        description: "Uses plugin UI auth",
-        sampleTools: [],
-        capabilities: [],
-        tools: [],
-        loadStatus: "loaded" as const,
-        auth: {
-          label: "Token auth",
-          statusTool: "token_status",
-          loginTool: "token_login",
-          logoutTool: "token_logout",
-        },
-      },
-    ]);
-    const callPluginMethod = vi.fn(async (tool: string) =>
-      tool === "token_status" ? { authenticated: false } : { ok: true },
-    );
-    const listPluginUiExtensions = vi
-      .fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          pluginId: "token-plugin",
-          extension: {
-            id: "main",
-            slot: "sidebar",
-            kind: "embedded-module",
-            title: "Token Plugin",
-            entry: "dist/ui.js",
-            window: { defaultMode: "detached" },
-          },
-          entryUrl: "file:///token-plugin/dist/ui.js",
-        },
-      ]);
-
-    Object.defineProperty(window, "lvis", {
-      value: {
-        plugins: { cards },
-        pluginConfig: {
-          get: vi.fn(async () => ({ ok: true as const, config: {} })),
-          set: vi.fn(async () => ({ ok: true as const, config: {} })),
-          listSecretKeys: vi.fn(async () => ({ ok: true as const, keys: [] })),
-        },
-      },
-      writable: true,
-      configurable: true,
-    });
-    Object.defineProperty(window, "lvisApi", {
-      value: {
-        callPluginMethod,
-        onPluginEvent: vi.fn(() => () => undefined),
-        listPluginUiExtensions,
-        onPluginInstallProgress: vi.fn(() => () => undefined),
-        onPluginInstallResult: vi.fn((handler: (payload: { slug: string; success: boolean }) => void) => {
-          installHandler = handler;
-          return () => undefined;
-        }),
-        onPluginUninstallResult: vi.fn(() => () => undefined),
-        window: { openDetached: vi.fn(async () => ({ ok: true as const, windowId: 7 })) },
-      },
-      writable: true,
-      configurable: true,
-    });
-    Object.defineProperty(window, "lvisHost", {
-      value: { takePluginMarketplaceApi: () => null },
-      writable: true,
-      configurable: true,
-    });
-
-    render(<PluginConfigTab />);
-
-    expect(await screen.findByTestId("plugin-auth-login-token-plugin")).toHaveTextContent("로그인");
-    installHandler?.({ slug: "token-plugin", success: true });
-
-    await waitFor(() => {
-      expect(listPluginUiExtensions).toHaveBeenCalledTimes(2);
-      expect(screen.getByTestId("plugin-auth-login-token-plugin")).toHaveTextContent("로그인 창 열기");
-    });
+    expect(window.lvisApi.window.openDetached).not.toHaveBeenCalled();
   });
 });
