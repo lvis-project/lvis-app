@@ -76,6 +76,32 @@ describe("CheckpointDivider tier mapping", () => {
     const divider = container.querySelector("[data-testid='checkpoint-divider']");
     expect(divider?.getAttribute("data-tier")).toBe("default");
   });
+
+  // §457 Phase 3: revert button surfaced only when onRevert is provided
+  it("renders revert button when onRevert is supplied", () => {
+    const { getByTestId } = render(
+      <CheckpointDivider tier="hard-token" messageCount={10} onRevert={() => {}} />,
+    );
+    const btn = getByTestId("checkpoint-revert-btn");
+    expect(btn.textContent).toContain("여기로 되돌아가기");
+  });
+
+  it("hides revert button when onRevert is omitted", () => {
+    const { queryByTestId } = render(
+      <CheckpointDivider tier="hard-token" messageCount={10} />,
+    );
+    expect(queryByTestId("checkpoint-revert-btn")).toBeNull();
+  });
+
+  it("invokes onRevert when revert button is clicked", async () => {
+    const { vi } = await import("vitest");
+    const onRevert = vi.fn();
+    const { getByTestId } = render(
+      <CheckpointDivider tier="soft-time" messageCount={3} onRevert={onRevert} />,
+    );
+    getByTestId("checkpoint-revert-btn").click();
+    expect(onRevert).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ─── 3. Summary toast ──────────────────────────────────────────────────────────
