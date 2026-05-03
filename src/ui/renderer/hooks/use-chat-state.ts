@@ -210,6 +210,7 @@ export function useChatState(api: LvisApi) {
             removedMessages: removed,
             freedTokens: freed,
             ...(ev.tier ? { tier: ev.tier } : {}),
+            ...(ev.revertSessionId ? { revertSessionId: ev.revertSessionId } : {}),
           },
         ]);
       } else if (ev.type === "done") {
