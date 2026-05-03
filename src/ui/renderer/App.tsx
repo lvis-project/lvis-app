@@ -205,6 +205,24 @@ export function App() {
     void api.openExternalUrl(marketplaceUrl);
   }, [api, marketplaceUrl, marketplaceUrlReady]);
 
+  const openDetachedPluginView = useCallback(
+    async (viewKey: string): Promise<boolean> => {
+      const openDetached = api.window?.openDetached;
+      if (!openDetached) {
+        setErrorWithThought("오류: 플러그인 창을 열 수 없습니다.");
+        return false;
+      }
+      const result = await openDetached(viewKey);
+      if (!result.ok) {
+        console.warn(`[plugin-ui] detached plugin view ${viewKey} did not open`, result.error);
+        setErrorWithThought(`오류: 플러그인 창을 열 수 없습니다. ${result.error}`);
+        return false;
+      }
+      return true;
+    },
+    [api, setErrorWithThought],
+  );
+
   // When a plugin view declares `window.defaultMode: "detached"`, a sidebar
   // click opens it in a separate magnetic-snap BrowserWindow instead of
   // switching the main window's active view.
@@ -212,7 +230,7 @@ export function App() {
   // If the owning plugin declares `manifest.auth` AND its current state is
   // unauthed, embedded views invoke loginTool before navigating. Detached
   // views open directly so plugin-owned login UIs can collect their own
-  // payloads (for example a token entry panel) instead of the host calling
+  // credentials through the plugin surface instead of the host calling
   // loginTool with no arguments.
   const handleSidebarSelect = useCallback(
     (key: string) => {
@@ -221,7 +239,7 @@ export function App() {
         if (!view) return;
         const isDetachedView = view.extension.window?.defaultMode === "detached";
         if (isDetachedView) {
-          void api.window?.openDetached(key);
+          void openDetachedPluginView(key);
           return;
         }
 
@@ -265,7 +283,7 @@ export function App() {
       }
       setActiveView(key);
     },
-    [api, pluginViews, pluginAuthStatuses, pluginCards],
+    [api, pluginViews, pluginAuthStatuses, pluginCards, openDetachedPluginView],
   );
 
   // If the currently-open sidebar view belongs to a plugin that just got
@@ -481,12 +499,12 @@ export function App() {
   const commandActions = useMemo(
     () =>
       buildQuickActions({
-        setActiveView,
+        setActiveView: handleSidebarSelect,
         setSettingsOpen,
         handleNewChat,
         pluginViews,
       }),
-    [pluginViews, handleNewChat],
+    [pluginViews, handleNewChat, handleSidebarSelect],
   );
 
   const onOpenSettings = useCallback(() => setSettingsOpen(true), []);

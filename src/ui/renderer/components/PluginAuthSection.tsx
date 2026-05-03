@@ -3,6 +3,10 @@ import { Button } from "../../../components/ui/button.js";
 import type { PluginAuthState } from "../hooks/use-plugin-auth-status.js";
 import type { LvisApi, PluginAuthSummary } from "../types.js";
 
+function isOpenLoginUiFailure(result: unknown): result is { ok: false; error?: string } {
+  return typeof result === "object" && result !== null && (result as { ok?: unknown }).ok === false;
+}
+
 interface PluginAuthSectionProps {
   api: LvisApi;
   pluginId: string;
@@ -52,7 +56,10 @@ export function PluginAuthSection({
     setWorking(true);
     try {
       if (onOpenLoginUi) {
-        await onOpenLoginUi();
+        const result = await onOpenLoginUi();
+        if (isOpenLoginUiFailure(result)) {
+          throw new Error(result.error?.trim() || "detached login window failed");
+        }
       } else {
         await api.callPluginMethod(auth.loginTool);
         onRefresh();
