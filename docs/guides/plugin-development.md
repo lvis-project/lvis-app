@@ -127,7 +127,7 @@ interface PluginManifest {
 #### id
 
 - 플러그인 패키지 식별자. **시스템이 플러그인을 추적하는 유일한 키**.
-- 현재 출시된 플러그인은 모두 flat 형식 (`meeting`, `local-indexer`, `email`, `calendar`).
+- 현재 출시된 플러그인은 모두 flat 형식 (`meeting`, `local-indexer`, `ms-graph`).
 - 도트 형식 (`com.ep.meeting-recorder`) 도 허용되지만 **필수 아님**.
 - UI 슬롯 ID, 이벤트 네임스페이스의 프리픽스로 사용 가능.
 - ⚠️ **LLM tool name 과 별개** — `id` 에 도트가 있어도 `tools[]` 는 언더스코어만 허용.
@@ -528,12 +528,12 @@ capability 는 호스트가 특정 pluginId 를 몰라도 통합 지점을 결�
 | capability | 의미 | 강제? | 예시 |
 |-----------|------|-------|------|
 | `meeting-recorder` | 실시간 음성 캡처 + STT | advisory | meeting |
-| `mail-source` | 이메일 소스 연결 | advisory | email |
-| `calendar-source` | 캘린더 소스 연결 | advisory | calendar |
-| `background-watcher` | `startupTools` 로 폴러/워처 기동 | advisory | email, calendar |
+| `mail-source` | 이메일 소스 연결 | advisory | ms-graph |
+| `calendar-source` | 캘린더 소스 연결 | advisory | ms-graph |
+| `background-watcher` | `startupTools` 로 폴러/워처 기동 | advisory | ms-graph |
 | `worker-client` | 외부 프로세스(Python 등) 워커 래퍼 | advisory | local-indexer |
 | `knowledge-index` | 문서 인덱스/검색 제공 | advisory | local-indexer |
-| `ms-graph-consumer` | HostApi 의 MS Graph 메서드 사용 | **강제** (§B-5) | email, calendar |
+| `ms-graph-consumer` | HostApi 의 MS Graph 메서드 사용 | **강제** (§B-5) | ms-graph |
 
 현재 **런타임이 강제하는 capability 는 `ms-graph-consumer` 하나뿐**입니다. 미선언 플러그인이 `getMsGraphToken` / `startMsGraphAuth` / `isMsGraphAuthenticated` / `getMsGraphAccount` 중 하나라도 호출하면 `capability not declared: ms-graph-consumer` 예외가 발생합니다.
 
@@ -786,4 +786,4 @@ Meeting / Microsoft 365 (Outlook 메일+캘린더) / Local Indexer 의 실제 �
 - `src/plugins/types.ts`, `src/plugins/runtime.ts`, `src/plugins/marketplace.ts`, `src/plugins/plugin-install-receipt.ts`, `src/plugins/publisher-keys.ts`
 - `src/boot.ts`, `src/boot/conversation.ts` (callLlm 레이트리밋), `src/boot/plugins.ts` (notification / eventSubscriptions)
 - `schemas/plugin.schema.json`
-- Meeting / Email / Calendar / Local Indexer 플러그인 저장소 (현행 사용 예제)
+- Meeting / Microsoft 365 (ms-graph) / Local Indexer 플러그인 저장소 (현행 사용 예제)
