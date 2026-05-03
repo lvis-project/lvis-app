@@ -1,21 +1,27 @@
 /**
- * StackedChatView unit tests — PR-5 Phase 2.
+ * StackedChatView unit tests — PR-5 Phase 2 (§457 PR-A: structured-kind refactor).
  *
- * 8 cases:
+ * 9 cases:
  * 1. Day separator renders when date changes.
- * 2. Checkpoint divider renders for system message with "checkpoint".
- * 3. Summary toast renders after checkpoint.
- * 4. User messages render right-aligned (max-w-[75%] + ml-auto).
- * 5. Assistant messages render left-aligned (max-w-[80%]).
+ * 2. CheckpointDivider tier-aware label/icon/color.
+ * 3. Summary toast renders summary + truncates long ones.
+ * 4. SessionResumeDivider renders preamble char count (§457 PR-A).
+ * 5. User messages render right-aligned (max-w-[75%] + ml-auto).
  * 6. Empty state renders when sessions=[] and entries=[].
  * 7. Scroll sentinel is present (for IntersectionObserver).
  * 8. Feature flag OFF → existing ChatView renders (regression guard).
+ * 9. Legacy free-text "checkpoint" system message no longer triggers a divider
+ *    (regression-lock for the dead-string-match removal).
  */
 import "../../../../test/renderer/setup.js";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render, waitFor } from "@testing-library/react";
-import type { ChatEntry } from "../../../lib/chat-stream-state.js";
-import { DaySeparator, CheckpointDivider, SummaryToast } from "../components/StackedChatView.js";
+import {
+  DaySeparator,
+  CheckpointDivider,
+  SummaryToast,
+  SessionResumeDivider,
+} from "../components/StackedChatView.js";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 
 // ─── 1. Day separator ──────────────────────────────────────────────────────────
@@ -40,15 +46,35 @@ describe("DaySeparator", () => {
   });
 });
 
-// ─── 2. Checkpoint divider ─────────────────────────────────────────────────────
-describe("CheckpointDivider", () => {
-  it("renders checkpoint label and message count", () => {
-    const { container } = render(
-      <CheckpointDivider label="자동 정리" messageCount={24} />,
-    );
-    expect(container.textContent).toContain("체크포인트");
-    expect(container.textContent).toContain("24 messages");
-    expect(container.querySelector("[data-testid='checkpoint-divider']")).toBeTruthy();
+// ─── 2. Checkpoint divider — tier-aware label/icon (§457 PR-A) ────────────────
+describe("CheckpointDivider tier mapping", () => {
+  it("hard-token tier → 긴급 정리 label + 🚨 icon", () => {
+    const { container } = render(<CheckpointDivider tier="hard-token" messageCount={42} />);
+    expect(container.textContent).toContain("긴급 정리");
+    expect(container.textContent).toContain("🚨");
+    expect(container.textContent).toContain("42 messages");
+    const divider = container.querySelector("[data-testid='checkpoint-divider']");
+    expect(divider?.getAttribute("data-tier")).toBe("hard-token");
+  });
+
+  it("semantic-llm tier → 주제 전환 label + 🔀 icon", () => {
+    const { container } = render(<CheckpointDivider tier="semantic-llm" messageCount={16} />);
+    expect(container.textContent).toContain("주제 전환");
+    expect(container.textContent).toContain("🔀");
+  });
+
+  it("soft-time tier → 이전 세션 정리 label + 🌙 icon", () => {
+    const { container } = render(<CheckpointDivider tier="soft-time" messageCount={30} />);
+    expect(container.textContent).toContain("이전 세션 정리");
+    expect(container.textContent).toContain("🌙");
+  });
+
+  it("undefined tier → default 자동 정리 label + 📌 icon", () => {
+    const { container } = render(<CheckpointDivider messageCount={5} />);
+    expect(container.textContent).toContain("자동 정리");
+    expect(container.textContent).toContain("📌");
+    const divider = container.querySelector("[data-testid='checkpoint-divider']");
+    expect(divider?.getAttribute("data-tier")).toBe("default");
   });
 });
 
@@ -70,6 +96,16 @@ describe("SummaryToast", () => {
     // Should not contain more than 130 chars of "가" (accounting for prefix)
     const gaCount = (text.match(/가/g) ?? []).length;
     expect(gaCount).toBeLessThanOrEqual(117);
+  });
+});
+
+// ─── 3b. Session resume divider (§457 PR-A) ───────────────────────────────────
+describe("SessionResumeDivider", () => {
+  it("renders preamble char count and resume marker", () => {
+    const { container } = render(<SessionResumeDivider preambleChars={1234} />);
+    expect(container.textContent).toContain("이전 대화 이어서 시작");
+    expect(container.textContent).toContain("1234자");
+    expect(container.querySelector("[data-testid='session-resume-divider']")).toBeTruthy();
   });
 });
 
