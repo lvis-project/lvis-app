@@ -214,3 +214,67 @@ describe("PluginConfigTab — §9.2 Track B configSchema rendering", () => {
     });
   });
 });
+
+describe("PluginConfigTab — auth UI", () => {
+  it("uses loginTool even when a plugin also declares detached UI views", async () => {
+    const cards = vi.fn(async () => [
+      {
+        id: "token-plugin",
+        name: "Token Plugin",
+        description: "Uses plugin UI auth",
+        sampleTools: [],
+        capabilities: [],
+        tools: [],
+        loadStatus: "loaded" as const,
+        auth: {
+          label: "Token auth",
+          statusTool: "token_status",
+          loginTool: "token_login",
+          logoutTool: "token_logout",
+        },
+      },
+    ]);
+    const callPluginMethod = vi.fn(async (tool: string) =>
+      tool === "token_status" ? { authenticated: false } : { ok: true },
+    );
+
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: {
+          get: vi.fn(async () => ({ ok: true as const, config: {} })),
+          set: vi.fn(async () => ({ ok: true as const, config: {} })),
+          listSecretKeys: vi.fn(async () => ({ ok: true as const, keys: [] })),
+        },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisApi", {
+      value: {
+        callPluginMethod,
+        onPluginEvent: vi.fn(() => () => undefined),
+        listPluginUiExtensions: vi.fn(async () => []),
+        window: { openDetached: vi.fn(async () => ({ ok: true as const, windowId: 7 })) },
+      },
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "lvisHost", {
+      value: { takePluginMarketplaceApi: () => null },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    const loginButton = await screen.findByTestId("plugin-auth-login-token-plugin");
+    expect(loginButton).toHaveTextContent("로그인");
+    fireEvent.click(loginButton);
+
+    await waitFor(() => {
+      expect(callPluginMethod).toHaveBeenCalledWith("token_login");
+    });
+    expect(window.lvisApi.window.openDetached).not.toHaveBeenCalled();
+  });
+});
