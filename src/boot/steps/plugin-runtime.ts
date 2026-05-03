@@ -38,8 +38,11 @@ import {
 import { PROACTIVE_SOURCE_PATTERN } from "../../engine/proactive-source.js";
 import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
 import type {
+  AuthWindowCookie,
   ConversationTriggerResult,
   ConversationTriggerSpec,
+  OpenAuthWindowBaseOptions,
+  OpenAuthWindowFinalUrlResult,
   PluginHostApi,
   PluginManifest,
 } from "../../plugins/types.js";
@@ -492,8 +495,8 @@ export interface InitPluginRuntimeInput {
   mainWindow: BrowserWindow;
   openAuthWindowService: (
     parent: BrowserWindow,
-    opts: Parameters<PluginHostApi["openAuthWindow"]>[0],
-  ) => ReturnType<PluginHostApi["openAuthWindow"]>;
+    opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean },
+  ) => Promise<AuthWindowCookie[] | OpenAuthWindowFinalUrlResult>;
 }
 
 export interface InitPluginRuntimeOutput {
@@ -823,7 +826,7 @@ export async function initPluginRuntime(
       //
       // 로그에는 origin + path 만 기록 — SAML/OAuth URL 에 담기는 민감 query
       // (SAMLRequest, code, state, session id 등) 은 유출 방지 위해 제외.
-      openAuthWindow: async (opts) => {
+      openAuthWindow: (async (opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean }) => {
         const safeUrlForLog = (() => {
           try {
             const parsed = new URL(opts.url);
@@ -898,7 +901,7 @@ export async function initPluginRuntime(
           ? opts
           : { ...opts, persistPartition: defaultPartition };
         return openAuthWindowService(mainWindow, effectiveOpts);
-      },
+      }) as PluginHostApi["openAuthWindow"],
 
       // ─── Proactive Brain — hostApi.triggerConversation() ───────────────
       // Gate body lives in evaluateTriggerSpec() so prod and tests share
@@ -1010,4 +1013,3 @@ export async function initPluginRuntime(
 
 // Re-export so boot.ts's return statement can still reach BrowserWindow type.
 export type { BrowserWindow };
-

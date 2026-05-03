@@ -96,6 +96,59 @@ describe("PluginAuthSection", () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
+  it("opens provided login UI instead of invoking loginTool", async () => {
+    const api = makeApi();
+    const onOpenLoginUi = vi.fn(async () => ({ ok: true }));
+    const onRefresh = vi.fn();
+    render(
+      <PluginAuthSection
+        api={api}
+        pluginId="detached-plugin"
+        pluginName="Detached Plugin"
+        auth={{ ...baseAuth, loginTool: "detached_login" }}
+        state={{ kind: "unauthed" }}
+        onOpenLoginUi={onOpenLoginUi}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    expect(screen.getByTestId("plugin-auth-login-detached-plugin")).toHaveTextContent("로그인 창 열기");
+    fireEvent.click(screen.getByTestId("plugin-auth-login-detached-plugin"));
+    await waitFor(() => {
+      expect(onOpenLoginUi).toHaveBeenCalledOnce();
+    });
+    expect(api.callPluginMethod).not.toHaveBeenCalledWith("detached_login");
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
+  it("renders an error when the provided login UI opener returns ok=false", async () => {
+    const api = makeApi();
+    const onOpenLoginUi = vi.fn(async () => ({ ok: false as const, error: "window denied" }));
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      render(
+        <PluginAuthSection
+          api={api}
+          pluginId="detached-plugin"
+          pluginName="Detached Plugin"
+          auth={{ ...baseAuth, loginTool: "detached_login" }}
+          state={{ kind: "unauthed" }}
+          onOpenLoginUi={onOpenLoginUi}
+          onRefresh={() => undefined}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("plugin-auth-login-detached-plugin"));
+      await waitFor(() => {
+        expect(screen.getByText(/로그인에 실패했습니다/)).toBeInTheDocument();
+      });
+      expect(onOpenLoginUi).toHaveBeenCalledOnce();
+      expect(api.callPluginMethod).not.toHaveBeenCalledWith("detached_login");
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
   it("invokes logoutTool + onRefresh when 로그아웃 clicked", async () => {
     const api = makeApi();
     const onRefresh = vi.fn();
