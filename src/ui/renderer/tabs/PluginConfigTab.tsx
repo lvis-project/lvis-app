@@ -4,10 +4,10 @@ import { Input } from "../../../components/ui/input.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
 import { Separator } from "../../../components/ui/separator.js";
 import { sanitizePluginConfig, sanitizePluginConfigKey } from "../../../shared/plugin-config.js";
-import { getApi, toViewKey } from "../api-client.js";
+import { getApi } from "../api-client.js";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { InstallInFlight } from "../hooks/use-plugin-marketplace.js";
-import type { PluginCardSummary, PluginUiExtension } from "../types.js";
+import type { PluginCardSummary } from "../types.js";
 import { PluginAuthSection } from "../components/PluginAuthSection.js";
 import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
 import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
@@ -54,7 +54,6 @@ export function PluginConfigTab() {
     apiForAuthHook,
     plugins,
   );
-  const [pluginViews, setPluginViews] = useState<PluginUiExtension[]>([]);
   const [entries, setEntries] = useState<KV[]>([]);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
@@ -67,19 +66,6 @@ export function PluginConfigTab() {
     setBanner({ type, msg });
     bannerTimerRef.current = setTimeout(() => setBanner(null), 4000);
   }, []);
-
-  const refreshPluginViews = useCallback(async () => {
-    if (!apiForAuthHook) {
-      setPluginViews([]);
-      return;
-    }
-    try {
-      setPluginViews(await apiForAuthHook.listPluginUiExtensions());
-    } catch (e) {
-      setPluginViews([]);
-      showBanner("error", (e as Error).message ?? "플러그인 UI 목록 로드 실패");
-    }
-  }, [apiForAuthHook, showBanner]);
 
   useEffect(() => {
     return () => {
@@ -110,11 +96,6 @@ export function PluginConfigTab() {
   useEffect(() => {
     void refreshPlugins();
   }, [refreshPlugins]);
-
-  useEffect(() => {
-    if (!apiForAuthHook) return;
-    void refreshPluginViews();
-  }, [apiForAuthHook, refreshPluginViews]);
 
   // Sync with main-process lifecycle events. Both install (via `lvis://`
   // deep link) and uninstall (via this tab or any other surface) emit
@@ -150,7 +131,6 @@ export function PluginConfigTab() {
           });
           if (success) {
             void refreshPlugins();
-            void refreshPluginViews();
           }
         }),
       );
@@ -160,7 +140,6 @@ export function PluginConfigTab() {
         api.onPluginUninstallResult(({ success }) => {
           if (success) {
             void refreshPlugins();
-            void refreshPluginViews();
           }
         }),
       );
@@ -168,7 +147,7 @@ export function PluginConfigTab() {
     return () => {
       for (const u of unsubs) u();
     };
-  }, [refreshPlugins, refreshPluginViews]);
+  }, [refreshPlugins]);
 
   // Load config for selected plugin
   const [savedConfig, setSavedConfig] = useState<Record<string, unknown>>({});
@@ -243,18 +222,6 @@ export function PluginConfigTab() {
   }, [selectedId, entries, showBanner]);
 
   const selectedPlugin = plugins.find((p) => p.id === selectedId);
-  const selectedDetachedView = useMemo(
-    () => {
-      if (!selectedId) return undefined;
-      const detachedViews = pluginViews.filter(
-        (view) =>
-          view.pluginId === selectedId &&
-          view.extension.window?.defaultMode === "detached",
-      );
-      return detachedViews.length === 1 ? detachedViews[0] : undefined;
-    },
-    [pluginViews, selectedId],
-  );
   // §9.2 Track B — merge schema-declared defaults with the saved config
   // so the typed form always shows the value the plugin will actually
   // receive (defaults first, saved overrides win).
@@ -546,11 +513,6 @@ export function PluginConfigTab() {
                       pluginName={selectedPlugin.name}
                       auth={selectedPlugin.auth}
                       state={authStatuses.get(selectedPlugin.id) ?? { kind: "loading" }}
-                      onOpenLoginUi={
-                        selectedDetachedView && apiForAuthHook.window?.openDetached
-                          ? () => apiForAuthHook.window!.openDetached(toViewKey(selectedDetachedView))
-                          : undefined
-                      }
                       onRefresh={() => refreshAuthStatus(selectedPlugin.id)}
                     />
                   </>

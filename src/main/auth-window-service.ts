@@ -133,6 +133,19 @@ export function sanitizeUrlForLog(url: string): string {
   }
 }
 
+/**
+ * Result-shape selector for `openAuthWindow`. Pulled out as a pure function so the
+ * `returnFinalUrl` contract can be exercised without spinning up a BrowserWindow —
+ * Copilot flagged that the branch was otherwise untested.
+ */
+export function buildAuthResult(
+  cookies: AuthCookie[],
+  finalUrl: string,
+  returnFinalUrl: boolean,
+): AuthCookie[] | OpenAuthWindowResult {
+  return returnFinalUrl ? { cookies, finalUrl } : cookies;
+}
+
 function extractCompletionTarget(url: string): string {
   try {
     const parsed = new URL(url);
@@ -294,7 +307,7 @@ export async function openAuthWindow(
         const filtered = filterCookiesByHost(allCookies, normalizedCookieHosts);
         finish(() => {
           clearTimeout(timer);
-          resolve(returnFinalUrl ? { cookies: filtered, finalUrl: currentUrl } : filtered);
+          resolve(buildAuthResult(filtered, currentUrl, returnFinalUrl));
           if (!authWindow.isDestroyed()) authWindow.close();
         });
       } catch (err) {
