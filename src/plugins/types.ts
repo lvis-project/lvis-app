@@ -746,14 +746,6 @@ export interface PluginHostApi {
    */
   agentApproval: {
     /**
-     * List all currently pending ApprovalRequests as a snapshot.
-     * Returns minimal public fields (id, category, requireExplicit, createdAt,
-     * nonce, hmac). Full toolName/args remain in the renderer-side ApprovalRequest
-     * that was dispatched via IPC.
-     */
-    list(): Promise<ApprovalGateEntry[]>;
-
-    /**
      * Resolve a pending ApprovalGate entry from the main process.
      *
      * Equivalent to `approvalGate.resolve(requestId, { requestId, choice, nonce, hmac })`.
@@ -763,22 +755,15 @@ export interface PluginHostApi {
      *
      * If no pending entry matches `requestId`, this is a no-op (safe to call
      * after timeout).
+     *
+     * NOTE: a `list()` method was deliberately NOT exposed. Listing pending
+     * approvals from a plugin would surface gate-issued nonces/HMACs (§D2
+     * confused-deputy material) to plugin code with no current use case.
+     * If a future flow legitimately needs the snapshot, add it then with a
+     * scoped capability — do not pre-expose dead surface.
      */
     respond(requestId: string, choice: ApprovalChoice, nonce?: string, hmac?: string): Promise<void>;
   };
-}
-
-/**
- * §8 minimal public shape of a pending approval as returned by
- * `hostApi.agentApproval.list()`.
- */
-export interface ApprovalGateEntry {
-  id: string;
-  category: "tool";
-  requireExplicit: boolean;
-  createdAt: number;
-  nonce?: string;
-  hmac?: string;
 }
 
 /**
