@@ -186,24 +186,29 @@ export interface RotationDecision {
  *
  * Tier 1 (hard-token): ctxUsage >= 0.85 → 무조건 rotation + 요약 생성
  * Tier 2 (semantic-llm): LLM이 [checkpoint-suggested] 마커 삽입 → rotation, 요약은 ctxUsage 판단
- * Tier 3 (soft-time): 24h 경과 OR 30개 메시지 → rotation, 요약은 ctxUsage 판단
+ * Tier 3 (soft-time): 24h 경과 OR 30개 *user 요청* → rotation, 요약은 ctxUsage 판단
  *
- * @param args.ctxUsage        0.0–1.0 컨텍스트 사용률
- * @param args.sessionAgeMs    세션 시작 이후 경과 ms
- * @param args.messageCount    현재 세션의 메시지 수
- * @param args.semanticHint    [checkpoint-suggested] 마커 발견 여부
+ * @param args.ctxUsage         0.0–1.0 컨텍스트 사용률
+ * @param args.sessionAgeMs     세션 시작 이후 경과 ms
+ * @param args.userMessageCount 현재 세션의 *user 메시지* 수.
+ *   ⚠️ 전체 history.length 가 아니라 `role === "user"` 메시지만 카운트.
+ *   tool-heavy 한 턴 (1 user → N tool_use/tool_result) 에서 history.length
+ *   가 빨리 부풀어 30 message threshold 가 도구 호출 8회만 해도 hit 했던
+ *   문제(2026-05-04 incident)를 차단하기 위해 세맨틱을 "user 가 보낸 요청"
+ *   으로 변경. 사용자 관점에서 "30 turn 째" 가 일관되게 적용됨.
+ * @param args.semanticHint     [checkpoint-suggested] 마커 발견 여부
  * @param args.continuousBackendEnabled  Safety gate: when false, always returns { shouldRotate: false }.
- * @param args.devMode         Developer mode: reduces soft-time threshold to 1h / 5 messages for easier testing.
+ * @param args.devMode          Developer mode: reduces soft-time threshold to 1h / 5 user requests for easier testing.
  */
 export function decideRotation(args: {
   ctxUsage: number;
   sessionAgeMs: number;
-  messageCount: number;
+  userMessageCount: number;
   semanticHint: boolean;
   continuousBackendEnabled?: boolean;
   devMode?: boolean;
 }): RotationDecision {
-  const { ctxUsage, sessionAgeMs, messageCount, semanticHint } = args;
+  const { ctxUsage, sessionAgeMs, userMessageCount, semanticHint } = args;
   const continuousBackendEnabled = args.continuousBackendEnabled ?? true;
   const devMode = args.devMode ?? false;
 
@@ -223,11 +228,11 @@ export function decideRotation(args: {
   }
 
   // Tier 3: soft-time
-  // devMode: 1h / 5 messages (낮은 threshold — 테스트 편의)
-  // prod: 24h / 30 messages
+  // devMode: 1h / 5 user requests (낮은 threshold — 테스트 편의)
+  // prod: 24h / 30 user requests (history.length 아님 — 위 doc 참조)
   const dayMs = devMode ? 60 * 60 * 1_000 : 24 * 60 * 60 * 1_000;
-  const msgThreshold = devMode ? 5 : 30;
-  if (sessionAgeMs >= dayMs || messageCount >= msgThreshold) {
+  const userMsgThreshold = devMode ? 5 : 30;
+  if (sessionAgeMs >= dayMs || userMessageCount >= userMsgThreshold) {
     return { shouldRotate: true, trigger: "soft-time", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
   }
 
