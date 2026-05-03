@@ -385,6 +385,46 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               continue;
             }
 
+            // §457 PR-A: legacy ChatView gets a single-line text fallback for the
+            // structured kinds. The rich CheckpointDivider/SessionResumeDivider live
+            // in StackedChatView; the legacy view only needs to surface that *some*
+            // checkpoint or resume happened so the user does not lose visibility
+            // when the stacked-chat feature flag is OFF.
+            if (entry.kind === "checkpoint") {
+              const tierLabel = entry.tier === "hard-token"
+                ? "긴급 정리"
+                : entry.tier === "semantic-llm"
+                  ? "주제 전환"
+                  : entry.tier === "soft-time"
+                    ? "이전 세션 정리"
+                    : "자동 정리";
+              rendered.push(
+                <div
+                  key={`cp-${idx}`}
+                  data-testid="checkpoint-fallback"
+                  className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
+                >
+                  📌 체크포인트 · {tierLabel} ({entry.removedMessages} messages)
+                </div>,
+              );
+              i++;
+              continue;
+            }
+
+            if (entry.kind === "session_resume") {
+              rendered.push(
+                <div
+                  key={`sr-${idx}`}
+                  data-testid="session-resume-fallback"
+                  className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
+                >
+                  ↩ 이전 대화 이어서 시작 (요약 {entry.preambleChars}자 적용)
+                </div>,
+              );
+              i++;
+              continue;
+            }
+
             if (entry.kind === "imported_trigger") {
               rendered.push(
                 <ImportedTriggerCard
