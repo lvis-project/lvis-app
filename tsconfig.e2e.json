@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext"
+  },
+  "include": [
+    "src",
+    "scripts",
+    "test/e2e/agent-hub",
+    "test/e2e/fixtures",
+    "test/e2e/ui/fixtures.ts"
+  ]
+}

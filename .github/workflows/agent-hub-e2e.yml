@@ -1,0 +1,74 @@
+name: Agent Hub E2E (Playwright)
+
+on:
+  push:
+    branches:
+      - main
+      - feat/agent-hub-v3-e2e
+    paths:
+      - 'src/plugins/**'
+      - 'test/e2e/agent-hub/**'
+      - 'test/e2e/fixtures/agent-hub-mock-server.ts'
+      - '.github/workflows/agent-hub-e2e.yml'
+  pull_request:
+    paths:
+      - 'src/plugins/**'
+      - 'test/e2e/agent-hub/**'
+      - 'test/e2e/fixtures/agent-hub-mock-server.ts'
+      - '.github/workflows/agent-hub-e2e.yml'
+  schedule:
+    # Nightly at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  agent-hub-e2e:
+    name: Agent Hub E2E (Electron / Chromium)
+    runs-on: [self-hosted, Linux, ARM64, oracle]
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      E2E: "1"
+      LVIS_E2E: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install xvfb + Electron runtime deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            libgtk-3-0 libnss3 libasound2t64 libxss1 libxshmfence1 \
+            libgbm1 libdrm2 libxcomposite1 libxrandr2 libatk1.0-0 \
+            libatk-bridge2.0-0 libcups2 libpangocairo-1.0-0 \
+            libpango-1.0-0 libcairo2
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type-check e2e files
+        run: bunx tsc --noEmit --project tsconfig.e2e.json
+
+      - name: Install Playwright (no extra browser deps needed for Electron)
+        run: bunx playwright install --with-deps=false
+
+      - name: Build app
+        run: bun run build
+
+      - name: Run Agent Hub E2E
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" bunx playwright test test/e2e/agent-hub/agent-hub-v3.spec.ts
+
+      - name: Upload Playwright report and traces
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-hub-e2e-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
