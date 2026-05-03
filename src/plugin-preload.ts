@@ -13,6 +13,10 @@
  *   - emitEvent(type, data)      → host event bus, capability-gated
  *   - onEvent(type, handler)     → host events scoped to this plugin
  *   - getEntryUrl()              → canonical entry URL from main
+ *   - config.get(key)            → read this plugin's config field
+ *   - config.set(key, value)     → write this plugin's config field
+ *   - storage.get(key)           → read JSON from per-plugin sandboxed dir
+ *   - storage.set(key, value)    → write JSON to per-plugin sandboxed dir
  *
  * Explicitly NOT exposed (vs host `window.lvisApi`):
  *   - Lifecycle / runtime / marketplace / chat / memory / settings / MCP /
@@ -103,5 +107,59 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
       throw new Error(`lvis:plugin:get-entry-url rejected: ${reply?.error ?? "unknown"}`);
     }
     return reply.entryUrl;
+  },
+
+  // ─── Config namespace (#B1) ────────────────────────────────────────────
+  // Reads/writes this plugin's config record (the same record managed by the
+  // PluginConfigTab). Cross-plugin writes are refused at the IPC boundary —
+  // pluginId is resolved from `event.sender.id`, never from the renderer.
+  // Secret-formatted fields are stripped server-side before persistence
+  // (mirrors the `lvis:plugins:config:set` host handler), so plugin UI cannot
+  // bypass the keychain by writing through this surface.
+  config: {
+    get: async <T = unknown>(key: string): Promise<T | undefined> => {
+      const reply = (await ipcRenderer.invoke("lvis:plugin:config:get", key)) as
+        | { ok: true; value: T | undefined }
+        | { ok: false; error: string };
+      if (!reply || reply.ok !== true) {
+        throw new Error(`lvis:plugin:config:get rejected: ${reply?.error ?? "unknown"}`);
+      }
+      return reply.value;
+    },
+    set: async <T = unknown>(key: string, value: T): Promise<void> => {
+      const reply = (await ipcRenderer.invoke("lvis:plugin:config:set", key, value)) as
+        | { ok: true }
+        | { ok: false; error: string };
+      if (!reply || reply.ok !== true) {
+        throw new Error(`lvis:plugin:config:set rejected: ${reply?.error ?? "unknown"}`);
+      }
+    },
+  },
+
+  // ─── Storage namespace (#B1) ────────────────────────────────────────────
+  // Persistent key/value JSON store rooted at the plugin's sandboxed data
+  // dir (createPluginStorage). Keys are restricted to `[A-Za-z0-9._-]{1,128}`;
+  // each key maps to `<pluginDataDir>/ui-storage/<key>.json`. Path traversal
+  // is rejected before the storage layer ever sees the key. Plugins should
+  // use this for UI-side state that must survive a webview reload — anything
+  // that needs cross-plugin coordination still goes through callTool/emitEvent.
+  storage: {
+    get: async <T = unknown>(key: string): Promise<T | undefined> => {
+      const reply = (await ipcRenderer.invoke("lvis:plugin:storage:get", key)) as
+        | { ok: true; value: T | undefined }
+        | { ok: false; error: string };
+      if (!reply || reply.ok !== true) {
+        throw new Error(`lvis:plugin:storage:get rejected: ${reply?.error ?? "unknown"}`);
+      }
+      return reply.value;
+    },
+    set: async <T = unknown>(key: string, value: T): Promise<void> => {
+      const reply = (await ipcRenderer.invoke("lvis:plugin:storage:set", key, value)) as
+        | { ok: true }
+        | { ok: false; error: string };
+      if (!reply || reply.ok !== true) {
+        throw new Error(`lvis:plugin:storage:set rejected: ${reply?.error ?? "unknown"}`);
+      }
+    },
   },
 });

@@ -961,6 +961,111 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   });
 
+  // ─── Plugin webview config bridge (#B1 — bridge.config namespace) ─────────
+  // Plugin UI webviews call these via `bridge.config.get/set(key)` to read/
+  // write their own per-plugin config record (the same record managed by
+  // PluginConfigTab via lvis:plugins:config:get/set). Cross-plugin access is
+  // refused by `resolvePluginFromSender` — a webview can only touch its own
+  // plugin's config. Secret fields are stripped before persistence (matches
+  // `lvis:plugins:config:set` behaviour) so plugin UI cannot bypass the
+  // keychain-backed secret store via this surface.
+  ipcMain.handle("lvis:plugin:config:get", (e, key: string) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
+      auditUnauthorized(auditLogger, "lvis:plugin:config:get", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof key !== "string" || !key.trim()) {
+      return { ok: false as const, error: "invalid-key" };
+    }
+    try {
+      const config = settingsService.getPluginConfig(binding.pluginId) ?? {};
+      return { ok: true as const, value: config[key] };
+    } catch (err) {
+      return { ok: false as const, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle("lvis:plugin:config:set", async (e, key: string, value: unknown) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
+      auditUnauthorized(auditLogger, "lvis:plugin:config:set", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (typeof key !== "string" || !key.trim()) {
+      return { ok: false as const, error: "invalid-key" };
+    }
+    try {
+      const manifest = pluginRuntime.getPluginManifest(binding.pluginId);
+      const schema = manifest?.configSchema;
+      const current = settingsService.getPluginConfig(binding.pluginId) ?? {};
+      const next = { ...current, [key]: value };
+      // Same secret-strip path used by `lvis:plugins:config:set` — keeps
+      // declared secret fields out of the plain-config record. Plugins
+      // store secrets via the existing `setSecret` IPC.
+      const stripped = stripSecretFields(schema, asPlainRecord(next));
+      const savedConfig = await settingsService.setPluginConfig(binding.pluginId, stripped);
+      pluginRuntime.setConfigOverride(binding.pluginId, savedConfig);
+      emitPluginConfigChange(binding.pluginId, key, savedConfig?.[key]);
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: (err as Error).message };
+    }
+  });
+
+  // ─── Plugin webview storage bridge (#B1 — bridge.storage namespace) ───────
+  // Plugin UI webviews call these via `bridge.storage.get/set(key)`. Storage
+  // is the per-plugin sandboxed data directory (createPluginStorage) — the
+  // same root the host plugin sees via `hostApi.storage`. Each key maps to a
+  // JSON file `<pluginDataDir>/ui-storage/<sanitized-key>.json` so the bridge
+  // surface (key/value) doesn't leak the underlying filesystem layout to the
+  // webview. Path traversal in `key` is rejected at `sanitizeStorageKey`.
+  function sanitizeStorageKey(key: unknown): string | null {
+    if (typeof key !== "string") return null;
+    const trimmed = key.trim();
+    if (!trimmed || trimmed.length > 128) return null;
+    // Allowlist: alphanumerics, `-`, `_`, `.` only. Refuses `..`, slashes, and
+    // any control char a malicious renderer could embed to escape the
+    // ui-storage subdir even before the storage layer's realpath check fires.
+    if (!/^[A-Za-z0-9._-]+$/.test(trimmed)) return null;
+    if (trimmed === "." || trimmed === "..") return null;
+    return trimmed;
+  }
+  ipcMain.handle("lvis:plugin:storage:get", async (e, key: string) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
+      auditUnauthorized(auditLogger, "lvis:plugin:storage:get", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const safeKey = sanitizeStorageKey(key);
+    if (!safeKey) return { ok: false as const, error: "invalid-key" };
+    const storage = pluginRuntime.getPluginStorage(binding.pluginId);
+    if (!storage) return { ok: false as const, error: "unknown-plugin-id" };
+    try {
+      const value = await storage.readJson<unknown>(`ui-storage/${safeKey}.json`);
+      return { ok: true as const, value: value ?? undefined };
+    } catch (err) {
+      return { ok: false as const, error: (err as Error).message };
+    }
+  });
+  ipcMain.handle("lvis:plugin:storage:set", async (e, key: string, value: unknown) => {
+    const binding = resolvePluginFromSender(e);
+    if (!binding) {
+      auditUnauthorized(auditLogger, "lvis:plugin:storage:set", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const safeKey = sanitizeStorageKey(key);
+    if (!safeKey) return { ok: false as const, error: "invalid-key" };
+    const storage = pluginRuntime.getPluginStorage(binding.pluginId);
+    if (!storage) return { ok: false as const, error: "unknown-plugin-id" };
+    try {
+      await storage.writeJson(`ui-storage/${safeKey}.json`, value);
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: (err as Error).message };
+    }
+  });
+
   ipcMain.handle("lvis:plugin:emit-event", (e, type: string, data?: unknown) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
