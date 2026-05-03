@@ -660,6 +660,15 @@ export class PluginRuntime {
     }
 
     await this.instantiateAndStartSinglePlugin(targetPlan, manifest, approvedPluginAccess);
+
+    // Throw if the plugin landed in failed state — caller (IPC install
+    // handler) catches to roll back marketplace state. boot-time `load()`
+    // doesn't take this path; it inlines its own iteration.
+    if (this.failedPluginIds.has(pluginId) || !this.plugins.has(pluginId)) {
+      const stub = this.failedPluginStubs.get(pluginId);
+      const reason = stub?.description ?? "plugin failed to load (see prior log)";
+      throw new Error(`addPlugin failed for ${pluginId}: ${reason}`);
+    }
   }
 
   /**

@@ -657,14 +657,18 @@ export class PluginMarketplaceService {
     const next = new Promise<void>((resolvePromise) => {
       release = resolvePromise;
     });
-    this.locks.set(pluginId, prev.then(() => next));
+    // `prev.then(() => next)` produces a NEW Promise object each call, so a
+    // set + identity-compare against re-evaluated `prev.then(() => next)`
+    // would never match and `this.locks` would leak one stale entry per
+    // install. Hoist to a local so the same reference is stored + compared.
+    const tail = prev.then(() => next);
+    this.locks.set(pluginId, tail);
     try {
       await prev;
       return await fn();
     } finally {
       release();
-      // Clean up the map entry if this is still the tail of the queue.
-      if (this.locks.get(pluginId) === prev.then(() => next)) {
+      if (this.locks.get(pluginId) === tail) {
         this.locks.delete(pluginId);
       }
     }
