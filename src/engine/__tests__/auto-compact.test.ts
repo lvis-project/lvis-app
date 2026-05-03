@@ -278,21 +278,21 @@ describe("decideRotation — 3-tier rotation decision tree", () => {
   // ── Tier 1: hard-token ────────────────────────────
 
   it("tier-1: ctxUsage=0.85 triggers hard-token rotation", () => {
-    const r = decideRotation({ ctxUsage: 0.85, sessionAgeMs: 0, userMessageCount: 0, semanticHint: false });
+    const r = decideRotation({ ctxUsage: 0.85, sessionAgeMs: 0, semanticHint: false });
     expect(r.shouldRotate).toBe(true);
     expect(r.trigger).toBe("hard-token");
     expect(r.shouldSkipSummary).toBe(false);
   });
 
   it("tier-1: ctxUsage=1.0 triggers hard-token rotation with shouldSkipSummary=false", () => {
-    const r = decideRotation({ ctxUsage: 1.0, sessionAgeMs: 0, userMessageCount: 0, semanticHint: false });
+    const r = decideRotation({ ctxUsage: 1.0, sessionAgeMs: 0, semanticHint: false });
     expect(r.shouldRotate).toBe(true);
     expect(r.trigger).toBe("hard-token");
     expect(r.shouldSkipSummary).toBe(false);
   });
 
   it("tier-1: ctxUsage=0.84 does NOT trigger hard-token", () => {
-    const r = decideRotation({ ctxUsage: 0.84, sessionAgeMs: 0, userMessageCount: 0, semanticHint: false });
+    const r = decideRotation({ ctxUsage: 0.84, sessionAgeMs: 0, semanticHint: false });
     // no tier-2 or tier-3 hints → no rotation
     expect(r.shouldRotate).toBe(false);
     expect(r.trigger).toBeUndefined();
@@ -301,27 +301,27 @@ describe("decideRotation — 3-tier rotation decision tree", () => {
   // ── Tier 2: semantic-llm ──────────────────────────
 
   it("tier-2: semanticHint=true triggers semantic-llm rotation", () => {
-    const r = decideRotation({ ctxUsage: 0.5, sessionAgeMs: 0, userMessageCount: 5, semanticHint: true });
+    const r = decideRotation({ ctxUsage: 0.5, sessionAgeMs: 0, semanticHint: true });
     expect(r.shouldRotate).toBe(true);
     expect(r.trigger).toBe("semantic-llm");
   });
 
   it("tier-2: semanticHint at low ctx (0.05) skips summary", () => {
-    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: 0, userMessageCount: 5, semanticHint: true });
+    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: 0, semanticHint: true });
     expect(r.shouldRotate).toBe(true);
     expect(r.trigger).toBe("semantic-llm");
     expect(r.shouldSkipSummary).toBe(true); // ctxUsage 0.05 < 0.10
   });
 
   it("tier-2: semanticHint at 0.10 ctx generates summary", () => {
-    const r = decideRotation({ ctxUsage: 0.10, sessionAgeMs: 0, userMessageCount: 5, semanticHint: true });
+    const r = decideRotation({ ctxUsage: 0.10, sessionAgeMs: 0, semanticHint: true });
     expect(r.shouldRotate).toBe(true);
     expect(r.trigger).toBe("semantic-llm");
     expect(r.shouldSkipSummary).toBe(false); // ctxUsage 0.10 is NOT < 0.10
   });
 
   it("tier-2: hard-token takes precedence over semantic hint", () => {
-    const r = decideRotation({ ctxUsage: 0.90, sessionAgeMs: 0, userMessageCount: 5, semanticHint: true });
+    const r = decideRotation({ ctxUsage: 0.90, sessionAgeMs: 0, semanticHint: true });
     expect(r.trigger).toBe("hard-token"); // tier-1 wins
     expect(r.shouldSkipSummary).toBe(false);
   });
@@ -329,52 +329,50 @@ describe("decideRotation — 3-tier rotation decision tree", () => {
   // ── Tier 3: soft-time ─────────────────────────────
 
   it("tier-3: sessionAgeMs >= 24h triggers soft-time rotation", () => {
-    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: DAY_MS, userMessageCount: 5, semanticHint: false });
+    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: DAY_MS, semanticHint: false });
     expect(r.shouldRotate).toBe(true);
     expect(r.trigger).toBe("soft-time");
   });
 
   it("tier-3: sessionAgeMs < 24h does NOT trigger by time alone", () => {
-    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: DAY_MS - 1, userMessageCount: 5, semanticHint: false });
+    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: DAY_MS - 1, semanticHint: false });
     expect(r.shouldRotate).toBe(false);
   });
 
-  it("tier-3: userMessageCount >= 30 triggers soft-time rotation (user requests, not history.length)", () => {
-    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: 0, userMessageCount: 30, semanticHint: false });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("soft-time");
-  });
-
-  it("tier-3: userMessageCount=29 does NOT trigger by count alone", () => {
-    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: 0, userMessageCount: 29, semanticHint: false });
-    expect(r.shouldRotate).toBe(false);
-  });
-
-  it("tier-3: low ctx (0.09) with 30 msgs skips summary", () => {
-    const r = decideRotation({ ctxUsage: 0.09, sessionAgeMs: 0, userMessageCount: 30, semanticHint: false });
+  // 2026-05-04 incident 후속 정정: tier-3 의 message-count 분기 *제거*. weak
+  // signal proxy 가 짧은 도구-heavy 세션에서 false-positive 트리거하던 root
+  // cause. tier 3 는 24h day-boundary 안전망만 유지 — context 압박은 tier 1
+  // (토큰), topic shift 는 tier 2 (semantic) 에서 처리.
+  it("tier-3: low ctx (0.09) with 24h skips summary", () => {
+    const r = decideRotation({ ctxUsage: 0.09, sessionAgeMs: DAY_MS, semanticHint: false });
     expect(r.shouldRotate).toBe(true);
     expect(r.trigger).toBe("soft-time");
     expect(r.shouldSkipSummary).toBe(true);
   });
 
   it("tier-3: high ctx (0.50) with 24h generates summary", () => {
-    const r = decideRotation({ ctxUsage: 0.50, sessionAgeMs: DAY_MS, userMessageCount: 1, semanticHint: false });
+    const r = decideRotation({ ctxUsage: 0.50, sessionAgeMs: DAY_MS, semanticHint: false });
     expect(r.shouldRotate).toBe(true);
     expect(r.trigger).toBe("soft-time");
     expect(r.shouldSkipSummary).toBe(false);
   });
 
+  it("tier-3: 23h59m does NOT trigger (boundary)", () => {
+    const r = decideRotation({ ctxUsage: 0.05, sessionAgeMs: DAY_MS - 1, semanticHint: false });
+    expect(r.shouldRotate).toBe(false);
+  });
+
   // ── No rotation ───────────────────────────────────
 
   it("no rotation when none of the conditions met", () => {
-    const r = decideRotation({ ctxUsage: 0.50, sessionAgeMs: DAY_MS - 1, userMessageCount: 29, semanticHint: false });
+    const r = decideRotation({ ctxUsage: 0.50, sessionAgeMs: DAY_MS - 1, semanticHint: false });
     expect(r.shouldRotate).toBe(false);
     expect(r.trigger).toBeUndefined();
     expect(r.shouldSkipSummary).toBe(false);
   });
 
   it("shouldSkipSummary is always false when shouldRotate is false", () => {
-    const r = decideRotation({ ctxUsage: 0.0, sessionAgeMs: 0, userMessageCount: 0, semanticHint: false });
+    const r = decideRotation({ ctxUsage: 0.0, sessionAgeMs: 0, semanticHint: false });
     expect(r.shouldRotate).toBe(false);
     expect(r.shouldSkipSummary).toBe(false);
   });
@@ -386,7 +384,6 @@ describe("decideRotation — 3-tier rotation decision tree", () => {
     const r = decideRotation({
       ctxUsage: 0.90,
       sessionAgeMs: DAY_MS * 2,
-      userMessageCount: 50,
       semanticHint: true,
       continuousBackendEnabled: false,
     });
@@ -398,7 +395,6 @@ describe("decideRotation — 3-tier rotation decision tree", () => {
     const r = decideRotation({
       ctxUsage: 0.85,
       sessionAgeMs: 0,
-      userMessageCount: 0,
       semanticHint: false,
       continuousBackendEnabled: true,
     });
@@ -408,37 +404,11 @@ describe("decideRotation — 3-tier rotation decision tree", () => {
 
   // ── Dev mode thresholds ───────────────────────────
 
-  it("devMode: soft-time triggers at 5 messages (vs 30 in prod)", () => {
-    const r = decideRotation({
-      ctxUsage: 0.05,
-      sessionAgeMs: 0,
-      userMessageCount: 5,
-      semanticHint: false,
-      continuousBackendEnabled: true,
-      devMode: true,
-    });
-    expect(r.shouldRotate).toBe(true);
-    expect(r.trigger).toBe("soft-time");
-  });
-
-  it("devMode: 4 messages does NOT trigger soft-time", () => {
-    const r = decideRotation({
-      ctxUsage: 0.05,
-      sessionAgeMs: 0,
-      userMessageCount: 4,
-      semanticHint: false,
-      continuousBackendEnabled: true,
-      devMode: true,
-    });
-    expect(r.shouldRotate).toBe(false);
-  });
-
   it("devMode: soft-time triggers at 1h (vs 24h in prod)", () => {
     const ONE_HOUR_MS = 60 * 60 * 1_000;
     const r = decideRotation({
       ctxUsage: 0.05,
       sessionAgeMs: ONE_HOUR_MS,
-      userMessageCount: 0,
       semanticHint: false,
       continuousBackendEnabled: true,
       devMode: true,

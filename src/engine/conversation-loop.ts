@@ -164,6 +164,10 @@ export class ConversationLoop {
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
   /** PR-4: timestamp when the current session started (ms since epoch) — used by decideRotation */
   private sessionStartedAt: number = Date.now();
+  // 2026-05-04 incident 후속: rotation 직후 한 turn 동안 다음 rotation 보류
+  // (OpenCode 패턴 — 회전 결과 자체가 다시 회전 트리거되는 race 방지). next
+  // runRotationCheck 가 호출되면 이 flag 를 보고 early-return + clear.
+  private justRotated: boolean = false;
   /** PR-4: index into history marking where the last checkpoint rotation occurred */
   private lastCheckpointMessageIndex: number = 0;
   /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
@@ -683,8 +687,12 @@ export class ConversationLoop {
       this.deps.idleScheduler?.signalConversation();
     }
 
-    // PR-4: 3-tier rotation orchestration
-    await this.runRotationCheck(result.text, callbacks);
+    // PR-4: 3-tier rotation orchestration. 2026-05-04 incident 정정: turn
+    // 이 *완전 종료* 됐을 때만 rotation. stopReason==="interrupted" /
+    // empty text / 마지막이 tool_result 인 (LLM 이 도구 후 답을 못 한)
+    // 케이스는 incomplete turn 으로 보고 회전 보류. notification (line 695-)
+    // 와 동일한 turn-completeness 판정.
+    await this.runRotationCheck(result.text, result.stopReason, callbacks);
 
     callbacks?.onTurnComplete?.(result.text);
 
@@ -1172,8 +1180,37 @@ export class ConversationLoop {
    * 매 턴 종료 후 호출. 3-tier rotation 결정 트리를 평가하고
    * 필요 시 summary 생성 → checkpoint 기록 → child session으로 전환.
    */
-  private async runRotationCheck(lastAssistantText: string, callbacks?: TurnCallbacks): Promise<void> {
+  private async runRotationCheck(
+    lastAssistantText: string,
+    stopReason: "end_turn" | "tool_use" | "interrupted" | undefined,
+    callbacks?: TurnCallbacks,
+  ): Promise<void> {
     if (!this.provider) return;
+
+    // 2026-05-04 incident: turn-completeness guards. 4 케이스에서 rotation 보류:
+    //
+    //   (A1) stopReason === "interrupted": 사용자가 abort 한 turn — 이어서
+    //        하려는 작업이 아직 남아있을 가능성이 큼.
+    //   (A2) lastAssistantText.trim() === "": LLM 이 도구 호출 후 빈 답변으로
+    //        end_turn — incident 의 직접 원인. assistant 가 사용자에게 final
+    //        answer 를 못 준 상태.
+    //   (A3) 마지막 history msg.role === "tool_result": tool 후 follow-up
+    //        assistant text 가 없음 — A2 와 같은 incomplete state 의 다른
+    //        측면 (history 관점). 둘 다 잡으면 좀 더 robust.
+    //   (B)  this.justRotated === true: 직전 turn 에서 회전 → 이번 turn 은
+    //        skip (OpenCode 패턴 — 회전 직후 즉시 또 회전 트리거되는 race 방지).
+    //
+    // 어느 하나라도 hit 하면 사용자가 본 *답변 미완료 + 체크포인트 표시*
+    // incident 가 차단됨. 첫 두 가드만으로도 직접 원인 막히지만, 4 가드
+    // 묶으면 비슷한 latent 케이스 (사용자 abort, race, etc.) 까지 함께 잡힘.
+    if (this.justRotated) {
+      this.justRotated = false; // one-shot — 다음 turn 부터는 정상 검사
+      return;
+    }
+    if (stopReason === "interrupted") return;
+    if (lastAssistantText.trim().length === 0) return;
+    const messages = this.history.getMessages();
+    if (messages.at(-1)?.role === "tool_result") return;
 
     const llmSettings = this.deps.settingsService.get("llm");
     const contextWindow = getModelContextWindow(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model);
@@ -1181,24 +1218,12 @@ export class ConversationLoop {
       ? Math.min(1.0, this.cumulativeUsage.inputTokens / contextWindow)
       : 0;
 
-    const messages = this.history.getMessages();
-    // 2026-05-04 incident: history.length 으로 카운트 시 tool-heavy 턴 (1 user
-    // 메시지 → user / assistant text / tool_use / tool_result 등 ≥4 entries)
-    // 에서 30 message threshold 를 도구 호출 8회만 돼도 넘김 → 답변 도중
-    // checkpoint divider 가 떠서 사용자가 대화가 끊긴 것으로 인식. soft-time
-    // 의 의미를 "사용자가 보낸 요청 N개 후" 로 정정해 user 관점의 turn count
-    // 와 정렬.
-    const userMessageCount = messages.reduce(
-      (sum, m) => (m.role === "user" ? sum + 1 : sum),
-      0,
-    );
     const features = this.deps.settingsService.get("features");
     const continuousBackendEnabled = features?.experimentalContinuousBackend ?? false;
     const devMode = process.env.LVIS_DEV === "1";
     const decision = decideRotation({
       ctxUsage,
       sessionAgeMs: Date.now() - this.sessionStartedAt,
-      userMessageCount,
       semanticHint: lastAssistantText.includes("[checkpoint-suggested]"),
       continuousBackendEnabled,
       devMode,
@@ -1316,6 +1341,10 @@ export class ConversationLoop {
     // Reset all session-scoped helpers so the new session starts clean.
     this.tracer = createTracer(childSessionId);
     this.sessionPluginExpansions = 0;
+    // 2026-05-04 incident 후속: 회전 직후 한 turn 동안 다음 회전 보류 (one-shot).
+    // 막 만들어진 child session 의 첫 user turn 이 끝나도 즉시 또 회전 트리거
+    // 되는 race 방지. runRotationCheck 진입부에서 read + clear 됨.
+    this.justRotated = true;
     // rolling summary preamble 주입 — 다음 턴부터 LLM context에 포함됨
     this.deps.systemPromptBuilder.setSummaryPreamble?.(summary);
   }

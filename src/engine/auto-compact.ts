@@ -184,31 +184,32 @@ export interface RotationDecision {
 /**
  * 3-tier rotation 결정 트리.
  *
- * Tier 1 (hard-token): ctxUsage >= 0.85 → 무조건 rotation + 요약 생성
+ * Tier 1 (hard-token):  ctxUsage >= 0.85 → 무조건 rotation + 요약 생성
  * Tier 2 (semantic-llm): LLM이 [checkpoint-suggested] 마커 삽입 → rotation, 요약은 ctxUsage 판단
- * Tier 3 (soft-time): 24h 경과 OR 30개 *user 요청* → rotation, 요약은 ctxUsage 판단
+ * Tier 3 (soft-time):   24h 경과 → rotation, 요약은 ctxUsage 판단 (day-boundary 안전망)
  *
  * @param args.ctxUsage         0.0–1.0 컨텍스트 사용률
  * @param args.sessionAgeMs     세션 시작 이후 경과 ms
- * @param args.userMessageCount 현재 세션의 *user 메시지* 수.
- *   ⚠️ 전체 history.length 가 아니라 `role === "user"` 메시지만 카운트.
- *   tool-heavy 한 턴 (1 user → N tool_use/tool_result) 에서 history.length
- *   가 빨리 부풀어 30 message threshold 가 도구 호출 8회만 해도 hit 했던
- *   문제(2026-05-04 incident)를 차단하기 위해 세맨틱을 "user 가 보낸 요청"
- *   으로 변경. 사용자 관점에서 "30 turn 째" 가 일관되게 적용됨.
  * @param args.semanticHint     [checkpoint-suggested] 마커 발견 여부
  * @param args.continuousBackendEnabled  Safety gate: when false, always returns { shouldRotate: false }.
- * @param args.devMode          Developer mode: reduces soft-time threshold to 1h / 5 user requests for easier testing.
+ * @param args.devMode          Developer mode: reduces soft-time threshold to 1h for easier testing.
+ *
+ * 2026-05-04 incident 후속 정정: tier 3 의 message-count 분기 (`userMessageCount
+ * >= 30`) 를 *제거*. message-count 는 토큰/시간/의미 어느 진짜 신호도 측정하지
+ * 않는 weak-signal proxy 로 판명 — ctx 1% 인 짧은 도구-heavy 세션에서도 회전
+ * 트리거되어 사용자 답변 도중 CheckpointDivider 가 표시되는 incident 의 root
+ * cause 였음. context 압박은 tier 1 (토큰), topic shift 는 tier 2 (semantic),
+ * day-boundary 안전망만 tier 3 (24h time-based) 으로 정합화. OpenCode 의 순수
+ * 토큰 기반 패턴과 정렬됨.
  */
 export function decideRotation(args: {
   ctxUsage: number;
   sessionAgeMs: number;
-  userMessageCount: number;
   semanticHint: boolean;
   continuousBackendEnabled?: boolean;
   devMode?: boolean;
 }): RotationDecision {
-  const { ctxUsage, sessionAgeMs, userMessageCount, semanticHint } = args;
+  const { ctxUsage, sessionAgeMs, semanticHint } = args;
   const continuousBackendEnabled = args.continuousBackendEnabled ?? true;
   const devMode = args.devMode ?? false;
 
@@ -227,12 +228,9 @@ export function decideRotation(args: {
     return { shouldRotate: true, trigger: "semantic-llm", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
   }
 
-  // Tier 3: soft-time
-  // devMode: 1h / 5 user requests (낮은 threshold — 테스트 편의)
-  // prod: 24h / 30 user requests (history.length 아님 — 위 doc 참조)
+  // Tier 3: soft-time — day boundary 안전망. devMode 는 1h 로 단축.
   const dayMs = devMode ? 60 * 60 * 1_000 : 24 * 60 * 60 * 1_000;
-  const userMsgThreshold = devMode ? 5 : 30;
-  if (sessionAgeMs >= dayMs || userMessageCount >= userMsgThreshold) {
+  if (sessionAgeMs >= dayMs) {
     return { shouldRotate: true, trigger: "soft-time", shouldSkipSummary: _shouldSkipSummary(ctxUsage) };
   }
 
