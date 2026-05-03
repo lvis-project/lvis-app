@@ -176,7 +176,7 @@ export interface PluginDeploymentMetadata {
 }
 ```
 
-**Backward compatibility**: `deployment` 필드가 없는 기존 매니페스트는 `"user"`로 해석. Phase 1에서 이미 설치된 3개 번들 플러그인(local-indexer, meeting, email)은 Phase 1.5 전까지 user로 잡히다가, IT가 정책을 push하면서 자동으로 managed로 전환된다.
+**Backward compatibility**: `deployment` 필드가 없는 기존 매니페스트는 `"user"`로 해석. Phase 1에서 이미 설치된 3개 번들 플러그인(local-indexer, meeting, ms-graph)은 Phase 1.5 전까지 user로 잡히다가, IT가 정책을 push하면서 자동으로 managed로 전환된다.
 
 ---
 
@@ -804,7 +804,7 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 - `lvis-app/src/plugin-runtime/plugin-deployment-guard.ts` (경량 version)
 - `lvis-app/src/plugin-runtime/runtime.ts` (guard 주입)
 - `lvis-app/src/renderer.tsx` (UI 잠금 표시)
-- `lvis-plugin-{local-indexer,meeting,email}/plugin.json` (`deployment: "managed"` 추가)
+- `lvis-plugin-{local-indexer,meeting,ms-graph}/plugin.json` (`deployment: "managed"` 추가)
 
 ### Phase 2 — IT Admin API 연동
 
@@ -860,7 +860,7 @@ ipcMain.handle("lvis:plugins:disable", async (_e, pluginId: string) => {
 
 ## 14. 마이그레이션 계획
 
-현재 Phase 1 종료 시점에서 번들된 3개 플러그인(`lvis-plugin-local-indexer`, `-meeting`, `-email`)은 `deployment` 필드가 없으므로 자동으로 **user**로 분류된다. IT 부서가 정책을 push하기 전까지는 사용자가 이들을 제거할 수 있다.
+현재 Phase 1 종료 시점에서 번들된 3개 플러그인(`lvis-plugin-local-indexer`, `-meeting`, `-ms-graph`)은 `deployment` 필드가 없으므로 자동으로 **user**로 분류된다. IT 부서가 정책을 push하기 전까지는 사용자가 이들을 제거할 수 있다.
 
 **마이그레이션 단계**:
 

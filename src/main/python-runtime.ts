@@ -387,7 +387,7 @@ export class PythonRuntimeBootstrapper {
     extraEnv: Record<string, string> = {}
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      // Whitelist-only env — same rationale as localIndexerPlugin.ts.
+      // Whitelist-only env — only the uv subprocess needs PATH/HOME/locale.
       // uv only needs PATH + HOME + locale + tmp dirs. Callers supply
       // UV_PYTHON_INSTALL_DIR via extraEnv.
       const allowedEnvKeys = new Set<string>([
