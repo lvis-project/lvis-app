@@ -59,7 +59,9 @@ const PLUGIN_TOKEN_NAMES = new Set([
 ]);
 // Allowlist-based value guard: only HSL colors, hex colors, and dimension values pass.
 // Blocklist patterns (url(), expression(), Unicode-escaped equivalents) would all fail this check.
-const _SAFE_TOKEN_VALUE = /^(hsl\(\s*-?\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%\s*(?:,\s*[\d.]+)?\s*\)|#[0-9a-fA-F]{3,8}|\d+(?:\.\d+)?(?:rem|em|px|%))$/;
+// Hex: only valid CSS lengths — 3 (#RGB), 4 (#RGBA), 6 (#RRGGBB), 8 (#RRGGBBAA).
+// 5- and 7-char hex are not valid CSS and would be silently ignored by browsers.
+const _SAFE_TOKEN_VALUE = /^(hsl\(\s*-?\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%\s*\)|#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})|\d+(?:\.\d+)?(?:rem|em|px|%))$/;
 
 async function resolveInstalledManifestPath(pluginId: string): Promise<string | undefined> {
   const pluginPaths = resolvePluginPaths();

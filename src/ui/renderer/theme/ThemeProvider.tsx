@@ -9,7 +9,7 @@ import {
   resolveTheme,
 } from "./resolve-theme.js";
 import { resolvePluginTokens } from "./plugin-token-map.js";
-export { resolvePluginTokens } from "./plugin-token-map.js";
+export { resolvePluginTokens };
 import type {
   ChatThemePreference,
   CodeThemePreference,
