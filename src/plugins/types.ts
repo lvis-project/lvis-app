@@ -15,6 +15,38 @@ export type InstallPolicy = "admin" | "user";
  */
 export type PluginRegistryEntryInstallSource = "admin" | "user" | "local-dev";
 
+export type AuthWindowCookie = {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  expirationDate?: number;
+};
+
+export type OpenAuthWindowBaseOptions = {
+  url: string;
+  completionUrlPatterns: string[];
+  cookieHosts: string[];
+  timeoutMs?: number;
+  windowTitle?: string;
+  persistPartition?: string;
+};
+
+export type OpenAuthWindowWithFinalUrlOptions = OpenAuthWindowBaseOptions & {
+  returnFinalUrl: true;
+};
+
+export type OpenAuthWindowCookieOptions = OpenAuthWindowBaseOptions & {
+  returnFinalUrl?: false | undefined;
+};
+
+export type OpenAuthWindowFinalUrlResult = {
+  cookies: AuthWindowCookie[];
+  finalUrl: string;
+};
+
 export interface DependencySpec {
   pluginId: string;
   versionRange?: string;
@@ -674,34 +706,8 @@ export interface PluginHostApi {
    * §6.1 "3+ 플러그인 규칙" 예외 #2 (보안·감사 통제 필요)로 정당화 — 외부 포털 쿠키
    * 수집은 민감 자산 취급이므로 단일 플러그인 사용처여도 HostApi에서 제공한다.
    */
-  openAuthWindow(options: {
-    url: string;
-    completionUrlPatterns: string[];
-    cookieHosts: string[];
-    timeoutMs?: number;
-    windowTitle?: string;
-    persistPartition?: string;
-    returnFinalUrl?: boolean;
-  }): Promise<Array<{
-    name: string;
-    value: string;
-    domain?: string;
-    path?: string;
-    secure?: boolean;
-    httpOnly?: boolean;
-    expirationDate?: number;
-  }> | {
-    cookies: Array<{
-      name: string;
-      value: string;
-      domain?: string;
-      path?: string;
-      secure?: boolean;
-      httpOnly?: boolean;
-      expirationDate?: number;
-    }>;
-    finalUrl: string;
-  }>;
+  openAuthWindow(options: OpenAuthWindowWithFinalUrlOptions): Promise<OpenAuthWindowFinalUrlResult>;
+  openAuthWindow(options: OpenAuthWindowCookieOptions): Promise<AuthWindowCookie[]>;
 
   /**
    * Proactive Brain — start a host ConversationLoop turn from a plugin-observed
