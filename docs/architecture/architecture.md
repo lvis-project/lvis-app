@@ -1697,6 +1697,55 @@ Components ─► Semantic tokens (--background, --primary, --destructive)
 상세 토큰 표·마이그레이션 가이드는 [`docs/development/theme-system.md`](../development/theme-system.md)
 참조.
 
+### 6.7.1 플러그인 webview 테마 전파 (PR #489)
+
+호스트 렌더러의 테마 변경(theme · chatTheme · codeTheme 어느 축이든)을 모든 plugin
+webview 로 fan-out 한다. 플러그인은 호스트와 동일한 시각 컨텍스트 안에서 자체 UI
+를 그릴 수 있고, 폴링/관찰 코드를 별도로 짜지 않아도 된다.
+
+```
+ThemeProvider.tsx (renderer)
+  ├─ resolved · chatTheme · resolvedCodeTheme 변경 useEffect
+  └─ resolvePluginTokens(resolved, chatTheme)         ← computed --lvis-* 값
+      └─ api.notifyPluginTheme({theme, chatTheme, codeTheme, tokens})
+          └─ IPC: lvis:host:plugin-theme-notify       (renderer → main)
+              ├─ validateSender(e)                     ← 호스트 main frame 만 통과
+              ├─ validateThemePayload(payload)         ← key/value 이중 검증
+              └─ for (wcId of pluginWebviewRegistry):
+                  └─ webContents.fromId(wcId).send("lvis:plugin:event",
+                       "host.theme.changed", safe)     ← main → plugin webview fan-out
+                      └─ plugin SDK useTheme()
+                          └─ applyThemeTokens(payload.tokens)
+                              └─ document.documentElement
+                                  · setAttribute("data-theme", …)
+                                  · style.setProperty("--lvis-*", …)
+```
+
+**코드 경로**:
+- 트리거: `src/ui/renderer/theme/ThemeProvider.tsx` (테마축 useEffect → notify)
+- 호스트 IPC bridge: `src/preload.ts` (`notifyPluginTheme` 노출)
+- main 핸들러: `src/ipc/domains/plugins.ts` (`lvis:host:plugin-theme-notify` —
+  validateSender, payload 검증, registry fan-out)
+- plugin webview registry: `pluginWebviewRegistry` (`lvis:plugin:register-webview`
+  로 채워지는 webContentsId ↔ pluginId 맵)
+- plugin SDK 소비: `useTheme()` → `applyThemeTokens()` (host.theme.changed
+  이벤트 listen → CSS variable + data-theme 동기 적용)
+
+**보안 게이트**:
+- `validateSender` — 호스트 메인 webContents 만 broadcast 트리거 가능. plugin
+  webview 가 위장 호출 시 `auditUnauthorized` 로 감사 로그 남기고 reject
+- payload key/value 검증 — `--lvis-*` prefix + HSL/색상 값 화이트리스트.
+  임의 CSS 주입 차단 (자세한 검증은 `validateThemePayload`)
+- registry 외 webContents 로 누출 없음 — `pluginWebviewRegistry` 등록된
+  webContentsId 만 순회
+
+**알려진 한계 — register-vs-broadcast race**: 호스트는 테마축이 *변할 때*에만
+broadcast 한다. plugin webview 가 ThemeProvider 의 초기 push 보다 늦게
+`lvis:plugin:register-webview` 를 보내면 그 push 를 놓치므로, 사용자가 다음으로
+테마를 바꿀 때까지 plugin 은 SDK 기본값으로 렌더된다. 향후 register 핸들러가
+응답 직전 현재 테마 스냅샷을 한 번 push 하거나 plugin SDK 가 mount 시 호스트에
+현재 테마를 요청하는 경로를 추가하면 race 를 닫을 수 있음.
+
 ---
 
 ## 6.8 Floating Question Panel (PR #334)
