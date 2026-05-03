@@ -479,34 +479,6 @@ export class ApprovalGate {
     return this.pending.size;
   }
 
-  /**
-   * Returns a snapshot of all currently pending ApprovalRequests (without
-   * the internal resolver/timer). Used by hostApi.agentApproval.list() so
-   * plugin clients can enumerate what the user has not yet decided on.
-   *
-   * The returned array is a live snapshot — callers must not mutate it.
-   * Items arrive in insertion order (Map iteration order).
-   */
-  listPending(): ApprovalRequest[] {
-    // Re-construct the public ApprovalRequest shape from the stored data.
-    // PendingEntry does not carry the full request — only the nonce/hmac
-    // used for §D2 verification. We expose what we have: the requestId +
-    // the nonce+hmac the gate minted. Callers that need full toolName/args
-    // should compare against the IPC-dispatched request the renderer already
-    // holds. For now we surface the minimal useful shape.
-    return [...this.pending.entries()].map(([id, entry]) => ({
-      id,
-      category: "tool" as const,
-      toolName: "",
-      args: undefined,
-      reason: "",
-      requireExplicit: this.currentPolicy.requireExplicitApproval,
-      createdAt: Date.now(),
-      nonce: entry.nonce,
-      hmac: entry.expectedHmac,
-    }));
-  }
-
   /** 현재 적용 중인 policy 조회 (테스트용) */
   get policy(): PolicyFile {
     return this.currentPolicy;
