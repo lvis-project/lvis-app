@@ -230,12 +230,13 @@ export function PluginUiHostView({
       // Therefore the initial `src` must already be the real shell URL so
       // preload runs once for the right origin. The race between the host's
       // did-attach → registerPluginWebview handshake and the shell's
-      // immediate `getEntryUrl` call is absorbed by the host's
-      // `pendingEntryUrlResolvers` wait queue + the shell's 6s retry
-      // budget (issue #439 / PR #441). The did-attach listener still
-      // populates `shellSrcBinding` for parity with the old contract;
-      // `shellSrc` may already equal `shellUrl` here, in which case it's a
-      // no-op.
+      // immediate `getEntryUrl` call is absorbed by main's
+      // `pendingEntryUrlResolvers` wait queue (5s deadline; restored
+      // 2026-05-04 after PR #447 removed it on the assumption that
+      // register-before-attach was airtight — which broke during the
+      // plugin update lifecycle). The did-attach listener still populates
+      // `shellSrcBinding` for parity with the old contract; `shellSrc` may
+      // already equal `shellUrl` here, in which case it's a no-op.
       content = (
         <webview
           key={`${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}`}
