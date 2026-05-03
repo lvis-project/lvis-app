@@ -155,6 +155,12 @@ export async function bootstrap(
   // Routine delivery sites pass `notificationService` explicitly per-call so
   // there's no module-level singleton to reset between tests/processes.
 
+  // B1 + §F7: ApprovalGate with audit. Constructed BEFORE initPluginRuntime so
+  // the per-plugin HostApi factory can wire `agentApproval` namespace to the
+  // live gate — without this ordering, plugins receive a hostApi missing the
+  // namespace and §8 main-process approval routing silently no-ops.
+  const approvalGate = await createApprovalGate(mainWindow, bootAuditLogger, notificationService);
+
   // §4.2 Step 3 + 5: PluginRuntime + per-plugin HostApi factory.
   const {
     pluginRuntime,
@@ -173,6 +179,7 @@ export async function bootstrap(
     bootAuditLogger,
     mainWindow,
     openAuthWindowService,
+    approvalGate,
   });
 
   // Workflow system tools (S1+S2) — services constructed up-front so the
@@ -203,10 +210,11 @@ export async function bootstrap(
     notificationService,
   );
   let subAgentRunnerRef: { fn: SubAgentRunner | undefined } = { fn: undefined };
-  // Late-bound ApprovalGate ref — populated after createApprovalGate() below.
-  // skill_load needs the same gate the executor uses so user-authored skills
-  // pop the approval modal on first load (and only on first load).
-  let approvalGateRef: { fn: import("./permissions/approval-gate.js").ApprovalGate | undefined } = { fn: undefined };
+  // ApprovalGate ref — gate is constructed up-front (before initPluginRuntime)
+  // so this is bound immediately. skill_load reuses the same gate the
+  // executor uses so user-authored skills pop the approval modal on first
+  // load (and only on first load).
+  let approvalGateRef: { fn: import("./permissions/approval-gate.js").ApprovalGate | undefined } = { fn: approvalGate };
   const workflowDeps: WorkflowToolDeps = {
     remindersStore,
     sessionTodoStore,
@@ -352,9 +360,9 @@ export async function bootstrap(
     auditLogger: bootAuditLogger,
   });
 
-  // B1 + §F7: ApprovalGate with audit.
-  const approvalGate = await createApprovalGate(mainWindow, bootAuditLogger, notificationService);
-  approvalGateRef.fn = approvalGate;
+  // ApprovalGate already constructed above (before initPluginRuntime) so the
+  // plugin HostApi factory could wire `agentApproval` to the live gate.
+  // approvalGateRef was bound at construction time.
 
   // Tier A4 (W3): HookRunner.
   const hookRunner = createHookRunner();
