@@ -42,7 +42,7 @@ Perform on each platform artifact before uploading:
 
 - [ ] App launches to the splash screen and transitions to the main window
 - [ ] Settings → API 키 입력 → 대화 1 턴 성공
-- [ ] Local Indexer, Meeting, Email, Calendar plugins list in 설정 → 플러그인
+- [ ] Local Indexer, Meeting, LVIS Microsoft 365 plugins list in 설정 → 플러그인
 - [ ] 자동 업데이트 설정 토글 동작 (default ON) — 설정 > 일반
 - [ ] 크래시 리포트 설정 토글 OFF → 덤프가 `~/.lvis/crash-dumps/` 에만 저장
 - [ ] 크래시 리포트 설정 ON + URL 입력 → 테스트 크래시 시 업로드 시도 확인
