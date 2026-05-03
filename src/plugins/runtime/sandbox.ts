@@ -141,6 +141,10 @@ export function createNoopHostApi(
       reason: "loop_unavailable",
       source: typeof spec?.source === "string" ? spec.source : "",
     }),
+    agentApproval: {
+      list: async () => [],
+      respond: async () => {},
+    },
   };
 }
 
