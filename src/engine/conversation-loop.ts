@@ -1182,13 +1182,23 @@ export class ConversationLoop {
       : 0;
 
     const messages = this.history.getMessages();
+    // 2026-05-04 incident: history.length 으로 카운트 시 tool-heavy 턴 (1 user
+    // 메시지 → user / assistant text / tool_use / tool_result 등 ≥4 entries)
+    // 에서 30 message threshold 를 도구 호출 8회만 돼도 넘김 → 답변 도중
+    // checkpoint divider 가 떠서 사용자가 대화가 끊긴 것으로 인식. soft-time
+    // 의 의미를 "사용자가 보낸 요청 N개 후" 로 정정해 user 관점의 turn count
+    // 와 정렬.
+    const userMessageCount = messages.reduce(
+      (sum, m) => (m.role === "user" ? sum + 1 : sum),
+      0,
+    );
     const features = this.deps.settingsService.get("features");
     const continuousBackendEnabled = features?.experimentalContinuousBackend ?? false;
     const devMode = process.env.LVIS_DEV === "1";
     const decision = decideRotation({
       ctxUsage,
       sessionAgeMs: Date.now() - this.sessionStartedAt,
-      messageCount: messages.length,
+      userMessageCount,
       semanticHint: lastAssistantText.includes("[checkpoint-suggested]"),
       continuousBackendEnabled,
       devMode,
