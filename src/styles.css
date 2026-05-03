@@ -206,11 +206,13 @@
     --primary:              var(--p-blue-500);
     --primary-foreground:   var(--p-slate-50);
 
-    /* User message bubble — defaults to mirror `--primary` so existing
-       chat themes don't need a separate override. The light+purple
-       chat-theme overlay later in this file gives it its own lilac fill
-       (different from the SEND button's vivid `--primary`). */
-    --message-user-bg:      var(--p-blue-500);
+    /* User message bubble — mirrors `--primary` via `var()` so chat-theme
+       overlays (orange/purple/blue) which only repaint `--primary`
+       automatically repaint the bubble too. Themes that want a bubble
+       distinct from `--primary` (lg's lilac vs vivid SEND) override this
+       explicitly in their own block. Resolving via `var(--primary)`
+       captures the value at use, so chat-theme cascade lands. */
+    --message-user-bg:      var(--primary);
     --message-user-fg:      var(--p-slate-50);
 
     /* Composer (input-bar) surface — every shell needs a fallback so
@@ -257,7 +259,7 @@
     --primary:              var(--p-blue-600);
     --primary-foreground:   var(--p-slate-50);
 
-    --message-user-bg:      var(--p-blue-600);
+    --message-user-bg:      var(--primary);
     --message-user-fg:      var(--p-slate-50);
 
     --input-bar-bg:         var(--p-slate-0);
@@ -300,7 +302,7 @@
     --primary:              60 100% 50%;
     --primary-foreground:   0 0% 0%;
 
-    --message-user-bg:      60 100% 50%;
+    --message-user-bg:      var(--primary);
     --message-user-fg:      0 0% 0%;
 
     --input-bar-bg:         0 0% 0%;
