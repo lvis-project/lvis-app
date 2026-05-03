@@ -68,6 +68,19 @@ export function PluginConfigTab() {
     bannerTimerRef.current = setTimeout(() => setBanner(null), 4000);
   }, []);
 
+  const refreshPluginViews = useCallback(async () => {
+    if (!apiForAuthHook) {
+      setPluginViews([]);
+      return;
+    }
+    try {
+      setPluginViews(await apiForAuthHook.listPluginUiExtensions());
+    } catch (e) {
+      setPluginViews([]);
+      showBanner("error", (e as Error).message ?? "플러그인 UI 목록 로드 실패");
+    }
+  }, [apiForAuthHook, showBanner]);
+
   useEffect(() => {
     return () => {
       if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
@@ -100,19 +113,8 @@ export function PluginConfigTab() {
 
   useEffect(() => {
     if (!apiForAuthHook) return;
-    let cancelled = false;
-    void apiForAuthHook.listPluginUiExtensions()
-      .then((views) => {
-        if (!cancelled) setPluginViews(views);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setPluginViews([]);
-          showBanner("error", (e as Error).message ?? "플러그인 UI 목록 로드 실패");
-        }
-      });
-    return () => { cancelled = true; };
-  }, [apiForAuthHook, showBanner]);
+    void refreshPluginViews();
+  }, [apiForAuthHook, refreshPluginViews]);
 
   // Sync with main-process lifecycle events. Both install (via `lvis://`
   // deep link) and uninstall (via this tab or any other surface) emit
@@ -146,21 +148,27 @@ export function PluginConfigTab() {
             delete next[slug];
             return next;
           });
-          if (success) void refreshPlugins();
+          if (success) {
+            void refreshPlugins();
+            void refreshPluginViews();
+          }
         }),
       );
     }
     if (typeof api.onPluginUninstallResult === "function") {
       unsubs.push(
         api.onPluginUninstallResult(({ success }) => {
-          if (success) void refreshPlugins();
+          if (success) {
+            void refreshPlugins();
+            void refreshPluginViews();
+          }
         }),
       );
     }
     return () => {
       for (const u of unsubs) u();
     };
-  }, [refreshPlugins]);
+  }, [refreshPlugins, refreshPluginViews]);
 
   // Load config for selected plugin
   const [savedConfig, setSavedConfig] = useState<Record<string, unknown>>({});
