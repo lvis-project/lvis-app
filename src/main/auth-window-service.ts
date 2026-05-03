@@ -44,6 +44,12 @@ export interface OpenAuthWindowOptions {
   /** 창 타이틀. 기본 "Login". */
   windowTitle?: string;
   /**
+   * Opt-in result shape for OAuth-style callbacks where the plugin needs the
+   * final callback URL (for example a fragment token) in addition to cookies.
+   * Default preserves the legacy AuthCookie[] return contract.
+   */
+  returnFinalUrl?: boolean;
+  /**
    * Electron session partition. `persist:` prefix 가 붙으면 디스크 영속,
    * 없으면 in-memory.
    *
@@ -55,6 +61,15 @@ export interface OpenAuthWindowOptions {
    * 네임스페이스 밖의 값을 거부한다 — plugin-runtime 참고.)
    */
   persistPartition?: string;
+}
+
+export interface OpenAuthWindowResult {
+  cookies: AuthCookie[];
+  /**
+   * The URL that matched completionUrlPatterns. May contain a fragment token,
+   * so host code must never include this value in logs or error messages.
+   */
+  finalUrl: string;
 }
 
 /** 호스트 문자열 정규화 — 선행 점/공백/대소문자 차이 흡수. 빈 문자열은 drop. */
@@ -104,6 +119,33 @@ export function isCompletionUrl(url: string, patterns: string[]): boolean {
   return patterns.some((p) => target.includes(p));
 }
 
+/** URL for host-visible diagnostics only; strips query/hash to avoid token leaks. */
+export function sanitizeUrlForLog(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    const q = url.indexOf("?");
+    const h = url.indexOf("#");
+    const cut =
+      q === -1 ? h : h === -1 ? q : Math.min(q, h);
+    return cut === -1 ? url : url.slice(0, cut);
+  }
+}
+
+/**
+ * Result-shape selector for `openAuthWindow`. Pulled out as a pure function so the
+ * `returnFinalUrl` contract can be exercised without spinning up a BrowserWindow —
+ * Copilot flagged that the branch was otherwise untested.
+ */
+export function buildAuthResult(
+  cookies: AuthCookie[],
+  finalUrl: string,
+  returnFinalUrl: boolean,
+): AuthCookie[] | OpenAuthWindowResult {
+  return returnFinalUrl ? { cookies, finalUrl } : cookies;
+}
+
 function extractCompletionTarget(url: string): string {
   try {
     const parsed = new URL(url);
@@ -122,16 +164,29 @@ function extractCompletionTarget(url: string): string {
  * 지정 URL을 띄우고 완료 패턴에 도달할 때까지 대기한 뒤 쿠키 수집.
  * 창은 항상 close(). 사용자가 창을 미리 닫으면 reject.
  */
+export function openAuthWindow(
+  parent: BrowserWindow,
+  options: OpenAuthWindowOptions & { returnFinalUrl: true },
+): Promise<OpenAuthWindowResult>;
+export function openAuthWindow(
+  parent: BrowserWindow,
+  options: OpenAuthWindowOptions & { returnFinalUrl?: false | undefined },
+): Promise<AuthCookie[]>;
+export function openAuthWindow(
+  parent: BrowserWindow,
+  options: OpenAuthWindowOptions,
+): Promise<AuthCookie[] | OpenAuthWindowResult>;
 export async function openAuthWindow(
   parent: BrowserWindow,
   options: OpenAuthWindowOptions,
-): Promise<AuthCookie[]> {
+): Promise<AuthCookie[] | OpenAuthWindowResult> {
   const {
     url,
     completionUrlPatterns,
     cookieHosts,
     windowTitle = "Login",
     persistPartition,
+    returnFinalUrl = false,
   } = options;
 
   // timeoutMs 검증 — NaN / Infinity / 음수 / 과도하게 긴 값 모두 거부.
@@ -151,7 +206,7 @@ export async function openAuthWindow(
   }
 
   if (!url || !/^https?:\/\//i.test(url)) {
-    throw new Error(`openAuthWindow: invalid url "${url}"`);
+    throw new Error("openAuthWindow: invalid url");
   }
 
   // 문자열 배열의 빈/공백 엔트리를 drop. 빈 문자열 한 개라도 남으면
@@ -228,7 +283,7 @@ export async function openAuthWindow(
     if (!isHttpUrl(targetUrl)) event.preventDefault();
   });
 
-  return new Promise<AuthCookie[]>((resolve, reject) => {
+  return new Promise<AuthCookie[] | OpenAuthWindowResult>((resolve, reject) => {
     let settled = false;
     const finish = (fn: () => void) => {
       if (settled) return;
@@ -252,7 +307,7 @@ export async function openAuthWindow(
         const filtered = filterCookiesByHost(allCookies, normalizedCookieHosts);
         finish(() => {
           clearTimeout(timer);
-          resolve(filtered);
+          resolve(buildAuthResult(filtered, currentUrl, returnFinalUrl));
           if (!authWindow.isDestroyed()) authWindow.close();
         });
       } catch (err) {
@@ -281,7 +336,7 @@ export async function openAuthWindow(
         clearTimeout(timer);
         reject(
           new Error(
-            `openAuthWindow: navigation failed (${errorCode} ${errorDesc}) url=${validatedUrl}`,
+            `openAuthWindow: navigation failed (${errorCode} ${errorDesc}) url=${sanitizeUrlForLog(validatedUrl)}`,
           ),
         );
         if (!authWindow.isDestroyed()) authWindow.close();
@@ -333,7 +388,7 @@ export async function openAuthWindow(
     authWindow.loadURL(url).catch((err) => {
       finish(() => {
         clearTimeout(timer);
-        reject(err as Error);
+        reject(new Error(`openAuthWindow: load failed for ${sanitizeUrlForLog(url)} (${(err as Error).name || "Error"})`));
         if (!authWindow.isDestroyed()) authWindow.close();
       });
     });
