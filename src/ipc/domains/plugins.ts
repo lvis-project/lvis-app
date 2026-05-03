@@ -103,6 +103,45 @@ interface PluginWebviewBinding {
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
+/**
+ * Wait queue for `lvis:plugin:get-entry-url` invocations that arrive before
+ * `lvis:plugin:register-webview` lands a binding for the same webContentsId.
+ *
+ * Why this exists: `<webview>` in `plugin-ui-host.tsx` renders with an initial
+ * `src={shellSrc || shellUrl}` because Electron only runs `<webview preload>`
+ * at the *first* attach — switching from about:blank to the real shell URL
+ * does NOT re-execute preload, so the lvisPlugin contextBridge would be lost.
+ * That fallback means the shell can call `getEntryUrl()` *before* the host
+ * renderer's `did-attach` → `registerPluginWebview` round-trip completes.
+ * Queue holds those resolvers until the matching register lands (or the 5s
+ * deadline expires, in which case the original "not-registered" sentinel is
+ * returned so a truly absent registration is still surfaced).
+ *
+ * Restored in 2026-05-04 after PR #447 removed it on the assumption that
+ * register-before-attach was airtight; the assumption broke in the plugin
+ * update lifecycle (sidebar webview re-attach with a fresh wcId), where the
+ * shell's first paint raced ahead of the host's register IPC.
+ */
+const PENDING_ENTRY_URL_DEADLINE_MS = 5_000;
+type PendingEntryUrlResolver = (
+  reply: { ok: true; entryUrl: string } | { ok: false; error: "not-registered" },
+) => void;
+const pendingEntryUrlResolvers = new Map<number, Set<PendingEntryUrlResolver>>();
+
+function flushPendingEntryUrl(webContentsId: number, binding: PluginWebviewBinding): void {
+  const resolvers = pendingEntryUrlResolvers.get(webContentsId);
+  if (!resolvers) return;
+  pendingEntryUrlResolvers.delete(webContentsId);
+  for (const resolve of resolvers) resolve({ ok: true, entryUrl: binding.entryUrl });
+}
+
+function clearPendingEntryUrl(webContentsId: number): void {
+  const resolvers = pendingEntryUrlResolvers.get(webContentsId);
+  if (!resolvers) return;
+  pendingEntryUrlResolvers.delete(webContentsId);
+  for (const resolve of resolvers) resolve({ ok: false, error: "not-registered" });
+}
+
 const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
 const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
 const ALLOWED_CODE_THEMES = new Set(["light", "dark"]);
@@ -178,6 +217,7 @@ export function validateThemePayload(payload: unknown):
 
 export function unregisterPluginWebview(webContentsId: number): void {
   pluginWebviewRegistry.delete(webContentsId);
+  clearPendingEntryUrl(webContentsId);
 }
 
 export function registerPluginsHandlers(deps: IpcDeps): void {
@@ -820,6 +860,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     const binding = { pluginId, entryUrl };
     pluginWebviewRegistry.set(webContentsId, binding);
+    flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
     return { ok: true };
   });
@@ -839,23 +880,55 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
       return UNAUTHORIZED_FRAME;
     }
-    // register-before-attach (#447): shell src is set only after
-    // registerPluginWebview completes, so this path should be unreachable in
-    // normal operation. Log as a warning so regressions surface in audit trail.
-    try {
-      auditLogger.log({
-        timestamp: new Date().toISOString(),
-        sessionId: "ipc-guard",
-        type: "warn",
-        input: safeStringify({
-          channel: "lvis:plugin:get-entry-url",
-          reason: "not-registered",
-          frameUrl: redactFsPath(e?.senderFrame?.url ?? ""),
-          senderId: e.sender?.id,
-        }),
-      });
-    } catch { /* audit must never break the sentinel return */ }
-    return { ok: false as const, error: "not-registered" };
+    const senderId = e.sender?.id;
+    if (typeof senderId !== "number") {
+      return { ok: false as const, error: "not-registered" };
+    }
+    // Race-tolerant path: the shell can call get-entry-url before the host
+    // renderer's `did-attach → registerPluginWebview` round-trip completes
+    // (e.g. plugin update lifecycle where the sidebar webview re-attaches
+    // with a fresh wcId). Queue this resolver and let the matching register
+    // call flush it. If no register lands within the deadline, fall back to
+    // the original "not-registered" sentinel so a genuinely absent
+    // registration is still surfaced.
+    return new Promise<{ ok: true; entryUrl: string } | { ok: false; error: "not-registered" }>(
+      (resolve) => {
+        let settled = false;
+        const wrapped: PendingEntryUrlResolver = (reply) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(reply);
+        };
+        const set = pendingEntryUrlResolvers.get(senderId) ?? new Set();
+        set.add(wrapped);
+        pendingEntryUrlResolvers.set(senderId, set);
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          const current = pendingEntryUrlResolvers.get(senderId);
+          if (current) {
+            current.delete(wrapped);
+            if (current.size === 0) pendingEntryUrlResolvers.delete(senderId);
+          }
+          try {
+            auditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "ipc-guard",
+              type: "warn",
+              input: safeStringify({
+                channel: "lvis:plugin:get-entry-url",
+                reason: "not-registered",
+                frameUrl: redactFsPath(e?.senderFrame?.url ?? ""),
+                senderId,
+                deadlineMs: PENDING_ENTRY_URL_DEADLINE_MS,
+              }),
+            });
+          } catch { /* audit must never break the sentinel return */ }
+          resolve({ ok: false, error: "not-registered" });
+        }, PENDING_ENTRY_URL_DEADLINE_MS);
+      },
+    );
   });
 
   ipcMain.handle("lvis:plugin:call-tool", async (e, method: string, payload?: unknown) => {
