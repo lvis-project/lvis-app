@@ -2717,6 +2717,29 @@ Step 1-8:  기존 boot sequence
 - **Phase 2**: Managed Policy Sync + Installer + IT Admin API 실연결 + SSO 토큰 경로
 - **Phase 3**: ECDSA 서명 검증 + LG CA 체인 + 오프라인 cache TTL + 사내 감사 endpoint 연동
 
+### 9.7 Plugin UI bridge namespaces (added in v0.x)
+
+Plugins mounted via `plugin-ui-host.tsx` receive a `MountContext.bridge`
+extended with `config` and `storage` namespaces:
+
+- `bridge.config.get<T>(key): Promise<T | undefined>` — read plugin's
+  configSchema-declared values from `~/.lvis/plugins/<id>/settings.json`
+- `bridge.config.set<T>(key, value): Promise<void>` — write (server-side
+  strips `format: "secret"` fields before persisting)
+- `bridge.storage.get<T>(key): Promise<T | undefined>` — read JSON blob
+  from `<pluginDataDir>/ui-storage/<key>.json`
+- `bridge.storage.set<T>(key, value): Promise<void>` — write JSON blob
+
+IPC channels: `lvis:plugin:config:get/set`, `lvis:plugin:storage:get/set`.
+PluginId resolved server-side via `event.sender.id` — cross-plugin
+spoofing structurally impossible. Storage keys sanitized to `^[A-Za-z0-9._-]+$`
+to block path traversal. See `src/ipc/domains/plugins.ts:868-1067`.
+
+Reference: agent-hub plugin v0.2.0 SettingsPanel uses these namespaces;
+prior PR #60 attempt to misuse `bridge.callTool("hostApi.config.get")`
+(dotted name violating tool naming convention) was reverted — `asPanelBridge`
+guard in agent-hub-panel-v3.tsx throws if host omits the namespaces.
+
 ---
 
 ## 10. Agent Hub — 사원 레플리카 메시지 보드 및 업무 보드
