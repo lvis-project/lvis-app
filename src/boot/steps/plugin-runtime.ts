@@ -4,7 +4,7 @@
  * Extracted from boot.ts to keep orchestration thin. This module:
  *   • constructs the PluginDeploymentGuard and plugin runtime integrity gate
  *   • builds the per-plugin HostApi factory (registerKeywords / emitEvent /
- *     onEvent / addTask / getSecret / msGraph* / callLlm /
+ *     onEvent / getSecret / callLlm /
  *     logEvent / onShutdown)
  *   • creates the PluginRuntime, starts plugins, wires manifest startupTools
  *     and the dev hot-reload watcher
@@ -36,7 +36,6 @@ import {
   subscribePluginConfigChange,
 } from "../../plugins/config-change-bus.js";
 import { PROACTIVE_SOURCE_PATTERN } from "../../engine/proactive-source.js";
-import { TaskSourceRegistry, deriveCategoryId } from "../../plugins/task-source-registry.js";
 import type {
   ApprovalChoice,
   AuthWindowCookie,
@@ -51,7 +50,6 @@ import type { KeywordEngine } from "../../core/keyword-engine.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { MemoryManager } from "../../memory/memory-manager.js";
-import type { TaskService } from "../../taskService.js";
 import { emitEvent, onEvent } from "../types.js";
 import {
   buildPluginConfigOverrides,
@@ -538,7 +536,6 @@ export interface InitPluginRuntimeInput {
   memoryManager: MemoryManager;
   keywordEngine: KeywordEngine;
   toolRegistry: ToolRegistry;
-  taskService: TaskService;
   pythonPath: string | undefined;
   bootAuditLogger: AuditLogger;
   mainWindow: BrowserWindow;
@@ -560,7 +557,6 @@ export interface InitPluginRuntimeInput {
 export interface InitPluginRuntimeOutput {
   pluginRuntime: PluginRuntime;
   deploymentGuard: PluginDeploymentGuard;
-  taskSourceRegistry: TaskSourceRegistry;
   lateBinding: LateBindingRefs;
   pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }>;
   /** Phase 0 SoT — shared with MarketplaceService + post-boot update detector. */
@@ -581,7 +577,6 @@ export async function initPluginRuntime(
     memoryManager,
     keywordEngine,
     toolRegistry,
-    taskService,
     pythonPath,
     bootAuditLogger,
     mainWindow,
@@ -618,9 +613,6 @@ export async function initPluginRuntime(
       app.quit();
     })();
   });
-
-  // TaskSource 자기 등록 레지스트리
-  const taskSourceRegistry = new TaskSourceRegistry();
 
   // 범용 configOverrides + pythonExecutable 선언형 주입
   const configOverrides = buildPluginConfigOverrides(settingsService);
@@ -835,19 +827,6 @@ export async function initPluginRuntime(
         const unsubscribe = () => { unsubInstalled(); unsubUninstalled(); };
         pluginRuntime.registerDisposer(pluginId, unsubscribe);
         return unsubscribe;
-      },
-      addTask: (task) => {
-        const categoryId = deriveCategoryId(pluginId, task.source);
-        taskSourceRegistry.register({ id: categoryId, origin: "plugin", pluginId });
-        taskService.add({
-          title: task.title,
-          description: task.description,
-          source: categoryId,
-          sourceRef: task.sourceRef,
-          priority: task.priority ?? "medium",
-          status: "pending",
-        });
-        log.info(`plugin:${pluginId} created task: "${task.title.slice(0, 50)}"`);
       },
       getSecret: (key) => {
         return settingsService.getSecret(key);
@@ -1150,7 +1129,6 @@ export async function initPluginRuntime(
   return {
     pluginRuntime,
     deploymentGuard,
-    taskSourceRegistry,
     lateBinding,
     pluginShutdownHandlers,
     pluginPaths,

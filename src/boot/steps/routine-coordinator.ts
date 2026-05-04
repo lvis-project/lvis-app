@@ -19,7 +19,6 @@
  */
 import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../../plugins/runtime.js";
-import type { TaskService } from "../../taskService.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { RoutineEngine, RoutineResult } from "../../core/routine-engine.js";
 import type { PowerMonitorLike } from "../../main/idle-scheduler.js";
@@ -37,7 +36,6 @@ const log = createLogger("lvis");
 
 export interface WireRoutineCoordinatorInput {
   routineEngine: RoutineEngine;
-  taskService: TaskService;
   pluginRuntime: PluginRuntime;
   settingsService: SettingsService;
   /** Electron powerMonitor (or test fake). Optional — Linux/test envs may pass undefined. */
