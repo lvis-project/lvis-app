@@ -84,8 +84,6 @@ export function SettingsDialog({ open, onOpenChange, api, onSaved }: { open: boo
               setAutoCompact={s.setAutoCompact}
               streamSmoothing={s.streamSmoothing}
               setStreamSmoothing={s.setStreamSmoothing}
-              experimentalStackedChat={s.experimentalStackedChat}
-              setExperimentalStackedChat={s.setExperimentalStackedChat}
               experimentalContinuousBackend={s.experimentalContinuousBackend}
               setExperimentalContinuousBackend={s.setExperimentalContinuousBackend}
             />

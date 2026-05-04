@@ -160,13 +160,6 @@ export function App() {
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const { llmVendor, llmModel, enableThinkingChat, refresh: refreshLlmSettings, toggleThinking } = useSettings(api);
 
-  // Feature flags — loaded once at mount and refreshed after each settings save.
-  const [experimentalStackedChat, setExperimentalStackedChat] = useState(false);
-  useEffect(() => {
-    void api.getSettings().then((s) => {
-      setExperimentalStackedChat(s.features?.experimentalStackedChat ?? false);
-    }).catch(() => {});
-  }, [api]);
   const { usedTokens, contextBudget, contextOverflowPct } =
     useContextBudget({ entries, llmVendor, llmModel });
 
@@ -634,18 +627,17 @@ export function App() {
             onOpenMarketplace={onOpenMarketplace}
             marketplaceUrlReady={marketplaceUrlReady}
             activePluginView={activePluginView ?? null}
-            useStackedChatView={experimentalStackedChat}
           />
         </main>
         </div>
         <StatusBar persistent={statusPersistent} visibleToast={statusVisibleToast} pendingCount={statusPendingCount} onToastClick={handleStatusToastClick} />
       </div>
 
-      {/* ask_user_question cards now render inline inside ChatView /
-          StackedChatView (immediately after the active turn's entries),
+      {/* ask_user_question cards now render inline inside ChatView
+          (immediately after the active turn's entries),
           so the previous App-level FloatingQuestionPanel mount is gone.
           See <AskUserQuestionCard> + ChatView ask-question slot. */}
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); void api.getSettings().then((s) => setExperimentalStackedChat(s.features?.experimentalStackedChat ?? false)).catch(() => {}); }} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} api={api} onSaved={() => { void checkApiKey(); void refreshLlmSettings(); }} />
       <ApprovalDialog queue={approvalQueue} onDecide={handleApprovalDecide} onDecideAll={handleApprovalDecideAll} />
       <ApprovalQueueStatus queue={approvalQueue} />
       {/* Conditional mount: avoids useMemorySearch IPC calls while dialog is closed.

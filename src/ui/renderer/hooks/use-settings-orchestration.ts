@@ -45,8 +45,6 @@ export interface SettingsOrchestrationState {
   piiRedactEnabled: boolean;
   setPiiRedactEnabled: (v: boolean) => void;
   // Experimental feature flags
-  experimentalStackedChat: boolean;
-  setExperimentalStackedChat: (v: boolean) => void;
   experimentalContinuousBackend: boolean;
   setExperimentalContinuousBackend: (v: boolean) => void;
   // Marketplace
@@ -90,7 +88,6 @@ export function useSettingsOrchestration(
   const [hasWebKey, setHasWebKey] = useState(false);
   const [enableWakeupRoutine, setEnableWakeupRoutine] = useState(false);
   const [piiRedactEnabled, setPiiRedactEnabled] = useState(false);
-  const [experimentalStackedChat, setExperimentalStackedChat] = useState(false);
   const [experimentalContinuousBackend, setExperimentalContinuousBackend] = useState(false);
   const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
   const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
@@ -122,7 +119,6 @@ export function useSettingsOrchestration(
       setHasWebKey(webApiKeySet);
       setEnableWakeupRoutine(s.routine?.enableWakeupRoutine ?? false);
       setPiiRedactEnabled(s.privacy?.piiRedactEnabled ?? false);
-      setExperimentalStackedChat(s.features?.experimentalStackedChat ?? false);
       setExperimentalContinuousBackend(s.features?.experimentalContinuousBackend ?? false);
       setMarketplaceBaseUrl(s.marketplace?.realCloudBaseUrl ?? "");
       setMarketplaceAllowPrivateNetwork(s.marketplace?.realCloudAllowPrivateNetwork ?? false);
@@ -211,7 +207,7 @@ export function useSettingsOrchestration(
             realCloudBaseUrl: marketplaceBaseUrl.trim() || undefined,
             realCloudAllowPrivateNetwork: marketplaceAllowPrivateNetwork,
           },
-          features: { experimentalStackedChat, experimentalContinuousBackend },
+          features: { experimentalContinuousBackend },
         } as any);
       }
       if (tab !== "permissions") { onSaved(); onOpenChange(false); }
@@ -238,7 +234,6 @@ export function useSettingsOrchestration(
     hasWebKey, setHasWebKey,
     enableWakeupRoutine, setEnableWakeupRoutine,
     piiRedactEnabled, setPiiRedactEnabled,
-    experimentalStackedChat, setExperimentalStackedChat,
     experimentalContinuousBackend, setExperimentalContinuousBackend,
     marketplaceBaseUrl, setMarketplaceBaseUrl,
     marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,
