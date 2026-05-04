@@ -87,8 +87,6 @@ export interface AuditSettings {
  * migration — missing keys are treated as false at load time.
  */
 export interface FeatureFlags {
-  /** PR-5 Phase 2: Kakao-style continuous chat history (stacked view). Default false. */
-  experimentalStackedChat?: boolean;
   /**
    * Phase 1 continuous-backend behaviors (checkpoint detection, title chaining,
    * rolling summary preamble in system prompt, session rotation).
@@ -338,7 +336,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   plugins: {},
   pluginConfigs: {},
   features: {
-    experimentalStackedChat: false,
     experimentalContinuousBackend: false,
   },
 };
@@ -693,9 +690,6 @@ function normalizeFeatureFlags(input: unknown): FeatureFlags {
   }
   const obj = input as Record<string, unknown>;
   const result: FeatureFlags = {};
-  if (typeof obj.experimentalStackedChat === "boolean") {
-    result.experimentalStackedChat = obj.experimentalStackedChat;
-  }
   if (typeof obj.experimentalContinuousBackend === "boolean") {
     result.experimentalContinuousBackend = obj.experimentalContinuousBackend;
   }
