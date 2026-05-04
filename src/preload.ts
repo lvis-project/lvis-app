@@ -196,14 +196,6 @@ const api = {
     getPerfStats: async () => ipcRenderer.invoke("lvis:plugins:perf-stats"),
   },
 
-  // ─── Tasks ───────────────────────────────────────
-  addTask: async (task: unknown) => ipcRenderer.invoke("lvis:tasks:add", task),
-  queryTasks: async (filter?: unknown) => ipcRenderer.invoke("lvis:tasks:query", filter),
-  updateTask: async (id: string, patch: unknown) => ipcRenderer.invoke("lvis:tasks:update", id, patch),
-  deleteTask: async (id: string) => ipcRenderer.invoke("lvis:tasks:delete", id),
-  getTodayTasks: async () => ipcRenderer.invoke("lvis:tasks:today"),
-  getOverdueTasks: async () => ipcRenderer.invoke("lvis:tasks:overdue"),
-
   listRoutines: async () => ipcRenderer.invoke("lvis:routines:list"),
   updateRoutine: async (
     routineId: string,

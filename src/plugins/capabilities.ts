@@ -167,12 +167,9 @@ export const ENFORCED_CAPABILITIES: ReadonlyMap<string, CapabilityPolicy> = new 
  * namespace. Plugins without the capability have their emissions dropped
  * (log.warn + no fan-out).
  *
- * `task` namespace is intentionally absent — `task.*` events are emitted
- * only by the host's `TaskDeadlinePoller` (`src/main/task-deadline-poller.ts`)
- * via the boot event bus, NOT by any plugin via `hostApi.emitEvent()`.
- * If/when tasks-plugin-split resumes (memory `feedback-tasks-plugin-split-paused`)
- * and a plugin starts emitting `task.*`, add a `tasks-source` capability
- * here so spoofing is gated.
+ * `task` namespace is absent — host-side TaskDeadlinePoller and TaskService
+ * were removed in Phase 4 (2026-05-05). task ownership is now fully in agent-hub.
+ * If a plugin ever emits `task.*`, add a `tasks-source` capability here.
  */
 export const EVENT_NAMESPACE_CAPABILITY: ReadonlyMap<string, string> = new Map([
   ["email", "mail-source"],

@@ -16,7 +16,6 @@ describe("Sidebar", () => {
       <Sidebar activeView="home" setActiveView={vi.fn()} starredCount={0} />,
     );
     expect(getByText("홈")).toBeTruthy();
-    expect(getByText("태스크")).toBeTruthy();
     expect(getByText("즐겨찾기")).toBeTruthy();
     expect(getByText("메모리")).toBeTruthy();
   });

@@ -1,8 +1,8 @@
 /**
  * SessionTodoPanel — collapsible chat-side checklist for the
- * `todo_session_write` LLM tool. Visually distinct from user TaskView
+ * `todo_session_write` LLM tool. Visually distinct from persistent task views
  * (dashed border, amber accent) so the user can tell at a glance this is
- * the assistant's running plan, not their persistent task list.
+ * the assistant's running plan.
  *
  * Expanded view: every item with status pill + content. The currently
  * in-progress item pulses so it's the obvious focal point.

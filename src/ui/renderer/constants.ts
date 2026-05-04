@@ -1,17 +1,11 @@
 // Phase 2: React-free constants extracted from src/renderer.tsx.
 
-import type { ExecMode, Task } from "./types.js";
+import type { ExecMode } from "./types.js";
 import {
   LLM_VENDOR_DEFAULTS,
   LLM_VENDORS,
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
-
-export const PRIORITY_CLASS: Record<Task["priority"], string> = {
-  high: "text-red-400",
-  medium: "text-amber-400",
-  low: "text-slate-400",
-};
 
 export const SOURCE_LABEL: Record<string, string> = {
   email: "메일",
