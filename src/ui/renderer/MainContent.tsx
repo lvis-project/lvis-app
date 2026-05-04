@@ -10,7 +10,6 @@ import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
 import { StarredView } from "./components/StarredView.js";
-import { TaskView } from "./components/TaskView.js";
 import { RemindersList } from "./components/RemindersList.js";
 
 type Api = ReturnType<typeof getApi>;
@@ -123,14 +122,6 @@ export function MainContent(props: MainContentProps): ReactNode {
     return (
       <MainPaneShell>
         <MemorySearchPanel api={api} />
-      </MainPaneShell>
-    );
-  }
-
-  if (activeView === "tasks") {
-    return (
-      <MainPaneShell>
-        <TaskView api={api} />
       </MainPaneShell>
     );
   }
