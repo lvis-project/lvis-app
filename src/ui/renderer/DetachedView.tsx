@@ -145,6 +145,22 @@ function DetachedContent({ viewKey }: ContentProps) {
   );
 }
 
+export function getDetachedShellClassName(viewKey: string): string {
+  if (viewKey.startsWith("plugin:")) {
+    return "flex h-screen flex-col overflow-hidden text-foreground";
+  }
+  return "flex h-screen flex-col overflow-hidden bg-background text-foreground";
+}
+
+export function getDetachedMainClassName(viewKey: string): string {
+  // Plugin webviews own their detached-view canvas. Host padding/background leaks
+  // the LVIS shell theme around translucent plugin panels, so keep them full-bleed.
+  if (viewKey.startsWith("plugin:")) {
+    return "flex min-h-0 flex-1 flex-col overflow-hidden";
+  }
+  return "flex min-h-0 flex-1 flex-col overflow-hidden p-4";
+}
+
 // ─── DetachedView ─────────────────────────────────────────────────────────────
 
 export interface DetachedViewProps {
@@ -152,6 +168,8 @@ export interface DetachedViewProps {
 }
 
 export function DetachedView({ viewKey: initialViewKey }: DetachedViewProps) {
+  const api = useMemo(() => getApi(), []);
+
   // Single-instance shell: WindowManager may send lvis:detached:navigate to
   // replace the displayed content without closing and reopening the window.
   const [viewKey, setViewKey] = useState(initialViewKey);
@@ -164,11 +182,11 @@ export function DetachedView({ viewKey: initialViewKey }: DetachedViewProps) {
   }, []);
 
   return (
-    <ThemeProvider>
+    <ThemeProvider api={api}>
       <TooltipProvider>
-        <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+        <div className={getDetachedShellClassName(viewKey)}>
           <CustomTitleBar />
-          <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+          <main className={getDetachedMainClassName(viewKey)}>
             <ErrorBoundary>
               <DetachedContent viewKey={viewKey} />
             </ErrorBoundary>
