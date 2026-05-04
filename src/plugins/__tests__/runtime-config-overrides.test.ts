@@ -138,4 +138,125 @@ describe("PluginRuntime config overrides", () => {
     expect(events).toEqual(["disable:cleanup-plugin", "register:cleanup-plugin"]);
     await expect(runtime.call("cleanup_echo")).resolves.toBe("ok");
   });
+
+  it("backfills configSchema defaults when neither manifest.config nor overrides set the key", async () => {
+    const pluginDir = join(installedDir, "schema-default-plugin");
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return {
+    handlers: {
+      "schema_default_echo": async () => ctx.config.hubServerUrl ?? "MISSING",
+    },
+  };
+}
+`,
+      "utf-8",
+    );
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "schema-default-plugin",
+        name: "Schema Default Plugin",
+        version: "1.0.0",
+        description: "Verifies host backfills configSchema.default.",
+        publisher: "Test fixture",
+        entry: "entry.mjs",
+        tools: ["schema_default_echo"],
+        configSchema: {
+          properties: {
+            hubServerUrl: {
+              type: "string",
+              default: "https://example.test",
+            },
+          },
+        },
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "schema-default-plugin", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    // No override for schema-default-plugin — handler must see the
+    // schema-declared default, not undefined. Reproduces the agent-hub
+    // 404 regression where `${cfg.hubServerUrl}${path}` produced
+    // `undefined/api/v1/me` because configSchema defaults weren't
+    // applied at sandbox-context build time.
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      configOverrides: {},
+    });
+    await runtime.load();
+    await expect(runtime.call("schema_default_echo")).resolves.toBe(
+      "https://example.test",
+    );
+  });
+
+  it("plugin-specific override wins over configSchema default", async () => {
+    const pluginDir = join(installedDir, "override-wins-plugin");
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(ctx) {
+  return {
+    handlers: {
+      "override_wins_echo": async () => ctx.config.hubServerUrl,
+    },
+  };
+}
+`,
+      "utf-8",
+    );
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: "override-wins-plugin",
+        name: "Override Wins Plugin",
+        version: "1.0.0",
+        description: "Verifies override > configSchema default.",
+        publisher: "Test fixture",
+        entry: "entry.mjs",
+        tools: ["override_wins_echo"],
+        configSchema: {
+          properties: {
+            hubServerUrl: {
+              type: "string",
+              default: "https://default.test",
+            },
+          },
+        },
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: "override-wins-plugin", manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      configOverrides: {
+        "override-wins-plugin": { hubServerUrl: "https://override.test" },
+      },
+    });
+    await runtime.load();
+    await expect(runtime.call("override_wins_echo")).resolves.toBe(
+      "https://override.test",
+    );
+  });
 });
