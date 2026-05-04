@@ -227,6 +227,14 @@ export class ApprovalGate {
    */
   private readonly notificationService?: NotificationService;
   /**
+   * Optional callback invoked after each gate timeout (requestId, timeoutMs).
+   * Used by `plugin-runtime.ts` to call
+   * `approvalIssuerRegistry.purgeStalerThan(timeoutMs)` so stale issuer
+   * registry entries from timed-out requests are cleaned up without the
+   * registry needing to know about the gate's timeout policy.
+   */
+  private readonly onTimeout?: (requestId: string, timeoutMs: number) => void;
+  /**
    * §D2: Per-instance HMAC secret. 32 random bytes generated at construction
    * time. Never leaves the main process — used only to sign/verify the nonce
    * that rides along with approval requests. A fresh key each boot naturally
@@ -240,11 +248,13 @@ export class ApprovalGate {
     timeoutMs = 5 * 60 * 1000,
     auditLogger?: AuditLogger,
     notificationService?: NotificationService,
+    onTimeout?: (requestId: string, timeoutMs: number) => void,
   ) {
     this.webContents = webContents;
     this.timeoutMs = timeoutMs;
     this.auditLogger = auditLogger;
     this.notificationService = notificationService;
+    this.onTimeout = onTimeout;
     this.currentPolicy = initialPolicy ?? {
       version: 1,
       requireExplicitApproval: true,
@@ -375,6 +385,9 @@ export class ApprovalGate {
           type: "approval",
           output: `[approval:timeout] ${fullReq.id} toolName=${fullReq.toolName} → deny-once`,
         });
+        // Notify the issuer registry so it can purge stale entries that
+        // accumulated from timed-out requests whose respond() was never called.
+        this.onTimeout?.(fullReq.id, this.timeoutMs);
         resolve({
           requestId: fullReq.id,
           choice: "deny-once",

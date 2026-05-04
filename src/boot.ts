@@ -93,7 +93,7 @@ import {
 } from "./boot/conversation.js";
 import { TriggerExecutor } from "./engine/trigger-executor.js";
 import type { ConversationLoop } from "./engine/conversation-loop.js";
-import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
+import { initPluginRuntime, approvalIssuerRegistry } from "./boot/steps/plugin-runtime.js";
 import { registerPluginEventBridge } from "./boot/steps/ipc-bridge.js";
 import { wireRoutineCoordinator } from "./boot/steps/routine-coordinator.js";
 import { wireReleasePrep, wireUpdateCheck } from "./boot/steps/post-boot.js";
@@ -160,7 +160,15 @@ export async function bootstrap(
   // the per-plugin HostApi factory can wire `agentApproval` namespace to the
   // live gate — without this ordering, plugins receive a hostApi missing the
   // namespace and §8 main-process approval routing silently no-ops.
-  const approvalGate = await createApprovalGate(mainWindow, bootAuditLogger, notificationService);
+  // §8 P0 registry leak fix: on each gate timeout, purge issuer registry entries
+  // older than the gate timeout window so stale entries from timed-out requests
+  // (where respond() was never called, e.g. renderer crash) do not accumulate.
+  const approvalGate = await createApprovalGate(
+    mainWindow,
+    bootAuditLogger,
+    notificationService,
+    (_requestId, timeoutMs) => { approvalIssuerRegistry.purgeStalerThan(timeoutMs); },
+  );
 
   // §4.2 Step 3 + 5: PluginRuntime + per-plugin HostApi factory.
   const {

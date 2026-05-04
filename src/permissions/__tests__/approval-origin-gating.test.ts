@@ -15,7 +15,7 @@
  *   (f) requestAgentApproval records into registry using the provided scope.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import {
   ApprovalIssuerRegistry,
   verifyApprovalResponder,
@@ -23,6 +23,12 @@ import {
   ApprovalOriginError,
 } from "../agent-action-requester.js";
 import type { ApprovalGate } from "../approval-gate.js";
+
+// These tests verify the hard-enforcement security contract.
+// Set LVIS_FEATURE_APPROVAL_ORIGIN_GATING=true so verifyApprovalResponder
+// throws on violations rather than soft-logging.
+beforeAll(() => { vi.stubEnv("LVIS_FEATURE_APPROVAL_ORIGIN_GATING", "true"); });
+afterAll(() => { vi.unstubAllEnvs(); });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

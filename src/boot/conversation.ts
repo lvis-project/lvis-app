@@ -98,10 +98,14 @@ export async function createApprovalGate(
   mainWindow: BrowserWindow,
   auditLogger: AuditLogger,
   notificationService?: NotificationService,
+  onTimeout?: (requestId: string, timeoutMs: number) => void,
 ): Promise<ApprovalGate> {
   // B1: Policy 로드 후 ApprovalGate 생성 — mainWindow.webContents 준비 후
   // §F7: bootAuditLogger 주입 → requested/decided/timeout/send-failed 4 phase 감사
   // Issue #260: notificationService 주입 → 승인 트리거 시 OS/in-app notification
+  // §8 P0: onTimeout callback — triggers approvalIssuerRegistry.purgeStalerThan
+  //   on each gate timeout so stale entries from renderer-crash / no-respond
+  //   paths are cleaned up without unbounded registry growth.
   const bootPolicy = await loadPolicy();
   return new ApprovalGate(
     mainWindow.webContents,
@@ -109,6 +113,7 @@ export async function createApprovalGate(
     5 * 60 * 1000,
     auditLogger,
     notificationService,
+    onTimeout,
   );
 }
 
