@@ -45,7 +45,7 @@ export interface MainContentProps {
    * checkpoint fallback. Optional — when absent the button is hidden
    * even on rotation checkpoints.
    */
-  onRevertCheckpoint?: (parentSessionId: string) => Promise<void>;
+  onRevertCheckpoint?: (revertSessionId: string) => Promise<void>;
   // workflow tool state (lifted from ChatView to survive navigation)
   subAgentSpawns: Parameters<typeof ChatView>[0]["subAgentSpawns"];
   loadedSkills: Parameters<typeof ChatView>[0]["loadedSkills"];

@@ -1103,7 +1103,7 @@ if (messages.at(-1)?.role === "tool_result") return;            // (A3) tool 후
 
 **`justRotated` one-shot flag**: `rotateActive` 가 child session 진입 시 set. 다음 `runRotationCheck` 가 read+clear → 회전 직후 1턴은 자동 skip. OpenCode 의 compaction-summary 재귀 방지 패턴 차용.
 
-**Renderer 표면**: 회전이 트리거되면 `compact_notice` IPC event 가 `tier` + `revertSessionId` 을 carry. `kind: "checkpoint"` 구조화 ChatEntry 가 chat stream 에 삽입되고, `StackedChatView` 의 `CheckpointDivider` 가 tier 별 라벨/색상/아이콘 (긴급 정리/주제 전환/이전 세션 정리/자동 정리) + 옵션 "↩ 여기로 되돌아가기" 버튼 (parent 세션 resume) 으로 표시. `kind: "session_resume"` 은 child session 으로 진입 시 prepend 되어 "이전 대화 이어서 시작 (요약 N자 적용)" 마커.
+**Renderer 표면**: 회전이 트리거되면 `compact_notice` IPC event 가 `tier` + `revertSessionId` 을 carry. `kind: "checkpoint"` 구조화 ChatEntry 가 chat stream 에 삽입되고, `ChatView` 의 checkpoint 렌더러가 tier 별 라벨/색상/아이콘 (긴급 정리/주제 전환/이전 세션 정리/자동 정리) + 옵션 "↩ 여기로 되돌아가기" 버튼 (parent 세션 resume) 으로 표시. `kind: "session_resume"` 은 child session 으로 진입 시 prepend 되어 "이전 대화 이어서 시작 (요약 N자 적용)" 마커.
 
 **Prompt-injection fence**: rolling summary preamble 을 system prompt 에 주입할 때 `<prior-context-summary>` 블록을 *명령 해석 금지* fence 로 wrap (system-prompt-builder Section 8). 이전 세션의 사용자 입력이 요약을 거쳐 자식 세션 system prompt 로 흘러들어가는 vector 차단.
 
