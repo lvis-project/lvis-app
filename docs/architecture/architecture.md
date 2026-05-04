@@ -1072,6 +1072,40 @@ flowchart TB
 | **OpenHarness** | 실행 run 단위를 구조화해 추적 | LVIS도 tool round를 `groupId` 단위로 추적 |
 | **Paperclip / PaperclipAI** | thinking, tool call, tool result, assistant를 분리 기록 | reasoning card와 assistant round를 분리 유지 |
 
+#### 4.5.11 Continuous Chat Rotation — 3-Tier Decision + Incomplete-Turn Guards
+
+Issue #457 (Continuous Chat v3) 의 Phase 1+2+3 구현. §4.5.4 의 Auto-Compact 가 *현재 세션 안에서* 토큰을 줄이는 것이라면, Rotation 은 *세션 자체를 분기* 하여 child session 에 rolling summary preamble 만 남기고 fresh 컨텍스트로 시작한다. `runRotationCheck` 가 매 턴-종료 직후 (`runTurn` line 687) 호출되며, 결정 트리는 `decideRotation` (`auto-compact.ts`).
+
+**3-tier 결정 트리** (직교 신호; 어느 하나라도 hit 하면 rotate):
+
+| Tier | 신호 | 임계 | UX 의미 |
+|---|---|---|---|
+| **hard-token** | `ctxUsage` (cumulative tokens / context window) | `≥ 0.85` | 비상 — overflow 직전 |
+| **semantic-llm** | LLM assistant text | `[checkpoint-suggested]` 마커 | 토픽 전환 감지 |
+| **soft-time** | `sessionAgeMs` | `≥ 24h` (devMode 1h) | day-boundary 안전망 |
+
+**Tier 3 의 message-count 분기 부재 (의도적)**: 초기 구현은 `history.length >= 30` 분기를 포함했으나, 도구 호출 8회 ≈ 32 history entries → 첫 사용자 요청 도중에 false-positive trigger (2026-05-04 incident). 토큰/시간/의미 어느 진짜 신호도 측정 안 함. PR #525 에서 분기 자체 제거 → OpenCode 의 순수 토큰 + 시간 패턴으로 정합화.
+
+**Incomplete-turn 가드 (4 layer defense-in-depth)**: rotation 호출 진입부에서 다음 4 케이스 skip:
+
+```typescript
+// runRotationCheck 진입부 (conversation-loop.ts)
+if (this.justRotated) { this.justRotated = false; return; }   // (B)  재귀 방지
+if (stopReason === "interrupted") return;                       // (A1) 사용자 abort
+if (lastAssistantText.trim().length === 0) return;              // (A2) empty answer
+if (messages.at(-1)?.role === "tool_result") return;            // (A3) tool 후 follow-up 없음
+```
+
+각 가드는 동일 incident (답변 미완료 도중 CheckpointDivider 표시) 의 *다른 측면* 을 잡음. (A2) empty-text 와 (A3) tool_result-last 는 LLM 이 도구 후 `end_turn` 으로 끝났는데 final answer 가 없는 케이스의 두 관점 (text 관점 + history shape 관점). 둘 다 두면 robust.
+
+**`justRotated` one-shot flag**: `rotateActive` 가 child session 진입 시 set. 다음 `runRotationCheck` 가 read+clear → 회전 직후 1턴은 자동 skip. OpenCode 의 compaction-summary 재귀 방지 패턴 차용.
+
+**Renderer 표면**: 회전이 트리거되면 `compact_notice` IPC event 가 `tier` + `revertSessionId` 을 carry. `kind: "checkpoint"` 구조화 ChatEntry 가 chat stream 에 삽입되고, `StackedChatView` 의 `CheckpointDivider` 가 tier 별 라벨/색상/아이콘 (긴급 정리/주제 전환/이전 세션 정리/자동 정리) + 옵션 "↩ 여기로 되돌아가기" 버튼 (parent 세션 resume) 으로 표시. `kind: "session_resume"` 은 child session 으로 진입 시 prepend 되어 "이전 대화 이어서 시작 (요약 N자 적용)" 마커.
+
+**Prompt-injection fence**: rolling summary preamble 을 system prompt 에 주입할 때 `<prior-context-summary>` 블록을 *명령 해석 금지* fence 로 wrap (system-prompt-builder Section 8). 이전 세션의 사용자 입력이 요약을 거쳐 자식 세션 system prompt 로 흘러들어가는 vector 차단.
+
+**상세**: `docs/blueprints/continuous-chat-rotation-closure-report.md` — 4 PR (#520/#521/#522/#525) 변경 내역 + 2026-05-04 incident hotfix + 연구 출처 (Copilot Checkpoints / Warp / OpenCode).
+
 ---
 
 ### 4.6 Source Tree Layout & Module Boundaries — Phase 3
