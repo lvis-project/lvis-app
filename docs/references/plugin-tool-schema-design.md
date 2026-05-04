@@ -381,6 +381,63 @@ Invalid tool name 'meeting.start' in plugin 'lvis-plugin-meeting' at 'tools[0]' 
 
 ---
 
+### 2.6 UI Styling Tokens — `--lvis-*` 화이트리스트
+
+플러그인 UI 는 호스트가 broadcast 하는 17 개의 `--lvis-*` 디자인 토큰만 사용해야
+한다 (architecture.md §6.7.1 의 `host.theme.changed` 흐름 참조). 호스트의
+`validateThemePayload` (`src/ipc/domains/plugins.ts` `PLUGIN_TOKEN_NAMES`) 가
+broadcast 시점에 같은 화이트리스트로 silently drop 하므로, 그 외 토큰을 참조하면
+런타임에 CSS `initial` 키워드로 렌더되어 invisible regression 이 된다.
+
+**Authoring 규칙**:
+
+1. **참조** — `var(--lvis-bg)` / `var(--lvis-fg-muted)` 등. 17 개 SoT 는 SDK
+   `@lvis/plugin-sdk/ui/tokens` 의 `LVIS_TOKEN_NAMES` 가 canonical (host 의
+   `PLUGIN_TOKEN_NAMES` 는 broadcast-side mirror). 두 곳은 lockstep 갱신 — 한쪽만
+   추가하면 broadcast 가 새 토큰을 drop 하거나 SDK 가 정의되지 않은 토큰을 노출.
+2. **재정의 금지** — 플러그인 코드 어디서도 `--lvis-*: ...` 선언 (예: `:root`
+   override) 을 두면 안 된다. 호스트가 canonical 값의 owner. 재정의는 chat-theme
+   / accent toolbar / dark-light 전환 등 host-driven UX 와 충돌.
+3. **번들 경로** — JSX 속성 안 quoted string (`stroke="var(--lvis-fg)"`) 은
+   build-time validator 가 못 보는 위치다 (string strip 단계에서 erase). 토큰
+   참조는 항상 `injectTokenCss` 의 template-literal CSS 블록에 두자. SDK 컴포넌트
+   가 모두 같은 패턴.
+
+**Build-time validator** (SDK v3.8.0+):
+
+```ts
+// scripts/check-ui-tokens.mjs
+import { validateTokenUsage, validateTokenDefinitions } from "@lvis/plugin-sdk/ui/tokens/validate";
+
+const css = readFileSync("src/ui/MyComponent.tsx", "utf8");
+const usage = validateTokenUsage(css);
+if (!usage.ok) {
+  console.error("Unknown --lvis-* references:", usage.unknown);
+  process.exit(1);
+}
+const defs = validateTokenDefinitions(css);
+if (!defs.ok) {
+  console.error("Plugins must not redefine --lvis-* tokens:", defs.forbiddenRedefinitions);
+  process.exit(1);
+}
+```
+
+순수 string-scan (postcss 의존성 0). `lvis-plugin-template` 의
+`scripts/check-ui-tokens.mjs` + `.github/workflows/validate-ui-tokens.yml` 이
+canonical 예시 — 새 플러그인은 템플릿에서 fork 하면 자동 보호.
+
+**SoT 동기화 정책**:
+
+- SDK `LVIS_TOKEN_NAMES` (canonical) ← host `PLUGIN_TOKEN_NAMES` 가 lockstep.
+- `lvis-plugin-sdk` 의 `scripts/sync-from-host.mjs` 가 host plugins.ts 에서 토큰
+  명단을 추출해 SDK `src/ui/tokens/index.ts` 에 반영 (drift-check workflow 가
+  매일 + PR 마다 실행) — 호스트만 갱신 후 SDK 동기화 누락 케이스 차단.
+- 새 토큰 추가 시: host `PLUGIN_TOKEN_NAMES` + SDK `LVIS_TOKEN_NAMES` +
+  `lvis-tokens.css :root` + first consumer (or reserved 마커) 한 PR 안에서
+  lockstep. 위반 시 architect P0 follow-up.
+
+---
+
 ## 3. toolSchemas 작성 가이드
 
 `toolSchemas` 는 LLM 이 파라미터를 잘못 추론하는 메서드에만 추가한다.
