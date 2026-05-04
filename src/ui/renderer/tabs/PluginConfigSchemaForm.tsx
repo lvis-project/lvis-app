@@ -16,7 +16,7 @@
  * field is rendered as a read-only display so the user is not silently
  * locked out of declared settings.
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Input } from "../../../components/ui/input.js";
 import type { PluginConfigSchemaPropertySummary, PluginConfigSchemaSummary } from "../types.js";
@@ -94,6 +94,15 @@ export function PluginConfigSchemaForm({
   const properties = schema.properties ?? {};
   const propertyKeys = useMemo(() => Object.keys(properties), [properties]);
   const [draft, setDraft] = useState<PluginConfigFormValues>(() => ({ ...values }));
+  // Re-sync draft when `values` reference changes — the parent's saved-config
+  // fetch is async and resolves AFTER this form first mounts, so the lazy
+  // `useState` initializer runs against an empty `values` and locks the form
+  // into a blank state. PluginConfigTab memoizes `values` on
+  // [selectedPlugin, savedConfig], so this only fires on plugin switch or
+  // post-save refresh — not on every keystroke.
+  useEffect(() => {
+    setDraft({ ...values });
+  }, [values]);
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
   const [secretSaving, setSecretSaving] = useState<Record<string, boolean>>({});
   const required = new Set(schema.required ?? []);
