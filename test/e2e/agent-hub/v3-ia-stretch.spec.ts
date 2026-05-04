@@ -12,8 +12,9 @@
  *   2. 팀보드 stretch    — TeamScheduleCard (reuses TodayScheduleCard testid) height
  *                         > TeamKpiCombo + TeamBoardList combined - gap
  *   3. 팀보드 summary 최상단 — agent-hub-card-team-summary y < KPI card y (above)
- *   4. 좌측 stack 동일 폭 — weekly ≈ myboard width (마이워크); kpi ≈ team-list width (팀보드)
- *   5. ah-row-grid 1.45fr / 0.55fr 비율 — LLM card width / Approval card width ≈ 2.636
+ *   4. 마이워크 좌측 stack 동일 폭 — weekly ≈ myboard width (±2px)
+ *   5. 팀보드 좌측 stack 동일 폭 — kpi ≈ team-list width (±2px)
+ *   6. ah-row-grid 1.45fr / 0.55fr 비율 — LLM card width / Approval card width ≈ 2.636
  *
  * Design notes:
  *   • All tests skip gracefully when the plugin panel is absent (build predates v0.2.1).
@@ -127,14 +128,14 @@ test('마이워크: TodayScheduleCard stretches taller than WeeklyGantt + MyBoar
   const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
-  await switchToMyWork(panel!, mainWindow);
+  await switchToMyWork(panel, mainWindow);
 
   // Give layout a tick to settle after toggle
   await mainWindow.waitForTimeout(200);
 
-  const todayBox = await cardBox(panel!, 'agent-hub-card-today');
-  const weeklyBox = await cardBox(panel!, 'agent-hub-card-weekly');
-  const myboardBox = await cardBox(panel!, 'agent-hub-card-myboard');
+  const todayBox = await cardBox(panel, 'agent-hub-card-today');
+  const weeklyBox = await cardBox(panel, 'agent-hub-card-weekly');
+  const myboardBox = await cardBox(panel, 'agent-hub-card-myboard');
 
   test.skip(
     !todayBox || !weeklyBox || !myboardBox,
@@ -163,13 +164,13 @@ test('팀보드: TeamScheduleCard stretches taller than KPI + TeamBoardList comb
   const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
-  await switchToTeamBoard(panel!, mainWindow);
+  await switchToTeamBoard(panel, mainWindow);
   await mainWindow.waitForTimeout(200);
 
   // TeamScheduleCard delegates to TodayScheduleCard — same testid
-  const scheduleBox = await cardBox(panel!, 'agent-hub-card-today');
-  const kpiBox = await cardBox(panel!, 'agent-hub-card-team-kpi');
-  const listBox = await cardBox(panel!, 'agent-hub-card-team-list');
+  const scheduleBox = await cardBox(panel, 'agent-hub-card-today');
+  const kpiBox = await cardBox(panel, 'agent-hub-card-team-kpi');
+  const listBox = await cardBox(panel, 'agent-hub-card-team-list');
 
   test.skip(
     !scheduleBox || !kpiBox || !listBox,
@@ -198,12 +199,12 @@ test('팀보드: TeamSummaryCard is positioned above the KPI and list cards', as
   const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
-  await switchToTeamBoard(panel!, mainWindow);
+  await switchToTeamBoard(panel, mainWindow);
   await mainWindow.waitForTimeout(200);
 
-  const summaryBox = await cardBox(panel!, 'agent-hub-card-team-summary');
-  const kpiBox = await cardBox(panel!, 'agent-hub-card-team-kpi');
-  const listBox = await cardBox(panel!, 'agent-hub-card-team-list');
+  const summaryBox = await cardBox(panel, 'agent-hub-card-team-summary');
+  const kpiBox = await cardBox(panel, 'agent-hub-card-team-kpi');
+  const listBox = await cardBox(panel, 'agent-hub-card-team-list');
 
   test.skip(
     !summaryBox || !kpiBox || !listBox,
@@ -234,11 +235,11 @@ test('마이워크: WeeklyGanttCard and MyBoardCard share the same column width 
   const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
-  await switchToMyWork(panel!, mainWindow);
+  await switchToMyWork(panel, mainWindow);
   await mainWindow.waitForTimeout(200);
 
-  const weeklyBox = await cardBox(panel!, 'agent-hub-card-weekly');
-  const myboardBox = await cardBox(panel!, 'agent-hub-card-myboard');
+  const weeklyBox = await cardBox(panel, 'agent-hub-card-weekly');
+  const myboardBox = await cardBox(panel, 'agent-hub-card-myboard');
 
   test.skip(
     !weeklyBox || !myboardBox,
@@ -261,11 +262,11 @@ test('팀보드: TeamKpiCombo and TeamBoardListCard share the same column width 
   const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
-  await switchToTeamBoard(panel!, mainWindow);
+  await switchToTeamBoard(panel, mainWindow);
   await mainWindow.waitForTimeout(200);
 
-  const kpiBox = await cardBox(panel!, 'agent-hub-card-team-kpi');
-  const listBox = await cardBox(panel!, 'agent-hub-card-team-list');
+  const kpiBox = await cardBox(panel, 'agent-hub-card-team-kpi');
+  const listBox = await cardBox(panel, 'agent-hub-card-team-list');
 
   test.skip(
     !kpiBox || !listBox,
@@ -292,11 +293,11 @@ test('마이워크: ah-row-grid preserves 1.45fr/0.55fr column ratio (LLM vs App
   const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
-  await switchToMyWork(panel!, mainWindow);
+  await switchToMyWork(panel, mainWindow);
   await mainWindow.waitForTimeout(200);
 
-  const llmBox = await cardBox(panel!, 'agent-hub-card-llm');
-  const approvalBox = await cardBox(panel!, 'agent-hub-card-approval');
+  const llmBox = await cardBox(panel, 'agent-hub-card-llm');
+  const approvalBox = await cardBox(panel, 'agent-hub-card-approval');
 
   test.skip(
     !llmBox || !approvalBox,

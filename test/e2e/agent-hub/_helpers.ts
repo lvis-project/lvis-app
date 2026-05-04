@@ -107,17 +107,11 @@ export async function setupMockRoutes(
 ): Promise<void> {
   const base = mockServer.baseUrl;
 
-  // Intercept all requests destined for the mock server and proxy them
-  // through Playwright's route handler — this works for already-loaded
-  // windows because route interception operates at the network layer, not
-  // at script-evaluation time.
-  await page.route(`${base}/**`, async (route) => {
-    // Forward to the real mock server running on localhost.
-    await route.continue();
-  });
-
   // Expose the mock base URL to in-page code so the plugin's fetch logic
-  // picks it up.  evaluate() (not addInitScript) works on the live window.
+  // resolves to the running AgentHubMockServer.  evaluate() (not
+  // addInitScript) works on the already-loaded Electron window.
+  // Note: no page.route() interception — the mock server is a real HTTP
+  // endpoint on localhost; requests reach it directly via this base URL.
   await page.evaluate((baseUrl: string) => {
     const win = window as any;
     win.__LVIS_AGENT_HUB_MOCK_BASE__ = baseUrl;
