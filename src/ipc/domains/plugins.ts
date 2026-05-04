@@ -103,6 +103,76 @@ interface PluginWebviewBinding {
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
+export type SafeThemePayload = {
+  theme: "light" | "dark" | "high-contrast";
+  chatTheme: "default" | "lg" | "purple" | "orange" | "blue";
+  codeTheme: "light" | "dark";
+  tokens?: Record<string, string>;
+};
+
+/**
+ * Last validated `host.theme.changed` payload broadcast to plugin webviews.
+ *
+ * Why: a plugin webview that registers AFTER the renderer's last
+ * `notifyPluginTheme` call would otherwise miss the active theme entirely
+ * (stuck on the SDK's `:root` fallback) until the user toggles a theme.
+ * On register we replay this cached payload to the freshly attached wc so
+ * the plugin paints with the right tokens from first frame.
+ *
+ * Null until the renderer's first broadcast — pre-broadcast registrations
+ * still fall through to the SDK fallback (acceptable boot window). Renderer
+ * always re-broadcasts on its own mount, so this gap closes within milliseconds.
+ */
+let lastThemePayload: SafeThemePayload | null = null;
+
+/** @internal — read access to the cached theme payload (tests + replay). */
+export function getLastThemePayload(): SafeThemePayload | null {
+  return lastThemePayload;
+}
+
+/**
+ * Validate a theme payload and, on success, record it as the new replay cache.
+ * Invalid payloads leave the existing cache untouched. The IPC handler uses
+ * this so the validate + cache step stays atomic under unit test.
+ */
+export function recordValidatedTheme(payload: unknown):
+  | { ok: true; safe: SafeThemePayload }
+  | { ok: false; error: string } {
+  const result = validateThemePayload(payload);
+  if (result.ok) lastThemePayload = result.safe;
+  return result;
+}
+
+/**
+ * Push the cached theme payload to a freshly registered webview so the
+ * plugin paints with the active tokens from first frame instead of the
+ * SDK `:root` fallback. Returns the payload that was sent (or null when
+ * the cache is empty / wc destroyed) so callers can log lifecycle.
+ *
+ * Synchronous between `register-webview` returning OK and this call, so
+ * `webContents.fromId` should always succeed; the catch is defensive
+ * against pathological reload paths where the wc tears down between
+ * registry-set and send.
+ */
+export function replayThemeToWebview(webContentsId: number): SafeThemePayload | null {
+  if (!lastThemePayload) return null;
+  try {
+    const wc = webContents.fromId(webContentsId);
+    if (wc && !wc.isDestroyed()) {
+      wc.send("lvis:plugin:event", "host.theme.changed", lastThemePayload);
+      return lastThemePayload;
+    }
+  } catch {
+    /* swallowed — caller logs at debug. */
+  }
+  return null;
+}
+
+/** @internal — test-only reset to keep cross-test state clean. */
+export function __resetLastThemePayloadForTests(): void {
+  lastThemePayload = null;
+}
+
 /**
  * Wait queue for `lvis:plugin:get-entry-url` invocations that arrive before
  * `lvis:plugin:register-webview` lands a binding for the same webContentsId.
@@ -182,13 +252,6 @@ async function preparePythonRuntimeForInstalledPlugin(
   if (!runtime) return;
   deps.pluginRuntime.mergeConfigOverride("*", { pythonExecutable: runtime.pythonPath });
 }
-
-export type SafeThemePayload = {
-  theme: "light" | "dark" | "high-contrast";
-  chatTheme: "default" | "lg" | "purple" | "orange" | "blue";
-  codeTheme: "light" | "dark";
-  tokens?: Record<string, string>;
-};
 
 export function validateThemePayload(payload: unknown):
   | { ok: true; safe: SafeThemePayload }
@@ -862,6 +925,9 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
+    if (replayThemeToWebview(webContentsId)) {
+      plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "theme replay sent");
+    }
     return { ok: true };
   });
 
@@ -1113,7 +1179,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       auditUnauthorized(auditLogger, "lvis:host:plugin-theme-notify", e);
       return UNAUTHORIZED_FRAME;
     }
-    const validated = validateThemePayload(payload);
+    const validated = recordValidatedTheme(payload);
     if (!validated.ok) return validated;
     const { safe } = validated;
     for (const [wcId] of pluginWebviewRegistry) {

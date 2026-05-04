@@ -1773,12 +1773,34 @@ ThemeProvider.tsx (renderer)
 - registry 외 webContents 로 누출 없음 — `pluginWebviewRegistry` 등록된
   webContentsId 만 순회
 
-**알려진 한계 — register-vs-broadcast race**: 호스트는 테마축이 *변할 때*에만
-broadcast 한다. plugin webview 가 ThemeProvider 의 초기 push 보다 늦게
-`lvis:plugin:register-webview` 를 보내면 그 push 를 놓치므로, 사용자가 다음으로
-테마를 바꿀 때까지 plugin 은 SDK 기본값으로 렌더된다. 향후 register 핸들러가
-응답 직전 현재 테마 스냅샷을 한 번 push 하거나 plugin SDK 가 mount 시 호스트에
-현재 테마를 요청하는 경로를 추가하면 race 를 닫을 수 있음.
+**Register 시점 replay**: 호스트는 마지막으로 broadcast 된 검증 완료 payload 를
+모듈 캐시(`lastThemePayload`) 에 보관한다. plugin webview 가
+`lvis:plugin:register-webview` 로 등록되면 캐시가 차 있는 한 그 webContents 한
+곳에만 즉시 `host.theme.changed` 를 push 한다 — ThemeProvider 의 정주기 broadcast
+보다 늦게 mount 된 webview 가 SDK `:root` fallback 으로 묶이는 race 를 닫는다.
+
+main 의 push 는 동기적이지만 webview 측 `lvisPlugin.onEvent` 는 *late-binding* 이라
+(SDK `useTheme` 의 `useEffect` 가 React tree mount 후에 `ipcRenderer.on` 부착)
+preload 의 sticky-event 버퍼가 함께 동작해야 첫 프레임이 올바른 토큰으로 그려진다.
+
+- `plugin-preload.ts` 의 `STICKY_EVENT_TYPES` 에 `host.theme.changed` 가 포함됨
+- preload 가 main 으로부터 받은 sticky 이벤트의 *최신 payload 만* (state, not log)
+  보관, `bridge.onEvent(type, h)` 첫 구독 시 즉시 1회 flush
+- 두 단계(main 캐시 + preload 버퍼) 가 함께 register-vs-mount race 를 닫는다 —
+  main 캐시만으로는 listener attach 보다 push 가 빨라 drop 되고, preload 버퍼만으로는
+  register 가 broadcast 보다 늦게 와도 첫 프레임이 못 채색됨
+
+캐시는 다음과 같이 동작한다:
+- `recordValidatedTheme(payload)` 가 validation 통과 시에만 갱신, 실패 시 기존 값
+  유지 (잘못된 broadcast 가 캐시를 오염시키지 않음)
+- 호스트 부팅 직후 ThemeProvider 가 처음 broadcast 하기 전에 등록된 webview 는
+  캐시가 null 이라 SDK fallback 으로 잠깐 그려지지만, ThemeProvider 의 mount-time
+  push 가 수 ms 내에 도달
+- 같은 키/값 화이트리스트 검증을 거치므로 register-replay 경로도 broadcast 경로와
+  동일한 보안 게이트 통과
+- 캐시는 host process lifetime 동안 유지되고 종료 시 자동 소멸 — payload 자체가
+  plugin-agnostic (UI 토큰 + 테마 enum) 이라 plugin install/uninstall/hot-reload
+  시 따로 invalidate 할 필요가 없다
 
 ---
 
