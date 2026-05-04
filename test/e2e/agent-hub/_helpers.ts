@@ -88,20 +88,25 @@ export async function waitForAuthS3(
 // ---------------------------------------------------------------------------
 
 /**
- * Set up Playwright route interception for the agent-hub mock server and
- * inject the base URL into the already-loaded Electron window.
+ * Inject the agent-hub mock server's base URL into the already-loaded
+ * Electron window.  The plugin's fetch logic reads `window.lvisEnv.AGENT_HUB_API_BASE`
+ * (and `__LVIS_AGENT_HUB_MOCK_BASE__` legacy alias) and dispatches to that origin.
  *
- * Uses page.route() (Playwright-native network interception) rather than
- * page.addInitScript() — the latter only fires on page navigation and is
- * therefore a no-op for already-loaded Electron windows.
+ * Uses `page.evaluate()` rather than `page.addInitScript()` — the latter only
+ * fires on page navigation and is a no-op for already-loaded Electron windows.
  *
- * Must be called BEFORE openAgentHubTab() so that any fetch triggered at
- * panel mount is already intercepted.
+ * No `page.route()` interception is performed: AgentHubMockServer is a real
+ * HTTP endpoint on localhost, so the plugin's fetches reach it directly via
+ * the injected base URL.  Future iteration may add `page.route()` if hard
+ * network isolation is needed.
+ *
+ * Must be called BEFORE `openAgentHubTab()` so the panel's mount-time fetches
+ * already see the mock URL.
  *
  * @param page        Playwright Page object for the main Electron window.
  * @param mockServer  Running AgentHubMockServer instance.
  */
-export async function setupMockRoutes(
+export async function injectMockBaseUrl(
   page: Page,
   mockServer: AgentHubMockServer,
 ): Promise<void> {

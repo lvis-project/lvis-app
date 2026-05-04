@@ -19,7 +19,7 @@
 
 import { AgentHubMockServer } from './fixtures/agent-hub-mock-server';
 import { test as base, expect } from '../ui/fixtures';
-import { openAgentHubTab, waitForV3Panel, setupMockRoutes } from './_helpers';
+import { openAgentHubTab, waitForV3Panel, injectMockBaseUrl } from './_helpers';
 
 // ---------------------------------------------------------------------------
 // Extended fixture: mock server lifecycle
@@ -115,8 +115,8 @@ test('ah-pill-toggle switches between 마이워크 and 팀보드', async ({ main
 // ---------------------------------------------------------------------------
 
 test('approval row click opens ConfirmModal and confirm updates DOM', async ({ mainWindow, mockServer }) => {
-  // Set up route interception BEFORE opening the tab so panel-mount fetches are intercepted.
-  await setupMockRoutes(mainWindow, mockServer);
+  // Inject mock base URL BEFORE opening the tab so panel-mount fetches use it.
+  await injectMockBaseUrl(mainWindow, mockServer);
 
   const tabFound = await openAgentHubTab(mainWindow);
   test.skip(!tabFound, 'agent-hub plugin tab not present — skipping approval test');
@@ -339,8 +339,8 @@ test('bridge.config round-trip: gear → SettingsPanel → save → value persis
 // ---------------------------------------------------------------------------
 
 test('S5PartialSync banner appears when one region fails', async ({ mainWindow, mockServerFailing }) => {
-  // Set up route interception BEFORE opening the tab so panel-mount fetches are intercepted.
-  await setupMockRoutes(mainWindow, mockServerFailing);
+  // Inject mock base URL BEFORE opening the tab so panel-mount fetches use it.
+  await injectMockBaseUrl(mainWindow, mockServerFailing);
 
   const tabFound = await openAgentHubTab(mainWindow);
   test.skip(!tabFound, 'agent-hub plugin tab not present — skipping partial-sync test');
@@ -402,8 +402,8 @@ test('S5PartialSync banner appears when one region fails', async ({ mainWindow, 
 // ---------------------------------------------------------------------------
 
 test('ah-myboard-row entries are visible in 마이워크 board', async ({ mainWindow, mockServer }) => {
-  // Set up route interception BEFORE opening the tab so panel-mount fetches are intercepted.
-  await setupMockRoutes(mainWindow, mockServer);
+  // Inject mock base URL BEFORE opening the tab so panel-mount fetches use it.
+  await injectMockBaseUrl(mainWindow, mockServer);
 
   const tabFound = await openAgentHubTab(mainWindow);
   test.skip(!tabFound, 'agent-hub plugin tab not present — skipping myboard test');

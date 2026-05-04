@@ -27,7 +27,7 @@
 import { test as base, expect } from '../ui/fixtures';
 import { AgentHubMockServer } from './fixtures/agent-hub-mock-server';
 import type { Page, Locator } from 'playwright';
-import { openAgentHubTab, waitForV3Panel, waitForAuthS3, setupMockRoutes } from './_helpers';
+import { openAgentHubTab, waitForV3Panel, waitForAuthS3, injectMockBaseUrl } from './_helpers';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -93,10 +93,10 @@ async function setupPanel(
   page: Page,
   mockServer: AgentHubMockServer,
 ): Promise<{ panel: Locator; skip: boolean; skipReason: string }> {
-  // Set up Playwright route interception BEFORE opening the tab so any fetch
-  // triggered at panel mount is already intercepted.  page.route() works on
+  // Inject mock base URL into window BEFORE opening the tab so any fetch
+  // triggered at panel mount sees the mock URL.  evaluate() works on
   // the already-loaded Electron window; page.addInitScript() does not.
-  await setupMockRoutes(page, mockServer);
+  await injectMockBaseUrl(page, mockServer);
 
   const tabFound = await openAgentHubTab(page);
   if (!tabFound) {
