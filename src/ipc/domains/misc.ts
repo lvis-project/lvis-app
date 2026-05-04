@@ -8,31 +8,7 @@ import { createLogger } from "../../lib/logger.js";
 const log = createLogger("lvis");
 
 export function registerMiscHandlers(deps: IpcDeps): void {
-  const { taskService, remindersStore, sessionTodoStore, conversationLoop, auditLogger, getMainWindow } = deps;
-
-  // ─── Tasks ──────────────────────────────────────
-  ipcMain.handle("lvis:tasks:add", (e, task) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:tasks:add", e); return UNAUTHORIZED_FRAME; }
-    return taskService.add(task);
-  });
-  ipcMain.handle("lvis:tasks:update", (e, id: string, patch) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:tasks:update", e); return UNAUTHORIZED_FRAME; }
-    return taskService.update(id, patch);
-  });
-  // read-only, sender guard optional
-  ipcMain.handle("lvis:tasks:get", (_e, id: string) => taskService.get(id));
-  ipcMain.handle("lvis:tasks:delete", (e, id: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:tasks:delete", e); return UNAUTHORIZED_FRAME; }
-    return taskService.delete(id);
-  });
-  // read-only, sender guard optional
-  ipcMain.handle("lvis:tasks:query", (_e, filter) => taskService.query(filter));
-  // read-only, sender guard optional
-  ipcMain.handle("lvis:tasks:pending", () => taskService.getPendingByPriority());
-  // read-only, sender guard optional
-  ipcMain.handle("lvis:tasks:overdue", () => taskService.getOverdue());
-  // read-only, sender guard optional
-  ipcMain.handle("lvis:tasks:today", () => taskService.getDueToday());
+  const { remindersStore, sessionTodoStore, conversationLoop, auditLogger, getMainWindow } = deps;
 
   // ─── Reminders ──────────────────────────────────
   ipcMain.handle("lvis:reminders:list", (e) => {

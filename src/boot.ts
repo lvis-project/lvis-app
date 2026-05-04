@@ -6,7 +6,7 @@
  *   Step 0-1 + 4-5  src/boot/services.ts          core services (python,
  *                                                 ms-graph, audit, settings,
  *                                                 memory, keyword/route,
- *                                                 tool-registry, task-service)
+ *                                                 tool-registry)
  *   Step 3 + 5      src/boot/steps/plugin-runtime — PluginRuntime + per-plugin
  *                                                 HostApi factory + startAll
  *                                                 + manifest startupTools +
@@ -66,7 +66,6 @@ import {
 } from "./boot/tools.js";
 import { RemindersStore } from "./main/reminders-store.js";
 import { RemindersScheduler } from "./main/reminders-scheduler.js";
-import { TaskDeadlinePoller } from "./main/task-deadline-poller.js";
 import { SessionTodoStore } from "./main/session-todo-store.js";
 import { AskUserQuestionGate, IPC_ASK_USER_QUESTION_REQUEST } from "./main/ask-user-question-gate.js";
 import { NotificationService } from "./main/notification-service.js";
@@ -131,7 +130,6 @@ export async function bootstrap(
     keywordEngine,
     toolRegistry,
     routeEngine,
-    taskService,
   } = core;
 
   // Sprint 1-A A3 — shared AuditLogger instance (plugin runtime + hooks + gate).
@@ -166,7 +164,6 @@ export async function bootstrap(
   const {
     pluginRuntime,
     deploymentGuard,
-    taskSourceRegistry,
     lateBinding,
     pluginPaths,
   } = await initPluginRuntime({
@@ -175,7 +172,6 @@ export async function bootstrap(
     memoryManager,
     keywordEngine,
     toolRegistry,
-    taskService,
     pythonPath,
     bootAuditLogger,
     mainWindow,
@@ -242,7 +238,7 @@ export async function bootstrap(
   };
 
   // §4.2 Step 4: builtin tools + request_plugin meta tool.
-  registerBuiltinTools(memoryManager, toolRegistry, settingsService, taskService, workflowDeps);
+  registerBuiltinTools(memoryManager, toolRegistry, settingsService, workflowDeps);
   registerRequestPluginMetaTool(toolRegistry);
 
   // §4.4 HybridRetriever + Knowledge Tools DI, §6.1 IdleSchedulerService.
@@ -341,7 +337,6 @@ export async function bootstrap(
   // it via deliverRoutineResult(... { notificationService }).
   const routineCoordinator = wireRoutineCoordinator({
     routineEngine,
-    taskService,
     pluginRuntime,
     settingsService,
     powerMonitor: adaptPowerMonitor(powerMonitor),
@@ -431,19 +426,6 @@ export async function bootstrap(
   // reminder fires immediately into a void. main.ts now invokes
   // `services.startRemindersScheduler()` AFTER `registerIpcHandlers()` to
   // close that gap.
-
-  // Task deadline detector (observer side) — polls TaskService for pending
-  // tasks whose dueAt is within the warning window and emits
-  // `task.deadline.approaching` on the host event bus. Brain plugins
-  // (work-proactive etc.) subscribe via `pluginAccess.events` and decide
-  // whether to fire `triggerConversation()`. Same observer/judge split as
-  // calendar.event.upcoming → calendar plugin emits, brain subscribes.
-  // Tasks happen to live in host (split paused — memory
-  // `feedback-tasks-plugin-split-paused`), so the observer lives here.
-  const taskDeadlinePoller = new TaskDeadlinePoller(taskService);
-  taskDeadlinePoller.onApproaching((payload) => {
-    emitEvent("task.deadline.approaching", payload);
-  });
 
   // Trigger executor — spawns a fresh ConversationLoop per
   // hostApi.triggerConversation() call so the user's chat history is never
@@ -549,7 +531,7 @@ export async function bootstrap(
 
   return {
     pythonRuntime, pythonPath,
-    pluginRuntime, pluginMarketplace, taskService, taskSourceRegistry, settingsService,
+    pluginRuntime, pluginMarketplace, settingsService,
     memoryManager, keywordEngine, routeEngine, toolRegistry,
     systemPromptBuilder, conversationLoop, routineEngine, mcpManager, mcpArtifactStore,
     triggerExecutor: lateBinding.triggerExecutorRef.fn ?? undefined,
@@ -559,7 +541,6 @@ export async function bootstrap(
     notificationService,
     telemetry, pluginTelemetry, autoUpdaterStop,
     startRemindersScheduler: () => remindersScheduler.start(),
-    startTaskDeadlinePoller: () => taskDeadlinePoller.start(),
     refreshPluginNotifications: () => {
       disposePluginNotifications();
       disposePluginNotifications = registerPluginNotifications(pluginRuntime, mainWindow);
@@ -578,12 +559,10 @@ export async function bootstrap(
         pluginTelemetry?.stop();
         idleScheduler?.stop();
         remindersScheduler.stop();
-        taskDeadlinePoller.stop();
         askUserQuestionGate.disposeAll();
         mcpGovernance.stopPolicyRefresh();
         await mcpManager.disconnectAll();
         await auditService.stop();
-        taskService.close();
       })();
       return shutdownPromise;
     },

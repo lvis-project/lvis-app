@@ -34,7 +34,7 @@ const SLASH_COMMANDS: { cmd: string; label: string }[] = [
 ];
 
 export interface CommandPopoverProps {
-  /** Quick-action items (홈, 태스크, 루틴, 설정, 새 대화, plugin views …) */
+  /** Quick-action items (홈, 루틴, 설정, 새 대화, plugin views …) */
   actions: QuickAction[];
   /** Called when a slash command is selected; receives the command string with a trailing space e.g. "/help " */
   onInsert: (cmd: string) => void;
@@ -221,7 +221,6 @@ export function buildQuickActions({
 }): QuickAction[] {
   return [
     { id: "home",      label: "홈으로 이동",   run: () => setActiveView("home") },
-    { id: "tasks",     label: "태스크 보기",   run: () => setActiveView("tasks") },
     { id: "routines",  label: "루틴 보기",     run: () => setActiveView("routines") },
     { id: "settings",  label: "설정 열기",     run: () => setSettingsOpen(true) },
     { id: "new-chat",  label: "새 대화 시작",  run: handleNewChat },

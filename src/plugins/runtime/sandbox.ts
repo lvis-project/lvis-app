@@ -128,7 +128,6 @@ export function createNoopHostApi(
     onEvent: () => () => {},
     getInstalledPluginIds: () => [],
     onPluginsChanged: () => () => {},
-    addTask: () => {},
     getSecret: () => null,
     callTool: async () => {
       throw new Error("Plugin tool invocation not available in noop context");

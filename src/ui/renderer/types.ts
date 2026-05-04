@@ -25,18 +25,6 @@ export type MarketplaceItem = {
 
 export type PluginUiExtension = PluginUiExtensionView;
 
-export type Task = {
-  id: string;
-  title: string;
-  description?: string;
-  source: string;
-  priority: "high" | "medium" | "low";
-  status: "pending" | "done" | "snoozed";
-  dueAt?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export type PluginConfigSchemaPropertySummary = {
   type: "string" | "number" | "integer" | "boolean" | "array";
   title?: string;
@@ -322,12 +310,6 @@ export type LvisApi = {
    */
   onPluginEvent?: (eventType: string, handler: (data: unknown) => void) => (() => void);
   listPluginCards: () => Promise<PluginCardSummary[]>;
-  addTask: (t: unknown) => Promise<Task>;
-  queryTasks: (f?: unknown) => Promise<Task[]>;
-  updateTask: (id: string, p: unknown) => Promise<Task>;
-  deleteTask: (id: string) => Promise<void>;
-  getTodayTasks: () => Promise<Task[]>;
-  getOverdueTasks: () => Promise<Task[]>;
   listRoutines: () => Promise<RoutineRecord[]>;
   updateRoutine: (
     routineId: string,
