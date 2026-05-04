@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { requestAgentApproval } from "../agent-action-requester.js";
+import { requestAgentApproval, ApprovalIssuerRegistry } from "../agent-action-requester.js";
 import type { ApprovalGate } from "../approval-gate.js";
 import type { ApprovalDecision } from "../approval-gate.js";
 
@@ -212,5 +212,83 @@ describe("hostApi.agentApproval.respond — gate.resolve round-trip", () => {
       nonce: undefined,
       hmac: undefined,
     });
+  });
+});
+
+// ─── Group A — ApprovalIssuerRegistry.purgeStalerThan ────────────────────────
+
+describe("ApprovalIssuerRegistry.purgeStalerThan", () => {
+  it("purges entries older than maxAgeMs", () => {
+    const r = new ApprovalIssuerRegistry();
+    const old = "req-old";
+    r.record(old, "plugin-a", "agent_file_share");
+    // simulate clock advance
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 60_000);
+    const fresh = "req-fresh";
+    r.record(fresh, "plugin-a", "agent_file_share");
+    const purged = r.purgeStalerThan(30_000);
+    expect(purged).toBe(1); // old purged
+    expect(r.peek(fresh)).toBeDefined();
+    expect(r.peek(old)).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("returns 0 when nothing is older than maxAgeMs", () => {
+    const r = new ApprovalIssuerRegistry();
+    r.record("a", "p", "s");
+    expect(r.purgeStalerThan(60_000)).toBe(0);
+  });
+
+  it("boundary: entry exactly at cutoff is preserved (uses < not <=)", () => {
+    const r = new ApprovalIssuerRegistry();
+    vi.useFakeTimers();
+    const t0 = Date.now();
+    vi.setSystemTime(t0);
+    r.record("a", "p", "s");
+    vi.setSystemTime(t0 + 30_000);
+    expect(r.purgeStalerThan(30_000)).toBe(0); // recordedAt(t0) < cutoff(t0)? false → preserved
+    vi.useRealTimers();
+  });
+});
+
+// ─── Group B — requestAgentApproval try-finally entry cleanup ────────────────
+
+describe("requestAgentApproval try-finally cleanup", () => {
+  it("deletes registry entry when gate.requestAndWait throws", async () => {
+    const r = new ApprovalIssuerRegistry();
+    const gate = {
+      requestAndWait: vi.fn(async () => {
+        throw new Error("gate failure");
+      }),
+    };
+    await expect(
+      requestAgentApproval(
+        gate as unknown as ApprovalGate,
+        { requestId: "req-x", toolName: "t", args: {}, reason: "r", source: "plugin", sourcePluginId: "plugin-a", scope: "agent_file_share" },
+        r,
+      ),
+    ).rejects.toThrow("gate failure");
+    expect(r.peek("req-x")).toBeUndefined(); // cleaned up via finally
+  });
+
+  it("does NOT delete entry on success (registry consumed by respond path)", async () => {
+    const r = new ApprovalIssuerRegistry();
+    const gate = {
+      requestAndWait: vi.fn(async () => ({
+        requestId: "req-y",
+        choice: "allow-once" as const,
+        nonce: "n",
+        hmac: "h",
+      })),
+    };
+    const choice = await requestAgentApproval(
+      gate as unknown as ApprovalGate,
+      { toolName: "t", args: {}, reason: "r", source: "plugin", sourcePluginId: "plugin-a", scope: "agent_file_share" },
+      r,
+    );
+    expect(choice).toBe("allow-once");
+    // The requestId is generated internally — check registry has exactly 1 entry
+    expect(r.size).toBe(1); // settled=true, finally skips delete
   });
 });

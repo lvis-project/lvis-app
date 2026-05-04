@@ -68,6 +68,41 @@ import {
 const log = createLogger("lvis");
 
 /**
+ * AC1.5 audit helper — logs an approval violation then re-throws the original
+ * error. Extracted so the try-catch logic can be unit-tested without wiring the
+ * full initPluginRuntime context.
+ *
+ * Guarantees: if `auditLogger.log` throws, that error is swallowed (non-fatal)
+ * and `err` is still re-thrown to the caller.
+ *
+ * @internal — exported for testing only; production code calls this via the
+ *             `respond()` closure inside initPluginRuntime.
+ */
+export function auditApprovalViolation(
+  err: unknown,
+  auditLogger: { log(entry: AuditEntry): void },
+  pluginId: string,
+  requestId: string,
+): never {
+  try {
+    auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "approval-gating",
+      type: "error",
+      input: err instanceof ApprovalOriginError
+        ? `[${err.code}] plugin='${pluginId}' requestId='${requestId}' ${err.message}`
+        : `[approval-gating] plugin='${pluginId}' requestId='${requestId}' ${String(err)}`,
+    });
+  } catch (auditErr) {
+    log.warn(
+      "approval-gating audit log failed (non-fatal): %s",
+      (auditErr as Error).message,
+    );
+  }
+  throw err;
+}
+
+/**
  * §8 P0 security — shared issuer registry for agent approval origin gating.
  * Instantiated once per boot (module-level singleton). Records
  * (requestId → issuerPluginId + scope) at request time so the respond path
@@ -981,15 +1016,7 @@ export async function initPluginRuntime(
               allowedScopes,
             );
           } catch (err) {
-            bootAuditLogger.log({
-              timestamp: new Date().toISOString(),
-              sessionId: "approval-gating",
-              type: "error",
-              input: err instanceof ApprovalOriginError
-                ? `[${err.code}] plugin='${pluginId}' requestId='${requestId}' ${err.message}`
-                : `[approval-gating] plugin='${pluginId}' requestId='${requestId}' ${String(err)}`,
-            });
-            throw err;
+            auditApprovalViolation(err, bootAuditLogger, pluginId, requestId);
           }
           approvalGate.resolve(requestId, { requestId, choice, nonce, hmac });
         },
@@ -1042,6 +1069,33 @@ export async function initPluginRuntime(
         return decision.result;
       },
     }),
+  });
+
+  // AC1.2 — periodic purge of stale ApprovalIssuerRegistry entries.
+  // ApprovalGate's per-request timeout (default 5 min) resolves deny-once but
+  // doesn't reach back into this registry; if the respond path is never hit
+  // (renderer crash, plugin crash) the issuer entry would leak. We sweep on
+  // a 1-minute cadence, dropping anything older than the gate timeout. The
+  // interval is cleared on `before-quit` to avoid keeping the process alive
+  // during shutdown.
+  const APPROVAL_REGISTRY_PURGE_MAX_AGE_MS = 5 * 60 * 1000;
+  const APPROVAL_REGISTRY_PURGE_INTERVAL_MS = 60 * 1000;
+  const approvalRegistryPurgeTimer = setInterval(() => {
+    try {
+      const purged = approvalIssuerRegistry.purgeStalerThan(
+        APPROVAL_REGISTRY_PURGE_MAX_AGE_MS,
+      );
+      if (purged > 0) {
+        log.info("approval issuer registry purged %d stale entries", purged);
+      }
+    } catch (err) {
+      log.warn("approval registry purge failed: %s", (err as Error).message);
+    }
+  }, APPROVAL_REGISTRY_PURGE_INTERVAL_MS);
+  // Don't keep the event loop alive solely for this housekeeping timer.
+  approvalRegistryPurgeTimer.unref?.();
+  app.prependOnceListener("before-quit", () => {
+    clearInterval(approvalRegistryPurgeTimer);
   });
 
   await pluginRuntime.startAll();
