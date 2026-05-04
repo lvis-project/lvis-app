@@ -306,11 +306,21 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             const myTurnStart = turnStart >= 0 ? turnStart : 0;
             entryTurnStartMap.set(i, myTurnStart);
 
-            if (hasSubsequent) {
+            // Assistant text is the answer the user came for — it must never
+            // be hidden inside the auto-collapsing WorkGroup. Only tool/reasoning
+            // "work" entries get collapsed when followed by more turn content.
+            // (See screenshot regression on 2026-05-04: a multi-round turn
+            //  ended with the first assistant bubble collapsed inside "작업
+            //  1단계 ▶", making the response look truncated.)
+            if (e.kind === "assistant") {
+              if (!hasSubsequent && !streaming) {
+                entryClassMap.set(i, "final");
+                finalTurnStartMap.set(i, myTurnStart);
+              } else {
+                entryClassMap.set(i, "live");
+              }
+            } else if (hasSubsequent) {
               entryClassMap.set(i, "intermediate");
-            } else if (e.kind === "assistant" && !streaming) {
-              entryClassMap.set(i, "final");
-              finalTurnStartMap.set(i, myTurnStart);
             } else {
               entryClassMap.set(i, "live");
             }
