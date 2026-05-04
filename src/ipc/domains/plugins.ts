@@ -103,6 +103,13 @@ interface PluginWebviewBinding {
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
+export type SafeThemePayload = {
+  theme: "light" | "dark" | "high-contrast";
+  chatTheme: "default" | "lg" | "purple" | "orange" | "blue";
+  codeTheme: "light" | "dark";
+  tokens?: Record<string, string>;
+};
+
 /**
  * Last validated `host.theme.changed` payload broadcast to plugin webviews.
  *
@@ -134,6 +141,31 @@ export function recordValidatedTheme(payload: unknown):
   const result = validateThemePayload(payload);
   if (result.ok) lastThemePayload = result.safe;
   return result;
+}
+
+/**
+ * Push the cached theme payload to a freshly registered webview so the
+ * plugin paints with the active tokens from first frame instead of the
+ * SDK `:root` fallback. Returns the payload that was sent (or null when
+ * the cache is empty / wc destroyed) so callers can log lifecycle.
+ *
+ * Synchronous between `register-webview` returning OK and this call, so
+ * `webContents.fromId` should always succeed; the catch is defensive
+ * against pathological reload paths where the wc tears down between
+ * registry-set and send.
+ */
+export function replayThemeToWebview(webContentsId: number): SafeThemePayload | null {
+  if (!lastThemePayload) return null;
+  try {
+    const wc = webContents.fromId(webContentsId);
+    if (wc && !wc.isDestroyed()) {
+      wc.send("lvis:plugin:event", "host.theme.changed", lastThemePayload);
+      return lastThemePayload;
+    }
+  } catch {
+    /* swallowed — caller logs at debug. */
+  }
+  return null;
 }
 
 /** @internal — test-only reset to keep cross-test state clean. */
@@ -220,13 +252,6 @@ async function preparePythonRuntimeForInstalledPlugin(
   if (!runtime) return;
   deps.pluginRuntime.mergeConfigOverride("*", { pythonExecutable: runtime.pythonPath });
 }
-
-export type SafeThemePayload = {
-  theme: "light" | "dark" | "high-contrast";
-  chatTheme: "default" | "lg" | "purple" | "orange" | "blue";
-  codeTheme: "light" | "dark";
-  tokens?: Record<string, string>;
-};
 
 export function validateThemePayload(payload: unknown):
   | { ok: true; safe: SafeThemePayload }
@@ -900,13 +925,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
-    if (lastThemePayload) {
-      try {
-        const wc = webContents.fromId(webContentsId);
-        if (wc && !wc.isDestroyed()) {
-          wc.send("lvis:plugin:event", "host.theme.changed", lastThemePayload);
-        }
-      } catch { /* wc destroyed between register and replay */ }
+    if (replayThemeToWebview(webContentsId)) {
+      plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "theme replay sent");
     }
     return { ok: true };
   });
