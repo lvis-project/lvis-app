@@ -142,6 +142,7 @@ export function createNoopHostApi(
       source: typeof spec?.source === "string" ? spec.source : "",
     }),
     agentApproval: {
+      request: async () => "deny-once" as const,
       respond: async () => {},
     },
   };

@@ -30,6 +30,7 @@ const BASE_INPUT = {
   reason: "승인 요청: 결재 ID 42",
   source: "plugin" as const,
   sourcePluginId: "agent-hub",
+  scope: "agent_external_api_call",
 };
 
 // ─── Tests ────────────────────────────────────────────

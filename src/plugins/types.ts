@@ -61,6 +61,18 @@ export interface PluginAccessTarget {
 
 export interface PluginAccessSpec {
   plugins: PluginAccessTarget[];
+  /**
+   * §8 P0 security — approval action scopes this plugin is permitted to
+   * issue via `requestAgentApproval()` / `hostApi.agentApproval.respond()`.
+   *
+   * Defaults to empty array (no approval scopes allowed) when omitted.
+   * The host verifies at respond-time that the issuer's declared scopes
+   * include the scope recorded at request-time — violations throw
+   * ApprovalOriginError (no silent fallback).
+   *
+   * Known scopes: "agent_file_share", "agent_task_delegate", "agent_external_api_call"
+   */
+  agentApprovalScopes?: string[];
 }
 
 /**
@@ -746,6 +758,24 @@ export interface PluginHostApi {
    */
   agentApproval: {
     /**
+     * Request an approval via the §8 ApprovalGate on behalf of this plugin.
+     *
+     * Records (requestId → issuerPluginId + scope) in the host's
+     * ApprovalIssuerRegistry BEFORE calling the gate, so the respond path
+     * can verify cross-plugin hijack and scope violations.
+     *
+     * The gate generates nonce + HMAC internally (§D2 confused-deputy defense).
+     * Plugin MUST NOT compute nonce/HMAC.
+     *
+     * `scope` must be declared in `manifest.pluginAccess.agentApprovalScopes`.
+     */
+    request(input: {
+      toolName: string;
+      args: unknown;
+      reason: string;
+      scope: string;
+    }): Promise<ApprovalChoice>;
+    /**
      * Resolve a pending ApprovalGate entry from the main process.
      *
      * Equivalent to `approvalGate.resolve(requestId, { requestId, choice, nonce, hmac })`.
@@ -753,8 +783,8 @@ export interface PluginHostApi {
      * the original ApprovalRequest — the gate re-verifies them before honoring
      * the decision. A mismatch forces deny-once (confused-deputy defense).
      *
-     * If no pending entry matches `requestId`, this is a no-op (safe to call
-     * after timeout).
+     * §8 P0 security: host verifies (a) requestId was issued by this plugin,
+     * (b) scope is in manifest.pluginAccess.agentApprovalScopes. Violations throw.
      *
      * NOTE: a `list()` method was deliberately NOT exposed. Listing pending
      * approvals from a plugin would surface gate-issued nonces/HMACs (§D2
