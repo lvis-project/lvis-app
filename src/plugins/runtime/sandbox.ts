@@ -7,6 +7,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { PluginHostApi, PluginManifest } from "../types.js";
 import { createPluginStorage } from "../storage.js";
+import { applyConfigDefaults } from "../config-schema.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("sandbox");
 
@@ -165,11 +166,18 @@ export function buildPluginContext(opts: {
     pluginRoot: opts.pluginRoot,
     hostRoot: opts.hostRoot,
     pluginDataDir: opts.pluginDataDir,
-    config: {
+    // configSchema defaults backfill keys missing from `manifest.config`
+    // and the override layers — without this, plugins that document a
+    // `default` for a config key (e.g. agent-hub's `hubServerUrl`) would
+    // see `undefined` whenever the user hasn't explicitly set the key,
+    // forcing every plugin to reimplement default-handling. Override
+    // precedence is preserved: plugin-specific > wildcard > manifest.config
+    // > schema defaults.
+    config: applyConfigDefaults(opts.manifest.configSchema, {
       ...(opts.manifest.config ?? {}),
       ...(opts.configOverrides["*"] ?? {}),
       ...(opts.configOverrides[opts.pluginId] ?? {}),
-    },
+    }),
     log: (message: string, meta?: unknown) => {
       if (meta !== undefined) {
         log.info({ pluginId: opts.pluginId, meta }, message);
