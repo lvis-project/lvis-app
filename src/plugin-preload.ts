@@ -58,6 +58,26 @@ console.log("[lvis:plugin-preload] loaded", {
  * existing plugins that already unwrap defensively (e.g. lvis-plugin-lge-api's
  * `unwrapBridgeReply`) continue to work unchanged after this lands.
  */
+/**
+ * Event types whose most recent payload should be replayed to a freshly
+ * subscribed handler. Plain `ipcRenderer.on(...)` is late-binding — `onEvent`
+ * only attaches its listener when the plugin calls `bridge.onEvent(type, h)`,
+ * which happens inside `useEffect` (i.e. after the React tree mounts). Any
+ * `lvis:plugin:event` IPC that arrives before that — including main's
+ * register-time theme replay — is silently dropped without this buffer.
+ *
+ * For these types we keep ONLY the latest payload (state, not log), so the
+ * buffer never grows past `STICKY_EVENT_TYPES.size` entries. New types can
+ * be added when main starts caching them too (see lvis-app
+ * `src/ipc/domains/plugins.ts` `lastThemePayload`).
+ */
+const STICKY_EVENT_TYPES = new Set<string>(["host.theme.changed"]);
+const stickyLastPayload = new Map<string, unknown>();
+
+ipcRenderer.on("lvis:plugin:event", (_e, type: string, data: unknown) => {
+  if (STICKY_EVENT_TYPES.has(type)) stickyLastPayload.set(type, data);
+});
+
 function unwrapEnvelope(reply: unknown): unknown {
   if (reply && typeof reply === "object" && "ok" in reply) {
     const env = reply as { ok: unknown; result?: unknown; error?: unknown };
@@ -78,6 +98,9 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
   },
 
   onEvent: (type: string, handler: (data: unknown) => void): (() => void) => {
+    if (STICKY_EVENT_TYPES.has(type) && stickyLastPayload.has(type)) {
+      try { handler(stickyLastPayload.get(type)); } catch { /* handler errors are the plugin's */ }
+    }
     const listener = (_event: unknown, incomingType: string, data: unknown) => {
       if (incomingType === type) handler(data);
     };
