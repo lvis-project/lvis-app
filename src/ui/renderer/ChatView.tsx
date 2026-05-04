@@ -108,10 +108,10 @@ export interface ChatViewProps {
   /**
    * §457 Phase 3: revert active session to the parent of a rotation
    * checkpoint. When provided, a "여기로 되돌아가기" link is rendered next
-   * to checkpoint fallback entries that carry a `parentSessionId`. When
+   * to checkpoint fallback entries that carry a `revertSessionId`. When
    * omitted, the link is hidden even on rotation checkpoints.
    */
-  onRevertCheckpoint?: (parentSessionId: string) => void | Promise<void>;
+  onRevertCheckpoint?: (revertSessionId: string) => void | Promise<void>;
 }
 
 export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onRevertCheckpoint }: ChatViewProps) {
