@@ -3,13 +3,11 @@ export interface ChatTabProps {
   setAutoCompact: (updater: boolean | ((prev: boolean) => boolean)) => void;
   streamSmoothing: "none" | "word" | "char";
   setStreamSmoothing: (v: "none" | "word" | "char") => void;
-  experimentalStackedChat?: boolean;
-  setExperimentalStackedChat?: (v: boolean) => void;
   experimentalContinuousBackend?: boolean;
   setExperimentalContinuousBackend?: (v: boolean) => void;
 }
 
-export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStreamSmoothing, experimentalStackedChat, setExperimentalStackedChat, experimentalContinuousBackend, setExperimentalContinuousBackend }: ChatTabProps) {
+export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStreamSmoothing, experimentalContinuousBackend, setExperimentalContinuousBackend }: ChatTabProps) {
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-2">
@@ -53,29 +51,12 @@ export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStrea
         </div>
         <p className="text-[11px] text-muted-foreground">출력 스트림을 단어 또는 글자 단위로 부드럽게 표시합니다.</p>
       </div>
-      {(setExperimentalStackedChat !== undefined || setExperimentalContinuousBackend !== undefined) && (
+      {setExperimentalContinuousBackend !== undefined && (
         <div className="space-y-2">
           <div>
             <p className="text-sm font-medium">실험적 기능</p>
             <p className="text-[11px] text-muted-foreground">기본값 OFF — 설정 후 앱 재시작 없이 전환됩니다.</p>
           </div>
-          {setExperimentalStackedChat !== undefined && (
-            <div className="flex items-center gap-3 rounded-md border px-3 py-3 opacity-50" aria-disabled="true">
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={false}
-                aria-disabled="true"
-                disabled
-                data-testid="stacked-chat-toggle"
-                className="relative h-5 w-5 flex-shrink-0 rounded border-2 border-muted-foreground cursor-not-allowed"
-              />
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium">Experimental: 연속 채팅 기록 (stacked view)</p>
-                <p className="text-[11px] text-muted-foreground">미구현 — 일부 메시지 유형 렌더링 없음. 다음 릴리스에서 완성 예정.</p>
-              </div>
-            </div>
-          )}
           {setExperimentalContinuousBackend !== undefined && (
             <div className="flex items-center gap-3 rounded-md border px-3 py-3">
               <button

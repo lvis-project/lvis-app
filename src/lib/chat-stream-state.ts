@@ -76,11 +76,11 @@ export type ChatEntry =
   | { kind: "system"; text: string }
   // §457 PR-A: structured replacement for the legacy
   // "💾 이전 N개 대화를 요약했습니다" system bubble. Carries the rotation
-  // tier so the StackedChatView's CheckpointDivider can render
-  // tier-aware label/color (emergency vs topic-shift vs natural rest)
-  // without parsing prose. Plain auto/reactive compaction (no rotation)
-  // emits an entry with `tier` undefined, in which case the renderer
-  // falls back to the generic "자동 정리" label.
+  // tier so the checkpoint UI can render tier-aware label/color
+  // (emergency vs topic-shift vs natural rest) without parsing prose.
+  // Plain auto/reactive compaction (no rotation) emits an entry with
+  // `tier` undefined, in which case the renderer falls back to the
+  // generic "자동 정리" label.
   | {
       kind: "checkpoint";
       tier?: CheckpointTier;

@@ -195,9 +195,8 @@ export function useChatState(api: LvisApi) {
         ]);
       } else if (ev.type === "compact_notice") {
         // §457 PR-A: emit a structured `kind: "checkpoint"` entry instead of
-        // a free-text system bubble. StackedChatView reads `tier` to pick a
-        // tier-aware label/color in CheckpointDivider; ChatView falls back
-        // to a single-line system pill. Keeping the old prose route would
+        // a free-text system bubble. ChatView reads `tier` to pick a
+        // tier-aware label/color. Keeping the old prose route would
         // force a brittle string-match (`entry.text.includes("checkpoint")`)
         // that never fired in production because the legacy text didn't
         // contain that token. See Issue #457 Phase 1+2 cleanup.

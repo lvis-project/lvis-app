@@ -3,8 +3,6 @@ import { PluginUiHostView } from "../../plugin-ui-host.js";
 import type { getApi } from "./api-client.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { ChatView } from "./ChatView.js";
-import { StackedChatView } from "./components/StackedChatView.js";
-import { useStackedChat } from "./hooks/use-stacked-chat.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { InstallPhase } from "./hooks/use-plugin-marketplace.js";
@@ -41,13 +39,6 @@ export interface MainContentProps {
   isEntryStarred: (entryIdx: number) => string | null;
   onAbort: () => Promise<void>;
   onFeedback: Parameters<typeof ChatView>[0]["onFeedback"];
-  /**
-   * §457 Phase 3: revert active session to the parent of a rotation
-   * checkpoint. Surfaces the "여기로 되돌아가기" action on
-   * StackedChatView's CheckpointDivider. Optional — when absent the
-   * button is hidden even on rotation checkpoints.
-   */
-  onRevertCheckpoint?: (parentSessionId: string) => Promise<void>;
   // workflow tool state (lifted from ChatView to survive navigation)
   subAgentSpawns: Parameters<typeof ChatView>[0]["subAgentSpawns"];
   loadedSkills: Parameters<typeof ChatView>[0]["loadedSkills"];
@@ -68,8 +59,6 @@ export interface MainContentProps {
   marketplaceUrlReady?: boolean;
   // plugin view
   activePluginView: PluginView | null;
-  /** Feature flag: use StackedChatView instead of ChatView. Default false. */
-  useStackedChatView?: boolean;
 }
 
 function MainPaneShell({ children, padded = true }: { children: ReactNode; padded?: boolean }) {
@@ -81,57 +70,11 @@ function MainPaneShell({ children, padded = true }: { children: ReactNode; padde
 }
 
 /**
- * HomeChatPane — wraps ChatView or StackedChatView depending on the feature flag.
- * Owns useStackedChat hook (only instantiated when stacked view is active).
+ * HomeChatPane — renders ChatView as the single chat renderer (issue #547).
  */
 function HomeChatPane(props: MainContentProps) {
-  const { chatContextValue, api } = props;
-  const useStacked = props.useStackedChatView ?? false;
-
-  // useStackedChat is always called (rules of hooks). The `enabled` flag gates
-  // its IPC effects so we don't pay for session-listing + per-session-history
-  // calls when the legacy ChatView is rendered.
-  const stackedChatHook = useStackedChat(api, props.currentSessionId, useStacked);
-
-  if (useStacked) {
-    return (
-      <ChatContextProvider value={chatContextValue}>
-        <StackedChatView
-          api={props.api}
-          historicalSessions={stackedChatHook.historicalSessions}
-          currentSessionId={props.currentSessionId}
-          entries={chatContextValue.entries}
-          streaming={chatContextValue.streaming}
-          askQuestions={props.askQuestions}
-          onResolveAskQuestion={props.onResolveAskQuestion}
-          onAsk={props.onAsk}
-          onGuide={props.onGuide}
-          onAbort={props.onAbort}
-          loading={stackedChatHook.loading}
-          reachedEnd={stackedChatHook.reachedEnd}
-          sentinelRef={stackedChatHook.sentinelRef}
-          scrollContainerRef={stackedChatHook.scrollContainerRef}
-          plugins={props.plugins}
-          onSelectPlugin={props.onSelectPlugin}
-          commandActions={props.commandActions}
-          commandPopoverOpen={props.commandPopoverOpen}
-          onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}
-          installingPlugins={props.installingPlugins}
-          onOpenMarketplace={props.onOpenMarketplace}
-          marketplaceUrlReady={props.marketplaceUrlReady}
-          onRetryEffort={props.onRetryEffort}
-          onFork={props.onFork}
-          onToggleStar={props.onToggleStar}
-          isEntryStarred={props.isEntryStarred}
-          onFeedback={props.onFeedback}
-          {...(props.onRevertCheckpoint ? { onRevertCheckpoint: props.onRevertCheckpoint } : {})}
-        />
-      </ChatContextProvider>
-    );
-  }
-
   return (
-    <ChatContextProvider value={chatContextValue}>
+    <ChatContextProvider value={props.chatContextValue}>
       <ChatView
         api={props.api}
         onAsk={props.onAsk}

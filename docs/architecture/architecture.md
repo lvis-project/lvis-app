@@ -1073,6 +1073,8 @@ flowchart TB
 | **OpenHarness** | 실행 run 단위를 구조화해 추적 | LVIS도 tool round를 `groupId` 단위로 추적 |
 | **Paperclip / PaperclipAI** | thinking, tool call, tool result, assistant를 분리 기록 | reasoning card와 assistant round를 분리 유지 |
 
+Chat은 단일 `ChatView` 컴포넌트를 통해 렌더링된다 (issue #547). PR #473에서 도입된 `StackedChatView` 컴포넌트는 제거되었으며 — Kakao-style 연속 스트림, day separator, token chip, WorkGroup 등 설계 의도는 `ChatView`에 직접 흡수되었다. 태그 `v1-chat` (`24191323`)이 회귀 경계로 유지된다 — chat 동작은 해당 지점 이전으로 회귀해서는 안 된다.
+
 #### 4.5.11 Continuous Chat Rotation — 3-Tier Decision + Incomplete-Turn Guards
 
 Issue #457 (Continuous Chat v3) 의 Phase 1+2+3 구현. §4.5.4 의 Auto-Compact 가 *현재 세션 안에서* 토큰을 줄이는 것이라면, Rotation 은 *세션 자체를 분기* 하여 child session 에 rolling summary preamble 만 남기고 fresh 컨텍스트로 시작한다. `runRotationCheck` 가 매 턴-종료 직후 (`runTurn` line 687) 호출되며, 결정 트리는 `decideRotation` (`auto-compact.ts`).

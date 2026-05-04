@@ -395,11 +395,9 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               continue;
             }
 
-            // §457 PR-A: legacy ChatView gets a single-line text fallback for the
-            // structured kinds. The rich CheckpointDivider/SessionResumeDivider live
-            // in StackedChatView; the legacy view only needs to surface that *some*
-            // checkpoint or resume happened so the user does not lose visibility
-            // when the stacked-chat feature flag is OFF.
+            // §457 PR-A: ChatView surfaces a single-line text fallback for
+            // structured kinds (checkpoint, session_resume) so the user does not
+            // lose visibility of rotation events.
             if (entry.kind === "checkpoint") {
               const tierLabel = entry.tier === "hard-token"
                 ? "긴급 정리"
