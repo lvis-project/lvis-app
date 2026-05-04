@@ -26,6 +26,7 @@
 import { test as base, expect } from '../ui/fixtures';
 import { AgentHubMockServer } from './fixtures/agent-hub-mock-server';
 import type { Page, Locator } from 'playwright';
+import { openAgentHubTab, waitForV3Panel, waitForAuthS3, setupMockRoutes } from './_helpers';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -43,62 +44,6 @@ const ROW_GRID_RATIO_TOLERANCE = 0.05; // 5%
 
 /** Width tolerance for "same column" assertions (±2 px per acceptance criteria). */
 const WIDTH_TOLERANCE_PX = 2;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Navigate to the agent-hub plugin tab.
- * Returns true when the tab was found and clicked.
- */
-async function openAgentHubTab(page: Page): Promise<boolean> {
-  const candidates = [
-    '[data-testid="agent-hub-tab"]',
-    'button[role="tab"]:has-text("에이전트 허브")',
-    'button[role="tab"]:has-text("Agent Hub")',
-    '[role="tab"]:has-text("에이전트 허브")',
-    '[role="tab"]:has-text("Agent Hub")',
-  ];
-  for (const sel of candidates) {
-    const el = page.locator(sel).first();
-    const visible = await el
-      .waitFor({ state: 'visible', timeout: 5_000 })
-      .then(() => true)
-      .catch(() => false);
-    if (visible) {
-      await el.click();
-      return true;
-    }
-  }
-  return false;
-}
-
-/** Wait for the v3 panel; return the locator or null. */
-async function waitForV3Panel(page: Page, timeout = 20_000): Promise<Locator | null> {
-  const panel = page.locator('[data-testid="agent-hub-panel-v3"]').first();
-  const found = await panel
-    .waitFor({ state: 'visible', timeout })
-    .then(() => true)
-    .catch(() => false);
-  return found ? panel : null;
-}
-
-/**
- * Ensure auth is at S3 (data loaded) by waiting for the toggle buttons to be
- * enabled.  The toggle is disabled in S0/S1/S2, enabled only in S3.
- */
-async function waitForAuthS3(panel: Locator, timeout = 30_000): Promise<boolean> {
-  const myworkBtn = panel.locator('[data-testid="agent-hub-toggle-mywork"]').first();
-  const visible = await myworkBtn
-    .waitFor({ state: 'visible', timeout })
-    .then(() => true)
-    .catch(() => false);
-  if (!visible) return false;
-  // Poll until enabled — avoids a race where the toggle is visible-but-disabled
-  // briefly during the S2→S3 auth transition.
-  return expect(myworkBtn).toBeEnabled({ timeout }).then(() => true).catch(() => false);
-}
 
 /** Click the 마이워크 toggle tab and wait for the view to mount. */
 async function switchToMyWork(panel: Locator, page: Page): Promise<void> {
@@ -145,18 +90,12 @@ const test = base.extend<Fixtures>({
 
 async function setupPanel(
   page: Page,
-  mockBaseUrl: string,
+  mockServer: AgentHubMockServer,
 ): Promise<{ panel: Locator; skip: boolean; skipReason: string }> {
-  // Inject mock base URL via addInitScript so any in-page fetch triggered at
-  // panel mount already sees the stub URL — avoids an initial-fetch race where
-  // the panel fires a real network call before evaluate() can run.
-  await page.addInitScript((baseUrl: string) => {
-    const win = window as any;
-    win.__LVIS_AGENT_HUB_MOCK_BASE__ = baseUrl;
-    // Also seed lvisEnv early in case the plugin reads it at module init time.
-    win.lvisEnv = win.lvisEnv ?? {};
-    win.lvisEnv.AGENT_HUB_API_BASE = baseUrl;
-  }, mockBaseUrl);
+  // Set up Playwright route interception BEFORE opening the tab so any fetch
+  // triggered at panel mount is already intercepted.  page.route() works on
+  // the already-loaded Electron window; page.addInitScript() does not.
+  await setupMockRoutes(page, mockServer);
 
   const tabFound = await openAgentHubTab(page);
   if (!tabFound) {
@@ -185,7 +124,7 @@ test('마이워크: TodayScheduleCard stretches taller than WeeklyGantt + MyBoar
   mainWindow,
   mockServer,
 }) => {
-  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer.baseUrl);
+  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
   await switchToMyWork(panel!, mainWindow);
@@ -221,7 +160,7 @@ test('팀보드: TeamScheduleCard stretches taller than KPI + TeamBoardList comb
   mainWindow,
   mockServer,
 }) => {
-  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer.baseUrl);
+  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
   await switchToTeamBoard(panel!, mainWindow);
@@ -256,7 +195,7 @@ test('팀보드: TeamSummaryCard is positioned above the KPI and list cards', as
   mainWindow,
   mockServer,
 }) => {
-  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer.baseUrl);
+  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
   await switchToTeamBoard(panel!, mainWindow);
@@ -292,7 +231,7 @@ test('마이워크: WeeklyGanttCard and MyBoardCard share the same column width 
   mainWindow,
   mockServer,
 }) => {
-  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer.baseUrl);
+  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
   await switchToMyWork(panel!, mainWindow);
@@ -319,7 +258,7 @@ test('팀보드: TeamKpiCombo and TeamBoardListCard share the same column width 
   mainWindow,
   mockServer,
 }) => {
-  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer.baseUrl);
+  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
   await switchToTeamBoard(panel!, mainWindow);
@@ -350,7 +289,7 @@ test('마이워크: ah-row-grid preserves 1.45fr/0.55fr column ratio (LLM vs App
   mainWindow,
   mockServer,
 }) => {
-  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer.baseUrl);
+  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
   test.skip(skip, skipReason);
 
   await switchToMyWork(panel!, mainWindow);

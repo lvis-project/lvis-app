@@ -19,53 +19,7 @@
 
 import { AgentHubMockServer } from './fixtures/agent-hub-mock-server';
 import { test as base, expect } from '../ui/fixtures';
-import type { Page } from 'playwright';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Navigate to the agent-hub plugin tab in the main toolbar.
- * Returns true if found, false if the plugin is not present (skip signal).
- */
-async function openAgentHubTab(page: Page): Promise<boolean> {
-  // Plugin tab may be labelled with the plugin's displayName from plugin.json.
-  // Try data-testid first, then common label variants.
-  const tabSelectors = [
-    '[data-testid="agent-hub-tab"]',
-    'button[role="tab"]:has-text("에이전트 허브")',
-    'button[role="tab"]:has-text("Agent Hub")',
-    '[role="tab"]:has-text("에이전트 허브")',
-    '[role="tab"]:has-text("Agent Hub")',
-  ];
-
-  for (const sel of tabSelectors) {
-    const tab = page.locator(sel).first();
-    const visible = await tab
-      .waitFor({ state: 'visible', timeout: 5_000 })
-      .then(() => true)
-      .catch(() => false);
-    if (visible) {
-      await tab.click();
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Wait for the agent-hub v3 panel to be visible.
- * Returns the panel locator or null when not present.
- */
-async function waitForV3Panel(page: Page, timeout = 20_000) {
-  const panel = page.locator('[data-testid="agent-hub-panel-v3"]').first();
-  const found = await panel
-    .waitFor({ state: 'visible', timeout })
-    .then(() => true)
-    .catch(() => false);
-  return found ? panel : null;
-}
+import { openAgentHubTab, waitForV3Panel, setupMockRoutes } from './_helpers';
 
 // ---------------------------------------------------------------------------
 // Extended fixture: mock server lifecycle
@@ -161,22 +115,14 @@ test('ah-pill-toggle switches between 마이워크 and 팀보드', async ({ main
 // ---------------------------------------------------------------------------
 
 test('approval row click opens ConfirmModal and confirm updates DOM', async ({ mainWindow, mockServer }) => {
+  // Set up route interception BEFORE opening the tab so panel-mount fetches are intercepted.
+  await setupMockRoutes(mainWindow, mockServer);
+
   const tabFound = await openAgentHubTab(mainWindow);
   test.skip(!tabFound, 'agent-hub plugin tab not present — skipping approval test');
 
   const panel = await waitForV3Panel(mainWindow);
   test.skip(!panel, 'agent-hub-panel-v3 not mounted — skipping approval test');
-
-  // Inject mock server URL into the plugin's fetch base via window env
-  // (the plugin reads LVIS_AGENT_HUB_API_BASE from window.lvisEnv or falls
-  // back to the default; we expose it via evaluate before the panel fetches)
-  await mainWindow.evaluate((baseUrl: string) => {
-    const win = window as any;
-    win.__LVIS_AGENT_HUB_MOCK_BASE__ = baseUrl;
-    if (win.lvisEnv) {
-      win.lvisEnv.AGENT_HUB_API_BASE = baseUrl;
-    }
-  }, mockServer.baseUrl);
 
   // Find the first approval row — try specific testid pattern first
   const approvalRow = panel!
@@ -393,17 +339,11 @@ test('bridge.config round-trip: gear → SettingsPanel → save → value persis
 // ---------------------------------------------------------------------------
 
 test('S5PartialSync banner appears when one region fails', async ({ mainWindow, mockServerFailing }) => {
+  // Set up route interception BEFORE opening the tab so panel-mount fetches are intercepted.
+  await setupMockRoutes(mainWindow, mockServerFailing);
+
   const tabFound = await openAgentHubTab(mainWindow);
   test.skip(!tabFound, 'agent-hub plugin tab not present — skipping partial-sync test');
-
-  // Inject failing mock server URL
-  await mainWindow.evaluate((baseUrl: string) => {
-    const win = window as any;
-    win.__LVIS_AGENT_HUB_MOCK_BASE__ = baseUrl;
-    if (win.lvisEnv) {
-      win.lvisEnv.AGENT_HUB_API_BASE = baseUrl;
-    }
-  }, mockServerFailing.baseUrl);
 
   const panel = await waitForV3Panel(mainWindow);
   test.skip(!panel, 'agent-hub-panel-v3 not mounted — skipping partial-sync test');
@@ -462,14 +402,11 @@ test('S5PartialSync banner appears when one region fails', async ({ mainWindow, 
 // ---------------------------------------------------------------------------
 
 test('ah-myboard-row entries are visible in 마이워크 board', async ({ mainWindow, mockServer }) => {
+  // Set up route interception BEFORE opening the tab so panel-mount fetches are intercepted.
+  await setupMockRoutes(mainWindow, mockServer);
+
   const tabFound = await openAgentHubTab(mainWindow);
   test.skip(!tabFound, 'agent-hub plugin tab not present — skipping myboard test');
-
-  await mainWindow.evaluate((baseUrl: string) => {
-    const win = window as any;
-    win.__LVIS_AGENT_HUB_MOCK_BASE__ = baseUrl;
-    if (win.lvisEnv) win.lvisEnv.AGENT_HUB_API_BASE = baseUrl;
-  }, mockServer.baseUrl);
 
   const panel = await waitForV3Panel(mainWindow);
   test.skip(!panel, 'agent-hub-panel-v3 not mounted — skipping myboard test');
