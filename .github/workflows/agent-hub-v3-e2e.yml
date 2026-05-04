@@ -52,7 +52,7 @@ jobs:
 
       - name: Install Playwright Chromium
         working-directory: lvis-app
-        run: bunx playwright install --with-deps=false chromium
+        run: bunx playwright install chromium
 
       - name: Build app
         working-directory: lvis-app
