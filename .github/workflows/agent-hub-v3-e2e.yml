@@ -1,0 +1,76 @@
+name: Agent Hub v3 E2E
+
+on:
+  pull_request:
+    paths:
+      - 'test/e2e/agent-hub/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'test/e2e/agent-hub/**'
+  schedule:
+    # Nightly at 02:00 UTC (11:00 KST)
+    - cron: '0 2 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  agent-hub-v3-e2e:
+    name: Agent Hub v3 E2E (Playwright + Electron)
+    runs-on: [self-hosted, Linux, ARM64, oracle]
+    timeout-minutes: 30
+    env:
+      E2E: "1"
+      LVIS_E2E: "1"
+      LVIS_DEV: "1"
+      NODE_ENV: test
+      ELECTRON_DISABLE_SECURITY_WARNINGS: "1"
+
+    steps:
+      - name: Checkout lvis-app
+        uses: actions/checkout@v4
+        with:
+          path: lvis-app
+
+      - name: Install xvfb + Electron runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            xvfb \
+            libgtk-3-0 libnss3 libasound2t64 libxss1 libxshmfence1 \
+            libgbm1 libdrm2 libxcomposite1 libxrandr2 libatk1.0-0 \
+            libatk-bridge2.0-0 libcups2 libpangocairo-1.0-0 \
+            libpango-1.0-0 libcairo2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install dependencies
+        working-directory: lvis-app
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: lvis-app
+        run: bunx playwright install --with-deps=false chromium
+
+      - name: Build app
+        working-directory: lvis-app
+        run: bun run build
+
+      - name: Run Agent Hub v3 E2E tests
+        working-directory: lvis-app
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" bunx playwright test test/e2e/agent-hub/
+        env:
+          CI: "true"
+
+      - name: Upload Playwright report and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-hub-v3-playwright-report-${{ github.run_id }}
+          path: |
+            lvis-app/playwright-report/
+            lvis-app/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
