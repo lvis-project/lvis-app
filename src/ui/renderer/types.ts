@@ -141,7 +141,6 @@ export type AppSettings = {
   };
   /** Experimental feature flags — all default false. */
   features?: {
-    experimentalStackedChat?: boolean;
     experimentalContinuousBackend?: boolean;
   };
 };
