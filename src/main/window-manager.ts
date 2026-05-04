@@ -91,7 +91,6 @@ type PersistedWindow = {
   viewKey: string;
   bounds: { x: number; y: number; width: number; height: number };
   snapped: boolean;
-  locked?: boolean;
 };
 
 type WindowState = {
@@ -496,7 +495,13 @@ export class WindowManager {
       ) ?? mainDisplay;
 
     const hasSpaceOnLeft = leftDisplay !== undefined;
-    const x = hasSpaceOnLeft ? leftX : rightX;
+    // Clamp right-side X so the panel never extends beyond the right edge of
+    // its host display (happens when the main window is already flush-right).
+    const clampedRightX = Math.min(
+      rightX,
+      rightDisplay.bounds.x + rightDisplay.bounds.width - childBounds.width
+    );
+    const x = hasSpaceOnLeft ? leftX : clampedRightX;
     const snapEdge: SnapEdge = hasSpaceOnLeft ? "w" : "e";
     const snapDeltaX = hasSpaceOnLeft ? -childBounds.width : mainBounds.width;
 
@@ -594,7 +599,6 @@ export class WindowManager {
         viewKey: entry.viewKey,
         bounds: entry.window.getBounds(),
         snapped: entry.snappedTo !== undefined,
-        locked: entry.locked ?? false,
       });
     }
     saveWindowState({ detached });
