@@ -167,7 +167,7 @@ export function App() {
       setExperimentalStackedChat(s.features?.experimentalStackedChat ?? false);
     }).catch(() => {});
   }, [api]);
-  const { usedTokens, contextBudget, contextPercent, contextColor, contextOverflowPct } =
+  const { usedTokens, contextBudget, contextOverflowPct } =
     useContextBudget({ entries, llmVendor, llmModel });
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
@@ -521,7 +521,7 @@ export function App() {
     triggerResult, onDismissTrigger: dismissTrigger, onAcceptTrigger: importTriggerIntoChat,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
-    contextOverflowPct, usedTokens, contextBudget, contextPercent, contextColor,
+    contextOverflowPct, usedTokens, contextBudget,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
