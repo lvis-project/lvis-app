@@ -141,6 +141,50 @@ describe("ChatView", () => {
     });
   });
 
+  // Regression 2026-05-04 — reasoning + assistant interleaving.
+  // When a turn contains [assistant(round1), reasoning, assistant(round2)],
+  // the round-1 assistant must stay visible as a standalone card and must
+  // NOT be pulled into the auto-collapsing WorkGroup alongside the reasoning
+  // entry. Pre-fix the classifier treated any entry followed by more turn
+  // content as `intermediate` regardless of kind, so round-1 assistant +
+  // reasoning both collapsed into "작업 2단계 ▶". Post-fix assistant entries
+  // are always `live`, leaving only the reasoning entry in the WorkGroup
+  // ("1단계").
+  it("keeps assistant text visible when reasoning follows in the same turn", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await act(async () => {
+      // Round 1 — text, finalized as tool_use (no actual tool events follow)
+      emitChatStream({ type: "text_delta", text: "첫번째 답변입니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "첫번째 답변입니다",
+        thought: "",
+        stopReason: "tool_use",
+        hasToolCalls: false,
+      });
+      // Round 2 — reasoning phase, then final answer
+      emitChatStream({ type: "reasoning_delta", text: "생각 중입니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "최종 답변입니다",
+        thought: "생각 중입니다",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+    await waitFor(() => {
+      // Both assistant texts must remain visible after the turn ends.
+      expect(container.textContent).toContain("첫번째 답변입니다");
+      expect(container.textContent).toContain("최종 답변입니다");
+      // WorkGroup contains only the reasoning entry (1단계). Pre-fix the
+      // round-1 assistant was also bucketed as `intermediate` alongside
+      // reasoning, producing "2단계" and hiding the round-1 text.
+      expect(container.textContent).toContain("1단계");
+      expect(container.textContent).not.toContain("2단계");
+    });
+  });
+
 });
 
 afterEach(() => {

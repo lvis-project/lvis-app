@@ -307,6 +307,73 @@ describe("Feature flag OFF regression guard", () => {
   });
 });
 
+// ─── 11. Reasoning-path visibility (parity with ChatView reasoning-path fix) ──
+//
+// Mirrors the reasoning-path regression test in ChatView.test.tsx.
+// When a turn contains [assistant(round1), reasoning, assistant(round2)],
+// StackedChatView's flushTurn must also carve assistant entries out of the
+// auto-collapsing WorkGroup. Pre-fix (without the parity patch) flushTurn
+// treated both the round-1 assistant AND the reasoning entry as
+// `intermediate`, producing "2단계" and hiding the round-1 text.
+describe("StackedChatView reasoning-path visibility", () => {
+  it("keeps round-1 assistant text visible when reasoning follows in the same turn", async () => {
+    const mockSettings = {
+      llm: {
+        provider: "openai",
+        vendors: {
+          openai: { model: "gpt-4o", enableThinking: false, thinkingBudgetTokens: 0 },
+        },
+        streamSmoothing: "none",
+        fallbackChain: [],
+      },
+      chat: { systemPrompt: "", autoCompact: true },
+      webSearch: { provider: "none" },
+      routine: { enableWakeupRoutine: false },
+      privacy: { piiRedactEnabled: false },
+      features: { experimentalStackedChat: true },
+    };
+
+    const { container, emitChatStream } = await renderApp({
+      hasApiKey: true,
+      settings: mockSettings,
+    });
+    const { act } = await import("@testing-library/react");
+
+    await act(async () => {
+      // Round 1 — text, finalized as tool_use (no actual tool events follow)
+      emitChatStream({ type: "text_delta", text: "첫번째 답변입니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "첫번째 답변입니다",
+        thought: "",
+        stopReason: "tool_use",
+        hasToolCalls: false,
+      });
+      // Round 2 — reasoning phase, then final answer
+      emitChatStream({ type: "reasoning_delta", text: "생각 중입니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "최종 답변입니다",
+        thought: "생각 중입니다",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      // Both assistant texts must remain visible after the turn ends.
+      expect(container.textContent).toContain("첫번째 답변입니다");
+      expect(container.textContent).toContain("최종 답변입니다");
+      // WorkGroup contains only the reasoning entry (1단계). Pre-fix
+      // flushTurn also bucketed the round-1 assistant as `intermediate`,
+      // producing "2단계" and hiding the round-1 text.
+      expect(container.textContent).toContain("1단계");
+      expect(container.textContent).not.toContain("2단계");
+    });
+  });
+});
+
 // ─── 10. Multi-round visibility (parity with ChatView 2026-05-04 fix) ─────────
 //
 // Regression — without this, multi-round LLM turns dropped the round-1
