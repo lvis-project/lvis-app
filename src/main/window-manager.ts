@@ -467,35 +467,41 @@ export class WindowManager {
     const mainBounds = main.getBounds();
     const childBounds = entry.window.getBounds();
 
-    // Determine which display the main window is on.
-    const allDisplays = screen.getAllDisplays();
-    const mainDisplay =
-      allDisplays.find(
-        (d) =>
-          mainBounds.x >= d.bounds.x &&
-          mainBounds.x < d.bounds.x + d.bounds.width
-      ) ?? screen.getPrimaryDisplay();
+    // Identify the display containing the main window by its center point.
+    // Using center avoids mis-detection on vertically stacked monitors that
+    // share the same horizontal span (same bounds.x range).
+    const mainDisplay = screen.getDisplayNearestPoint({
+      x: Math.round(mainBounds.x + mainBounds.width / 2),
+      y: Math.round(mainBounds.y + mainBounds.height / 2),
+    });
 
-    // Prefer left side; fall back to right side only when there is no display
-    // that can accommodate the child on the left AND vertically overlaps with
-    // the main window position. This handles both horizontal and vertically
-    // stacked multi-monitor setups correctly.
+    const allDisplays = screen.getAllDisplays();
+
+    // Prefer left side: find a display that fully accommodates the child AND
+    // vertically overlaps the main window so it is visible alongside it.
     const leftX = mainBounds.x - childBounds.width;
     const leftDisplay = allDisplays.find(
       (d) =>
         leftX >= d.bounds.x &&
         leftX + childBounds.width <= d.bounds.x + d.bounds.width &&
-        // Display must vertically overlap with the main window.
         mainBounds.y < d.bounds.y + d.bounds.height &&
         mainBounds.y + mainBounds.height > d.bounds.y
     );
+
+    // Find the display that will host the child when placed on the right.
+    const rightX = mainBounds.x + mainBounds.width;
+    const rightDisplay =
+      allDisplays.find(
+        (d) => rightX >= d.bounds.x && rightX < d.bounds.x + d.bounds.width
+      ) ?? mainDisplay;
+
     const hasSpaceOnLeft = leftDisplay !== undefined;
-    const x = hasSpaceOnLeft ? leftX : mainBounds.x + mainBounds.width;
+    const x = hasSpaceOnLeft ? leftX : rightX;
     const snapEdge: SnapEdge = hasSpaceOnLeft ? "w" : "e";
     const snapDeltaX = hasSpaceOnLeft ? -childBounds.width : mainBounds.width;
 
-    // Clamp Y against the display that will host the child window.
-    const hostDisplay = leftDisplay ?? mainDisplay;
+    // Clamp Y against the display that will actually host the child.
+    const hostDisplay = hasSpaceOnLeft ? leftDisplay! : rightDisplay;
     const y = Math.max(
       hostDisplay.bounds.y,
       Math.min(mainBounds.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height)
