@@ -104,6 +104,44 @@ interface PluginWebviewBinding {
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
 /**
+ * Last validated `host.theme.changed` payload broadcast to plugin webviews.
+ *
+ * Why: a plugin webview that registers AFTER the renderer's last
+ * `notifyPluginTheme` call would otherwise miss the active theme entirely
+ * (stuck on the SDK's `:root` fallback) until the user toggles a theme.
+ * On register we replay this cached payload to the freshly attached wc so
+ * the plugin paints with the right tokens from first frame.
+ *
+ * Null until the renderer's first broadcast — pre-broadcast registrations
+ * still fall through to the SDK fallback (acceptable boot window). Renderer
+ * always re-broadcasts on its own mount, so this gap closes within milliseconds.
+ */
+let lastThemePayload: SafeThemePayload | null = null;
+
+/** @internal — read access to the cached theme payload (tests + replay). */
+export function getLastThemePayload(): SafeThemePayload | null {
+  return lastThemePayload;
+}
+
+/**
+ * Validate a theme payload and, on success, record it as the new replay cache.
+ * Invalid payloads leave the existing cache untouched. The IPC handler uses
+ * this so the validate + cache step stays atomic under unit test.
+ */
+export function recordValidatedTheme(payload: unknown):
+  | { ok: true; safe: SafeThemePayload }
+  | { ok: false; error: string } {
+  const result = validateThemePayload(payload);
+  if (result.ok) lastThemePayload = result.safe;
+  return result;
+}
+
+/** @internal — test-only reset to keep cross-test state clean. */
+export function __resetLastThemePayloadForTests(): void {
+  lastThemePayload = null;
+}
+
+/**
  * Wait queue for `lvis:plugin:get-entry-url` invocations that arrive before
  * `lvis:plugin:register-webview` lands a binding for the same webContentsId.
  *
@@ -862,6 +900,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
+    if (lastThemePayload) {
+      try {
+        const wc = webContents.fromId(webContentsId);
+        if (wc && !wc.isDestroyed()) {
+          wc.send("lvis:plugin:event", "host.theme.changed", lastThemePayload);
+        }
+      } catch { /* wc destroyed between register and replay */ }
+    }
     return { ok: true };
   });
 
@@ -1113,7 +1159,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       auditUnauthorized(auditLogger, "lvis:host:plugin-theme-notify", e);
       return UNAUTHORIZED_FRAME;
     }
-    const validated = validateThemePayload(payload);
+    const validated = recordValidatedTheme(payload);
     if (!validated.ok) return validated;
     const { safe } = validated;
     for (const [wcId] of pluginWebviewRegistry) {
