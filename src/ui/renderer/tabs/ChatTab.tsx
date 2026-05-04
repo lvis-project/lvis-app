@@ -57,8 +57,7 @@ export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStrea
             <p className="text-sm font-medium">실험적 기능</p>
             <p className="text-[11px] text-muted-foreground">기본값 OFF — 설정 후 앱 재시작 없이 전환됩니다.</p>
           </div>
-          {setExperimentalContinuousBackend !== undefined && (
-            <div className="flex items-center gap-3 rounded-md border px-3 py-3">
+          <div className="flex items-center gap-3 rounded-md border px-3 py-3">
               <button
                 type="button"
                 role="checkbox"
@@ -76,7 +75,6 @@ export function ChatTab({ autoCompact, setAutoCompact, streamSmoothing, setStrea
                 <p className="text-[11px] text-muted-foreground">타이틀 자동 생성 + 체크포인트 압축을 활성화합니다. 기본값 OFF — 프로덕션에서 검증 중.</p>
               </div>
             </div>
-          )}
         </div>
       )}
     </div>
