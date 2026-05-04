@@ -68,6 +68,41 @@ import {
 const log = createLogger("lvis");
 
 /**
+ * AC1.5 audit helper — logs an approval violation then re-throws the original
+ * error. Extracted so the try-catch logic can be unit-tested without wiring the
+ * full initPluginRuntime context.
+ *
+ * Guarantees: if `auditLogger.log` throws, that error is swallowed (non-fatal)
+ * and `err` is still re-thrown to the caller.
+ *
+ * @internal — exported for testing only; production code calls this via the
+ *             `respond()` closure inside initPluginRuntime.
+ */
+export function auditApprovalViolation(
+  err: unknown,
+  auditLogger: { log(entry: AuditEntry): void },
+  pluginId: string,
+  requestId: string,
+): never {
+  try {
+    auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "approval-gating",
+      type: "error",
+      input: err instanceof ApprovalOriginError
+        ? `[${err.code}] plugin='${pluginId}' requestId='${requestId}' ${err.message}`
+        : `[approval-gating] plugin='${pluginId}' requestId='${requestId}' ${String(err)}`,
+    });
+  } catch (auditErr) {
+    log.warn(
+      "approval-gating audit log failed (non-fatal): %s",
+      (auditErr as Error).message,
+    );
+  }
+  throw err;
+}
+
+/**
  * §8 P0 security — shared issuer registry for agent approval origin gating.
  * Instantiated once per boot (module-level singleton). Records
  * (requestId → issuerPluginId + scope) at request time so the respond path
@@ -981,25 +1016,7 @@ export async function initPluginRuntime(
               allowedScopes,
             );
           } catch (err) {
-            // AC1.5: audit failure must NOT mask the gating error or break the
-            // throw path — wrap in try/catch so a logger crash still surfaces
-            // the original ApprovalOriginError to the caller.
-            try {
-              bootAuditLogger.log({
-                timestamp: new Date().toISOString(),
-                sessionId: "approval-gating",
-                type: "error",
-                input: err instanceof ApprovalOriginError
-                  ? `[${err.code}] plugin='${pluginId}' requestId='${requestId}' ${err.message}`
-                  : `[approval-gating] plugin='${pluginId}' requestId='${requestId}' ${String(err)}`,
-              });
-            } catch (auditErr) {
-              log.warn(
-                "approval-gating audit log failed (non-fatal): %s",
-                (auditErr as Error).message,
-              );
-            }
-            throw err;
+            auditApprovalViolation(err, bootAuditLogger, pluginId, requestId);
           }
           approvalGate.resolve(requestId, { requestId, choice, nonce, hmac });
         },

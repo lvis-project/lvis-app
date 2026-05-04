@@ -91,6 +91,15 @@ export class ApprovalIssuerRegistry {
   }
 
   /**
+   * Non-destructive lookup — returns the entry if present, undefined otherwise.
+   * Does NOT remove the entry (unlike `consume`). Intended for testing and
+   * diagnostic code paths only; production code should use `consume`.
+   */
+  peek(requestId: string): IssuerEntry | undefined {
+    return this.entries.get(requestId);
+  }
+
+  /**
    * Remove all entries older than `maxAgeMs` milliseconds from `now`.
    * Called by the gate timeout path to prevent unbounded growth when
    * the respond path is never reached (e.g. renderer crash).
