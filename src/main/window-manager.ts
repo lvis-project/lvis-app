@@ -30,7 +30,7 @@ import type { AuditLogger } from "../audit/audit-logger.js";
  * where each segment is alphanumeric with dots/underscores/hyphens.
  * toViewKey() in api-client.ts produces exactly this shape.
  */
-export const ALLOWED_VIEW_KEYS = /^(tasks|reminders|routines|memory|starred|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*)$/;
+export const ALLOWED_VIEW_KEYS = /^(reminders|routines|memory|starred|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*)$/;
 
 /** Human-readable window titles for built-in view keys. */
 const BUILTIN_VIEW_LABELS: Record<string, string> = {
@@ -83,12 +83,15 @@ interface ChildEntry {
    */
   snapDeltaX?: number;
   snapDeltaY?: number;
+  /** When true: window is permanently attached, not independently movable. */
+  locked?: boolean;
 }
 
 type PersistedWindow = {
   viewKey: string;
   bounds: { x: number; y: number; width: number; height: number };
   snapped: boolean;
+  locked?: boolean;
 };
 
 type WindowState = {
@@ -366,10 +369,8 @@ export class WindowManager {
 
     child.once("ready-to-show", () => {
       child.show();
-      // If previously snapped, immediately snap.
-      if (saved?.snapped) {
-        this._trySnap(child.id);
-      }
+      // Always snap to left edge of main window on open (side-panel behavior).
+      this._snapToLeftEdge(child.id);
     });
 
     // Navigate to detached single-view mode via URL fragment.
@@ -405,6 +406,9 @@ export class WindowManager {
     const entry = this._children.get(childId);
     if (!entry || entry.window.isDestroyed()) return;
 
+    // Locked windows are non-movable — skip drag detection.
+    if (entry.locked) return;
+
     const main = this.getMainWindow();
     if (!main || main.isDestroyed()) return;
 
@@ -431,6 +435,31 @@ export class WindowManager {
     } else {
       main.webContents.send("lvis:window:snap-edge", null);
     }
+  }
+
+  private _snapToLeftEdge(childId: number): void {
+    const entry = this._children.get(childId);
+    if (!entry || entry.window.isDestroyed()) return;
+    const main = this.getMainWindow();
+    if (!main || main.isDestroyed()) return;
+
+    const mainBounds = main.getBounds();
+    const childBounds = entry.window.getBounds();
+
+    // Position child to the left of main window, aligned to main's top edge.
+    const x = mainBounds.x - childBounds.width;
+    const y = mainBounds.y;
+    entry.window.setPosition(x, y);
+
+    // Record snap state — negative dx places child left of main.
+    entry.snappedTo = this._mainWindowId!;
+    entry.snapEdge = "w";
+    entry.snapDeltaX = -childBounds.width;
+    entry.snapDeltaY = 0;
+    entry.locked = true;
+
+    // Prevent the user from independently dragging the panel away.
+    entry.window.setMovable(false);
   }
 
   private _snap(entry: ChildEntry, mainBounds: Rect, childBounds: Rect, edge: SnapEdge): void {
@@ -501,6 +530,7 @@ export class WindowManager {
         viewKey: entry.viewKey,
         bounds: entry.window.getBounds(),
         snapped: entry.snappedTo !== undefined,
+        locked: entry.locked ?? false,
       });
     }
     saveWindowState({ detached });
