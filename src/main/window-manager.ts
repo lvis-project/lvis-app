@@ -212,10 +212,23 @@ export class WindowManager {
     win.on("move", () => this._onMainMove(win));
 
     win.on("maximize", () => {
-      // Un-snap all children so they are not buried under the maximised main.
+      // Hide locked side-panel children (they cannot follow a maximised window).
+      // Un-snap other snapped children so they are not buried under the maximised main.
       for (const [, entry] of this._children) {
-        if (entry.snappedTo !== undefined) {
+        if (entry.locked) {
+          if (!entry.window.isDestroyed()) entry.window.hide();
+        } else if (entry.snappedTo !== undefined) {
           this._unsnap(entry);
+        }
+      }
+    });
+
+    win.on("unmaximize", () => {
+      // Re-show and re-snap locked side-panel children after the main window is restored.
+      for (const [id, entry] of this._children) {
+        if (entry.locked && !entry.window.isDestroyed() && !entry.window.isVisible()) {
+          entry.window.show();
+          this._snapToLeftEdge(id);
         }
       }
     });
@@ -446,16 +459,36 @@ export class WindowManager {
     const mainBounds = main.getBounds();
     const childBounds = entry.window.getBounds();
 
-    // Position child to the left of main window, aligned to main's top edge.
-    const x = mainBounds.x - childBounds.width;
-    const y = mainBounds.y;
+    // Determine which display the main window is on.
+    const allDisplays = screen.getAllDisplays();
+    const mainDisplay =
+      allDisplays.find(
+        (d) =>
+          mainBounds.x >= d.bounds.x &&
+          mainBounds.x < d.bounds.x + d.bounds.width
+      ) ?? screen.getPrimaryDisplay();
+
+    // Prefer left side; fall back to right side when the main window is near
+    // the left edge of the display (no room for child window on the left).
+    const leftX = mainBounds.x - childBounds.width;
+    const onDisplay = leftX >= mainDisplay.bounds.x;
+    const x = onDisplay ? leftX : mainBounds.x + mainBounds.width;
+    const snapEdge: SnapEdge = onDisplay ? "w" : "e";
+    const snapDeltaX = onDisplay ? -childBounds.width : mainBounds.width;
+
+    // Clamp Y so the child stays fully within the display vertically.
+    const y = Math.max(
+      mainDisplay.bounds.y,
+      Math.min(mainBounds.y, mainDisplay.bounds.y + mainDisplay.bounds.height - childBounds.height)
+    );
+
     entry.window.setPosition(x, y);
 
-    // Record snap state — negative dx places child left of main.
+    // Record snap state.
     entry.snappedTo = this._mainWindowId!;
-    entry.snapEdge = "w";
-    entry.snapDeltaX = -childBounds.width;
-    entry.snapDeltaY = 0;
+    entry.snapEdge = snapEdge;
+    entry.snapDeltaX = snapDeltaX;
+    entry.snapDeltaY = y - mainBounds.y;
     entry.locked = true;
 
     // Prevent the user from independently dragging the panel away.
@@ -491,6 +524,12 @@ export class WindowManager {
     entry.snapEdge = undefined;
     entry.snapDeltaX = undefined;
     entry.snapDeltaY = undefined;
+    if (entry.locked) {
+      entry.locked = false;
+      if (!entry.window.isDestroyed()) {
+        entry.window.setMovable(true);
+      }
+    }
   }
 
   private _onMainMove(main: BrowserWindow): void {
