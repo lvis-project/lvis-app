@@ -197,6 +197,7 @@ export const EVENT_NAMESPACE_CAPABILITY: ReadonlyMap<string, string> = new Map([
  */
 export const HOST_ONLY_EMIT_NAMESPACES: ReadonlySet<string> = new Set([
   "plugin",
+  "host",
 ]);
 
 /**
