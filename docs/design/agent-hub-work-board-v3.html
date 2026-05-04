@@ -802,51 +802,71 @@
             <div class="toolbar"><span class="chip chip-blue">새로고침 09:35</span><span class="chip">Asia/Seoul · 2026.05.04</span></div>
           </div>
 
-          <!-- Row 1: LLM 오늘의 주요업무 + 승인 요청 -->
-          <div class="row-grid">
-            <article class="subpanel card llm-card">
-              <div class="card-title">
+          <!-- Row 1: LLM 오늘의 주요업무 + 승인 요청 (AH-2: 승인 2건 있는 상태) -->
+          <div class=”row-grid”>
+            <article class=”subpanel card llm-card”>
+              <div class=”card-title”>
                 <h3>오늘의 주요업무</h3>
-                <span class="chip chip-purple">LLM 분석</span>
+                <span class=”chip chip-purple”>LLM 분석</span>
               </div>
-              <p class="summary-text">민준님, 오늘은 plugin v3 목업 리뷰가 11시에 잡혀 있어 오전 시간을 그 결정에 우선 배치하시는 것을 권합니다.
+              <p class=”summary-text”>민준님, 오늘은 plugin v3 목업 리뷰가 11시에 잡혀 있어 오전 시간을 그 결정에 우선 배치하시는 것을 권합니다.
 어제 닫지 못한 callback UX 문구는 준호님이 14시까지 정리하기로 했으니 점심 직후 한 번 확인해주시면 좋겠습니다.
 주간업무 상으로는 “팀 보드 grouping” 만 정상 페이스이고, “웹 로그인 copy” 가 일정 대비 살짝 늦으니 오후에 주의를 모아주세요.
 오늘 회의 4건 중 16:30 팀장님 브리핑 초안은 risk 한 줄, action 한 줄로 압축해 두면 회의 시간에 의사결정만 남길 수 있습니다.
 승인 대기 2건 중 외부 공유 1건은 만료 7일이라 위험도가 낮으니 먼저 처리해도 무방해 보입니다.</p>
-              <div class="llm-foot">
-                <span>도구 호출: <b style="color:#d8b4fe">tasks_today · calendar_today · approval_pending · weekly_summary</b></span>
+              <div class=”llm-foot”>
+                <span>도구 호출: <b style=”color:#d8b4fe”>tasks_today · calendar_today · approval_pending · weekly_summary</b></span>
                 <span>09:35 갱신</span>
               </div>
             </article>
 
-            <article class="subpanel card approval-card">
-              <div class="card-title">
-                <h3>승인 요청 <span class="chip chip-red" style="margin-left:4px">2</span></h3>
-                <span class="chip">agent action</span>
+            <article class=”subpanel card approval-card”>
+              <div class=”card-title”>
+                <h3>승인 요청 <span class=”chip chip-red” style=”margin-left:4px”>2</span></h3>
+                <span class=”chip”>agent action</span>
               </div>
-              <div class="approval-row">
-                <div class="req-icon">!</div>
-                <div class="req-body">
+              <div class=”approval-row”>
+                <div class=”req-icon”>!</div>
+                <div class=”req-body”>
                   <strong>외부 공유 링크 생성</strong>
                   <span>Briefing summary · 만료 7일</span>
                 </div>
-                <span class="approval-chev">›</span>
+                <span class=”approval-chev”>›</span>
               </div>
-              <div class="approval-row">
-                <div class="req-icon">⌁</div>
-                <div class="req-body">
+              <div class=”approval-row”>
+                <div class=”req-icon”>⌁</div>
+                <div class=”req-body”>
                   <strong>일정 일괄 수정</strong>
                   <span>MS Graph · 3개 미팅 변경</span>
                 </div>
-                <span class="approval-chev">›</span>
+                <span class=”approval-chev”>›</span>
               </div>
-              <div class="approval-actions">
-                <span class="approval-foot">우선 처리: <b>외부 공유 링크 생성</b> · 컨펌 모달에서 결정</span>
-                <button class="req-btn deny">거절</button>
-                <button class="req-btn">승인</button>
+              <div class=”approval-actions”>
+                <span class=”approval-foot”>우선 처리: <b>외부 공유 링크 생성</b> · 컨펌 모달에서 결정</span>
+                <button class=”req-btn deny”>거절</button>
+                <button class=”req-btn”>승인</button>
               </div>
             </article>
+          </div>
+
+          <!-- AH-2: 승인 0건 상태 — LLM 카드 full-width (grid-column: 1 / -1) -->
+          <div style=”margin-top:10px”>
+            <div class=”label” style=”margin-bottom:8px”>AH-2 · 승인 0건 상태 — LLM full width</div>
+            <div class=”row-grid”>
+              <div style=”grid-column:1/-1;display:flex;flex-direction:column”>
+                <article class=”subpanel card llm-card”>
+                  <div class=”card-title”>
+                    <h3>오늘의 주요업무</h3>
+                    <span class=”chip chip-purple”>LLM 분석</span>
+                  </div>
+                  <p class=”summary-text”>오늘은 대기 중인 승인 요청이 없습니다. 주간업무 3건과 오후 회의 2건에 집중하세요.</p>
+                  <div class=”llm-foot”>
+                    <span>도구 호출: <b style=”color:#d8b4fe”>tasks_today · calendar_today · approval_pending · weekly_summary</b></span>
+                    <span>09:35 갱신</span>
+                  </div>
+                </article>
+              </div>
+            </div>
           </div>
 
           <!-- Row 2~3: 좌측 stack(주간업무 + 내 보드, 동일 폭) + 우측 오늘 일정(세로 stretch) -->
@@ -1102,7 +1122,7 @@
                 <div class="calendar-item"><time>09:30</time>
                   <div class="cal-card">Agent Hub daily sync<span class="cal-meta">30분 · 보드 IA 확인</span>
                     <div class="cal-attendees">
-                      <div class="ts-avatars"><span class="ts-avatar">민</span><span class="ts-avatar">서</span><span class="ts-avatar">준</span><span class="ts-avatar">하</span></div>
+                      <div class="ts-avatars" title="민준, 서연, 준호, 하린 외 9명"><span class="ts-avatar">민</span><span class="ts-avatar">서</span><span class="ts-avatar">준</span><span class="ts-avatar" aria-label="외 10명">+10</span></div>
                       <span class="meta">13명 참석 · 30분</span>
                     </div>
                   </div>
