@@ -376,26 +376,40 @@ export class RealCloudMarketplaceFetcher implements MarketplaceFetcher, Marketpl
     }
     const pluginAccessRaw = row.plugin_access ?? row.pluginAccess;
     if (pluginAccessRaw && typeof pluginAccessRaw === "object" && !Array.isArray(pluginAccessRaw)) {
-      const candidate = pluginAccessRaw as { plugins?: unknown };
+      const candidate = pluginAccessRaw as {
+        plugins?: unknown;
+        agentApprovalScopes?: unknown;
+      };
       if (Array.isArray(candidate.plugins)) {
-        item.pluginAccess = {
-          plugins: candidate.plugins.flatMap((entry) => {
-            if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-            const record = entry as Record<string, unknown>;
-            if (typeof record.pluginId !== "string" || record.pluginId.trim().length === 0) return [];
-            const tools = Array.isArray(record.tools)
-              ? record.tools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
-              : undefined;
-            const events = Array.isArray(record.events)
-              ? record.events.filter((event): event is string => typeof event === "string" && event.trim().length > 0)
-              : undefined;
-            return [{
-              pluginId: record.pluginId,
-              tools,
-              events,
-            }];
-          }),
-        };
+        const plugins = candidate.plugins.flatMap((entry) => {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+          const record = entry as Record<string, unknown>;
+          if (typeof record.pluginId !== "string" || record.pluginId.trim().length === 0) return [];
+          const tools = Array.isArray(record.tools)
+            ? record.tools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
+            : undefined;
+          const events = Array.isArray(record.events)
+            ? record.events.filter((event): event is string => typeof event === "string" && event.trim().length > 0)
+            : undefined;
+          return [{
+            pluginId: record.pluginId,
+            tools,
+            events,
+          }];
+        });
+        // §8 P0 — parse agentApprovalScopes from catalog row (added in
+        // lvis-plugin-sdk 3.6.0). Field is non-optional in artifact manifest
+        // for plugins that declare any scopes; dropping it here causes the
+        // assertInstalledManifestMatchesCatalog comparison to falsely flag
+        // a mismatch on install. Match exact JSON shape from upstream.
+        const agentApprovalScopes = Array.isArray(candidate.agentApprovalScopes)
+          ? candidate.agentApprovalScopes.filter(
+              (scope): scope is string => typeof scope === "string" && scope.trim().length > 0,
+            )
+          : undefined;
+        item.pluginAccess = agentApprovalScopes !== undefined
+          ? { plugins, agentApprovalScopes }
+          : { plugins };
       }
     }
     if (row.publisher) item.publisher = row.publisher;
