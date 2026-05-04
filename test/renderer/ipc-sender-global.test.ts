@@ -69,15 +69,6 @@ const CHANNEL_MANIFEST: Record<string, "tier1" | "tier2" | "tier3"> = {
   // Policy
   "lvis:policy:get": "tier3",
   "lvis:policy:set": "tier1",
-  // Tasks
-  "lvis:tasks:add": "tier1",
-  "lvis:tasks:update": "tier1",
-  "lvis:tasks:get": "tier3",
-  "lvis:tasks:delete": "tier1",
-  "lvis:tasks:query": "tier3",
-  "lvis:tasks:pending": "tier3",
-  "lvis:tasks:overdue": "tier3",
-  "lvis:tasks:today": "tier3",
   // Routine
   "lvis:routine:get-latest-result": "tier3",
   "lvis:routines:dev-trigger-wakeup": "tier1",
