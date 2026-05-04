@@ -264,6 +264,7 @@ Renderer UI 는 `lvis:plugins:call` IPC 를 통해 플러그인 메서드를 직
 | Namespace | 발행자 | 비고 |
 |----------|-------|------|
 | `plugin.*` | host (`emitEvent` from `boot/types.ts`) | `plugin.installed` / `plugin.uninstalled` lifecycle. plugin 의 `hostApi.emitEvent` 와 plugin webview IPC bridge 양쪽 모두 거부. work-proactive 의 `onPluginsChanged` 가 self-event filter + `source` discriminator 로 구독. 자세한 contract 는 architecture.md §9.4a. |
+| `host.*` | host main process | UI / 환경 상태 broadcast. plugin 측 emit 거부. plugin webview SDK 가 `bridge.onEvent("host.<axis>", h)` 로 구독. 현재 발행 이벤트: `host.theme.changed` (theme/chatTheme/codeTheme + computed `--lvis-*` tokens) — register 시점에 preload 가 sticky-buffer 로 1회 replay 보장 (자세한 흐름은 architecture.md §6.7.1). 추후 `host.locale.changed`, `host.online.changed` 등 추가 가능. |
 
 `task.*` 도 사실상 host-only 지만 별도 set 에 등록하지 않음 — plugin 측 emit 이 owner-mismatch 로 이미 거부되기 때문 (tasks-plugin-split paused 상태에서 plugin 측 emitter 부재).
 
