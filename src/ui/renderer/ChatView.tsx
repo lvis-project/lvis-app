@@ -105,9 +105,16 @@ export interface ChatViewProps {
   installingPlugins?: ReadonlyMap<string, InstallPhase>;
   onOpenMarketplace: () => void;
   marketplaceUrlReady?: boolean;
+  /**
+   * §457 Phase 3: revert active session to the parent of a rotation
+   * checkpoint. When provided, a "여기로 되돌아가기" link is rendered next
+   * to checkpoint fallback entries that carry a `parentSessionId`. When
+   * omitted, the link is hidden even on rotation checkpoints.
+   */
+  onRevertCheckpoint?: (parentSessionId: string) => void | Promise<void>;
 }
 
-export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady }: ChatViewProps) {
+export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onRevertCheckpoint }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -406,13 +413,25 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   : entry.tier === "soft-time"
                     ? "이전 세션 정리"
                     : "자동 정리";
+              const revertId = entry.revertSessionId;
               rendered.push(
                 <div
                   key={`cp-${idx}`}
                   data-testid="checkpoint-fallback"
-                  className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
+                  className="mx-auto flex items-center gap-2 text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
                 >
-                  📌 체크포인트 · {tierLabel} ({entry.removedMessages} messages)
+                  <span>📌 체크포인트 · {tierLabel} ({entry.removedMessages} messages)</span>
+                  {onRevertCheckpoint && revertId && (
+                    <button
+                      type="button"
+                      data-testid="checkpoint-revert-btn"
+                      onClick={() => void onRevertCheckpoint(revertId)}
+                      aria-label="이 체크포인트 이전 세션으로 되돌아가기"
+                      className="text-[11px] underline-offset-2 hover:underline cursor-pointer"
+                    >
+                      ↩ 여기로 되돌아가기
+                    </button>
+                  )}
                 </div>,
               );
               i++;
