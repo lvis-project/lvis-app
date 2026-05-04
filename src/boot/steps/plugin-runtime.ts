@@ -971,7 +971,9 @@ export async function initPluginRuntime(
         ): Promise<void> => {
           const allowedScopes: string[] =
             Array.isArray(manifest.pluginAccess?.agentApprovalScopes)
-              ? (manifest.pluginAccess!.agentApprovalScopes as string[])
+              ? manifest.pluginAccess!.agentApprovalScopes.filter(
+                  (s): s is string => typeof s === "string",
+                )
               : [];
           try {
             verifyApprovalResponder(

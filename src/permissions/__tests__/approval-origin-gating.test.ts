@@ -221,10 +221,7 @@ describe("requestAgentApproval — registry integration", () => {
     );
 
     expect(choice).toBe("allow-once");
-    // After requestAndWait returns, entry remains in registry until respond() consumes it.
-    // (registry.size may be 0 if gate resolve was synchronous in mock — gate mock is async
-    // but the call returns after await, so size should still be 1 at this point)
-    // Actually since requestAgentApproval awaits the gate promise, the entry persists:
+    // Entry persists after requestAndWait returns — only removed when respond() calls delete().
     expect(registry.size).toBe(1);
   });
 
@@ -257,16 +254,4 @@ describe("requestAgentApproval — registry integration", () => {
     expect(entry.scope).toBe("agent_task_delegate");
   });
 
-  it("(f) works without registry (backward compat — registry is optional)", async () => {
-    const gate = makeGate("allow-once");
-    const choice = await requestAgentApproval(gate, {
-      toolName: "tool",
-      args: {},
-      reason: "test",
-      source: "plugin",
-      sourcePluginId: PLUGIN_A,
-      scope: SCOPE,
-    });
-    expect(choice).toBe("allow-once");
-  });
 });

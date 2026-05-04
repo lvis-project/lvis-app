@@ -142,8 +142,12 @@ export function createNoopHostApi(
       source: typeof spec?.source === "string" ? spec.source : "",
     }),
     agentApproval: {
-      request: async () => "deny-once" as const,
-      respond: async () => {},
+      request: async () => {
+        throw new Error("agentApproval.request unavailable in sandbox context");
+      },
+      respond: async () => {
+        log.warn("agentApproval.respond called in sandbox context — no-op (no live gate)");
+      },
     },
   };
 }

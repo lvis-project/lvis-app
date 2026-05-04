@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { requestAgentApproval } from "../agent-action-requester.js";
+import { requestAgentApproval, ApprovalIssuerRegistry } from "../agent-action-requester.js";
 import type { ApprovalGate } from "../approval-gate.js";
 import type { ApprovalDecision } from "../approval-gate.js";
 
@@ -48,7 +48,7 @@ describe("requestAgentApproval", () => {
       hmac: "deadbeef",
     });
 
-    const choice = await requestAgentApproval(gate, BASE_INPUT);
+    const choice = await requestAgentApproval(gate, BASE_INPUT, new ApprovalIssuerRegistry());
     expect(choice).toBe("allow-once");
   });
 
@@ -60,7 +60,7 @@ describe("requestAgentApproval", () => {
       hmac: "deadbeef",
     });
 
-    const choice = await requestAgentApproval(gate, BASE_INPUT);
+    const choice = await requestAgentApproval(gate, BASE_INPUT, new ApprovalIssuerRegistry());
     expect(choice).toBe("deny-once");
   });
 
@@ -72,7 +72,7 @@ describe("requestAgentApproval", () => {
       hmac: "deadbeef",
     });
 
-    const choice = await requestAgentApproval(gate, BASE_INPUT);
+    const choice = await requestAgentApproval(gate, BASE_INPUT, new ApprovalIssuerRegistry());
     expect(choice).toBe("allow-always");
   });
 
@@ -84,7 +84,7 @@ describe("requestAgentApproval", () => {
       hmac: "gate-hmac",
     });
 
-    await requestAgentApproval(gate, BASE_INPUT);
+    await requestAgentApproval(gate, BASE_INPUT, new ApprovalIssuerRegistry());
 
     const [calledReq] = (gate.requestAndWait as ReturnType<typeof vi.fn>).mock.calls[0] as [
       Parameters<ApprovalGate["requestAndWait"]>[0],
@@ -113,8 +113,9 @@ describe("requestAgentApproval", () => {
       hmac: "h",
     });
 
-    await requestAgentApproval(gate, BASE_INPUT);
-    await requestAgentApproval(gate, BASE_INPUT);
+    const registry = new ApprovalIssuerRegistry();
+    await requestAgentApproval(gate, BASE_INPUT, registry);
+    await requestAgentApproval(gate, BASE_INPUT, registry);
 
     const calls = (gate.requestAndWait as ReturnType<typeof vi.fn>).mock.calls as [
       Parameters<ApprovalGate["requestAndWait"]>[0],
@@ -131,7 +132,7 @@ describe("requestAgentApproval", () => {
       choice: "deny-once",
     });
 
-    const choice = await requestAgentApproval(gate, BASE_INPUT);
+    const choice = await requestAgentApproval(gate, BASE_INPUT, new ApprovalIssuerRegistry());
     expect(choice).toBe("deny-once");
   });
 
@@ -142,9 +143,9 @@ describe("requestAgentApproval", () => {
       }),
     } as unknown as ApprovalGate;
 
-    await expect(requestAgentApproval(gate, BASE_INPUT)).rejects.toThrow(
-      "gate internal error",
-    );
+    await expect(
+      requestAgentApproval(gate, BASE_INPUT, new ApprovalIssuerRegistry()),
+    ).rejects.toThrow("gate internal error");
   });
 });
 

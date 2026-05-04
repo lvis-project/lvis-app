@@ -40,6 +40,7 @@ export interface AgentApprovalInput {
 interface IssuerEntry {
   issuerPluginId: string;
   scope: string;
+  recordedAt: number;
 }
 
 /**
@@ -47,49 +48,56 @@ interface IssuerEntry {
  *
  * Lifecycle:
  *   - `record(requestId, pluginId, scope)` — called before gate.requestAndWait().
- *   - `consume(requestId)` — called in the respond path; returns entry and removes it.
- *     Returns null if no entry (already consumed or never issued).
+ *   - `peek(requestId)` — returns entry without removing it (used in verifyApprovalResponder).
+ *   - `delete(requestId)` — removes entry after successful verification.
+ *     Call only after all checks pass; on violation leave the entry so the
+ *     legitimate issuer can still respond.
  *
  * The registry is intentionally a plain Map (no LRU cap) because
  * ApprovalGate already enforces a 5-minute timeout per request, after which
  * it removes the pending entry and resolves deny-once. The issuer registry
- * entry survives until `consume()` is called by the respond path; timed-out
- * requests whose `consume()` is never called are cleaned up by
+ * entry survives until `delete()` is called by the respond path; timed-out
+ * requests whose `delete()` is never called are cleaned up by
  * `purgeStalerThan()` which the gate timeout callback should trigger.
  */
 export class ApprovalIssuerRegistry {
   private readonly entries = new Map<string, IssuerEntry>();
 
   record(requestId: string, issuerPluginId: string, scope: string): void {
-    this.entries.set(requestId, { issuerPluginId, scope });
+    this.entries.set(requestId, { issuerPluginId, scope, recordedAt: Date.now() });
   }
 
   /**
-   * Retrieve and remove the issuer entry for `requestId`.
-   * Returns null if the entry was never recorded or already consumed.
+   * Return the issuer entry for `requestId` WITHOUT removing it.
+   * Returns undefined if the entry was never recorded.
    */
-  consume(requestId: string): IssuerEntry | null {
-    const entry = this.entries.get(requestId);
-    if (!entry) return null;
-    this.entries.delete(requestId);
-    return entry;
+  peek(requestId: string): IssuerEntry | undefined {
+    return this.entries.get(requestId);
   }
 
   /**
-   * Remove all entries older than `maxAgeMs` milliseconds from `now`.
+   * Remove the issuer entry for `requestId`.
+   * No-op if the entry does not exist.
+   */
+  delete(requestId: string): void {
+    this.entries.delete(requestId);
+  }
+
+  /**
+   * Remove all entries recorded more than `maxAgeMs` milliseconds ago.
    * Called by the gate timeout path to prevent unbounded growth when
    * the respond path is never reached (e.g. renderer crash).
    *
-   * NOTE: entries do not carry a timestamp — this method purges ALL
-   * stale entries by scanning the Map. Since the registry size is
-   * bounded by the number of concurrent pending approvals (≤ pending
-   * gate count, default timeout 5 min), unbounded growth is already
-   * prevented by the gate's own timeout + deny-once resolution which
-   * causes the respond path to call consume() on every settled request.
-   * This method exists as an explicit safety valve for crash scenarios.
+   * Each entry carries a `recordedAt` timestamp so this method performs
+   * true age-based eviction rather than clearing everything.
    */
-  purgeAll(): void {
-    this.entries.clear();
+  purgeStalerThan(maxAgeMs: number): void {
+    const cutoff = Date.now() - maxAgeMs;
+    for (const [id, entry] of this.entries) {
+      if (entry.recordedAt < cutoff) {
+        this.entries.delete(id);
+      }
+    }
   }
 
   get size(): number {
@@ -116,13 +124,13 @@ export class ApprovalIssuerRegistry {
 export async function requestAgentApproval(
   gate: ApprovalGate,
   input: AgentApprovalInput,
-  registry?: ApprovalIssuerRegistry,
+  registry: ApprovalIssuerRegistry,
 ): Promise<ApprovalChoice> {
   const requestId = randomUUID();
 
   // Record issuer BEFORE gate.requestAndWait() so the respond path
   // always sees the entry regardless of how fast the user responds.
-  registry?.record(requestId, input.sourcePluginId, input.scope);
+  registry.record(requestId, input.sourcePluginId, input.scope);
 
   const decision = await gate.requestAndWait({
     id: requestId,
@@ -159,7 +167,10 @@ export function verifyApprovalResponder(
   responderPluginId: string,
   allowedScopes: string[],
 ): IssuerEntry {
-  const entry = registry.consume(requestId);
+  // Peek first — do NOT remove until all checks pass.
+  // This prevents a race where a failed hijack attempt would delete the
+  // entry, blocking the legitimate issuer from responding.
+  const entry = registry.peek(requestId);
 
   if (!entry) {
     throw new ApprovalOriginError(
@@ -169,8 +180,7 @@ export function verifyApprovalResponder(
   }
 
   if (entry.issuerPluginId !== responderPluginId) {
-    // Re-insert so the legitimate issuer can still respond (best-effort)
-    registry.record(requestId, entry.issuerPluginId, entry.scope);
+    // Registry untouched — legitimate issuer can still respond.
     throw new ApprovalOriginError(
       `[approval-gating] respond denied: cross-plugin attack detected — ` +
       `responder='${responderPluginId}' is not the issuer='${entry.issuerPluginId}' ` +
@@ -180,6 +190,7 @@ export function verifyApprovalResponder(
   }
 
   if (!allowedScopes.includes(entry.scope)) {
+    // Registry untouched — caller may fix scope declaration and retry.
     throw new ApprovalOriginError(
       `[approval-gating] respond denied: scope='${entry.scope}' is not in ` +
       `issuer='${responderPluginId}' agentApprovalScopes=[${allowedScopes.join(",")}] ` +
@@ -188,6 +199,8 @@ export function verifyApprovalResponder(
     );
   }
 
+  // All checks passed — now delete the entry to prevent double-respond.
+  registry.delete(requestId);
   return entry;
 }
 
