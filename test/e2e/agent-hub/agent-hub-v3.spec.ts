@@ -87,7 +87,8 @@ test('ah-pill-toggle switches between 마이워크 and 팀보드', async ({ main
 
   // Click the toggle to switch boards
   await toggle.click();
-  await mainWindow.waitForTimeout(300);
+  // Deterministic: wait for the panel to remain visible (confirms state settled, no crash)
+  await expect(panel!).toBeVisible();
 
   const afterClickValue =
     (await toggle.getAttribute('aria-pressed').catch(() => null)) ??
@@ -101,12 +102,11 @@ test('ah-pill-toggle switches between 마이워크 and 팀보드', async ({ main
   // Arrow key navigation: press ArrowRight to cycle
   await toggle.focus();
   await mainWindow.keyboard.press('ArrowRight');
-  await mainWindow.waitForTimeout(200);
+  // Panel visible confirms keyboard navigation settled without crash
+  await expect(panel!).toBeVisible();
 
   await mainWindow.keyboard.press('ArrowLeft');
-  await mainWindow.waitForTimeout(200);
-
-  // Panel should still be visible (no crash)
+  // Panel visible confirms keyboard navigation settled without crash
   await expect(panel!).toBeVisible();
 });
 
@@ -141,7 +141,7 @@ test('approval row click opens ConfirmModal and confirm updates DOM', async ({ m
 
   // Click the row to open the ConfirmModal
   await approvalRow.click();
-  await mainWindow.waitForTimeout(300);
+  // No explicit wait needed — confirmModal.waitFor({ state: 'visible' }) below is deterministic
 
   // ConfirmModal should appear
   const confirmModal = mainWindow
@@ -177,7 +177,7 @@ test('approval row click opens ConfirmModal and confirm updates DOM', async ({ m
 
   await confirmBtn.waitFor({ state: 'visible', timeout: 5_000 });
   await confirmBtn.click();
-  await mainWindow.waitForTimeout(500);
+  // No explicit wait needed — expect(confirmModal).not.toBeVisible() below polls deterministically
 
   // Modal should close
   await expect(confirmModal).not.toBeVisible({ timeout: 5_000 });
@@ -228,7 +228,7 @@ test('bridge.config round-trip: gear → SettingsPanel → save → value persis
   test.skip(!gearFound, 'Gear/settings button not found — skipping config round-trip test');
 
   await gearBtn.click();
-  await mainWindow.waitForTimeout(300);
+  // No explicit wait needed — settingsPanel.waitFor({ state: 'visible' }) below is deterministic
 
   // SettingsPanel should appear
   const settingsPanel = mainWindow
@@ -274,7 +274,8 @@ test('bridge.config round-trip: gear → SettingsPanel → save → value persis
   const testValue = '42';
   await refreshInput.click({ clickCount: 3 });
   await refreshInput.fill(testValue);
-  await mainWindow.waitForTimeout(100);
+  // Verify the fill landed before proceeding to save
+  await expect(refreshInput).toHaveValue(testValue);
 
   // Save
   const saveBtn = settingsPanel
@@ -290,14 +291,14 @@ test('bridge.config round-trip: gear → SettingsPanel → save → value persis
 
   await saveBtn.waitFor({ state: 'visible', timeout: 5_000 });
   await saveBtn.click();
-  await mainWindow.waitForTimeout(500);
+  // No explicit wait needed — expect(settingsPanel).not.toBeVisible() below polls deterministically
 
   // Settings panel closes
   await expect(settingsPanel).not.toBeVisible({ timeout: 5_000 });
 
   // Re-open settings to verify persistence (bridge.config.set was called)
   await gearBtn.click();
-  await mainWindow.waitForTimeout(300);
+  // No explicit wait needed — settingsPanelReopened.waitFor({ state: 'visible' }) below is deterministic
 
   const settingsPanelReopened = mainWindow
     .locator(
@@ -426,7 +427,7 @@ test('ah-myboard-row entries are visible in 마이워크 board', async ({ mainWi
     const firstPillFound = await firstPill.isVisible().catch(() => false);
     if (firstPillFound) {
       await firstPill.click();
-      await mainWindow.waitForTimeout(300);
+      // No explicit wait needed — myboardRows.first().toBeVisible() below is the deterministic gate
     }
   }
 
