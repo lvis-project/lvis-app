@@ -8,7 +8,10 @@ interface WorkGroupProps {
 }
 
 export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
-  const [open, setOpen] = useState(true);
+  // Past-turn WorkGroups always receive streaming=false from first render,
+  // so they must start closed. Active-turn WorkGroups start open and
+  // auto-close when the true→false transition fires in the effect below.
+  const [open, setOpen] = useState(streaming);
   const prevStreaming = useRef(streaming);
 
   useEffect(() => {
