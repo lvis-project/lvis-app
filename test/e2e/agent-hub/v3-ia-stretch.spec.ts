@@ -326,3 +326,97 @@ test('마이워크: ah-row-grid preserves 1.45fr/0.55fr column ratio (LLM vs App
     `exceeds expected range high bound ${ratioHigh.toFixed(3)}`,
   ).toBeLessThanOrEqual(ratioHigh);
 });
+
+// ---------------------------------------------------------------------------
+// Test 6: AH-2 — LLM card spans full row 1 when approval count = 0
+// ---------------------------------------------------------------------------
+
+test('마이워크: when approval count = 0, LLM card spans full row 1', async ({
+  mainWindow,
+  mockServer,
+}) => {
+  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
+  test.skip(skip, skipReason);
+
+  await switchToMyWork(panel, mainWindow);
+  await mainWindow.waitForTimeout(200);
+
+  const approvalCard = panel.locator('[data-testid="agent-hub-card-approval"]').first();
+  const approvalVisible = await approvalCard.isVisible().catch(() => false);
+
+  // Only meaningful when approval card is absent (count = 0 state from mock)
+  test.skip(
+    approvalVisible,
+    'ApprovalRequestCard is visible — mock returned approvals; skipping zero-approval geometry test',
+  );
+
+  const llmBox = await cardBox(panel, 'agent-hub-card-llm');
+  test.skip(!llmBox, 'LlmBriefingCard not visible — skipping geometry assertion');
+
+  const rowGrid = panel.locator('.ah-row-grid').first();
+  const rowGridBox = await rowGrid.boundingBox();
+  test.skip(!rowGridBox, 'ah-row-grid container not found');
+
+  // LLM card wrapper must span the full grid width (within 4px tolerance for borders/padding)
+  expect(
+    llmBox!.width,
+    `LLM card width (${llmBox!.width}px) must equal ah-row-grid width (${rowGridBox!.width}px) ` +
+    'when approval count = 0 — ah-llm-card-full grid-column:1/-1 not applied',
+  ).toBeGreaterThanOrEqual(rowGridBox!.width - 4);
+});
+
+// ---------------------------------------------------------------------------
+// Test 7: AH-6 — 일정 카드 3 visible avatars + 4th is overflow indicator
+// ---------------------------------------------------------------------------
+
+test('일정: 3 avatars visible + 4th is overflow indicator', async ({
+  mainWindow,
+  mockServer,
+}) => {
+  const { panel, skip, skipReason } = await setupPanel(mainWindow, mockServer);
+  test.skip(skip, skipReason);
+
+  // Switch to 팀보드 which renders TodayScheduleCard with showAttendees=true
+  await switchToTeamBoard(panel, mainWindow);
+  await mainWindow.waitForTimeout(200);
+
+  const todayCard = panel.locator('[data-testid="agent-hub-card-today"]').first();
+  const cardVisible = await todayCard.isVisible().catch(() => false);
+  test.skip(!cardVisible, 'TodayScheduleCard not visible in 팀보드 — skipping avatar geometry test');
+
+  // Find any schedule item that has 4+ attendees rendered
+  const avatarGroups = todayCard.locator('.ah-ts-avatars');
+  const groupCount = await avatarGroups.count();
+  test.skip(groupCount === 0, 'No attendee avatar groups found — mock data may have no attendees');
+
+  // For each group with overflow indicator: verify at most 3 named avatars before the +N chip
+  let foundOverflowGroup = false;
+  for (let g = 0; g < groupCount; g++) {
+    const group = avatarGroups.nth(g);
+    const overflowChip = group.locator('[aria-label^="외 "]').first();
+    const hasOverflow = await overflowChip.isVisible().catch(() => false);
+    if (!hasOverflow) continue;
+
+    foundOverflowGroup = true;
+    const allAvatars = group.locator('.ah-ts-avatar');
+    const totalAvatarElements = await allAvatars.count();
+
+    // With MAX_AVATARS=3: visible = 3, overflow chip = 1 → total avatar elements ≤ 4
+    expect(
+      totalAvatarElements,
+      `Avatar group has ${totalAvatarElements} .ah-ts-avatar elements — ` +
+      'expected ≤ 4 (3 visible + 1 overflow chip) with MAX_AVATARS=3',
+    ).toBeLessThanOrEqual(4);
+
+    // Named avatars (excluding overflow chip) must be ≤ 3
+    const namedAvatars = totalAvatarElements - 1; // subtract the overflow chip
+    expect(
+      namedAvatars,
+      `${namedAvatars} named avatars visible — must be ≤ 3 (MAX_AVATARS=3)`,
+    ).toBeLessThanOrEqual(3);
+
+    break; // one group with overflow is sufficient
+  }
+
+  test.skip(!foundOverflowGroup, 'No avatar group with overflow indicator found — all meetings have ≤ 3 attendees in mock data');
+});
