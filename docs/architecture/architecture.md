@@ -1061,6 +1061,7 @@ flowchart TB
 - `tool_start`가 오면 group card가 먼저 생성되고, assistant 본문보다 앞에 보일 수 있다.
 - 각 도구는 `toolUseId`, `displayOrder`를 가지므로 하위 목록 순서가 안정적이다.
 - 인접한 tool round라도 그 사이에 `assistant_round`가 있으면 별도 묶음으로 유지한다.
+- **mid-turn assistant round는 접지 않는다** — 한 턴 안에 여러 assistant_round 가 존재해도(예: assistant 텍스트 → 도구 → assistant 텍스트 → end_turn) 모든 assistant 카드는 standalone 으로 노출되며 WorkGroup 으로 collapse 되지 않는다. WorkGroup 은 `tool_group` 과 `reasoning` 만 묶는다. (회귀 기록 2026-05-04: ChatView/StackedChatView 분류기가 mid-turn assistant 까지 intermediate 로 분류해 WorkGroup auto-collapse 가 응답 앞부분을 가리던 케이스.)
 - 완료된 도구 묶음은 접힘 상태로 유지되고, 필요 시에만 펼친다.
 - `spawn sh ENOENT` 같은 실행 실패는 그룹 전체가 아니라 해당 tool item 실패로만 표시한다.
 
