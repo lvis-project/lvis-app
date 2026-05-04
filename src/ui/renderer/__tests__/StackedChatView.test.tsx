@@ -306,3 +306,84 @@ describe("Feature flag OFF regression guard", () => {
     expect(stackedContainer).toBeNull();
   });
 });
+
+// ─── 10. Multi-round visibility (parity with ChatView 2026-05-04 fix) ─────────
+//
+// Regression — without this, multi-round LLM turns dropped the round-1
+// assistant bubble into the auto-collapsing WorkGroup ("작업 N단계 ▶")
+// once the turn ended, hiding the front of the response. The fix bucketed
+// assistant entries out of `intermediate` in StackedChatView's flushTurn,
+// matching the carve-out in ChatView's classifier.
+describe("StackedChatView multi-round visibility", () => {
+  it("keeps round-1 assistant text visible after a tool-use multi-round turn", async () => {
+    const mockSettings = {
+      llm: {
+        provider: "openai",
+        vendors: {
+          openai: { model: "gpt-4o", enableThinking: false, thinkingBudgetTokens: 0 },
+        },
+        streamSmoothing: "none",
+        fallbackChain: [],
+      },
+      chat: { systemPrompt: "", autoCompact: true },
+      webSearch: { provider: "none" },
+      routine: { enableWakeupRoutine: false },
+      privacy: { piiRedactEnabled: false },
+      features: { experimentalStackedChat: true },
+    };
+
+    const { container, emitChatStream } = await renderApp({
+      hasApiKey: true,
+      settings: mockSettings,
+    });
+    const { act } = await import("@testing-library/react");
+
+    await act(async () => {
+      // Round 1 — text + tool_use
+      emitChatStream({ type: "text_delta", text: "첫번째 답변입니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "첫번째 답변입니다",
+        thought: "",
+        stopReason: "tool_use",
+        hasToolCalls: true,
+      });
+      emitChatStream({
+        type: "tool_start",
+        name: "calendar_list",
+        groupId: "g1",
+        toolUseId: "t1",
+      });
+      emitChatStream({
+        type: "tool_end",
+        name: "calendar_list",
+        groupId: "g1",
+        toolUseId: "t1",
+        result: "ok",
+        isError: false,
+      });
+      // Round 2 — final answer
+      emitChatStream({ type: "text_delta", text: "두번째 답변입니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "두번째 답변입니다",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      // Both round texts must remain in DOM. Pre-fix the StackedChatView
+      // bucketed round-1 assistant as `intermediate`, dropping it inside
+      // a WorkGroup that auto-collapsed after the turn ended.
+      expect(container.textContent).toContain("첫번째 답변입니다");
+      expect(container.textContent).toContain("두번째 답변입니다");
+      // WorkGroup contains exactly the tool entry (1단계). Pre-fix this
+      // would have been "2단계" because round-1 assistant was inside.
+      expect(container.textContent).toContain("1단계");
+      expect(container.textContent).not.toContain("2단계");
+    });
+  });
+});
