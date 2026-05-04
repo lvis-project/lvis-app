@@ -3,7 +3,7 @@
  *
  * Purpose:
  *   Capture a visual-geometry baseline for the ah-stack-grid layout introduced
- *   in PR #70.  Unit tests (cards.test.tsx) verify rendering but do NOT measure
+ *   in lvis-plugin-agent-hub#70.  Unit tests (cards.test.tsx) verify rendering but do NOT measure
  *   boundingBox geometry.  These tests fill that gap so future visual regressions
  *   are caught before they ship.
  *
@@ -90,10 +90,14 @@ async function waitForV3Panel(page: Page, timeout = 20_000): Promise<Locator | n
  */
 async function waitForAuthS3(panel: Locator, timeout = 30_000): Promise<boolean> {
   const myworkBtn = panel.locator('[data-testid="agent-hub-toggle-mywork"]').first();
-  return myworkBtn
+  const visible = await myworkBtn
     .waitFor({ state: 'visible', timeout })
-    .then(() => myworkBtn.isEnabled())
+    .then(() => true)
     .catch(() => false);
+  if (!visible) return false;
+  // Poll until enabled — avoids a race where the toggle is visible-but-disabled
+  // briefly during the S2→S3 auth transition.
+  return expect(myworkBtn).toBeEnabled({ timeout }).then(() => true).catch(() => false);
 }
 
 /** Click the 마이워크 toggle tab and wait for the view to mount. */
@@ -143,6 +147,17 @@ async function setupPanel(
   page: Page,
   mockBaseUrl: string,
 ): Promise<{ panel: Locator; skip: boolean; skipReason: string }> {
+  // Inject mock base URL via addInitScript so any in-page fetch triggered at
+  // panel mount already sees the stub URL — avoids an initial-fetch race where
+  // the panel fires a real network call before evaluate() can run.
+  await page.addInitScript((baseUrl: string) => {
+    const win = window as any;
+    win.__LVIS_AGENT_HUB_MOCK_BASE__ = baseUrl;
+    // Also seed lvisEnv early in case the plugin reads it at module init time.
+    win.lvisEnv = win.lvisEnv ?? {};
+    win.lvisEnv.AGENT_HUB_API_BASE = baseUrl;
+  }, mockBaseUrl);
+
   const tabFound = await openAgentHubTab(page);
   if (!tabFound) {
     return { panel: page.locator('body'), skip: true, skipReason: 'agent-hub tab not present — build may predate v0.2.1' };
@@ -152,13 +167,6 @@ async function setupPanel(
   if (!panel) {
     return { panel: page.locator('body'), skip: true, skipReason: 'agent-hub-panel-v3 not mounted' };
   }
-
-  // Inject mock server so the plugin fetches from our local stub
-  await page.evaluate((baseUrl: string) => {
-    const win = window as any;
-    win.__LVIS_AGENT_HUB_MOCK_BASE__ = baseUrl;
-    if (win.lvisEnv) win.lvisEnv.AGENT_HUB_API_BASE = baseUrl;
-  }, mockBaseUrl);
 
   const atS3 = await waitForAuthS3(panel);
   if (!atS3) {
