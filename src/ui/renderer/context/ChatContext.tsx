@@ -90,8 +90,6 @@ export interface ChatContextValue {
   contextOverflowPct: number;
   usedTokens: number;
   contextBudget: number;
-  contextPercent: number;
-  contextColor: string;
 
   // Role presets
   rolePresets: RolePreset[];
