@@ -381,9 +381,17 @@ export class WindowManager {
     });
 
     child.once("ready-to-show", () => {
-      // Snap before show() to avoid a visible position jump (flicker).
-      this._snapToLeftEdge(child.id);
-      child.show();
+      const main = this.getMainWindow();
+      if (main?.isMaximized()) {
+        // Main is maximized; mark as locked but keep hidden.
+        // The unmaximize handler will snap and show it when the main restores.
+        const entry = this._children.get(child.id);
+        if (entry) entry.locked = true;
+      } else {
+        // Snap before show() to avoid a visible position jump (flicker).
+        this._snapToLeftEdge(child.id);
+        child.show();
+      }
     });
 
     // Navigate to detached single-view mode via URL fragment.
@@ -469,20 +477,28 @@ export class WindowManager {
       ) ?? screen.getPrimaryDisplay();
 
     // Prefer left side; fall back to right side only when there is no display
-    // that can accommodate the child on the left. This handles multi-monitor
-    // setups correctly: a monitor to the left of the main display is valid.
+    // that can accommodate the child on the left AND vertically overlaps with
+    // the main window position. This handles both horizontal and vertically
+    // stacked multi-monitor setups correctly.
     const leftX = mainBounds.x - childBounds.width;
-    const hasSpaceOnLeft = allDisplays.some(
-      (d) => leftX >= d.bounds.x && leftX + childBounds.width <= d.bounds.x + d.bounds.width
+    const leftDisplay = allDisplays.find(
+      (d) =>
+        leftX >= d.bounds.x &&
+        leftX + childBounds.width <= d.bounds.x + d.bounds.width &&
+        // Display must vertically overlap with the main window.
+        mainBounds.y < d.bounds.y + d.bounds.height &&
+        mainBounds.y + mainBounds.height > d.bounds.y
     );
+    const hasSpaceOnLeft = leftDisplay !== undefined;
     const x = hasSpaceOnLeft ? leftX : mainBounds.x + mainBounds.width;
     const snapEdge: SnapEdge = hasSpaceOnLeft ? "w" : "e";
     const snapDeltaX = hasSpaceOnLeft ? -childBounds.width : mainBounds.width;
 
-    // Clamp Y so the child stays fully within the display vertically.
+    // Clamp Y against the display that will host the child window.
+    const hostDisplay = leftDisplay ?? mainDisplay;
     const y = Math.max(
-      mainDisplay.bounds.y,
-      Math.min(mainBounds.y, mainDisplay.bounds.y + mainDisplay.bounds.height - childBounds.height)
+      hostDisplay.bounds.y,
+      Math.min(mainBounds.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height)
     );
 
     entry.window.setPosition(x, y);
