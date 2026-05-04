@@ -114,6 +114,31 @@ let appShutdownCompleted = false;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
+/**
+ * W1.0 — `--plugin-smoke=<id1>,<id2>,...` CLI flag.
+ *
+ * Verifies that the named plugins mount + init correctly during boot, then
+ * exits 0 (success) or 1 (any plugin missing / failed to initialize). Used
+ * by per-plugin smoke tests in CI and by the Cycle 2 verification gate.
+ *
+ * Returns null if the flag is not present.
+ */
+function parsePluginSmokeFlag(argv: readonly string[]): string[] | null {
+  for (const arg of argv) {
+    if (arg.startsWith("--plugin-smoke=")) {
+      const raw = arg.slice("--plugin-smoke=".length);
+      const ids = raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      return ids;
+    }
+  }
+  return null;
+}
+
+const pluginSmokeIds = parsePluginSmokeFlag(process.argv);
+
 function parseLvisInstallUri(url: string): { slug: string } | null {
   try {
     const parsed = new URL(url);
@@ -441,6 +466,27 @@ async function main() {
 
   // §4.2 Boot Sequence (mainWindow 전달 — PythonRuntimeBootstrapper IPC 사용)
   services = await bootstrap(projectRoot, mainWindow!, () => mainWindow);
+
+  // W1.0 — `--plugin-smoke=<id,...>` exits early after verifying that the
+  // named plugins mounted + initialized. Boot already awaited
+  // pluginRuntime.startAll(); here we just confirm the named ids are loaded.
+  if (pluginSmokeIds !== null) {
+    const loadedIds = new Set(services.pluginRuntime.listPluginIds());
+    const missing = pluginSmokeIds.filter((id) => !loadedIds.has(id));
+    if (missing.length > 0) {
+      log.error(
+        "plugin-smoke: %d/%d plugins missing: %s",
+        missing.length,
+        pluginSmokeIds.length,
+        missing.join(","),
+      );
+      app.exit(1);
+      return;
+    }
+    log.info(`all ${pluginSmokeIds.length} plugins initialized`);
+    app.exit(0);
+    return;
+  }
 
   // Window IPC handlers registered after bootstrap so auditLogger is available
   // for validateSender + viewKey security guards added in PR #354 follow-up.
