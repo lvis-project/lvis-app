@@ -2,6 +2,7 @@ import "../../../../test/renderer/setup.js";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { PluginConfigTab } from "../tabs/PluginConfigTab.js";
+import { PluginConfigSchemaForm } from "../tabs/PluginConfigSchemaForm.js";
 
 const mockCards = vi.fn(async () => [
   {
@@ -276,5 +277,55 @@ describe("PluginConfigTab — auth UI", () => {
       expect(callPluginMethod).toHaveBeenCalledWith("token_login");
     });
     expect(window.lvisApi.window.openDetached).not.toHaveBeenCalled();
+  });
+});
+
+describe("PluginConfigSchemaForm — values prop sync", () => {
+  it("re-syncs draft when values prop changes after mount (regression: outlook.com persistence)", async () => {
+    // 회귀 가드. PluginConfigTab 의 savedConfig fetch 가 async 라
+    // PluginConfigSchemaForm 은 처음에 빈 values 로 마운트된다. 이후
+    // savedConfig 가 도착해 values 가 바뀌어도 useState lazy-init 이라
+    // draft 가 그대로 비어 있어 사용자에게는 "저장한 값이 사라진" 것처럼
+    // 보였다. useEffect([values]) 로 동기화해서 막는다.
+    const schema = {
+      properties: {
+        meetingDetectorAllowedSenderDomains: {
+          type: "array" as const,
+          title: "허용 도메인",
+          items: { type: "string" as const },
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <PluginConfigSchemaForm
+        pluginId="work-proactive"
+        schema={schema}
+        values={{}}
+        secretsPresent={{}}
+        onSave={async () => {}}
+        onSetSecret={async () => {}}
+      />,
+    );
+    const input = document.querySelector(
+      '[id="pcfg:work-proactive:meetingDetectorAllowedSenderDomains"]',
+    ) as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(input.value).toBe("");
+
+    rerender(
+      <PluginConfigSchemaForm
+        pluginId="work-proactive"
+        schema={schema}
+        values={{ meetingDetectorAllowedSenderDomains: ["outlook.com"] }}
+        secretsPresent={{}}
+        onSave={async () => {}}
+        onSetSecret={async () => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(input.value).toBe("outlook.com");
+    });
   });
 });
