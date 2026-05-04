@@ -307,15 +307,24 @@ function EntriesList({
     const last = turnWorkEntries.length - 1;
     for (let k = 0; k < turnWorkEntries.length; k++) {
       const idx = turnWorkEntries[k] as number;
+      const e = entries[idx];
       entryTurnStartMap.set(idx, turnStart >= 0 ? turnStart : 0);
-      if (k < last) {
-        entryClassMap.set(idx, "intermediate");
+      const isLast = k === last;
+      // Mirror of the carve-out in ChatView's classifier — assistant text is
+      // the answer the user came for and must never be hidden inside the
+      // auto-collapsing WorkGroup. Only tool_group/reasoning entries fold.
+      // Without this parity, the same multi-round truncation regression
+      // (2026-05-04) reappears once the stacked-chat feature flag flips on.
+      if (e?.kind === "assistant") {
+        if (isLast && !streaming) {
+          entryClassMap.set(idx, "final");
+        } else {
+          entryClassMap.set(idx, "live");
+        }
+      } else if (isLast) {
+        entryClassMap.set(idx, "live");
       } else {
-        const e = entries[idx];
-        entryClassMap.set(
-          idx,
-          e?.kind === "assistant" && !streaming ? "final" : "live",
-        );
+        entryClassMap.set(idx, "intermediate");
       }
     }
     turnWorkEntries.length = 0;
