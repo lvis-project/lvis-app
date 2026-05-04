@@ -724,7 +724,7 @@
               <div class="step-num">✓</div>
               <div class="step-body">
                 <strong>S0 · 플러그인 진입</strong>
-                <span>로그인 CTA 노출 → 사용자가 “웹에서 로그인 시작” 클릭</span>
+                <span>로그인 CTA 노출 → 사용자가 "웹에서 로그인 시작" 클릭</span>
               </div>
               <span class="chip chip-green">완료</span>
             </div>
@@ -802,7 +802,7 @@
             <div class="toolbar"><span class="chip chip-blue">새로고침 09:35</span><span class="chip">Asia/Seoul · 2026.05.04</span></div>
           </div>
 
-          <!-- Row 1: LLM 오늘의 주요업무 + 승인 요청 -->
+          <!-- Row 1: LLM 오늘의 주요업무 + 승인 요청 (AH-2: 승인 2건 있는 상태) -->
           <div class="row-grid">
             <article class="subpanel card llm-card">
               <div class="card-title">
@@ -811,7 +811,7 @@
               </div>
               <p class="summary-text">민준님, 오늘은 plugin v3 목업 리뷰가 11시에 잡혀 있어 오전 시간을 그 결정에 우선 배치하시는 것을 권합니다.
 어제 닫지 못한 callback UX 문구는 준호님이 14시까지 정리하기로 했으니 점심 직후 한 번 확인해주시면 좋겠습니다.
-주간업무 상으로는 “팀 보드 grouping” 만 정상 페이스이고, “웹 로그인 copy” 가 일정 대비 살짝 늦으니 오후에 주의를 모아주세요.
+주간업무 상으로는 "팀 보드 grouping" 만 정상 페이스이고, "웹 로그인 copy" 가 일정 대비 살짝 늦으니 오후에 주의를 모아주세요.
 오늘 회의 4건 중 16:30 팀장님 브리핑 초안은 risk 한 줄, action 한 줄로 압축해 두면 회의 시간에 의사결정만 남길 수 있습니다.
 승인 대기 2건 중 외부 공유 1건은 만료 7일이라 위험도가 낮으니 먼저 처리해도 무방해 보입니다.</p>
               <div class="llm-foot">
@@ -847,6 +847,26 @@
                 <button class="req-btn">승인</button>
               </div>
             </article>
+          </div>
+
+          <!-- AH-2: 승인 0건 상태 — LLM 카드 full-width (grid-column: 1 / -1) -->
+          <div style="margin-top:10px">
+            <div class="label" style="margin-bottom:8px">AH-2 · 승인 0건 상태 — LLM full width</div>
+            <div class="row-grid">
+              <div style="grid-column:1/-1;display:flex;flex-direction:column">
+                <article class="subpanel card llm-card">
+                  <div class="card-title">
+                    <h3>오늘의 주요업무</h3>
+                    <span class="chip chip-purple">LLM 분석</span>
+                  </div>
+                  <p class="summary-text">오늘은 대기 중인 승인 요청이 없습니다. 주간업무 3건과 오후 회의 2건에 집중하세요.</p>
+                  <div class="llm-foot">
+                    <span>도구 호출: <b style="color:#d8b4fe">tasks_today · calendar_today · approval_pending · weekly_summary</b></span>
+                    <span>09:35 갱신</span>
+                  </div>
+                </article>
+              </div>
+            </div>
           </div>
 
           <!-- Row 2~3: 좌측 stack(주간업무 + 내 보드, 동일 폭) + 우측 오늘 일정(세로 stretch) -->
@@ -1102,7 +1122,7 @@
                 <div class="calendar-item"><time>09:30</time>
                   <div class="cal-card">Agent Hub daily sync<span class="cal-meta">30분 · 보드 IA 확인</span>
                     <div class="cal-attendees">
-                      <div class="ts-avatars"><span class="ts-avatar">민</span><span class="ts-avatar">서</span><span class="ts-avatar">준</span><span class="ts-avatar">하</span></div>
+                      <div class="ts-avatars" title="민준, 서연, 준호, 하린 외 9명"><span class="ts-avatar">민</span><span class="ts-avatar">서</span><span class="ts-avatar">준</span><span class="ts-avatar" aria-label="외 10명">+10</span></div>
                       <span class="meta">13명 참석 · 30분</span>
                     </div>
                   </div>
@@ -1279,7 +1299,7 @@
           </div>
           <div class="callout" style="margin-top:14px">
             <h3>Recovery copy principle</h3>
-            <p style="font-size:12px;margin-top:5px">사용자는 “무엇이 실패했는지”, “현재 어떤 데이터가 보이는지”, “다음으로 무엇을 누르면 되는지”를 플러그인 창 안에서 바로 알아야 합니다.</p>
+            <p style="font-size:12px;margin-top:5px">사용자는 "무엇이 실패했는지", "현재 어떤 데이터가 보이는지", "다음으로 무엇을 누르면 되는지"를 플러그인 창 안에서 바로 알아야 합니다.</p>
           </div>
         </section>
       </div>
@@ -1291,11 +1311,11 @@
       <h2>v3 합의 필요 항목</h2>
       <ul>
         <li>마이워크 우측 사이드 컬럼의 폭(0.55fr) 이 compact viewport 에서 충분한지 — 더 좁히고 그 폭 만큼 LLM 카드를 늘릴지.</li>
-        <li>승인 요청이 0건일 때: 카드 자체를 숨길지, 빈 상태로 남길지(“대기 중인 승인 없음”).</li>
+        <li>승인 요청이 0건일 때: 카드 자체를 숨길지, 빈 상태로 남길지("대기 중인 승인 없음").</li>
         <li>팀원 mini row 의 리스크 0건 표시: 중성 회색(현재) vs 아예 미노출.</li>
         <li>팀 통합 대시보드 페이지네이션을 ‹ › 버튼 대신 가로 swipe 인지 / dot indicator 인지.</li>
-        <li>팀 업무 요약 paragraph 의 길이 정책: 최대 N줄 truncation 후 “더 보기”인지, 자유 길이인지.</li>
-        <li>오늘 팀원 전체 일정 카드의 참석자 avatar 최대 노출 수(현재 4) + “+9명” overflow 처리.</li>
+        <li>팀 업무 요약 paragraph 의 길이 정책: 최대 N줄 truncation 후 "더 보기"인지, 자유 길이인지.</li>
+        <li>오늘 팀원 전체 일정 카드의 참석자 avatar 최대 노출 수(현재 4) + "+9명" overflow 처리.</li>
       </ul>
     </article>
     <article class="panel">
