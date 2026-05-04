@@ -65,16 +65,9 @@ export function useContextBudget(params: {
     return estimatedTokens / contextBudget;
   }, [entries, contextBudget]);
 
-  const contextPercent = Math.min(100, Math.round((usedTokens / contextBudget) * 100));
-  const contextColor =
-    contextPercent < 50 ? "text-emerald-500" :
-    contextPercent < 80 ? "text-amber-500" : "text-red-500";
-
   return {
     usedTokens,
     contextBudget,
-    contextPercent,
-    contextColor,
     contextOverflowPct,
     isOverflow: contextOverflowPct >= 1,
   };
