@@ -381,9 +381,9 @@ export class WindowManager {
     });
 
     child.once("ready-to-show", () => {
-      child.show();
-      // Always snap to left edge of main window on open (side-panel behavior).
+      // Snap before show() to avoid a visible position jump (flicker).
       this._snapToLeftEdge(child.id);
+      child.show();
     });
 
     // Navigate to detached single-view mode via URL fragment.
@@ -468,13 +468,16 @@ export class WindowManager {
           mainBounds.x < d.bounds.x + d.bounds.width
       ) ?? screen.getPrimaryDisplay();
 
-    // Prefer left side; fall back to right side when the main window is near
-    // the left edge of the display (no room for child window on the left).
+    // Prefer left side; fall back to right side only when there is no display
+    // that can accommodate the child on the left. This handles multi-monitor
+    // setups correctly: a monitor to the left of the main display is valid.
     const leftX = mainBounds.x - childBounds.width;
-    const onDisplay = leftX >= mainDisplay.bounds.x;
-    const x = onDisplay ? leftX : mainBounds.x + mainBounds.width;
-    const snapEdge: SnapEdge = onDisplay ? "w" : "e";
-    const snapDeltaX = onDisplay ? -childBounds.width : mainBounds.width;
+    const hasSpaceOnLeft = allDisplays.some(
+      (d) => leftX >= d.bounds.x && leftX + childBounds.width <= d.bounds.x + d.bounds.width
+    );
+    const x = hasSpaceOnLeft ? leftX : mainBounds.x + mainBounds.width;
+    const snapEdge: SnapEdge = hasSpaceOnLeft ? "w" : "e";
+    const snapDeltaX = hasSpaceOnLeft ? -childBounds.width : mainBounds.width;
 
     // Clamp Y so the child stays fully within the display vertically.
     const y = Math.max(
