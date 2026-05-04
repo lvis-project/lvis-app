@@ -7,12 +7,8 @@
  *
  * MS Graph 인증은 PR 3 이후 ms-graph 플러그인이 자체 소유 — host 에는 관련 코드 없음.
  */
-import { resolve } from "node:path";
-import { homedir } from "node:os";
-import { mkdirSync } from "node:fs";
 import { app } from "electron";
 import type { BrowserWindow } from "electron";
-import { TaskService } from "../taskService.js";
 import { SettingsService } from "../data/settings-store.js";
 import { MemoryManager } from "../memory/memory-manager.js";
 import { KeywordEngine } from "../core/keyword-engine.js";
@@ -36,7 +32,6 @@ export interface CoreServices {
   keywordEngine: KeywordEngine;
   toolRegistry: ToolRegistry;
   routeEngine: RouteEngine;
-  taskService: TaskService;
 }
 
 export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<CoreServices> {
@@ -90,15 +85,6 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
   toolRegistry.register(new BashTool());
   const routeEngine = new RouteEngine({ toolRegistry });
 
-  // Task DB lives under `~/.lvis/tasks/` so all user-controlled state shares
-  // the single `~/.lvis/` root with memory, audit, mcp, plugins, etc. The
-  // SQLite open call doesn't create parent dirs, so do it once at boot.
-  const tasksDir = resolve(homedir(), ".lvis", "tasks");
-  mkdirSync(tasksDir, { recursive: true });
-  const taskService = new TaskService({
-    dbPath: resolve(tasksDir, "lvis-tasks.db"),
-  });
-
   return {
     pythonPath,
     pythonRuntime,
@@ -109,6 +95,5 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow): Promise<
     keywordEngine,
     toolRegistry,
     routeEngine,
-    taskService,
   };
 }

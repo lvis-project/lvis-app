@@ -8,7 +8,7 @@ export interface SidebarProps {
 }
 
 // "home" is the chat view — not detachable (it is the primary anchor window).
-const DETACHABLE_KEYS = new Set(["tasks", "reminders", "routines", "memory", "starred"]);
+const DETACHABLE_KEYS = new Set(["reminders", "routines", "memory", "starred"]);
 
 interface ContextMenuState {
   x: number;
@@ -49,7 +49,6 @@ export function Sidebar(props: SidebarProps) {
   // cell + spinner-with-phase) so the sidebar stays clean.
   const navItems = [
     { key: "home", label: "홈" },
-    { key: "tasks", label: "태스크" },
     { key: "reminders", label: "리마인더" },
     { key: "routines", label: "루틴" },
     { key: "starred", label: "즐겨찾기", badge: starredCount > 0 ? `(${starredCount})` : null },

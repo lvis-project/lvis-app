@@ -98,16 +98,6 @@ function makeServices(
       listUiExtensions: vi.fn(() => []),
     } as any,
     pluginMarketplace: { list: vi.fn(), install: vi.fn(), uninstall: vi.fn() } as any,
-    taskService: {
-      add: vi.fn(),
-      update: vi.fn(),
-      get: vi.fn(),
-      delete: vi.fn(),
-      query: vi.fn(),
-      getPendingByPriority: vi.fn(() => []),
-      getOverdue: vi.fn(() => []),
-      getDueToday: vi.fn(() => []),
-    } as any,
     settingsService: {
       getAll: vi.fn(),
       patch: vi.fn(),

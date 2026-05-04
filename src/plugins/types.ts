@@ -657,13 +657,6 @@ export interface PluginHostApi {
    * test plugin trigger downstream cascades against marketplace expectations.
    */
   onPluginsChanged(handler: (event: PluginLifecycleEvent) => void): () => void;
-  addTask(task: {
-    title: string;
-    description?: string;
-    source: string;
-    sourceRef?: string;
-    priority?: "high" | "medium" | "low";
-  }): void;
   getSecret(key: string): string | null;
 
   // PR 3 이후: Microsoft Graph 인증은 ms-graph 플러그인이 자체 소유한다.

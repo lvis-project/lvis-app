@@ -7,7 +7,6 @@
  */
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { PluginMarketplaceService } from "../plugins/marketplace.js";
-import type { TaskService } from "../taskService.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { KeywordEngine } from "../core/keyword-engine.js";
@@ -27,7 +26,6 @@ import type { StarredStore } from "../data/starred-store.js";
 import type { FeedbackStore } from "../data/feedback-store.js";
 import type { TelemetryService } from "../main/telemetry.js";
 import type { PluginTelemetryClient } from "../telemetry/client.js";
-import type { TaskSourceRegistry } from "../plugins/task-source-registry.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
 import { createLogger } from "../lib/logger.js";
@@ -68,8 +66,6 @@ export interface AppServices {
   pythonPath?: string;
   pluginRuntime: PluginRuntime;
   pluginMarketplace: PluginMarketplaceService;
-  taskService: TaskService;
-  taskSourceRegistry: TaskSourceRegistry;
   settingsService: SettingsService;
   memoryManager: MemoryManager;
   keywordEngine: KeywordEngine;
@@ -146,12 +142,6 @@ export interface AppServices {
    * has a renderer listener attached. Idempotent — safe to call multiple times.
    */
   startRemindersScheduler?: () => void;
-  /**
-   * Deferred TaskDeadlinePoller.start() handle. Started AFTER plugin runtime
-   * is up so brain subscribers (work-proactive etc.) are registered before
-   * the first deadline event fires. Idempotent.
-   */
-  startTaskDeadlinePoller?: () => void;
   /**
    * Issue #260 — system-level notification service. Auto-fires desktop
    * notifications at 4 lifecycle points (turn-end / routine / ask-user /
