@@ -60,7 +60,20 @@ import {
 } from "../plugins.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
+import {
+  ApprovalIssuerRegistry,
+  verifyApprovalResponder,
+  ApprovalOriginError,
+} from "../../permissions/agent-action-requester.js";
 const log = createLogger("lvis");
+
+/**
+ * §8 P0 security — shared issuer registry for agent approval origin gating.
+ * Instantiated once per boot (module-level singleton). Records
+ * (requestId → issuerPluginId + scope) at request time so the respond path
+ * can verify cross-plugin attacks and scope violations.
+ */
+export const approvalIssuerRegistry = new ApprovalIssuerRegistry();
 
 /**
  * In-memory dedupe for `hostApi.triggerConversation()`. A brain plugin can set
@@ -915,19 +928,69 @@ export async function initPluginRuntime(
       }) as PluginHostApi["openAuthWindow"],
 
       // ─── §8 Agent Approval — hostApi.agentApproval ────────────────────
-      // Exposes the main-process ApprovalGate to plugins so they can resolve
-      // pending approval entries from handler code (NOT from the renderer-only
-      // preload bridge). approvalGate is REQUIRED at construction time —
-      // there is no noop fallback. A missing gate would mean the boot order
-      // is wrong, which is a programming error to surface loudly rather than
-      // silently swallow.
+      // Exposes the main-process ApprovalGate to plugins so they can request
+      // and resolve pending approval entries from handler code (NOT from the
+      // renderer-only preload bridge). approvalGate is REQUIRED at construction
+      // time — there is no noop fallback. A missing gate would mean the boot
+      // order is wrong, which is a programming error to surface loudly.
+      //
+      // §8 P0 security (issue #71):
+      //   request(): records (requestId → pluginId + scope) in registry.
+      //   respond(): verifies (a) requestId was issued by THIS plugin
+      //              (b) scope is in manifest.pluginAccess.agentApprovalScopes.
+      //   Violations throw ApprovalOriginError (no silent fallback, §No-Fallback).
       agentApproval: {
+        request: async (input: {
+          toolName: string;
+          args: unknown;
+          reason: string;
+          scope: string;
+        }): Promise<ApprovalChoice> => {
+          const { requestAgentApproval } = await import(
+            "../../permissions/agent-action-requester.js"
+          );
+          return requestAgentApproval(
+            approvalGate,
+            {
+              toolName: input.toolName,
+              args: input.args,
+              reason: input.reason,
+              source: "plugin",
+              sourcePluginId: pluginId,
+              scope: input.scope,
+            },
+            approvalIssuerRegistry,
+          );
+        },
+
         respond: async (
           requestId: string,
           choice: ApprovalChoice,
           nonce?: string,
           hmac?: string,
         ): Promise<void> => {
+          const allowedScopes: string[] =
+            Array.isArray(manifest.pluginAccess?.agentApprovalScopes)
+              ? (manifest.pluginAccess!.agentApprovalScopes as string[])
+              : [];
+          try {
+            verifyApprovalResponder(
+              approvalIssuerRegistry,
+              requestId,
+              pluginId,
+              allowedScopes,
+            );
+          } catch (err) {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "approval-gating",
+              type: "error",
+              input: err instanceof ApprovalOriginError
+                ? `[${err.code}] plugin='${pluginId}' requestId='${requestId}' ${err.message}`
+                : `[approval-gating] plugin='${pluginId}' requestId='${requestId}' ${String(err)}`,
+            });
+            throw err;
+          }
           approvalGate.resolve(requestId, { requestId, choice, nonce, hmac });
         },
       },
