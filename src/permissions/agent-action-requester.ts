@@ -40,6 +40,8 @@ export interface AgentApprovalInput {
 interface IssuerEntry {
   issuerPluginId: string;
   scope: string;
+  /** Wall-clock ms at which this entry was recorded — used by `purgeStalerThan`. */
+  recordedAt: number;
 }
 
 /**
@@ -61,7 +63,11 @@ export class ApprovalIssuerRegistry {
   private readonly entries = new Map<string, IssuerEntry>();
 
   record(requestId: string, issuerPluginId: string, scope: string): void {
-    this.entries.set(requestId, { issuerPluginId, scope });
+    this.entries.set(requestId, {
+      issuerPluginId,
+      scope,
+      recordedAt: Date.now(),
+    });
   }
 
   /**
@@ -76,20 +82,40 @@ export class ApprovalIssuerRegistry {
   }
 
   /**
+   * Explicit deletion (no-op if absent). Used by `requestAgentApproval`'s
+   * try-finally to prune the entry when the gate throws — without this the
+   * entry would leak until `purgeStalerThan` runs.
+   */
+  delete(requestId: string): void {
+    this.entries.delete(requestId);
+  }
+
+  /**
+   * Non-destructive lookup — returns the entry if present, undefined otherwise.
+   * Does NOT remove the entry (unlike `consume`). Intended for testing and
+   * diagnostic code paths only; production code should use `consume`.
+   */
+  peek(requestId: string): IssuerEntry | undefined {
+    return this.entries.get(requestId);
+  }
+
+  /**
    * Remove all entries older than `maxAgeMs` milliseconds from `now`.
    * Called by the gate timeout path to prevent unbounded growth when
    * the respond path is never reached (e.g. renderer crash).
    *
-   * NOTE: entries do not carry a timestamp — this method purges ALL
-   * stale entries by scanning the Map. Since the registry size is
-   * bounded by the number of concurrent pending approvals (≤ pending
-   * gate count, default timeout 5 min), unbounded growth is already
-   * prevented by the gate's own timeout + deny-once resolution which
-   * causes the respond path to call consume() on every settled request.
-   * This method exists as an explicit safety valve for crash scenarios.
+   * Returns the count of purged entries.
    */
-  purgeAll(): void {
-    this.entries.clear();
+  purgeStalerThan(maxAgeMs: number, now: number = Date.now()): number {
+    const cutoff = now - maxAgeMs;
+    let purged = 0;
+    for (const [requestId, entry] of this.entries) {
+      if (entry.recordedAt < cutoff) {
+        this.entries.delete(requestId);
+        purged += 1;
+      }
+    }
+    return purged;
   }
 
   get size(): number {
@@ -98,6 +124,12 @@ export class ApprovalIssuerRegistry {
 }
 
 /**
+ * **Internal helper.** Plugin code MUST call `hostApi.agentApproval.request()`
+ * — `requestAgentApproval` is the host-side wiring that the HostApi factory
+ * binds to. Direct callers must hold the live `ApprovalGate` and shared
+ * `ApprovalIssuerRegistry` references and are expected to be host-internal
+ * code paths only.
+ *
  * Request approval via the §8 ApprovalGate on behalf of a plugin.
  *
  * Records the (requestId → issuerPluginId, scope) mapping in the
@@ -106,7 +138,9 @@ export class ApprovalIssuerRegistry {
  *
  * The gate generates nonce + HMAC internally (§D2 confused-deputy defense).
  * On timeout the gate returns deny-once; this function propagates that
- * choice without masking the error path.
+ * choice without masking the error path. If `gate.requestAndWait` throws,
+ * the registry entry recorded above is removed in the `finally` block so
+ * a thrown gate cannot leak issuer entries (AC1.4).
  *
  * @param gate     - The live ApprovalGate instance (injected by the IPC layer).
  * @param registry - Shared ApprovalIssuerRegistry for origin tracking.
@@ -124,16 +158,26 @@ export async function requestAgentApproval(
   // always sees the entry regardless of how fast the user responds.
   registry?.record(requestId, input.sourcePluginId, input.scope);
 
-  const decision = await gate.requestAndWait({
-    id: requestId,
-    category: "tool",
-    toolName: input.toolName,
-    args: input.args,
-    reason: input.reason,
-    source: input.source,
-    createdAt: Date.now(),
-  });
-  return decision.choice;
+  let settled = false;
+  try {
+    const decision = await gate.requestAndWait({
+      id: requestId,
+      category: "tool",
+      toolName: input.toolName,
+      args: input.args,
+      reason: input.reason,
+      source: input.source,
+      createdAt: Date.now(),
+    });
+    settled = true;
+    return decision.choice;
+  } finally {
+    // On gate throw (settled=false) we must purge the entry we just
+    // recorded, otherwise a subsequent malicious respond() with the same
+    // id (replay or guessed UUID) could see a leaked issuer mapping.
+    // On normal resolve we leave the entry — the respond path consumes it.
+    if (!settled) registry?.delete(requestId);
+  }
 }
 
 /**
