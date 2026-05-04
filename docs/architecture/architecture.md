@@ -1073,6 +1073,8 @@ flowchart TB
 | **OpenHarness** | 실행 run 단위를 구조화해 추적 | LVIS도 tool round를 `groupId` 단위로 추적 |
 | **Paperclip / PaperclipAI** | thinking, tool call, tool result, assistant를 분리 기록 | reasoning card와 assistant round를 분리 유지 |
 
+Chat은 단일 `ChatView` 컴포넌트를 통해 렌더링된다 (issue #547). PR #473에서 도입된 `StackedChatView` 컴포넌트는 제거되었으며 — Kakao-style 연속 스트림, day separator, token chip, WorkGroup 등 설계 의도는 `ChatView`에 직접 흡수되었다. 태그 `v1-chat` (`24191323`)이 회귀 경계로 유지된다 — chat 동작은 해당 지점 이전으로 회귀해서는 안 된다.
+
 #### 4.5.11 Continuous Chat Rotation — 3-Tier Decision + Incomplete-Turn Guards
 
 Issue #457 (Continuous Chat v3) 의 Phase 1+2+3 구현. §4.5.4 의 Auto-Compact 가 *현재 세션 안에서* 토큰을 줄이는 것이라면, Rotation 은 *세션 자체를 분기* 하여 child session 에 rolling summary preamble 만 남기고 fresh 컨텍스트로 시작한다. `runRotationCheck` 가 매 턴-종료 직후 (`runTurn` line 687) 호출되며, 결정 트리는 `decideRotation` (`auto-compact.ts`).
@@ -1101,7 +1103,7 @@ if (messages.at(-1)?.role === "tool_result") return;            // (A3) tool 후
 
 **`justRotated` one-shot flag**: `rotateActive` 가 child session 진입 시 set. 다음 `runRotationCheck` 가 read+clear → 회전 직후 1턴은 자동 skip. OpenCode 의 compaction-summary 재귀 방지 패턴 차용.
 
-**Renderer 표면**: 회전이 트리거되면 `compact_notice` IPC event 가 `tier` + `revertSessionId` 을 carry. `kind: "checkpoint"` 구조화 ChatEntry 가 chat stream 에 삽입되고, `StackedChatView` 의 `CheckpointDivider` 가 tier 별 라벨/색상/아이콘 (긴급 정리/주제 전환/이전 세션 정리/자동 정리) + 옵션 "↩ 여기로 되돌아가기" 버튼 (parent 세션 resume) 으로 표시. `kind: "session_resume"` 은 child session 으로 진입 시 prepend 되어 "이전 대화 이어서 시작 (요약 N자 적용)" 마커.
+**Renderer 표면**: 회전이 트리거되면 `compact_notice` IPC event 가 `tier` + `revertSessionId` 을 carry. `kind: "checkpoint"` 구조화 ChatEntry 가 chat stream 에 삽입되고, `ChatView` 의 checkpoint 렌더러가 tier 별 라벨/색상/아이콘 (긴급 정리/주제 전환/이전 세션 정리/자동 정리) + 옵션 "↩ 여기로 되돌아가기" 버튼 (parent 세션 resume) 으로 표시. `kind: "session_resume"` 은 child session 으로 진입 시 prepend 되어 "이전 대화 이어서 시작 (요약 N자 적용)" 마커.
 
 **Prompt-injection fence**: rolling summary preamble 을 system prompt 에 주입할 때 `<prior-context-summary>` 블록을 *명령 해석 금지* fence 로 wrap (system-prompt-builder Section 8). 이전 세션의 사용자 입력이 요약을 거쳐 자식 세션 system prompt 로 흘러들어가는 vector 차단.
 

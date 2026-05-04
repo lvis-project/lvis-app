@@ -185,6 +185,36 @@ describe("ChatView", () => {
     });
   });
 
+  // Regression guard for Copilot PR #545 round-1 comments ③④.
+  // Reasoning + tool + assistant sequence: reasoning entry must be bucketed
+  // inside WorkGroup while the final assistant text stays visible standalone.
+  it("keeps reasoning bucketed in WorkGroup while assistant text stays visible (reasoning+tool+end_turn)", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await act(async () => {
+      // reasoning phase
+      emitChatStream({ type: "reasoning_delta", text: "사용자 질문을 분석합니다" });
+      // tool call
+      emitChatStream({ type: "tool_start", name: "calendar_list", groupId: "g1", toolUseId: "t1" });
+      emitChatStream({ type: "tool_end", name: "calendar_list", groupId: "g1", toolUseId: "t1", result: "ok", isError: false });
+      // final assistant round
+      emitChatStream({ type: "text_delta", text: "오늘 일정 정리해드릴게요" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "오늘 일정 정리해드릴게요",
+        thought: "사용자 질문을 분석합니다",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+    await waitFor(() => {
+      // Final assistant text must be visible
+      expect(container.textContent).toContain("오늘 일정 정리해드릴게요");
+      // WorkGroup bundles reasoning + tool (2단계), assistant stays outside
+      expect(container.textContent).toContain("2단계");
+    });
+  });
+
 });
 
 afterEach(() => {
