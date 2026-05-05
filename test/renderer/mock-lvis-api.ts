@@ -14,7 +14,6 @@ type ApiOverrides = {
   settings?: unknown;
   sessions?: Array<{ id: string; modifiedAt: string }>;
   currentSession?: string;
-  tasks?: unknown[];
   starred?: unknown[];
   history?: { sessionId: string; messages: unknown[] };
   hasApiKey?: boolean;
@@ -54,7 +53,6 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const settings = overrides.settings ?? DEFAULT_SETTINGS;
   const sessions = overrides.sessions ?? [];
   const currentSession = overrides.currentSession ?? "sess-default";
-  const tasks = overrides.tasks ?? [];
   const starred = overrides.starred ?? [];
   const history = overrides.history ?? { sessionId: currentSession, messages: [] };
   const hasApiKey = overrides.hasApiKey ?? true;
@@ -144,13 +142,6 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       onDetachedNavigate: vi.fn(() => () => {}),
     },
 
-    addTask: vi.fn(async (t: unknown) => t),
-    queryTasks: vi.fn(async () => tasks),
-    updateTask: vi.fn(async (_id: string, t: unknown) => t),
-    deleteTask: vi.fn(async () => undefined),
-    getTodayTasks: vi.fn(async () => tasks),
-    getOverdueTasks: vi.fn(async () => []),
-    getTasks: vi.fn(async () => tasks),
     getRecentNotes: vi.fn(async () => []),
 
     getUsageSummary: vi.fn(async () => usage),
