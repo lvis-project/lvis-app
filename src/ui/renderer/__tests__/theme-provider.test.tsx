@@ -503,9 +503,9 @@ describe("<ThemeProvider> + reduced-motion", () => {
 });
 
 describe("resolvePluginTokens", () => {
-  it("dark/default — returns all 17 --lvis-* keys", () => {
+  it("dark/default — returns all 36 --lvis-* keys", () => {
     const tokens = resolvePluginTokens("dark", "default");
-    expect(Object.keys(tokens)).toHaveLength(17);
+    expect(Object.keys(tokens)).toHaveLength(36);
     expect(tokens["--lvis-bg"]).toMatch(/^hsl\(/);
     expect(tokens["--lvis-radius"]).toBe("0.6rem");
   });
