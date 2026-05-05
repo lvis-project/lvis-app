@@ -294,37 +294,17 @@ export class WindowManager {
       }
     }
 
-    // Restore saved bounds if available.
+    // Restore saved size (width/height) if available.
+    // Position (x/y) is intentionally NOT restored here: every detached window
+    // is snapped to the main window edge by _snapToLeftEdge() inside
+    // ready-to-show before it becomes visible, so any saved x/y would be
+    // immediately overwritten and would only create a misleading impression
+    // that the persisted position matters.
     const saved = loadWindowState().detached.find((d) => d.viewKey === viewKey);
-
-    // Validate saved position against current displays. On multi-monitor
-    // setups a window may be saved to a display that is no longer connected;
-    // without this check the window opens off-screen and the user cannot
-    // interact with it (§354 follow-up, SEV-2).
-    let restoredX = saved?.bounds.x;
-    let restoredY = saved?.bounds.y;
-    if (restoredX !== undefined && restoredY !== undefined) {
-      const displays = screen.getAllDisplays();
-      const fitsAnyDisplay = displays.some(
-        (d) =>
-          restoredX! >= d.bounds.x &&
-          restoredX! < d.bounds.x + d.bounds.width &&
-          restoredY! >= d.bounds.y &&
-          restoredY! < d.bounds.y + d.bounds.height,
-      );
-      if (!fitsAnyDisplay) {
-        // Clamp to primary display work area, preserving size.
-        const primary = screen.getPrimaryDisplay();
-        restoredX = primary.workArea.x + 100;
-        restoredY = primary.workArea.y + 100;
-      }
-    }
 
     const child = new BrowserWindow({
       width: saved?.bounds.width ?? 800,
       height: saved?.bounds.height ?? 600,
-      x: restoredX,
-      y: restoredY,
       show: false,
       title: `LVIS — ${viewKeyLabel(viewKey)}`,
       webPreferences: {
@@ -462,21 +442,47 @@ export class WindowManager {
     // Calling _snapToLeftEdge() here would trigger another 'move' → another
     // _onChildMove() → infinite loop.  Instead we compute expected position
     // directly and only call setPosition() when the panel has genuinely drifted.
+    //
+    // We also apply the same screen-edge clamps as _followMainForSnapped so
+    // that the restored position is always on-screen (e.g. "w" snap near the
+    // left edge of the display produces a negative X without clamping).
     if (entry.locked) {
       if (entry.snapEdge === undefined) return;
       const main = this.getMainWindow();
       if (!main || main.isDestroyed()) return;
       const mainBounds = main.getBounds();
       const childBounds = entry.window.getBounds();
-      const expected = snappedPosition(
+      const pos = snappedPosition(
         mainBounds,
         childBounds,
         entry.snapEdge,
         entry.snapDeltaX ?? 0,
         entry.snapDeltaY ?? 0,
       );
-      if (childBounds.x !== expected.x || childBounds.y !== expected.y) {
-        entry.window.setPosition(expected.x, expected.y);
+      const allDisplays = screen.getAllDisplays();
+      const hostDisplay =
+        allDisplays.find(
+          (d) =>
+            pos.x >= d.bounds.x &&
+            pos.x < d.bounds.x + d.bounds.width &&
+            mainBounds.y < d.bounds.y + d.bounds.height &&
+            mainBounds.y + mainBounds.height > d.bounds.y,
+        ) ?? screen.getDisplayNearestPoint({ x: pos.x, y: pos.y });
+      const clampedY = Math.max(
+        hostDisplay.bounds.y,
+        Math.min(pos.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height),
+      );
+      let clampedX = pos.x;
+      if (entry.snapEdge === "e") {
+        clampedX = Math.max(
+          hostDisplay.bounds.x,
+          Math.min(pos.x, hostDisplay.bounds.x + hostDisplay.bounds.width - childBounds.width),
+        );
+      } else if (entry.snapEdge === "w") {
+        clampedX = Math.max(hostDisplay.bounds.x, pos.x);
+      }
+      if (childBounds.x !== clampedX || childBounds.y !== clampedY) {
+        entry.window.setPosition(clampedX, clampedY);
       }
       return;
     }

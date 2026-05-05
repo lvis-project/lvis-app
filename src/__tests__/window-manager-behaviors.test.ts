@@ -341,6 +341,39 @@ describe("WindowManager — magnetic snap behaviors", () => {
         (deferWm as unknown as { _hiddenByMaximize: Set<number> })._hiddenByMaximize.has(childId)
       ).toBe(true);
     });
+
+    it("snaps and shows child when main is NOT maximized at open time", () => {
+      // Verifies the normal open path: ready-to-show must call _snapToLeftEdge
+      // (which calls setPosition) and then show().
+      const normalMain = makeMockWin({
+        id: 301,
+        bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+        maximized: false,
+      });
+      bwStore.set(normalMain.id, normalMain);
+
+      const normalWm = new WindowManager({
+        preloadPath: "/fake/preload.cjs",
+        distRoot: "/fake/dist",
+      });
+      normalWm.registerMainWindow(normalMain as never);
+
+      const bwSizeBefore = bwStore.size;
+      normalWm.openDetachedTab("plugin:agent-hub:panel");
+
+      const childId = [...bwStore.keys()].find(
+        (id) => id !== normalMain.id && id !== mainWin.id && id >= 301
+      )!;
+      const child = bwStore.get(childId)!;
+
+      (child as unknown as { emit: (e: string) => void }).emit("ready-to-show");
+
+      // show() must be called and child must be in a locked, snapped state.
+      expect((child as unknown as MockWindow).show).toHaveBeenCalledOnce();
+      const entry = wmChildren(normalWm).get(childId);
+      expect(entry?.locked).toBe(true);
+      expect((child as unknown as MockWindow).setPosition).toHaveBeenCalled();
+    });
   });
 
   // ── 5. setMovable — locked panels cannot be dragged ─────────────────────
