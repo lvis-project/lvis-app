@@ -9,6 +9,27 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 
+function expectTextOrder(text: string, orderedNeedles: string[]) {
+  let previousIndex = -1;
+  for (const needle of orderedNeedles) {
+    const nextIndex = text.indexOf(needle);
+    expect(nextIndex, `Missing "${needle}" in rendered transcript`).toBeGreaterThanOrEqual(0);
+    expect(nextIndex, `"${needle}" should render after the previous transcript item`).toBeGreaterThan(previousIndex);
+    previousIndex = nextIndex;
+  }
+}
+
+function expectNodeBefore(
+  before: Node,
+  after: Node,
+  label: string,
+) {
+  expect(
+    before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING,
+    label,
+  ).toBeTruthy();
+}
+
 describe("ChatView", () => {
   it("mounts without crashing", async () => {
     const { container } = await renderApp();
@@ -261,53 +282,62 @@ describe("ChatView", () => {
     });
   });
 
-  it("renders one coherent WorkGroup for a multi-tool/reasoning assistant turn", async () => {
-    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await act(async () => {
-      emitChatStream({ type: "reasoning_delta", text: "첫 번째 검색 계획" });
-      emitChatStream({
-        type: "assistant_round",
-        text: "",
-        thought: "첫 번째 검색 계획",
-        stopReason: "tool_use",
-        hasToolCalls: true,
-      });
-      emitChatStream({ type: "tool_start", name: "web_search", groupId: "g1", toolUseId: "t1" });
-      emitChatStream({ type: "tool_end", name: "web_search", groupId: "g1", toolUseId: "t1", result: "검색 결과", isError: false });
-      emitChatStream({ type: "text_delta", text: "중간 확인 내용은 사용자에게 보여야 합니다." });
-      emitChatStream({
-        type: "assistant_round",
-        text: "중간 확인 내용은 사용자에게 보여야 합니다.",
-        thought: "",
-        stopReason: "tool_use",
-        hasToolCalls: true,
-      });
-      emitChatStream({ type: "reasoning_delta", text: "두 번째 도구 결과를 검증" });
-      emitChatStream({
-        type: "assistant_round",
-        text: "",
-        thought: "두 번째 도구 결과를 검증",
-        stopReason: "tool_use",
-        hasToolCalls: true,
-      });
-      emitChatStream({ type: "tool_start", name: "web_fetch", groupId: "g2", toolUseId: "t2" });
-      emitChatStream({ type: "tool_end", name: "web_fetch", groupId: "g2", toolUseId: "t2", result: "본문", isError: false });
-      emitChatStream({ type: "text_delta", text: "최종 답변입니다." });
-      emitChatStream({
-        type: "assistant_round",
-        text: "최종 답변입니다.",
-        thought: "",
-        stopReason: "end_turn",
-        hasToolCalls: false,
-      });
-      emitChatStream({ type: "done" });
+  it("preserves transcript order when visible assistant text separates work phases", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      history: {
+        sessionId: "sess-work-order",
+        messages: [
+          { index: 0, role: "user", content: "작업 순서 확인" },
+          {
+            index: 1,
+            role: "assistant",
+            content: "",
+            thought: "첫 번째 검색 계획",
+            toolCalls: [{ id: "t1", name: "web_search", input: { q: "LVIS" } }],
+          },
+          { index: 2, role: "tool_result", toolUseId: "t1", toolName: "web_search", content: "검색 결과" },
+          { index: 3, role: "assistant", content: "중간 확인 내용은 사용자에게 보여야 합니다." },
+          {
+            index: 4,
+            role: "assistant",
+            content: "",
+            thought: "두 번째 도구 결과를 검증",
+            toolCalls: [{ id: "t2", name: "web_fetch", input: { url: "https://example.com" } }],
+          },
+          { index: 5, role: "tool_result", toolUseId: "t2", toolName: "web_fetch", content: "본문" },
+          { index: 6, role: "assistant", content: "최종 답변입니다." },
+        ],
+      },
     });
 
     await waitFor(() => {
-      expect(container.textContent).toContain("중간 확인 내용은 사용자에게 보여야 합니다.");
-      expect(container.textContent).toContain("최종 답변입니다.");
-      expect(container.textContent).toContain("4단계");
-      expect(container.textContent?.match(/작업/g) ?? []).toHaveLength(1);
+      const transcriptText = container.textContent ?? "";
+      expectTextOrder(transcriptText, ["중간 확인 내용은 사용자에게 보여야 합니다.", "최종 답변입니다."]);
+      // Visible assistant text is the semantic boundary between work phases:
+      // work remains coherent within each phase, but is not allowed to reorder
+      // across the assistant card to preserve entries[] chronology.
+      expect(transcriptText).toContain("2단계");
+      expect(transcriptText).not.toContain("4단계");
+
+      const workGroups = Array.from(container.querySelectorAll("[data-wg-id]"));
+      const assistantBodies = Array.from(container.querySelectorAll('[data-testid="assistant-message-body"]'));
+      const middleBody = assistantBodies.find((el) => el.textContent?.includes("중간 확인 내용"));
+      const finalBody = assistantBodies.find((el) => el.textContent?.includes("최종 답변"));
+      expect(middleBody).toBeTruthy();
+      expect(finalBody).toBeTruthy();
+      const workBeforeMiddle = workGroups.filter((node) =>
+        !!(node.compareDocumentPosition(middleBody!) & Node.DOCUMENT_POSITION_FOLLOWING),
+      );
+      const workAfterMiddle = workGroups.filter((node) =>
+        !!(middleBody!.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING),
+      );
+      expect(workBeforeMiddle.length, "work should render before mid-turn assistant").toBeGreaterThan(0);
+      expect(workAfterMiddle.length, "later work should render after mid-turn assistant").toBeGreaterThan(0);
+
+      expectNodeBefore(workBeforeMiddle.at(-1)!, middleBody!, "first work phase should render before mid-turn assistant");
+      expectNodeBefore(middleBody!, workAfterMiddle[0], "mid-turn assistant should render before later work phase");
+      expectNodeBefore(workAfterMiddle.at(-1)!, finalBody!, "later work phase should render before final assistant");
     });
   });
 

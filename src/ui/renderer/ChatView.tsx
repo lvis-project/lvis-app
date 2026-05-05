@@ -435,7 +435,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               continue;
             }
 
-            // ── Intermediate: collect the turn's work entries into one WorkGroup ──
+            // ── Intermediate: collect contiguous turn work into one WorkGroup ──
             if (entryClassMap.get(i) === "intermediate") {
               const groupStart = i;
               const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
@@ -451,7 +451,6 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                 });
               }
               const groupEntries: { idx: number; node: React.ReactNode }[] = [];
-              const visibleAssistantEntries: { idx: number; node: React.ReactNode }[] = [];
 
               while (i < entries.length) {
                 const e = entries[i];
@@ -471,23 +470,10 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   } else {
                     break;
                   }
-                } else if (e.kind === "assistant") {
-                  // Assistant text is user-visible answer content, not hidden
-                  // work.  It may appear between tool rounds in the event
-                  // stream; keep it visible while the turn's reasoning/tool
-                  // work is still grouped under one explicit turn boundary.
-                  const assistantRingCls = ringClassFor(i);
-                  visibleAssistantEntries.push({ idx: i, node: (
-                    <div key={i} className={assistantRingCls ? `${assistantRingCls} rounded-md` : undefined}>
-                      <AssistantCard
-                        entry={e}
-                        highlightQuery={searchHighlight}
-                        isStarred={!!isEntryStarred(i)}
-                        isFinal={false}
-                      />
-                    </div>
-                  )});
                 } else {
+                  // Visible assistant text is chronological transcript
+                  // content, not collapsible work. Stop the work run here so
+                  // the normal live/final branch renders it at entries[] order.
                   break;
                 }
                 i++;
@@ -504,7 +490,6 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   </WorkGroup>
                 );
               }
-              rendered.push(...visibleAssistantEntries.map((entry) => entry.node));
               continue;
             }
 
