@@ -33,15 +33,21 @@ import { HtmlPreview } from "./HtmlPreview.js";
 import { McpAppView } from "./McpAppView.js";
 
 /** Single-tool inline indicator — no collapsible wrapper */
-function SingleToolInline({ tool }: { tool: Extract<ChatEntry, { kind: "tool_group" }>["tools"][number] }) {
+function SingleToolInline({
+  tool,
+  embedded = false,
+}: {
+  tool: Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
+  embedded?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
   return (
-    <div className="max-w-[85%] rounded-md text-[11px] text-muted-foreground">
+    <div className={`${embedded ? "w-full" : "max-w-[85%]"} rounded-md text-[11px] text-muted-foreground`}>
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/30"
         onClick={() => setOpen((o) => !o)}
       >
         <Wrench className="h-3 w-3 flex-shrink-0" />
@@ -75,11 +81,25 @@ function SingleToolInline({ tool }: { tool: Extract<ChatEntry, { kind: "tool_gro
   );
 }
 
-export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "tool_group" }> }) {
+export function ToolGroupCard({
+  group,
+  embedded = false,
+}: {
+  group: Extract<ChatEntry, { kind: "tool_group" }>;
+  embedded?: boolean;
+}) {
   // All hooks must be declared before any conditional return (Rules of Hooks)
   const [open, setOpen] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
+
+  const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
+
+  if (embedded && tools.length === 1 && tools[0]) {
+    return (
+      <SingleToolInline tool={tools[0]} embedded />
+    );
+  }
 
   // Single tool: render inline without group wrapper
   if (group.tools.length === 1 && group.tools[0]) {
@@ -100,7 +120,6 @@ export function ToolGroupCard({ group }: { group: Extract<ChatEntry, { kind: "to
     });
   }
 
-  const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
   const uniqueToolNames = [...new Set(tools.map((t) => getToolDisplayName(t.name)))].join(" · ");
   const htmlPreviews = tools
     .filter((t) => t.name === "render_html" && t.status === "done")
