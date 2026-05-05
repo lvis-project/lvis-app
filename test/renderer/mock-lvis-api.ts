@@ -12,7 +12,7 @@ export type MockLvisApi = Record<string, Mock>;
 
 type ApiOverrides = {
   settings?: unknown;
-  sessions?: Array<{ id: string; modifiedAt: string }>;
+  sessions?: Array<{ id: string; modifiedAt: string; title?: string }>;
   currentSession?: string;
   starred?: unknown[];
   history?: { sessionId: string; messages: unknown[] } | Promise<{ sessionId: string; messages: unknown[] }>;
@@ -101,7 +101,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatSessionResume: vi.fn(async (id: string) => ({ ok: true, compacted: false, compactedAt: null, removedMessageCount: 0 })),
     chatCompact: vi.fn(async () => ({ compacted: false, compactedAt: null, summary: "불필요", removedMessageCount: 0 })),
     chatGetHistory: vi.fn(async () => history),
-    chatSessionHistory: vi.fn(async (_sessionId: string) => ({ ok: false, messages: [] })),
+    chatSessionHistory: vi.fn(async (_sessionId: string) => {
+      const resolvedHistory = await history;
+      return { ok: true, messages: resolvedHistory.messages };
+    }),
     chatEditResend: vi.fn(async () => ({ ok: true })),
     chatFork: vi.fn(async () => ({ ok: true, sessionId: currentSession })),
     chatRetryEffort: vi.fn(async () => ({ ok: true })),

@@ -314,6 +314,24 @@ export function App() {
         debugLog("handleAsk", "skip:compact-command-handled");
         return;
       }
+      if (mode === "default" && (t === "/load" || t.startsWith("/load "))) {
+        const requested = t.slice("/load".length).trim();
+        if (requested.length === 0) {
+          setErrorWithThought("사용법: /load <세션ID>");
+          return;
+        }
+        const listed = await api.chatSessions();
+        const match = listed.sessions.find((session) => session.id.startsWith(requested));
+        if (!match) {
+          setErrorWithThought(`세션을 찾을 수 없습니다: ${requested}`);
+          return;
+        }
+        await sessionLoad(match.id, false, applyLoadedSession);
+        await refreshSessionId();
+        await refreshSessions();
+        debugLog("handleAsk", "load-session:handled", { sessionId: match.id });
+        return;
+      }
       if (!(await checkApiKey())) { setSettingsOpen(true); return; }
       const requestId = ++turnRequestRef.current;
       const streamingRequestId = beginStreamingRequest();
@@ -408,6 +426,10 @@ export function App() {
       finishStreamingRequest,
       setErrorWithThought,
       handleCompactCommand,
+      sessionLoad,
+      applyLoadedSession,
+      refreshSessionId,
+      refreshSessions,
       closeOpenImportedTrigger,
       // attachments is read directly at the post-send cleanup branch
       // (line ~260) and is also a transitive dep via composeOutgoing,
