@@ -10,7 +10,8 @@
  *    window edge it snaps: its position is locked relative to that edge.
  *  - When the main window moves, all snapped children follow.
  *  - When the child is dragged away more than SNAP_THRESHOLD_DIP it detaches.
- *  - Maximising the main window un-snaps all children.
+ *  - Maximising the main window hides locked (permanently snapped) children
+ *    and un-snaps the rest; unmaximising restores them in the correct order.
  *
  * All coordinates are in DIP (device-independent pixels) because Electron's
  * BrowserWindow.getBounds() always returns DIP values.
@@ -30,7 +31,7 @@ import type { AuditLogger } from "../audit/audit-logger.js";
  * where each segment is alphanumeric with dots/underscores/hyphens.
  * toViewKey() in api-client.ts produces exactly this shape.
  */
-export const ALLOWED_VIEW_KEYS = /^(tasks|reminders|routines|memory|starred|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*)$/;
+export const ALLOWED_VIEW_KEYS = /^(reminders|routines|memory|starred|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*)$/;
 
 /** Human-readable window titles for built-in view keys. */
 const BUILTIN_VIEW_LABELS: Record<string, string> = {
@@ -83,6 +84,8 @@ interface ChildEntry {
    */
   snapDeltaX?: number;
   snapDeltaY?: number;
+  /** When true: window is permanently attached, not independently movable. */
+  locked?: boolean;
 }
 
 type PersistedWindow = {
@@ -191,6 +194,12 @@ export class WindowManager {
    */
   private _detachedShell: BrowserWindow | null = null;
   private _detachedShellViewKey: string | null = null;
+  /**
+   * IDs of locked children that were hidden BY maximize (not by the user).
+   * Used in the unmaximize handler to avoid accidentally restoring windows
+   * that the user intentionally minimised before the main was maximised.
+   */
+  private _hiddenByMaximize = new Set<number>();
   private _lastMainMoveAt = 0;
   private _mainMoveTimer: ReturnType<typeof setTimeout> | null = null;
   private _preloadPath: string;
@@ -209,10 +218,38 @@ export class WindowManager {
     win.on("move", () => this._onMainMove(win));
 
     win.on("maximize", () => {
-      // Un-snap all children so they are not buried under the maximised main.
-      for (const [, entry] of this._children) {
-        if (entry.snappedTo !== undefined) {
+      // Hide locked side-panel children (they cannot follow a maximised window).
+      // Track which IDs we hide so unmaximize only restores those, not windows
+      // the user intentionally minimised before maximize happened.
+      // Un-snap other snapped children so they are not buried under the maximised main.
+      for (const [id, entry] of this._children) {
+        if (entry.locked) {
+          // Only record windows that are actually visible before maximising.
+          // If the user had already minimised/hidden the panel, we must not
+          // unconditionally restore it on unmaximize.
+          if (!entry.window.isDestroyed() && entry.window.isVisible()) {
+            entry.window.hide();
+            this._hiddenByMaximize.add(id);
+          }
+        } else if (entry.snappedTo !== undefined) {
           this._unsnap(entry);
+        }
+      }
+    });
+
+    win.on("unmaximize", () => {
+      // Re-show and re-snap only locked children that WE hid (not user-minimised ones).
+      // Snap before show() to avoid flicker from stale pre-maximize coordinates
+      // (mirrors the ordering in the ready-to-show handler).
+      for (const [id, entry] of this._children) {
+        if (
+          entry.locked &&
+          !entry.window.isDestroyed() &&
+          this._hiddenByMaximize.has(id)
+        ) {
+          this._hiddenByMaximize.delete(id);
+          this._snapToLeftEdge(id);
+          entry.window.show();
         }
       }
     });
@@ -257,37 +294,17 @@ export class WindowManager {
       }
     }
 
-    // Restore saved bounds if available.
+    // Restore saved size (width/height) if available.
+    // Position (x/y) is intentionally NOT restored here: every detached window
+    // is snapped to the main window edge by _snapToLeftEdge() inside
+    // ready-to-show before it becomes visible, so any saved x/y would be
+    // immediately overwritten and would only create a misleading impression
+    // that the persisted position matters.
     const saved = loadWindowState().detached.find((d) => d.viewKey === viewKey);
-
-    // Validate saved position against current displays. On multi-monitor
-    // setups a window may be saved to a display that is no longer connected;
-    // without this check the window opens off-screen and the user cannot
-    // interact with it (§354 follow-up, SEV-2).
-    let restoredX = saved?.bounds.x;
-    let restoredY = saved?.bounds.y;
-    if (restoredX !== undefined && restoredY !== undefined) {
-      const displays = screen.getAllDisplays();
-      const fitsAnyDisplay = displays.some(
-        (d) =>
-          restoredX! >= d.bounds.x &&
-          restoredX! < d.bounds.x + d.bounds.width &&
-          restoredY! >= d.bounds.y &&
-          restoredY! < d.bounds.y + d.bounds.height,
-      );
-      if (!fitsAnyDisplay) {
-        // Clamp to primary display work area, preserving size.
-        const primary = screen.getPrimaryDisplay();
-        restoredX = primary.workArea.x + 100;
-        restoredY = primary.workArea.y + 100;
-      }
-    }
 
     const child = new BrowserWindow({
       width: saved?.bounds.width ?? 800,
       height: saved?.bounds.height ?? 600,
-      x: restoredX,
-      y: restoredY,
       show: false,
       title: `LVIS — ${viewKeyLabel(viewKey)}`,
       webPreferences: {
@@ -365,10 +382,21 @@ export class WindowManager {
     });
 
     child.once("ready-to-show", () => {
-      child.show();
-      // If previously snapped, immediately snap.
-      if (saved?.snapped) {
-        this._trySnap(child.id);
+      const main = this.getMainWindow();
+      if (main?.isMaximized()) {
+        // Main is maximized; mark as locked but keep hidden.
+        // Also register in _hiddenByMaximize so the unmaximize handler will
+        // restore this panel when the main window un-maximises (just like a
+        // panel that was already open when maximize was triggered).
+        const entry = this._children.get(child.id);
+        if (entry) {
+          entry.locked = true;
+          this._hiddenByMaximize.add(child.id);
+        }
+      } else {
+        // Snap before show() to avoid a visible position jump (flicker).
+        this._snapToLeftEdge(child.id);
+        child.show();
       }
     });
 
@@ -405,6 +433,60 @@ export class WindowManager {
     const entry = this._children.get(childId);
     if (!entry || entry.window.isDestroyed()) return;
 
+    // setMovable(false) is advisory-only on Linux: some compositors still
+    // allow the user to drag the panel.  Re-snap it back to its locked
+    // position immediately so it cannot drift away from the main window edge.
+    //
+    // We compare current vs expected position before calling setPosition()
+    // because Electron emits 'move' for programmatic setPosition() calls too.
+    // Calling _snapToLeftEdge() here would trigger another 'move' → another
+    // _onChildMove() → infinite loop.  Instead we compute expected position
+    // directly and only call setPosition() when the panel has genuinely drifted.
+    //
+    // We also apply the same screen-edge clamps as _followMainForSnapped so
+    // that the restored position is always on-screen (e.g. "w" snap near the
+    // left edge of the display produces a negative X without clamping).
+    if (entry.locked) {
+      if (entry.snapEdge === undefined) return;
+      const main = this.getMainWindow();
+      if (!main || main.isDestroyed()) return;
+      const mainBounds = main.getBounds();
+      const childBounds = entry.window.getBounds();
+      const pos = snappedPosition(
+        mainBounds,
+        childBounds,
+        entry.snapEdge,
+        entry.snapDeltaX ?? 0,
+        entry.snapDeltaY ?? 0,
+      );
+      const allDisplays = screen.getAllDisplays();
+      const hostDisplay =
+        allDisplays.find(
+          (d) =>
+            pos.x >= d.bounds.x &&
+            pos.x < d.bounds.x + d.bounds.width &&
+            mainBounds.y < d.bounds.y + d.bounds.height &&
+            mainBounds.y + mainBounds.height > d.bounds.y,
+        ) ?? screen.getDisplayNearestPoint({ x: pos.x, y: pos.y });
+      const clampedY = Math.max(
+        hostDisplay.bounds.y,
+        Math.min(pos.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height),
+      );
+      let clampedX = pos.x;
+      if (entry.snapEdge === "e") {
+        clampedX = Math.max(
+          hostDisplay.bounds.x,
+          Math.min(pos.x, hostDisplay.bounds.x + hostDisplay.bounds.width - childBounds.width),
+        );
+      } else if (entry.snapEdge === "w") {
+        clampedX = Math.max(hostDisplay.bounds.x, pos.x);
+      }
+      if (childBounds.x !== clampedX || childBounds.y !== clampedY) {
+        entry.window.setPosition(clampedX, clampedY);
+      }
+      return;
+    }
+
     const main = this.getMainWindow();
     if (!main || main.isDestroyed()) return;
 
@@ -431,6 +513,88 @@ export class WindowManager {
     } else {
       main.webContents.send("lvis:window:snap-edge", null);
     }
+  }
+
+  private _snapToLeftEdge(childId: number): void {
+    const entry = this._children.get(childId);
+    if (!entry || entry.window.isDestroyed()) return;
+    const main = this.getMainWindow();
+    if (!main || main.isDestroyed()) return;
+
+    const mainBounds = main.getBounds();
+    const childBounds = entry.window.getBounds();
+
+    // Identify the display containing the main window by its center point.
+    // Using center avoids mis-detection on vertically stacked monitors that
+    // share the same horizontal span (same bounds.x range).
+    const mainDisplay = screen.getDisplayNearestPoint({
+      x: Math.round(mainBounds.x + mainBounds.width / 2),
+      y: Math.round(mainBounds.y + mainBounds.height / 2),
+    });
+
+    const allDisplays = screen.getAllDisplays();
+
+    // Prefer left side: find a display that fully accommodates the child AND
+    // vertically overlaps the main window so it is visible alongside it.
+    const leftX = mainBounds.x - childBounds.width;
+    const leftDisplay = allDisplays.find(
+      (d) =>
+        leftX >= d.bounds.x &&
+        leftX + childBounds.width <= d.bounds.x + d.bounds.width &&
+        mainBounds.y < d.bounds.y + d.bounds.height &&
+        mainBounds.y + mainBounds.height > d.bounds.y
+    );
+
+    // Find the display that will host the child when placed on the right.
+    // Must check vertical overlap (same as leftDisplay logic) so that vertically
+    // stacked monitors sharing the same X range don't get picked incorrectly.
+    const rightX = mainBounds.x + mainBounds.width;
+    const rightDisplay =
+      allDisplays.find(
+        (d) =>
+          rightX >= d.bounds.x &&
+          rightX < d.bounds.x + d.bounds.width &&
+          mainBounds.y < d.bounds.y + d.bounds.height &&
+          mainBounds.y + mainBounds.height > d.bounds.y
+      ) ?? mainDisplay;
+
+    const hasSpaceOnLeft = leftDisplay !== undefined;
+    // Clamp right-side X: upper bound prevents overflow beyond the display's right
+    // edge; lower bound prevents underflow when childWidth > displayWidth.
+    const clampedRightX = Math.max(
+      rightDisplay.bounds.x,
+      Math.min(rightX, rightDisplay.bounds.x + rightDisplay.bounds.width - childBounds.width)
+    );
+    const x = hasSpaceOnLeft ? leftX : clampedRightX;
+    const snapEdge: SnapEdge = hasSpaceOnLeft ? "w" : "e";
+    // "w" edge: snappedPosition computes x = main.x + dx  → dx = -childWidth
+    // "e" edge: snappedPosition computes x = main.x + main.width + dx
+    //           dx = 0 keeps child flush against main's right edge on every follow-move.
+    //           clampedRightX already handles the initial off-screen case via setPosition(x,…)
+    //           below; subsequent follow-moves re-clamp via _followMainForSnapped.
+    const snapDeltaX = hasSpaceOnLeft ? -childBounds.width : 0;
+
+    // Clamp Y against the display that will actually host the child.
+    const hostDisplay = hasSpaceOnLeft ? leftDisplay! : rightDisplay;
+    const y = Math.max(
+      hostDisplay.bounds.y,
+      Math.min(mainBounds.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height)
+    );
+
+    entry.window.setPosition(x, y);
+
+    // Record snap state.
+    entry.snappedTo = this._mainWindowId!;
+    entry.snapEdge = snapEdge;
+    entry.snapDeltaX = snapDeltaX;
+    entry.snapDeltaY = y - mainBounds.y;
+    entry.locked = true;
+
+    // Prevent the user from independently dragging the panel away.
+    // Note: setMovable(false) is enforced by Electron on macOS and Windows.
+    // On Linux it is advisory only — the compositor may still allow dragging.
+    // _onChildMove detects such drift and immediately re-snaps the panel back.
+    entry.window.setMovable(false);
   }
 
   private _snap(entry: ChildEntry, mainBounds: Rect, childBounds: Rect, edge: SnapEdge): void {
@@ -462,6 +626,12 @@ export class WindowManager {
     entry.snapEdge = undefined;
     entry.snapDeltaX = undefined;
     entry.snapDeltaY = undefined;
+    if (entry.locked) {
+      entry.locked = false;
+      if (!entry.window.isDestroyed()) {
+        entry.window.setMovable(true);
+      }
+    }
   }
 
   private _onMainMove(main: BrowserWindow): void {
@@ -479,6 +649,7 @@ export class WindowManager {
   private _followMainForSnapped(main: BrowserWindow): void {
     if (main.isDestroyed()) return;
     const mainBounds = main.getBounds();
+    const allDisplays = screen.getAllDisplays();
 
     for (const [, entry] of this._children) {
       if (entry.snappedTo === undefined || entry.window.isDestroyed()) continue;
@@ -487,7 +658,39 @@ export class WindowManager {
       const dy = entry.snapDeltaY ?? 0;
       const childBounds = entry.window.getBounds();
       const pos = snappedPosition(mainBounds, childBounds, edge, dx, dy);
-      entry.window.setPosition(pos.x, pos.y);
+
+      // Re-clamp Y on every follow-move so the child stays on-screen when
+      // the main window is dragged toward a short or vertically-stacked display.
+      const hostDisplay =
+        allDisplays.find(
+          (d) =>
+            pos.x >= d.bounds.x &&
+            pos.x < d.bounds.x + d.bounds.width &&
+            mainBounds.y < d.bounds.y + d.bounds.height &&
+            mainBounds.y + mainBounds.height > d.bounds.y
+        ) ?? screen.getDisplayNearestPoint({ x: pos.x, y: pos.y });
+      const clampedY = Math.max(
+        hostDisplay.bounds.y,
+        Math.min(pos.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height)
+      );
+
+      // Re-clamp X for edge snaps: snappedPosition() returns the raw flush
+      // position, but the initial _snapToLeftEdge clamped to display bounds.
+      // Without follow-move clamping, dragging main to either screen edge
+      // pushes the panel partially or fully off-screen (left: negative X,
+      // right: x + childWidth > displayWidth).
+      let clampedX = pos.x;
+      if (edge === "e") {
+        clampedX = Math.max(
+          hostDisplay.bounds.x,
+          Math.min(pos.x, hostDisplay.bounds.x + hostDisplay.bounds.width - childBounds.width)
+        );
+      } else if (edge === "w") {
+        // Left-side: child.x can go negative when main moves to the left edge.
+        clampedX = Math.max(hostDisplay.bounds.x, pos.x);
+      }
+
+      entry.window.setPosition(clampedX, clampedY);
     }
   }
 
