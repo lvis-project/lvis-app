@@ -1,4 +1,5 @@
 import type { ChatThemePreference, ResolvedTheme } from "./types.js";
+import type { LvisTokenName } from "@lvis/plugin-sdk/ui/tokens";
 
 // Derives the full set of --lvis-* CSS custom properties from the current
 // (resolved shell theme, chat theme) combination. Values are literal HSL
@@ -7,64 +8,94 @@ import type { ChatThemePreference, ResolvedTheme } from "./types.js";
 // update both files when adding a new theme.
 const _H = (h: number, s: number, l: number) => `hsl(${h}, ${s}%, ${l}%)`;
 
+// Theme-invariant tokens — same across dark/light/HC.
+// Not sent separately; spread into every base map at resolve time.
+const _INVARIANT: Record<string, string> = {
+  "--lvis-radius-xs":       "0.15rem",
+  "--lvis-radius-lg":       "0.75rem",
+  "--lvis-radius-full":     "9999px",
+  "--lvis-text-xs":         "0.75rem",
+  "--lvis-text-sm":         "0.875rem",
+  "--lvis-text-base":       "1rem",
+  "--lvis-text-lg":         "1.125rem",
+  "--lvis-weight-normal":   "400",
+  "--lvis-weight-medium":   "500",
+  "--lvis-weight-semibold": "600",
+  "--lvis-space-1":         "0.25rem",
+  "--lvis-space-2":         "0.5rem",
+  "--lvis-space-3":         "0.75rem",
+  "--lvis-space-4":         "1rem",
+  "--lvis-motion-fast":     "150ms",
+  "--lvis-motion-normal":   "200ms",
+};
+
 const _DARK_BASE: Record<string, string> = {
-  "--lvis-bg":           _H(222.2, 84,   4.9),
-  "--lvis-surface":      _H(222.2, 84,   7  ),
-  "--lvis-fg":           _H(210,   40,  98  ),
-  "--lvis-fg-muted":     _H(215,   20,  65  ),
-  "--lvis-primary":      _H(217.2, 91.2,59.8),
-  "--lvis-primary-fg":   _H(210,   40,  98  ),
-  "--lvis-secondary":    _H(217,   33,  17  ),
-  "--lvis-secondary-fg": _H(210,   40,  98  ),
-  "--lvis-danger":       _H(0,     62.8,30.6),
-  "--lvis-danger-fg":    _H(210,   40,  98  ),
-  "--lvis-warning":      _H(48,    97,  77  ),
-  "--lvis-warning-fg":   _H(30,    80,  25  ),
-  "--lvis-success":      _H(142,   71,  45  ),
-  "--lvis-border":       _H(217,   33,  17  ),
-  "--lvis-ring":         _H(224.3, 76.3,48  ),
-  "--lvis-radius":       "0.6rem",
-  "--lvis-radius-sm":    "0.25rem",
+  "--lvis-bg":              _H(222.2, 84,   4.9),
+  "--lvis-surface":         _H(222.2, 84,   7  ),
+  "--lvis-surface-overlay": _H(222.2, 60,   10 ),
+  "--lvis-fg":              _H(210,   40,  98  ),
+  "--lvis-fg-muted":        _H(215,   20,  65  ),
+  "--lvis-fg-disabled":     _H(215,   16,  40  ),
+  "--lvis-primary":         _H(217.2, 91.2,59.8),
+  "--lvis-primary-fg":      _H(210,   40,  98  ),
+  "--lvis-secondary":       _H(217,   33,  17  ),
+  "--lvis-secondary-fg":    _H(210,   40,  98  ),
+  "--lvis-danger":          _H(0,     62.8,30.6),
+  "--lvis-danger-fg":       _H(210,   40,  98  ),
+  "--lvis-warning":         _H(48,    97,  77  ),
+  "--lvis-warning-fg":      _H(30,    80,  25  ),
+  "--lvis-success":         _H(142,   71,  45  ),
+  "--lvis-success-fg":      _H(210,   40,  98  ),
+  "--lvis-border":          _H(217,   33,  17  ),
+  "--lvis-ring":            _H(224.3, 76.3,48  ),
+  "--lvis-radius":          "0.6rem",
+  "--lvis-radius-sm":       "0.25rem",
 };
 
 const _LIGHT_BASE: Record<string, string> = {
-  "--lvis-bg":           _H(0,     0,  100  ),
-  "--lvis-surface":      _H(0,     0,  100  ),
-  "--lvis-fg":           _H(222,   47,  11  ),
-  "--lvis-fg-muted":     _H(215,   16,  47  ),
-  "--lvis-primary":      _H(224.3, 76.3,48  ),
-  "--lvis-primary-fg":   _H(210,   40,  98  ),
-  "--lvis-secondary":    _H(210,   40,  96  ),
-  "--lvis-secondary-fg": _H(222,   47,  11  ),
-  "--lvis-danger":       _H(0,     84,  60  ),
-  "--lvis-danger-fg":    _H(210,   40,  98  ),
-  "--lvis-warning":      _H(48,    96,  89  ),
-  "--lvis-warning-fg":   _H(30,    80,  25  ),
-  "--lvis-success":      _H(142,   71,  45  ),
-  "--lvis-border":       _H(214,   32,  91  ),
-  "--lvis-ring":         _H(217.2, 91.2,59.8),
-  "--lvis-radius":       "0.6rem",
-  "--lvis-radius-sm":    "0.25rem",
+  "--lvis-bg":              _H(0,     0,  100  ),
+  "--lvis-surface":         _H(0,     0,  100  ),
+  "--lvis-surface-overlay": _H(220,   9,   90  ),
+  "--lvis-fg":              _H(222,   47,  11  ),
+  "--lvis-fg-muted":        _H(215,   16,  47  ),
+  "--lvis-fg-disabled":     _H(215,   16,  65  ),
+  "--lvis-primary":         _H(224.3, 76.3,48  ),
+  "--lvis-primary-fg":      _H(210,   40,  98  ),
+  "--lvis-secondary":       _H(210,   40,  96  ),
+  "--lvis-secondary-fg":    _H(222,   47,  11  ),
+  "--lvis-danger":          _H(0,     84,  60  ),
+  "--lvis-danger-fg":       _H(210,   40,  98  ),
+  "--lvis-warning":         _H(48,    96,  89  ),
+  "--lvis-warning-fg":      _H(30,    80,  25  ),
+  "--lvis-success":         _H(142,   71,  45  ),
+  "--lvis-success-fg":      _H(210,   40,  98  ),
+  "--lvis-border":          _H(214,   32,  91  ),
+  "--lvis-ring":            _H(217.2, 91.2,59.8),
+  "--lvis-radius":          "0.6rem",
+  "--lvis-radius-sm":       "0.25rem",
 };
 
 const _HC_BASE: Record<string, string> = {
-  "--lvis-bg":           _H(0,   0,   0  ),
-  "--lvis-surface":      _H(0,   0,   0  ),
-  "--lvis-fg":           _H(0,   0, 100  ),
-  "--lvis-fg-muted":     _H(0,   0,  80  ),
-  "--lvis-primary":      _H(60, 100,  50  ),
-  "--lvis-primary-fg":   _H(0,   0,   0  ),
-  "--lvis-secondary":    _H(0,   0,  15  ),
-  "--lvis-secondary-fg": _H(0,   0, 100  ),
-  "--lvis-danger":       _H(0, 100,  50  ),
-  "--lvis-danger-fg":    _H(0,   0, 100  ),
-  "--lvis-warning":      _H(48, 100,  50  ),
-  "--lvis-warning-fg":   _H(0,   0,   0  ),
-  "--lvis-success":      _H(120, 100,  40  ),
-  "--lvis-border":       _H(0,   0, 100  ),
-  "--lvis-ring":         _H(60, 100,  50  ),
-  "--lvis-radius":       "0.6rem",
-  "--lvis-radius-sm":    "0.25rem",
+  "--lvis-bg":              _H(0,   0,   0  ),
+  "--lvis-surface":         _H(0,   0,   0  ),
+  "--lvis-surface-overlay": _H(0,   0,  10  ),
+  "--lvis-fg":              _H(0,   0, 100  ),
+  "--lvis-fg-muted":        _H(0,   0,  80  ),
+  "--lvis-fg-disabled":     _H(0,   0,  50  ),
+  "--lvis-primary":         _H(60, 100,  50  ),
+  "--lvis-primary-fg":      _H(0,   0,   0  ),
+  "--lvis-secondary":       _H(0,   0,  15  ),
+  "--lvis-secondary-fg":    _H(0,   0, 100  ),
+  "--lvis-danger":          _H(0, 100,  50  ),
+  "--lvis-danger-fg":       _H(0,   0, 100  ),
+  "--lvis-warning":         _H(48, 100,  50  ),
+  "--lvis-warning-fg":      _H(0,   0,   0  ),
+  "--lvis-success":         _H(120, 100,  40  ),
+  "--lvis-success-fg":      _H(0,   0,   0  ),
+  "--lvis-border":          _H(0,   0, 100  ),
+  "--lvis-ring":            _H(60, 100,  50  ),
+  "--lvis-radius":          "0.6rem",
+  "--lvis-radius-sm":       "0.25rem",
 };
 
 // Accent tokens that override any shell base for LG brand theme.
@@ -101,27 +132,27 @@ const _LG_DARK_SURFACE: Record<string, string> = {
 export function resolvePluginTokens(
   theme: ResolvedTheme,
   chatTheme: ChatThemePreference,
-): Record<string, string> {
+): Record<LvisTokenName, string> {
   const base = theme === "light" ? _LIGHT_BASE : theme === "high-contrast" ? _HC_BASE : _DARK_BASE;
   // HC locks primary/ring to yellow; no chat-theme overlay applies.
-  if (theme === "high-contrast") return { ...base };
+  if (theme === "high-contrast") return { ..._INVARIANT, ...base } as Record<LvisTokenName, string>;
   switch (chatTheme) {
     case "lg": {
       const surface = theme === "dark" ? _LG_DARK_SURFACE : _LG_LIGHT_SURFACE;
       // surface first, then accent — accent must always win (LG red, vivid purple).
-      return { ...base, ...surface, ..._LG_ACCENT };
+      return { ..._INVARIANT, ...base, ...surface, ..._LG_ACCENT } as Record<LvisTokenName, string>;
     }
     case "purple":
-      return { ...base, "--lvis-primary": _H(262, 83, 58), "--lvis-primary-fg": _H(0, 0, 100), "--lvis-ring": _H(263, 70, 50) };
+      return { ..._INVARIANT, ...base, "--lvis-primary": _H(262, 83, 58), "--lvis-primary-fg": _H(0, 0, 100), "--lvis-ring": _H(263, 70, 50) } as Record<LvisTokenName, string>;
     case "orange":
       return theme === "dark"
-        ? { ...base, "--lvis-primary": _H(25, 95, 53), "--lvis-primary-fg": _H(0, 0, 100), "--lvis-ring": _H(21, 90, 48) }
-        : { ...base, "--lvis-primary": _H(21, 90, 48), "--lvis-primary-fg": _H(0, 0, 100), "--lvis-ring": _H(25, 95, 53) };
+        ? { ..._INVARIANT, ...base, "--lvis-primary": _H(25, 95, 53), "--lvis-primary-fg": _H(0, 0, 100), "--lvis-ring": _H(21, 90, 48) } as Record<LvisTokenName, string>
+        : { ..._INVARIANT, ...base, "--lvis-primary": _H(21, 90, 48), "--lvis-primary-fg": _H(0, 0, 100), "--lvis-ring": _H(25, 95, 53) } as Record<LvisTokenName, string>;
     case "blue":
       return theme === "dark"
-        ? { ...base, "--lvis-primary": _H(217.2, 91.2, 59.8), "--lvis-ring": _H(224.3, 76.3, 48) }
-        : { ...base, "--lvis-primary": _H(224.3, 76.3, 48), "--lvis-ring": _H(217.2, 91.2, 59.8) };
+        ? { ..._INVARIANT, ...base, "--lvis-primary": _H(217.2, 91.2, 59.8), "--lvis-ring": _H(224.3, 76.3, 48) } as Record<LvisTokenName, string>
+        : { ..._INVARIANT, ...base, "--lvis-primary": _H(224.3, 76.3, 48), "--lvis-ring": _H(217.2, 91.2, 59.8) } as Record<LvisTokenName, string>;
     default:   // "default" — no overlay
-      return { ...base };
+      return { ..._INVARIANT, ...base } as Record<LvisTokenName, string>;
   }
 }
