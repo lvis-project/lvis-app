@@ -526,7 +526,10 @@ export class PluginRuntime {
     }
     const entryPath = this.resolveEntryPathForPlugin(pluginRoot, manifest.entry);
     const resolvedEntryPath = resolveRealEntryPath(entryPath);
-    const importUrl = buildImportUrl(resolvedEntryPath);
+    // Cache-bust: Node ESM loader memoizes by URL — without it
+    // restart re-runs createPlugin against the OLD module's closures
+    // even when the on-disk bundle changed. Mirrors `reloadPlugin`.
+    const importUrl = buildImportUrl(resolvedEntryPath, true);
 
     let module: { default?: RuntimePluginFactory; createPlugin?: RuntimePluginFactory };
     try {
