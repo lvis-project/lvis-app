@@ -224,10 +224,12 @@ export class WindowManager {
 
     win.on("unmaximize", () => {
       // Re-show and re-snap locked side-panel children after the main window is restored.
+      // Snap before show() to avoid flicker from stale pre-maximize coordinates
+      // (mirrors the ordering in the ready-to-show handler).
       for (const [id, entry] of this._children) {
         if (entry.locked && !entry.window.isDestroyed() && !entry.window.isVisible()) {
-          entry.window.show();
           this._snapToLeftEdge(id);
+          entry.window.show();
         }
       }
     });
