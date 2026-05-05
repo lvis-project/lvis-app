@@ -17,7 +17,7 @@
  * All other https hosts and all non-https schemes remain blocked.
  */
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
+import { dirname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { installPluginAssetProtocolHandler, PLUGIN_ASSET_SCHEME } from "./plugin-asset-protocol.js";
 
@@ -27,6 +27,8 @@ import { installPluginAssetProtocolHandler, PLUGIN_ASSET_SCHEME } from "./plugin
 // (#498). Resolve once at module load.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
+const pluginShellHtmlPath = normalize(resolve(__dirname, "..", "plugin-ui-shell.html"));
+const pluginShellJsPath = normalize(resolve(__dirname, "..", "plugin-ui-shell.js"));
 
 type SessionApi = { fromPartition(partition: string): Electron.Session };
 
@@ -99,6 +101,16 @@ function installCdnAllowlist(ses: Electron.Session): void {
  */
 const installedPluginPartitions = new Set<string>();
 
+function isAllowedPluginShellFile(url: URL): boolean {
+  if (url.protocol !== "file:") return false;
+  try {
+    const filePath = normalize(fileURLToPath(url));
+    return filePath === pluginShellHtmlPath || filePath === pluginShellJsPath;
+  } catch {
+    return false;
+  }
+}
+
 export function installPluginPartitionPolicy(
   partitionName: string,
   options: { pluginRoot?: string } = {},
@@ -124,7 +136,7 @@ export function installPluginPartitionPolicy(
     try {
       const url = new URL(details.url);
       if (
-        url.protocol === "file:" ||
+        isAllowedPluginShellFile(url) ||
         url.protocol === `${PLUGIN_ASSET_SCHEME}:` ||
         url.protocol === "data:" ||
         url.protocol === "blob:" ||

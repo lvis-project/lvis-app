@@ -1,12 +1,12 @@
 import type { Session } from "electron";
-import { realpathSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const PLUGIN_ASSET_SCHEME = "lvis-plugin";
 const PLUGIN_ASSET_HOST = "asset";
 
-const rootsByPartition = new Map<string, string>();
+const rootsByPartition = new Map<string, PartitionAssetRoot>();
 const handledPartitions = new Set<string>();
 
 export function registerPluginAssetProtocolScheme(
@@ -19,6 +19,7 @@ export function registerPluginAssetProtocolScheme(
         standard: true,
         secure: true,
         supportFetchAPI: true,
+        corsEnabled: true,
       },
     },
   ]);
@@ -40,7 +41,11 @@ export function pluginAssetUrlFromRealPath(realRoot: string, realAsset: string):
   return `${PLUGIN_ASSET_SCHEME}://${PLUGIN_ASSET_HOST}/${encoded}`;
 }
 
-export function resolvePluginAssetRequest(pluginRoot: string, requestUrl: string): string | null {
+export async function resolvePluginAssetRequest(
+  pluginRoot: string,
+  requestUrl: string,
+  options: { rootIsReal?: boolean } = {},
+): Promise<string | null> {
   let url: URL;
   try {
     url = new URL(requestUrl);
@@ -64,8 +69,8 @@ export function resolvePluginAssetRequest(pluginRoot: string, requestUrl: string
   let realRoot: string;
   let realAsset: string;
   try {
-    realRoot = realpathSync(pluginRoot);
-    realAsset = realpathSync(path.resolve(realRoot, relPath));
+    realRoot = options.rootIsReal ? pluginRoot : await realpath(pluginRoot);
+    realAsset = await realpath(path.resolve(realRoot, relPath));
   } catch {
     return null;
   }
@@ -76,19 +81,39 @@ export function resolvePluginAssetRequest(pluginRoot: string, requestUrl: string
   return realAsset;
 }
 
+type PartitionAssetRoot = {
+  pluginRoot: string;
+  realRoot?: string;
+};
+
 export function installPluginAssetProtocolHandler(
   partitionName: string,
   ses: Session,
   pluginRoot: string,
 ): void {
-  rootsByPartition.set(partitionName, pluginRoot);
+  const previous = rootsByPartition.get(partitionName);
+  rootsByPartition.set(
+    partitionName,
+    previous?.pluginRoot === pluginRoot ? previous : { pluginRoot },
+  );
   if (handledPartitions.has(partitionName)) return;
   handledPartitions.add(partitionName);
 
   ses.protocol.handle(PLUGIN_ASSET_SCHEME, async (request) => {
-    const root = rootsByPartition.get(partitionName);
-    if (!root) return new Response("plugin asset root missing", { status: 404 });
-    const assetPath = resolvePluginAssetRequest(root, request.url);
+    const rootRecord = rootsByPartition.get(partitionName);
+    if (!rootRecord) return new Response("plugin asset root missing", { status: 404 });
+    let realRoot = rootRecord.realRoot;
+    if (!realRoot) {
+      try {
+        realRoot = await realpath(rootRecord.pluginRoot);
+        rootRecord.realRoot = realRoot;
+      } catch {
+        return new Response("plugin asset root missing", { status: 404 });
+      }
+    }
+    const assetPath = await resolvePluginAssetRequest(realRoot, request.url, {
+      rootIsReal: true,
+    });
     if (!assetPath) return new Response("plugin asset denied", { status: 403 });
     const { net } = await import("electron");
     return net.fetch(pathToFileURL(assetPath).toString());

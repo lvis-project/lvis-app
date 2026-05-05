@@ -42,6 +42,7 @@ describe("plugin asset protocol", () => {
           standard: true,
           secure: true,
           supportFetchAPI: true,
+          corsEnabled: true,
         },
       },
     ]);
@@ -55,24 +56,35 @@ describe("plugin asset protocol", () => {
     );
   });
 
-  it("resolves relative plugin asset URLs inside the plugin root", () => {
+  it("resolves relative plugin asset URLs inside the plugin root", async () => {
     const { root, asset } = fixture();
 
-    expect(resolvePluginAssetRequest(root, "lvis-plugin://asset/dist/icon.svg")).toBe(
+    await expect(resolvePluginAssetRequest(root, "lvis-plugin://asset/dist/icon.svg")).resolves.toBe(
       realpathSync(asset),
     );
   });
 
-  it("rejects traversal outside the plugin root", () => {
-    const { root } = fixture();
+  it("keeps relative module imports rooted at the lvis-plugin asset URL", async () => {
+    const { root, entry, asset } = fixture();
+    const entryUrl = pluginAssetUrlFromRealPath(realpathSync(root), realpathSync(entry));
+    const relativeAssetUrl = new URL("./icon.svg", entryUrl).toString();
 
-    expect(resolvePluginAssetRequest(root, "lvis-plugin://asset/../package.json")).toBeNull();
+    expect(relativeAssetUrl).toBe("lvis-plugin://asset/dist/icon.svg");
+    await expect(resolvePluginAssetRequest(root, relativeAssetUrl)).resolves.toBe(
+      realpathSync(asset),
+    );
   });
 
-  it("rejects non-plugin-asset schemes and hosts", () => {
+  it("rejects traversal outside the plugin root", async () => {
     const { root } = fixture();
 
-    expect(resolvePluginAssetRequest(root, "file:///tmp/plugin.js")).toBeNull();
-    expect(resolvePluginAssetRequest(root, "lvis-plugin://other/dist/ui.js")).toBeNull();
+    await expect(resolvePluginAssetRequest(root, "lvis-plugin://asset/../package.json")).resolves.toBeNull();
+  });
+
+  it("rejects non-plugin-asset schemes and hosts", async () => {
+    const { root } = fixture();
+
+    await expect(resolvePluginAssetRequest(root, "file:///tmp/plugin.js")).resolves.toBeNull();
+    await expect(resolvePluginAssetRequest(root, "lvis-plugin://other/dist/ui.js")).resolves.toBeNull();
   });
 });

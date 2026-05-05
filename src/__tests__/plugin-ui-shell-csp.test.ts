@@ -124,7 +124,6 @@ describe("plugin-ui-shell — CSP-safe external bootstrap", () => {
     expect(shellJs).not.toMatch(/lvisPlugin\.getEntryModuleSource/);
     expect(shellJs).not.toMatch(/URL\.createObjectURL/);
     expect(shellJs).not.toMatch(/URL\.revokeObjectURL/);
-    expect(shellJs).toMatch(/lvis-plugin:\/\/asset/);
     expect(shellJs).toMatch(/import\(\s*\/\*\s*@vite-ignore\s*\*\/\s*entry\s*\)/);
   });
 

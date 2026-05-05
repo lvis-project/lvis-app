@@ -5,6 +5,12 @@
  * handler that allows data:/blob:/about:blank and cancels everything else.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { dirname, resolve } from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";
+
+const __dirnameLocal = dirname(fileURLToPath(import.meta.url));
+const pluginShellHtmlUrl = pathToFileURL(resolve(__dirnameLocal, "..", "..", "plugin-ui-shell.html")).toString();
+const pluginShellJsUrl = pathToFileURL(resolve(__dirnameLocal, "..", "..", "plugin-ui-shell.js")).toString();
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 const mockOnBeforeRequest = vi.fn();
@@ -62,6 +68,18 @@ function invokeHandler(url: string): { cancel: boolean } {
 
 function invokeMcpHandler(url: string): { cancel: boolean } {
   const handler = mockOnBeforeRequestMcp.mock.calls[0][0] as (
+    details: { url: string },
+    callback: (result: { cancel: boolean }) => void,
+  ) => void;
+  let result!: { cancel: boolean };
+  handler({ url }, (r) => {
+    result = r;
+  });
+  return result;
+}
+
+function invokePluginHandler(url: string): { cancel: boolean } {
+  const handler = mockOnBeforeRequestPlugin.mock.calls[0][0] as (
     details: { url: string },
     callback: (result: { cancel: boolean }) => void,
   ) => void;
@@ -160,15 +178,16 @@ describe("installPluginPartitionPolicy", () => {
 
   it("allows the lvis-plugin asset protocol on plugin partitions", () => {
     installPluginPartitionPolicy("persist:plugin:lvisasset", {}, mockSessionApi);
-    const handler = mockOnBeforeRequestPlugin.mock.calls[0][0] as (
-      details: { url: string },
-      callback: (result: { cancel: boolean }) => void,
-    ) => void;
-    let result!: { cancel: boolean };
-    handler({ url: "lvis-plugin://asset/dist/ui/panel.js" }, (r) => {
-      result = r;
-    });
-    expect(result).toEqual({ cancel: false });
+    expect(invokePluginHandler("lvis-plugin://asset/dist/ui/panel.js")).toEqual({ cancel: false });
+  });
+
+  it("allows only host-owned plugin shell file URLs on plugin partitions", () => {
+    installPluginPartitionPolicy("persist:plugin:shellfiles", {}, mockSessionApi);
+
+    expect(invokePluginHandler("file:///etc/passwd")).toEqual({ cancel: true });
+    expect(invokePluginHandler("file:///plugins/agent-hub/dist/ui.js")).toEqual({ cancel: true });
+    expect(invokePluginHandler(pluginShellHtmlUrl)).toEqual({ cancel: false });
+    expect(invokePluginHandler(pluginShellJsUrl)).toEqual({ cancel: false });
   });
 
   it("registers the lvis-plugin handler when a plugin root is provided", () => {
