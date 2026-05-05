@@ -59,9 +59,13 @@ function makeAuditLogger() {
 
 describe("ALLOWED_VIEW_KEYS", () => {
   it("accepts built-in view keys", () => {
-    for (const key of ["tasks", "reminders", "routines", "memory", "starred"]) {
+    for (const key of ["reminders", "routines", "memory", "starred"]) {
       expect(ALLOWED_VIEW_KEYS.test(key)).toBe(true);
     }
+  });
+
+  it("rejects 'tasks' (removed from allowlist)", () => {
+    expect(ALLOWED_VIEW_KEYS.test("tasks")).toBe(false);
   });
 
   it("accepts valid plugin view keys (pluginId:extensionId format)", () => {
