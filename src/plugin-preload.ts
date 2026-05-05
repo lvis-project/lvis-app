@@ -13,6 +13,7 @@
  *   - emitEvent(type, data)      → host event bus, capability-gated
  *   - onEvent(type, handler)     → host events scoped to this plugin
  *   - getEntryUrl()              → canonical entry URL from main
+ *   - getEntryModuleSource()     → vetted UI entry source from main
  *   - config.get(key)            → read this plugin's config field
  *   - config.set(key, value)     → write this plugin's config field
  *   - storage.get(key)           → read JSON from per-plugin sandboxed dir
@@ -130,6 +131,23 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
       throw new Error(`lvis:plugin:get-entry-url rejected: ${reply?.error ?? "unknown"}`);
     }
     return reply.entryUrl;
+  },
+
+  /**
+   * Fetch the source text for the registered UI entry. Main resolves the
+   * pluginId and entryUrl from `event.sender.id`, then repeats the same
+   * realpath containment check used during webview registration before
+   * reading the file. The shell turns this into a blob: module so CSP never
+   * needs to allow broad `file:` script execution.
+   */
+  getEntryModuleSource: async (): Promise<string> => {
+    const reply = (await ipcRenderer.invoke("lvis:plugin:get-entry-module-source")) as
+      | { ok: true; source: string }
+      | { ok: false; error: string };
+    if (!reply || reply.ok !== true) {
+      throw new Error(`lvis:plugin:get-entry-module-source rejected: ${reply?.error ?? "unknown"}`);
+    }
+    return reply.source;
   },
 
   /**

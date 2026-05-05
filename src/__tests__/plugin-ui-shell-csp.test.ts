@@ -2,7 +2,7 @@
  * Regression: Plugin UI Shell must not require inline script execution.
  *
  * The shell document declares a strict CSP:
- *   script-src 'self' file: blob: http://localhost:* https://localhost:*
+ *   script-src 'self' blob: http://localhost:* https://localhost:*
  * with no `'unsafe-inline'`, no nonce, no hash. Historically the shell
  * embedded its bootstrap as `<script type="module">…</script>`, which the
  * renderer silently refused — producing fully blank embedded plugin areas
@@ -14,9 +14,10 @@
  *   2. The shell HTML references an external host-owned bootstrap
  *      (`./plugin-ui-shell.js`) via `<script type="module" src="…">`.
  *   3. The CSP is unchanged in spirit — still no `'unsafe-inline'`, still
- *      includes `'self'` so the sibling bootstrap loads, and still includes
- *      `file:` so host-vetted installed plugin modules can be imported from
- *      `~/.lvis/plugins`.
+ *      includes `'self'` so the sibling bootstrap loads, and does NOT
+ *      include `file:`. Installed plugin modules are read by main after the
+ *      registered entry path passes containment checks, then imported as blob
+ *      modules inside the shell.
  *   4. The build pipeline copies the bootstrap to `dist/src/` alongside
  *      the HTML, and the dev launcher copies/watches it too.
  *   5. The bootstrap source itself contains the user-visible error fallback
@@ -65,10 +66,11 @@ describe("plugin-ui-shell — CSP-safe external bootstrap", () => {
     // "fix" a blank shell by adding 'unsafe-inline' should fail this test
     // and read the rationale in src/plugin-ui-shell.js instead.
     const scriptSrc = csp.match(/script-src[^;]*/i)?.[0] ?? "";
-    // Installed marketplace plugins are loaded from absolute file:// URLs
-    // under ~/.lvis/plugins, which are not same-origin siblings of the shell.
-    // The host vets these URLs before returning them from getEntryUrl().
-    expect(scriptSrc).toMatch(/\bfile:/);
+    // Do not allow arbitrary local JS execution from the plugin webview.
+    // Installed marketplace plugins are read by main and imported as blob:
+    // modules after registry/realpath containment checks.
+    expect(scriptSrc).not.toMatch(/\bfile:/);
+    expect(scriptSrc).toMatch(/\bblob:/);
     expect(scriptSrc).not.toMatch(/'unsafe-inline'/);
     // Defensive: also no nonce/hash hack — the fix must stay declarative.
     expect(scriptSrc).not.toMatch(/'nonce-/);
@@ -116,8 +118,11 @@ describe("plugin-ui-shell — CSP-safe external bootstrap", () => {
     expect(shellJs).toContain("entry 조회 실패");
     // Sanity: the bootstrap must still call the bridge entry-resolver.
     expect(shellJs).toMatch(/lvisPlugin\.getEntryUrl/);
-    // And it must dynamic-import the resolved URL.
-    expect(shellJs).toMatch(/import\(\s*\/\*\s*@vite-ignore\s*\*\/\s*entry\s*\)/);
+    // File-backed entries must be converted to blob: modules before import.
+    expect(shellJs).toMatch(/lvisPlugin\.getEntryModuleSource/);
+    expect(shellJs).toMatch(/URL\.createObjectURL/);
+    expect(shellJs).toMatch(/URL\.revokeObjectURL/);
+    expect(shellJs).toMatch(/import\(\s*\/\*\s*@vite-ignore\s*\*\/\s*importUrl\s*\)/);
   });
 
   it("build script copies plugin-ui-shell.js into dist/src/", () => {

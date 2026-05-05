@@ -202,6 +202,10 @@ type PendingEntryUrlResolver = (
 ) => void;
 const pendingEntryUrlResolvers = new Map<number, Set<PendingEntryUrlResolver>>();
 
+type EntrySourceReply =
+  | { ok: true; source: string }
+  | { ok: false; error: string };
+
 function flushPendingEntryUrl(webContentsId: number, binding: PluginWebviewBinding): void {
   const resolvers = pendingEntryUrlResolvers.get(webContentsId);
   if (!resolvers) return;
@@ -214,6 +218,45 @@ function clearPendingEntryUrl(webContentsId: number): void {
   if (!resolvers) return;
   pendingEntryUrlResolvers.delete(webContentsId);
   for (const resolve of resolvers) resolve({ ok: false, error: "not-registered" });
+}
+
+async function readRegisteredEntrySource(
+  binding: PluginWebviewBinding | undefined,
+  pluginRuntime: IpcDeps["pluginRuntime"],
+): Promise<EntrySourceReply> {
+  if (!binding) {
+    return { ok: false, error: "not-registered" };
+  }
+  if (!binding.entryUrl.startsWith("file://")) {
+    return { ok: false, error: "invalid-entry-url" };
+  }
+  const rawInstallRoot = pluginRuntime.getPluginRoot(binding.pluginId);
+  if (!rawInstallRoot) {
+    return { ok: false, error: "plugin-not-loaded" };
+  }
+  let entryFsPath: string;
+  try {
+    entryFsPath = fileURLToPath(binding.entryUrl);
+  } catch {
+    return { ok: false, error: "invalid-entry-url" };
+  }
+  let realRoot: string;
+  let realEntry: string;
+  try {
+    realRoot = realpathSync(rawInstallRoot);
+    realEntry = realpathSync(entryFsPath);
+  } catch {
+    return { ok: false, error: "entry-url-outside-install-root" };
+  }
+  const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
+  if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
+    return { ok: false, error: "entry-url-outside-install-root" };
+  }
+  try {
+    return { ok: true, source: await readFile(realEntry, "utf-8") };
+  } catch {
+    return { ok: false, error: "entry-module-read-failed" };
+  }
 }
 
 const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
@@ -1010,6 +1053,19 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         }, PENDING_ENTRY_URL_DEADLINE_MS);
       },
     );
+  });
+
+  ipcMain.handle("lvis:plugin:get-entry-module-source", async (e) => {
+    if (!validatePluginFrame(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugin:get-entry-module-source", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const senderId = e.sender?.id;
+    if (typeof senderId !== "number") {
+      return { ok: false as const, error: "not-registered" };
+    }
+    const binding = pluginWebviewRegistry.get(senderId);
+    return readRegisteredEntrySource(binding, pluginRuntime);
   });
 
   // Pull-on-load theme handshake. The plugin shell calls this BEFORE

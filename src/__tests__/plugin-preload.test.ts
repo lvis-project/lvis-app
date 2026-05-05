@@ -168,6 +168,26 @@ describe("plugin-preload bridge", () => {
     await expect(bridge.getEntryUrl()).rejects.toThrow(/not-registered/);
   });
 
+  it("getEntryModuleSource invokes the source IPC channel and unwraps source text", async () => {
+    const bridge = exposed.get("lvisPlugin") as { getEntryModuleSource: () => Promise<string> };
+    mockInvoke.mockResolvedValueOnce({
+      ok: true,
+      source: "export function mount() {}",
+    });
+
+    const source = await bridge.getEntryModuleSource();
+
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:plugin:get-entry-module-source");
+    expect(source).toBe("export function mount() {}");
+  });
+
+  it("getEntryModuleSource throws when main returns a rejection sentinel", async () => {
+    const bridge = exposed.get("lvisPlugin") as { getEntryModuleSource: () => Promise<string> };
+    mockInvoke.mockResolvedValueOnce({ ok: false, error: "entry-url-outside-install-root" });
+
+    await expect(bridge.getEntryModuleSource()).rejects.toThrow(/entry-url-outside-install-root/);
+  });
+
   it("getTheme invokes lvis:plugin:get-theme and unwraps the cached payload", async () => {
     const bridge = exposed.get("lvisPlugin") as { getTheme: () => Promise<unknown> };
     const payload = {
