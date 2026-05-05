@@ -9,6 +9,7 @@ import type { WebContents } from "electron";
 import { redactForLLM } from "../../audit/dlp-filter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
+import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "../../engine/proactive-source.js";
 import {
@@ -34,6 +35,7 @@ import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("chat");
 
+export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 
 function removeOrphanToolUse(messages: GenericMessage[]): GenericMessage[] {
   const result = [...messages];
@@ -364,13 +366,7 @@ ${input}`;
     const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
     return {
       sessionId: conversationLoop.getSessionId(),
-      messages: messages.map((m, i) => ({
-        index: i,
-        role: m.role,
-        content: m.role === "tool_result" ? m.content : (m as { content: string }).content,
-        toolName: m.role === "tool_result" ? m.toolName : undefined,
-        isError: m.role === "tool_result" ? m.isError : undefined,
-      })),
+      messages: messages.map(serializeHistoryMessage),
     };
   });
 
@@ -420,17 +416,7 @@ ${input}`;
     }
     return {
       ok: true,
-      messages: raw.map((m, i) => ({
-        index: i,
-        role: m.role,
-        content: m.role === "user"
-          ? userContentText(m.content)
-          : m.role === "tool_result"
-            ? m.content
-            : m.content,
-        toolName: m.role === "tool_result" ? m.toolName : undefined,
-        isError: m.role === "tool_result" ? m.isError : undefined,
-      })),
+      messages: raw.map(serializeHistoryMessage),
       preambleChars,
       ...(parentSessionId !== undefined ? { parentSessionId } : {}),
     };

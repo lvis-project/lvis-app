@@ -15,7 +15,7 @@ type ApiOverrides = {
   sessions?: Array<{ id: string; modifiedAt: string }>;
   currentSession?: string;
   starred?: unknown[];
-  history?: { sessionId: string; messages: unknown[] };
+  history?: { sessionId: string; messages: unknown[] } | Promise<{ sessionId: string; messages: unknown[] }>;
   hasApiKey?: boolean;
   hasProvider?: boolean;
   usage?: unknown;
