@@ -1,5 +1,5 @@
 import type { ChatThemePreference, ResolvedTheme } from "./types.js";
-import type { LvisTokenName } from "@lvis/plugin-sdk/ui/tokens";
+import type { LvisTokenName } from "../../../shared/plugin-ui-tokens.js";
 
 // Derives the full set of --lvis-* CSS custom properties from the current
 // (resolved shell theme, chat theme) combination. Values are literal HSL
