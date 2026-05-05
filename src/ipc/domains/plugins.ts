@@ -24,7 +24,7 @@ import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
-import { LVIS_TOKEN_NAMES } from "@lvis/plugin-sdk/ui/tokens";
+import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -219,9 +219,9 @@ function clearPendingEntryUrl(webContentsId: number): void {
 const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
 const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
 const ALLOWED_CODE_THEMES = new Set(["light", "dark"]);
-// SDK SoT: token names come from the SDK contract, not duplicated here.
-// When the SDK adds a token, this set auto-expands — no manual sync needed.
-// Cast to Set<string> so .has(k) accepts arbitrary string keys from IPC payloads.
+// Host SoT: runtime validation stays in-app so main-process code never depends
+// on SDK runtime values. The SDK republishes the same contract for plugin
+// authors via sync-from-host.
 const PLUGIN_TOKEN_NAMES: Set<string> = new Set(LVIS_TOKEN_NAMES);
 // Allowlist-based value guard: only HSL colors, hex colors, dimension values,
 // font-weight integers, and motion timing values pass.
