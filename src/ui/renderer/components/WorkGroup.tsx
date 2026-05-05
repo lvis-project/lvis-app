@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
-import { debugLog } from "../../../lib/debug-stream.js";
+import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
 
 interface WorkGroupProps {
   stepCount: number;
@@ -16,6 +16,7 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
   // Past-turn WorkGroups always receive streaming=false from first render,
   // so they must start closed. Active-turn WorkGroups start open and
   // auto-close when the true→false transition fires in the effect below.
+  const debugStreamEnabled = isDebugStreamEnabled();
   const [open, setOpen] = useState(streaming);
   const prevStreaming = useRef(streaming);
 
@@ -29,22 +30,26 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
 
   // Diagnostic: log mount + every unmount.
   useEffect(() => {
-    debugLog("WG", "mount", { wgId, streaming, stepCount, openInitial: open });
+    if (debugStreamEnabled) {
+      debugLog("WG", "mount", { wgId, streaming, stepCount, openInitial: open });
+    }
     return () => {
-      debugLog("WG", "unmount", { wgId });
+      if (debugStreamEnabled) debugLog("WG", "unmount", { wgId });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     const willCollapse = prevStreaming.current && !streaming;
-    debugLog("WG", "effect", {
-      wgId,
-      streaming,
-      prevStreaming: prevStreaming.current,
-      open,
-      willCollapse,
-    });
+    if (debugStreamEnabled) {
+      debugLog("WG", "effect", {
+        wgId,
+        streaming,
+        prevStreaming: prevStreaming.current,
+        open,
+        willCollapse,
+      });
+    }
     if (willCollapse) {
       setOpen(false);
     }
@@ -53,7 +58,9 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
 
   // Diagnostic: log every render with the relevant state — surfaces
   // re-renders that come from parent prop changes vs internal state.
-  debugLog("WG", "render", { wgId, streaming, open, stepCount });
+  if (debugStreamEnabled) {
+    debugLog("WG", "render", { wgId, streaming, open, stepCount });
+  }
 
   return (
     <div className="max-w-[85%] text-xs text-muted-foreground" data-wg-id={wgId}>
@@ -61,7 +68,9 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
         type="button"
         className="flex items-center gap-1.5 px-1 py-1 hover:opacity-80"
         onClick={() => {
-          debugLog("WG", "click-toggle", { wgId, prevOpen: open });
+          if (debugStreamEnabled) {
+            debugLog("WG", "click-toggle", { wgId, prevOpen: open });
+          }
           setOpen((v) => !v);
         }}
       >
