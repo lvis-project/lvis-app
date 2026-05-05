@@ -65,10 +65,10 @@ export function applyThemeToDocument(theme: ResolvedTheme, doc: Document = docum
 }
 
 /**
- * Apply the chat accent preference to a target document element.
+ * Apply the chat theme preference to a target document element.
  * "default" REMOVES the attribute so the dark/light shell defaults win
  * (no override). Anything else writes a `data-chat-theme` value that is
- * matched by the accent overlay block in styles.css.
+ * matched by the chat-theme overlay block in styles.css.
  */
 export function applyChatThemeToDocument(
   chatTheme: ChatThemePreference,

@@ -36,6 +36,7 @@ const mockWindowInstances: Array<{
   loadedUrl: string | null;
   sentMessages: Array<[string, unknown]>;
   events: Map<string, Array<() => void>>;
+  setSize: ReturnType<typeof vi.fn>;
 }> = [];
 
 let nextWindowId = 1;
@@ -56,6 +57,7 @@ vi.mock("electron", () => {
       isDestroyed: vi.fn(() => instance.destroyed),
       focus: vi.fn(() => { instance.focused = true; }),
       setTitle: vi.fn((t: string) => { instance.title = t; }),
+      setSize: vi.fn(),
       show: vi.fn(),
       close: vi.fn(() => {
         instance.destroyed = true;
@@ -143,6 +145,14 @@ describe("WindowManager — single-instance detached shell", () => {
     const listed = wm.listChildren();
     expect(listed).toHaveLength(1);
     expect(listed[0].viewKey).toBe("plugin:local-indexer:search");
+  });
+
+  it("applies Agent Hub default size when reusing the detached plugin shell", () => {
+    wm.openDetachedTab("plugin:meeting:meeting-control");
+    wm.openDetachedTab("plugin:agent-hub:agent-hub-panel");
+
+    expect(mockWindowInstances).toHaveLength(1);
+    expect(mockWindowInstances[0].setSize).toHaveBeenCalledWith(960, 780);
   });
 
   it("after shell closed, next call spawns a fresh window", () => {

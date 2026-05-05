@@ -128,11 +128,11 @@ export interface PluginSettings {}
  *   - `theme`      — global shell light/dark/high-contrast
  *       "system" | "light" | "dark" | "high-contrast"
  *       (default "system")
- *   - `chatTheme`  — accent color overlay for chat / UI surfaces
+ *   - `chatTheme`  — visual chat theme for accents and, when needed, surfaces
  *       "default" | "lg" | "purple" | "orange" | "blue"
  *       (default "lg" — LG brand identity: warm-grey chat surface
  *        with lilac user bubble + vivid SEND button + LG red.
- *        "purple"/"orange"/"blue" are pure accent overlays that only
+ *        "purple"/"orange"/"blue" are pure accent variants that only
  *        repaint the action color. "default" means no override —
  *        inherits surface and accent from `theme`.)
  *   - `codeTheme`  — code-block surface scheme, independent of shell
