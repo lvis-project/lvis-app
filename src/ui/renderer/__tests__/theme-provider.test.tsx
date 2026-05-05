@@ -522,16 +522,16 @@ describe("resolvePluginTokens", () => {
     expect(hc["--lvis-primary"]).not.toMatch(/262/);
   });
 
-  it("dark/lg — uses LG surface (Grey-1 bg) and vivid purple primary", () => {
+  it("dark/lg — only accent changes, plugin surface stays dark", () => {
     const tokens = resolvePluginTokens("dark", "lg");
-    expect(tokens["--lvis-bg"]).toBe("hsl(0, 0%, 15%)");           // Grey-1
+    expect(tokens["--lvis-bg"]).toBe("hsl(222.2, 84%, 4.9%)");
     expect(tokens["--lvis-primary"]).toBe("hsl(253, 100%, 65%)");   // #734dff
     expect(tokens["--lvis-danger"]).toBe("hsl(1, 98%, 59%)");       // LG red
   });
 
-  it("light/lg — uses warm-grey surface", () => {
+  it("light/lg — only accent changes, plugin surface stays white", () => {
     const tokens = resolvePluginTokens("light", "lg");
-    expect(tokens["--lvis-bg"]).toBe("hsl(40, 25%, 92%)");  // Grey-6 #F0ECE4
+    expect(tokens["--lvis-bg"]).toBe("hsl(0, 0%, 100%)");
     expect(tokens["--lvis-primary"]).toBe("hsl(253, 100%, 65%)");
   });
 

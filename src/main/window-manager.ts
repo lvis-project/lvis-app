@@ -61,6 +61,14 @@ function viewKeyLabel(viewKey: string): string {
 
 // Distance in DIP within which a child snaps to a main-window edge.
 const SNAP_THRESHOLD_DIP = 20;
+const SNAP_GAP_DIP = 12;
+
+function defaultDetachedBounds(viewKey: string): { width: number; height: number } {
+  if (viewKey === "plugin:agent-hub:agent-hub-panel") {
+    return { width: 960, height: 780 };
+  }
+  return { width: 800, height: 600 };
+}
 
 // Throttle move-event IPC sends: max one per MOVE_THROTTLE_MS.
 const MOVE_THROTTLE_MS = 32; // ~30fps
@@ -302,9 +310,10 @@ export class WindowManager {
     // that the persisted position matters.
     const saved = loadWindowState().detached.find((d) => d.viewKey === viewKey);
 
+    const defaults = defaultDetachedBounds(viewKey);
     const child = new BrowserWindow({
-      width: saved?.bounds.width ?? 800,
-      height: saved?.bounds.height ?? 600,
+      width: saved?.bounds.width ?? defaults.width,
+      height: saved?.bounds.height ?? defaults.height,
       show: false,
       title: `LVIS — ${viewKeyLabel(viewKey)}`,
       webPreferences: {
@@ -536,7 +545,7 @@ export class WindowManager {
 
     // Prefer left side: find a display that fully accommodates the child AND
     // vertically overlaps the main window so it is visible alongside it.
-    const leftX = mainBounds.x - childBounds.width;
+    const leftX = mainBounds.x - childBounds.width - SNAP_GAP_DIP;
     const leftDisplay = allDisplays.find(
       (d) =>
         leftX >= d.bounds.x &&
@@ -548,7 +557,7 @@ export class WindowManager {
     // Find the display that will host the child when placed on the right.
     // Must check vertical overlap (same as leftDisplay logic) so that vertically
     // stacked monitors sharing the same X range don't get picked incorrectly.
-    const rightX = mainBounds.x + mainBounds.width;
+    const rightX = mainBounds.x + mainBounds.width + SNAP_GAP_DIP;
     const rightDisplay =
       allDisplays.find(
         (d) =>
@@ -567,12 +576,13 @@ export class WindowManager {
     );
     const x = hasSpaceOnLeft ? leftX : clampedRightX;
     const snapEdge: SnapEdge = hasSpaceOnLeft ? "w" : "e";
-    // "w" edge: snappedPosition computes x = main.x + dx  → dx = -childWidth
+    // "w" edge: snappedPosition computes x = main.x + dx
+    //           dx = -childWidth - gap keeps a visible gutter.
     // "e" edge: snappedPosition computes x = main.x + main.width + dx
-    //           dx = 0 keeps child flush against main's right edge on every follow-move.
+    //           dx = gap keeps a visible gutter on every follow-move.
     //           clampedRightX already handles the initial off-screen case via setPosition(x,…)
     //           below; subsequent follow-moves re-clamp via _followMainForSnapped.
-    const snapDeltaX = hasSpaceOnLeft ? -childBounds.width : 0;
+    const snapDeltaX = hasSpaceOnLeft ? -childBounds.width - SNAP_GAP_DIP : SNAP_GAP_DIP;
 
     // Clamp Y against the display that will actually host the child.
     const hostDisplay = hasSpaceOnLeft ? leftDisplay! : rightDisplay;
