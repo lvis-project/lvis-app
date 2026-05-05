@@ -10,13 +10,11 @@
  *
  * pluginId is NOT carried in the webview src query string. Instead, the
  * host renderer registers (webContents.id → pluginId) with main on the
- * `did-attach` event. The `did-attach` event fires when the webview is
- * attached to the DOM — before any content loads — and carries webContentsId
- * directly on the event object (no getWebContentsId() call needed). After
- * registration succeeds. The shell URL is still mounted from the first attach
- * because Electron only runs sandboxed <webview> preload at the initial guest
- * attach; main's pending get-entry-url wait queue absorbs the small race until
- * the did-attach registration lands.
+ * `did-attach` event by calling `getWebContentsId()` on the webview tag.
+ * The real shell URL must already be mounted at the first attach because
+ * Electron only runs sandboxed <webview> preload at the initial guest attach.
+ * Main's pending get-entry-url wait queue absorbs the small race between the
+ * did-attach registration handshake and the shell's first entry-url lookup.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
