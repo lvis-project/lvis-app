@@ -74,7 +74,7 @@ export function App() {
     entries, streaming, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
-    clearForNewChat, appendUserEntry, applyLoadedSession, truncateToEntry,
+    clearForNewChat, appendUserEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
     addImportedTriggerEntry, closeOpenImportedTrigger,
     fallbackToast,
   } = useChatState(api);
@@ -146,7 +146,7 @@ export function App() {
   const {
     currentSessionId, sessions, refreshSessionId, refreshSessions,
     handleLoadSession: sessionLoad, handleFork: sessionFork,
-  } = useSessions(api);
+  } = useSessions(api, applyInitialSession);
 
   // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
   const {

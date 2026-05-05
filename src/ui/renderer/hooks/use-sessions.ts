@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
 import { historyToEntries } from "../utils/history.js";
@@ -19,13 +19,36 @@ export interface SessionSummary {
  * rows the backend history doesn't track) — so the caller passes the resolved
  * history index and a `setEntries` truncator.
  */
-export function useSessions(api: LvisApi) {
+export function useSessions(
+  api: LvisApi,
+  applyInitialSession?: (entries: ChatEntry[]) => void,
+) {
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const sessionReadTokenRef = useRef(0);
 
   const refreshSessionId = useCallback(async () => {
-    try { const h = await api.chatGetHistory(); setCurrentSessionId(h.sessionId); } catch { /* ignore */ }
+    const token = ++sessionReadTokenRef.current;
+    try {
+      const h = await api.chatGetHistory();
+      if (token !== sessionReadTokenRef.current) return;
+      setCurrentSessionId(h.sessionId);
+    } catch { /* ignore */ }
   }, [api]);
+
+  const hydrateInitialSession = useCallback(async () => {
+    const token = ++sessionReadTokenRef.current;
+    try {
+      const h = await api.chatGetHistory();
+      if (token !== sessionReadTokenRef.current) return;
+      setCurrentSessionId(h.sessionId);
+      // The renderer state contract is: active in-memory stream entries and
+      // persisted session replay both enter ChatView as ChatEntry[].  Hydrate
+      // the current session at startup, but let the chat-state owner reject a
+      // late result if the user already started a live turn.
+      applyInitialSession?.(historyToEntries(h.messages));
+    } catch { /* ignore */ }
+  }, [api, applyInitialSession]);
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -35,7 +58,7 @@ export function useSessions(api: LvisApi) {
     } catch { /* ignore */ }
   }, [api]);
 
-  useEffect(() => { void refreshSessionId(); }, [refreshSessionId]);
+  useEffect(() => { void hydrateInitialSession(); }, [hydrateInitialSession]);
 
   const handleLoadSession = useCallback(
     async (
@@ -48,10 +71,13 @@ export function useSessions(api: LvisApi) {
       // would race. The "기록" button is also disabled during streaming, but
       // keep this guard here too for programmatic callers (e.g. starred jump).
       if (streaming) return;
+      const token = ++sessionReadTokenRef.current;
       try {
         const res = await api.chatSessionResume(sessionId);
+        if (token !== sessionReadTokenRef.current) return;
         if (!res?.ok) return;
         const h = await api.chatGetHistory();
+        if (token !== sessionReadTokenRef.current) return;
         applyLoadedSession(historyToEntries(h.messages));
         setCurrentSessionId(h.sessionId);
       } catch { /* ignore */ }

@@ -318,9 +318,12 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             // Capture idx by value — closures in this loop must not close over mutable `i`
             const idx = i;
 
-            const isMatch = searchMatchSet.has(idx);
-            const isCurrentMatch = searchOpen && searchMatches[searchIdx] === idx;
-            const ringCls = isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
+            const ringClassFor = (entryIdx: number) => {
+              const isMatch = searchMatchSet.has(entryIdx);
+              const isCurrentMatch = searchOpen && searchMatches[searchIdx] === entryIdx;
+              return isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
+            };
+            const ringCls = ringClassFor(idx);
 
             if (entry.kind === "user") {
               // Add extra breathing room only after a *completed* assistant
@@ -432,7 +435,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               continue;
             }
 
-            // ── Intermediate: collect consecutive intermediate entries into one WorkGroup ──
+            // ── Intermediate: collect contiguous turn work into one WorkGroup ──
             if (entryClassMap.get(i) === "intermediate") {
               const groupStart = i;
               const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
@@ -449,23 +452,29 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               }
               const groupEntries: { idx: number; node: React.ReactNode }[] = [];
 
-              while (i < entries.length && entryClassMap.get(i) === "intermediate") {
+              while (i < entries.length) {
                 const e = entries[i];
                 if (!e) { i++; continue; }
+                if ((entryTurnStartMap.get(i) ?? groupTurnStart) !== groupTurnStart) break;
+                const cls = entryClassMap.get(i);
+                if (cls === "final") break;
                 if (e.kind === "reasoning") {
-                  groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
+                  if (cls === "intermediate") {
+                    groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
+                  } else {
+                    break;
+                  }
                 } else if (e.kind === "tool_group") {
-                  groupEntries.push({ idx: i, node: <ToolGroupCard key={e.groupId} group={e} /> });
-                } else if (e.kind === "assistant") {
-                  groupEntries.push({ idx: i, node: (
-                    <AssistantCard
-                      key={i}
-                      entry={e}
-                      highlightQuery={searchHighlight}
-                      isStarred={false}
-                      isFinal={false}
-                    />
-                  )});
+                  if (cls === "intermediate") {
+                    groupEntries.push({ idx: i, node: <ToolGroupCard key={e.groupId} group={e} /> });
+                  } else {
+                    break;
+                  }
+                } else {
+                  // Visible assistant text is chronological transcript
+                  // content, not collapsible work. Stop the work run here so
+                  // the normal live/final branch renders it at entries[] order.
+                  break;
                 }
                 i++;
               }
