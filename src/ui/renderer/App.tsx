@@ -146,7 +146,7 @@ export function App() {
   const {
     currentSessionId, sessions, refreshSessionId, refreshSessions,
     handleLoadSession: sessionLoad, handleFork: sessionFork,
-  } = useSessions(api);
+  } = useSessions(api, applyLoadedSession);
 
   // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
   const {

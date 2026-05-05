@@ -213,6 +213,24 @@ describe("ChatView", () => {
     });
   });
 
+  it("hydrates current-session backlog history on mount", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      history: {
+        sessionId: "sess-history",
+        messages: [
+          { index: 0, role: "user", content: "이전 질문" },
+          { index: 1, role: "assistant", content: "이전 답변" },
+        ],
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("이전 질문");
+      expect(container.textContent).toContain("이전 답변");
+    });
+  });
+
   // Regression guard for Copilot PR #545 round-1 comments ③④.
   // Reasoning + tool + assistant sequence: reasoning entry must be bucketed
   // inside WorkGroup while the final assistant text stays visible standalone.
@@ -240,6 +258,56 @@ describe("ChatView", () => {
       expect(container.textContent).toContain("오늘 일정 정리해드릴게요");
       // WorkGroup bundles reasoning + tool (2단계), assistant stays outside
       expect(container.textContent).toContain("2단계");
+    });
+  });
+
+  it("renders one coherent WorkGroup for a multi-tool/reasoning assistant turn", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await act(async () => {
+      emitChatStream({ type: "reasoning_delta", text: "첫 번째 검색 계획" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "",
+        thought: "첫 번째 검색 계획",
+        stopReason: "tool_use",
+        hasToolCalls: true,
+      });
+      emitChatStream({ type: "tool_start", name: "web_search", groupId: "g1", toolUseId: "t1" });
+      emitChatStream({ type: "tool_end", name: "web_search", groupId: "g1", toolUseId: "t1", result: "검색 결과", isError: false });
+      emitChatStream({ type: "text_delta", text: "중간 확인 내용은 사용자에게 보여야 합니다." });
+      emitChatStream({
+        type: "assistant_round",
+        text: "중간 확인 내용은 사용자에게 보여야 합니다.",
+        thought: "",
+        stopReason: "tool_use",
+        hasToolCalls: true,
+      });
+      emitChatStream({ type: "reasoning_delta", text: "두 번째 도구 결과를 검증" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "",
+        thought: "두 번째 도구 결과를 검증",
+        stopReason: "tool_use",
+        hasToolCalls: true,
+      });
+      emitChatStream({ type: "tool_start", name: "web_fetch", groupId: "g2", toolUseId: "t2" });
+      emitChatStream({ type: "tool_end", name: "web_fetch", groupId: "g2", toolUseId: "t2", result: "본문", isError: false });
+      emitChatStream({ type: "text_delta", text: "최종 답변입니다." });
+      emitChatStream({
+        type: "assistant_round",
+        text: "최종 답변입니다.",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("중간 확인 내용은 사용자에게 보여야 합니다.");
+      expect(container.textContent).toContain("최종 답변입니다.");
+      expect(container.textContent).toContain("4단계");
+      expect(container.textContent?.match(/작업/g) ?? []).toHaveLength(1);
     });
   });
 

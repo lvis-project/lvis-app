@@ -432,7 +432,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               continue;
             }
 
-            // ── Intermediate: collect consecutive intermediate entries into one WorkGroup ──
+            // ── Intermediate: collect the turn's work entries into one WorkGroup ──
             if (entryClassMap.get(i) === "intermediate") {
               const groupStart = i;
               const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
@@ -448,24 +448,43 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                 });
               }
               const groupEntries: { idx: number; node: React.ReactNode }[] = [];
+              const visibleAssistantEntries: { idx: number; node: React.ReactNode }[] = [];
 
-              while (i < entries.length && entryClassMap.get(i) === "intermediate") {
+              while (i < entries.length) {
                 const e = entries[i];
                 if (!e) { i++; continue; }
+                if ((entryTurnStartMap.get(i) ?? groupTurnStart) !== groupTurnStart) break;
+                const cls = entryClassMap.get(i);
+                if (cls === "final") break;
                 if (e.kind === "reasoning") {
-                  groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
+                  if (cls === "intermediate") {
+                    groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
+                  } else {
+                    break;
+                  }
                 } else if (e.kind === "tool_group") {
-                  groupEntries.push({ idx: i, node: <ToolGroupCard key={e.groupId} group={e} /> });
+                  if (cls === "intermediate") {
+                    groupEntries.push({ idx: i, node: <ToolGroupCard key={e.groupId} group={e} /> });
+                  } else {
+                    break;
+                  }
                 } else if (e.kind === "assistant") {
-                  groupEntries.push({ idx: i, node: (
-                    <AssistantCard
-                      key={i}
-                      entry={e}
-                      highlightQuery={searchHighlight}
-                      isStarred={false}
-                      isFinal={false}
-                    />
+                  // Assistant text is user-visible answer content, not hidden
+                  // work.  It may appear between tool rounds in the event
+                  // stream; keep it visible while the turn's reasoning/tool
+                  // work is still grouped under one explicit turn boundary.
+                  visibleAssistantEntries.push({ idx: i, node: (
+                    <div key={i} className={searchMatchSet.has(i) ? "ring-1 ring-primary/40 rounded-md" : undefined}>
+                      <AssistantCard
+                        entry={e}
+                        highlightQuery={searchHighlight}
+                        isStarred={!!isEntryStarred(i)}
+                        isFinal={false}
+                      />
+                    </div>
                   )});
+                } else {
+                  break;
                 }
                 i++;
               }
@@ -481,6 +500,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   </WorkGroup>
                 );
               }
+              rendered.push(...visibleAssistantEntries.map((entry) => entry.node));
               continue;
             }
 

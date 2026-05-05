@@ -19,13 +19,24 @@ export interface SessionSummary {
  * rows the backend history doesn't track) — so the caller passes the resolved
  * history index and a `setEntries` truncator.
  */
-export function useSessions(api: LvisApi) {
+export function useSessions(
+  api: LvisApi,
+  applyInitialSession?: (entries: ChatEntry[]) => void,
+) {
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
 
   const refreshSessionId = useCallback(async () => {
-    try { const h = await api.chatGetHistory(); setCurrentSessionId(h.sessionId); } catch { /* ignore */ }
-  }, [api]);
+    try {
+      const h = await api.chatGetHistory();
+      setCurrentSessionId(h.sessionId);
+      // The renderer state contract is: active in-memory stream entries and
+      // persisted session replay both enter ChatView as ChatEntry[].  Hydrate
+      // the current session at startup instead of only recording its id, or a
+      // restart shows an empty backlog until the user manually reloads history.
+      applyInitialSession?.(historyToEntries(h.messages));
+    } catch { /* ignore */ }
+  }, [api, applyInitialSession]);
 
   const refreshSessions = useCallback(async () => {
     try {
