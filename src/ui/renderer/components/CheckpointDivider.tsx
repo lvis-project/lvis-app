@@ -16,7 +16,7 @@
  * for resuming the parent session.
  */
 
-export type CheckpointTier = "hard-token" | "semantic-llm" | "soft-time";
+import type { CheckpointTier } from "../../../lib/chat-stream-state.js";
 
 const TIER_VARIANTS: Record<CheckpointTier | "default", { label: string; icon: string; lineCls: string; textCls: string }> = {
   "hard-token": {
