@@ -1093,7 +1093,9 @@ export async function initPluginRuntime(
   // by walking the loaded-plugin set sidesteps the partition-name read
   // entirely.
   for (const pluginId of pluginRuntime.listPluginIds()) {
-    installPluginPartitionPolicy(pluginPartitionName(pluginId));
+    installPluginPartitionPolicy(pluginPartitionName(pluginId), {
+      pluginRoot: pluginRuntime.getPluginRoot(pluginId),
+    });
   }
   // Cover plugins added AFTER startAll() — deep-link install
   // (`lvis://install/<slug>` → `addPlugin`), dev hot-reload watcher
@@ -1105,7 +1107,9 @@ export async function initPluginRuntime(
   onHostEvent("plugin.installed", (data) => {
     const pluginId = (data as { pluginId?: string } | undefined)?.pluginId;
     if (typeof pluginId !== "string") return;
-    installPluginPartitionPolicy(pluginPartitionName(pluginId));
+    installPluginPartitionPolicy(pluginPartitionName(pluginId), {
+      pluginRoot: pluginRuntime.getPluginRoot(pluginId),
+    });
   });
 
   // 선언형 startupTools 자동 실행

@@ -25,6 +25,7 @@ import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
+import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -101,6 +102,7 @@ async function withInstallLock<T>(
 interface PluginWebviewBinding {
   pluginId: string;
   entryUrl: string;
+  assetEntryUrl: string;
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
@@ -206,7 +208,7 @@ function flushPendingEntryUrl(webContentsId: number, binding: PluginWebviewBindi
   const resolvers = pendingEntryUrlResolvers.get(webContentsId);
   if (!resolvers) return;
   pendingEntryUrlResolvers.delete(webContentsId);
-  for (const resolve of resolvers) resolve({ ok: true, entryUrl: binding.entryUrl });
+  for (const resolve of resolvers) resolve({ ok: true, entryUrl: binding.assetEntryUrl });
 }
 
 function clearPendingEntryUrl(webContentsId: number): void {
@@ -215,6 +217,7 @@ function clearPendingEntryUrl(webContentsId: number): void {
   pendingEntryUrlResolvers.delete(webContentsId);
   for (const resolve of resolvers) resolve({ ok: false, error: "not-registered" });
 }
+
 
 const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
 const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
@@ -936,7 +939,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
-    const binding = { pluginId, entryUrl };
+    const assetEntryUrl = pluginAssetUrlFromRealPath(realRoot, realEntry);
+    const binding = { pluginId, entryUrl, assetEntryUrl };
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
@@ -955,7 +959,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:plugin:get-entry-url", (e) => {
     const binding = resolvePluginFromSender(e);
-    if (binding) return { ok: true as const, entryUrl: binding.entryUrl };
+    if (binding) return { ok: true as const, entryUrl: binding.assetEntryUrl };
 
     if (!validatePluginFrame(e)) {
       auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
