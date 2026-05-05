@@ -370,7 +370,8 @@ describe("WindowManager — magnetic snap behaviors", () => {
     });
     it("re-snaps locked child immediately if compositor allows drag (Linux advisory)", () => {
       // Simulate a locked panel that has drifted (e.g. Linux compositor ignored
-      // setMovable(false)) — _onChildMove must call _snapToLeftEdge, not return.
+      // setMovable(false)).  _onChildMove must call setPosition() directly —
+      // NOT _snapToLeftEdge() — to avoid a move-event re-entry loop.
       const child = makeMockWin({
         id: 152,
         bounds: { x: 999, y: 0, width: 400, height: 800 }, // drifted position

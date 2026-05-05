@@ -10,7 +10,8 @@
  *    window edge it snaps: its position is locked relative to that edge.
  *  - When the main window moves, all snapped children follow.
  *  - When the child is dragged away more than SNAP_THRESHOLD_DIP it detaches.
- *  - Maximising the main window un-snaps all children.
+ *  - Maximising the main window hides locked (permanently snapped) children
+ *    and un-snaps the rest; unmaximising restores them in the correct order.
  *
  * All coordinates are in DIP (device-independent pixels) because Electron's
  * BrowserWindow.getBounds() always returns DIP values.
@@ -455,10 +456,27 @@ export class WindowManager {
     // setMovable(false) is advisory-only on Linux: some compositors still
     // allow the user to drag the panel.  Re-snap it back to its locked
     // position immediately so it cannot drift away from the main window edge.
+    //
+    // We compare current vs expected position before calling setPosition()
+    // because Electron emits 'move' for programmatic setPosition() calls too.
+    // Calling _snapToLeftEdge() here would trigger another 'move' → another
+    // _onChildMove() → infinite loop.  Instead we compute expected position
+    // directly and only call setPosition() when the panel has genuinely drifted.
     if (entry.locked) {
+      if (entry.snapEdge === undefined) return;
       const main = this.getMainWindow();
-      if (main && !main.isDestroyed()) {
-        this._snapToLeftEdge(childId);
+      if (!main || main.isDestroyed()) return;
+      const mainBounds = main.getBounds();
+      const childBounds = entry.window.getBounds();
+      const expected = snappedPosition(
+        mainBounds,
+        childBounds,
+        entry.snapEdge,
+        entry.snapDeltaX ?? 0,
+        entry.snapDeltaY ?? 0,
+      );
+      if (childBounds.x !== expected.x || childBounds.y !== expected.y) {
+        entry.window.setPosition(expected.x, expected.y);
       }
       return;
     }
