@@ -1775,30 +1775,51 @@ ThemeProvider.tsx (renderer)
 - registry 외 webContents 로 누출 없음 — `pluginWebviewRegistry` 등록된
   webContentsId 만 순회
 
-**Register 시점 replay**: 호스트는 마지막으로 broadcast 된 검증 완료 payload 를
-모듈 캐시(`lastThemePayload`) 에 보관한다. plugin webview 가
-`lvis:plugin:register-webview` 로 등록되면 캐시가 차 있는 한 그 webContents 한
-곳에만 즉시 `host.theme.changed` 를 push 한다 — ThemeProvider 의 정주기 broadcast
-보다 늦게 mount 된 webview 가 SDK `:root` fallback 으로 묶이는 race 를 닫는다.
+**초기 상태 — pull-on-load (1차 메커니즘)**: plugin-ui-shell 이 plugin 모듈
+dynamic-import 직전에 `await window.lvisPlugin.getTheme()` 으로 호스트의 캐시된
+payload (`lastThemePayload`) 를 *명시적으로 요청*. 받은 토큰을
+`documentElement` 의 inline `style` 에 즉시 적용 → 첫 React commit 부터 올바른
+색으로 paint.
 
-main 의 push 는 동기적이지만 webview 측 `lvisPlugin.onEvent` 는 *late-binding* 이라
-(SDK `useTheme` 의 `useEffect` 가 React tree mount 후에 `ipcRenderer.on` 부착)
-preload 의 sticky-event 버퍼가 함께 동작해야 첫 프레임이 올바른 토큰으로 그려진다.
+```
+plugin-ui-shell.html
+  ├─ await getEntryUrl()
+  ├─ await getTheme()        ← 새 IPC: lvis:plugin:get-theme
+  │   └─ apply tokens to <html style="--lvis-*: ...">
+  └─ dynamic import(entry) → plugin React mounts → useTheme listens for changes
+```
 
-- `plugin-preload.ts` 의 `STICKY_EVENT_TYPES` 에 `host.theme.changed` 가 포함됨
-- preload 가 main 으로부터 받은 sticky 이벤트의 *최신 payload 만* (state, not log)
-  보관, `bridge.onEvent(type, h)` 첫 구독 시 즉시 1회 flush
-- 두 단계(main 캐시 + preload 버퍼) 가 함께 register-vs-mount race 를 닫는다 —
-  main 캐시만으로는 listener attach 보다 push 가 빨라 drop 되고, preload 버퍼만으로는
-  register 가 broadcast 보다 늦게 와도 첫 프레임이 못 채색됨
+Pull 모델인 이유:
+- **Race-free** — request/response 라 timing 무관. preload listener 가 언제
+  설치됐든 main 은 항상 응답할 수 있음
+- **Flash-free** — 토큰이 첫 paint 전에 inline style 로 적용 → SDK fallback
+  CSS 의 dark 값과 host 의 light 값이 충돌해서 첫 프레임이 잘못 그려지는
+  케이스가 원천 차단
+- **단일 layer 보장** — host 가 plugin-ui-shell 을 소유하므로 모든 플러그인이
+  자동 혜택 (각 플러그인이 별도 opt-in 필요 없음)
 
-캐시는 다음과 같이 동작한다:
+**변경 알림 — push (`host.theme.changed`)**: 호스트 테마가 *변할 때*는 기존
+broadcast 흐름 (`lvis:host:plugin-theme-notify` → wc.send → preload listener →
+useTheme) 그대로. plugin-ui-shell 에서 한 번 pull 한 후 useTheme 가 후속
+broadcast 만 처리.
+
+**Defense-in-depth (보조 layer, 머지된 상태 유지)**:
+- `register-webview` 시점 replay (`replayThemeToWebview`) — pull 이 어떤
+  이유로 실패해도 wc.send 로 한번 더 시도. preload listener 가 늦게
+  등록되면 sticky buffer 가 흡수
+- preload sticky buffer (`STICKY_EVENT_TYPES.has("host.theme.changed")`) —
+  late-binding `bridge.onEvent` 에 대한 보호. pull 이 정상이면 buffer 는
+  단순히 redundant
+- SDK `lvis-tokens-fallback` `<style>` (PR #101) — pull 이 null 반환 (cold
+  boot 직후 ThemeProvider 첫 effect 전) 했을 때 :root 다크 기본값 적용
+
+캐시 (`lastThemePayload`) 는 다음과 같이 동작한다:
 - `recordValidatedTheme(payload)` 가 validation 통과 시에만 갱신, 실패 시 기존 값
   유지 (잘못된 broadcast 가 캐시를 오염시키지 않음)
-- 호스트 부팅 직후 ThemeProvider 가 처음 broadcast 하기 전에 등록된 webview 는
-  캐시가 null 이라 SDK fallback 으로 잠깐 그려지지만, ThemeProvider 의 mount-time
-  push 가 수 ms 내에 도달
-- 같은 키/값 화이트리스트 검증을 거치므로 register-replay 경로도 broadcast 경로와
+- 호스트 부팅 직후 ThemeProvider 가 처음 broadcast 하기 전에 pull 하면 `null`
+  반환. SDK :root fallback 으로 잠깐 그려지다가 ThemeProvider mount-time push
+  가 수 ms 내 도달
+- 같은 키/값 화이트리스트 검증을 거치므로 pull / replay / broadcast 모두
   동일한 보안 게이트 통과
 - 캐시는 host process lifetime 동안 유지되고 종료 시 자동 소멸 — payload 자체가
   plugin-agnostic (UI 토큰 + 테마 enum) 이라 plugin install/uninstall/hot-reload
