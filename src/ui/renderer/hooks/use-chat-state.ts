@@ -16,6 +16,7 @@ import {
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
+import { debugLog } from "../../../lib/debug-stream.js";
 import type { LvisApi } from "../types.js";
 
 /**
@@ -74,12 +75,18 @@ export function useChatState(api: LvisApi) {
       // stream event, killing the entire listener so text_delta /
       // reasoning_delta / message_complete never get processed — the user
       // sees an empty response. Guard with typeof.
-      if (
-        typeof process !== "undefined" &&
-        process.env?.VITE_DEBUG_STREAM === "1"
-      ) {
-        console.log("[lvis:chat:stream]", ev);
-      }
+      debugLog("stream", "ev", {
+        type: ev.type,
+        streamId: ev.streamId ?? null,
+        textLen: typeof ev.text === "string" ? ev.text.length : null,
+        thoughtLen: typeof ev.thought === "string" ? ev.thought.length : null,
+        stopReason: (ev as { stopReason?: string }).stopReason,
+        hasToolCalls: (ev as { hasToolCalls?: boolean }).hasToolCalls,
+        groupId: (ev as { groupId?: string }).groupId,
+        toolUseId: (ev as { toolUseId?: string }).toolUseId,
+        accStream: streamRef.current.length,
+        accThought: thoughtRef.current.length,
+      });
       const streamId = typeof ev.streamId === "number" ? ev.streamId : null;
       if (ev.type === "guidance_reset") {
         if (streamId !== null) activeStreamIdRef.current = streamId;
@@ -88,6 +95,9 @@ export function useChatState(api: LvisApi) {
           const reopened = reopenLastAssistant(p);
           streamRef.current = reopened.text;
           thoughtRef.current = "";
+          debugLog("stream", "guidance_reset:applied", {
+            reopenedTextLen: reopened.text.length,
+          });
           return reopened.entries;
         });
         return;
@@ -95,7 +105,13 @@ export function useChatState(api: LvisApi) {
       if (streamId !== null) {
         if (activeStreamIdRef.current === null) {
           activeStreamIdRef.current = streamId;
+          debugLog("stream", "activeStreamId:adopt", { streamId });
         } else if (activeStreamIdRef.current !== streamId) {
+          debugLog("stream", "ev:rejected-stale-streamId", {
+            evStreamId: streamId,
+            active: activeStreamIdRef.current,
+            evType: ev.type,
+          });
           return;
         }
       }
@@ -128,6 +144,15 @@ export function useChatState(api: LvisApi) {
           return upsertStreamingReasoning(base, thoughtRef.current);
         });
       } else if (ev.type === "assistant_round") {
+        debugLog("stream", "assistant_round:enter", {
+          evTextLen: ev.text?.length ?? 0,
+          evThoughtLen: ev.thought?.length ?? 0,
+          evTextEmpty: ev.text === "",
+          evThoughtEmpty: ev.thought === "",
+          accStream: streamRef.current.length,
+          accThought: thoughtRef.current.length,
+          stopReason: ev.stopReason,
+        });
         setEntries((p) => {
           // Brain trigger flow — DO NOT finalize the imported_trigger
           // card here. assistant_round fires once per LLM round
@@ -149,8 +174,19 @@ export function useChatState(api: LvisApi) {
           }
           const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
           guidanceResetPendingRef.current = false;
+          const beforeCount = base.length;
           let next = finalizeStreamingReasoning(base, ev.thought ?? thoughtRef.current);
+          const afterReasoningCount = next.length;
           next = finalizeStreamingAssistant(next, ev.text ?? streamRef.current);
+          const afterAssistantCount = next.length;
+          debugLog("stream", "assistant_round:finalized", {
+            beforeCount,
+            afterReasoningCount,
+            afterAssistantCount,
+            usedThought: (ev.thought ?? thoughtRef.current).length,
+            usedText: (ev.text ?? streamRef.current).length,
+            kinds: next.map((e) => e.kind).join(","),
+          });
           return next;
         });
         streamRef.current = "";
@@ -213,6 +249,11 @@ export function useChatState(api: LvisApi) {
           },
         ]);
       } else if (ev.type === "done") {
+        debugLog("stream", "done:enter", {
+          accStream: streamRef.current.length,
+          accThought: thoughtRef.current.length,
+          route: ev.route,
+        });
         // Brain trigger flow — close the card's streaming indicator.
         // Independent of the regular streaming-assistant finalize; the
         // card may have absorbed every text_delta of this turn so
@@ -226,15 +267,30 @@ export function useChatState(api: LvisApi) {
           // Safety: if cleanedText is empty (e.g. entire stream was markers), use raw.
           const detected = detectFromStream(streamRef.current);
           const finalText = detected.cleanedText || streamRef.current;
+          debugLog("stream", "done:detect", {
+            rawLen: streamRef.current.length,
+            cleanedLen: detected.cleanedText.length,
+            usedFinalLen: finalText.length,
+            newTitle: detected.newTitle,
+            checkpointSuggested: detected.checkpointSuggested,
+          });
           setEntries((p) => {
             const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
             guidanceResetPendingRef.current = false;
             let next = finalizeStreamingReasoning(base, thoughtRef.current);
             next = finalizeStreamingAssistant(next, finalText, doneRoute ? { route: doneRoute } : undefined);
+            debugLog("stream", "done:finalized", {
+              kinds: next.map((e) => e.kind).join(","),
+              total: next.length,
+            });
             return next;
           });
           streamRef.current = "";
           thoughtRef.current = "";
+        } else {
+          debugLog("stream", "done:skip-finalize", {
+            reason: "streamRef and thoughtRef both empty",
+          });
         }
         activeStreamIdRef.current = null;
         guidanceResetPendingRef.current = false;
@@ -291,12 +347,23 @@ export function useChatState(api: LvisApi) {
 
   const beginStreamingRequest = useCallback(() => {
     const requestId = ++streamingRequestRef.current;
+    debugLog("stream", "BEGIN", {
+      requestId,
+      currentRef: streamingRequestRef.current,
+    });
     setStreaming(true);
     return requestId;
   }, []);
 
   const finishStreamingRequest = useCallback((requestId: number) => {
-    if (streamingRequestRef.current === requestId) {
+    const match = streamingRequestRef.current === requestId;
+    debugLog("stream", "FINISH", {
+      requestId,
+      currentRef: streamingRequestRef.current,
+      match,
+      action: match ? "setStreaming(false)" : "ignored-stale",
+    });
+    if (match) {
       setStreaming(false);
     }
   }, []);
