@@ -331,11 +331,10 @@
     color-scheme: dark;
   }
 
-  /* ── Tier B+: chat-theme accent overlays ───────────────────────────────
-   *  These ONLY remap accent semantic tokens (--primary, --ring) on top of
-   *  whatever data-theme is active. They do NOT touch background/foreground
-   *  surfaces, so a "purple chat theme on dark shell" still has slate-950
-   *  background but a purple action button.
+  /* ── Tier B+: chat-theme overlays ─────────────────────────────────────
+   *  Chat themes own the visual chat identity on top of data-theme.
+   *  Accent-only themes (purple/orange/blue) remap action tokens, while
+   *  full brand themes (LG) may also repaint background/card/input surfaces.
    *
    *  data-chat-theme="default" is intentionally NOT defined — it means
    *  "no override; inherit data-theme defaults".

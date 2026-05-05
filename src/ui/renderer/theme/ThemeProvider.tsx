@@ -26,7 +26,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
  *
  * Manages three independent axes:
  *   - `preference`  → `<html data-theme="...">`        (shell light/dark/HC)
- *   - `chatTheme`   → `<html data-chat-theme="...">`   (accent overlay)
+ *   - `chatTheme`   → `<html data-chat-theme="...">`   (chat visual overlay)
  *   - `codeTheme`   → `<html data-code-theme="...">`   (code-surface scheme)
  *
  * Responsibilities:
@@ -108,7 +108,7 @@ export function ThemeProvider({
     applyThemeToDocument(resolved);
   }, [resolved]);
 
-  // Apply chat accent overlay whenever the user changes it.
+  // Apply chat visual overlay whenever the user changes it.
   useEffect(() => {
     if (typeof document === "undefined") return;
     applyChatThemeToDocument(chatTheme);
