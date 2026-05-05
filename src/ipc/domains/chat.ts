@@ -41,33 +41,33 @@ export function serializeHistoryMessage(
   m: GenericMessage,
   index: number,
 ): SerializedHistoryMessage {
-  const base = {
-    index,
-    role: m.role,
-    // Renderer history replay operates on visible text. Multimodal user
-    // content is flattened to the same placeholders used by export/search,
-    // while assistant/tool structural fields below are passed through intact.
-    content: m.role === "user" ? userContentText(m.content) : m.content,
-  };
-
-  if (m.role === "assistant") {
-    return {
-      ...base,
-      ...(m.thought !== undefined ? { thought: m.thought } : {}),
-      ...(m.toolCalls !== undefined ? { toolCalls: m.toolCalls } : {}),
-    };
+  switch (m.role) {
+    case "user":
+      // Renderer history replay operates on visible text. Multimodal user
+      // content is flattened to the same placeholders used by export/search.
+      return {
+        index,
+        role: m.role,
+        content: userContentText(m.content),
+      };
+    case "assistant":
+      return {
+        index,
+        role: m.role,
+        content: m.content,
+        ...(m.thought !== undefined ? { thought: m.thought } : {}),
+        ...(m.toolCalls !== undefined ? { toolCalls: m.toolCalls } : {}),
+      };
+    case "tool_result":
+      return {
+        index,
+        role: m.role,
+        content: m.content,
+        toolUseId: m.toolUseId,
+        ...(m.toolName !== undefined ? { toolName: m.toolName } : {}),
+        ...(m.isError !== undefined ? { isError: m.isError } : {}),
+      };
   }
-
-  if (m.role === "tool_result") {
-    return {
-      ...base,
-      toolUseId: m.toolUseId,
-      ...(m.toolName !== undefined ? { toolName: m.toolName } : {}),
-      ...(m.isError !== undefined ? { isError: m.isError } : {}),
-    };
-  }
-
-  return base;
 }
 
 
