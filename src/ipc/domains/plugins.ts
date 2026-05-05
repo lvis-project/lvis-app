@@ -997,6 +997,28 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     );
   });
 
+  // Pull-on-load theme handshake. The plugin shell calls this BEFORE
+  // dynamic-importing the plugin entry, applies the returned tokens to
+  // documentElement inline style, and then loads the plugin code — so
+  // every plugin paints with correct host tokens from frame 0.
+  //
+  // This avoids the race the prior register-time replay had: `wc.send`
+  // does not buffer for late-attaching listeners, so a replay sent
+  // before the preload's `ipcRenderer.on` registration was lost. Pull
+  // is request-response and timing-safe: main answers whenever the
+  // shell asks, regardless of when preload listeners were set up.
+  //
+  // Returns `null` when the host hasn't broadcast yet (extreme cold-
+  // boot window). The shell falls back to SDK CSS-side defaults in
+  // that case.
+  ipcMain.handle("lvis:plugin:get-theme", (e) => {
+    if (!validatePluginFrame(e)) {
+      auditUnauthorized(auditLogger, "lvis:plugin:get-theme", e);
+      return UNAUTHORIZED_FRAME;
+    }
+    return { ok: true as const, theme: getLastThemePayload() };
+  });
+
   ipcMain.handle("lvis:plugin:call-tool", async (e, method: string, payload?: unknown) => {
     const binding = resolvePluginFromSender(e);
     if (!binding) {
