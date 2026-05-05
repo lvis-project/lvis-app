@@ -452,8 +452,16 @@ export class WindowManager {
     const entry = this._children.get(childId);
     if (!entry || entry.window.isDestroyed()) return;
 
-    // Locked windows are non-movable — skip drag detection.
-    if (entry.locked) return;
+    // setMovable(false) is advisory-only on Linux: some compositors still
+    // allow the user to drag the panel.  Re-snap it back to its locked
+    // position immediately so it cannot drift away from the main window edge.
+    if (entry.locked) {
+      const main = this.getMainWindow();
+      if (main && !main.isDestroyed()) {
+        this._snapToLeftEdge(childId);
+      }
+      return;
+    }
 
     const main = this.getMainWindow();
     if (!main || main.isDestroyed()) return;
@@ -561,7 +569,7 @@ export class WindowManager {
     // Prevent the user from independently dragging the panel away.
     // Note: setMovable(false) is enforced by Electron on macOS and Windows.
     // On Linux it is advisory only — the compositor may still allow dragging.
-    // The locked flag and _onChildMove early-return handle that gracefully.
+    // _onChildMove detects such drift and immediately re-snaps the panel back.
     entry.window.setMovable(false);
   }
 

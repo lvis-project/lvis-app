@@ -368,9 +368,21 @@ describe("WindowManager — magnetic snap behaviors", () => {
       expect(child.setMovable).toHaveBeenCalledWith(true);
       expect(entry.locked).toBe(false);
     });
-  });
+    it("re-snaps locked child immediately if compositor allows drag (Linux advisory)", () => {
+      // Simulate a locked panel that has drifted (e.g. Linux compositor ignored
+      // setMovable(false)) — _onChildMove must call _snapToLeftEdge, not return.
+      const child = makeMockWin({
+        id: 152,
+        bounds: { x: 999, y: 0, width: 400, height: 800 }, // drifted position
+      });
+      injectChild(wm, child, { locked: true, snappedTo: mainWin.id, snapEdge: "w" });
 
-  // ── 6. _followMainForSnapped — right-side child follows correctly ─────────
+      (wm as unknown as { _onChildMove: (id: number) => void })._onChildMove(child.id);
+
+      // setPosition must have been called to restore snap position.
+      expect(child.setPosition).toHaveBeenCalled();
+    });
+  });
 
   describe("_followMainForSnapped after right-side snap", () => {
     it("places child flush against main right edge (dx=0) after main moves", () => {
