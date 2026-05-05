@@ -59,6 +59,23 @@ describe("historyToEntries", () => {
     expect(entries.at(-1)).toMatchObject({ kind: "assistant", text: "일정이 없습니다." });
   });
 
+  it("does not create blank assistant bubbles for whitespace-only structural rounds", () => {
+    const entries = historyToEntries([
+      { index: 0, role: "user", content: "도구만 먼저 써줘" },
+      {
+        index: 1,
+        role: "assistant",
+        content: "\n  ",
+        toolCalls: [{ id: "t1", name: "calendar_list", input: {} }],
+      },
+      { index: 2, role: "tool_result", toolUseId: "t1", toolName: "calendar_list", content: "[]" },
+      { index: 3, role: "assistant", content: "일정이 없습니다." },
+    ]);
+
+    expect(entries.filter((entry) => entry.kind === "assistant")).toHaveLength(1);
+    expect(entries.map((entry) => entry.kind)).toEqual(["user", "tool_group", "assistant"]);
+  });
+
   it("preserves old consecutive tool_result history as one work group", () => {
     const entries = historyToEntries([
       { index: 0, role: "user", content: "두 도구 결과" },

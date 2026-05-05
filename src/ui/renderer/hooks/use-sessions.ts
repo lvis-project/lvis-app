@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
 import { historyToEntries } from "../utils/history.js";
@@ -25,15 +25,27 @@ export function useSessions(
 ) {
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const sessionReadTokenRef = useRef(0);
 
   const refreshSessionId = useCallback(async () => {
+    const token = ++sessionReadTokenRef.current;
     try {
       const h = await api.chatGetHistory();
+      if (token !== sessionReadTokenRef.current) return;
+      setCurrentSessionId(h.sessionId);
+    } catch { /* ignore */ }
+  }, [api]);
+
+  const hydrateInitialSession = useCallback(async () => {
+    const token = ++sessionReadTokenRef.current;
+    try {
+      const h = await api.chatGetHistory();
+      if (token !== sessionReadTokenRef.current) return;
       setCurrentSessionId(h.sessionId);
       // The renderer state contract is: active in-memory stream entries and
       // persisted session replay both enter ChatView as ChatEntry[].  Hydrate
-      // the current session at startup instead of only recording its id, or a
-      // restart shows an empty backlog until the user manually reloads history.
+      // the current session at startup, but let the chat-state owner reject a
+      // late result if the user already started a live turn.
       applyInitialSession?.(historyToEntries(h.messages));
     } catch { /* ignore */ }
   }, [api, applyInitialSession]);
@@ -46,7 +58,7 @@ export function useSessions(
     } catch { /* ignore */ }
   }, [api]);
 
-  useEffect(() => { void refreshSessionId(); }, [refreshSessionId]);
+  useEffect(() => { void hydrateInitialSession(); }, [hydrateInitialSession]);
 
   const handleLoadSession = useCallback(
     async (

@@ -9,7 +9,7 @@ import type { WebContents } from "electron";
 import { redactForLLM } from "../../audit/dlp-filter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
-import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
+import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "../../engine/proactive-source.js";
 import {
@@ -36,40 +36,6 @@ import { createLogger } from "../../lib/logger.js";
 const log = createLogger("chat");
 
 export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
-
-export function serializeHistoryMessage(
-  m: GenericMessage,
-  index: number,
-): SerializedHistoryMessage {
-  switch (m.role) {
-    case "user":
-      // Renderer history replay operates on visible text. Multimodal user
-      // content is flattened to the same placeholders used by export/search.
-      return {
-        index,
-        role: m.role,
-        content: userContentText(m.content),
-      };
-    case "assistant":
-      return {
-        index,
-        role: m.role,
-        content: m.content,
-        ...(m.thought !== undefined ? { thought: m.thought } : {}),
-        ...(m.toolCalls !== undefined ? { toolCalls: m.toolCalls } : {}),
-      };
-    case "tool_result":
-      return {
-        index,
-        role: m.role,
-        content: m.content,
-        toolUseId: m.toolUseId,
-        ...(m.toolName !== undefined ? { toolName: m.toolName } : {}),
-        ...(m.isError !== undefined ? { isError: m.isError } : {}),
-      };
-  }
-}
-
 
 function removeOrphanToolUse(messages: GenericMessage[]): GenericMessage[] {
   const result = [...messages];

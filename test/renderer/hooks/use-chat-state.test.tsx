@@ -257,6 +257,52 @@ describe("useSessions (streaming guard)", () => {
     expect(api.chatSessionResume).toHaveBeenCalledWith("other-sess");
     expect(setEntries).toHaveBeenCalled();
   });
+
+  it("handleLoadSession replays structural history into chat entries", async () => {
+    const { api } = makeMockLvisApi();
+    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const setEntries = vi.fn();
+    api.chatGetHistory.mockClear();
+    api.chatGetHistory.mockResolvedValueOnce({
+      sessionId: "other-sess",
+      messages: [
+        { index: 0, role: "user", content: "작업 순서 확인" },
+        {
+          index: 1,
+          role: "assistant",
+          content: "",
+          thought: "검색 계획",
+          toolCalls: [{ id: "t1", name: "web_search", input: { q: "LVIS" } }],
+        },
+        { index: 2, role: "tool_result", toolUseId: "t1", toolName: "web_search", content: "검색 결과" },
+        { index: 3, role: "assistant", content: "중간 답변" },
+        {
+          index: 4,
+          role: "assistant",
+          content: "",
+          thought: "검증 계획",
+          toolCalls: [{ id: "t2", name: "web_fetch", input: { url: "https://example.com" } }],
+        },
+        { index: 5, role: "tool_result", toolUseId: "t2", toolName: "web_fetch", content: "본문" },
+        { index: 6, role: "assistant", content: "최종 답변" },
+      ],
+    });
+
+    await act(async () => {
+      await result.current.handleLoadSession("other-sess", false, setEntries);
+    });
+
+    expect(setEntries).toHaveBeenCalledWith([
+      { kind: "user", text: "작업 순서 확인" },
+      { kind: "reasoning", text: "검색 계획", streaming: false },
+      expect.objectContaining({ kind: "tool_group", status: "done" }),
+      { kind: "assistant", text: "중간 답변", streaming: false, route: undefined },
+      { kind: "reasoning", text: "검증 계획", streaming: false },
+      expect.objectContaining({ kind: "tool_group", status: "done" }),
+      { kind: "assistant", text: "최종 답변", streaming: false, route: undefined },
+    ]);
+    expect(result.current.currentSessionId).toBe("other-sess");
+  });
 });
 
 describe("useStarred (toggle semantics)", () => {

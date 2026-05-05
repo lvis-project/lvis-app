@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { serializeHistoryMessage } from "../domains/chat.js";
+import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 
 describe("chat history IPC serialization", () => {

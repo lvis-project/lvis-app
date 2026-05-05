@@ -30,6 +30,14 @@ function expectNodeBefore(
   ).toBeTruthy();
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 describe("ChatView", () => {
   it("mounts without crashing", async () => {
     const { container } = await renderApp();
@@ -249,6 +257,44 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("이전 질문");
       expect(container.textContent).toContain("이전 답변");
+    });
+  });
+
+  it("does not let delayed startup history overwrite a live user turn", async () => {
+    const history = deferred<{
+      sessionId: string;
+      messages: Array<{ index: number; role: "user" | "assistant" | "tool_result"; content: string }>;
+    }>();
+    const { container, api, emitChatStream } = await renderApp({
+      hasApiKey: true,
+      history: history.promise,
+    });
+
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea).toBeTruthy();
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "방금 보낸 질문" } });
+      fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
+    });
+    await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
+
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "실시간 답변" });
+      history.resolve({
+        sessionId: "stale-startup-session",
+        messages: [
+          { index: 0, role: "user", content: "이전 질문" },
+          { index: 1, role: "assistant", content: "이전 답변" },
+        ],
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("방금 보낸 질문");
+      expect(container.textContent).toContain("실시간 답변");
+      expect(container.textContent).not.toContain("이전 질문");
+      expect(container.textContent).not.toContain("이전 답변");
     });
   });
 

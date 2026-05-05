@@ -53,8 +53,9 @@ export function historyToEntries(
       out.push({ kind: "user", text: textContent(m.content) });
     } else if (m.role === "assistant") {
       const text = textContent(m.content);
+      const visibleText = text.trim().length > 0 ? text : "";
       out = finalizeStreamingReasoning(out, m.thought ?? "");
-      out = finalizeStreamingAssistant(out, text);
+      out = finalizeStreamingAssistant(out, visibleText);
 
       if (m.toolCalls?.length) {
         const groupId = `hist-tools-${m.index}`;
