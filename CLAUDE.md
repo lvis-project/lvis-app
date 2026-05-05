@@ -13,7 +13,7 @@ See `docs/architecture/architecture.md` §4.6 and `docs/blueprints/phase3-folder
 src/
   main.ts                     — Electron entry point
   boot.ts                     — §4.2 Boot Sequence (service init, plugin loading)
-  ipc-bridge.ts               — All IPC handlers (settings, chat, memory, plugins, tasks)
+  ipc-bridge.ts               — All IPC handlers (settings, chat, memory, plugins)
   preload.ts / preload.cjs    — Electron preload scripts
   renderer.tsx                — minimal entry mounting ui/renderer/App.tsx
   plugin-ui-host.tsx          — Dynamic plugin UI mounting
@@ -31,7 +31,7 @@ src/
                                ReasoningCard, ToolApprovalDialog, ToolGroupCard,
                                ChatSearchOverlay, Sparkline, UsageDashboard,
                                HtmlPreview (partition lvis-render-html, webRequest block A5),
-                               TaskView, StarredView, MarketplaceUpdateBanner
+                               StarredView, MarketplaceUpdateBanner
     dialogs/                  — ApprovalDialog, PluginInstallDialog,
                                PluginUninstallDialog, CommandPaletteDialog
     tabs/                     — RolesTab, PermissionsTab, AuditTab,

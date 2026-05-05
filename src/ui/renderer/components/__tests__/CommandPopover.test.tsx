@@ -8,7 +8,6 @@ import { CommandPopover, type QuickAction } from "../CommandPopover.js";
 
 const DEFAULT_ACTIONS: QuickAction[] = [
   { id: "home",     label: "홈으로 이동",   run: vi.fn() },
-  { id: "tasks",    label: "태스크 보기",   run: vi.fn() },
   { id: "routines", label: "루틴 보기",     run: vi.fn() },
   { id: "settings", label: "설정 열기",     run: vi.fn() },
   { id: "new-chat", label: "새 대화 시작",  run: vi.fn() },
