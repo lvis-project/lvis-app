@@ -404,9 +404,14 @@ export class WindowManager {
       const main = this.getMainWindow();
       if (main?.isMaximized()) {
         // Main is maximized; mark as locked but keep hidden.
-        // The unmaximize handler will snap and show it when the main restores.
+        // Also register in _hiddenByMaximize so the unmaximize handler will
+        // restore this panel when the main window un-maximises (just like a
+        // panel that was already open when maximize was triggered).
         const entry = this._children.get(child.id);
-        if (entry) entry.locked = true;
+        if (entry) {
+          entry.locked = true;
+          this._hiddenByMaximize.add(child.id);
+        }
       } else {
         // Snap before show() to avoid a visible position jump (flicker).
         this._snapToLeftEdge(child.id);
@@ -637,16 +642,20 @@ export class WindowManager {
         Math.min(pos.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height)
       );
 
-      // Re-clamp X for right-side ("e") snaps: the initial _snapToLeftEdge call
-      // clamps to the display boundary, but snappedPosition() returns the raw
-      // flush position.  Without this clamp, dragging the main window to the
-      // right edge of the display pushes the child partially off-screen.
+      // Re-clamp X for edge snaps: snappedPosition() returns the raw flush
+      // position, but the initial _snapToLeftEdge clamped to display bounds.
+      // Without follow-move clamping, dragging main to either screen edge
+      // pushes the panel partially or fully off-screen (left: negative X,
+      // right: x + childWidth > displayWidth).
       let clampedX = pos.x;
       if (edge === "e") {
         clampedX = Math.max(
           hostDisplay.bounds.x,
           Math.min(pos.x, hostDisplay.bounds.x + hostDisplay.bounds.width - childBounds.width)
         );
+      } else if (edge === "w") {
+        // Left-side: child.x can go negative when main moves to the left edge.
+        clampedX = Math.max(hostDisplay.bounds.x, pos.x);
       }
 
       entry.window.setPosition(clampedX, clampedY);

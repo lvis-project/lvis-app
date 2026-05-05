@@ -335,6 +335,11 @@ describe("WindowManager — magnetic snap behaviors", () => {
       expect((child as unknown as MockWindow).show).not.toHaveBeenCalled();
       const entry = wmChildren(deferWm).get(childId);
       expect(entry?.locked).toBe(true);
+      // Panel opened while maximized must be in _hiddenByMaximize so the
+      // unmaximize handler will restore it (regression: was not added before).
+      expect(
+        (deferWm as unknown as { _hiddenByMaximize: Set<number> })._hiddenByMaximize.has(childId)
+      ).toBe(true);
     });
   });
 
@@ -410,7 +415,50 @@ describe("WindowManager — magnetic snap behaviors", () => {
     });
   });
 
-  // ── 7. maximize / unmaximize distinguishes user-minimised windows ─────────
+  // ── 7. _followMainForSnapped — left-side child clamped at display edge ──────
+
+  describe("_followMainForSnapped after left-side snap", () => {
+    it("clamps child.x >= display.x when main moves to the left screen edge", () => {
+      // Main is at x=50 (near left edge); child is 400px wide → raw left-snap
+      // x = 50 + (-400) = -350, which is off-screen.  The clamp must keep x ≥ 0.
+      const leftMain = makeMockWin({
+        id: 500,
+        bounds: { x: 50, y: 0, width: 1200, height: 1080 },
+      });
+      bwStore.set(leftMain.id, leftMain);
+
+      (screen.getAllDisplays as ReturnType<typeof vi.fn>).mockReturnValue([
+        { bounds: { x: 0, y: 0, width: 1920, height: 1080 } },
+      ]);
+      (screen.getDisplayNearestPoint as ReturnType<typeof vi.fn>).mockReturnValue({
+        bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      });
+
+      const leftWm = new WindowManager({ preloadPath: "/fake/preload.cjs", distRoot: "/fake/dist" });
+      leftWm.registerMainWindow(leftMain as never);
+
+      const child = makeMockWin({ id: 501, bounds: { x: 0, y: 0, width: 400, height: 800 } });
+      wmChildren(leftWm).set(child.id, {
+        window: child,
+        viewKey: "plugin:test:panel",
+        locked: true,
+        snappedTo: leftMain.id,
+        snapEdge: "w",
+        snapDeltaX: -400,
+        snapDeltaY: 0,
+      } as never);
+
+      (leftWm as unknown as { _followMainForSnapped: (w: unknown) => void })
+        ._followMainForSnapped(leftMain as never);
+
+      expect(child.setPosition).toHaveBeenCalledOnce();
+      const [x] = (child.setPosition as ReturnType<typeof vi.fn>).mock.calls[0] as [number, number];
+      // Raw x = 50 - 400 = -350; clamped to display.x = 0.
+      expect(x).toBe(0);
+    });
+  });
+
+  // ── 8. maximize / unmaximize distinguishes user-minimised windows ─────────
 
   describe("_hiddenByMaximize tracking", () => {
     it("does not restore a child that was already hidden before maximize", () => {
