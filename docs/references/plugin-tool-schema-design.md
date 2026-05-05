@@ -456,6 +456,10 @@ import { Stack, Toggle } from "@lvis/plugin-sdk/ui";
 의미가 커짐 — 그 전엔 React 1MB 가 dominant 라 subpath 효과가 시각적으로 안
 드러남. 그러나 import 자체는 항상 subpath 가 정도.
 
+> Subpath 명단의 SoT 는 `lvis-plugin-sdk/package.json` 의 `exports` 필드 —
+> 본 문서의 예시는 illustrative. SDK 가 새 컴포넌트를 추가하거나 경로를
+> rename 하면 SDK CHANGELOG / README 가 권위 있는 참조.
+
 ---
 
 ## 3. toolSchemas 작성 가이드
