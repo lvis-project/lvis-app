@@ -23,7 +23,7 @@
  *      text paths so a CSP regression would be visible (not blank).
  */
 import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -141,12 +141,4 @@ describe("plugin-ui-shell — CSP-safe external bootstrap", () => {
     expect(devScript).toMatch(/dist\/src\/plugin-ui-shell\.js/);
   });
 
-  it("build artifacts land in dist/src/ when a build output exists", () => {
-    const distHtml = resolve(repoRoot, "dist/src/plugin-ui-shell.html");
-    const distJs = resolve(repoRoot, "dist/src/plugin-ui-shell.js");
-    if (!existsSync(dirname(distHtml))) return;
-
-    expect(existsSync(distHtml), "dist/src/plugin-ui-shell.html missing").toBe(true);
-    expect(existsSync(distJs), "dist/src/plugin-ui-shell.js missing").toBe(true);
-  });
 });

@@ -5,7 +5,7 @@
  *
  * Why this lives in its own host-owned file (not inline in the HTML):
  *   The shell document declares a strict CSP:
- *     script-src 'self' blob: http://localhost:* https://localhost:*
+ *     script-src 'self' file: blob: http://localhost:* https://localhost:*
  *   …with no `'unsafe-inline'` and no nonce/hash. Electron's renderer enforces
  *   that policy, so an inline `<script type="module">` block would be silently
  *   refused — which is exactly the failure mode that produced fully blank
@@ -15,6 +15,10 @@
  *   `'self'` covers the file:// origin of the shell HTML (Electron treats the
  *   directory of the document as the same-origin scope for `'self'`), so this
  *   sibling file loads under the same CSP without weakening it.
+ *
+ *   `file:` remains necessary for host-vetted installed plugin bundles under
+ *   ~/.lvis/plugins, which are returned by `getEntryUrl()` as absolute file://
+ *   module URLs outside the shell document's same-origin sibling directory.
  *
  * Behavior is identical to the previous inline script:
  *   1. Ask main for the verified entry URL via `window.lvisPlugin.getEntryUrl`
