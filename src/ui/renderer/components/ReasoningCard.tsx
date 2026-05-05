@@ -10,6 +10,8 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
  *     so completed reasoning doesn't clutter the conversation; user can click
  *     the header to re-expand the captured thought. Mirrors ToolGroupCard's
  *     "expand to inspect the result" pattern.
+ *   - embedded=true    → rendered inside an already-collapsible WorkGroup, so
+ *     the reasoning body stays visible when that outer group is open.
  *
  * A ref-based one-shot guard ensures the auto-collapse only fires on the
  * transition — re-renders after the user has re-opened it do not snap it shut
@@ -17,8 +19,10 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
  */
 export function ReasoningCard({
   entry,
+  embedded = false,
 }: {
   entry: Extract<ChatEntry, { kind: "reasoning" }>;
+  embedded?: boolean;
 }) {
   const streaming = entry.streaming === true;
   // Initial open state mirrors streaming: live turns start expanded so deltas
@@ -26,11 +30,11 @@ export function ReasoningCard({
   // streaming rehydrated turns) start collapsed — otherwise the auto-collapse
   // effect below never runs for them (no streaming→done edge) and every past
   // reasoning block in history would render fully expanded.
-  const [open, setOpen] = useState(streaming);
+  const [open, setOpen] = useState(streaming || embedded);
   const wasStreamingRef = useRef(streaming);
 
   useEffect(() => {
-    if (wasStreamingRef.current && !streaming) {
+    if (!embedded && wasStreamingRef.current && !streaming) {
       // streaming just finished — collapse once. Subsequent user re-expands
       // remain untouched because wasStreamingRef.current is now false and this
       // branch can no longer trigger.
@@ -40,21 +44,21 @@ export function ReasoningCard({
   }, [streaming]);
 
   const title = streaming ? "생각 정리 중" : "생각 정리";
-  const bodyVisible = streaming || open;
+  const bodyVisible = streaming || open || embedded;
   const approxTokens = !streaming && entry.text
     ? Math.max(1, Math.ceil(entry.text.length / 4))
     : 0;
 
   return (
-    <div className="max-w-[85%] rounded-md text-sm text-muted-foreground">
+    <div className={`${embedded ? "w-full" : "max-w-[85%]"} rounded-md text-sm text-muted-foreground`}>
       <button
         type="button"
         className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/30 disabled:cursor-default disabled:hover:bg-transparent"
         onClick={() => {
-          if (streaming) return;
+          if (streaming || embedded) return;
           setOpen((o) => !o);
         }}
-        disabled={streaming}
+        disabled={streaming || embedded}
         aria-expanded={bodyVisible}
       >
         {streaming
@@ -66,7 +70,7 @@ export function ReasoningCard({
             ~{approxTokens >= 1000 ? `${(approxTokens / 1000).toFixed(1)}k` : approxTokens} tok
           </span>
         )}
-        {!streaming && (
+        {!streaming && !embedded && (
           <span className="ml-auto">
             {bodyVisible
               ? <ChevronDown className="h-3 w-3 flex-shrink-0" />

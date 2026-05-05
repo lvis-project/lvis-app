@@ -251,10 +251,11 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
         {(() => {
           // Three-way entry classification eliminates retroactive-reclassification flicker.
           //
-          // "intermediate" — has ≥1 subsequent entry in the same turn → lives in WorkGroup
-          // "live"         — last entry in turn while global streaming is still active
-          //                  → shown below WorkGroup, NO TurnActionBar (prevents premature
-          //                    action-bar flash when a planning message transitions to a tool call)
+          // "intermediate" — non-final work inside a user turn. This includes
+          //                  reasoning, tools, and mid-turn assistant text.
+          //                  Once the final assistant answer lands, all prior
+          //                  work collapses into one WorkGroup.
+          // "live"         — last entry in the active streaming turn.
           // "final"        — last assistant entry AND global streaming=false
           //                  → shown with TurnActionBar (turn truly complete)
           //
@@ -283,27 +284,31 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               if (entries[j]?.kind === "user") { nextUserIdx = j; break; }
             }
 
-            const hasSubsequent = entries.slice(i + 1, nextUserIdx).some(
+            const subsequentTurnEntries = entries.slice(i + 1, nextUserIdx);
+            const hasSubsequent = subsequentTurnEntries.some(
               (ne) => ne.kind === "assistant" || ne.kind === "tool_group" || ne.kind === "reasoning",
+            );
+            const hasSubsequentWork = subsequentTurnEntries.some(
+              (ne) => ne.kind === "tool_group" || ne.kind === "reasoning",
             );
 
             const myTurnStart = turnStart >= 0 ? turnStart : 0;
             entryTurnStartMap.set(i, myTurnStart);
+            const isActiveTurnEntry = myTurnStart === lastUserIdx && streaming;
+            const hasPriorWork = entries.slice(myTurnStart + 1, i).some(
+              (pe) => pe.kind === "tool_group" || pe.kind === "reasoning",
+            );
 
-            // Assistant text is the answer the user came for — it must never
-            // be hidden inside the auto-collapsing WorkGroup. Only tool/reasoning
-            // "work" entries get collapsed when followed by more turn content.
-            // (See screenshot regression on 2026-05-04: a multi-round turn
-            //  ended with the first assistant bubble collapsed inside "작업
-            //  1단계 ▶", making the response look truncated.)
             if (e.kind === "assistant") {
               if (!hasSubsequent && !streaming) {
                 entryClassMap.set(i, "final");
                 finalTurnStartMap.set(i, myTurnStart);
+              } else if (hasSubsequentWork || hasPriorWork || (isActiveTurnEntry && hasPriorWork)) {
+                entryClassMap.set(i, "intermediate");
               } else {
                 entryClassMap.set(i, "live");
               }
-            } else if (hasSubsequent) {
+            } else if (hasSubsequent || isActiveTurnEntry) {
               entryClassMap.set(i, "intermediate");
             } else {
               entryClassMap.set(i, "live");
@@ -460,36 +465,44 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                 if (cls === "final") break;
                 if (e.kind === "reasoning") {
                   if (cls === "intermediate") {
-                    groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} /> });
+                    groupEntries.push({ idx: i, node: <ReasoningCard key={i} entry={e} embedded /> });
                   } else {
                     break;
                   }
                 } else if (e.kind === "tool_group") {
                   if (cls === "intermediate") {
-                    groupEntries.push({ idx: i, node: <ToolGroupCard key={e.groupId} group={e} /> });
+                    groupEntries.push({ idx: i, node: <ToolGroupCard key={e.groupId} group={e} embedded /> });
+                  } else {
+                    break;
+                  }
+                } else if (e.kind === "assistant") {
+                  if (cls === "intermediate") {
+                    groupEntries.push({
+                      idx: i,
+                      node: (
+                        <AssistantCard
+                          key={i}
+                          entry={e}
+                          highlightQuery={searchHighlight}
+                          isStarred={!!isEntryStarred(i)}
+                          isFinal={false}
+                        />
+                      ),
+                    });
                   } else {
                     break;
                   }
                 } else {
-                  // Visible assistant text is chronological transcript
-                  // content, not collapsible work. Stop the work run here so
-                  // the normal live/final branch renders it at entries[] order.
                   break;
                 }
                 i++;
               }
 
-              // Single intermediate step: skip WorkGroup wrapper and render directly.
-              // WorkGroup "작업 N단계" is only meaningful when 2+ steps are present.
-              if (groupEntries.length === 1 && groupEntries[0]) {
-                rendered.push(groupEntries[0].node);
-              } else {
-                rendered.push(
-                  <WorkGroup key={`wg-${groupStart}`} stepCount={groupEntries.length} streaming={groupIsActiveTurn}>
-                    {groupEntries.map((ge) => ge.node)}
-                  </WorkGroup>
-                );
-              }
+              rendered.push(
+                <WorkGroup key={`wg-${groupStart}`} stepCount={groupEntries.length} streaming={groupIsActiveTurn}>
+                  {groupEntries.map((ge) => ge.node)}
+                </WorkGroup>
+              );
               continue;
             }
 
