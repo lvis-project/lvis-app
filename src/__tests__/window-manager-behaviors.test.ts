@@ -28,6 +28,7 @@ function makeMockWin(opts: {
     isDestroyed: vi.fn(() => false),
     getBounds: vi.fn(() => opts.bounds ?? { x: 0, y: 0, width: 1200, height: 800 }),
     setPosition: vi.fn(),
+    setSize: vi.fn(),
     setMovable: vi.fn(),
     show: vi.fn(),
     hide: vi.fn(),
@@ -81,6 +82,7 @@ const { MockBrowserWindow, bwStore } = vi.hoisted(() => {
     isDestroyed = vi.fn(() => false);
     getBounds = vi.fn(() => ({ x: 0, y: 0, width: 400, height: 800 }));
     setPosition = vi.fn();
+    setSize = vi.fn();
     setMovable = vi.fn();
     show = vi.fn();
     hide = vi.fn();
@@ -263,6 +265,55 @@ describe("WindowManager — magnetic snap behaviors", () => {
   // ── 3. right-side clamp ───────────────────────────────────────────────────
 
   describe("_snapToLeftEdge — right-side fallback", () => {
+    it("uses a 12 DIP gutter when placing a child on the left side", () => {
+      const leftMain = makeMockWin({
+        id: 202,
+        bounds: { x: 800, y: 0, width: 800, height: 1080 },
+      });
+      bwStore.set(leftMain.id, leftMain);
+      const leftWm = new WindowManager({ preloadPath: "/fake/preload.cjs", distRoot: "/fake/dist" });
+      leftWm.registerMainWindow(leftMain as never);
+
+      const childWidth = 480;
+      const child = makeMockWin({
+        id: 205,
+        bounds: { x: 0, y: 0, width: childWidth, height: 800 },
+      });
+      injectChild(leftWm, child, { locked: false, snappedTo: undefined });
+
+      (leftWm as unknown as { _snapToLeftEdge: (id: number) => void })._snapToLeftEdge(child.id);
+
+      expect(child.setPosition).toHaveBeenCalledOnce();
+      const [x] = (child.setPosition as ReturnType<typeof vi.fn>).mock.calls[0] as [number, number];
+      expect(x).toBe(800 - childWidth - 12);
+    });
+
+    it("uses a 12 DIP gutter when falling back to the right side", () => {
+      const rightMain = makeMockWin({
+        id: 203,
+        bounds: { x: 0, y: 0, width: 400, height: 1080 },
+      });
+      bwStore.set(rightMain.id, rightMain);
+
+      const rightWm = new WindowManager({
+        preloadPath: "/fake/preload.cjs",
+        distRoot: "/fake/dist",
+      });
+      rightWm.registerMainWindow(rightMain as never);
+
+      const child = makeMockWin({
+        id: 204,
+        bounds: { x: 0, y: 0, width: 480, height: 800 },
+      });
+      injectChild(rightWm, child, { locked: false, snappedTo: undefined });
+
+      (rightWm as unknown as { _snapToLeftEdge: (id: number) => void })._snapToLeftEdge(child.id);
+
+      expect(child.setPosition).toHaveBeenCalledOnce();
+      const [x] = (child.setPosition as ReturnType<typeof vi.fn>).mock.calls[0] as [number, number];
+      expect(x).toBe(0 + 400 + 12);
+    });
+
     it("clamps child within the display when main is flush against the right edge", () => {
       // Main right edge = 1920, child width = 480.
       // rightX = 1920 → without clamp x=1920 is off-screen.
@@ -419,6 +470,35 @@ describe("WindowManager — magnetic snap behaviors", () => {
   });
 
   describe("_followMainForSnapped after right-side snap", () => {
+    it("preserves the 12 DIP right-side gutter when the main window moves", () => {
+      const movingMain = makeMockWin({
+        id: 402,
+        bounds: { x: 200, y: 0, width: 800, height: 1080 },
+      });
+      bwStore.set(movingMain.id, movingMain);
+
+      const followWm = new WindowManager({ preloadPath: "/fake/preload.cjs", distRoot: "/fake/dist" });
+      followWm.registerMainWindow(movingMain as never);
+
+      const child = makeMockWin({ id: 403, bounds: { x: 0, y: 0, width: 400, height: 800 } });
+      wmChildren(followWm).set(child.id, {
+        window: child,
+        viewKey: "plugin:test:panel",
+        locked: true,
+        snappedTo: movingMain.id,
+        snapEdge: "e",
+        snapDeltaX: 12,
+        snapDeltaY: 0,
+      } as never);
+
+      (followWm as unknown as { _followMainForSnapped: (w: unknown) => void })
+        ._followMainForSnapped(movingMain as never);
+
+      expect(child.setPosition).toHaveBeenCalledOnce();
+      const [x] = (child.setPosition as ReturnType<typeof vi.fn>).mock.calls[0] as [number, number];
+      expect(x).toBe(200 + 800 + 12);
+    });
+
     it("places child flush against main right edge (dx=0) after main moves", () => {
       // Main starts at x=400, moves to x=600.
       const movingMain = makeMockWin({
@@ -464,6 +544,35 @@ describe("WindowManager — magnetic snap behaviors", () => {
   // ── 7. _followMainForSnapped — left-side child clamped at display edge ──────
 
   describe("_followMainForSnapped after left-side snap", () => {
+    it("preserves the 12 DIP left-side gutter when the main window moves", () => {
+      const leftMain = makeMockWin({
+        id: 502,
+        bounds: { x: 800, y: 0, width: 800, height: 1080 },
+      });
+      bwStore.set(leftMain.id, leftMain);
+
+      const leftWm = new WindowManager({ preloadPath: "/fake/preload.cjs", distRoot: "/fake/dist" });
+      leftWm.registerMainWindow(leftMain as never);
+
+      const child = makeMockWin({ id: 503, bounds: { x: 0, y: 0, width: 400, height: 800 } });
+      wmChildren(leftWm).set(child.id, {
+        window: child,
+        viewKey: "plugin:test:panel",
+        locked: true,
+        snappedTo: leftMain.id,
+        snapEdge: "w",
+        snapDeltaX: -400 - 12,
+        snapDeltaY: 0,
+      } as never);
+
+      (leftWm as unknown as { _followMainForSnapped: (w: unknown) => void })
+        ._followMainForSnapped(leftMain as never);
+
+      expect(child.setPosition).toHaveBeenCalledOnce();
+      const [x] = (child.setPosition as ReturnType<typeof vi.fn>).mock.calls[0] as [number, number];
+      expect(x).toBe(800 - 400 - 12);
+    });
+
     it("clamps child.x >= display.x when main moves to the left screen edge", () => {
       // Main is at x=50 (near left edge); child is 400px wide → raw left-snap
       // x = 50 + (-400) = -350, which is off-screen.  The clamp must keep x ≥ 0.
