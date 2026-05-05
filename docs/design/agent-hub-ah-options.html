@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>Agent Hub — AH-1~6 Open Questions Visual Picker</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --fg: #e6edf3; --fg-muted: #8b949e; --primary: #58a6ff;
+    --green: #3fb950; --orange: #d29922; --red: #f78166; --purple: #a371f7;
+  }
+  body { background: var(--bg); color: var(--fg); font: 13px/1.5 -apple-system, sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 8px; }
+  .lead { color: var(--fg-muted); margin-bottom: 24px; }
+  .question { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 18px; }
+  .qhead { font-size: 14px; font-weight: 600; margin-bottom: 4px; color: var(--primary); }
+  .qsub { font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; }
+  .options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .opt { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+  .opt h4 { font-size: 12px; margin: 0 0 6px 0; color: var(--green); }
+  .opt-pick { color: var(--orange); }
+  .preview { background: #161b22; border: 1px solid var(--border); border-radius: 4px; padding: 8px; margin-top: 8px; font-size: 11px; }
+
+  /* AH-1 column-width preview boxes */
+  .col-grid { display: grid; gap: 6px; height: 60px; }
+  .col-grid > div { background: var(--primary); opacity: 0.4; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; }
+  .ah1-a { grid-template-columns: 1.45fr 0.55fr; }
+  .ah1-b { grid-template-columns: 1.55fr 0.45fr; }
+  .ah1-c { grid-template-columns: 1.35fr 0.65fr; }
+
+  /* AH-2 approval card states */
+  .ah2-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; height: 70px; }
+  .ah2-card { background: #161b22; border: 1px dashed var(--border); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; padding: 4px; text-align: center; }
+  .ah2-card.empty { opacity: 0.5; border-style: dotted; }
+  .ah2-card.minimal { background: var(--green); opacity: 0.3; }
+
+  /* AH-3 mc-pill chips */
+  .ah3-row { display: flex; gap: 4px; align-items: center; padding: 8px 0; }
+  .pill { background: #21262d; border: 1px solid var(--border); padding: 2px 6px; border-radius: 6px; font-size: 10px; }
+  .pill b { font-weight: 700; margin-right: 2px; }
+  .pill.in { color: var(--primary); }
+  .pill.up { color: var(--orange); }
+  .pill.dn { color: var(--green); }
+  .pill.rk { color: var(--red); }
+  .pill.rk.zero { opacity: 0.3; }
+
+  /* AH-4 list pagination vs scroll */
+  .ah4 { font-size: 10px; }
+  .ah4-row { padding: 3px 6px; border-bottom: 1px solid var(--border); }
+  .ah4-paged { background: var(--panel); border-radius: 4px; padding: 4px; }
+  .ah4-cap { color: var(--fg-muted); font-size: 9px; padding: 4px; text-align: center; }
+  .ah4-scroll { max-height: 70px; overflow-y: auto; background: var(--panel); border-radius: 4px; padding: 4px; scrollbar-width: thin; }
+
+  /* AH-5 paragraph length */
+  .ah5 { font-size: 10px; padding: 6px; background: var(--panel); border-radius: 4px; line-height: 1.4; }
+
+  /* AH-6 avatar overflow */
+  .ah6 { display: flex; gap: 4px; align-items: center; padding: 6px; }
+  .av { width: 22px; height: 22px; border-radius: 50%; background: var(--primary); display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 600; border: 2px solid var(--bg); margin-left: -6px; }
+  .av:first-child { margin-left: 0; }
+  .av-overflow { background: var(--fg-muted); color: var(--bg); }
+
+  .picker { margin-top: 16px; padding: 12px; background: #0d1117; border: 1px dashed var(--primary); border-radius: 8px; }
+  .picker code { background: #161b22; padding: 2px 4px; border-radius: 3px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<h1>Agent Hub v3 — AH-1~6 Open Questions Visual Picker</h1>
+<p class="lead">v0.2.1 GA 시 default 정책으로 시각적 mockup만 합의됨. 본 picker로 v0.2.2에서 6개 결정값 batch 적용. Issue <a href="https://github.com/lvis-project/lvis-plugin-agent-hub/issues/66">#66</a>.</p>
+
+<!-- AH-1 -->
+<div class="question">
+  <div class="qhead">AH-1. 사이드 컬럼 폭 정책</div>
+  <div class="qsub">현재 default: 0.55fr (35%). 메인 콘텐츠 vs 사이드 (오늘 일정 등) 비율.</div>
+  <div class="options">
+    <div class="opt">
+      <h4>A. 0.55fr (현재)</h4>
+      <div class="col-grid ah1-a"><div>Main 65%</div><div>Side 35%</div></div>
+      <div class="preview">균형. 마이워크/팀보드 두 view 모두 적합.</div>
+    </div>
+    <div class="opt">
+      <h4>B. 0.45fr (좁게)</h4>
+      <div class="col-grid ah1-b"><div>Main 71%</div><div>Side 29%</div></div>
+      <div class="preview">메인 강조. 작은 화면에서 일정이 좁아짐.</div>
+    </div>
+    <div class="opt">
+      <h4>C. 0.65fr (넓게)</h4>
+      <div class="col-grid ah1-c"><div>Main 60%</div><div>Side 40%</div></div>
+      <div class="preview">사이드 강조. 일정 가독성 +. 메인 -.</div>
+    </div>
+  </div>
+</div>
+
+<!-- AH-2 -->
+<div class="question">
+  <div class="qhead">AH-2. 승인 0건일 때 카드 표시</div>
+  <div class="qsub">Row 1 우측 승인 요청 카드. 대기 0건일 때 어떻게?</div>
+  <div class="options">
+    <div class="opt">
+      <h4>A. 카드 자체 숨김</h4>
+      <div class="ah2-row"><div class="ah2-card" style="grid-column:span 2">LLM 분석 카드만 (1.45fr full)</div></div>
+      <div class="preview">레이아웃 재조정. LLM이 더 넓어짐.</div>
+    </div>
+    <div class="opt">
+      <h4>B. empty placeholder</h4>
+      <div class="ah2-row"><div class="ah2-card">LLM 5줄</div><div class="ah2-card empty">✓ 승인 0건<br/>처리 완료 :)</div></div>
+      <div class="preview">유지 + 가벼운 confirm. 시선 흐름 안정.</div>
+    </div>
+    <div class="opt">
+      <h4>C. 1줄 미니멀 chip</h4>
+      <div class="ah2-row"><div class="ah2-card">LLM 5줄</div><div class="ah2-card minimal" style="height:24px;align-self:start">대기 0</div></div>
+      <div class="preview">최소 공간. 미해결 발견 시 expand.</div>
+    </div>
+  </div>
+</div>
+
+<!-- AH-3 -->
+<div class="question">
+  <div class="qhead">AH-3. 팀원 mc-pill 0건 표시</div>
+  <div class="qsub">팀원별 진행/예정/완료/리스크 chip. 0건 chip을 어떻게 처리?</div>
+  <div class="options">
+    <div class="opt">
+      <h4>A. zero opacity 회색</h4>
+      <div class="ah3-row"><span class="pill in"><b>3</b>진행</span><span class="pill up"><b>2</b>예정</span><span class="pill dn"><b>5</b>완료</span><span class="pill rk zero"><b>0</b>리스크</span></div>
+      <div class="preview">존재 인지 + 시각적 약화 동시.</div>
+    </div>
+    <div class="opt">
+      <h4>B. 숫자 chip 숨김</h4>
+      <div class="ah3-row"><span class="pill in"><b>3</b>진행</span><span class="pill up"><b>2</b>예정</span><span class="pill dn"><b>5</b>완료</span></div>
+      <div class="preview">조밀. 4번째 자리 빔 → 의도적인지 모호.</div>
+    </div>
+    <div class="opt">
+      <h4>C. 모두 동일 표시</h4>
+      <div class="ah3-row"><span class="pill in"><b>3</b>진행</span><span class="pill up"><b>2</b>예정</span><span class="pill dn"><b>5</b>완료</span><span class="pill rk"><b>0</b>리스크</span></div>
+      <div class="preview">가장 단순. 0이 부각됨 (단점일 수도).</div>
+    </div>
+  </div>
+</div>
+
+<!-- AH-4 -->
+<div class="question">
+  <div class="qhead">AH-4. 카드 6 항목 초과 시 페이지/스크롤</div>
+  <div class="qsub">주간업무/내 보드/팀보드 list 등 6+ 항목.</div>
+  <div class="options">
+    <div class="opt">
+      <h4>A. 페이지네이션</h4>
+      <div class="ah4 ah4-paged">
+        <div class="ah4-row">1. plugin v3 mockup [진행]</div>
+        <div class="ah4-row">2. 웹 로그인 copy [주의]</div>
+        <div class="ah4-row">3. 팀 보드 grouping [정상]</div>
+      </div>
+      <div class="ah4-cap">◀ 1/2 ▶  6 of 12 items</div>
+      <div class="preview">페이지 단위 명확. 다음 페이지 = click.</div>
+    </div>
+    <div class="opt">
+      <h4>B. swipe / wheel scroll</h4>
+      <div class="ah4 ah4-scroll" style="scrollbar-width:none">
+        <div class="ah4-row">1. plugin v3 mockup</div>
+        <div class="ah4-row">2. 웹 로그인 copy</div>
+        <div class="ah4-row">3. 팀 보드 grouping</div>
+        <div class="ah4-row">4. Agent Hub API</div>
+        <div class="ah4-row">5. 회의 요약</div>
+      </div>
+      <div class="preview">연속 스크롤. 스크롤바 숨김 (clean).</div>
+    </div>
+    <div class="opt">
+      <h4>C. virtual scroll + bar (현재)</h4>
+      <div class="ah4 ah4-scroll">
+        <div class="ah4-row">1. plugin v3 mockup</div>
+        <div class="ah4-row">2. 웹 로그인 copy</div>
+        <div class="ah4-row">3. 팀 보드 grouping</div>
+        <div class="ah4-row">4. Agent Hub API</div>
+        <div class="ah4-row">5. 회의 요약</div>
+      </div>
+      <div class="ah4-cap">scrollable · 6 / 12</div>
+      <div class="preview">현재 mockup. 스크롤바 + 캡션. 명시적.</div>
+    </div>
+  </div>
+</div>
+
+<!-- AH-5 -->
+<div class="question">
+  <div class="qhead">AH-5. 팀 업무 요약 paragraph 길이</div>
+  <div class="qsub">팀보드 Row 1 narrative. 주요 성과 / 이슈·리스크.</div>
+  <div class="options">
+    <div class="opt">
+      <h4>A. 짧음 (~40자)</h4>
+      <div class="ah5">API 통합 85% 완료, UI 개선 동기화.</div>
+      <div class="preview">2-3줄. 핵심만. 빠른 스캔.</div>
+    </div>
+    <div class="opt">
+      <h4>B. 중간 (~80자, 현재)</h4>
+      <div class="ah5">엔지니어링 진행 속도가 매우 빠릅니다. 핵심 API 통합이 85% 완료...</div>
+      <div class="preview">4-5줄. balance. 현재 default.</div>
+    </div>
+    <div class="opt">
+      <h4>C. 긴 (~150자)</h4>
+      <div class="ah5">엔지니어링 진행 속도가 매우 빠릅니다. 핵심 API 통합이 85% 완료되어 예정보다 이틀 앞서 진행. UI 개선 작업이 모든 멤버 브랜치에 걸쳐 동기화되었으며...</div>
+      <div class="preview">6-8줄. 풍부한 컨텍스트. 모바일 -.</div>
+    </div>
+  </div>
+</div>
+
+<!-- AH-6 -->
+<div class="question">
+  <div class="qhead">AH-6. 일정 attendees avatar overflow</div>
+  <div class="qsub">팀 일정 카드의 참석자 표시. n명 초과 시?</div>
+  <div class="options">
+    <div class="opt">
+      <h4>A. 4 + "외 N명" (현재)</h4>
+      <div class="ah6"><div class="av">민</div><div class="av">서</div><div class="av">준</div><div class="av">하</div><span style="margin-left:8px;color:var(--fg-muted);font-size:11px">외 5명</span></div>
+      <div class="preview">현재 default. compact + 명확.</div>
+    </div>
+    <div class="opt">
+      <h4>B. 6 + "+N"</h4>
+      <div class="ah6"><div class="av">민</div><div class="av">서</div><div class="av">준</div><div class="av">하</div><div class="av">지</div><div class="av">우</div><div class="av av-overflow">+3</div></div>
+      <div class="preview">더 많이 시각화. 좁은 column에서 wrap.</div>
+    </div>
+    <div class="opt">
+      <h4>C. 3 + hover 펼침</h4>
+      <div class="ah6"><div class="av">민</div><div class="av">서</div><div class="av">준</div><span style="margin-left:8px;color:var(--fg-muted);font-size:11px">(8명)</span></div>
+      <div class="preview">최소. 호버 인터랙션 의존.</div>
+    </div>
+  </div>
+</div>
+
+<div class="picker">
+  <strong>📝 답변 형식</strong>:
+  <code>AH-1: A · AH-2: C · AH-3: A · AH-4: C · AH-5: B · AH-6: A</code>
+  처럼 6개 한 번에 알려주시면 worker가 batch 적용합니다.
+</div>
+
+</body>
+</html>
