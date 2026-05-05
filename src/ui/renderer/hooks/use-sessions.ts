@@ -41,12 +41,40 @@ export function useSessions(
     try {
       const h = await api.chatGetHistory();
       if (token !== sessionReadTokenRef.current) return;
-      setCurrentSessionId(h.sessionId);
-      // The renderer state contract is: active in-memory stream entries and
-      // persisted session replay both enter ChatView as ChatEntry[].  Hydrate
-      // the current session at startup, but let the chat-state owner reject a
-      // late result if the user already started a live turn.
-      applyInitialSession?.(historyToEntries(h.messages));
+      if (h.messages.length > 0) {
+        setCurrentSessionId(h.sessionId);
+        // The renderer state contract is: active in-memory stream entries and
+        // persisted session replay both enter ChatView as ChatEntry[].  Hydrate
+        // the current session at startup, but let the chat-state owner reject a
+        // late result if the user already started a live turn.
+        applyInitialSession?.(historyToEntries(h.messages));
+        return;
+      }
+
+      const listed = await api.chatSessions();
+      if (token !== sessionReadTokenRef.current) return;
+      const latest = listed.sessions[0];
+      if (!latest) {
+        setCurrentSessionId(h.sessionId);
+        applyInitialSession?.([]);
+        return;
+      }
+      const resumed = await api.chatSessionResume(latest.id);
+      if (token !== sessionReadTokenRef.current) return;
+      if (!resumed?.ok) {
+        setCurrentSessionId(h.sessionId);
+        applyInitialSession?.([]);
+        return;
+      }
+      const persisted = await api.chatSessionHistory(latest.id);
+      if (token !== sessionReadTokenRef.current) return;
+      if (!persisted.ok) {
+        setCurrentSessionId(h.sessionId);
+        applyInitialSession?.([]);
+        return;
+      }
+      setCurrentSessionId(latest.id);
+      applyInitialSession?.(sessionHistoryToEntries(persisted));
     } catch { /* ignore */ }
   }, [api, applyInitialSession]);
 
@@ -76,10 +104,11 @@ export function useSessions(
         const res = await api.chatSessionResume(sessionId);
         if (token !== sessionReadTokenRef.current) return;
         if (!res?.ok) return;
-        const h = await api.chatGetHistory();
+        const h = await api.chatSessionHistory(sessionId);
         if (token !== sessionReadTokenRef.current) return;
-        applyLoadedSession(historyToEntries(h.messages));
-        setCurrentSessionId(h.sessionId);
+        if (!h.ok) return;
+        applyLoadedSession(sessionHistoryToEntries(h));
+        setCurrentSessionId(sessionId);
       } catch { /* ignore */ }
     },
     [api],
@@ -116,4 +145,17 @@ export function useSessions(
     handleLoadSession,
     handleFork,
   };
+}
+
+function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["chatSessionHistory"]>>): ChatEntry[] {
+  const entries = historyToEntries(history.messages);
+  if ((history.preambleChars ?? 0) <= 0) return entries;
+  return [
+    {
+      kind: "session_resume",
+      preambleChars: history.preambleChars ?? 0,
+      ...(history.parentSessionId ? { parentSessionId: history.parentSessionId } : {}),
+    },
+    ...entries,
+  ];
 }

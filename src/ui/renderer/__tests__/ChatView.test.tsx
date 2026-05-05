@@ -9,33 +9,21 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 
-function expectTextOrder(text: string, orderedNeedles: string[]) {
-  let previousIndex = -1;
-  for (const needle of orderedNeedles) {
-    const nextIndex = text.indexOf(needle);
-    expect(nextIndex, `Missing "${needle}" in rendered transcript`).toBeGreaterThanOrEqual(0);
-    expect(nextIndex, `"${needle}" should render after the previous transcript item`).toBeGreaterThan(previousIndex);
-    previousIndex = nextIndex;
-  }
-}
-
-function expectNodeBefore(
-  before: Node,
-  after: Node,
-  label: string,
-) {
-  expect(
-    before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING,
-    label,
-  ).toBeTruthy();
-}
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => {
     resolve = r;
   });
   return { promise, resolve };
+}
+
+async function submitUser(container: HTMLElement, text: string) {
+  const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+  expect(textarea).toBeTruthy();
+  await act(async () => {
+    fireEvent.change(textarea, { target: { value: text } });
+    fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
+  });
 }
 
 describe("ChatView", () => {
@@ -114,12 +102,9 @@ describe("ChatView", () => {
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
   });
 
-  // Regression 2026-05-04 — multi-round turns rendered the first assistant
-  // bubble inside an auto-collapsing WorkGroup ("작업 N단계 ▶"). After the
-  // turn finished, the WorkGroup collapsed and the user only saw the second
-  // round's text — looked like the front of the response was truncated.
-  it("keeps both assistant texts visible across a tool-use multi-round turn", async () => {
+  it("collapses pre-final assistant work and tools into one turn WorkGroup", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "일정 확인");
     await act(async () => {
       // Round 1 — text + tool_use
       emitChatStream({ type: "text_delta", text: "첫번째 답변입니다" });
@@ -156,30 +141,25 @@ describe("ChatView", () => {
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {
-      // Both round texts must remain in the rendered DOM after the turn ends.
-      expect(container.textContent).toContain("첫번째 답변입니다");
+      expect(container.textContent).toContain("작업");
+      expect(container.textContent).toContain("2단계");
       expect(container.textContent).toContain("두번째 답변입니다");
-      // Single-step intermediate group (one tool entry) renders without
-      // the "작업 N단계" WorkGroup wrapper after de72933 — the tool card
-      // is shown directly. Pre-classifier-fix the round-1 assistant was
-      // bucketed as `intermediate` too, producing a 2-entry group with
-      // "작업 2단계" header. Now we assert the *absence* of the wrapper
-      // text as proof that round-1 assistant was carved out correctly.
-      expect(container.textContent).not.toContain("작업 2단계");
+      expect(container.textContent).not.toContain("첫번째 답변입니다");
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector("[data-wg-id] button")!);
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("첫번째 답변입니다");
+      expect(container.textContent).toContain("calendar list");
     });
   });
 
-  // Regression 2026-05-04 — reasoning + assistant interleaving.
-  // When a turn contains [assistant(round1), reasoning, assistant(round2)],
-  // the round-1 assistant must stay visible as a standalone card and must
-  // NOT be pulled into the auto-collapsing WorkGroup alongside the reasoning
-  // entry. Pre-fix the classifier treated any entry followed by more turn
-  // content as `intermediate` regardless of kind, so round-1 assistant +
-  // reasoning both collapsed into "작업 2단계 ▶". Post-fix assistant entries
-  // are always `live`, leaving only the reasoning entry in the WorkGroup
-  // ("1단계").
-  it("keeps assistant text visible when reasoning follows in the same turn", async () => {
+  it("keeps a one-step pre-final assistant round inside WorkGroup", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "추론 확인");
     await act(async () => {
       // Round 1 — text, finalized as tool_use (no actual tool events follow)
       emitChatStream({ type: "text_delta", text: "첫번째 답변입니다" });
@@ -202,16 +182,19 @@ describe("ChatView", () => {
       emitChatStream({ type: "done" });
     });
     await waitFor(() => {
-      // Both assistant texts must remain visible after the turn ends.
-      expect(container.textContent).toContain("첫번째 답변입니다");
+      expect(container.textContent).toContain("작업");
+      expect(container.textContent).toContain("2단계");
       expect(container.textContent).toContain("최종 답변입니다");
-      // Single-step intermediate (just the reasoning entry) renders the
-      // ReasoningCard directly without "작업 N단계" WorkGroup wrapper after
-      // de72933 — the "생각 정리" header proves the reasoning entry was
-      // produced as a single intermediate, and the absence of "작업 2단계"
-      // proves the round-1 assistant was correctly carved out.
+      expect(container.textContent).not.toContain("첫번째 답변입니다");
+    });
+
+    await act(async () => {
+      fireEvent.click(container.querySelector("[data-wg-id] button")!);
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("첫번째 답변입니다");
       expect(container.textContent).toContain("생각 정리");
-      expect(container.textContent).not.toContain("작업 2단계");
     });
   });
 
@@ -303,6 +286,7 @@ describe("ChatView", () => {
   // inside WorkGroup while the final assistant text stays visible standalone.
   it("keeps reasoning bucketed in WorkGroup while assistant text stays visible (reasoning+tool+end_turn)", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "오늘 일정");
     await act(async () => {
       // reasoning phase
       emitChatStream({ type: "reasoning_delta", text: "사용자 질문을 분석합니다" });
@@ -328,7 +312,7 @@ describe("ChatView", () => {
     });
   });
 
-  it("preserves transcript order when visible assistant text separates work phases", async () => {
+  it("replays persisted pre-final assistant work as one collapsed turn WorkGroup", async () => {
     const { container } = await renderApp({
       hasApiKey: true,
       history: {
@@ -359,35 +343,30 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       const transcriptText = container.textContent ?? "";
-      expectTextOrder(transcriptText, ["중간 확인 내용은 사용자에게 보여야 합니다.", "최종 답변입니다."]);
-      // Visible assistant text is the semantic boundary between work phases:
-      // work remains coherent within each phase, but is not allowed to reorder
-      // across the assistant card to preserve entries[] chronology.
-      expect(transcriptText).toContain("2단계");
-      expect(transcriptText).not.toContain("4단계");
+      expect(transcriptText).toContain("5단계");
+      expect(transcriptText).toContain("최종 답변입니다.");
+      expect(transcriptText).not.toContain("중간 확인 내용은 사용자에게 보여야 합니다.");
+      expect(container.querySelectorAll("[data-wg-id]")).toHaveLength(1);
+    });
 
-      const workGroups = Array.from(container.querySelectorAll("[data-wg-id]"));
-      const assistantBodies = Array.from(container.querySelectorAll('[data-testid="assistant-message-body"]'));
-      const middleBody = assistantBodies.find((el) => el.textContent?.includes("중간 확인 내용"));
-      const finalBody = assistantBodies.find((el) => el.textContent?.includes("최종 답변"));
-      expect(middleBody).toBeTruthy();
-      expect(finalBody).toBeTruthy();
-      const workBeforeMiddle = workGroups.filter((node) =>
-        !!(node.compareDocumentPosition(middleBody!) & Node.DOCUMENT_POSITION_FOLLOWING),
-      );
-      const workAfterMiddle = workGroups.filter((node) =>
-        !!(middleBody!.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING),
-      );
-      expect(workBeforeMiddle.length, "work should render before mid-turn assistant").toBeGreaterThan(0);
-      expect(workAfterMiddle.length, "later work should render after mid-turn assistant").toBeGreaterThan(0);
+    await act(async () => {
+      fireEvent.click(container.querySelector("[data-wg-id] button")!);
+    });
 
-      expectNodeBefore(workBeforeMiddle.at(-1)!, middleBody!, "first work phase should render before mid-turn assistant");
-      expectNodeBefore(middleBody!, workAfterMiddle[0], "mid-turn assistant should render before later work phase");
-      expectNodeBefore(workAfterMiddle.at(-1)!, finalBody!, "later work phase should render before final assistant");
+    await waitFor(() => {
+      const transcriptText = container.textContent ?? "";
+      const first = transcriptText.indexOf("첫 번째 검색 계획");
+      const middle = transcriptText.indexOf("중간 확인 내용은 사용자에게 보여야 합니다.");
+      const second = transcriptText.indexOf("두 번째 도구 결과를 검증");
+      const final = transcriptText.indexOf("최종 답변입니다.");
+      expect(first).toBeGreaterThanOrEqual(0);
+      expect(middle).toBeGreaterThan(first);
+      expect(second).toBeGreaterThan(middle);
+      expect(final).toBeGreaterThan(second);
     });
   });
 
-  it("preserves current search-match ring on visible assistant entries inside a WorkGroup turn", async () => {
+  it("keeps pre-final search matches collapsed while preserving final highlight", async () => {
     const { container } = await renderApp({
       hasApiKey: true,
       history: {
@@ -417,8 +396,8 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(container.textContent).toContain("needle 중간 답변은 계속 보여야 합니다.");
       expect(container.textContent).toContain("needle 최종 답변입니다.");
+      expect(container.textContent).not.toContain("needle 중간 답변은 계속 보여야 합니다.");
     });
 
     await act(async () => {
@@ -438,12 +417,9 @@ describe("ChatView", () => {
     });
 
     const assistantBodies = Array.from(container.querySelectorAll('[data-testid="assistant-message-body"]'));
-    const middleBody = assistantBodies.find((el) => el.textContent?.includes("중간 답변")) as HTMLElement | undefined;
     const finalBody = assistantBodies.find((el) => el.textContent?.includes("최종 답변")) as HTMLElement | undefined;
-    const middleRingWrapper = middleBody?.parentElement?.parentElement;
     const finalRingWrapper = finalBody?.parentElement?.parentElement;
 
-    expect(middleRingWrapper?.className).toContain("ring-2 ring-primary");
     expect(finalRingWrapper?.className).toContain("ring-1 ring-primary/40");
   });
 
