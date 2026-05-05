@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
+import { debugLog } from "../../lib/debug-stream.js";
 import { RoutineCard } from "./components/RoutineCard.js";
 import { RoutineRunningIndicator } from "./components/RoutineRunningIndicator.js";
 import { TriggerCard } from "./components/TriggerCard.js";
@@ -475,6 +476,13 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               const groupTurnStart = entryTurnStartMap.get(i) ?? 0;
               // Spinner is shown only while this WorkGroup belongs to the currently active turn
               const groupIsActiveTurn = groupTurnStart === lastUserIdx && streaming;
+              debugLog("ChatView", "WorkGroup:render-decision", {
+                groupStart,
+                groupTurnStart,
+                lastUserIdx,
+                globalStreaming: streaming,
+                groupIsActiveTurn,
+              });
               const groupEntries: { idx: number; node: React.ReactNode }[] = [];
 
               while (i < entries.length && entryClassMap.get(i) === "intermediate") {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { debugLog } from "../../lib/debug-stream.js";
 import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
 import { vendorSupportsThinking as vendorSupportsThinkingShared } from "../../shared/vendor-capabilities.js";
 import { supportsVision } from "../../engine/llm/vendor-capabilities.js";
@@ -299,13 +300,24 @@ export function App() {
       q: string,
       mode: "default" | "guidance" | "trigger-import" = "default",
     ) => {
+      debugLog("handleAsk", "enter", { mode, qLen: q.length, streaming });
       const t = q.trim();
-      if (!t) return;
-      if (mode === "default" && streaming) return;
-      if (mode === "default" && await handleCompactCommand(t)) return;
+      if (!t) {
+        debugLog("handleAsk", "skip:empty");
+        return;
+      }
+      if (mode === "default" && streaming) {
+        debugLog("handleAsk", "skip:already-streaming");
+        return;
+      }
+      if (mode === "default" && await handleCompactCommand(t)) {
+        debugLog("handleAsk", "skip:compact-command-handled");
+        return;
+      }
       if (!(await checkApiKey())) { setSettingsOpen(true); return; }
       const requestId = ++turnRequestRef.current;
       const streamingRequestId = beginStreamingRequest();
+      debugLog("handleAsk", "begin", { requestId, streamingRequestId });
       setQuestion("");
       // trigger-import: send the wrapped prompt verbatim. composeOutgoing
       // would prefix it with role-preset / language-lock framing that
@@ -352,8 +364,10 @@ export function App() {
       try {
         if (mode === "guidance") {
           await api.chatGuide(outgoing);
+          debugLog("handleAsk", "chatGuide:resolved", { requestId });
         } else {
           await api.chatSend(outgoing, outgoingAttachments);
+          debugLog("handleAsk", "chatSend:resolved", { requestId });
           // After successful send, clear attachments — the textarea was
           // already cleared by setQuestion(""). N counter persists across
           // turns so re-attached items get fresh numbers.
@@ -362,6 +376,10 @@ export function App() {
           }
         }
       } catch (err) {
+        debugLog("handleAsk", "chatSend:rejected", {
+          requestId,
+          err: (err as Error)?.message,
+        });
         // chatSend rejection (network fail, abort, etc.) on a
         // trigger-import turn never lands a `done` event, so the
         // open imported_trigger card's streaming spinner would hang
@@ -369,7 +387,14 @@ export function App() {
         if (mode === "trigger-import") closeOpenImportedTrigger();
         setErrorWithThought(`오류: ${(err as Error).message}`);
       } finally {
-        if (turnRequestRef.current === requestId) finishStreamingRequest(streamingRequestId);
+        const turnMatch = turnRequestRef.current === requestId;
+        debugLog("handleAsk", "finally", {
+          requestId,
+          currentTurnRef: turnRequestRef.current,
+          turnMatch,
+          willCallFinish: turnMatch,
+        });
+        if (turnMatch) finishStreamingRequest(streamingRequestId);
       }
     },
     [
