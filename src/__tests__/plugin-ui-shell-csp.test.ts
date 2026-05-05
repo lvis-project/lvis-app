@@ -2,7 +2,7 @@
  * Regression: Plugin UI Shell must not require inline script execution.
  *
  * The shell document declares a strict CSP:
- *   script-src 'self' blob: http://localhost:* https://localhost:*
+ *   script-src 'self' lvis-plugin:
  * with no `'unsafe-inline'`, no nonce, no hash. Historically the shell
  * embedded its bootstrap as `<script type="module">…</script>`, which the
  * renderer silently refused — producing fully blank embedded plugin areas

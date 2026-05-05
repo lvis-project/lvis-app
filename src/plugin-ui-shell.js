@@ -5,7 +5,7 @@
  *
  * Why this lives in its own host-owned file (not inline in the HTML):
  *   The shell document declares a strict CSP:
- *     script-src 'self' blob: http://localhost:* https://localhost:*
+ *     script-src 'self' lvis-plugin:
  *   …with no `'unsafe-inline'` and no nonce/hash. Electron's renderer enforces
  *   that policy, so an inline `<script type="module">` block would be silently
  *   refused — which is exactly the failure mode that produced fully blank
