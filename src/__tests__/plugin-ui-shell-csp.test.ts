@@ -2,7 +2,7 @@
  * Regression: Plugin UI Shell must not require inline script execution.
  *
  * The shell document declares a strict CSP:
- *   script-src 'self' blob: http://localhost:* https://localhost:*
+ *   script-src 'self' file: blob: http://localhost:* https://localhost:*
  * with no `'unsafe-inline'`, no nonce, no hash. Historically the shell
  * embedded its bootstrap as `<script type="module">…</script>`, which the
  * renderer silently refused — producing fully blank embedded plugin areas
@@ -14,14 +14,16 @@
  *   2. The shell HTML references an external host-owned bootstrap
  *      (`./plugin-ui-shell.js`) via `<script type="module" src="…">`.
  *   3. The CSP is unchanged in spirit — still no `'unsafe-inline'`, still
- *      includes `'self'` so the sibling bootstrap loads.
+ *      includes `'self'` so the sibling bootstrap loads, and still includes
+ *      `file:` so host-vetted installed plugin modules can be imported from
+ *      `~/.lvis/plugins`.
  *   4. The build pipeline copies the bootstrap to `dist/src/` alongside
  *      the HTML, and the dev launcher copies/watches it too.
  *   5. The bootstrap source itself contains the user-visible error fallback
  *      text paths so a CSP regression would be visible (not blank).
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -63,6 +65,10 @@ describe("plugin-ui-shell — CSP-safe external bootstrap", () => {
     // "fix" a blank shell by adding 'unsafe-inline' should fail this test
     // and read the rationale in src/plugin-ui-shell.js instead.
     const scriptSrc = csp.match(/script-src[^;]*/i)?.[0] ?? "";
+    // Installed marketplace plugins are loaded from absolute file:// URLs
+    // under ~/.lvis/plugins, which are not same-origin siblings of the shell.
+    // The host vets these URLs before returning them from getEntryUrl().
+    expect(scriptSrc).toMatch(/\bfile:/);
     expect(scriptSrc).not.toMatch(/'unsafe-inline'/);
     // Defensive: also no nonce/hash hack — the fix must stay declarative.
     expect(scriptSrc).not.toMatch(/'nonce-/);
@@ -133,5 +139,14 @@ describe("plugin-ui-shell — CSP-safe external bootstrap", () => {
     expect(devScript).toMatch(/src\/plugin-ui-shell\.js/);
     expect(devScript).toMatch(/dist\/src\/plugin-ui-shell\.html/);
     expect(devScript).toMatch(/dist\/src\/plugin-ui-shell\.js/);
+  });
+
+  it("build artifacts land in dist/src/ when a build output exists", () => {
+    const distHtml = resolve(repoRoot, "dist/src/plugin-ui-shell.html");
+    const distJs = resolve(repoRoot, "dist/src/plugin-ui-shell.js");
+    if (!existsSync(dirname(distHtml))) return;
+
+    expect(existsSync(distHtml), "dist/src/plugin-ui-shell.html missing").toBe(true);
+    expect(existsSync(distJs), "dist/src/plugin-ui-shell.js missing").toBe(true);
   });
 });

@@ -17,9 +17,9 @@
     <meta charset="utf-8" />
     <!-- CSP: plugins cannot make external network requests (connect-src 'none').
          script-src allows:
-           - 'self' for the host-owned external bootstrap (./plugin-ui-shell.js)
-             and (after dynamic import) the plugin module file when it's served
-             from the same file:// origin (packed asar);
+           - 'self' for the host-owned external bootstrap (./plugin-ui-shell.js);
+           - file: for vetted installed plugin UI modules resolved by the host
+             (for example ~/.lvis/plugins/<id>/dist/ui/*.js);
            - blob: for plugin modules loaded via blob URLs;
            - http(s)://localhost:* for plugin dev servers.
          Note: there is intentionally NO 'unsafe-inline' / nonce / hash.
@@ -27,7 +27,7 @@
          block here would be refused under this policy and leave the surface
          blank with no error text. See `src/plugin-ui-shell.js` for details. -->
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'none'; script-src 'self' blob: http://localhost:* https://localhost:*; style-src 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'none';" />
+          content="default-src 'none'; script-src 'self' file: blob: http://localhost:* https://localhost:*; style-src 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'none';" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Plugin UI</title>
     <style>
