@@ -39,7 +39,7 @@ export interface ThemeContextValue {
    * if the provider was given an api.
    */
   setPreference: (next: ThemePreference) => void;
-  /** Live-set the chat-accent preference. Same persistence semantics. */
+  /** Live-set the chat visual theme. Same persistence semantics. */
   setChatTheme: (next: ChatThemePreference) => void;
   /** Live-set the code-surface preference. Same persistence semantics. */
   setCodeTheme: (next: CodeThemePreference) => void;
