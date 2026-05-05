@@ -5,6 +5,7 @@ import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
 import type { StreamEvent } from "../../lib/chat-stream-state.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../../mcp/types.js";
 import type { ScheduleAgentId, ScheduleRoutineEntry, ScheduleRoutineSchedule } from "../../routines/schedule.js";
+import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 
 // Re-export MCP types for renderer-side consumers (type-only, no main-process runtime)
@@ -267,10 +268,10 @@ export type LvisApi = {
   chatLoadSession: (sessionId: string) => Promise<{ ok: boolean; sessionId: string | null }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
-  chatGetHistory: () => Promise<{ sessionId: string; messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }> }>;
+  chatGetHistory: () => Promise<{ sessionId: string; messages: SerializedHistoryMessage[] }>;
   chatSessionHistory: (sessionId: string) => Promise<{
     ok: boolean;
-    messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }>;
+    messages: SerializedHistoryMessage[];
     /** §457 PR-A: chars in the rolling summary preamble inherited from parent. 0 = no preamble. */
     preambleChars?: number;
     /** §457 PR-A: parent session id when this session is a rotation child. */

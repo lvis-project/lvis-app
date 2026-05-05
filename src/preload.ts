@@ -8,6 +8,7 @@ import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { ScheduleAgentId, ScheduleRoutineSchedule } from "./routines/schedule.js";
+import type { SerializedHistoryMessage } from "./shared/chat-history.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
@@ -131,11 +132,12 @@ const api = {
       sessionId: string | null;
     }>,
   // Sprint 4.C — conversation UX
-  chatGetHistory: async () => ipcRenderer.invoke("lvis:chat:get-history"),
+  chatGetHistory: async () =>
+    ipcRenderer.invoke("lvis:chat:get-history") as Promise<{ sessionId: string; messages: SerializedHistoryMessage[] }>,
   chatSessionHistory: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:chat:session-history", sessionId) as Promise<{
       ok: boolean;
-      messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }>;
+      messages: SerializedHistoryMessage[];
       /** §457 PR-A: chars in the rolling summary preamble inherited from parent. 0 = no preamble. */
       preambleChars?: number;
       /** §457 PR-A: parent session id when this session is a rotation child. */
