@@ -1810,7 +1810,7 @@ broadcast 만 처리.
 - preload sticky buffer (`STICKY_EVENT_TYPES.has("host.theme.changed")`) —
   late-binding `bridge.onEvent` 에 대한 보호. pull 이 정상이면 buffer 는
   단순히 redundant
-- SDK `lvis-tokens-fallback` `<style>` (PR #101) — pull 이 null 반환 (cold
+- SDK `lvis-tokens-fallback` `<style>` (lvis-plugin-sdk PR #101) — pull 이 null 반환 (cold
   boot 직후 ThemeProvider 첫 effect 전) 했을 때 :root 다크 기본값 적용
 
 캐시 (`lastThemePayload`) 는 다음과 같이 동작한다:
