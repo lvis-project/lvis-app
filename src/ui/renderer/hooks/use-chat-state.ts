@@ -184,7 +184,13 @@ export function useChatState(api: LvisApi) {
           const beforeCount = base.length;
           let next = finalizeStreamingReasoning(base, ev.thought ?? thoughtRef.current);
           const afterReasoningCount = next.length;
-          next = finalizeStreamingAssistant(next, ev.text ?? streamRef.current);
+           // Bugfix #561 follow-up: empty-string `ev.text` from the engine
+           // would be picked by the previous `ev.text ?? streamRef.current`
+           // form (since `""` is not nullish), erasing the renderer's
+           // accumulated body and leaving the assistant entry blank. Use
+           // `||` so an empty string falls through to the delta-accumulated
+           // `streamRef.current` instead of overwriting body content.
+          next = finalizeStreamingAssistant(next, ev.text || streamRef.current);
           const afterAssistantCount = next.length;
           if (debugStreamEnabled) {
             debugLog("stream", "assistant_round:finalized", {
@@ -192,7 +198,7 @@ export function useChatState(api: LvisApi) {
               afterReasoningCount,
               afterAssistantCount,
               usedThought: (ev.thought ?? thoughtRef.current).length,
-              usedText: (ev.text ?? streamRef.current).length,
+              usedText: (ev.text || streamRef.current).length,
               kinds: next.map((e) => e.kind).join(","),
             });
           }
