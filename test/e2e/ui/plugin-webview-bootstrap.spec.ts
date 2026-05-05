@@ -4,6 +4,7 @@ import { test, expect } from './fixtures';
 type PluginViewSummary = {
   pluginId: string;
   extensionId: string;
+  defaultMode?: "embedded" | "detached";
   viewKey: string;
 };
 
@@ -12,11 +13,14 @@ async function listPluginViews(
 ): Promise<PluginViewSummary[]> {
   return page.evaluate(async () => {
     const views = await window.lvisApi.listPluginUiExtensions();
-    return views.map((view) => ({
-      pluginId: view.pluginId,
-      extensionId: view.extension.id,
-      viewKey: `plugin:${view.pluginId}:${view.extension.id}`,
-    }));
+    return views
+      .filter((view) => view.extension.slot === 'sidebar')
+      .map((view) => ({
+        pluginId: view.pluginId,
+        extensionId: view.extension.id,
+        defaultMode: view.extension.window?.defaultMode,
+        viewKey: `plugin:${view.pluginId}:${view.extension.id}`,
+      }));
   });
 }
 
@@ -27,14 +31,14 @@ async function listPluginViews(
  */
 test('embedded plugin view creates a plugin shell webview guest', async ({ app, mainWindow }) => {
   const pluginViews = await listPluginViews(mainWindow);
-  const proactiveView = pluginViews.find((view) => view.pluginId === 'work-proactive');
+  const embeddedView = pluginViews.find((view) => view.defaultMode !== 'detached');
 
-  test.skip(!proactiveView, 'work-proactive sidebar view not available in this build');
+  test.skip(!embeddedView, 'No embedded sidebar plugin view available in this build');
 
   await app.evaluate(({ BrowserWindow }, viewKey) => {
     const win = BrowserWindow.getAllWindows()[0];
     win.webContents.send('lvis:view:activate', { viewKey });
-  }, proactiveView!.viewKey);
+  }, embeddedView!.viewKey);
 
   await expect(mainWindow.locator('webview')).toHaveCount(1, { timeout: 15_000 });
 
@@ -65,11 +69,9 @@ test('embedded plugin view creates a plugin shell webview guest', async ({ app, 
 
 test('detached plugin view creates a detached host window plus plugin shell guest', async ({ app, mainWindow }) => {
   const pluginViews = await listPluginViews(mainWindow);
-  const detachedTarget =
-    pluginViews.find((view) => view.pluginId === 'agent-hub')
-    ?? pluginViews[0];
+  const detachedTarget = pluginViews.find((view) => view.defaultMode === 'detached');
 
-  test.skip(!detachedTarget, 'No plugin sidebar views available in this build');
+  test.skip(!detachedTarget, 'No detached sidebar plugin view available in this build');
 
   const detachedWindowPromise = app.waitForEvent('window');
   const openResult = await mainWindow.evaluate(
