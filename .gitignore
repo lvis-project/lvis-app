@@ -30,3 +30,6 @@ packages/hello-world/
 
 # Dev runtime: plugin manifests written by scripts/run-electron-dev.mjs into the user-data dir.
 .lvis-dev/
+
+# Legacy bun binary lockfile — repo uses text bun.lock
+bun.lockb
