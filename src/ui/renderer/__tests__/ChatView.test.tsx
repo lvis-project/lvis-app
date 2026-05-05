@@ -130,14 +130,13 @@ describe("ChatView", () => {
       // Both round texts must remain in the rendered DOM after the turn ends.
       expect(container.textContent).toContain("첫번째 답변입니다");
       expect(container.textContent).toContain("두번째 답변입니다");
-      // The WorkGroup must contain ONLY the tool entry (1단계). Pre-fix
-      // round-1 assistant was bucketed as "intermediate" too, so the group
-      // header read "2단계" — `textContent` alone was insufficient because
-      // entries collapsed into a `display:none` group are also picked up by
-      // textContent. Asserting the step count pins the regression to the
-      // classifier's WorkGroup-content selection, not just final visibility.
-      expect(container.textContent).toContain("1단계");
-      expect(container.textContent).not.toContain("2단계");
+      // Single-step intermediate group (one tool entry) renders without
+      // the "작업 N단계" WorkGroup wrapper after de72933 — the tool card
+      // is shown directly. Pre-classifier-fix the round-1 assistant was
+      // bucketed as `intermediate` too, producing a 2-entry group with
+      // "작업 2단계" header. Now we assert the *absence* of the wrapper
+      // text as proof that round-1 assistant was carved out correctly.
+      expect(container.textContent).not.toContain("작업 2단계");
     });
   });
 
@@ -177,11 +176,13 @@ describe("ChatView", () => {
       // Both assistant texts must remain visible after the turn ends.
       expect(container.textContent).toContain("첫번째 답변입니다");
       expect(container.textContent).toContain("최종 답변입니다");
-      // WorkGroup contains only the reasoning entry (1단계). Pre-fix the
-      // round-1 assistant was also bucketed as `intermediate` alongside
-      // reasoning, producing "2단계" and hiding the round-1 text.
-      expect(container.textContent).toContain("1단계");
-      expect(container.textContent).not.toContain("2단계");
+      // Single-step intermediate (just the reasoning entry) renders the
+      // ReasoningCard directly without "작업 N단계" WorkGroup wrapper after
+      // de72933 — the "생각 정리" header proves the reasoning entry was
+      // produced as a single intermediate, and the absence of "작업 2단계"
+      // proves the round-1 assistant was correctly carved out.
+      expect(container.textContent).toContain("생각 정리");
+      expect(container.textContent).not.toContain("작업 2단계");
     });
   });
 
