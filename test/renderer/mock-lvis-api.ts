@@ -221,6 +221,7 @@ export function makeMockLvisNamespace() {
       env: {
         isDev: false,
         enableDevConsole: false,
+        debugStream: false,
       },
     },
     emitApproval: (r: unknown) => approvalHandlers.forEach((h) => h(r)),
