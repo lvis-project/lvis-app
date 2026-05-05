@@ -186,6 +186,33 @@ describe("ChatView", () => {
     });
   });
 
+  // Regression 2026-05-05 — engine-emitted empty `assistant_round.text`
+  // overwrote the renderer's delta-accumulated body. With `ev.text ?? streamRef`,
+  // an empty string is non-nullish so `??` picks it, leaving the assistant
+  // entry blank. Fix: `ev.text || streamRef.current` so empty falls through
+  // to the accumulated body. (User report: "결론 본문이 사라지고 마커만 남는".)
+  it("preserves accumulated body when assistant_round.text is empty-string", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await act(async () => {
+      // Full body streams via deltas
+      emitChatStream({ type: "text_delta", text: "본문이 정상적으로 누적되었습니다" });
+      // Engine emits assistant_round with EMPTY text (the bug trigger)
+      emitChatStream({
+        type: "assistant_round",
+        text: "",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+    await waitFor(() => {
+      // Body must survive — pre-fix it was wiped because empty `ev.text`
+      // beat the accumulated streamRef under `??` precedence.
+      expect(container.textContent).toContain("본문이 정상적으로 누적되었습니다");
+    });
+  });
+
   // Regression guard for Copilot PR #545 round-1 comments ③④.
   // Reasoning + tool + assistant sequence: reasoning entry must be bucketed
   // inside WorkGroup while the final assistant text stays visible standalone.
