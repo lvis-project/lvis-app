@@ -223,7 +223,10 @@ export class WindowManager {
       // Un-snap other snapped children so they are not buried under the maximised main.
       for (const [id, entry] of this._children) {
         if (entry.locked) {
-          if (!entry.window.isDestroyed()) {
+          // Only record windows that are actually visible before maximising.
+          // If the user had already minimised/hidden the panel, we must not
+          // unconditionally restore it on unmaximize.
+          if (!entry.window.isDestroyed() && entry.window.isVisible()) {
             entry.window.hide();
             this._hiddenByMaximize.add(id);
           }
@@ -634,7 +637,19 @@ export class WindowManager {
         Math.min(pos.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height)
       );
 
-      entry.window.setPosition(pos.x, clampedY);
+      // Re-clamp X for right-side ("e") snaps: the initial _snapToLeftEdge call
+      // clamps to the display boundary, but snappedPosition() returns the raw
+      // flush position.  Without this clamp, dragging the main window to the
+      // right edge of the display pushes the child partially off-screen.
+      let clampedX = pos.x;
+      if (edge === "e") {
+        clampedX = Math.max(
+          hostDisplay.bounds.x,
+          Math.min(pos.x, hostDisplay.bounds.x + hostDisplay.bounds.width - childBounds.width)
+        );
+      }
+
+      entry.window.setPosition(clampedX, clampedY);
     }
   }
 

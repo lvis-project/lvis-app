@@ -230,7 +230,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
 
   describe("unmaximize event", () => {
     it("snaps BEFORE showing locked hidden children (no flicker)", () => {
-      const child = makeMockWin({ id: 103, visible: false });
+      const child = makeMockWin({ id: 103, visible: true });
       injectChild(wm, child, { locked: true, snappedTo: undefined });
 
       // Emit maximize first so the child is tracked in _hiddenByMaximize;
@@ -403,8 +403,10 @@ describe("WindowManager — magnetic snap behaviors", () => {
 
       expect(child.setPosition).toHaveBeenCalledOnce();
       const [x] = (child.setPosition as ReturnType<typeof vi.fn>).mock.calls[0] as [number, number];
-      // Child left edge must equal main right edge: 600 + 1200 = 1800.
-      expect(x).toBe(600 + 1200);
+      // Display is 1920px wide; child is 400px wide.
+      // Raw flush position: 600 + 1200 = 1800.
+      // Clamped: min(1800, 1920 - 400) = 1520 — child stays on-screen.
+      expect(x).toBe(1920 - 400);
     });
   });
 
@@ -412,18 +414,22 @@ describe("WindowManager — magnetic snap behaviors", () => {
 
   describe("_hiddenByMaximize tracking", () => {
     it("does not restore a child that was already hidden before maximize", () => {
-      // Child is hidden (user minimised it), but NOT tracked in _hiddenByMaximize.
+      // Child is hidden (user minimised it) BEFORE the main window is maximised.
+      // The isVisible() guard in the maximize handler must skip it, so it never
+      // enters _hiddenByMaximize and is therefore not restored on unmaximize.
       const child = makeMockWin({ id: 160, visible: false });
       injectChild(wm, child, { locked: true, snappedTo: mainWin.id, snapEdge: "w" });
 
-      // Emit maximize — because child is already hidden, hide() is called,
-      // but it IS added to _hiddenByMaximize.
+      // Emit maximize: child.isVisible() returns false, so the handler must NOT
+      // call hide() again and must NOT add it to _hiddenByMaximize.
       mainWin.emit("maximize");
 
-      // Remove from the set to simulate "hidden before maximize" state.
-      (wm as unknown as { _hiddenByMaximize: Set<number> })._hiddenByMaximize.delete(child.id);
+      // isVisible guard must have prevented tracking.
+      expect(
+        (wm as unknown as { _hiddenByMaximize: Set<number> })._hiddenByMaximize.has(child.id)
+      ).toBe(false);
 
-      // Emit unmaximize — child NOT in _hiddenByMaximize so must NOT be restored.
+      // Emit unmaximize — child is not in _hiddenByMaximize, so show() must be skipped.
       (child.show as ReturnType<typeof vi.fn>).mockClear();
       mainWin.emit("unmaximize");
 
