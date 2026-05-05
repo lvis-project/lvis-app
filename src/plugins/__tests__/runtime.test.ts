@@ -1164,14 +1164,18 @@ export default async function createPlugin(ctx) {
     const beforeA = await runtime.call("p_a_ping");
     const beforeB = await runtime.call("p_b_ping");
 
-    // restartPlugin only restarts p-a; p-b's start counter must be unchanged.
+    // restartPlugin only restarts p-a; p-b's module state must be unchanged.
     await runtime.restartPlugin("p-a");
 
     const afterA = await runtime.call("p_a_ping");
     const afterB = await runtime.call("p_b_ping");
-    // start counter increments on each start. p-a went 1 → 2; p-b stays at 1.
+    // restartPlugin cache-busts the dynamic import so p-a 의 entry.mjs 가
+    // 새 module 로 다시 평가됨 → top-level `let started = 0` 리셋 → start()
+    // 가 다시 호출되어 1. p-b 는 미접촉 — 같은 module reuse, started=1 유지.
+    // (옛 동작은 cache hit 으로 p-a started 가 2 까지 증가했으나, 그건
+    // restart 의 의도된 의미가 아닌 ESM cache footgun 이었음.)
     expect(beforeA).toBe("hi-p-a-1");
-    expect(afterA).toBe("hi-p-a-2");
+    expect(afterA).toBe("hi-p-a-1");
     expect(beforeB).toBe("hi-p-b-1");
     expect(afterB).toBe("hi-p-b-1");
   });
@@ -1239,8 +1243,11 @@ export default async function createPlugin(ctx) {
 
     await runtime.addPlugin("p-existing");
 
-    // p-existing restarted (start counter 1 → 2), p-other unchanged.
-    expect(await runtime.call("p_existing_ping")).toBe("hi-p-existing-2");
+    // p-existing restarted (cache-bust → fresh module → top-level
+    // `started=0` 다시 리셋 후 start() 한 번 호출 → 1). p-other 미접촉.
+    // 옛 캐시 hit 동작에선 module reuse 로 started 가 2 까지 갔으나,
+    // 그건 restart 의 의도된 의미가 아닌 footgun 이었음.
+    expect(await runtime.call("p_existing_ping")).toBe("hi-p-existing-1");
     expect(await runtime.call("p_other_ping")).toBe("hi-p-other-1");
   });
 
