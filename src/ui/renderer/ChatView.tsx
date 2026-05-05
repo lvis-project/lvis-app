@@ -459,11 +459,17 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                 i++;
               }
 
-              rendered.push(
-                <WorkGroup key={`wg-${groupStart}`} stepCount={groupEntries.length} streaming={groupIsActiveTurn}>
-                  {groupEntries.map((ge) => ge.node)}
-                </WorkGroup>
-              );
+              // Single intermediate step: skip WorkGroup wrapper and render directly.
+              // WorkGroup "작업 N단계" is only meaningful when 2+ steps are present.
+              if (groupEntries.length === 1 && groupEntries[0]) {
+                rendered.push(groupEntries[0].node);
+              } else {
+                rendered.push(
+                  <WorkGroup key={`wg-${groupStart}`} stepCount={groupEntries.length} streaming={groupIsActiveTurn}>
+                    {groupEntries.map((ge) => ge.node)}
+                  </WorkGroup>
+                );
+              }
               continue;
             }
 
