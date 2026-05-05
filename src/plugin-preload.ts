@@ -132,6 +132,32 @@ contextBridge.exposeInMainWorld("lvisPlugin", {
     return reply.entryUrl;
   },
 
+  /**
+   * Fetch the host's currently-broadcast theme payload (theme axis +
+   * `--lvis-*` token map) for pre-paint application before the plugin
+   * module loads. Plugin-ui-shell calls this between `getEntryUrl` and
+   * the dynamic `import()` so the page's `documentElement` carries the
+   * right token values from frame 0 — eliminating the wc.send-vs-listener
+   * race that the prior register-time replay model had.
+   *
+   * Returns `null` when the host has not yet broadcast (very cold boot,
+   * or if the renderer's ThemeProvider hasn't run its first effect). The
+   * shell falls back to SDK CSS-side `:root` defaults in that case.
+   */
+  getTheme: async (): Promise<unknown> => {
+    const reply = (await ipcRenderer.invoke("lvis:plugin:get-theme")) as
+      | { ok: true; theme: unknown }
+      | { ok: false; error: string };
+    if (!reply || reply.ok !== true) {
+      // Non-fatal — caller must tolerate a null theme on cold-boot. We
+      // intentionally swallow the unauthorized-frame sentinel here so a
+      // misconfigured plugin frame just paints with defaults rather than
+      // bubbling an exception that would block the entry import.
+      return null;
+    }
+    return reply.theme;
+  },
+
   // ─── Config namespace (#B1) ────────────────────────────────────────────
   // Reads/writes this plugin's config record (the same record managed by the
   // PluginConfigTab). Cross-plugin writes are refused at the IPC boundary —
