@@ -50,6 +50,8 @@
   .ah4-paged { background: var(--panel); border-radius: 4px; padding: 4px; }
   .ah4-cap { color: var(--fg-muted); font-size: 9px; padding: 4px; text-align: center; }
   .ah4-scroll { max-height: 70px; overflow-y: auto; background: var(--panel); border-radius: 4px; padding: 4px; scrollbar-width: thin; }
+  .ah4-scroll-hidden { scrollbar-width: none; }
+  .ah4-scroll-hidden::-webkit-scrollbar { display: none; }
 
   /* AH-5 paragraph length */
   .ah5 { font-size: 10px; padding: 6px; background: var(--panel); border-radius: 4px; line-height: 1.4; }
@@ -155,7 +157,7 @@
     </div>
     <div class="opt">
       <h4>B. swipe / wheel scroll</h4>
-      <div class="ah4 ah4-scroll" style="scrollbar-width:none">
+      <div class="ah4 ah4-scroll ah4-scroll-hidden">
         <div class="ah4-row">1. plugin v3 mockup</div>
         <div class="ah4-row">2. 웹 로그인 copy</div>
         <div class="ah4-row">3. 팀 보드 grouping</div>
