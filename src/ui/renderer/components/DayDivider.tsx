@@ -14,7 +14,7 @@ import { Calendar } from "../../../components/ui/calendar.js";
  */
 export function DayDivider({ dateKey }: { dateKey?: string }) {
   const [pickedDate, setPickedDate] = useState<Date | undefined>(undefined);
-  const key = dateKey ?? new Date().toISOString().split("T")[0]!;
+  const key = dateKey ?? getLocalDateKey(new Date());
   const label = formatDayLabel(key);
   return (
     <div
@@ -41,12 +41,19 @@ export function DayDivider({ dateKey }: { dateKey?: string }) {
   );
 }
 
+function getLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function formatDayLabel(dateKey: string): string {
-  const todayKey = new Date().toISOString().split("T")[0]!;
+  const todayKey = getLocalDateKey(new Date());
   if (dateKey === todayKey) return `${dateKey} (오늘)`;
   const y = new Date();
   y.setDate(y.getDate() - 1);
-  const yKey = y.toISOString().split("T")[0]!;
+  const yKey = getLocalDateKey(y);
   if (dateKey === yKey) return `${dateKey} (어제)`;
   return dateKey;
 }

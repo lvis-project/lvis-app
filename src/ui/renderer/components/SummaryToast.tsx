@@ -1,5 +1,5 @@
 /**
- * SummaryToast — emerald-tinted compact card that surfaces the rolling
+ * SummaryToast — blue-tinted compact card that surfaces the rolling
  * summary attached to a checkpoint entry. Restored from the deleted
  * StackedChatView (issue #547 visual absorption). Truncated to 120 chars
  * so it stays a *toast*, not a competing message bubble.
