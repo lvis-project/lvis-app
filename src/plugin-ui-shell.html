@@ -16,10 +16,16 @@
   <head>
     <meta charset="utf-8" />
     <!-- CSP: plugins cannot make external network requests (connect-src 'none').
-         script-src allows only the bundled module loaded via import() from the
-         plugin's local dev server (localhost) or packed asar (blob:). -->
+         script-src allows:
+           - 'self' for the host-owned external bootstrap (./plugin-ui-shell.js);
+           - lvis-plugin: for plugin modules served from the host-vetted
+             per-plugin asset protocol.
+         Note: there is intentionally NO 'unsafe-inline' / nonce / hash.
+         The bootstrap MUST live in `plugin-ui-shell.js`; an inline module
+         block here would be refused under this policy and leave the surface
+         blank with no error text. See `src/plugin-ui-shell.js` for details. -->
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'none'; script-src 'self' blob: http://localhost:* https://localhost:*; style-src 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'none';" />
+          content="default-src 'none'; script-src 'self' lvis-plugin:; style-src 'unsafe-inline' lvis-plugin:; font-src 'self' data: lvis-plugin:; img-src 'self' data: blob: lvis-plugin:; connect-src 'none';" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Plugin UI</title>
     <style>
@@ -30,76 +36,9 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module">
-      (async () => {
-        const root = document.getElementById("root");
-        if (!window.lvisPlugin?.getEntryUrl) {
-          root.textContent = "[lvis] plugin-ui-shell: lvisPlugin bridge missing.";
-          return;
-        }
-        // The host's `did-attach → registerPluginWebview` round-trip can lose
-        // a race against this script when the plugin is updated and the
-        // sidebar webview is re-attached with a fresh wcId. Main absorbs that
-        // race with a 5s wait queue (pendingEntryUrlResolvers) so getEntryUrl
-        // resolves once the binding lands; the queue's deadline returns the
-        // same `not-registered` sentinel for genuinely missing registrations.
-        let entry;
-        try {
-          entry = await window.lvisPlugin.getEntryUrl();
-        } catch (err) {
-          root.textContent = "[lvis] entry 조회 실패: " + (err?.message ?? String(err));
-          return;
-        }
-        // Pre-paint theme tokens BEFORE the plugin module loads. This is
-        // a pull (request/response) so it has no race vs the prior
-        // register-time `wc.send` replay (which lost events sent before
-        // preload's listener was attached). With tokens applied to
-        // `documentElement` inline style here, the plugin's first React
-        // commit paints with correct host colors from frame 0 — no flash
-        // of fallback dark on light themes.
-        try {
-          if (typeof window.lvisPlugin.getTheme === "function") {
-            const theme = await window.lvisPlugin.getTheme();
-            if (theme && typeof theme === "object") {
-              const r = document.documentElement;
-              if (theme.theme) r.setAttribute("data-theme", String(theme.theme));
-              if (theme.codeTheme) r.setAttribute("data-code-theme", String(theme.codeTheme));
-              if (theme.chatTheme && theme.chatTheme !== "default") {
-                r.setAttribute("data-chat-theme", String(theme.chatTheme));
-              }
-              const tokens = theme.tokens;
-              if (tokens && typeof tokens === "object") {
-                for (const [k, v] of Object.entries(tokens)) {
-                  if (typeof v === "string" && k.startsWith("--lvis-")) {
-                    r.style.setProperty(k, v);
-                  }
-                }
-              }
-            }
-          }
-        } catch (err) {
-          // Non-fatal — plugin still gets tokens via `host.theme.changed`
-          // event after mount. Just paint with SDK :root defaults.
-          console.warn("[lvis:plugin-shell] theme prefetch failed", err);
-        }
-        try {
-          const mod = await import(/* @vite-ignore */ entry);
-          const mountFn =
-            mod.mount ??
-            mod.default?.mount ??
-            (typeof mod.default === "function" ? mod.default : null);
-          if (typeof mountFn !== "function") {
-            throw new Error("플러그인 모듈에서 mount 함수를 찾을 수 없습니다.");
-          }
-          await mountFn({ root, bridge: window.lvisPlugin });
-        } catch (err) {
-          root.style.color = "red";
-          root.style.padding = "8px";
-          root.style.fontSize = "12px";
-          root.textContent = "[lvis] Plugin UI 로딩 실패: " + (err?.message ?? String(err));
-          console.error("[lvis:plugin-shell] mount failed", err);
-        }
-      })();
-    </script>
+    <!-- Bootstrap is intentionally external (host-owned, sibling file) so it
+         loads under `script-src 'self'` without 'unsafe-inline'. See the CSP
+         comment above and `src/plugin-ui-shell.js` for the full rationale. -->
+    <script type="module" src="./plugin-ui-shell.js"></script>
   </body>
 </html>

@@ -12,7 +12,7 @@
     "build:styles": "tailwindcss -i src/styles.css -o dist/src/styles.css --minify",
     "build:preload": "esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/src/preload.cjs",
     "build:plugin-preload": "esbuild src/plugin-preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/src/plugin-preload.cjs",
-    "build": "bun run build:main && bun run build:renderer && bun run build:styles && bun run build:preload && bun run build:plugin-preload && node scripts/copy-build-assets.mjs src/index.html dist/src/index.html src/plugin-ui-shell.html dist/src/plugin-ui-shell.html scripts/electron-flags.mjs dist/scripts/electron-flags.mjs && node scripts/check-no-tls-bypass.mjs",
+    "build": "bun run build:main && bun run build:renderer && bun run build:styles && bun run build:preload && bun run build:plugin-preload && node scripts/copy-build-assets.mjs src/index.html dist/src/index.html src/plugin-ui-shell.html dist/src/plugin-ui-shell.html src/plugin-ui-shell.js dist/src/plugin-ui-shell.js scripts/electron-flags.mjs dist/scripts/electron-flags.mjs && node scripts/check-no-tls-bypass.mjs",
     "typecheck": "tsc --noEmit",
     "start": "bun run build && node scripts/run-electron.mjs dist/src/main.js",
     "dev": "node scripts/run-electron-dev.mjs",

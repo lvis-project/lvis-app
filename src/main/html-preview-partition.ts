@@ -16,15 +16,25 @@
  *   fonts.googleapis.com, fonts.gstatic.com
  * All other https hosts and all non-https schemes remain blocked.
  */
-import { session } from "electron";
-import { dirname, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installPluginAssetProtocolHandler, PLUGIN_ASSET_SCHEME } from "./plugin-asset-protocol.js";
 
 // ESM equivalent of CommonJS `__dirname`. The original code referenced
 // `__dirname` directly, which is undefined under `"type": "module"` and
 // crashed when `installPluginPartitionPolicy` was first reached at runtime
 // (#498). Resolve once at module load.
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const pluginShellHtmlPath = normalize(resolve(__dirname, "..", "plugin-ui-shell.html"));
+const pluginShellJsPath = normalize(resolve(__dirname, "..", "plugin-ui-shell.js"));
+
+type SessionApi = { fromPartition(partition: string): Electron.Session };
+
+function getElectronSession(): SessionApi {
+  return require("electron").session as SessionApi;
+}
 
 const CDN_ALLOWLIST = new Set([
   "cdn.jsdelivr.net",
@@ -76,7 +86,7 @@ function installCdnAllowlist(ses: Electron.Session): void {
  * We apply a permissive policy that still blocks raw http/https to external
  * hosts that weren't explicitly loaded by the plugin module itself.
  *
- * Allowed: file://, data:, blob:, about:
+ * Allowed: file://, lvis-plugin://, data:, blob:, about:
  * Blocked: http, https, ftp, and any other scheme (plugin UI should be
  *   self-contained; network calls go through lvis:plugin:call-tool IPC).
  *
@@ -91,10 +101,27 @@ function installCdnAllowlist(ses: Electron.Session): void {
  */
 const installedPluginPartitions = new Set<string>();
 
-export function installPluginPartitionPolicy(partitionName: string): void {
+function isAllowedPluginShellFile(url: URL): boolean {
+  if (url.protocol !== "file:") return false;
+  try {
+    const filePath = normalize(fileURLToPath(url));
+    return filePath === pluginShellHtmlPath || filePath === pluginShellJsPath;
+  } catch {
+    return false;
+  }
+}
+
+export function installPluginPartitionPolicy(
+  partitionName: string,
+  options: { pluginRoot?: string } = {},
+  sessionApi: SessionApi = getElectronSession(),
+): void {
+  const ses = sessionApi.fromPartition(partitionName);
+  if (options.pluginRoot) {
+    installPluginAssetProtocolHandler(partitionName, ses, options.pluginRoot);
+  }
   if (installedPluginPartitions.has(partitionName)) return;
   installedPluginPartitions.add(partitionName);
-  const ses = session.fromPartition(partitionName);
 
   // setPreloads is required for sandboxed <webview> — the preload= attribute
   // alone is silently ignored when webpreferences="sandbox=yes". Electron
@@ -109,7 +136,8 @@ export function installPluginPartitionPolicy(partitionName: string): void {
     try {
       const url = new URL(details.url);
       if (
-        url.protocol === "file:" ||
+        isAllowedPluginShellFile(url) ||
+        url.protocol === `${PLUGIN_ASSET_SCHEME}:` ||
         url.protocol === "data:" ||
         url.protocol === "blob:" ||
         url.protocol === "about:"
@@ -124,10 +152,10 @@ export function installPluginPartitionPolicy(partitionName: string): void {
   });
 }
 
-export function installHtmlPreviewPartitionBlock(): void {
+export function installHtmlPreviewPartitionBlock(sessionApi: SessionApi = getElectronSession()): void {
   // ── 1. LLM-authored HTML: strict inline-only partition ──
-  installStrictInlineOnly(session.fromPartition("lvis-render-html"));
+  installStrictInlineOnly(sessionApi.fromPartition("lvis-render-html"));
 
   // ── 2. MCP App HTML: trusted plugin UI with limited CDN allowlist ──
-  installCdnAllowlist(session.fromPartition("lvis-mcp-app"));
+  installCdnAllowlist(sessionApi.fromPartition("lvis-mcp-app"));
 }

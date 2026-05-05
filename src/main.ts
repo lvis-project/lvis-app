@@ -4,7 +4,7 @@
  * 슬림 엔트리. 모든 로직은 boot.ts와 ipc-bridge.ts로 위임.
  * §4.1 Client Architecture 준수.
  */
-import { Menu, app, BrowserWindow, shell, dialog, type MenuItemConstructorOptions } from "electron";
+import { Menu, app, BrowserWindow, shell, dialog, protocol, type MenuItemConstructorOptions } from "electron";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import * as https from "node:https";
@@ -15,6 +15,7 @@ import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers, registerWindowEventListeners, unregisterPluginWebview } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
+import { registerPluginAssetProtocolScheme } from "./main/plugin-asset-protocol.js";
 import { findLvisProtocolUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
@@ -28,6 +29,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const distRoot = resolve(__dirname, "..");
 const projectRoot = resolve(distRoot, "..");
+
+registerPluginAssetProtocolScheme(protocol);
 
 // Tab detach + magnetic snap — created before createWindow() so it is ready
 // when the main window is registered.
