@@ -34,6 +34,50 @@ import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("chat");
 
+export type SerializedHistoryMessage = {
+  index: number;
+  role: GenericMessage["role"];
+  content: string;
+  thought?: string;
+  toolCalls?: Array<{ id: string; name: string; input?: Record<string, unknown> }>;
+  toolUseId?: string;
+  toolName?: string;
+  isError?: boolean;
+};
+
+export function serializeHistoryMessage(
+  m: GenericMessage,
+  index: number,
+): SerializedHistoryMessage {
+  const base = {
+    index,
+    role: m.role,
+    // Renderer history replay operates on visible text. Multimodal user
+    // content is flattened to the same placeholders used by export/search,
+    // while assistant/tool structural fields below are passed through intact.
+    content: m.role === "user" ? userContentText(m.content) : m.content,
+  };
+
+  if (m.role === "assistant") {
+    return {
+      ...base,
+      ...(m.thought !== undefined ? { thought: m.thought } : {}),
+      ...(m.toolCalls !== undefined ? { toolCalls: m.toolCalls } : {}),
+    };
+  }
+
+  if (m.role === "tool_result") {
+    return {
+      ...base,
+      toolUseId: m.toolUseId,
+      ...(m.toolName !== undefined ? { toolName: m.toolName } : {}),
+      ...(m.isError !== undefined ? { isError: m.isError } : {}),
+    };
+  }
+
+  return base;
+}
+
 
 function removeOrphanToolUse(messages: GenericMessage[]): GenericMessage[] {
   const result = [...messages];
@@ -364,13 +408,7 @@ ${input}`;
     const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
     return {
       sessionId: conversationLoop.getSessionId(),
-      messages: messages.map((m, i) => ({
-        index: i,
-        role: m.role,
-        content: m.role === "tool_result" ? m.content : (m as { content: string }).content,
-        toolName: m.role === "tool_result" ? m.toolName : undefined,
-        isError: m.role === "tool_result" ? m.isError : undefined,
-      })),
+      messages: messages.map(serializeHistoryMessage),
     };
   });
 
@@ -420,17 +458,7 @@ ${input}`;
     }
     return {
       ok: true,
-      messages: raw.map((m, i) => ({
-        index: i,
-        role: m.role,
-        content: m.role === "user"
-          ? userContentText(m.content)
-          : m.role === "tool_result"
-            ? m.content
-            : m.content,
-        toolName: m.role === "tool_result" ? m.toolName : undefined,
-        isError: m.role === "tool_result" ? m.isError : undefined,
-      })),
+      messages: raw.map(serializeHistoryMessage),
       preambleChars,
       ...(parentSessionId !== undefined ? { parentSessionId } : {}),
     };

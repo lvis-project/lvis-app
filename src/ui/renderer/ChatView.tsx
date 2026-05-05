@@ -318,9 +318,12 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             // Capture idx by value — closures in this loop must not close over mutable `i`
             const idx = i;
 
-            const isMatch = searchMatchSet.has(idx);
-            const isCurrentMatch = searchOpen && searchMatches[searchIdx] === idx;
-            const ringCls = isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
+            const ringClassFor = (entryIdx: number) => {
+              const isMatch = searchMatchSet.has(entryIdx);
+              const isCurrentMatch = searchOpen && searchMatches[searchIdx] === entryIdx;
+              return isCurrentMatch ? "ring-2 ring-primary" : isMatch ? "ring-1 ring-primary/40" : "";
+            };
+            const ringCls = ringClassFor(idx);
 
             if (entry.kind === "user") {
               // Add extra breathing room only after a *completed* assistant
@@ -473,8 +476,9 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   // work.  It may appear between tool rounds in the event
                   // stream; keep it visible while the turn's reasoning/tool
                   // work is still grouped under one explicit turn boundary.
+                  const assistantRingCls = ringClassFor(i);
                   visibleAssistantEntries.push({ idx: i, node: (
-                    <div key={i} className={searchMatchSet.has(i) ? "ring-1 ring-primary/40 rounded-md" : undefined}>
+                    <div key={i} className={assistantRingCls ? `${assistantRingCls} rounded-md` : undefined}>
                       <AssistantCard
                         entry={e}
                         highlightQuery={searchHighlight}

@@ -17,7 +17,7 @@ type PersistedToolCall = {
 export type PersistedHistoryMessage = {
   index: number;
   role: string;
-  content: string | Array<{ type: string; text?: string; mimeType?: string }>;
+  content: string;
   thought?: string;
   toolCalls?: PersistedToolCall[];
   toolUseId?: string;
@@ -97,12 +97,5 @@ function nextToolOrder(orderByGroupId: Map<string, number>, groupId: string): nu
 }
 
 function textContent(content: PersistedHistoryMessage["content"]): string {
-  if (typeof content === "string") return content;
-  return content
-    .map((part) =>
-      part.type === "text"
-        ? part.text ?? ""
-        : `[${part.type}:${part.mimeType ?? part.type}]`,
-    )
-    .join("\n");
+  return content;
 }

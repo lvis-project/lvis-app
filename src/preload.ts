@@ -31,6 +31,17 @@ type PluginActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
   | { ok: false; error: string; message?: string };
 
+type HistoryIpcMessage = {
+  index: number;
+  role: string;
+  content: string;
+  thought?: string;
+  toolCalls?: Array<{ id: string; name: string; input?: Record<string, unknown> }>;
+  toolUseId?: string;
+  toolName?: string;
+  isError?: boolean;
+};
+
 function invalidPluginActionResult(): PluginActionResult {
   return {
     ok: false,
@@ -131,11 +142,12 @@ const api = {
       sessionId: string | null;
     }>,
   // Sprint 4.C — conversation UX
-  chatGetHistory: async () => ipcRenderer.invoke("lvis:chat:get-history"),
+  chatGetHistory: async () =>
+    ipcRenderer.invoke("lvis:chat:get-history") as Promise<{ sessionId: string; messages: HistoryIpcMessage[] }>,
   chatSessionHistory: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:chat:session-history", sessionId) as Promise<{
       ok: boolean;
-      messages: Array<{ index: number; role: string; content: string; toolName?: string; isError?: boolean }>;
+      messages: HistoryIpcMessage[];
       /** §457 PR-A: chars in the rolling summary preamble inherited from parent. 0 = no preamble. */
       preambleChars?: number;
       /** §457 PR-A: parent session id when this session is a rotation child. */

@@ -311,6 +311,66 @@ describe("ChatView", () => {
     });
   });
 
+  it("preserves current search-match ring on visible assistant entries inside a WorkGroup turn", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      history: {
+        sessionId: "sess-search-rings",
+        messages: [
+          { index: 0, role: "user", content: "검색 링 확인" },
+          {
+            index: 1,
+            role: "assistant",
+            content: "",
+            thought: "첫 번째 작업",
+            toolCalls: [{ id: "t1", name: "web_search", input: { q: "needle" } }],
+          },
+          { index: 2, role: "tool_result", toolUseId: "t1", toolName: "web_search", content: "검색 결과" },
+          { index: 3, role: "assistant", content: "needle 중간 답변은 계속 보여야 합니다." },
+          {
+            index: 4,
+            role: "assistant",
+            content: "",
+            thought: "두 번째 작업",
+            toolCalls: [{ id: "t2", name: "web_fetch", input: { url: "https://example.com" } }],
+          },
+          { index: 5, role: "tool_result", toolUseId: "t2", toolName: "web_fetch", content: "본문" },
+          { index: 6, role: "assistant", content: "needle 최종 답변입니다." },
+        ],
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("needle 중간 답변은 계속 보여야 합니다.");
+      expect(container.textContent).toContain("needle 최종 답변입니다.");
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+    const input = await waitFor(() => {
+      const el = container.querySelector('input[placeholder="대화 검색..."]') as HTMLInputElement | null;
+      expect(el).toBeTruthy();
+      return el;
+    });
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "needle" } });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("1/2");
+    });
+
+    const assistantBodies = Array.from(container.querySelectorAll('[data-testid="assistant-message-body"]'));
+    const middleBody = assistantBodies.find((el) => el.textContent?.includes("중간 답변")) as HTMLElement | undefined;
+    const finalBody = assistantBodies.find((el) => el.textContent?.includes("최종 답변")) as HTMLElement | undefined;
+    const middleRingWrapper = middleBody?.parentElement?.parentElement;
+    const finalRingWrapper = finalBody?.parentElement?.parentElement;
+
+    expect(middleRingWrapper?.className).toContain("ring-2 ring-primary");
+    expect(finalRingWrapper?.className).toContain("ring-1 ring-primary/40");
+  });
+
 });
 
 afterEach(() => {
