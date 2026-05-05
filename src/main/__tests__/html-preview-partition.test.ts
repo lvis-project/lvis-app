@@ -5,12 +5,19 @@
  * handler that allows data:/blob:/about:blank and cancels everything else.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { dirname, resolve } from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";
+
+const __dirnameLocal = dirname(fileURLToPath(import.meta.url));
+const pluginShellHtmlUrl = pathToFileURL(resolve(__dirnameLocal, "..", "..", "plugin-ui-shell.html")).toString();
+const pluginShellJsUrl = pathToFileURL(resolve(__dirnameLocal, "..", "..", "plugin-ui-shell.js")).toString();
 
 // ─── Mock electron ────────────────────────────────────────────────────────────
 const mockOnBeforeRequest = vi.fn();
 const mockOnBeforeRequestMcp = vi.fn();
 const mockOnBeforeRequestPlugin = vi.fn();
 const mockSetPreloadsPlugin = vi.fn();
+const mockProtocolHandlePlugin = vi.fn();
 const mockSession = {
   webRequest: {
     onBeforeRequest: mockOnBeforeRequest,
@@ -28,23 +35,23 @@ const mockPluginSession = {
     onBeforeRequest: mockOnBeforeRequestPlugin,
   },
   setPreloads: mockSetPreloadsPlugin,
+  protocol: {
+    handle: mockProtocolHandlePlugin,
+  },
 };
 
-vi.mock("electron", () => ({
-  session: {
-    fromPartition: vi.fn((partition: string) => {
-      if (partition === "lvis-mcp-app") return mockMcpSession;
-      if (partition.startsWith("persist:plugin:")) return mockPluginSession;
-      return mockSession;
-    }),
-  },
-}));
-
-import { session } from "electron";
 import {
   installHtmlPreviewPartitionBlock,
   installPluginPartitionPolicy,
 } from "../html-preview-partition.js";
+
+const mockSessionApi = {
+  fromPartition: vi.fn((partition: string) => {
+    if (partition === "lvis-mcp-app") return mockMcpSession as unknown as Electron.Session;
+    if (partition.startsWith("persist:plugin:")) return mockPluginSession as unknown as Electron.Session;
+    return mockSession as unknown as Electron.Session;
+  }),
+};
 
 // Helper: invoke the registered handler and return callback result
 function invokeHandler(url: string): { cancel: boolean } {
@@ -71,15 +78,27 @@ function invokeMcpHandler(url: string): { cancel: boolean } {
   return result;
 }
 
+function invokePluginHandler(url: string): { cancel: boolean } {
+  const handler = mockOnBeforeRequestPlugin.mock.calls[0][0] as (
+    details: { url: string },
+    callback: (result: { cancel: boolean }) => void,
+  ) => void;
+  let result!: { cancel: boolean };
+  handler({ url }, (r) => {
+    result = r;
+  });
+  return result;
+}
+
 describe("installHtmlPreviewPartitionBlock", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    installHtmlPreviewPartitionBlock();
+    installHtmlPreviewPartitionBlock(mockSessionApi);
   });
 
   it("calls session.fromPartition with the correct partition name", () => {
-    expect(vi.mocked(session.fromPartition)).toHaveBeenCalledWith("lvis-render-html");
-    expect(vi.mocked(session.fromPartition)).toHaveBeenCalledWith("lvis-mcp-app");
+    expect(mockSessionApi.fromPartition).toHaveBeenCalledWith("lvis-render-html");
+    expect(mockSessionApi.fromPartition).toHaveBeenCalledWith("lvis-mcp-app");
   });
 
   it("registers a webRequest.onBeforeRequest handler", () => {
@@ -130,15 +149,16 @@ describe("installPluginPartitionPolicy", () => {
   beforeEach(() => {
     mockOnBeforeRequestPlugin.mockClear();
     mockSetPreloadsPlugin.mockClear();
-    vi.mocked(session.fromPartition).mockClear();
+    mockProtocolHandlePlugin.mockClear();
+    mockSessionApi.fromPartition.mockClear();
   });
 
   it("registers plugin-preload.cjs via session.setPreloads (sandboxed <webview> requirement)", () => {
     // Unique partition name avoids the module-level installedPluginPartitions
     // Set short-circuit from prior test runs.
-    installPluginPartitionPolicy("persist:plugin:abc123");
+    installPluginPartitionPolicy("persist:plugin:abc123", {}, mockSessionApi);
 
-    expect(vi.mocked(session.fromPartition)).toHaveBeenCalledWith("persist:plugin:abc123");
+    expect(mockSessionApi.fromPartition).toHaveBeenCalledWith("persist:plugin:abc123");
     expect(mockSetPreloadsPlugin).toHaveBeenCalledOnce();
 
     const [preloadList] = mockSetPreloadsPlugin.mock.calls[0] as [string[]];
@@ -151,14 +171,33 @@ describe("installPluginPartitionPolicy", () => {
   });
 
   it("also installs the webRequest allowlist on the plugin partition session", () => {
-    installPluginPartitionPolicy("persist:plugin:def456");
+    installPluginPartitionPolicy("persist:plugin:def456", {}, mockSessionApi);
     expect(mockOnBeforeRequestPlugin).toHaveBeenCalledOnce();
     expect(mockOnBeforeRequestPlugin.mock.calls[0][0]).toBeTypeOf("function");
   });
 
+  it("allows the lvis-plugin asset protocol on plugin partitions", () => {
+    installPluginPartitionPolicy("persist:plugin:lvisasset", {}, mockSessionApi);
+    expect(invokePluginHandler("lvis-plugin://asset/dist/ui/panel.js")).toEqual({ cancel: false });
+  });
+
+  it("allows only host-owned plugin shell file URLs on plugin partitions", () => {
+    installPluginPartitionPolicy("persist:plugin:shellfiles", {}, mockSessionApi);
+
+    expect(invokePluginHandler("file:///etc/passwd")).toEqual({ cancel: true });
+    expect(invokePluginHandler("file:///plugins/agent-hub/dist/ui.js")).toEqual({ cancel: true });
+    expect(invokePluginHandler(pluginShellHtmlUrl)).toEqual({ cancel: false });
+    expect(invokePluginHandler(pluginShellJsUrl)).toEqual({ cancel: false });
+  });
+
+  it("registers the lvis-plugin handler when a plugin root is provided", () => {
+    installPluginPartitionPolicy("persist:plugin:withroot", { pluginRoot: "/plugins/agent-hub" }, mockSessionApi);
+    expect(mockProtocolHandlePlugin).toHaveBeenCalledWith("lvis-plugin", expect.any(Function));
+  });
+
   it("is idempotent: re-installing the same partition does not re-register setPreloads", () => {
-    installPluginPartitionPolicy("persist:plugin:idempotent");
-    installPluginPartitionPolicy("persist:plugin:idempotent");
+    installPluginPartitionPolicy("persist:plugin:idempotent", {}, mockSessionApi);
+    installPluginPartitionPolicy("persist:plugin:idempotent", {}, mockSessionApi);
     expect(mockSetPreloadsPlugin).toHaveBeenCalledOnce();
     expect(mockOnBeforeRequestPlugin).toHaveBeenCalledOnce();
   });

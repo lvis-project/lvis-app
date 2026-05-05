@@ -14,7 +14,10 @@
 //   - esbuild --watch for preload (CJS)
 //   - esbuild --watch for renderer (ESM, browser)
 //   - tailwindcss --watch for styles
-//   - copies src/index.html once (and on change)
+//   - copies src/index.html, src/plugin-ui-shell.html, and the host-owned
+//     external bootstrap src/plugin-ui-shell.js once (and on change).
+//     The plugin shell bootstrap MUST be a sibling file (not inlined) so it
+//     loads under the shell's strict CSP `script-src 'self'`.
 //   - launches electron dist/src/main.js after initial build
 //   - restarts electron when dist/src/main.js changes (debounced)
 
@@ -256,6 +259,23 @@ const binDir = resolve(repoRoot, "node_modules/.bin");
 const mainOutput = resolve(repoRoot, "dist/src/main.js");
 const htmlSrc = resolve(repoRoot, "src/index.html");
 const htmlOut = resolve(repoRoot, "dist/src/index.html");
+// Plugin UI shell — HTML + external bootstrap module. Both must reach
+// `dist/src/` for plugin webviews to render. The bootstrap is a separate
+// file because the shell's CSP (`script-src 'self'`, no `'unsafe-inline'`)
+// would silently refuse an inline `<script type="module">` block, leaving
+// embedded plugin areas blank and detached windows black.
+const pluginShellAssets = [
+  {
+    src: resolve(repoRoot, "src/plugin-ui-shell.html"),
+    out: resolve(repoRoot, "dist/src/plugin-ui-shell.html"),
+    label: "plugin-ui-shell.html",
+  },
+  {
+    src: resolve(repoRoot, "src/plugin-ui-shell.js"),
+    out: resolve(repoRoot, "dist/src/plugin-ui-shell.js"),
+    label: "plugin-ui-shell.js",
+  },
+];
 
 const RESTART_DELAY_MS = parseMsEnv("LVIS_DEV_RESTART_DELAY_MS", 2500);
 const RESTART_FORCE_KILL_MS = parseMsEnv("LVIS_DEV_RESTART_FORCE_KILL_MS", 3000);
@@ -379,6 +399,20 @@ function copyHtml() {
   } catch (err) {
     log("html", `copy failed: ${err.message}`);
   }
+}
+
+function copyPluginShellAsset(asset) {
+  try {
+    mkdirSync(dirname(asset.out), { recursive: true });
+    copyFileSync(asset.src, asset.out);
+    log("plugin-shell", `copied ${asset.label}`);
+  } catch (err) {
+    log("plugin-shell", `copy failed (${asset.label}): ${err.message}`);
+  }
+}
+
+function copyAllPluginShellAssets() {
+  for (const asset of pluginShellAssets) copyPluginShellAsset(asset);
 }
 
 async function stopChildProcess(proc, { forceTree = false } = {}) {
@@ -542,6 +576,17 @@ async function main() {
     watch(htmlSrc, { persistent: true }, () => copyHtml());
   } catch (err) {
     log("html", `watch failed: ${err.message}`);
+  }
+
+  // Plugin UI shell assets (html + external bootstrap js). Copy once and
+  // watch each so the dev loop stays in sync without a full `bun run build`.
+  copyAllPluginShellAssets();
+  for (const asset of pluginShellAssets) {
+    try {
+      watch(asset.src, { persistent: true }, () => copyPluginShellAsset(asset));
+    } catch (err) {
+      log("plugin-shell", `watch failed (${asset.label}): ${err.message}`);
+    }
   }
 
   // Main (tsc --watch)
