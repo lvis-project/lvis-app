@@ -6,12 +6,13 @@
  * `dist/src/`. These power the plugin UI host's <webview> wiring without
  * relying on `window.location.href`, which can be a splash-phase data: URL.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const exposed = new Map<string, unknown>();
 const mockInvoke = vi.fn();
 const mockOn = vi.fn();
 const mockRemoveListener = vi.fn();
+const originalDebugStreamEnv = process.env.VITE_DEBUG_STREAM;
 
 // Named exports only — mirrors the named-import shape in preload.ts.
 // A regression to `import electron from "electron"` will fail here because
@@ -38,6 +39,15 @@ async function loadLvisApi(): Promise<Record<string, unknown>> {
   return api as Record<string, unknown>;
 }
 
+async function loadLvisNamespace(): Promise<Record<string, unknown>> {
+  await import("../preload.js");
+  const lvis = exposed.get("lvis");
+  if (!lvis || typeof lvis !== "object") {
+    throw new Error("lvis was not exposed");
+  }
+  return lvis as Record<string, unknown>;
+}
+
 describe("preload — plugin webview asset URLs", () => {
   beforeEach(() => {
     exposed.clear();
@@ -45,6 +55,15 @@ describe("preload — plugin webview asset URLs", () => {
     mockOn.mockReset();
     mockRemoveListener.mockReset();
     vi.resetModules();
+    delete process.env.VITE_DEBUG_STREAM;
+  });
+
+  afterEach(() => {
+    if (originalDebugStreamEnv === undefined) {
+      delete process.env.VITE_DEBUG_STREAM;
+    } else {
+      process.env.VITE_DEBUG_STREAM = originalDebugStreamEnv;
+    }
   });
 
   it("exposes pluginPreloadUrl as a file:// string under dist/src/", async () => {
@@ -75,5 +94,24 @@ describe("preload — plugin webview asset URLs", () => {
     expect(typeof api["pluginShellUrl"]).toBe("string");
     expect(typeof api["pluginPreloadUrl"]).not.toBe("function");
     expect(typeof api["pluginShellUrl"]).not.toBe("function");
+  });
+
+  it("exposes renderer env flags including debugStream", async () => {
+    const lvis = await loadLvisNamespace();
+    const env = lvis["env"] as Record<string, unknown>;
+
+    expect(env).toMatchObject({
+      isDev: false,
+      enableDevConsole: false,
+      debugStream: false,
+    });
+  });
+
+  it("reflects VITE_DEBUG_STREAM in the preload bridge", async () => {
+    process.env.VITE_DEBUG_STREAM = "1";
+    const lvis = await loadLvisNamespace();
+    const env = lvis["env"] as Record<string, unknown>;
+
+    expect(env["debugStream"]).toBe(true);
   });
 });

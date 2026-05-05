@@ -726,6 +726,7 @@ declare global {
       env: {
         isDev: boolean;
         enableDevConsole: boolean;
+        debugStream: boolean;
       };
     };
   }
