@@ -512,6 +512,10 @@ export function useChatState(api: LvisApi) {
     setEntries(loaded);
   }, []);
 
+  const applyInitialSession = useCallback((loaded: ChatEntry[]) => {
+    setEntries((current) => (current.length === 0 ? loaded : current));
+  }, []);
+
   const truncateToEntry = useCallback((entryIndex: number) => {
     setEntries((p) => p.slice(0, entryIndex + 1));
   }, []);
@@ -558,6 +562,7 @@ export function useChatState(api: LvisApi) {
     seedRoutineEntries,
     clearForNewChat,
     appendUserEntry: appendUserMessage,
+    applyInitialSession,
     applyLoadedSession,
     truncateToEntry,
     addImportedTriggerEntry,

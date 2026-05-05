@@ -21,6 +21,14 @@ import { useStarred } from "../../../src/ui/renderer/hooks/use-starred.js";
 import type { LvisApi } from "../../../src/ui/renderer/types.js";
 import type { ChatEntry } from "../../../src/lib/chat-stream-state.js";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 describe("useChatState", () => {
   it("subscribes to onChatStream on mount", () => {
     const { api } = makeMockLvisApi();
@@ -256,6 +264,89 @@ describe("useSessions (streaming guard)", () => {
     });
     expect(api.chatSessionResume).toHaveBeenCalledWith("other-sess");
     expect(setEntries).toHaveBeenCalled();
+  });
+
+  it("handleLoadSession replays structural history into chat entries", async () => {
+    const { api } = makeMockLvisApi();
+    const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
+    const setEntries = vi.fn();
+    api.chatGetHistory.mockClear();
+    api.chatGetHistory.mockResolvedValueOnce({
+      sessionId: "other-sess",
+      messages: [
+        { index: 0, role: "user", content: "작업 순서 확인" },
+        {
+          index: 1,
+          role: "assistant",
+          content: "",
+          thought: "검색 계획",
+          toolCalls: [{ id: "t1", name: "web_search", input: { q: "LVIS" } }],
+        },
+        { index: 2, role: "tool_result", toolUseId: "t1", toolName: "web_search", content: "검색 결과" },
+        { index: 3, role: "assistant", content: "중간 답변" },
+        {
+          index: 4,
+          role: "assistant",
+          content: "",
+          thought: "검증 계획",
+          toolCalls: [{ id: "t2", name: "web_fetch", input: { url: "https://example.com" } }],
+        },
+        { index: 5, role: "tool_result", toolUseId: "t2", toolName: "web_fetch", content: "본문" },
+        { index: 6, role: "assistant", content: "최종 답변" },
+      ],
+    });
+
+    await act(async () => {
+      await result.current.handleLoadSession("other-sess", false, setEntries);
+    });
+
+    expect(setEntries).toHaveBeenCalledWith([
+      { kind: "user", text: "작업 순서 확인" },
+      { kind: "reasoning", text: "검색 계획", streaming: false },
+      expect.objectContaining({ kind: "tool_group", status: "done" }),
+      { kind: "assistant", text: "중간 답변", streaming: false, route: undefined },
+      { kind: "reasoning", text: "검증 계획", streaming: false },
+      expect.objectContaining({ kind: "tool_group", status: "done" }),
+      { kind: "assistant", text: "최종 답변", streaming: false, route: undefined },
+    ]);
+    expect(result.current.currentSessionId).toBe("other-sess");
+  });
+
+  it("handleLoadSession cancels a late startup hydrate before it can overwrite the loaded session", async () => {
+    const { api } = makeMockLvisApi();
+    const startupHistory = deferred<{ sessionId: string; messages: unknown[] }>();
+    api.chatGetHistory.mockReset();
+    api.chatGetHistory
+      .mockReturnValueOnce(startupHistory.promise)
+      .mockResolvedValueOnce({
+        sessionId: "manual-sess",
+        messages: [{ index: 0, role: "user", content: "manual session" }],
+      });
+    const applyInitial = vi.fn();
+    const applyLoaded = vi.fn();
+    const { result } = renderHook(() =>
+      useSessions(api as unknown as LvisApi, applyInitial),
+    );
+
+    await waitFor(() => expect(api.chatGetHistory).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      await result.current.handleLoadSession("manual-sess", false, applyLoaded);
+    });
+
+    expect(applyLoaded).toHaveBeenCalledWith([{ kind: "user", text: "manual session" }]);
+    expect(result.current.currentSessionId).toBe("manual-sess");
+
+    await act(async () => {
+      startupHistory.resolve({
+        sessionId: "startup-sess",
+        messages: [{ index: 0, role: "user", content: "stale startup" }],
+      });
+      await startupHistory.promise;
+    });
+
+    expect(applyInitial).not.toHaveBeenCalled();
+    expect(result.current.currentSessionId).toBe("manual-sess");
   });
 });
 
