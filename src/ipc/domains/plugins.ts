@@ -25,6 +25,7 @@ import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import { LVIS_TOKEN_NAMES } from "../../shared/plugin-ui-tokens.js";
+import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -101,6 +102,7 @@ async function withInstallLock<T>(
 interface PluginWebviewBinding {
   pluginId: string;
   entryUrl: string;
+  assetEntryUrl: string;
 }
 const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
@@ -202,15 +204,11 @@ type PendingEntryUrlResolver = (
 ) => void;
 const pendingEntryUrlResolvers = new Map<number, Set<PendingEntryUrlResolver>>();
 
-type EntrySourceReply =
-  | { ok: true; source: string }
-  | { ok: false; error: string };
-
 function flushPendingEntryUrl(webContentsId: number, binding: PluginWebviewBinding): void {
   const resolvers = pendingEntryUrlResolvers.get(webContentsId);
   if (!resolvers) return;
   pendingEntryUrlResolvers.delete(webContentsId);
-  for (const resolve of resolvers) resolve({ ok: true, entryUrl: binding.entryUrl });
+  for (const resolve of resolvers) resolve({ ok: true, entryUrl: binding.assetEntryUrl });
 }
 
 function clearPendingEntryUrl(webContentsId: number): void {
@@ -220,44 +218,6 @@ function clearPendingEntryUrl(webContentsId: number): void {
   for (const resolve of resolvers) resolve({ ok: false, error: "not-registered" });
 }
 
-async function readRegisteredEntrySource(
-  binding: PluginWebviewBinding | undefined,
-  pluginRuntime: IpcDeps["pluginRuntime"],
-): Promise<EntrySourceReply> {
-  if (!binding) {
-    return { ok: false, error: "not-registered" };
-  }
-  if (!binding.entryUrl.startsWith("file://")) {
-    return { ok: false, error: "invalid-entry-url" };
-  }
-  const rawInstallRoot = pluginRuntime.getPluginRoot(binding.pluginId);
-  if (!rawInstallRoot) {
-    return { ok: false, error: "plugin-not-loaded" };
-  }
-  let entryFsPath: string;
-  try {
-    entryFsPath = fileURLToPath(binding.entryUrl);
-  } catch {
-    return { ok: false, error: "invalid-entry-url" };
-  }
-  let realRoot: string;
-  let realEntry: string;
-  try {
-    realRoot = realpathSync(rawInstallRoot);
-    realEntry = realpathSync(entryFsPath);
-  } catch {
-    return { ok: false, error: "entry-url-outside-install-root" };
-  }
-  const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-  if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
-    return { ok: false, error: "entry-url-outside-install-root" };
-  }
-  try {
-    return { ok: true, source: await readFile(realEntry, "utf-8") };
-  } catch {
-    return { ok: false, error: "entry-module-read-failed" };
-  }
-}
 
 const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
 const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
@@ -979,7 +939,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
-    const binding = { pluginId, entryUrl };
+    const assetEntryUrl = pluginAssetUrlFromRealPath(realRoot, realEntry);
+    const binding = { pluginId, entryUrl, assetEntryUrl };
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
     plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
@@ -998,7 +959,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
 
   ipcMain.handle("lvis:plugin:get-entry-url", (e) => {
     const binding = resolvePluginFromSender(e);
-    if (binding) return { ok: true as const, entryUrl: binding.entryUrl };
+    if (binding) return { ok: true as const, entryUrl: binding.assetEntryUrl };
 
     if (!validatePluginFrame(e)) {
       auditUnauthorized(auditLogger, "lvis:plugin:get-entry-url", e);
@@ -1053,19 +1014,6 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         }, PENDING_ENTRY_URL_DEADLINE_MS);
       },
     );
-  });
-
-  ipcMain.handle("lvis:plugin:get-entry-module-source", async (e) => {
-    if (!validatePluginFrame(e)) {
-      auditUnauthorized(auditLogger, "lvis:plugin:get-entry-module-source", e);
-      return UNAUTHORIZED_FRAME;
-    }
-    const senderId = e.sender?.id;
-    if (typeof senderId !== "number") {
-      return { ok: false as const, error: "not-registered" };
-    }
-    const binding = pluginWebviewRegistry.get(senderId);
-    return readRegisteredEntrySource(binding, pluginRuntime);
   });
 
   // Pull-on-load theme handshake. The plugin shell calls this BEFORE

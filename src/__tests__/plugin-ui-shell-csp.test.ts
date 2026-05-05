@@ -15,9 +15,9 @@
  *      (`./plugin-ui-shell.js`) via `<script type="module" src="…">`.
  *   3. The CSP is unchanged in spirit — still no `'unsafe-inline'`, still
  *      includes `'self'` so the sibling bootstrap loads, and does NOT
- *      include `file:`. Installed plugin modules are read by main after the
- *      registered entry path passes containment checks, then imported as blob
- *      modules inside the shell.
+ *      include `file:`. Installed plugin modules load through the
+ *      per-plugin `lvis-plugin:` asset protocol after the registered entry
+ *      path passes containment checks.
  *   4. The build pipeline copies the bootstrap to `dist/src/` alongside
  *      the HTML, and the dev launcher copies/watches it too.
  *   5. The bootstrap source itself contains the user-visible error fallback
@@ -67,10 +67,10 @@ describe("plugin-ui-shell — CSP-safe external bootstrap", () => {
     // and read the rationale in src/plugin-ui-shell.js instead.
     const scriptSrc = csp.match(/script-src[^;]*/i)?.[0] ?? "";
     // Do not allow arbitrary local JS execution from the plugin webview.
-    // Installed marketplace plugins are read by main and imported as blob:
-    // modules after registry/realpath containment checks.
+    // Installed marketplace plugins are served by main's per-partition
+    // lvis-plugin: asset protocol after registry/realpath containment checks.
     expect(scriptSrc).not.toMatch(/\bfile:/);
-    expect(scriptSrc).toMatch(/\bblob:/);
+    expect(scriptSrc).toMatch(/\blvis-plugin:/);
     expect(scriptSrc).not.toMatch(/'unsafe-inline'/);
     // Defensive: also no nonce/hash hack — the fix must stay declarative.
     expect(scriptSrc).not.toMatch(/'nonce-/);
@@ -118,11 +118,14 @@ describe("plugin-ui-shell — CSP-safe external bootstrap", () => {
     expect(shellJs).toContain("entry 조회 실패");
     // Sanity: the bootstrap must still call the bridge entry-resolver.
     expect(shellJs).toMatch(/lvisPlugin\.getEntryUrl/);
-    // File-backed entries must be converted to blob: modules before import.
-    expect(shellJs).toMatch(/lvisPlugin\.getEntryModuleSource/);
-    expect(shellJs).toMatch(/URL\.createObjectURL/);
-    expect(shellJs).toMatch(/URL\.revokeObjectURL/);
-    expect(shellJs).toMatch(/import\(\s*\/\*\s*@vite-ignore\s*\*\/\s*importUrl\s*\)/);
+    // File-backed entries must not be imported as file:// or blob: modules:
+    // main returns a lvis-plugin:// URL so relative imports/assets keep the
+    // original plugin install-directory base URL.
+    expect(shellJs).not.toMatch(/lvisPlugin\.getEntryModuleSource/);
+    expect(shellJs).not.toMatch(/URL\.createObjectURL/);
+    expect(shellJs).not.toMatch(/URL\.revokeObjectURL/);
+    expect(shellJs).toMatch(/lvis-plugin:\/\/asset/);
+    expect(shellJs).toMatch(/import\(\s*\/\*\s*@vite-ignore\s*\*\/\s*entry\s*\)/);
   });
 
   it("build script copies plugin-ui-shell.js into dist/src/", () => {

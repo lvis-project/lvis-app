@@ -17,17 +17,18 @@
  *   sibling file loads under the same CSP without weakening it.
  *
  *   Installed plugin bundles are never imported directly from `file://`.
- *   Main resolves and containment-checks the registered entry, then preload
- *   returns the vetted source text. The shell imports that text through a
- *   local blob URL, keeping `script-src file:` out of the policy.
+ *   Main resolves and containment-checks the registered entry, then returns
+ *   a `lvis-plugin://asset/...` URL served by the plugin's own Electron
+ *   session. That scheme is standard, so relative imports and
+ *   `new URL("./asset", import.meta.url)` keep resolving from the plugin
+ *   install directory without opening broad `script-src file:`.
  *
  * Behavior is identical to the previous inline script:
  *   1. Ask main for the verified entry URL via `window.lvisPlugin.getEntryUrl`
  *      (no user-controllable URL ever reaches `import()`).
  *   2. Pre-paint host theme tokens before the plugin module mounts so the
  *      first React commit paints with correct host colors (no flash).
- *   3. Load the verified module source as a blob and call its
- *      `mount({ root, bridge })`.
+ *   3. Load the verified module URL and call its `mount({ root, bridge })`.
  *   4. Surface user-visible error text on every failure path.
  */
 
@@ -93,29 +94,15 @@
     console.warn("[lvis:plugin-shell] theme prefetch failed", err);
   }
   try {
-    let importUrl = entry;
-    if (typeof entry === "string" && entry.startsWith("file://")) {
-      if (typeof window.lvisPlugin.getEntryModuleSource !== "function") {
-        throw new Error("플러그인 모듈 소스 브리지를 찾을 수 없습니다.");
-      }
-      const source = await window.lvisPlugin.getEntryModuleSource();
-      importUrl = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    const mod = await import(/* @vite-ignore */ entry);
+    const mountFn =
+      mod.mount ??
+      mod.default?.mount ??
+      (typeof mod.default === "function" ? mod.default : null);
+    if (typeof mountFn !== "function") {
+      throw new Error("플러그인 모듈에서 mount 함수를 찾을 수 없습니다.");
     }
-    try {
-      const mod = await import(/* @vite-ignore */ importUrl);
-      const mountFn =
-        mod.mount ??
-        mod.default?.mount ??
-        (typeof mod.default === "function" ? mod.default : null);
-      if (typeof mountFn !== "function") {
-        throw new Error("플러그인 모듈에서 mount 함수를 찾을 수 없습니다.");
-      }
-      await mountFn({ root, bridge: window.lvisPlugin });
-    } finally {
-      if (typeof importUrl === "string" && importUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(importUrl);
-      }
-    }
+    await mountFn({ root, bridge: window.lvisPlugin });
   } catch (err) {
     root.style.color = "red";
     root.style.padding = "8px";

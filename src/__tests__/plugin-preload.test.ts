@@ -143,13 +143,13 @@ describe("plugin-preload bridge", () => {
     const bridge = exposed.get("lvisPlugin") as { getEntryUrl: () => Promise<string> };
     mockInvoke.mockResolvedValueOnce({
       ok: true,
-      entryUrl: "file:///plugins/agent-hub/dist/ui/agent-hub-panel.js",
+      entryUrl: "lvis-plugin://asset/dist/ui/agent-hub-panel.js",
     });
 
     const url = await bridge.getEntryUrl();
 
     expect(mockInvoke).toHaveBeenCalledWith("lvis:plugin:get-entry-url");
-    expect(url).toBe("file:///plugins/agent-hub/dist/ui/agent-hub-panel.js");
+    expect(url).toBe("lvis-plugin://asset/dist/ui/agent-hub-panel.js");
   });
 
   it("getEntryUrl throws when main returns a rejection sentinel", async () => {
@@ -166,26 +166,6 @@ describe("plugin-preload bridge", () => {
     mockInvoke.mockResolvedValueOnce({ ok: false, error: "not-registered" });
 
     await expect(bridge.getEntryUrl()).rejects.toThrow(/not-registered/);
-  });
-
-  it("getEntryModuleSource invokes the source IPC channel and unwraps source text", async () => {
-    const bridge = exposed.get("lvisPlugin") as { getEntryModuleSource: () => Promise<string> };
-    mockInvoke.mockResolvedValueOnce({
-      ok: true,
-      source: "export function mount() {}",
-    });
-
-    const source = await bridge.getEntryModuleSource();
-
-    expect(mockInvoke).toHaveBeenCalledWith("lvis:plugin:get-entry-module-source");
-    expect(source).toBe("export function mount() {}");
-  });
-
-  it("getEntryModuleSource throws when main returns a rejection sentinel", async () => {
-    const bridge = exposed.get("lvisPlugin") as { getEntryModuleSource: () => Promise<string> };
-    mockInvoke.mockResolvedValueOnce({ ok: false, error: "entry-url-outside-install-root" });
-
-    await expect(bridge.getEntryModuleSource()).rejects.toThrow(/entry-url-outside-install-root/);
   });
 
   it("getTheme invokes lvis:plugin:get-theme and unwraps the cached payload", async () => {
