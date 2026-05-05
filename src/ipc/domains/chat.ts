@@ -9,6 +9,7 @@ import type { WebContents } from "electron";
 import { redactForLLM } from "../../audit/dlp-filter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
+import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
 import { parseImportedTriggerEnvelope } from "../../engine/proactive-source.js";
 import {
@@ -34,16 +35,7 @@ import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("chat");
 
-export type SerializedHistoryMessage = {
-  index: number;
-  role: GenericMessage["role"];
-  content: string;
-  thought?: string;
-  toolCalls?: Array<{ id: string; name: string; input?: Record<string, unknown> }>;
-  toolUseId?: string;
-  toolName?: string;
-  isError?: boolean;
-};
+export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 
 export function serializeHistoryMessage(
   m: GenericMessage,

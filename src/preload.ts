@@ -8,6 +8,7 @@ import { resolve as pathResolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpServerConfig } from "./mcp/types.js";
 import type { ScheduleAgentId, ScheduleRoutineSchedule } from "./routines/schedule.js";
+import type { SerializedHistoryMessage } from "./shared/chat-history.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "./plugins/capabilities.js";
 
 // ─── Deterministic plugin webview asset URLs ────────────────────────────────
@@ -31,16 +32,7 @@ type PluginActionResult =
   | { ok: true; pluginId: string; installed?: true; uninstalled?: true; version?: string }
   | { ok: false; error: string; message?: string };
 
-type HistoryIpcMessage = {
-  index: number;
-  role: string;
-  content: string;
-  thought?: string;
-  toolCalls?: Array<{ id: string; name: string; input?: Record<string, unknown> }>;
-  toolUseId?: string;
-  toolName?: string;
-  isError?: boolean;
-};
+type HistoryIpcMessage = SerializedHistoryMessage;
 
 function invalidPluginActionResult(): PluginActionResult {
   return {

@@ -7,23 +7,9 @@ import {
   finalizeStreamingReasoning,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
+import type { SerializedHistoryMessage } from "../../../shared/chat-history.js";
 
-type PersistedToolCall = {
-  id: string;
-  name: string;
-  input?: Record<string, unknown>;
-};
-
-export type PersistedHistoryMessage = {
-  index: number;
-  role: string;
-  content: string;
-  thought?: string;
-  toolCalls?: PersistedToolCall[];
-  toolUseId?: string;
-  toolName?: string;
-  isError?: boolean;
-};
+export type PersistedHistoryMessage = SerializedHistoryMessage;
 
 // Rebuild chat entries from persisted session history. Persisted assistant
 // messages are the durable turn contract: content is visible answer text,
