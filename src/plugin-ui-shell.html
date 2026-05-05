@@ -45,6 +45,38 @@
           root.textContent = "[lvis] entry 조회 실패: " + (err?.message ?? String(err));
           return;
         }
+        // Pre-paint theme tokens BEFORE the plugin module loads. This is
+        // a pull (request/response) so it has no race vs the prior
+        // register-time `wc.send` replay (which lost events sent before
+        // preload's listener was attached). With tokens applied to
+        // `documentElement` inline style here, the plugin's first React
+        // commit paints with correct host colors from frame 0 — no flash
+        // of fallback dark on light themes.
+        try {
+          if (typeof window.lvisPlugin.getTheme === "function") {
+            const theme = await window.lvisPlugin.getTheme();
+            if (theme && typeof theme === "object") {
+              const r = document.documentElement;
+              if (theme.theme) r.setAttribute("data-theme", String(theme.theme));
+              if (theme.codeTheme) r.setAttribute("data-code-theme", String(theme.codeTheme));
+              if (theme.chatTheme && theme.chatTheme !== "default") {
+                r.setAttribute("data-chat-theme", String(theme.chatTheme));
+              }
+              const tokens = theme.tokens;
+              if (tokens && typeof tokens === "object") {
+                for (const [k, v] of Object.entries(tokens)) {
+                  if (typeof v === "string" && k.startsWith("--lvis-")) {
+                    r.style.setProperty(k, v);
+                  }
+                }
+              }
+            }
+          }
+        } catch (err) {
+          // Non-fatal — plugin still gets tokens via `host.theme.changed`
+          // event after mount. Just paint with SDK :root defaults.
+          console.warn("[lvis:plugin-shell] theme prefetch failed", err);
+        }
         try {
           const mod = await import(/* @vite-ignore */ entry);
           const mountFn =
