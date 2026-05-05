@@ -270,9 +270,9 @@ describe("useSessions (streaming guard)", () => {
     const { api } = makeMockLvisApi();
     const { result } = renderHook(() => useSessions(api as unknown as LvisApi));
     const setEntries = vi.fn();
-    api.chatGetHistory.mockClear();
-    api.chatGetHistory.mockResolvedValueOnce({
-      sessionId: "other-sess",
+    api.chatSessionHistory.mockClear();
+    api.chatSessionHistory.mockResolvedValueOnce({
+      ok: true,
       messages: [
         { index: 0, role: "user", content: "작업 순서 확인" },
         {
@@ -300,6 +300,8 @@ describe("useSessions (streaming guard)", () => {
       await result.current.handleLoadSession("other-sess", false, setEntries);
     });
 
+    expect(api.chatSessionHistory).toHaveBeenCalledWith("other-sess");
+
     expect(setEntries).toHaveBeenCalledWith([
       { kind: "user", text: "작업 순서 확인" },
       { kind: "reasoning", text: "검색 계획", streaming: false },
@@ -316,10 +318,12 @@ describe("useSessions (streaming guard)", () => {
     const { api } = makeMockLvisApi();
     const startupHistory = deferred<{ sessionId: string; messages: unknown[] }>();
     api.chatGetHistory.mockReset();
+    api.chatSessionHistory.mockReset();
     api.chatGetHistory
-      .mockReturnValueOnce(startupHistory.promise)
+      .mockReturnValueOnce(startupHistory.promise);
+    api.chatSessionHistory
       .mockResolvedValueOnce({
-        sessionId: "manual-sess",
+        ok: true,
         messages: [{ index: 0, role: "user", content: "manual session" }],
       });
     const applyInitial = vi.fn();
@@ -347,6 +351,35 @@ describe("useSessions (streaming guard)", () => {
 
     expect(applyInitial).not.toHaveBeenCalled();
     expect(result.current.currentSessionId).toBe("manual-sess");
+  });
+
+  it("hydrates the latest persisted session on startup when active loop is empty", async () => {
+    const { api } = makeMockLvisApi({
+      currentSession: "fresh-empty",
+      history: { sessionId: "fresh-empty", messages: [] },
+      sessions: [{ id: "persisted-sess", modifiedAt: new Date().toISOString(), title: "Persisted" }],
+    });
+    api.chatSessionHistory.mockResolvedValueOnce({
+      ok: true,
+      messages: [
+        { index: 0, role: "user", content: "이전 질문" },
+        { index: 1, role: "assistant", content: "이전 답변" },
+      ],
+    });
+    const applyInitial = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessions(api as unknown as LvisApi, applyInitial),
+    );
+
+    await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("persisted-sess"));
+    await waitFor(() => {
+      expect(applyInitial).toHaveBeenCalledWith([
+        { kind: "user", text: "이전 질문" },
+        { kind: "assistant", text: "이전 답변", streaming: false, route: undefined },
+      ]);
+    });
+    expect(result.current.currentSessionId).toBe("persisted-sess");
   });
 });
 

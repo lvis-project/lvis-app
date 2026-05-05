@@ -77,8 +77,10 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
         {streaming
           ? <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
           : null}
-        <span className="font-medium text-foreground/90">작업</span>
-        <span className="opacity-50">{stepCount}단계</span>
+        <span className="font-medium text-foreground/90">
+          {streaming ? "작업 중..." : "작업"}
+        </span>
+        {!streaming && <span className="opacity-50">{stepCount}단계</span>}
         {!streaming && (
           open
             ? <ChevronDown className="h-3 w-3 flex-shrink-0 opacity-50" />
