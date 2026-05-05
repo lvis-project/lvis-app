@@ -49,12 +49,20 @@ const CHAT_OPTIONS: ReadonlyArray<ChatOption> = [
   // we use in the dark default. We render this with the literal blue accent
   // so the card stays visually distinct from the explicit "blue" card below.
   { value: "default", label: "기본", accentVar: "hsl(215 16% 47%)" },
-  // "lg" is an accent overlay: vivid SEND, lilac user bubble, LG red STOP.
-  // It intentionally keeps shell/card/plugin surfaces from the active theme.
+  // "lg" is a self-contained brand identity (warm-grey + lilac + LG red).
+  // Card preview shows the warm-grey background + Grey-7 muted bubble +
+  // lilac user bubble so users can recognize the full LG identity at a
+  // glance, not just the accent. (Other accent-only themes below keep
+  // generic slate surface — that matches their actual runtime behavior.)
   {
     value: "lg",
     label: "LG",
     accentVar: "hsl(271 76% 76%)",
+    surface: {
+      bg: "hsl(40 25% 92%)",       // Grey 6  #F0ECE4
+      text: "hsl(0 0% 15%)",        // Grey 1  #262626
+      bubbleOther: "hsl(44 37% 94%)", // Grey 7  #F6F3EB
+    },
   },
   { value: "purple", label: "퍼플", accentVar: "hsl(262 83% 58%)" },
   { value: "orange", label: "오렌지", accentVar: "hsl(25 95% 53%)" },
@@ -208,7 +216,7 @@ export function AppearanceTab() {
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
           <h3 className="text-sm font-semibold">채팅 테마</h3>
-          <span className="text-[11px] text-muted-foreground">강조색만 변경됩니다</span>
+          <span className="text-[11px] text-muted-foreground">색상과 배경을 함께 선택합니다</span>
         </div>
 
         <div

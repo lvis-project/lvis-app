@@ -3,7 +3,7 @@
  *
  * Three independent axes are managed by ThemeProvider:
  *   1. ThemePreference     — global shell light/dark/high-contrast (`data-theme`)
- *   2. ChatThemePreference — accent color overlay (`data-chat-theme`)
+ *   2. ChatThemePreference — chat visual overlay (`data-chat-theme`)
  *   3. CodeThemePreference — code-block surface scheme (`data-code-theme`)
  *
  * Mirrors the unions in `src/data/settings-store.ts` so the renderer can
@@ -27,7 +27,7 @@ export interface ThemeContextValue {
   preference: ThemePreference;
   /** Concrete shell theme actually applied to <html data-theme>. */
   resolved: ResolvedTheme;
-  /** User-facing chat accent (default/purple/orange/blue). */
+  /** User-facing chat visual theme (default/lg/purple/orange/blue). */
   chatTheme: ChatThemePreference;
   /** User-facing code-surface preference (auto/light/dark). */
   codeTheme: CodeThemePreference;

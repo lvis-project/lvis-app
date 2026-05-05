@@ -109,6 +109,26 @@ const _LG_ACCENT = {
   "--lvis-danger-fg":   _H(0,     0, 100),
 } satisfies Partial<Record<LvisTokenName, string>>;
 
+const _LG_LIGHT_SURFACE = {
+  "--lvis-bg":           _H(40,  25,  92),   // Grey-6 #F0ECE4
+  "--lvis-surface":      _H(44,  37,  94),   // Grey-7 #F6F3EB
+  "--lvis-fg":           _H(0,    0,  15),   // Grey-1 #262626
+  "--lvis-fg-muted":     _H(43,   3,  43),   // Grey-3 #716F6A
+  "--lvis-secondary":    _H(44,  37,  94),
+  "--lvis-secondary-fg": _H(0,    0,  15),
+  "--lvis-border":       _H(40,  10,  78),   // Grey-4 #CBC8C2
+} satisfies Partial<Record<LvisTokenName, string>>;
+
+const _LG_DARK_SURFACE = {
+  "--lvis-bg":           _H(0,    0,  15),   // Grey-1 #262626
+  "--lvis-surface":      _H(0,    0,  18),
+  "--lvis-fg":           _H(44,  37,  94),   // Grey-7 #F6F3EB
+  "--lvis-fg-muted":     _H(40,   5,  60),
+  "--lvis-secondary":    _H(0,    0,  20),
+  "--lvis-secondary-fg": _H(44,  37,  94),
+  "--lvis-border":       _H(0,    0,  28),
+} satisfies Partial<Record<LvisTokenName, string>>;
+
 export function resolvePluginTokens(
   theme: ResolvedTheme,
   chatTheme: ChatThemePreference,
@@ -117,8 +137,11 @@ export function resolvePluginTokens(
   // HC locks primary/ring to yellow; no chat-theme overlay applies.
   if (theme === "high-contrast") return { ..._INVARIANT, ...base };
   switch (chatTheme) {
-    case "lg":
-      return { ..._INVARIANT, ...base, ..._LG_ACCENT };
+    case "lg": {
+      const surface = theme === "dark" ? _LG_DARK_SURFACE : _LG_LIGHT_SURFACE;
+      // surface first, then accent — accent must always win (LG red, vivid purple).
+      return { ..._INVARIANT, ...base, ...surface, ..._LG_ACCENT };
+    }
     case "purple":
       return { ..._INVARIANT, ...base, "--lvis-primary": _H(262, 83, 58), "--lvis-primary-fg": _H(0, 0, 100), "--lvis-ring": _H(263, 70, 50) };
     case "orange":

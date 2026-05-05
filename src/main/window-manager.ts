@@ -70,6 +70,15 @@ function defaultDetachedBounds(viewKey: string): { width: number; height: number
   return { width: 800, height: 600 };
 }
 
+function detachedBoundsForViewKey(viewKey: string): { width: number; height: number } {
+  const saved = loadWindowState().detached.find((d) => d.viewKey === viewKey);
+  const defaults = defaultDetachedBounds(viewKey);
+  return {
+    width: saved?.bounds.width ?? defaults.width,
+    height: saved?.bounds.height ?? defaults.height,
+  };
+}
+
 // Throttle move-event IPC sends: max one per MOVE_THROTTLE_MS.
 const MOVE_THROTTLE_MS = 32; // ~30fps
 
@@ -291,11 +300,14 @@ export class WindowManager {
       } else {
         if (this._detachedShellViewKey !== viewKey) {
           this._detachedShellViewKey = viewKey;
+          const nextBounds = detachedBoundsForViewKey(viewKey);
+          shell.setSize(nextBounds.width, nextBounds.height);
           // Update the entry's viewKey so listChildren() reflects the live viewKey.
           const entry = this._children.get(shell.id);
           if (entry) entry.viewKey = viewKey;
           shell.setTitle(`LVIS — ${viewKeyLabel(viewKey)}`);
           shell.webContents.send("lvis:detached:navigate", { viewKey });
+          this._snapToLeftEdge(shell.id);
         }
         shell.focus();
         return shell;
@@ -308,12 +320,10 @@ export class WindowManager {
     // ready-to-show before it becomes visible, so any saved x/y would be
     // immediately overwritten and would only create a misleading impression
     // that the persisted position matters.
-    const saved = loadWindowState().detached.find((d) => d.viewKey === viewKey);
-
-    const defaults = defaultDetachedBounds(viewKey);
+    const bounds = detachedBoundsForViewKey(viewKey);
     const child = new BrowserWindow({
-      width: saved?.bounds.width ?? defaults.width,
-      height: saved?.bounds.height ?? defaults.height,
+      width: bounds.width,
+      height: bounds.height,
       show: false,
       title: `LVIS — ${viewKeyLabel(viewKey)}`,
       webPreferences: {

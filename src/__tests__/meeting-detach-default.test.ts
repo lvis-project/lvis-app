@@ -16,6 +16,9 @@ vi.mock("node:fs", async (importOriginal) => {
   return {
     ...actual,
     existsSync: (p: string) => p === "/fake/preload.cjs" || actual.existsSync(p),
+    readFileSync: () => { throw new Error("no-state"); },
+    writeFileSync: vi.fn(),
+    renameSync: vi.fn(),
   };
 });
 
