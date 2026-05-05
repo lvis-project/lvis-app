@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 import { KeyRound, Pencil, Star, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
@@ -15,33 +15,10 @@ import { UserMessageEditor } from "./components/UserMessageEditor.js";
 import { ReasoningCard } from "./components/ReasoningCard.js";
 import { ToolGroupCard } from "./components/ToolGroupCard.js";
 import { ChatSearchOverlay } from "./components/ChatSearchOverlay.js";
-import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
-import { Calendar } from "../../components/ui/calendar.js";
-
-/**
- * Today-date badge in the chat scroll header. Click opens a Popover with
- * the LVIS-styled calendar (shadcn/react-day-picker, palette-tuned). UI-only
- * for now — selected date isn't wired to history navigation yet.
- */
-function DateBadge() {
-  const [pickedDate, setPickedDate] = useState<Date | undefined>(undefined);
-  const label = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="rounded-full bg-card border px-3 py-1 text-[11px] text-foreground/70 cursor-pointer hover:bg-muted"
-        >
-          {label}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="center" className="w-auto p-2 shadow-none border border-[#E6E1D6] bg-[#F9F7F3]">
-        <Calendar mode="single" selected={pickedDate} onSelect={setPickedDate} />
-      </PopoverContent>
-    </Popover>
-  );
-}
+import { DayDivider } from "./components/DayDivider.js";
+import { CheckpointDivider } from "./components/CheckpointDivider.js";
+import { SummaryToast } from "./components/SummaryToast.js";
+import { SessionResumeDivider } from "./components/SessionResumeDivider.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
@@ -253,9 +230,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             current type doesn't carry; that's a follow-up. For now the badge
             represents "today" — auto-refreshes to the current locale date
             on render. */}
-        <div className="flex justify-center">
-          <DateBadge />
-        </div>
+        <DayDivider />
         {/* Workflow tools (S1+S2): skill badges + sub-agents + ask-user inline.
             SessionTodoPanel is intentionally NOT here — it sits above the input
             cluster (see below the ScrollArea) so it stays visible regardless of
@@ -402,51 +377,37 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               continue;
             }
 
-            // §457 PR-A: ChatView surfaces a single-line text fallback for
-            // structured kinds (checkpoint, session_resume) so the user does not
-            // lose visibility of rotation events.
+            // §457 PR-A: structured rotation markers — tier-aware visuals
+            // restored from the deleted StackedChatView (issue #547 visual
+            // absorption). CheckpointDivider applies the tier color/icon;
+            // SummaryToast surfaces the rolling summary text when present.
             if (entry.kind === "checkpoint") {
-              const tierLabel = entry.tier === "hard-token"
-                ? "긴급 정리"
-                : entry.tier === "semantic-llm"
-                  ? "주제 전환"
-                  : entry.tier === "soft-time"
-                    ? "이전 세션 정리"
-                    : "자동 정리";
               const revertId = entry.revertSessionId;
               rendered.push(
-                <div
+                <CheckpointDivider
                   key={`cp-${idx}`}
-                  data-testid="checkpoint-fallback"
-                  className="mx-auto flex items-center gap-2 text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
-                >
-                  <span>📌 체크포인트 · {tierLabel} ({entry.removedMessages} messages)</span>
-                  {onRevertCheckpoint && revertId && (
-                    <button
-                      type="button"
-                      data-testid="checkpoint-revert-btn"
-                      onClick={() => void onRevertCheckpoint(revertId)}
-                      aria-label="이 체크포인트 이전 세션으로 되돌아가기"
-                      className="text-[11px] underline-offset-2 hover:underline cursor-pointer"
-                    >
-                      ↩ 여기로 되돌아가기
-                    </button>
-                  )}
-                </div>,
+                  tier={entry.tier}
+                  messageCount={entry.removedMessages}
+                  {...(onRevertCheckpoint && revertId
+                    ? { onRevert: () => onRevertCheckpoint(revertId) }
+                    : {})}
+                />,
               );
+              if (entry.summary) {
+                rendered.push(
+                  <SummaryToast key={`cp-${idx}-summary`} summary={entry.summary} />,
+                );
+              }
               i++;
               continue;
             }
 
             if (entry.kind === "session_resume") {
               rendered.push(
-                <div
+                <SessionResumeDivider
                   key={`sr-${idx}`}
-                  data-testid="session-resume-fallback"
-                  className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50"
-                >
-                  ↩ 이전 대화 이어서 시작 (요약 {entry.preambleChars}자 적용)
-                </div>,
+                  preambleChars={entry.preambleChars}
+                />,
               );
               i++;
               continue;
