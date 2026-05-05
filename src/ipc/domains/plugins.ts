@@ -24,6 +24,7 @@ import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
+import { LVIS_TOKEN_NAMES } from "@lvis/plugin-sdk/ui/tokens";
 const log = createLogger("lvis");
 
 function pluginConfigError(
@@ -107,6 +108,9 @@ export type SafeThemePayload = {
   theme: "light" | "dark" | "high-contrast";
   chatTheme: "default" | "lg" | "purple" | "orange" | "blue";
   codeTheme: "light" | "dark";
+  colorScheme?: "light" | "dark";
+  reducedMotion?: boolean;
+  fonts?: { family: string };
   tokens?: Record<string, string>;
 };
 
@@ -215,19 +219,17 @@ function clearPendingEntryUrl(webContentsId: number): void {
 const ALLOWED_THEMES = new Set(["light", "dark", "high-contrast"]);
 const ALLOWED_CHAT_THEMES = new Set(["default", "lg", "purple", "orange", "blue"]);
 const ALLOWED_CODE_THEMES = new Set(["light", "dark"]);
-// Closed key allowlist — mirrors LVIS_TOKEN_NAMES in lvis-plugin-sdk/src/ui/tokens/index.ts.
-// Update both when adding a token.
-const PLUGIN_TOKEN_NAMES = new Set([
-  "--lvis-bg", "--lvis-surface", "--lvis-fg", "--lvis-fg-muted",
-  "--lvis-primary", "--lvis-primary-fg", "--lvis-secondary", "--lvis-secondary-fg",
-  "--lvis-danger", "--lvis-danger-fg", "--lvis-warning", "--lvis-warning-fg",
-  "--lvis-success", "--lvis-border", "--lvis-ring", "--lvis-radius", "--lvis-radius-sm",
-]);
-// Allowlist-based value guard: only HSL colors, hex colors, and dimension values pass.
+// SDK SoT: token names come from the SDK contract, not duplicated here.
+// When the SDK adds a token, this set auto-expands — no manual sync needed.
+// Cast to Set<string> so .has(k) accepts arbitrary string keys from IPC payloads.
+const PLUGIN_TOKEN_NAMES: Set<string> = new Set(LVIS_TOKEN_NAMES);
+// Allowlist-based value guard: only HSL colors, hex colors, dimension values,
+// font-weight integers, and motion timing values pass.
 // Blocklist patterns (url(), expression(), Unicode-escaped equivalents) would all fail this check.
 // Hex: only valid CSS lengths — 3 (#RGB), 4 (#RGBA), 6 (#RRGGBB), 8 (#RRGGBBAA).
 // 5- and 7-char hex are not valid CSS and would be silently ignored by browsers.
-const _SAFE_TOKEN_VALUE = /^(hsl\(\s*-?\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%\s*\)|#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})|\d+(?:\.\d+)?(?:rem|em|px|%))$/;
+// [1-9]00: font-weight values (100-900). \d+ms: motion timing (150ms, 200ms).
+const _SAFE_TOKEN_VALUE = /^(hsl\(\s*-?\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%\s*\)|#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})|\d+(?:\.\d+)?(?:rem|em|px|%)|[1-9]00|\d+(?:\.\d+)?ms)$/;
 
 async function resolveInstalledManifestPath(pluginId: string): Promise<string | undefined> {
   const pluginPaths = resolvePluginPaths();
@@ -274,6 +276,19 @@ export function validateThemePayload(payload: unknown):
       }
     }
     if (Object.keys(safeTokens).length > 0) safe.tokens = safeTokens;
+  }
+  // fonts.family: allowlist of safe system/web font family names (no injection)
+  if (p.fonts && typeof p.fonts === "object" && !Array.isArray(p.fonts)) {
+    const f = p.fonts as Record<string, unknown>;
+    if (typeof f.family === "string" && /^[\w\s,"'-]+$/.test(f.family) && f.family.length <= 200) {
+      safe.fonts = { family: f.family };
+    }
+  }
+  if (typeof p.colorScheme === "string" && (p.colorScheme === "light" || p.colorScheme === "dark")) {
+    safe.colorScheme = p.colorScheme;
+  }
+  if (typeof p.reducedMotion === "boolean") {
+    safe.reducedMotion = p.reducedMotion;
   }
   return { ok: true, safe };
 }
