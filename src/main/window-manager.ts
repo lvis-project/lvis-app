@@ -193,6 +193,12 @@ export class WindowManager {
    */
   private _detachedShell: BrowserWindow | null = null;
   private _detachedShellViewKey: string | null = null;
+  /**
+   * IDs of locked children that were hidden BY maximize (not by the user).
+   * Used in the unmaximize handler to avoid accidentally restoring windows
+   * that the user intentionally minimised before the main was maximised.
+   */
+  private _hiddenByMaximize = new Set<number>();
   private _lastMainMoveAt = 0;
   private _mainMoveTimer: ReturnType<typeof setTimeout> | null = null;
   private _preloadPath: string;
@@ -212,10 +218,15 @@ export class WindowManager {
 
     win.on("maximize", () => {
       // Hide locked side-panel children (they cannot follow a maximised window).
+      // Track which IDs we hide so unmaximize only restores those, not windows
+      // the user intentionally minimised before maximize happened.
       // Un-snap other snapped children so they are not buried under the maximised main.
-      for (const [, entry] of this._children) {
+      for (const [id, entry] of this._children) {
         if (entry.locked) {
-          if (!entry.window.isDestroyed()) entry.window.hide();
+          if (!entry.window.isDestroyed()) {
+            entry.window.hide();
+            this._hiddenByMaximize.add(id);
+          }
         } else if (entry.snappedTo !== undefined) {
           this._unsnap(entry);
         }
@@ -223,11 +234,16 @@ export class WindowManager {
     });
 
     win.on("unmaximize", () => {
-      // Re-show and re-snap locked side-panel children after the main window is restored.
+      // Re-show and re-snap only locked children that WE hid (not user-minimised ones).
       // Snap before show() to avoid flicker from stale pre-maximize coordinates
       // (mirrors the ordering in the ready-to-show handler).
       for (const [id, entry] of this._children) {
-        if (entry.locked && !entry.window.isDestroyed() && !entry.window.isVisible()) {
+        if (
+          entry.locked &&
+          !entry.window.isDestroyed() &&
+          this._hiddenByMaximize.has(id)
+        ) {
+          this._hiddenByMaximize.delete(id);
           this._snapToLeftEdge(id);
           entry.window.show();
         }
@@ -490,22 +506,33 @@ export class WindowManager {
     );
 
     // Find the display that will host the child when placed on the right.
+    // Must check vertical overlap (same as leftDisplay logic) so that vertically
+    // stacked monitors sharing the same X range don't get picked incorrectly.
     const rightX = mainBounds.x + mainBounds.width;
     const rightDisplay =
       allDisplays.find(
-        (d) => rightX >= d.bounds.x && rightX < d.bounds.x + d.bounds.width
+        (d) =>
+          rightX >= d.bounds.x &&
+          rightX < d.bounds.x + d.bounds.width &&
+          mainBounds.y < d.bounds.y + d.bounds.height &&
+          mainBounds.y + mainBounds.height > d.bounds.y
       ) ?? mainDisplay;
 
     const hasSpaceOnLeft = leftDisplay !== undefined;
-    // Clamp right-side X so the panel never extends beyond the right edge of
-    // its host display (happens when the main window is already flush-right).
-    const clampedRightX = Math.min(
-      rightX,
-      rightDisplay.bounds.x + rightDisplay.bounds.width - childBounds.width
+    // Clamp right-side X: upper bound prevents overflow beyond the display's right
+    // edge; lower bound prevents underflow when childWidth > displayWidth.
+    const clampedRightX = Math.max(
+      rightDisplay.bounds.x,
+      Math.min(rightX, rightDisplay.bounds.x + rightDisplay.bounds.width - childBounds.width)
     );
     const x = hasSpaceOnLeft ? leftX : clampedRightX;
     const snapEdge: SnapEdge = hasSpaceOnLeft ? "w" : "e";
-    const snapDeltaX = hasSpaceOnLeft ? -childBounds.width : mainBounds.width;
+    // "w" edge: snappedPosition computes x = main.x + dx  → dx = -childWidth
+    // "e" edge: snappedPosition computes x = main.x + main.width + dx
+    //           dx = 0 keeps child flush against main's right edge on every follow-move.
+    //           clampedRightX already handles the initial off-screen case via setPosition(x,…)
+    //           below; subsequent follow-moves re-clamp via _followMainForSnapped.
+    const snapDeltaX = hasSpaceOnLeft ? -childBounds.width : 0;
 
     // Clamp Y against the display that will actually host the child.
     const hostDisplay = hasSpaceOnLeft ? leftDisplay! : rightDisplay;
@@ -524,6 +551,9 @@ export class WindowManager {
     entry.locked = true;
 
     // Prevent the user from independently dragging the panel away.
+    // Note: setMovable(false) is enforced by Electron on macOS and Windows.
+    // On Linux it is advisory only — the compositor may still allow dragging.
+    // The locked flag and _onChildMove early-return handle that gracefully.
     entry.window.setMovable(false);
   }
 
@@ -579,6 +609,7 @@ export class WindowManager {
   private _followMainForSnapped(main: BrowserWindow): void {
     if (main.isDestroyed()) return;
     const mainBounds = main.getBounds();
+    const allDisplays = screen.getAllDisplays();
 
     for (const [, entry] of this._children) {
       if (entry.snappedTo === undefined || entry.window.isDestroyed()) continue;
@@ -587,7 +618,23 @@ export class WindowManager {
       const dy = entry.snapDeltaY ?? 0;
       const childBounds = entry.window.getBounds();
       const pos = snappedPosition(mainBounds, childBounds, edge, dx, dy);
-      entry.window.setPosition(pos.x, pos.y);
+
+      // Re-clamp Y on every follow-move so the child stays on-screen when
+      // the main window is dragged toward a short or vertically-stacked display.
+      const hostDisplay =
+        allDisplays.find(
+          (d) =>
+            pos.x >= d.bounds.x &&
+            pos.x < d.bounds.x + d.bounds.width &&
+            mainBounds.y < d.bounds.y + d.bounds.height &&
+            mainBounds.y + mainBounds.height > d.bounds.y
+        ) ?? screen.getDisplayNearestPoint({ x: pos.x, y: pos.y });
+      const clampedY = Math.max(
+        hostDisplay.bounds.y,
+        Math.min(pos.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height)
+      );
+
+      entry.window.setPosition(pos.x, clampedY);
     }
   }
 

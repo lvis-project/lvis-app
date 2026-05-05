@@ -67,7 +67,7 @@ type MockWindow = ReturnType<typeof makeMockWin>;
 // We define a mock BrowserWindow class here so that openDetachedTab() gets
 // a fully functional spy-equipped instance when it calls `new BrowserWindow()`.
 
-const { MockBrowserWindow, bwStore, fromIdMock } = vi.hoisted(() => {
+const { MockBrowserWindow, bwStore } = vi.hoisted(() => {
   // Instances created by `new BrowserWindow()` are stored here so that
   // BrowserWindow.fromId() and test helpers can retrieve them.
   const bwStore = new Map<number, MockWindow>();
@@ -121,9 +121,7 @@ const { MockBrowserWindow, bwStore, fromIdMock } = vi.hoisted(() => {
     static fromWebContents = vi.fn(() => null);
   }
 
-  const fromIdMock = vi.fn((id: number) => MockBrowserWindow.fromId(id));
-
-  return { MockBrowserWindow, bwStore, fromIdMock };
+  return { MockBrowserWindow, bwStore };
 });
 
 // ── Electron + fs mocks ───────────────────────────────────────────────────
@@ -235,6 +233,10 @@ describe("WindowManager — magnetic snap behaviors", () => {
       const child = makeMockWin({ id: 103, visible: false });
       injectChild(wm, child, { locked: true, snappedTo: undefined });
 
+      // Emit maximize first so the child is tracked in _hiddenByMaximize;
+      // without this the unmaximize handler skips children it didn't hide.
+      mainWin.emit("maximize");
+
       const callOrder: string[] = [];
       (child.setPosition as ReturnType<typeof vi.fn>).mockImplementation(() => {
         callOrder.push("setPosition");
@@ -306,7 +308,6 @@ describe("WindowManager — magnetic snap behaviors", () => {
 
   describe("ready-to-show while main is maximized", () => {
     it("marks child locked and keeps it hidden when main is maximized at open time", () => {
-      // Replace mainWin with a maximized version.
       const maximizedMain = makeMockWin({
         id: 300,
         bounds: { x: 0, y: 0, width: 1920, height: 1080 },
@@ -320,27 +321,130 @@ describe("WindowManager — magnetic snap behaviors", () => {
       });
       deferWm.registerMainWindow(maximizedMain as never);
 
-      // openDetachedTab() calls `new BrowserWindow()` — MockBrowserWindow is
-      // our constructor mock; the created instance is stored in bwStore.
       const bwSizeBefore = bwStore.size;
       deferWm.openDetachedTab("plugin:agent-hub:panel");
 
-      // Retrieve the child window created by openDetachedTab().
       expect(bwStore.size).toBeGreaterThan(bwSizeBefore);
       const childId = [...bwStore.keys()].find(
         (id) => id !== maximizedMain.id && id !== mainWin.id
       )!;
       const child = bwStore.get(childId)!;
 
-      // Fire the real ready-to-show handler registered by openDetachedTab().
       (child as unknown as { emit: (e: string) => void }).emit("ready-to-show");
 
-      // The child must stay hidden — show() must NOT have been called.
       expect((child as unknown as MockWindow).show).not.toHaveBeenCalled();
-
-      // The entry must be locked so unmaximize can re-snap it later.
       const entry = wmChildren(deferWm).get(childId);
       expect(entry?.locked).toBe(true);
+    });
+  });
+
+  // ── 5. setMovable — locked panels cannot be dragged ─────────────────────
+
+  describe("setMovable", () => {
+    it("calls setMovable(false) when _snapToLeftEdge locks the child", () => {
+      (wm as unknown as { _snapToLeftEdge: (id: number) => void })._snapToLeftEdge =
+        (wm as unknown as { _snapToLeftEdge: (id: number) => void })._snapToLeftEdge;
+
+      const child = makeMockWin({ id: 150, bounds: { x: 0, y: 0, width: 400, height: 800 } });
+      injectChild(wm, child, { locked: false, snappedTo: undefined });
+
+      (wm as unknown as { _snapToLeftEdge: (id: number) => void })._snapToLeftEdge(child.id);
+
+      expect(child.setMovable).toHaveBeenCalledWith(false);
+    });
+
+    it("calls setMovable(true) when _unsnap releases the child", () => {
+      const child = makeMockWin({ id: 151, visible: true });
+      const entry = { window: child, viewKey: "plugin:test:panel", locked: true, snappedTo: mainWin.id, snapEdge: "w" };
+      wmChildren(wm).set(child.id, entry as never);
+
+      (wm as unknown as { _unsnap: (e: unknown) => void })._unsnap(entry);
+
+      expect(child.setMovable).toHaveBeenCalledWith(true);
+      expect(entry.locked).toBe(false);
+    });
+  });
+
+  // ── 6. _followMainForSnapped — right-side child follows correctly ─────────
+
+  describe("_followMainForSnapped after right-side snap", () => {
+    it("places child flush against main right edge (dx=0) after main moves", () => {
+      // Main starts at x=400, moves to x=600.
+      const movingMain = makeMockWin({
+        id: 400,
+        bounds: { x: 600, y: 0, width: 1200, height: 1080 },
+      });
+      bwStore.set(movingMain.id, movingMain);
+
+      (screen.getAllDisplays as ReturnType<typeof vi.fn>).mockReturnValue([
+        { bounds: { x: 0, y: 0, width: 1920, height: 1080 } },
+      ]);
+      (screen.getDisplayNearestPoint as ReturnType<typeof vi.fn>).mockReturnValue({
+        bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      });
+
+      const followWm = new WindowManager({ preloadPath: "/fake/preload.cjs", distRoot: "/fake/dist" });
+      followWm.registerMainWindow(movingMain as never);
+
+      const child = makeMockWin({ id: 401, bounds: { x: 0, y: 0, width: 400, height: 800 } });
+      // Inject as a right-side ("e") snapped child with snapDeltaX=0 (flush).
+      wmChildren(followWm).set(child.id, {
+        window: child,
+        viewKey: "plugin:test:panel",
+        locked: true,
+        snappedTo: movingMain.id,
+        snapEdge: "e",
+        snapDeltaX: 0,
+        snapDeltaY: 0,
+      } as never);
+
+      (followWm as unknown as { _followMainForSnapped: (w: unknown) => void })
+        ._followMainForSnapped(movingMain as never);
+
+      expect(child.setPosition).toHaveBeenCalledOnce();
+      const [x] = (child.setPosition as ReturnType<typeof vi.fn>).mock.calls[0] as [number, number];
+      // Child left edge must equal main right edge: 600 + 1200 = 1800.
+      expect(x).toBe(600 + 1200);
+    });
+  });
+
+  // ── 7. maximize / unmaximize distinguishes user-minimised windows ─────────
+
+  describe("_hiddenByMaximize tracking", () => {
+    it("does not restore a child that was already hidden before maximize", () => {
+      // Child is hidden (user minimised it), but NOT tracked in _hiddenByMaximize.
+      const child = makeMockWin({ id: 160, visible: false });
+      injectChild(wm, child, { locked: true, snappedTo: mainWin.id, snapEdge: "w" });
+
+      // Emit maximize — because child is already hidden, hide() is called,
+      // but it IS added to _hiddenByMaximize.
+      mainWin.emit("maximize");
+
+      // Remove from the set to simulate "hidden before maximize" state.
+      (wm as unknown as { _hiddenByMaximize: Set<number> })._hiddenByMaximize.delete(child.id);
+
+      // Emit unmaximize — child NOT in _hiddenByMaximize so must NOT be restored.
+      (child.show as ReturnType<typeof vi.fn>).mockClear();
+      mainWin.emit("unmaximize");
+
+      expect(child.show).not.toHaveBeenCalled();
+    });
+
+    it("restores only children that maximize hid", () => {
+      const childA = makeMockWin({ id: 161, visible: true });
+      const childB = makeMockWin({ id: 162, visible: true });
+      injectChild(wm, childA, { locked: true, snappedTo: mainWin.id, snapEdge: "w" });
+      injectChild(wm, childB, { locked: true, snappedTo: mainWin.id, snapEdge: "w" });
+
+      mainWin.emit("maximize");
+
+      // Manually remove childB from set (simulates it had been hidden independently).
+      (wm as unknown as { _hiddenByMaximize: Set<number> })._hiddenByMaximize.delete(childB.id);
+
+      mainWin.emit("unmaximize");
+
+      expect(childA.show).toHaveBeenCalled();
+      expect(childB.show).not.toHaveBeenCalled();
     });
   });
 });
