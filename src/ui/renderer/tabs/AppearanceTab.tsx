@@ -216,7 +216,7 @@ export function AppearanceTab() {
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
           <h3 className="text-sm font-semibold">채팅 테마</h3>
-          <span className="text-[11px] text-muted-foreground">강조색만 변경됩니다</span>
+          <span className="text-[11px] text-muted-foreground">색상과 배경을 함께 선택합니다</span>
         </div>
 
         <div

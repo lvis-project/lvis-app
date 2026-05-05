@@ -16,6 +16,9 @@ vi.mock("node:fs", async (importOriginal) => {
   return {
     ...actual,
     existsSync: (p: string) => p === "/fake/preload.cjs" || actual.existsSync(p),
+    readFileSync: () => { throw new Error("no-state"); },
+    writeFileSync: vi.fn(),
+    renameSync: vi.fn(),
   };
 });
 
@@ -110,6 +113,13 @@ describe("meeting:detach-default — WindowManager.openDetachedTab", () => {
 
     expect(win).toBeDefined();
     expect(mockWindowInstances).toHaveLength(1);
+  });
+
+  it("uses a larger default detached canvas for Agent Hub", () => {
+    wm.openDetachedTab("plugin:agent-hub:agent-hub-panel");
+
+    expect(mockWindowInstances[0].opts["width"]).toBe(960);
+    expect(mockWindowInstances[0].opts["height"]).toBe(780);
   });
 
   it("enables webviewTag for plugin detached windows", () => {
