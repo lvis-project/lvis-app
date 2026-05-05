@@ -21,6 +21,14 @@ import { useStarred } from "../../../src/ui/renderer/hooks/use-starred.js";
 import type { LvisApi } from "../../../src/ui/renderer/types.js";
 import type { ChatEntry } from "../../../src/lib/chat-stream-state.js";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 describe("useChatState", () => {
   it("subscribes to onChatStream on mount", () => {
     const { api } = makeMockLvisApi();
@@ -302,6 +310,43 @@ describe("useSessions (streaming guard)", () => {
       { kind: "assistant", text: "최종 답변", streaming: false, route: undefined },
     ]);
     expect(result.current.currentSessionId).toBe("other-sess");
+  });
+
+  it("handleLoadSession cancels a late startup hydrate before it can overwrite the loaded session", async () => {
+    const { api } = makeMockLvisApi();
+    const startupHistory = deferred<{ sessionId: string; messages: unknown[] }>();
+    api.chatGetHistory.mockReset();
+    api.chatGetHistory
+      .mockReturnValueOnce(startupHistory.promise)
+      .mockResolvedValueOnce({
+        sessionId: "manual-sess",
+        messages: [{ index: 0, role: "user", content: "manual session" }],
+      });
+    const applyInitial = vi.fn();
+    const applyLoaded = vi.fn();
+    const { result } = renderHook(() =>
+      useSessions(api as unknown as LvisApi, applyInitial),
+    );
+
+    await waitFor(() => expect(api.chatGetHistory).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      await result.current.handleLoadSession("manual-sess", false, applyLoaded);
+    });
+
+    expect(applyLoaded).toHaveBeenCalledWith([{ kind: "user", text: "manual session" }]);
+    expect(result.current.currentSessionId).toBe("manual-sess");
+
+    await act(async () => {
+      startupHistory.resolve({
+        sessionId: "startup-sess",
+        messages: [{ index: 0, role: "user", content: "stale startup" }],
+      });
+      await startupHistory.promise;
+    });
+
+    expect(applyInitial).not.toHaveBeenCalled();
+    expect(result.current.currentSessionId).toBe("manual-sess");
   });
 });
 

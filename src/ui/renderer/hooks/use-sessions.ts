@@ -71,10 +71,13 @@ export function useSessions(
       // would race. The "기록" button is also disabled during streaming, but
       // keep this guard here too for programmatic callers (e.g. starred jump).
       if (streaming) return;
+      const token = ++sessionReadTokenRef.current;
       try {
         const res = await api.chatSessionResume(sessionId);
+        if (token !== sessionReadTokenRef.current) return;
         if (!res?.ok) return;
         const h = await api.chatGetHistory();
+        if (token !== sessionReadTokenRef.current) return;
         applyLoadedSession(historyToEntries(h.messages));
         setCurrentSessionId(h.sessionId);
       } catch { /* ignore */ }
