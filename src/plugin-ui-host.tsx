@@ -13,9 +13,10 @@
  * `did-attach` event. The `did-attach` event fires when the webview is
  * attached to the DOM — before any content loads — and carries webContentsId
  * directly on the event object (no getWebContentsId() call needed). After
- * registration succeeds, `src` is set on the webview so the shell loads only
- * once the binding is in place. Main resolves get-entry-url as a synchronous
- * lookup — no wait queue, no retry, no timeout (#447).
+ * registration succeeds. The shell URL is still mounted from the first attach
+ * because Electron only runs sandboxed <webview> preload at the initial guest
+ * attach; main's pending get-entry-url wait queue absorbs the small race until
+ * the did-attach registration lands.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.js";
