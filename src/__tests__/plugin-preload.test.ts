@@ -168,6 +168,42 @@ describe("plugin-preload bridge", () => {
     await expect(bridge.getEntryUrl()).rejects.toThrow(/not-registered/);
   });
 
+  it("getTheme invokes lvis:plugin:get-theme and unwraps the cached payload", async () => {
+    const bridge = exposed.get("lvisPlugin") as { getTheme: () => Promise<unknown> };
+    const payload = {
+      theme: "light",
+      chatTheme: "lg",
+      codeTheme: "dark",
+      tokens: { "--lvis-bg": "hsl(0,0%,100%)", "--lvis-fg": "hsl(222,47%,11%)" },
+    };
+    mockInvoke.mockResolvedValueOnce({ ok: true, theme: payload });
+
+    const theme = await bridge.getTheme();
+
+    expect(mockInvoke).toHaveBeenCalledWith("lvis:plugin:get-theme");
+    expect(theme).toEqual(payload);
+  });
+
+  it("getTheme returns null on cold-boot when host has not broadcast yet", async () => {
+    // Pre-paint must tolerate `theme: null` so the shell falls back to
+    // SDK :root defaults rather than blocking the entry import.
+    const bridge = exposed.get("lvisPlugin") as { getTheme: () => Promise<unknown> };
+    mockInvoke.mockResolvedValueOnce({ ok: true, theme: null });
+
+    const theme = await bridge.getTheme();
+    expect(theme).toBeNull();
+  });
+
+  it("getTheme returns null when main rejects (unauthorized frame) — non-fatal for shell", async () => {
+    // Per `getTheme` JSDoc: a misconfigured plugin frame paints with
+    // defaults rather than throwing. Validates the swallow-and-null path.
+    const bridge = exposed.get("lvisPlugin") as { getTheme: () => Promise<unknown> };
+    mockInvoke.mockResolvedValueOnce({ ok: false, error: "unauthorized-frame" });
+
+    const theme = await bridge.getTheme();
+    expect(theme).toBeNull();
+  });
+
   it("onEvent registers listener on lvis:plugin:event IPC channel and returns unsubscribe", () => {
     const bridge = exposed.get("lvisPlugin") as {
       onEvent: (type: string, handler: (data: unknown) => void) => () => void;
