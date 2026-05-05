@@ -473,7 +473,6 @@ describe("PluginRuntime.disable", () => {
             registerKeywords: () => {},
             emitEvent: () => {},
             onEvent: () => () => {},
-            addTask: () => {},
             saveMemory: async () => {},
             getSecret: () => null,
             callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> =>
@@ -522,7 +521,6 @@ describe("PluginRuntime.disable", () => {
           registerKeywords: () => {},
           emitEvent: () => {},
           onEvent: () => () => {},
-          addTask: () => {},
           saveMemory: async () => {},
           getSecret: () => null,
           callTool: async <T = unknown>(toolName: string, payload?: unknown): Promise<T> =>
@@ -799,7 +797,6 @@ describe("PluginRuntime.disable", () => {
         registerKeywords: () => {},
         emitEvent: () => {},
         onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
-        addTask: () => {},
         getSecret: () => null,
       } as unknown as import("../types.js").PluginHostApi),
     });
@@ -876,7 +873,6 @@ describe("PluginRuntime.disable", () => {
         registerKeywords: () => {},
         emitEvent: () => {},
         onEvent: (type) => runtime.assertPluginEventAccess(pluginId, type),
-        addTask: () => {},
         getSecret: () => null,
       } as unknown as import("../types.js").PluginHostApi),
     });

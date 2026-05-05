@@ -55,7 +55,6 @@ describe("wireRoutineCoordinator — schedule cron", () => {
     const pm = new FakePowerMonitor();
     const wired = wireRoutineCoordinator({
       routineEngine: { runRoutine } as any,
-      taskService: { getPendingByPriority: () => [] } as any,
       pluginRuntime: {
         findPluginIdByCapability: vi.fn(() => undefined),
         getPluginManifest: vi.fn(() => undefined),
@@ -111,7 +110,6 @@ describe("wireRoutineCoordinator — idle-driven wakeup/shutdown", () => {
     const runRoutine = vi.fn();
     const wired = wireRoutineCoordinator({
       routineEngine: { runRoutine } as any,
-      taskService: {} as any,
       pluginRuntime: {} as any,
       settingsService: { get: () => makeSettings({ enableScheduleRoutine: false }) } as any,
       powerMonitor: undefined,
