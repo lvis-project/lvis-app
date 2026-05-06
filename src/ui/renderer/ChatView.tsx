@@ -109,69 +109,127 @@ function HistoricalSessionMarker({ title, sessionId }: { title: string; sessionI
 }
 
 function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession["entries"] }) {
-  return (
-    <>
-      {entries.map((entry, idx) => {
-        if (entry.kind === "user") {
-          return (
-            <div
-              key={idx}
-              data-testid="historical-user-message"
-              className="ml-auto w-fit max-w-[85%] rounded-md bg-message-user/70 px-3.5 py-2 text-sm text-message-user-foreground/90"
-            >
-              <div className="whitespace-pre-wrap">{entry.text}</div>
-            </div>
-          );
+  const renderEntry = (entry: ContinuousHistorySession["entries"][number], idx: number, embedded = false) => {
+    if (entry.kind === "assistant") {
+      return (
+        <AssistantCard
+          key={idx}
+          entry={{ ...entry, streaming: false }}
+          highlightQuery=""
+          isStarred={false}
+          isFinal={true}
+        />
+      );
+    }
+    if (entry.kind === "reasoning") {
+      return <ReasoningCard key={idx} entry={{ ...entry, streaming: false }} embedded={embedded} />;
+    }
+    if (entry.kind === "tool_group") {
+      return <ToolGroupCard key={entry.groupId || idx} group={entry} embedded={embedded} />;
+    }
+    return null;
+  };
+
+  const rendered: React.ReactNode[] = [];
+  let i = 0;
+  while (i < entries.length) {
+    const entry = entries[i];
+    if (!entry) {
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "assistant" || entry.kind === "reasoning" || entry.kind === "tool_group") {
+      const segmentStart = i;
+      const segment: Array<{ entry: typeof entry; idx: number }> = [];
+      while (i < entries.length) {
+        const next = entries[i];
+        if (!next || (next.kind !== "assistant" && next.kind !== "reasoning" && next.kind !== "tool_group")) break;
+        segment.push({ entry: next as typeof entry, idx: i });
+        i++;
+      }
+      let finalAssistantOffset = -1;
+      for (let j = segment.length - 1; j >= 0; j--) {
+        if (segment[j]?.entry.kind === "assistant") {
+          finalAssistantOffset = j;
+          break;
         }
-        if (entry.kind === "assistant") {
-          return (
-            <AssistantCard
-              key={idx}
-              entry={{ ...entry, streaming: false }}
-              highlightQuery=""
-              isStarred={false}
-              isFinal={true}
-            />
-          );
-        }
-        if (entry.kind === "reasoning") {
-          return <ReasoningCard key={idx} entry={{ ...entry, streaming: false }} />;
-        }
-        if (entry.kind === "tool_group") {
-          return <ToolGroupCard key={entry.groupId || idx} group={entry} />;
-        }
-        if (entry.kind === "system") {
-          return <div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>;
-        }
-        if (entry.kind === "checkpoint") {
-          return (
-            <Fragment key={idx}>
-              <CheckpointDivider tier={entry.tier} messageCount={entry.removedMessages} />
-              {entry.summary ? <SummaryToast summary={entry.summary} /> : null}
-            </Fragment>
-          );
-        }
-        if (entry.kind === "session_resume") {
-          return <SessionResumeDivider key={idx} preambleChars={entry.preambleChars} />;
-        }
-        if (entry.kind === "imported_trigger") {
-          return (
-            <ImportedTriggerCard
-              key={`trigger:${entry.sessionId}`}
-              source={entry.source}
-              prompt={entry.prompt}
-              summary={entry.summary}
-              toolCallCount={entry.toolCallCount}
-              importedAt={entry.importedAt}
-              response={entry.response}
-              responseStreaming={false}
-            />
-          );
-        }
-        return null;
-      })}
-    </>
-  );
+      }
+      const workItems = finalAssistantOffset >= 0
+        ? segment.slice(0, finalAssistantOffset)
+        : segment;
+      if (workItems.length > 0) {
+        rendered.push(
+          <WorkGroup key={`hist-wg-${segmentStart}`} stepCount={workItems.length} streaming={false}>
+            {workItems.map((item) => renderEntry(item.entry, item.idx, true))}
+          </WorkGroup>,
+        );
+      }
+      if (finalAssistantOffset >= 0) {
+        const finalItem = segment[finalAssistantOffset];
+        if (finalItem) rendered.push(renderEntry(finalItem.entry, finalItem.idx));
+      }
+      continue;
+    }
+
+    if (entry.kind === "user") {
+      rendered.push(
+        <div
+          key={i}
+          data-testid="historical-user-message"
+          className="ml-auto w-fit max-w-[85%] rounded-md bg-message-user/70 px-3.5 py-2 text-sm text-message-user-foreground/90"
+        >
+          <div className="whitespace-pre-wrap">{entry.text}</div>
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "system") {
+      rendered.push(<div key={i} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>);
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "checkpoint") {
+      rendered.push(
+        <Fragment key={i}>
+          <CheckpointDivider tier={entry.tier} messageCount={entry.removedMessages} />
+          {entry.summary ? <SummaryToast summary={entry.summary} /> : null}
+        </Fragment>,
+      );
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "session_resume") {
+      rendered.push(<SessionResumeDivider key={i} preambleChars={entry.preambleChars} />);
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "imported_trigger") {
+      rendered.push(
+        <ImportedTriggerCard
+          key={`trigger:${entry.sessionId}`}
+          source={entry.source}
+          prompt={entry.prompt}
+          summary={entry.summary}
+          toolCallCount={entry.toolCallCount}
+          importedAt={entry.importedAt}
+          response={entry.response}
+          responseStreaming={false}
+        />,
+      );
+      i++;
+      continue;
+    }
+
+    i++;
+  }
+
+  return <>{rendered}</>;
 }
 
 export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onRevertCheckpoint }: ChatViewProps) {
