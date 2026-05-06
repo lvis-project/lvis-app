@@ -463,13 +463,14 @@ export class MemoryManager {
       });
   }
 
-  listSessionsPage(options: { limit?: number; before?: Date; beforeId?: string } = {}): SessionListEntry[] {
+  listSessionsPage(options: { limit?: number; before?: Date; beforeId?: string; after?: Date } = {}): SessionListEntry[] {
     if (!existsSync(this.sessionsDir)) return [];
     const limit = Number.isFinite(options.limit)
       ? Math.max(0, Math.floor(options.limit ?? 0))
       : Number.POSITIVE_INFINITY;
     const beforeTime = options.before?.getTime();
     const beforeId = options.beforeId;
+    const afterTime = options.after?.getTime();
     return readdirSync(this.sessionsDir)
       .filter((f) => f.endsWith(".jsonl"))
       .map((f) => {
@@ -481,8 +482,9 @@ export class MemoryManager {
         };
       })
       .filter((session) => {
-        if (beforeTime === undefined || Number.isNaN(beforeTime)) return true;
         const t = session.modifiedAt.getTime();
+        if (afterTime !== undefined && !Number.isNaN(afterTime) && t < afterTime) return false;
+        if (beforeTime === undefined || Number.isNaN(beforeTime)) return true;
         if (t < beforeTime) return true;
         return t === beforeTime && beforeId !== undefined && session.id < beforeId;
       })

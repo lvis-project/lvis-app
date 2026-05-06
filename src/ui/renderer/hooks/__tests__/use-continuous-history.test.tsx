@@ -1,6 +1,6 @@
 import "../../../../../test/renderer/setup.js";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LvisApi } from "../../types.js";
 import { useContinuousHistory } from "../use-continuous-history.js";
 
@@ -11,11 +11,13 @@ function makeApi(customSessions?: Array<{ id: string; modifiedAt: string; title:
     { id: "old-1", modifiedAt: "2026-05-04T08:00:00.000Z", title: "그제" },
   ];
   return {
-    chatSessions: vi.fn(async (opts?: { limit?: number; before?: string; beforeId?: string }) => {
+    chatSessions: vi.fn(async (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) => {
       const beforeTime = opts?.before ? Date.parse(opts.before) : Number.NaN;
+      const afterTime = opts?.after ? Date.parse(opts.after) : Number.NaN;
       const filtered = sessions.filter((session) => {
-        if (Number.isNaN(beforeTime)) return true;
         const sessionTime = Date.parse(session.modifiedAt);
+        if (!Number.isNaN(afterTime) && sessionTime < afterTime) return false;
+        if (Number.isNaN(beforeTime)) return true;
         return sessionTime < beforeTime || (sessionTime === beforeTime && Boolean(opts?.beforeId) && session.id < opts.beforeId);
       });
       return { current: "current", sessions: filtered.slice(0, opts?.limit ?? filtered.length) };
@@ -33,16 +35,29 @@ function makeApi(customSessions?: Array<{ id: string; modifiedAt: string; title:
 }
 
 describe("useContinuousHistory", () => {
-  it("loads persisted sessions above the active session and excludes current", async () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-06T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("initially hydrates only the previous KST day and excludes current", async () => {
     const api = makeApi();
     const { result } = renderHook(() => useContinuousHistory(api, "current", true));
 
     await waitFor(() => {
-      expect(result.current.historicalSessions.map((session) => session.id)).toEqual(["old-1", "old-2"]);
+      expect(result.current.historicalSessions.map((session) => session.id)).toEqual(["old-2"]);
     });
 
-    expect(api.chatSessions).toHaveBeenCalledWith(expect.objectContaining({ limit: 20 }));
-    expect(result.current.historicalSessions[1]?.entries[0]).toMatchObject({
+    expect(api.chatSessions).toHaveBeenCalledWith({
+      limit: 20,
+      before: "2026-05-05T15:00:00.000Z",
+      after: "2026-05-04T15:00:00.000Z",
+    });
+    expect(result.current.historicalSessions[0]?.entries[0]).toMatchObject({
       kind: "session_resume",
       preambleChars: 17,
     });
@@ -63,40 +78,62 @@ describe("useContinuousHistory", () => {
     );
 
     await waitFor(() => {
-      expect(result.current.historicalSessions.map((session) => session.id)).toEqual(["old-1", "old-2"]);
+      expect(result.current.historicalSessions.map((session) => session.id)).toEqual(["old-2"]);
     });
 
     expect(api.chatSessions).toHaveBeenCalledWith({
       limit: 20,
-      before: "2026-05-06T08:00:00.000Z",
-      beforeId: "current",
+      before: "2026-05-05T15:00:00.000Z",
+      after: "2026-05-04T15:00:00.000Z",
     });
   });
 
-  it("uses the oldest loaded session timestamp as the next cursor", async () => {
-    const manySessions = Array.from({ length: 21 }, (_, idx) => {
-      const date = new Date(Date.UTC(2026, 4, 6 - idx, 8, 0, 0));
-      return {
-        id: idx === 0 ? "current" : `old-${idx}`,
-        modifiedAt: date.toISOString(),
-        title: idx === 0 ? "현재" : `이전 ${idx}`,
-      };
-    });
-    const api = makeApi(manySessions);
+  it("loads the previous calendar day when loadMore reaches the top again", async () => {
+    const api = makeApi();
     const { result } = renderHook(() => useContinuousHistory(api, "current", true));
 
     await waitFor(() => {
-      expect(result.current.historicalSessions.length).toBe(19);
+      expect(result.current.historicalSessions.map((session) => session.id)).toEqual(["old-2"]);
     });
 
     await act(async () => {
       await result.current.loadMore();
     });
 
+    expect(result.current.historicalSessions.map((session) => session.id)).toEqual(["old-1", "old-2"]);
     expect(api.chatSessions).toHaveBeenLastCalledWith({
       limit: 20,
-      before: "2026-04-17T08:00:00.000Z",
-      beforeId: "old-19",
+      before: "2026-05-04T15:00:00.000Z",
+      after: "2026-05-03T15:00:00.000Z",
+    });
+  });
+
+  it("uses the oldest loaded session as a within-day cursor before advancing days", async () => {
+    const manySessions = [
+      { id: "current", modifiedAt: "2026-05-06T08:00:00.000Z", title: "현재" },
+      ...Array.from({ length: 21 }, (_, idx) => ({
+        id: `yesterday-${idx}`,
+        modifiedAt: new Date(Date.UTC(2026, 4, 5, 8, idx, 0)).toISOString(),
+        title: `어제 ${idx}`,
+      })).sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
+    ];
+    const api = makeApi(manySessions);
+    const { result } = renderHook(() => useContinuousHistory(api, "current", true));
+
+    await waitFor(() => {
+      expect(result.current.historicalSessions.length).toBe(20);
+    });
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(result.current.historicalSessions.length).toBe(21);
+    expect(api.chatSessions).toHaveBeenLastCalledWith({
+      limit: 20,
+      before: "2026-05-05T08:01:00.000Z",
+      beforeId: "yesterday-1",
+      after: "2026-05-04T15:00:00.000Z",
     });
   });
 
@@ -104,18 +141,17 @@ describe("useContinuousHistory", () => {
     const sameTime = "2026-05-01T08:00:00.000Z";
     const sessions = [
       { id: "current", modifiedAt: "2026-05-06T08:00:00.000Z", title: "현재" },
-      ...Array.from({ length: 19 }, (_, idx) => ({
+      ...Array.from({ length: 21 }, (_, idx) => ({
         id: `old-${String(30 - idx).padStart(2, "0")}`,
         modifiedAt: sameTime,
         title: `이전 ${idx}`,
       })),
-      { id: "old-10", modifiedAt: sameTime, title: "동시간대 다음 페이지" },
     ];
     const api = makeApi(sessions);
     const { result } = renderHook(() => useContinuousHistory(api, "current", true));
 
     await waitFor(() => {
-      expect(result.current.historicalSessions.length).toBe(19);
+      expect(result.current.historicalSessions.length).toBe(20);
     });
 
     await act(async () => {
@@ -125,10 +161,12 @@ describe("useContinuousHistory", () => {
     expect(api.chatSessions).toHaveBeenLastCalledWith({
       limit: 20,
       before: sameTime,
-      beforeId: "old-12",
+      beforeId: "old-11",
+      after: "2026-04-30T15:00:00.000Z",
     });
     await waitFor(() => {
       expect(result.current.historicalSessions.map((session) => session.id)).toContain("old-10");
+      expect(result.current.historicalSessions.length).toBe(21);
     });
   });
 
@@ -157,5 +195,41 @@ describe("useContinuousHistory", () => {
     });
 
     expect(result.current.historicalSessions.some((session) => session.id === "stale-old")).toBe(false);
+  });
+
+  it("jumps directly to the next older day with sessions instead of scanning day-by-day", async () => {
+    const api = makeApi([
+      { id: "current", modifiedAt: "2026-05-06T08:00:00.000Z", title: "현재" },
+      { id: "ancient", modifiedAt: "2020-01-01T08:00:00.000Z", title: "오래된 대화" },
+    ]);
+
+    const { result } = renderHook(() => useContinuousHistory(api, "current", true));
+
+    await waitFor(() => {
+      expect(result.current.historicalSessions.map((session) => session.id)).toEqual(["ancient"]);
+    });
+    expect(result.current.reachedEnd).toBe(false);
+    expect(api.chatSessions).toHaveBeenCalledTimes(3);
+    expect(api.chatSessions).toHaveBeenNthCalledWith(2, {
+      limit: 1,
+      before: "2026-05-04T15:00:00.000Z",
+    });
+    expect(api.chatSessions).toHaveBeenNthCalledWith(3, {
+      limit: 20,
+      before: "2020-01-01T15:00:00.000Z",
+      after: "2019-12-31T15:00:00.000Z",
+    });
+  });
+
+  it("marks history exhausted when no older session exists", async () => {
+    const api = makeApi([
+      { id: "current", modifiedAt: "2026-05-06T08:00:00.000Z", title: "현재" },
+    ]);
+    const { result } = renderHook(() => useContinuousHistory(api, "current", true));
+
+    await waitFor(() => {
+      expect(result.current.reachedEnd).toBe(true);
+    });
+    expect(result.current.historicalSessions).toEqual([]);
   });
 });
