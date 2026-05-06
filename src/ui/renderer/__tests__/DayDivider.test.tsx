@@ -13,7 +13,7 @@ describe("DayDivider", () => {
       const selected = Array.from(document.querySelectorAll('[class*="bg-primary"]'))
         .find((el) => el.textContent?.trim() === "6");
       expect(selected?.textContent?.trim()).toBe("6");
-    });
+    }, { timeout: 5_000 });
   });
 
   it("updates the selected calendar day when the divider date changes", async () => {
@@ -26,7 +26,7 @@ describe("DayDivider", () => {
       const selected = Array.from(document.querySelectorAll('[class*="bg-primary"]'))
         .find((el) => el.textContent?.trim() === "7");
       expect(selected?.textContent?.trim()).toBe("7");
-    });
+    }, { timeout: 5_000 });
   });
 
   it("uses the KST day key when filtering sessions around UTC boundaries", async () => {

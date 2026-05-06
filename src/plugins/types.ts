@@ -715,6 +715,40 @@ export interface PluginHostApi {
   openAuthWindow(options: OpenAuthWindowCookieOptions): Promise<AuthWindowCookie[]>;
 
   /**
+   * §B3 — Open an arbitrary external URL routed through the host's webView
+   * preference policy (`settings.webView.preferredFlow`):
+   *   - `"in-app"` → host opens a lightweight BrowserWindow (no cookieHosts /
+   *     completionUrlPatterns enforcement; this is *not* `openAuthWindow`).
+   *   - `"system-browser"` → host shells out to the OS default browser via
+   *     Electron's `shell.openExternal`.
+   *
+   * The policy is read fresh from `settingsService` on every call so users can
+   * toggle the preference live (no plugin reload required).
+   *
+   * Plugins SHOULD use this for "view this link" affordances (calendar webLink,
+   * help docs, etc.) instead of calling `shell.openExternal` directly — that
+   * bypasses the user's stated preference and breaks the §B1 toggle.
+   */
+  openExternalUrl?(url: string): Promise<void>;
+
+  /**
+   * §B3 — Read a host-level user preference exposed via the explicit
+   * `HOST_PUBLIC_PREFERENCE_KEYS` allowlist (currently only
+   * `"webView.preferredFlow"`).
+   *
+   * Returns `undefined` for unknown / non-allowlisted keys — never throws —
+   * so plugins can safely probe forward-compat keys. The host emits a single
+   * warn log per (pluginId, key, session) pair when a non-allowlisted key is
+   * requested, to aid auditing without flooding logs.
+   *
+   * This is deliberately read-only and narrow: secrets, plugin configs, and
+   * private host state stay invisible. To expose a new key, edit
+   * `HOST_PUBLIC_PREFERENCE_KEYS` in `boot/steps/plugin-runtime.ts` and the
+   * matching reader in this method's implementation — both must be updated.
+   */
+  getAppPreference?<T = unknown>(key: string): T | undefined;
+
+  /**
    * Proactive Brain — start a host ConversationLoop turn from a plugin-observed
    * signal. Unlike chat which is user-initiated, this lets a (read-only)
    * "brain" plugin make LVIS speak first when an event warrants action

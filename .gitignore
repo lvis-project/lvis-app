@@ -1,6 +1,7 @@
 node_modules/
 package-lock.json
 dist/
+release/
 .pageindex-workspace/
 .pageindex-workspace-test/
 .DS_Store

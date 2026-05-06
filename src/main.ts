@@ -16,7 +16,7 @@ import { registerIpcHandlers, registerWindowEventListeners, unregisterPluginWebv
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
 import { registerPluginAssetProtocolScheme } from "./main/plugin-asset-protocol.js";
-import { findLvisProtocolUri } from "./main/lvis-protocol.js";
+import { findLvisProtocolUri, parsePluginAuthUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { emitEvent as emitHostEvent } from "./boot/types.js";
@@ -200,6 +200,24 @@ const lvisDevWarn = (msg: string, obj?: object) => {
 
 async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri called", { url });
+
+  // Route generic plugin OAuth callback (`lvis://plugin-auth/<pluginId>?code=<code>`)
+  // to a host event so the matching plugin can exchange the code.
+  // Validation lives in parsePluginAuthUri — bad URIs silently drop
+  // (DoS / probing defense). Plain-text `code` MUST NOT be logged.
+  const authParams = parsePluginAuthUri(url);
+  if (authParams) {
+    lvisDevLog("[lvis] handleLvisUri: plugin auth callback received", {
+      pluginId: authParams.pluginId,
+      codeLength: authParams.code.length,
+    });
+    emitHostEvent("plugin.auth.code.received", {
+      pluginId: authParams.pluginId,
+      code: authParams.code,
+    });
+    return;
+  }
+
   const params = parseLvisInstallUri(url);
   if (!params) {
     lvisDevWarn("[lvis] handleLvisUri: parseLvisInstallUri returned null", { url });

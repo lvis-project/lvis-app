@@ -30,11 +30,26 @@ rm -rf dist release node_modules/.cache
 # 2. Install
 bun install
 
-# 3. Cut release (bumps patch, builds, signs plugins, runs electron-builder)
+# 3. Cut release (bumps patch, builds, runs the native installer target)
 bun run release
 
-# Output: release/LVIS-<version>.{dmg,exe,AppImage}
+# Output: release/LVIS-<version>-<platform>-<arch>...
 ```
+
+For local installer builds without a version bump:
+
+```bash
+bun run dist                     # current OS installer
+bun run dist:current             # current OS installer
+bun run dist:mac                 # macOS DMG + ZIP, run on macOS
+bun run dist:linux               # AppImage + DEB + RPM, run on Linux
+bun run dist:win                 # NSIS + ZIP, run on Windows
+```
+
+For all three platforms, use the **Build Installers** GitHub Actions workflow.
+It runs the same `scripts/build-installers.mjs` entrypoint on macOS, Linux,
+and Windows runners so native dependencies and installer tooling are resolved
+on the target OS instead of relying on cross-platform packaging.
 
 ## Smoke-Test Checklist
 
