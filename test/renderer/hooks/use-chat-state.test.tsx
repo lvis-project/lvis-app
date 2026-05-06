@@ -87,6 +87,33 @@ describe("useChatState", () => {
     });
   });
 
+  it("preserves checkpoint summary from compact_notice events", async () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+
+    act(() => {
+      emitChatStream({
+        type: "compact_notice",
+        removedMessages: 7,
+        freedTokens: 123,
+        tier: "semantic-llm",
+        revertSessionId: "parent-session",
+        summary: "이전 주제 요약",
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.entries.at(-1)).toMatchObject({
+        kind: "checkpoint",
+        removedMessages: 7,
+        freedTokens: 123,
+        tier: "semantic-llm",
+        revertSessionId: "parent-session",
+        summary: "이전 주제 요약",
+      });
+    });
+  });
+
   it("does not log to console when VITE_DEBUG_STREAM is unset (Fix 3)", () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useMemo, useRef } from "react";
 import { flushSync } from "react-dom";
 import { KeyRound, Pencil, Star, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
@@ -43,6 +43,8 @@ import { AskUserQuestionCard, type AskUserQuestionRequest } from "./components/A
 import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
+import type { SessionSummary } from "./hooks/use-sessions.js";
+import { useContinuousHistory, type ContinuousHistorySession } from "./hooks/use-continuous-history.js";
 
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
@@ -75,6 +77,9 @@ export interface ChatViewProps {
   plugins: PluginEntry[];
   /** Navigate to a plugin view */
   onSelectPlugin: (viewKey: string) => void;
+  sessions?: SessionSummary[];
+  onLoadSession?: (sessionId: string) => void | Promise<void>;
+  onRefreshSessions?: () => void | Promise<void>;
   /** Quick-action items for CommandPopover (빠른 실행 section) */
   commandActions: QuickAction[];
   /** Controlled open state for CommandPopover */
@@ -92,7 +97,142 @@ export interface ChatViewProps {
   onRevertCheckpoint?: (revertSessionId: string) => void | Promise<void>;
 }
 
-export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onRevertCheckpoint }: ChatViewProps) {
+function HistoricalSessionMarker({ title, sessionId }: { title: string; sessionId: string }) {
+  return (
+    <div
+      className="mx-auto text-center text-[11px] text-muted-foreground/50 py-0.5 px-3"
+      data-testid="session-marker"
+    >
+      - {title || sessionId.slice(0, 8)} -
+    </div>
+  );
+}
+
+function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession["entries"] }) {
+  const renderEntry = (entry: ContinuousHistorySession["entries"][number], idx: number, embedded = false) => {
+    if (entry.kind === "assistant") {
+      return (
+        <AssistantCard
+          key={idx}
+          entry={{ ...entry, streaming: false }}
+          highlightQuery=""
+          isStarred={false}
+          isFinal={true}
+        />
+      );
+    }
+    if (entry.kind === "reasoning") {
+      return <ReasoningCard key={idx} entry={{ ...entry, streaming: false }} embedded={embedded} />;
+    }
+    if (entry.kind === "tool_group") {
+      return <ToolGroupCard key={entry.groupId || idx} group={entry} embedded={embedded} />;
+    }
+    return null;
+  };
+
+  const rendered: React.ReactNode[] = [];
+  let i = 0;
+  while (i < entries.length) {
+    const entry = entries[i];
+    if (!entry) {
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "assistant" || entry.kind === "reasoning" || entry.kind === "tool_group") {
+      const segmentStart = i;
+      const segment: Array<{ entry: typeof entry; idx: number }> = [];
+      while (i < entries.length) {
+        const next = entries[i];
+        if (!next || (next.kind !== "assistant" && next.kind !== "reasoning" && next.kind !== "tool_group")) break;
+        segment.push({ entry: next as typeof entry, idx: i });
+        i++;
+      }
+      let finalAssistantOffset = -1;
+      for (let j = segment.length - 1; j >= 0; j--) {
+        if (segment[j]?.entry.kind === "assistant") {
+          finalAssistantOffset = j;
+          break;
+        }
+      }
+      const workItems = finalAssistantOffset >= 0
+        ? segment.slice(0, finalAssistantOffset)
+        : segment;
+      if (workItems.length > 0) {
+        rendered.push(
+          <WorkGroup key={`hist-wg-${segmentStart}`} stepCount={workItems.length} streaming={false}>
+            {workItems.map((item) => renderEntry(item.entry, item.idx, true))}
+          </WorkGroup>,
+        );
+      }
+      if (finalAssistantOffset >= 0) {
+        const finalItem = segment[finalAssistantOffset];
+        if (finalItem) rendered.push(renderEntry(finalItem.entry, finalItem.idx));
+      }
+      continue;
+    }
+
+    if (entry.kind === "user") {
+      rendered.push(
+        <div
+          key={i}
+          data-testid="historical-user-message"
+          className="ml-auto w-fit max-w-[85%] rounded-md bg-message-user/70 px-3.5 py-2 text-sm text-message-user-foreground/90"
+        >
+          <div className="whitespace-pre-wrap">{entry.text}</div>
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "system") {
+      rendered.push(<div key={i} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>);
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "checkpoint") {
+      rendered.push(
+        <Fragment key={i}>
+          <CheckpointDivider tier={entry.tier} messageCount={entry.removedMessages} />
+          {entry.summary ? <SummaryToast summary={entry.summary} /> : null}
+        </Fragment>,
+      );
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "session_resume") {
+      rendered.push(<SessionResumeDivider key={i} preambleChars={entry.preambleChars} />);
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "imported_trigger") {
+      rendered.push(
+        <ImportedTriggerCard
+          key={`trigger:${entry.sessionId}`}
+          source={entry.source}
+          prompt={entry.prompt}
+          summary={entry.summary}
+          toolCallCount={entry.toolCallCount}
+          importedAt={entry.importedAt}
+          response={entry.response}
+          responseStreaming={false}
+        />,
+      );
+      i++;
+      continue;
+    }
+
+    i++;
+  }
+
+  return <>{rendered}</>;
+}
+
+export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onRevertCheckpoint }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -113,6 +253,30 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
     costEstimate, costBadgeClass,
   } = useChatContext();
+
+  const {
+    historicalSessions,
+    loading: loadingHistory,
+    reachedEnd: reachedHistoryEnd,
+    sentinelRef,
+    scrollViewportRef,
+  } = useContinuousHistory(api, currentSessionId, hasApiKey !== false);
+
+  const historicalByDay = useMemo(() => {
+    const map = new Map<string, ContinuousHistorySession[]>();
+    for (const session of historicalSessions) {
+      const existing = map.get(session.dayKey);
+      if (existing) {
+        existing.push(session);
+      } else {
+        map.set(session.dayKey, [session]);
+      }
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [historicalSessions]);
+
+  const hasHistoricalContent = historicalSessions.length > 0;
+  const activeDayKey = getKoreaDateKey(new Date());
 
 
   // No auto-scroll needed for floating panel — it is positioned outside
@@ -213,7 +377,41 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           </div>
         </div>
       )}
-      <ScrollArea className="h-full px-3 py-4"><div className="space-y-3">
+      <ScrollArea className="h-full px-3 py-4" viewportRef={scrollViewportRef}><div className="space-y-3">
+        <div ref={sentinelRef} data-testid="chat-history-sentinel" className="h-px" />
+        {loadingHistory && (
+          <div
+            data-testid="chat-history-loading"
+            className="py-2 text-center text-[11px] text-muted-foreground border-b border-dashed border-border/40"
+          >
+            이전 대화 기록 불러오는 중...
+          </div>
+        )}
+        {reachedHistoryEnd && hasHistoricalContent && (
+          <div className="py-2 text-center text-[10px] text-muted-foreground/50">
+            - 대화 시작 -
+          </div>
+        )}
+        {historicalByDay.map(([dayKey, daySessions]) => (
+          <Fragment key={dayKey}>
+            <DayDivider
+              dateKey={dayKey}
+              sessions={sessions}
+              currentSessionId={currentSessionId}
+              streaming={streaming}
+              onLoadSession={onLoadSession}
+              onRefreshSessions={onRefreshSessions}
+            />
+            {daySessions.map((session, sessionIdx) => (
+              <Fragment key={session.id}>
+                {daySessions.length > 1 && sessionIdx > 0 ? (
+                  <HistoricalSessionMarker title={session.title} sessionId={session.id} />
+                ) : null}
+                <HistoricalEntriesList entries={session.entries} />
+              </Fragment>
+            ))}
+          </Fragment>
+        ))}
         <ChatSearchOverlay
           open={searchOpen}
           query={searchQuery}
@@ -226,13 +424,18 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           onPrev={searchPrev}
           onClose={searchCloseOverlay}
         />
-        {/* Today's date badge — always shown above the conversation. Per-day
-            session grouping (one badge per day-boundary inside a long
-            conversation) requires a timestamp on each ChatEntry, which the
-            current type doesn't carry; that's a follow-up. For now the badge
-            represents "today" — auto-refreshes to the current locale date
-            on render. */}
-        <DayDivider />
+        {/* Today's date badge — always shown above the active conversation.
+            Even when historical sessions already rendered today's date, the
+            active turn boundary must remain the same calendar-enabled divider
+            instead of degrading to a plain "현재 대화" separator. */}
+        <DayDivider
+          dateKey={activeDayKey}
+          sessions={sessions}
+          currentSessionId={currentSessionId}
+          streaming={streaming}
+          onLoadSession={onLoadSession}
+          onRefreshSessions={onRefreshSessions}
+        />
         {/* Workflow tools (S1+S2): skill badges + sub-agents + ask-user inline.
             SessionTodoPanel is intentionally NOT here — it sits above the input
             cluster (see below the ScrollArea) so it stays visible regardless of
@@ -247,7 +450,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
         {subAgentSpawns.map((spawn) => (
           <SubAgentCard key={spawn.spawnId} spawn={spawn} />
         ))}
-        {entries.length === 0 && hasApiKey !== false && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
+        {entries.length === 0 && !hasHistoricalContent && hasApiKey !== false && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
         {(() => {
           // Three-way entry classification eliminates retroactive-reclassification flicker.
           //
@@ -778,4 +981,15 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
       </div>
     </div>
   );
+}
+
+function getKoreaDateKey(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }

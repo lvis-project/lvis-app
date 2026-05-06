@@ -127,7 +127,62 @@ export function PluginUiHostView({
   });
 
   const onDidAttachRef = useRef<((e: Event) => void) | null>(null);
+  const onLifecycleRegisterRef = useRef<((e: Event) => void) | null>(null);
+  const registerAttemptRef = useRef<{ key: string; status: "pending" | "done" } | null>(null);
   const webviewRef = useRef<Electron.WebviewTag | null>(null);
+
+  const attemptRegisterWebview = useCallback((node: Electron.WebviewTag | null) => {
+    if (!node || !view?.pluginId || !view?.entryUrl) return;
+    if (typeof node.getWebContentsId !== "function") return;
+    const wcId = node.getWebContentsId();
+    if (!Number.isFinite(wcId)) return;
+    const { shellUrl: url } = readPluginAssetUrls();
+    if (!url) return;
+
+    const capturedPluginId = view.pluginId;
+    const capturedExtensionId = view.extension.id;
+    const capturedEntryUrl = view.entryUrl;
+    const viewKey = `${capturedPluginId}:${capturedExtensionId}:${capturedEntryUrl}`;
+    const registerKey = `${viewKey}:${wcId}`;
+    const previous = registerAttemptRef.current;
+    if (previous?.key === registerKey && (previous.status === "pending" || previous.status === "done")) return;
+
+    const api = (window as unknown as {
+      lvisApi?: {
+        registerPluginWebview?: (p: {
+          webContentsId: number;
+          pluginId: string;
+          entryUrl: string;
+        }) => Promise<{ ok: boolean; error?: string } | null | undefined>;
+      };
+    }).lvisApi;
+    const registerPluginWebview = api?.registerPluginWebview;
+    if (typeof registerPluginWebview !== "function") return;
+
+    registerAttemptRef.current = { key: registerKey, status: "pending" };
+    void (async () => {
+      try {
+        const result = await registerPluginWebview({
+          webContentsId: wcId as number,
+          pluginId: capturedPluginId,
+          entryUrl: capturedEntryUrl,
+        });
+        if (result && (result as { ok: boolean }).ok === false) {
+          if (registerAttemptRef.current?.key === registerKey) registerAttemptRef.current = null;
+          setErrorText(`Plugin webview 등록 실패: ${(result as { error?: string }).error ?? "unknown"}`);
+          setLoading(false);
+          return;
+        }
+      } catch (err) {
+        if (registerAttemptRef.current?.key === registerKey) registerAttemptRef.current = null;
+        setErrorText(`Plugin webview 등록 실패: ${(err as Error).message ?? "unknown"}`);
+        setLoading(false);
+        return;
+      }
+      registerAttemptRef.current = { key: registerKey, status: "done" };
+      setShellSrcBinding({ viewKey, url });
+    })();
+  }, [view?.pluginId, view?.entryUrl, view?.extension.id]);
 
   const handleWebviewRef = useCallback((node: Electron.WebviewTag | null) => {
     const prev = webviewRef.current;
@@ -136,6 +191,12 @@ export function PluginUiHostView({
       prev.removeEventListener("did-fail-load", onFailRef.current);
       const onDidAttach = onDidAttachRef.current;
       if (onDidAttach) prev.removeEventListener("did-attach", onDidAttach);
+      const onLifecycleRegister = onLifecycleRegisterRef.current;
+      if (onLifecycleRegister) {
+        prev.removeEventListener("did-start-loading", onLifecycleRegister);
+        prev.removeEventListener("dom-ready", onLifecycleRegister);
+        prev.removeEventListener("did-finish-load", onLifecycleRegister);
+      }
     }
     webviewRef.current = node;
     if (node) {
@@ -146,49 +207,22 @@ export function PluginUiHostView({
         // method `getWebContentsId()` (canonical Electron API) instead of
         // reading a non-standard `e.webContentsId` property which returns
         // undefined and silently aborts the registration handshake.
-        const wcId = node.getWebContentsId();
-        if (!Number.isFinite(wcId) || !view?.pluginId || !view?.entryUrl) return;
-        const { shellUrl: url } = readPluginAssetUrls();
-        if (!url) return;
-        const capturedPluginId = view.pluginId;
-        const capturedEntryUrl = view.entryUrl;
-        const vk = `${capturedPluginId}:${view.extension.id}:${capturedEntryUrl}`;
-        const api = (window as unknown as {
-          lvisApi?: {
-            registerPluginWebview?: (p: {
-              webContentsId: number;
-              pluginId: string;
-              entryUrl: string;
-            }) => Promise<{ ok: boolean; error?: string } | null | undefined>;
-          };
-        }).lvisApi;
-        void (async () => {
-          try {
-            const result = await api?.registerPluginWebview?.({
-              webContentsId: wcId as number,
-              pluginId: capturedPluginId,
-              entryUrl: capturedEntryUrl,
-            });
-            if (result && (result as { ok: boolean }).ok === false) {
-              setErrorText(`Plugin webview 등록 실패: ${(result as { error?: string }).error ?? "unknown"}`);
-              setLoading(false);
-              return;
-            }
-          } catch (err) {
-            setErrorText(`Plugin webview 등록 실패: ${(err as Error).message ?? "unknown"}`);
-            setLoading(false);
-            return;
-          }
-          setShellSrcBinding({ viewKey: vk, url });
-        })();
+        attemptRegisterWebview(node);
       };
+      const onLifecycleRegister = () => attemptRegisterWebview(node);
       onDidAttachRef.current = onDidAttach;
+      onLifecycleRegisterRef.current = onLifecycleRegister;
       node.addEventListener("did-attach", onDidAttach);
+      node.addEventListener("did-start-loading", onLifecycleRegister);
+      node.addEventListener("dom-ready", onLifecycleRegister);
+      node.addEventListener("did-finish-load", onLifecycleRegister);
+      queueMicrotask(() => attemptRegisterWebview(node));
     }
-  }, [view?.pluginId, view?.entryUrl, view?.extension.id]);
+  }, [attemptRegisterWebview]);
 
   useEffect(() => {
     setShellSrcBinding(null);
+    registerAttemptRef.current = null;
     if (!view) {
       setErrorText("플러그인 뷰를 찾을 수 없습니다.");
       setLoading(false);

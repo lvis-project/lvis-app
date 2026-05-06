@@ -499,7 +499,10 @@ export function App() {
     setActiveView,
     toggleCommandPopover,
   });
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [entries]);
+  const askQuestionScrollKey = askQuestions.map((q) => q.id).join("|");
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [entries, askQuestionScrollKey]);
 
   // Refresh plugin views + marketplace catalog when a lvis:// deep-link
   // install completes in the main process, so new sidebar tabs appear
@@ -645,9 +648,11 @@ export function App() {
             api={api}
             starred={starred}
             currentSessionId={currentSessionId}
+            sessions={sessions}
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSession}
+            onRefreshSessions={refreshSessions}
             onStartRoutineSession={handleStartRoutineSession}
             chatContextValue={chatContextValue}
             onAsk={(q) => handleAsk(q, "default")}

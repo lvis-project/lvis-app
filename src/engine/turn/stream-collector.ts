@@ -152,7 +152,15 @@ export async function collectRoundStream(
     if (isContextLengthError(err) && !reactiveCompacted) {
       return { kind: "context_error", errorMessage: (err as Error)?.message ?? String(err) };
     }
-    throw err;
+    const raw = err instanceof Error ? err.message : String(err);
+    if (reactiveCompacted && isContextLengthError(err)) {
+      return {
+        kind: "stream_error",
+        userMessage: `오류: 대화 기록을 압축한 뒤에도 모델 컨텍스트 한도를 초과했습니다. 새 세션을 시작하거나 이전 첨부를 정리해 주세요 (원인: ${raw})`,
+      };
+    }
+    const classified = classifyProviderError(raw);
+    return { kind: "stream_error", userMessage: `오류: ${classified.userMessage}` };
   }
 
   if (abortSignal?.aborted) return { kind: "interrupted", text };

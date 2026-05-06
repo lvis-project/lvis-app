@@ -32,6 +32,7 @@ const mockWindowInstances: Array<{
   isDestroyed: () => boolean;
   destroy: () => void;
   show: () => void;
+  setMenu: ReturnType<typeof vi.fn>;
 }> = [];
 
 let nextWindowId = 1;
@@ -56,6 +57,7 @@ vi.mock("electron", () => {
         instance.loadedUrl = url;
         return Promise.resolve();
       }),
+      setMenu: vi.fn(),
       on: vi.fn((event: string, cb: () => void) => {
         if (!events.has(event)) events.set(event, []);
         events.get(event)!.push(cb);
@@ -126,6 +128,18 @@ describe("meeting:detach-default — WindowManager.openDetachedTab", () => {
     wm.openDetachedTab("plugin:meeting:meeting-control");
     const prefs = mockWindowInstances[0].opts["webPreferences"] as Record<string, unknown>;
     expect(prefs["webviewTag"]).toBe(true);
+  });
+
+  it("creates plugin detached windows without native chrome or menu", () => {
+    wm.openDetachedTab("plugin:meeting:meeting-control");
+    const opts = mockWindowInstances[0].opts;
+
+    if (process.platform !== "darwin") {
+      expect(opts["frame"]).toBe(false);
+    }
+    expect(opts["titleBarStyle"]).toBe(process.platform === "darwin" ? "hiddenInset" : "hidden");
+    expect(opts["autoHideMenuBar"]).toBe(true);
+    expect(mockWindowInstances[0].setMenu).toHaveBeenCalledWith(null);
   });
 
   it("loads the correct detached URL fragment for the meeting viewKey", () => {

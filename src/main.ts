@@ -23,6 +23,7 @@ import { emitEvent as emitHostEvent } from "./boot/types.js";
 import { deliverRoutineResult } from "./routines/routine-delivery.js";
 import { WindowManager } from "./main/window-manager.js";
 import { createLogger } from "./lib/logger.js";
+import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "./shared/lvis-logo.js";
 const log = createLogger("lvis");
 
 const __filename = fileURLToPath(import.meta.url);
@@ -326,6 +327,26 @@ async function loadMainInterface(win: BrowserWindow, reason: string) {
   }
 }
 
+const BOOTSTRAP_STATUS_MESSAGES = [
+  "런타임을 준비하는 중...",
+  "사용자 설정과 메모리를 불러오는 중...",
+  "플러그인 무결성을 확인하는 중...",
+  "마켓플레이스와 동기화하는 중...",
+  "작업 화면을 여는 중...",
+] as const;
+const BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS = 500;
+const BOOTSTRAP_SPLASH_MIN_VISIBLE_MS =
+  BOOTSTRAP_STATUS_MESSAGES.length * BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS;
+let bootstrapSplashShownAt = 0;
+
+async function waitForMinimumBootstrapSplash() {
+  if (bootstrapSplashShownAt <= 0) return;
+  const remaining = BOOTSTRAP_SPLASH_MIN_VISIBLE_MS - (Date.now() - bootstrapSplashShownAt);
+  if (remaining > 0) {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, remaining));
+  }
+}
+
 /**
  * Bootstrap 동안 렌더러에 표시할 임시 splash HTML.
  * 실 index.html은 IPC 핸들러 등록 후에 로드된다 — 초기 useEffect IPC 호출이
@@ -334,13 +355,41 @@ async function loadMainInterface(win: BrowserWindow, reason: string) {
 const BOOTSTRAP_SPLASH = `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><title>LVIS</title>
 <style>
-  html,body{margin:0;height:100%;background:#0b0b10;color:#e4e4e8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-  .wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:.8rem}
-  h1{margin:0;font-size:1.1rem;font-weight:600;letter-spacing:.02em}
-  p{margin:0;font-size:.85rem;opacity:.65}
-  .spin{width:24px;height:24px;border:2px solid #2a2a33;border-top-color:#7a7aff;border-radius:50%;animation:s 1s linear infinite}
-  @keyframes s{to{transform:rotate(360deg)}}
-</style></head><body><div class="wrap"><div class="spin"></div><h1>LVIS 초기 부팅 중</h1><p>Python 런타임과 플러그인을 준비하고 있습니다…</p></div></body></html>`;
+  html,body{margin:0;height:100%;background:#f3f3f3;color:#2c2c2c;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif}
+  body{overflow:hidden}
+  .wrap{box-sizing:border-box;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:28px;background:radial-gradient(circle at 62% 34%,rgba(255,255,255,.94),rgba(255,220,228,.74) 34%,rgba(255,180,198,.68) 68%,rgba(255,255,255,.82));background-size:cover}
+  .panel{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+  .logo{width:104px;height:auto;transform:translateY(-26px);filter:drop-shadow(0 8px 18px rgba(217,0,255,.16))}
+  .name{margin:-20px 0 0;color:#ef0b4c;font-size:26px;font-weight:650;line-height:1;letter-spacing:0}
+  .status{min-height:18px;margin:2px 0 0;color:rgba(239,11,76,.52);font-size:12px;line-height:18px;text-align:center;transition:opacity .25s ease}
+  .fade{animation:fade 1.35s ease-in-out infinite}
+  @keyframes fade{0%,100%{opacity:.28}45%{opacity:.72}}
+</style></head><body>
+  <div class="wrap">
+    <div class="panel" role="status" aria-live="polite">
+      <svg class="logo" viewBox="${LVIS_LOGO_VIEW_BOX}" fill="none" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+        <path d="${LVIS_LOGO_PATH}" fill="url(#lvisSplashLogo)" />
+        <defs>
+          <linearGradient id="lvisSplashLogo" x1="50.1574" y1="-3.85755" x2="181.301" y2="235.331" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#FF0000" />
+            <stop offset="1" stop-color="#D900FF" />
+          </linearGradient>
+        </defs>
+      </svg>
+      <h1 class="name">LVIS</h1>
+      <p id="status" class="status fade">런타임을 준비하는 중...</p>
+    </div>
+  </div>
+  <script>
+    const messages = ${JSON.stringify(BOOTSTRAP_STATUS_MESSAGES)};
+    const status = document.getElementById("status");
+    let i = 0;
+    setInterval(() => {
+      i = (i + 1) % messages.length;
+      if (status) status.textContent = messages[i];
+    }, ${BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS});
+  </script>
+</body></html>`;
 
 function createWindow() {
   const preloadPath = resolve(__dirname, "preload.cjs");
@@ -396,21 +445,15 @@ function createWindow() {
   // are instance-specific and are lost when a new window object is created.
   registerWindowEventListeners(win);
 
-  // Development debugging is provided by an in-app floating console toggle in
-  // the renderer. Avoid docking Chromium DevTools into the main window because
-  // it distorts the runtime viewport and causes misleading layout regressions.
-  // For deeper debugging (DOM/CSS/Network/breakpoints) opt in via LVIS_DEV=1
-  // — DevTools opens in `detach` mode so the runtime viewport stays intact and
-  // controls anchored to the bottom of the window (e.g. InputActionBar plugin
-  // grid button) remain clickable. Packaged builds never auto-open DevTools.
+  // Development debugging is provided by the renderer-side eruda console
+  // (LVIS_DEV_CONSOLE=1). Do not auto-open native Chromium DevTools: it
+  // changes the runtime viewport and makes UI regressions look different
+  // from the real app window.
 
   win.once("ready-to-show", () => {
     log.info("window ready-to-show");
     win.show();
     win.focus();
-    if (!app.isPackaged && process.env.LVIS_DEV === "1") {
-      win.webContents.openDevTools({ mode: "detach" });
-    }
   });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
@@ -469,6 +512,7 @@ function createWindow() {
 
   // §M-race: bootstrap 동안 splash만 표시. 실 index.html 로드는 main()이
   // IPC 핸들러 등록 후 수행.
+  bootstrapSplashShownAt = Date.now();
   void win
     .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(BOOTSTRAP_SPLASH)}`)
     .catch((err) => log.error({ err }, "splash load failed"));
@@ -525,6 +569,7 @@ async function main() {
 
   // 실 UI 로드 — 이 시점부터 렌더러의 IPC 호출이 항상 handler와 매칭됨
   if (mainWindow) {
+    if (!pendingRendererReload) await waitForMinimumBootstrapSplash();
     await loadMainInterface(mainWindow, pendingRendererReload ? "bootstrap-recovery" : "bootstrap-complete");
   }
 

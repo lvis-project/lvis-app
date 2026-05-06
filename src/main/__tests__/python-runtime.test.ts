@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import type { EventEmitter } from "node:events";
+import path from "node:path";
 
 // ─── electron mock ────────────────────────────────────────────────────────────
 vi.mock("electron", () => ({
@@ -37,6 +38,18 @@ import * as cpMock from "node:child_process";
 const mockedAccess = vi.mocked(fsMock.access);
 const mockedReadFile = vi.mocked(fsMock.readFile);
 const mockedSpawn = vi.mocked(cpMock.spawn);
+
+function normalizePathForAssert(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^[A-Z]:/i, "");
+}
+
+function expectArgsToContainPath(args: string[], expectedPath: string): void {
+  expect(args.map(normalizePathForAssert)).toContain(normalizePathForAssert(path.normalize(expectedPath)));
+}
+
+function expectArgsNotToContainPath(args: string[], expectedPath: string): void {
+  expect(args.map(normalizePathForAssert)).not.toContain(normalizePathForAssert(path.normalize(expectedPath)));
+}
 
 /**
  * 성공하는 spawn 프로세스 mock을 반환한다.
@@ -182,7 +195,7 @@ describe("PythonRuntimeBootstrapper", () => {
     );
     expect(pipSyncCall).toBeDefined();
     expect(pipSyncCall![1] as string[]).not.toContain("--frozen");
-    expect(pipSyncCall![1] as string[]).toContain(lockFilePath);
+    expectArgsToContainPath(pipSyncCall![1] as string[], lockFilePath);
 
     // result 유효
     expect(result.pythonPath).toBeTruthy();
@@ -212,7 +225,7 @@ describe("PythonRuntimeBootstrapper", () => {
       ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
     );
     expect(pipSyncCall).toBeDefined();
-    expect(pipSyncCall![1] as string[]).toContain(declaredLockFilePath);
+    expectArgsToContainPath(pipSyncCall![1] as string[], declaredLockFilePath);
   });
 
   it("registry discovery ignores Python lockfiles from non-document-indexer plugins", async () => {
@@ -244,11 +257,11 @@ describe("PythonRuntimeBootstrapper", () => {
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
     mockedAccess.mockImplementation(async (filePath) => {
-      const path = String(filePath);
-      if (path.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-      if (path.endsWith("/uv")) return undefined;
-      if (path === "/installed/local-indexer/python-requirements.lock") return undefined;
-      if (path === "/installed/other/python-requirements.lock") return undefined;
+      const normalizedPath = normalizePathForAssert(String(filePath));
+      if (normalizedPath.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (normalizedPath.endsWith("/uv") || normalizedPath.endsWith("/uv.exe")) return undefined;
+      if (normalizedPath === "/installed/local-indexer/python-requirements.lock") return undefined;
+      if (normalizedPath === "/installed/other/python-requirements.lock") return undefined;
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
     mockedSpawn
@@ -264,8 +277,8 @@ describe("PythonRuntimeBootstrapper", () => {
       ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
     );
     expect(pipSyncCall).toBeDefined();
-    expect(pipSyncCall![1] as string[]).toContain("/installed/local-indexer/python-requirements.lock");
-    expect(pipSyncCall![1] as string[]).not.toContain("/installed/other/python-requirements.lock");
+    expectArgsToContainPath(pipSyncCall![1] as string[], "/installed/local-indexer/python-requirements.lock");
+    expectArgsNotToContainPath(pipSyncCall![1] as string[], "/installed/other/python-requirements.lock");
   });
 
   it("plugin.json이 선언한 절대 lockfile 경로는 거부하고 plugin 디렉토리 기본 lockfile만 사용한다", async () => {
@@ -291,8 +304,8 @@ describe("PythonRuntimeBootstrapper", () => {
       ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
     );
     expect(pipSyncCall).toBeDefined();
-    expect(pipSyncCall![1] as string[]).toContain(defaultLockFilePath);
-    expect(pipSyncCall![1] as string[]).not.toContain("/outside/python.lock");
+    expectArgsToContainPath(pipSyncCall![1] as string[], defaultLockFilePath);
+    expectArgsNotToContainPath(pipSyncCall![1] as string[], "/outside/python.lock");
   });
 
   it("first-session plugin install can prepare runtime from the newly installed manifest", async () => {
@@ -320,7 +333,7 @@ describe("PythonRuntimeBootstrapper", () => {
       ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
     );
     expect(pipSyncCall).toBeDefined();
-    expect(pipSyncCall![1] as string[]).toContain(declaredLockFilePath);
+    expectArgsToContainPath(pipSyncCall![1] as string[], declaredLockFilePath);
   });
 
   // ─── 3. spawn non-zero exit → throws ─────────────────────────────────────
