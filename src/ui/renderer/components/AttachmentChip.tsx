@@ -134,7 +134,7 @@ export function AttachmentChip({
           type="button"
           data-testid="attachment-chip"
           aria-label={`첨부 ${chipLabel(attachment)} — 정보 보기 또는 파일 열기`}
-          className="flex flex-col items-center gap-1 rounded-sm select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="flex max-w-20 flex-col items-center gap-1 rounded-sm select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           title="첨부 정보 보기 / 파일 열기"
         >
           {attachment.kind === "image" ? (
@@ -145,8 +145,9 @@ export function AttachmentChip({
             <PasteThumb />
           )}
           <span
-            className={`text-[10px] font-mono ${badgeClass(total)}`}
+            className={`max-w-full truncate text-[10px] font-mono ${badgeClass(total)}`}
             data-testid="chip-count-badge"
+            title={`${chipLabel(attachment)} · ${total}/${ATTACH_MAX_COUNT}`}
           >
             {chipLabel(attachment)} · {total}/{ATTACH_MAX_COUNT}
           </span>
@@ -191,12 +192,12 @@ export function AttachmentChipCollapsed({
           type="button"
           data-testid="attachment-chip-collapsed"
           aria-label={`첨부 ${total}개 — 목록 보기`}
-          className="flex flex-col items-center gap-1 rounded-sm select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="flex max-w-20 flex-col items-center gap-1 rounded-sm select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           title="첨부 목록 보기"
         >
           <StackVisual layers={total} />
           <span
-            className={`text-[10px] font-mono ${badgeClass(total)}`}
+            className={`max-w-full truncate text-[10px] font-mono ${badgeClass(total)}`}
             data-testid="chip-count-badge"
           >
             {total}/{ATTACH_MAX_COUNT}

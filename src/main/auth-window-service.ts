@@ -12,7 +12,10 @@
  *    호스트는 LGE-specific 정보를 알지 못한다 (§1 원칙 "NO plugin-specific code in host").
  */
 import { randomBytes } from "node:crypto";
-import { BrowserWindow, type Cookie, type Session } from "electron";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { BrowserWindow, type Cookie, type Session, type WebContents } from "electron";
+import { registerWindowEventListeners } from "../ipc/domains/window.js";
 
 export interface AuthCookie {
   name: string;
@@ -70,6 +73,128 @@ export interface OpenAuthWindowResult {
    * so host code must never include this value in logs or error messages.
    */
   finalUrl: string;
+}
+
+function authShellPreloadPath(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "../preload.cjs");
+}
+
+export function buildAuthWindowShellHtml(input: {
+  title: string;
+  url: string;
+  partition: string;
+}): string {
+  const title = JSON.stringify(input.title);
+  const url = JSON.stringify(input.url);
+  const partition = JSON.stringify(input.partition);
+  return `<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-src http: https:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(input.title)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      display: flex;
+      flex-direction: column;
+      background: hsl(48 20% 94%);
+      color: hsl(24 10% 10%);
+      font-family: "Malgun Gothic", "Noto Sans KR", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .titlebar {
+      height: 36px;
+      flex: 0 0 36px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid hsl(35 14% 80% / 0.7);
+      background: hsl(48 20% 94%);
+      color: hsl(24 10% 10%);
+      user-select: none;
+      -webkit-app-region: drag;
+    }
+    .title {
+      min-width: 0;
+      padding-left: 12px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      font-size: 12px;
+      font-weight: 600;
+      opacity: .82;
+    }
+    .controls {
+      height: 100%;
+      display: flex;
+      align-items: stretch;
+      -webkit-app-region: no-drag;
+    }
+    .titlebar-btn {
+      width: 44px;
+      height: 36px;
+      border: 0;
+      border-radius: 0;
+      display: grid;
+      place-items: center;
+      background: transparent;
+      color: hsl(24 8% 32%);
+      cursor: default;
+    }
+    .titlebar-btn:hover { background: hsl(35 14% 84% / 0.8); color: hsl(24 10% 10%); }
+    .titlebar-btn-close:hover { background: hsl(0 72% 51%); color: white; }
+    .titlebar-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    webview {
+      flex: 1 1 auto;
+      width: 100%;
+      min-height: 0;
+      border: 0;
+      background: white;
+    }
+  </style>
+</head>
+<body>
+  <div class="titlebar" id="titlebar">
+    <div class="title" id="title"></div>
+    <div class="controls">
+      <button class="titlebar-btn" id="minimize" title="최소화" aria-label="최소화">
+        <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+      </button>
+      <button class="titlebar-btn" id="maximize" title="최대화" aria-label="최대화">
+        <svg id="max-icon" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+      </button>
+      <button class="titlebar-btn titlebar-btn-close" id="close" title="닫기" aria-label="닫기">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+  </div>
+  <webview id="auth-view" src="" partition=""></webview>
+  <script>
+    const title = ${title};
+    const url = ${url};
+    const partition = ${partition};
+    document.title = title;
+    document.getElementById("title").textContent = title;
+    const view = document.getElementById("auth-view");
+    view.setAttribute("partition", partition);
+    view.setAttribute("src", url);
+    document.getElementById("minimize").addEventListener("click", () => window.lvisWindow?.minimize());
+    document.getElementById("maximize").addEventListener("click", () => window.lvisWindow?.toggleMaximize());
+    document.getElementById("close").addEventListener("click", () => window.lvisWindow?.close());
+    document.getElementById("titlebar").addEventListener("dblclick", (event) => {
+      if (event.target.closest("button")) return;
+      window.lvisWindow?.toggleMaximize();
+    });
+    window.lvisWindow?.onMaximizedChanged?.((maximized) => {
+      const btn = document.getElementById("maximize");
+      btn.title = maximized ? "이전 크기로" : "최대화";
+      btn.setAttribute("aria-label", btn.title);
+    });
+  </script>
+</body>
+</html>`;
 }
 
 /** 호스트 문자열 정규화 — 선행 점/공백/대소문자 차이 흡수. 빈 문자열은 drop. */
@@ -160,6 +285,14 @@ function extractCompletionTarget(url: string): string {
   }
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 /**
  * 지정 URL을 띄우고 완료 패턴에 도달할 때까지 대기한 뒤 쿠키 수집.
  * 창은 항상 close(). 사용자가 창을 미리 닫으면 reject.
@@ -248,19 +381,22 @@ export async function openAuthWindow(
     width: 1024,
     height: 768,
     title: windowTitle,
+    autoHideMenuBar: true,
+    frame: process.platform !== "darwin" ? false : undefined,
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      nodeIntegrationInSubFrames: false,
-      webviewTag: false,
-      sandbox: true,
-      partition: effectivePartition,
+      webviewTag: true,
+      sandbox: false,
+      preload: authShellPreloadPath(),
     },
   });
+  centerAuthWindowOverParent(authWindow, parent);
+  if (typeof authWindow.setMenu === "function") authWindow.setMenu(null);
+  registerWindowEventListeners(authWindow);
 
-  // Popup / window.open 차단 — 포털이 새 창을 열어 쿠키를 다른 origin 에
-  // 심거나 사용자를 임의 사이트로 튕기는 경로 제거.
-  authWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  let authContents: WebContents | null = null;
 
   // Top-level navigation 프로토콜 제한 — http/https 만 허용. 외부 포털이
   // redirect / 사용자 클릭으로 `file:`, `data:`, custom scheme 으로 이동해
@@ -276,11 +412,35 @@ export async function openAuthWindow(
       return false;
     }
   };
-  authWindow.webContents.on("will-navigate", (event, targetUrl) => {
-    if (!isHttpUrl(targetUrl)) event.preventDefault();
-  });
-  authWindow.webContents.on("will-redirect", (event, targetUrl) => {
-    if (!isHttpUrl(targetUrl)) event.preventDefault();
+  const attachAuthNavigationGuards = (contents: WebContents) => {
+    contents.setWindowOpenHandler(() => ({ action: "deny" }));
+    contents.on("will-navigate", (event, targetUrl) => {
+      if (!isHttpUrl(targetUrl)) event.preventDefault();
+    });
+    contents.on("will-redirect", (event, targetUrl) => {
+      if (!isHttpUrl(targetUrl)) event.preventDefault();
+    });
+  };
+
+  // The host shell is local/data: and owns only the chrome. The external
+  // login page must be the single sandboxed webview below.
+  authWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  authWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    if (typeof params.src !== "string" || params.src !== url) {
+      event.preventDefault();
+      return;
+    }
+    const prefs = webPreferences as Record<string, unknown>;
+    delete prefs.preload;
+    delete prefs.preloadURL;
+    prefs.nodeIntegration = false;
+    prefs.nodeIntegrationInWorker = false;
+    prefs.nodeIntegrationInSubFrames = false;
+    prefs.contextIsolation = true;
+    prefs.webSecurity = true;
+    prefs.sandbox = true;
+    prefs.webviewTag = false;
+    prefs.partition = effectivePartition;
   });
 
   return new Promise<AuthCookie[] | OpenAuthWindowResult>((resolve, reject) => {
@@ -300,10 +460,11 @@ export async function openAuthWindow(
 
     const checkAndCollect = async () => {
       if (settled) return;
-      const currentUrl = authWindow.webContents.getURL();
+      if (!authContents || authContents.isDestroyed()) return;
+      const currentUrl = authContents.getURL();
       if (!isCompletionUrl(currentUrl, normalizedCompletionPatterns)) return;
       try {
-        const allCookies = await (authWindow.webContents.session as Session).cookies.get({});
+        const allCookies = await (authContents.session as Session).cookies.get({});
         const filtered = filterCookiesByHost(allCookies, normalizedCookieHosts);
         finish(() => {
           clearTimeout(timer);
@@ -319,8 +480,13 @@ export async function openAuthWindow(
       }
     };
 
-    authWindow.webContents.on("did-navigate", () => { void checkAndCollect(); });
-    authWindow.webContents.on("did-navigate-in-page", () => { void checkAndCollect(); });
+    authWindow.webContents.on("did-attach-webview", (_event, contents) => {
+      authContents = contents;
+      attachAuthNavigationGuards(contents);
+      contents.on("did-navigate", () => { void checkAndCollect(); });
+      contents.on("did-navigate-in-page", () => { void checkAndCollect(); });
+      void checkAndCollect();
+    });
 
     // Fast-fail on navigation errors so we don't wait the full timeout for
     // DNS / TLS / proxy / offline / renderer-crash scenarios. isMainFrame
@@ -370,6 +536,20 @@ export async function openAuthWindow(
         handleNavigationFailure(errorCode, errorDescription, validatedURL, isMainFrame);
       },
     );
+    authWindow.webContents.on("did-attach-webview", (_event, contents) => {
+      contents.on(
+        "did-fail-load",
+        (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+          handleNavigationFailure(errorCode, errorDescription, validatedURL, isMainFrame);
+        },
+      );
+      contents.on(
+        "did-fail-provisional-load",
+        (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+          handleNavigationFailure(errorCode, errorDescription, validatedURL, isMainFrame);
+        },
+      );
+    });
     authWindow.webContents.on("render-process-gone", (_e, details) => {
       finish(() => {
         clearTimeout(timer);
@@ -385,7 +565,12 @@ export async function openAuthWindow(
       });
     });
 
-    authWindow.loadURL(url).catch((err) => {
+    const html = buildAuthWindowShellHtml({
+      title: windowTitle,
+      url,
+      partition: effectivePartition,
+    });
+    authWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch((err) => {
       finish(() => {
         clearTimeout(timer);
         reject(new Error(`openAuthWindow: load failed for ${sanitizeUrlForLog(url)} (${(err as Error).name || "Error"})`));
@@ -393,4 +578,14 @@ export async function openAuthWindow(
       });
     });
   });
+}
+
+function centerAuthWindowOverParent(authWindow: BrowserWindow, parent: BrowserWindow): void {
+  if (authWindow.isDestroyed() || parent.isDestroyed()) return;
+  const parentBounds = parent.getBounds();
+  const authBounds = authWindow.getBounds();
+  authWindow.setPosition(
+    Math.round(parentBounds.x + (parentBounds.width - authBounds.width) / 2),
+    Math.round(parentBounds.y + (parentBounds.height - authBounds.height) / 2),
+  );
 }
