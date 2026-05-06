@@ -37,7 +37,7 @@ export function AssistantCard({
   // Sprint 4.B: rough token estimate for tooltip (~4 chars/token)
   const outputTokens = Math.ceil(displayText.length / 4);
   return (
-    <div className="group relative max-w-[85%] rounded-md px-3 py-2 text-sm">
+    <div className="group relative min-w-0 max-w-[85%] overflow-hidden rounded-md px-3 py-2 text-sm">
       {(actions !== undefined || entry.streaming) && (
         <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
           {title}
@@ -91,7 +91,7 @@ export function AssistantCard({
       )}
 
       <div
-        className={`prose prose-sm lvis-prose max-w-none break-words ${entry.route === "command" ? "whitespace-pre-wrap" : ""}`}
+        className={`prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere] ${entry.route === "command" ? "whitespace-pre-wrap" : ""}`}
         data-testid="assistant-message-body"
       >
         {highlightQuery && highlighted ? (

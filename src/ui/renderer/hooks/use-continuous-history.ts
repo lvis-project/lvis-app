@@ -10,6 +10,11 @@ export type ContinuousHistorySession = SessionSummary & {
 
 const PAGE_SIZE = 20;
 
+type HistoryCursor = {
+  modifiedAt: string;
+  id: string;
+};
+
 export function useContinuousHistory(
   api: LvisApi,
   currentSessionId: string,
@@ -21,9 +26,10 @@ export function useContinuousHistory(
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-  const cursorRef = useRef<string | undefined>(undefined);
+  const cursorRef = useRef<HistoryCursor | undefined>(undefined);
   const loadingRef = useRef(false);
   const reachedEndRef = useRef(false);
+  const requestTokenRef = useRef(0);
   const currentSessionIdRef = useRef(currentSessionId);
 
   useEffect(() => {
@@ -48,12 +54,18 @@ export function useContinuousHistory(
     const viewport = scrollViewportRef.current;
     const prevScrollHeight = viewport?.scrollHeight ?? 0;
     const prevScrollTop = viewport?.scrollTop ?? 0;
+    const requestToken = requestTokenRef.current;
 
     try {
-      const page = await api.chatSessions({ limit: PAGE_SIZE, before: cursorRef.current });
+      const cursor = cursorRef.current;
+      const page = await api.chatSessions({
+        limit: PAGE_SIZE,
+        ...(cursor ? { before: cursor.modifiedAt, beforeId: cursor.id } : {}),
+      });
+      if (requestToken !== requestTokenRef.current) return;
       const pageSessions = page.sessions;
       const oldest = pageSessions[pageSessions.length - 1];
-      cursorRef.current = oldest?.modifiedAt ?? cursorRef.current;
+      const nextCursor = oldest ? { modifiedAt: oldest.modifiedAt, id: oldest.id } : cursorRef.current;
 
       const filtered = pageSessions.filter((session) => session.id !== currentSessionIdRef.current);
       const hydrated = await Promise.all(
@@ -63,9 +75,14 @@ export function useContinuousHistory(
           entries: await loadEntries(session.id),
         })),
       );
+      if (requestToken !== requestTokenRef.current) return;
+      cursorRef.current = nextCursor;
       const visible = hydrated
         .filter((session) => session.entries.length > 0)
-        .sort((a, b) => a.modifiedAt.localeCompare(b.modifiedAt));
+        .sort((a, b) => {
+          const timeDelta = a.modifiedAt.localeCompare(b.modifiedAt);
+          return timeDelta !== 0 ? timeDelta : a.id.localeCompare(b.id);
+        });
 
       setSessions((prev) => {
         if (visible.length === 0) return prev;
@@ -86,12 +103,15 @@ export function useContinuousHistory(
         });
       }
     } finally {
-      loadingRef.current = false;
-      setLoading(false);
+      if (requestToken === requestTokenRef.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   }, [api, currentSessionId, enabled, loadEntries]);
 
   useEffect(() => {
+    requestTokenRef.current += 1;
     setSessions([]);
     setReachedEnd(false);
     reachedEndRef.current = false;

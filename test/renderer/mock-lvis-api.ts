@@ -101,12 +101,17 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatSend: vi.fn(async () => ({ ok: true })),
     chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
-    chatSessions: vi.fn(async (opts?: { limit?: number; before?: string }) => {
+    chatSessions: vi.fn(async (opts?: { limit?: number; before?: string; beforeId?: string }) => {
       const beforeTime = opts?.before ? Date.parse(opts.before) : Number.NaN;
-      const filtered = sessions.filter((session) => Number.isNaN(beforeTime) || Date.parse(session.modifiedAt) < beforeTime);
+      const filtered = sessions.filter((session) => {
+        if (Number.isNaN(beforeTime)) return true;
+        const t = Date.parse(session.modifiedAt);
+        if (t < beforeTime) return true;
+        return t === beforeTime && opts?.beforeId !== undefined && session.id < opts.beforeId;
+      });
       return {
         current: currentSession,
-        sessions: filtered.slice(0, opts?.limit ?? filtered.length),
+        sessions: filtered.slice(0, opts?.limit ?? 20),
       };
     }),
     chatLoadSession: vi.fn(async (id: string) => ({ ok: true, sessionId: id })),
