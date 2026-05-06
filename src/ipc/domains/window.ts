@@ -33,16 +33,18 @@ export function registerWindowEventListeners(win: ElectronBrowserWindow): void {
 export function registerWindowHandlers(deps: IpcDeps): void {
   const { auditLogger, getMainWindow } = deps;
   const getSenderWindow = (e: IpcMainInvokeEvent): ElectronBrowserWindow | null =>
-    BrowserWindow.fromWebContents(e.sender) ?? getMainWindow();
+    BrowserWindow.fromWebContents(e.sender);
+  const getSenderWindowOrMain = (e: IpcMainInvokeEvent): ElectronBrowserWindow | null =>
+    getSenderWindow(e) ?? getMainWindow();
 
   ipcMain.handle("window:minimize", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:minimize", e); return; }
-    getSenderWindow(e)?.minimize();
+    getSenderWindowOrMain(e)?.minimize();
   });
 
   ipcMain.handle("window:toggleMaximize", (e) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:toggleMaximize", e); return; }
-    const win = getSenderWindow(e);
+    const win = getSenderWindowOrMain(e);
     if (!win) return;
     win.isMaximized() ? win.unmaximize() : win.maximize();
   });
@@ -55,7 +57,7 @@ export function registerWindowHandlers(deps: IpcDeps): void {
   ipcMain.handle("window:syncTitleBarTheme", (e, payload: { color: string; symbolColor: string }) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "window:syncTitleBarTheme", e); return; }
     if (process.platform === "darwin") return;
-    const win = getSenderWindow(e);
+    const win = getSenderWindowOrMain(e);
     if (!win || typeof win.setTitleBarOverlay !== "function") return;
     if (typeof payload?.color !== "string" || typeof payload?.symbolColor !== "string") {
       throw new Error("[lvis] window:syncTitleBarTheme: invalid payload");

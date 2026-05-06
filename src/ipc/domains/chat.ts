@@ -337,15 +337,21 @@ ${input}`;
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:chat:sessions", (_e, opts?: { limit?: unknown; before?: unknown }) => {
+  ipcMain.handle("lvis:chat:sessions", (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown }) => {
+    if (!validateSender(e)) {
+      auditUnauthorized(auditLogger, "lvis:chat:sessions", e);
+      return { current: conversationLoop.getSessionId(), sessions: [] };
+    }
     const limit = typeof opts?.limit === "number" && Number.isFinite(opts.limit)
       ? Math.max(1, Math.min(100, Math.floor(opts.limit)))
       : 20;
     const beforeTime = typeof opts?.before === "string" ? Date.parse(opts.before) : Number.NaN;
-    const sessions = conversationLoop
-      .listSessions()
-      .filter((s) => Number.isNaN(beforeTime) || s.modifiedAt.getTime() < beforeTime)
-      .slice(0, limit)
+    const before = Number.isNaN(beforeTime) ? undefined : new Date(beforeTime);
+    const beforeId = typeof opts?.beforeId === "string" && /^[a-zA-Z0-9_\-]+$/.test(opts.beforeId)
+      ? opts.beforeId
+      : undefined;
+    const sessions = memoryManager
+      .listSessionsPage({ limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}) })
       .map((s) => ({
       id: s.id,
       modifiedAt: s.modifiedAt.toISOString(),
