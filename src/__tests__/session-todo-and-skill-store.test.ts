@@ -26,6 +26,39 @@ describe("SessionTodoStore", () => {
     expect(r2[2].content).toBe("c");
   });
 
+  it("inserts, moves, deletes, and clears a fully completed plan", () => {
+    const store = new SessionTodoStore();
+    const initial = store.write("s", [
+      { content: "a", status: "pending" },
+      { content: "c", status: "pending" },
+    ]);
+    const [a, c] = initial;
+
+    const inserted = store.write("s", [
+      { content: "b", status: "pending", beforeId: c.id },
+    ]);
+    expect(inserted.map((i) => i.content)).toEqual(["a", "b", "c"]);
+
+    const b = inserted[1];
+    const moved = store.write("s", [
+      { id: b.id, status: "pending", afterId: c.id },
+    ]);
+    expect(moved.map((i) => i.content)).toEqual(["a", "c", "b"]);
+
+    const deleted = store.write("s", [
+      { id: c.id, status: "deleted" },
+    ]);
+    expect(deleted.map((i) => i.content)).toEqual(["a", "b"]);
+
+    expect(store.clearIfAllCompleted("s")).toBe(false);
+    store.write("s", [
+      { id: a.id, status: "completed" },
+      { id: b.id, status: "completed" },
+    ]);
+    expect(store.clearIfAllCompleted("s")).toBe(true);
+    expect(store.list("s")).toEqual([]);
+  });
+
   it("emits change events with the merged list", () => {
     const store = new SessionTodoStore();
     const events: number[] = [];

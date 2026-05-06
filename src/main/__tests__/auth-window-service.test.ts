@@ -13,7 +13,7 @@ vi.mock("electron", () => ({
   ipcMain: {},
 }));
 
-const { filterCookiesByHost, isCompletionUrl, sanitizeUrlForLog, buildAuthResult } = await import(
+const { filterCookiesByHost, isCompletionUrl, sanitizeUrlForLog, buildAuthResult, buildAuthWindowShellHtml } = await import(
   "../auth-window-service.js"
 );
 
@@ -153,5 +153,24 @@ describe("buildAuthResult", () => {
     const result = buildAuthResult(cookies, finalUrl, true);
     expect(result).toEqual({ cookies, finalUrl });
     expect(Array.isArray(result)).toBe(false);
+  });
+});
+
+describe("buildAuthWindowShellHtml", () => {
+  it("renders host-owned titlebar controls and a sandboxed auth webview", () => {
+    const html = buildAuthWindowShellHtml({
+      title: "Login <unsafe>",
+      url: "https://sso.example.com/login",
+      partition: "persist:plugin-auth:example",
+    });
+    expect(html).toContain("titlebar-btn");
+    expect(html).toContain("id=\"minimize\"");
+    expect(html).toContain("id=\"maximize\"");
+    expect(html).toContain("id=\"close\"");
+    expect(html).toContain("<webview");
+    expect(html).toContain("window.lvisWindow");
+    expect(html).toContain("https://sso.example.com/login");
+    expect(html).toContain("persist:plugin-auth:example");
+    expect(html).toContain("<title>Login &lt;unsafe&gt;</title>");
   });
 });

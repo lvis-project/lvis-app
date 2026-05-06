@@ -63,10 +63,10 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
   }
 
   return (
-    <div className="min-w-0 max-w-[85%] overflow-hidden text-xs text-muted-foreground" data-wg-id={wgId}>
+    <div className="min-w-0 w-full max-w-full overflow-x-hidden text-xs text-muted-foreground" data-wg-id={wgId}>
       <button
         type="button"
-        className="flex max-w-full items-center gap-1.5 px-1 py-1 hover:opacity-80"
+        className="flex max-w-full min-w-0 items-center gap-1.5 px-1 py-1 hover:opacity-80"
         onClick={() => {
           if (debugStreamEnabled) {
             debugLog("WG", "click-toggle", { wgId, prevOpen: open });
@@ -77,10 +77,10 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
         {streaming
           ? <Loader2 className="h-3 w-3 animate-spin flex-shrink-0" />
           : null}
-        <span className="font-medium text-foreground/90">
+        <span className="min-w-0 font-medium text-foreground/90">
           {streaming ? "작업 중..." : "작업"}
         </span>
-        {!streaming && <span className="opacity-50">{stepCount}단계</span>}
+        {!streaming && <span className="shrink-0 opacity-50">{stepCount}단계</span>}
         {!streaming && (
           open
             ? <ChevronDown className="h-3 w-3 flex-shrink-0 opacity-50" />
@@ -88,7 +88,7 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
         )}
       </button>
       {open && (
-        <div className="pl-1 space-y-1.5 pt-1">
+        <div className="min-w-0 space-y-1.5 pl-1 pt-1">
           {children}
         </div>
       )}

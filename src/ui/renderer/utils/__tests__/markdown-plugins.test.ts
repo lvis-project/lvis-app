@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import remarkGfm from "remark-gfm";
-import { MARKDOWN_REMARK_PLUGINS } from "../markdown-plugins.js";
+import { MARKDOWN_REMARK_PLUGINS, remarkKoreanAdjacentStrong } from "../markdown-plugins.js";
 
 // Single source of truth check. Every chat-side ReactMarkdown
 // (AssistantCard, TriggerCard, RoutineCard, ImportedTriggerCard summary +
@@ -11,15 +11,20 @@ import { MARKDOWN_REMARK_PLUGINS } from "../markdown-plugins.js";
 // drift, and a `grep -r remarkGfm` would surface any new direct usage.
 
 describe("MARKDOWN_REMARK_PLUGINS shared config", () => {
-  it("exposes exactly one plugin entry (remark-gfm with options)", () => {
+  it("exposes the shared plugin entries", () => {
     expect(MARKDOWN_REMARK_PLUGINS).toBeDefined();
-    expect(MARKDOWN_REMARK_PLUGINS).toHaveLength(1);
+    expect(MARKDOWN_REMARK_PLUGINS).toHaveLength(2);
   });
 
   it("plugin is remark-gfm with singleTilde disabled", () => {
-    const list = MARKDOWN_REMARK_PLUGINS as Array<[unknown, { singleTilde: boolean }]>;
+    const list = MARKDOWN_REMARK_PLUGINS as Array<[unknown, { singleTilde: boolean }] | unknown>;
     expect(Array.isArray(list[0])).toBe(true);
-    expect(list[0]![0]).toBe(remarkGfm);
-    expect(list[0]![1]).toEqual({ singleTilde: false });
+    const gfm = list[0] as [unknown, { singleTilde: boolean }];
+    expect(gfm[0]).toBe(remarkGfm);
+    expect(gfm[1]).toEqual({ singleTilde: false });
+  });
+
+  it("includes the Korean adjacent strong normalizer", () => {
+    expect(MARKDOWN_REMARK_PLUGINS?.[1]).toBe(remarkKoreanAdjacentStrong);
   });
 });

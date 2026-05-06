@@ -241,6 +241,45 @@ describe("todo_session_write tool", () => {
     expect(after2[0].status).toBe("completed");
     expect(after2[1].status).toBe("pending");
   });
+
+  it("supports ordered insertion and deletion", async () => {
+    const store = new SessionTodoStore();
+    const tool = createTodoSessionWriteTool(store);
+    const r1 = await tool.execute(
+      {
+        items: [
+          { content: "step 1", status: "pending" },
+          { content: "step 3", status: "pending" },
+        ],
+      },
+      ctx("s-order"),
+    );
+    const after1 = JSON.parse(r1.output).items as Array<{ id: string; content: string }>;
+    const step1 = after1[0];
+    const step3 = after1[1];
+
+    const r2 = await tool.execute(
+      {
+        items: [
+          { content: "step 2", status: "pending", beforeId: step3.id },
+        ],
+      },
+      ctx("s-order"),
+    );
+    const after2 = JSON.parse(r2.output).items as Array<{ id: string; content: string }>;
+    expect(after2.map((i) => i.content)).toEqual(["step 1", "step 2", "step 3"]);
+
+    const r3 = await tool.execute(
+      {
+        items: [
+          { id: step1.id, status: "deleted" },
+        ],
+      },
+      ctx("s-order"),
+    );
+    const after3 = JSON.parse(r3.output).items as Array<{ content: string }>;
+    expect(after3.map((i) => i.content)).toEqual(["step 2", "step 3"]);
+  });
 });
 
 describe("agent_spawn tool", () => {

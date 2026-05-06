@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Minus, Maximize2, Minimize2, X } from "lucide-react";
+import { Button } from "../../../components/ui/button.js";
 import { useOptionalTheme } from "../theme/ThemeProvider.js";
 
 // ─── Token → hex helpers ──────────────────────────────────────────────────
@@ -137,75 +138,55 @@ export function CustomTitleBar() {
   return (
     <div
       data-testid="custom-titlebar"
+      className="flex h-9 shrink-0 items-center justify-end border-b border-border/50 bg-background text-foreground select-none"
       style={{
-        height: 36,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "flex-end",
-        backgroundColor: "hsl(var(--background))",
-        borderBottom: "1px solid hsl(var(--border) / 0.5)",
-        flexShrink: 0,
         // @ts-expect-error — Electron-specific CSS extension
         WebkitAppRegion: "drag",
-        userSelect: "none",
       }}
       onDoubleClick={handleDoubleClick}
     >
       {/* no-drag wrapper so buttons receive mouse events */}
       <div
+        className="flex h-full items-stretch"
         style={{
-          display: "flex",
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "no-drag",
         }}
       >
-        <button
+        <Button
           data-testid="titlebar-minimize"
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={handleMinimize}
           title="최소화"
-          style={buttonStyle}
-          className="titlebar-btn titlebar-btn-minimize"
+          className="titlebar-btn titlebar-btn-minimize h-9 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Minus size={14} />
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="titlebar-maximize"
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={handleMaximize}
           title={isMaximized ? "이전 크기로" : "최대화"}
-          style={buttonStyle}
-          className="titlebar-btn titlebar-btn-maximize"
+          className="titlebar-btn titlebar-btn-maximize h-9 w-11 rounded-none text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="titlebar-close"
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={handleClose}
           title="닫기"
-          style={{ ...buttonStyle, ...closeButtonStyle }}
-          className="titlebar-btn titlebar-btn-close"
+          className="titlebar-btn titlebar-btn-close h-9 w-11 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
         >
           <X size={14} />
-        </button>
+        </Button>
       </div>
     </div>
   );
 }
-
-// ─── Styles ───────────────────────────────────────────────────────────────
-const buttonStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: 46,
-  height: 36,
-  border: "none",
-  background: "transparent",
-  color: "hsl(var(--foreground))",
-  cursor: "pointer",
-  opacity: 0.7,
-  transition: "background 0.1s, opacity 0.1s",
-};
-
-const closeButtonStyle: React.CSSProperties = {
-  // Close button gets a red hover via CSS class; keep base style neutral.
-};
