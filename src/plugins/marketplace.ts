@@ -14,7 +14,7 @@ import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./off
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import { PluginArtifactStore } from "./plugin-artifact-store.js";
-import { listFilesRecursive } from "./plugin-install-receipt.js";
+import { listFilesRecursive, verifyInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import { createLogger } from "../lib/logger.js";
@@ -373,9 +373,18 @@ export class PluginMarketplaceService {
         !plugin.version ||
         !installedVersion ||
         plugin.version === installedVersion;
-      if (isSameVersion) {
+      const manifestPath = isAbsolute(existingEntry.manifestPath)
+        ? existingEntry.manifestPath
+        : resolve(dirname(this.registryPath), existingEntry.manifestPath);
+      const hasValidReceipt = await this.hasValidInstallReceipt(plugin.id, manifestPath);
+      if (isSameVersion && hasValidReceipt) {
         await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
         return { pluginId: plugin.id, installed: true };
+      }
+      if (isSameVersion && !hasValidReceipt) {
+        log.warn(
+          `installed plugin '${plugin.id}' has invalid install receipt — reinstalling from marketplace`,
+        );
       }
     }
 
@@ -1050,7 +1059,13 @@ export class PluginMarketplaceService {
         : resolve(dirname(this.registryPath), entry.manifestPath);
       try {
         await readFile(manifestPath, "utf-8");
-        installedIds.add(entry.id);
+        if (await this.hasValidInstallReceipt(entry.id, manifestPath)) {
+          installedIds.add(entry.id);
+        } else {
+          log.warn(
+            `installed plugin '${entry.id}' ignored during managed bootstrap: invalid install receipt`,
+          );
+        }
       } catch {
         log.warn(
           `stale registry entry ignored during managed bootstrap: ${entry.id}`,
@@ -1058,6 +1073,27 @@ export class PluginMarketplaceService {
       }
     }
     return installedIds;
+  }
+
+  private async hasValidInstallReceipt(
+    pluginId: string,
+    manifestPath: string,
+  ): Promise<boolean> {
+    const pluginRoot = dirname(manifestPath);
+    const result = await verifyInstallReceipt(this.cacheRoot, pluginId, pluginRoot);
+    if (!result.ok) {
+      log.warn(
+        `install receipt check failed for '${pluginId}': ${result.reason}`,
+      );
+      return false;
+    }
+    if (result.receipt.installSource === "local-dev" && !isDevModeUnlocked()) {
+      log.warn(
+        `install receipt check failed for '${pluginId}': local-dev install is not allowed in this build`,
+      );
+      return false;
+    }
+    return true;
   }
 
   /**

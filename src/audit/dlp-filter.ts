@@ -8,6 +8,7 @@
  * filesystem paths before they are written to the audit log (#449).
  */
 import os from "node:os";
+import { pathToFileURL } from "node:url";
 
 export interface DlpResult {
   masked: string;
@@ -164,9 +165,12 @@ export function redactFsPath(p: string): string {
   if (!p) return p;
   let out = p;
   if (_homeDir) {
-    const fileUrlHome = "file://" + _homeDir;
-    if (out === fileUrlHome || out.startsWith(fileUrlHome + "/")) {
-      out = "file://<home>" + out.slice(fileUrlHome.length);
+    const standardFileUrlHome = pathToFileURL(_homeDir).toString();
+    const legacyFileUrlHome = "file://" + _homeDir;
+    if (out === standardFileUrlHome || out.startsWith(standardFileUrlHome + "/")) {
+      out = "file://<home>" + out.slice(standardFileUrlHome.length);
+    } else if (out === legacyFileUrlHome || out.startsWith(legacyFileUrlHome + "/") || out.startsWith(legacyFileUrlHome + "\\")) {
+      out = "file://<home>" + out.slice(legacyFileUrlHome.length).replace(/\\/g, "/");
     } else if (out === _homeDir || out.startsWith(_homeDir + "/") || out.startsWith(_homeDir + "\\")) {
       out = "<home>" + out.slice(_homeDir.length);
     }
