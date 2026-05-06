@@ -148,7 +148,7 @@ export function useSessions(
   };
 }
 
-function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["chatSessionHistory"]>>): ChatEntry[] {
+export function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["chatSessionHistory"]>>): ChatEntry[] {
   const entries = historyToEntries(history.messages);
   if ((history.preambleChars ?? 0) <= 0) return entries;
   return [

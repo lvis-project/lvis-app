@@ -42,6 +42,8 @@ export type StreamEvent = {
    * CheckpointDivider.
    */
   revertSessionId?: string;
+  /** Rolling summary attached to a rotation checkpoint, when generated. */
+  summary?: string;
   /** Set to "command" on `done` events when the turn was a slash command. */
   route?: "command";
   /** MCP Apps spec §3.2 — optional UI payload emitted with tool_end events. */

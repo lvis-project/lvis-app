@@ -52,7 +52,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitAskUserQuestion: (r: unknown) => void;
 } {
   const settings = overrides.settings ?? DEFAULT_SETTINGS;
-  const sessions = overrides.sessions ?? [];
+  const sessions = (overrides.sessions ?? []).map((session) => ({
+    ...session,
+    title: session.title ?? `세션 ${session.id.slice(0, 8)}`,
+  }));
   const currentSession = overrides.currentSession ?? "sess-default";
   const starred = overrides.starred ?? [];
   const history = overrides.history ?? { sessionId: currentSession, messages: [] };
@@ -98,7 +101,14 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatSend: vi.fn(async () => ({ ok: true })),
     chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
-    chatSessions: vi.fn(async () => ({ current: currentSession, sessions })),
+    chatSessions: vi.fn(async (opts?: { limit?: number; before?: string }) => {
+      const beforeTime = opts?.before ? Date.parse(opts.before) : Number.NaN;
+      const filtered = sessions.filter((session) => Number.isNaN(beforeTime) || Date.parse(session.modifiedAt) < beforeTime);
+      return {
+        current: currentSession,
+        sessions: filtered.slice(0, opts?.limit ?? filtered.length),
+      };
+    }),
     chatLoadSession: vi.fn(async (id: string) => ({ ok: true, sessionId: id })),
     chatSessionResume: vi.fn(async (id: string) => ({ ok: true, compacted: false, compactedAt: null, removedMessageCount: 0 })),
     chatCompact: vi.fn(async () => ({ compacted: false, compactedAt: null, summary: "불필요", removedMessageCount: 0 })),

@@ -1,7 +1,8 @@
 /**
  * Streaming-flow diagnostic logger.
  *
- * Gated by `VITE_DEBUG_STREAM=1` / preload bridge (cheap disabled fast-path).
+ * Gated by `VITE_DEBUG_STREAM=1` or the dev-console preload bridge
+ * (`LVIS_DEV=1` + `LVIS_DEV_CONSOLE=1`; cheap disabled fast-path).
  * Used to trace the chat-streaming path top-to-bottom: IPC events,
  * stream-state mutations, classifier output, WorkGroup mount/effect, and
  * handleAsk lifecycle.
