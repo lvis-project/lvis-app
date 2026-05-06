@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { historyToEntries } from "../history.js";
+import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../../../../lib/chat-stream-state.js";
 
 describe("historyToEntries", () => {
   it("replays persisted assistant rounds with the same turn/work shape as live streaming", () => {
@@ -74,6 +75,38 @@ describe("historyToEntries", () => {
 
     expect(entries.filter((entry) => entry.kind === "assistant")).toHaveLength(1);
     expect(entries.map((entry) => entry.kind)).toEqual(["user", "tool_group", "assistant"]);
+  });
+
+  it("strips persisted assistant meta markers during replay", () => {
+    const entries = historyToEntries([
+      { index: 0, role: "user", content: "제목 마커 확인" },
+      {
+        index: 1,
+        role: "assistant",
+        content: "결과는 **정상**입니다.<title>히스토리 마커 제거</title>[checkpoint-suggested]",
+      },
+    ]);
+
+    expect(entries.at(-1)).toMatchObject({
+      kind: "assistant",
+      text: "결과는 **정상**입니다.",
+    });
+  });
+
+  it("shows an explicit empty response when persisted assistant text only contains meta markers", () => {
+    const entries = historyToEntries([
+      { index: 0, role: "user", content: "제목만 생성" },
+      {
+        index: 1,
+        role: "assistant",
+        content: "<title>제목만 생성</title>[checkpoint-suggested]",
+      },
+    ]);
+
+    expect(entries.at(-1)).toMatchObject({
+      kind: "assistant",
+      text: EMPTY_ASSISTANT_RESPONSE_TEXT,
+    });
   });
 
   it("preserves old consecutive tool_result history as one work group", () => {

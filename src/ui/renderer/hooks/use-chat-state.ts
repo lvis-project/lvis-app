@@ -13,6 +13,7 @@ import {
   setAssistantError,
   upsertStreamingAssistant,
   upsertStreamingReasoning,
+  EMPTY_ASSISTANT_RESPONSE_TEXT,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
@@ -190,7 +191,11 @@ export function useChatState(api: LvisApi) {
            // accumulated body and leaving the assistant entry blank. Use
            // `||` so an empty string falls through to the delta-accumulated
            // `streamRef.current` instead of overwriting body content.
-          next = finalizeStreamingAssistant(next, ev.text || streamRef.current);
+          const rawText = ev.text || streamRef.current;
+          const detected = detectFromStream(rawText);
+          const finalText = visibleAssistantText(detected.cleanedText);
+          const phase = ev.stopReason === "tool_use" || ev.hasToolCalls ? "work" : "final";
+          next = finalizeStreamingAssistant(next, finalText, { phase, overrideText: finalText });
           const afterAssistantCount = next.length;
           if (debugStreamEnabled) {
             debugLog("stream", "assistant_round:finalized", {
@@ -198,7 +203,9 @@ export function useChatState(api: LvisApi) {
               afterReasoningCount,
               afterAssistantCount,
               usedThought: (ev.thought ?? thoughtRef.current).length,
-              usedText: (ev.text || streamRef.current).length,
+              rawTextLen: rawText.length,
+              cleanedTextLen: finalText.length,
+              phase,
               kinds: next.map((e) => e.kind).join(","),
             });
           }
@@ -276,14 +283,15 @@ export function useChatState(api: LvisApi) {
         // card may have absorbed every text_delta of this turn so
         // streamRef.current can be empty even though the card has
         // content to seal.
-        setEntries((p) => finalizeImportedTriggerResponse(p));
+        setEntries((p) =>
+          finalizeImportedTriggerResponse(p, (response) => detectFromStream(response).cleanedText),
+        );
         if (streamRef.current || thoughtRef.current) {
           const doneRoute = ev.route;
           // §PR-3: strip <title>...</title> and [checkpoint-suggested] markers
           // that may have been streamed as raw deltas before post-turn cleanup.
-          // Safety: if cleanedText is empty (e.g. entire stream was markers), use raw.
           const detected = detectFromStream(streamRef.current);
-          const finalText = detected.cleanedText || streamRef.current;
+          const finalText = visibleAssistantText(detected.cleanedText);
           if (debugStreamEnabled) {
             debugLog("stream", "done:detect", {
               rawLen: streamRef.current.length,
@@ -297,7 +305,11 @@ export function useChatState(api: LvisApi) {
             const base = guidanceResetPendingRef.current ? reopenLastAssistant(p).entries : p;
             guidanceResetPendingRef.current = false;
             let next = finalizeStreamingReasoning(base, thoughtRef.current);
-            next = finalizeStreamingAssistant(next, finalText, doneRoute ? { route: doneRoute } : undefined);
+            next = finalizeStreamingAssistant(
+              next,
+              finalText,
+              doneRoute ? { route: doneRoute, overrideText: finalText } : { overrideText: finalText },
+            );
             if (debugStreamEnabled) {
               debugLog("stream", "done:finalized", {
                 kinds: next.map((e) => e.kind).join(","),
@@ -568,4 +580,8 @@ export function useChatState(api: LvisApi) {
     addImportedTriggerEntry,
     closeOpenImportedTrigger,
   };
+}
+
+function visibleAssistantText(text: string): string {
+  return text.trim().length > 0 ? text : EMPTY_ASSISTANT_RESPONSE_TEXT;
 }

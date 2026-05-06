@@ -255,8 +255,8 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           //                  reasoning, tools, and mid-turn assistant text.
           //                  Once the final assistant answer lands, all prior
           //                  work collapses into one WorkGroup.
-          // "live"         — last entry in the active streaming turn.
-          // "final"        — last assistant entry AND global streaming=false
+          // "live"         — standalone non-final edge entry.
+          // "final"        — last assistant entry outside the active streaming turn
           //                  → shown with TurnActionBar (turn truly complete)
           //
           // TurnActionBar therefore appears ONLY when the whole turn is done, never during it.
@@ -300,10 +300,12 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             );
 
             if (e.kind === "assistant") {
-              if (!hasSubsequent && !streaming) {
+              if (e.phase === "work") {
+                entryClassMap.set(i, "intermediate");
+              } else if (!hasSubsequent && !isActiveTurnEntry) {
                 entryClassMap.set(i, "final");
                 finalTurnStartMap.set(i, myTurnStart);
-              } else if (hasSubsequentWork || hasPriorWork || (isActiveTurnEntry && hasPriorWork)) {
+              } else if (isActiveTurnEntry || hasSubsequentWork || hasPriorWork) {
                 entryClassMap.set(i, "intermediate");
               } else {
                 entryClassMap.set(i, "live");

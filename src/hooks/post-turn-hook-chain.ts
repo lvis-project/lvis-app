@@ -1,11 +1,11 @@
 /**
  * Post-Turn Hook Chain — §4.5 11단계 후 실행
  *
- * compact → saveSession → extractMemory → detect-checkpoint → update-title → auditLog → idle-poke 순차 실행.
+ * compact → detect-checkpoint → saveSession → extractMemory → update-title → auditLog → idle-poke 순차 실행.
  * 각 단계는 독립적이며 한 단계 실패가 다음을 차단하지 않음.
  *
  * §PR-3 확장:
- *   4. detect-checkpoint — detectFromStream() 호출, [checkpoint-suggested] 발견 시 checkpoint-suggested 이벤트 emit
+ *   2. detect-checkpoint — detectFromStream() 호출, [checkpoint-suggested] 발견 시 checkpoint-suggested 이벤트 emit
  *   5. update-title — newTitle 있으면 session metadata 업데이트, 없으면 chainTitle LLM fallback (옵션)
  *
  * conversation-loop.ts의 기존 5개 post-turn 로직을 흡수:
@@ -25,6 +25,7 @@ import type { AuditLogger } from "../audit/audit-logger.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { SettingsService } from "../data/settings-store.js";
 import { createLogger } from "../lib/logger.js";
+import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../lib/chat-stream-state.js";
 const log = createLogger("post-turn");
 
 export interface PostTurnHookContext {
@@ -123,39 +124,9 @@ export class PostTurnHookChain {
       log.warn({ err }, "compact failed");
     }
 
-    // 2. 세션 영속화 (§4.5.7)
-    try {
-      const messagesToSave = compactedMessages ?? ctx.messages;
-      await this.deps.memoryManager?.saveSession(ctx.sessionId, messagesToSave);
-    } catch (err) {
-      log.warn("saveSession failed: %s", err);
-    }
-
-    // 3. Memory Extraction — "기억해" 패턴 감지 시 memory/ 자동 저장
-    try {
-      if (this.deps.memoryManager) {
-        const memoryPatterns = /기억해|기억하|잊지\s*마|remember|don't forget|메모해/i;
-        if (memoryPatterns.test(ctx.input)) {
-          const confirmPatterns = /기억하겠|메모.*저장|기록.*했|noted|remembered|saved/i;
-          if (confirmPatterns.test(ctx.output)) {
-            const title = ctx.input.slice(0, 40).replace(/\n/g, " ").trim();
-            if (title.length >= 3) {
-              await this.deps.memoryManager.saveMemory(
-                `자동-${title}`,
-                `[사용자 요청]\n${ctx.input}\n\n[어시스턴트 응답]\n${ctx.output.slice(0, 500)}`,
-              );
-              log.info(`memory-extraction: auto-saved note "${title}"`);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      log.warn("extractMemory failed: %s", err);
-    }
-
-    // 4. §PR-3: Detect Checkpoint — detectFromStream 호출
-    //    Skipped when experimentalContinuousBackend feature flag is OFF to prevent
-    //    silent failures from stopping tool streams and contaminating output.
+    // 2. §PR-3: Detect Checkpoint — detectFromStream 호출
+    //    Run before persistence so durable session history stores the same
+    //    cleaned assistant output that the caller and renderer receive.
     let detector: DetectorResult = { cleanedText: ctx.output, newTitle: null, checkpointSuggested: false };
     const continuousBackendEnabled =
       this.deps.settingsService?.get("features")?.experimentalContinuousBackend ?? false;
@@ -173,6 +144,47 @@ export class PostTurnHookChain {
       } catch (err) {
         log.warn("detect-checkpoint failed: %s", err);
       }
+    }
+    const outputForHooks = detector.cleanedText;
+    const outputForPersistence =
+      outputForHooks.trim().length > 0
+        ? outputForHooks
+        : ctx.output.trim().length > 0
+          ? EMPTY_ASSISTANT_RESPONSE_TEXT
+          : outputForHooks;
+
+    // 3. 세션 영속화 (§4.5.7)
+    try {
+      const baseMessages = compactedMessages ?? ctx.messages;
+      const messagesToSave =
+        outputForPersistence !== ctx.output
+          ? replaceLastAssistantOutput(baseMessages, ctx.output, outputForPersistence)
+          : baseMessages;
+      await this.deps.memoryManager?.saveSession(ctx.sessionId, messagesToSave);
+    } catch (err) {
+      log.warn("saveSession failed: %s", err);
+    }
+
+    // 4. Memory Extraction — "기억해" 패턴 감지 시 memory/ 자동 저장
+    try {
+      if (this.deps.memoryManager) {
+        const memoryPatterns = /기억해|기억하|잊지\s*마|remember|don't forget|메모해/i;
+        if (memoryPatterns.test(ctx.input)) {
+          const confirmPatterns = /기억하겠|메모.*저장|기록.*했|noted|remembered|saved/i;
+          if (confirmPatterns.test(outputForHooks)) {
+            const title = ctx.input.slice(0, 40).replace(/\n/g, " ").trim();
+            if (title.length >= 3) {
+              await this.deps.memoryManager.saveMemory(
+                `자동-${title}`,
+                `[사용자 요청]\n${ctx.input}\n\n[어시스턴트 응답]\n${outputForHooks.slice(0, 500)}`,
+              );
+              log.info(`memory-extraction: auto-saved note "${title}"`);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      log.warn("extractMemory failed: %s", err);
     }
 
     // 5. §PR-3: Update Title — newTitle 있으면 session metadata 업데이트
@@ -223,7 +235,7 @@ export class PostTurnHookChain {
       this.deps.auditLogger?.logTurn({
         sessionId: ctx.sessionId,
         input: ctx.input,
-        output: ctx.output,
+        output: outputForHooks,
         toolCalls: ctx.toolCalls,
         tokenUsage: ctx.tokenUsage,
         route: auditRoute,
@@ -241,4 +253,22 @@ export class PostTurnHookChain {
 
     return { compactedMessages, detector };
   }
+}
+
+function replaceLastAssistantOutput(
+  messages: GenericMessage[],
+  rawOutput: string,
+  cleanedOutput: string,
+): GenericMessage[] {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role !== "assistant") continue;
+    const next = [...messages];
+    next[i] = {
+      ...message,
+      content: message.content === rawOutput ? cleanedOutput : message.content.replace(rawOutput, cleanedOutput),
+    };
+    return next;
+  }
+  return messages;
 }
