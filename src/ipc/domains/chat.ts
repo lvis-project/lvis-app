@@ -176,13 +176,14 @@ async function runStreamedTurn(
       onToolEnd: (name, toolResult, isError, meta, uiPayload) =>
         send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }) }),
       onError: (error) => send({ type: "error", error }),
-      onCompactOccurred: ({ removedMessages, freedTokens, tier, revertSessionId }) =>
+      onCompactOccurred: ({ removedMessages, freedTokens, tier, revertSessionId, summary }) =>
         send({
           type: "compact_notice",
           removedMessages,
           freedTokens,
           ...(tier !== undefined ? { tier } : {}),
           ...(revertSessionId !== undefined ? { revertSessionId } : {}),
+          ...(summary !== undefined ? { summary } : {}),
         }),
       onFallback: (from, to) => webContents?.send("lvis:chat:fallback", { from, to }),
     },
@@ -336,14 +337,25 @@ ${input}`;
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:chat:sessions", () => ({
-    current: conversationLoop.getSessionId(),
-    sessions: conversationLoop.listSessions(20).map((s) => ({
+  ipcMain.handle("lvis:chat:sessions", (_e, opts?: { limit?: unknown; before?: unknown }) => {
+    const limit = typeof opts?.limit === "number" && Number.isFinite(opts.limit)
+      ? Math.max(1, Math.min(100, Math.floor(opts.limit)))
+      : 20;
+    const beforeTime = typeof opts?.before === "string" ? Date.parse(opts.before) : Number.NaN;
+    const sessions = conversationLoop
+      .listSessions()
+      .filter((s) => Number.isNaN(beforeTime) || s.modifiedAt.getTime() < beforeTime)
+      .slice(0, limit)
+      .map((s) => ({
       id: s.id,
       modifiedAt: s.modifiedAt.toISOString(),
       title: s.title,
-    })),
-  }));
+    }));
+    return {
+      current: conversationLoop.getSessionId(),
+      sessions,
+    };
+  });
 
   ipcMain.handle("lvis:chat:load-session", (e, sessionId: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, "lvis:chat:load-session", e); return UNAUTHORIZED_FRAME; }

@@ -41,6 +41,9 @@ export function useSessions(
     try {
       const h = await api.chatGetHistory();
       if (token !== sessionReadTokenRef.current) return;
+      const listed = await api.chatSessions();
+      if (token !== sessionReadTokenRef.current) return;
+      setSessions(listed.sessions);
       if (h.messages.length > 0) {
         setCurrentSessionId(h.sessionId);
         // The renderer state contract is: active in-memory stream entries and
@@ -51,8 +54,6 @@ export function useSessions(
         return;
       }
 
-      const listed = await api.chatSessions();
-      if (token !== sessionReadTokenRef.current) return;
       const latest = listed.sessions[0];
       if (!latest) {
         setCurrentSessionId(h.sessionId);
@@ -147,7 +148,7 @@ export function useSessions(
   };
 }
 
-function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["chatSessionHistory"]>>): ChatEntry[] {
+export function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["chatSessionHistory"]>>): ChatEntry[] {
   const entries = historyToEntries(history.messages);
   if ((history.preambleChars ?? 0) <= 0) return entries;
   return [
