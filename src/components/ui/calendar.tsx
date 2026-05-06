@@ -23,23 +23,23 @@ export function Calendar({
       locale={ko}
       weekStartsOn={0}
       showOutsideDays={showOutsideDays}
-      className={cn("p-3 relative", className)}
+      className={cn("relative p-3", className)}
       classNames={{
         months: "flex flex-col sm:flex-row gap-2",
         month: "flex flex-col gap-2",
-        month_caption: "flex pt-1 pb-1 px-1 items-center",
+        month_caption: "flex items-center px-1 pb-1 pt-1 pr-16",
         caption_label: "text-xs font-semibold",
         // Nav is a sibling of <Months>, so absolute-position it onto the
         // caption row to land on the same line as the label. wrapper has
         // `relative` so right/top resolve to the calendar's outer edges.
-        nav: "flex items-center gap-1 absolute right-3 top-3",
+        nav: "absolute right-2 top-2 flex items-center gap-1",
         button_previous: cn(
           buttonVariants({ variant: "outline" }),
-          "h-6 w-6 bg-transparent p-0 opacity-70 hover:opacity-100",
+          "h-7 w-7 rounded-full border-border bg-muted/30 p-0 opacity-80 hover:bg-accent hover:opacity-100",
         ),
         button_next: cn(
           buttonVariants({ variant: "outline" }),
-          "h-6 w-6 bg-transparent p-0 opacity-70 hover:opacity-100",
+          "h-7 w-7 rounded-full border-border bg-muted/30 p-0 opacity-80 hover:bg-accent hover:opacity-100",
         ),
         month_grid: "w-full border-collapse",
         weekdays: "flex",
@@ -52,7 +52,7 @@ export function Calendar({
         ),
         selected:
           "[&>button]:bg-primary [&>button]:text-primary-foreground [&>button]:hover:bg-primary [&>button]:hover:text-primary-foreground [&>button]:rounded-full",
-        today: "[&>button]:bg-primary/15 [&>button]:text-primary [&>button]:font-semibold",
+        today: "[&>button]:text-primary [&>button]:font-semibold",
         outside: "[&>button]:text-muted-foreground/40",
         disabled: "[&>button]:text-muted-foreground/40",
         range_middle: "[&>button]:bg-primary/15 [&>button]:text-primary",

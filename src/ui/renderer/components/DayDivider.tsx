@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CalendarDays } from "lucide-react";
+import type { Matcher } from "react-day-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Calendar } from "../../../components/ui/calendar.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
@@ -32,7 +33,12 @@ export function DayDivider({
   const key = dateKey ?? getKoreaDateKey(new Date());
   const label = formatDayLabel(key);
   const selectedKey = pickedDate ? getKoreaDateKey(pickedDate) : key;
+  const sessionDateKeys = Array.from(
+    new Set(sessions.map((session) => getKoreaDateKey(new Date(session.modifiedAt)))),
+  );
+  const sessionDateMatchers: Matcher[] = sessionDateKeys.map(dateFromKey);
   const sessionsForDate = sessions.filter((session) => getKoreaDateKey(new Date(session.modifiedAt)) === selectedKey);
+  const selectToday = () => setPickedDate(new Date());
   return (
     <div
       data-testid="day-divider"
@@ -52,11 +58,29 @@ export function DayDivider({
             {label}
           </button>
         </PopoverTrigger>
-        <PopoverContent align="center" className="w-[264px] border-border bg-popover p-2 text-popover-foreground shadow-lg">
-          <Calendar mode="single" selected={pickedDate} onSelect={setPickedDate} />
+        <PopoverContent align="center" className="w-[292px] border-border bg-popover p-2 text-popover-foreground shadow-lg">
+          <Calendar
+            mode="single"
+            selected={pickedDate}
+            onSelect={setPickedDate}
+            modifiers={{ hasSession: sessionDateMatchers }}
+            modifiersClassNames={{
+              hasSession:
+                "after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary/80 [&>button]:font-semibold",
+            }}
+          />
           <div className="border-t border-border/70 px-1 py-2">
-            <div className="mb-1 px-1 text-[10px] font-medium text-muted-foreground">
-              {selectedKey} 대화
+            <div className="mb-1 flex items-center justify-between gap-2 px-1">
+              <span className="min-w-0 truncate text-[10px] font-medium text-muted-foreground">
+                {selectedKey} 대화
+              </span>
+              <button
+                type="button"
+                onClick={selectToday}
+                className="shrink-0 rounded border border-border bg-muted/30 px-2 py-0.5 text-[10px] text-foreground/80 hover:bg-accent hover:text-accent-foreground"
+              >
+                오늘
+              </button>
             </div>
             {sessionsForDate.length === 0 ? (
               <div className="px-1 py-1 text-[11px] text-muted-foreground">해당 날짜의 저장된 대화가 없습니다.</div>
@@ -105,6 +129,11 @@ function getKoreaDateKey(date: Date): string {
   }).formatToParts(date);
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function dateFromKey(dateKey: string): Date {
+  const [year = "0", month = "1", day = "1"] = dateKey.split("-");
+  return new Date(Number(year), Number(month) - 1, Number(day));
 }
 
 function formatDayLabel(dateKey: string): string {
