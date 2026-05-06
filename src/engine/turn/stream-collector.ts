@@ -100,6 +100,7 @@ export async function collectRoundStream(
   const toolCalls: ToolCallBlock[] = [];
   let stopReason: "end_turn" | "tool_use" = "end_turn";
   let usage: TokenUsage | undefined;
+  let sawMessageComplete = false;
 
   try {
     for await (const event of provider.streamTurn({
@@ -126,6 +127,7 @@ export async function collectRoundStream(
           toolCalls.push({ id: event.id, name: event.name, input: event.input });
           break;
         case "message_complete":
+          sawMessageComplete = true;
           stopReason = event.stopReason;
           if (event.thinkingBlocks && event.thinkingBlocks.length > 0) {
             thinkingBlocks = event.thinkingBlocks;
@@ -164,6 +166,12 @@ export async function collectRoundStream(
   }
 
   if (abortSignal?.aborted) return { kind: "interrupted", text };
+  if (!sawMessageComplete && toolCalls.length > 0) {
+    return {
+      kind: "stream_error",
+      userMessage: "오류: 모델 스트림이 도구 호출 완료 신호 없이 종료되었습니다. 다시 시도해 주세요.",
+    };
+  }
 
   return {
     kind: "ok",

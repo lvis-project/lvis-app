@@ -759,4 +759,10 @@
   .lvis-prose :where(code):not(:where(pre code, [class~="not-prose"] *))::after {
     content: "";
   }
+  .lvis-prose :where(pre, table, img, video, canvas, iframe):not(:where([class~="not-prose"] *)) {
+    max-width: 100%;
+  }
+  .lvis-prose :where(pre, table):not(:where([class~="not-prose"] *)) {
+    overflow-x: auto;
+  }
 }

@@ -60,12 +60,12 @@ describe("window domain IPC", () => {
     expect(mainWindow.close).not.toHaveBeenCalled();
   });
 
-  it("falls back to the main window when sender BrowserWindow cannot be resolved", async () => {
+  it("does not close the main window when sender BrowserWindow cannot be resolved", async () => {
     fromWebContents.mockReturnValueOnce(null);
 
     await handleMap.get("window:close")!(trustedEvent());
 
-    expect(mainWindow.close).toHaveBeenCalledOnce();
+    expect(mainWindow.close).not.toHaveBeenCalled();
   });
 
   it("targets minimize and maximize at the sender window", async () => {

@@ -68,7 +68,10 @@ type InstallOperationState = {
   >;
 };
 
-type InstallReceiptValidityCache = Map<string, boolean>;
+type InstallReceiptValidation = {
+  ok: boolean;
+  reason?: string;
+};
 
 export interface MarketplaceListItem extends PluginMarketplaceItem {
   installed: boolean;
@@ -180,6 +183,7 @@ export class PluginMarketplaceService {
    * breadcrumb + history.json from corruption.
    */
   private readonly locks = new Map<string, Promise<void>>();
+  private readonly installReceiptValidationCache = new Map<string, InstallReceiptValidation>();
   /** Optional diagnostic logger. Injected in tests; no-op in production. */
   readonly log?: (message: string, ...args: unknown[]) => void;
 
@@ -378,10 +382,15 @@ export class PluginMarketplaceService {
       const manifestPath = isAbsolute(existingEntry.manifestPath)
         ? existingEntry.manifestPath
         : resolve(dirname(this.registryPath), existingEntry.manifestPath);
-      const hasValidReceipt = await this.hasValidInstallReceipt(plugin.id, manifestPath);
-      if (isSameVersion && hasValidReceipt) {
+      const receiptValidation = await this.getInstallReceiptValidation(plugin.id, manifestPath);
+      if (isSameVersion && receiptValidation.ok) {
         await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
         return { pluginId: plugin.id, installed: true };
+      }
+      if (isSameVersion && !receiptValidation.ok) {
+        log.warn(
+          `installed plugin '${plugin.id}' has invalid install receipt (${receiptValidation.reason ?? "unknown"}) — reinstalling from marketplace`,
+        );
       }
     }
 
@@ -404,6 +413,7 @@ export class PluginMarketplaceService {
     const manifestAbsPath = isAbsolute(manifestPath)
       ? manifestPath
       : resolve(dirname(this.registryPath), manifestPath);
+    this.clearInstallReceiptValidation(pluginId, manifestAbsPath);
     await this.artifactStore.cacheVersionFromManifest(pluginId, manifestAbsPath);
 
     // §M1 F-round: atomic read-modify-write under registry lock.
@@ -463,8 +473,7 @@ export class PluginMarketplaceService {
     // boot); a corrupt registry must NOT silently force-reinstall every
     // managed plugin on top of an unknown prior state.
     const registry = await readPluginRegistry(this.registryPath);
-    const receiptValidityCache: InstallReceiptValidityCache = new Map();
-    const installedIds = await this.resolveInstalledIds(registry.plugins, receiptValidityCache);
+    const installedIds = await this.resolveInstalledIds(registry.plugins);
     for (const plugin of managed) {
       if (installedIds.has(plugin.id)) continue;
       try {
@@ -1049,7 +1058,6 @@ export class PluginMarketplaceService {
 
   private async resolveInstalledIds(
     entries: Array<{ id: string; manifestPath: string }>,
-    receiptValidityCache: InstallReceiptValidityCache,
   ): Promise<Set<string>> {
     const installedIds = new Set<string>();
     for (const entry of entries) {
@@ -1058,8 +1066,13 @@ export class PluginMarketplaceService {
         : resolve(dirname(this.registryPath), entry.manifestPath);
       try {
         await readFile(manifestPath, "utf-8");
-        if (await this.hasValidInstallReceipt(entry.id, manifestPath, receiptValidityCache)) {
+        const receiptValidation = await this.getInstallReceiptValidation(entry.id, manifestPath);
+        if (receiptValidation.ok) {
           installedIds.add(entry.id);
+        } else {
+          log.warn(
+            `installed plugin '${entry.id}' ignored during managed bootstrap: invalid install receipt (${receiptValidation.reason ?? "unknown"})`,
+          );
         }
       } catch {
         log.warn(
@@ -1070,33 +1083,37 @@ export class PluginMarketplaceService {
     return installedIds;
   }
 
-  private async hasValidInstallReceipt(
+  private async getInstallReceiptValidation(
     pluginId: string,
     manifestPath: string,
-    receiptValidityCache?: InstallReceiptValidityCache,
-  ): Promise<boolean> {
-    const pluginRoot = dirname(manifestPath);
-    const cacheKey = `${pluginId}\0${pluginRoot}`;
-    const cached = receiptValidityCache?.get(cacheKey);
-    if (cached !== undefined) return cached;
+  ): Promise<InstallReceiptValidation> {
+    const cacheKey = this.installReceiptValidationCacheKey(pluginId, manifestPath);
+    const cached = this.installReceiptValidationCache.get(cacheKey);
+    if (cached) return cached;
 
+    const pluginRoot = dirname(manifestPath);
     const result = await verifyInstallReceipt(this.cacheRoot, pluginId, pluginRoot);
     if (!result.ok) {
-      log.warn(
-        `install receipt check failed for '${pluginId}': ${result.reason}`,
-      );
-      receiptValidityCache?.set(cacheKey, false);
-      return false;
+      const validation = { ok: false, reason: result.reason };
+      this.installReceiptValidationCache.set(cacheKey, validation);
+      return validation;
     }
     if (result.receipt.installSource === "local-dev" && !isDevModeUnlocked()) {
-      log.warn(
-        `install receipt check failed for '${pluginId}': local-dev install is not allowed in this build`,
-      );
-      receiptValidityCache?.set(cacheKey, false);
-      return false;
+      const validation = { ok: false, reason: "local-dev install is not allowed in this build" };
+      this.installReceiptValidationCache.set(cacheKey, validation);
+      return validation;
     }
-    receiptValidityCache?.set(cacheKey, true);
-    return true;
+    const validation = { ok: true };
+    this.installReceiptValidationCache.set(cacheKey, validation);
+    return validation;
+  }
+
+  private clearInstallReceiptValidation(pluginId: string, manifestPath: string): void {
+    this.installReceiptValidationCache.delete(this.installReceiptValidationCacheKey(pluginId, manifestPath));
+  }
+
+  private installReceiptValidationCacheKey(pluginId: string, manifestPath: string): string {
+    return `${pluginId}\0${resolve(manifestPath)}`;
   }
 
   /**
