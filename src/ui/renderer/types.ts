@@ -268,7 +268,7 @@ export type LvisApi = {
   ) => Promise<unknown>;
   chatGuide: (input: string) => Promise<unknown>;
   chatNew: () => Promise<{ ok: true }>;
-  chatSessions: (opts?: { limit?: number; before?: string; beforeId?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string }> }>;
+  chatSessions: (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) => Promise<{ current: string; sessions: Array<{ id: string; modifiedAt: string; title: string }> }>;
   chatLoadSession: (sessionId: string) => Promise<{ ok: boolean; sessionId: string | null }>;
   onChatStream: (h: (e: StreamEvent) => void) => () => void;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;

@@ -16,6 +16,7 @@ type ApiOverrides = {
   currentSession?: string;
   starred?: unknown[];
   history?: { sessionId: string; messages: unknown[] } | Promise<{ sessionId: string; messages: unknown[] }>;
+  historyBySession?: Record<string, { messages: unknown[] } | Promise<{ messages: unknown[] }>>;
   hasApiKey?: boolean;
   hasProvider?: boolean;
   usage?: unknown;
@@ -59,6 +60,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const currentSession = overrides.currentSession ?? "sess-default";
   const starred = overrides.starred ?? [];
   const history = overrides.history ?? { sessionId: currentSession, messages: [] };
+  const historyBySession = overrides.historyBySession ?? {};
   const hasApiKey = overrides.hasApiKey ?? true;
   const hasProvider = overrides.hasProvider ?? true;
   const usage = overrides.usage ?? DEFAULT_USAGE;
@@ -101,11 +103,13 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatSend: vi.fn(async () => ({ ok: true })),
     chatGuide: vi.fn(async () => ({ ok: true })),
     chatNew: vi.fn(async () => ({ ok: true })),
-    chatSessions: vi.fn(async (opts?: { limit?: number; before?: string; beforeId?: string }) => {
+    chatSessions: vi.fn(async (opts?: { limit?: number; before?: string; beforeId?: string; after?: string }) => {
       const beforeTime = opts?.before ? Date.parse(opts.before) : Number.NaN;
+      const afterTime = opts?.after ? Date.parse(opts.after) : Number.NaN;
       const filtered = sessions.filter((session) => {
-        if (Number.isNaN(beforeTime)) return true;
         const t = Date.parse(session.modifiedAt);
+        if (!Number.isNaN(afterTime) && t < afterTime) return false;
+        if (Number.isNaN(beforeTime)) return true;
         if (t < beforeTime) return true;
         return t === beforeTime && opts?.beforeId !== undefined && session.id < opts.beforeId;
       });
@@ -118,7 +122,12 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     chatSessionResume: vi.fn(async (id: string) => ({ ok: true, compacted: false, compactedAt: null, removedMessageCount: 0 })),
     chatCompact: vi.fn(async () => ({ compacted: false, compactedAt: null, summary: "불필요", removedMessageCount: 0 })),
     chatGetHistory: vi.fn(async () => history),
-    chatSessionHistory: vi.fn(async (_sessionId: string) => {
+    chatSessionHistory: vi.fn(async (sessionId: string) => {
+      const sessionHistory = historyBySession[sessionId];
+      if (sessionHistory) {
+        const resolvedSessionHistory = await sessionHistory;
+        return { ok: true, messages: resolvedSessionHistory.messages };
+      }
       const resolvedHistory = await history;
       return { ok: true, messages: resolvedHistory.messages };
     }),
