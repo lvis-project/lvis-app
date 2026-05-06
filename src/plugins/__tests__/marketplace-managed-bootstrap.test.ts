@@ -91,6 +91,67 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     expect(result.failed).toEqual([]);
   });
 
+  it("reinstalls managed plugins when manifest exists but install receipt is missing", async () => {
+    await writeFile(
+      marketplacePath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "meeting",
+            name: "Meeting",
+            description: "fixture",
+            packageSpec: "file:../lvis-plugin-meeting",
+            packageName: "@lvis/plugin-meeting",
+            tools: [],
+            installPolicy: "admin",
+          },
+        ],
+      }),
+      "utf-8",
+    );
+    const pluginDir = join(pluginsDir, "meeting");
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(
+      join(pluginDir, "plugin.json"),
+      JSON.stringify({
+        id: "meeting",
+        name: "Meeting",
+        version: "1.0.0",
+        entry: "dist/hostPlugin.js",
+        tools: [],
+        description: "fixture",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            id: "meeting",
+            manifestPath: "meeting/plugin.json",
+            enabled: true,
+            installSource: "admin",
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const service = makeManagedService(testDir, marketplacePath);
+    const installSpy = vi
+      .spyOn(service, "install")
+      .mockResolvedValue({ pluginId: "meeting", installed: true });
+
+    const result = await service.ensureManagedInstalled();
+
+    expect(installSpy).toHaveBeenCalledWith("meeting", "it-admin");
+    expect(result.installed).toEqual(["meeting"]);
+    expect(result.failed).toEqual([]);
+  });
+
   it("installs bundle companion plugins before the bundle root plugin", async () => {
     await writeFile(
       marketplacePath,

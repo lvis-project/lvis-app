@@ -20,18 +20,27 @@ function card(streaming: boolean, text = "thinking content here") {
   );
 }
 
+function embeddedCard(streaming: boolean, text = "embedded thinking content") {
+  return (
+    <ReasoningCard
+      entry={{ kind: "reasoning", text, streaming }}
+      embedded
+    />
+  );
+}
+
 describe("ReasoningCard", () => {
   it("renders body expanded while streaming and hides it after the stream finishes", () => {
     const { rerender, queryByText, getByRole } = render(card(true));
 
     // Streaming: body visible, header button disabled.
-    expect(queryByText("생각 정리 중")).toBeInTheDocument();
+    expect(queryByText("생각 중...")).toBeInTheDocument();
     expect(queryByText("thinking content here")).toBeInTheDocument();
     expect(getByRole("button")).toBeDisabled();
 
     // Stream finishes -> auto-collapse.
     rerender(card(false));
-    expect(queryByText("생각 정리")).toBeInTheDocument();
+    expect(queryByText("생각 완료")).toBeInTheDocument();
     expect(queryByText("thinking content here")).not.toBeInTheDocument();
     expect(getByRole("button")).not.toBeDisabled();
   });
@@ -61,12 +70,26 @@ describe("ReasoningCard", () => {
     // effect only fires on a streaming true→false edge, so initial open must
     // also depend on `streaming` — otherwise past thoughts render expanded.
     const { queryByText, getByRole } = render(card(false));
-    expect(queryByText("생각 정리")).toBeInTheDocument();
+    expect(queryByText("생각 완료")).toBeInTheDocument();
     expect(queryByText("thinking content here")).not.toBeInTheDocument();
     expect(getByRole("button")).not.toBeDisabled();
 
     // And the header is still interactive: click to inspect the cached thought.
     fireEvent.click(getByRole("button"));
     expect(queryByText("thinking content here")).toBeInTheDocument();
+  });
+
+  it("collapses completed embedded reasoning and allows manual expansion", () => {
+    const { rerender, queryByText, getByRole } = render(embeddedCard(true));
+    expect(queryByText("embedded thinking content")).toBeInTheDocument();
+    expect(getByRole("button")).toBeDisabled();
+
+    rerender(embeddedCard(false));
+    expect(queryByText("생각 완료")).toBeInTheDocument();
+    expect(queryByText("embedded thinking content")).not.toBeInTheDocument();
+    expect(getByRole("button")).not.toBeDisabled();
+
+    fireEvent.click(getByRole("button"));
+    expect(queryByText("embedded thinking content")).toBeInTheDocument();
   });
 });

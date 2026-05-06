@@ -114,4 +114,13 @@ describe("preload — plugin webview asset URLs", () => {
 
     expect(env["debugStream"]).toBe(true);
   });
+
+  it("enables debugStream when the dev console is enabled in dev mode", async () => {
+    process.env.LVIS_DEV = "1";
+    process.env.LVIS_DEV_CONSOLE = "1";
+    const lvis = await loadLvisNamespace();
+    const env = lvis["env"] as Record<string, unknown>;
+
+    expect(env["debugStream"]).toBe(true);
+  });
 });

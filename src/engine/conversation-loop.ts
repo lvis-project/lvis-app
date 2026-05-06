@@ -70,6 +70,12 @@ export interface TurnCallbacks {
      * plain auto/reactive compaction (no fork occurred).
      */
     revertSessionId?: string;
+    /**
+     * Rolling summary generated for rotation checkpoints. Undefined means no
+     * user-facing summary is available; null summaries are intentionally not
+     * sent because there is nothing useful to render.
+     */
+    summary?: string;
   }) => void;
   onFallback?: (from: string, to: string) => void;
 }
@@ -1285,6 +1291,7 @@ export class ConversationLoop {
         freedTokens,
         tier: decision.trigger,
         revertSessionId: parentSessionId,
+        ...(summary ? { summary } : {}),
       });
 
       if (process.env.NODE_ENV !== "production") {

@@ -180,7 +180,10 @@ describe("ConversationLoop reactive compact recovery", () => {
     const provider = new AlwaysThrowProvider(authError);
     const loop = makeLoop(provider);
 
-    await expect(loop.runTurn("질문", {})).rejects.toThrow("401 Unauthorized");
+    const errors: string[] = [];
+    const result = await loop.runTurn("질문", { onError: (message) => errors.push(message) });
+    expect(result.text).toContain("API 키");
+    expect(errors[0]).toContain("API 키");
     expect(provider.getCallCount()).toBe(1); // no retry
   });
 
@@ -189,7 +192,10 @@ describe("ConversationLoop reactive compact recovery", () => {
     const provider = new AlwaysThrowProvider(rateLimitError);
     const loop = makeLoop(provider);
 
-    await expect(loop.runTurn("질문", {})).rejects.toThrow("rate limit");
+    const errors: string[] = [];
+    const result = await loop.runTurn("질문", { onError: (message) => errors.push(message) });
+    expect(result.text).toContain("모델 요청 한도");
+    expect(errors[0]).toContain("모델 요청 한도");
     expect(provider.getCallCount()).toBe(1);
   });
 
@@ -205,8 +211,11 @@ describe("ConversationLoop reactive compact recovery", () => {
       loop.getHistory().append({ role: "assistant", content: `응답 ${i}` });
     }
 
-    await expect(loop.runTurn("질문", {})).rejects.toThrow("prompt is too long");
-    // First call throws → compact → second call throws → propagate (total 2 calls)
+    const errors: string[] = [];
+    const result = await loop.runTurn("질문", { onError: (message) => errors.push(message) });
+    expect(result.text).toContain("압축한 뒤에도 모델 컨텍스트 한도를 초과");
+    expect(errors[0]).toContain("압축한 뒤에도 모델 컨텍스트 한도를 초과");
+    // First call throws → compact → second call throws → stream_error (total 2 calls)
     expect(provider.getCallCount()).toBe(2);
   });
 

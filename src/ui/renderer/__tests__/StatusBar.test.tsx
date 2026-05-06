@@ -30,6 +30,11 @@ describe("StatusBar", () => {
     expect(screen.getByText("LVIS")).toBeInTheDocument();
   });
 
+  it("marks the placeholder logo as decorative so LVIS is announced once", () => {
+    render(<StatusBar persistent={[]} visibleToast={null} />);
+    expect(screen.queryByRole("img", { name: "LVIS" })).toBeNull();
+  });
+
   it("renders persistent items with label and value", () => {
     render(<StatusBar persistent={[persistent()]} visibleToast={null} />);
     expect(screen.getByText("다음 루틴")).toBeInTheDocument();

@@ -32,8 +32,7 @@ export function ChatSearchOverlay({
   onPrev: () => void;
   onClose: () => void;
 }) {
-  // Local-only state for the calendar popover; selecting a date is UI-only
-  // for now (no history navigation wired yet).
+  // Local-only date marker for the compact in-conversation search popover.
   const [pickedDate, setPickedDate] = useState<Date | undefined>(undefined);
   if (!open) return null;
   return (
@@ -48,7 +47,7 @@ export function ChatSearchOverlay({
           if (e.key === "Escape") { e.preventDefault(); onClose(); }
         }}
         placeholder="대화 검색..."
-        className="h-7 w-48 text-xs bg-white"
+        className="h-7 w-48 bg-background text-xs"
       />
       <span className="text-[10px] text-muted-foreground tabular-nums">{matchCount === 0 ? "0/0" : `${currentIdx + 1}/${matchCount}`}</span>
       <button
@@ -60,16 +59,14 @@ export function ChatSearchOverlay({
       <button className="rounded p-0.5 hover:bg-muted" onClick={onNext} title="다음"><ChevronRight className="h-3 w-3" /></button>
       {/* Spacer pushes the calendar + close cluster to the far right. */}
       <div className="flex-1" />
-      {/* Calendar shortcut — Popover + react-day-picker (shadcn Calendar)
-          styled to the LVIS palette. UI-only for now (selecting a date
-          updates `pickedDate` but doesn't navigate history yet). */}
+      {/* Calendar shortcut — Popover + react-day-picker (shadcn Calendar). */}
       <Popover>
         <PopoverTrigger asChild>
           <button className="rounded p-0.5 hover:bg-muted" title="날짜로 이동" aria-label="날짜 선택">
             <CalendarIcon className="h-3 w-3" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-auto p-2 shadow-none border border-[#E6E1D6] bg-[#F9F7F3]">
+        <PopoverContent align="end" className="w-auto border-border bg-popover p-2 text-popover-foreground shadow-lg">
           <Calendar mode="single" selected={pickedDate} onSelect={setPickedDate} />
         </PopoverContent>
       </Popover>

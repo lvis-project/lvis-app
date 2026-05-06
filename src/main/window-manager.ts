@@ -368,6 +368,9 @@ export class WindowManager {
       height: bounds.height,
       show: false,
       title: `LVIS — ${viewKeyLabel(viewKey)}`,
+      autoHideMenuBar: true,
+      frame: process.platform !== "darwin" ? false : undefined,
+      titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -376,6 +379,7 @@ export class WindowManager {
         preload: this._preloadPath,
       },
     });
+    if (typeof child.setMenu === "function") child.setMenu(null);
 
     this._detachedShell = child;
     this._detachedShellViewKey = viewKey;

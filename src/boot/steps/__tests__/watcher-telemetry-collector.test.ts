@@ -148,8 +148,10 @@ describe("watcher-telemetry-collector", () => {
   it("writeOne 실패 (예: 권한) 가 plugin 흐름을 throw 시키지 않는다", async () => {
     const bus = makeBus();
     const log = vi.fn();
+    const notDirectory = join(workDir, "not-a-directory");
+    await writeFile(notDirectory, "blocks mkdir");
     const collector = startWatcherTelemetryCollector({
-      filePath: "/dev/null/cant-write-here/file.jsonl", // ENOENT 보장
+      filePath: join(notDirectory, "file.jsonl"),
       subscribe: bus.subscribe,
       log,
     });

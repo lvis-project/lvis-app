@@ -3,13 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalDebugStreamEnv = process.env.VITE_DEBUG_STREAM;
 
-function setRendererDebugFlag(value: boolean) {
+function setRendererDebugFlag(value: boolean, overrides?: { isDev?: boolean; enableDevConsole?: boolean }) {
   const current = window.lvis;
   window.lvis = {
     ...(current ?? {}),
     env: {
-      isDev: current?.env?.isDev ?? false,
-      enableDevConsole: current?.env?.enableDevConsole ?? false,
+      isDev: overrides?.isDev ?? current?.env?.isDev ?? false,
+      enableDevConsole: overrides?.enableDevConsole ?? current?.env?.enableDevConsole ?? false,
       debugStream: value,
     },
   } as typeof window.lvis;

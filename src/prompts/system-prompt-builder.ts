@@ -10,6 +10,7 @@
 import { hostname, platform, homedir, userInfo } from "node:os";
 import type { MemoryManager } from "../memory/memory-manager.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import { redactFsPath } from "../audit/dlp-filter.js";
 
 // ─── Types ──────────────────────────────────────────
 
@@ -443,7 +444,7 @@ export class SystemPromptBuilder {
           `OS: ${platform()}`,
           `Host: ${hostname()}`,
           `User: ${userInfo().username}`,
-          `Home: ${homedir()}`,
+          `Home: ${redactFsPath(homedir())}`,
           `Time: ${kstIso} (KST, UTC+9)`,
           `Locale: ${Intl.DateTimeFormat().resolvedOptions().locale}`,
           "NOTE: 날짜/시간 관련 도구 호출 시 반드시 KST(한국 표준시) 기준으로 위와 같은 ISO 8601 형식(+09:00 offset 포함)으로 전달하세요.",

@@ -181,6 +181,71 @@ describe("PluginMarketplaceService install()", () => {
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
   });
 
+  it("reinstalls the same marketplace version when the install receipt is missing", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "test-plugin",
+      slug: "test-plugin",
+      name: "Test Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/test-plugin@1.2.3",
+      packageName: "@lvis/test-plugin",
+      tools: ["ping"],
+    };
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: plugin.tools,
+    });
+    const downloadArtifact = vi.fn(async () => ({
+      body: zipBuffer,
+      sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+      status: 200,
+    }));
+    const fetchSignatureEnvelope = vi.fn(async () => makeEnvelope(zipBuffer, signingKey.privateKey));
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: typeof downloadArtifact;
+      fetchSignatureEnvelope: typeof fetchSignatureEnvelope;
+    } = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      },
+      downloadArtifact,
+      fetchSignatureEnvelope,
+    };
+
+    const { service } = makeService(fetcher);
+    await expect(service.install("test-plugin")).resolves.toEqual({
+      pluginId: "test-plugin",
+      installed: true,
+    });
+
+    await rm(join(cacheRoot, "test-plugin", "install-receipt.json"), { force: true });
+    await rm(join(installedDir, "test-plugin", "dist", "hostPlugin.js"), { force: true });
+
+    await expect(service.install("test-plugin")).resolves.toEqual({
+      pluginId: "test-plugin",
+      installed: true,
+    });
+
+    await expect(
+      readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"),
+    ).resolves.toContain('"schemaVersion": 2');
+    await expect(
+      readFile(join(installedDir, "test-plugin", "dist", "hostPlugin.js"), "utf-8"),
+    ).resolves.toContain("createPlugin");
+    expect(downloadArtifact).toHaveBeenCalled();
+    expect(fetchSignatureEnvelope).toHaveBeenCalled();
+  });
+
   it("rejects zip-slip entries from signed marketplace artifacts", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({

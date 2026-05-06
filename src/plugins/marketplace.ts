@@ -14,7 +14,7 @@ import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./off
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import { PluginArtifactStore } from "./plugin-artifact-store.js";
-import { listFilesRecursive } from "./plugin-install-receipt.js";
+import { listFilesRecursive, verifyInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import { createLogger } from "../lib/logger.js";
@@ -67,6 +67,8 @@ type InstallOperationState = {
     }
   >;
 };
+
+type InstallReceiptValidityCache = Map<string, boolean>;
 
 export interface MarketplaceListItem extends PluginMarketplaceItem {
   installed: boolean;
@@ -373,7 +375,11 @@ export class PluginMarketplaceService {
         !plugin.version ||
         !installedVersion ||
         plugin.version === installedVersion;
-      if (isSameVersion) {
+      const manifestPath = isAbsolute(existingEntry.manifestPath)
+        ? existingEntry.manifestPath
+        : resolve(dirname(this.registryPath), existingEntry.manifestPath);
+      const hasValidReceipt = await this.hasValidInstallReceipt(plugin.id, manifestPath);
+      if (isSameVersion && hasValidReceipt) {
         await this.touchInstalledRegistryEntry(plugin.id, activeBundleRootId, actor, plugin.pluginAccess, state);
         return { pluginId: plugin.id, installed: true };
       }
@@ -457,7 +463,8 @@ export class PluginMarketplaceService {
     // boot); a corrupt registry must NOT silently force-reinstall every
     // managed plugin on top of an unknown prior state.
     const registry = await readPluginRegistry(this.registryPath);
-    const installedIds = await this.resolveInstalledIds(registry.plugins);
+    const receiptValidityCache: InstallReceiptValidityCache = new Map();
+    const installedIds = await this.resolveInstalledIds(registry.plugins, receiptValidityCache);
     for (const plugin of managed) {
       if (installedIds.has(plugin.id)) continue;
       try {
@@ -1042,6 +1049,7 @@ export class PluginMarketplaceService {
 
   private async resolveInstalledIds(
     entries: Array<{ id: string; manifestPath: string }>,
+    receiptValidityCache: InstallReceiptValidityCache,
   ): Promise<Set<string>> {
     const installedIds = new Set<string>();
     for (const entry of entries) {
@@ -1050,7 +1058,9 @@ export class PluginMarketplaceService {
         : resolve(dirname(this.registryPath), entry.manifestPath);
       try {
         await readFile(manifestPath, "utf-8");
-        installedIds.add(entry.id);
+        if (await this.hasValidInstallReceipt(entry.id, manifestPath, receiptValidityCache)) {
+          installedIds.add(entry.id);
+        }
       } catch {
         log.warn(
           `stale registry entry ignored during managed bootstrap: ${entry.id}`,
@@ -1058,6 +1068,35 @@ export class PluginMarketplaceService {
       }
     }
     return installedIds;
+  }
+
+  private async hasValidInstallReceipt(
+    pluginId: string,
+    manifestPath: string,
+    receiptValidityCache?: InstallReceiptValidityCache,
+  ): Promise<boolean> {
+    const pluginRoot = dirname(manifestPath);
+    const cacheKey = `${pluginId}\0${pluginRoot}`;
+    const cached = receiptValidityCache?.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const result = await verifyInstallReceipt(this.cacheRoot, pluginId, pluginRoot);
+    if (!result.ok) {
+      log.warn(
+        `install receipt check failed for '${pluginId}': ${result.reason}`,
+      );
+      receiptValidityCache?.set(cacheKey, false);
+      return false;
+    }
+    if (result.receipt.installSource === "local-dev" && !isDevModeUnlocked()) {
+      log.warn(
+        `install receipt check failed for '${pluginId}': local-dev install is not allowed in this build`,
+      );
+      receiptValidityCache?.set(cacheKey, false);
+      return false;
+    }
+    receiptValidityCache?.set(cacheKey, true);
+    return true;
   }
 
   /**
@@ -1218,4 +1257,3 @@ export class PluginMarketplaceService {
   }
 
 }
-
