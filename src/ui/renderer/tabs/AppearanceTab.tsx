@@ -18,12 +18,16 @@
  *
  * Adding a new chat-theme variant: see ThemeProvider.tsx header comment.
  */
+import { useEffect, useState } from "react";
 import { useTheme } from "../theme/index.js";
 import type {
   ChatThemePreference,
   ThemePreference,
 } from "../theme/index.js";
 import type { CSSProperties } from "react";
+import { getApi } from "../api-client.js";
+
+type WebViewPreferredFlow = "in-app" | "system-browser";
 
 /* ─── chat-theme card data ───────────────────────────────────────────── */
 interface ChatOption {
@@ -190,6 +194,57 @@ function SwatchCard({ selected, label, accessibleName, onSelect, children }: Swa
   );
 }
 
+/* ─── webView preferredFlow options ──────────────────────────────────── */
+const WEBVIEW_OPTIONS: ReadonlyArray<{ value: WebViewPreferredFlow; label: string; hint: string }> = [
+  { value: "in-app", label: "인앱 표시", hint: "외부 URL 을 LVIS 창 안에 표시합니다." },
+  { value: "system-browser", label: "시스템 브라우저", hint: "외부 URL 을 OS 기본 브라우저에서 엽니다." },
+];
+
+function useWebViewPreferredFlow(): {
+  flow: WebViewPreferredFlow;
+  setFlow: (next: WebViewPreferredFlow) => void;
+} {
+  const [flow, setFlowState] = useState<WebViewPreferredFlow>("in-app");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const api = getApi();
+        const settings = await api.getSettings();
+        if (cancelled) return;
+        const next = settings.webView?.preferredFlow;
+        if (next === "in-app" || next === "system-browser") {
+          setFlowState(next);
+        }
+      } catch {
+        /* ignore — toggle stays at default until user interacts */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const setFlow = (next: WebViewPreferredFlow) => {
+    const prev = flow;
+    setFlowState(next);
+    if (typeof process !== "undefined" && process.env?.LVIS_DEV === "1") {
+      // dev-mode toggle log — formal telemetry deferred (see plan §7).
+      // eslint-disable-next-line no-console
+      console.log(`[settings] webView.preferredFlow changed: ${prev} -> ${next}`);
+    }
+    try {
+      const api = getApi();
+      void api
+        .updateSettings({ webView: { preferredFlow: next } })
+        .catch(() => { /* ignore — local state already reflects */ });
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return { flow, setFlow };
+}
+
 export function AppearanceTab() {
   const {
     preference,
@@ -201,6 +256,7 @@ export function AppearanceTab() {
     setChatTheme,
     setCodeTheme,
   } = useTheme();
+  const { flow: webViewFlow, setFlow: setWebViewFlow } = useWebViewPreferredFlow();
 
   return (
     <div className="space-y-6 pt-4">
@@ -297,6 +353,47 @@ export function AppearanceTab() {
                 role="radio"
                 aria-checked={checked}
                 onClick={() => setPreference(opt.value)}
+                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                  checked
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ── 외부 URL 표시 정책 (B1) ─────────────────────────────────── */}
+      <section className="space-y-2 border-t border-border pt-4">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-sm font-semibold">외부 URL 표시</h3>
+          <span className="text-[11px] text-muted-foreground">
+            현재: <span className="font-mono text-foreground">{webViewFlow}</span>
+          </span>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          이 설정은 ms-graph 의 외부 URL 표시에 적용됩니다 (agent-hub 는 별도 사이클 예정).
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="외부 URL 표시 정책 선택"
+          data-testid="webview-preferred-flow"
+          className="flex flex-wrap gap-2"
+        >
+          {WEBVIEW_OPTIONS.map((opt) => {
+            const checked = webViewFlow === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={checked}
+                data-value={opt.value}
+                title={opt.hint}
+                onClick={() => setWebViewFlow(opt.value)}
                 className={`rounded-full border px-3 py-1 text-xs transition-colors ${
                   checked
                     ? "border-primary bg-primary text-primary-foreground"

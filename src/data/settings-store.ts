@@ -111,6 +111,8 @@ export interface AppSettings {
   msGraph: MsGraphSettings;
   /** UX Track 3 — visual theme + future UI preferences. */
   appearance: AppearanceSettings;
+  /** §B1 — external URL viewer policy (in-app BrowserWindow vs system browser). */
+  webView: WebViewSettings;
   /** Plugin settings reserved for non-trust UI preferences. Trust gates are host-owned. */
   plugins: PluginSettings;
   /** 플러그인별 설정값 — pluginId → key/value 맵 */
@@ -154,6 +156,26 @@ export interface AppearanceSettings {
   theme: ThemePreference;
   chatTheme: ChatThemePreference;
   codeTheme: CodeThemePreference;
+}
+
+/**
+ * §B1 — External URL viewer policy.
+ *
+ * `preferredFlow` decides whether external URLs (OAuth IdP, calendar webLinks,
+ * email open/compose URLs, etc.) are surfaced inside a host BrowserWindow
+ * ("in-app") or routed to the OS default browser ("system-browser").
+ *
+ * SoT for the host. Plugins consume this via `hostApi.getAppPreference(...)`
+ * and/or `hostApi.openExternalUrl(...)` — see plan
+ * `.omc/plans/2026-05-04-external-url-viewer-policy.md`.
+ *
+ * Default `"in-app"` matches the current ms-graph OAuth UX (v0.1.23+).
+ * Future enum extension reserved (e.g. `"ask-each-time"`).
+ */
+export type WebViewPreferredFlow = "in-app" | "system-browser";
+
+export interface WebViewSettings {
+  preferredFlow: WebViewPreferredFlow;
 }
 
 /**
@@ -333,6 +355,9 @@ const DEFAULT_SETTINGS: AppSettings = {
     chatTheme: "lg",
     codeTheme: "auto",
   },
+  webView: {
+    preferredFlow: "in-app",
+  },
   plugins: {},
   pluginConfigs: {},
   features: {
@@ -430,6 +455,9 @@ export class SettingsService {
     }
     if (partial.appearance) {
       this.settings.appearance = { ...this.settings.appearance, ...partial.appearance };
+    }
+    if (partial.webView) {
+      this.settings.webView = { ...this.settings.webView, ...partial.webView };
     }
     if (partial.pluginConfigs) {
       const sanitized: Record<string, PluginConfigRecord> = {};
@@ -562,6 +590,7 @@ export class SettingsService {
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
         msGraph: { ...DEFAULT_SETTINGS.msGraph, ...parsed.msGraph },
         appearance: normalizeAppearance(parsed.appearance),
+        webView: normalizeWebView(parsed.webView),
         plugins: {},
         pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
         features: { ...DEFAULT_SETTINGS.features, ...normalizeFeatureFlags(parsed.features) },
@@ -678,6 +707,37 @@ function normalizeAppearance(input: unknown): AppearanceSettings {
       : "auto";
 
   return { theme, chatTheme, codeTheme };
+}
+
+/**
+ * §B1 / Critic F4 mitigation — coerce on-disk `webView` block back to
+ * the WebViewSettings shape.
+ *
+ * If the field is missing entirely (existing installs), apply the default
+ * `"in-app"`. If a *partial-but-invalid* value is on disk (e.g. user hand-
+ * edited to `"yes"`, `null`, `42`), only that field is replaced with the
+ * default — the rest of settings.json is preserved by the normal per-section
+ * spread pattern in loadSettings(). A warn log emits once per load so a
+ * silent corruption is still observable.
+ */
+const VALID_WEBVIEW_FLOWS: readonly WebViewPreferredFlow[] = ["in-app", "system-browser"];
+
+function normalizeWebView(input: unknown): WebViewSettings {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ...DEFAULT_SETTINGS.webView };
+  }
+  const obj = input as { preferredFlow?: unknown };
+  const raw = obj.preferredFlow;
+  if (typeof raw === "string" && (VALID_WEBVIEW_FLOWS as readonly string[]).includes(raw)) {
+    return { preferredFlow: raw as WebViewPreferredFlow };
+  }
+  if (raw !== undefined) {
+    log.warn(
+      `webView.preferredFlow invalid (received ${JSON.stringify(raw)}), using default %s`,
+      DEFAULT_SETTINGS.webView.preferredFlow,
+    );
+  }
+  return { ...DEFAULT_SETTINGS.webView };
 }
 
 /**
