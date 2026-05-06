@@ -4,7 +4,7 @@
  * 슬림 엔트리. 모든 로직은 boot.ts와 ipc-bridge.ts로 위임.
  * §4.1 Client Architecture 준수.
  */
-import { Menu, app, BrowserWindow, shell, dialog, protocol, type MenuItemConstructorOptions } from "electron";
+import { Menu, app, BrowserWindow, shell, dialog, protocol, screen, type MenuItemConstructorOptions } from "electron";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import * as https from "node:https";
@@ -116,6 +116,23 @@ let appShutdownStarted = false;
 let appShutdownCompleted = false;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+const MAIN_WINDOW_WIDTH = 560;
+const MAIN_WINDOW_HEIGHT = 936;
+const MAIN_WINDOW_MIN_WIDTH = 480;
+const MAIN_WINDOW_MIN_HEIGHT = 480;
+const MAIN_WINDOW_TOP_GAP = 24;
+
+function initialMainWindowBounds(): { x: number; y: number; width: number; height: number } {
+  const { workArea } = screen.getPrimaryDisplay();
+  const width = Math.max(MAIN_WINDOW_MIN_WIDTH, Math.min(MAIN_WINDOW_WIDTH, workArea.width));
+  const height = Math.max(MAIN_WINDOW_MIN_HEIGHT, Math.min(MAIN_WINDOW_HEIGHT, workArea.height));
+  return {
+    x: workArea.x + workArea.width - width,
+    y: workArea.y + Math.min(MAIN_WINDOW_TOP_GAP, Math.max(0, workArea.height - height)),
+    width,
+    height,
+  };
+}
 
 /**
  * W1.0 — `--plugin-smoke=<id1>,<id2>,...` CLI flag.
@@ -332,10 +349,9 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 560,
-    height: 720,
-    minWidth: 480,
-    minHeight: 480,
+    ...initialMainWindowBounds(),
+    minWidth: MAIN_WINDOW_MIN_WIDTH,
+    minHeight: MAIN_WINDOW_MIN_HEIGHT,
     show: true,
     autoHideMenuBar: false,
     // ─── Cross-platform titlebar ─────────────────────────────────────────
