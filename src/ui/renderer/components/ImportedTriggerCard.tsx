@@ -21,6 +21,8 @@ import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
+import { detectFromStream } from "../../../lib/stream-markers.js";
+import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../../../lib/chat-stream-state.js";
 
 /**
  * Strip lines whose only purpose is to feed an opaque base64 entry id
@@ -65,6 +67,7 @@ export function ImportedTriggerCard({
   } catch {
     timeLabel = importedAt;
   }
+  const displayResponse = response ? detectFromStream(response).cleanedText : response;
 
   return (
     <div
@@ -123,15 +126,15 @@ export function ImportedTriggerCard({
             />
           ) : null}
         </div>
-        {response && response.length > 0 ? (
+        {displayResponse && displayResponse.length > 0 ? (
           <div className="prose prose-sm lvis-prose max-w-none break-words">
             <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-              {responseStreaming ? clampDanglingMarkdownLink(response) : response}
+              {responseStreaming ? clampDanglingMarkdownLink(displayResponse) : displayResponse}
             </ReactMarkdown>
           </div>
         ) : !responseStreaming ? (
           <p className="text-xs text-muted-foreground">
-            응답이 비어있습니다. (도구 호출만 있었거나 LLM 이 텍스트를 생성하지 않음)
+            {EMPTY_ASSISTANT_RESPONSE_TEXT}
           </p>
         ) : null}
       </div>

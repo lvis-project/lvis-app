@@ -101,6 +101,20 @@ describe("ImportedTriggerCard", () => {
     expect(getByText(/6\/1 15:00 캘린더 등록할까요\?/)).toBeTruthy();
   });
 
+  it("strips response meta markers while preserving Markdown", () => {
+    const { container, getByTestId } = render(
+      <ImportedTriggerCard
+        {...base}
+        response="결과는 **정상**입니다.<title>프로액티브 응답 제목</title>"
+        responseStreaming={false}
+      />,
+    );
+    const responseEl = getByTestId("imported-trigger-response");
+    expect(responseEl.textContent).toContain("결과는 정상입니다.");
+    expect(responseEl.textContent).not.toContain("<title>");
+    expect(container.querySelector('[data-testid="imported-trigger-response"] strong')?.textContent).toBe("정상");
+  });
+
   it("renders an empty-response placeholder when the LLM ended without text", () => {
     // Edge case: LLM only emits a tool_use then end_turn, no text_delta.
     // Earlier the response section was hidden on empty content, which

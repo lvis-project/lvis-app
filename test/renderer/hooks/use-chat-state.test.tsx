@@ -19,7 +19,7 @@ import { useCostEstimate } from "../../../src/ui/renderer/hooks/use-cost-estimat
 import { useSessions } from "../../../src/ui/renderer/hooks/use-sessions.js";
 import { useStarred } from "../../../src/ui/renderer/hooks/use-starred.js";
 import type { LvisApi } from "../../../src/ui/renderer/types.js";
-import type { ChatEntry } from "../../../src/lib/chat-stream-state.js";
+import { EMPTY_ASSISTANT_RESPONSE_TEXT, type ChatEntry } from "../../../src/lib/chat-stream-state.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -49,6 +49,41 @@ describe("useChatState", () => {
         (e) => e.kind === "assistant" && (e as { text: string }).text.includes("hello world"),
       );
       expect(hasAssistant).toBe(true);
+    });
+  });
+
+  it("finalizes marker-only assistant rounds as an explicit empty response", async () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+
+    act(() => {
+      emitChatStream({ type: "text_delta", text: "<title>제목</title>[checkpoint-suggested]" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "<title>제목</title>[checkpoint-suggested]",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+    });
+
+    await waitFor(() => {
+      const assistant = result.current.entries.findLast((e) => e.kind === "assistant") as { text: string } | undefined;
+      expect(assistant?.text).toBe(EMPTY_ASSISTANT_RESPONSE_TEXT);
+    });
+  });
+
+  it("finalizes marker-only done events as an explicit empty response", async () => {
+    const { api, emitChatStream } = makeMockLvisApi();
+    const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
+
+    act(() => {
+      emitChatStream({ type: "text_delta", text: "<title>제목</title>[checkpoint-suggested]" });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      const assistant = result.current.entries.findLast((e) => e.kind === "assistant") as { text: string } | undefined;
+      expect(assistant?.text).toBe(EMPTY_ASSISTANT_RESPONSE_TEXT);
     });
   });
 
