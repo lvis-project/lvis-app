@@ -277,7 +277,6 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
 
   const hasHistoricalContent = historicalSessions.length > 0;
   const activeDayKey = getKoreaDateKey(new Date());
-  const activeDayAlreadyRendered = historicalByDay.some(([dayKey]) => dayKey === activeDayKey);
 
 
   // No auto-scroll needed for floating panel — it is positioned outside
@@ -425,27 +424,18 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           onPrev={searchPrev}
           onClose={searchCloseOverlay}
         />
-        {/* Today's date badge — always shown above the conversation. Per-day
-            session grouping (one badge per day-boundary inside a long
-            conversation) requires a timestamp on each ChatEntry, which the
-            current type doesn't carry; that's a follow-up. For now the badge
-            represents "today" — auto-refreshes to the current locale date
-            on render. */}
-        {activeDayAlreadyRendered && entries.length > 0 ? (
-          <div className="my-1 flex items-center gap-2">
-            <span className="h-px flex-1 bg-border/30" />
-            <span className="text-[10px] text-muted-foreground/50">현재 대화</span>
-            <span className="h-px flex-1 bg-border/30" />
-          </div>
-        ) : (
-          <DayDivider
-            sessions={sessions}
-            currentSessionId={currentSessionId}
-            streaming={streaming}
-            onLoadSession={onLoadSession}
-            onRefreshSessions={onRefreshSessions}
-          />
-        )}
+        {/* Today's date badge — always shown above the active conversation.
+            Even when historical sessions already rendered today's date, the
+            active turn boundary must remain the same calendar-enabled divider
+            instead of degrading to a plain "현재 대화" separator. */}
+        <DayDivider
+          dateKey={activeDayKey}
+          sessions={sessions}
+          currentSessionId={currentSessionId}
+          streaming={streaming}
+          onLoadSession={onLoadSession}
+          onRefreshSessions={onRefreshSessions}
+        />
         {/* Workflow tools (S1+S2): skill badges + sub-agents + ask-user inline.
             SessionTodoPanel is intentionally NOT here — it sits above the input
             cluster (see below the ScrollArea) so it stays visible regardless of

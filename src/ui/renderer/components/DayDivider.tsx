@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import type { Matcher } from "react-day-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
@@ -31,6 +31,9 @@ export function DayDivider({
 }) {
   const key = dateKey ?? getKoreaDateKey(new Date());
   const [pickedDate, setPickedDate] = useState<Date | undefined>(() => dateFromKey(key));
+  useEffect(() => {
+    setPickedDate(dateFromKey(key));
+  }, [key]);
   const label = formatDayLabel(key);
   const selectedKey = pickedDate ? getKoreaDateKey(pickedDate) : key;
   const sessionDateKeys = Array.from(
@@ -133,7 +136,7 @@ function getKoreaDateKey(date: Date): string {
 
 function dateFromKey(dateKey: string): Date {
   const [year = "0", month = "1", day = "1"] = dateKey.split("-");
-  return new Date(Number(year), Number(month) - 1, Number(day));
+  return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
 }
 
 function formatDayLabel(dateKey: string): string {

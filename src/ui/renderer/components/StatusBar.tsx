@@ -59,7 +59,7 @@ export function StatusBar(props: StatusBarProps) {
       <div className="flex min-w-0 items-center gap-3 truncate">
         {persistent.length === 0 ? (
           <span className="flex items-center gap-1.5 opacity-60">
-            <LvisLogo className="h-3.5 w-3.5 shrink-0" />
+            <LvisLogo className="h-3.5 w-3.5 shrink-0" decorative />
             <span>LVIS</span>
           </span>
         ) : (

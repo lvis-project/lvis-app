@@ -432,7 +432,8 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(container.textContent).toContain("생각 완료");
+      expect(container.textContent).toMatch(/작업\s*1단계/);
+      expect(container.textContent).toContain("응답이 비어있습니다.");
       expect(container.textContent).not.toContain("완료되면 접혀야 하는 생각");
     });
   });
@@ -463,6 +464,31 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("지역 기준을 알려주세요");
       expect(scrollSpy.mock.calls.length).toBeGreaterThan(before);
+    });
+  });
+
+  it("keeps the calendar day divider visible for the active conversation when history already has today", async () => {
+    const now = new Date().toISOString();
+    const { container } = await renderApp({
+      currentSession: "current",
+      sessions: [
+        { id: "old-today", modifiedAt: now, title: "이전 오늘 대화" },
+        { id: "current", modifiedAt: now, title: "현재 대화" },
+      ],
+      history: {
+        sessionId: "old-today",
+        messages: [
+          { index: 0, role: "user", content: "이전 질문" },
+          { index: 1, role: "assistant", content: "이전 답변" },
+        ],
+      },
+    });
+
+    await submitUser(container, "새 질문");
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="day-divider"]').length).toBeGreaterThanOrEqual(2);
+      expect(container.textContent).not.toContain("현재 대화");
     });
   });
 

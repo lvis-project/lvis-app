@@ -4,9 +4,10 @@ import { LVIS_LOGO_PATH, LVIS_LOGO_VIEW_BOX } from "../../../shared/lvis-logo.js
 interface LvisLogoProps {
   className?: string;
   title?: string;
+  decorative?: boolean;
 }
 
-export function LvisLogo({ className, title = "LVIS" }: LvisLogoProps) {
+export function LvisLogo({ className, title = "LVIS", decorative = false }: LvisLogoProps) {
   const gradientId = `lvisLogoGradient${useId().replace(/:/g, "")}`;
   return (
     <svg
@@ -15,8 +16,9 @@ export function LvisLogo({ className, title = "LVIS" }: LvisLogoProps) {
       height="233"
       viewBox={LVIS_LOGO_VIEW_BOX}
       fill="none"
-      role="img"
-      aria-label={title}
+      role={decorative ? undefined : "img"}
+      aria-hidden={decorative ? "true" : undefined}
+      aria-label={decorative ? undefined : title}
       xmlns="http://www.w3.org/2000/svg"
     >
       <path d={LVIS_LOGO_PATH} fill={`url(#${gradientId})`} />
