@@ -33,7 +33,8 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
     name: "agent_spawn",
     description:
       "sub-agent 를 띄워 별도의 작은 작업을 실행합니다. 부모 대화 히스토리와 분리된 fresh 컨텍스트, " +
-      "지정한 sourceTools 만 사용 가능, maxTurns (기본 5) 이내. 결과로 요약 텍스트 + tool call 수 반환.",
+      "지정한 sourceTools 만 사용 가능, maxTurns (기본 5) 이내. 결과로 요약 텍스트 + tool call 수 반환. " +
+      "특정 tool/plugin 을 직접 호출하라는 요청의 대체 경로로 사용하지 마세요. Agent Hub work board 조회는 agent_hub_* 도구를 직접 호출하세요.",
     source: "builtin",
     category: "dangerous",
     jsonSchema: {

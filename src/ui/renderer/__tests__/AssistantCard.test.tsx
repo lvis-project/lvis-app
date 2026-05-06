@@ -1,8 +1,8 @@
 /**
  * AssistantCard unit tests.
  *
- * Regression tests for the slash-command newline fix (route="command"):
- *   - slash command output (route="command") → whitespace-pre-wrap
+ * Regression tests for assistant prose rendering:
+ *   - slash command output (route="command") → ReactMarkdown
  *   - regular LLM output (no route) → ReactMarkdown
  *   - search active → whitespace-pre-wrap regardless of route
  */
@@ -33,12 +33,14 @@ function renderCard(entry: AssistantEntry, highlightQuery?: string) {
 }
 
 describe("AssistantCard — slash command newline fix", () => {
-  it("applies whitespace-pre-wrap for route=command entries", () => {
-    const { container } = renderCard(makeEntry({ route: "command" }));
+  it("renders Markdown for route=command entries", () => {
+    const { container } = renderCard(makeEntry({ text: "표 제목은 **진하게** 표시", route: "command" }));
     const body = container.querySelector("[data-testid='assistant-message-body']");
     expect(body).not.toBeNull();
-    const prewrap = body!.querySelector(".whitespace-pre-wrap");
-    expect(prewrap).not.toBeNull();
+    expect(body!.className).toContain("whitespace-pre-wrap");
+    const strong = body!.querySelector("strong");
+    expect(strong).not.toBeNull();
+    expect(strong!.textContent).toBe("진하게");
   });
 
   it("does NOT apply whitespace-pre-wrap for regular LLM entries (uses ReactMarkdown)", () => {
@@ -50,12 +52,21 @@ describe("AssistantCard — slash command newline fix", () => {
     expect(prewrap).toBeNull();
   });
 
-  it("renders multi-line text with newlines preserved for route=command", () => {
-    const text = "/help 출력:\n/new — 새 대화\n/sessions — 목록";
+  it("renders multi-line command output through Markdown", () => {
+    const text = "/help 출력:\n\n- /new — 새 대화\n- /sessions — 목록";
     const { container } = renderCard(makeEntry({ text, route: "command" }));
-    // All three lines must appear in textContent
     expect(container.textContent).toContain("/new — 새 대화");
     expect(container.textContent).toContain("/sessions — 목록");
+    expect(container.querySelector("li")).not.toBeNull();
+  });
+
+  it("preserves single newlines in plain command output", () => {
+    const { container } = renderCard(makeEntry({ text: "line1\nline2\nline3", route: "command" }));
+    const body = container.querySelector("[data-testid='assistant-message-body']");
+    expect(body!.querySelectorAll("br")).toHaveLength(2);
+    expect(body!.textContent).toContain("line1");
+    expect(body!.textContent).toContain("line2");
+    expect(body!.textContent).toContain("line3");
   });
 
   it("applies whitespace-pre-wrap for search active + route=command", () => {
