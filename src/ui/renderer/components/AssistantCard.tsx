@@ -7,6 +7,7 @@ import { highlightText } from "../utils/html-preview.js";
 import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { replaceToolNamesInText } from "../utils/tool-display.js";
+import { detectFromStream } from "../../../lib/stream-markers.js";
 
 export function AssistantCard({
   entry,
@@ -29,9 +30,12 @@ export function AssistantCard({
   const [showReasonBox, setShowReasonBox] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
   const title = entry.streaming ? "LVIS 응답 작성 중" : "LVIS 응답";
-  const highlighted = highlightText(entry.text, highlightQuery);
+  const displayText = detectFromStream(entry.text || "").cleanedText;
+  const highlighted = highlightText(displayText, highlightQuery);
+  const renderedText = replaceToolNamesInText(displayText);
+  const markdownText = entry.route === "command" ? preserveCommandLineBreaks(renderedText) : renderedText;
   // Sprint 4.B: rough token estimate for tooltip (~4 chars/token)
-  const outputTokens = Math.ceil(entry.text.length / 4);
+  const outputTokens = Math.ceil(displayText.length / 4);
   return (
     <div className="group relative max-w-[85%] rounded-md px-3 py-2 text-sm">
       {(actions !== undefined || entry.streaming) && (
@@ -86,16 +90,17 @@ export function AssistantCard({
         </div>
       )}
 
-      <div className="prose prose-sm lvis-prose max-w-none break-words" data-testid="assistant-message-body">
+      <div
+        className={`prose prose-sm lvis-prose max-w-none break-words ${entry.route === "command" ? "whitespace-pre-wrap" : ""}`}
+        data-testid="assistant-message-body"
+      >
         {highlightQuery && highlighted ? (
           <div className="whitespace-pre-wrap">{highlighted}</div>
-        ) : entry.route === "command" ? (
-          <div className="whitespace-pre-wrap">{replaceToolNamesInText(entry.text || "")}</div>
         ) : (
           <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
             {entry.streaming
-              ? clampDanglingMarkdownLink(replaceToolNamesInText(entry.text)) || "응답을 작성하는 중..."
-              : replaceToolNamesInText(entry.text || "")}
+              ? clampDanglingMarkdownLink(markdownText) || "응답을 작성하는 중..."
+              : markdownText}
           </ReactMarkdown>
         )}
       </div>
@@ -170,4 +175,8 @@ export function AssistantCard({
       ) : null}
     </div>
   );
+}
+
+function preserveCommandLineBreaks(text: string): string {
+  return text.replace(/([^\n])\n(?=[^\n])/g, "$1  \n");
 }

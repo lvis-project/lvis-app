@@ -93,6 +93,40 @@ describe("chat-stream-state", () => {
     });
   });
 
+  it("can replace streaming assistant text with cleaned final text", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "질문");
+    entries = upsertStreamingAssistant(entries, "<title>숨김</title>\n최종 **응답**");
+
+    entries = finalizeStreamingAssistant(entries, "최종 **응답**", {
+      overrideText: "최종 **응답**",
+      phase: "final",
+    });
+
+    expect(entries[1]).toMatchObject({
+      kind: "assistant",
+      text: "최종 **응답**",
+      streaming: false,
+      phase: "final",
+    });
+  });
+
+  it("does not treat an undefined overrideText property as an explicit empty override", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "질문");
+    entries = upsertStreamingAssistant(entries, "스트리밍 응답");
+
+    entries = finalizeStreamingAssistant(entries, "fallback", {
+      overrideText: undefined,
+      phase: "final",
+    } as unknown as Parameters<typeof finalizeStreamingAssistant>[2]);
+
+    expect(entries[1]).toMatchObject({
+      kind: "assistant",
+      text: "스트리밍 응답",
+      streaming: false,
+      phase: "final",
+    });
+  });
+
   it("keeps step reasoning stacked between tool bundles", () => {
     let entries: ChatEntry[] = appendUserEntry([], "질문");
 
