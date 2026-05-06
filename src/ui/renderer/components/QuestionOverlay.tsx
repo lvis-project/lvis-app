@@ -16,7 +16,7 @@ export function QuestionOverlay({ api, requests, onResolved }: QuestionOverlayPr
       className="pointer-events-auto absolute inset-x-0 bottom-0 z-40 flex justify-center px-3 pb-3"
       data-testid="question-overlay"
     >
-      <div className="max-h-[min(360px,calc(100%+20dvh))] w-full max-w-[720px] min-w-0 overflow-y-auto rounded-lg">
+      <div className="max-h-[min(360px,calc(100%_+_20dvh))] w-full max-w-[720px] min-w-0 overflow-y-auto rounded-lg">
         <AskUserQuestionCard
           api={api}
           request={current}
