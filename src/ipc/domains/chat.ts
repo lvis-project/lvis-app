@@ -337,7 +337,7 @@ ${input}`;
   });
 
   // read-only, sender guard optional
-  ipcMain.handle("lvis:chat:sessions", (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown }) => {
+  ipcMain.handle("lvis:chat:sessions", (e, opts?: { limit?: unknown; before?: unknown; beforeId?: unknown; after?: unknown }) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, "lvis:chat:sessions", e);
       return { current: conversationLoop.getSessionId(), sessions: [] };
@@ -347,11 +347,13 @@ ${input}`;
       : 20;
     const beforeTime = typeof opts?.before === "string" ? Date.parse(opts.before) : Number.NaN;
     const before = Number.isNaN(beforeTime) ? undefined : new Date(beforeTime);
+    const afterTime = typeof opts?.after === "string" ? Date.parse(opts.after) : Number.NaN;
+    const after = Number.isNaN(afterTime) ? undefined : new Date(afterTime);
     const beforeId = typeof opts?.beforeId === "string" && /^[a-zA-Z0-9_\-]+$/.test(opts.beforeId)
       ? opts.beforeId
       : undefined;
     const sessions = memoryManager
-      .listSessionsPage({ limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}) })
+      .listSessionsPage({ limit, ...(before ? { before } : {}), ...(beforeId ? { beforeId } : {}), ...(after ? { after } : {}) })
       .map((s) => ({
       id: s.id,
       modifiedAt: s.modifiedAt.toISOString(),

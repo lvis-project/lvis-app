@@ -27,7 +27,8 @@ export function useContinuousHistory(
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-  const cursorRef = useRef<HistoryCursor | undefined>(undefined);
+  const dayCursorRef = useRef<HistoryCursor | undefined>(undefined);
+  const targetDayKeyRef = useRef<string | undefined>(undefined);
   const loadingRef = useRef(false);
   const reachedEndRef = useRef(false);
   const requestTokenRef = useRef(0);
@@ -60,15 +61,10 @@ export function useContinuousHistory(
     const requestToken = requestTokenRef.current;
 
     try {
-      const cursor = cursorRef.current;
-      const page = await api.chatSessions({
-        limit: PAGE_SIZE,
-        ...(cursor ? { before: cursor.modifiedAt, beforeId: cursor.id } : {}),
-      });
+      const page = await loadNextDayPage(api, targetDayKeyRef.current, dayCursorRef.current);
       if (requestToken !== requestTokenRef.current) return;
       const pageSessions = page.sessions;
       const oldest = pageSessions[pageSessions.length - 1];
-      const nextCursor = oldest ? { modifiedAt: oldest.modifiedAt, id: oldest.id } : cursorRef.current;
 
       const filtered = pageSessions.filter((session) => session.id !== currentSessionIdRef.current);
       const hydrated = await Promise.all(
@@ -79,7 +75,16 @@ export function useContinuousHistory(
         })),
       );
       if (requestToken !== requestTokenRef.current) return;
-      cursorRef.current = nextCursor;
+      if (page.exhausted) {
+        reachedEndRef.current = true;
+        setReachedEnd(true);
+      } else if (oldest && pageSessions.length >= PAGE_SIZE) {
+        targetDayKeyRef.current = page.dayKey;
+        dayCursorRef.current = { modifiedAt: oldest.modifiedAt, id: oldest.id };
+      } else {
+        targetDayKeyRef.current = previousDateKey(page.dayKey);
+        dayCursorRef.current = undefined;
+      }
       const visible = hydrated
         .filter((session) => session.entries.length > 0)
         .sort((a, b) => {
@@ -93,11 +98,6 @@ export function useContinuousHistory(
         const novel = visible.filter((session) => !existing.has(session.id));
         return [...novel, ...prev];
       });
-
-      if (pageSessions.length < PAGE_SIZE || !oldest) {
-        reachedEndRef.current = true;
-        setReachedEnd(true);
-      }
 
       if (viewport && prevScrollHeight > 0) {
         requestAnimationFrame(() => {
@@ -118,9 +118,10 @@ export function useContinuousHistory(
     setSessions([]);
     setReachedEnd(false);
     reachedEndRef.current = false;
-    cursorRef.current = currentSessionAnchorId && currentSessionAnchorModifiedAt
-      ? { id: currentSessionAnchorId, modifiedAt: currentSessionAnchorModifiedAt }
-      : undefined;
+    targetDayKeyRef.current = previousDateKey(
+      currentSessionAnchorModifiedAt ? toDateKey(currentSessionAnchorModifiedAt) : toDateKey(new Date().toISOString()),
+    );
+    dayCursorRef.current = undefined;
     loadingRef.current = false;
     if (enabled && currentSessionId) {
       void loadMore();
@@ -152,6 +153,43 @@ export function useContinuousHistory(
   };
 }
 
+async function loadNextDayPage(
+  api: LvisApi,
+  targetDayKey: string | undefined,
+  dayCursor: HistoryCursor | undefined,
+): Promise<{ dayKey: string; sessions: SessionSummary[]; exhausted: boolean }> {
+  const dayKey = targetDayKey ?? previousDateKey(toDateKey(new Date().toISOString()));
+  const dayBounds = dayWindow(dayKey);
+  const page = await api.chatSessions({
+    limit: PAGE_SIZE,
+    before: dayCursor?.modifiedAt ?? dayBounds.before,
+    ...(dayCursor ? { beforeId: dayCursor.id } : {}),
+    after: dayBounds.after,
+  });
+  if (page.sessions.length > 0) {
+    return { dayKey, sessions: page.sessions, exhausted: false };
+  }
+
+  const older = await api.chatSessions({ limit: 1, before: dayBounds.after });
+  const nextAvailable = older.sessions[0];
+  if (!nextAvailable) {
+    return { dayKey, sessions: [], exhausted: true };
+  }
+
+  const nextDayKey = toDateKey(nextAvailable.modifiedAt);
+  const nextDayBounds = dayWindow(nextDayKey);
+  const nextPage = await api.chatSessions({
+    limit: PAGE_SIZE,
+    before: nextDayBounds.before,
+    after: nextDayBounds.after,
+  });
+  return {
+    dayKey: nextDayKey,
+    sessions: nextPage.sessions,
+    exhausted: nextPage.sessions.length === 0,
+  };
+}
+
 function toDateKey(iso: string): string {
   const date = new Date(iso);
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -162,4 +200,38 @@ function toDateKey(iso: string): string {
   }).formatToParts(date);
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function previousDateKey(dateKey: string): string {
+  return shiftDateKey(dateKey, -1);
+}
+
+function shiftDateKey(dateKey: string, offsetDays: number): string {
+  const [year, month, day] = parseDateKey(dateKey);
+  const utcNoon = new Date(Date.UTC(year, month - 1, day + offsetDays, 12, 0, 0));
+  return utcNoon.toISOString().slice(0, 10);
+}
+
+function dayWindow(dateKey: string): { after: string; before: string } {
+  return {
+    after: koreaDateBoundary(dateKey).toISOString(),
+    before: koreaDateBoundary(shiftDateKey(dateKey, 1)).toISOString(),
+  };
+}
+
+function koreaDateBoundary(dateKey: string): Date {
+  const [year, month, day] = parseDateKey(dateKey);
+  return new Date(Date.UTC(year, month - 1, day, -9, 0, 0));
+}
+
+function parseDateKey(dateKey: string): [number, number, number] {
+  const [rawYear, rawMonth, rawDay] = dateKey.split("-");
+  const year = Number.parseInt(rawYear ?? "", 10);
+  const month = Number.parseInt(rawMonth ?? "", 10);
+  const day = Number.parseInt(rawDay ?? "", 10);
+  return [
+    Number.isFinite(year) ? year : 1970,
+    Number.isFinite(month) ? month : 1,
+    Number.isFinite(day) ? day : 1,
+  ];
 }

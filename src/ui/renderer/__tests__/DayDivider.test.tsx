@@ -1,9 +1,14 @@
 import "../../../../test/renderer/setup.js";
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { DayDivider } from "../components/DayDivider.js";
+import { preloadCalendar } from "../components/LazyCalendar.js";
 
 describe("DayDivider", () => {
+  beforeEach(async () => {
+    await preloadCalendar();
+  });
+
   it("opens the calendar with the divider date selected", async () => {
     const { getByRole } = render(<DayDivider dateKey="2026-05-06" />);
 
