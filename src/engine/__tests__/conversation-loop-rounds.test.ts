@@ -7,6 +7,7 @@ import type { LLMProvider, StreamEvent } from "../llm/types.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { SessionTodoStore } from "../../main/session-todo-store.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -20,6 +21,43 @@ class FakeProvider implements LLMProvider {
 }
 
 describe("ConversationLoop queryLoop", () => {
+  it("clears a fully completed session TO-DO plan at the next turn start", async () => {
+    const toolRegistry = new ToolRegistry();
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const sessionTodoStore = new SessionTodoStore();
+    sessionTodoStore.write("s-main", [
+      { content: "done", status: "completed" },
+    ]);
+    const loop = new ConversationLoop(({
+      settingsService: {
+        get: () => fakeLlmSettings(),
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: {
+        build: () => "system",
+      },
+      keywordEngine: new KeywordEngine(),
+      routeEngine: new RouteEngine({ toolRegistry }),
+      toolRegistry,
+      memoryManager: {
+        saveSession: () => {},
+        listSessions: () => [],
+      },
+      sessionTodoStore,
+    } as unknown) as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+    (loop as { sessionId: string }).sessionId = "s-main";
+
+    await loop.runTurn("다음 질문");
+
+    expect(sessionTodoStore.list("s-main")).toEqual([]);
+  });
+
   it("preserves reasoning and exposes assistant ping-pong rounds around tool execution", async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(createDynamicTool({

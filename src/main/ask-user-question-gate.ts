@@ -156,7 +156,11 @@ export class AskUserQuestionGate {
       questions: input.questions.map((q) => ({
         question: q.question,
         choices: q.choices,
+        recommendedIndex: q.recommendedIndex,
+        altIndices: q.altIndices,
         allowFreeText: q.allowFreeText !== false,
+        placeholder: q.placeholder,
+        summaryHint: q.summaryHint,
         suggestedAnswers: q.suggestedAnswers,
       })),
       urgent: input.urgent ?? false,

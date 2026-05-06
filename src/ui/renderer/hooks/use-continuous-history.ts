@@ -19,6 +19,7 @@ export function useContinuousHistory(
   api: LvisApi,
   currentSessionId: string,
   enabled = true,
+  currentSessionAnchor?: HistoryCursor,
 ) {
   const [sessions, setSessions] = useState<ContinuousHistorySession[]>([]);
   const [loading, setLoading] = useState(false);
@@ -31,6 +32,8 @@ export function useContinuousHistory(
   const reachedEndRef = useRef(false);
   const requestTokenRef = useRef(0);
   const currentSessionIdRef = useRef(currentSessionId);
+  const currentSessionAnchorId = currentSessionAnchor?.id;
+  const currentSessionAnchorModifiedAt = currentSessionAnchor?.modifiedAt;
 
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId;
@@ -115,12 +118,14 @@ export function useContinuousHistory(
     setSessions([]);
     setReachedEnd(false);
     reachedEndRef.current = false;
-    cursorRef.current = undefined;
+    cursorRef.current = currentSessionAnchorId && currentSessionAnchorModifiedAt
+      ? { id: currentSessionAnchorId, modifiedAt: currentSessionAnchorModifiedAt }
+      : undefined;
     loadingRef.current = false;
     if (enabled && currentSessionId) {
       void loadMore();
     }
-  }, [currentSessionId, enabled, loadMore]);
+  }, [currentSessionId, currentSessionAnchorId, currentSessionAnchorModifiedAt, enabled, loadMore]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;

@@ -47,46 +47,46 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
   const displayTitle = clipTitle(spawn.title);
   return (
     <div
-      className={`max-w-[85%] rounded-md border text-xs ${isError ? "border-destructive/40 bg-destructive/5" : "border-blue-500/40 bg-blue-500/5"}`}
+      className={`w-full max-w-full min-w-0 rounded-md border text-xs ${isError ? "border-destructive/40 bg-destructive/5" : "border-blue-500/40 bg-blue-500/5"}`}
       data-testid="sub-agent-card"
     >
       <button
-        className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-blue-500/10"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 hover:bg-blue-500/10"
         onClick={() => setOpen((o) => !o)}
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <Bot className="h-3 w-3" />
-        <span className="font-medium" title={spawn.title}>{displayTitle}</span>
-        <Badge variant="outline" className="px-1 py-0 text-[10px]">
+        <span className="min-w-0 truncate font-medium" title={spawn.title}>{displayTitle}</span>
+        <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
           {spawn.turns.length} turn
         </Badge>
         {spawn.status === "running" ? (
-          <Loader2 className="ml-auto h-3 w-3 animate-spin" />
+          <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin" />
         ) : (
           <Badge
             variant={isError ? "secondary" : "default"}
-            className={`ml-auto px-1 py-0 text-[10px] ${isError ? "text-destructive" : ""}`}
+            className={`ml-auto shrink-0 px-1 py-0 text-[10px] ${isError ? "text-destructive" : ""}`}
           >
             {isError ? "오류" : "완료"}
           </Badge>
         )}
       </button>
       {open && (
-        <div className="space-y-1 border-t px-3 py-1.5">
+        <div className="min-w-0 space-y-1 border-t px-3 py-1.5">
           {spawn.turns.map((t) => (
-            <div key={t.turn} className="rounded border border-dashed/50 px-2 py-1">
+            <div key={t.turn} className="min-w-0 rounded border border-dashed/50 px-2 py-1">
               <div className="text-[10px] uppercase opacity-60">Turn {t.turn}</div>
               {t.text && (
-                <div className="mt-1 whitespace-pre-wrap text-[11px] opacity-80">
+                <div className="mt-1 whitespace-pre-wrap break-words text-[11px] opacity-80 [overflow-wrap:anywhere]">
                   {t.text}
                 </div>
               )}
             </div>
           ))}
           {spawn.summary && (
-            <div className="rounded border bg-background/40 px-2 py-1">
+            <div className="min-w-0 rounded border bg-background/40 px-2 py-1">
               <div className="text-[10px] uppercase opacity-60">요약</div>
-              <div className="mt-1 whitespace-pre-wrap text-[11px]">
+              <div className="mt-1 whitespace-pre-wrap break-words text-[11px] [overflow-wrap:anywhere]">
                 {spawn.summary}
               </div>
               <div className="mt-1 text-[10px] opacity-60">

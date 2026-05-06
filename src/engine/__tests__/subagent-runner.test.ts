@@ -22,7 +22,7 @@ import { createDynamicTool } from "../../tools/base.js";
 import { KeywordEngine } from "../../core/keyword-engine.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { SubAgentRunner } from "../subagent-runner.js";
-import type { LLMProvider, StreamEvent } from "../llm/types.js";
+import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { createAgentSpawnTool } from "../../tools/agent-spawn.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 
@@ -31,10 +31,12 @@ import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 class ScriptedProvider implements LLMProvider {
   readonly vendor = "openai" as const;
   public turnsServed = 0;
+  public observedToolNames: string[][] = [];
 
   constructor(private readonly turns: StreamEvent[][]) {}
 
-  async *streamTurn(): AsyncIterable<StreamEvent> {
+  async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    this.observedToolNames.push((params.tools ?? []).map((tool) => tool.name));
     const idx = this.turnsServed++;
     yield* this.turns[idx] ?? this.turns[this.turns.length - 1] ?? [
       { type: "text_delta", text: "(out-of-script)" },
@@ -179,6 +181,72 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
     expect(scoped.findByName("bash")).toBeDefined();
     expect(scoped.findByName("read_file")).toBeUndefined();
     void runner; // referenced so test compiles even if assertions trim
+  });
+
+  it("keeps allowlisted plugin tools visible to the child LLM schema", async () => {
+    const toolRegistry = new ToolRegistry();
+    const execSpy = vi.fn(async () => ({ output: "schedule", isError: false }));
+    toolRegistry.register(
+      createDynamicTool({
+        name: "agent_hub_today_team_schedule",
+        description: "team schedule",
+        source: "plugin",
+        pluginId: "agent-hub",
+        category: "read",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: {} },
+        execute: execSpy,
+      }),
+    );
+    toolRegistry.register(
+      createDynamicTool({
+        name: "other_plugin_tool",
+        description: "other",
+        source: "plugin",
+        pluginId: "other-plugin",
+        category: "read",
+        isReadOnly: () => true,
+        jsonSchema: { type: "object", properties: {} },
+        execute: async () => ({ output: "other", isError: false }),
+      }),
+    );
+
+    const provider = new ScriptedProvider([
+      [
+        { type: "tool_call", id: "tu-1", name: "agent_hub_today_team_schedule", input: {} },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const parentDeps = buildLoopDeps(toolRegistry);
+    const runner = new SubAgentRunner({ parentDeps, toolRegistry });
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { refreshProvider: () => void }, "refreshProvider")
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+
+    try {
+      await runner.spawn({
+        title: "team schedule",
+        instructions: "오늘 팀 스케줄 조회",
+        sourceTools: ["agent_hub_today_team_schedule"],
+        maxTurns: 2,
+      });
+
+      expect(provider.observedToolNames[0]).toEqual(["agent_hub_today_team_schedule"]);
+      expect(provider.observedToolNames[0]).not.toContain("other_plugin_tool");
+      expect(execSpy).toHaveBeenCalledOnce();
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
   });
 });
 

@@ -126,4 +126,46 @@ describe("historyToEntries", () => {
       ],
     });
   });
+
+  it("replays ask_user_question answers as a visible answer recap bubble", () => {
+    const entries = historyToEntries([
+      { index: 0, role: "user", content: "뉴스 정리해줘" },
+      {
+        index: 1,
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "ask-1",
+            name: "ask_user_question",
+            input: {
+              questions: [
+                {
+                  question: "헤드라인 범위는요?",
+                  summaryHint: "범위",
+                  choices: ["국내", "국제", "IT/경제"],
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        index: 2,
+        role: "tool_result",
+        toolUseId: "ask-1",
+        toolName: "ask_user_question",
+        content: JSON.stringify({ answers: [{ choice: "IT/경제" }] }),
+      },
+      { index: 3, role: "assistant", content: "IT/경제 기준으로 정리하겠습니다." },
+    ]);
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["user", "tool_group", "ask_user_answer", "assistant"]);
+    expect(entries[2]).toMatchObject({
+      kind: "ask_user_answer",
+      sourceToolUseId: "ask-1",
+      rows: [{ label: "범위", value: "IT/경제" }],
+    });
+  });
+
 });

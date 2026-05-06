@@ -78,6 +78,12 @@ export type ChatEntry =
   | { kind: "reasoning"; text: string; streaming?: boolean }
   | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final" }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
+  | {
+      kind: "ask_user_answer";
+      sourceToolUseId: string;
+      dismissed?: boolean;
+      rows: Array<{ label: string; value: string }>;
+    }
   | { kind: "system"; text: string }
   // §457 PR-A: structured replacement for the legacy
   // "💾 이전 N개 대화를 요약했습니다" system bubble. Carries the rotation
@@ -531,9 +537,89 @@ export function applyToolEnd(
         }
       : tool,
   );
+  const completedTool = tools.find((tool: ToolEntryItem) => tool.toolUseId === payload.toolUseId);
   const stillRunning = tools.some((tool: ToolEntryItem) => tool.status === "running");
   next[groupIdx] = { ...group, status: stillRunning ? "running" : "done", tools };
+  const answerEntry = completedTool ? askUserAnswerEntryFromTool(completedTool) : null;
+  if (answerEntry && !next.some((entry) => entry.kind === "ask_user_answer" && entry.sourceToolUseId === answerEntry.sourceToolUseId)) {
+    next.push(answerEntry);
+  }
   return next;
+}
+
+function askUserAnswerEntryFromTool(
+  tool: ToolEntryItem,
+): Extract<ChatEntry, { kind: "ask_user_answer" }> | null {
+  if (tool.name !== "ask_user_question") return null;
+  if (!tool.result) return null;
+
+  const parsed = safeJsonParse(tool.result);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const result = parsed as { answers?: unknown; dismissed?: unknown };
+  if (result.dismissed === true) {
+    return {
+      kind: "ask_user_answer",
+      sourceToolUseId: tool.toolUseId,
+      dismissed: true,
+      rows: [],
+    };
+  }
+  if (!Array.isArray(result.answers)) return null;
+
+  const questions = extractAskQuestions(tool.input);
+  const rows = result.answers
+    .map((answer, index) => {
+      if (!answer || typeof answer !== "object" || Array.isArray(answer)) return null;
+      const record = answer as { choice?: unknown; freeText?: unknown };
+      const value =
+        typeof record.choice === "string" && record.choice.trim().length > 0
+          ? record.choice.trim()
+          : typeof record.freeText === "string" && record.freeText.trim().length > 0
+            ? record.freeText.trim()
+            : "";
+      if (!value) return null;
+      return {
+        label: answerLabel(questions[index], index),
+        value,
+      };
+    })
+    .filter((row): row is { label: string; value: string } => row !== null);
+
+  if (rows.length === 0) return null;
+  return {
+    kind: "ask_user_answer",
+    sourceToolUseId: tool.toolUseId,
+    rows,
+  };
+}
+
+function extractAskQuestions(input: ToolEntryItem["input"]): Array<{ question?: string; summaryHint?: string }> {
+  const raw = input?.questions;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return {};
+    const record = item as { question?: unknown; summaryHint?: unknown };
+    return {
+      question: typeof record.question === "string" ? record.question : undefined,
+      summaryHint: typeof record.summaryHint === "string" ? record.summaryHint : undefined,
+    };
+  });
+}
+
+function answerLabel(question: { question?: string; summaryHint?: string } | undefined, index: number): string {
+  const hint = question?.summaryHint?.trim();
+  if (hint) return hint;
+  const text = question?.question?.trim();
+  if (!text) return `답변 ${index + 1}`;
+  return text.length <= 14 ? text : `${text.slice(0, 13)}…`;
+}
+
+function safeJsonParse(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function findLastIdx<T>(items: T[], predicate: (value: T) => boolean): number {

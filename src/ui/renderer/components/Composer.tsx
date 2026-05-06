@@ -251,10 +251,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const isFull = liveAttachments.length >= ATTACH_MAX_COUNT;
 
   return (
-    <div data-testid="composer" className="px-3">
+    <div data-testid="composer" className="min-w-0 px-3">
       <div
         data-testid="composer-input-bar"
-        className="flex items-stretch gap-0 rounded-xl bg-input-bar overflow-hidden shadow-md"
+        className="flex min-w-0 w-full items-stretch gap-0 overflow-hidden rounded-xl bg-input-bar shadow-md"
       >
         {/* Strip is rendered ONLY when there is at least one attachment so
             the empty state does not reserve horizontal space. Single chip
@@ -262,7 +262,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {liveAttachments.length === 1 ? (
           <div
             data-testid="composer-strip"
-            className="flex items-center pl-3 pr-0"
+            className="flex min-w-0 shrink-0 items-center pl-3 pr-0"
           >
             <AttachmentChip
               attachment={liveAttachments[0]}
@@ -273,7 +273,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         ) : liveAttachments.length >= 2 ? (
           <div
             data-testid="composer-strip"
-            className="flex items-center pl-3 pr-0"
+            className="flex min-w-0 shrink-0 items-center pl-3 pr-0"
           >
             <AttachmentChipCollapsed
               attachments={liveAttachments}
@@ -290,7 +290,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
           placeholder={placeholder ?? "질문을 입력하세요... (Cmd/Ctrl+V 로 클립보드 붙여넣기)"}
-          className="flex-1 min-h-[88px] border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-3"
+          className="min-w-0 flex-1 resize-none min-h-[88px] border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none rounded-none text-xs placeholder:text-xs px-4 py-3"
         />
 
         {streaming ? (
@@ -298,7 +298,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             variant="destructive"
             onClick={() => onAbort?.()}
             data-testid="composer-abort-button"
-            className="rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"
+            className="shrink-0 rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"
             title="스트리밍 중단 (Ctrl/Cmd+C)"
           >
             <Square className="h-4 w-4 mr-1" />STOP
@@ -308,7 +308,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             onClick={onSend}
             disabled={disabled || (text.trim().length === 0 && liveAttachments.length === 0)}
             data-testid="composer-send-button"
-            className="rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"
+            className="shrink-0 rounded-none self-stretch !h-auto w-[72px] px-0 text-xs font-bold"
           >
             <Loader2 className="h-4 w-4 mr-1 hidden" />SEND
           </Button>

@@ -206,7 +206,7 @@ export function AskUserQuestionCard({
 
   return (
     <Card
-      className={`w-full max-w-[560px] border border-l-4 border-l-message-user shadow-none ${request.urgent ? "border-amber-500/60 bg-amber-500/5" : ""}`}
+      className={`w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none ${request.urgent ? "border-amber-500/60 bg-amber-500/5" : ""}`}
       data-testid="ask-user-question-card"
     >
       <CardHeader className="flex flex-row items-center justify-between gap-2 px-3 pt-3 pb-1.5 space-y-0">

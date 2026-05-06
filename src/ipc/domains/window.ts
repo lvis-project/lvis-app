@@ -62,6 +62,11 @@ export function registerWindowHandlers(deps: IpcDeps): void {
     if (typeof payload?.color !== "string" || typeof payload?.symbolColor !== "string") {
       throw new Error("[lvis] window:syncTitleBarTheme: invalid payload");
     }
-    win.setTitleBarOverlay({ color: payload.color, symbolColor: payload.symbolColor, height: 36 });
+    try {
+      win.setTitleBarOverlay({ color: payload.color, symbolColor: payload.symbolColor, height: 36 });
+    } catch (err) {
+      if ((err as Error).message.includes("Titlebar overlay is not enabled")) return;
+      throw err;
+    }
   });
 }
