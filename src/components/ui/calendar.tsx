@@ -10,11 +10,7 @@ export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 
 /**
  * shadcn-style Calendar wrapper around react-day-picker v9, customized to
- * the LVIS palette: today/selected = #FD312E filled circle, surface = warm
- * grey card, ko-KR + Sunday-first.
- *
- * UI-only for now — caller wires `selected` / `onSelect` whenever the
- * date-jump feature lands.
+ * the app theme tokens, ko-KR + Sunday-first.
  */
 export function Calendar({
   className,
@@ -27,39 +23,39 @@ export function Calendar({
       locale={ko}
       weekStartsOn={0}
       showOutsideDays={showOutsideDays}
-      className={cn("p-3 relative", className)}
+      className={cn("relative p-3", className)}
       classNames={{
         months: "flex flex-col sm:flex-row gap-2",
         month: "flex flex-col gap-2",
-        month_caption: "flex pt-1 pb-1 px-1 items-center",
+        month_caption: "flex items-center px-1 pb-1 pt-1 pr-16",
         caption_label: "text-xs font-semibold",
         // Nav is a sibling of <Months>, so absolute-position it onto the
         // caption row to land on the same line as the label. wrapper has
         // `relative` so right/top resolve to the calendar's outer edges.
-        nav: "flex items-center gap-1 absolute right-3 top-3",
+        nav: "absolute right-2 top-2 flex items-center gap-1",
         button_previous: cn(
           buttonVariants({ variant: "outline" }),
-          "h-6 w-6 bg-transparent p-0 opacity-70 hover:opacity-100",
+          "h-7 w-7 rounded-full border-border bg-muted/30 p-0 opacity-80 hover:bg-accent hover:opacity-100",
         ),
         button_next: cn(
           buttonVariants({ variant: "outline" }),
-          "h-6 w-6 bg-transparent p-0 opacity-70 hover:opacity-100",
+          "h-7 w-7 rounded-full border-border bg-muted/30 p-0 opacity-80 hover:bg-accent hover:opacity-100",
         ),
         month_grid: "w-full border-collapse",
         weekdays: "flex",
-        weekday: "text-foreground rounded-md w-7 font-extrabold text-[11px]",
+        weekday: "w-8 rounded-md text-[11px] font-medium text-muted-foreground",
         week: "flex w-full mt-0.5",
-        day: "h-7 w-7 text-center text-xs p-0 relative",
+        day: "relative h-8 w-8 p-0 text-center text-xs",
         day_button: cn(
           buttonVariants({ variant: "ghost" }),
-          "h-7 w-7 p-0 text-xs font-normal hover:bg-[#FD312E]/15 rounded-full",
+          "h-8 w-8 rounded-full p-0 text-xs font-normal text-popover-foreground hover:bg-accent hover:text-accent-foreground",
         ),
         selected:
-          "[&>button]:bg-[#FD312E] [&>button]:text-white [&>button]:hover:bg-[#FD312E] [&>button]:hover:text-white [&>button]:rounded-full",
-        today: "[&>button]:bg-[#FD312E]/15 [&>button]:text-[#FD312E] [&>button]:font-semibold",
+          "[&>button]:bg-primary [&>button]:text-primary-foreground [&>button]:hover:bg-primary [&>button]:hover:text-primary-foreground [&>button]:rounded-full",
+        today: "[&>button]:text-primary [&>button]:font-semibold",
         outside: "[&>button]:text-muted-foreground/40",
         disabled: "[&>button]:text-muted-foreground/40",
-        range_middle: "[&>button]:bg-[#FD312E]/15 [&>button]:text-[#FD312E]",
+        range_middle: "[&>button]:bg-primary/15 [&>button]:text-primary",
         hidden: "invisible",
         ...classNames,
       }}

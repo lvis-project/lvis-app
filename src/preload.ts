@@ -121,10 +121,10 @@ const api = {
     ipcRenderer.invoke("lvis:chat:send", input, attachments),
   chatGuide: async (input: string) => ipcRenderer.invoke("lvis:chat:guide", input),
   chatNew: async () => ipcRenderer.invoke("lvis:chat:new"),
-  chatSessions: async () =>
-    ipcRenderer.invoke("lvis:chat:sessions") as Promise<{
+  chatSessions: async (opts?: { limit?: number; before?: string }) =>
+    ipcRenderer.invoke("lvis:chat:sessions", opts) as Promise<{
       current: string;
-      sessions: Array<{ id: string; modifiedAt: string }>;
+      sessions: Array<{ id: string; modifiedAt: string; title: string }>;
     }>,
   chatLoadSession: async (sessionId: string) =>
     ipcRenderer.invoke("lvis:chat:load-session", sessionId) as Promise<{
@@ -157,7 +157,7 @@ const api = {
     ipcRenderer.invoke("lvis:starred:add", entry),
   starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
     ipcRenderer.invoke("lvis:starred:remove", opts),
-  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean }) => void) => {
+  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; tier?: "hard-token" | "semantic-llm" | "soft-time"; revertSessionId?: string; summary?: string }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:chat:stream", listener);
     return () => ipcRenderer.removeListener("lvis:chat:stream", listener);
@@ -795,7 +795,9 @@ contextBridge.exposeInMainWorld("lvis", {
   env: {
     isDev: process.env.LVIS_DEV === "1",
     enableDevConsole: process.env.LVIS_DEV_CONSOLE === "1",
-    debugStream: process.env.VITE_DEBUG_STREAM === "1",
+    debugStream:
+      process.env.VITE_DEBUG_STREAM === "1" ||
+      (process.env.LVIS_DEV === "1" && process.env.LVIS_DEV_CONSOLE === "1"),
   },
   attach: {
     openFile: () => ipcRenderer.invoke("lvis:attach:openFile"),

@@ -11,6 +11,7 @@ import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
 import { StarredView } from "./components/StarredView.js";
 import { RemindersList } from "./components/RemindersList.js";
+import type { SessionSummary } from "./hooks/use-sessions.js";
 
 type Api = ReturnType<typeof getApi>;
 type PluginView = Parameters<typeof PluginUiHostView>[0]["view"];
@@ -22,10 +23,12 @@ export interface MainContentProps {
   // starred
   starred: StarredItem[];
   currentSessionId: string;
+  sessions: SessionSummary[];
   refreshStarred: () => void;
   // navigation
   onActivateHome: () => void;
   onJumpToSession: (sessionId: string) => void;
+  onRefreshSessions: () => void | Promise<void>;
   onStartRoutineSession: (routineId: string) => Promise<void>;
   // chat
   chatContextValue: ChatContextValue;
@@ -99,6 +102,9 @@ function HomeChatPane(props: MainContentProps) {
         onResolveAskQuestion={props.onResolveAskQuestion}
         plugins={props.plugins}
         onSelectPlugin={props.onSelectPlugin}
+        sessions={props.sessions}
+        onLoadSession={props.onJumpToSession}
+        onRefreshSessions={props.onRefreshSessions}
         commandActions={props.commandActions}
         commandPopoverOpen={props.commandPopoverOpen}
         onCommandPopoverOpenChange={props.onCommandPopoverOpenChange}

@@ -30,12 +30,12 @@ function makeLoop(): ConversationLoop {
 }
 
 describe("ConversationLoop currentAbortController lifecycle", () => {
-  it("clears currentAbortController in finally even when queryLoop throws", async () => {
+  it("clears currentAbortController and surfaces a stream error when provider iteration throws", async () => {
     const loop = makeLoop();
     // Provider that throws partway through the stream — simulates a network
-    // / API failure inside queryLoop. The original try/catch-less code path
-    // left `currentAbortController` set forever, breaking downstream
-    // consumers (TriggerExecutor's chat-busy guard).
+    // / API failure inside queryLoop. This should take the same user-visible
+    // stream_error path as provider-emitted error events instead of rejecting
+    // the IPC turn and leaving renderer state ambiguous.
     (loop as { provider: LLMProvider }).provider = {
       vendor: "openai" as const,
       // eslint-disable-next-line require-yield
@@ -44,7 +44,10 @@ describe("ConversationLoop currentAbortController lifecycle", () => {
       },
     };
 
-    await expect(loop.runTurn("ask")).rejects.toBeDefined();
+    const errors: string[] = [];
+    const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) });
+    expect(result.text).toContain("synthetic provider failure");
+    expect(errors[0]).toContain("synthetic provider failure");
     expect(loop.currentAbortController).toBeNull();
   });
 });
@@ -162,9 +165,10 @@ describe("ConversationLoop abort (B4)", () => {
     };
 
     let errorCalled = false;
-    // This should propagate as a real error, not an interrupt
-    await expect(loop.runTurn("hi", { onError: () => { errorCalled = true; } })).rejects.toThrow();
-    expect(errorCalled).toBe(false);
+    const result = await loop.runTurn("hi", { onError: () => { errorCalled = true; } });
+    expect(result.stopReason).not.toBe("interrupted");
+    expect(result.text).toContain("네트워크 연결 문제");
+    expect(errorCalled).toBe(true);
   });
 
   it("abortCurrentTurn() aborts in-flight controller", () => {
