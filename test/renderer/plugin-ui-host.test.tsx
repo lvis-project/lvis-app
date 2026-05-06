@@ -2,9 +2,10 @@
  * Plugin UI Host — webview registration flow (#447 register-before-attach)
  *
  * Verifies that PluginUiHostView:
- *   1. Mounts <webview> with src="" (empty) initially.
- *   2. On did-attach, calls registerPluginWebview IPC and sets src to the
- *      shell URL only after registration succeeds.
+ *   1. Mounts <webview> with the shell URL initially so preload runs in the
+ *      right renderer world.
+ *   2. Registers the webview as soon as its webContentsId is available,
+ *      including the cold-boot path where did-attach is missed by the host.
  *   3. Falls back to error text when asset URLs are missing.
  *   4. Shows error text when registration fails.
  *
@@ -66,6 +67,8 @@ afterEach(() => {
   for (const el of Array.from(document.body.children)) {
     el.remove();
   }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  delete (HTMLElement.prototype as any).getWebContentsId;
   vi.unstubAllGlobals();
 });
 
@@ -104,6 +107,44 @@ describe("PluginUiHostView — webview attach flow", () => {
       entryUrl: VIEW.entryUrl,
     });
     expect(webview?.getAttribute("src")).toBe(SHELL_URL);
+  });
+
+  it("registers from the ref lifecycle when did-attach is missed on cold boot", async () => {
+    const registerPluginWebview = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("lvisApi", {
+      pluginShellUrl: SHELL_URL,
+      pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview,
+    });
+    // First cold attach can happen before the host observes did-attach. In
+    // that case the ref/lifecycle retry path must still bind the webContentsId
+    // before the shell's pending get-entry-url request expires.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (HTMLElement.prototype as any).getWebContentsId = () => 84;
+
+    const container = mountHost(VIEW);
+    const webview = container.querySelector("webview");
+    expect(webview).not.toBeNull();
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(registerPluginWebview).toHaveBeenCalledTimes(1);
+    expect(registerPluginWebview).toHaveBeenCalledWith({
+      webContentsId: 84,
+      pluginId: VIEW.pluginId,
+      entryUrl: VIEW.entryUrl,
+    });
+
+    await act(async () => {
+      webview!.dispatchEvent(new Event("did-start-loading"));
+      webview!.dispatchEvent(new Event("dom-ready"));
+      webview!.dispatchEvent(new Event("did-finish-load"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(registerPluginWebview).toHaveBeenCalledTimes(1);
   });
 
   it("shows error text and removes webview when registration returns ok=false", async () => {
