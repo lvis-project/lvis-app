@@ -19,7 +19,6 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
  */
 export function ReasoningCard({
   entry,
-  embedded = false,
 }: {
   entry: Extract<ChatEntry, { kind: "reasoning" }>;
   embedded?: boolean;
@@ -50,7 +49,7 @@ export function ReasoningCard({
     : 0;
 
   return (
-    <div className={`${embedded ? "w-full max-w-full" : "max-w-[80%]"} min-w-0 rounded-md text-sm text-muted-foreground`}>
+    <div className="min-w-0 w-full max-w-full rounded-md text-sm text-muted-foreground">
       <button
         type="button"
         className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/30 disabled:cursor-default disabled:hover:bg-transparent"

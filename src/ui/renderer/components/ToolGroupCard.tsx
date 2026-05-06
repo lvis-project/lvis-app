@@ -35,16 +35,14 @@ import { McpAppView } from "./McpAppView.js";
 /** Single-tool inline indicator — no collapsible wrapper */
 function SingleToolInline({
   tool,
-  embedded = false,
 }: {
   tool: Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
-  embedded?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
   return (
-    <div className={`${embedded ? "w-full max-w-full" : "max-w-[80%]"} min-w-0 rounded-md text-[11px] text-muted-foreground`}>
+    <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
       <button
         type="button"
         className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/30"
@@ -83,7 +81,6 @@ function SingleToolInline({
 
 export function ToolGroupCard({
   group,
-  embedded = false,
 }: {
   group: Extract<ChatEntry, { kind: "tool_group" }>;
   embedded?: boolean;
@@ -94,12 +91,6 @@ export function ToolGroupCard({
   const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
 
   const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
-
-  if (embedded && tools.length === 1 && tools[0]) {
-    return (
-      <SingleToolInline tool={tools[0]} embedded />
-    );
-  }
 
   // Single tool: render inline without group wrapper
   if (group.tools.length === 1 && group.tools[0]) {
@@ -136,7 +127,7 @@ export function ToolGroupCard({
   }
 
   return (
-    <div className={`${embedded ? "w-full max-w-full" : "max-w-[80%]"} min-w-0 rounded-md text-[11px] text-muted-foreground`}>
+    <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
       <button
         className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
         onClick={() => setOpen((o) => !o)}

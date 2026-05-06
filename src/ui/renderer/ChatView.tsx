@@ -227,7 +227,7 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
     i++;
   }
 
-  return <div className="min-w-0 space-y-3 overflow-visible">{rendered}</div>;
+  return <div className="min-w-0 w-full max-w-full space-y-3 overflow-x-hidden">{rendered}</div>;
 }
 
 export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onRevertCheckpoint }: ChatViewProps) {
@@ -375,7 +375,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           </div>
         </div>
       )}
-      <ScrollArea className="min-h-0 min-w-0 flex-1" viewportRef={scrollViewportRef}><div className="mx-auto min-w-0 w-full max-w-3xl space-y-3 px-3 py-4">
+      <ScrollArea className="min-h-0 min-w-0 max-w-full flex-1" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
         <div ref={sentinelRef} data-testid="chat-history-sentinel" className="h-px" />
         {loadingHistory && (
           <div
@@ -439,7 +439,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             cluster (see below the ScrollArea) so it stays visible regardless of
             chat scroll position. */}
         {loadedSkills.length > 0 && (
-          <div className="flex max-w-[80%] flex-wrap gap-2" data-testid="skill-badges-row">
+          <div className="flex w-full max-w-full flex-wrap gap-2" data-testid="skill-badges-row">
             {loadedSkills.map((s, i) => (
               <SkillBadge key={`${s.name}:${i}`} {...s} />
             ))}
@@ -750,7 +750,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               }, 0);
 
               rendered.push(
-                <div key={idx} className={`${ringCls} rounded-md`}>
+                  <div key={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
                   <AssistantCard
                     entry={entry}
                     highlightQuery={searchHighlight}
@@ -799,13 +799,13 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
         <div ref={chatEndRef} />
       </div></ScrollArea>
       {contextOverflowPct >= 0.95 && (
-        <div className="mx-auto flex w-full max-w-3xl items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
           <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
           <span>— 자동 압축이 필요합니다. 전송이 일시 차단됩니다.</span>
         </div>
       )}
       {contextOverflowPct >= 0.80 && contextOverflowPct < 0.95 && (
-        <div className="mx-auto flex w-full max-w-3xl items-center gap-2 border-t bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+        <div className="flex w-full max-w-full items-center gap-2 border-t bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
           <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
           <span>— 곧 자동 압축됩니다.</span>
         </div>
@@ -815,10 +815,10 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      <div className="mx-auto w-full max-w-3xl min-w-0 px-3">
+      <div className="w-full max-w-full min-w-0 px-3">
         <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
       </div>
-      <div className="mx-auto w-full max-w-3xl min-w-0 bg-background pb-1 space-y-2">
+      <div className="w-full max-w-full min-w-0 overflow-x-hidden bg-background pb-1 space-y-2">
         <InputActionBar
           usedTokens={usedTokens}
           contextBudget={contextBudget}

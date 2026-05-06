@@ -17,7 +17,6 @@ export function AssistantCard({
   onFeedback,
   isFinal = true,
   turnTokens,
-  embedded = false,
 }: {
   entry: Extract<ChatEntry, { kind: "assistant" }>;
   highlightQuery?: string;
@@ -38,9 +37,8 @@ export function AssistantCard({
   const markdownText = entry.route === "command" ? preserveCommandLineBreaks(renderedText) : renderedText;
   // Sprint 4.B: rough token estimate for tooltip (~4 chars/token)
   const outputTokens = Math.ceil(displayText.length / 4);
-  const widthClass = embedded ? "w-full max-w-full" : "max-w-[80%]";
   return (
-    <div className={`group relative min-w-0 overflow-visible rounded-md px-3 py-2 text-sm ${widthClass}`}>
+    <div className="group relative min-w-0 w-full max-w-full overflow-visible rounded-md px-3 py-2 text-sm">
       {(actions !== undefined || entry.streaming) && (
         <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
           {title}

@@ -63,7 +63,7 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
   }
 
   return (
-    <div className="min-w-0 max-w-[80%] overflow-visible text-xs text-muted-foreground" data-wg-id={wgId}>
+    <div className="min-w-0 w-full max-w-full overflow-x-hidden text-xs text-muted-foreground" data-wg-id={wgId}>
       <button
         type="button"
         className="flex max-w-full min-w-0 items-center gap-1.5 px-1 py-1 hover:opacity-80"

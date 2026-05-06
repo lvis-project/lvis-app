@@ -60,10 +60,10 @@ export function Sidebar(props: SidebarProps) {
   return (
     <aside
       data-testid="sidebar"
-      className="flex min-h-0 w-14 shrink-0 flex-col items-center border-r bg-background px-2 py-3"
+      className="flex min-h-0 w-14 shrink-0 flex-col items-center overflow-visible border-r bg-background px-2 py-3"
     >
       <TooltipProvider delayDuration={250}>
-        <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto">
+        <div className="flex flex-1 flex-col items-center gap-1 overflow-visible">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = activeView === item.key;
@@ -75,7 +75,7 @@ export function Sidebar(props: SidebarProps) {
                   <Button
                     variant={active ? "secondary" : "ghost"}
                     size="icon"
-                    className="relative h-10 w-10"
+                    className="relative h-10 w-10 overflow-visible"
                     aria-label={label}
                     title={navTitle}
                     onClick={() => setActiveView(item.key)}
@@ -86,7 +86,7 @@ export function Sidebar(props: SidebarProps) {
                     {item.badge ? (
                       <>
                         <span className="sr-only">({item.badge})</span>
-                        <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-primary px-1 text-[9px] leading-4 text-primary-foreground">
+                        <span className="absolute right-0 top-0 min-w-4 rounded-full bg-primary px-1 text-center text-[9px] leading-4 text-primary-foreground">
                           {item.badge}
                         </span>
                       </>

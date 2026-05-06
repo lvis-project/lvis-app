@@ -47,7 +47,7 @@ export function SubAgentCard({ spawn }: { spawn: SubAgentSpawn }) {
   const displayTitle = clipTitle(spawn.title);
   return (
     <div
-      className={`max-w-[80%] min-w-0 rounded-md border text-xs ${isError ? "border-destructive/40 bg-destructive/5" : "border-blue-500/40 bg-blue-500/5"}`}
+      className={`w-full max-w-full min-w-0 rounded-md border text-xs ${isError ? "border-destructive/40 bg-destructive/5" : "border-blue-500/40 bg-blue-500/5"}`}
       data-testid="sub-agent-card"
     >
       <button

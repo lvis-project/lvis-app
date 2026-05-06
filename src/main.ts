@@ -117,18 +117,20 @@ let appShutdownStarted = false;
 let appShutdownCompleted = false;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
-const MAIN_WINDOW_WIDTH = 560;
+const MAIN_WINDOW_WIDTH = 720;
 const MAIN_WINDOW_HEIGHT = 936;
-const MAIN_WINDOW_MIN_WIDTH = 480;
-const MAIN_WINDOW_MIN_HEIGHT = 480;
+const MAIN_WINDOW_MIN_WIDTH = 640;
+const MAIN_WINDOW_MIN_HEIGHT = 640;
 const MAIN_WINDOW_TOP_GAP = 24;
+const MAIN_WINDOW_RIGHT_GAP = 10;
 
 function initialMainWindowBounds(): { x: number; y: number; width: number; height: number } {
   const { workArea } = screen.getPrimaryDisplay();
   const width = Math.max(MAIN_WINDOW_MIN_WIDTH, Math.min(MAIN_WINDOW_WIDTH, workArea.width));
   const height = Math.max(MAIN_WINDOW_MIN_HEIGHT, Math.min(MAIN_WINDOW_HEIGHT, workArea.height));
+  const rightGap = width < workArea.width ? MAIN_WINDOW_RIGHT_GAP : 0;
   return {
-    x: workArea.x + workArea.width - width,
+    x: workArea.x + workArea.width - width - rightGap,
     y: workArea.y + Math.min(MAIN_WINDOW_TOP_GAP, Math.max(0, workArea.height - height)),
     width,
     height,
