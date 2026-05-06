@@ -16,7 +16,7 @@ import { registerIpcHandlers, registerWindowEventListeners, unregisterPluginWebv
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
 import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
 import { registerPluginAssetProtocolScheme } from "./main/plugin-asset-protocol.js";
-import { findLvisProtocolUri, parseAgentHubAuthUri } from "./main/lvis-protocol.js";
+import { findLvisProtocolUri, parsePluginAuthUri } from "./main/lvis-protocol.js";
 import { buildDevProtocolArgs } from "./main/electron-protocol-args.js";
 import { devNoSandboxAllowed, setIsPackaged } from "./boot/dev-flags.js";
 import { emitEvent as emitHostEvent } from "./boot/types.js";
@@ -199,16 +199,20 @@ const lvisDevWarn = (msg: string, obj?: object) => {
 async function handleLvisUri(url: string) {
   lvisDevLog("[lvis] handleLvisUri called", { url });
 
-  // Route agent-hub OAuth callback (`lvis://agent-hub-auth?code=<code>`)
-  // to a host event so the agent-hub plugin can exchange the code.
-  // Validation lives in parseAgentHubAuthUri — bad URIs silently drop
+  // Route generic plugin OAuth callback (`lvis://plugin-auth/<pluginId>?code=<code>`)
+  // to a host event so the matching plugin can exchange the code.
+  // Validation lives in parsePluginAuthUri — bad URIs silently drop
   // (DoS / probing defense). Plain-text `code` MUST NOT be logged.
-  const authParams = parseAgentHubAuthUri(url);
+  const authParams = parsePluginAuthUri(url);
   if (authParams) {
-    lvisDevLog("[lvis] handleLvisUri: agent-hub auth callback received", {
+    lvisDevLog("[lvis] handleLvisUri: plugin auth callback received", {
+      pluginId: authParams.pluginId,
       codeLength: authParams.code.length,
     });
-    emitHostEvent("agent-hub.auth.code.received", { code: authParams.code });
+    emitHostEvent("plugin.auth.code.received", {
+      pluginId: authParams.pluginId,
+      code: authParams.code,
+    });
     return;
   }
 
