@@ -177,6 +177,14 @@ async function main() {
     env.CSC_KEY_PASSWORD = env.CSC_KEY_PASSWORD ?? env.WIN_CSC_KEY_PASSWORD;
   }
   if (skipCodeSign) {
+    delete env.CSC_LINK;
+    delete env.CSC_KEY_PASSWORD;
+    delete env.WIN_CSC_LINK;
+    delete env.WIN_CSC_KEY_PASSWORD;
+    delete env.APPLE_ID;
+    delete env.APPLE_ID_PASSWORD;
+    delete env.APPLE_APP_SPECIFIC_PASSWORD;
+    delete env.APPLE_TEAM_ID;
     env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
     process.stdout.write("[installer] --skip-code-sign: CSC_IDENTITY_AUTO_DISCOVERY=false\n");
   }

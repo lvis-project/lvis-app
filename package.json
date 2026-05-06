@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Test Electron host app for LVIS plugins.",
-  "author": "lvis-project",
+  "author": {
+    "name": "lvis-project",
+    "email": "jo.dreame@gmail.com"
+  },
   "main": "dist/src/main.js",
   "scripts": {
     "postinstall": "electron-rebuild && node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs",
