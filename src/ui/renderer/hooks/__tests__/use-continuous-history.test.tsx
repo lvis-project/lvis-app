@@ -11,9 +11,13 @@ function makeApi(customSessions?: Array<{ id: string; modifiedAt: string; title:
     { id: "old-1", modifiedAt: "2026-05-04T08:00:00.000Z", title: "그제" },
   ];
   return {
-    chatSessions: vi.fn(async (opts?: { limit?: number; before?: string }) => {
+    chatSessions: vi.fn(async (opts?: { limit?: number; before?: string; beforeId?: string }) => {
       const beforeTime = opts?.before ? Date.parse(opts.before) : Number.NaN;
-      const filtered = sessions.filter((session) => Number.isNaN(beforeTime) || Date.parse(session.modifiedAt) < beforeTime);
+      const filtered = sessions.filter((session) => {
+        if (Number.isNaN(beforeTime)) return true;
+        const sessionTime = Date.parse(session.modifiedAt);
+        return sessionTime < beforeTime || (sessionTime === beforeTime && Boolean(opts?.beforeId) && session.id < opts.beforeId);
+      });
       return { current: "current", sessions: filtered.slice(0, opts?.limit ?? filtered.length) };
     }),
     chatSessionHistory: vi.fn(async (sessionId: string) => ({
@@ -67,6 +71,66 @@ describe("useContinuousHistory", () => {
     expect(api.chatSessions).toHaveBeenLastCalledWith({
       limit: 20,
       before: "2026-04-17T08:00:00.000Z",
+      beforeId: "old-19",
     });
+  });
+
+  it("uses session id as a tiebreaker when timestamps match the next cursor", async () => {
+    const sameTime = "2026-05-01T08:00:00.000Z";
+    const sessions = [
+      { id: "current", modifiedAt: "2026-05-06T08:00:00.000Z", title: "현재" },
+      ...Array.from({ length: 19 }, (_, idx) => ({
+        id: `old-${String(30 - idx).padStart(2, "0")}`,
+        modifiedAt: sameTime,
+        title: `이전 ${idx}`,
+      })),
+      { id: "old-10", modifiedAt: sameTime, title: "동시간대 다음 페이지" },
+    ];
+    const api = makeApi(sessions);
+    const { result } = renderHook(() => useContinuousHistory(api, "current", true));
+
+    await waitFor(() => {
+      expect(result.current.historicalSessions.length).toBe(19);
+    });
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(api.chatSessions).toHaveBeenLastCalledWith({
+      limit: 20,
+      before: sameTime,
+      beforeId: "old-12",
+    });
+    await waitFor(() => {
+      expect(result.current.historicalSessions.map((session) => session.id)).toContain("old-10");
+    });
+  });
+
+  it("ignores a stale loadMore response after the active session changes", async () => {
+    let resolveSessions: ((value: { current: string; sessions: Array<{ id: string; modifiedAt: string; title: string }> }) => void) | undefined;
+    const api = makeApi();
+    vi.mocked(api.chatSessions).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSessions = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(
+      ({ currentSessionId }) => useContinuousHistory(api, currentSessionId, true),
+      { initialProps: { currentSessionId: "current" } },
+    );
+
+    await act(async () => {
+      const promise = result.current.loadMore();
+      rerender({ currentSessionId: "new-current" });
+      resolveSessions?.({
+        current: "current",
+        sessions: [{ id: "stale-old", modifiedAt: "2026-05-05T08:00:00.000Z", title: "stale" }],
+      });
+      await promise;
+    });
+
+    expect(result.current.historicalSessions.some((session) => session.id === "stale-old")).toBe(false);
   });
 });

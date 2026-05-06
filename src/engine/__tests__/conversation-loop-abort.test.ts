@@ -50,6 +50,25 @@ describe("ConversationLoop currentAbortController lifecycle", () => {
     expect(errors[0]).toContain("synthetic provider failure");
     expect(loop.currentAbortController).toBeNull();
   });
+
+  it("surfaces a stream error when a tool call arrives without message_complete", async () => {
+    const loop = makeLoop();
+    (loop as { provider: LLMProvider }).provider = {
+      vendor: "openai" as const,
+      async *streamTurn(): AsyncIterable<StreamEvent> {
+        yield { type: "text_delta", text: "도구를 확인합니다." } as StreamEvent;
+        yield { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent;
+      },
+    };
+
+    const errors: string[] = [];
+    const result = await loop.runTurn("ask", { onError: (message) => errors.push(message) });
+
+    expect(result.stopReason).not.toBe("tool_use");
+    expect(result.text).toContain("도구 호출 완료 신호 없이 종료");
+    expect(errors[0]).toContain("도구 호출 완료 신호 없이 종료");
+    expect(loop.getHistory().getMessages().some((message) => message.role === "tool")).toBe(false);
+  });
 });
 
 describe("ConversationLoop abort (B4)", () => {
