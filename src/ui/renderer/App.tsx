@@ -499,10 +499,9 @@ export function App() {
     setActiveView,
     toggleCommandPopover,
   });
-  const askQuestionScrollKey = askQuestions.map((q) => q.id).join("|");
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [entries, askQuestionScrollKey]);
+  }, [entries]);
 
   // Refresh plugin views + marketplace catalog when a lvis:// deep-link
   // install completes in the main process, so new sidebar tabs appear
@@ -603,7 +602,7 @@ export function App() {
     <TooltipProvider>
         <div className="flex h-screen flex-col overflow-hidden">
           <CustomTitleBar />
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <Sidebar
             activeView={activeView}
             setActiveView={handleSidebarSelect}

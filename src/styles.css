@@ -2,21 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── CustomTitleBar (Win/Linux) button hover states ───────────────────────
-   WebkitAppRegion:drag on the parent suppresses hover from the OS layer, so
-   we re-implement hover via :hover pseudo-class on the individual buttons.
-   The .titlebar-btn-close hover uses a destructive red to match OS conventions.
-──────────────────────────────────────────────────────────────────────────── */
-.titlebar-btn:hover {
-  background: hsl(var(--muted));
-  opacity: 1;
-}
-.titlebar-btn-close:hover {
-  background: hsl(var(--destructive));
-  color: hsl(var(--destructive-foreground));
-  opacity: 1;
-}
-
 /* ─── Plugin grid (PluginGridButton v3) ─────────────────────────────────────
    .plugin-cell transition + installing overlay pulse. Tailwind's animate-spin
    covers the spinner; cellPulse dims installing cells so they read as "busy".
@@ -754,6 +739,9 @@
     padding: 0.1rem 0.3rem;
     border-radius: 0.25rem;
     font-weight: 500;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .lvis-prose :where(code):not(:where(pre code, [class~="not-prose"] *))::before,
   .lvis-prose :where(code):not(:where(pre code, [class~="not-prose"] *))::after {
@@ -762,7 +750,43 @@
   .lvis-prose :where(pre, table, img, video, canvas, iframe):not(:where([class~="not-prose"] *)) {
     max-width: 100%;
   }
+  .lvis-prose :where(p, li, blockquote, dd, figcaption, h1, h2, h3, h4, h5, h6, a, strong, em):not(:where([class~="not-prose"] *)) {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
   .lvis-prose :where(pre, table):not(:where([class~="not-prose"] *)) {
+    display: block;
+    max-width: 100%;
     overflow-x: auto;
+  }
+  .lvis-prose :where(pre):not(:where([class~="not-prose"] *)) {
+    border: 1px solid hsl(var(--border));
+    background-color: hsl(var(--code-bg));
+    color: hsl(var(--code-fg));
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+  }
+  .lvis-prose :where(pre code):not(:where([class~="not-prose"] *)) {
+    background-color: transparent;
+    color: inherit;
+    padding: 0;
+    border-radius: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* Radix ScrollArea inserts an internal `display: table; min-width: 100%`
+     wrapper under the viewport. In the chat timeline, long markdown/tool
+     content can make that table wrapper expand to max-content width; then
+     child `w-full` cards use the oversized table as their containing block.
+     Keep this override scoped to ChatView so other ScrollArea measurements are
+     not changed globally. */
+  .lvis-chat-scroll [data-radix-scroll-area-viewport] > div {
+    display: block !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 }

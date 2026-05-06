@@ -1,5 +1,7 @@
 import { useCallback, useRef, useState } from "react";
+import { Bell, Home, Repeat2, Star, Database } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip.js";
 
 export interface SidebarProps {
   activeView: string;
@@ -48,35 +50,55 @@ export function Sidebar(props: SidebarProps) {
   // In-flight install progress lives there too (PluginGridButton's placeholder
   // cell + spinner-with-phase) so the sidebar stays clean.
   const navItems = [
-    { key: "home", label: "홈" },
-    { key: "reminders", label: "리마인더" },
-    { key: "routines", label: "루틴" },
-    { key: "starred", label: "즐겨찾기", badge: starredCount > 0 ? `(${starredCount})` : null },
-    { key: "memory", label: "메모리" },
+    { key: "home", label: "홈", icon: Home },
+    { key: "reminders", label: "리마인더", icon: Bell },
+    { key: "routines", label: "루틴", icon: Repeat2 },
+    { key: "starred", label: "즐겨찾기", icon: Star, badge: starredCount > 0 ? String(starredCount) : null },
+    { key: "memory", label: "메모리", icon: Database },
   ];
 
   return (
     <aside
       data-testid="sidebar"
-      className="flex min-h-0 w-32 shrink-0 flex-col border-r bg-background px-3 py-4"
+      className="flex min-h-0 w-14 shrink-0 flex-col items-center overflow-visible border-r bg-background px-2 py-3"
     >
-      <div className="mb-4 px-2 text-xs font-semibold tracking-wide text-muted-foreground">
-        메뉴
-      </div>
-      <div className="flex-1 space-y-1 overflow-y-auto pr-1">
-        {navItems.map((item) => (
-          <Button
-            key={item.key}
-            variant={activeView === item.key ? "secondary" : "ghost"}
-            className="w-full min-w-0 justify-start gap-2 px-3"
-            onClick={() => setActiveView(item.key)}
-            onContextMenu={(e) => handleContextMenu(e, item.key)}
-          >
-            <span className="truncate">{item.label}</span>
-            {item.badge ? <span className="shrink-0 text-[10px] text-muted-foreground">{item.badge}</span> : null}
-          </Button>
-        ))}
-      </div>
+      <TooltipProvider delayDuration={250}>
+        <div className="flex flex-1 flex-col items-center gap-1 overflow-visible">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active = activeView === item.key;
+            const label = item.badge ? `${item.label} ${item.badge}` : item.label;
+            const navTitle = `${label} 보기`;
+            return (
+              <Tooltip key={item.key}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={active ? "secondary" : "ghost"}
+                    size="icon"
+                    className="relative h-10 w-10 overflow-visible"
+                    aria-label={label}
+                    title={navTitle}
+                    onClick={() => setActiveView(item.key)}
+                    onContextMenu={(e) => handleContextMenu(e, item.key)}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span className="sr-only">{label}</span>
+                    {item.badge ? (
+                      <>
+                        <span className="sr-only">({item.badge})</span>
+                        <span className="absolute right-0 top-0 min-w-4 rounded-full bg-primary px-1 text-center text-[9px] leading-4 text-primary-foreground">
+                          {item.badge}
+                        </span>
+                      </>
+                    ) : null}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{label}</TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+      </TooltipProvider>
 
       {/* Right-click context menu */}
       {contextMenu && (

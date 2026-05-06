@@ -4,7 +4,7 @@
  * 인메모리 GenericMessage 배열 관리. LLM Provider에 전달되는 대화 이력.
  * 벤더 추상화: Anthropic.MessageParam 대신 GenericMessage 사용.
  */
-import type { GenericMessage, ToolCallBlock } from "./llm/types.js";
+import type { GenericMessage } from "./llm/types.js";
 
 export interface ConversationHistoryOptions {
   maxMessages?: number;
@@ -27,12 +27,20 @@ export class ConversationHistory {
     return [...this.messages];
   }
 
+  repairToolPairInvariant(): { removedMessages: number; removedToolCalls: number } {
+    const { messages, removedMessages, removedToolCalls } = normalizeToolPairInvariant(this.messages);
+    if (removedMessages > 0 || removedToolCalls > 0) {
+      this.messages = messages;
+    }
+    return { removedMessages, removedToolCalls };
+  }
+
   clear(): void {
     this.messages = [];
   }
 
   restore(messages: GenericMessage[]): void {
-    this.messages = [...messages];
+    this.messages = normalizeToolPairInvariant(messages).messages;
     this.trim();
   }
 
@@ -70,6 +78,89 @@ export class ConversationHistory {
   private trim(): void {
     if (this.messages.length > this.maxMessages) {
       this.messages = this.messages.slice(-this.maxMessages);
+      this.messages = normalizeToolPairInvariant(this.messages, { preserveOpenToolTail: true }).messages;
     }
   }
+}
+
+interface NormalizeToolPairOptions {
+  preserveOpenToolTail?: boolean;
+}
+
+export function normalizeToolPairInvariant(
+  messages: GenericMessage[],
+  options: NormalizeToolPairOptions = {},
+): {
+  messages: GenericMessage[];
+  removedMessages: number;
+  removedToolCalls: number;
+} {
+  const futureResultCounts = new Map<string, number>();
+  for (const message of messages) {
+    if (message.role === "tool_result") {
+      futureResultCounts.set(message.toolUseId, (futureResultCounts.get(message.toolUseId) ?? 0) + 1);
+    }
+  }
+
+  const availableToolCalls = new Set<string>();
+  const normalized: GenericMessage[] = [];
+  let removedMessages = 0;
+  let removedToolCalls = 0;
+
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    if (message.role === "assistant" && message.toolCalls && message.toolCalls.length > 0) {
+      const isOpenToolTail =
+        options.preserveOpenToolTail === true &&
+        messages.slice(i + 1).every((next) => next.role === "tool_result");
+      const pairedToolCalls = isOpenToolTail
+        ? message.toolCalls
+        : message.toolCalls.filter((toolCall) => (futureResultCounts.get(toolCall.id) ?? 0) > 0);
+      removedToolCalls += message.toolCalls.length - pairedToolCalls.length;
+
+      if (pairedToolCalls.length > 0) {
+        for (const toolCall of pairedToolCalls) {
+          availableToolCalls.add(toolCall.id);
+        }
+        normalized.push({ ...message, toolCalls: pairedToolCalls });
+        continue;
+      }
+
+      const { toolCalls: _toolCalls, ...withoutToolCalls } = message;
+      const hasVisibleAssistantPayload =
+        withoutToolCalls.content.length > 0 ||
+        Boolean(withoutToolCalls.thought && withoutToolCalls.thought.length > 0) ||
+        Boolean(withoutToolCalls.thinkingBlocks && withoutToolCalls.thinkingBlocks.length > 0);
+      if (hasVisibleAssistantPayload) {
+        normalized.push(withoutToolCalls);
+      } else {
+        removedMessages += 1;
+      }
+      continue;
+    }
+
+    if (message.role === "tool_result") {
+      const count = futureResultCounts.get(message.toolUseId) ?? 0;
+      if (count <= 1) {
+        futureResultCounts.delete(message.toolUseId);
+      } else {
+        futureResultCounts.set(message.toolUseId, count - 1);
+      }
+      if (availableToolCalls.has(message.toolUseId)) {
+        normalized.push(message);
+        availableToolCalls.delete(message.toolUseId);
+      } else {
+        removedMessages += 1;
+      }
+      continue;
+    }
+
+    normalized.push(message);
+  }
+
+  return {
+    messages: normalized,
+    removedMessages,
+    removedToolCalls,
+  };
 }

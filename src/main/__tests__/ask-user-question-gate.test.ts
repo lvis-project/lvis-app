@@ -216,6 +216,46 @@ describe("AskUserQuestionGate — multi-question contract", () => {
     await slot;
   });
 
+  it("preserves recommendation metadata and labels in the renderer request", async () => {
+    const wc = makeMockWebContents();
+    const gate = new AskUserQuestionGate(wc as never, 60_000);
+
+    const slot = gate.ask({
+      questions: [
+        {
+          question: "범위는?",
+          choices: ["국내", "국제", "IT/경제"],
+          recommendedIndex: 2,
+          altIndices: [0, 1],
+          allowFreeText: true,
+          placeholder: "직접 입력",
+          summaryHint: "범위",
+        },
+      ],
+    });
+
+    const reqCall = wc.send.mock.calls.find(
+      (c) => c[0] === "lvis:ask-user-question:request",
+    );
+    expect(reqCall).toBeDefined();
+    expect(reqCall![1]).toMatchObject({
+      questions: [
+        {
+          question: "범위는?",
+          choices: ["국내", "국제", "IT/경제"],
+          recommendedIndex: 2,
+          altIndices: [0, 1],
+          allowFreeText: true,
+          placeholder: "직접 입력",
+          summaryHint: "범위",
+        },
+      ],
+    });
+
+    gate.disposeAll();
+    await slot;
+  });
+
   it("propagates per-question answers from resolve() back to the awaiting caller", async () => {
     const wc = makeMockWebContents();
     const gate = new AskUserQuestionGate(wc as never, 60_000);
