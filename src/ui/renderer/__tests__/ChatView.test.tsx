@@ -477,20 +477,26 @@ describe("ChatView", () => {
     });
   });
 
-  it("keeps the calendar day divider visible for the active conversation when history already has today", async () => {
+  it("keeps the calendar day divider visible for the active conversation after previous-day history loads", async () => {
     const now = new Date().toISOString();
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { container } = await renderApp({
       currentSession: "current",
       sessions: [
-        { id: "a-old-today", modifiedAt: now, title: "이전 오늘 대화" },
         { id: "current", modifiedAt: now, title: "현재 대화" },
+        { id: "old-yesterday", modifiedAt: yesterday, title: "이전 대화" },
       ],
       history: {
         sessionId: "current",
+        messages: [],
+      },
+      historyBySession: {
+        "old-yesterday": {
         messages: [
           { index: 0, role: "user", content: "이전 질문" },
           { index: 1, role: "assistant", content: "이전 답변" },
         ],
+        },
       },
     });
 
