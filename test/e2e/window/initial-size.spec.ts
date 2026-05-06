@@ -3,8 +3,8 @@
  *
  * Verifies that on first launch (no persisted window-state.json) the main
  * BrowserWindow is created at the correct dimensions:
- *   width  = 720 px  (compact but wide enough for sidebar + composer)
- *   height ≈ 936 px  (720px + 30% vertical room)
+ *   width  = 460 px  (single-column chat shell)
+ *   height = 840 px  (tall enough for composer + recent history)
  *   right edge keeps a small visual gap from the primary work area edge.
  *
  * Uses `app.evaluate` to read bounds directly via Electron BrowserWindow APIs.
@@ -20,6 +20,11 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST_MAIN = resolve(HERE, "../../../dist/src/main.js");
+const EXPECTED_WIDTH = 460;
+const EXPECTED_HEIGHT = 840;
+const EXPECTED_MIN_HEIGHT = 640;
+const EXPECTED_RIGHT_GAP = 10;
+const EXPECTED_TOP_GAP = 24;
 
 test.describe("initial window size", () => {
   test.skip(!existsSync(DIST_MAIN), "dist/src/main.js not built — skipping");
@@ -62,14 +67,17 @@ test.describe("initial window size", () => {
       };
     });
 
-    expect(bounds.width).toBeGreaterThanOrEqual(Math.min(720, workArea.width));
-    expect(bounds.width).toBeLessThanOrEqual(Math.min(728, workArea.width));
-    expect(bounds.height).toBeGreaterThanOrEqual(Math.min(936, workArea.height));
-    expect(bounds.height).toBeLessThanOrEqual(Math.min(944, workArea.height));
+    const expectedWidth = EXPECTED_WIDTH;
+    const expectedHeight = Math.max(EXPECTED_MIN_HEIGHT, Math.min(EXPECTED_HEIGHT, workArea.height));
+    expect(bounds.width).toBeGreaterThanOrEqual(expectedWidth);
+    expect(bounds.width).toBeLessThanOrEqual(expectedWidth + 8);
+    expect(bounds.height).toBeGreaterThanOrEqual(expectedHeight);
+    expect(bounds.height).toBeLessThanOrEqual(expectedHeight + 8);
     const rightGap = (workArea.x + workArea.width) - (bounds.x + bounds.width);
-    const expectedRightGap = bounds.width < workArea.width ? 10 : 0;
+    const expectedRightGap = bounds.width < workArea.width ? EXPECTED_RIGHT_GAP : 0;
     expect(Math.abs(rightGap - expectedRightGap)).toBeLessThanOrEqual(8);
-    expect(Math.abs(bounds.y - (workArea.y + Math.min(24, Math.max(0, workArea.height - bounds.height))))).toBeLessThanOrEqual(8);
+    const expectedY = workArea.y + Math.min(EXPECTED_TOP_GAP, Math.max(0, workArea.height - bounds.height));
+    expect(Math.abs(bounds.y - expectedY)).toBeLessThanOrEqual(8);
     // Ensure height is not accidentally compact (the PR #368 regression was 380px)
     expect(bounds.height).toBeGreaterThanOrEqual(600);
   });
