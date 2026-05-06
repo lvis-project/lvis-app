@@ -1,0 +1,74 @@
+name: Build Installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to build
+        required: false
+        default: main
+      skip_code_sign:
+        description: Build unsigned internal installers
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  installers:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS installer
+            os: macos-latest
+            target: mac
+          - name: Linux installer
+            os: ubuntu-latest
+            target: linux
+          - name: Windows installer
+            os: windows-latest
+            target: win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+      - uses: oven-sh/setup-bun@v2
+      - name: Install Linux packaging tools
+        if: matrix.target == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot rpm
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Build installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=("--${{ matrix.target }}")
+          if [ "${{ github.event_name == 'push' && 'false' || inputs.skip_code_sign }}" = "true" ]; then
+            args+=("--skip-code-sign")
+          fi
+          node scripts/build-installers.mjs "${args[@]}"
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Upload installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: lvis-${{ matrix.target }}-installers
+          path: |
+            release/*
+            !release/**/*.blockmap
+          if-no-files-found: error
+          retention-days: 14
