@@ -1,5 +1,6 @@
-# lvis-app (test host)
-`lvis` 메인 패키지가 아직 없는 상태에서 플러그인 통합을 검증하기 위한 테스트용 Electron 호스트입니다.
+# lvis-app
+
+LVIS 데스크톱 호스트 앱입니다. Electron main/renderer/preload, 플러그인 런타임, 채팅 UI, 마켓플레이스 설치 흐름, Python 런타임 부트스트랩, OS별 installer 패키징을 이 저장소에서 관리합니다.
 
 ## 포함 내용
 - Plugin Runtime + Manifest 기반 동적 로딩
@@ -9,6 +10,8 @@
   마켓플레이스 install 또는 `lvis-cli install file://<path-to-dist.zip>` 으로 사이드로드
 - 앱 시작 시 Local Indexer 워커 + 자동 인덱서 구동
 - 실제 채팅 UI(렌더러) + preload IPC 브리지
+- webpack 기반 renderer/preload/plugin-preload 번들링
+- macOS / Linux / Windows installer 빌드 스크립트와 GitHub Actions matrix
 - IPC 핸들러
   - `lvis:index:scan`
   - `lvis:index:documents`
@@ -18,6 +21,19 @@
   - `lvis:meeting:stop`
   - `lvis:meeting:transcript`
 - E2E 플로우 스모크 테스트 스크립트
+
+## 현재 빌드/배포 상태
+
+- 개발 실행: `bun run start`
+- 타입 검사: `bun run typecheck`
+- 앱 빌드: `bun run build`
+- 현재 OS installer: `bun run dist`
+- OS별 installer:
+  - macOS: `bun run dist:mac` → DMG + ZIP
+  - Linux: `bun run dist:linux` → AppImage + DEB + RPM
+  - Windows: `bun run dist:win` → NSIS setup + ZIP
+- 3개 OS 전체 산출물은 GitHub Actions **Build Installers** workflow에서 생성합니다.
+- production release 세부 절차는 [`docs/references/production-release-checklist.md`](./docs/references/production-release-checklist.md)를 기준으로 합니다.
 
 ## 동적 플러그인 매니페스트
 설치된 플러그인은 `~/.lvis/plugins/<id>/plugin.json` 에 위치하며 `~/.lvis/plugins/registry.json` 가 활성 목록을 관리합니다. `<repo>/plugins/installed/...` 의 in-tree 레이아웃은 Phase 2 부터 폐기되었습니다.
@@ -108,7 +124,7 @@ UI 렌더링 책임은 호스트(`lvis-app` renderer)에 있으며, 플러그인
 | `email.new` | email hostPlugin | boot.ts (OS 알림) |
 | `meeting.ended` | meeting hostPlugin | calendar hostPlugin |
 
-## 설치
+## 개발 환경 설치
 
 이 저장소는 `packages/plugin-sdk`를 git submodule (`lvis-plugin-sdk`)로 참조합니다.
 clone 시 submodule 을 함께 가져오는 것을 권장합니다:
@@ -131,6 +147,59 @@ Electron 런타임 자체는 여전히 Node로 구동됩니다 (`scripts/run-ele
 > (`scripts/run-electron.mjs`)는 시스템 `node` CLI를 직접 호출합니다.
 > Electron 내장 Node는 PATH의 `node` 바이너리를 대체하지 않으므로,
 > **개발자 머신에 Node.js v18 이상**이 별도로 설치되어 있어야 합니다.
+
+## 빌드
+
+```bash
+# 타입 검사
+bun run typecheck
+
+# main TypeScript + webpack renderer/preload bundles + Tailwind CSS + asset copy
+bun run build
+
+# Electron version smoke test
+bun run test:electron-smoke
+```
+
+`bun run build`는 다음 단계를 수행합니다.
+
+1. `tsc -p tsconfig.json`으로 main/shared TypeScript를 빌드합니다.
+2. `webpack.config.cjs`의 `renderer`, `preload`, `pluginPreload` compiler를 실행합니다.
+3. Tailwind CSS를 `dist/src/styles.css`로 minify 출력합니다.
+4. HTML/plugin shell/electron flag 자산을 `dist/`로 복사합니다.
+5. TLS bypass guard를 실행합니다.
+
+## 설치 파일 생성
+
+installer 스크립트는 `scripts/build-installers.mjs`가 단일 진입점입니다. native dependency rebuild, OS별 signing/notarization 도구, installer format 차이를 줄이기 위해 각 OS installer는 해당 OS runner에서 생성하는 것을 원칙으로 합니다.
+
+```bash
+# 현재 OS installer
+bun run dist
+
+# OS별 native installer
+bun run dist:mac
+bun run dist:linux
+bun run dist:win
+```
+
+출력은 `release/` 아래에 생성됩니다.
+
+| OS | 산출물 |
+|----|--------|
+| macOS | `LVIS-<version>-mac-<arch>.dmg`, `LVIS-<version>-mac-<arch>.zip` |
+| Linux | `LVIS-<version>-linux-<arch>.AppImage`, `.deb`, `.rpm` |
+| Windows | `LVIS-<version>-windows-<arch>-setup.exe`, `LVIS-<version>-windows-<arch>.zip` |
+
+unsigned 내부 검증 빌드는 직접 스크립트를 호출해 명시적으로 선택합니다.
+
+```bash
+node scripts/build-installers.mjs --current --skip-code-sign
+```
+
+전체 macOS/Linux/Windows artifact는 GitHub Actions의 **Build Installers** workflow에서 생성합니다. `skip_code_sign=true`는 내부 검증용 unsigned artifact를 만들고, production 배포 시에는 signing/notarization secrets를 설정한 뒤 `skip_code_sign=false`로 실행합니다.
+
+`lvis://` deep link protocol과 `resources/uv/<platform>-<arch>/uv` Python bootstrap binary는 electron-builder `build` 설정에서 packaged app resource로 포함됩니다.
 
 ## Windows (사내망) 실행 가이드
 
@@ -183,9 +252,11 @@ bun run start
 
 ## 테스트
 ```bash
+bun run typecheck
+bun run build
+bun run test
 bun run test:electron-smoke
 bun run test:main-flow
-bunx vitest run
 ```
 
 ## 실행
