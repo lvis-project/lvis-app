@@ -5,8 +5,7 @@
  * Steps:
  *   1. Pre-flight security checks (H2 dev-key block, H3 signing-env validation)
  *   2. Read + patch-bump version in package.json
- *   3. bun run build
- *   4. electron-builder --publish=never → artifacts under ./release/
+ *   3. node scripts/build-installers.mjs --current --publish=never
  *
  * Usage:  node scripts/release.mjs [--allow-dev-key] [--skip-code-sign]
  *
@@ -116,8 +115,11 @@ function checkSigningEnv(pkg) {
       missing.push("macOS: CSC_LINK+CSC_KEY_PASSWORD OR APPLE_ID+APPLE_ID_PASSWORD+APPLE_TEAM_ID");
     }
   } else if (process.platform === "win32") {
-    if (!process.env.CSC_LINK || !process.env.CSC_KEY_PASSWORD) {
-      missing.push("Windows: CSC_LINK + CSC_KEY_PASSWORD");
+    const hasWinCsc =
+      (process.env.CSC_LINK && process.env.CSC_KEY_PASSWORD) ||
+      (process.env.WIN_CSC_LINK && process.env.WIN_CSC_KEY_PASSWORD);
+    if (!hasWinCsc) {
+      missing.push("Windows: CSC_LINK+CSC_KEY_PASSWORD OR WIN_CSC_LINK+WIN_CSC_KEY_PASSWORD");
     }
   }
 
@@ -147,8 +149,12 @@ async function main() {
   pkg.version = newVersion;
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
 
-  run("bun", ["run", "build"]);
-  run("bunx", ["electron-builder", "--publish=never"]);
+  run("node", [
+    "scripts/build-installers.mjs",
+    "--current",
+    "--publish=never",
+    ...(SKIP_CODE_SIGN ? ["--skip-code-sign"] : []),
+  ]);
 
   console.log(`[release] done. Artifacts in release/  (version ${newVersion})`);
 }
