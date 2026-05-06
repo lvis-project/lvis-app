@@ -95,8 +95,9 @@ interface ChildEntry {
   snapEdge?: SnapEdge;
   /**
    * Delta from main edge to child origin when snapped, in DIP.
-   * snapDeltaX = child.x - main.x  (for "e"/"w" snap)
-   * snapDeltaY = child.y - main.y  (for "n"/"s" snap)
+   * snapDeltaX is relative to the edge used by snappedPosition().
+   * For "e" it is child.x - (main.x + main.width), otherwise child.x - main.x.
+   * snapDeltaY follows the same rule for "s" vs. the other edges.
    * Both are stored unconditionally for the follow logic.
    */
   snapDeltaX?: number;
@@ -198,6 +199,48 @@ function snappedPosition(main: Rect, child: Rect, edge: SnapEdge, dx: number, dy
   }
 }
 
+function snapDeltas(main: Rect, child: Rect, edge: SnapEdge): { dx: number; dy: number } {
+  switch (edge) {
+    case "n":
+    case "w":
+      return { dx: child.x - main.x, dy: child.y - main.y };
+    case "s":
+      return { dx: child.x - main.x, dy: child.y - (main.y + main.height) };
+    case "e":
+      return { dx: child.x - (main.x + main.width), dy: child.y - main.y };
+  }
+}
+
+function horizontalDistanceToRect(x: number, rect: Rect): number {
+  if (x < rect.x) return rect.x - x;
+  const right = rect.x + rect.width;
+  if (x >= right) return x - right;
+  return 0;
+}
+
+function displayForSnappedPosition(
+  displays: Array<{ bounds: Rect }>,
+  mainDisplay: { bounds: Rect },
+  mainBounds: Rect,
+  pos: { x: number; y: number }
+): { bounds: Rect } {
+  const verticallyOverlapping = displays.filter(
+    (d) =>
+      mainBounds.y < d.bounds.y + d.bounds.height &&
+      mainBounds.y + mainBounds.height > d.bounds.y
+  );
+  const containing = verticallyOverlapping.find(
+    (d) => pos.x >= d.bounds.x && pos.x < d.bounds.x + d.bounds.width
+  );
+  if (containing) return containing;
+
+  return verticallyOverlapping.reduce((best, display) => {
+    const distance = horizontalDistanceToRect(pos.x, display.bounds);
+    const bestDistance = horizontalDistanceToRect(pos.x, best.bounds);
+    return distance < bestDistance ? display : best;
+  }, mainDisplay);
+}
+
 // ─── WindowManager ──────────────────────────────────────────────────────────
 
 export class WindowManager {
@@ -217,7 +260,6 @@ export class WindowManager {
    * that the user intentionally minimised before the main was maximised.
    */
   private _hiddenByMaximize = new Set<number>();
-  private _lastMainMoveAt = 0;
   private _mainMoveTimer: ReturnType<typeof setTimeout> | null = null;
   private _preloadPath: string;
   private _distRoot: string;
@@ -382,16 +424,44 @@ export class WindowManager {
     const entry: ChildEntry = { window: child, viewKey };
     this._children.set(child.id, entry);
 
-    // Move event: throttled snap detection.
+    // Move event: locked panels correct drift immediately. Unlocked proximity
+    // checks are leading+trailing throttled so the final drag position is not
+    // dropped when a burst of move events arrives inside MOVE_THROTTLE_MS.
     let lastMoveAt = 0;
+    let trailingMoveTimer: ReturnType<typeof setTimeout> | null = null;
     child.on("move", () => {
+      const entry = this._children.get(child.id);
+      if (entry?.locked) {
+        if (trailingMoveTimer !== null) {
+          clearTimeout(trailingMoveTimer);
+          trailingMoveTimer = null;
+        }
+        this._onChildMove(child.id);
+        return;
+      }
+
       const now = Date.now();
-      if (now - lastMoveAt < MOVE_THROTTLE_MS) return;
-      lastMoveAt = now;
-      this._onChildMove(child.id);
+      const elapsed = now - lastMoveAt;
+      if (elapsed >= MOVE_THROTTLE_MS) {
+        lastMoveAt = now;
+        this._onChildMove(child.id);
+        return;
+      }
+
+      if (trailingMoveTimer === null) {
+        trailingMoveTimer = setTimeout(() => {
+          trailingMoveTimer = null;
+          lastMoveAt = Date.now();
+          this._onChildMove(child.id);
+        }, MOVE_THROTTLE_MS - elapsed);
+      }
     });
 
     child.on("closed", () => {
+      if (trailingMoveTimer !== null) {
+        clearTimeout(trailingMoveTimer);
+        trailingMoveTimer = null;
+      }
       this._children.delete(child.id);
       if (this._detachedShell === child) {
         this._detachedShell = null;
@@ -446,6 +516,17 @@ export class WindowManager {
     }));
   }
 
+  private _setChildPositionIfChanged(
+    entry: ChildEntry,
+    x: number,
+    y: number,
+    currentBounds = entry.window.getBounds()
+  ): void {
+    if (currentBounds.x !== x || currentBounds.y !== y) {
+      entry.window.setPosition(x, y);
+    }
+  }
+
   // ── Snap logic ────────────────────────────────────────────────────────────
 
   private _onChildMove(childId: number): void {
@@ -479,14 +560,11 @@ export class WindowManager {
         entry.snapDeltaY ?? 0,
       );
       const allDisplays = screen.getAllDisplays();
-      const hostDisplay =
-        allDisplays.find(
-          (d) =>
-            pos.x >= d.bounds.x &&
-            pos.x < d.bounds.x + d.bounds.width &&
-            mainBounds.y < d.bounds.y + d.bounds.height &&
-            mainBounds.y + mainBounds.height > d.bounds.y,
-        ) ?? screen.getDisplayNearestPoint({ x: pos.x, y: pos.y });
+      const mainDisplay = screen.getDisplayNearestPoint({
+        x: Math.round(mainBounds.x + mainBounds.width / 2),
+        y: Math.round(mainBounds.y + mainBounds.height / 2),
+      });
+      const hostDisplay = displayForSnappedPosition(allDisplays, mainDisplay, mainBounds, pos);
       const clampedY = Math.max(
         hostDisplay.bounds.y,
         Math.min(pos.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height),
@@ -500,9 +578,7 @@ export class WindowManager {
       } else if (entry.snapEdge === "w") {
         clampedX = Math.max(hostDisplay.bounds.x, pos.x);
       }
-      if (childBounds.x !== clampedX || childBounds.y !== clampedY) {
-        entry.window.setPosition(clampedX, clampedY);
-      }
+      this._setChildPositionIfChanged(entry, clampedX, clampedY, childBounds);
       return;
     }
 
@@ -553,55 +629,38 @@ export class WindowManager {
 
     const allDisplays = screen.getAllDisplays();
 
-    // Prefer left side: find a display that fully accommodates the child AND
-    // vertically overlaps the main window so it is visible alongside it.
+    // Prefer a real display to the left. It may be slightly too narrow for the
+    // full 12 DIP gutter, but as long as the child itself fits, clamp within
+    // that display instead of falling back to the main display.
     const leftX = mainBounds.x - childBounds.width - SNAP_GAP_DIP;
     const leftDisplay = allDisplays.find(
       (d) =>
-        leftX >= d.bounds.x &&
-        leftX + childBounds.width <= d.bounds.x + d.bounds.width &&
+        d.bounds.x + d.bounds.width <= mainBounds.x &&
+        childBounds.width <= d.bounds.width &&
+        leftX < d.bounds.x + d.bounds.width &&
+        leftX + childBounds.width > d.bounds.x &&
         mainBounds.y < d.bounds.y + d.bounds.height &&
         mainBounds.y + mainBounds.height > d.bounds.y
     );
 
-    // Find the display that will host the child when placed on the right.
-    // Must check vertical overlap (same as leftDisplay logic) so that vertically
-    // stacked monitors sharing the same X range don't get picked incorrectly.
-    const rightX = mainBounds.x + mainBounds.width + SNAP_GAP_DIP;
-    const rightDisplay =
-      allDisplays.find(
-        (d) =>
-          rightX >= d.bounds.x &&
-          rightX < d.bounds.x + d.bounds.width &&
-          mainBounds.y < d.bounds.y + d.bounds.height &&
-          mainBounds.y + mainBounds.height > d.bounds.y
-      ) ?? mainDisplay;
-
-    const hasSpaceOnLeft = leftDisplay !== undefined;
-    // Clamp right-side X: upper bound prevents overflow beyond the display's right
-    // edge; lower bound prevents underflow when childWidth > displayWidth.
-    const clampedRightX = Math.max(
-      rightDisplay.bounds.x,
-      Math.min(rightX, rightDisplay.bounds.x + rightDisplay.bounds.width - childBounds.width)
+    const hostDisplay = leftDisplay ?? mainDisplay;
+    const x = Math.max(
+      hostDisplay.bounds.x,
+      Math.min(leftX, hostDisplay.bounds.x + hostDisplay.bounds.width - childBounds.width)
     );
-    const x = hasSpaceOnLeft ? leftX : clampedRightX;
-    const snapEdge: SnapEdge = hasSpaceOnLeft ? "w" : "e";
-    // "w" edge: snappedPosition computes x = main.x + dx
-    //           dx = -childWidth - gap keeps a visible gutter.
-    // "e" edge: snappedPosition computes x = main.x + main.width + dx
-    //           dx = gap keeps a visible gutter on every follow-move.
-    //           clampedRightX already handles the initial off-screen case via setPosition(x,…)
-    //           below; subsequent follow-moves re-clamp via _followMainForSnapped.
-    const snapDeltaX = hasSpaceOnLeft ? -childBounds.width - SNAP_GAP_DIP : SNAP_GAP_DIP;
+    const snapEdge: SnapEdge = "w";
+    // "w" edge: snappedPosition computes x = main.x + dx.
+    // Store the desired gutter delta, even when the initial placement must be
+    // clamped at the display edge. When the main window later moves right far
+    // enough, follow logic restores the 12 DIP gap instead of preserving a
+    // temporary clamped delta.
+    const snapDeltaX = -childBounds.width - SNAP_GAP_DIP;
 
     // Clamp Y against the display that will actually host the child.
-    const hostDisplay = hasSpaceOnLeft ? leftDisplay! : rightDisplay;
     const y = Math.max(
       hostDisplay.bounds.y,
       Math.min(mainBounds.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height)
     );
-
-    entry.window.setPosition(x, y);
 
     // Record snap state.
     entry.snappedTo = this._mainWindowId!;
@@ -615,17 +674,19 @@ export class WindowManager {
     // On Linux it is advisory only — the compositor may still allow dragging.
     // _onChildMove detects such drift and immediately re-snaps the panel back.
     entry.window.setMovable(false);
+    this._setChildPositionIfChanged(entry, x, y, childBounds);
   }
 
   private _snap(entry: ChildEntry, mainBounds: Rect, childBounds: Rect, edge: SnapEdge): void {
     entry.snappedTo = this._mainWindowId!;
     entry.snapEdge = edge;
-    entry.snapDeltaX = childBounds.x - mainBounds.x;
-    entry.snapDeltaY = childBounds.y - mainBounds.y;
+    const { dx, dy } = snapDeltas(mainBounds, childBounds, edge);
+    entry.snapDeltaX = dx;
+    entry.snapDeltaY = dy;
 
     // Lock child to the snapped position.
     const pos = snappedPosition(mainBounds, childBounds, edge, entry.snapDeltaX, entry.snapDeltaY);
-    entry.window.setPosition(pos.x, pos.y);
+    this._setChildPositionIfChanged(entry, pos.x, pos.y, childBounds);
   }
 
   private _trySnap(childId: number): void {
@@ -655,9 +716,6 @@ export class WindowManager {
   }
 
   private _onMainMove(main: BrowserWindow): void {
-    const now = Date.now();
-    this._lastMainMoveAt = now;
-
     // Throttle with a single scheduled callback.
     if (this._mainMoveTimer !== null) return;
     this._mainMoveTimer = setTimeout(() => {
@@ -670,9 +728,13 @@ export class WindowManager {
     if (main.isDestroyed()) return;
     const mainBounds = main.getBounds();
     const allDisplays = screen.getAllDisplays();
+    const mainDisplay = screen.getDisplayNearestPoint({
+      x: Math.round(mainBounds.x + mainBounds.width / 2),
+      y: Math.round(mainBounds.y + mainBounds.height / 2),
+    });
 
     for (const [, entry] of this._children) {
-      if (entry.snappedTo === undefined || entry.window.isDestroyed()) continue;
+      if (entry.snappedTo !== main.id || entry.window.isDestroyed()) continue;
       const edge = entry.snapEdge!;
       const dx = entry.snapDeltaX ?? 0;
       const dy = entry.snapDeltaY ?? 0;
@@ -681,14 +743,7 @@ export class WindowManager {
 
       // Re-clamp Y on every follow-move so the child stays on-screen when
       // the main window is dragged toward a short or vertically-stacked display.
-      const hostDisplay =
-        allDisplays.find(
-          (d) =>
-            pos.x >= d.bounds.x &&
-            pos.x < d.bounds.x + d.bounds.width &&
-            mainBounds.y < d.bounds.y + d.bounds.height &&
-            mainBounds.y + mainBounds.height > d.bounds.y
-        ) ?? screen.getDisplayNearestPoint({ x: pos.x, y: pos.y });
+      const hostDisplay = displayForSnappedPosition(allDisplays, mainDisplay, mainBounds, pos);
       const clampedY = Math.max(
         hostDisplay.bounds.y,
         Math.min(pos.y, hostDisplay.bounds.y + hostDisplay.bounds.height - childBounds.height)
@@ -710,7 +765,7 @@ export class WindowManager {
         clampedX = Math.max(hostDisplay.bounds.x, pos.x);
       }
 
-      entry.window.setPosition(clampedX, clampedY);
+      this._setChildPositionIfChanged(entry, clampedX, clampedY, childBounds);
     }
   }
 
