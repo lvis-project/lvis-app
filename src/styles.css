@@ -765,12 +765,14 @@
   .lvis-prose :where(pre, table, img, video, canvas, iframe):not(:where([class~="not-prose"] *)) {
     max-width: 100%;
   }
-  .lvis-prose :where(p, li, blockquote, dd, figcaption):not(:where([class~="not-prose"] *)) {
+  .lvis-prose :where(p, li, blockquote, dd, figcaption, h1, h2, h3, h4, h5, h6, a, strong, em):not(:where([class~="not-prose"] *)) {
     min-width: 0;
     overflow-wrap: anywhere;
     word-break: break-word;
   }
   .lvis-prose :where(pre, table):not(:where([class~="not-prose"] *)) {
+    display: block;
+    max-width: 100%;
     overflow-x: auto;
   }
 }

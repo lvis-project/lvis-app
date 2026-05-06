@@ -63,7 +63,7 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
   }
 
   return (
-    <div className="min-w-0 max-w-[85%] overflow-hidden text-xs text-muted-foreground" data-wg-id={wgId}>
+    <div className="min-w-0 max-w-[85%] overflow-visible text-xs text-muted-foreground" data-wg-id={wgId}>
       <button
         type="button"
         className="flex max-w-full items-center gap-1.5 px-1 py-1 hover:opacity-80"
@@ -88,7 +88,7 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
         )}
       </button>
       {open && (
-        <div className="pl-1 space-y-1.5 pt-1">
+        <div className="min-w-0 pl-1 space-y-1.5 pt-1">
           {children}
         </div>
       )}

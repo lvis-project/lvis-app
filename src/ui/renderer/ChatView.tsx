@@ -226,7 +226,7 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
     i++;
   }
 
-  return <div className="min-w-0 space-y-3 overflow-x-hidden">{rendered}</div>;
+  return <div className="min-w-0 space-y-3 overflow-visible">{rendered}</div>;
 }
 
 export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onRevertCheckpoint }: ChatViewProps) {
