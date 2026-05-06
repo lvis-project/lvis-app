@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useMemo, useRef } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { KeyRound, Pencil, Star, GitBranch } from "lucide-react";
+import { ChevronDown, KeyRound, Pencil, Star, GitBranch } from "lucide-react";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -25,6 +25,7 @@ import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
+import { QuestionOverlay } from "./components/QuestionOverlay.js";
 import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
 import { useChatContext } from "./context/ChatContext.js";
@@ -45,6 +46,8 @@ import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { SessionSummary } from "./hooks/use-sessions.js";
 import { useContinuousHistory, type ContinuousHistorySession } from "./hooks/use-continuous-history.js";
+
+const CHAT_BOTTOM_THRESHOLD_PX = 96;
 
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
@@ -108,6 +111,43 @@ function HistoricalSessionMarker({ title, sessionId }: { title: string; sessionI
   );
 }
 
+function AskUserAnswerBubble({
+  entry,
+}: {
+  entry: Extract<ContinuousHistorySession["entries"][number], { kind: "ask_user_answer" }>;
+}) {
+  if (entry.dismissed) {
+    return (
+      <div
+        className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/70 border-l-2 border-l-muted-foreground/60 bg-card/80 px-3 py-2 text-xs text-muted-foreground"
+        data-testid="ask-user-answer-bubble"
+      >
+        <div className="text-[10.5px] text-muted-foreground/80">↳ 질문 건너뜀</div>
+        <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">기본값으로 진행</div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="ml-auto w-fit min-w-0 max-w-[75%] rounded-md border border-border/70 border-l-2 border-l-message-user bg-card/90 px-3 py-2 text-xs text-card-foreground shadow-sm"
+      data-testid="ask-user-answer-bubble"
+    >
+      <div className="mb-1 text-[10.5px] text-muted-foreground">
+        ↳ 내 답변{entry.rows.length > 1 ? ` (${entry.rows.length}개)` : ""}
+      </div>
+      <div className="space-y-0.5">
+        {entry.rows.map((row, idx) => (
+          <div key={`${idx}:${row.label}`} className="flex min-w-0 items-baseline gap-2">
+            <span className="w-[4.5rem] shrink-0 truncate text-[10.5px] text-muted-foreground">{row.label}</span>
+            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[12px] [overflow-wrap:anywhere]">{row.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession["entries"] }) {
   const renderEntry = (entry: ContinuousHistorySession["entries"][number], idx: number, embedded = false) => {
     if (entry.kind === "assistant") {
@@ -127,6 +167,9 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
     }
     if (entry.kind === "tool_group") {
       return <ToolGroupCard key={entry.groupId || idx} group={entry} embedded={embedded} />;
+    }
+    if (entry.kind === "ask_user_answer") {
+      return <AskUserAnswerBubble key={entry.sourceToolUseId || idx} entry={entry} />;
     }
     return null;
   };
@@ -180,6 +223,12 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
           <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{entry.text}</div>
         </div>,
       );
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "ask_user_answer") {
+      rendered.push(<AskUserAnswerBubble key={i} entry={entry} />);
       i++;
       continue;
     }
@@ -252,17 +301,81 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
     costEstimate, costBadgeClass,
   } = useChatContext();
 
+  const currentSessionAnchor = useMemo(() => {
+    const current = sessions?.find((session) => session.id === currentSessionId);
+    return current ? { id: currentSessionId, modifiedAt: current.modifiedAt } : undefined;
+  }, [currentSessionId, sessions]);
+
   const {
     historicalSessions,
     loading: loadingHistory,
     reachedEnd: reachedHistoryEnd,
     sentinelRef,
     scrollViewportRef,
-  } = useContinuousHistory(api, currentSessionId, hasApiKey !== false);
+  } = useContinuousHistory(api, currentSessionId, hasApiKey !== false, currentSessionAnchor);
+
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const initialBottomScrollPendingRef = useRef(true);
+  const sawHistoryLoadingRef = useRef(false);
+
+  const isNearBottom = useCallback(() => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return true;
+    return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= CHAT_BOTTOM_THRESHOLD_PX;
+  }, [scrollViewportRef]);
+
+  const scrollChatToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const viewport = scrollViewportRef.current;
+    if (viewport) {
+      if (typeof viewport.scrollTo === "function") {
+        viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+      } else {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    } else {
+      chatEndRef.current?.scrollIntoView({ behavior });
+    }
+    setShowJumpToBottom(false);
+  }, [chatEndRef, scrollViewportRef]);
+
+  useEffect(() => {
+    initialBottomScrollPendingRef.current = true;
+    sawHistoryLoadingRef.current = false;
+    setShowJumpToBottom(false);
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return;
+    const onScroll = () => setShowJumpToBottom(!isNearBottom());
+    onScroll();
+    viewport.addEventListener("scroll", onScroll, { passive: true });
+    return () => viewport.removeEventListener("scroll", onScroll);
+  }, [isNearBottom, scrollViewportRef]);
+
+  useEffect(() => {
+    if (loadingHistory) {
+      sawHistoryLoadingRef.current = true;
+      return;
+    }
+    if (!initialBottomScrollPendingRef.current) return;
+    if (!sawHistoryLoadingRef.current) return;
+    initialBottomScrollPendingRef.current = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollChatToBottom("auto"));
+    });
+  }, [loadingHistory, scrollChatToBottom]);
+
+  useEffect(() => {
+    if (isNearBottom()) {
+      requestAnimationFrame(() => scrollChatToBottom("smooth"));
+    }
+  }, [entries.length, isNearBottom, scrollChatToBottom]);
 
   const historicalByDay = useMemo(() => {
     const map = new Map<string, ContinuousHistorySession[]>();
     for (const session of historicalSessions) {
+      if (session.id === currentSessionId) continue;
       const existing = map.get(session.dayKey);
       if (existing) {
         existing.push(session);
@@ -271,7 +384,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
       }
     }
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [historicalSessions]);
+  }, [currentSessionId, historicalSessions]);
 
   const hasHistoricalContent = historicalSessions.length > 0;
   const activeDayKey = getKoreaDateKey(new Date());
@@ -375,7 +488,8 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           </div>
         </div>
       )}
-      <ScrollArea className="lvis-chat-scroll min-h-0 min-w-0 max-w-full flex-1" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
+      <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
+      <ScrollArea className="lvis-chat-scroll h-full min-h-0 min-w-0 max-w-full" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
         <div ref={sentinelRef} data-testid="chat-history-sentinel" className="h-px" />
         {loadingHistory && (
           <div
@@ -400,11 +514,9 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               onLoadSession={onLoadSession}
               onRefreshSessions={onRefreshSessions}
             />
-            {daySessions.map((session, sessionIdx) => (
+            {daySessions.map((session) => (
               <Fragment key={session.id}>
-                {daySessions.length > 1 && sessionIdx > 0 ? (
-                  <HistoricalSessionMarker title={session.title} sessionId={session.id} />
-                ) : null}
+                <HistoricalSessionMarker title={session.title} sessionId={session.id} />
                 <HistoricalEntriesList entries={session.entries} />
               </Fragment>
             ))}
@@ -584,6 +696,12 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               continue;
             }
 
+            if (entry.kind === "ask_user_answer") {
+              rendered.push(<AskUserAnswerBubble key={idx} entry={entry} />);
+              i++;
+              continue;
+            }
+
             if (entry.kind === "system") {
               rendered.push(<div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>);
               i++;
@@ -702,11 +820,13 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                 i++;
               }
 
-              rendered.push(
-                <WorkGroup key={`wg-${groupStart}`} stepCount={groupEntries.length} streaming={groupIsActiveTurn}>
-                  {groupEntries.map((ge) => ge.node)}
-                </WorkGroup>
-              );
+              if (groupEntries.length > 0) {
+                rendered.push(
+                  <WorkGroup key={`wg-${groupStart}`} stepCount={groupEntries.length} streaming={groupIsActiveTurn}>
+                    {groupEntries.map((ge) => ge.node)}
+                  </WorkGroup>
+                );
+              }
               continue;
             }
 
@@ -738,6 +858,9 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               const turnTokens = entries.slice(turnStartIdx, i + 1).reduce((sum, e) => {
                 if (e.kind === "assistant" || e.kind === "reasoning" || e.kind === "user") {
                   return sum + Math.ceil(((e as any).text?.length ?? 0) / 4);
+                }
+                if (e.kind === "ask_user_answer") {
+                  return sum + e.rows.reduce((rowSum, row) => rowSum + Math.ceil((row.label.length + row.value.length) / 4), 0);
                 }
                 if (e.kind === "tool_group") {
                   const toolSum = ((e as any).tools ?? []).reduce(
@@ -784,20 +907,22 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           }
           return rendered;
         })()}
-        {/* Inline ask_user_question cards — rendered at the tail of the
-            entries stream so the question sits naturally in conversation
-            order. Replaces the previous App-level FloatingQuestionPanel
-            popup; conversation_loop wiring is unchanged. */}
-        {askQuestions.map((req) => (
-          <AskUserQuestionCard
-            key={req.id}
-            api={api}
-            request={req}
-            onResolved={onResolveAskQuestion}
-          />
-        ))}
         <div ref={chatEndRef} />
       </div></ScrollArea>
+      {showJumpToBottom && (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="absolute bottom-4 right-5 z-20 h-8 rounded-full border bg-background/90 px-3 text-xs shadow-md backdrop-blur"
+          onClick={() => scrollChatToBottom("smooth")}
+          data-testid="jump-to-bottom"
+        >
+          <ChevronDown className="mr-1 h-3.5 w-3.5" />
+          맨밑으로
+        </Button>
+      )}
+      </div>
       {contextOverflowPct >= 0.95 && (
         <div className="flex w-full max-w-full items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
           <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
@@ -815,36 +940,37 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      <div className="w-full max-w-full min-w-0 px-3">
-        <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
-      </div>
-      <div className="w-full max-w-full min-w-0 overflow-x-hidden bg-background pb-1 space-y-2">
-        <InputActionBar
-          usedTokens={usedTokens}
-          contextBudget={contextBudget}
-          plugins={plugins}
-          onSelectPlugin={onSelectPlugin}
-          installingPlugins={installingPlugins}
-          onOpenMarketplace={onOpenMarketplace}
-          marketplaceUrlReady={marketplaceUrlReady}
-          onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
-          onToggleChatSearch={searchToggleOverlay}
-          commandActions={commandActions}
-          commandPopoverOpen={commandPopoverOpen}
-          onCommandPopoverOpenChange={onCommandPopoverOpenChange}
-          attachDisabled={
-            attachments.length >= ATTACH_MAX_COUNT ||
-            hasApiKey === false ||
-            contextOverflowPct >= 0.95
-          }
-          attachDisabledReason={
-            hasApiKey === false
-              ? "no-api-key"
-              : contextOverflowPct >= 0.95
-                ? "context-overflow"
-                : "limit"
-          }
-          onAttach={async () => {
+      <div className="relative z-30 w-full max-w-full min-w-0 overflow-visible bg-background">
+        <div className="w-full max-w-full min-w-0 px-3">
+          <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
+        </div>
+        <div className="w-full max-w-full min-w-0 overflow-x-hidden pb-1 space-y-2">
+          <InputActionBar
+            usedTokens={usedTokens}
+            contextBudget={contextBudget}
+            plugins={plugins}
+            onSelectPlugin={onSelectPlugin}
+            installingPlugins={installingPlugins}
+            onOpenMarketplace={onOpenMarketplace}
+            marketplaceUrlReady={marketplaceUrlReady}
+            onInsertSlashCommand={(cmd) => setQuestion(question ? question + cmd + " " : cmd + " ")}
+            onToggleChatSearch={searchToggleOverlay}
+            commandActions={commandActions}
+            commandPopoverOpen={commandPopoverOpen}
+            onCommandPopoverOpenChange={onCommandPopoverOpenChange}
+            attachDisabled={
+              attachments.length >= ATTACH_MAX_COUNT ||
+              hasApiKey === false ||
+              contextOverflowPct >= 0.95
+            }
+            attachDisabledReason={
+              hasApiKey === false
+                ? "no-api-key"
+                : contextOverflowPct >= 0.95
+                  ? "context-overflow"
+                  : "limit"
+            }
+            onAttach={async () => {
             const result = await window.lvis.attach.openFile();
             if (result.canceled) return;
             if (result.rejected.length > 0) {
@@ -934,51 +1060,57 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             // closes — without this, focus stays on the action bar button
             // and the next keystroke goes nowhere visible.
             composerRef.current?.focus();
-          }}
-          rolePresets={rolePresets}
-          activePreset={activePreset}
-          activePresetId={activePresetId}
-          onSelectPreset={setActivePresetId}
-          vendorSupportsThinking={vendorSupportsThinking}
-          enableThinkingChat={enableThinkingChat}
-          onToggleThinking={toggleThinking}
-        />
-        <Composer
-          ref={composerRef}
-          text={question}
-          onTextChange={setQuestion}
-          attachments={attachments}
-          onAttachmentsChange={setAttachments}
-          allocateN={() => ++attachmentNCounter.current}
-          saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
-          openExternal={(p) => window.lvis.attach.openExternal(p)}
-          onSend={() => void (streaming ? onGuide(question) : onAsk(question))}
-          onAbort={() => void onAbort()}
-          streaming={streaming}
-          disabled={hasApiKey === false || contextOverflowPct >= 0.95}
-          onWarning={(msg) => console.warn(msg)}
-          placeholder={
-            hasApiKey === false
-              ? "API 키를 먼저 설정해 주세요..."
-              : streaming
-                ? "응답 방향 지시 입력 (Enter 힌트 전송 / Shift+Enter 줄바꿈)"
-                : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
-          }
-        />
-        <div className="px-3">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
-                {formatCostBadge(costEstimate.total)}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent className="text-xs">
-              <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
-              <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
-              <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
-            </TooltipContent>
-          </Tooltip>
+            }}
+            rolePresets={rolePresets}
+            activePreset={activePreset}
+            activePresetId={activePresetId}
+            onSelectPreset={setActivePresetId}
+            vendorSupportsThinking={vendorSupportsThinking}
+            enableThinkingChat={enableThinkingChat}
+            onToggleThinking={toggleThinking}
+          />
+          <Composer
+            ref={composerRef}
+            text={question}
+            onTextChange={setQuestion}
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+            allocateN={() => ++attachmentNCounter.current}
+            saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
+            openExternal={(p) => window.lvis.attach.openExternal(p)}
+            onSend={() => void (streaming ? onGuide(question) : onAsk(question))}
+            onAbort={() => void onAbort()}
+            streaming={streaming}
+            disabled={hasApiKey === false || contextOverflowPct >= 0.95}
+            onWarning={(msg) => console.warn(msg)}
+            placeholder={
+              hasApiKey === false
+                ? "API 키를 먼저 설정해 주세요..."
+                : streaming
+                  ? "응답 방향 지시 입력 (Enter 힌트 전송 / Shift+Enter 줄바꿈)"
+                  : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
+            }
+          />
+          <div className="px-3">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`text-[11px] font-mono ${costBadgeClass}`} title="예상 비용">
+                  {formatCostBadge(costEstimate.total)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="text-xs">
+                <div>입력: {costEstimate.inputTokens.toLocaleString()} tok · ${costEstimate.inputCost.toFixed(5)}</div>
+                <div>출력(추정): {costEstimate.outputTokens.toLocaleString()} tok · ${costEstimate.outputCost.toFixed(5)}</div>
+                <div className="font-semibold">합계: ${costEstimate.total.toFixed(5)}</div>
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
+        <QuestionOverlay
+          api={api}
+          requests={askQuestions}
+          onResolved={onResolveAskQuestion}
+        />
       </div>
     </div>
   );

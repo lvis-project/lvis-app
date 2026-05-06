@@ -195,6 +195,72 @@ describe("chat-stream-state", () => {
       streaming: false,
     });
   });
+
+  it("adds a user answer recap bubble when ask_user_question resolves", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "뉴스 헤드라인 정리해줄래?");
+    entries = applyToolStart(entries, {
+      groupId: "round-ask",
+      toolUseId: "ask-1",
+      name: "ask_user_question",
+      displayOrder: 0,
+      input: {
+        questions: [
+          {
+            question: "헤드라인 범위는요?",
+            summaryHint: "범위",
+            choices: ["국내", "국제", "IT/경제"],
+          },
+          {
+            question: "몇 개로 정리할까요?",
+            summaryHint: "개수",
+          },
+        ],
+      },
+    });
+    entries = applyToolEnd(entries, {
+      groupId: "round-ask",
+      toolUseId: "ask-1",
+      result: JSON.stringify({
+        answers: [{ choice: "IT/경제" }, { freeText: "10개" }],
+        dismissed: false,
+      }),
+      isError: false,
+    });
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["user", "tool_group", "ask_user_answer"]);
+    expect(entries[2]).toMatchObject({
+      kind: "ask_user_answer",
+      sourceToolUseId: "ask-1",
+      rows: [
+        { label: "범위", value: "IT/경제" },
+        { label: "개수", value: "10개" },
+      ],
+    });
+  });
+
+  it("adds a dismissed recap when ask_user_question is skipped", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "질문 필요");
+    entries = applyToolStart(entries, {
+      groupId: "round-ask",
+      toolUseId: "ask-1",
+      name: "ask_user_question",
+      displayOrder: 0,
+      input: { questions: [{ question: "계속할까요?" }] },
+    });
+    entries = applyToolEnd(entries, {
+      groupId: "round-ask",
+      toolUseId: "ask-1",
+      result: JSON.stringify({ dismissed: true }),
+      isError: false,
+    });
+
+    expect(entries[2]).toMatchObject({
+      kind: "ask_user_answer",
+      sourceToolUseId: "ask-1",
+      dismissed: true,
+      rows: [],
+    });
+  });
 });
 
 describe("imported_trigger helpers (brain-import card lifecycle)", () => {

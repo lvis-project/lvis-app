@@ -3,7 +3,6 @@ import ReactMarkdown from "react-markdown";
 import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
-import { highlightText } from "../utils/html-preview.js";
 import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { replaceToolNamesInText } from "../utils/tool-display.js";
@@ -11,7 +10,6 @@ import { detectFromStream } from "../../../lib/stream-markers.js";
 
 export function AssistantCard({
   entry,
-  highlightQuery,
   actions,
   isStarred,
   onFeedback,
@@ -32,7 +30,6 @@ export function AssistantCard({
   const [reasonDraft, setReasonDraft] = useState("");
   const title = entry.streaming ? "LVIS 응답 작성 중" : "LVIS 응답";
   const displayText = detectFromStream(entry.text || "").cleanedText;
-  const highlighted = highlightText(displayText, highlightQuery);
   const renderedText = replaceToolNamesInText(displayText);
   const markdownText = entry.route === "command" ? preserveCommandLineBreaks(renderedText) : renderedText;
   // Sprint 4.B: rough token estimate for tooltip (~4 chars/token)
@@ -92,18 +89,14 @@ export function AssistantCard({
       )}
 
       <div
-        className={`prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere] ${entry.route === "command" ? "whitespace-pre-wrap" : ""}`}
+        className={`prose prose-sm lvis-prose max-h-none max-w-none overflow-y-visible break-words [overflow-wrap:anywhere] ${entry.route === "command" ? "whitespace-pre-wrap" : ""}`}
         data-testid="assistant-message-body"
       >
-        {highlightQuery && highlighted ? (
-          <div className="whitespace-pre-wrap">{highlighted}</div>
-        ) : (
-          <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
-            {entry.streaming
-              ? clampDanglingMarkdownLink(markdownText) || "응답을 작성하는 중..."
-              : markdownText}
-          </ReactMarkdown>
-        )}
+        <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+          {entry.streaming
+            ? clampDanglingMarkdownLink(markdownText) || "응답을 작성하는 중..."
+            : markdownText}
+        </ReactMarkdown>
       </div>
 
       {!entry.streaming && onFeedback ? (

@@ -70,7 +70,7 @@ export function ReasoningCard({
           </span>
         )}
         {!streaming && (
-          <span className="ml-auto">
+          <span className="shrink-0">
             {bodyVisible
               ? <ChevronDown className="h-3 w-3 flex-shrink-0" />
               : <ChevronRight className="h-3 w-3 flex-shrink-0" />}

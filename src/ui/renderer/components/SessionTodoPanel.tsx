@@ -20,7 +20,7 @@
  * the current `sessionId` prop so a stale session's emissions cannot
  * clobber the active view (the renderer used to apply every push
  * regardless of which session emitted it, which surfaced the bug
- * "TODO 가 작성은 되는데 업데이트는 안됨").
+ * "TO-DO 가 작성은 되는데 업데이트는 안됨").
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ListChecks, RotateCcw, Sparkles } from "lucide-react";
@@ -172,19 +172,19 @@ export function SessionTodoPanel({
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <ListChecks className="h-3 w-3" />
-        <span className="font-medium">Todos</span>
+        <span className="font-medium">세션 TO-DO</span>
         <Badge variant="outline" className="px-1 py-0 text-[10px]">
           {completedCount}/{visible.length}
         </Badge>
         {/* Continuation chip — explicit affordance for the user feedback:
-            "신규 TODO 를 작성하거나, 다음 턴을 시작할 때, 계속 이어서 하는 것인지
+            "신규 TO-DO 를 작성하거나, 다음 턴을 시작할 때, 계속 이어서 하는 것인지
             초기화 하고 가는 것인지도 판단이 잘 안되고 있음". `resumed === null`
             means the first fetch hasn't resolved yet, so show nothing. */}
         {resumed === true && (
           <span
             className="ml-1 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0 text-[10px] text-amber-600 dark:text-amber-400"
             data-testid="session-todo-continuation"
-            title="이전 턴의 TODO 를 이어서 진행 중"
+            title="이전 턴의 TO-DO 를 이어서 진행 중"
           >
             <RotateCcw className="h-2.5 w-2.5" />
             이어서
@@ -194,7 +194,7 @@ export function SessionTodoPanel({
           <span
             className="ml-1 inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0 text-[10px] text-emerald-600 dark:text-emerald-400"
             data-testid="session-todo-fresh"
-            title="새 세션에서 TODO 를 새로 작성"
+            title="새 세션에서 TO-DO 를 새로 작성"
           >
             <Sparkles className="h-2.5 w-2.5" />
             새 시작

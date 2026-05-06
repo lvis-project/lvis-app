@@ -1,27 +1,38 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Wrench } from "lucide-react";
+import { ScrollArea } from "../../../components/ui/scroll-area.js";
 
-/** Truncated/expandable code block for tool input or output */
-function ExpandableCode({ value, isError = false }: { value: string; isError?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  const lines = value.split("\n");
-  const needsTruncation = lines.length > 5;
-  const displayed = expanded || !needsTruncation ? value : lines.slice(0, 5).join("\n");
+/** Pretty, bounded code block for tool input/output. */
+function ToolPayloadBlock({ value, isError = false }: { value: string; isError?: boolean }) {
+  const formatted = useMemo(() => formatToolPayload(value), [value]);
+  const scrollable = shouldConstrainPayload(formatted);
+  const pre = (
+    <pre
+      className={`max-w-full whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-[10px] leading-[1.35rem] [overflow-wrap:anywhere] ${
+        isError ? "text-red-400" : "text-muted-foreground"
+      }`}
+    >
+      {formatted}
+    </pre>
+  );
   return (
-    <div className="min-w-0 max-w-full">
-      <pre className={`max-w-full overflow-x-auto rounded bg-muted p-2 font-mono text-[10px] whitespace-pre-wrap break-all ${isError ? "text-red-400" : "opacity-80"} ${!expanded && needsTruncation ? "max-h-20 overflow-hidden" : ""}`}>
-        {displayed}
-      </pre>
-      {needsTruncation && (
-        <button
-          className="mt-0.5 text-[9px] text-muted-foreground hover:text-foreground"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? "접기 ↑" : "전체 보기 ↓"}
-        </button>
-      )}
+    <div className="min-w-0 max-w-full rounded bg-muted/70 ring-1 ring-border/50">
+      {scrollable ? <ScrollArea className="h-[6.9rem]">{pre}</ScrollArea> : pre}
     </div>
   );
+}
+
+function shouldConstrainPayload(value: string): boolean {
+  const lines = value.split("\n");
+  if (lines.length > 5) return true;
+  // Long JSON/XML/RSS strings often wrap visually into many rows without
+  // containing newline characters. Approximate wrapped rows so every tool
+  // input/output follows the same "about 5 visible lines" rule.
+  const estimatedVisualLines = lines.reduce(
+    (sum, line) => sum + Math.max(1, Math.ceil(line.length / 96)),
+    0,
+  );
+  return estimatedVisualLines > 5;
 }
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
@@ -32,15 +43,47 @@ import type { RenderHtmlPayload } from "../types.js";
 import { HtmlPreview } from "./HtmlPreview.js";
 import { McpAppView } from "./McpAppView.js";
 
+function formatToolPayload(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.stringify(expandJsonStrings(JSON.parse(trimmed)), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function expandJsonStrings(value: unknown, depth = 0): unknown {
+  if (depth > 4) return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
+    try {
+      return expandJsonStrings(JSON.parse(trimmed), depth + 1);
+    } catch {
+      return value;
+    }
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => expandJsonStrings(item, depth + 1));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, expandJsonStrings(item, depth + 1)]),
+    );
+  }
+  return value;
+}
+
 /** Single-tool inline indicator — no collapsible wrapper */
 function SingleToolInline({
   tool,
 }: {
   tool: Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
 }) {
-  const [open, setOpen] = useState(false);
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
+  const [open, setOpen] = useState(isRunning);
   return (
     <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
       <button
@@ -64,13 +107,13 @@ function SingleToolInline({
           {tool.input && (
             <div>
               <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
-              <ExpandableCode value={JSON.stringify(tool.input, null, 2)} />
+              <ToolPayloadBlock value={JSON.stringify(tool.input, null, 2)} />
             </div>
           )}
           {tool.result !== undefined && (
             <div>
               <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${isError ? "text-red-400" : ""}`}>{isError ? "오류" : "결과"}</div>
-              <ExpandableCode value={tool.result} isError={isError} />
+              <ToolPayloadBlock value={tool.result} isError={isError} />
             </div>
           )}
         </div>
@@ -86,11 +129,12 @@ export function ToolGroupCard({
   embedded?: boolean;
 }) {
   // All hooks must be declared before any conditional return (Rules of Hooks)
-  const [open, setOpen] = useState(false);
-  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
-  const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
-
   const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
+  const [open, setOpen] = useState(group.status === "running");
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(
+    () => new Set(tools.filter((tool) => tool.status === "running").map((tool) => tool.toolUseId)),
+  );
+  const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
 
   // Single tool: render inline without group wrapper
   if (group.tools.length === 1 && group.tools[0]) {
@@ -178,7 +222,7 @@ export function ToolGroupCard({
                     {tool.input && (
                       <div>
                         <div className="mb-0.5 text-[9px] uppercase opacity-60">입력</div>
-                        <ExpandableCode value={JSON.stringify(tool.input, null, 2)} />
+                        <ToolPayloadBlock value={JSON.stringify(tool.input, null, 2)} />
                       </div>
                     )}
                     {tool.result !== undefined && (
@@ -186,7 +230,7 @@ export function ToolGroupCard({
                         <div className={`mb-0.5 text-[9px] uppercase opacity-60 ${tool.status === "error" ? "text-red-400" : ""}`}>
                           {tool.status === "error" ? "오류" : "결과"}
                         </div>
-                        <ExpandableCode value={tool.result} isError={tool.status === "error"} />
+                        <ToolPayloadBlock value={tool.result} isError={tool.status === "error"} />
                       </div>
                     )}
                   </div>

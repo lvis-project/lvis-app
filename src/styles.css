@@ -760,6 +760,22 @@
     max-width: 100%;
     overflow-x: auto;
   }
+  .lvis-prose :where(pre):not(:where([class~="not-prose"] *)) {
+    border: 1px solid hsl(var(--border));
+    background-color: hsl(var(--code-bg));
+    color: hsl(var(--code-fg));
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+  }
+  .lvis-prose :where(pre code):not(:where([class~="not-prose"] *)) {
+    background-color: transparent;
+    color: inherit;
+    padding: 0;
+    border-radius: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
 
   /* Radix ScrollArea inserts an internal `display: table; min-width: 100%`
      wrapper under the viewport. In the chat timeline, long markdown/tool

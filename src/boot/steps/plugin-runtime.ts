@@ -13,7 +13,7 @@
  *
  * No plugin-specific literals here — everything is manifest-driven.
  */
-import { app } from "electron";
+import { app, BrowserWindow as ElectronBrowserWindow } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
@@ -938,7 +938,7 @@ export async function initPluginRuntime(
         const effectiveOpts = requested
           ? opts
           : { ...opts, persistPartition: defaultPartition };
-        return openAuthWindowService(mainWindow, effectiveOpts);
+        return openAuthWindowService(ElectronBrowserWindow.getFocusedWindow() ?? mainWindow, effectiveOpts);
       }) as PluginHostApi["openAuthWindow"],
 
       // ─── §8 Agent Approval — hostApi.agentApproval ────────────────────

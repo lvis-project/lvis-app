@@ -24,7 +24,8 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
     description:
       "현재 턴 동안 어시스턴트가 따라갈 체크리스트를 작성/갱신합니다. " +
       "사용자 task_* 와 다름 (세션 단위 휘발성). id 를 같이 보내면 merge, " +
-      "생략하면 새 항목 생성. status: pending | in_progress | completed | deleted.",
+      "생략하면 새 항목 생성. beforeId/afterId 로 중간 삽입 또는 이동 가능. " +
+      "status: pending | in_progress | completed | deleted.",
     source: "builtin",
     // H1: category="read" — the assistant's own per-session checklist lives
     // entirely in an in-memory store this conversation owns; there is no
@@ -50,6 +51,8 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
               id: { type: "string", description: "기존 항목 id — 생략 시 신규 생성. id 전달 시 content 생략 가능(기존 내용 유지)." },
               content: { type: "string", description: "항목 내용. 신규 생성 시 필수." },
               status: { type: "string", enum: STATUS_VALUES },
+              beforeId: { type: "string", description: "이 항목 앞에 삽입/이동할 기준 id. afterId 보다 우선." },
+              afterId: { type: "string", description: "이 항목 뒤에 삽입/이동할 기준 id. 기준이 없으면 뒤에 추가." },
             },
           },
         },
@@ -68,11 +71,13 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
         const obj = it as Record<string, unknown>;
         const content = typeof obj.content === "string" ? obj.content : undefined;
         const id = typeof obj.id === "string" ? obj.id : undefined;
+        const beforeId = typeof obj.beforeId === "string" ? obj.beforeId : undefined;
+        const afterId = typeof obj.afterId === "string" ? obj.afterId : undefined;
         const status = obj.status as SessionTodoStatus;
         // new items require content; updates by id allow content omission
         if (!id && !content?.trim()) continue;
         if (!STATUS_VALUES.includes(status)) continue;
-        updates.push({ id, content, status });
+        updates.push({ id, content, status, beforeId, afterId });
       }
       if (updates.length === 0) {
         return {

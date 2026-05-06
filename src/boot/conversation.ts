@@ -23,6 +23,7 @@ import { loadHooksConfig } from "../hooks/config-loader.js";
 import { ExternalHookExecutor } from "../hooks/external-executor.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
+import type { SessionTodoStore } from "../main/session-todo-store.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
 
@@ -155,6 +156,8 @@ export interface ConversationDeps {
   pluginRuntime: PluginRuntime;
   /** C2(c): per-session SkillOverlay handle, cleared on newConversation(). */
   skillOverlay?: { clear(sessionId: string): void };
+  /** Session-scoped assistant TO-DO lifecycle. */
+  sessionTodoStore?: SessionTodoStore;
   /** Issue #260: optional notification service for turn-end auto-fire. */
   notificationService?: NotificationService;
 }
@@ -272,6 +275,7 @@ export function createConversationLoop(deps: ConversationDeps): ConversationLoop
     // Phase 1.5 Option C — request_plugin 메타 툴 pluginId 검증용.
     pluginRuntime: deps.pluginRuntime,
     skillOverlay: deps.skillOverlay,
+    sessionTodoStore: deps.sessionTodoStore,
     notificationService: deps.notificationService,
   });
 }

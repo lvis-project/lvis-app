@@ -117,9 +117,9 @@ let appShutdownStarted = false;
 let appShutdownCompleted = false;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
-const MAIN_WINDOW_WIDTH = 720;
-const MAIN_WINDOW_HEIGHT = 936;
-const MAIN_WINDOW_MIN_WIDTH = 640;
+const MAIN_WINDOW_WIDTH = 460;
+const MAIN_WINDOW_HEIGHT = 840;
+const MAIN_WINDOW_MIN_WIDTH = 460;
 const MAIN_WINDOW_MIN_HEIGHT = 640;
 const MAIN_WINDOW_TOP_GAP = 24;
 const MAIN_WINDOW_RIGHT_GAP = 10;
@@ -413,11 +413,6 @@ function createWindow() {
     frame: process.platform !== "darwin" ? false : undefined,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     trafficLightPosition: process.platform === "darwin" ? { x: 14, y: 14 } : undefined,
-    titleBarOverlay: process.platform !== "darwin" ? {
-      color: "#0b0d10",       // matches --background (dark default); renderer overrides via window:syncTitleBarTheme
-      symbolColor: "#e2e8f0", // matches --foreground (dark default)
-      height: 36,
-    } : undefined,
     // ─────────────────────────────────────────────────────────────────────
     webPreferences: {
       contextIsolation: true,

@@ -499,10 +499,9 @@ export function App() {
     setActiveView,
     toggleCommandPopover,
   });
-  const askQuestionScrollKey = askQuestions.map((q) => q.id).join("|");
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [entries, askQuestionScrollKey]);
+  }, [entries]);
 
   // Refresh plugin views + marketplace catalog when a lvis:// deep-link
   // install completes in the main process, so new sidebar tabs appear
