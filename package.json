@@ -8,11 +8,12 @@
   "scripts": {
     "postinstall": "electron-rebuild && node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs",
     "build:main": "tsc -p tsconfig.json",
-    "build:renderer": "esbuild src/renderer.tsx --bundle --platform=browser --format=esm --splitting --outdir=dist/src --out-extension:.js=.js",
+    "build:webpack": "webpack --config webpack.config.cjs",
+    "build:renderer": "webpack --config webpack.config.cjs --config-name renderer",
     "build:styles": "tailwindcss -i src/styles.css -o dist/src/styles.css --minify",
-    "build:preload": "esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/src/preload.cjs",
-    "build:plugin-preload": "esbuild src/plugin-preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/src/plugin-preload.cjs",
-    "build": "bun run build:main && bun run build:renderer && bun run build:styles && bun run build:preload && bun run build:plugin-preload && node scripts/copy-build-assets.mjs src/index.html dist/src/index.html src/plugin-ui-shell.html dist/src/plugin-ui-shell.html src/plugin-ui-shell.js dist/src/plugin-ui-shell.js scripts/electron-flags.mjs dist/scripts/electron-flags.mjs && node scripts/check-no-tls-bypass.mjs",
+    "build:preload": "webpack --config webpack.config.cjs --config-name preload",
+    "build:plugin-preload": "webpack --config webpack.config.cjs --config-name pluginPreload",
+    "build": "bun run build:main && bun run build:webpack && bun run build:styles && node scripts/copy-build-assets.mjs src/index.html dist/src/index.html src/plugin-ui-shell.html dist/src/plugin-ui-shell.html src/plugin-ui-shell.js dist/src/plugin-ui-shell.js scripts/electron-flags.mjs dist/scripts/electron-flags.mjs && node scripts/check-no-tls-bypass.mjs",
     "typecheck": "tsc --noEmit",
     "start": "bun run build && node scripts/run-electron.mjs dist/src/main.js",
     "dev": "node scripts/run-electron-dev.mjs",
@@ -98,10 +99,13 @@
     "postcss": "^8.5.9",
     "storybook": "^8.6.14",
     "tailwindcss": "^3.4.13",
+    "ts-loader": "^9.5.2",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3",
     "vite": "^8.0.8",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "webpack": "^5.105.4",
+    "webpack-cli": "^6.0.1"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
