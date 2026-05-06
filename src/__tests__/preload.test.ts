@@ -13,6 +13,8 @@ const mockInvoke = vi.fn();
 const mockOn = vi.fn();
 const mockRemoveListener = vi.fn();
 const originalDebugStreamEnv = process.env.VITE_DEBUG_STREAM;
+const originalLvisDevEnv = process.env.LVIS_DEV;
+const originalLvisDevConsoleEnv = process.env.LVIS_DEV_CONSOLE;
 
 // Named exports only — mirrors the named-import shape in preload.ts.
 // A regression to `import electron from "electron"` will fail here because
@@ -56,6 +58,8 @@ describe("preload — plugin webview asset URLs", () => {
     mockRemoveListener.mockReset();
     vi.resetModules();
     delete process.env.VITE_DEBUG_STREAM;
+    delete process.env.LVIS_DEV;
+    delete process.env.LVIS_DEV_CONSOLE;
   });
 
   afterEach(() => {
@@ -63,6 +67,16 @@ describe("preload — plugin webview asset URLs", () => {
       delete process.env.VITE_DEBUG_STREAM;
     } else {
       process.env.VITE_DEBUG_STREAM = originalDebugStreamEnv;
+    }
+    if (originalLvisDevEnv === undefined) {
+      delete process.env.LVIS_DEV;
+    } else {
+      process.env.LVIS_DEV = originalLvisDevEnv;
+    }
+    if (originalLvisDevConsoleEnv === undefined) {
+      delete process.env.LVIS_DEV_CONSOLE;
+    } else {
+      process.env.LVIS_DEV_CONSOLE = originalLvisDevConsoleEnv;
     }
   });
 

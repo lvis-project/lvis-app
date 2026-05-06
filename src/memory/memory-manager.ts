@@ -463,6 +463,55 @@ export class MemoryManager {
       });
   }
 
+  listSessionsPage(options: { limit?: number; before?: Date; beforeId?: string } = {}): SessionListEntry[] {
+    if (!existsSync(this.sessionsDir)) return [];
+    const limit = Number.isFinite(options.limit)
+      ? Math.max(0, Math.floor(options.limit ?? 0))
+      : Number.POSITIVE_INFINITY;
+    const beforeTime = options.before?.getTime();
+    const beforeId = options.beforeId;
+    return readdirSync(this.sessionsDir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .map((f) => {
+        const stat = statSync(join(this.sessionsDir, f));
+        return {
+          id: f.replace(".jsonl", ""),
+          modifiedAt: stat.mtime,
+          size: stat.size,
+        };
+      })
+      .filter((session) => {
+        if (beforeTime === undefined || Number.isNaN(beforeTime)) return true;
+        const t = session.modifiedAt.getTime();
+        if (t < beforeTime) return true;
+        return t === beforeTime && beforeId !== undefined && session.id < beforeId;
+      })
+      .sort((a, b) => {
+        const timeDelta = b.modifiedAt.getTime() - a.modifiedAt.getTime();
+        return timeDelta !== 0 ? timeDelta : b.id.localeCompare(a.id);
+      })
+      .slice(0, Number.isFinite(limit) ? limit : undefined)
+      .map((session) => {
+        const metadata = this.loadSessionMetadata(session.id);
+        const summary = session.size > MAX_SESSION_FILE_BYTES
+          ? {
+              title: metadata?.routineTitle
+                ? `${metadata.routineTitle} 대화`
+                : `세션 ${session.id.slice(0, 8)}`,
+              preview: "(대화가 커서 미리보기를 생략했습니다)",
+            }
+          : this.readSessionSummary(session.id);
+        return {
+          id: session.id,
+          modifiedAt: session.modifiedAt,
+          title: metadata?.title || summary.title || metadata?.routineTitle || `세션 ${session.id.slice(0, 8)}`,
+          preview: summary.preview,
+          routineId: metadata?.routineId,
+          routineTitle: metadata?.routineTitle,
+        };
+      });
+  }
+
   listSessionsByRoutine(routineId: string, limit = Number.POSITIVE_INFINITY): SessionListEntry[] {
     return this.listSessions()
       .filter((session) => session.routineId === routineId)

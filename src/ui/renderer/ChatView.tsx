@@ -100,7 +100,7 @@ export interface ChatViewProps {
 function HistoricalSessionMarker({ title, sessionId }: { title: string; sessionId: string }) {
   return (
     <div
-      className="mx-auto text-center text-[11px] text-muted-foreground/50 py-0.5 px-3"
+      className="mx-auto max-w-full truncate text-center text-[11px] text-muted-foreground/50 py-0.5 px-3"
       data-testid="session-marker"
     >
       - {title || sessionId.slice(0, 8)} -
@@ -148,13 +148,10 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
         segment.push({ entry: next as typeof entry, idx: i });
         i++;
       }
-      let finalAssistantOffset = -1;
-      for (let j = segment.length - 1; j >= 0; j--) {
-        if (segment[j]?.entry.kind === "assistant") {
-          finalAssistantOffset = j;
-          break;
-        }
-      }
+      const lastSegmentEntry = segment[segment.length - 1]?.entry;
+      const finalAssistantOffset = lastSegmentEntry?.kind === "assistant"
+        ? segment.length - 1
+        : -1;
       const workItems = finalAssistantOffset >= 0
         ? segment.slice(0, finalAssistantOffset)
         : segment;
@@ -177,9 +174,9 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
         <div
           key={i}
           data-testid="historical-user-message"
-          className="ml-auto w-fit max-w-[85%] rounded-md bg-message-user/70 px-3.5 py-2 text-sm text-message-user-foreground/90"
+          className="ml-auto w-fit min-w-0 max-w-[85%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground"
         >
-          <div className="whitespace-pre-wrap">{entry.text}</div>
+          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{entry.text}</div>
         </div>,
       );
       i++;
@@ -229,7 +226,7 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
     i++;
   }
 
-  return <>{rendered}</>;
+  return <div className="min-w-0 space-y-3 overflow-x-hidden">{rendered}</div>;
 }
 
 export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onRevertCheckpoint }: ChatViewProps) {
@@ -377,7 +374,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           </div>
         </div>
       )}
-      <ScrollArea className="h-full px-3 py-4" viewportRef={scrollViewportRef}><div className="space-y-3">
+      <ScrollArea className="h-full px-3 py-4" viewportRef={scrollViewportRef}><div className="min-w-0 space-y-3 overflow-x-hidden">
         <div ref={sentinelRef} data-testid="chat-history-sentinel" className="h-px" />
         {loadingHistory && (
           <div
@@ -564,7 +561,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                 const starId = isEntryStarred(idx);
                 const starActive = !!starId;
                 rendered.push(
-                  <div key={idx} className={`group relative ml-auto w-fit max-w-[85%] rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
+                  <div key={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[85%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
                     {/* "나" label removed — sender is implicit. Star + hover
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
@@ -578,7 +575,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                         <Star className={`h-3 w-3 ${starActive ? "fill-yellow-400 text-yellow-400" : ""}`} />
                       </button>
                     </div>
-                    <div className="whitespace-pre-wrap">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
+                    <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}</div>
                   </div>
                 );
               }
