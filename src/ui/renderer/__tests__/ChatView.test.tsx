@@ -192,9 +192,17 @@ describe("ChatView", () => {
       fireEvent.click(container.querySelector("[data-wg-id] button")!);
     });
 
+    for (const button of Array.from(container.querySelectorAll("button"))) {
+      if (button.textContent?.includes("생각 완료")) {
+        await act(async () => {
+          fireEvent.click(button);
+        });
+      }
+    }
+
     await waitFor(() => {
       expect(container.textContent).toContain("첫번째 답변입니다");
-      expect(container.textContent).toContain("생각 정리");
+      expect(container.textContent).toContain("생각 완료");
     });
   });
 
@@ -369,6 +377,171 @@ describe("ChatView", () => {
     });
   });
 
+  it("keeps completed prior turns visible while a new turn is streaming", async () => {
+    const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "첫 질문");
+    await act(async () => {
+      emitChatStream({ type: "reasoning_delta", text: "첫 턴 생각" });
+      emitChatStream({ type: "text_delta", text: "첫 최종 답변" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "첫 최종 답변",
+        thought: "첫 턴 생각",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("첫 최종 답변");
+      expect(container.textContent).not.toContain("첫 턴 생각");
+    });
+
+    const pendingSend = deferred<{ ok: true }>();
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+    await submitUser(container, "둘째 질문");
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "둘째 답변 작성 중" });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("첫 최종 답변");
+      expect(container.textContent).toContain("둘째 답변 작성 중");
+      expect(container.textContent).toContain("작업 중...");
+    });
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await Promise.resolve();
+    });
+  });
+
+  it("collapses standalone reasoning when thinking completes", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "생각만 확인");
+    await act(async () => {
+      emitChatStream({ type: "reasoning_delta", text: "완료되면 접혀야 하는 생각" });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("생각 중...");
+      expect(container.textContent).toContain("완료되면 접혀야 하는 생각");
+    });
+
+    await act(async () => {
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toMatch(/작업\s*1단계/);
+      expect(container.textContent).toContain("응답이 비어있습니다.");
+      expect(container.textContent).not.toContain("완료되면 접혀야 하는 생각");
+    });
+  });
+
+  it("scrolls to the bottom when an ask_user_question card appears", async () => {
+    const scrollSpy = vi
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    const { container, emitAskUserQuestion } = await renderApp({ hasApiKey: true });
+    const before = scrollSpy.mock.calls.length;
+
+    await act(async () => {
+      emitAskUserQuestion({
+        id: "ask-scroll-1",
+        urgent: false,
+        createdAt: Date.now(),
+        questions: [
+          {
+            question: "지역 기준을 알려주세요",
+            choices: ["서울", "경기"],
+            allowFreeText: true,
+          },
+        ],
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("지역 기준을 알려주세요");
+      expect(scrollSpy.mock.calls.length).toBeGreaterThan(before);
+    });
+  });
+
+  it("keeps the calendar day divider visible for the active conversation when history already has today", async () => {
+    const now = new Date().toISOString();
+    const { container } = await renderApp({
+      currentSession: "current",
+      sessions: [
+        { id: "old-today", modifiedAt: now, title: "이전 오늘 대화" },
+        { id: "current", modifiedAt: now, title: "현재 대화" },
+      ],
+      history: {
+        sessionId: "old-today",
+        messages: [
+          { index: 0, role: "user", content: "이전 질문" },
+          { index: 1, role: "assistant", content: "이전 답변" },
+        ],
+      },
+    });
+
+    await submitUser(container, "새 질문");
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="day-divider"]').length).toBeGreaterThanOrEqual(2);
+      expect(container.textContent).not.toContain("현재 대화");
+    });
+  });
+
+  it("moves a tool_use assistant round into the active WorkGroup before tool events arrive", async () => {
+    const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
+    const pendingSend = deferred<{ ok: true }>();
+    api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
+    await submitUser(container, "직접 도구 호출");
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "도구를 바로 호출하겠습니다" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "도구를 바로 호출하겠습니다",
+        thought: "",
+        stopReason: "tool_use",
+        hasToolCalls: true,
+      });
+    });
+
+    await waitFor(() => {
+      const workGroup = container.querySelector("[data-wg-id]");
+      expect(workGroup).toBeTruthy();
+      expect(workGroup!.textContent).toContain("작업 중...");
+      expect(workGroup!.textContent).toContain("도구를 바로 호출하겠습니다");
+    });
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await Promise.resolve();
+    });
+  });
+
+  it("strips meta markers and renders Markdown for assistant_round text", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    await submitUser(container, "마크다운 확인");
+    await act(async () => {
+      emitChatStream({ type: "text_delta", text: "결과는 **정상**입니다.<title>마크다운 렌더링 확인</title>" });
+      emitChatStream({
+        type: "assistant_round",
+        text: "결과는 **정상**입니다.<title>마크다운 렌더링 확인</title>",
+        thought: "",
+        stopReason: "end_turn",
+        hasToolCalls: false,
+      });
+      emitChatStream({ type: "done" });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("결과는 정상입니다.");
+      expect(container.textContent).not.toContain("<title>");
+      expect(container.querySelector('[data-testid="assistant-message-body"] strong')?.textContent).toBe("정상");
+    });
+  });
+
   // Regression guard for Copilot PR #545 round-1 comments ③④.
   // Reasoning + tool + assistant sequence: reasoning entry must be bucketed
   // inside WorkGroup while the final assistant text stays visible standalone.
@@ -443,14 +616,12 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       const transcriptText = container.textContent ?? "";
-      const first = transcriptText.indexOf("첫 번째 검색 계획");
       const middle = transcriptText.indexOf("중간 확인 내용은 사용자에게 보여야 합니다.");
-      const second = transcriptText.indexOf("두 번째 도구 결과를 검증");
       const final = transcriptText.indexOf("최종 답변입니다.");
-      expect(first).toBeGreaterThanOrEqual(0);
-      expect(middle).toBeGreaterThan(first);
-      expect(second).toBeGreaterThan(middle);
-      expect(final).toBeGreaterThan(second);
+      expect(transcriptText).not.toContain("첫 번째 검색 계획");
+      expect(transcriptText).not.toContain("두 번째 도구 결과를 검증");
+      expect(middle).toBeGreaterThanOrEqual(0);
+      expect(final).toBeGreaterThan(middle);
     });
   });
 
@@ -514,5 +685,6 @@ describe("ChatView", () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
