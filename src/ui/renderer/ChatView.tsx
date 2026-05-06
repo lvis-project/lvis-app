@@ -375,7 +375,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           </div>
         </div>
       )}
-      <ScrollArea className="min-h-0 min-w-0 max-w-full flex-1" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
+      <ScrollArea className="lvis-chat-scroll min-h-0 min-w-0 max-w-full flex-1" viewportRef={scrollViewportRef}><div className="min-w-0 w-full max-w-full overflow-x-hidden space-y-3 px-3 py-4">
         <div ref={sentinelRef} data-testid="chat-history-sentinel" className="h-px" />
         {loadingHistory && (
           <div

@@ -218,7 +218,9 @@ test.describe("chat layout overflow", () => {
       };
       const sentinel = document.querySelector('[data-testid="chat-history-sentinel"]');
       const chatViewport = sentinel?.closest("[data-radix-scroll-area-viewport]");
+      const chatContentWrapper = chatViewport?.firstElementChild;
       const viewportBox = toBox(chatViewport);
+      const contentWrapperBox = toBox(chatContentWrapper);
       const elementBoxes = [
         ...document.querySelectorAll('[data-testid="assistant-message-body"], [data-wg-id], pre, code, [data-testid="composer-input-bar"], .bg-message-user'),
       ]
@@ -237,6 +239,7 @@ test.describe("chat layout overflow", () => {
         docWidth: document.documentElement.scrollWidth,
         bodyWidth: document.body.scrollWidth,
         chatViewport: viewportBox,
+        chatContentWrapper: contentWrapperBox,
         sidebar: toBox(document.querySelector('[data-testid="sidebar"]')),
         workGroup: toBox(document.querySelector("[data-wg-id]")),
         composer: toBox(document.querySelector('[data-testid="composer-input-bar"]')),
@@ -251,9 +254,12 @@ test.describe("chat layout overflow", () => {
 
     expect(metrics.docWidth).toBeLessThanOrEqual(metrics.viewportWidth + 1);
     expect(metrics.bodyWidth).toBeLessThanOrEqual(metrics.viewportWidth + 1);
-    for (const box of [metrics.chatViewport, metrics.sidebar, metrics.workGroup, metrics.composer]) {
+    for (const box of [metrics.chatViewport, metrics.chatContentWrapper, metrics.sidebar, metrics.workGroup, metrics.composer]) {
       expect(box).not.toBeNull();
     }
+    expect(metrics.chatViewport!.right).toBeLessThanOrEqual(metrics.viewportWidth + 1);
+    expect(metrics.chatContentWrapper!.right).toBeLessThanOrEqual(metrics.chatViewport!.right + 1);
+    expect(metrics.chatContentWrapper!.scrollWidth).toBeLessThanOrEqual(metrics.chatContentWrapper!.clientWidth + 1);
     expect(metrics.sidebar!.right).toBeLessThanOrEqual(metrics.chatViewport!.left + 1);
     expect(metrics.workGroup!.right).toBeLessThanOrEqual(metrics.chatViewport!.right + 1);
     expect(metrics.composer!.right).toBeLessThanOrEqual(metrics.chatViewport!.right + 1);

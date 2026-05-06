@@ -603,7 +603,7 @@ export function App() {
     <TooltipProvider>
         <div className="flex h-screen flex-col overflow-hidden">
           <CustomTitleBar />
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <Sidebar
             activeView={activeView}
             setActiveView={handleSidebarSelect}

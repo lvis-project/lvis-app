@@ -760,4 +760,17 @@
     max-width: 100%;
     overflow-x: auto;
   }
+
+  /* Radix ScrollArea inserts an internal `display: table; min-width: 100%`
+     wrapper under the viewport. In the chat timeline, long markdown/tool
+     content can make that table wrapper expand to max-content width; then
+     child `w-full` cards use the oversized table as their containing block.
+     Keep this override scoped to ChatView so other ScrollArea measurements are
+     not changed globally. */
+  .lvis-chat-scroll [data-radix-scroll-area-viewport] > div {
+    display: block !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
 }
