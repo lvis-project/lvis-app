@@ -303,7 +303,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
   }, [streaming, onAbort]);
 
   return (
-    <div className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] mx-auto w-full max-w-3xl">
+    <div className="relative mx-auto grid min-h-0 min-w-0 flex-1 w-full max-w-3xl grid-rows-[1fr_auto] overflow-hidden">
       {/* ChatSearchOverlay moved INSIDE ScrollArea below so its sticky top-0
           attaches to the chat scroll viewport instead of floating above it. */}
       {hasApiKey === false && (
@@ -374,7 +374,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           </div>
         </div>
       )}
-      <ScrollArea className="h-full px-3 py-4" viewportRef={scrollViewportRef}><div className="min-w-0 space-y-3 overflow-x-hidden">
+      <ScrollArea className="h-full min-w-0 px-3 py-4" viewportRef={scrollViewportRef}><div className="min-w-0 max-w-full space-y-3 overflow-x-hidden">
         <div ref={sentinelRef} data-testid="chat-history-sentinel" className="h-px" />
         {loadingHistory && (
           <div
@@ -814,7 +814,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
       <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
-      <div className="bg-background pb-1 space-y-2">
+      <div className="min-w-0 overflow-hidden bg-background pb-1 space-y-2">
         <InputActionBar
           usedTokens={usedTokens}
           contextBudget={contextBudget}
