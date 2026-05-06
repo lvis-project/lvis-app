@@ -43,12 +43,12 @@ export function Calendar({
         ),
         month_grid: "w-full border-collapse",
         weekdays: "flex",
-        weekday: "text-muted-foreground rounded-md w-7 font-medium text-[11px]",
+        weekday: "w-8 rounded-md text-[11px] font-medium text-muted-foreground",
         week: "flex w-full mt-0.5",
-        day: "h-7 w-7 text-center text-xs p-0 relative",
+        day: "relative h-8 w-8 p-0 text-center text-xs",
         day_button: cn(
           buttonVariants({ variant: "ghost" }),
-          "h-7 w-7 p-0 text-xs font-normal text-popover-foreground hover:bg-accent hover:text-accent-foreground rounded-full",
+          "h-8 w-8 rounded-full p-0 text-xs font-normal text-popover-foreground hover:bg-accent hover:text-accent-foreground",
         ),
         selected:
           "[&>button]:bg-primary [&>button]:text-primary-foreground [&>button]:hover:bg-primary [&>button]:hover:text-primary-foreground [&>button]:rounded-full",

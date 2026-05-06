@@ -58,7 +58,7 @@ export function DayDivider({
             {label}
           </button>
         </PopoverTrigger>
-        <PopoverContent align="center" className="w-[292px] border-border bg-popover p-2 text-popover-foreground shadow-lg">
+        <PopoverContent align="center" className="w-[268px] border-border bg-popover p-2 text-popover-foreground shadow-lg">
           <Calendar
             mode="single"
             selected={pickedDate}
