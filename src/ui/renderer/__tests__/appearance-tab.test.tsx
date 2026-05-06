@@ -125,9 +125,9 @@ describe("AppearanceTab — shell picker", () => {
   });
 
   it("shows the resolved shell theme in the disclosure caption", async () => {
-    const { getByText } = renderWithTheme("dark");
+    const { getAllByText } = renderWithTheme("dark");
     await waitFor(() => {
-      expect(getByText(/현재:/)).toBeTruthy();
+      expect(getAllByText(/현재:/).some((el) => el.textContent === "현재: dark")).toBe(true);
     });
   });
 
