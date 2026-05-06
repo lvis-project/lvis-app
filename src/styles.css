@@ -754,6 +754,9 @@
     padding: 0.1rem 0.3rem;
     border-radius: 0.25rem;
     font-weight: 500;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .lvis-prose :where(code):not(:where(pre code, [class~="not-prose"] *))::before,
   .lvis-prose :where(code):not(:where(pre code, [class~="not-prose"] *))::after {
@@ -761,6 +764,11 @@
   }
   .lvis-prose :where(pre, table, img, video, canvas, iframe):not(:where([class~="not-prose"] *)) {
     max-width: 100%;
+  }
+  .lvis-prose :where(p, li, blockquote, dd, figcaption):not(:where([class~="not-prose"] *)) {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .lvis-prose :where(pre, table):not(:where([class~="not-prose"] *)) {
     overflow-x: auto;
