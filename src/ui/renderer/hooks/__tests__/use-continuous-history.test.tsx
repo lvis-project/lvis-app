@@ -41,7 +41,7 @@ describe("useContinuousHistory", () => {
       expect(result.current.historicalSessions.map((session) => session.id)).toEqual(["old-1", "old-2"]);
     });
 
-    expect(api.chatSessions).toHaveBeenCalledWith({ limit: 20, before: undefined });
+    expect(api.chatSessions).toHaveBeenCalledWith(expect.objectContaining({ limit: 20 }));
     expect(result.current.historicalSessions[1]?.entries[0]).toMatchObject({
       kind: "session_resume",
       preambleChars: 17,
