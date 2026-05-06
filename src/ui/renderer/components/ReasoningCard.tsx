@@ -50,10 +50,10 @@ export function ReasoningCard({
     : 0;
 
   return (
-    <div className={`${embedded ? "w-full" : "max-w-[85%]"} rounded-md text-sm text-muted-foreground`}>
+    <div className={`${embedded ? "w-full max-w-full" : "max-w-[80%]"} min-w-0 rounded-md text-sm text-muted-foreground`}>
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/30 disabled:cursor-default disabled:hover:bg-transparent"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/30 disabled:cursor-default disabled:hover:bg-transparent"
         onClick={() => {
           if (streaming) return;
           setOpen((o) => !o);
@@ -64,9 +64,9 @@ export function ReasoningCard({
         {streaming
           ? <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
           : <Brain className="h-3 w-3 flex-shrink-0" />}
-        <span className="font-medium">{title}</span>
+        <span className="min-w-0 font-medium">{title}</span>
         {approxTokens > 0 && (
-          <span className="rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
+          <span className="shrink-0 rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
             ~{approxTokens >= 1000 ? `${(approxTokens / 1000).toFixed(1)}k` : approxTokens} tok
           </span>
         )}
@@ -79,7 +79,7 @@ export function ReasoningCard({
         )}
       </button>
       {bodyVisible && (
-        <div className="whitespace-pre-wrap border-l-2 border-muted ml-3 pl-3 py-1 text-[11px] italic leading-5 text-muted-foreground/80">
+        <div className="ml-3 min-w-0 whitespace-pre-wrap break-words border-l-2 border-muted py-1 pl-3 text-[11px] italic leading-5 text-muted-foreground/80 [overflow-wrap:anywhere]">
           {entry.text || (streaming ? "생각하는 중..." : "")}
         </div>
       )}

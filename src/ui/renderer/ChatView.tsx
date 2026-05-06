@@ -118,6 +118,7 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
           highlightQuery=""
           isStarred={false}
           isFinal={true}
+          embedded={embedded}
         />
       );
     }
@@ -174,7 +175,7 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
         <div
           key={i}
           data-testid="historical-user-message"
-          className="ml-auto w-fit min-w-0 max-w-[85%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground"
+          className="ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground"
         >
           <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{entry.text}</div>
         </div>,
@@ -303,7 +304,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
   }, [streaming, onAbort]);
 
   return (
-    <div className="relative mx-auto grid min-h-0 min-w-0 flex-1 w-full max-w-3xl grid-rows-[1fr_auto] overflow-hidden">
+    <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
       {/* ChatSearchOverlay moved INSIDE ScrollArea below so its sticky top-0
           attaches to the chat scroll viewport instead of floating above it. */}
       {hasApiKey === false && (
@@ -374,7 +375,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           </div>
         </div>
       )}
-      <ScrollArea className="h-full min-w-0 px-3 py-4" viewportRef={scrollViewportRef}><div className="min-w-0 max-w-full space-y-3 overflow-x-hidden">
+      <ScrollArea className="min-h-0 min-w-0 flex-1" viewportRef={scrollViewportRef}><div className="mx-auto min-w-0 w-full max-w-3xl space-y-3 px-3 py-4">
         <div ref={sentinelRef} data-testid="chat-history-sentinel" className="h-px" />
         {loadingHistory && (
           <div
@@ -438,7 +439,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             cluster (see below the ScrollArea) so it stays visible regardless of
             chat scroll position. */}
         {loadedSkills.length > 0 && (
-          <div className="flex max-w-[85%] flex-wrap gap-2" data-testid="skill-badges-row">
+          <div className="flex max-w-[80%] flex-wrap gap-2" data-testid="skill-badges-row">
             {loadedSkills.map((s, i) => (
               <SkillBadge key={`${s.name}:${i}`} {...s} />
             ))}
@@ -561,7 +562,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                 const starId = isEntryStarred(idx);
                 const starActive = !!starId;
                 rendered.push(
-                  <div key={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[85%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
+                  <div key={idx} className={`group relative ml-auto w-fit min-w-0 max-w-[75%] overflow-hidden rounded-md bg-message-user px-3.5 py-2 text-sm text-message-user-foreground ${userGapCls} ${ringCls}`}>
                     {/* "나" label removed — sender is implicit. Star + hover
                         actions float top-right via absolute positioning so
                         the bubble has no header chrome. */}
@@ -688,6 +689,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                           highlightQuery={searchHighlight}
                           isStarred={!!isEntryStarred(i)}
                           isFinal={false}
+                          embedded
                         />
                       ),
                     });
@@ -797,13 +799,13 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
         <div ref={chatEndRef} />
       </div></ScrollArea>
       {contextOverflowPct >= 0.95 && (
-        <div className="border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive flex items-center gap-2">
+        <div className="mx-auto flex w-full max-w-3xl items-center gap-2 border-t bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
           <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
           <span>— 자동 압축이 필요합니다. 전송이 일시 차단됩니다.</span>
         </div>
       )}
       {contextOverflowPct >= 0.80 && contextOverflowPct < 0.95 && (
-        <div className="border-t bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
+        <div className="mx-auto flex w-full max-w-3xl items-center gap-2 border-t bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
           <span className="font-semibold">컨텍스트 {Math.round(contextOverflowPct * 100)}% 사용</span>
           <span>— 곧 자동 압축됩니다.</span>
         </div>
@@ -813,8 +815,10 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           scrolled the chat. The panel collapses by default once it has
           content; in the collapsed state the active item title streams next
           to the count so the user always sees what step is running. */}
-      <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
-      <div className="min-w-0 overflow-hidden bg-background pb-1 space-y-2">
+      <div className="mx-auto w-full max-w-3xl min-w-0 px-3">
+        <SessionTodoPanel api={workflowApi} sessionId={currentSessionId} />
+      </div>
+      <div className="mx-auto w-full max-w-3xl min-w-0 bg-background pb-1 space-y-2">
         <InputActionBar
           usedTokens={usedTokens}
           contextBudget={contextBudget}

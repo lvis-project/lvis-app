@@ -86,9 +86,9 @@ export function InputActionBar({
   onToggleThinking,
 }: InputActionBarProps) {
   return (
-    <div data-testid="input-action-bar" className="flex items-center justify-between gap-2 px-3 pt-2">
+    <div data-testid="input-action-bar" className="flex min-w-0 items-center justify-between gap-2 px-3 pt-2">
       {/* Leading cluster */}
-      <div className="flex items-center gap-0.5" data-testid="iab-leading">
+      <div className="flex min-w-0 items-center gap-0.5" data-testid="iab-leading">
         <TokenProgressRing used={usedTokens} budget={contextBudget} />
         <Tooltip>
           <TooltipTrigger asChild>
@@ -121,7 +121,7 @@ export function InputActionBar({
       </div>
 
       {/* Trailing cluster */}
-      <div className="flex items-center gap-1 pr-2" data-testid="iab-trailing">
+      <div className="flex min-w-0 shrink-0 items-center gap-1 pr-2" data-testid="iab-trailing">
         {/* Single unified attach button — images, files, anything except the
             deny-listed dangerous extensions. The chip count badge lives on
             the inline composer chip (n/5), not here. */}
@@ -144,11 +144,11 @@ export function InputActionBar({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 gap-1 text-[11px] bg-input-bar"
+              className="h-7 max-w-28 gap-1 bg-input-bar text-[11px]"
               title="역할 프리셋 선택"
             >
               <User className="h-3 w-3" />
-              {activePreset?.name ?? "기본"}
+              <span className="min-w-0 truncate">{activePreset?.name ?? "기본"}</span>
               <ChevronDown className="h-3 w-3 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
