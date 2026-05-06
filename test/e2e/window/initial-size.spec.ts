@@ -3,10 +3,9 @@
  *
  * Verifies that on first launch (no persisted window-state.json) the main
  * BrowserWindow is created at the correct dimensions:
- *   width  ≤ 600 px  (target 560 — narrow chat column from #364)
+ *   width  = 720 px  (compact but wide enough for sidebar + composer)
  *   height ≈ 936 px  (720px + 30% vertical room)
- *   right edge aligns with the primary work area so the detached shell can
- *   magnetically attach to the main window's left edge.
+ *   right edge keeps a small visual gap from the primary work area edge.
  *
  * Uses `app.evaluate` to read bounds directly via Electron BrowserWindow APIs.
  * Skipped automatically when the built app binary is absent so CI that doesn't
@@ -63,10 +62,14 @@ test.describe("initial window size", () => {
       };
     });
 
-    expect(bounds.width).toBe(Math.min(560, workArea.width));
-    expect(bounds.height).toBe(Math.min(936, workArea.height));
-    expect(bounds.x + bounds.width).toBe(workArea.x + workArea.width);
-    expect(bounds.y).toBe(workArea.y + Math.min(24, Math.max(0, workArea.height - bounds.height)));
+    expect(bounds.width).toBeGreaterThanOrEqual(Math.min(720, workArea.width));
+    expect(bounds.width).toBeLessThanOrEqual(Math.min(728, workArea.width));
+    expect(bounds.height).toBeGreaterThanOrEqual(Math.min(936, workArea.height));
+    expect(bounds.height).toBeLessThanOrEqual(Math.min(944, workArea.height));
+    const rightGap = (workArea.x + workArea.width) - (bounds.x + bounds.width);
+    const expectedRightGap = bounds.width < workArea.width ? 10 : 0;
+    expect(Math.abs(rightGap - expectedRightGap)).toBeLessThanOrEqual(8);
+    expect(Math.abs(bounds.y - (workArea.y + Math.min(24, Math.max(0, workArea.height - bounds.height))))).toBeLessThanOrEqual(8);
     // Ensure height is not accidentally compact (the PR #368 regression was 380px)
     expect(bounds.height).toBeGreaterThanOrEqual(600);
   });

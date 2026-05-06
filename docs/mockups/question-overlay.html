@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LVIS Question Overlay Mockup</title>
+  <style>
+    :root {
+      --bg: #f0ece6;
+      --panel: #fffdf9;
+      --line: #d8d1c8;
+      --text: #17130f;
+      --muted: #6f675e;
+      --purple: #b98af5;
+      --purple-strong: #8a55f0;
+      --code-bg: #25211d;
+      --code-fg: #f3eee7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #1b1b1b;
+      color: var(--text);
+      font: 14px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .window {
+      width: min(980px, 96vw);
+      height: min(760px, 94vh);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid #2e2e2e;
+      border-radius: 8px;
+      background: var(--bg);
+      box-shadow: 0 18px 60px rgba(0,0,0,.35);
+    }
+    .toolbar, .status {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 14px;
+      border-bottom: 1px solid var(--line);
+      padding: 0 16px;
+      color: var(--muted);
+      background: rgba(255,255,255,.24);
+    }
+    .status {
+      justify-content: flex-start;
+      border-top: 1px solid var(--line);
+      border-bottom: 0;
+      font-size: 11px;
+    }
+    .chat {
+      position: relative;
+      min-height: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+    .scroll {
+      height: 100%;
+      overflow: auto;
+      padding: 28px 28px 44px;
+    }
+    .message {
+      max-width: 100%;
+      margin: 0 0 22px;
+    }
+    .user {
+      margin-left: auto;
+      max-width: 56%;
+      border-radius: 8px;
+      background: var(--purple);
+      color: white;
+      padding: 10px 14px;
+      font-weight: 650;
+    }
+    .work {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 20px 0 8px;
+    }
+    pre {
+      max-width: 100%;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--code-bg);
+      color: var(--code-fg);
+      padding: 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 12px;
+    }
+    .composer {
+      position: relative;
+      border-top: 1px solid var(--line);
+      padding: 12px 18px 8px;
+      background: var(--bg);
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      color: var(--muted);
+    }
+    .inputbar {
+      display: grid;
+      grid-template-columns: 1fr 92px;
+      min-height: 84px;
+      overflow: hidden;
+      border-radius: 12px;
+      background: white;
+      box-shadow: 0 8px 18px rgba(50,38,24,.16);
+    }
+    .placeholder { padding: 16px; color: var(--muted); font-size: 13px; }
+    .send {
+      display: grid;
+      place-items: center;
+      background: #b59afa;
+      color: white;
+      font-weight: 800;
+    }
+    .overlay {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      justify-content: center;
+      padding: 0 14px 12px;
+    }
+    .question-shell {
+      width: min(720px, 100%);
+      max-height: min(360px, calc(100% + 20dvh));
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: 0 18px 46px rgba(40,28,18,.24);
+    }
+    .question-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .question-body {
+      overflow: auto;
+      padding: 14px;
+    }
+    .q-title { font-weight: 800; margin-bottom: 10px; }
+    .choices { display: grid; gap: 8px; }
+    .choice {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfaf7;
+      padding: 9px 10px;
+      text-align: left;
+    }
+    .choice.primary { border-color: var(--purple-strong); background: rgba(138,85,240,.1); }
+    .free {
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+      color: var(--muted);
+    }
+    .question-actions {
+      display: flex;
+      justify-content: space-between;
+      border-top: 1px dashed var(--line);
+      margin-top: 12px;
+      padding-top: 12px;
+    }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: white;
+      padding: 7px 12px;
+      font: inherit;
+    }
+    button.primary {
+      border-color: var(--purple-strong);
+      background: var(--purple-strong);
+      color: white;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <main class="window">
+    <div class="toolbar">+ 새 대화 &nbsp; ⌕ &nbsp; ☰</div>
+    <section class="chat">
+      <div class="scroll">
+        <div class="message user">오늘 팀 일정 기준으로 마감 작업만 정리해줘.</div>
+        <div class="work">작업 1단계 &gt;</div>
+        <div class="message">
+          오늘 사용자 기준의 팀 스케줄을 가져와 종료 시각 근처의 작업/미팅을 우선순위로 요약하겠습니다.
+        </div>
+        <pre>{"tool":"agent_hub_today_team_schedule","arguments":{}}
+tool_use response가 오면 종료 시각 기준으로 가장 가까운 마감 항목을 묶어 요약하겠습니다.</pre>
+        <div class="work">생각 완료 ~106 tok &gt;</div>
+        <div class="message">
+          이 구간은 오버레이가 떠도 상단 20% 영역에 남아 사용자가 배경 맥락을 계속 볼 수 있습니다.
+        </div>
+      </div>
+    </section>
+    <section class="composer">
+      <div class="overlay">
+        <section class="question-shell">
+          <div class="question-top">
+            <strong>사용자 응답 대기</strong>
+            <span>1 / 2</span>
+          </div>
+          <div class="question-body">
+            <div class="q-title">일정 정리 기준을 선택해 주세요.</div>
+            <div class="choices">
+              <button class="choice primary">Recommend · 종료 시각이 가까운 순서</button>
+              <button class="choice">대안 · 중요도 높은 순서</button>
+              <button class="choice">대안 · 담당자별 묶기</button>
+            </div>
+            <div class="free">직접 입력: 예) 오늘 18시 이전 건만</div>
+            <div class="question-actions">
+              <button>건너뛰기</button>
+              <button class="primary">다음</button>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div class="actions">
+        <span>○  ⌕  ⧉  ⌘</span>
+        <span>📎  기본  ☑ Thinking</span>
+      </div>
+      <div class="inputbar">
+        <div class="placeholder">질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능</div>
+        <div class="send">SEND</div>
+      </div>
+    </section>
+    <div class="status">~$0.02 · Runtime · Marketplace online</div>
+  </main>
+</body>
+</html>

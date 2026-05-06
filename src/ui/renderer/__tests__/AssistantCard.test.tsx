@@ -4,7 +4,7 @@
  * Regression tests for assistant prose rendering:
  *   - slash command output (route="command") → ReactMarkdown
  *   - regular LLM output (no route) → ReactMarkdown
- *   - search active → whitespace-pre-wrap regardless of route
+ *   - search active → still goes through ReactMarkdown so formatting survives
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -47,6 +47,8 @@ describe("AssistantCard — slash command newline fix", () => {
     const { container } = renderCard(makeEntry());
     const body = container.querySelector("[data-testid='assistant-message-body']");
     expect(body).not.toBeNull();
+    expect(body!.className).toContain("overflow-y-visible");
+    expect(body!.className).toContain("max-h-none");
     // ReactMarkdown renders a <p> tag; whitespace-pre-wrap div should be absent
     const prewrap = body!.querySelector(".whitespace-pre-wrap");
     expect(prewrap).toBeNull();
@@ -69,24 +71,30 @@ describe("AssistantCard — slash command newline fix", () => {
     expect(body!.textContent).toContain("line3");
   });
 
-  it("applies whitespace-pre-wrap for search active + route=command", () => {
+  it("keeps Markdown rendering when search is active + route=command", () => {
     const { container } = renderCard(
-      makeEntry({ route: "command" }),
-      "line1",
+      makeEntry({ text: "표 제목은 **진하게** 표시", route: "command" }),
+      "표",
     );
     const body = container.querySelector("[data-testid='assistant-message-body']");
-    const prewrap = body!.querySelector(".whitespace-pre-wrap");
-    expect(prewrap).not.toBeNull();
+    expect(body!.querySelector("strong")?.textContent).toBe("진하게");
   });
 
-  it("applies whitespace-pre-wrap for search active + no route (regular text)", () => {
+  it("keeps Markdown rendering when search is active + no route", () => {
     const { container } = renderCard(
-      makeEntry(),
-      "line1",
+      makeEntry({ text: "결과는 **정상**입니다." }),
+      "결과",
     );
     const body = container.querySelector("[data-testid='assistant-message-body']");
-    const prewrap = body!.querySelector(".whitespace-pre-wrap");
-    expect(prewrap).not.toBeNull();
+    expect(body!.querySelector("strong")?.textContent).toBe("정상");
+  });
+
+  it("renders Korean postposition-adjacent bold markers as Markdown", () => {
+    const text = "먼저 **오늘 뉴스 헤드라인**을 **어떤 범위(국내/국제/IT·경제)**로 모을지 확인할게요.";
+    const { container } = renderCard(makeEntry({ text }));
+    const strongTexts = Array.from(container.querySelectorAll("strong")).map((el) => el.textContent);
+    expect(strongTexts).toEqual(["오늘 뉴스 헤드라인", "어떤 범위(국내/국제/IT·경제)"]);
+    expect(container.textContent).not.toContain("**");
   });
 
   it("does NOT strikethrough single-tilde ranges like 7~12℃ (singleTilde:false)", () => {

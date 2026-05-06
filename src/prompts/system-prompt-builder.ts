@@ -567,6 +567,7 @@ const TOOL_USE_STRATEGY = `## 도구 사용 전략
   2. **첫 번째 단계 시작 선언**: 계획 등록 직후, 다른 도구를 호출하기 **전에** todo_session_write 를 다시 호출해 첫 번째 항목을 in_progress 로 표시합니다.
   3. **단계 완료 후 즉시 전환**: 각 도구 호출(또는 분석 단계)이 끝나면 해당 항목을 completed 로, 다음 항목을 in_progress 로 **같은 호출에** 업데이트합니다.
   4. **마지막 단계 완료**: 모든 작업이 끝나면 마지막 항목도 completed 로 표시합니다.
+  5. **계획 변경 반영**: 새 단계가 생기면 beforeId/afterId 로 정확한 위치에 삽입하고, 필요 없어진 단계는 status=deleted 로 제거합니다. 순서를 바꿔야 하면 기존 id 와 beforeId/afterId 를 같이 보내 이동합니다.
 
   **절대 금지**: pending 상태 항목이 남아 있는 채로 실제 작업 도구를 호출하지 마세요. 사용자는 SessionTodoPanel 에서 실시간으로 진행 상황을 확인하므로, 도구를 호출하기 전에 반드시 해당 단계를 in_progress 로 먼저 업데이트해야 합니다.
 

@@ -48,6 +48,31 @@ describe("useContinuousHistory", () => {
     });
   });
 
+  it("starts from the active session cursor when an anchor is provided", async () => {
+    const api = makeApi([
+      { id: "newer", modifiedAt: "2026-05-07T08:00:00.000Z", title: "더 최신" },
+      { id: "current", modifiedAt: "2026-05-06T08:00:00.000Z", title: "현재" },
+      { id: "old-2", modifiedAt: "2026-05-05T08:00:00.000Z", title: "어제" },
+      { id: "old-1", modifiedAt: "2026-05-04T08:00:00.000Z", title: "그제" },
+    ]);
+    const { result } = renderHook(() =>
+      useContinuousHistory(api, "current", true, {
+        id: "current",
+        modifiedAt: "2026-05-06T08:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.historicalSessions.map((session) => session.id)).toEqual(["old-1", "old-2"]);
+    });
+
+    expect(api.chatSessions).toHaveBeenCalledWith({
+      limit: 20,
+      before: "2026-05-06T08:00:00.000Z",
+      beforeId: "current",
+    });
+  });
+
   it("uses the oldest loaded session timestamp as the next cursor", async () => {
     const manySessions = Array.from({ length: 21 }, (_, idx) => {
       const date = new Date(Date.UTC(2026, 4, 6 - idx, 8, 0, 0));

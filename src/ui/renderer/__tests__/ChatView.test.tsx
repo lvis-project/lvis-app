@@ -126,7 +126,7 @@ describe("ChatView", () => {
         name: "calendar_list",
         groupId: "g1",
         toolUseId: "t1",
-        result: "ok",
+        result: "__calendar_result__",
         isError: false,
       });
       // Round 2 — final answer + end_turn
@@ -143,6 +143,8 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("작업");
       expect(container.textContent).toContain("2단계");
+      expect(container.textContent).not.toContain("calendar list");
+      expect(container.textContent).not.toContain("__calendar_result__");
       expect(container.textContent).toContain("두번째 답변입니다");
       expect(container.textContent).not.toContain("첫번째 답변입니다");
     });
@@ -154,6 +156,18 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("첫번째 답변입니다");
       expect(container.textContent).toContain("calendar list");
+      expect(container.textContent).not.toContain("__calendar_result__");
+    });
+
+    const toolButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("calendar list"),
+    ) as HTMLButtonElement | undefined;
+    expect(toolButton).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(toolButton!);
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("__calendar_result__");
     });
   });
 
@@ -438,12 +452,8 @@ describe("ChatView", () => {
     });
   });
 
-  it("scrolls to the bottom when an ask_user_question card appears", async () => {
-    const scrollSpy = vi
-      .spyOn(Element.prototype, "scrollIntoView")
-      .mockImplementation(() => {});
+  it("renders ask_user_question in the bottom overlay without scrolling chat history", async () => {
     const { container, emitAskUserQuestion } = await renderApp({ hasApiKey: true });
-    const before = scrollSpy.mock.calls.length;
 
     await act(async () => {
       emitAskUserQuestion({
@@ -463,7 +473,7 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain("지역 기준을 알려주세요");
-      expect(scrollSpy.mock.calls.length).toBeGreaterThan(before);
+      expect(container.querySelector('[data-testid="question-overlay"]')).not.toBeNull();
     });
   });
 
@@ -472,11 +482,11 @@ describe("ChatView", () => {
     const { container } = await renderApp({
       currentSession: "current",
       sessions: [
-        { id: "old-today", modifiedAt: now, title: "이전 오늘 대화" },
+        { id: "a-old-today", modifiedAt: now, title: "이전 오늘 대화" },
         { id: "current", modifiedAt: now, title: "현재 대화" },
       ],
       history: {
-        sessionId: "old-today",
+        sessionId: "current",
         messages: [
           { index: 0, role: "user", content: "이전 질문" },
           { index: 1, role: "assistant", content: "이전 답변" },
@@ -553,7 +563,7 @@ describe("ChatView", () => {
       emitChatStream({ type: "reasoning_delta", text: "사용자 질문을 분석합니다" });
       // tool call
       emitChatStream({ type: "tool_start", name: "calendar_list", groupId: "g1", toolUseId: "t1" });
-      emitChatStream({ type: "tool_end", name: "calendar_list", groupId: "g1", toolUseId: "t1", result: "ok", isError: false });
+      emitChatStream({ type: "tool_end", name: "calendar_list", groupId: "g1", toolUseId: "t1", result: "__calendar_result__", isError: false });
       // final assistant round
       emitChatStream({ type: "text_delta", text: "오늘 일정 정리해드릴게요" });
       emitChatStream({
@@ -568,8 +578,27 @@ describe("ChatView", () => {
     await waitFor(() => {
       // Final assistant text must be visible
       expect(container.textContent).toContain("오늘 일정 정리해드릴게요");
-      // WorkGroup bundles reasoning + tool (2단계), assistant stays outside
+      // Reasoning and tool results are one completed WorkGroup and collapse together.
       expect(container.textContent).toContain("2단계");
+      expect(container.textContent).not.toContain("calendar list");
+      expect(container.textContent).not.toContain("__calendar_result__");
+    });
+    await act(async () => {
+      fireEvent.click(container.querySelector("[data-wg-id] button")!);
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("calendar list");
+      expect(container.textContent).not.toContain("__calendar_result__");
+    });
+    const toolButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("calendar list"),
+    ) as HTMLButtonElement | undefined;
+    expect(toolButton).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(toolButton!);
+    });
+    await waitFor(() => {
+      expect(container.textContent).toContain("__calendar_result__");
     });
   });
 
@@ -606,6 +635,10 @@ describe("ChatView", () => {
       const transcriptText = container.textContent ?? "";
       expect(transcriptText).toContain("5단계");
       expect(transcriptText).toContain("최종 답변입니다.");
+      expect(transcriptText).not.toContain("웹 검색");
+      expect(transcriptText).not.toContain("검색 결과");
+      expect(transcriptText).not.toContain("웹 페이지 가져오기");
+      expect(transcriptText).not.toContain("본문");
       expect(transcriptText).not.toContain("중간 확인 내용은 사용자에게 보여야 합니다.");
       expect(container.querySelectorAll("[data-wg-id]")).toHaveLength(1);
     });
@@ -620,8 +653,28 @@ describe("ChatView", () => {
       const final = transcriptText.indexOf("최종 답변입니다.");
       expect(transcriptText).not.toContain("첫 번째 검색 계획");
       expect(transcriptText).not.toContain("두 번째 도구 결과를 검증");
+      expect(transcriptText).toContain("웹 검색");
+      expect(transcriptText).toContain("웹 페이지 가져오기");
+      expect(transcriptText).not.toContain("검색 결과");
+      expect(transcriptText).not.toContain("본문");
       expect(middle).toBeGreaterThanOrEqual(0);
       expect(final).toBeGreaterThan(middle);
+    });
+
+    const toolButtons = Array.from(container.querySelectorAll("button"));
+    const searchToolButton = toolButtons.find((button) => button.textContent?.includes("웹 검색")) as HTMLButtonElement | undefined;
+    const fetchToolButton = toolButtons.find((button) => button.textContent?.includes("웹 페이지 가져오기")) as HTMLButtonElement | undefined;
+    expect(searchToolButton).toBeTruthy();
+    expect(fetchToolButton).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(searchToolButton!);
+      fireEvent.click(fetchToolButton!);
+    });
+
+    await waitFor(() => {
+      const transcriptText = container.textContent ?? "";
+      expect(transcriptText).toContain("검색 결과");
+      expect(transcriptText).toContain("본문");
     });
   });
 

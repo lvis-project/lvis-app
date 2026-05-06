@@ -7,7 +7,7 @@
  * 벤더 추상화: LLMProvider 인터페이스를 통해 Claude/OpenAI/Gemini/Copilot 통일 처리.
  * claw-code harness 패턴 기반.
  */
-import { ConversationHistory } from "./conversation-history.js";
+import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import { shouldCompact, compactMessages, getModelContextWindow, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
@@ -124,11 +124,25 @@ export interface ConversationLoopDeps {
     listPluginIds(): string[];
   };
   /**
+   * Sub-agent fixed tool-surface support. When a child loop receives a
+   * pre-scoped registry containing plugin tools, lazy keyword matching may
+   * not see the plugin keywords in the child instruction text. These plugin
+   * ids are therefore always included in the child turn scope so the LLM gets
+   * the actual structured tool schemas instead of only natural-language
+   * instructions about available tools.
+   */
+  forcedActivePluginIds?: ReadonlySet<string>;
+  /**
    * C2(c): per-session SkillOverlay handle. Cleared on `newConversation()`
    * so a brand-new session does not inherit a previous session's loaded
    * skills. Optional — legacy unit-test setups skip the overlay.
    */
   skillOverlay?: { clear(sessionId: string): void };
+  /**
+   * Session-scoped assistant TO-DO lifecycle. At the start of a new turn,
+   * a fully completed prior plan is cleared so the next plan starts fresh.
+   */
+  sessionTodoStore?: { clearIfAllCompleted(sessionId: string): boolean };
   /**
    * Issue #260: optional system notification service. When supplied, the
    * loop fires a `turn-end` notification when runTurn resolves successfully
@@ -372,11 +386,21 @@ export class ConversationLoop {
       });
     }
 
+    const normalized = normalizeToolPairInvariant(messages as import("./llm/types.js").GenericMessage[]);
+    if (normalized.removedMessages > 0 || normalized.removedToolCalls > 0) {
+      log.warn(
+        `loadSession: repaired invalid tool history for ${sessionId} (removedMessages=${normalized.removedMessages}, removedToolCalls=${normalized.removedToolCalls})`,
+      );
+      void this.deps.memoryManager.saveSession(sessionId, normalized.messages).catch((err: unknown) => {
+        log.warn("loadSession repair saveSession failed: %s", (err as Error).message);
+      });
+    }
+
     this.sessionId = sessionId;
     const sessionMeta = this.deps.memoryManager.loadSessionMetadata(sessionId);
     this.sessionRoutineId = sessionMeta?.routineId ?? null;
     this.history.clear();
-    this.history.restore(messages as import("./llm/types.js").GenericMessage[]);
+    this.history.restore(normalized.messages);
     this.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     this.sessionStartedAt = Date.now();
     this.lastCheckpointMessageIndex = 0;
@@ -524,6 +548,9 @@ export class ConversationLoop {
       spawnDepth?: number;
     },
   ): Promise<TurnResult> {
+    const effectiveSessionId = options?.sessionIdOverride ?? this.sessionId;
+    this.deps.sessionTodoStore?.clearIfAllCompleted(effectiveSessionId);
+
     // §4.5.2 step 1 — REQUEST_ENTRY (main process 도달 시점)
     this.tracer.step("REQUEST_ENTRY", { inputLen: input.length });
     if (!this.provider) {
@@ -786,6 +813,13 @@ export class ConversationLoop {
       }
       // §4.5.2 step 7 — LLM_STREAM
       this.tracer.step("LLM_STREAM", { round, model, toolCount: toolSchemas.length });
+
+      const repaired = this.history.repairToolPairInvariant();
+      if (repaired.removedMessages > 0 || repaired.removedToolCalls > 0) {
+        log.warn(
+          `queryLoop: repaired invalid tool history before provider call (removedMessages=${repaired.removedMessages}, removedToolCalls=${repaired.removedToolCalls})`,
+        );
+      }
 
       // ─── Stream 1차 시도 → context-length 에러면 reactive compact 후 재시도 ───
       let stream = await collectRoundStream({
@@ -1075,9 +1109,12 @@ export class ConversationLoop {
    */
   private resolveToolScope(input: string): ToolScope {
     const matched = this.deps.keywordEngine.matchAllPluginIds(input);
-    const activePluginIds = matched.size > 0
+    const activePluginIds = new Set(matched.size > 0
       ? matched
-      : (this.lastTurnScope ?? new Set<string>());
+      : (this.lastTurnScope ?? new Set<string>()));
+    for (const pluginId of this.deps.forcedActivePluginIds ?? []) {
+      activePluginIds.add(pluginId);
+    }
     return {
       activePluginIds,
       includeBuiltins: true,

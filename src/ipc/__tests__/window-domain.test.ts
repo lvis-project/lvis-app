@@ -80,4 +80,20 @@ describe("window domain IPC", () => {
     expect(mainWindow.minimize).not.toHaveBeenCalled();
     expect(mainWindow.maximize).not.toHaveBeenCalled();
   });
+
+  it("ignores titlebar theme sync when overlay is disabled", async () => {
+    const win = makeWindow({
+      setTitleBarOverlay: vi.fn(() => {
+        throw new TypeError("Titlebar overlay is not enabled");
+      }),
+    });
+    fromWebContents.mockReturnValueOnce(win);
+
+    expect(() =>
+      handleMap.get("window:syncTitleBarTheme")!(
+        trustedEvent(),
+        { color: "#ffffff", symbolColor: "#111111" },
+      ),
+    ).not.toThrow();
+  });
 });
