@@ -53,6 +53,8 @@ import { FeedbackStore } from "./data/feedback-store.js";
 import { McpGovernance } from "./mcp/mcp-governance.js";
 import { McpManager } from "./mcp/mcp-manager.js";
 import { openAuthWindow as openAuthWindowService } from "./main/auth-window-service.js";
+import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
+import { shell } from "electron";
 
 import { type AppServices, emitEvent, onEvent } from "./boot/types.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
@@ -176,6 +178,8 @@ export async function bootstrap(
     bootAuditLogger,
     mainWindow,
     openAuthWindowService,
+    openLinkWindowService,
+    shellOpenExternal: (url: string) => shell.openExternal(url),
     approvalGate,
   });
 

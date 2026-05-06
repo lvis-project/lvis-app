@@ -13,7 +13,7 @@
  *
  * No plugin-specific literals here — everything is manifest-driven.
  */
-import { app } from "electron";
+import { app, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
@@ -107,6 +107,136 @@ export function auditApprovalViolation(
  * can verify cross-plugin attacks and scope violations.
  */
 export const approvalIssuerRegistry = new ApprovalIssuerRegistry();
+
+/**
+ * §B3 — Explicit allowlist of host preference keys readable by plugins via
+ * `hostApi.getAppPreference(key)`. Adding a new entry is a deliberate API
+ * surface change: it must be reviewed for "does this leak host-private
+ * state?" (secrets, auth tokens, plugin configs all stay OFF this list).
+ *
+ * Reader logic in `buildAppPreferenceReader()` must be updated in lockstep —
+ * a key on this list with no reader returns `undefined` (safe failure).
+ */
+export const HOST_PUBLIC_PREFERENCE_KEYS = [
+  "webView.preferredFlow",
+] as const;
+
+export type HostPublicPreferenceKey = (typeof HOST_PUBLIC_PREFERENCE_KEYS)[number];
+
+function isHostPublicPreferenceKey(key: string): key is HostPublicPreferenceKey {
+  return (HOST_PUBLIC_PREFERENCE_KEYS as readonly string[]).includes(key);
+}
+
+/**
+ * §B3 — Build the reader closure used by every plugin's
+ * `hostApi.getAppPreference`. Reads run live against `settingsService` so a
+ * settings toggle is visible on the next call.
+ *
+ * Per-plugin warn dedupe: at most one warn line per (pluginId, key) per
+ * runtime — prevents log floods when a plugin polls a denied key.
+ */
+/**
+ * §B3 — Internal routing for `hostApi.openExternalUrl`. Extracted so it can
+ * be unit-tested with stubbed services without standing up a full
+ * initPluginRuntime context.
+ *
+ * Behavior:
+ *  - Validates URL shape + scheme (http(s) only).
+ *  - Reads `settings.webView.preferredFlow` LIVE on every call.
+ *  - Audits with origin+path only (no full URL — query may carry secrets).
+ *  - `"system-browser"` → `shellOpenExternal`.
+ *  - anything else (default `"in-app"`) → light viewer.
+ */
+export async function routeExternalUrl(input: {
+  url: string;
+  pluginId: string;
+  settingsService: Pick<SettingsService, "get">;
+  bootAuditLogger: { log: (entry: AuditEntry) => void };
+  openLinkWindowService: (
+    opts: { url: string; windowTitle?: string; persistPartition?: string },
+  ) => Promise<void>;
+  shellOpenExternal: (url: string) => Promise<void>;
+}): Promise<void> {
+  const { url, pluginId, settingsService, bootAuditLogger, openLinkWindowService, shellOpenExternal } = input;
+  if (typeof url !== "string" || url.length === 0) {
+    throw new Error(`[plugin:${pluginId}] openExternalUrl: url must be a non-empty string`);
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`[plugin:${pluginId}] openExternalUrl: invalid URL`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(
+      `[plugin:${pluginId}] openExternalUrl: only http(s) URLs are allowed (got ${parsed.protocol})`,
+    );
+  }
+  const safeUrlForLog = `${parsed.origin}${parsed.pathname}`;
+  const flow = settingsService.get("webView")?.preferredFlow ?? "in-app";
+
+  try {
+    bootAuditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "plugin",
+      type: "tool_call",
+      input: `[plugin:${pluginId}] openExternalUrl flow=${flow} url=${safeUrlForLog}`,
+    });
+  } catch { /* audit must not break host */ }
+
+  if (flow === "system-browser") {
+    await shellOpenExternal(url);
+    return;
+  }
+  await openLinkWindowService({ url });
+}
+
+export function buildAppPreferenceReader(
+  settingsService: SettingsService,
+  warnLogger: { warn: (msg: string) => void },
+): (pluginId: string, key: string) => unknown {
+  const warnedPerPlugin = new Map<string, Set<string>>();
+  const recordWarn = (pluginId: string, key: string) => {
+    let set = warnedPerPlugin.get(pluginId);
+    if (!set) {
+      set = new Set();
+      warnedPerPlugin.set(pluginId, set);
+    }
+    if (set.has(key)) return false;
+    set.add(key);
+    return true;
+  };
+
+  return (pluginId, key) => {
+    if (typeof key !== "string" || key.length === 0) {
+      if (recordWarn(pluginId, String(key))) {
+        warnLogger.warn(
+          `plugin:${pluginId} getAppPreference: invalid key`,
+        );
+      }
+      return undefined;
+    }
+    if (!isHostPublicPreferenceKey(key)) {
+      if (recordWarn(pluginId, key)) {
+        warnLogger.warn(
+          `plugin:${pluginId} getAppPreference: key not on host public allowlist key=${key}`,
+        );
+      }
+      return undefined;
+    }
+    switch (key) {
+      case "webView.preferredFlow":
+        return settingsService.get("webView")?.preferredFlow;
+      default: {
+        // Exhaustiveness: if a key is added to HOST_PUBLIC_PREFERENCE_KEYS but
+        // not wired here, fall through and warn so it's caught in tests.
+        const _exhaustive: never = key;
+        void _exhaustive;
+        return undefined;
+      }
+    }
+  };
+}
 
 /**
  * In-memory dedupe for `hostApi.triggerConversation()`. A brain plugin can set
@@ -544,6 +674,23 @@ export interface InitPluginRuntimeInput {
     opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean },
   ) => Promise<AuthWindowCookie[] | OpenAuthWindowFinalUrlResult>;
   /**
+   * §B3 — Light external-link viewer used when
+   * `settings.webView.preferredFlow === "in-app"`. Distinct from
+   * `openAuthWindowService` (no cookieHosts / completionUrlPatterns).
+   * Tests inject a stub; production wiring is `openLinkWindow` from
+   * `src/main/link-window-service.ts`.
+   */
+  openLinkWindowService: (
+    parent: BrowserWindow,
+    opts: { url: string; windowTitle?: string; persistPartition?: string },
+  ) => Promise<void>;
+  /**
+   * §B3 — System browser opener used when
+   * `settings.webView.preferredFlow === "system-browser"`. Production wiring
+   * is `shell.openExternal` from electron; tests inject a spy.
+   */
+  shellOpenExternal: (url: string) => Promise<void>;
+  /**
    * §8 — required ApprovalGate instance. The `agentApproval` namespace on
    * every plugin's HostApi is wired to this gate so main-process plugin
    * handlers can respond to pending approvals without going through the
@@ -581,8 +728,15 @@ export async function initPluginRuntime(
     bootAuditLogger,
     mainWindow,
     openAuthWindowService,
+    openLinkWindowService,
+    shellOpenExternal,
     approvalGate,
   } = input;
+
+  // §B3 — host public preference reader, shared across all per-plugin HostApi
+  // instances. Reads `settingsService` live so a Settings toggle is visible on
+  // the next plugin call without reload.
+  const readAppPreference = buildAppPreferenceReader(settingsService, log);
 
   // Plugin shutdown handler registry — fires on before-quit (see Sprint 1-A A3).
   const pluginShutdownHandlers: Array<{ pluginId: string; handler: () => void | Promise<void> }> = [];
@@ -857,6 +1011,27 @@ export async function initPluginRuntime(
       },
       onShutdown: (handler) => {
         pluginShutdownHandlers.push({ pluginId, handler });
+      },
+      // ─── §B3 외부 URL viewer + host public preference read ────────────
+      // openExternalUrl: Settings → webView.preferredFlow 토글에 따라
+      //   "in-app"  → light BrowserWindow (link-window-service)
+      //   "system-browser" → shell.openExternal
+      // 매 호출마다 settingsService 에서 다시 읽어 live update 반영.
+      //
+      // getAppPreference: HOST_PUBLIC_PREFERENCE_KEYS allowlist 만 read 허용.
+      //   거부된 key 는 throw 하지 않고 undefined 반환 + 1회/key/session warn.
+      openExternalUrl: async (url: string): Promise<void> => {
+        await routeExternalUrl({
+          url,
+          pluginId,
+          settingsService,
+          bootAuditLogger,
+          openLinkWindowService: (opts) => openLinkWindowService(mainWindow, opts),
+          shellOpenExternal,
+        });
+      },
+      getAppPreference: <T = unknown>(key: string): T | undefined => {
+        return readAppPreference(pluginId, key) as T | undefined;
       },
       // ─── 외부 포털 interactive 인증 (쿠키 수집) ───────────────────
       // `external-auth-consumer` capability 로 게이팅 — 쿠키는 민감 자산이므로
