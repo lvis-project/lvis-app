@@ -128,6 +128,10 @@ export type AppSettings = {
     chatTheme?: "default" | "lg" | "purple" | "orange" | "blue";
     codeTheme?: "auto" | "light" | "dark";
   };
+  /** §B1 — external URL viewer policy (in-app vs system browser). */
+  webView?: {
+    preferredFlow: "in-app" | "system-browser";
+  };
   /** Experimental feature flags — all default false. */
   features?: {
     experimentalContinuousBackend?: boolean;
