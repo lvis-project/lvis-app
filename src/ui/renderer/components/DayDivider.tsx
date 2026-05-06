@@ -46,7 +46,7 @@ export function DayDivider({
     <div
       data-testid="day-divider"
       data-date={key}
-      className="flex items-center gap-3 py-3"
+      className="sticky top-0 z-10 -mx-3 flex items-center gap-3 bg-background/90 px-3 py-3 backdrop-blur"
     >
       <span className="h-px flex-1 bg-border/50" />
       <Popover onOpenChange={(open) => {
