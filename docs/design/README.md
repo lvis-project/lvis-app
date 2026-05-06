@@ -13,6 +13,7 @@ step and no dependency on the app.
 | [`chat-continuous-v3.html`](./chat-continuous-v3.html) | Continuous chat / Kakao-style stream / invisible auto-checkpoint / 3-tier rotation. Reference systems: Warp Agent topic-shift, OpenCode auto-compact, GitHub Copilot Checkpoints. | Absorbed into ChatView; StackedChatView removed (PR #549, closes issue #547) |
 | [`plugin-grid-v3.html`](./plugin-grid-v3.html) | 5×2 plugin grid in the input action bar — monochrome line icons, install overlay, marketplace link. | PR #437 |
 | [`composer-attachments.html`](./composer-attachments.html) | Multimodal composer — image/file drag-drop, clipboard paste, marker tokens (`[Image #N]`, `[File #N]`, `[Pasted text #N +M lines]`), `composeOutgoing()` contract. | PR #440 |
+| [`ask-user-question-card.html`](./ask-user-question-card.html) | `ask_user_question` LLM tool inline card — single-question form / 2–4 paginated multi-question / urgent variant / confirm-review step / `dismissed:true` fallback. Recommend + 대안 badges, single-line free-text. | PR #334 (initial floating panel) → inlined into chat stream by `AskUserQuestionCard` (current production) |
 | [`agent-hub-work-board-v1.html`](./agent-hub-work-board-v1.html) | Agent Hub Plugin UI detached-window storyboard — scenario states from plugin entry/login waiting/callback sync to My Work, Team Board, and exception/empty states. | Design review / not shipped |
 
 ## When to update vs add a new file
