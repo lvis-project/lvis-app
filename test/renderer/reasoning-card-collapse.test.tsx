@@ -25,13 +25,13 @@ describe("ReasoningCard", () => {
     const { rerender, queryByText, getByRole } = render(card(true));
 
     // Streaming: body visible, header button disabled.
-    expect(queryByText("생각 정리 중")).toBeInTheDocument();
+    expect(queryByText("생각 중...")).toBeInTheDocument();
     expect(queryByText("thinking content here")).toBeInTheDocument();
     expect(getByRole("button")).toBeDisabled();
 
     // Stream finishes -> auto-collapse.
     rerender(card(false));
-    expect(queryByText("생각 정리")).toBeInTheDocument();
+    expect(queryByText("생각 완료")).toBeInTheDocument();
     expect(queryByText("thinking content here")).not.toBeInTheDocument();
     expect(getByRole("button")).not.toBeDisabled();
   });
@@ -61,7 +61,7 @@ describe("ReasoningCard", () => {
     // effect only fires on a streaming true→false edge, so initial open must
     // also depend on `streaming` — otherwise past thoughts render expanded.
     const { queryByText, getByRole } = render(card(false));
-    expect(queryByText("생각 정리")).toBeInTheDocument();
+    expect(queryByText("생각 완료")).toBeInTheDocument();
     expect(queryByText("thinking content here")).not.toBeInTheDocument();
     expect(getByRole("button")).not.toBeDisabled();
 

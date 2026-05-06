@@ -43,7 +43,7 @@ export function ReasoningCard({
     wasStreamingRef.current = streaming;
   }, [streaming]);
 
-  const title = streaming ? "생각 정리 중" : "생각 정리";
+  const title = streaming ? "생각 중..." : "생각 완료";
   const bodyVisible = streaming || open || embedded;
   const approxTokens = !streaming && entry.text
     ? Math.max(1, Math.ceil(entry.text.length / 4))
@@ -80,7 +80,7 @@ export function ReasoningCard({
       </button>
       {bodyVisible && (
         <div className="whitespace-pre-wrap border-l-2 border-muted ml-3 pl-3 py-1 text-[11px] italic leading-5 text-muted-foreground/80">
-          {entry.text || (streaming ? "생각을 정리하는 중..." : "")}
+          {entry.text || (streaming ? "생각하는 중..." : "")}
         </div>
       )}
     </div>

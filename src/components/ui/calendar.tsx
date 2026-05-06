@@ -10,11 +10,7 @@ export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 
 /**
  * shadcn-style Calendar wrapper around react-day-picker v9, customized to
- * the LVIS palette: today/selected = #FD312E filled circle, surface = warm
- * grey card, ko-KR + Sunday-first.
- *
- * UI-only for now — caller wires `selected` / `onSelect` whenever the
- * date-jump feature lands.
+ * the app theme tokens, ko-KR + Sunday-first.
  */
 export function Calendar({
   className,
@@ -47,19 +43,19 @@ export function Calendar({
         ),
         month_grid: "w-full border-collapse",
         weekdays: "flex",
-        weekday: "text-foreground rounded-md w-7 font-extrabold text-[11px]",
+        weekday: "text-muted-foreground rounded-md w-7 font-medium text-[11px]",
         week: "flex w-full mt-0.5",
         day: "h-7 w-7 text-center text-xs p-0 relative",
         day_button: cn(
           buttonVariants({ variant: "ghost" }),
-          "h-7 w-7 p-0 text-xs font-normal hover:bg-[#FD312E]/15 rounded-full",
+          "h-7 w-7 p-0 text-xs font-normal text-popover-foreground hover:bg-accent hover:text-accent-foreground rounded-full",
         ),
         selected:
-          "[&>button]:bg-[#FD312E] [&>button]:text-white [&>button]:hover:bg-[#FD312E] [&>button]:hover:text-white [&>button]:rounded-full",
-        today: "[&>button]:bg-[#FD312E]/15 [&>button]:text-[#FD312E] [&>button]:font-semibold",
+          "[&>button]:bg-primary [&>button]:text-primary-foreground [&>button]:hover:bg-primary [&>button]:hover:text-primary-foreground [&>button]:rounded-full",
+        today: "[&>button]:bg-primary/15 [&>button]:text-primary [&>button]:font-semibold",
         outside: "[&>button]:text-muted-foreground/40",
         disabled: "[&>button]:text-muted-foreground/40",
-        range_middle: "[&>button]:bg-[#FD312E]/15 [&>button]:text-[#FD312E]",
+        range_middle: "[&>button]:bg-primary/15 [&>button]:text-primary",
         hidden: "invisible",
         ...classNames,
       }}

@@ -645,9 +645,11 @@ export function App() {
             api={api}
             starred={starred}
             currentSessionId={currentSessionId}
+            sessions={sessions}
             refreshStarred={refreshStarred}
             onActivateHome={() => setActiveView("home")}
             onJumpToSession={handleLoadSession}
+            onRefreshSessions={refreshSessions}
             onStartRoutineSession={handleStartRoutineSession}
             chatContextValue={chatContextValue}
             onAsk={(q) => handleAsk(q, "default")}

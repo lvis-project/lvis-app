@@ -43,6 +43,7 @@ import { AskUserQuestionCard, type AskUserQuestionRequest } from "./components/A
 import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./components/SubAgentCard.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
+import type { SessionSummary } from "./hooks/use-sessions.js";
 
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
@@ -75,6 +76,9 @@ export interface ChatViewProps {
   plugins: PluginEntry[];
   /** Navigate to a plugin view */
   onSelectPlugin: (viewKey: string) => void;
+  sessions?: SessionSummary[];
+  onLoadSession?: (sessionId: string) => void | Promise<void>;
+  onRefreshSessions?: () => void | Promise<void>;
   /** Quick-action items for CommandPopover (빠른 실행 section) */
   commandActions: QuickAction[];
   /** Controlled open state for CommandPopover */
@@ -92,7 +96,7 @@ export interface ChatViewProps {
   onRevertCheckpoint?: (revertSessionId: string) => void | Promise<void>;
 }
 
-export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onRevertCheckpoint }: ChatViewProps) {
+export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar, onRetryEffort, isEntryStarred, onAbort, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, sessions, onLoadSession, onRefreshSessions, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, installingPlugins, onOpenMarketplace, marketplaceUrlReady, onRevertCheckpoint }: ChatViewProps) {
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
   const debugStreamEnabled = isDebugStreamEnabled();
@@ -232,7 +236,13 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             current type doesn't carry; that's a follow-up. For now the badge
             represents "today" — auto-refreshes to the current locale date
             on render. */}
-        <DayDivider />
+        <DayDivider
+          sessions={sessions}
+          currentSessionId={currentSessionId}
+          streaming={streaming}
+          onLoadSession={onLoadSession}
+          onRefreshSessions={onRefreshSessions}
+        />
         {/* Workflow tools (S1+S2): skill badges + sub-agents + ask-user inline.
             SessionTodoPanel is intentionally NOT here — it sits above the input
             cluster (see below the ScrollArea) so it stays visible regardless of
