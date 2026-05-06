@@ -138,6 +138,79 @@ describe("SettingsService LLM per-vendor patching", () => {
   });
 });
 
+describe("SettingsService webView (B1 — external URL viewer policy)", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-webview-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  it("defaults preferredFlow to 'in-app' on a fresh install", () => {
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
+  });
+
+  it("applies default 'in-app' when webView field is absent on disk (legacy settings.json)", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ marketplace: { backend: "real-cloud" } }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
+  });
+
+  it("round-trips a system-browser preference across restart", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ webView: { preferredFlow: "system-browser" } });
+    expect(service.get("webView")).toEqual({ preferredFlow: "system-browser" });
+
+    const reloaded = new SettingsService({ userDataPath });
+    expect(reloaded.get("webView")).toEqual({ preferredFlow: "system-browser" });
+  });
+
+  // Critic F4 mitigation: schema-invalid value falls back to default for THIS
+  // field only — other settings sections must remain intact.
+  it.each([
+    ["string-not-in-enum", "yes"],
+    ["null", null],
+    ["number", 42],
+    ["array", ["in-app"]],
+  ])("falls back to default when preferredFlow is invalid (%s) without resetting unrelated settings", (_label, badValue) => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        webView: { preferredFlow: badValue },
+        chat: { systemPrompt: "preserved-prompt", autoCompact: false },
+        marketplace: { backend: "real-cloud", realCloudBaseUrl: "https://preserved.example" },
+      }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
+    // Unrelated sections must be preserved (no full default reset).
+    expect(service.get("chat").systemPrompt).toBe("preserved-prompt");
+    expect(service.get("chat").autoCompact).toBe(false);
+    expect(service.get("marketplace").realCloudBaseUrl).toBe("https://preserved.example");
+  });
+
+  it("falls back to default when webView block is not an object", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ webView: "garbage" }),
+      "utf-8",
+    );
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
+  });
+});
+
 describe("SettingsService msGraph patching", () => {
   let userDataPath: string;
 
