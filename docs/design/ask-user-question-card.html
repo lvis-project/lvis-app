@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>LVIS Ask-User-Question Card — design mockup</title>
+<title>LVIS 질문 카드 (Ask-User-Question Card) — 디자인 목업</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   body { background: #0a0e1a; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif; }
@@ -11,7 +11,21 @@
   .msg-assistant { padding: 8px 10px; margin: 6px 0; font-size: 13px; max-width: 80%; color: #e6edf3; }
   .meta { font-size: 11px; color: #8b949e; margin-top: 2px; }
 
-  /* Card surface — matches AskUserQuestionCard.tsx:208-211 (border-l-4 border-l-message-user) */
+  .answer-bubble {
+    background: #11162a;
+    border: 1px solid #2a3245;
+    border-left: 2px solid #2f81f7;
+    padding: 6px 10px;
+    border-radius: 0 6px 6px 0;
+    margin: 6px 0 6px auto;
+    font-size: 12px;
+    max-width: 75%;
+    color: #c9d1d9;
+  }
+  .answer-bubble .label { font-size: 10.5px; color: #8b949e; margin-bottom: 2px; }
+  .answer-bubble .value { font-size: 12.5px; color: #e6edf3; }
+  .answer-bubble.dismissed { border-left-color: #8b949e; opacity: 0.7; }
+
   .ask-card {
     border: 1px solid #2a3245;
     border-left: 4px solid #2f81f7;
@@ -26,76 +40,36 @@
     border-left-color: #f59e0b;
     background: rgba(245, 158, 11, 0.05);
   }
-  .ask-header {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 8px; padding: 10px 12px 6px 12px;
+  .ask-card.resolved {
+    opacity: 0.55;
+    pointer-events: none;
   }
+  .ask-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 6px 12px; }
   .ask-title { font-size: 12px; font-weight: 500; color: #8b949e; }
   .ask-step { font-size: 10px; color: rgba(139,148,158,0.7); }
   .ask-body { padding: 0 12px 12px 12px; }
   .ask-question { font-size: 13px; color: #e6edf3; white-space: pre-wrap; margin-bottom: 8px; }
 
-  /* Choice chip — full-width row, recommend / alt badges anchored at the start. */
   .choice {
     display: flex; align-items: center; gap: 8px;
     padding: 6px 10px;
-    border: 1px solid #2a3245;
-    border-radius: 6px;
-    background: #11162a;
+    border: 1px solid #2a3245; border-radius: 6px; background: #11162a;
     font-size: 12px; color: #e6edf3;
     cursor: pointer; text-align: left; width: 100%;
     transition: background 0.12s, border-color 0.12s;
   }
   .choice:hover { background: #1a2030; }
-  .choice.selected {
-    background: #2f81f7;
-    color: #ffffff;
-    border-color: #2f81f7;
-  }
+  .choice.selected { background: #2f81f7; color: #ffffff; border-color: #2f81f7; }
   .choice + .choice { margin-top: 4px; }
-  .badge-recommend {
-    flex-shrink: 0;
-    font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em;
-    background: rgba(47, 129, 247, 0.15);
-    color: #58a6ff;
-    padding: 1px 6px; border-radius: 3px;
-  }
-  .badge-alt {
-    flex-shrink: 0;
-    font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em;
-    background: rgba(139, 148, 158, 0.15);
-    color: #8b949e;
-    padding: 1px 6px; border-radius: 3px;
-  }
+  .badge-recommend { flex-shrink: 0; font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em; background: rgba(47,129,247,0.15); color: #58a6ff; padding: 1px 6px; border-radius: 3px; }
+  .badge-alt { flex-shrink: 0; font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em; background: rgba(139,148,158,0.15); color: #8b949e; padding: 1px 6px; border-radius: 3px; }
 
-  /* Free-text single-line input. */
-  .free-text {
-    width: 100%;
-    height: 32px;
-    padding: 0 8px;
-    background: #0a0e1a;
-    border: 1px solid #2a3245;
-    border-radius: 6px;
-    color: #e6edf3;
-    font-size: 12px;
-    margin-top: 6px;
-  }
+  .free-text { width: 100%; height: 32px; padding: 0 8px; background: #0a0e1a; border: 1px solid #2a3245; border-radius: 6px; color: #e6edf3; font-size: 12px; margin-top: 6px; }
   .free-text::placeholder { color: rgba(139,148,158,0.5); }
   .free-text:focus { outline: none; border-color: #2f81f7; }
 
-  /* Footer button row — dashed top divider, dismiss left / nav right. */
-  .ask-footer {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 8px;
-    padding-top: 8px;
-    margin-top: 8px;
-    border-top: 1px dashed #2a3245;
-  }
-  .btn {
-    height: 28px; padding: 0 12px; border-radius: 6px;
-    font-size: 11px; cursor: pointer;
-    transition: background 0.12s, border-color 0.12s, opacity 0.12s;
-  }
+  .ask-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; margin-top: 8px; border-top: 1px dashed #2a3245; }
+  .btn { height: 28px; padding: 0 12px; border-radius: 6px; font-size: 11px; cursor: pointer; transition: background 0.12s, border-color 0.12s, opacity 0.12s; }
   .btn-ghost { background: transparent; color: #8b949e; border: none; }
   .btn-ghost:hover { color: #e6edf3; }
   .btn-outline { background: transparent; color: #e6edf3; border: 1px solid #2a3245; }
@@ -104,24 +78,13 @@
   .btn-primary:hover { background: #4a95f8; }
   .btn-primary:disabled { background: #2a3245; color: #8b949e; cursor: not-allowed; }
 
-  /* Confirm review row. */
-  .confirm-row {
-    width: 100%;
-    border: 1px solid #2a3245;
-    border-radius: 6px;
-    padding: 6px 10px;
-    background: #0d1424;
-    text-align: left;
-    cursor: pointer;
-    margin-bottom: 4px;
-  }
+  .confirm-row { width: 100%; border: 1px solid #2a3245; border-radius: 6px; padding: 6px 10px; background: #0d1424; text-align: left; cursor: pointer; margin-bottom: 4px; }
   .confirm-row:hover { background: #1a2030; }
   .confirm-label { font-size: 10.5px; color: #8b949e; }
   .confirm-answer { font-size: 12px; color: #e6edf3; }
   .confirm-answer.missing { color: #f59e0b; }
   .confirm-help { font-size: 10.5px; color: #8b949e; margin-bottom: 6px; }
 
-  /* Section headers. */
   h2 { color: #e6edf3; }
   table { width: 100%; font-size: 12px; }
   th, td { padding: 8px; border: 1px solid #2a3245; text-align: left; vertical-align: top; }
@@ -131,75 +94,65 @@
   .pill-bad { background: rgba(247,129,102,0.13); color: #fcd2c4; padding: 2px 8px; border-radius: 999px; font-size: 10px; }
   .pill-neutral { background: rgba(88,166,255,0.13); color: #93c5fd; padding: 2px 8px; border-radius: 999px; font-size: 10px; }
 
-  .scenario-label {
-    font-size: 11px; color: #8b949e; text-transform: uppercase;
-    letter-spacing: 0.06em; font-weight: 600;
-    margin: 16px 0 8px 0;
-  }
+  .scenario-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin: 16px 0 8px 0; }
   .scenario-note { font-size: 11.5px; color: #8b949e; margin-bottom: 8px; line-height: 1.55; }
+  .arrow { font-size: 14px; color: #8b949e; text-align: center; padding: 8px 0; }
 </style>
 </head>
 <body class="p-6 min-h-screen">
 <div class="max-w-7xl mx-auto space-y-10">
 
   <header class="border-b border-[#2a3245] pb-4">
-    <h1 class="text-2xl font-semibold">LVIS Ask-User-Question Card — design mockup</h1>
+    <h1 class="text-2xl font-semibold">LVIS 질문 카드 (Ask-User-Question Card) — 디자인 목업</h1>
     <p class="text-sm text-[#8b949e] mt-1">
-      Inline chat-side multi-question prompt for the <code>ask_user_question</code> LLM tool.
-      Component lives at <code>src/ui/renderer/components/AskUserQuestionCard.tsx</code> and is rendered
-      inline at the tail of the chat stream (replaces the legacy floating <code>FloatingQuestionPanel</code>).
-      Implementation reference: PR #334 (initial floating), later inlined for in-stream consistency.
+      <code>ask_user_question</code> LLM 도구가 발생시키는 인라인 질문 카드의 디자인 의도 기록.
+      구현체는 <code>src/ui/renderer/components/AskUserQuestionCard.tsx</code> 에 존재하며, 채팅 스트림 끝에 인라인으로 렌더된다
+      (PR #334 의 floating panel 은 폐기되고 인라인으로 통합됨).
     </p>
   </header>
 
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <!-- Section 1 — Design intent -->
-  <!-- ─────────────────────────────────────────────────────────── -->
   <section>
-    <h2 class="text-base font-semibold mb-3">1. Design intent</h2>
+    <h2 class="text-base font-semibold mb-3">1. 디자인 의도 요약</h2>
     <table>
       <thead>
         <tr>
-          <th>Question count</th>
-          <th>Layout</th>
-          <th>Submit flow</th>
-          <th>Dismiss</th>
+          <th>질문 개수</th>
+          <th>레이아웃</th>
+          <th>응답 흐름</th>
+          <th>건너뛰기</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>1</td>
-          <td>Single form: question text + choice chips + optional free-text input</td>
-          <td>Click choice → immediate <code>respond</code>. Free-text → "보내기" button.</td>
-          <td>"건너뛰기" → <code>dismissed: true</code>; LLM falls back to defaults.</td>
+          <td>1개</td>
+          <td>단일 폼: 질문 텍스트 + 선택지 칩 + 선택적 자유 입력</td>
+          <td>선택지 클릭 시 즉시 <code>respond</code>. 자유 입력은 "보내기" 버튼으로 전송.</td>
+          <td>"건너뛰기" → <code>dismissed: true</code> 로 LLM 에 전달, LLM 은 기본값으로 fallback.</td>
         </tr>
         <tr>
-          <td>2–4</td>
+          <td>2~4개</td>
           <td>
-            Paginated. Step header shows <code>n / total</code>.<br />
-            Final page = confirm review (all answers listed; click row to jump back).
+            페이지네이션 방식. 헤더에 <code>n / total</code> 표기.<br />
+            마지막 단계 = 검토 화면 (모든 답변 나열, 행 클릭 시 해당 질문으로 복귀).
           </td>
-          <td>다음 → 이전 nav until last step → 검토 → 보내기 sends all answers.</td>
-          <td>"건너뛰기" at any step → entire card dismissed.</td>
+          <td>다음/이전 → 마지막 단계 → 검토 → 보내기 로 모든 답변 일괄 전송.</td>
+          <td>어느 단계에서든 "건너뛰기" 시 카드 전체가 닫힘.</td>
         </tr>
         <tr>
-          <td>Urgent (any count)</td>
-          <td>Amber border + 🟠 긴급 질문 title. Same layout as above.</td>
-          <td>Same.</td>
-          <td>Same.</td>
+          <td>긴급 (개수 무관)</td>
+          <td>amber border + 🟠 긴급 질문 타이틀. 그 외 레이아웃은 동일.</td>
+          <td>동일.</td>
+          <td>동일.</td>
         </tr>
       </tbody>
     </table>
   </section>
 
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <!-- Section 2 — Scenario A: single question with choices + recommend/alt -->
-  <!-- ─────────────────────────────────────────────────────────── -->
   <section>
-    <h2 class="text-base font-semibold mb-3">2. Scenario A — Single question (1 of 1)</h2>
+    <h2 class="text-base font-semibold mb-3">2. 시나리오 A — 단일 질문 (1/1)</h2>
     <p class="scenario-note">
-      Most common path. The LLM emits 3 choices with <code>recommendedIndex: 1</code> and <code>altIndices: [2]</code>.
-      Click any choice → card submits and resolves. Free-text fallback is shown only when <code>allowFreeText: true</code>.
+      가장 흔한 경로. LLM 이 3개 선택지를 emit, <code>recommendedIndex: 1</code> · <code>altIndices: [2]</code> 로 표기.
+      어느 선택지든 클릭하면 즉시 응답하고 카드가 resolved 상태로 전환된다. 자유 입력은 <code>allowFreeText: true</code> 일 때만 노출.
     </p>
 
     <div class="panel p-4">
@@ -209,116 +162,66 @@
       <div class="msg-assistant">회의록 정리 어떤 형식으로 만들어 드릴까요?</div>
 
       <div class="ask-card">
-        <div class="ask-header">
-          <span class="ask-title">❓ 질문</span>
-        </div>
+        <div class="ask-header"><span class="ask-title">❓ 질문</span></div>
         <div class="ask-body">
           <div class="ask-question">출력 형식을 골라주세요. 회의 길이가 30분 이상이면 요약형이 더 보기 쉽습니다.</div>
-
-          <button type="button" class="choice">
-            <span class="badge-alt">대안</span>
-            <span class="flex-1 text-left">전체 발언 그대로</span>
-          </button>
-          <button type="button" class="choice selected">
-            <span class="badge-recommend">Recommend</span>
-            <span class="flex-1 text-left">주제별 요약 + 액션 아이템</span>
-          </button>
-          <button type="button" class="choice">
-            <span class="badge-alt">대안</span>
-            <span class="flex-1 text-left">10줄 미만 핵심만</span>
-          </button>
-
+          <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">전체 발언 그대로</span></button>
+          <button type="button" class="choice selected"><span class="badge-recommend">Recommend</span><span class="flex-1 text-left">주제별 요약 + 액션 아이템</span></button>
+          <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">10줄 미만 핵심만</span></button>
           <input type="text" class="free-text" placeholder="다른 형식이 있다면 입력 (≤20자)" />
-
           <div class="ask-footer">
             <button class="btn btn-ghost">건너뛰기</button>
-            <div class="flex items-center gap-2">
-              <button class="btn btn-primary">보내기</button>
-            </div>
+            <div class="flex items-center gap-2"><button class="btn btn-primary">보내기</button></div>
           </div>
         </div>
       </div>
     </div>
 
     <div class="scenario-note mt-3">
-      <strong>State annotations</strong>
+      <strong>상태 표기 규칙</strong>
       <ul class="list-disc pl-5 mt-2 space-y-1">
-        <li><span class="pill-neutral">Recommend</span> — single chip per question; <code>recommendedIndex</code> 1 entry max.</li>
-        <li><span class="pill-neutral">대안</span> — secondary recommends; disjoint with the Recommend chip; rendered with neutral-muted tint.</li>
-        <li>Selected choice = solid primary fill. Pre-fix UX issue: duplicate-label choices were marked together when comparing by string — now compared by <code>choiceIndex</code>.</li>
-        <li>20-char anchor is <em>advisory</em> — UI never truncates; prompt enforces upstream.</li>
+        <li><span class="pill-neutral">Recommend</span> — 질문당 1개. <code>recommendedIndex</code> 가 둘 이상이어도 첫 번째만 사용.</li>
+        <li><span class="pill-neutral">대안</span> — 보조 추천. Recommend 와 disjoint, 회색 톤.</li>
+        <li>선택된 칩 = 파란색 배경. 같은 라벨이 중복돼도 인덱스로 구분 (label 비교 시 동시 활성화 버그가 있어 인덱스 비교로 변경됨).</li>
+        <li>20자 한도는 <em>권고</em> 일 뿐 — UI 는 자르지 않음. 프롬프트에서 강제.</li>
       </ul>
     </div>
   </section>
 
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <!-- Section 3 — Scenario B: paginated multi-question -->
-  <!-- ─────────────────────────────────────────────────────────── -->
   <section>
-    <h2 class="text-base font-semibold mb-3">3. Scenario B — Paginated multi-question (3 questions)</h2>
+    <h2 class="text-base font-semibold mb-3">3. 시나리오 B — 다중 질문 (3개) 페이지네이션</h2>
     <p class="scenario-note">
-      Carousel through each question. Bottom-right button cycles 다음 → 검토 (last step) → 보내기 (confirm).
-      이전 returns to a prior step. Card state persists per <code>request.id</code>.
+      각 질문을 단계별로 진행. 우측 하단 버튼이 다음 → 검토 (마지막 단계) → 보내기 (검토 화면) 로 순환.
+      이전 으로 복귀 가능. 카드의 step + drafts 상태는 <code>request.id</code> 별로 보존된다.
     </p>
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-      <!-- Step 1 of 3 -->
       <div>
-        <div class="scenario-label">Step 1 / 3 · 회의 길이</div>
+        <div class="scenario-label">1단계 / 3 · 회의 길이</div>
         <div class="ask-card">
-          <div class="ask-header">
-            <span class="ask-title">❓ 질문</span>
-            <span class="ask-step">· 1 / 3</span>
-          </div>
+          <div class="ask-header"><span class="ask-title">❓ 질문</span><span class="ask-step">· 1 / 3</span></div>
           <div class="ask-body">
             <div class="ask-question">회의 길이는 어느 정도로 예상하시나요?</div>
-            <button type="button" class="choice">
-              <span class="badge-recommend">Recommend</span>
-              <span class="flex-1 text-left">30분 이내</span>
-            </button>
-            <button type="button" class="choice selected">
-              <span class="flex-1 text-left">30~60분</span>
-            </button>
-            <button type="button" class="choice">
-              <span class="flex-1 text-left">60분 초과</span>
-            </button>
-
+            <button type="button" class="choice"><span class="badge-recommend">Recommend</span><span class="flex-1 text-left">30분 이내</span></button>
+            <button type="button" class="choice selected"><span class="flex-1 text-left">30~60분</span></button>
+            <button type="button" class="choice"><span class="flex-1 text-left">60분 초과</span></button>
             <div class="ask-footer">
               <button class="btn btn-ghost">건너뛰기</button>
-              <div class="flex items-center gap-2">
-                <button class="btn btn-primary">다음</button>
-              </div>
+              <div class="flex items-center gap-2"><button class="btn btn-primary">다음</button></div>
             </div>
           </div>
         </div>
       </div>
-
-      <!-- Step 2 of 3 -->
       <div>
-        <div class="scenario-label">Step 2 / 3 · 형식</div>
+        <div class="scenario-label">2단계 / 3 · 형식</div>
         <div class="ask-card">
-          <div class="ask-header">
-            <span class="ask-title">❓ 질문</span>
-            <span class="ask-step">· 2 / 3</span>
-          </div>
+          <div class="ask-header"><span class="ask-title">❓ 질문</span><span class="ask-step">· 2 / 3</span></div>
           <div class="ask-body">
             <div class="ask-question">출력 형식을 골라주세요.</div>
-            <button type="button" class="choice">
-              <span class="badge-alt">대안</span>
-              <span class="flex-1 text-left">전체 발언 그대로</span>
-            </button>
-            <button type="button" class="choice selected">
-              <span class="badge-recommend">Recommend</span>
-              <span class="flex-1 text-left">주제별 요약 + 액션 아이템</span>
-            </button>
-            <button type="button" class="choice">
-              <span class="badge-alt">대안</span>
-              <span class="flex-1 text-left">10줄 미만 핵심만</span>
-            </button>
-
+            <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">전체 발언 그대로</span></button>
+            <button type="button" class="choice selected"><span class="badge-recommend">Recommend</span><span class="flex-1 text-left">주제별 요약 + 액션 아이템</span></button>
+            <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">10줄 미만 핵심만</span></button>
             <input type="text" class="free-text" placeholder="다른 형식 (≤20자)" />
-
             <div class="ask-footer">
               <button class="btn btn-ghost">건너뛰기</button>
               <div class="flex items-center gap-2">
@@ -329,28 +232,15 @@
           </div>
         </div>
       </div>
-
-      <!-- Step 3 of 3 -->
       <div>
-        <div class="scenario-label">Step 3 / 3 · 공유</div>
+        <div class="scenario-label">3단계 / 3 · 공유</div>
         <div class="ask-card">
-          <div class="ask-header">
-            <span class="ask-title">❓ 질문</span>
-            <span class="ask-step">· 3 / 3</span>
-          </div>
+          <div class="ask-header"><span class="ask-title">❓ 질문</span><span class="ask-step">· 3 / 3</span></div>
           <div class="ask-body">
             <div class="ask-question">완성 후 자동 공유할까요?</div>
-            <button type="button" class="choice selected">
-              <span class="flex-1 text-left">공유 안 함</span>
-            </button>
-            <button type="button" class="choice">
-              <span class="badge-recommend">Recommend</span>
-              <span class="flex-1 text-left">팀즈 채널에 공유</span>
-            </button>
-            <button type="button" class="choice">
-              <span class="flex-1 text-left">이메일로 발송</span>
-            </button>
-
+            <button type="button" class="choice selected"><span class="flex-1 text-left">공유 안 함</span></button>
+            <button type="button" class="choice"><span class="badge-recommend">Recommend</span><span class="flex-1 text-left">팀즈 채널에 공유</span></button>
+            <button type="button" class="choice"><span class="flex-1 text-left">이메일로 발송</span></button>
             <div class="ask-footer">
               <button class="btn btn-ghost">건너뛰기</button>
               <div class="flex items-center gap-2">
@@ -363,29 +253,15 @@
       </div>
     </div>
 
-    <!-- Step 4: confirm review -->
     <div class="mt-6">
-      <div class="scenario-label">Step 4 / 3 · 검토 (confirm)</div>
+      <div class="scenario-label">최종 단계 · 검토 (confirm)</div>
       <div class="ask-card">
-        <div class="ask-header">
-          <span class="ask-title">❓ 질문</span>
-          <span class="ask-step">· 검토</span>
-        </div>
+        <div class="ask-header"><span class="ask-title">❓ 질문</span><span class="ask-step">· 검토</span></div>
         <div class="ask-body">
           <div class="confirm-help">모든 답변을 확인한 뒤 보내기를 누르세요. 항목을 클릭하면 해당 질문으로 돌아갑니다.</div>
-          <button class="confirm-row">
-            <div class="confirm-label">회의 길이</div>
-            <div class="confirm-answer">30~60분</div>
-          </button>
-          <button class="confirm-row">
-            <div class="confirm-label">형식</div>
-            <div class="confirm-answer">주제별 요약 + 액션 아이템</div>
-          </button>
-          <button class="confirm-row">
-            <div class="confirm-label">공유</div>
-            <div class="confirm-answer">공유 안 함</div>
-          </button>
-
+          <button class="confirm-row"><div class="confirm-label">회의 길이</div><div class="confirm-answer">30~60분</div></button>
+          <button class="confirm-row"><div class="confirm-label">형식</div><div class="confirm-answer">주제별 요약 + 액션 아이템</div></button>
+          <button class="confirm-row"><div class="confirm-label">공유</div><div class="confirm-answer">공유 안 함</div></button>
           <div class="ask-footer">
             <button class="btn btn-ghost">건너뛰기</button>
             <div class="flex items-center gap-2">
@@ -398,20 +274,17 @@
     </div>
 
     <div class="scenario-note mt-3">
-      <strong>Confirm row label</strong>: <code>summaryHint</code> if the model provided one (≤ 10 char Korean by prompt contract);
-      otherwise truncated <code>question</code> at ~14 chars (<code>truncateForLabel</code> in component).
-      Missing-answer rows show the answer text in amber.
+      <strong>검토 행 라벨</strong>: 모델이 <code>summaryHint</code> 를 제공한 경우 그 값 (한국어 ≤ 10자 권고).
+      누락 시 <code>question</code> 을 약 14자에서 잘라서 사용 (<code>truncateForLabel</code>).
+      미응답 행은 답변 텍스트가 amber 색으로 표시.
     </div>
   </section>
 
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <!-- Section 4 — Scenario C: urgent variant -->
-  <!-- ─────────────────────────────────────────────────────────── -->
   <section>
-    <h2 class="text-base font-semibold mb-3">4. Scenario C — Urgent question</h2>
+    <h2 class="text-base font-semibold mb-3">4. 시나리오 C — 긴급 질문 (urgent)</h2>
     <p class="scenario-note">
-      <code>request.urgent === true</code> swaps the title icon to 🟠 긴급 질문 and tints the entire card amber.
-      Layout is otherwise identical to scenarios A/B.
+      <code>request.urgent === true</code> 이면 타이틀 아이콘이 🟠 긴급 질문 으로 바뀌고 카드 전체가 amber 톤으로 강조됨.
+      그 외 레이아웃 / 응답 흐름은 시나리오 A · B 와 동일.
     </p>
 
     <div class="panel p-4">
@@ -419,83 +292,144 @@
       <div class="meta text-right">오후 5:42</div>
 
       <div class="ask-card urgent">
-        <div class="ask-header">
-          <span class="ask-title">🟠 긴급 질문</span>
-        </div>
+        <div class="ask-header"><span class="ask-title">🟠 긴급 질문</span></div>
         <div class="ask-body">
           <div class="ask-question">내일 오전 9시 미팅까지 시간이 부족합니다. 어떤 부분을 우선적으로 준비할까요?</div>
-          <button type="button" class="choice">
-            <span class="badge-recommend">Recommend</span>
-            <span class="flex-1 text-left">전체 슬라이드 (15장 추정)</span>
-          </button>
-          <button type="button" class="choice selected">
-            <span class="flex-1 text-left">표지 + 결론 슬라이드만</span>
-          </button>
-          <button type="button" class="choice">
-            <span class="badge-alt">대안</span>
-            <span class="flex-1 text-left">talking points 텍스트만</span>
-          </button>
-
+          <button type="button" class="choice"><span class="badge-recommend">Recommend</span><span class="flex-1 text-left">전체 슬라이드 (15장 추정)</span></button>
+          <button type="button" class="choice selected"><span class="flex-1 text-left">표지 + 결론 슬라이드만</span></button>
+          <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">talking points 텍스트만</span></button>
           <div class="ask-footer">
             <button class="btn btn-ghost">건너뛰기</button>
-            <div class="flex items-center gap-2">
-              <button class="btn btn-primary">보내기</button>
-            </div>
+            <div class="flex items-center gap-2"><button class="btn btn-primary">보내기</button></div>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <!-- Section 5 — IPC + state contract -->
-  <!-- ─────────────────────────────────────────────────────────── -->
   <section>
-    <h2 class="text-base font-semibold mb-3">5. IPC + state contract</h2>
+    <h2 class="text-base font-semibold mb-3">5. 시나리오 D — 답변 완료 후 채팅 노출 (신규)</h2>
+    <p class="scenario-note">
+      <strong>핵심 변경점</strong>: 답변 후 카드만 사라지면 <em>무엇을 답했는지</em> 가 채팅 history 에 남지 않아 사용자가 회상하기 어렵다.
+      답변 시점에 카드를 resolved 상태로 어둡게 비활성화하고, 그 아래에 한 줄짜리 <em>답변 회고 칩</em> 을 user-bubble 우측 정렬로 추가해서
+      향후 스크롤 / 세션 reload 후에도 응답 내용이 보존되도록 한다.
+    </p>
+
+    <div class="panel p-4">
+      <div class="msg-user">"이번 주 회의록 정리 시작할까요?"</div>
+      <div class="meta text-right">오후 2:14</div>
+
+      <div class="msg-assistant">회의록 정리 어떤 형식으로 만들어 드릴까요?</div>
+
+      <div class="scenario-label">상태 1 — 응답 입력 중 (활성)</div>
+      <div class="ask-card">
+        <div class="ask-header"><span class="ask-title">❓ 질문</span></div>
+        <div class="ask-body">
+          <div class="ask-question">출력 형식을 골라주세요.</div>
+          <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">전체 발언 그대로</span></button>
+          <button type="button" class="choice selected"><span class="badge-recommend">Recommend</span><span class="flex-1 text-left">주제별 요약 + 액션 아이템</span></button>
+          <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">10줄 미만 핵심만</span></button>
+          <div class="ask-footer">
+            <button class="btn btn-ghost">건너뛰기</button>
+            <div class="flex items-center gap-2"><button class="btn btn-primary">보내기</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow">↓ "보내기" 클릭</div>
+
+      <div class="scenario-label">상태 2 — 응답 완료 (resolved + 답변 회고 칩)</div>
+      <div class="ask-card resolved">
+        <div class="ask-header"><span class="ask-title">✅ 응답 완료</span></div>
+        <div class="ask-body">
+          <div class="ask-question text-[#8b949e]">출력 형식을 골라주세요.</div>
+          <button type="button" class="choice selected"><span class="badge-recommend">Recommend</span><span class="flex-1 text-left">주제별 요약 + 액션 아이템</span></button>
+        </div>
+      </div>
+
+      <div class="answer-bubble">
+        <div class="label">↳ 내 답변 · 형식</div>
+        <div class="value">주제별 요약 + 액션 아이템</div>
+      </div>
+
+      <div class="msg-assistant">알겠습니다. 주제별 요약과 액션 아이템 중심으로 정리해 드릴게요. 시작합니다…</div>
+    </div>
+
+    <div class="scenario-note mt-3">
+      <strong>다중 질문 케이스</strong>: 보내기 클릭 시 답변 칩이 N개 노출. 각 질문의 <code>summaryHint</code> 를 라벨로, 답변을 값으로.
+    </div>
+
+    <div class="panel p-4 mt-4">
+      <div class="answer-bubble"><div class="label">↳ 내 답변 · 회의 길이</div><div class="value">30~60분</div></div>
+      <div class="answer-bubble"><div class="label">↳ 내 답변 · 형식</div><div class="value">주제별 요약 + 액션 아이템</div></div>
+      <div class="answer-bubble"><div class="label">↳ 내 답변 · 공유</div><div class="value">공유 안 함</div></div>
+      <div class="msg-assistant">알겠습니다. 30~60분 회의 기준으로 주제별 요약 + 액션 아이템을 만들고, 자동 공유는 하지 않겠습니다.</div>
+    </div>
+
+    <div class="scenario-note mt-3">
+      <strong>건너뛰기 케이스</strong>: 답변 칩 대신 회색 톤의 dismissed 마커가 표시되어 LLM 이 fallback 으로 진행했음을 사용자에게 알림.
+    </div>
+
+    <div class="panel p-4 mt-4">
+      <div class="answer-bubble dismissed"><div class="label">↳ 질문 건너뜀</div><div class="value">사용자가 응답하지 않아 기본값으로 진행</div></div>
+      <div class="msg-assistant">기본값(주제별 요약)으로 정리하겠습니다.</div>
+    </div>
+
+    <div class="scenario-note mt-4">
+      <strong>구현 메모</strong>:
+      <ul class="list-disc pl-5 mt-2 space-y-1">
+        <li>현재 구현은 <code>onResolved(request.id)</code> 시점에 카드를 askQuestions 큐에서 제거 → DOM 에서 사라짐. 답변 회고 칩 미존재 = 본 시나리오 추가 분.</li>
+        <li>답변 회고 칩은 <code>kind: "ask_user_answer"</code> (또는 <code>system</code> 변형) 새 ChatEntry 종류로 entries 에 push 하면 자연스러움. 채팅 history JSON 에 저장되어 새로고침 / 세션 reload 후에도 유지.</li>
+        <li>Resolved 카드는 entries 에 그대로 두되 시각적으로 비활성화. 이전 페이지로 스크롤하면 사용자가 어떤 질문에 어떻게 답했는지 그대로 확인 가능.</li>
+        <li>다중 질문은 <code>respondAskUserQuestion</code> 한 번 호출 → 답변 칩 N개 push.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="text-base font-semibold mb-3">6. IPC + 상태 컨트랙트</h2>
     <table>
       <thead>
         <tr>
-          <th>Event</th>
-          <th>Payload</th>
-          <th>UI behavior</th>
+          <th>이벤트</th>
+          <th>페이로드</th>
+          <th>UI 동작</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><code>ask_user_question</code> tool emits</td>
+          <td><code>ask_user_question</code> 도구 emit</td>
           <td><code>{id, questions[], urgent, createdAt}</code></td>
-          <td>Card mounted at tail of <code>askQuestions</code> queue in ChatView.</td>
+          <td>ChatView 의 <code>askQuestions</code> 큐 끝에 카드 마운트.</td>
         </tr>
         <tr>
-          <td>User picks choice (single Q)</td>
+          <td>단일 질문에서 선택지 클릭</td>
           <td><code>respondAskUserQuestion({requestId, answers: [{choice}]})</code></td>
-          <td>Card resolves; LLM tool_result has the answer.</td>
+          <td>카드 resolved → 답변 회고 칩 push (시나리오 D 적용 시).</td>
         </tr>
         <tr>
-          <td>User submits multi-Q</td>
+          <td>다중 질문 보내기</td>
           <td><code>respondAskUserQuestion({requestId, answers: [{choice or freeText}, ...]})</code></td>
-          <td>All answers in one IPC call.</td>
+          <td>한 번의 IPC 호출로 모든 답변 일괄 전송. 답변 칩 N개 push.</td>
         </tr>
         <tr>
-          <td>User dismisses</td>
+          <td>건너뛰기</td>
           <td><code>respondAskUserQuestion({requestId, dismissed: true})</code></td>
-          <td>LLM tool_result: <code>dismissed: true</code> → fallback to defaults.</td>
+          <td>LLM tool_result <code>dismissed: true</code> → 기본값 fallback. dismissed 마커 push.</td>
         </tr>
       </tbody>
     </table>
   </section>
 
-  <!-- ─────────────────────────────────────────────────────────── -->
-  <!-- Section 6 — Open design notes -->
-  <!-- ─────────────────────────────────────────────────────────── -->
   <section>
-    <h2 class="text-base font-semibold mb-3">6. Open design notes</h2>
+    <h2 class="text-base font-semibold mb-3">7. 미해결 디자인 메모</h2>
     <ul class="text-sm text-[#c9d1d9] list-disc pl-6 space-y-1.5">
-      <li><strong>Single-line input only</strong>. The legacy popup used Textarea — vertical bloat made the card feel like a modal. Korean ≤ 20 chars by prompt contract.</li>
-      <li><strong>No badges baked into <code>choice.label</code></strong>. The model emits a flat answer string; recommend / alt placement is purely visual via <code>recommendedIndex</code> / <code>altIndices</code>. Keeps the 20-char anchor on the actual answer text.</li>
-      <li><strong>Index-based selection</strong>. Duplicate <code>choices</code> labels are visually disambiguated by <code>choiceIndex</code>; comparing by string would mark every same-label chip as selected.</li>
-      <li><strong>Persisted state per <code>request.id</code></strong>. Re-mounts with the same id keep step + drafts; a new id resets.</li>
-      <li><strong>Inline placement</strong>. Card sits at the tail of the chat stream (after the active turn's entries), not as a floating overlay. PR #334's <code>FloatingQuestionPanel</code> is removed; rationale: keep question-flow part of conversation history rather than a layered modal.</li>
+      <li><strong>한 줄 입력 고정</strong>. 기존 popup 은 Textarea 라 세로로 비대했음 — 카드가 modal 처럼 느껴짐. 한국어 ≤ 20자 권고는 프롬프트가 강제.</li>
+      <li><strong>label 자체에 뱃지 baked-in 금지</strong>. 모델은 평문 답변만 emit, Recommend / 대안 표기는 <code>recommendedIndex</code> · <code>altIndices</code> 로 시각만 분리. label 의 20자 권고가 답변 텍스트에 그대로 적용됨.</li>
+      <li><strong>인덱스 기반 선택 비교</strong>. 같은 라벨 중복 시 string 비교로 모두 활성화되는 버그가 있어 <code>choiceIndex</code> 로 변경.</li>
+      <li><strong><code>request.id</code> 별 상태 보존</strong>. 같은 id 로 재마운트되면 step + drafts 보존, 새 id 면 초기화.</li>
+      <li><strong>인라인 배치</strong>. 카드는 chat 스트림 끝 (활성 turn 의 entries 직후) 에 위치. PR #334 의 <code>FloatingQuestionPanel</code> 은 폐기 — 질문 흐름을 layered modal 이 아니라 conversation history 의 일부로 유지하기 위함.</li>
+      <li><strong>답변 회고 칩 (시나리오 D)</strong>: 미구현. 새 entry kind 추가 필요. 우선순위 medium — 사용자가 무엇을 답했는지 기억 못 하는 UX 갭 해소용.</li>
     </ul>
   </section>
 
