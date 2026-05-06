@@ -5,6 +5,7 @@ import type { GenericMessage } from "../../engine/llm/types.js";
 import type { MemoryManager } from "../../memory/memory-manager.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { EMPTY_ASSISTANT_RESPONSE_TEXT } from "../../lib/chat-stream-state.js";
 
 function createMessages(): GenericMessage[] {
   return [
@@ -155,12 +156,16 @@ describe("PostTurnHookChain", () => {
     } as unknown as SettingsService;
     const chain = new PostTurnHookChain({ memoryManager, settingsService });
 
+    const rawOutput = "정리 완료입니다.<title>회의 결과 요약 정리본</title>[checkpoint-suggested]";
     const result = await chain.run({
       sessionId: "session-detect",
-      messages: createMessages(),
+      messages: [
+        { role: "user", content: "회의 정리해줘" },
+        { role: "assistant", content: rawOutput },
+      ],
       cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
       input: "회의 정리해줘",
-      output: "정리 완료입니다.<title>회의 결과 요약 정리본</title>[checkpoint-suggested]",
+      output: rawOutput,
       toolCalls: [],
       route: "chat",
     });
@@ -170,6 +175,48 @@ describe("PostTurnHookChain", () => {
     expect(result.detector.cleanedText).not.toContain("<title>");
     expect(result.detector.cleanedText).not.toContain("[checkpoint-suggested]");
     expect(result.detector.cleanedText).toContain("정리 완료입니다.");
+    const savedMessages = saveSession.mock.calls[0]?.[1] as GenericMessage[];
+    expect(savedMessages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "정리 완료입니다.",
+    });
+  });
+
+  it("detect-checkpoint: persists marker-only assistant output as an explicit empty response", async () => {
+    const saveSession = vi.fn();
+    const memoryManager = {
+      saveSession,
+      saveSessionMetadata: vi.fn(),
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        if (key === "features") return { experimentalContinuousBackend: true };
+        return { systemPrompt: "", autoCompact: false };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({ memoryManager, settingsService });
+    const rawOutput = "<title>제목만 생성</title>[checkpoint-suggested]";
+
+    await chain.run({
+      sessionId: "session-marker-only",
+      messages: [
+        { role: "user", content: "제목만 만들지 말고 저장해줘" },
+        { role: "assistant", content: rawOutput },
+      ],
+      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+      input: "제목만 만들지 말고 저장해줘",
+      output: rawOutput,
+      toolCalls: [],
+      route: "chat",
+    });
+
+    const savedMessages = saveSession.mock.calls[0]?.[1] as GenericMessage[];
+    expect(savedMessages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: EMPTY_ASSISTANT_RESPONSE_TEXT,
+    });
   });
 
   it("detect-checkpoint: onCheckpointSuggested callback is invoked when marker present", async () => {
@@ -270,6 +317,43 @@ describe("PostTurnHookChain", () => {
     expect(saveMemory).toHaveBeenCalledOnce();
   });
 
+  it("auto-extracts memory from cleaned assistant output when stream markers are present", async () => {
+    const saveMemory = vi.fn().mockResolvedValue({
+      filename: "auto-memory.md",
+      title: "자동-이거 기억해줘",
+      content: "# 자동-이거 기억해줘\n\n...",
+    });
+    const memoryManager = {
+      saveSession: vi.fn(),
+      saveMemory,
+      saveSessionMetadata: vi.fn(),
+      loadSessionMetadata: vi.fn().mockReturnValue(null),
+    } as unknown as MemoryManager;
+    const settingsService = {
+      get: vi.fn((key: string) => {
+        if (key === "llm") return fakeLlmSettings();
+        if (key === "features") return { experimentalContinuousBackend: true };
+        return { systemPrompt: "", autoCompact: false };
+      }),
+    } as unknown as SettingsService;
+    const chain = new PostTurnHookChain({ memoryManager, settingsService });
+
+    await chain.run({
+      sessionId: "session-memory-cleaned",
+      messages: createMessages(),
+      cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+      input: "이거 기억해줘",
+      output: "네, 기억하겠습니다.<title>기억 저장 테스트 제목</title>[checkpoint-suggested]",
+      toolCalls: [],
+      route: "chat",
+    });
+
+    const savedBody = saveMemory.mock.calls[0]?.[1] as string;
+    expect(savedBody).toContain("네, 기억하겠습니다.");
+    expect(savedBody).not.toContain("<title>");
+    expect(savedBody).not.toContain("[checkpoint-suggested]");
+  });
+
   describe("audit route emission", () => {
     function makeChain(opts: { autoCompact: boolean; logTurn: ReturnType<typeof vi.fn> }) {
       const auditLogger = { logTurn: opts.logTurn } as unknown as import("../../audit/audit-logger.js").AuditLogger;
@@ -350,6 +434,32 @@ describe("PostTurnHookChain", () => {
 
       const call = logTurn.mock.calls[0]![0] as { route: string };
       expect(call.route).toBe("claude/claude-3-5-sonnet-20241022");
+    });
+
+    it("logs cleaned output when stream markers are present", async () => {
+      const logTurn = vi.fn();
+      const auditLogger = { logTurn } as unknown as import("../../audit/audit-logger.js").AuditLogger;
+      const settingsService = {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return fakeLlmSettings();
+          if (key === "features") return { experimentalContinuousBackend: true };
+          return { systemPrompt: "", autoCompact: false };
+        }),
+      } as unknown as SettingsService;
+      const chain = new PostTurnHookChain({ auditLogger, settingsService });
+
+      await chain.run({
+        sessionId: "session-audit-cleaned",
+        messages: createMessages(),
+        cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
+        input: "정리",
+        output: "정리 완료입니다.<title>감사 로그 테스트 제목</title>",
+        toolCalls: [],
+        route: "chat",
+      });
+
+      const call = logTurn.mock.calls[0]![0] as { output: string };
+      expect(call.output).toBe("정리 완료입니다.");
     });
   });
 

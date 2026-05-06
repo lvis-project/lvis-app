@@ -3,10 +3,12 @@
 import {
   applyToolEnd,
   applyToolStart,
+  EMPTY_ASSISTANT_RESPONSE_TEXT,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
+import { detectFromStream } from "../../../lib/stream-markers.js";
 import type { SerializedHistoryMessage } from "../../../shared/chat-history.js";
 
 export type PersistedHistoryMessage = SerializedHistoryMessage;
@@ -53,7 +55,12 @@ export function historyToEntries(
       out.push({ kind: "user", text: textContent(m.content) });
     } else if (m.role === "assistant") {
       const text = textContent(m.content);
-      const visibleText = text.trim().length > 0 ? text : "";
+      const cleanedText = detectFromStream(text).cleanedText;
+      const visibleText = cleanedText.trim().length > 0
+        ? cleanedText
+        : text.trim().length > 0
+          ? EMPTY_ASSISTANT_RESPONSE_TEXT
+          : "";
       out = finalizeStreamingReasoning(out, m.thought ?? "");
       out = finalizeStreamingAssistant(out, visibleText);
 

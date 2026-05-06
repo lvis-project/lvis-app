@@ -244,6 +244,16 @@ describe("todo_session_write tool", () => {
 });
 
 describe("agent_spawn tool", () => {
+  it("description forbids proxying direct Agent Hub tool calls", () => {
+    const tool = createAgentSpawnTool({
+      getRunner: () => undefined,
+      emit: () => undefined,
+    });
+    expect(tool.description).toContain("직접 호출");
+    expect(tool.description).toContain("Agent Hub work board");
+    expect(tool.description).toContain("agent_hub_*");
+  });
+
   it("rejects when runner is missing", async () => {
     const tool = createAgentSpawnTool({
       getRunner: () => undefined,

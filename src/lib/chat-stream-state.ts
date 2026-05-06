@@ -12,6 +12,9 @@
  */
 export type CheckpointTier = "hard-token" | "semantic-llm" | "soft-time";
 
+export const EMPTY_ASSISTANT_RESPONSE_TEXT =
+  "응답이 비어있습니다. (도구 호출만 있었거나 LLM이 텍스트를 생성하지 않음)";
+
 export type StreamEvent = {
   type: string;
   streamId?: number;
@@ -71,7 +74,7 @@ export type ToolEntryItem = {
 export type ChatEntry =
   | { kind: "user"; text: string }
   | { kind: "reasoning"; text: string; streaming?: boolean }
-  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command" }
+  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final" }
   | { kind: "tool_group"; groupId: string; groupIds: string[]; status: "running" | "done" | "error"; tools: ToolEntryItem[] }
   | { kind: "system"; text: string }
   // §457 PR-A: structured replacement for the legacy
@@ -217,12 +220,18 @@ export function appendDeltaToImportedTriggerResponse(
 /** Mark the imported_trigger response as no longer streaming (server "done"). */
 export function finalizeImportedTriggerResponse(
   entries: ChatEntry[],
+  transformResponse?: (response: string) => string,
 ): ChatEntry[] {
   const idx = findStreamingImportedTriggerIndex(entries);
   if (idx < 0) return entries;
   const target = entries[idx] as Extract<ChatEntry, { kind: "imported_trigger" }>;
   const next: ChatEntry[] = [...entries];
-  next[idx] = { ...target, responseStreaming: false };
+  const response = target.response ?? "";
+  next[idx] = {
+    ...target,
+    response: transformResponse && response ? transformResponse(response) : target.response,
+    responseStreaming: false,
+  };
   return next;
 }
 
@@ -340,7 +349,7 @@ export function finalizeStreamingReasoning(
 export function finalizeStreamingAssistant(
   entries: ChatEntry[],
   fallbackText: string,
-  opts?: { route?: "command" },
+  opts?: { route?: "command"; phase?: "work" | "final"; overrideText?: string },
 ): ChatEntry[] {
   const next = [...entries];
   const assistantIdx = findLastIdx(
@@ -351,7 +360,7 @@ export function finalizeStreamingAssistant(
 
   if (assistantIdx >= 0) {
     const assistant = next[assistantIdx] as AssistantEntry;
-    const text = assistant.text || fallbackText;
+    const text = opts?.overrideText !== undefined ? opts.overrideText : assistant.text || fallbackText;
     if (!text) {
       next.splice(assistantIdx, 1);
       return next;
@@ -366,6 +375,7 @@ export function finalizeStreamingAssistant(
       // a complete state transition — there is no valid case where a
       // finalized entry should inherit a streaming-era route.
       route: opts?.route,
+      phase: opts?.phase,
     };
     return next;
   }
@@ -379,6 +389,7 @@ export function finalizeStreamingAssistant(
     text: fallbackText,
     streaming: false,
     route: opts?.route,
+    phase: opts?.phase,
   });
   return next;
 }
