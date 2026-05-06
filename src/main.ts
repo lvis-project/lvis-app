@@ -445,21 +445,15 @@ function createWindow() {
   // are instance-specific and are lost when a new window object is created.
   registerWindowEventListeners(win);
 
-  // Development debugging is provided by an in-app floating console toggle in
-  // the renderer. Avoid docking Chromium DevTools into the main window because
-  // it distorts the runtime viewport and causes misleading layout regressions.
-  // For deeper debugging (DOM/CSS/Network/breakpoints) opt in via LVIS_DEV=1
-  // — DevTools opens in `detach` mode so the runtime viewport stays intact and
-  // controls anchored to the bottom of the window (e.g. InputActionBar plugin
-  // grid button) remain clickable. Packaged builds never auto-open DevTools.
+  // Development debugging is provided by the renderer-side eruda console
+  // (LVIS_DEV_CONSOLE=1). Do not auto-open native Chromium DevTools: it
+  // changes the runtime viewport and makes UI regressions look different
+  // from the real app window.
 
   win.once("ready-to-show", () => {
     log.info("window ready-to-show");
     win.show();
     win.focus();
-    if (!app.isPackaged && process.env.LVIS_DEV === "1") {
-      win.webContents.openDevTools({ mode: "detach" });
-    }
   });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;

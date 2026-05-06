@@ -10,8 +10,8 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
  *     so completed reasoning doesn't clutter the conversation; user can click
  *     the header to re-expand the captured thought. Mirrors ToolGroupCard's
  *     "expand to inspect the result" pattern.
- *   - embedded=true    → rendered inside an already-collapsible WorkGroup, so
- *     the reasoning body stays visible when that outer group is open.
+ *   - embedded=true    → rendered full-width inside a WorkGroup, but completed
+ *     reasoning still collapses by default so it doesn't bury the next action.
  *
  * A ref-based one-shot guard ensures the auto-collapse only fires on the
  * transition — re-renders after the user has re-opened it do not snap it shut
@@ -30,11 +30,11 @@ export function ReasoningCard({
   // streaming rehydrated turns) start collapsed — otherwise the auto-collapse
   // effect below never runs for them (no streaming→done edge) and every past
   // reasoning block in history would render fully expanded.
-  const [open, setOpen] = useState(streaming || embedded);
+  const [open, setOpen] = useState(streaming);
   const wasStreamingRef = useRef(streaming);
 
   useEffect(() => {
-    if (!embedded && wasStreamingRef.current && !streaming) {
+    if (wasStreamingRef.current && !streaming) {
       // streaming just finished — collapse once. Subsequent user re-expands
       // remain untouched because wasStreamingRef.current is now false and this
       // branch can no longer trigger.
@@ -44,7 +44,7 @@ export function ReasoningCard({
   }, [streaming]);
 
   const title = streaming ? "생각 중..." : "생각 완료";
-  const bodyVisible = streaming || open || embedded;
+  const bodyVisible = streaming || open;
   const approxTokens = !streaming && entry.text
     ? Math.max(1, Math.ceil(entry.text.length / 4))
     : 0;
@@ -55,10 +55,10 @@ export function ReasoningCard({
         type="button"
         className="flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/30 disabled:cursor-default disabled:hover:bg-transparent"
         onClick={() => {
-          if (streaming || embedded) return;
+          if (streaming) return;
           setOpen((o) => !o);
         }}
-        disabled={streaming || embedded}
+        disabled={streaming}
         aria-expanded={bodyVisible}
       >
         {streaming
@@ -70,7 +70,7 @@ export function ReasoningCard({
             ~{approxTokens >= 1000 ? `${(approxTokens / 1000).toFixed(1)}k` : approxTokens} tok
           </span>
         )}
-        {!streaming && !embedded && (
+        {!streaming && (
           <span className="ml-auto">
             {bodyVisible
               ? <ChevronDown className="h-3 w-3 flex-shrink-0" />

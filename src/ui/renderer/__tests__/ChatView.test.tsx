@@ -192,6 +192,14 @@ describe("ChatView", () => {
       fireEvent.click(container.querySelector("[data-wg-id] button")!);
     });
 
+    for (const button of Array.from(container.querySelectorAll("button"))) {
+      if (button.textContent?.includes("생각 완료")) {
+        await act(async () => {
+          fireEvent.click(button);
+        });
+      }
+    }
+
     await waitFor(() => {
       expect(container.textContent).toContain("첫번째 답변입니다");
       expect(container.textContent).toContain("생각 완료");
@@ -429,6 +437,35 @@ describe("ChatView", () => {
     });
   });
 
+  it("scrolls to the bottom when an ask_user_question card appears", async () => {
+    const scrollSpy = vi
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    const { container, emitAskUserQuestion } = await renderApp({ hasApiKey: true });
+    const before = scrollSpy.mock.calls.length;
+
+    await act(async () => {
+      emitAskUserQuestion({
+        id: "ask-scroll-1",
+        urgent: false,
+        createdAt: Date.now(),
+        questions: [
+          {
+            question: "지역 기준을 알려주세요",
+            choices: ["서울", "경기"],
+            allowFreeText: true,
+          },
+        ],
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("지역 기준을 알려주세요");
+      expect(scrollSpy.mock.calls.length).toBeGreaterThan(before);
+    });
+  });
+
   it("moves a tool_use assistant round into the active WorkGroup before tool events arrive", async () => {
     const { container, api, emitChatStream } = await renderApp({ hasApiKey: true });
     const pendingSend = deferred<{ ok: true }>();
@@ -553,14 +590,12 @@ describe("ChatView", () => {
 
     await waitFor(() => {
       const transcriptText = container.textContent ?? "";
-      const first = transcriptText.indexOf("첫 번째 검색 계획");
       const middle = transcriptText.indexOf("중간 확인 내용은 사용자에게 보여야 합니다.");
-      const second = transcriptText.indexOf("두 번째 도구 결과를 검증");
       const final = transcriptText.indexOf("최종 답변입니다.");
-      expect(first).toBeGreaterThanOrEqual(0);
-      expect(middle).toBeGreaterThan(first);
-      expect(second).toBeGreaterThan(middle);
-      expect(final).toBeGreaterThan(second);
+      expect(transcriptText).not.toContain("첫 번째 검색 계획");
+      expect(transcriptText).not.toContain("두 번째 도구 결과를 검증");
+      expect(middle).toBeGreaterThanOrEqual(0);
+      expect(final).toBeGreaterThan(middle);
     });
   });
 
@@ -624,5 +659,6 @@ describe("ChatView", () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

@@ -29,8 +29,8 @@ export function DayDivider({
   onLoadSession?: (sessionId: string) => void | Promise<void>;
   onRefreshSessions?: () => void | Promise<void>;
 }) {
-  const [pickedDate, setPickedDate] = useState<Date | undefined>(undefined);
   const key = dateKey ?? getKoreaDateKey(new Date());
+  const [pickedDate, setPickedDate] = useState<Date | undefined>(() => dateFromKey(key));
   const label = formatDayLabel(key);
   const selectedKey = pickedDate ? getKoreaDateKey(pickedDate) : key;
   const sessionDateKeys = Array.from(

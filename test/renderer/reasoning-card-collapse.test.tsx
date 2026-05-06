@@ -20,6 +20,15 @@ function card(streaming: boolean, text = "thinking content here") {
   );
 }
 
+function embeddedCard(streaming: boolean, text = "embedded thinking content") {
+  return (
+    <ReasoningCard
+      entry={{ kind: "reasoning", text, streaming }}
+      embedded
+    />
+  );
+}
+
 describe("ReasoningCard", () => {
   it("renders body expanded while streaming and hides it after the stream finishes", () => {
     const { rerender, queryByText, getByRole } = render(card(true));
@@ -68,5 +77,19 @@ describe("ReasoningCard", () => {
     // And the header is still interactive: click to inspect the cached thought.
     fireEvent.click(getByRole("button"));
     expect(queryByText("thinking content here")).toBeInTheDocument();
+  });
+
+  it("collapses completed embedded reasoning and allows manual expansion", () => {
+    const { rerender, queryByText, getByRole } = render(embeddedCard(true));
+    expect(queryByText("embedded thinking content")).toBeInTheDocument();
+    expect(getByRole("button")).toBeDisabled();
+
+    rerender(embeddedCard(false));
+    expect(queryByText("생각 완료")).toBeInTheDocument();
+    expect(queryByText("embedded thinking content")).not.toBeInTheDocument();
+    expect(getByRole("button")).not.toBeDisabled();
+
+    fireEvent.click(getByRole("button"));
+    expect(queryByText("embedded thinking content")).toBeInTheDocument();
   });
 });

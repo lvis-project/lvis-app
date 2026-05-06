@@ -49,6 +49,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitChatStream: (ev: unknown) => void;
   emitRoutineCompleted: (r: unknown) => void;
   emitViewActivate: (v: string) => void;
+  emitAskUserQuestion: (r: unknown) => void;
 } {
   const settings = overrides.settings ?? DEFAULT_SETTINGS;
   const sessions = overrides.sessions ?? [];
@@ -66,6 +67,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const chatStreamHandlers = new Set<(ev: unknown) => void>();
   const routineCompletedHandlers = new Set<(r: unknown) => void>();
   const viewHandlers = new Set<(v: string) => void>();
+  const askUserQuestionHandlers = new Set<(r: unknown) => void>();
 
   const api: MockLvisApi = {
     notifyPluginTheme: vi.fn(async () => ({ ok: true })),
@@ -167,6 +169,13 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     dismissTrigger: vi.fn(async () => ({ ok: true, removed: true })),
     importTrigger: vi.fn(async () => ({ ok: true, imported: 0 })),
 
+    onAskUserQuestion: vi.fn((h: (r: unknown) => void) => {
+      askUserQuestionHandlers.add(h);
+      return () => askUserQuestionHandlers.delete(h);
+    }),
+    onAskUserQuestionTimeout: vi.fn(() => () => {}),
+    respondAskUserQuestion: vi.fn(async () => ({ ok: true })),
+
     submitFeedback: vi.fn(async () => ({ ok: true })),
 
     onViewActivate: vi.fn((h: (v: string) => void) => {
@@ -190,6 +199,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitChatStream: (ev) => chatStreamHandlers.forEach((h) => h(ev)),
     emitRoutineCompleted: (r) => routineCompletedHandlers.forEach((h) => h(r)),
     emitViewActivate: (v) => viewHandlers.forEach((h) => h(v)),
+    emitAskUserQuestion: (r) => askUserQuestionHandlers.forEach((h) => h(r)),
   };
 }
 
