@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { Search, ChevronRight, X as XIcon, Calendar as CalendarIcon } from "lucide-react";
 import { Input } from "../../../components/ui/input.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
-import { Calendar } from "../../../components/ui/calendar.js";
+import { CalendarFallback, LazyCalendar, preloadCalendar } from "./LazyCalendar.js";
 
 /**
  * Sprint 4.C: Ctrl/Cmd+F overlay for in-conversation search. Scans
@@ -60,14 +60,18 @@ export function ChatSearchOverlay({
       {/* Spacer pushes the calendar + close cluster to the far right. */}
       <div className="flex-1" />
       {/* Calendar shortcut — Popover + react-day-picker (shadcn Calendar). */}
-      <Popover>
+      <Popover onOpenChange={(popoverOpen) => {
+        if (popoverOpen) void preloadCalendar();
+      }}>
         <PopoverTrigger asChild>
           <button className="rounded p-0.5 hover:bg-muted" title="날짜로 이동" aria-label="날짜 선택">
             <CalendarIcon className="h-3 w-3" />
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-auto border-border bg-popover p-2 text-popover-foreground shadow-lg">
-          <Calendar mode="single" selected={pickedDate} onSelect={setPickedDate} />
+          <Suspense fallback={<CalendarFallback />}>
+            <LazyCalendar mode="single" selected={pickedDate} onSelect={setPickedDate} />
+          </Suspense>
         </PopoverContent>
       </Popover>
       <button className="rounded p-0.5 hover:bg-muted" onClick={onClose} title="닫기"><XIcon className="h-3 w-3" /></button>

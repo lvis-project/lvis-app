@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import type { Matcher } from "react-day-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
-import { Calendar } from "../../../components/ui/calendar.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
+import { CalendarFallback, LazyCalendar, preloadCalendar } from "./LazyCalendar.js";
 
 /**
  * DayDivider — inline horizontal-line + center date label that opens
@@ -34,6 +34,9 @@ export function DayDivider({
   useEffect(() => {
     setPickedDate(dateFromKey(key));
   }, [key]);
+  useEffect(() => {
+    void preloadCalendar();
+  }, []);
   const label = formatDayLabel(key);
   const selectedKey = pickedDate ? getKoreaDateKey(pickedDate) : key;
   const sessionDateKeys = Array.from(
@@ -50,7 +53,10 @@ export function DayDivider({
     >
       <span className="h-px flex-1 bg-border/50" />
       <Popover onOpenChange={(open) => {
-        if (open) void onRefreshSessions?.();
+        if (open) {
+          void preloadCalendar();
+          void onRefreshSessions?.();
+        }
       }}>
         <PopoverTrigger asChild>
           <button
@@ -62,16 +68,18 @@ export function DayDivider({
           </button>
         </PopoverTrigger>
         <PopoverContent align="center" className="w-[268px] border-border bg-popover p-2 text-popover-foreground shadow-lg">
-          <Calendar
-            mode="single"
-            selected={pickedDate}
-            onSelect={setPickedDate}
-            modifiers={{ hasSession: sessionDateMatchers }}
-            modifiersClassNames={{
-              hasSession:
-                "after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary/80 [&>button]:font-semibold",
-            }}
-          />
+          <Suspense fallback={<CalendarFallback />}>
+            <LazyCalendar
+              mode="single"
+              selected={pickedDate}
+              onSelect={setPickedDate}
+              modifiers={{ hasSession: sessionDateMatchers }}
+              modifiersClassNames={{
+                hasSession:
+                  "after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary/80 [&>button]:font-semibold",
+              }}
+            />
+          </Suspense>
           <div className="border-t border-border/70 px-1 py-2">
             <div className="mb-1 flex items-center justify-between gap-2 px-1">
               <span className="min-w-0 truncate text-[10px] font-medium text-muted-foreground">
