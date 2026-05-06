@@ -26,6 +26,30 @@
   .answer-bubble .value { font-size: 12.5px; color: #e6edf3; }
   .answer-bubble.dismissed { border-left-color: #8b949e; opacity: 0.7; }
 
+  /* 시안 1 — Stacked rows in one bubble (단일 헤더 + 라벨/값 한줄씩 stacked) */
+  .answer-bubble-v1 { background: #11162a; border: 1px solid #2a3245; border-left: 2px solid #2f81f7; padding: 8px 10px; border-radius: 0 6px 6px 0; margin: 6px 0 6px auto; max-width: 75%; color: #c9d1d9; }
+  .answer-bubble-v1 > .header { font-size: 10.5px; color: #8b949e; margin-bottom: 6px; }
+  .answer-bubble-v1 .row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; font-size: 12.5px; }
+  .answer-bubble-v1 .row .k { font-size: 10.5px; color: #8b949e; min-width: 60px; flex-shrink: 0; }
+  .answer-bubble-v1 .row .v { color: #e6edf3; }
+
+  /* 시안 2 — Definition-list table style (key/value 2-col grid + 구분선) */
+  .answer-bubble-v2 { background: #11162a; border: 1px solid #2a3245; border-left: 2px solid #2f81f7; padding: 6px 10px 8px 10px; border-radius: 0 6px 6px 0; margin: 6px 0 6px auto; max-width: 75%; }
+  .answer-bubble-v2 > .header { font-size: 10.5px; color: #8b949e; margin: 2px 0 4px 0; }
+  .answer-bubble-v2 .grid { display: grid; grid-template-columns: max-content 1fr; column-gap: 12px; row-gap: 0; }
+  .answer-bubble-v2 .grid .k { font-size: 10.5px; color: #8b949e; padding: 4px 0; border-bottom: 1px solid rgba(42,50,69,0.5); }
+  .answer-bubble-v2 .grid .v { font-size: 12.5px; color: #e6edf3; padding: 4px 0; border-bottom: 1px solid rgba(42,50,69,0.5); }
+  .answer-bubble-v2 .grid > div:nth-last-child(-n+2) { border-bottom: none; }
+
+  /* 시안 3 — Inline pill cluster (한 div 안에 답변들이 작은 칩으로 나열) */
+  .answer-bubble-v3 { background: rgba(47,129,247,0.06); border: 1px solid rgba(47,129,247,0.2); padding: 6px 10px; border-radius: 8px; margin: 6px 0 6px auto; max-width: 75%; }
+  .answer-bubble-v3 > .header { font-size: 10.5px; color: #8b949e; margin-bottom: 4px; }
+  .answer-bubble-v3 .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .answer-bubble-v3 .pill { display: inline-flex; align-items: center; gap: 4px; background: #11162a; border: 1px solid #2a3245; border-radius: 999px; padding: 2px 8px; font-size: 11.5px; color: #e6edf3; }
+  .answer-bubble-v3 .pill .k { font-size: 10px; color: #8b949e; font-weight: 500; }
+  .answer-bubble-v3 .pill .v { color: #e6edf3; }
+  .answer-bubble-v3 .pill .sep { color: rgba(139,148,158,0.5); }
+
   .ask-card {
     border: 1px solid #2a3245;
     border-left: 4px solid #2f81f7;
@@ -356,14 +380,120 @@
     </div>
 
     <div class="scenario-note mt-3">
-      <strong>다중 질문 케이스</strong>: 보내기 클릭 시 답변 칩이 N개 노출. 각 질문의 <code>summaryHint</code> 를 라벨로, 답변을 값으로.
+      <strong>다중 질문 케이스 — 답변 회고 칩을 한 개의 div 로 합치는 3가지 시안</strong>.
+      이전 버전은 답변별로 div 가 분리되어 채팅이 길어지는 느낌이 있었음.
+      아래 시안들은 <em>모든 답변을 하나의 컨테이너</em>에 표시하면서도 가독성을 유지하는 방향.
     </div>
 
-    <div class="panel p-4 mt-4">
-      <div class="answer-bubble"><div class="label">↳ 내 답변 · 회의 길이</div><div class="value">30~60분</div></div>
-      <div class="answer-bubble"><div class="label">↳ 내 답변 · 형식</div><div class="value">주제별 요약 + 액션 아이템</div></div>
-      <div class="answer-bubble"><div class="label">↳ 내 답변 · 공유</div><div class="value">공유 안 함</div></div>
+    <!-- ─────────── 시안 1 — Stacked rows in one bubble ─────────── -->
+    <div class="scenario-label">시안 1 — Stacked rows (한 div 안에 라벨/값 행 stacked)</div>
+    <p class="scenario-note">
+      가장 단순한 형태. 단일 헤더 "↳ 내 답변" 아래에 라벨/값 행들이 세로로 쌓임. 라벨은 좁은 고정폭(60px),
+      값은 가변폭. 답변 개수가 늘어도 자연스럽게 확장. 시각 무게 가벼움.
+    </p>
+
+    <div class="panel p-4 mt-2">
+      <div class="answer-bubble-v1">
+        <div class="header">↳ 내 답변 (3개)</div>
+        <div class="row"><span class="k">회의 길이</span><span class="v">30~60분</span></div>
+        <div class="row"><span class="k">형식</span><span class="v">주제별 요약 + 액션 아이템</span></div>
+        <div class="row"><span class="k">공유</span><span class="v">공유 안 함</span></div>
+      </div>
       <div class="msg-assistant">알겠습니다. 30~60분 회의 기준으로 주제별 요약 + 액션 아이템을 만들고, 자동 공유는 하지 않겠습니다.</div>
+    </div>
+
+    <!-- ─────────── 시안 2 — Definition-list table ─────────── -->
+    <div class="scenario-label">시안 2 — Definition-list table (key/value 2-col grid + 구분선)</div>
+    <p class="scenario-note">
+      답변을 표 형식으로 보여주는 시안. 라벨/값 사이에 옅은 구분선으로 행 단위 시각 분리.
+      답변이 많거나 텍스트가 길 때 가독성이 가장 높음. 스캔하기 좋음.
+    </p>
+
+    <div class="panel p-4 mt-2">
+      <div class="answer-bubble-v2">
+        <div class="header">↳ 내 답변</div>
+        <div class="grid">
+          <div class="k">회의 길이</div>
+          <div class="v">30~60분</div>
+          <div class="k">형식</div>
+          <div class="v">주제별 요약 + 액션 아이템</div>
+          <div class="k">공유</div>
+          <div class="v">공유 안 함</div>
+        </div>
+      </div>
+      <div class="msg-assistant">알겠습니다. 30~60분 회의 기준으로 주제별 요약 + 액션 아이템을 만들고, 자동 공유는 하지 않겠습니다.</div>
+    </div>
+
+    <!-- ─────────── 시안 3 — Inline pill cluster ─────────── -->
+    <div class="scenario-label">시안 3 — Inline pill cluster (작은 칩들이 wrap-flex 로 한 div 안에 나열)</div>
+    <p class="scenario-note">
+      가장 컴팩트한 형태. 답변마다 작은 알약형 칩으로 표시되고 좁은 화면에서는 자동 wrap.
+      대화 흐름을 끊지 않으면서 답변 메타데이터를 작게 끼워넣는 느낌. 답변 텍스트가 짧을 때 최적.
+      텍스트가 긴 답변은 칩이 길어져 가독성이 떨어질 수 있음.
+    </p>
+
+    <div class="panel p-4 mt-2">
+      <div class="answer-bubble-v3">
+        <div class="header">↳ 내 답변</div>
+        <div class="pills">
+          <span class="pill"><span class="k">회의 길이</span><span class="sep">:</span><span class="v">30~60분</span></span>
+          <span class="pill"><span class="k">형식</span><span class="sep">:</span><span class="v">주제별 요약 + 액션 아이템</span></span>
+          <span class="pill"><span class="k">공유</span><span class="sep">:</span><span class="v">공유 안 함</span></span>
+        </div>
+      </div>
+      <div class="msg-assistant">알겠습니다. 30~60분 회의 기준으로 주제별 요약 + 액션 아이템을 만들고, 자동 공유는 하지 않겠습니다.</div>
+    </div>
+
+    <div class="scenario-note mt-4">
+      <strong>비교 요약</strong>
+      <table class="mt-2">
+        <thead><tr><th>시안</th><th>가독성</th><th>공간 효율</th><th>긴 답변 처리</th><th>적합한 케이스</th></tr></thead>
+        <tbody>
+          <tr><td>1 · Stacked rows</td><td>🟢 좋음</td><td>🟡 중간</td><td>🟢 자연스러움</td><td>답변 2~4개, 보통 길이</td></tr>
+          <tr><td>2 · Table grid</td><td>🟢 가장 좋음</td><td>🟡 중간 (구분선 영역)</td><td>🟢 매우 좋음</td><td>답변 3개+, 텍스트 긴 경우</td></tr>
+          <tr><td>3 · Pill cluster</td><td>🟡 중간</td><td>🟢 가장 좋음</td><td>🔴 칩이 비대해짐</td><td>답변 짧고 2~3개, 채팅 흐름 우선</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="scenario-note mt-4">
+      <strong>긴 답변 스트레스 테스트</strong> — 시나리오 A 의 자유 입력 케이스 (20자 권고 초과 답변)
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+      <div>
+        <div class="scenario-label">시안 1 · 긴 답변</div>
+        <div class="answer-bubble-v1">
+          <div class="header">↳ 내 답변 (3개)</div>
+          <div class="row"><span class="k">회의 길이</span><span class="v">90분 이상 — 전체 라운드테이블 포함</span></div>
+          <div class="row"><span class="k">형식</span><span class="v">한국어 + 영어 병기로 작성, 부록에 원문 첨부</span></div>
+          <div class="row"><span class="k">공유</span><span class="v">팀즈 + 이메일 동시 발송</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="scenario-label">시안 2 · 긴 답변</div>
+        <div class="answer-bubble-v2">
+          <div class="header">↳ 내 답변</div>
+          <div class="grid">
+            <div class="k">회의 길이</div>
+            <div class="v">90분 이상 — 전체 라운드테이블 포함</div>
+            <div class="k">형식</div>
+            <div class="v">한국어 + 영어 병기로 작성, 부록에 원문 첨부</div>
+            <div class="k">공유</div>
+            <div class="v">팀즈 + 이메일 동시 발송</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="scenario-label">시안 3 · 긴 답변 (wrap)</div>
+        <div class="answer-bubble-v3">
+          <div class="header">↳ 내 답변</div>
+          <div class="pills">
+            <span class="pill"><span class="k">회의 길이</span><span class="sep">:</span><span class="v">90분 이상 — 전체 라운드테이블 포함</span></span>
+            <span class="pill"><span class="k">형식</span><span class="sep">:</span><span class="v">한국어 + 영어 병기로 작성, 부록에 원문 첨부</span></span>
+            <span class="pill"><span class="k">공유</span><span class="sep">:</span><span class="v">팀즈 + 이메일 동시 발송</span></span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="scenario-note mt-3">
