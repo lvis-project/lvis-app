@@ -50,7 +50,10 @@ export function TokenCostBadge({
   cacheWriteTokens = 0,
   pricing,
 }: TokenCostBadgeProps) {
-  const [mode, setMode] = useState<"tokens" | "cost">("tokens");
+  // Default = cost mode (Cline 패턴). 사용자에게 가장 의미 있는 단일 metric 은
+  // *얼마 들었나* — 토큰 절대수보다 청구액이 직관적. pricing 부재 시에만
+  // tokens fallback. 클릭으로 token 수 토글 가능 (size 의도 검증용).
+  const [mode, setMode] = useState<"tokens" | "cost">(pricing ? "cost" : "tokens");
   const total = tokensIn + tokensOut;
   if (total === 0) return null;
 
