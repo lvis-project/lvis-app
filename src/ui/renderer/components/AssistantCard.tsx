@@ -14,7 +14,6 @@ export function AssistantCard({
   isStarred,
   onFeedback,
   isFinal = true,
-  turnTokens,
 }: {
   entry: Extract<ChatEntry, { kind: "assistant" }>;
   highlightQuery?: string;
@@ -22,7 +21,6 @@ export function AssistantCard({
   isStarred?: boolean;
   onFeedback?: (rating: "up" | "down", reason?: string) => void | Promise<void>;
   isFinal?: boolean;
-  turnTokens?: number;
   embedded?: boolean;
 }) {
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
@@ -32,8 +30,9 @@ export function AssistantCard({
   const displayText = detectFromStream(entry.text || "").cleanedText;
   const renderedText = replaceToolNamesInText(displayText);
   const markdownText = entry.route === "command" ? preserveCommandLineBreaks(renderedText) : renderedText;
-  // Sprint 4.B: rough token estimate for tooltip (~4 chars/token)
-  const outputTokens = Math.ceil(displayText.length / 4);
+  // chars/4 token estimate 제거 (2026-05-07): TurnActionBar 의 TokenCostBadge
+  // 가 provider-reported 값을 단일 source 로 표시. 카드 헤더의 ~tok 배지는
+  // 한국어 2-3× under-estimate 거짓 정보였음.
   return (
     <div className="group relative min-w-0 w-full max-w-full overflow-visible rounded-md px-3 py-2 text-sm">
       {(actions !== undefined || entry.streaming) && (
@@ -41,33 +40,8 @@ export function AssistantCard({
           {title}
           {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
           {isStarred ? <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> : null}
-          {!entry.streaming && (isFinal && turnTokens && turnTokens > 0 ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="ml-auto cursor-default rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
-                  ~{turnTokens >= 1000 ? `${(turnTokens / 1000).toFixed(1)}k` : turnTokens} tok
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs">
-                <div>이번 턴 전체 토큰(추정): {turnTokens.toLocaleString()}</div>
-                <div className="text-muted-foreground">실제값은 감사 로그에서 확인 가능</div>
-              </TooltipContent>
-            </Tooltip>
-          ) : outputTokens > 0 ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="ml-auto cursor-default rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
-                  ~{outputTokens >= 1000 ? `${(outputTokens / 1000).toFixed(1)}k` : outputTokens} tok
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="text-xs">
-                <div>출력 토큰(추정): {outputTokens.toLocaleString()}</div>
-                <div className="text-muted-foreground">실제값은 감사 로그에서 확인 가능</div>
-              </TooltipContent>
-            </Tooltip>
-          ) : null)}
           {actions && !entry.streaming ? (
-            <div className={`gap-1 ${isFinal !== false ? "flex" : "hidden group-hover:flex"}`}>
+            <div className={`ml-auto gap-1 ${isFinal !== false ? "flex" : "hidden group-hover:flex"}`}>
               {actions.onRetry && (
                 <Tooltip><TooltipTrigger asChild>
                   <button className="rounded p-0.5 hover:bg-muted" onClick={actions.onRetry} title="다시 시도 (깊이: high)">

@@ -6,13 +6,29 @@ interface WorkGroupProps {
   stepCount: number;
   streaming: boolean;
   children: React.ReactNode;
+  /**
+   * Optional total wall-clock duration of the turn (ms). When provided and
+   * the group is not streaming, the header shows `⏱ Tm Ts` next to the
+   * step count. Replaces the standalone TurnSummaryFooter that previously
+   * carried this info as a separate row.
+   */
+  turnDurationMs?: number;
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const totalSec = ms / 1000;
+  if (totalSec < 60) return `${totalSec.toFixed(1)}s`;
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec - min * 60;
+  return `${min}m ${sec.toFixed(1)}s`;
 }
 
 // Monotonic per-instance id so multiple WorkGroups in one turn can be
 // distinguished in the debug logs without relying on React internals.
 let __wgInstanceCounter = 0;
 
-export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
+export function WorkGroup({ stepCount, streaming, children, turnDurationMs }: WorkGroupProps) {
   // Past-turn WorkGroups always receive streaming=false from first render,
   // so they must start closed. Active-turn WorkGroups start open and
   // auto-close when the true→false transition fires in the effect below.
@@ -81,6 +97,9 @@ export function WorkGroup({ stepCount, streaming, children }: WorkGroupProps) {
           {streaming ? "작업 중..." : "작업"}
         </span>
         {!streaming && <span className="shrink-0 opacity-50">{stepCount}단계</span>}
+        {!streaming && turnDurationMs !== undefined && turnDurationMs > 0 && (
+          <span className="shrink-0 opacity-50 tabular-nums">⏱ {formatDuration(turnDurationMs)}</span>
+        )}
         {!streaming && (
           open
             ? <ChevronDown className="h-3 w-3 flex-shrink-0 opacity-50" />
