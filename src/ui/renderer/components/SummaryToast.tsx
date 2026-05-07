@@ -1,17 +1,32 @@
 /**
- * SummaryToast — blue-tinted compact card that surfaces the rolling
- * summary attached to a checkpoint entry. Restored from the deleted
- * StackedChatView (issue #547 visual absorption). Truncated to 120 chars
- * so it stays a *toast*, not a competing message bubble.
+ * SummaryToast — checkpoint 직후에 표시되는 *이전 컨텍스트 요약* 카드.
+ *
+ * Layout (2026-05-07): LLM 응답 카드와 동일한 full-width + markdown 본문.
+ * 이전엔 max-w-[70%] + 120자 truncate 의 toast 였으나, *내용을 정독하지
+ * 않으면 회전 후 어디까지 정리됐는지 사용자가 알 수 없는* 결함이 있어
+ * 정식 카드로 격상. 좌측 border + label 만 남겨 LLM 응답과 시각적
+ * 구분.
  */
+import ReactMarkdown from "react-markdown";
+import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
+
 export function SummaryToast({ summary }: { summary: string }) {
-  const trimmed = summary.length > 120 ? `${summary.slice(0, 117)}…` : summary;
   return (
     <div
       data-testid="summary-toast"
-      className="mx-auto max-w-[70%] border-l-2 border-blue-500/40 bg-card/50 px-3 py-1.5 mb-3 rounded-r text-[11px] text-muted-foreground/70"
+      className="w-full min-w-0 max-w-full border-l-2 border-blue-500/40 bg-blue-500/5 px-4 py-2.5 mb-3 rounded-r"
     >
-      📝 이전 요약: {trimmed}
+      <div className="text-[10px] uppercase tracking-wider text-blue-600/80 dark:text-blue-300/80 mb-1.5 font-medium">
+        📝 이전 요약
+      </div>
+      <div
+        className="prose prose-sm lvis-prose max-w-none break-words text-sm text-muted-foreground [overflow-wrap:anywhere]"
+        data-testid="summary-toast-body"
+      >
+        <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+          {summary}
+        </ReactMarkdown>
+      </div>
     </div>
   );
 }
