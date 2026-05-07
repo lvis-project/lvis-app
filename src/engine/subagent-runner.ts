@@ -62,8 +62,12 @@ export interface SubAgentRunnerDeps {
   toolRegistry: ToolRegistry;
 }
 
-const MAX_TURNS_DEFAULT = 5;
-const MAX_TURNS_CAP = 20;
+// Sub-agent turn budget: default 30 covers most multi-step research/edit
+// flows; cap 60 leaves headroom for genuinely complex investigations. The
+// LLM is instructed (see `agent_spawn` description) to set `maxTurns`
+// based on its own complexity judgment of the task it is delegating.
+const MAX_TURNS_DEFAULT = 30;
+const MAX_TURNS_CAP = 60;
 /**
  * C3(b): tools that must NEVER appear in a sub-agent's registry, regardless
  * of `sourceTools`. Adding `agent_spawn` here is the primary fork-bomb

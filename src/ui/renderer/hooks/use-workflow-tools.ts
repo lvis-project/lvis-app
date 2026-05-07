@@ -55,6 +55,7 @@ export function useWorkflowTools(api: LvisApi) {
             status: "running",
             turns: [],
             toolCallCount: 0,
+            toolUseId: event.toolUseId,
           };
           return [...prev, fresh];
         }
@@ -72,6 +73,7 @@ export function useWorkflowTools(api: LvisApi) {
             toolCallCount: event.toolCallCount ?? 0,
             summary: event.summary,
             errorMessage: event.message,
+            toolUseId: event.toolUseId,
           };
           return [...prev, synthetic];
         }

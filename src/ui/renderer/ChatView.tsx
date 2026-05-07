@@ -344,6 +344,44 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
     return current ? { id: currentSessionId, modifiedAt: current.modifiedAt } : undefined;
   }, [currentSessionId, sessions]);
 
+  // Sub-agent spawns by their originating tool_use id. Used so SubAgentCard
+  // renders inline next to the ToolGroupCard whose `agent_spawn` call started
+  // it, rather than stacking all spawns at the top of the chat (where users
+  // miss them entirely — see 2026-05-07 incident).
+  const spawnsByToolUseId = useMemo(() => {
+    const map = new Map<string, SubAgentSpawn[]>();
+    for (const spawn of subAgentSpawns) {
+      if (!spawn.toolUseId) continue;
+      const list = map.get(spawn.toolUseId);
+      if (list) list.push(spawn);
+      else map.set(spawn.toolUseId, [spawn]);
+    }
+    return map;
+  }, [subAgentSpawns]);
+
+  const orphanSpawns = useMemo(
+    () => subAgentSpawns.filter((s) => !s.toolUseId),
+    [subAgentSpawns],
+  );
+
+  const renderSpawnsForGroup = useCallback(
+    (group: { tools: { toolUseId: string }[] }) => {
+      const seen = new Set<string>();
+      const nodes: React.ReactNode[] = [];
+      for (const tool of group.tools) {
+        const list = spawnsByToolUseId.get(tool.toolUseId);
+        if (!list) continue;
+        for (const spawn of list) {
+          if (seen.has(spawn.spawnId)) continue;
+          seen.add(spawn.spawnId);
+          nodes.push(<SubAgentCard key={spawn.spawnId} spawn={spawn} />);
+        }
+      }
+      return nodes;
+    },
+    [spawnsByToolUseId],
+  );
+
   const {
     historicalSessions,
     loading: loadingHistory,
@@ -611,7 +649,10 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             ))}
           </div>
         )}
-        {subAgentSpawns.map((spawn) => (
+        {/* Orphan-only fallback: spawns without a toolUseId association
+            (legacy events or pre-association race conditions). Spawns with
+            a toolUseId render inline next to their ToolGroupCard below. */}
+        {orphanSpawns.map((spawn) => (
           <SubAgentCard key={spawn.spawnId} spawn={spawn} />
         ))}
         {entries.length === 0 && !hasHistoricalContent && hasApiKey !== false && !hasAskQuestions && <div className="py-12 text-center text-sm text-muted-foreground">LVIS 에이전트가 준비되었습니다. 질문을 입력하거나 /command를 사용하세요.</div>}
@@ -868,7 +909,18 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   }
                 } else if (e.kind === "tool_group") {
                   if (cls === "intermediate") {
-                    groupEntries.push({ idx: i, node: <ToolGroupCard key={e.groupId} group={e} embedded /> });
+                    const spawnNodes = renderSpawnsForGroup(e);
+                    groupEntries.push({
+                      idx: i,
+                      node: spawnNodes.length === 0 ? (
+                        <ToolGroupCard key={e.groupId} group={e} embedded />
+                      ) : (
+                        <Fragment key={e.groupId}>
+                          <ToolGroupCard group={e} embedded />
+                          {spawnNodes}
+                        </Fragment>
+                      ),
+                    });
                   } else {
                     break;
                   }
@@ -912,6 +964,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                 rendered.push(<ReasoningCard key={idx} entry={entry} />);
               } else if (entry.kind === "tool_group") {
                 rendered.push(<ToolGroupCard key={entry.groupId} group={entry} />);
+                for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
               } else if (entry.kind === "assistant") {
                 rendered.push(
                   <div key={idx} className={ringCls || undefined}>
@@ -978,6 +1031,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               rendered.push(<ReasoningCard key={idx} entry={entry} />);
             } else if (entry.kind === "tool_group") {
               rendered.push(<ToolGroupCard key={entry.groupId} group={entry} />);
+              for (const node of renderSpawnsForGroup(entry)) rendered.push(node);
             }
             i++;
           }
