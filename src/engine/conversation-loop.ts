@@ -10,7 +10,7 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, getModelContextWindow, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
+import { shouldCompact, compactMessages, getModelUsableContext, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
 import { generateSummary } from "./summary-generator.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
@@ -101,7 +101,24 @@ export interface TurnCallbacks {
     turnDurationMs: number;
     toolCount: number;
     cumulativeToolMs: number;
+    /**
+     * `tokensIn` = the LAST round's raw input tokens (prompt size at turn
+     * end, includes cache reads). Used by TokenProgressRing to render the
+     * "context window fill" indicator — cache reads still occupy context
+     * window slots, so the ring needs the full size.
+     */
     tokensIn: number;
+    /**
+     * `freshInputTokens` = turn-aggregate fresh input (sum across rounds of
+     * `inputTokens − cacheReadTokens − cacheWriteTokens`). This is the
+     * billing-weight number the TokenCostBadge needs — fresh tokens are
+     * billed at full input price, while cached reads are billed at 10%.
+     * Splitting `tokensIn` (last-round raw, for size) from `freshInputTokens`
+     * (turn-aggregate fresh, for billing) avoids the prior bug where the
+     * badge subtracted whole-turn cache from one round's input and ended up
+     * showing 0 fresh on multi-round (tool-using) turns.
+     */
+    freshInputTokens: number;
     tokensOut: number;
     /**
      * Cache breakdown — Anthropic prompt cache (read 90% 할인 / write 25% 가산).
@@ -494,7 +511,7 @@ export class ConversationLoop {
     let removedMessageCount = 0;
     if (this.isAutoCompactEnabled()) {
       const llmSettings = this.deps.settingsService.get("llm");
-      if (shouldCompact(this.cumulativeUsage, getModelContextWindow(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
+      if (shouldCompact(this.cumulativeUsage, getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
         const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages());
         if (cr.compacted) {
           this.history.clear();
@@ -792,7 +809,7 @@ export class ConversationLoop {
       // PostTurnHookChain을 주입한 경우와 fallback 모두 memory 추출은
       // hook chain의 memory-extract 단계에서만 일어난다.
       const llmSettings = this.deps.settingsService.get("llm");
-      if (this.isAutoCompactEnabled() && shouldCompact(this.cumulativeUsage, getModelContextWindow(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
+      if (this.isAutoCompactEnabled() && shouldCompact(this.cumulativeUsage, getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model))) {
         const { messages: compacted, result: cr } = compactMessages(this.history.getMessages());
         if (cr.compacted) {
           this.history.clear();
@@ -848,14 +865,23 @@ export class ConversationLoop {
       `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text?.trim().length ?? 0} usage=${result.usage ? `in=${result.usage.inputTokens} out=${result.usage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
     );
     if (willEmitSummary) {
-      // tokensIn = 마지막 round 의 prompt size (user-facing context size).
-      // tokensOut / cacheRead / cacheWrite 는 모든 round 의 합산 (turn 의
-      // 누적 work). 이 split 가 "이번 turn 이 얼마나 컸나" 직관과 일치
-      // (사용자 보고 2026-05-07: 합산 inputTokens 는 10× over-count 처럼 보임).
+      // tokensIn = 마지막 round 의 prompt size (TokenProgressRing 의 "컨텍스트
+      //   윈도우 fill" 표시용 — cache 읽기도 컨텍스트 슬롯을 차지하므로 raw 가
+      //   맞음).
+      // tokensOut / cacheRead / cacheWrite = turn 전체 합산 (billing 누적).
+      // freshInputTokens = turn 전체 fresh 합산 (TokenCostBadge headline +
+      //   cost 계산용 — 라운드별 (inputTokens − cacheRead − cacheWrite) 의 합).
+      //   `result.usage` 는 turn-aggregate (queryLoop:1098 turnUsage), 그러므로
+      //   여기서 단순 산수만 하면 정확. 이전 badge 버그는 last-round raw 와
+      //   turn-aggregate cache 를 빼느라 음수 → 0 으로 잘리던 mismatch.
       turnTokensIn = this.lastRoundInputTokens;
       turnTokensOut = result.usage?.outputTokens ?? 0;
       const turnCacheRead = result.usage?.cacheReadTokens ?? 0;
       const turnCacheWrite = result.usage?.cacheWriteTokens ?? 0;
+      const turnFreshInput = Math.max(
+        0,
+        (result.usage?.inputTokens ?? 0) - turnCacheRead - turnCacheWrite,
+      );
       const breakdown =
         turnToolBreakdown.size > 0
           ? Object.fromEntries(turnToolBreakdown.entries())
@@ -866,6 +892,7 @@ export class ConversationLoop {
           toolCount: turnToolCount,
           cumulativeToolMs: turnCumulativeToolMs,
           tokensIn: turnTokensIn,
+          freshInputTokens: turnFreshInput,
           tokensOut: turnTokensOut,
           ...(turnCacheRead > 0 ? { cacheReadTokens: turnCacheRead } : {}),
           ...(turnCacheWrite > 0 ? { cacheWriteTokens: turnCacheWrite } : {}),
@@ -1519,9 +1546,11 @@ export class ConversationLoop {
     if (messages.at(-1)?.role === "tool_result") return;
 
     const llmSettings = this.deps.settingsService.get("llm");
-    const contextWindow = getModelContextWindow(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model);
-    const ctxUsage = contextWindow > 0
-      ? Math.min(1.0, this.cumulativeUsage.inputTokens / contextWindow)
+    // ctxUsage 는 *usable* 분모 기준. UI ring / decideRotation 의 0.85 임계가
+    // raw 가 아닌 usable 의 비율이 되도록 일치시킴 — Cline 패턴.
+    const usable = getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model);
+    const ctxUsage = usable > 0
+      ? Math.min(1.0, this.cumulativeUsage.inputTokens / usable)
       : 0;
 
     const features = this.deps.settingsService.get("features");

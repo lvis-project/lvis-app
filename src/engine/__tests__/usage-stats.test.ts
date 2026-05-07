@@ -69,7 +69,13 @@ describe("usage-stats", () => {
     try {
       const p = getModelPricing("claude", "claude-sonnet-4-6");
       expect(p.inputPer1M).toBe(100);
-      expect(computeCost(1_000_000, 1_000_000, p)).toBeCloseTo(200, 5);
+      expect(
+        computeCost(
+          { inputTokens: 1_000_000, outputTokens: 1_000_000 },
+          p,
+          "claude",
+        ),
+      ).toBeCloseTo(200, 5);
     } finally {
       delete process.env.LVIS_PRICING_OVERRIDE;
     }
@@ -117,15 +123,15 @@ describe("computeMonthlyProjection", () => {
 
   it("projects avg-per-day × 30", () => {
     const trend: UsageTrendPoint[] = [
-      { date: "2026-04-01", inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 1.0 },
-      { date: "2026-04-02", inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 3.0 },
+      { date: "2026-04-01", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 1.0 },
+      { date: "2026-04-02", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 3.0 },
     ];
     expect(computeMonthlyProjection(trend)).toBeCloseTo(60, 5);
   });
 
   it("projects correctly for a single day", () => {
     const trend: UsageTrendPoint[] = [
-      { date: "2026-04-01", inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0.5 },
+      { date: "2026-04-01", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0.5 },
     ];
     expect(computeMonthlyProjection(trend)).toBeCloseTo(15, 5);
   });

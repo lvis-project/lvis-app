@@ -5,9 +5,22 @@
  * cache write / output breakdown 을 tooltip 으로 노출. 데이터는 모두
  * provider 보고 값 (turn_summary entry → conversation-loop onTurnSummary).
  *
+ * 토큰 수치 정의:
+ *   - `freshInputTokens` = turn 전체 fresh input 합산 (cache read/write 제외).
+ *     billing 가중치 (full input price) 가 그대로 적용되는 부분.
+ *   - `tokensOut` = turn 전체 output 합산.
+ *   - `cacheReadTokens`, `cacheWriteTokens` = turn 전체 cache 합산.
+ *   - `tokensIn` = 마지막 라운드의 raw input (= fresh + cache, 컨텍스트 윈도우
+ *     fill 표시용 — TokenProgressRing 이 사용. 이 배지에서는 tooltip 의
+ *     "context (last)" 보조 정보로만 노출).
+ *
+ * Headline = `freshInputTokens + tokensOut` — 사용자가 "이번 턴에 어떤 일이
+ * 일어났나" 를 가장 잘 보여주는 단일 수치. 캐시 read 는 가중치가 1/10 이라
+ * headline 에 더하면 직관에 어긋남 (e.g. 100k 캐시 hit 으로 "100k 토큰 사용"
+ * 보이면 사용자가 비용을 과대 추정).
+ *
  * `pricing` 이 없으면 cost 모드 자체를 표시하지 않는다 (토글 비활성).
- * 잘못된 비용을 보여주느니 비용 표시를 안 하는 쪽이 정직 — 호출자가
- * pricing 을 wiring 하기 전까지는 token 만 표시.
+ * 잘못된 비용을 보여주느니 비용 표시를 안 하는 쪽이 정직.
  */
 import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -22,7 +35,11 @@ export interface TokenCostBadgePricing {
 }
 
 export interface TokenCostBadgeProps {
+  /** Last-round raw input tokens (includes cache reads). Tooltip-only here;
+   *  TokenProgressRing reads this from turn_summary directly for context fill. */
   tokensIn: number;
+  /** Turn-aggregate fresh input — billing weight, drives headline + cost. */
+  freshInputTokens: number;
   tokensOut: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
@@ -45,24 +62,20 @@ function formatCost(c: number): string {
 
 export function TokenCostBadge({
   tokensIn,
+  freshInputTokens,
   tokensOut,
   cacheReadTokens = 0,
   cacheWriteTokens = 0,
   pricing,
 }: TokenCostBadgeProps) {
-  // Default = cost mode (Cline 패턴). 사용자에게 가장 의미 있는 단일 metric 은
-  // *얼마 들었나* — 토큰 절대수보다 청구액이 직관적. pricing 부재 시에만
-  // tokens fallback. 클릭으로 token 수 토글 가능 (size 의도 검증용).
-  const [mode, setMode] = useState<"tokens" | "cost">(pricing ? "cost" : "tokens");
-  const total = tokensIn + tokensOut;
-  if (total === 0) return null;
-
-  // Vercel AI SDK v6 의 inputTokens 가 cached 까지 포함한 정규화 값 →
-  // fresh 만 분리해야 정상 가격 적용. (Kilo OpenCode session.ts:355)
-  const freshIn = Math.max(0, tokensIn - cacheReadTokens - cacheWriteTokens);
+  // Default = tokens. 사용자 요청: 청구액보다 토큰 수치가 더 직관적.
+  // 클릭으로 cost 토글 가능 (pricing 이 있을 때만).
+  const [mode, setMode] = useState<"tokens" | "cost">("tokens");
+  const headlineTokens = freshInputTokens + tokensOut;
+  if (headlineTokens === 0 && tokensIn === 0) return null;
 
   const cost = pricing
-    ? (freshIn * pricing.inputPer1M +
+    ? (freshInputTokens * pricing.inputPer1M +
         cacheReadTokens * (pricing.cacheReadPer1M ?? pricing.inputPer1M * 0.1) +
         cacheWriteTokens * (pricing.cacheWritePer1M ?? pricing.inputPer1M * 1.25) +
         tokensOut * pricing.outputPer1M) /
@@ -81,12 +94,12 @@ export function TokenCostBadge({
             if (cost !== null) setMode((m) => (m === "tokens" ? "cost" : "tokens"));
           }}
           className={`inline-flex items-center gap-1 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] tabular-nums ${cost !== null ? "cursor-pointer hover:bg-muted/60" : "cursor-default"}`}
-          aria-label={showCostMode ? "추정 비용 (클릭: 토큰 표시)" : "토큰 합계 (클릭: 비용 표시)"}
+          aria-label={showCostMode ? "추정 비용 (클릭: 토큰 표시)" : "fresh + output 토큰 (클릭: 비용 표시)"}
         >
           {showCostMode ? (
             <span className="text-emerald-600 dark:text-emerald-400">≈ {formatCost(cost!)}</span>
           ) : (
-            <span>🪙 {formatTokens(total)}</span>
+            <span>🪙 {formatTokens(headlineTokens)}</span>
           )}
           {cost !== null && <span className="text-[8px] opacity-50">⇅</span>}
         </button>
@@ -96,7 +109,7 @@ export function TokenCostBadge({
         <div className="space-y-0.5">
           <div className="flex justify-between gap-3">
             <span>fresh in (1.0×):</span>
-            <span>{freshIn.toLocaleString()}</span>
+            <span>{freshInputTokens.toLocaleString()}</span>
           </div>
           {cacheReadTokens > 0 && (
             <div className="flex justify-between gap-3 text-emerald-500">
@@ -116,12 +129,16 @@ export function TokenCostBadge({
           </div>
         </div>
         <div className="mt-1 border-t border-border/40 pt-1 space-y-0.5">
-          <div className="flex justify-between gap-3">
-            <span className="opacity-60">total tokens:</span>
-            <span>{total.toLocaleString()}</span>
+          <div className="flex justify-between gap-3 font-semibold">
+            <span>fresh + output:</span>
+            <span>{headlineTokens.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between gap-3 opacity-70">
+            <span>context (last round):</span>
+            <span>{tokensIn.toLocaleString()}</span>
           </div>
           {cost !== null && (
-            <div className="flex justify-between gap-3 font-semibold text-emerald-500">
+            <div className="flex justify-between gap-3 font-semibold text-emerald-500 pt-0.5 border-t border-border/40">
               <span>≈ cost:</span>
               <span>{formatCost(cost)}</span>
             </div>

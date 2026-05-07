@@ -268,6 +268,7 @@ function HistoricalEntriesList({
             <div key={`hist-tcb-${segmentStart}`} className="px-3 mt-0.5">
               <TokenCostBadge
                 tokensIn={histTurnSummary.tokensIn}
+                freshInputTokens={histTurnSummary.freshInputTokens}
                 tokensOut={histTurnSummary.tokensOut}
                 cacheReadTokens={histTurnSummary.cacheReadTokens}
                 cacheWriteTokens={histTurnSummary.cacheWriteTokens}
@@ -409,6 +410,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
       toolCount: number;
       cumulativeToolMs: number;
       tokensIn: number;
+      freshInputTokens: number;
       tokensOut: number;
       cacheReadTokens?: number;
       cacheWriteTokens?: number;
@@ -425,6 +427,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
           toolCount: e.toolCount,
           cumulativeToolMs: e.cumulativeToolMs,
           tokensIn: e.tokensIn,
+          freshInputTokens: e.freshInputTokens,
           tokensOut: e.tokensOut,
           ...(e.cacheReadTokens !== undefined ? { cacheReadTokens: e.cacheReadTokens } : {}),
           ...(e.cacheWriteTokens !== undefined ? { cacheWriteTokens: e.cacheWriteTokens } : {}),

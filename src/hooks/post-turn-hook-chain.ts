@@ -16,7 +16,7 @@
  *   5. idleScheduler.signalConversation (Agent 5 §6.1)
  */
 
-import { shouldCompact, compactMessages, microcompactMessages, getModelContextWindow } from "../engine/auto-compact.js";
+import { shouldCompact, compactMessages, microcompactMessages, getModelUsableContext } from "../engine/auto-compact.js";
 import { detectFromStream, type DetectorResult } from "../engine/checkpoint-detector.js";
 import { chainTitle } from "../engine/title-chainer.js";
 import type { GenericMessage, TokenUsage, LLMProvider } from "../engine/llm/types.js";
@@ -110,17 +110,19 @@ export class PostTurnHookChain {
           log.info(`microcompact: SKIPPED — no stale tool_result content found (msgCount=${beforeMicroCount})`);
         }
 
-        // Stage 1b: threshold-triggered full compact
+        // Stage 1b: threshold-triggered full compact. Denominator is *usable*
+        // (raw − Cline buffer) so the 80% threshold matches the rotation /
+        // UI-ring math — see `shared/context-budget.ts:getUsableContext`.
         const llmSettings = this.deps.settingsService?.get("llm");
-        const contextWindow = llmSettings
-          ? getModelContextWindow(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model)
+        const usable = llmSettings
+          ? getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model)
           : undefined;
-        const willCompact = shouldCompact(ctx.cumulativeUsage, contextWindow);
-        const usagePct = contextWindow
-          ? ((ctx.cumulativeUsage.inputTokens / contextWindow) * 100).toFixed(1)
+        const willCompact = shouldCompact(ctx.cumulativeUsage, usable);
+        const usagePct = usable
+          ? ((ctx.cumulativeUsage.inputTokens / usable) * 100).toFixed(1)
           : "?";
         log.info(
-          `auto-compact: decision — cumIn=${ctx.cumulativeUsage.inputTokens} ctxWindow=${contextWindow ?? "?"} usage=${usagePct}% threshold=80% → shouldCompact=${willCompact}`,
+          `auto-compact: decision — cumIn=${ctx.cumulativeUsage.inputTokens} usableCtx=${usable ?? "?"} usage=${usagePct}% threshold=80% → shouldCompact=${willCompact}`,
         );
         if (willCompact) {
           const { messages: compacted, result: cr } = compactMessages(working, undefined, "auto");
