@@ -44,7 +44,14 @@ export interface TurnCallbacks {
   onReasoningDelta?: (text: string) => void;
   onTextDelta?: (text: string) => void;
   onToolStart?: (name: string, input: Record<string, unknown>, meta: ToolCallMeta) => void;
-  onToolEnd?: (name: string, result: string, isError: boolean, meta: ToolCallMeta, uiPayload?: import("../mcp/types.js").McpUiPayload) => void;
+  onToolEnd?: (
+    name: string,
+    result: string,
+    isError: boolean,
+    meta: ToolCallMeta,
+    uiPayload: import("../mcp/types.js").McpUiPayload | undefined,
+    durationMs: number,
+  ) => void;
   onAssistantRound?: (round: {
     roundIndex: number;
     text: string;
