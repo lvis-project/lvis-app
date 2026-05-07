@@ -275,6 +275,8 @@ export function useChatState(api: LvisApi) {
             cumulativeToolMs,
             tokensIn,
             tokensOut,
+            ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+            ...(ev.cacheWriteTokens !== undefined ? { cacheWriteTokens: ev.cacheWriteTokens } : {}),
             ...(ev.breakdown ? { breakdown: ev.breakdown } : {}),
           },
         ]);

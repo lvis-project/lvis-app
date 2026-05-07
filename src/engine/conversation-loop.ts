@@ -103,6 +103,14 @@ export interface TurnCallbacks {
     cumulativeToolMs: number;
     tokensIn: number;
     tokensOut: number;
+    /**
+     * Cache breakdown — Anthropic prompt cache (read 90% 할인 / write 25% 가산).
+     * Vercel AI SDK v6 의 inputTokens 는 cached 포함 정규화이므로 이 두 값을
+     * 별도로 surface 해야 사용자가 fresh vs cached 비용 차이 인지 가능.
+     * Reference: Kilo Code OpenCode session.ts:355 패턴.
+     */
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
     breakdown?: Record<string, { count: number; ms: number }>;
   }) => void;
 }
@@ -824,6 +832,8 @@ export class ConversationLoop {
     ) {
       turnTokensIn = result.usage?.inputTokens ?? 0;
       turnTokensOut = result.usage?.outputTokens ?? 0;
+      const turnCacheRead = result.usage?.cacheReadTokens ?? 0;
+      const turnCacheWrite = result.usage?.cacheWriteTokens ?? 0;
       const breakdown =
         turnToolBreakdown.size > 0
           ? Object.fromEntries(turnToolBreakdown.entries())
@@ -835,6 +845,8 @@ export class ConversationLoop {
           cumulativeToolMs: turnCumulativeToolMs,
           tokensIn: turnTokensIn,
           tokensOut: turnTokensOut,
+          ...(turnCacheRead > 0 ? { cacheReadTokens: turnCacheRead } : {}),
+          ...(turnCacheWrite > 0 ? { cacheWriteTokens: turnCacheWrite } : {}),
           ...(breakdown ? { breakdown } : {}),
         });
       } catch {
@@ -1037,10 +1049,37 @@ export class ConversationLoop {
       }
 
       // stream.kind === "ok" — usage 반영 + assistant round commit
+      //
+      // Kilo Code OpenCode session.ts:355 패턴 적용:
+      //   "AI SDK v6 normalized inputTokens to include cached tokens across
+      //    all providers — subtract cacheRead/cacheWrite to get fresh input."
+      //
+      // 1) turnUsage 는 모든 round 합산 (이전: `=` 으로 마지막 round 만 보존
+      //    → multi-round turn 의 turn_summary 가 under-report 되던 버그).
+      // 2) cumulativeUsage.inputTokens 는 fresh input 만 누적 (cached 빼서)
+      //    → long session 에서 cached prefix 가 매 turn 누적되어 ctxUsage 가
+      //    조기에 100% 도달, auto-compact 가 premature 발화하던 root cause 해소.
+      // 3) cache read/write 는 별도 누적 — 비용 계산은 다른 가중치 (read 0.1×,
+      //    write 1.25×) 적용 가능하도록 분리 보존.
       if (stream.usage) {
-        turnUsage = stream.usage;
-        this.cumulativeUsage.inputTokens += stream.usage.inputTokens;
-        this.cumulativeUsage.outputTokens += stream.usage.outputTokens;
+        const u = stream.usage;
+        const cacheRead = u.cacheReadTokens ?? 0;
+        const cacheWrite = u.cacheWriteTokens ?? 0;
+        const adjustedIn = Math.max(0, u.inputTokens - cacheRead - cacheWrite);
+
+        turnUsage = {
+          inputTokens: (turnUsage?.inputTokens ?? 0) + u.inputTokens,
+          outputTokens: (turnUsage?.outputTokens ?? 0) + u.outputTokens,
+          cacheReadTokens: (turnUsage?.cacheReadTokens ?? 0) + cacheRead,
+          cacheWriteTokens: (turnUsage?.cacheWriteTokens ?? 0) + cacheWrite,
+        };
+
+        this.cumulativeUsage.inputTokens += adjustedIn;
+        this.cumulativeUsage.outputTokens += u.outputTokens;
+        this.cumulativeUsage.cacheReadTokens =
+          (this.cumulativeUsage.cacheReadTokens ?? 0) + cacheRead;
+        this.cumulativeUsage.cacheWriteTokens =
+          (this.cumulativeUsage.cacheWriteTokens ?? 0) + cacheWrite;
       }
 
       const { text: textContent, thought: thoughtContent, thinkingBlocks: roundThinkingBlocks, toolCalls: pendingToolCalls, stopReason } = stream;
