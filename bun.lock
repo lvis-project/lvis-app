@@ -24,7 +24,9 @@
         "ai": "~6.0.168",
         "ajv": "^8.18.0",
         "ajv-formats": "^3.0.1",
+        "baseline-browser-mapping": "^2.10.27",
         "better-sqlite3": "^12.8.0",
+        "caniuse-lite": "^1.0.30001792",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
@@ -283,7 +285,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@lvis/plugin-sdk": ["@lvis/plugin-sdk@github:lvis-project/lvis-plugin-sdk#3e3c646", { "dependencies": { "focus-trap": "^8.2.0", "lucide-react": "^1.14.0" }, "peerDependencies": { "react": ">=18.0.0", "react-dom": ">=18.0.0", "tsup": ">=8.0.0" }, "optionalPeers": ["react", "react-dom", "tsup"] }, "lvis-project-lvis-plugin-sdk-3e3c646", "sha512-oyPOhCgmjfoRYMhMQ/mE0fdrJVi6zBTfUX177tfC3rl97xrsaPV8LPnY4cVDGn+vpJlfMxpuzl1rb+3Z8h+vQA=="],
+    "@lvis/plugin-sdk": ["@lvis/plugin-sdk@github:lvis-project/lvis-plugin-sdk#3e3c646", { "dependencies": { "focus-trap": "^8.2.0", "lucide-react": "^1.14.0" }, "peerDependencies": { "react": ">=18.0.0", "react-dom": ">=18.0.0", "tsup": ">=8.0.0" }, "optionalPeers": ["react", "react-dom", "tsup"] }, "lvis-project-lvis-plugin-sdk-3e3c646"],
 
     "@malept/cross-spawn-promise": ["@malept/cross-spawn-promise@2.0.0", "", { "dependencies": { "cross-spawn": "^7.0.1" } }, "sha512-1DpKU0Z5ThltBwjNySMC14g0CkbyhCaz9FkhxqNsZI6uAPJXFS8cMXlBKo26FJ8ZuW6S9GCMcR9IO5k2X5/9Fg=="],
 
