@@ -642,18 +642,17 @@ export class ConversationLoop {
             turnToolStarts.set(meta.toolUseId, Date.now());
             callbacks.onToolStart?.(name, input, meta);
           },
-          onToolEnd: (name, result, isError, meta, uiPayload) => {
+          onToolEnd: (name, result, isError, meta, uiPayload, durationMs) => {
             const startedAt = turnToolStarts.get(meta.toolUseId);
             turnToolStarts.delete(meta.toolUseId);
-            // Prefer durationMs threaded through `meta` (companion PR);
-            // otherwise fall back to wall-clock between start/end. When
-            // start was never recorded (mid-turn instrumentation) we
-            // contribute 0 ms — the renderer treats 0 cumulative as
-            // "per-tool timing not yet available" and elides the slice.
-            const metaDuration = (meta as unknown as { durationMs?: number }).durationMs;
+            // Prefer the executor-provided durationMs (companion PR
+            // `feat/tool-execution-duration-display`, now merged); fall
+            // back to wall-clock between start/end if absent. When start
+            // was never recorded (mid-turn instrumentation) we contribute
+            // 0 ms.
             const elapsed =
-              typeof metaDuration === "number" && Number.isFinite(metaDuration) && metaDuration >= 0
-                ? metaDuration
+              typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs >= 0
+                ? durationMs
                 : startedAt !== undefined
                   ? Math.max(0, Date.now() - startedAt)
                   : 0;
@@ -661,7 +660,7 @@ export class ConversationLoop {
             turnCumulativeToolMs += elapsed;
             const prev = turnToolBreakdown.get(name) ?? { count: 0, ms: 0 };
             turnToolBreakdown.set(name, { count: prev.count + 1, ms: prev.ms + elapsed });
-            callbacks.onToolEnd?.(name, result, isError, meta, uiPayload);
+            callbacks.onToolEnd?.(name, result, isError, meta, uiPayload, elapsed);
           },
         }
       : undefined;
