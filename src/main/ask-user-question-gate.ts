@@ -43,7 +43,6 @@ export interface AskUserQuestionItem {
 export interface AskUserQuestionRequest {
   id: string;
   questions: AskUserQuestionItem[];
-  urgent: boolean;
   createdAt: number;
 }
 
@@ -132,7 +131,6 @@ export class AskUserQuestionGate {
      * against malformed multi-question shapes.
      */
     questions: AskUserQuestionItem[];
-    urgent?: boolean;
     /**
      * Per-turn abort signal from the conversation loop. When the user
      * presses 중단 the signal fires and we resolve `dismissed: true` plus
@@ -163,7 +161,6 @@ export class AskUserQuestionGate {
         summaryHint: q.summaryHint,
         suggestedAnswers: q.suggestedAnswers,
       })),
-      urgent: input.urgent ?? false,
       createdAt: Date.now(),
     };
     // H3: enforce concurrent-pending cap before scheduling anything.
@@ -196,7 +193,6 @@ export class AskUserQuestionGate {
         title: "질문이 도착했습니다",
         body: previewBody,
         contextRef: { questionId: req.id },
-        urgent: req.urgent,
       });
     } catch {
       // notification failure must never block the gate

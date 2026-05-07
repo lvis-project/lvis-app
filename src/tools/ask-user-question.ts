@@ -108,10 +108,6 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
             },
           },
         },
-        urgent: {
-          type: "boolean",
-          description: "긴급 표시 (UI 상단 강조). 기본 false.",
-        },
       },
     },
     execute: async (rawInput, ctx) => {
@@ -229,10 +225,8 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
               : undefined,
         });
       }
-      const urgent = a.urgent === true;
       const response = await gate.ask({
         questions,
-        urgent,
         // Honor the user's 중단 button — without this the gate sits on its
         // 5-minute timer regardless of the conversation loop's abort.
         abortSignal: ctx.abortSignal,
