@@ -1,18 +1,13 @@
 /**
  * TokenCostBadge — turn-aggregate 토큰/비용 토글 배지.
  *
- * 사용자가 클릭하면 토큰 합계 ↔ 추정 비용 사이를 토글하고, hover 시
- * fresh / cache read / cache write / output 의 분리 breakdown 을 tooltip
- * 으로 보여준다. Anthropic prompt cache 가중치 (read 0.1× / write 1.25×)
- * 를 적용해 *billable equivalent* 비용 산출.
+ * 클릭하면 토큰 합계 ↔ 추정 비용 사이를 토글. hover 시 fresh / cache read /
+ * cache write / output breakdown 을 tooltip 으로 노출. 데이터는 모두
+ * provider 보고 값 (turn_summary entry → conversation-loop onTurnSummary).
  *
- * 데이터 source 는 conversation-loop 의 `onTurnSummary` 에서 흘러오는
- * provider 보고 값 (chars/4 추정 아님). pricing 정보는 호출자가 prop
- * 으로 전달하며 미지정 시 Sonnet 기본값으로 fallback (대략치). Phase 3
- * 에서 active model 의 정확 pricing 으로 교체 예정.
- *
- * Reference: Kilo Code OpenCode session.ts:354-392 — fresh = inputTokens
- * − cacheRead − cacheWrite, cost = sum(component × per-component-rate).
+ * `pricing` 이 없으면 cost 모드 자체를 표시하지 않는다 (토글 비활성).
+ * 잘못된 비용을 보여주느니 비용 표시를 안 하는 쪽이 정직 — 호출자가
+ * pricing 을 wiring 하기 전까지는 token 만 표시.
  */
 import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -20,16 +15,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 export interface TokenCostBadgePricing {
   inputPer1M: number;
   outputPer1M: number;
-  /** Anthropic 표준: cache read 는 input 의 10%. 미지정 시 inputPer1M × 0.1. */
+  /** Anthropic 기본: cache read = input 의 10%. 미지정 시 inputPer1M × 0.1. */
   cacheReadPer1M?: number;
-  /** Anthropic 표준: cache write 는 input 의 125%. 미지정 시 inputPer1M × 1.25. */
+  /** Anthropic 기본: cache write = input 의 125%. 미지정 시 inputPer1M × 1.25. */
   cacheWritePer1M?: number;
 }
-
-const DEFAULT_PRICING: TokenCostBadgePricing = {
-  inputPer1M: 3,
-  outputPer1M: 15,
-};
 
 export interface TokenCostBadgeProps {
   tokensIn: number;
@@ -64,22 +54,19 @@ export function TokenCostBadge({
   const total = tokensIn + tokensOut;
   if (total === 0) return null;
 
-  const p = pricing ?? DEFAULT_PRICING;
-  const inP = p.inputPer1M;
-  const outP = p.outputPer1M;
-  const crP = p.cacheReadPer1M ?? inP * 0.1;
-  const cwP = p.cacheWritePer1M ?? inP * 1.25;
-
-  // Vercel AI SDK v6: inputTokens 는 cached 포함 정규화이므로 fresh 만
-  // 분리해서 정상 가격 적용 (Kilo Code session.ts:355 패턴).
+  // Vercel AI SDK v6 의 inputTokens 가 cached 까지 포함한 정규화 값 →
+  // fresh 만 분리해야 정상 가격 적용. (Kilo OpenCode session.ts:355)
   const freshIn = Math.max(0, tokensIn - cacheReadTokens - cacheWriteTokens);
 
-  const cost =
-    (freshIn * inP +
-      cacheReadTokens * crP +
-      cacheWriteTokens * cwP +
-      tokensOut * outP) /
-    1_000_000;
+  const cost = pricing
+    ? (freshIn * pricing.inputPer1M +
+        cacheReadTokens * (pricing.cacheReadPer1M ?? pricing.inputPer1M * 0.1) +
+        cacheWriteTokens * (pricing.cacheWritePer1M ?? pricing.inputPer1M * 1.25) +
+        tokensOut * pricing.outputPer1M) /
+      1_000_000
+    : null;
+
+  const showCostMode = mode === "cost" && cost !== null;
 
   return (
     <Tooltip>
@@ -88,17 +75,17 @@ export function TokenCostBadge({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            setMode((m) => (m === "tokens" ? "cost" : "tokens"));
+            if (cost !== null) setMode((m) => (m === "tokens" ? "cost" : "tokens"));
           }}
-          className="inline-flex items-center gap-1 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] cursor-pointer hover:bg-muted/60 transition-colors tabular-nums"
-          aria-label={mode === "tokens" ? "토큰 합계 — 클릭하여 비용으로 전환" : "추정 비용 — 클릭하여 토큰으로 전환"}
+          className={`inline-flex items-center gap-1 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] tabular-nums ${cost !== null ? "cursor-pointer hover:bg-muted/60" : "cursor-default"}`}
+          aria-label={showCostMode ? "추정 비용 (클릭: 토큰 표시)" : "토큰 합계 (클릭: 비용 표시)"}
         >
-          {mode === "tokens" ? (
-            <span>🪙 {formatTokens(total)}</span>
+          {showCostMode ? (
+            <span className="text-emerald-600 dark:text-emerald-400">≈ {formatCost(cost!)}</span>
           ) : (
-            <span className="text-emerald-600 dark:text-emerald-400">≈ {formatCost(cost)}</span>
+            <span>🪙 {formatTokens(total)}</span>
           )}
-          <span className="text-[8px] opacity-50">⇅</span>
+          {cost !== null && <span className="text-[8px] opacity-50">⇅</span>}
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" className="text-xs tabular-nums">
@@ -130,13 +117,12 @@ export function TokenCostBadge({
             <span className="opacity-60">total tokens:</span>
             <span>{total.toLocaleString()}</span>
           </div>
-          <div className="flex justify-between gap-3 font-semibold text-emerald-500">
-            <span>≈ cost:</span>
-            <span>{formatCost(cost)}</span>
-          </div>
-        </div>
-        <div className="mt-1 text-[10px] opacity-60 leading-relaxed">
-          Anthropic 캐시: read 90% 할인 / write 25% 가산. 비용은 추정치.
+          {cost !== null && (
+            <div className="flex justify-between gap-3 font-semibold text-emerald-500">
+              <span>≈ cost:</span>
+              <span>{formatCost(cost)}</span>
+            </div>
+          )}
         </div>
       </TooltipContent>
     </Tooltip>
