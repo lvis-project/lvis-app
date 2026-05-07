@@ -113,26 +113,31 @@ export class PostTurnHookChain {
         // Stage 1b: threshold-triggered full compact. Denominator is *usable*
         // (raw − Cline buffer) so the 80% threshold matches the rotation /
         // UI-ring math — see `shared/context-budget.ts:getUsableContext`.
+        // No llmSettings → can't determine context window → skip Stage 1b
+        // (microcompact above already covered the safe per-turn path).
         const llmSettings = this.deps.settingsService?.get("llm");
-        const usable = llmSettings
-          ? getModelUsableContext(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model)
-          : undefined;
-        const willCompact = shouldCompact(ctx.cumulativeUsage, usable);
-        const usagePct = usable
-          ? ((ctx.cumulativeUsage.inputTokens / usable) * 100).toFixed(1)
-          : "?";
-        log.info(
-          `auto-compact: decision — cumIn=${ctx.cumulativeUsage.inputTokens} usableCtx=${usable ?? "?"} usage=${usagePct}% threshold=80% → shouldCompact=${willCompact}`,
-        );
-        if (willCompact) {
-          const { messages: compacted, result: cr } = compactMessages(working, undefined, "auto");
-          if (cr.compacted) {
-            compactedMessages = compacted;
-            log.info(
-              `auto-compact: APPLIED — removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens (msgCount ${working.length} → ${compacted.length})`,
-            );
-          } else {
-            log.info("auto-compact: shouldCompact=true 였으나 compactMessages no-op (preserve 윈도우만 남음)");
+        if (!llmSettings) {
+          log.info("auto-compact: SKIPPED — settingsService missing, cannot resolve usable context");
+        } else {
+          const usable = getModelUsableContext(
+            llmSettings.provider,
+            llmSettings.vendors[llmSettings.provider].model,
+          );
+          const willCompact = shouldCompact(ctx.cumulativeUsage, usable);
+          const usagePct = ((ctx.cumulativeUsage.inputTokens / usable) * 100).toFixed(1);
+          log.info(
+            `auto-compact: decision — cumIn=${ctx.cumulativeUsage.inputTokens} usableCtx=${usable} usage=${usagePct}% threshold=80% → shouldCompact=${willCompact}`,
+          );
+          if (willCompact) {
+            const { messages: compacted, result: cr } = compactMessages(working, undefined, "auto");
+            if (cr.compacted) {
+              compactedMessages = compacted;
+              log.info(
+                `auto-compact: APPLIED — removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens (msgCount ${working.length} → ${compacted.length})`,
+              );
+            } else {
+              log.info("auto-compact: shouldCompact=true 였으나 compactMessages no-op (preserve 윈도우만 남음)");
+            }
           }
         }
       }
