@@ -217,8 +217,8 @@ export function useChatState(api: LvisApi) {
         const { groupId, toolUseId, displayOrder = 0, name, input } = ev;
         setEntries((p) => applyToolStart(p, { groupId, toolUseId, displayOrder, name, input }));
       } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
-        const { groupId, toolUseId, result, isError, uiPayload } = ev;
-        setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload }));
+        const { groupId, toolUseId, result, isError, uiPayload, durationMs } = ev;
+        setEntries((p) => applyToolEnd(p, { groupId, toolUseId, result, isError, uiPayload, durationMs }));
       } else if (ev.type === "error") {
         setEntries((p) => {
           // Error during a brain-trigger import turn: also close the

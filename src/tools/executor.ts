@@ -132,11 +132,34 @@ export interface ToolResult {
   is_error?: boolean;
   /** MCP Apps spec §3.2 — optional UI payload from MCP tool response. */
   uiPayload?: import("../mcp/types.js").McpUiPayload;
+  /**
+   * Wall-clock time spent inside this tool's handler (Step 6) plus any
+   * pipeline overhead measured from Step 1's start. Surfaced on every
+   * tool_end emission so the renderer can display per-tool execution
+   * cost (`⏱ 1.4s`) inside ToolGroupCard.
+   *
+   * Always present — including on early-aborts (deny/rate-limit/error)
+   * so the UI never has a "missing" timer for a tool the user saw run.
+   */
+  durationMs: number;
 }
 
 export interface ToolExecutorCallbacks {
   onToolStart?: (name: string, input: Record<string, unknown>, meta: ToolCallMeta) => void;
-  onToolEnd?: (name: string, result: string, isError: boolean, meta: ToolCallMeta, uiPayload?: import("../mcp/types.js").McpUiPayload) => void;
+  /**
+   * Fired after Step 7b (DLP) and Step 8 (audit) for both success and
+   * failure paths. `durationMs` is wall-clock from Step 1 start to the
+   * moment the result is finalized — used by the renderer to show
+   * per-tool execution cost (`⏱ 1.4s`) on each ToolGroupCard row.
+   */
+  onToolEnd?: (
+    name: string,
+    result: string,
+    isError: boolean,
+    meta: ToolCallMeta,
+    uiPayload: import("../mcp/types.js").McpUiPayload | undefined,
+    durationMs: number,
+  ) => void;
 }
 
 // ─── Rate Limiter (tool-governance.md §9) ──────────
@@ -281,8 +304,10 @@ export class ToolExecutor {
     // ── Step 1: Lookup + source/trust 확인 ──────────
     const tool = this.toolRegistry.findByName(toolUse.name);
     if (!tool) {
+      const durationMs = Date.now() - startTime;
       this.auditToolCall(sessionId, toolUse.name, "builtin", "high", toolUse.input, "도구 없음", true, startTime, { decision: "deny", reason: "도구 없음", layer: 0 }, Infinity);
-      return { tool_use_id: toolUse.id, content: `도구를 찾을 수 없습니다: ${toolUse.name}`, is_error: true };
+      callbacks?.onToolEnd?.(toolUse.name, `도구를 찾을 수 없습니다: ${toolUse.name}`, true, meta, undefined, durationMs);
+      return { tool_use_id: toolUse.id, content: `도구를 찾을 수 없습니다: ${toolUse.name}`, is_error: true, durationMs };
     }
     source = tool.source;
     trust = trustFromSource(source);
@@ -298,10 +323,11 @@ export class ToolExecutor {
       const bashResult = this.bashAstValidator.validate(toolUse.name, toolUse.input);
       if (bashResult.decision === "deny") {
         const msg = `[Bash AST 차단] ${bashResult.reason} (pattern: ${bashResult.patternId})`;
+        const durationMs = Date.now() - startTime;
         callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
-        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
         this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity);
-        return { tool_use_id: toolUse.id, content: msg, is_error: true };
+        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
       if (bashResult.decision === "warn") {
         log.warn(`${bashResult.reason}`);
@@ -329,10 +355,11 @@ export class ToolExecutor {
       permissionResult = this.permissionManager.checkDetailed(toolUse.name, source, tool.category, proactiveOrigin);
       if (permissionResult.decision === "deny") {
         const msg = `[권한 차단] 도구 '${toolUse.name}' (${source}, trust:${trust}) — ${permissionResult.reason}`;
+        const durationMs = Date.now() - startTime;
         callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
-        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
         this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
-        return { tool_use_id: toolUse.id, content: msg, is_error: true };
+        return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
       }
       if (permissionResult.decision === "ask") {
         if (this.approvalGate) {
@@ -365,10 +392,11 @@ export class ToolExecutor {
             decision = await this.approvalGate.requestAndWait(approvalRequest);
           } catch (approvalErr) {
             const msg = `[승인 오류] 도구 '${toolUse.name}' — 승인 게이트 내부 오류: ${approvalErr instanceof Error ? approvalErr.message : String(approvalErr)}`;
+            const durationMs = Date.now() - startTime;
             callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
-            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
             this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
-            return { tool_use_id: toolUse.id, content: msg, is_error: true };
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
           if (decision.choice.startsWith("deny")) {
@@ -378,10 +406,11 @@ export class ToolExecutor {
               await this.permissionManager.addAlwaysDeniedPersist(pattern);
             }
             const msg = `[승인 거부] 도구 '${toolUse.name}' — 사용자가 실행을 거부했습니다.`;
+            const durationMs = Date.now() - startTime;
             callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
-            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
             this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
-            return { tool_use_id: toolUse.id, content: msg, is_error: true };
+            return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
           }
 
           // allow-always: 영구 허용 규칙 추가
@@ -393,11 +422,12 @@ export class ToolExecutor {
         } else {
           // §F4: approvalGate 미연결 시 fail-closed — 모든 ask 결정을 차단
           const msg = `[승인 게이트 미연결] 도구 '${toolUse.name}' (${source}) — ask 결정이지만 승인 게이트가 없어 차단. ${permissionResult.reason}`;
+          const durationMs = Date.now() - startTime;
           log.error(msg);
           callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
-          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
+          callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
           this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
-          return { tool_use_id: toolUse.id, content: msg, is_error: true };
+          return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
         }
       }
     }
@@ -405,10 +435,11 @@ export class ToolExecutor {
     // ── Step 4: Hook Override ───────────────────────
     if (preResult.action === "deny") {
       const msg = `[훅 차단] ${preResult.reason ?? "PreToolUse 훅에 의해 차단됨"}`;
+      const durationMs = Date.now() - startTime;
       callbacks?.onToolStart?.(toolUse.name, toolUse.input, meta);
-      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
       this.auditToolCall(sessionId, toolUse.name, source, trust, toolUse.input, msg, true, startTime, permissionResult, Infinity);
-      return { tool_use_id: toolUse.id, content: msg, is_error: true };
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
     const finalInput = preResult.action === "modify" && preResult.updatedInput
@@ -419,10 +450,11 @@ export class ToolExecutor {
     const rateResult = this.rateLimiter.check(toolUse.name, trust);
     if (!rateResult.allowed) {
       const msg = `[속도 제한] 도구 '${toolUse.name}' (trust:${trust}) 호출 빈도 초과. 잠시 후 다시 시도해주세요.`;
+      const durationMs = Date.now() - startTime;
       callbacks?.onToolStart?.(toolUse.name, finalInput, meta);
-      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
       this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, permissionResult, 0);
-      return { tool_use_id: toolUse.id, content: msg, is_error: true };
+      return { tool_use_id: toolUse.id, content: msg, is_error: true, durationMs };
     }
 
     callbacks?.onToolStart?.(toolUse.name, finalInput, meta);
@@ -493,7 +525,8 @@ export class ToolExecutor {
     }
 
     // ── Step 8: Audit + Result (항상 실행) ──────────
-    callbacks?.onToolEnd?.(toolUse.name, content, isError, meta, uiPayload);
+    const durationMs = Date.now() - startTime;
+    callbacks?.onToolEnd?.(toolUse.name, content, isError, meta, uiPayload, durationMs);
     // H3: redact the user's freeText answer before it lands in the audit
     // log. The DLP filter at Step 7b only catches structured patterns
     // (emails, IDs); a free-form answer ("내 비밀번호는 …") wouldn't match
@@ -511,7 +544,7 @@ export class ToolExecutor {
         : content;
     this.auditToolCall(sessionId, toolUse.name, source, trust, finalInput, auditContent, isError, startTime, permissionResult, rateResult.remaining);
 
-    return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }), ...(uiPayload && { uiPayload }) };
+    return { tool_use_id: toolUse.id, content, ...(isError && { is_error: true }), ...(uiPayload && { uiPayload }), durationMs };
   }
 
   // ─── Audit (불변 — 항상 실행) ────────────────────

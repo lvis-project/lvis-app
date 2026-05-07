@@ -203,6 +203,98 @@ describe("ToolGroupCard", () => {
     const { container } = render(<ToolGroupCard group={group} />);
     expect(container.textContent).toContain("오류 있음");
   });
+
+  it("single tool done: renders ⏱ duration badge with one decimal second precision", () => {
+    const group = makeGroup({
+      status: "done",
+      tools: [
+        {
+          toolUseId: "tu-1",
+          name: "read_file",
+          input: { path: "/tmp/test.txt" },
+          result: "file content",
+          status: "done",
+          displayOrder: 0,
+          durationMs: 1400,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    const badge = container.querySelector('[data-testid="tool-duration"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toContain("⏱ 1.4s");
+  });
+
+  it("single tool done: shows '<0.1s' for sub-100ms calls", () => {
+    const group = makeGroup({
+      status: "done",
+      tools: [
+        {
+          toolUseId: "tu-1",
+          name: "read_file",
+          input: {},
+          result: "ok",
+          status: "done",
+          displayOrder: 0,
+          durationMs: 50,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.querySelector('[data-testid="tool-duration"]')?.textContent).toContain("<0.1s");
+  });
+
+  it("single tool done: shows minute formatting for >60s calls", () => {
+    const group = makeGroup({
+      status: "done",
+      tools: [
+        {
+          toolUseId: "tu-1",
+          name: "read_file",
+          input: {},
+          result: "ok",
+          status: "done",
+          displayOrder: 0,
+          durationMs: 72_400,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.querySelector('[data-testid="tool-duration"]')?.textContent).toContain("⏱ 1m 12.4s");
+  });
+
+  it("single tool running: hides ⏱ duration badge while pending", () => {
+    const group = makeGroup({
+      status: "running",
+      tools: [
+        {
+          toolUseId: "tu-1",
+          name: "read_file",
+          input: {},
+          status: "running",
+          displayOrder: 0,
+        },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    expect(container.querySelector('[data-testid="tool-duration"]')).toBeNull();
+  });
+
+  it("multi-tool done: renders ⏱ duration badge for each completed tool row", () => {
+    const group = makeMultiGroup({
+      status: "done",
+      tools: [
+        { toolUseId: "tu-1", name: "knowledge_search", input: {}, result: "r1", status: "done", displayOrder: 0, durationMs: 300 },
+        { toolUseId: "tu-2", name: "read_file", input: {}, result: "r2", status: "done", displayOrder: 1, durationMs: 1400 },
+      ],
+    });
+    const { container } = render(<ToolGroupCard group={group} />);
+    fireEvent.click(container.querySelector("button") as HTMLButtonElement);
+    const badges = container.querySelectorAll('[data-testid="tool-duration"]');
+    expect(badges.length).toBe(2);
+    expect(badges[0]?.textContent).toContain("⏱ 0.3s");
+    expect(badges[1]?.textContent).toContain("⏱ 1.4s");
+  });
 });
 
 afterEach(() => {
