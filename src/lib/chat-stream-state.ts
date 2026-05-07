@@ -4,7 +4,7 @@
  * string-literal union here so the renderer side has zero engine imports.
  *
  * - "hard-token":   ctxUsage ≥ 85% → emergency rotation
- * - "semantic-llm": LLM emitted [checkpoint-suggested] marker → topic shift
+ * - "semantic-llm": LLM emitted [checkpoint] marker → topic shift
  * - "soft-time":    24h / 30 messages → natural rest checkpoint
  *
  * Absent from `compact_notice` events triggered by plain auto/reactive

@@ -3,6 +3,7 @@ import type React from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { EstimateBreakdown } from "../../../lib/cost-estimator.js";
+import type { ModelPricing } from "../../../shared/pricing-data.js";
 import type { Attachment } from "../types/attachments.js";
 
 type RoutineResult = {
@@ -113,6 +114,13 @@ export interface ChatContextValue {
   // Cost
   costEstimate: EstimateBreakdown;
   costBadgeClass: string;
+  /**
+   * Active model 의 pricing — `TokenCostBadge` 가 cost 모드 토글에 사용.
+   * undefined (unknown vendor/model) 이면 토글 비활성. App 에서 lookupPricing
+   * 으로 한 번 계산해 전달, 같은 source 가 cost-estimator 와 context-budget 에
+   * 도 흘러들어가도록 일치.
+   */
+  activePricing: ModelPricing | undefined;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
