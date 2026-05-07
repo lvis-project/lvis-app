@@ -22,6 +22,7 @@ import { SettingsDialog } from "./SettingsDialog.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
+import { lookupPricing } from "../../shared/pricing-data.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useRoutineResult } from "./hooks/use-routine-result.js";
 import { useRoutineRunning } from "./hooks/use-routine-running.js";
@@ -469,6 +470,10 @@ export function App() {
 
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
+  const activePricing = useMemo(
+    () => lookupPricing(llmVendor, llmModel),
+    [llmVendor, llmModel],
+  );
 
   const handleNewChat = useCallback(async () => {
     if (streaming) { console.warn("new chat blocked during streaming"); return; }
@@ -567,6 +572,7 @@ export function App() {
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
+    activePricing,
   });
 
   // Bottom status bar (#231) — bottom slot for persistent items + transient

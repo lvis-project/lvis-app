@@ -83,7 +83,7 @@ describe("historyToEntries", () => {
       {
         index: 1,
         role: "assistant",
-        content: "결과는 **정상**입니다.<title>히스토리 마커 제거</title>[checkpoint-suggested]",
+        content: "결과는 **정상**입니다.<title>히스토리 마커 제거</title>[checkpoint]",
       },
     ]);
 
@@ -99,7 +99,7 @@ describe("historyToEntries", () => {
       {
         index: 1,
         role: "assistant",
-        content: "<title>제목만 생성</title>[checkpoint-suggested]",
+        content: "<title>제목만 생성</title>[checkpoint]",
       },
     ]);
 
