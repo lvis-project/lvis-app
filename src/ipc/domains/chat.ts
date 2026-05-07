@@ -185,7 +185,7 @@ async function runStreamedTurn(
           ...(revertSessionId !== undefined ? { revertSessionId } : {}),
           ...(summary !== undefined ? { summary } : {}),
         }),
-      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, tokensOut, breakdown }) =>
+      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, tokensOut, cacheReadTokens, cacheWriteTokens, breakdown }) =>
         send({
           type: "turn_summary",
           turnDurationMs,
@@ -193,6 +193,8 @@ async function runStreamedTurn(
           cumulativeToolMs,
           tokensIn,
           tokensOut,
+          ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+          ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
           ...(breakdown ? { breakdown } : {}),
         }),
       onFallback: (from, to) => webContents?.send("lvis:chat:fallback", { from, to }),
