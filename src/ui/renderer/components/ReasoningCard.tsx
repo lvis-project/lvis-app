@@ -44,9 +44,9 @@ export function ReasoningCard({
 
   const title = streaming ? "생각 중..." : "생각 완료";
   const bodyVisible = streaming || open;
-  const approxTokens = !streaming && entry.text
-    ? Math.max(1, Math.ceil(entry.text.length / 4))
-    : 0;
+  // chars/4 token estimate 제거 (2026-05-07): 한국어 2-3× under-estimate
+  // 의 거짓 정보였음. 토큰 정보는 turn 단위로 ActionBar 의 TokenCostBadge
+  // 한 곳에서만 표시.
 
   return (
     <div className="min-w-0 w-full max-w-full rounded-md text-sm text-muted-foreground">
@@ -64,11 +64,6 @@ export function ReasoningCard({
           ? <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
           : <Brain className="h-3 w-3 flex-shrink-0" />}
         <span className="min-w-0 font-medium">{title}</span>
-        {approxTokens > 0 && (
-          <span className="shrink-0 rounded bg-muted/60 px-1 text-[10px] text-muted-foreground">
-            ~{approxTokens >= 1000 ? `${(approxTokens / 1000).toFixed(1)}k` : approxTokens} tok
-          </span>
-        )}
         {!streaming && (
           <span className="shrink-0">
             {bodyVisible
