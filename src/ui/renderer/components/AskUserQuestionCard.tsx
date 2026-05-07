@@ -62,7 +62,6 @@ export interface AskUserQuestionItem {
 export interface AskUserQuestionRequest {
   id: string;
   questions: AskUserQuestionItem[];
-  urgent: boolean;
   createdAt: number;
 }
 
@@ -206,12 +205,12 @@ export function AskUserQuestionCard({
 
   return (
     <Card
-      className={`w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none ${request.urgent ? "border-amber-500/60 bg-amber-500/5" : ""}`}
+      className="w-full max-w-none border border-l-4 border-l-message-user bg-card shadow-none"
       data-testid="ask-user-question-card"
     >
       <CardHeader className="flex flex-row items-center justify-between gap-2 px-3 pt-3 pb-1.5 space-y-0">
         <CardTitle className="text-[12px] font-medium text-muted-foreground">
-          {request.urgent ? "🟠 긴급 질문" : "❓ 질문"}
+          ❓ 질문
         </CardTitle>
         {stepLabel && (
           <span className="text-[10px] text-muted-foreground/70" data-testid="ask-step-label">
