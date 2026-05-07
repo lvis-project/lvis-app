@@ -165,9 +165,11 @@ function AskUserAnswerBubble({
 function HistoricalEntriesList({
   entries,
   activePricing,
+  activeVendor,
 }: {
   entries: ContinuousHistorySession["entries"];
   activePricing: ChatContextValue["activePricing"];
+  activeVendor: ChatContextValue["activeVendor"];
 }) {
   const renderEntry = (entry: ContinuousHistorySession["entries"][number], idx: number, embedded = false) => {
     if (entry.kind === "assistant") {
@@ -272,6 +274,7 @@ function HistoricalEntriesList({
                 tokensOut={histTurnSummary.tokensOut}
                 cacheReadTokens={histTurnSummary.cacheReadTokens}
                 cacheWriteTokens={histTurnSummary.cacheWriteTokens}
+                vendor={activeVendor}
                 pricing={activePricing}
               />
             </div>,
@@ -373,7 +376,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
-    costEstimate, costBadgeClass, activePricing,
+    costEstimate, costBadgeClass, activePricing, activeVendor,
   } = useChatContext();
 
   const currentSessionAnchor = useMemo(() => {
@@ -681,7 +684,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             {daySessions.map((session) => (
               <Fragment key={session.id}>
                 <HistoricalSessionMarker title={session.title} sessionId={session.id} />
-                <HistoricalEntriesList entries={session.entries} activePricing={activePricing} />
+                <HistoricalEntriesList entries={session.entries} activePricing={activePricing} activeVendor={activeVendor} />
               </Fragment>
             ))}
           </Fragment>
@@ -1029,12 +1032,17 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               }
 
               if (groupEntries.length > 0) {
+                // Prefer the turn_summary's authoritative `toolCount` over
+                // groupEntries.length — the latter includes reasoning /
+                // assistant bubbles / ask_user_answer / inline sub-agent
+                // cards and would diverge from the actual tool-call count.
+                const groupSummary = turnSummaryByTurnStart.get(groupTurnStart);
                 rendered.push(
                   <WorkGroup
                     key={`wg-${groupStart}`}
-                    stepCount={groupEntries.length}
+                    stepCount={groupSummary?.toolCount ?? groupEntries.length}
                     streaming={groupIsActiveTurn}
-                    turnDurationMs={turnSummaryByTurnStart.get(groupTurnStart)?.turnDurationMs}
+                    turnDurationMs={groupSummary?.turnDurationMs}
                   >
                     {groupEntries.map((ge) => ge.node)}
                   </WorkGroup>
@@ -1081,6 +1089,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   <TurnActionBar
                     turnSummary={summary}
                     pricing={activePricing}
+                    vendor={activeVendor}
                     isStarred={!!isEntryStarred(idx)}
                     actions={{
                       onRetry: () => void onRetryEffort(),
