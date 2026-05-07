@@ -10,7 +10,7 @@
 import { ConversationHistory, normalizeToolPairInvariant } from "./conversation-history.js";
 import { ToolExecutor, type ToolUseBlock } from "../tools/executor.js";
 import { HookRunner } from "../hooks/hook-runner.js";
-import { shouldCompact, compactMessages, getModelUsableContext, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
+import { shouldCompact, compactMessages, estimateMessagesTokens, getModelUsableContext, decideRotation, type CheckpointTriggerType } from "./auto-compact.js";
 import { generateSummary } from "./summary-generator.js";
 import { createProvider, secretKeyFor } from "./llm/provider-factory.js";
 import { FallbackProvider } from "./llm/vercel/fallback-chain.js";
@@ -498,14 +498,18 @@ export class ConversationLoop {
       return { ok: false, compacted: false, compactedAt: null, removedMessageCount: 0 };
     }
 
-    // Issue 1: loadSession resets cumulativeUsage to zero, so shouldCompact()
-    // would never fire on resume. Estimate usage from loaded history instead.
-    // Approximation: sum of content char lengths / 4 (same formula as estimateTokens).
-    const estimatedInputTokens = this.history.getMessages().reduce((sum, msg) => {
-      const content = typeof msg.content === "string" ? msg.content : "";
-      return sum + Math.ceil(content.length / 4) + 1;
-    }, 0);
-    this.cumulativeUsage = { inputTokens: estimatedInputTokens, outputTokens: 0 };
+    // loadSession resets cumulativeUsage to zero, so shouldCompact() would
+    // never fire on resume. Estimate usage from loaded history via the
+    // canonical `estimateMessagesTokens` helper — counts thinking blocks
+    // and tool fields too, not just user-text content. Known limitation:
+    // chars/4 under-estimates Korean by ~50% (Korean ≈ 1.7-2 chars/token);
+    // resumed sessions near the rotation threshold may take one extra turn
+    // to fire compact. Acceptable for the resume edge case — full real-
+    // time accounting takes over once the next provider response lands.
+    this.cumulativeUsage = {
+      inputTokens: estimateMessagesTokens(this.history.getMessages()),
+      outputTokens: 0,
+    };
 
     let compacted = false;
     let removedMessageCount = 0;
