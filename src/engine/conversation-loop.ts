@@ -1501,11 +1501,7 @@ export class ConversationLoop {
     const continuousBackendEnabled = features?.experimentalContinuousBackend ?? false;
     const devMode = process.env.LVIS_DEV === "1";
     const sessionAgeMs = Date.now() - this.sessionStartedAt;
-    // 마커 어휘 정정 (2026-05-07): `[checkpoint]` 가 정식 형태. legacy
-    // `[checkpoint-suggested]` 도 한동안 backward-compat 으로 인식한다.
-    const semanticHint =
-      lastAssistantText.includes("[checkpoint]") ||
-      lastAssistantText.includes("[checkpoint-suggested]");
+    const semanticHint = lastAssistantText.includes("[checkpoint]");
     const decision = decideRotation({
       ctxUsage,
       sessionAgeMs,

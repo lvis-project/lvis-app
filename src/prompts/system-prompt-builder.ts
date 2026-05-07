@@ -455,14 +455,12 @@ export class SystemPromptBuilder {
 
     // ⑨-b Conversation Meta Output (per-turn)
     //
-    // PR-2: Instructs the LLM to emit <title>…</title> and optional
-    // [checkpoint-suggested] at the end of every final answer.
-    // The session title (if set) is injected so the LLM can produce an
-    // evolved, cumulative title grounded in the existing context.
-    // Extraction of the markers from the rendered stream is handled in PR-3
-    // (renderer stream parser) — this source only emits the instructions.
-    // Gated by experimentalContinuousBackend flag — skipped when false to prevent
-    // LLM instructions that produce markers which can contaminate UI output.
+    // Instructs the LLM to emit <title>…</title> and optionally [checkpoint]
+    // at the end of every final answer. The session title (if set) is injected
+    // so the LLM can produce an evolved, cumulative title grounded in the
+    // existing context. Gated by experimentalContinuousBackend flag — skipped
+    // when false to prevent LLM instructions that produce markers which can
+    // contaminate UI output.
     this.sources.push({
       id: 9.9,
       name: "Conversation Meta Output",
@@ -536,10 +534,7 @@ const CONVERSATION_META_OUTPUT = `## 대화 메타 출력 (final answer 끝에 �
 #### 의사결정 원칙
 - "사용자가 다음에 같은 작업을 이어갈까, 아니면 새 작업으로 넘어갈까?" — 후자에 더 가까우면 마커.
 - 애매하면 *생략* 보다 *삽입* 이 안전 (회전이 trivial 비용, 누락은 컨텍스트 폭주 비용 큼).
-- 한 세션 안에 여러 번 발화 가능 — 매번 task boundary 마다.
-
-### 호환 안내 (구 어휘)
-이전에는 \`[checkpoint-suggested]\` 로 표기했지만, 시스템은 두 표기 모두 인식합니다. 새 답변에서는 \`[checkpoint]\` 만 사용하세요.`;
+- 한 세션 안에 여러 번 발화 가능 — 매번 task boundary 마다.`;
 
 const TOOL_USE_STRATEGY = `## 도구 사용 전략
 
