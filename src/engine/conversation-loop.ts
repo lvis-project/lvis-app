@@ -221,6 +221,13 @@ export class ConversationLoop {
   /** K4: §4.5 11-step trace — dev 모드 활성, 프로덕션 no-op */
   private tracer: ConversationTracer = createTracer(this.sessionId);
   private cumulativeUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  /**
+   * 마지막 round 의 raw inputTokens — turn_summary.tokensIn 으로 forward.
+   * "이번 turn 의 prompt 가 얼마나 컸나" (size 의도). queryLoop 에서 매 round
+   * overwrite, runTurn 의 turn_summary emit 시 read. billing 합산 (turnUsage)
+   * 와 다른 metric.
+   */
+  private lastRoundInputTokens = 0;
   /** PR-4: timestamp when the current session started (ms since epoch) — used by decideRotation */
   private sessionStartedAt: number = Date.now();
   // 2026-05-04 incident 후속: rotation 직후 한 turn 동안 다음 rotation 보류
@@ -643,6 +650,11 @@ export class ConversationLoop {
     const turnStartedAt = Date.now();
     let turnTokensIn = 0;
     let turnTokensOut = 0;
+    // queryLoop 가 별 method 라 마지막 round 의 raw inputTokens 를 instance
+    // field 로 share. queryLoop 가 매 round set, runTurn 이 turn_summary
+    // emit 시 read. 의도: "이번 turn 의 prompt size" 사용자 직관 (사용자
+    // 보고 2026-05-07: 합산은 10× over-count 처럼 보임).
+    this.lastRoundInputTokens = 0;
     let turnToolCount = 0;
     let turnCumulativeToolMs = 0;
     const turnToolStarts = new Map<string, number>();
@@ -836,7 +848,11 @@ export class ConversationLoop {
       `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text?.trim().length ?? 0} usage=${result.usage ? `in=${result.usage.inputTokens} out=${result.usage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
     );
     if (willEmitSummary) {
-      turnTokensIn = result.usage?.inputTokens ?? 0;
+      // tokensIn = 마지막 round 의 prompt size (user-facing context size).
+      // tokensOut / cacheRead / cacheWrite 는 모든 round 의 합산 (turn 의
+      // 누적 work). 이 split 가 "이번 turn 이 얼마나 컸나" 직관과 일치
+      // (사용자 보고 2026-05-07: 합산 inputTokens 는 10× over-count 처럼 보임).
+      turnTokensIn = this.lastRoundInputTokens;
       turnTokensOut = result.usage?.outputTokens ?? 0;
       const turnCacheRead = result.usage?.cacheReadTokens ?? 0;
       const turnCacheWrite = result.usage?.cacheWriteTokens ?? 0;
@@ -1072,6 +1088,11 @@ export class ConversationLoop {
         const cacheRead = u.cacheReadTokens ?? 0;
         const cacheWrite = u.cacheWriteTokens ?? 0;
         const adjustedIn = Math.max(0, u.inputTokens - cacheRead - cacheWrite);
+
+        // Last-round overwrite (instance field — runTurn 의 turn_summary
+        // emit 이 read). turn_summary.tokensIn 의 size 의도. billing 합산은
+        // turnUsage.inputTokens / cumulativeUsage 가 별도 추적.
+        this.lastRoundInputTokens = u.inputTokens;
 
         turnUsage = {
           inputTokens: (turnUsage?.inputTokens ?? 0) + u.inputTokens,

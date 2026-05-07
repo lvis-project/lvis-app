@@ -105,15 +105,15 @@ describe("ConversationLoop onTurnSummary", () => {
 
     expect(summary).not.toBeNull();
     expect(summary!.toolCount).toBe(3);
-    // Contract (2026-05-07 Kilo Code 패턴 적용 후): turn_summary 의 token
-    // 값은 *모든 round 합산*. mock provider 의 3 round usage:
+    // Contract (2026-05-07 v2): tokensIn = *마지막 round* 의 raw inputTokens
+    // (사용자 직관 = "이번 turn 의 context size"). tokensOut + cache 는 모든
+    // round 합산 (turn 의 누적 work). 사용자 보고 "10× over-count" 후 size
+    // 의도로 align.
     //   round 1: in=100, out=20
     //   round 2: in= 80, out=15
-    //   round 3: in= 60, out=10  (end_turn)
-    // 합산 → tokensIn=240, tokensOut=45.
-    // 이전 동작 (`turnUsage = stream.usage` 으로 last-round 만 보존) 은
-    // multi-round turn 의 footer 가 under-report 되던 버그였음.
-    expect(summary!.tokensIn).toBe(240);
+    //   round 3: in= 60, out=10  (end_turn — last)
+    // → tokensIn=60 (last round), tokensOut=45 (sum).
+    expect(summary!.tokensIn).toBe(60);
     expect(summary!.tokensOut).toBe(45);
     expect(summary!.turnDurationMs).toBeGreaterThanOrEqual(0);
     // cumulativeToolMs aggregates per-call wall-clock — non-negative; tool
