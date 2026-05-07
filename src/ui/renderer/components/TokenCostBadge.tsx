@@ -25,6 +25,7 @@
 import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { anthropicCacheRates } from "../../../shared/pricing-data.js";
+import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 
 export interface TokenCostBadgePricing {
   inputPer1M: number;
@@ -45,6 +46,19 @@ export interface TokenCostBadgeProps {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   pricing?: TokenCostBadgePricing;
+  /**
+   * Active vendor for the turn — selects how cache fields combine with the
+   * cost formula. Mirrors the asymmetry encoded in
+   * `engine/llm/pricing.ts:computeCost`:
+   *   - "claude": cache is additive (Anthropic ratios applied).
+   *   - everyone else: cache is already inside `freshInputTokens` /
+   *     prompt_tokens (provider's billing pipeline auto-discounts cached
+   *     portion); the badge ignores cache fields in cost mode to avoid
+   *     double-charging.
+   * Optional for backward-compat in tests; production callers always
+   * propagate the active vendor from ChatContext.
+   */
+  vendor?: LLMVendor;
 }
 
 function formatTokens(n: number): string {
@@ -68,6 +82,7 @@ export function TokenCostBadge({
   cacheReadTokens = 0,
   cacheWriteTokens = 0,
   pricing,
+  vendor,
 }: TokenCostBadgeProps) {
   // Default = tokens. 사용자 요청: 청구액보다 토큰 수치가 더 직관적.
   // 클릭으로 cost 토글 가능 (pricing 이 있을 때만).
@@ -77,14 +92,20 @@ export function TokenCostBadge({
 
   const cost = (() => {
     if (!pricing) return null;
-    const { read: cacheReadRate, write: cacheWriteRate } = anthropicCacheRates(pricing);
-    return (
-      (freshInputTokens * pricing.inputPer1M +
-        cacheReadTokens * cacheReadRate +
-        cacheWriteTokens * cacheWriteRate +
-        tokensOut * pricing.outputPer1M) /
-      1_000_000
-    );
+    const baseInput = freshInputTokens * pricing.inputPer1M;
+    const output = tokensOut * pricing.outputPer1M;
+    if (vendor === "claude") {
+      // Anthropic raw shape — cache is additive at published ratios.
+      const { read: cacheReadRate, write: cacheWriteRate } = anthropicCacheRates(pricing);
+      return (baseInput + cacheReadTokens * cacheReadRate + cacheWriteTokens * cacheWriteRate + output) / 1_000_000;
+    }
+    // OpenAI / Gemini / Copilot / Azure-Foundry / Vertex-AI — cached portion
+    // is already inside the prompt_tokens that became `freshInputTokens`
+    // (Vercel SDK normalized `cachedInputTokens` is subtracted in the
+    // engine before emit). Provider auto-discounts the cached portion in
+    // billing — LVIS approximates with list price. No cache addition here
+    // would double-charge.
+    return (baseInput + output) / 1_000_000;
   })();
 
   const showCostMode = mode === "cost" && cost !== null;

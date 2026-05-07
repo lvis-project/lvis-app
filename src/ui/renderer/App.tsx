@@ -576,6 +576,7 @@ export function App() {
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
     activePricing,
+    activeVendor: llmVendor,
   });
 
   // Bottom status bar (#231) — bottom slot for persistent items + transient

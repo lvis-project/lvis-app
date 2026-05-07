@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
+import { formatDuration } from "../../../lib/turn-summary-format.js";
 
 interface WorkGroupProps {
   stepCount: number;
@@ -9,19 +10,11 @@ interface WorkGroupProps {
   /**
    * Optional total wall-clock duration of the turn (ms). When provided and
    * the group is not streaming, the header shows `⏱ Tm Ts` next to the
-   * step count. Replaces the standalone TurnSummaryFooter that previously
-   * carried this info as a separate row.
+   * step count. Reuses the shared turn-summary `formatDuration` formatter
+   * so this label stays consistent with TurnSummaryFooter and per-tool
+   * duration labels.
    */
   turnDurationMs?: number;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const totalSec = ms / 1000;
-  if (totalSec < 60) return `${totalSec.toFixed(1)}s`;
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec - min * 60;
-  return `${min}m ${sec.toFixed(1)}s`;
 }
 
 // Monotonic per-instance id so multiple WorkGroups in one turn can be

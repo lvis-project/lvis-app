@@ -4,6 +4,7 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { EstimateBreakdown } from "../../../lib/cost-estimator.js";
 import type { ModelPricing } from "../../../shared/pricing-data.js";
+import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { Attachment } from "../types/attachments.js";
 
 type RoutineResult = {
@@ -121,6 +122,12 @@ export interface ChatContextValue {
    * 도 흘러들어가도록 일치.
    */
   activePricing: ModelPricing | undefined;
+  /**
+   * Active vendor — `TokenCostBadge` 가 cache 가산 분기 (claude only) 결정에
+   * 사용. `engine/llm/pricing.ts:computeCost` 와 동일한 vendor-aware 룰을
+   * UI 에 일치시키기 위해 propagate.
+   */
+  activeVendor: LLMVendor;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
