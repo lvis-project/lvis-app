@@ -156,7 +156,7 @@ describe("PostTurnHookChain", () => {
     } as unknown as SettingsService;
     const chain = new PostTurnHookChain({ memoryManager, settingsService });
 
-    const rawOutput = "정리 완료입니다.<title>회의 결과 요약 정리본</title>[checkpoint-suggested]";
+    const rawOutput = "정리 완료입니다.<title>회의 결과 요약 정리본</title>[checkpoint]";
     const result = await chain.run({
       sessionId: "session-detect",
       messages: [
@@ -173,7 +173,7 @@ describe("PostTurnHookChain", () => {
     expect(result.detector.checkpointSuggested).toBe(true);
     expect(result.detector.newTitle).toBe("회의 결과 요약 정리본");
     expect(result.detector.cleanedText).not.toContain("<title>");
-    expect(result.detector.cleanedText).not.toContain("[checkpoint-suggested]");
+    expect(result.detector.cleanedText).not.toContain("[checkpoint]");
     expect(result.detector.cleanedText).toContain("정리 완료입니다.");
     const savedMessages = saveSession.mock.calls[0]?.[1] as GenericMessage[];
     expect(savedMessages.at(-1)).toMatchObject({
@@ -197,7 +197,7 @@ describe("PostTurnHookChain", () => {
       }),
     } as unknown as SettingsService;
     const chain = new PostTurnHookChain({ memoryManager, settingsService });
-    const rawOutput = "<title>제목만 생성</title>[checkpoint-suggested]";
+    const rawOutput = "<title>제목만 생성</title>[checkpoint]";
 
     await chain.run({
       sessionId: "session-marker-only",
@@ -242,7 +242,7 @@ describe("PostTurnHookChain", () => {
       messages: createMessages(),
       cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
       input: "마무리",
-      output: "완료.[checkpoint-suggested]",
+      output: "완료.[checkpoint]",
       toolCalls: [],
       route: "chat",
     });
@@ -343,7 +343,7 @@ describe("PostTurnHookChain", () => {
       messages: createMessages(),
       cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
       input: "이거 기억해줘",
-      output: "네, 기억하겠습니다.<title>기억 저장 테스트 제목</title>[checkpoint-suggested]",
+      output: "네, 기억하겠습니다.<title>기억 저장 테스트 제목</title>[checkpoint]",
       toolCalls: [],
       route: "chat",
     });
@@ -351,7 +351,7 @@ describe("PostTurnHookChain", () => {
     const savedBody = saveMemory.mock.calls[0]?.[1] as string;
     expect(savedBody).toContain("네, 기억하겠습니다.");
     expect(savedBody).not.toContain("<title>");
-    expect(savedBody).not.toContain("[checkpoint-suggested]");
+    expect(savedBody).not.toContain("[checkpoint]");
   });
 
   describe("audit route emission", () => {
@@ -487,7 +487,7 @@ describe("PostTurnHookChain", () => {
         messages: createMessages(),
         cumulativeUsage: { inputTokens: 100, outputTokens: 0 },
         input: "테스트",
-        output: "응답 완료입니다.<title>테스트 제목</title>[checkpoint-suggested]",
+        output: "응답 완료입니다.<title>테스트 제목</title>[checkpoint]",
         toolCalls: [],
         route: "chat",
       });
@@ -496,7 +496,7 @@ describe("PostTurnHookChain", () => {
       expect(result.detector.checkpointSuggested).toBe(false);
       expect(result.detector.newTitle).toBeNull();
       // cleanedText stays as raw output (not stripped) since detect was skipped
-      expect(result.detector.cleanedText).toContain("[checkpoint-suggested]");
+      expect(result.detector.cleanedText).toContain("[checkpoint]");
       expect(onCheckpointSuggested).not.toHaveBeenCalled();
     });
 

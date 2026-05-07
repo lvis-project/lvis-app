@@ -24,7 +24,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
-    costEstimate, costBadgeClass,
+    costEstimate, costBadgeClass, activePricing,
   } = parts;
 
   return useMemo<ChatContextValue>(() => ({
@@ -42,7 +42,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
-    costEstimate, costBadgeClass,
+    costEstimate, costBadgeClass, activePricing,
   }), [
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
@@ -58,6 +58,6 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
-    costEstimate, costBadgeClass,
+    costEstimate, costBadgeClass, activePricing,
   ]);
 }

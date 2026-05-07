@@ -170,7 +170,7 @@ export function getModelContextWindow(vendor: LLMVendor, model: string): number 
 /**
  * 체크포인트 트리거 종류 (3-tier rotation 결정 트리).
  * - "hard-token":  컨텍스트 윈도우 85% 도달 → 즉시 rotation 필요
- * - "semantic-llm": LLM이 [checkpoint-suggested] 마커를 삽입 → 토픽 전환 감지
+ * - "semantic-llm": LLM이 [checkpoint] 마커를 삽입 → 토픽 전환 감지
  * - "soft-time":  24h 경과 또는 30개 메시지 → 자연 체크포인트
  */
 export type CheckpointTriggerType = "hard-token" | "semantic-llm" | "soft-time";
@@ -185,12 +185,12 @@ export interface RotationDecision {
  * 3-tier rotation 결정 트리.
  *
  * Tier 1 (hard-token):  ctxUsage >= 0.85 → 무조건 rotation + 요약 생성
- * Tier 2 (semantic-llm): LLM이 [checkpoint-suggested] 마커 삽입 → rotation, 요약은 ctxUsage 판단
+ * Tier 2 (semantic-llm): LLM이 [checkpoint] 마커 삽입 → rotation, 요약은 ctxUsage 판단
  * Tier 3 (soft-time):   24h 경과 → rotation, 요약은 ctxUsage 판단 (day-boundary 안전망)
  *
  * @param args.ctxUsage         0.0–1.0 컨텍스트 사용률
  * @param args.sessionAgeMs     세션 시작 이후 경과 ms
- * @param args.semanticHint     [checkpoint-suggested] 마커 발견 여부
+ * @param args.semanticHint     [checkpoint] 마커 발견 여부
  * @param args.continuousBackendEnabled  Safety gate: when false, always returns { shouldRotate: false }.
  * @param args.devMode          Developer mode: reduces soft-time threshold to 1h for easier testing.
  *
