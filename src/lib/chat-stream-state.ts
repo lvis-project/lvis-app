@@ -54,6 +54,12 @@ export type StreamEvent = {
     height?: number;
     title?: string;
   };
+  /**
+   * Wall-clock execution time of a single tool call (ms). Emitted on
+   * `tool_end` for every path (success, error, deny, rate-limit) so the
+   * renderer can show per-tool timing on each ToolGroupCard row.
+   */
+  durationMs?: number;
 };
 
 export type ToolEntryItem = {
@@ -71,6 +77,13 @@ export type ToolEntryItem = {
     height?: number;
     title?: string;
   };
+  /**
+   * Wall-clock execution duration in milliseconds. Set on tool completion
+   * (success or error). Used by ToolGroupCard to render `⏱ 1.4s` next to
+   * the tool name. Optional because running tools don't yet have a
+   * duration; once `status` flips to "done"/"error" this is populated.
+   */
+  durationMs?: number;
 };
 
 export type ChatEntry =
@@ -514,6 +527,7 @@ export function applyToolEnd(
     result?: string;
     isError?: boolean;
     uiPayload?: ToolEntryItem["uiPayload"];
+    durationMs?: number;
   },
 ): ChatEntry[] {
   const next = [...entries];
@@ -534,6 +548,7 @@ export function applyToolEnd(
           status: (payload.isError ? "error" : "done") as "done" | "error",
           result: payload.result,
           ...(payload.uiPayload && { uiPayload: payload.uiPayload }),
+          ...(typeof payload.durationMs === "number" && { durationMs: payload.durationMs }),
         }
       : tool,
   );
