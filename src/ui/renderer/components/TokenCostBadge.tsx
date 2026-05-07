@@ -24,6 +24,7 @@
  */
 import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import { anthropicCacheRates } from "../../../shared/pricing-data.js";
 
 export interface TokenCostBadgePricing {
   inputPer1M: number;
@@ -74,13 +75,17 @@ export function TokenCostBadge({
   const headlineTokens = freshInputTokens + tokensOut;
   if (headlineTokens === 0 && tokensIn === 0) return null;
 
-  const cost = pricing
-    ? (freshInputTokens * pricing.inputPer1M +
-        cacheReadTokens * (pricing.cacheReadPer1M ?? pricing.inputPer1M * 0.1) +
-        cacheWriteTokens * (pricing.cacheWritePer1M ?? pricing.inputPer1M * 1.25) +
+  const cost = (() => {
+    if (!pricing) return null;
+    const { read: cacheReadRate, write: cacheWriteRate } = anthropicCacheRates(pricing);
+    return (
+      (freshInputTokens * pricing.inputPer1M +
+        cacheReadTokens * cacheReadRate +
+        cacheWriteTokens * cacheWriteRate +
         tokensOut * pricing.outputPer1M) /
       1_000_000
-    : null;
+    );
+  })();
 
   const showCostMode = mode === "cost" && cost !== null;
 
@@ -94,7 +99,14 @@ export function TokenCostBadge({
             if (cost !== null) setMode((m) => (m === "tokens" ? "cost" : "tokens"));
           }}
           className={`inline-flex items-center gap-1 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] tabular-nums ${cost !== null ? "cursor-pointer hover:bg-muted/60" : "cursor-default"}`}
-          aria-label={showCostMode ? "추정 비용 (클릭: 토큰 표시)" : "fresh + output 토큰 (클릭: 비용 표시)"}
+          aria-disabled={cost === null}
+          aria-label={
+            cost === null
+              ? "fresh + output 토큰 (비용 표시 비활성 — 가격 정보 없음)"
+              : showCostMode
+                ? "추정 비용 (클릭: 토큰 표시)"
+                : "fresh + output 토큰 (클릭: 비용 표시)"
+          }
         >
           {showCostMode ? (
             <span className="text-emerald-600 dark:text-emerald-400">≈ {formatCost(cost!)}</span>

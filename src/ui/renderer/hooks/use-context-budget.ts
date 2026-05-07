@@ -3,17 +3,15 @@ import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { lookupPricing, effectiveContextWindow } from "../../../shared/pricing-data.js";
 import { getUsableContext } from "../../../shared/context-budget.js";
 
-const DEFAULT_CONTEXT_WINDOW = 128_000;
-
 /**
  * Context budget hook — provider-truth based (Phase 3, 2026-05-07).
  *
- * `usedTokens` = the most recent `turn_summary` entry's `tokensIn`. Engine
- * already applies the Kilo Code pattern (Vercel AI SDK v6 normalized
- * inputTokens minus cacheRead/cacheWrite → fresh-only) before emitting, so
- * this number reflects the *actual* fresh prompt size the provider just
- * billed. Auto-compact reduces it on the next turn; the ring shrinks
- * accordingly.
+ * `usedTokens` = the most recent `turn_summary` entry's `tokensIn` — the
+ * *last round's raw input* (includes cache reads). This is the right
+ * denominator for the context-fill ring because cache reads still occupy
+ * context-window slots even though they're billed at 1/10 the rate. The
+ * billing-weight number lives on `freshInputTokens` (TokenCostBadge),
+ * which is a different question.
  *
  * Replaces the old `entries.map(chars/4).sum()` heuristic which:
  *   - missed system prompt (12-source assembly), tool schemas, memory
@@ -25,7 +23,9 @@ const DEFAULT_CONTEXT_WINDOW = 128_000;
  * Pre-first-turn: returns 0 (no usage yet). Streaming: still uses the
  * *previous* turn_summary until the new one lands at turn end.
  *
- * Context window source: `src/shared/pricing-data.ts`. Unknown model → 128k.
+ * Context window source: `src/shared/pricing-data.ts` →
+ * `effectiveContextWindow()` (picks 1M-beta tier for Sonnet/Opus 4.6) →
+ * `getUsableContext()` (Cline-style fixed buffer for output reservation).
  */
 export function useContextBudget(params: {
   entries: ChatEntry[];
@@ -35,13 +35,13 @@ export function useContextBudget(params: {
   const { entries, llmVendor, llmModel } = params;
 
   const contextBudget = useMemo(() => {
-    const pricing = lookupPricing(llmVendor, llmModel);
     // Effective window picks the 1M beta tier when the model defines one
     // (adapter auto-sends `context-1m-2025-08-07`). Cline-style buffer
     // then subtracts output + safety reservation so the ring hits 100% at
     // the actual rotation point, not at raw context = full.
-    const raw = pricing ? effectiveContextWindow(pricing) : DEFAULT_CONTEXT_WINDOW;
-    return getUsableContext(raw);
+    // `lookupPricing` always returns a value (FALLBACK_PRICING on miss),
+    // so no null branch is needed here.
+    return getUsableContext(effectiveContextWindow(lookupPricing(llmVendor, llmModel)));
   }, [llmVendor, llmModel]);
 
   const usedTokens = useMemo(() => {
@@ -52,7 +52,10 @@ export function useContextBudget(params: {
       }
     }
     return 0;
-  }, [entries]);
+    // Memo key avoids the O(n) scan on every streaming delta — the array
+    // identity changes but the *last* entry is the only one that matters
+    // for the latest turn_summary. Mirrors the pattern in `use-cost-estimate`.
+  }, [entries.length, entries[entries.length - 1]]);
 
   const contextOverflowPct = useMemo(
     () => (contextBudget > 0 ? usedTokens / contextBudget : 0),

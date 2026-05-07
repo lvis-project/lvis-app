@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, type Cookie, type Session, type WebContents } from "electron";
 import { registerWindowEventListeners } from "../ipc/domains/window.js";
+import { markAsAuthOwned } from "./auth-window-registry.js";
 
 const requireFromHere = createRequire(import.meta.url);
 
@@ -554,6 +555,7 @@ export async function openAuthWindow(
 
     authWindow.webContents.on("did-attach-webview", (_event, contents) => {
       authContents = contents;
+      markAsAuthOwned(contents);
       attachAuthNavigationGuards(contents);
       contents.on("did-navigate", () => { void checkAndCollect(); });
       contents.on("did-navigate-in-page", () => { void checkAndCollect(); });

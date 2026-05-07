@@ -413,6 +413,48 @@ describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", 
     vi.doUnmock("@ai-sdk/anthropic");
   });
 
+  it("claude-3.x — no `context-1m-2025-08-07` header (model lacks contextWindow1MBeta)", async () => {
+    vi.resetModules();
+    const streamTextSpy = vi.fn(() => ({
+      fullStream: (async function* () {
+        yield {
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: { inputTokens: 1, outputTokens: 1 },
+        };
+      })(),
+    }));
+    vi.doMock("ai", async () => {
+      const actual = await vi.importActual<typeof import("ai")>("ai");
+      return { ...actual, streamText: streamTextSpy };
+    });
+    vi.doMock("@ai-sdk/anthropic", () => ({
+      createAnthropic: () => ({
+        languageModel: (_m: string) => ({ __mock: "claude" }),
+      }),
+    }));
+
+    const { VercelUnifiedProvider } = await import("../adapter.js");
+    const provider = new VercelUnifiedProvider("claude", "test-key");
+
+    await collect(
+      provider.streamTurn({
+        model: "claude-3-5-sonnet-20241022",
+        systemPrompt: "sys",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    );
+
+    const callArg = streamTextSpy.mock.calls[0]![0] as Record<string, unknown>;
+    // Negative case for the 1M-beta auto-send: claude-3-5-sonnet has no
+    // contextWindow1MBeta in pricing-data, so the adapter must not emit
+    // any anthropic-beta header (no thinking either → no interleaved beta).
+    expect(callArg.headers).toBeUndefined();
+
+    vi.doUnmock("ai");
+    vi.doUnmock("@ai-sdk/anthropic");
+  });
+
   it("claude-3.x + thinking uses budget-based enabled thinking", async () => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
