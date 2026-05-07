@@ -164,7 +164,11 @@ export const DEFAULT_PRICING: Record<PricingVendor, Record<string, ModelPricing>
 
   // ── Azure AI Foundry / Vertex AI ───────────────────────────────────────────
   // Deployment-name routed — pricing is account-specific. Populate via env
-  // override (`LVIS_PRICING_OVERRIDE`).
+  // override (`LVIS_PRICING_OVERRIDE`). Without an override every model on
+  // these vendors falls through to FALLBACK_PRICING, which means UI ring +
+  // shouldCompact denominate at 128K regardless of the actual deployment
+  // capability — explicit override is REQUIRED for context-window math, not
+  // just cost accuracy.
   "azure-foundry": {},
   "vertex-ai": {},
 };
@@ -178,7 +182,8 @@ export const FALLBACK_PRICING: ModelPricing = {
 /**
  * Resolve a pricing entry by exact match, then prefix-match (longest wins —
  * date-suffixed snapshots resolve to their family entry). Returns
- * `FALLBACK_PRICING` on miss.
+ * `FALLBACK_PRICING` on miss so cost / window math always has *some* value
+ * to work with (zero pricing + 128K window — conservative).
  *
  * Does NOT consult env overrides. Use `engine/llm/pricing.ts:getModelPricing()`
  * for the override-aware variant.
@@ -188,6 +193,20 @@ export function lookupPricing(
   model: string,
   table: Record<string, Record<string, ModelPricing>> = DEFAULT_PRICING,
 ): ModelPricing {
+  return lookupPricingOptional(vendor, model, table) ?? FALLBACK_PRICING;
+}
+
+/**
+ * Strict variant — returns `undefined` on miss instead of `FALLBACK_PRICING`.
+ * Use this when the caller needs to distinguish "known model" from
+ * "unknown / not in catalog" (e.g., disabling cost-mode toggles in UI when
+ * pricing is genuinely unavailable rather than zero-by-fallback).
+ */
+export function lookupPricingOptional(
+  vendor: string,
+  model: string,
+  table: Record<string, Record<string, ModelPricing>> = DEFAULT_PRICING,
+): ModelPricing | undefined {
   const vendorTable = table[vendor] ?? {};
   const exact = vendorTable[model];
   if (exact) return exact;
@@ -197,8 +216,31 @@ export function lookupPricing(
       bestKey = key;
     }
   }
-  if (bestKey !== undefined) return vendorTable[bestKey];
-  return FALLBACK_PRICING;
+  return bestKey !== undefined ? vendorTable[bestKey] : undefined;
+}
+
+/**
+ * Anthropic prompt cache per-1M rates resolved against an explicit pricing
+ * entry. When the entry omits `cacheReadPer1M` / `cacheWritePer1M`, the
+ * publicly-documented Anthropic ratios are applied:
+ *
+ *   - read  = 0.1× input    (Sonnet $3 → $0.30, Opus $15 → $1.50, Haiku $1 → $0.10)
+ *   - write = 1.25× input   (5m TTL — same ratio across Sonnet/Opus/Haiku)
+ *
+ * 1h-TTL deployments (write rate 2× input) require an explicit
+ * `cacheWritePer1M` override on the pricing entry. This helper is the single
+ * place these ratios are encoded; engine cost math
+ * (`engine/llm/pricing.ts:computeCost`) and the renderer billing badge
+ * (`TokenCostBadge.tsx`) both consume it so the published ratios stay in
+ * sync without duplication.
+ */
+export function anthropicCacheRates(
+  pricing: Pick<ModelPricing, "inputPer1M" | "cacheReadPer1M" | "cacheWritePer1M">,
+): { read: number; write: number } {
+  return {
+    read: pricing.cacheReadPer1M ?? pricing.inputPer1M * 0.1,
+    write: pricing.cacheWritePer1M ?? pricing.inputPer1M * 1.25,
+  };
 }
 
 /**

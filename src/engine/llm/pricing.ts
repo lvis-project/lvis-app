@@ -11,7 +11,7 @@
 import type { LLMVendor } from "./types.js";
 import {
   DEFAULT_PRICING,
-  FALLBACK_PRICING,
+  anthropicCacheRates,
   lookupPricing,
   type ModelPricing,
 } from "../../shared/pricing-data.js";
@@ -35,13 +35,11 @@ function getOverride(): Record<LLMVendor, Record<string, ModelPricing>> | null {
 }
 
 export function getModelPricing(vendor: LLMVendor, model: string): ModelPricing {
-  const override = getOverride();
-  const overridden = override?.[vendor]?.[model];
+  const overridden = getOverride()?.[vendor]?.[model];
   if (overridden) return overridden;
-  // Shared lookup (exact → prefix → FALLBACK_PRICING).
-  const base = lookupPricing(vendor, model);
-  if (base !== FALLBACK_PRICING) return base;
-  return FALLBACK_PRICING;
+  // Shared lookup (exact → prefix → FALLBACK_PRICING). lookupPricing already
+  // handles the miss path, so no extra wrapping needed here.
+  return lookupPricing(vendor, model);
 }
 
 /**
@@ -90,12 +88,9 @@ export function computeCost(
 
   switch (vendor) {
     case "claude": {
-      // Anthropic raw shape — `input_tokens` 는 fresh-only. cache 가 가산.
-      // 모델별 cache rate 가 pricing 에 명시 안 됐으면 Anthropic 공개
-      // 가격 비율 (read 0.1×, write 5m TTL 1.25×) 을 사용. Sonnet/Opus/
-      // Haiku 모두 동일 비율이라 ratio 기반 산출이 안전하다.
-      const cacheReadRate = pricing.cacheReadPer1M ?? pricing.inputPer1M * 0.1;
-      const cacheWriteRate = pricing.cacheWritePer1M ?? pricing.inputPer1M * 1.25;
+      // Anthropic raw shape — `input_tokens` 는 fresh-only, cache 가 가산.
+      // ratio 정책은 `anthropicCacheRates` 한 곳 — pricing-data 참조.
+      const { read: cacheReadRate, write: cacheWriteRate } = anthropicCacheRates(pricing);
       return (
         per1M(input, pricing.inputPer1M) +
         per1M(cacheRead, cacheReadRate) +

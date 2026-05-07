@@ -22,7 +22,7 @@ import { SettingsDialog } from "./SettingsDialog.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
-import { lookupPricing } from "../../shared/pricing-data.js";
+import { lookupPricingOptional } from "../../shared/pricing-data.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useRoutineResult } from "./hooks/use-routine-result.js";
 import { useRoutineRunning } from "./hooks/use-routine-running.js";
@@ -470,8 +470,11 @@ export function App() {
 
   const { costEstimate, costBadgeClass } =
     useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
+  // Strict variant — `undefined` means "model not in catalog" so the cost
+  // toggle in TokenCostBadge stays disabled rather than showing $0 from
+  // FALLBACK_PRICING.
   const activePricing = useMemo(
-    () => lookupPricing(llmVendor, llmModel),
+    () => lookupPricingOptional(llmVendor, llmModel),
     [llmVendor, llmModel],
   );
 
