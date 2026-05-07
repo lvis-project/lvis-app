@@ -26,6 +26,13 @@ export interface SubAgentSpawn {
   summary?: string;
   toolCallCount: number;
   errorMessage?: string;
+  /**
+   * The originating `agent_spawn` tool_use id. Set on `start` event and
+   * preserved across turn/done/error updates. Used by ChatView to inline
+   * the spawn card next to the ToolGroupCard that contains the matching
+   * tool entry, instead of stacking all spawns above the chat flow.
+   */
+  toolUseId?: string;
 }
 
 /**
