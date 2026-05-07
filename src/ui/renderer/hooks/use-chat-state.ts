@@ -318,7 +318,7 @@ export function useChatState(api: LvisApi) {
         );
         if (streamRef.current || thoughtRef.current) {
           const doneRoute = ev.route;
-          // §PR-3: strip <title>...</title> and [checkpoint-suggested] markers
+          // §PR-3: strip <title>...</title> and [checkpoint] markers
           // that may have been streamed as raw deltas before post-turn cleanup.
           const detected = detectFromStream(streamRef.current);
           const finalText = visibleAssistantText(detected.cleanedText);

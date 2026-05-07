@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { formatCostBadge } from "../../lib/cost-estimator.js";
+import type { ChatEntry } from "../../lib/chat-stream-state.js";
 import { debugLog, isDebugStreamEnabled } from "../../lib/debug-stream.js";
 import { RoutineCard } from "./components/RoutineCard.js";
 import { RoutineRunningIndicator } from "./components/RoutineRunningIndicator.js";
@@ -22,6 +23,7 @@ import { SummaryToast } from "./components/SummaryToast.js";
 import { SessionResumeDivider } from "./components/SessionResumeDivider.js";
 import { SessionTodoPanel } from "./components/SessionTodoPanel.js";
 import { SubAgentCard } from "./components/SubAgentCard.js";
+import { TokenCostBadge } from "./components/TokenCostBadge.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
@@ -32,7 +34,7 @@ import { TurnActionBar } from "./components/TurnActionBar.js";
 import { QuestionOverlay } from "./components/QuestionOverlay.js";
 import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
-import { useChatContext } from "./context/ChatContext.js";
+import { useChatContext, type ChatContextValue } from "./context/ChatContext.js";
 import { InputActionBar } from "./components/InputActionBar.js";
 import { Composer, type ComposerHandle } from "./components/Composer.js";
 import {
@@ -160,7 +162,13 @@ function AskUserAnswerBubble({
   );
 }
 
-function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession["entries"] }) {
+function HistoricalEntriesList({
+  entries,
+  activePricing,
+}: {
+  entries: ContinuousHistorySession["entries"];
+  activePricing: ChatContextValue["activePricing"];
+}) {
   const renderEntry = (entry: ContinuousHistorySession["entries"][number], idx: number, embedded = false) => {
     if (entry.kind === "assistant") {
       return (
@@ -218,32 +226,33 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
       const workItems = finalAssistantOffset >= 0
         ? segment.slice(0, finalAssistantOffset)
         : segment;
-      if (workItems.length > 0) {
-        // historical 의 turnStart 추적 — 이전 user entry idx 가 있으면 그것이
-        // 이 segment 의 turnStart. turn_summary 는 segment 외부 (다음 user
-        // 직전) 에 있으므로 entries 전체에서 찾되 segment 가 끝나기 전이어야.
-        let histTurnStart = -1;
-        for (let k = segmentStart; k >= 0; k--) {
-          if (entries[k]?.kind === "user") { histTurnStart = k; break; }
-        }
-        let histDurationMs: number | undefined;
-        if (histTurnStart >= 0) {
-          for (let k = segmentStart; k < entries.length; k++) {
-            const ne = entries[k];
-            if (!ne) continue;
-            if (ne.kind === "user" && k !== histTurnStart) break;
-            if (ne.kind === "turn_summary") {
-              histDurationMs = ne.turnDurationMs;
-              break;
-            }
+      // Historical segment 의 turnStart + 같은 turn 의 turn_summary entry
+      // 한 번에 lookup. turn_summary 는 segment 외부 (다음 user 직전) 에 있어
+      // entries 전체에서 찾되 다음 user 만나기 전까지만.
+      let histTurnStart = -1;
+      for (let k = segmentStart; k >= 0; k--) {
+        if (entries[k]?.kind === "user") { histTurnStart = k; break; }
+      }
+      let histTurnSummary: Extract<ChatEntry, { kind: "turn_summary" }> | undefined;
+      if (histTurnStart >= 0) {
+        for (let k = segmentStart; k < entries.length; k++) {
+          const ne = entries[k];
+          if (!ne) continue;
+          if (ne.kind === "user" && k !== histTurnStart) break;
+          if (ne.kind === "turn_summary") {
+            histTurnSummary = ne;
+            break;
           }
         }
+      }
+
+      if (workItems.length > 0) {
         rendered.push(
           <WorkGroup
             key={`hist-wg-${segmentStart}`}
             stepCount={workItems.length}
             streaming={false}
-            turnDurationMs={histDurationMs}
+            turnDurationMs={histTurnSummary?.turnDurationMs}
           >
             {workItems.map((item) => renderEntry(item.entry, item.idx, true))}
           </WorkGroup>,
@@ -252,6 +261,21 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
       if (finalAssistantOffset >= 0) {
         const finalItem = segment[finalAssistantOffset];
         if (finalItem) rendered.push(renderEntry(finalItem.entry, finalItem.idx));
+        // Historical 의 final assistant 다음에 token 정보 inline 표시.
+        // Live 와 달리 ActionBar 가 없어 별도 footer slot — TokenCostBadge 만.
+        if (histTurnSummary) {
+          rendered.push(
+            <div key={`hist-tcb-${segmentStart}`} className="px-3 mt-0.5">
+              <TokenCostBadge
+                tokensIn={histTurnSummary.tokensIn}
+                tokensOut={histTurnSummary.tokensOut}
+                cacheReadTokens={histTurnSummary.cacheReadTokens}
+                cacheWriteTokens={histTurnSummary.cacheWriteTokens}
+                pricing={activePricing}
+              />
+            </div>,
+          );
+        }
       }
       continue;
     }
@@ -348,7 +372,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
     vendorSupportsThinking, enableThinkingChat, toggleThinking,
-    costEstimate, costBadgeClass,
+    costEstimate, costBadgeClass, activePricing,
   } = useChatContext();
 
   const currentSessionAnchor = useMemo(() => {
@@ -654,7 +678,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             {daySessions.map((session) => (
               <Fragment key={session.id}>
                 <HistoricalSessionMarker title={session.title} sessionId={session.id} />
-                <HistoricalEntriesList entries={session.entries} />
+                <HistoricalEntriesList entries={session.entries} activePricing={activePricing} />
               </Fragment>
             ))}
           </Fragment>
@@ -1053,6 +1077,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   />
                   <TurnActionBar
                     turnSummary={summary}
+                    pricing={activePricing}
                     isStarred={!!isEntryStarred(idx)}
                     actions={{
                       onRetry: () => void onRetryEffort(),

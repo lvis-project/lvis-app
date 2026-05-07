@@ -5,7 +5,7 @@
  * 각 단계는 독립적이며 한 단계 실패가 다음을 차단하지 않음.
  *
  * §PR-3 확장:
- *   2. detect-checkpoint — detectFromStream() 호출, [checkpoint-suggested] 발견 시 checkpoint-suggested 이벤트 emit
+ *   2. detect-checkpoint — detectFromStream() 호출, [checkpoint] 발견 시 checkpoint-suggested 이벤트 emit
  *   5. update-title — newTitle 있으면 session metadata 업데이트, 없으면 chainTitle LLM fallback (옵션)
  *
  * conversation-loop.ts의 기존 5개 post-turn 로직을 흡수:
@@ -65,7 +65,7 @@ export interface PostTurnHookChainDeps {
    */
   llmProvider?: LLMProvider;
   /**
-   * §PR-3: optional callback invoked when [checkpoint-suggested] is detected.
+   * §PR-3: optional callback invoked when [checkpoint] is detected.
    * Caller (typically conversation-loop or IPC bridge) can trigger PR-4 summary.
    */
   onCheckpointSuggested?: (sessionId: string, cleanedOutput: string) => void;
@@ -148,7 +148,7 @@ export class PostTurnHookChain {
       try {
         detector = detectFromStream(ctx.output);
         if (detector.checkpointSuggested) {
-          log.info(`detect-checkpoint: [checkpoint-suggested] detected for session ${ctx.sessionId}`);
+          log.info(`detect-checkpoint: [checkpoint] detected for session ${ctx.sessionId}`);
           try {
             this.deps.onCheckpointSuggested?.(ctx.sessionId, detector.cleanedText);
           } catch (cbErr) {
