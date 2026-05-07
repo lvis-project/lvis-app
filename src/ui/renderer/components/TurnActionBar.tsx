@@ -2,6 +2,7 @@ import { RefreshCw, GitBranch, Star, ThumbsUp, ThumbsDown } from "lucide-react";
 import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { TokenCostBadge, type TokenCostBadgePricing, type TokenCostBadgeProps } from "./TokenCostBadge.js";
+import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 
 /**
  * Turn-aggregate provider-reported token usage forwarded to the inline
@@ -15,12 +16,15 @@ export type TurnSummaryForBadge = Pick<
 export function TurnActionBar({
   turnSummary,
   pricing,
+  vendor,
   isStarred,
   actions,
   onFeedback,
 }: {
   turnSummary?: TurnSummaryForBadge;
   pricing?: TokenCostBadgePricing;
+  /** Active vendor — selects cache-cost branching in TokenCostBadge. */
+  vendor?: LLMVendor;
   isStarred?: boolean;
   actions?: { onRetry?: () => void; onFork?: () => void; onToggleStar?: () => void };
   onFeedback?: (rating: "up" | "down", reason?: string) => void | Promise<void>;
@@ -37,7 +41,7 @@ export function TurnActionBar({
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 px-3">
       <span className="shrink-0">{timestamp}</span>
-      {turnSummary ? <TokenCostBadge {...turnSummary} pricing={pricing} /> : null}
+      {turnSummary ? <TokenCostBadge {...turnSummary} pricing={pricing} vendor={vendor} /> : null}
       <div className="flex-1" />
       {actions?.onRetry && (
         <Tooltip>

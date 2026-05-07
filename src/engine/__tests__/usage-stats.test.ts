@@ -162,7 +162,7 @@ describe("usage-stats", () => {
       },
     );
 
-    it("NaN / undefined / negative tokens are treated as 0", () => {
+    it("NaN / undefined / negative tokens all clamp to 0 (no negative cost)", () => {
       const result = computeCost(
         {
           inputTokens: NaN as unknown as number,
@@ -173,11 +173,9 @@ describe("usage-stats", () => {
         sonnet,
         "claude",
       );
-      // Output: -100 → 0 (Number.isFinite(-100) is true so it stays). Hmm.
-      // Actually Number.isFinite(-100) === true, so -100 passes through.
-      // The formula: 0 + 0 + 0 + (-100/1M)*15 = -0.0015. We document that
-      // negative is caller-bug territory and the fn doesn't sanitize.
-      expect(result).toBeCloseTo(-0.0015, 6);
+      // Negatives clamp to 0 — usage is monotonic; malformed upstream data
+      // must not produce sub-zero billing.
+      expect(result).toBe(0);
     });
   });
 
