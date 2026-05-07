@@ -1,5 +1,5 @@
 import "../../../../test/renderer/setup.js";
-import { beforeEach, describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { DayDivider } from "../components/DayDivider.js";
 import { preloadCalendar } from "../components/LazyCalendar.js";
@@ -51,5 +51,28 @@ describe("DayDivider", () => {
     fireEvent.click(getByRole("button", { name: /2026-05-06/ }));
 
     expect(await findByText("자정 이후 KST 대화")).toBeTruthy();
+  });
+
+  it("notifies session selection even for the current session", async () => {
+    const onLoadSession = vi.fn();
+    const { getByRole, findByText } = render(
+      <DayDivider
+        dateKey="2026-05-06"
+        currentSessionId="current-session"
+        onLoadSession={onLoadSession}
+        sessions={[
+          {
+            id: "current-session",
+            title: "현재 대화",
+            modifiedAt: "2026-05-06T01:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(getByRole("button", { name: /2026-05-06/ }));
+    fireEvent.click(await findByText("현재 대화"));
+
+    expect(onLoadSession).toHaveBeenCalledWith("current-session");
   });
 });

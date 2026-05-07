@@ -26,6 +26,17 @@ async function submitUser(container: HTMLElement, text: string) {
   });
 }
 
+function kstDateKey(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 describe("ChatView", () => {
   it("mounts without crashing", async () => {
     const { container } = await renderApp();
@@ -506,6 +517,60 @@ describe("ChatView", () => {
       expect(container.querySelectorAll('[data-testid="day-divider"]').length).toBeGreaterThanOrEqual(2);
       expect(container.textContent).not.toContain("현재 대화");
     });
+  });
+
+  it("scrolls to an already loaded historical session from the calendar session list", async () => {
+    const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+    const now = new Date().toISOString();
+    const yesterdayDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const yesterday = yesterdayDate.toISOString();
+    const yesterdayKey = kstDateKey(yesterdayDate);
+    const { container } = await renderApp({
+      currentSession: "current",
+      sessions: [
+        { id: "current", modifiedAt: now, title: "현재 대화" },
+        { id: "old-yesterday", modifiedAt: yesterday, title: "이전 대화" },
+      ],
+      history: {
+        sessionId: "current",
+        messages: [],
+      },
+      historyBySession: {
+        "old-yesterday": {
+          messages: [
+            { index: 0, role: "user", content: "이전 질문" },
+            { index: 1, role: "assistant", content: "이전 답변" },
+          ],
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-session-marker-id="old-yesterday"]')).toBeTruthy();
+    });
+
+    const dayButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes(yesterdayKey),
+    ) as HTMLButtonElement | undefined;
+    expect(dayButton).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(dayButton!);
+    });
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("이전 대화");
+    });
+
+    const sessionButton = Array.from(document.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("이전 대화"),
+    ) as HTMLButtonElement | undefined;
+    expect(sessionButton).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(sessionButton!);
+    });
+
+    expect(scrollSpy).toHaveBeenCalled();
   });
 
   it("moves a tool_use assistant round into the active WorkGroup before tool events arrive", async () => {
