@@ -486,6 +486,7 @@ export type LvisApi = {
       summary?: string;
       toolCallCount?: number;
       message?: string;
+      toolUseId?: string;
     }) => void,
   ) => () => void;
   onSkillLoaded: (
