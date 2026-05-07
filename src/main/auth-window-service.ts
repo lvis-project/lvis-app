@@ -12,10 +12,36 @@
  *    호스트는 LGE-specific 정보를 알지 못한다 (§1 원칙 "NO plugin-specific code in host").
  */
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, type Cookie, type Session, type WebContents } from "electron";
 import { registerWindowEventListeners } from "../ipc/domains/window.js";
+
+const requireFromHere = createRequire(import.meta.url);
+
+/**
+ * Eruda devtools source — read once on demand and cached. Lets the auth shell
+ * + the embedded webview both inline a working in-page console without the
+ * webview having to fetch any external script (its CSP comes from the remote
+ * server and would block <script src=...>).
+ */
+let cachedErudaSource: string | null = null;
+function getErudaSource(): string | null {
+  if (cachedErudaSource !== null) return cachedErudaSource;
+  try {
+    const erudaPath = requireFromHere.resolve("eruda");
+    cachedErudaSource = readFileSync(erudaPath, "utf8");
+    return cachedErudaSource;
+  } catch {
+    return null;
+  }
+}
+
+function isDevConsoleEnabled(): boolean {
+  return process.env.LVIS_DEV_CONSOLE === "1";
+}
 
 export interface AuthCookie {
   name: string;
@@ -83,10 +109,42 @@ export function buildAuthWindowShellHtml(input: {
   title: string;
   url: string;
   partition: string;
+  /**
+   * Platform string. macOS hides the HTML titlebar controls/title text since
+   * the OS-rendered traffic lights (from `titleBarStyle: "hiddenInset"`)
+   * already cover minimize/maximize/close. On Win/Linux `frame: false` removes
+   * any native chrome, so the HTML buttons are required to allow window
+   * control. Defaults to current `process.platform` when omitted.
+   */
+  platform?: NodeJS.Platform;
+  /** When true, inline eruda devtools script. */
+  devConsole?: boolean;
 }): string {
+  const platform: NodeJS.Platform = input.platform ?? process.platform;
+  const isMac = platform === "darwin";
   const title = JSON.stringify(input.title);
   const url = JSON.stringify(input.url);
   const partition = JSON.stringify(input.partition);
+  const erudaScript = input.devConsole === true ? buildErudaInlineScript() : "";
+  // macOS: render an empty 28px draggable strip so the user can still drag the
+  // window, but no title text and no buttons (the OS traffic lights occupy
+  // this space). Win/Linux: full titlebar with title text + control buttons.
+  const titleBarHtml = isMac
+    ? `<div class="titlebar titlebar-mac" id="titlebar"></div>`
+    : `<div class="titlebar" id="titlebar">
+    <div class="title" id="title"></div>
+    <div class="controls">
+      <button class="titlebar-btn" id="minimize" title="최소화" aria-label="최소화">
+        <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+      </button>
+      <button class="titlebar-btn" id="maximize" title="최대화" aria-label="최대화">
+        <svg id="max-icon" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+      </button>
+      <button class="titlebar-btn titlebar-btn-close" id="close" title="닫기" aria-label="닫기">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+  </div>`;
   return `<!doctype html>
 <html lang="ko">
 <head>
@@ -115,6 +173,12 @@ export function buildAuthWindowShellHtml(input: {
       color: hsl(24 10% 10%);
       user-select: none;
       -webkit-app-region: drag;
+    }
+    .titlebar-mac {
+      height: 28px;
+      flex: 0 0 28px;
+      border-bottom: 0;
+      background: transparent;
     }
     .title {
       min-width: 0;
@@ -156,45 +220,47 @@ export function buildAuthWindowShellHtml(input: {
   </style>
 </head>
 <body>
-  <div class="titlebar" id="titlebar">
-    <div class="title" id="title"></div>
-    <div class="controls">
-      <button class="titlebar-btn" id="minimize" title="최소화" aria-label="최소화">
-        <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
-      </button>
-      <button class="titlebar-btn" id="maximize" title="최대화" aria-label="최대화">
-        <svg id="max-icon" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-      </button>
-      <button class="titlebar-btn titlebar-btn-close" id="close" title="닫기" aria-label="닫기">
-        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-      </button>
-    </div>
-  </div>
+  ${titleBarHtml}
   <webview id="auth-view" src="" partition=""></webview>
   <script>
     const title = ${title};
     const url = ${url};
     const partition = ${partition};
+    const isMac = ${JSON.stringify(isMac)};
     document.title = title;
-    document.getElementById("title").textContent = title;
+    const titleEl = document.getElementById("title");
+    if (titleEl) titleEl.textContent = title;
     const view = document.getElementById("auth-view");
     view.setAttribute("partition", partition);
     view.setAttribute("src", url);
-    document.getElementById("minimize").addEventListener("click", () => window.lvisWindow?.minimize());
-    document.getElementById("maximize").addEventListener("click", () => window.lvisWindow?.toggleMaximize());
-    document.getElementById("close").addEventListener("click", () => window.lvisWindow?.close());
+    if (!isMac) {
+      document.getElementById("minimize").addEventListener("click", () => window.lvisWindow?.minimize());
+      document.getElementById("maximize").addEventListener("click", () => window.lvisWindow?.toggleMaximize());
+      document.getElementById("close").addEventListener("click", () => window.lvisWindow?.close());
+      window.lvisWindow?.onMaximizedChanged?.((maximized) => {
+        const btn = document.getElementById("maximize");
+        btn.title = maximized ? "이전 크기로" : "최대화";
+        btn.setAttribute("aria-label", btn.title);
+      });
+    }
     document.getElementById("titlebar").addEventListener("dblclick", (event) => {
-      if (event.target.closest("button")) return;
+      if (event.target.closest && event.target.closest("button")) return;
       window.lvisWindow?.toggleMaximize();
     });
-    window.lvisWindow?.onMaximizedChanged?.((maximized) => {
-      const btn = document.getElementById("maximize");
-      btn.title = maximized ? "이전 크기로" : "최대화";
-      btn.setAttribute("aria-label", btn.title);
-    });
   </script>
+  ${erudaScript}
 </body>
 </html>`;
+}
+
+function buildErudaInlineScript(): string {
+  const src = getErudaSource();
+  if (!src) return "";
+  // Wrap in a try/catch so a malformed eruda load can't break the shell.
+  // `__lvis_eruda_booted` guards against double-init when the shell is
+  // re-rendered (HMR / future flows).
+  return `<script>${src}
+;try{if(!window.__lvis_eruda_booted){window.__lvis_eruda_booted=true;eruda.init();}}catch(e){console.error("[lvis] auth shell eruda init failed", e);}</script>`;
 }
 
 /** 호스트 문자열 정규화 — 선행 점/공백/대소문자 차이 흡수. 빈 문자열은 drop. */
@@ -412,13 +478,19 @@ export async function openAuthWindow(
       return false;
     }
   };
+  // Electron 24+ exposes the navigation URL on `details.url` (the typed event
+  // payload). The legacy second positional `url` argument is deprecated and is
+  // empty/undefined on Electron 41.x — relying on it silently
+  // `preventDefault()`'d every navigation, which is the bug that broke the
+  // /login/callback handoff for plugin auth windows. Read only from the
+  // canonical event payload.
   const attachAuthNavigationGuards = (contents: WebContents) => {
     contents.setWindowOpenHandler(() => ({ action: "deny" }));
-    contents.on("will-navigate", (event, targetUrl) => {
-      if (!isHttpUrl(targetUrl)) event.preventDefault();
+    contents.on("will-navigate", (details) => {
+      if (!isHttpUrl(details.url)) details.preventDefault();
     });
-    contents.on("will-redirect", (event, targetUrl) => {
-      if (!isHttpUrl(targetUrl)) event.preventDefault();
+    contents.on("will-redirect", (details) => {
+      if (!isHttpUrl(details.url)) details.preventDefault();
     });
   };
 
@@ -485,8 +557,47 @@ export async function openAuthWindow(
       attachAuthNavigationGuards(contents);
       contents.on("did-navigate", () => { void checkAndCollect(); });
       contents.on("did-navigate-in-page", () => { void checkAndCollect(); });
+      // Inject eruda into the sandboxed webview after each navigation so
+      // the in-page console survives the SPA's own client-side routes.
+      // The webview's CSP comes from the remote server and may forbid
+      // <script src=...>, but `executeJavaScript` runs in the page's main
+      // world and bypasses page-level CSP — that's the whole point here.
+      if (isDevConsoleEnabled()) {
+        const injectEruda = () => {
+          const src = getErudaSource();
+          if (!src || contents.isDestroyed()) return;
+          const script =
+            `${src}\n;try{if(!window.__lvis_eruda_booted){window.__lvis_eruda_booted=true;eruda.init();}}catch(e){console.error("[lvis] webview eruda init failed", e);}`;
+          contents.executeJavaScript(script).catch(() => {
+            // Swallow — devtools is best-effort, never block the auth flow.
+          });
+        };
+        contents.on("did-finish-load", injectEruda);
+        contents.on("did-frame-finish-load", (_e, isMainFrame) => {
+          if (isMainFrame) injectEruda();
+        });
+      }
       void checkAndCollect();
     });
+    // F12 / Cmd+Alt+I → open native Chromium DevTools on the webview. Eruda
+    // is fine for read-only inspection but native DevTools is needed for
+    // network panel / breakpoints when the login flow misbehaves.
+    if (isDevConsoleEnabled()) {
+      authWindow.webContents.on("before-input-event", (_event, input) => {
+        const isF12 = input.key === "F12" && input.type === "keyDown";
+        const isCmdAltI =
+          input.type === "keyDown" &&
+          (input.meta || input.control) &&
+          input.alt &&
+          (input.key === "i" || input.key === "I");
+        if (!(isF12 || isCmdAltI)) return;
+        if (authContents && !authContents.isDestroyed()) {
+          authContents.openDevTools({ mode: "detach" });
+        } else if (!authWindow.isDestroyed()) {
+          authWindow.webContents.openDevTools({ mode: "detach" });
+        }
+      });
+    }
 
     // Fast-fail on navigation errors so we don't wait the full timeout for
     // DNS / TLS / proxy / offline / renderer-crash scenarios. isMainFrame
@@ -508,47 +619,34 @@ export async function openAuthWindow(
         if (!authWindow.isDestroyed()) authWindow.close();
       });
 
-    const handleNavigationFailure = (
-      errorCode: number,
-      errorDescription: string,
-      validatedURL: string,
-      isMainFrame: boolean,
-    ) => {
-      if (!isMainFrame) return;
-      if (errorCode === ERR_ABORTED) {
+    // Read load-failure metadata from the canonical Electron 24+ event payload
+    // (`event.errorCode`, `event.errorDescription`, `event.validatedURL`,
+    // `event.isMainFrame`). The deprecated positional args arrive empty on
+    // Electron 41.x; reading them would silently turn every fail-load into a
+    // no-op (isMainFrame === undefined → early return) and we'd wait the full
+    // 5-minute timeout instead of fast-failing on real DNS/TLS errors.
+    type FailLoadEvent = {
+      errorCode: number;
+      errorDescription: string;
+      validatedURL: string;
+      isMainFrame: boolean;
+    };
+    const onFailLoad = (event: FailLoadEvent) => {
+      if (!event.isMainFrame) return;
+      if (event.errorCode === ERR_ABORTED) {
         // benign: redirect / page-transition cancel. 완료 조건 충족했는지
         // 재검사하고 (쿠키 수집이 가능하면 그쪽으로 resolve), 아니면 그냥 흘림.
         void checkAndCollect();
         return;
       }
-      failReject(errorCode, errorDescription, validatedURL);
+      failReject(event.errorCode, event.errorDescription, event.validatedURL);
     };
 
-    authWindow.webContents.on(
-      "did-fail-load",
-      (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
-        handleNavigationFailure(errorCode, errorDescription, validatedURL, isMainFrame);
-      },
-    );
-    authWindow.webContents.on(
-      "did-fail-provisional-load",
-      (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
-        handleNavigationFailure(errorCode, errorDescription, validatedURL, isMainFrame);
-      },
-    );
+    authWindow.webContents.on("did-fail-load", onFailLoad as never);
+    authWindow.webContents.on("did-fail-provisional-load", onFailLoad as never);
     authWindow.webContents.on("did-attach-webview", (_event, contents) => {
-      contents.on(
-        "did-fail-load",
-        (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
-          handleNavigationFailure(errorCode, errorDescription, validatedURL, isMainFrame);
-        },
-      );
-      contents.on(
-        "did-fail-provisional-load",
-        (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
-          handleNavigationFailure(errorCode, errorDescription, validatedURL, isMainFrame);
-        },
-      );
+      contents.on("did-fail-load", onFailLoad as never);
+      contents.on("did-fail-provisional-load", onFailLoad as never);
     });
     authWindow.webContents.on("render-process-gone", (_e, details) => {
       finish(() => {
@@ -569,6 +667,8 @@ export async function openAuthWindow(
       title: windowTitle,
       url,
       partition: effectivePartition,
+      platform: process.platform,
+      devConsole: isDevConsoleEnabled(),
     });
     authWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch((err) => {
       finish(() => {
