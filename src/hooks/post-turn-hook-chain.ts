@@ -94,15 +94,20 @@ export class PostTurnHookChain {
     //    Stage 1b (threshold):  full compact — 사용률 임계치 초과 시 LLM-free 요약으로 압축
     try {
       const autoCompactEnabled = this.deps.settingsService?.get("chat").autoCompact ?? true;
-      if (autoCompactEnabled) {
+      if (!autoCompactEnabled) {
+        log.info("post-turn compact: SKIPPED (autoCompact 설정 OFF)");
+      } else {
         // Stage 1a: microcompact (항상 실행, 저비용)
+        const beforeMicroCount = ctx.messages.length;
         const { messages: afterMicro, result: mr } = microcompactMessages(ctx.messages);
         let working = afterMicro;
         if (mr.stripped) {
           compactedMessages = afterMicro;
           log.info(
-            `microcompact: stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars`,
+            `microcompact: stripped ${mr.strippedCount} tool_results, freed ~${mr.freedChars} chars (msgCount ${beforeMicroCount} → ${afterMicro.length}, content stub-replaced)`,
           );
+        } else {
+          log.info(`microcompact: SKIPPED — no stale tool_result content found (msgCount=${beforeMicroCount})`);
         }
 
         // Stage 1b: threshold-triggered full compact
@@ -110,13 +115,22 @@ export class PostTurnHookChain {
         const contextWindow = llmSettings
           ? getModelContextWindow(llmSettings.provider, llmSettings.vendors[llmSettings.provider].model)
           : undefined;
-        if (shouldCompact(ctx.cumulativeUsage, contextWindow)) {
+        const willCompact = shouldCompact(ctx.cumulativeUsage, contextWindow);
+        const usagePct = contextWindow
+          ? ((ctx.cumulativeUsage.inputTokens / contextWindow) * 100).toFixed(1)
+          : "?";
+        log.info(
+          `auto-compact: decision — cumIn=${ctx.cumulativeUsage.inputTokens} ctxWindow=${contextWindow ?? "?"} usage=${usagePct}% threshold=80% → shouldCompact=${willCompact}`,
+        );
+        if (willCompact) {
           const { messages: compacted, result: cr } = compactMessages(working, undefined, "auto");
           if (cr.compacted) {
             compactedMessages = compacted;
             log.info(
-              `auto-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`,
+              `auto-compact: APPLIED — removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens (msgCount ${working.length} → ${compacted.length})`,
             );
+          } else {
+            log.info("auto-compact: shouldCompact=true 였으나 compactMessages no-op (preserve 윈도우만 남음)");
           }
         }
       }
