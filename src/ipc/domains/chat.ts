@@ -185,6 +185,16 @@ async function runStreamedTurn(
           ...(revertSessionId !== undefined ? { revertSessionId } : {}),
           ...(summary !== undefined ? { summary } : {}),
         }),
+      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, tokensOut, breakdown }) =>
+        send({
+          type: "turn_summary",
+          turnDurationMs,
+          toolCount,
+          cumulativeToolMs,
+          tokensIn,
+          tokensOut,
+          ...(breakdown ? { breakdown } : {}),
+        }),
       onFallback: (from, to) => webContents?.send("lvis:chat:fallback", { from, to }),
     },
     undefined,
