@@ -47,7 +47,6 @@ describe("AskUserQuestionCard — single question", () => {
           questions: [
             { question: "Continue?", choices: ["yes", "no"], allowFreeText: true },
           ],
-          urgent: false,
           createdAt: 0,
         }}
         onResolved={onResolved}
@@ -82,7 +81,6 @@ describe("AskUserQuestionCard — single question", () => {
               allowFreeText: true,
             },
           ],
-          urgent: false,
           createdAt: 0,
         }}
         onResolved={vi.fn()}
@@ -113,7 +111,6 @@ describe("AskUserQuestionCard — single question", () => {
               allowFreeText: true,
             },
           ],
-          urgent: false,
           createdAt: 0,
         }}
         onResolved={vi.fn()}
@@ -141,7 +138,6 @@ describe("AskUserQuestionCard — single question", () => {
               allowFreeText: false,
             },
           ],
-          urgent: false,
           createdAt: 0,
         }}
         onResolved={vi.fn()}
@@ -169,7 +165,6 @@ describe("AskUserQuestionCard — single question", () => {
               placeholder: "다른 방향을 한 줄로",
             },
           ],
-          urgent: false,
           createdAt: 0,
         }}
         onResolved={vi.fn()}
@@ -188,7 +183,6 @@ describe("AskUserQuestionCard — single question", () => {
         request={{
           id: "q-dismiss",
           questions: [{ question: "?", allowFreeText: true }],
-          urgent: false,
           createdAt: 0,
         }}
         onResolved={vi.fn()}
@@ -214,7 +208,6 @@ describe("AskUserQuestionCard — multi-question", () => {
             { question: "Where?", choices: ["서울", "부산"], allowFreeText: false },
             { question: "When?", choices: ["오늘", "내일"], allowFreeText: false },
           ],
-          urgent: false,
           createdAt: 0,
         }}
         onResolved={vi.fn()}

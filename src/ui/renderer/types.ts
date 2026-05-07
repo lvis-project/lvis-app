@@ -431,7 +431,6 @@ export type LvisApi = {
         allowFreeText: boolean;
         suggestedAnswers?: string[];
       }>;
-      urgent: boolean;
       createdAt: number;
     }) => void,
   ) => () => void;

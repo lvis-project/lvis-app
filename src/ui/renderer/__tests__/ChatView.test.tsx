@@ -469,7 +469,6 @@ describe("ChatView", () => {
     await act(async () => {
       emitAskUserQuestion({
         id: "ask-scroll-1",
-        urgent: false,
         createdAt: Date.now(),
         questions: [
           {
