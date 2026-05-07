@@ -103,7 +103,6 @@ describe("ask_user_question tool", () => {
           { question: "Continue?", choices: ["yes", "no"] },
           { question: "When?" },
         ],
-        urgent: true,
       },
       ctx(),
     );
@@ -116,7 +115,6 @@ describe("ask_user_question tool", () => {
         { question: "Continue?", choices: ["yes", "no"], allowFreeText: true },
         { question: "When?", choices: undefined, allowFreeText: true },
       ],
-      urgent: true,
       abortSignal: undefined,
     });
   });

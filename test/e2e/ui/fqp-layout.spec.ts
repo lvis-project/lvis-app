@@ -50,7 +50,6 @@ async function injectAskQuestion(
       if (!api?._askUserQuestionCallbacks?.length) return false;
       const req = {
         id,
-        urgent: false,
         createdAt: Date.now(),
         questions: [{ question, choices: [], allowFreeText }],
       };
@@ -79,7 +78,6 @@ async function injectBothChoicesAndSuggested(
       if (!api?._askUserQuestionCallbacks?.length) return false;
       const req = {
         id,
-        urgent: false,
         createdAt: Date.now(),
         questions: [
           {

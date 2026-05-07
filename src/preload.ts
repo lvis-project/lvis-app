@@ -555,7 +555,6 @@ const api = {
         allowFreeText: boolean;
         suggestedAnswers?: string[];
       }>;
-      urgent: boolean;
       createdAt: number;
     }) => void,
   ) => {
