@@ -5,18 +5,26 @@ import { lookupPricing } from "../../../shared/pricing-data.js";
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 
 /**
- * Phase 5 — context budget hook.
+ * Context budget hook — provider-truth based (Phase 3, 2026-05-07).
  *
- * Computes per-model context window + current usage estimate via a chars/4
- * heuristic that approximates the engine's token count (±20%). It is NOT the
- * authoritative estimator — the hook omits richer fields (thinkingBlocks,
- * toolCalls, toolUseId, toolName, etc.) that `serializeMessageForEstimation`
- * in `src/engine/llm/types.ts` serializes for the auto-compact trigger. Use
- * this only for UI overflow badges; real budget decisions must go through the
- * engine-side serializer.
+ * `usedTokens` = the most recent `turn_summary` entry's `tokensIn`. Engine
+ * already applies the Kilo Code pattern (Vercel AI SDK v6 normalized
+ * inputTokens minus cacheRead/cacheWrite → fresh-only) before emitting, so
+ * this number reflects the *actual* fresh prompt size the provider just
+ * billed. Auto-compact reduces it on the next turn; the ring shrinks
+ * accordingly.
  *
- * Context-window source: `src/shared/pricing-data.ts` (single source of truth,
- * shared with cost-estimator). Unknown vendor/model falls back to 128k.
+ * Replaces the old `entries.map(chars/4).sum()` heuristic which:
+ *   - missed system prompt (12-source assembly), tool schemas, memory
+ *     injection — all huge contributors that a renderer-side serializer
+ *     can't see;
+ *   - over-counted under-Korean content because chars/4 ≠ tokens/4 (1.7-2);
+ *   - did not shrink after compact since entries persisted in UI.
+ *
+ * Pre-first-turn: returns 0 (no usage yet). Streaming: still uses the
+ * *previous* turn_summary until the new one lands at turn end.
+ *
+ * Context window source: `src/shared/pricing-data.ts`. Unknown model → 128k.
  */
 export function useContextBudget(params: {
   entries: ChatEntry[];
@@ -30,40 +38,20 @@ export function useContextBudget(params: {
     return pricing?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
   }, [llmVendor, llmModel]);
 
-  // Keyed on length + last-entry identity (matches use-cost-estimate pattern):
-  // during streaming, `entries` reference changes per delta but only the last
-  // entry mutates. Re-serialize only when a new entry is appended or the
-  // tail entry's object identity changes.
   const usedTokens = useMemo(() => {
-    let total = 0;
-    for (const e of entries) {
-      let serialized = "";
-      if (e.kind === "user" || e.kind === "assistant" || e.kind === "reasoning" || e.kind === "system") {
-        serialized = JSON.stringify({ kind: e.kind, text: (e as { text?: string }).text ?? "" });
-      } else if (e.kind === "tool_group") {
-        serialized = JSON.stringify({
-          kind: "tool_group",
-          tools: (e.tools ?? []).map((t: { input?: unknown; result?: unknown }) => ({
-            input: t.input ?? {},
-            result: t.result ?? "",
-          })),
-        });
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (e?.kind === "turn_summary") {
+        return Math.max(0, e.tokensIn);
       }
-      if (serialized) total += Math.ceil(serialized.length / 4) + 1;
     }
-    return total;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries.length, entries[entries.length - 1]]);
+    return 0;
+  }, [entries]);
 
-  const contextOverflowPct = useMemo(() => {
-    // Rough character-count estimate (~4 chars/token) used for overflow badge.
-    // Separate from `usedTokens` which uses the richer serialization heuristic.
-    const estimatedTokens = entries.reduce((sum, e) => {
-      if (e.kind === "user" || e.kind === "assistant") return sum + Math.ceil(e.text.length / 4);
-      return sum;
-    }, 0);
-    return estimatedTokens / contextBudget;
-  }, [entries, contextBudget]);
+  const contextOverflowPct = useMemo(
+    () => (contextBudget > 0 ? usedTokens / contextBudget : 0),
+    [usedTokens, contextBudget],
+  );
 
   return {
     usedTokens,
