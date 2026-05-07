@@ -55,6 +55,7 @@ import {
   buildPluginConfigOverrides,
   registerPluginTools,
   runManifestStartupTools,
+  syncPluginToolRegistry,
 } from "../plugins.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
@@ -1279,12 +1280,38 @@ export async function initPluginRuntime(
   // for these (it reads `contents.session.partition` which is undocumented
   // and returns `undefined`), so the partition policy must be installed at
   // plugin-install time.
+  // Full ToolRegistry resync on every plugin lifecycle event. Idempotent —
+  // wipes plugin-sourced tools then re-registers from the current
+  // PluginRuntime state, so install/update/uninstall/reinstall all converge
+  // to a consistent registry without per-event special casing. A transient
+  // failure (logged below) is healed automatically by the next event.
   onHostEvent("plugin.installed", (data) => {
     const pluginId = (data as { pluginId?: string } | undefined)?.pluginId;
     if (typeof pluginId !== "string") return;
     installPluginPartitionPolicy(pluginPartitionName(pluginId), {
       pluginRoot: pluginRuntime.getPluginRoot(pluginId),
     });
+    try {
+      syncPluginToolRegistry(pluginRuntime, toolRegistry);
+    } catch (err) {
+      log.error(
+        `tool registry sync failed after plugin.installed (${pluginId}): %s`,
+        (err as Error).message,
+      );
+    }
+  });
+
+  onHostEvent("plugin.uninstalled", (data) => {
+    const pluginId = (data as { pluginId?: string } | undefined)?.pluginId;
+    if (typeof pluginId !== "string") return;
+    try {
+      syncPluginToolRegistry(pluginRuntime, toolRegistry);
+    } catch (err) {
+      log.error(
+        `tool registry sync failed after plugin.uninstalled (${pluginId}): %s`,
+        (err as Error).message,
+      );
+    }
   });
 
   // 선언형 startupTools 자동 실행
@@ -1299,7 +1326,7 @@ export async function initPluginRuntime(
     onReloaded: (pluginId) => {
       const manifest = pluginRuntime.getPluginManifest(pluginId);
       if (!manifest) return;
-      registerPluginTools(pluginRuntime, toolRegistry);
+      syncPluginToolRegistry(pluginRuntime, toolRegistry);
       log.info(`plugin:${pluginId} hot-reloaded (${manifest.tools.length} tools)`);
     },
   });
