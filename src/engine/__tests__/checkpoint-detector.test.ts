@@ -31,18 +31,18 @@ describe("detectFromStream", () => {
     expect(result.cleanedText).not.toContain("두 번째 최종 제목");
   });
 
-  it("detects [checkpoint-suggested] marker and sets checkpointSuggested true", () => {
-    const raw = "답변 완료.[checkpoint-suggested]";
+  it("detects [checkpoint] marker and sets checkpointSuggested true", () => {
+    const raw = "답변 완료.[checkpoint]";
     const result = detectFromStream(raw);
     expect(result.checkpointSuggested).toBe(true);
-    expect(result.cleanedText).not.toContain("[checkpoint-suggested]");
+    expect(result.cleanedText).not.toContain("[checkpoint]");
   });
 
   it("removes both title and checkpoint markers from cleanedText", () => {
-    const raw = "내용.<title>오늘 업무 세션 요약</title> 추가 내용.[checkpoint-suggested]";
+    const raw = "내용.<title>오늘 업무 세션 요약</title> 추가 내용.[checkpoint]";
     const result = detectFromStream(raw);
     expect(result.cleanedText).not.toContain("<title>");
-    expect(result.cleanedText).not.toContain("[checkpoint-suggested]");
+    expect(result.cleanedText).not.toContain("[checkpoint]");
     expect(result.cleanedText).toContain("내용.");
     expect(result.cleanedText).toContain("추가 내용.");
     expect(result.newTitle).toBe("오늘 업무 세션 요약");
