@@ -353,10 +353,18 @@ export class VercelUnifiedProvider implements LLMProvider {
       const cleanBaseUrl = parsedUrl.toString().replace(/\/chat\/completions\/?$/, "/");
       // CTRL simplification: dropped max_tokens→max_completion_tokens fetch
       // shim; max output tokens is no longer threaded through from settings.
+      // Azure AI Foundry 는 OpenAI 호환 endpoint 지만 streaming response 의
+      // 마지막 chunk 에 usage 객체를 *기본적으로 포함하지 않음*. OpenAI 의
+      // 표준 `stream_options: { include_usage: true }` flag 가 필요한데
+      // createOpenAICompatible 가 default 로 안 보냄 → @ai-sdk/openai-compatible
+      // 의 `includeUsage: true` 옵션으로 강제. 이게 빠지면 turn_summary 의
+      // tokensIn/Out 이 항상 0 → ring + TokenCostBadge 둘 다 0% / hide.
+      // (audit log 에서 azure-foundry/* turn 만 inputTokens=0 로 catch).
       const azure = createOpenAICompatible({
         name: "azure-foundry",
         baseURL: cleanBaseUrl,
         apiKey: this.apiKey,
+        includeUsage: true,
         ...(apiVersion ? { queryParams: { "api-version": apiVersion } } : {}),
         ...(this.customFetch ? { fetch: this.customFetch } : {}),
       });
