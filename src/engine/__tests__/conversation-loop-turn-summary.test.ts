@@ -91,6 +91,8 @@ describe("ConversationLoop onTurnSummary", () => {
           cumulativeToolMs: number;
           tokensIn: number;
           tokensOut: number;
+          cacheReadTokens?: number;
+          cacheWriteTokens?: number;
           breakdown?: Record<string, { count: number; ms: number }>;
         }
       | null = null;
@@ -103,11 +105,16 @@ describe("ConversationLoop onTurnSummary", () => {
 
     expect(summary).not.toBeNull();
     expect(summary!.toolCount).toBe(3);
-    // Provider's *last* round's usage is what `result.usage` carries (per
-    // queryLoop logic — `turnUsage = stream.usage`). Sum per the contract:
-    // tokensIn = result.usage.inputTokens, tokensOut = result.usage.outputTokens.
-    expect(summary!.tokensIn).toBe(60);
-    expect(summary!.tokensOut).toBe(10);
+    // Contract (2026-05-07 Kilo Code 패턴 적용 후): turn_summary 의 token
+    // 값은 *모든 round 합산*. mock provider 의 3 round usage:
+    //   round 1: in=100, out=20
+    //   round 2: in= 80, out=15
+    //   round 3: in= 60, out=10  (end_turn)
+    // 합산 → tokensIn=240, tokensOut=45.
+    // 이전 동작 (`turnUsage = stream.usage` 으로 last-round 만 보존) 은
+    // multi-round turn 의 footer 가 under-report 되던 버그였음.
+    expect(summary!.tokensIn).toBe(240);
+    expect(summary!.tokensOut).toBe(45);
     expect(summary!.turnDurationMs).toBeGreaterThanOrEqual(0);
     // cumulativeToolMs aggregates per-call wall-clock — non-negative; tool
     // executor is in-process so duration may round to <1ms but never < 0.

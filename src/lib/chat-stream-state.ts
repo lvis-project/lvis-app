@@ -73,6 +73,13 @@ export type StreamEvent = {
   cumulativeToolMs?: number;
   tokensIn?: number;
   tokensOut?: number;
+  /**
+   * Cache breakdown — Anthropic prompt cache (read 90% 할인 / write 25% 가산).
+   * Vercel AI SDK v6 가 inputTokens 를 cached 포함 정규화하므로 separately
+   * surface. Reference: Kilo Code session.ts:354.
+   */
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   breakdown?: Record<string, { count: number; ms: number }>;
 };
 
@@ -198,6 +205,14 @@ export type ChatEntry =
       cumulativeToolMs: number;
       tokensIn: number;
       tokensOut: number;
+      /**
+       * Anthropic prompt cache breakdown. Optional — only set when the
+       * provider reported non-zero cache read/write for this turn. Required
+       * for the AssistantCard cost badge tooltip to show fresh vs cached
+       * split + correct billable equivalent.
+       */
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
       /** Per-tool aggregate (`{ count, ms }` per tool name). Omitted when no tools ran. */
       breakdown?: Record<string, { count: number; ms: number }>;
     };
