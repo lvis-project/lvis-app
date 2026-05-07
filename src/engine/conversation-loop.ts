@@ -179,7 +179,11 @@ export interface ConversationLoopDeps {
   notificationService?: import("../main/notification-service.js").NotificationService;
 }
 
-const MAX_TOOL_ROUNDS = 10;
+// 사용자가 *26 step* 작업에서 cap hit 으로 *조용히 끊긴* 사례 (2026-05-07) 후
+// 10 → 30 으로 상향. 사용자 task 의 자연 round 분포 (~13 rounds for 26 steps) 를
+// 수용하면서 *진정한 무한 루프* 는 여전히 차단. SubAgentRunner 는 자기 maxRounds
+// 로 clamp 하므로 영향 없음 (line 902 `Math.min`).
+const MAX_TOOL_ROUNDS = 30;
 /**
  * C3(a): per-round cap on the number of tool calls an assistant round can
  * issue. Pathological round-emitting many tool_use blocks at once would
@@ -909,6 +913,15 @@ export class ConversationLoop {
       // turn-cap leans on (callbacks calling abortCurrentTurn only halts
       // the next streaming response, not pending tool execution).
       if (assistantRoundsRun >= effectiveMaxRounds) {
+        // EARLY-EXIT #1: round cap hit. 이 자리에서 *조용히* synthetic 텍스트
+        // 를 반환하면 사용자는 "왜 갑자기 끊겼지?" 의문. WARN 로그 + UI 콜백으로
+        // 명시적 신호.
+        log.warn(
+          `queryLoop: EARLY-EXIT(round-cap) — assistantRoundsRun=${assistantRoundsRun} effectiveMaxRounds=${effectiveMaxRounds} totalToolCalls=${allToolCalls.length}`,
+        );
+        callbacks?.onError?.(
+          `라운드 한도 (${effectiveMaxRounds}) 도달 — 작업이 중단됐습니다. 더 진행하려면 새 메시지를 보내세요.`,
+        );
         return {
           text: allToolCalls.length > 0
             ? `(round cap ${effectiveMaxRounds} reached — last assistant text: ${this.history.getMessages().filter((m) => m.role === "assistant").slice(-1)[0]?.content ?? ""})`
@@ -963,12 +976,22 @@ export class ConversationLoop {
       }
 
       if (stream.kind === "stream_error") {
+        // EARLY-EXIT #2: provider stream error. 이미 onError 콜백 + history 에
+        // 메시지 push. 추가 진단 로그로 빈도 추적.
+        log.warn(
+          `queryLoop: EARLY-EXIT(stream-error) — round=${roundIndex} userMessage="${stream.userMessage.slice(0, 100)}"`,
+        );
         callbacks?.onError?.(stream.userMessage);
         this.history.append({ role: "assistant", content: stream.userMessage });
         return { text: stream.userMessage, toolCalls: allToolCalls, usage: turnUsage };
       }
 
       if (stream.kind === "interrupted") {
+        // EARLY-EXIT #3: 사용자 abort. abortCurrentTurn() 또는 외부 abortSignal.
+        // 정상 케이스이지만 빈도 추적용 로그.
+        log.info(
+          `queryLoop: EARLY-EXIT(interrupted) — round=${roundIndex} priorTextLen=${(stream.text ?? "").length}`,
+        );
         const savedText = (stream.text ?? "") + "\n\n[중단됨]";
         this.history.append({ role: "assistant", content: savedText });
         callbacks?.onTextDelta?.("\n\n[중단됨]");
@@ -1044,7 +1067,20 @@ export class ConversationLoop {
       assistantRoundsRun += 1;
 
       if (pendingToolCalls.length === 0 || stopReason === "end_turn") {
-        return { text: textContent, toolCalls: allToolCalls, usage: turnUsage };
+        // EARLY-EXIT #4: turn 종료. 정상 케이스는 stopReason === "end_turn"
+        // 또는 LLM 이 tool 없이 final 답을 내놓은 케이스. *비정상 silent
+        // truncation* (예: max_tokens / unknown stopReason 으로 0 tools 반환)
+        // 도 같은 분기로 떨어지므로 stopReason 이 end_turn 이 *아닌데* 0 tools
+        // 면 WARN 로 명시적 진단 — 28-step abandonment 의 가능한 원인.
+        if (stopReason !== "end_turn" && pendingToolCalls.length === 0) {
+          log.warn(
+            `queryLoop: EARLY-EXIT(suspect-truncation) — stopReason="${stopReason}" pendingTools=0 textLen=${textContent.length} round=${roundIndex}`,
+          );
+          callbacks?.onError?.(
+            `응답이 ${stopReason ?? "알 수 없는 이유"} 로 조기 종료됐습니다 (round ${roundIndex}). 추가 응답 필요 시 후속 메시지로 요청하세요.`,
+          );
+        }
+        return { text: textContent, toolCalls: allToolCalls, usage: turnUsage, stopReason };
       }
 
       // §4.5.6 tool execution — request_plugin 가로채기 + knowledge depth cap + executor 호출
