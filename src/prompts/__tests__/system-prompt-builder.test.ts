@@ -43,16 +43,17 @@ describe("SystemPromptBuilder — Conversation Meta Output", () => {
     const prompt = builder.build();
     expect(prompt).toContain("## 대화 메타 출력 (final answer 끝에 추가)");
     expect(prompt).toContain("<title>10-20자 한국어 제목</title>");
-    expect(prompt).toContain("[checkpoint-suggested]");
+    expect(prompt).toContain("[checkpoint]");
   });
 
-  it("always emits Title 정책 and Checkpoint suggestion sections", () => {
+  it("always emits Title 정책 and Checkpoint 마커 sections", () => {
     const builder = makeBuilder();
     const prompt = builder.build();
     expect(prompt).toContain("### Title 정책");
-    expect(prompt).toContain("### Checkpoint suggestion");
+    expect(prompt).toContain("### Checkpoint 마커");
+    expect(prompt).toContain("제안이 아니라 당신의 결정");
     expect(prompt).toContain("누적 진화 제목");
-    expect(prompt).toContain("시스템이 자동으로 새 세션 spawn");
+    expect(prompt).toContain("즉시 새 세션으로 회전");
   });
 
   it("injects current session title when set", () => {
