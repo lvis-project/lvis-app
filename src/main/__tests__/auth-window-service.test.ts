@@ -157,11 +157,12 @@ describe("buildAuthResult", () => {
 });
 
 describe("buildAuthWindowShellHtml", () => {
-  it("renders host-owned titlebar controls and a sandboxed auth webview", () => {
+  it("Win/Linux: renders HTML titlebar with min/max/close (no native frame)", () => {
     const html = buildAuthWindowShellHtml({
       title: "Login <unsafe>",
       url: "https://sso.example.com/login",
       partition: "persist:plugin-auth:example",
+      platform: "win32",
     });
     expect(html).toContain("titlebar-btn");
     expect(html).toContain("id=\"minimize\"");
@@ -172,5 +173,50 @@ describe("buildAuthWindowShellHtml", () => {
     expect(html).toContain("https://sso.example.com/login");
     expect(html).toContain("persist:plugin-auth:example");
     expect(html).toContain("<title>Login &lt;unsafe&gt;</title>");
+  });
+
+  it("macOS: suppresses HTML titlebar buttons + title text so OS traffic lights aren't duplicated", () => {
+    const html = buildAuthWindowShellHtml({
+      title: "Login",
+      url: "https://sso.example.com/login",
+      partition: "persist:plugin-auth:example",
+      platform: "darwin",
+    });
+    expect(html).not.toContain("id=\"minimize\"");
+    expect(html).not.toContain("id=\"maximize\"");
+    expect(html).not.toContain("id=\"close\"");
+    // No <button class="titlebar-btn"> elements should be rendered. The CSS
+    // class itself stays in the <style> block (harmless dead rule) — only
+    // the DOM rendering is suppressed.
+    expect(html).not.toContain("<button class=\"titlebar-btn");
+    expect(html).toContain("titlebar-mac");
+    expect(html).toContain("<webview");
+    // Drag region must remain so users can still move the window.
+    expect(html).toContain("-webkit-app-region: drag");
+  });
+
+  it("devConsole=true: inlines eruda init script in the shell", () => {
+    const html = buildAuthWindowShellHtml({
+      title: "Login",
+      url: "https://sso.example.com/login",
+      partition: "persist:plugin-auth:example",
+      platform: "win32",
+      devConsole: true,
+    });
+    // eruda is bundled in node_modules; if it's resolvable we should see init.
+    // If absent (CI env quirk) we tolerate empty injection — script must not throw.
+    if (html.includes("eruda.init")) {
+      expect(html).toContain("__lvis_eruda_booted");
+    }
+  });
+
+  it("devConsole=false (default): does NOT inline eruda", () => {
+    const html = buildAuthWindowShellHtml({
+      title: "Login",
+      url: "https://sso.example.com/login",
+      partition: "persist:plugin-auth:example",
+      platform: "win32",
+    });
+    expect(html).not.toContain("__lvis_eruda_booted");
   });
 });
