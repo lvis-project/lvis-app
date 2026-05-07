@@ -1,14 +1,16 @@
 import { RefreshCw, GitBranch, Star, ThumbsUp, ThumbsDown } from "lucide-react";
 import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import { TokenCostBadge, type TokenCostBadgePricing } from "./TokenCostBadge.js";
+import { TokenCostBadge, type TokenCostBadgePricing, type TokenCostBadgeProps } from "./TokenCostBadge.js";
 
-export interface TurnSummaryForBadge {
-  tokensIn: number;
-  tokensOut: number;
-  cacheReadTokens?: number;
-  cacheWriteTokens?: number;
-}
+/**
+ * Turn-aggregate provider-reported token usage forwarded to the inline
+ * <TokenCostBadge>. Subset of TokenCostBadgeProps (pricing 은 별 prop).
+ */
+export type TurnSummaryForBadge = Pick<
+  TokenCostBadgeProps,
+  "tokensIn" | "tokensOut" | "cacheReadTokens" | "cacheWriteTokens"
+>;
 
 export function TurnActionBar({
   turnSummary,
@@ -17,13 +19,6 @@ export function TurnActionBar({
   actions,
   onFeedback,
 }: {
-  /**
-   * Turn-aggregate provider-reported token usage. When provided the
-   * <TokenCostBadge> renders a clickable badge (token ↔ cost toggle)
-   * with a hover tooltip breaking down fresh / cache-read / cache-write
-   * / output. Replaces the old chars/4 estimate that was 2-3× off on
-   * Korean content.
-   */
   turnSummary?: TurnSummaryForBadge;
   pricing?: TokenCostBadgePricing;
   isStarred?: boolean;
@@ -42,15 +37,7 @@ export function TurnActionBar({
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 px-3">
       <span className="shrink-0">{timestamp}</span>
-      {turnSummary ? (
-        <TokenCostBadge
-          tokensIn={turnSummary.tokensIn}
-          tokensOut={turnSummary.tokensOut}
-          {...(turnSummary.cacheReadTokens !== undefined ? { cacheReadTokens: turnSummary.cacheReadTokens } : {})}
-          {...(turnSummary.cacheWriteTokens !== undefined ? { cacheWriteTokens: turnSummary.cacheWriteTokens } : {})}
-          {...(pricing ? { pricing } : {})}
-        />
-      ) : null}
+      {turnSummary ? <TokenCostBadge {...turnSummary} pricing={pricing} /> : null}
       <div className="flex-1" />
       {actions?.onRetry && (
         <Tooltip>
