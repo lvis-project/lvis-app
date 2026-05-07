@@ -517,10 +517,14 @@ function createWindow() {
     }
     return { action: "deny" };
   });
-  // <a href> 클릭 또는 location.href 변경으로 인한 탐색 차단
-  win.webContents.on("will-navigate", (event, url) => {
+  // <a href> 클릭 또는 location.href 변경으로 인한 탐색 차단.
+  // Electron 24+ exposes the URL on `details.url`; the legacy positional
+  // `url` arg is deprecated and arrives empty on Electron 41.x, so we read
+  // the canonical event payload only.
+  win.webContents.on("will-navigate", (details) => {
+    const url = details.url;
     if (!url.startsWith("file://") && !url.startsWith("data:")) {
-      event.preventDefault();
+      details.preventDefault();
       void shell.openExternal(url);
     }
   });
@@ -703,14 +707,29 @@ app.on("web-contents-created", (_event, contents) => {
   contents.on("destroyed", dropBinding);
   contents.on("render-process-gone", dropBinding);
 
-  contents.on("will-navigate", (navEvent, url) => {
+  contents.on("will-navigate", (navEvent) => {
     // Plugin webview policy: allow file:// navigations ONLY into the app's
     // dist/src directory (plugin-ui-shell.html + plugin entry modules
     // resolved by the shell). The previous substring match on ".js" or
     // "plugin-ui-shell" let any local .js file load — treat that as LFI
     // and reject. LLM-HTML webviews (different consumer) keep the
     // data:/about: only fallback below.
+    //
+    // URL must come from the canonical `navEvent.url` payload. Electron 41.x
+    // empties the deprecated positional `url` arg, so reading it would crash
+    // here and bypass the security check entirely.
+    const url = navEvent.url;
     const currentUrl = contents.getURL();
+    // Auth-window webviews (plugin OAuth/SSO portals) load remote http/https
+    // login pages. Their navigation policy lives in
+    // `src/main/auth-window-service.ts` and is scoped per auth flow (allows
+    // only http/https, with completion-pattern matching). The generic
+    // plugin-shell policy below would block legitimate post-login redirects
+    // like `/login/callback#access_token=…` because the URL is neither
+    // `data:` nor `about:`. Skip it for any webview already on http/https —
+    // those are owned by the auth window service and not by the plugin shell
+    // pipeline.
+    if (currentUrl.startsWith("http://") || currentUrl.startsWith("https://")) return;
     const isPluginShellFrame = currentUrl.includes("plugin-ui-shell.html");
     if (isPluginShellFrame && url.startsWith("file://")) {
       try {
