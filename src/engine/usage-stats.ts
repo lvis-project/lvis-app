@@ -15,7 +15,12 @@ export interface AuditTurnEntry {
   timestamp: string;
   sessionId: string;
   type: string;
-  tokenUsage?: { inputTokens: number; outputTokens: number };
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
   route?: string;
   input?: string;
 }
@@ -23,6 +28,8 @@ export interface AuditTurnEntry {
 export interface UsageTotals {
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   totalTokens: number;
   cost: number;
 }
@@ -36,6 +43,8 @@ export interface UsageTrendPoint {
   date: string; // YYYY-MM-DD
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   totalTokens: number;
   cost: number;
 }
@@ -58,7 +67,14 @@ export interface UsageSummary {
 }
 
 function emptyTotals(): UsageTotals {
-  return { inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0 };
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 0,
+    cost: 0,
+  };
 }
 
 /**
@@ -85,10 +101,24 @@ function parseRoute(route: string | undefined): { vendor: LLMVendor; model: stri
   return { vendor, model: rest.join("/") || "unknown" };
 }
 
-function addTo(target: UsageTotals, input: number, output: number, cost: number): void {
+function addTo(
+  target: UsageTotals,
+  input: number,
+  output: number,
+  cacheRead: number,
+  cacheWrite: number,
+  cost: number,
+): void {
   target.inputTokens += input;
   target.outputTokens += output;
-  target.totalTokens += input + output;
+  target.cacheReadTokens += cacheRead;
+  target.cacheWriteTokens += cacheWrite;
+  // Anthropic raw shape: input_tokens 가 fresh-only 이므로 cache 도 합산해야
+  // 실제 effective input 이 됨. OpenAI/Gemini 는 cacheRead/Write 가 0 이거나
+  // (cacheRead 만 들어와도) prompt_tokens 안에 이미 포함된 상태라
+  // adapter 에서 0 으로 normalize 한다는 가정. 자세한 것은
+  // reference_token_session_4source.md §1 참조.
+  target.totalTokens += input + output + cacheRead + cacheWrite;
   target.cost += cost;
 }
 
@@ -167,17 +197,26 @@ export function computeUsageSummary(
 
   for (const e of entries) {
     if (!e.tokenUsage) continue;
-    const { inputTokens, outputTokens } = e.tokenUsage;
+    const {
+      inputTokens,
+      outputTokens,
+      cacheReadTokens = 0,
+      cacheWriteTokens = 0,
+    } = e.tokenUsage;
     const { vendor, model } = parseRoute(e.route);
     const pricing = getModelPricing(vendor, model);
-    const cost = computeCost(inputTokens, outputTokens, pricing);
+    const cost = computeCost(
+      { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
+      pricing,
+      vendor,
+    );
     const ts = new Date(e.timestamp);
     if (Number.isNaN(ts.getTime())) continue;
     const dKey = dateKey(ts);
 
-    if (dKey === todayKey) addTo(today, inputTokens, outputTokens, cost);
-    if (dKey >= weekKey) addTo(thisWeek, inputTokens, outputTokens, cost);
-    if (dKey >= monthKey) addTo(thisMonth, inputTokens, outputTokens, cost);
+    if (dKey === todayKey) addTo(today, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
+    if (dKey >= weekKey) addTo(thisWeek, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
+    if (dKey >= monthKey) addTo(thisMonth, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
 
     // per vendor
     const vKey = vendor;
@@ -186,7 +225,7 @@ export function computeUsageSummary(
       v = { vendor, model: "*", ...emptyTotals() };
       perVendorMap.set(vKey, v);
     }
-    addTo(v, inputTokens, outputTokens, cost);
+    addTo(v, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
 
     // per model
     const mKey = `${vendor}/${model}`;
@@ -195,7 +234,7 @@ export function computeUsageSummary(
       m = { vendor, model, ...emptyTotals() };
       perModelMap.set(mKey, m);
     }
-    addTo(m, inputTokens, outputTokens, cost);
+    addTo(m, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
 
     // trend
     let t = trendMap.get(dKey);
@@ -203,7 +242,7 @@ export function computeUsageSummary(
       t = { date: dKey, ...emptyTotals() } as UsageTrendPoint;
       trendMap.set(dKey, t);
     }
-    addTo(t, inputTokens, outputTokens, cost);
+    addTo(t, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
 
     // per conversation
     let c = convMap.get(e.sessionId);
@@ -212,7 +251,7 @@ export function computeUsageSummary(
       convMap.set(e.sessionId, c);
     }
     c.turns += 1;
-    addTo(c, inputTokens, outputTokens, cost);
+    addTo(c, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
   }
 
   const trend = Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
