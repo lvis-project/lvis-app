@@ -753,6 +753,11 @@ export class ConversationLoop {
       });
       // compact가 발생했으면 history 교체
       if (hookResult.compactedMessages) {
+        const beforeCount = this.history.getMessages().length;
+        const afterCount = hookResult.compactedMessages.length;
+        log.info(
+          `post-turn: history mutation — ${beforeCount} → ${afterCount} msgs (compact applied to history reference)`,
+        );
         this.history.clear();
         this.history.restore(hookResult.compactedMessages);
       }
@@ -955,9 +960,13 @@ export class ConversationLoop {
       });
 
       if (stream.kind === "context_error" && !reactiveCompacted) {
+        log.warn(
+          `queryLoop: context_error caught (round=${roundIndex} errMsg="${(stream.errorMessage ?? "").slice(0, 100)}") — entering reactive-compact + retry branch`,
+        );
         reactiveCompacted = true;
         const retried = this.tryReactiveCompact(callbacks);
         if (retried) {
+          log.info(`queryLoop: reactive-compact succeeded — retrying stream (round=${roundIndex})`);
           stream = await collectRoundStream({
             provider: this.provider!,
             model,
@@ -970,7 +979,31 @@ export class ConversationLoop {
             onTextDelta: callbacks?.onTextDelta,
             reactiveCompacted,
           });
+          // 재시도 결과 분류 — silent failure 의 정확한 원인 추적용.
+          log.warn(
+            `queryLoop: post-reactive-compact retry result kind="${stream.kind}" round=${roundIndex}` +
+              (stream.kind === "ok"
+                ? ` text=${stream.text.length}ch toolCalls=${stream.toolCalls.length} stopReason="${stream.stopReason}"`
+                : ""),
+          );
+          // LLM 이 retry 후 *empty + 0 tool* 응답하면 prior tool chain 이
+          // mid-flight 으로 손상되어 LLM 이 plan 잃은 경우. 사용자에게 명시.
+          if (
+            stream.kind === "ok" &&
+            stream.text.length === 0 &&
+            stream.toolCalls.length === 0
+          ) {
+            log.warn(
+              "queryLoop: reactive-compact retry returned EMPTY response — LLM 추론 chain 이 history mutation 으로 손상된 가능성 (silent failure 후보)",
+            );
+            callbacks?.onError?.(
+              "대화 이력이 길어 일부 압축됐고 그 직후 LLM 응답이 비어있습니다. 이어서 진행하려면 메시지를 다시 보내주세요.",
+            );
+          }
         } else {
+          log.warn(
+            `queryLoop: reactive-compact failed (compactMessages no-op or threw) — propagating context_error`,
+          );
           throw new Error(stream.errorMessage);
         }
       }
@@ -1217,16 +1250,38 @@ export class ConversationLoop {
   /**
    * Reactive compact — context-length 초과 시 history 를 압축한다.
    * 성공했으면 true 반환 (호출자가 stream 재시도). 실패 시 false.
+   *
+   * **Diagnostic note**: 이 경로는 mid-loop 으로 history 를 *대체* 하므로
+   * LLM 의 추론 chain 을 *깨뜨릴* 수 있음 (silent failure suspect — "툴
+   * 사용 중 멈춤" incident 의 prime suspect, 2026-05-07). production 에서도
+   * 항상 log + onCompactOccurred surface 해서 사후 진단 가능하게 함.
    */
   private tryReactiveCompact(callbacks?: TurnCallbacks): boolean {
+    const before = {
+      msgCount: this.history.getMessages().length,
+      lastRole: this.history.getMessages().at(-1)?.role,
+      cumulativeIn: this.cumulativeUsage.inputTokens,
+    };
+    log.warn(
+      `reactive-compact: BEFORE — msgCount=${before.msgCount} lastRole=${before.lastRole} cumIn=${before.cumulativeIn}`,
+    );
     try {
       const { messages: compactedMsgs, result: cr } = compactMessages(this.history.getMessages(), undefined, "reactive");
-      if (!cr.compacted) return false;
+      if (!cr.compacted) {
+        log.warn("reactive-compact: compactMessages returned compacted=false (no-op) — provider context_error will propagate");
+        return false;
+      }
       this.history.clear();
       this.history.restore(compactedMsgs);
-      if (process.env.NODE_ENV !== "production") {
-        log.info(`reactive-compact: removed ${cr.removedMessages} msgs, freed ~${cr.freedTokens} tokens`);
-      }
+      const after = {
+        msgCount: this.history.getMessages().length,
+        lastRole: this.history.getMessages().at(-1)?.role,
+      };
+      // production 에서도 항상 log — dev-only 가드 제거 (silent compact 가
+      // mid-loop incident 의 root cause 진단을 막던 패턴 정정).
+      log.warn(
+        `reactive-compact: AFTER — removed=${cr.removedMessages} freed~${cr.freedTokens} msgCount=${after.msgCount} lastRole=${after.lastRole} (history mutated mid-loop — LLM 의 prior tool_result 회상 손실 가능)`,
+      );
       callbacks?.onCompactOccurred?.({ removedMessages: cr.removedMessages, freedTokens: cr.freedTokens });
       return true;
     } catch (compactErr) {
@@ -1406,13 +1461,21 @@ export class ConversationLoop {
     const features = this.deps.settingsService.get("features");
     const continuousBackendEnabled = features?.experimentalContinuousBackend ?? false;
     const devMode = process.env.LVIS_DEV === "1";
+    const sessionAgeMs = Date.now() - this.sessionStartedAt;
+    const semanticHint = lastAssistantText.includes("[checkpoint-suggested]");
     const decision = decideRotation({
       ctxUsage,
-      sessionAgeMs: Date.now() - this.sessionStartedAt,
-      semanticHint: lastAssistantText.includes("[checkpoint-suggested]"),
+      sessionAgeMs,
+      semanticHint,
       continuousBackendEnabled,
       devMode,
     });
+
+    // Diagnostic: 모든 회전 결정의 input/output 을 production 에서도 log.
+    // "왜 갑자기 체크포인트 정리?" 류 사용자 의문 시 정확한 trigger + 상태 추적 가능.
+    log.info(
+      `runRotationCheck: ctxUsage=${(ctxUsage * 100).toFixed(1)}% sessionAgeMs=${sessionAgeMs} semanticHint=${semanticHint} continuousBackend=${continuousBackendEnabled} devMode=${devMode} → decision: shouldRotate=${decision.shouldRotate}${decision.trigger ? ` trigger="${decision.trigger}"` : ""} skipSummary=${decision.shouldSkipSummary}`,
+    );
 
     if (!decision.shouldRotate) return;
 
