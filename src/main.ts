@@ -329,7 +329,7 @@ function refreshApplicationMenu() {
       ? [
           { label: app.name, submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }] },
           createViewMenu(),
-          { label: "편집", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }] },
+          { label: "편집", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
           { label: "보기", submenu: [{ role: "reload" }] },
         ]
       : [createViewMenu()];
