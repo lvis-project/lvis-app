@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
-import { lookupPricing } from "../../../shared/pricing-data.js";
+import { lookupPricing, effectiveContextWindow } from "../../../shared/pricing-data.js";
+import { getUsableContext } from "../../../shared/context-budget.js";
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 
@@ -35,7 +36,12 @@ export function useContextBudget(params: {
 
   const contextBudget = useMemo(() => {
     const pricing = lookupPricing(llmVendor, llmModel);
-    return pricing?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+    // Effective window picks the 1M beta tier when the model defines one
+    // (adapter auto-sends `context-1m-2025-08-07`). Cline-style buffer
+    // then subtracts output + safety reservation so the ring hits 100% at
+    // the actual rotation point, not at raw context = full.
+    const raw = pricing ? effectiveContextWindow(pricing) : DEFAULT_CONTEXT_WINDOW;
+    return getUsableContext(raw);
   }, [llmVendor, llmModel]);
 
   const usedTokens = useMemo(() => {
