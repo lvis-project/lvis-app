@@ -8,6 +8,7 @@ import {
   DEFAULT_PRICING,
   FALLBACK_PRICING,
   lookupPricing,
+  lookupPricingOptional,
 } from "../pricing-data.js";
 import { getModelPricing, PRICING_TABLE } from "../../engine/llm/pricing.js";
 
@@ -93,5 +94,15 @@ describe("engine pricing env-override (Node-only layer)", () => {
     process.env.LVIS_PRICING_OVERRIDE = "{not valid json";
     const p = getModelPricing("claude", "claude-sonnet-4-6");
     expect(p.inputPer1M).toBe(3);
+  });
+
+  it("lookupPricingOptional returns undefined on miss (strict variant)", () => {
+    // Locks the contract that UI consumers use to disable cost-mode toggle:
+    // unknown vendor/model → undefined (not FALLBACK_PRICING) so the badge
+    // shows "no pricing available" instead of an inaccurate $0 estimate.
+    expect(lookupPricingOptional("openai", "no-such-model-xyz")).toBeUndefined();
+    expect(lookupPricingOptional("azure-foundry", "any-deployment")).toBeUndefined();
+    // Known model still resolves
+    expect(lookupPricingOptional("claude", "claude-sonnet-4-6")?.inputPer1M).toBe(3);
   });
 });
