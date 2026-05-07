@@ -173,8 +173,8 @@ async function runStreamedTurn(
         send({ type: "assistant_round", roundIndex, text, thought, stopReason, hasToolCalls }),
       onToolStart: (name, toolInput, meta) =>
         send({ type: "tool_start", name, input: toolInput, ...meta }),
-      onToolEnd: (name, toolResult, isError, meta, uiPayload) =>
-        send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }) }),
+      onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
+        send({ type: "tool_end", name, result: toolResult, isError, ...meta, ...(uiPayload && { uiPayload }), durationMs }),
       onError: (error) => send({ type: "error", error }),
       onCompactOccurred: ({ removedMessages, freedTokens, tier, revertSessionId, summary }) =>
         send({
