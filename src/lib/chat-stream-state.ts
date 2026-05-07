@@ -60,6 +60,20 @@ export type StreamEvent = {
    * renderer can show per-tool timing on each ToolGroupCard row.
    */
   durationMs?: number;
+  /**
+   * Turn aggregate footer — emitted as a single `type: "turn_summary"` event
+   * after `done`. Carries totals computed in the conversation loop so the
+   * renderer never needs to re-aggregate per-tool / per-round numbers.
+   * `cumulativeToolMs` is summed from per-tool `durationMs` once available;
+   * may be 0 in legacy/aborted turns. `breakdown` is the optional per-tool
+   * dictionary used by the expand affordance.
+   */
+  turnDurationMs?: number;
+  toolCount?: number;
+  cumulativeToolMs?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  breakdown?: Record<string, { count: number; ms: number }>;
 };
 
 export type ToolEntryItem = {
@@ -164,6 +178,28 @@ export type ChatEntry =
       response?: string;
       /** True while the response is mid-stream. */
       responseStreaming?: boolean;
+    }
+  // Turn aggregate footer — appended after the final assistant entry of a
+  // turn. Carries the totals shown by `TurnSummaryFooter` (step count,
+  // wall-clock duration, token usage from the LLM provider, optional
+  // per-tool breakdown). Persisted alongside other history entries so the
+  // footer survives chat reloads and historical session rendering.
+  | {
+      kind: "turn_summary";
+      turnDurationMs: number;
+      toolCount: number;
+      /**
+       * Cumulative per-tool wall-clock ms summed across the turn. May be 0
+       * when the executor has not yet been instrumented with durationMs
+       * (companion PR `feat/tool-execution-duration-display`); the
+       * renderer treats 0 as "per-tool slice unavailable" and elides it
+       * from the footer summary line.
+       */
+      cumulativeToolMs: number;
+      tokensIn: number;
+      tokensOut: number;
+      /** Per-tool aggregate (`{ count, ms }` per tool name). Omitted when no tools ran. */
+      breakdown?: Record<string, { count: number; ms: number }>;
     };
 
 type ReasoningEntry = Extract<ChatEntry, { kind: "reasoning" }>;
