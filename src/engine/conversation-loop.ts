@@ -825,11 +825,17 @@ export class ConversationLoop {
     // into the round stream's `usage` field). Suppressed for interrupted
     // turns and turns without a real assistant response (mirrors the
     // turn-end notification gate so dropped turns don't render footers).
-    if (
+    // Production diagnostic — turn_summary 가 사용자 UI (TokenCostBadge 배지
+     // + TokenProgressRing) 의 단일 source 라 *emit 되지 않으면* 두 표면 모두
+     // 0 표시. 어느 단계에서 끊겼는지 정확히 가시화.
+    const willEmitSummary =
       result.stopReason !== "interrupted" &&
       typeof result.text === "string" &&
-      result.text.trim().length > 0
-    ) {
+      result.text.trim().length > 0;
+    log.info(
+      `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text?.trim().length ?? 0} usage=${result.usage ? `in=${result.usage.inputTokens} out=${result.usage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
+    );
+    if (willEmitSummary) {
       turnTokensIn = result.usage?.inputTokens ?? 0;
       turnTokensOut = result.usage?.outputTokens ?? 0;
       const turnCacheRead = result.usage?.cacheReadTokens ?? 0;
