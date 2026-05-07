@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { bootstrap, type AppServices } from "./boot.js";
 import { registerIpcHandlers, registerWindowEventListeners, unregisterPluginWebview } from "./ipc-bridge.js";
 import { ensureCorporateCa } from "./main/corp-ca-loader.js";
+import { isAuthOwned } from "./main/auth-window-registry.js";
 import { installHtmlPreviewPartitionBlock, installPluginPartitionPolicy } from "./main/html-preview-partition.js";
 import { registerPluginAssetProtocolScheme } from "./main/plugin-asset-protocol.js";
 import { findLvisProtocolUri, parsePluginAuthUri } from "./main/lvis-protocol.js";
@@ -726,10 +727,11 @@ app.on("web-contents-created", (_event, contents) => {
     // only http/https, with completion-pattern matching). The generic
     // plugin-shell policy below would block legitimate post-login redirects
     // like `/login/callback#access_token=…` because the URL is neither
-    // `data:` nor `about:`. Skip it for any webview already on http/https —
-    // those are owned by the auth window service and not by the plugin shell
-    // pipeline.
-    if (currentUrl.startsWith("http://") || currentUrl.startsWith("https://")) return;
+    // `data:` nor `about:`. Skip the global guard *only* when this
+    // webContents was explicitly registered as auth-owned — a URL-prefix
+    // check would also exempt any unrelated future webview that happens
+    // to be on http(s).
+    if (isAuthOwned(contents)) return;
     const isPluginShellFrame = currentUrl.includes("plugin-ui-shell.html");
     if (isPluginShellFrame && url.startsWith("file://")) {
       try {

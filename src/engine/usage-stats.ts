@@ -81,14 +81,11 @@ function emptyTotals(): UsageTotals {
  * Parse a route string `"vendor/model"` into `{ vendor, model }`.
  * Fallback: `{ vendor: DEFAULT_LLM_VENDOR, model: "unknown" }`.
  *
- * TODO(usage-stats): `AuditTurnEntry.route` is currently logged as the
- * `RouteResult.route` discriminator ("llm" / "skill" / "command" /
- * "agent-hub") by `AuditLogger.logTurn`, NOT as a `vendor/model` pair.
- * This parser therefore falls through to the default for most audit
- * entries, so per-vendor / per-model cost breakdown is inaccurate
- * until the logger is updated to emit `${vendor}/${model}`. The fix
- * touches the audit emission site in `engine/conversation-loop.ts`,
- * not this parser.
+ * `engine/conversation-loop.ts` 의 audit emission site 는 LLM 턴에 한해
+ * `${vendor}/${model}` 형태로 route 를 기록하므로 LLM 활동의 per-vendor /
+ * per-model 비용 breakdown 이 정상 분류된다. 비-LLM RouteResult discriminator
+ * (skill / command / agent-hub) 는 의도적으로 default vendor 로 묶여
+ * "non-LLM" 사용량을 한 줄로 집계 — 그쪽은 토큰/비용 attribution 의미가 없다.
  */
 function parseRoute(route: string | undefined): { vendor: LLMVendor; model: string } {
   if (!route) return { vendor: DEFAULT_LLM_VENDOR, model: "unknown" };
@@ -107,18 +104,21 @@ function addTo(
   output: number,
   cacheRead: number,
   cacheWrite: number,
+  vendor: LLMVendor,
   cost: number,
 ): void {
   target.inputTokens += input;
   target.outputTokens += output;
   target.cacheReadTokens += cacheRead;
   target.cacheWriteTokens += cacheWrite;
-  // Anthropic raw shape: input_tokens 가 fresh-only 이므로 cache 도 합산해야
-  // 실제 effective input 이 됨. OpenAI/Gemini 는 cacheRead/Write 가 0 이거나
-  // (cacheRead 만 들어와도) prompt_tokens 안에 이미 포함된 상태라
-  // adapter 에서 0 으로 normalize 한다는 가정. 자세한 것은
-  // reference_token_session_4source.md §1 참조.
-  target.totalTokens += input + output + cacheRead + cacheWrite;
+  // totalTokens 의미는 vendor 별로 다르다 — Anthropic 은 input + cache 가산,
+  // OpenAI/Gemini 는 cache 가 이미 input 안에 포함 (Vercel SDK normalized
+  // cachedInputTokens). 동일 공식을 쓰면 OpenAI 활동에서 cache 가
+  // double-count 되어 dashboard 합계가 부풀려진다.
+  target.totalTokens +=
+    vendor === "claude"
+      ? input + output + cacheRead + cacheWrite
+      : input + output;
   target.cost += cost;
 }
 
@@ -214,9 +214,9 @@ export function computeUsageSummary(
     if (Number.isNaN(ts.getTime())) continue;
     const dKey = dateKey(ts);
 
-    if (dKey === todayKey) addTo(today, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
-    if (dKey >= weekKey) addTo(thisWeek, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
-    if (dKey >= monthKey) addTo(thisMonth, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
+    if (dKey === todayKey) addTo(today, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
+    if (dKey >= weekKey) addTo(thisWeek, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
+    if (dKey >= monthKey) addTo(thisMonth, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
 
     // per vendor
     const vKey = vendor;
@@ -225,7 +225,7 @@ export function computeUsageSummary(
       v = { vendor, model: "*", ...emptyTotals() };
       perVendorMap.set(vKey, v);
     }
-    addTo(v, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
+    addTo(v, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
 
     // per model
     const mKey = `${vendor}/${model}`;
@@ -234,7 +234,7 @@ export function computeUsageSummary(
       m = { vendor, model, ...emptyTotals() };
       perModelMap.set(mKey, m);
     }
-    addTo(m, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
+    addTo(m, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
 
     // trend
     let t = trendMap.get(dKey);
@@ -242,7 +242,7 @@ export function computeUsageSummary(
       t = { date: dKey, ...emptyTotals() } as UsageTrendPoint;
       trendMap.set(dKey, t);
     }
-    addTo(t, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
+    addTo(t, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
 
     // per conversation
     let c = convMap.get(e.sessionId);
@@ -251,7 +251,7 @@ export function computeUsageSummary(
       convMap.set(e.sessionId, c);
     }
     c.turns += 1;
-    addTo(c, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost);
+    addTo(c, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, vendor, cost);
   }
 
   const trend = Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
