@@ -39,9 +39,32 @@ import { Button } from "../../../components/ui/button.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
 import { getToolDisplayName } from "../utils/tool-display.js";
+import { formatToolDuration } from "../utils/format-duration.js";
 import type { RenderHtmlPayload } from "../types.js";
 import { HtmlPreview } from "./HtmlPreview.js";
 import { McpAppView } from "./McpAppView.js";
+
+/**
+ * Per-tool execution duration badge — `⏱ 1.4s`. Rendered next to the
+ * tool name on every ToolGroupCard row (single-tool inline and grouped
+ * rows). Hidden while the tool is running (no duration yet) and when
+ * `durationMs` is undefined (legacy stream events from a session that
+ * predates the per-tool timer instrumentation).
+ */
+function ToolDurationBadge({ durationMs }: { durationMs?: number }) {
+  if (typeof durationMs !== "number") return null;
+  const label = formatToolDuration(durationMs);
+  if (!label) return null;
+  return (
+    <span
+      className="shrink-0 font-mono text-[10px] tabular-nums opacity-70"
+      title={`${durationMs} ms`}
+      data-testid="tool-duration"
+    >
+      ⏱ {label}
+    </span>
+  );
+}
 
 function formatToolPayload(value: string): string {
   const trimmed = value.trim();
@@ -93,6 +116,7 @@ function SingleToolInline({
       >
         <Wrench className="h-3 w-3 flex-shrink-0" />
         <span className="min-w-0 truncate font-medium">{getToolDisplayName(tool.name)}</span>
+        {!isRunning && <ToolDurationBadge durationMs={tool.durationMs} />}
         {isRunning ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
         ) : (
@@ -204,6 +228,7 @@ export function ToolGroupCard({
                 >
                   {isExpanded ? <ChevronDown className="h-2.5 w-2.5 flex-shrink-0" /> : <ChevronRight className="h-2.5 w-2.5 flex-shrink-0" />}
                   <span className="min-w-0 truncate">{getToolDisplayName(tool.name)}</span>
+                  {tool.status !== "running" && <ToolDurationBadge durationMs={tool.durationMs} />}
                   {tool.status === "running" ? (
                     <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />
                   ) : (

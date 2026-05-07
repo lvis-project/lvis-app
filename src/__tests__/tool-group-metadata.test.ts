@@ -74,4 +74,57 @@ describe("ToolExecutor metadata", () => {
     expect(orderedStarts.map((meta) => meta.toolUseId)).toEqual(["tu-1", "tu-2", "tu-3"]);
     expect(orderedEnds.map((meta) => meta.toolUseId)).toEqual(["tu-1", "tu-2", "tu-3"]);
   });
+
+  it("attaches durationMs to every ToolResult and forwards it to onToolEnd", async () => {
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "slow_tool",
+      description: "deliberately slow",
+      source: "builtin",
+      category: "read",
+      jsonSchema: { type: "object" },
+      execute: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { output: "ok", isError: false };
+      },
+    }));
+
+    const executor = new ToolExecutor(registry);
+    const callbackDurations: number[] = [];
+
+    const results = await executor.executeAll(
+      [{ id: "tu-1", name: "slow_tool", input: {} }],
+      {
+        onToolEnd: (_name, _result, _isError, _meta, _ui, durationMs) =>
+          callbackDurations.push(durationMs),
+      },
+      "session-1",
+    );
+
+    expect(results).toHaveLength(1);
+    expect(typeof results[0]?.durationMs).toBe("number");
+    expect(results[0]?.durationMs).toBeGreaterThanOrEqual(20);
+    expect(callbackDurations).toHaveLength(1);
+    expect(callbackDurations[0]).toBe(results[0]?.durationMs);
+  });
+
+  it("attaches durationMs to ToolResult on missing-tool error path", async () => {
+    const registry = new ToolRegistry();
+    const executor = new ToolExecutor(registry);
+    const callbackDurations: number[] = [];
+
+    const results = await executor.executeAll(
+      [{ id: "tu-1", name: "nonexistent_tool", input: {} }],
+      {
+        onToolEnd: (_name, _result, _isError, _meta, _ui, durationMs) =>
+          callbackDurations.push(durationMs),
+      },
+      "session-1",
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.is_error).toBe(true);
+    expect(typeof results[0]?.durationMs).toBe("number");
+    expect(callbackDurations).toHaveLength(1);
+  });
 });

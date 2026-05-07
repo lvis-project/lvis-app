@@ -261,6 +261,48 @@ describe("chat-stream-state", () => {
       rows: [],
     });
   });
+
+  it("preserves durationMs on the completed tool entry", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "타이밍");
+    entries = applyToolStart(entries, {
+      groupId: "round-1",
+      toolUseId: "tool-1",
+      name: "web_fetch",
+      displayOrder: 0,
+      input: { url: "https://example.com" },
+    });
+    entries = applyToolEnd(entries, {
+      groupId: "round-1",
+      toolUseId: "tool-1",
+      result: "ok",
+      isError: false,
+      durationMs: 1400,
+    });
+
+    const group = entries.find((e) => e.kind === "tool_group");
+    if (group?.kind !== "tool_group") throw new Error("expected tool_group");
+    expect(group.tools[0]?.durationMs).toBe(1400);
+  });
+
+  it("omits durationMs when the payload doesn't carry one (legacy)", () => {
+    let entries: ChatEntry[] = appendUserEntry([], "legacy");
+    entries = applyToolStart(entries, {
+      groupId: "round-1",
+      toolUseId: "tool-1",
+      name: "web_fetch",
+      displayOrder: 0,
+    });
+    entries = applyToolEnd(entries, {
+      groupId: "round-1",
+      toolUseId: "tool-1",
+      result: "ok",
+      isError: false,
+    });
+
+    const group = entries.find((e) => e.kind === "tool_group");
+    if (group?.kind !== "tool_group") throw new Error("expected tool_group");
+    expect(group.tools[0]?.durationMs).toBeUndefined();
+  });
 });
 
 describe("imported_trigger helpers (brain-import card lifecycle)", () => {
