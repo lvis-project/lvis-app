@@ -68,6 +68,35 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).toContain("read file"); // unmapped name: underscores → spaces fallback
   });
 
+  it("single tool running: keeps input collapsed by default", () => {
+    const { container } = render(
+      <ToolGroupCard group={makeGroup({ status: "running", tools: [{ toolUseId: "tu-1", name: "read_file", input: { path: "/tmp/live.txt" }, status: "running", displayOrder: 0 }] })} />,
+    );
+
+    expect(container.textContent).toContain("read file");
+    expect(container.textContent).not.toContain("/tmp/live.txt");
+
+    fireEvent.click(container.querySelector("button") as HTMLButtonElement);
+    expect(container.textContent).toContain("/tmp/live.txt");
+  });
+
+  it("single tool running then done: does not leave result expanded", () => {
+    const running = makeGroup({
+      status: "running",
+      tools: [{ toolUseId: "tu-1", name: "read_file", input: { path: "/tmp/live.txt" }, status: "running", displayOrder: 0 }],
+    });
+    const done = makeGroup({
+      status: "done",
+      tools: [{ toolUseId: "tu-1", name: "read_file", input: { path: "/tmp/live.txt" }, result: "live result", status: "done", displayOrder: 0 }],
+    });
+    const { container, rerender } = render(<ToolGroupCard group={running} />);
+
+    rerender(<ToolGroupCard group={done} />);
+
+    expect(container.textContent).toContain("read file");
+    expect(container.textContent).not.toContain("live result");
+  });
+
   it("single tool error: shows 실패 badge", () => {
     const group = makeGroup({ status: "error", tools: [{ toolUseId: "tu-1", name: "read_file", input: {}, result: "err", status: "error", displayOrder: 0 }] });
     const { container } = render(<ToolGroupCard group={group} />);
@@ -123,6 +152,22 @@ describe("ToolGroupCard", () => {
       ] })} />,
     );
     expect(container.textContent).toContain("도구 사용 중");
+  });
+
+  it("multi-tool running: does not auto-expand the first running tool", () => {
+    const { container } = render(
+      <ToolGroupCard group={makeMultiGroup({ status: "running", tools: [
+        { toolUseId: "tu-1", name: "knowledge_search", input: { query: "hidden live input" }, status: "running", displayOrder: 0 },
+        { toolUseId: "tu-2", name: "read_file", input: {}, status: "running", displayOrder: 1 },
+      ] })} />,
+    );
+
+    expect(container.textContent).toContain("도구 사용 중");
+    expect(container.textContent).not.toContain("hidden live input");
+
+    fireEvent.click(container.querySelector("button") as HTMLButtonElement);
+    expect(container.textContent).toContain("문서 검색");
+    expect(container.textContent).not.toContain("hidden live input");
   });
 
   it("multi-tool: shows tool display names in header", () => {
