@@ -64,7 +64,7 @@ jobs:
             --publisher-key "$PUBLISHER_KEY"
 
       - name: Setup Node (required by postinstall + build scripts)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
