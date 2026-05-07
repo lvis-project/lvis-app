@@ -57,10 +57,10 @@ describe("useChatState", () => {
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
 
     act(() => {
-      emitChatStream({ type: "text_delta", text: "<title>제목</title>[checkpoint-suggested]" });
+      emitChatStream({ type: "text_delta", text: "<title>제목</title>[checkpoint]" });
       emitChatStream({
         type: "assistant_round",
-        text: "<title>제목</title>[checkpoint-suggested]",
+        text: "<title>제목</title>[checkpoint]",
         stopReason: "end_turn",
         hasToolCalls: false,
       });
@@ -77,7 +77,7 @@ describe("useChatState", () => {
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
 
     act(() => {
-      emitChatStream({ type: "text_delta", text: "<title>제목</title>[checkpoint-suggested]" });
+      emitChatStream({ type: "text_delta", text: "<title>제목</title>[checkpoint]" });
       emitChatStream({ type: "done" });
     });
 
@@ -271,19 +271,46 @@ describe("useContextBudget (deterministic math)", () => {
     expect(result.current.isOverflow).toBe(false);
   });
 
-  it("usedTokens grows monotonically with entries", () => {
-    const small: ChatEntry[] = [{ kind: "user", text: "hi" }];
-    const big: ChatEntry[] = [
+  it("usedTokens reflects the latest turn_summary's tokensIn", () => {
+    // 2026-05-07 Phase 3: usedTokens 는 더 이상 entries 의 chars/4 누적이
+    // 아니라 *마지막 turn_summary entry 의 tokensIn* (provider report). 같은
+    // turn 안에서 모델 호출 후 turn_summary 가 emit 되면 그 값으로 ring 이
+    // 갱신, compact 후 다음 turn 에는 작은 값이 들어와 자동 감소. 이전
+    // monotonic-growth contract 는 더 이상 보장되지 않으며 (compact 가
+    // 의도적으로 줄임), 이 테스트가 새 contract 를 명시적으로 검증.
+    const after10k: ChatEntry[] = [
       { kind: "user", text: "hi" },
-      { kind: "assistant", text: "a".repeat(1000) },
+      { kind: "assistant", text: "answer" },
+      {
+        kind: "turn_summary",
+        turnDurationMs: 1000,
+        toolCount: 0,
+        cumulativeToolMs: 0,
+        tokensIn: 10_000,
+        tokensOut: 200,
+      },
+    ];
+    const after5k: ChatEntry[] = [
+      ...after10k,
+      { kind: "user", text: "more" },
+      { kind: "assistant", text: "post-compact" },
+      {
+        kind: "turn_summary",
+        turnDurationMs: 1000,
+        toolCount: 0,
+        cumulativeToolMs: 0,
+        tokensIn: 5_000,
+        tokensOut: 100,
+      },
     ];
     const a = renderHook(() =>
-      useContextBudget({ entries: small, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+      useContextBudget({ entries: after10k, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
     ).result.current.usedTokens;
     const b = renderHook(() =>
-      useContextBudget({ entries: big, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
+      useContextBudget({ entries: after5k, llmVendor: "openai", llmModel: "gpt-4o-mini" }),
     ).result.current.usedTokens;
-    expect(b).toBeGreaterThan(a);
+    expect(a).toBe(10_000);
+    expect(b).toBe(5_000); // compact 후 감소가 정상 — Phase 3 의 핵심 동작.
   });
 });
 
