@@ -9,7 +9,7 @@ import { TokenCostBadge, type TokenCostBadgePricing, type TokenCostBadgeProps } 
  */
 export type TurnSummaryForBadge = Pick<
   TokenCostBadgeProps,
-  "tokensIn" | "tokensOut" | "cacheReadTokens" | "cacheWriteTokens"
+  "tokensIn" | "freshInputTokens" | "tokensOut" | "cacheReadTokens" | "cacheWriteTokens"
 >;
 
 export function TurnActionBar({

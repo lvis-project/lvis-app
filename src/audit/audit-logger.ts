@@ -50,7 +50,12 @@ export interface AuditEntry {
     permissionReason?: string;
     rateLimitRemaining?: number;
   }>;
-  tokenUsage?: { inputTokens: number; outputTokens: number };
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
   route?: string;
 }
 
@@ -315,7 +320,12 @@ export class AuditLogger {
     input: string;
     output: string;
     toolCalls: Array<{ name: string; isError: boolean }>;
-    tokenUsage?: { inputTokens: number; outputTokens: number };
+    tokenUsage?: {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+    };
     route: string;
   }): void {
     this.log({

@@ -74,6 +74,13 @@ export type StreamEvent = {
   tokensIn?: number;
   tokensOut?: number;
   /**
+   * Turn-aggregate fresh input tokens (sum of per-round
+   * `inputTokens − cacheRead − cacheWrite`). Used by TokenCostBadge for the
+   * billing-weight headline + cost calc. Distinct from `tokensIn` (last
+   * round raw, used by TokenProgressRing for context-fill).
+   */
+  freshInputTokens?: number;
+  /**
    * Cache breakdown — Anthropic prompt cache (read 90% 할인 / write 25% 가산).
    * Vercel AI SDK v6 가 inputTokens 를 cached 포함 정규화하므로 separately
    * surface. Reference: Kilo Code session.ts:354.
@@ -203,7 +210,17 @@ export type ChatEntry =
        * from the footer summary line.
        */
       cumulativeToolMs: number;
+      /**
+       * Last round's raw input tokens. TokenProgressRing uses this for the
+       * context-window fill indicator (cache reads still occupy slots).
+       */
       tokensIn: number;
+      /**
+       * Turn-aggregate fresh input tokens (excludes cache reads/writes).
+       * TokenCostBadge uses this for the billing-weight headline and cost
+       * calculation. Required at emit time — engine always computes it now.
+       */
+      freshInputTokens: number;
       tokensOut: number;
       /**
        * Anthropic prompt cache breakdown. Optional — only set when the

@@ -12,157 +12,53 @@
 import type { GenericMessage, TokenUsage, LLMVendor, ConversationCarryover, UserContentPart } from "./llm/types.js";
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
 import { shouldSkipSummary as _shouldSkipSummary } from "./summary-generator.js";
+import { lookupPricing, effectiveContextWindow } from "../shared/pricing-data.js";
+import { getUsableContext } from "../shared/context-budget.js";
 
 /** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
 const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
 
-// ─── Context Window Registry ─────────────────────────
-
 /**
- * 알려진 모델별 최대 컨텍스트 윈도우 토큰 수.
- * 최신 정보 기준 (2026-04-17): 각 공급사 공식 문서 · API 스펙 참조.
- * 미등록 모델은 getModelContextWindow()에서 DEFAULT_CONTEXT_WINDOW(128K)로 폴백.
+ * shouldCompact 의 contextWindow 인자 기본값. lookupPricing 의 FALLBACK_PRICING
+ * 과 같은 값(128K) — 혼동 방지를 위해 한 자리로 굳혀둔다. 정상 caller 는 모두
+ * `getModelContextWindow()` 결과를 명시적으로 넘기므로 이 default 는 사실상
+ * 안전 그물.
  */
-const MODEL_CONTEXT_WINDOWS: Partial<Record<LLMVendor, Record<string, number>>> = {
-  // ── Anthropic Claude ───────────────────────────────────────────────────────
-  // 출처: https://platform.claude.com/docs/en/about-claude/models/overview
-  claude: {
-    // Claude 4 세대 (2025~2026) — 최신
-    "claude-opus-4-6":           1_000_000, // 1M context (2026-02)
-    "claude-sonnet-4-6":         1_000_000, // 1M context (2026-02)
-    "claude-opus-4-5":             200_000, // 200K (2025-11)
-    "claude-sonnet-4-5":           200_000, // 200K (2025-09)
-    "claude-haiku-4-5":            200_000, // 200K (2025-10)
-    "claude-haiku-4-5-20251001":   200_000,
-    "claude-opus-4-20250514":      200_000, // Claude 4 최초 릴리즈 스냅샷
-    "claude-sonnet-4-20250514":    200_000, // Claude 4 최초 릴리즈 스냅샷
-    // Claude 3.x 세대 (구형 — 하위 호환)
-    "claude-3-5-sonnet-20241022":  200_000,
-    "claude-3-5-haiku-20241022":   200_000,
-    "claude-3-opus-20240229":      200_000,
-    "claude-3-sonnet-20240229":    200_000,
-    "claude-3-haiku-20240307":     200_000,
-  },
-
-  // ── OpenAI ─────────────────────────────────────────────────────────────────
-  // 출처: https://platform.openai.com/docs/models
-  openai: {
-    // GPT-5.4 시리즈 (2026-03) — 최신, 1.05M context
-    "gpt-5.4":                   1_050_000,
-    "gpt-5.4-pro":               1_050_000,
-    "gpt-5.4-mini":              1_050_000,
-    "gpt-5.4-nano":              1_050_000,
-    // GPT-5.3 (2026) — 400K context
-    "gpt-5.3":                     400_000,
-    // GPT-5.2 시리즈 (2025-12) — 400K context
-    "gpt-5.2":                     400_000,
-    "gpt-5.2-codex":               400_000,
-    "gpt-5.3-codex":               400_000,
-    // GPT-5.1 시리즈 (2025) — 400K context
-    "gpt-5.1":                     400_000,
-    "gpt-5.1-reasoning":           400_000,
-    "gpt-5.1-pro":                 400_000,
-    "gpt-5.1-codex":               400_000,
-    "gpt-5.1-codex-mini":          400_000,
-    "gpt-5.1-codex-max":           400_000,
-    // GPT-5 베이스 시리즈 (2025) — 400K context
-    "gpt-5":                       400_000,
-    "gpt-5-mini":                  400_000,
-    "gpt-5-nano":                  400_000,
-    // GPT-4.1 시리즈 (2025-04) — 1M context
-    "gpt-4.1":                   1_000_000,
-    "gpt-4.1-mini":              1_000_000,
-    "gpt-4.1-nano":              1_000_000,
-    "gpt-4.1-2025-04-14":        1_000_000,
-    // o-series 추론 모델 (2025)
-    "o3":                          200_000,
-    "o3-2025-04-16":               200_000,
-    "o4-mini":                     200_000,
-    "o4-mini-2025-04-24":          200_000,
-    "o1":                          200_000,
-    "o1-mini":                     128_000,
-    // GPT-4o 시리즈 (128K)
-    "gpt-4o":                      128_000,
-    "gpt-4o-mini":                 128_000,
-    // GPT-4 레거시
-    "gpt-4-turbo":                 128_000,
-    "gpt-4-32k":                    32_768,
-    "gpt-4":                         8_192,
-    "gpt-3.5-turbo":                16_385,
-  },
-
-  // ── Google Gemini ──────────────────────────────────────────────────────────
-  // 출처: https://ai.google.dev/gemini-api/docs/models
-  gemini: {
-    // Gemini 2.5 시리즈 (2025) — 최신
-    "gemini-2.5-pro":            1_000_000,
-    "gemini-2.5-flash":          1_000_000,
-    "gemini-2.5-flash-lite":       128_000,
-    // Gemini 2.0 시리즈 (구형)
-    "gemini-2.0-flash":          1_048_576,
-    "gemini-2.0-flash-lite":       128_000,
-    // Gemini 1.5 시리즈 (레거시)
-    "gemini-1.5-pro":            2_097_152,
-    "gemini-1.5-flash":          1_048_576,
-    "gemini-1.5-flash-8b":       1_048_576,
-  },
-
-  // ── GitHub Copilot (github.ai/inference) ───────────────────────────────────
-  // 출처: https://docs.github.com/en/copilot/reference/ai-models/supported-models
-  copilot: {
-    // GPT-5.4 (최신 — 2026-04 기준)
-    "gpt-5.4":                   1_050_000,
-    "gpt-5.4-mini":              1_050_000,
-    // GPT-5.x 시리즈
-    "gpt-5.3":                     400_000,
-    "gpt-5.2":                     400_000,
-    "gpt-5.1":                     400_000,
-    "gpt-5.1-codex":               400_000,
-    "gpt-5.1-codex-mini":          400_000,
-    "gpt-5.1-codex-max":           400_000,
-    "gpt-5":                       400_000,
-    "gpt-5-mini":                  400_000,
-    // GPT-4.1 (2025-05부터 Copilot 기본 모델)
-    "gpt-4.1":                   1_000_000,
-    "gpt-4.1-mini":              1_000_000,
-    // GPT-4o
-    "gpt-4o":                      128_000,
-    "gpt-4o-mini":                 128_000,
-    // Claude (GitHub Models를 통해 접근)
-    "claude-opus-4-6":           1_000_000,
-    "claude-sonnet-4-6":         1_000_000,
-    "claude-opus-4-5":             200_000,
-    "claude-sonnet-4-5":           200_000,
-    "claude-haiku-4-5":            200_000,
-  },
-};
-
-/** 벤더/모델 정보가 없을 때 사용하는 기본 컨텍스트 윈도우 크기 */
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 
+// ─── Context Window Registry ─────────────────────────
+//
+// Single source of truth for context windows lives in
+// `shared/pricing-data.ts:DEFAULT_PRICING`. This module defers all lookups
+// there. The previous in-tree `MODEL_CONTEXT_WINDOWS` table was removed in
+// the 2026-05 SoT consolidation (see `reference_token_session_4source.md`).
+
 /**
- * 벤더·모델 식별자로부터 최대 컨텍스트 윈도우 토큰 수를 반환.
- * 알 수 없는 모델은 DEFAULT_CONTEXT_WINDOW(128K)를 반환.
+ * Model identifier → effective context window in tokens.
  *
- * 매칭 순서:
- * 1. 정확히 일치하는 키 (우선)
- * 2. model.startsWith(k) 방향의 프리픽스 중 가장 긴 것 (날짜 suffix 등 변형 대응)
+ * "Effective" because the adapter auto-sends the `context-1m-2025-08-07`
+ * beta header for any Claude model with `contextWindow1MBeta` set
+ * (`engine/llm/vercel/adapter.ts`), so the beta value is what the model
+ * actually delivers. {@link effectiveContextWindow} resolves this for us.
+ *
+ * Unknown models fall back to `FALLBACK_PRICING.contextWindow` (128K) via
+ * `lookupPricing`. The lookup itself supports prefix matching for
+ * date-suffixed snapshots.
  */
 export function getModelContextWindow(vendor: LLMVendor, model: string): number {
-  const vendorMap = MODEL_CONTEXT_WINDOWS[vendor];
-  if (vendorMap) {
-    if (vendorMap[model] !== undefined) return vendorMap[model];
-    // 프리픽스 매칭: model이 등록된 키로 시작하는 경우만 허용 (역방향 제외)
-    // 여러 키가 매칭되면 가장 구체적인(긴) 키를 선택
-    let bestKey: string | undefined;
-    for (const k of Object.keys(vendorMap)) {
-      if (model.startsWith(k) && (bestKey === undefined || k.length > bestKey.length)) {
-        bestKey = k;
-      }
-    }
-    if (bestKey !== undefined) return vendorMap[bestKey];
-  }
-  return DEFAULT_CONTEXT_WINDOW;
+  return effectiveContextWindow(lookupPricing(vendor, model));
+}
+
+/**
+ * Usable portion of the model's context window — what callers should treat
+ * as the denominator for "fullness" math. Subtracts Cline-style fixed
+ * buffer (output + safety reservation). See {@link getUsableContext}.
+ *
+ * Use this for `shouldCompact`, `decideRotation`, and any UI ring that
+ * should hit 100% at the actual rotation point rather than at raw context.
+ */
+export function getModelUsableContext(vendor: LLMVendor, model: string): number {
+  return getUsableContext(getModelContextWindow(vendor, model));
 }
 
 // ─── 3-Tier Rotation Types ────────────────────────────

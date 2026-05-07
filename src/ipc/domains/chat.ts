@@ -185,13 +185,14 @@ async function runStreamedTurn(
           ...(revertSessionId !== undefined ? { revertSessionId } : {}),
           ...(summary !== undefined ? { summary } : {}),
         }),
-      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, tokensOut, cacheReadTokens, cacheWriteTokens, breakdown }) =>
+      onTurnSummary: ({ turnDurationMs, toolCount, cumulativeToolMs, tokensIn, freshInputTokens, tokensOut, cacheReadTokens, cacheWriteTokens, breakdown }) =>
         send({
           type: "turn_summary",
           turnDurationMs,
           toolCount,
           cumulativeToolMs,
           tokensIn,
+          freshInputTokens,
           tokensOut,
           ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
           ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
