@@ -107,6 +107,24 @@ src/
 3. **Multi-vendor LLM** — GenericMessage abstraction, never vendor-specific in core logic
 4. **Config wildcard** — `configOverrides["*"]` passes API keys to all plugins
 
+## Information Source Hierarchy
+
+LVIS 사설 자산 정보는 *공개 검색 엔진에 인덱스 없음*. 아래 순서로 lookup:
+
+| 정보 유형 | 1순위 source | 2순위 source | ❌ 사용 금지 |
+|---|---|---|---|
+| 마켓플레이스 plugin 최신 버전 | `curl https://marketplace.lvisai.xyz/api/v1/plugins/<slug>` | `git -C lvis-plugin-<slug> tag --sort=-creatordate` | WebSearch |
+| 설치된 plugin 버전 | `cat ~/.lvis/plugins/<slug>/plugin.json \| jq .version` | `cat lvis-plugin-<slug>/plugin.json` | WebSearch |
+| 호스트 LVIS 자체 버전 | `cat lvis-app/package.json \| jq .version` | `git -C lvis-app log --oneline -1` | WebSearch |
+| LVIS 내부 SDK / 의존성 | repo 의 `package.json` + git tag | — | WebSearch (사설 패키지 미인덱스) |
+| LVIS 내부 이슈 / PR 상태 | `gh -R lvis-project/<repo> pr list` | `gh -R lvis-project/<repo> issue list` | WebSearch |
+
+**실제 실패 사례 (2026-05-07)**: `lvis-plugin-agent-hub` 최신 버전 확인 작업에서 agent 가 `WebSearch("lvis plugin-agent-hub 0.2.17 release")` 를 반복 → blackmagicdesign.com 등 무관 결과만 반환 → 28 step 후 결론 없이 종료. 정답은 marketplace API 1회 호출.
+
+**Loop escape clause**: 동일 카테고리 도구로 *3회 연속 zero-relevance 결과* 시 즉시 다른 카테고리로 전환 (e.g. WebSearch → `Bash + curl`).
+
+**Why**: 외부 검색은 공개 인덱스 가정. 사설/내부/on-machine 정보는 인덱스 부재 → 무한 재시도해도 결과 없음. 도메인 인식이 도구 선택의 첫 step.
+
 ## Playwright Verification (REQUIRED for app changes)
 
 UI/렌더러 변경은 **반드시 Playwright e2e 검증** 거친 후 머지. 빌드/typecheck/단위 테스트만으로는 시각적 회귀를 잡을 수 없음 — 실제 사용자 플로우가 깨지지 않았는지 마지막에 한 번 더 확인.
