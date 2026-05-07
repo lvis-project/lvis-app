@@ -265,6 +265,7 @@ export function useChatState(api: LvisApi) {
         const toolCount = ev.toolCount ?? 0;
         const cumulativeToolMs = ev.cumulativeToolMs ?? 0;
         const tokensIn = ev.tokensIn ?? 0;
+        const freshInputTokens = ev.freshInputTokens ?? 0;
         const tokensOut = ev.tokensOut ?? 0;
         setEntries((p) => [
           ...p,
@@ -274,6 +275,7 @@ export function useChatState(api: LvisApi) {
             toolCount,
             cumulativeToolMs,
             tokensIn,
+            freshInputTokens,
             tokensOut,
             ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
             ...(ev.cacheWriteTokens !== undefined ? { cacheWriteTokens: ev.cacheWriteTokens } : {}),

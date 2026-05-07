@@ -19,6 +19,7 @@ import { genericToModelMessages } from "./message-mapper.js";
 import { fullStreamToStreamEvent } from "./stream-mapper.js";
 import { mapAiSdkErrorToLvis } from "./error-mapper.js";
 import { createLogger } from "../../../lib/logger.js";
+import { lookupPricing } from "../../../shared/pricing-data.js";
 const log = createLogger("adapter");
 
 /**
@@ -95,6 +96,7 @@ export function supportsAdaptiveThinking(modelId: string): boolean {
 }
 
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
+const CONTEXT_1M_BETA = "context-1m-2025-08-07";
 
 export interface VercelProviderExtras {
   /** Vertex AI — GCP project ID (required when vendor="vertex-ai"). */
@@ -189,7 +191,8 @@ export class VercelUnifiedProvider implements LLMProvider {
           : undefined;
 
       // Anthropic-specific wiring: adaptive (4.x) vs budget-based (3.x) thinking
-      // plus interleaved-thinking beta header when thinking+tools coincide.
+      // plus beta-header opt-ins (interleaved-thinking when thinking+tools,
+      // context-1m for 1M-tier models).
       let headers: Record<string, string> | undefined;
       if (slot === "claude") {
         const thinkingEnabled = params.enableThinking === true;
@@ -210,8 +213,17 @@ export class VercelUnifiedProvider implements LLMProvider {
         if (Object.keys(anthropicOpts).length > 0) {
           providerOptions = { ...(providerOptions ?? {}), anthropic: anthropicOpts };
         }
+        // Beta header set: comma-joined per Anthropic's API convention. We
+        // gather them in an array and emit one `anthropic-beta` value.
+        const betas: string[] = [];
+        if (lookupPricing("claude", params.model).contextWindow1MBeta !== undefined) {
+          betas.push(CONTEXT_1M_BETA);
+        }
         if (thinkingEnabled && hasTools) {
-          headers = { "anthropic-beta": INTERLEAVED_THINKING_BETA };
+          betas.push(INTERLEAVED_THINKING_BETA);
+        }
+        if (betas.length > 0) {
+          headers = { "anthropic-beta": betas.join(",") };
         }
       }
 

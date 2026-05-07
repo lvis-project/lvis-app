@@ -283,6 +283,71 @@ describe("stream-mapper — Claude signature capture per-step", () => {
       expect(last.usage?.cacheWriteTokens).toBe(42);
     }
   });
+
+  it("omits cache fields entirely when neither providerMetadata nor cachedInputTokens present", async () => {
+    const canned = [
+      { type: "text-delta", id: "t1", text: "hi" },
+      {
+        type: "finish",
+        finishReason: "stop",
+        totalUsage: { inputTokens: 5, outputTokens: 1 },
+      },
+    ];
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const last = events.at(-1);
+    if (last?.type === "message_complete") {
+      // Spread-conditional emits only when defined — undefined keys must
+      // not pollute the usage shape (downstream cost math treats undefined
+      // and 0 differently in the OpenAI/Gemini branches).
+      expect(last.usage).toBeDefined();
+      expect("cacheReadTokens" in (last.usage ?? {})).toBe(false);
+      expect("cacheWriteTokens" in (last.usage ?? {})).toBe(false);
+    }
+  });
+
+  it("falls back to Vercel SDK normalized cachedInputTokens when providerMetadata absent (Gemini/OpenAI path)", async () => {
+    const canned = [
+      { type: "text-delta", id: "t1", text: "hi" },
+      {
+        type: "finish",
+        finishReason: "stop",
+        totalUsage: {
+          inputTokens: 100,
+          outputTokens: 5,
+          cachedInputTokens: 30, // SDK-normalized, no providerMetadata
+        },
+      },
+    ];
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const last = events.at(-1);
+    if (last?.type === "message_complete") {
+      expect(last.usage?.cacheReadTokens).toBe(30);
+      // No providerMetadata.anthropic.cacheCreationInputTokens — write side stays absent
+      expect("cacheWriteTokens" in (last.usage ?? {})).toBe(false);
+    }
+  });
+
+  it("providerMetadata.anthropic takes precedence over SDK cachedInputTokens for cacheReadTokens", async () => {
+    const canned = [
+      {
+        type: "finish",
+        finishReason: "stop",
+        totalUsage: { inputTokens: 50, outputTokens: 2, cachedInputTokens: 10 },
+        providerMetadata: {
+          anthropic: {
+            cacheReadInputTokens: 999, // Authoritative when present
+            cacheCreationInputTokens: 5,
+          },
+        },
+      },
+    ];
+    const events = await collect(fullStreamToStreamEvent(fromArray(canned)));
+    const last = events.at(-1);
+    if (last?.type === "message_complete") {
+      expect(last.usage?.cacheReadTokens).toBe(999);
+      expect(last.usage?.cacheWriteTokens).toBe(5);
+    }
+  });
 });
 
 // ────────────────────────────────────────────────────────────────
@@ -338,9 +403,10 @@ describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", 
         thinking: { type: "adaptive", effort: "high" },
       },
     });
-    // Beta header ONLY when thinking+tools both active.
+    // Two betas comma-joined: context-1m for the 1M-tier model + interleaved
+    // thinking because thinking+tools coincide.
     expect(callArg.headers).toEqual({
-      "anthropic-beta": "interleaved-thinking-2025-05-14",
+      "anthropic-beta": "context-1m-2025-08-07,interleaved-thinking-2025-05-14",
     });
 
     vi.doUnmock("ai");
@@ -436,7 +502,11 @@ describe("VercelUnifiedProvider claude — adapter wiring (mocked streamText)", 
 
     const callArg = streamTextSpy.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArg.providerOptions).toBeUndefined();
-    expect(callArg.headers).toBeUndefined();
+    // 1M beta still applies — thinking off but the model is 1M-tier, so the
+    // adapter opts in unconditionally to match the pricing-data SoT.
+    expect(callArg.headers).toEqual({
+      "anthropic-beta": "context-1m-2025-08-07",
+    });
 
     vi.doUnmock("ai");
     vi.doUnmock("@ai-sdk/anthropic");
