@@ -1,11 +1,16 @@
 /**
  * Cost Estimator — Sprint B
  *
- * Pre-send cost preview for the chat input bar. Mirrors the token-estimation
- * heuristic used by `engine/llm/types.ts`
- * (`serializeMessageForEstimation` → `Math.ceil(serialized.length / 4) + 1`),
- * and reuses the pricing table from `engine/llm/pricing.ts` via a shared
- * `ModelPricing` shape.
+ * Pre-send cost preview for the chat input bar (the small badge next to
+ * the input). Uses a chars/4 heuristic, ±20% accuracy. *Pre-send only* —
+ * post-call display must use provider-reported `usage` from `turn_summary`
+ * (see TokenCostBadge / useContextBudget for the post-call surfaces).
+ *
+ * 2026-05-07 Phase 3: kept as the only client-side estimator (Kilo Code
+ * pattern — single tiktoken-equivalent for *prediction* before the call,
+ * never reconciled against post-call reality). chars/4 is good enough for
+ * "will this draft cost a lot?" vibe-check; precise figures come from the
+ * provider.
  */
 
 export interface ModelPricingLite {
