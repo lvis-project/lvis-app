@@ -18,14 +18,6 @@ import { getUsableContext } from "../shared/context-budget.js";
 /** compactMessages()가 boundary marker 뒤에 삽입하는 assistant ACK (double-compact 감지용) */
 const POST_COMPACT_ACK = "이전 대화 내용을 확인했습니다. 계속 도와드리겠습니다.";
 
-/**
- * shouldCompact 의 contextWindow 인자 기본값. lookupPricing 의 FALLBACK_PRICING
- * 과 같은 값(128K) — 혼동 방지를 위해 한 자리로 굳혀둔다. 정상 caller 는 모두
- * `getModelContextWindow()` 결과를 명시적으로 넘기므로 이 default 는 사실상
- * 안전 그물.
- */
-const DEFAULT_CONTEXT_WINDOW = 128_000;
-
 // ─── Context Window Registry ─────────────────────────
 //
 // Single source of truth for context windows lives in
@@ -188,24 +180,23 @@ export function estimateMessagesTokens(messages: GenericMessage[]): number {
 // ─── Compact Logic ──────────────────────────────────
 
 /**
- * 컴팩션 필요 여부 확인
+ * 컴팩션 필요 여부 확인.
  *
  * 임계치 = floor(contextWindowTokens × config.thresholdPct).
- * 기본 설정(128K 윈도우, 80%)에서는 102,400 토큰 도달 시 true 반환.
+ * 호출자는 `getModelUsableContext()` 결과를 넘기므로 (Cline buffer 적용된
+ * usable 분모), 0.8 임계는 사실상 "usable 의 80% 도달 → preventive compact".
  *
- * @param cumulativeUsage - 누적 토큰 사용량
- * @param contextWindowTokens - 모델의 최대 컨텍스트 윈도우 크기 (미제공 시 128K 기본값)
+ * @param cumulativeUsage - 누적 토큰 사용량 (fresh-only inputTokens)
+ * @param contextWindowTokens - usable context window — 호출자 책임
  * @param config - 컴팩션 설정 (미제공 시 기본값: thresholdPct=0.8)
  *
  * @example
- * // gpt-5.4 (1,050,000 토큰 윈도우), 80% 임계치 → 840,000 토큰 도달 시 압축
- * shouldCompact({ inputTokens: 850_000, outputTokens: 0 }, 1_050_000); // true
- * // gpt-4o (128,000 토큰 윈도우), 80% 임계치 → 102,400 토큰 도달 시 압축
- * shouldCompact({ inputTokens: 80_000, outputTokens: 0 }, 128_000);    // false
+ * // 200K Sonnet → usable 160K → 80% × 160K = 128K trigger
+ * shouldCompact({ inputTokens: 130_000, outputTokens: 0 }, 160_000); // true
  */
 export function shouldCompact(
   cumulativeUsage: TokenUsage,
-  contextWindowTokens: number = DEFAULT_CONTEXT_WINDOW,
+  contextWindowTokens: number,
   config: CompactConfig = DEFAULT_CONFIG,
 ): boolean {
   const threshold = Math.floor(contextWindowTokens * config.thresholdPct);
