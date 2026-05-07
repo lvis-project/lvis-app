@@ -942,6 +942,27 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                   } else {
                     break;
                   }
+                } else if (e.kind === "ask_user_answer") {
+                  // ask_user_question 의 사용자 응답 카드도 같은 turn 의
+                  // WorkGroup 안에 inline 으로 흡수. 이전: 이 branch 가 없어
+                  // default break 로 떨어지면서 WorkGroup 가 분리 → 사용자가
+                  // "작업 3단계 + 작업 9단계" 로 보이던 UX 분리 (2026-05-07).
+                  // entryTurnStartMap 에는 ask_user_answer 가 없어 line 901
+                  // 의 fallback 으로 같은 turn 처리되었으나, 여기서 명시 push
+                  // 가 없으면 default `break` 로 떨어짐. 안전을 위해 walkback
+                  // 으로 turnStart 일치 검증.
+                  let aaTurnStart = -1;
+                  for (let k = i; k >= 0; k--) {
+                    if (entries[k]?.kind === "user") { aaTurnStart = k; break; }
+                  }
+                  if (aaTurnStart === groupTurnStart) {
+                    groupEntries.push({
+                      idx: i,
+                      node: <AskUserAnswerBubble key={`ask-${i}`} entry={e} />,
+                    });
+                  } else {
+                    break;
+                  }
                 } else {
                   break;
                 }
