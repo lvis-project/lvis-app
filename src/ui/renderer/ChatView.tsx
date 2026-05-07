@@ -243,7 +243,7 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
             key={`hist-wg-${segmentStart}`}
             stepCount={workItems.length}
             streaming={false}
-            {...(histDurationMs !== undefined && histDurationMs > 0 ? { turnDurationMs: histDurationMs } : {})}
+            turnDurationMs={histDurationMs}
           >
             {workItems.map((item) => renderEntry(item.entry, item.idx, true))}
           </WorkGroup>,
@@ -1007,9 +1007,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                     key={`wg-${groupStart}`}
                     stepCount={groupEntries.length}
                     streaming={groupIsActiveTurn}
-                    {...(turnSummaryByTurnStart.get(groupTurnStart)?.turnDurationMs
-                      ? { turnDurationMs: turnSummaryByTurnStart.get(groupTurnStart)!.turnDurationMs }
-                      : {})}
+                    turnDurationMs={turnSummaryByTurnStart.get(groupTurnStart)?.turnDurationMs}
                   >
                     {groupEntries.map((ge) => ge.node)}
                   </WorkGroup>
@@ -1045,19 +1043,6 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             if (entryClassMap.get(i) === "final" && entry.kind === "assistant") {
               const turnStartIdx = finalTurnStartMap.get(i) ?? 0;
               const summary = turnSummaryByTurnStart.get(turnStartIdx);
-              // chars/4 turnTokens 계산 폐기 (2026-05-07): provider 보고 값
-              // (turn_summary entry 의 tokensIn/Out + cacheRead/Write) 을
-              // TurnActionBar 의 TokenCostBadge 에 전달. 한국어 2-3× under-
-              // estimate + 시스템 prompt / 도구 schema 누락 문제 해소.
-              const turnSummaryProp = summary
-                ? {
-                    tokensIn: summary.tokensIn,
-                    tokensOut: summary.tokensOut,
-                    ...(summary.cacheReadTokens !== undefined ? { cacheReadTokens: summary.cacheReadTokens } : {}),
-                    ...(summary.cacheWriteTokens !== undefined ? { cacheWriteTokens: summary.cacheWriteTokens } : {}),
-                  }
-                : undefined;
-
               rendered.push(
                   <div key={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
                   <AssistantCard
@@ -1067,7 +1052,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                     isFinal={true}
                   />
                   <TurnActionBar
-                    {...(turnSummaryProp ? { turnSummary: turnSummaryProp } : {})}
+                    turnSummary={summary}
                     isStarred={!!isEntryStarred(idx)}
                     actions={{
                       onRetry: () => void onRetryEffort(),
