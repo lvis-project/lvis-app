@@ -75,8 +75,11 @@ export function computeCost(
   pricing: ModelPricing,
   vendor: LLMVendor,
 ): number {
+  // Clamp non-finite + negative inputs to 0 — token usage is monotonic, so a
+  // negative value indicates upstream malformed data; letting it through
+  // would produce negative USD and pollute the usage dashboard.
   const safe = (n: number | undefined): number =>
-    typeof n === "number" && Number.isFinite(n) ? n : 0;
+    typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
 
   const input = safe(usage.inputTokens);
   const output = safe(usage.outputTokens);
