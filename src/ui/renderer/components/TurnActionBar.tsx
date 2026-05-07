@@ -1,14 +1,31 @@
 import { RefreshCw, GitBranch, Star, ThumbsUp, ThumbsDown } from "lucide-react";
 import { useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
+import { TokenCostBadge, type TokenCostBadgePricing } from "./TokenCostBadge.js";
+
+export interface TurnSummaryForBadge {
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+}
 
 export function TurnActionBar({
-  turnTokens,
+  turnSummary,
+  pricing,
   isStarred,
   actions,
   onFeedback,
 }: {
-  turnTokens?: number;
+  /**
+   * Turn-aggregate provider-reported token usage. When provided the
+   * <TokenCostBadge> renders a clickable badge (token ↔ cost toggle)
+   * with a hover tooltip breaking down fresh / cache-read / cache-write
+   * / output. Replaces the old chars/4 estimate that was 2-3× off on
+   * Korean content.
+   */
+  turnSummary?: TurnSummaryForBadge;
+  pricing?: TokenCostBadgePricing;
   isStarred?: boolean;
   actions?: { onRetry?: () => void; onFork?: () => void; onToggleStar?: () => void };
   onFeedback?: (rating: "up" | "down", reason?: string) => void | Promise<void>;
@@ -25,18 +42,14 @@ export function TurnActionBar({
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 px-3">
       <span className="shrink-0">{timestamp}</span>
-      {turnTokens && turnTokens > 0 ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="cursor-default rounded bg-muted/40 px-1 text-[10px]">
-              ~{turnTokens >= 1000 ? `${(turnTokens / 1000).toFixed(1)}k` : turnTokens} tok
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="text-xs">
-            <div>이번 턴 전체 토큰(추정): {turnTokens.toLocaleString()}</div>
-            <div className="text-muted-foreground">실제값은 감사 로그에서 확인 가능</div>
-          </TooltipContent>
-        </Tooltip>
+      {turnSummary ? (
+        <TokenCostBadge
+          tokensIn={turnSummary.tokensIn}
+          tokensOut={turnSummary.tokensOut}
+          {...(turnSummary.cacheReadTokens !== undefined ? { cacheReadTokens: turnSummary.cacheReadTokens } : {})}
+          {...(turnSummary.cacheWriteTokens !== undefined ? { cacheWriteTokens: turnSummary.cacheWriteTokens } : {})}
+          {...(pricing ? { pricing } : {})}
+        />
       ) : null}
       <div className="flex-1" />
       {actions?.onRetry && (

@@ -25,7 +25,10 @@ import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
-import { TurnSummaryFooter } from "./components/TurnSummaryFooter.js";
+// TurnSummaryFooter 컴포넌트는 2026-05-07 폐기. 토큰 정보는 TurnActionBar 의
+// TokenCostBadge (provider-truth, 토글 + tooltip breakdown) 가 단일 source 로
+// 표시. 시간 정보는 WorkGroup 헤더의 ⏱ T 가 흡수. turn_summary entry 는
+// 데이터 carrier 로 history 에 남고, lookup 으로 두 surface 에 공급.
 import { QuestionOverlay } from "./components/QuestionOverlay.js";
 import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
@@ -181,17 +184,11 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
       return <AskUserAnswerBubble key={entry.sourceToolUseId || idx} entry={entry} />;
     }
     if (entry.kind === "turn_summary") {
-      return (
-        <TurnSummaryFooter
-          key={`hist-ts-${idx}`}
-          turnDurationMs={entry.turnDurationMs}
-          toolCount={entry.toolCount}
-          cumulativeToolMs={entry.cumulativeToolMs}
-          tokensIn={entry.tokensIn}
-          tokensOut={entry.tokensOut}
-          {...(entry.breakdown ? { breakdown: entry.breakdown } : {})}
-        />
-      );
+      // Historical: turn_summary 는 데이터 carrier 로만 — standalone 표시 X.
+      // duration 정보는 WorkGroup 헤더가 표시. token 정보는 historical 의
+      // final assistant 위치엔 ActionBar 가 없어 이번 phase 에서 미노출;
+      // 필요 시 후속에서 historical-footer 컴포넌트 추가 가능.
+      return null;
     }
     return null;
   };
@@ -222,8 +219,32 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
         ? segment.slice(0, finalAssistantOffset)
         : segment;
       if (workItems.length > 0) {
+        // historical 의 turnStart 추적 — 이전 user entry idx 가 있으면 그것이
+        // 이 segment 의 turnStart. turn_summary 는 segment 외부 (다음 user
+        // 직전) 에 있으므로 entries 전체에서 찾되 segment 가 끝나기 전이어야.
+        let histTurnStart = -1;
+        for (let k = segmentStart; k >= 0; k--) {
+          if (entries[k]?.kind === "user") { histTurnStart = k; break; }
+        }
+        let histDurationMs: number | undefined;
+        if (histTurnStart >= 0) {
+          for (let k = segmentStart; k < entries.length; k++) {
+            const ne = entries[k];
+            if (!ne) continue;
+            if (ne.kind === "user" && k !== histTurnStart) break;
+            if (ne.kind === "turn_summary") {
+              histDurationMs = ne.turnDurationMs;
+              break;
+            }
+          }
+        }
         rendered.push(
-          <WorkGroup key={`hist-wg-${segmentStart}`} stepCount={workItems.length} streaming={false}>
+          <WorkGroup
+            key={`hist-wg-${segmentStart}`}
+            stepCount={workItems.length}
+            streaming={false}
+            {...(histDurationMs !== undefined && histDurationMs > 0 ? { turnDurationMs: histDurationMs } : {})}
+          >
             {workItems.map((item) => renderEntry(item.entry, item.idx, true))}
           </WorkGroup>,
         );
@@ -262,17 +283,8 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
     }
 
     if (entry.kind === "turn_summary") {
-      rendered.push(
-        <TurnSummaryFooter
-          key={`hist-ts-${i}`}
-          turnDurationMs={entry.turnDurationMs}
-          toolCount={entry.toolCount}
-          cumulativeToolMs={entry.cumulativeToolMs}
-          tokensIn={entry.tokensIn}
-          tokensOut={entry.tokensOut}
-          {...(entry.breakdown ? { breakdown: entry.breakdown } : {})}
-        />,
-      );
+      // Historical: turn_summary 는 데이터 carrier 로만 — standalone 표시 X.
+      // (See note in renderEntry above.)
       i++;
       continue;
     }
@@ -363,6 +375,40 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
     () => subAgentSpawns.filter((s) => !s.toolUseId),
     [subAgentSpawns],
   );
+
+  // turn_summary entry 의 turnStart 별 lookup. 각 turn 의 final assistant
+  // 와 WorkGroup 이 같은 turn 의 token / duration 정보를 inline 으로 가져와
+  // 표시한다. turn_summary entry 자체는 standalone 렌더링 되지 않는다.
+  const turnSummaryByTurnStart = useMemo(() => {
+    type TurnSummary = {
+      turnDurationMs: number;
+      toolCount: number;
+      cumulativeToolMs: number;
+      tokensIn: number;
+      tokensOut: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+    };
+    const map = new Map<number, TurnSummary>();
+    let curTurnStart = -1;
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      if (!e) continue;
+      if (e.kind === "user") curTurnStart = i;
+      else if (e.kind === "turn_summary" && curTurnStart >= 0) {
+        map.set(curTurnStart, {
+          turnDurationMs: e.turnDurationMs,
+          toolCount: e.toolCount,
+          cumulativeToolMs: e.cumulativeToolMs,
+          tokensIn: e.tokensIn,
+          tokensOut: e.tokensOut,
+          ...(e.cacheReadTokens !== undefined ? { cacheReadTokens: e.cacheReadTokens } : {}),
+          ...(e.cacheWriteTokens !== undefined ? { cacheWriteTokens: e.cacheWriteTokens } : {}),
+        });
+      }
+    }
+    return map;
+  }, [entries]);
 
   const renderSpawnsForGroup = useCallback(
     (group: { tools: { toolUseId: string }[] }) => {
@@ -803,24 +849,10 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               continue;
             }
 
-            // Turn aggregate footer — appended right after the final assistant
-            // entry of a completed turn (and after any TurnActionBar) so the
-            // user sees step count + duration + token totals as the closing
-            // line of the turn. Engine emits this entry via the "turn_summary"
-            // stream event once the turn fully resolves; see
-            // `engine/conversation-loop.ts` runTurn → onTurnSummary callback.
+            // turn_summary entry — 데이터 carrier 로 history 에 남기되 standalone
+            // 렌더링 안 함. 같은 turn 의 final AssistantCard / WorkGroup 이
+            // turnSummaryByTurnStart 에서 lookup 해 inline 으로 표시한다.
             if (entry.kind === "turn_summary") {
-              rendered.push(
-                <TurnSummaryFooter
-                  key={`ts-${idx}`}
-                  turnDurationMs={entry.turnDurationMs}
-                  toolCount={entry.toolCount}
-                  cumulativeToolMs={entry.cumulativeToolMs}
-                  tokensIn={entry.tokensIn}
-                  tokensOut={entry.tokensOut}
-                  {...(entry.breakdown ? { breakdown: entry.breakdown } : {})}
-                />,
-              );
               i++;
               continue;
             }
@@ -971,7 +1003,14 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
 
               if (groupEntries.length > 0) {
                 rendered.push(
-                  <WorkGroup key={`wg-${groupStart}`} stepCount={groupEntries.length} streaming={groupIsActiveTurn}>
+                  <WorkGroup
+                    key={`wg-${groupStart}`}
+                    stepCount={groupEntries.length}
+                    streaming={groupIsActiveTurn}
+                    {...(turnSummaryByTurnStart.get(groupTurnStart)?.turnDurationMs
+                      ? { turnDurationMs: turnSummaryByTurnStart.get(groupTurnStart)!.turnDurationMs }
+                      : {})}
+                  >
                     {groupEntries.map((ge) => ge.node)}
                   </WorkGroup>
                 );
@@ -1005,22 +1044,19 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             // ── Final: turn complete, last assistant — show TurnActionBar ──
             if (entryClassMap.get(i) === "final" && entry.kind === "assistant") {
               const turnStartIdx = finalTurnStartMap.get(i) ?? 0;
-              const turnTokens = entries.slice(turnStartIdx, i + 1).reduce((sum, e) => {
-                if (e.kind === "assistant" || e.kind === "reasoning" || e.kind === "user") {
-                  return sum + Math.ceil(((e as any).text?.length ?? 0) / 4);
-                }
-                if (e.kind === "ask_user_answer") {
-                  return sum + e.rows.reduce((rowSum, row) => rowSum + Math.ceil((row.label.length + row.value.length) / 4), 0);
-                }
-                if (e.kind === "tool_group") {
-                  const toolSum = ((e as any).tools ?? []).reduce(
-                    (ts: number, t: any) => ts + Math.ceil((JSON.stringify(t.input ?? {}).length + (t.result?.length ?? 0)) / 4),
-                    0,
-                  );
-                  return sum + toolSum;
-                }
-                return sum;
-              }, 0);
+              const summary = turnSummaryByTurnStart.get(turnStartIdx);
+              // chars/4 turnTokens 계산 폐기 (2026-05-07): provider 보고 값
+              // (turn_summary entry 의 tokensIn/Out + cacheRead/Write) 을
+              // TurnActionBar 의 TokenCostBadge 에 전달. 한국어 2-3× under-
+              // estimate + 시스템 prompt / 도구 schema 누락 문제 해소.
+              const turnSummaryProp = summary
+                ? {
+                    tokensIn: summary.tokensIn,
+                    tokensOut: summary.tokensOut,
+                    ...(summary.cacheReadTokens !== undefined ? { cacheReadTokens: summary.cacheReadTokens } : {}),
+                    ...(summary.cacheWriteTokens !== undefined ? { cacheWriteTokens: summary.cacheWriteTokens } : {}),
+                  }
+                : undefined;
 
               rendered.push(
                   <div key={idx} className={`${ringCls} min-w-0 w-full max-w-full overflow-x-hidden rounded-md`}>
@@ -1029,10 +1065,9 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
                     highlightQuery={searchHighlight}
                     isStarred={!!isEntryStarred(idx)}
                     isFinal={true}
-                    turnTokens={turnTokens}
                   />
                   <TurnActionBar
-                    turnTokens={turnTokens}
+                    {...(turnSummaryProp ? { turnSummary: turnSummaryProp } : {})}
                     isStarred={!!isEntryStarred(idx)}
                     actions={{
                       onRetry: () => void onRetryEffort(),
