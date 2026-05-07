@@ -69,6 +69,43 @@ export function registerPluginTools(pluginRuntime: PluginRuntime, toolRegistry: 
 }
 
 /**
+ * Idempotent full re-sync of plugin-sourced tools in {@link ToolRegistry}
+ * from the current {@link PluginRuntime} state.
+ *
+ * Called by every install / uninstall / update / reinstall / dev-hot-reload
+ * event so the registry always mirrors `pluginRuntime.listPluginManifests()`.
+ *
+ * Two-step contract:
+ *   1. Drop every plugin-sourced tool currently in the registry. We scan
+ *      `toolRegistry.listAll()` rather than iterating `listPluginIds()`
+ *      because an uninstalled plugin is already gone from the runtime but
+ *      its tools still linger in the registry — those would survive a
+ *      `listPluginIds`-only scan and become ghost entries the LLM keeps
+ *      seeing. Builtins and MCP-sourced tools are untouched
+ *      (`unregisterByPlugin` only matches `tool.pluginId === pluginId`).
+ *   2. Re-register from the current runtime state via
+ *      {@link registerPluginTools}. Same name@version safe because step 1
+ *      cleared any prior generation.
+ *
+ * Idempotency means the catch path needs no recovery logic: a transient
+ * failure is healed by the next install/uninstall/reload event firing
+ * another full sync.
+ */
+export function syncPluginToolRegistry(
+  pluginRuntime: PluginRuntime,
+  toolRegistry: ToolRegistry,
+): void {
+  const pluginIdsInRegistry = new Set<string>();
+  for (const tool of toolRegistry.listAll()) {
+    if (tool.source === "plugin" && tool.pluginId) {
+      pluginIdsInRegistry.add(tool.pluginId);
+    }
+  }
+  for (const id of pluginIdsInRegistry) toolRegistry.unregisterByPlugin(id);
+  registerPluginTools(pluginRuntime, toolRegistry);
+}
+
+/**
  * Phase 5 §5 — fail-soft startupTools.
  * One throwing startupTool does NOT unload the plugin and does NOT abort the
  * remaining startupTools. Each failure is logged as a warning so operators
