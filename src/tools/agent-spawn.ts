@@ -18,6 +18,13 @@ export interface AgentSpawnEvent {
   summary?: string;
   toolCallCount?: number;
   message?: string;
+  /**
+   * The `tool_use` id of the `agent_spawn` invocation that triggered this
+   * spawn. Set on the `start` event so the renderer can render the
+   * SubAgentCard inline next to the originating ToolGroupCard instead of
+   * stacking all spawns at the top of the chat.
+   */
+  toolUseId?: string;
 }
 
 export interface AgentSpawnToolDeps {
@@ -33,7 +40,9 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
     name: "agent_spawn",
     description:
       "sub-agent 를 띄워 별도의 작은 작업을 실행합니다. 부모 대화 히스토리와 분리된 fresh 컨텍스트, " +
-      "지정한 sourceTools 만 사용 가능, maxTurns (기본 5) 이내. 결과로 요약 텍스트 + tool call 수 반환. " +
+      "지정한 sourceTools 만 사용 가능. maxTurns (기본 30, 최대 60) — task 복잡도를 직접 판단해서 명시하세요: " +
+      "단일 lookup/요약은 5-10, 표준 multi-step 작업은 20-30, 깊은 코드 탐색·다중 파일 분석·복합 디버깅은 40-60. " +
+      "결과로 요약 텍스트 + tool call 수 반환. " +
       "특정 tool/plugin 을 직접 호출하라는 요청의 대체 경로로 사용하지 마세요. Agent Hub work board 조회는 agent_hub_* 도구를 직접 호출하세요.",
     source: "builtin",
     category: "dangerous",
@@ -58,8 +67,9 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         maxTurns: {
           type: "integer",
           minimum: 1,
-          maximum: 20,
-          description: "최대 어시스턴트 라운드 수. 기본 5.",
+          maximum: 60,
+          description:
+            "최대 어시스턴트 라운드 수. 기본 30. 간단 lookup 5-10 · 표준 20-30 · 복잡 multi-step 40-60. LLM 이 task 복잡도로 직접 판단.",
         },
       },
     },
@@ -105,14 +115,18 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         : undefined;
       const maxTurns =
         typeof a.maxTurns === "number" && Number.isFinite(a.maxTurns)
-          ? Math.max(1, Math.min(20, Math.floor(a.maxTurns)))
+          ? Math.max(1, Math.min(60, Math.floor(a.maxTurns)))
           : undefined;
       const parentSessionId =
         typeof ctx.metadata?.sessionId === "string"
           ? (ctx.metadata.sessionId as string)
           : undefined;
+      const toolUseId =
+        typeof ctx.metadata?.toolUseId === "string"
+          ? (ctx.metadata.toolUseId as string)
+          : undefined;
       const spawnId = randomUUID();
-      deps.emit({ spawnId, type: "start", title });
+      deps.emit({ spawnId, type: "start", title, toolUseId });
       try {
         const result = await runner.spawn(
           {

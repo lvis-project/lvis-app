@@ -622,6 +622,7 @@ const api = {
       summary?: string;
       toolCallCount?: number;
       message?: string;
+      toolUseId?: string;
     }) => void,
   ) => {
     const listener = (_e: unknown, ev: Parameters<typeof handler>[0]) => handler(ev);
