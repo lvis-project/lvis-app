@@ -251,6 +251,33 @@ export function useChatState(api: LvisApi) {
           ...p,
           { kind: "system", text: `🔒 전송 전 PII ${count}건 리댁트됨${kindLabel ? ` (${kindLabel})` : ""}` },
         ]);
+      } else if (ev.type === "turn_summary") {
+        // Turn aggregate footer (§ chat transcript per-turn footer) — append a
+        // single `kind: "turn_summary"` entry. Lives in the entries stream so
+        // it survives session reload + historical rendering rather than being
+        // re-derived from per-tool / per-round events. Renderer (ChatView)
+        // consumes this entry to render <TurnSummaryFooter> next to the final
+        // assistant card. tokensIn / tokensOut are routed from the LLM
+        // provider's usage report (Vercel AI SDK forwards prompt_tokens +
+        // completion_tokens through stream-mapper.ts; see the engine-side
+        // `onTurnSummary` wiring in conversation-loop.ts runTurn).
+        const turnDurationMs = ev.turnDurationMs ?? 0;
+        const toolCount = ev.toolCount ?? 0;
+        const cumulativeToolMs = ev.cumulativeToolMs ?? 0;
+        const tokensIn = ev.tokensIn ?? 0;
+        const tokensOut = ev.tokensOut ?? 0;
+        setEntries((p) => [
+          ...p,
+          {
+            kind: "turn_summary",
+            turnDurationMs,
+            toolCount,
+            cumulativeToolMs,
+            tokensIn,
+            tokensOut,
+            ...(ev.breakdown ? { breakdown: ev.breakdown } : {}),
+          },
+        ]);
       } else if (ev.type === "compact_notice") {
         // §457 PR-A: emit a structured `kind: "checkpoint"` entry instead of
         // a free-text system bubble. ChatView reads `tier` to pick a

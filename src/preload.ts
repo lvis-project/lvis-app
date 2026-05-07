@@ -157,7 +157,7 @@ const api = {
     ipcRenderer.invoke("lvis:starred:add", entry),
   starredRemove: async (opts: { id?: string; sessionId?: string; messageIndex?: number }) =>
     ipcRenderer.invoke("lvis:starred:remove", opts),
-  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; tier?: "hard-token" | "semantic-llm" | "soft-time"; revertSessionId?: string; summary?: string }) => void) => {
+  onChatStream: (handler: (event: { type: string; text?: string; thought?: string; name?: string; error?: string; result?: string; isError?: boolean; input?: Record<string, unknown>; groupId?: string; toolUseId?: string; displayOrder?: number; roundIndex?: number; stopReason?: "end_turn" | "tool_use"; hasToolCalls?: boolean; removedMessages?: number; freedTokens?: number; tier?: "hard-token" | "semantic-llm" | "soft-time"; revertSessionId?: string; summary?: string; turnDurationMs?: number; toolCount?: number; cumulativeToolMs?: number; tokensIn?: number; tokensOut?: number; breakdown?: Record<string, { count: number; ms: number }> }) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on("lvis:chat:stream", listener);
     return () => ipcRenderer.removeListener("lvis:chat:stream", listener);
