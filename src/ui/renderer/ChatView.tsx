@@ -105,10 +105,18 @@ function HistoricalSessionMarker({ title, sessionId }: { title: string; sessionI
     <div
       className="mx-auto max-w-full truncate text-center text-[11px] text-muted-foreground/50 py-0.5 px-3"
       data-testid="session-marker"
+      data-session-marker-id={sessionId}
     >
       - {title || sessionId.slice(0, 8)} -
     </div>
   );
+}
+
+function sessionMarkerSelector(sessionId: string): string {
+  const escaped = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(sessionId)
+    : sessionId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `[data-session-marker-id="${escaped}"]`;
 }
 
 function AskUserAnswerBubble({
@@ -338,6 +346,21 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
     setShowJumpToBottom(false);
   }, [chatEndRef, scrollViewportRef]);
 
+  const scrollToSessionMarker = useCallback((sessionId: string): boolean => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return false;
+    const target = viewport.querySelector<HTMLElement>(sessionMarkerSelector(sessionId));
+    if (!target) return false;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    setShowJumpToBottom(!isNearBottom());
+    return true;
+  }, [isNearBottom, scrollViewportRef]);
+
+  const handleCalendarSessionSelect = useCallback(async (sessionId: string) => {
+    if (scrollToSessionMarker(sessionId)) return;
+    await onLoadSession?.(sessionId);
+  }, [onLoadSession, scrollToSessionMarker]);
+
   useEffect(() => {
     initialBottomScrollPendingRef.current = true;
     sawHistoryLoadingRef.current = false;
@@ -511,7 +534,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               sessions={sessions}
               currentSessionId={currentSessionId}
               streaming={streaming}
-              onLoadSession={onLoadSession}
+              onLoadSession={handleCalendarSessionSelect}
               onRefreshSessions={onRefreshSessions}
             />
             {daySessions.map((session) => (
@@ -540,10 +563,11 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             instead of degrading to a plain "현재 대화" separator. */}
         <DayDivider
           dateKey={activeDayKey}
+          sessionMarkerId={currentSessionId}
           sessions={sessions}
           currentSessionId={currentSessionId}
           streaming={streaming}
-          onLoadSession={onLoadSession}
+          onLoadSession={handleCalendarSessionSelect}
           onRefreshSessions={onRefreshSessions}
         />
         {/* Workflow tools (S1+S2): skill badges + sub-agents + ask-user inline.

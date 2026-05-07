@@ -83,7 +83,7 @@ function SingleToolInline({
 }) {
   const isRunning = tool.status === "running";
   const isError = tool.status === "error";
-  const [open, setOpen] = useState(isRunning);
+  const [open, setOpen] = useState(false);
   return (
     <div className="min-w-0 w-full max-w-full rounded-md text-[11px] text-muted-foreground">
       <button
@@ -130,10 +130,8 @@ export function ToolGroupCard({
 }) {
   // All hooks must be declared before any conditional return (Rules of Hooks)
   const tools = [...group.tools].sort((a, b) => a.displayOrder - b.displayOrder);
-  const [open, setOpen] = useState(group.status === "running");
-  const [expandedTools, setExpandedTools] = useState<Set<string>>(
-    () => new Set(tools.filter((tool) => tool.status === "running").map((tool) => tool.toolUseId)),
-  );
+  const [open, setOpen] = useState(false);
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(() => new Set());
   const [scriptAllowed, setScriptAllowed] = useState<Set<string>>(new Set());
 
   // Single tool: render inline without group wrapper

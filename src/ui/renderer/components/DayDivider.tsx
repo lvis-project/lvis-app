@@ -16,6 +16,7 @@ import { CalendarFallback, LazyCalendar, preloadCalendar } from "./LazyCalendar.
  */
 export function DayDivider({
   dateKey,
+  sessionMarkerId,
   sessions = [],
   currentSessionId = "",
   streaming = false,
@@ -23,6 +24,7 @@ export function DayDivider({
   onRefreshSessions,
 }: {
   dateKey?: string;
+  sessionMarkerId?: string;
   sessions?: SessionSummary[];
   currentSessionId?: string;
   streaming?: boolean;
@@ -31,6 +33,7 @@ export function DayDivider({
 }) {
   const key = dateKey ?? getKoreaDateKey(new Date());
   const [pickedDate, setPickedDate] = useState<Date | undefined>(() => dateFromKey(key));
+  const [popoverOpen, setPopoverOpen] = useState(false);
   useEffect(() => {
     setPickedDate(dateFromKey(key));
   }, [key]);
@@ -45,19 +48,22 @@ export function DayDivider({
   const sessionDateMatchers: Matcher[] = sessionDateKeys.map(dateFromKey);
   const sessionsForDate = sessions.filter((session) => getKoreaDateKey(new Date(session.modifiedAt)) === selectedKey);
   const selectToday = () => setPickedDate(new Date());
+  const handlePopoverOpenChange = (open: boolean) => {
+    setPopoverOpen(open);
+    if (open) {
+      void preloadCalendar();
+      void onRefreshSessions?.();
+    }
+  };
   return (
     <div
       data-testid="day-divider"
       data-date={key}
+      data-session-marker-id={sessionMarkerId}
       className="sticky top-0 z-10 -mx-3 flex items-center gap-3 bg-background/90 px-3 py-3 backdrop-blur"
     >
       <span className="h-px flex-1 bg-border/50" />
-      <Popover onOpenChange={(open) => {
-        if (open) {
-          void preloadCalendar();
-          void onRefreshSessions?.();
-        }
-      }}>
+      <Popover open={popoverOpen} onOpenChange={handlePopoverOpenChange}>
         <PopoverTrigger asChild>
           <button
             type="button"
@@ -105,7 +111,8 @@ export function DayDivider({
                       type="button"
                       disabled={(streaming && !isCurrent) || !onLoadSession}
                       onClick={() => {
-                        if (!isCurrent) void onLoadSession?.(session.id);
+                        setPopoverOpen(false);
+                        void onLoadSession?.(session.id);
                       }}
                       className={`block w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50 ${isCurrent ? "bg-muted text-foreground" : "text-popover-foreground"}`}
                     >
