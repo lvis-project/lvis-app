@@ -25,6 +25,7 @@ import { SubAgentCard } from "./components/SubAgentCard.js";
 import { SkillBadge } from "./components/SkillBadge.js";
 import { WorkGroup } from "./components/WorkGroup.js";
 import { TurnActionBar } from "./components/TurnActionBar.js";
+import { TurnSummaryFooter } from "./components/TurnSummaryFooter.js";
 import { QuestionOverlay } from "./components/QuestionOverlay.js";
 import { getApi } from "./api-client.js";
 import { highlightText } from "./utils/html-preview.js";
@@ -179,6 +180,19 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
     if (entry.kind === "ask_user_answer") {
       return <AskUserAnswerBubble key={entry.sourceToolUseId || idx} entry={entry} />;
     }
+    if (entry.kind === "turn_summary") {
+      return (
+        <TurnSummaryFooter
+          key={`hist-ts-${idx}`}
+          turnDurationMs={entry.turnDurationMs}
+          toolCount={entry.toolCount}
+          cumulativeToolMs={entry.cumulativeToolMs}
+          tokensIn={entry.tokensIn}
+          tokensOut={entry.tokensOut}
+          {...(entry.breakdown ? { breakdown: entry.breakdown } : {})}
+        />
+      );
+    }
     return null;
   };
 
@@ -243,6 +257,22 @@ function HistoricalEntriesList({ entries }: { entries: ContinuousHistorySession[
 
     if (entry.kind === "system") {
       rendered.push(<div key={i} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>);
+      i++;
+      continue;
+    }
+
+    if (entry.kind === "turn_summary") {
+      rendered.push(
+        <TurnSummaryFooter
+          key={`hist-ts-${i}`}
+          turnDurationMs={entry.turnDurationMs}
+          toolCount={entry.toolCount}
+          cumulativeToolMs={entry.cumulativeToolMs}
+          tokensIn={entry.tokensIn}
+          tokensOut={entry.tokensOut}
+          {...(entry.breakdown ? { breakdown: entry.breakdown } : {})}
+        />,
+      );
       i++;
       continue;
     }
@@ -728,6 +758,28 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
 
             if (entry.kind === "system") {
               rendered.push(<div key={idx} className="mx-auto text-center text-xs text-muted-foreground py-1 px-3 rounded-full bg-muted/50">{entry.text}</div>);
+              i++;
+              continue;
+            }
+
+            // Turn aggregate footer — appended right after the final assistant
+            // entry of a completed turn (and after any TurnActionBar) so the
+            // user sees step count + duration + token totals as the closing
+            // line of the turn. Engine emits this entry via the "turn_summary"
+            // stream event once the turn fully resolves; see
+            // `engine/conversation-loop.ts` runTurn → onTurnSummary callback.
+            if (entry.kind === "turn_summary") {
+              rendered.push(
+                <TurnSummaryFooter
+                  key={`ts-${idx}`}
+                  turnDurationMs={entry.turnDurationMs}
+                  toolCount={entry.toolCount}
+                  cumulativeToolMs={entry.cumulativeToolMs}
+                  tokensIn={entry.tokensIn}
+                  tokensOut={entry.tokensOut}
+                  {...(entry.breakdown ? { breakdown: entry.breakdown } : {})}
+                />,
+              );
               i++;
               continue;
             }

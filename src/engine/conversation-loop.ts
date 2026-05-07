@@ -85,6 +85,26 @@ export interface TurnCallbacks {
     summary?: string;
   }) => void;
   onFallback?: (from: string, to: string) => void;
+  /**
+   * Turn aggregate footer (§ chat transcript per-turn footer) — fires once
+   * after the turn fully resolves with cumulative wall-clock / step-count /
+   * token totals. Renderer maps the payload to a `kind: "turn_summary"`
+   * chat entry placed under the final assistant message.
+   *
+   * `cumulativeToolMs` is the sum of per-tool durationMs when available;
+   * 0 when the executor has not yet been instrumented (companion PR
+   * `feat/tool-execution-duration-display` provides the missing field).
+   * `breakdown` carries `{ count, ms }` per tool name; omitted when no
+   * tools ran (the footer hides the expand affordance in that case).
+   */
+  onTurnSummary?: (summary: {
+    turnDurationMs: number;
+    toolCount: number;
+    cumulativeToolMs: number;
+    tokensIn: number;
+    tokensOut: number;
+    breakdown?: Record<string, { count: number; ms: number }>;
+  }) => void;
 }
 
 export interface TurnResult {
@@ -600,6 +620,53 @@ export class ConversationLoop {
     // §4.5.2 step 4 — TURN_ORCHESTRATE
     this.tracer.step("TURN_ORCHESTRATE", { sessionId: this.sessionId });
 
+    // Turn aggregate footer tracking — see TurnCallbacks.onTurnSummary.
+    // Wrap the caller-supplied tool callbacks so per-call durationMs (when
+    // available on the executor's `meta`) feeds into the cumulative slice
+    // without forcing every caller to instrument tool callbacks. The
+    // start-time map keys on `toolUseId` so parallel tool calls within a
+    // round don't clobber each other. When the executor PR (companion)
+    // attaches a `durationMs` field directly to `meta`, we prefer that;
+    // otherwise we synthesize ms from start→end wall-clock.
+    const turnStartedAt = Date.now();
+    let turnTokensIn = 0;
+    let turnTokensOut = 0;
+    let turnToolCount = 0;
+    let turnCumulativeToolMs = 0;
+    const turnToolStarts = new Map<string, number>();
+    const turnToolBreakdown = new Map<string, { count: number; ms: number }>();
+    const wrappedCallbacks: TurnCallbacks | undefined = callbacks
+      ? {
+          ...callbacks,
+          onToolStart: (name, input, meta) => {
+            turnToolStarts.set(meta.toolUseId, Date.now());
+            callbacks.onToolStart?.(name, input, meta);
+          },
+          onToolEnd: (name, result, isError, meta, uiPayload) => {
+            const startedAt = turnToolStarts.get(meta.toolUseId);
+            turnToolStarts.delete(meta.toolUseId);
+            // Prefer durationMs threaded through `meta` (companion PR);
+            // otherwise fall back to wall-clock between start/end. When
+            // start was never recorded (mid-turn instrumentation) we
+            // contribute 0 ms — the renderer treats 0 cumulative as
+            // "per-tool timing not yet available" and elides the slice.
+            const metaDuration = (meta as unknown as { durationMs?: number }).durationMs;
+            const elapsed =
+              typeof metaDuration === "number" && Number.isFinite(metaDuration) && metaDuration >= 0
+                ? metaDuration
+                : startedAt !== undefined
+                  ? Math.max(0, Date.now() - startedAt)
+                  : 0;
+            turnToolCount += 1;
+            turnCumulativeToolMs += elapsed;
+            const prev = turnToolBreakdown.get(name) ?? { count: 0, ms: 0 };
+            turnToolBreakdown.set(name, { count: prev.count + 1, ms: prev.ms + elapsed });
+            callbacks.onToolEnd?.(name, result, isError, meta, uiPayload);
+          },
+        }
+      : undefined;
+    const callbacksForLoop = wrappedCallbacks ?? callbacks;
+
     const baseText = routeResult.route === "skill"
       ? `[스킬: ${routeResult.skillId}] ${input}`
       : input;
@@ -641,7 +708,7 @@ export class ConversationLoop {
       result = await this.queryLoop(
         systemPrompt,
         scope,
-        callbacks,
+        callbacksForLoop,
         turnSignal,
         options?.originSource ?? null,
         {
@@ -733,6 +800,39 @@ export class ConversationLoop {
     // 케이스는 incomplete turn 으로 보고 회전 보류. notification (line 695-)
     // 와 동일한 turn-completeness 판정.
     await this.runRotationCheck(result.text, result.stopReason, callbacks);
+
+    // Turn aggregate footer — see TurnCallbacks.onTurnSummary doc above.
+    // Tokens come from the LLM provider's usage report (Vercel AI SDK
+    // exposes prompt_tokens + completion_tokens via the provider's
+    // streamText/onFinish equivalent — see `engine/llm/vercel/adapter.ts`
+    // and `engine/llm/vercel/stream-mapper.ts` which forward the values
+    // into the round stream's `usage` field). Suppressed for interrupted
+    // turns and turns without a real assistant response (mirrors the
+    // turn-end notification gate so dropped turns don't render footers).
+    if (
+      result.stopReason !== "interrupted" &&
+      typeof result.text === "string" &&
+      result.text.trim().length > 0
+    ) {
+      turnTokensIn = result.usage?.inputTokens ?? 0;
+      turnTokensOut = result.usage?.outputTokens ?? 0;
+      const breakdown =
+        turnToolBreakdown.size > 0
+          ? Object.fromEntries(turnToolBreakdown.entries())
+          : undefined;
+      try {
+        callbacks?.onTurnSummary?.({
+          turnDurationMs: Math.max(0, Date.now() - turnStartedAt),
+          toolCount: turnToolCount,
+          cumulativeToolMs: turnCumulativeToolMs,
+          tokensIn: turnTokensIn,
+          tokensOut: turnTokensOut,
+          ...(breakdown ? { breakdown } : {}),
+        });
+      } catch {
+        // Summary emission must never break turn completion.
+      }
+    }
 
     callbacks?.onTurnComplete?.(result.text);
 
