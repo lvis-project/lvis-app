@@ -1368,7 +1368,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
             allocateN={() => ++attachmentNCounter.current}
             saveClipboardImage={(b64) => window.lvis.attach.saveClipboardImage(b64)}
             openExternal={(p) => window.lvis.attach.openExternal(p)}
-            onSend={() => void (streaming ? onGuide(question) : onAsk(question))}
+            onSend={() => void onAsk(question)}
             onAbort={() => void onAbort()}
             streaming={streaming}
             disabled={hasApiKey === false || contextOverflowPct >= 0.95 || viewMode !== null}
@@ -1377,7 +1377,7 @@ export function ChatView({ api, onAsk, onGuide, onEditSave, onFork, onToggleStar
               hasApiKey === false
                 ? "API 키를 먼저 설정해 주세요..."
                 : streaming
-                  ? "응답 방향 지시 입력 (Enter 힌트 전송 / Shift+Enter 줄바꿈)"
+                  ? "새 메시지 전송 시 현재 응답을 중단하고 새 턴을 시작합니다"
                   : "질문 입력 (Enter 전송 · Cmd/Ctrl+V 첨부) · /command 사용 가능"
             }
           />
