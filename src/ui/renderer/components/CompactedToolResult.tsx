@@ -102,12 +102,30 @@ export function CompactedToolResult({
           <span className="shrink-0 text-muted-foreground/70">· {verbatim.lineCount}줄</span>
           <span className="ml-auto shrink-0 text-[10px] text-primary">접기</span>
         </button>
-        <div className="tre-body min-w-0 rounded-b-md border-t"
+        <div className="tre-body min-w-0 rounded-b-md border-t max-h-[16rem] overflow-y-auto px-3 py-1 font-mono text-[10px] leading-[1.4]"
           style={{ backgroundColor: "hsl(var(--code-bg))", color: "hsl(var(--code-fg))" }}
         >
-          <pre className="max-h-[16rem] overflow-y-auto px-3 py-1 font-mono text-[10px] leading-[1.4] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-            {verbatim.content}
-          </pre>
+          {(() => {
+            const MAX_DISPLAY_LINES = 1000;
+            const lines = verbatim.content.split("\n");
+            const displayLines = lines.slice(0, MAX_DISPLAY_LINES);
+            const truncated = lines.length > MAX_DISPLAY_LINES;
+            return (
+              <div>
+                {displayLines.map((line, i) => (
+                  <div className="tre-line flex gap-2" key={i}>
+                    <span className="tre-ln shrink-0 select-none text-muted-foreground/40 text-right w-7">{i + 1}</span>
+                    <span className="tre-code whitespace-pre-wrap break-words [overflow-wrap:anywhere] min-w-0">{line}</span>
+                  </div>
+                ))}
+                {truncated && (
+                  <div className="tre-truncated px-2 py-1 text-muted-foreground/60 italic">
+                    ⓘ {lines.length - MAX_DISPLAY_LINES}줄 더 — 화면 표시 제한 ({MAX_DISPLAY_LINES} 줄)
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
