@@ -65,6 +65,11 @@ export function CompactedToolResult({
   const origChars = parseStubChars(stubContent);
 
   async function handleExpand() {
+    // cache hit — verbatim already fetched, skip IPC
+    if (verbatim) {
+      setState("expanded");
+      return;
+    }
     setState("loading");
     try {
       const result = await getApi().getVerbatimToolResult(sessionId, toolUseId);
@@ -100,21 +105,9 @@ export function CompactedToolResult({
         <div className="tre-body min-w-0 rounded-b-md border-t"
           style={{ backgroundColor: "hsl(var(--code-bg))", color: "hsl(var(--code-fg))" }}
         >
-          <div className="max-h-[16rem] overflow-y-auto px-0 py-1 font-mono text-[10px] leading-[1.4]">
-            {verbatim.content.split("\n").map((line, i) => (
-              <div key={i} className="tre-line flex min-w-0 gap-0">
-                <span
-                  className="tre-ln w-9 shrink-0 select-none px-2 text-right tabular-nums opacity-40"
-                  style={{ borderRight: "1px solid hsl(var(--code-border))" }}
-                >
-                  {i + 1}
-                </span>
-                <span className="tre-code min-w-0 flex-1 whitespace-pre-wrap break-words px-2 [overflow-wrap:anywhere]">
-                  {line}
-                </span>
-              </div>
-            ))}
-          </div>
+          <pre className="max-h-[16rem] overflow-y-auto px-3 py-1 font-mono text-[10px] leading-[1.4] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+            {verbatim.content}
+          </pre>
         </div>
       </div>
     );

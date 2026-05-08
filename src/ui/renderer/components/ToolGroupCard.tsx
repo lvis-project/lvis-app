@@ -111,10 +111,11 @@ function SingleToolInline({
   const isError = tool.status === "error";
   const [open, setOpen] = useState(false);
 
-  // PR-4: stub result — render collapsible CompactedToolResult instead of raw block
+  // PR-4: stub result — render collapsible CompactedToolResult instead of raw block.
+  // Compaction marks tool_results by role+length, independent of error status,
+  // so error tool_results can also be stubs.
   const isStubResult =
     !isRunning &&
-    !isError &&
     typeof tool.result === "string" &&
     tool.result.startsWith("[tool_result stripped:");
 

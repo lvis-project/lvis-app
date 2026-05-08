@@ -852,7 +852,11 @@ ${input}`;
   // lineCount is computed here so the renderer never has to split on "\n".
   ipcMain.handle(
     "lvis:chat:get-verbatim-tool-result",
-    (_e, { sessionId, toolUseId }: { sessionId: string; toolUseId: string }) => {
+    (e, { sessionId, toolUseId }: { sessionId: string; toolUseId: string }) => {
+      if (!validateSender(e)) {
+        auditUnauthorized(auditLogger, "lvis:chat:get-verbatim-tool-result", e);
+        return null;
+      }
       if (sessionId !== conversationLoop.getSessionId()) return null;
       const messages = conversationLoop.getHistory().getMessages() as GenericMessage[];
       const msg = messages.find(
@@ -867,7 +871,11 @@ ${input}`;
       if (typeof content !== "string") return null;
       // already stub text → verbatim lost
       if (content.startsWith("[tool_result stripped:")) return null;
-      const lineCount = content.split("\n").length;
+      // zero-allocation line count
+      let lineCount = 1;
+      for (let i = 0; i < content.length; i++) {
+        if (content.charCodeAt(i) === 10) lineCount++;
+      }
       return { content, lineCount };
     },
   );
