@@ -111,14 +111,20 @@
 
 /*
  * ─────────────────────────────────────────────────────────────────────────────
- *  LVIS theme system — semantic design tokens
+ *  LVIS theme system v2 — bundle-based semantic design tokens
  * ─────────────────────────────────────────────────────────────────────────────
  *
- *  Three-axis model (PR: feat/theme-picker-redesign-two-axis):
- *    1. data-theme         — global light/dark/high-contrast shell
- *    2. data-chat-theme    — accent color for chat / UI surfaces
- *                            (default | purple | orange | blue)
- *    3. data-code-theme    — code-block surface scheme (light | dark)
+ *  Single-axis model: each data-theme-bundle block defines ALL tokens
+ *  (Tier B shell + chat surface + Tier C code + action) in one place.
+ *  No combinatorial overlays — one selector, one outcome.
+ *
+ *  Six built-in bundles:
+ *    1. tokyo-night   — dark shell + blue accent
+ *    2. midnight      — dark shell + magenta accent
+ *    3. forest        — light shell + teal accent
+ *    4. lge-light     — light shell + LG warm-grey + vivid purple
+ *    5. lge-dark      — dark shell  + LG warm-grey-1 + vivid purple
+ *    6. high-contrast — black bg + yellow primary (accessibility)
  *
  *  Token tiers:
  *    A. PRIMITIVE tokens (--p-*) — raw HSL triples, single source of truth
@@ -193,316 +199,267 @@
     --radius: 0.6rem;
   }
 
-  /* ── Tier B: semantic mapping — DARK (default) ─────────────────────── */
-  :root,
-  :root[data-theme="dark"] {
-    --background:           var(--p-slate-950);
-    --foreground:           var(--p-slate-50);
+  /* ── Bundle token blocks ──────────────────────────────────────────────
+   *  Each bundle defines ALL semantic tokens (Tier B + Tier C + action)
+   *  in a single :root[data-theme-bundle="<id>"] block. Self-contained:
+   *  no var(--p-*) chain dependencies — Tier A primitives above remain
+   *  as the authoritative reference but bundles do not rely on them.
+   *
+   *  color-scheme drives native form/scrollbar tinting per bundle.
+   * ─────────────────────────────────────────────────────────────────── */
 
-    --card:                 var(--p-slate-card-dark);
-    --card-foreground:      var(--p-slate-50);
-
-    --popover:              var(--p-slate-950);
-    --popover-foreground:   var(--p-slate-50);
-
-    --primary:              var(--p-blue-500);
-    --primary-foreground:   var(--p-slate-50);
-
-    /* User message bubble — mirrors `--primary` via `var()` so chat-theme
-       overlays (orange/purple/blue) which only repaint `--primary`
-       automatically repaint the bubble too. Themes that want a bubble
-       distinct from `--primary` (lg's lilac vs vivid SEND) override this
-       explicitly in their own block. Resolving via `var(--primary)`
-       captures the value at use, so chat-theme cascade lands. */
-    --message-user-bg:      var(--primary);
-    --message-user-fg:      var(--p-slate-50);
-
-    /* Composer (input-bar) surface — every shell needs a fallback so
-       `bg-input-bar` doesn't resolve to invalid `hsl()` outside the
-       light+purple overlay. Dark surface uses card-dark; light shell
-       and HC override below. */
-    --input-bar-bg:         var(--p-slate-card-dark);
-
-    --secondary:            var(--p-slate-800);
-    --secondary-foreground: var(--p-slate-50);
-
-    --muted:                var(--p-slate-800);
-    --muted-foreground:     var(--p-slate-400);
-
-    --accent:               var(--p-slate-800);
-    --accent-foreground:    var(--p-slate-50);
-
-    --destructive:          var(--p-red-700);
-    --destructive-foreground: var(--p-slate-50);
-
-    --warning:              var(--p-yellow-200);
-    --warning-foreground:   var(--p-yellow-800);
-
-    --success:              var(--p-green-500);
-
-    --border:               var(--p-slate-800);
-    --input:                var(--p-slate-800);
-    --ring:                 var(--p-blue-600);
-
+  /* ── 1. tokyo-night ─────────────────────────── dark + blue accent ── */
+  :root[data-theme-bundle="tokyo-night"] {
+    --background:               222.2 84% 4.9%;
+    --foreground:               210 40% 98%;
+    --card:                     222.2 84% 7%;
+    --card-foreground:          210 40% 98%;
+    --popover:                  222.2 84% 4.9%;
+    --popover-foreground:       210 40% 98%;
+    --primary:                  217.2 91.2% 59.8%;
+    --primary-foreground:       210 40% 98%;
+    --secondary:                217 33% 17%;
+    --secondary-foreground:     210 40% 98%;
+    --muted:                    217 33% 17%;
+    --muted-foreground:         215 20% 65%;
+    --accent:                   217 33% 17%;
+    --accent-foreground:        210 40% 98%;
+    --destructive:              0 62.8% 30.6%;
+    --destructive-foreground:   210 40% 98%;
+    --warning:                  48 97% 77%;
+    --warning-foreground:       30 80% 25%;
+    --success:                  142 71% 45%;
+    --border:                   217 33% 17%;
+    --input:                    217 33% 17%;
+    --ring:                     224.3 76.3% 48%;
+    --message-user-bg:          217.2 91.2% 59.8%;
+    --message-user-fg:          210 40% 98%;
+    --input-bar-bg:             222.2 84% 7%;
+    --code-bg:                  222 47% 9%;
+    --code-fg:                  210 40% 96%;
+    --code-border:              217 33% 22%;
+    --action-view:              262 83% 58%;
+    --action-branch:            25 95% 53%;
+    --action-compact:           262 83% 58%;
     color-scheme: dark;
   }
 
-  /* ── Tier B: semantic mapping — LIGHT ──────────────────────────────── */
-  :root[data-theme="light"] {
-    --background:           var(--p-slate-0);
-    --foreground:           var(--p-slate-900);
+  /* ── 2. midnight ──────────────────────────── dark + magenta accent ── */
+  :root[data-theme-bundle="midnight"] {
+    --background:               222.2 84% 4.9%;
+    --foreground:               210 40% 98%;
+    --card:                     222.2 84% 7%;
+    --card-foreground:          210 40% 98%;
+    --popover:                  222.2 84% 4.9%;
+    --popover-foreground:       210 40% 98%;
+    --primary:                  290 80% 60%;
+    --primary-foreground:       210 40% 98%;
+    --secondary:                217 33% 17%;
+    --secondary-foreground:     210 40% 98%;
+    --muted:                    217 33% 17%;
+    --muted-foreground:         215 20% 65%;
+    --accent:                   217 33% 17%;
+    --accent-foreground:        210 40% 98%;
+    --destructive:              0 62.8% 30.6%;
+    --destructive-foreground:   210 40% 98%;
+    --warning:                  48 97% 77%;
+    --warning-foreground:       30 80% 25%;
+    --success:                  142 71% 45%;
+    --border:                   217 33% 17%;
+    --input:                    217 33% 17%;
+    --ring:                     290 70% 50%;
+    --message-user-bg:          290 80% 60%;
+    --message-user-fg:          210 40% 98%;
+    --input-bar-bg:             222.2 84% 7%;
+    --code-bg:                  222 47% 9%;
+    --code-fg:                  210 40% 96%;
+    --code-border:              217 33% 22%;
+    --action-view:              290 80% 60%;
+    --action-branch:            25 95% 53%;
+    --action-compact:           290 80% 60%;
+    color-scheme: dark;
+  }
 
-    --card:                 var(--p-slate-0);
-    --card-foreground:      var(--p-slate-900);
-
-    --popover:              var(--p-slate-0);
-    --popover-foreground:   var(--p-slate-900);
-
-    --primary:              var(--p-blue-600);
-    --primary-foreground:   var(--p-slate-50);
-
-    --message-user-bg:      var(--primary);
-    --message-user-fg:      var(--p-slate-50);
-
-    --input-bar-bg:         var(--p-slate-0);
-
-    --secondary:            var(--p-slate-100);
-    --secondary-foreground: var(--p-slate-900);
-
-    --muted:                var(--p-slate-100);
-    --muted-foreground:     var(--p-slate-500);
-
-    --accent:               var(--p-slate-100);
-    --accent-foreground:    var(--p-slate-900);
-
-    --destructive:          var(--p-red-500);
-    --destructive-foreground: var(--p-slate-50);
-
-    --warning:              var(--p-yellow-100);
-    --warning-foreground:   var(--p-yellow-800);
-
-    --success:              var(--p-green-500);
-
-    --border:               var(--p-slate-200);
-    --input:                var(--p-slate-200);
-    --ring:                 var(--p-blue-500);
-
+  /* ── 3. forest ─────────────────────────────── light + teal accent ── */
+  :root[data-theme-bundle="forest"] {
+    --background:               0 0% 100%;
+    --foreground:               222 47% 11%;
+    --card:                     0 0% 100%;
+    --card-foreground:          222 47% 11%;
+    --popover:                  0 0% 100%;
+    --popover-foreground:       222 47% 11%;
+    --primary:                  170 70% 45%;
+    --primary-foreground:       210 40% 98%;
+    --secondary:                210 40% 96%;
+    --secondary-foreground:     222 47% 11%;
+    --muted:                    210 40% 96%;
+    --muted-foreground:         215 16% 47%;
+    --accent:                   210 40% 96%;
+    --accent-foreground:        222 47% 11%;
+    --destructive:              0 84% 60%;
+    --destructive-foreground:   210 40% 98%;
+    --warning:                  48 96% 89%;
+    --warning-foreground:       30 80% 25%;
+    --success:                  142 71% 45%;
+    --border:                   214 32% 91%;
+    --input:                    214 32% 91%;
+    --ring:                     170 70% 35%;
+    --message-user-bg:          170 70% 45%;
+    --message-user-fg:          210 40% 98%;
+    --input-bar-bg:             0 0% 100%;
+    --code-bg:                  210 40% 98%;
+    --code-fg:                  222 47% 11%;
+    --code-border:              214 32% 88%;
+    --action-view:              170 70% 35%;
+    --action-branch:            25 95% 53%;
+    --action-compact:           170 70% 35%;
     color-scheme: light;
   }
 
-  /* ── Tier B: semantic mapping — HIGH-CONTRAST ──────────────────────── */
-  :root[data-theme="high-contrast"] {
-    --background:           0 0% 0%;
-    --foreground:           0 0% 100%;
-
-    --card:                 0 0% 0%;
-    --card-foreground:      0 0% 100%;
-
-    --popover:              0 0% 0%;
-    --popover-foreground:   0 0% 100%;
-
-    --primary:              60 100% 50%;
-    --primary-foreground:   0 0% 0%;
-
-    --message-user-bg:      var(--primary);
-    --message-user-fg:      0 0% 0%;
-
-    --input-bar-bg:         0 0% 0%;
-
-    --secondary:            0 0% 15%;
-    --secondary-foreground: 0 0% 100%;
-
-    --muted:                0 0% 15%;
-    --muted-foreground:     0 0% 80%;
-
-    --accent:               60 100% 50%;
-    --accent-foreground:    0 0% 0%;
-
-    --destructive:          0 100% 50%;
-    --destructive-foreground: 0 0% 100%;
-
-    --warning:              48 100% 50%;
-    --warning-foreground:   0 0% 0%;
-
-    --success:              120 100% 40%;
-
-    --border:               0 0% 100%;
-    --input:                0 0% 100%;
-    --ring:                 60 100% 50%;
-
-    color-scheme: dark;
-  }
-
-  /* ── Tier B+: chat-theme overlays ─────────────────────────────────────
-   *  Chat themes own the visual chat identity on top of data-theme.
-   *  Accent-only themes (purple/orange/blue) remap action tokens, while
-   *  full brand themes (LG) may also repaint background/card/input surfaces.
-   *
-   *  data-chat-theme="default" is intentionally NOT defined — it means
-   *  "no override; inherit data-theme defaults".
-   * ──────────────────────────────────────────────────────────────────── */
-  :root[data-chat-theme="purple"] {
-    /* Pure purple accent — only the action color (SEND, focus ring)
-       is repainted. Surface tokens stay inherited from the active
-       data-theme (light/dark/HC) so this remains a generic accent
-       overlay, identical in spirit to "blue" / "orange" below. */
-    --primary:            262 83% 58%;
-    --primary-foreground:  0   0% 100%;
-    --ring:               var(--p-purple-600);
-  }
-
-  :root[data-chat-theme="lg"] {
-    /* LG brand chat theme — light variant.
-       Lilac user bubble (#c497ef) on warm-grey chat surface (#F0ECE4)
-       with vivid-purple SEND button (#734dff) and LG red destructive
-       (#FD312E). Accent tokens stay constant across light/dark variants
-       so the brand reads consistently. Surface tokens here are the
-       light-mode set; dark overlay below repaints surfaces only.
-
-       Pairs with data-theme="light" or "system" (when system resolves
-       to light). High-contrast shell overrides --primary/--ring back
-       to yellow via the [data-theme="high-contrast"][data-chat-theme]
-       block — accessibility wins over brand. */
-    --primary:                253 100% 65%;       /* #734dff — SEND */
-    --primary-foreground:       0   0% 100%;
-    --message-user-bg:        271  76% 76%;       /* #c497ef — user bubble */
-    --message-user-fg:          0   0% 100%;
-    --ring:                   var(--p-purple-600);
-
-    --background:              40 25% 92%;        /* Grey 6  #F0ECE4 */
-    --foreground:               0  0% 15%;        /* Grey 1  #262626 */
-    --card:                    40 25% 92%;
-    --card-foreground:          0  0% 15%;
-    --popover:                  0  0% 100%;
-    --popover-foreground:       0  0% 15%;
-    --input-bar-bg:             0  0% 100%;       /* white — composer only */
-    --muted:                   44 37% 94%;        /* Grey 7  #F6F3EB */
-    --muted-foreground:        43  3% 43%;        /* Grey 3  #716F6A */
-    --secondary:               44 37% 94%;
-    --secondary-foreground:     0  0% 15%;
-    --accent:                  44 37% 94%;
-    --accent-foreground:        0  0% 15%;
-    --border:                  40 10% 78%;        /* Grey 4  #CBC8C2 */
-    --input:                   40 10% 78%;
-
-    --destructive:              1 98% 59%;        /* #FD312E — STOP */
-    --destructive-foreground:   0  0% 100%;
-
+  /* ── 4. lge-light ─ light + LG warm-grey + vivid purple + LG red ─── */
+  :root[data-theme-bundle="lge-light"] {
+    --background:               40 25% 92%;    /* Grey 6  #F0ECE4 */
+    --foreground:               0 0% 15%;      /* Grey 1  #262626 */
+    --card:                     40 25% 92%;
+    --card-foreground:          0 0% 15%;
+    --popover:                  0 0% 100%;
+    --popover-foreground:       0 0% 15%;
+    --primary:                  253 100% 65%;  /* #734dff — SEND */
+    --primary-foreground:       0 0% 100%;
+    --secondary:                44 37% 94%;    /* Grey 7  #F6F3EB */
+    --secondary-foreground:     0 0% 15%;
+    --muted:                    44 37% 94%;
+    --muted-foreground:         43 3% 43%;     /* Grey 3  #716F6A */
+    --accent:                   44 37% 94%;
+    --accent-foreground:        0 0% 15%;
+    --destructive:              1 98% 59%;     /* #FD312E — LG red STOP */
+    --destructive-foreground:   0 0% 100%;
+    --warning:                  48 96% 89%;
+    --warning-foreground:       30 80% 25%;
+    --success:                  142 71% 45%;
+    --border:                   40 10% 78%;    /* Grey 4  #CBC8C2 */
+    --input:                    40 10% 78%;
+    --ring:                     263 70% 50%;
+    --message-user-bg:          271 76% 76%;   /* #c497ef — lilac user bubble */
+    --message-user-fg:          0 0% 100%;
+    --input-bar-bg:             0 0% 100%;     /* white composer */
+    --code-bg:                  210 40% 98%;
+    --code-fg:                  222 47% 11%;
+    --code-border:              214 32% 88%;
+    --action-view:              263 70% 50%;
+    --action-branch:            25 95% 53%;
+    --action-compact:           263 70% 50%;
     color-scheme: light;
   }
 
-  :root[data-theme="dark"][data-chat-theme="lg"] {
-    /* LG brand chat theme — dark variant. Repaints surface tokens
-       only; accent tokens (lilac bubble, vivid SEND, LG red destructive)
-       are inherited from the base lg block above so the brand reads
-       consistently across shells. Surface palette is the warm-neutral
-       inversion of the light variant — Grey-1 base, Grey-7 text. */
-    --background:               0  0% 15%;        /* Grey 1  #262626 — chat surface */
-    --foreground:              44 37% 94%;        /* Grey 7  #F6F3EB — text on dark */
-    --card:                     0  0% 18%;        /* slight elevation above surface */
-    --card-foreground:         44 37% 94%;
-    --popover:                  0  0% 22%;        /* dropdowns / popovers */
-    --popover-foreground:      44 37% 94%;
-    --input-bar-bg:             0  0% 22%;        /* composer reads as elevated card */
-    --muted:                    0  0% 20%;
-    --muted-foreground:        40  5% 60%;        /* warm light gray — timestamps */
-    --secondary:                0  0% 20%;
-    --secondary-foreground:    44 37% 94%;
-    --accent:                   0  0% 20%;
-    --accent-foreground:       44 37% 94%;
-    --border:                   0  0% 28%;
-    --input:                    0  0% 28%;
-
+  /* ── 5. lge-dark ── dark + LG warm-grey-1 + vivid purple + LG red ── */
+  :root[data-theme-bundle="lge-dark"] {
+    --background:               0 0% 15%;      /* Grey 1  #262626 */
+    --foreground:               44 37% 94%;    /* Grey 7  #F6F3EB */
+    --card:                     0 0% 18%;
+    --card-foreground:          44 37% 94%;
+    --popover:                  0 0% 22%;
+    --popover-foreground:       44 37% 94%;
+    --primary:                  253 100% 65%;  /* #734dff — SEND */
+    --primary-foreground:       0 0% 100%;
+    --secondary:                0 0% 20%;
+    --secondary-foreground:     44 37% 94%;
+    --muted:                    0 0% 20%;
+    --muted-foreground:         40 5% 60%;
+    --accent:                   0 0% 20%;
+    --accent-foreground:        44 37% 94%;
+    --destructive:              1 98% 59%;     /* #FD312E — LG red STOP */
+    --destructive-foreground:   0 0% 100%;
+    --warning:                  48 97% 77%;
+    --warning-foreground:       30 80% 25%;
+    --success:                  142 71% 45%;
+    --border:                   0 0% 28%;
+    --input:                    0 0% 28%;
+    --ring:                     263 70% 50%;
+    --message-user-bg:          271 76% 76%;   /* #c497ef — lilac user bubble */
+    --message-user-fg:          0 0% 100%;
+    --input-bar-bg:             0 0% 22%;      /* elevated composer */
+    --code-bg:                  222 47% 9%;
+    --code-fg:                  210 40% 96%;
+    --code-border:              217 33% 22%;
+    --action-view:              263 70% 50%;
+    --action-branch:            25 95% 53%;
+    --action-compact:           263 70% 50%;
     color-scheme: dark;
   }
 
-  :root[data-chat-theme="orange"] {
-    --primary: var(--p-orange-500);
-    --ring:    var(--p-orange-600);
-  }
-  :root[data-theme="light"][data-chat-theme="orange"] {
-    --primary: var(--p-orange-600);
-    --ring:    var(--p-orange-500);
-  }
-
-  :root[data-chat-theme="blue"] {
-    --primary: var(--p-blue-500);
-    --ring:    var(--p-blue-600);
-  }
-  :root[data-theme="light"][data-chat-theme="blue"] {
-    --primary: var(--p-blue-600);
-    --ring:    var(--p-blue-500);
-  }
-
-  /* High-contrast intentionally locks accent to its yellow — chat-theme
-   * overlays MUST NOT defeat the accessibility variant. We achieve this by
-   * placing the high-contrast block AFTER chat-theme overlays in source
-   * order, but to guard against future re-orderings we also redeclare here. */
-  :root[data-theme="high-contrast"][data-chat-theme] {
-    --primary: 60 100% 50%;
-    --ring:    60 100% 50%;
-  }
-
-  /* ── PR-4/5 action tokens — collapsible tool result + branch UI ────────
-   *  --action-view:    verbatim viewer chevron / header accent
-   *  --action-branch:  branch/fork action accent
-   *  --action-compact: compress marker accent (📦 compact box)
-   *
-   *  Dark/light map to purple-500/600 for view+compact (inline with
-   *  chat "verbatim memory" intent) and orange-500/600 for branch
-   *  (consistent with existing fork/GitBranch usage).
-   *  High-contrast locks all three to the accessibility yellow.
-   * ──────────────────────────────────────────────────────────────────── */
-  :root[data-theme="dark"] {
-    --action-view:    var(--p-purple-500);
-    --action-branch:  var(--p-orange-500);
-    --action-compact: var(--p-purple-500);
-  }
-  :root[data-theme="light"] {
-    --action-view:    var(--p-purple-600);
-    --action-branch:  var(--p-orange-600);
-    --action-compact: var(--p-purple-600);
-  }
-  :root[data-theme="high-contrast"] {
-    --action-view:    60 100% 50%;
-    --action-branch:  60 100% 50%;
-    --action-compact: 60 100% 50%;
+  /* ── 6. high-contrast ─── black + yellow primary (WCAG AA+) ────────── */
+  :root[data-theme-bundle="high-contrast"] {
+    --background:               0 0% 0%;
+    --foreground:               0 0% 100%;
+    --card:                     0 0% 0%;
+    --card-foreground:          0 0% 100%;
+    --popover:                  0 0% 0%;
+    --popover-foreground:       0 0% 100%;
+    --primary:                  60 100% 50%;   /* yellow — WCAG AA+ */
+    --primary-foreground:       0 0% 0%;
+    --secondary:                0 0% 15%;
+    --secondary-foreground:     0 0% 100%;
+    --muted:                    0 0% 15%;
+    --muted-foreground:         0 0% 80%;
+    --accent:                   60 100% 50%;
+    --accent-foreground:        0 0% 0%;
+    --destructive:              0 100% 50%;
+    --destructive-foreground:   0 0% 100%;
+    --warning:                  48 100% 50%;
+    --warning-foreground:       0 0% 0%;
+    --success:                  120 100% 40%;
+    --border:                   0 0% 100%;
+    --input:                    0 0% 100%;
+    --ring:                     60 100% 50%;
+    --message-user-bg:          60 100% 50%;
+    --message-user-fg:          0 0% 0%;
+    --input-bar-bg:             0 0% 0%;
+    --code-bg:                  222 47% 9%;
+    --code-fg:                  210 40% 96%;
+    --code-border:              0 0% 100%;
+    --action-view:              60 100% 50%;
+    --action-branch:            60 100% 50%;
+    --action-compact:           60 100% 50%;
+    color-scheme: dark;
   }
 
-  /* ── Tier C: code-surface tokens ───────────────────────────────────────
-   *  Default (no data-code-theme) inherits from the active data-theme:
-   *  light shells get the light code panel, dark shells get the dark panel.
-   *  Explicit data-code-theme="..." overrides regardless of shell.
-   * ──────────────────────────────────────────────────────────────────── */
-  :root,
-  :root[data-theme="dark"],
-  :root[data-theme="high-contrast"] {
-    --code-bg:     var(--p-code-dark-bg);
-    --code-fg:     var(--p-code-dark-fg);
-    --code-border: var(--p-code-dark-border);
-  }
-  :root[data-theme="light"] {
-    --code-bg:     var(--p-code-light-bg);
-    --code-fg:     var(--p-code-light-fg);
-    --code-border: var(--p-code-light-border);
-  }
-
-  /* Explicit user override — wins regardless of shell */
-  :root[data-code-theme="light"] {
-    --code-bg:     var(--p-code-light-bg);
-    --code-fg:     var(--p-code-light-fg);
-    --code-border: var(--p-code-light-border);
-  }
-  :root[data-code-theme="dark"] {
-    --code-bg:     var(--p-code-dark-bg);
-    --code-fg:     var(--p-code-dark-fg);
-    --code-border: var(--p-code-dark-border);
+  /* ── Default (no bundle set) → tokyo-night tokens for pre-hydration ── */
+  :root {
+    --background:               222.2 84% 4.9%;
+    --foreground:               210 40% 98%;
+    --card:                     222.2 84% 7%;
+    --card-foreground:          210 40% 98%;
+    --popover:                  222.2 84% 4.9%;
+    --popover-foreground:       210 40% 98%;
+    --primary:                  217.2 91.2% 59.8%;
+    --primary-foreground:       210 40% 98%;
+    --secondary:                217 33% 17%;
+    --secondary-foreground:     210 40% 98%;
+    --muted:                    217 33% 17%;
+    --muted-foreground:         215 20% 65%;
+    --accent:                   217 33% 17%;
+    --accent-foreground:        210 40% 98%;
+    --destructive:              0 62.8% 30.6%;
+    --destructive-foreground:   210 40% 98%;
+    --warning:                  48 97% 77%;
+    --warning-foreground:       30 80% 25%;
+    --success:                  142 71% 45%;
+    --border:                   217 33% 17%;
+    --input:                    217 33% 17%;
+    --ring:                     224.3 76.3% 48%;
+    --message-user-bg:          217.2 91.2% 59.8%;
+    --message-user-fg:          210 40% 98%;
+    --input-bar-bg:             222.2 84% 7%;
+    --code-bg:                  222 47% 9%;
+    --code-fg:                  210 40% 96%;
+    --code-border:              217 33% 22%;
+    color-scheme: dark;
   }
 
   /*
-   * Theme transition: keep root background/foreground swap smooth, but
-   * respect `prefers-reduced-motion` — users with that preference set must
-   * NOT see a transition flicker on first paint or theme switch.
+   * Bundle transition: smooth background/foreground swap on bundle switch.
+   * Respects prefers-reduced-motion — no flicker on first paint or OS toggle.
    */
   :root {
     transition: background-color 150ms ease, color 150ms ease;

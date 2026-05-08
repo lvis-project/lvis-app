@@ -1,6 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { validateThemePayload } from "../domains/plugins.js";
 
+// v2 helper: a full ThemeProvider v2 payload shape
+const V2_PAYLOAD = {
+  bundleId: "tokyo-night",
+  shell: "dark",
+  theme: "dark",
+  chatTheme: "default",
+  codeTheme: "dark",
+} as const;
+
 describe("validateThemePayload", () => {
   it("accepts a valid dark/purple/dark payload", () => {
     const result = validateThemePayload({ theme: "dark", chatTheme: "purple", codeTheme: "dark" });
@@ -159,6 +168,55 @@ describe("validateThemePayload", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.safe.tokens).toEqual({ "--lvis-radius": "0.6rem", "--lvis-radius-sm": "0.25rem", "--lvis-primary": "#734dff" });
+    }
+  });
+
+  // ── v2: bundleId + shell fields ─────────────────────────────────────────
+
+  it("v2: accepts valid bundleId and shell fields alongside v1 fields", () => {
+    const result = validateThemePayload(V2_PAYLOAD);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.safe.bundleId).toBe("tokyo-night");
+      expect(result.safe.shell).toBe("dark");
+      expect(result.safe.theme).toBe("dark");
+    }
+  });
+
+  it("v2: accepts all 6 valid bundleIds", () => {
+    const ids = ["tokyo-night", "midnight", "forest", "lge-light", "lge-dark", "high-contrast"];
+    for (const bundleId of ids) {
+      const shell = bundleId === "forest" || bundleId === "lge-light" ? "light" : "dark";
+      const theme = shell === "light" ? "light" : (bundleId === "high-contrast" ? "high-contrast" : "dark");
+      const result = validateThemePayload({ bundleId, shell, theme, chatTheme: "default", codeTheme: shell });
+      expect(result.ok, `bundleId=${bundleId}`).toBe(true);
+      if (result.ok) expect(result.safe.bundleId).toBe(bundleId);
+    }
+  });
+
+  it("v2: drops unknown bundleId — safe output omits bundleId field", () => {
+    const result = validateThemePayload({ bundleId: "evil-theme", shell: "dark", theme: "dark", chatTheme: "default", codeTheme: "dark" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.safe.bundleId).toBeUndefined();
+    }
+  });
+
+  it("v2: drops unknown shell value — safe output omits shell field", () => {
+    const result = validateThemePayload({ bundleId: "tokyo-night", shell: "auto", theme: "dark", chatTheme: "default", codeTheme: "dark" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.safe.shell).toBeUndefined();
+    }
+  });
+
+  it("v2: payload without bundleId/shell still validates (v1 backward compat)", () => {
+    const result = validateThemePayload({ theme: "dark", chatTheme: "default", codeTheme: "dark" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.safe.bundleId).toBeUndefined();
+      expect(result.safe.shell).toBeUndefined();
+      expect(result.safe.theme).toBe("dark");
     }
   });
 });
